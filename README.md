@@ -260,14 +260,4 @@ Hooks are the bridge between AI workflows and any external system. They allow ag
 
 -----
 
-## 📘 API Documentation
-
-The full API surface is thoroughly documented and defined in the OpenAPI format, making it easy to integrate with other tools. More details here:
-
-  * 🔗 [API Reference Documentation](./docs/api-reference.md)
-  * 🔗 [View OpenAPI Spec (YAML)](./docs/openapi.yaml)
-
-The [API-Tests](./apitests) are available for additional context.
-```
-
 > for further information contact: **hello@contenox.com**
