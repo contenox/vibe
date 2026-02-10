@@ -256,8 +256,6 @@ Hooks are the bridge between AI workflows and any external system. They allow ag
   * **Secure Credential Injection**: Securely manage API keys, tokens, and other configuration. Configure hooks to automatically inject headers (`Authorization: Bearer ...`) or other properties into every API call, keeping them hidden from the LLM and the workflow definition.
   * **Scoping & Controlling**: Control what Tools are available to the LLMs in which state and branch of the task-chain.
 
-[🔗 **Deep Dive: See the Advanced Hooks Guide**](./docs/hooks.md)
-
 -----
 
 > for further information contact: **hello@contenox.com**
