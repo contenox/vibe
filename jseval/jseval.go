@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/runtime/eventsourceservice"
-	"github.com/contenox/runtime/eventstore"
-	"github.com/contenox/runtime/execservice"
-	"github.com/contenox/runtime/functionservice"
-	"github.com/contenox/runtime/libtracker"
-	"github.com/contenox/runtime/taskchainservice"
-	"github.com/contenox/runtime/taskengine"
+	"github.com/contenox/vibe/eventsourceservice"
+	"github.com/contenox/vibe/eventstore"
+	"github.com/contenox/vibe/execservice"
+	"github.com/contenox/vibe/functionservice"
+	"github.com/contenox/vibe/libtracker"
+	"github.com/contenox/vibe/taskchainservice"
+	"github.com/contenox/vibe/taskengine"
 	"github.com/dop251/goja"
 )
 

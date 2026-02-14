@@ -6,10 +6,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/contenox/runtime/eventstore"
-	"github.com/contenox/runtime/functionservice"
-	"github.com/contenox/runtime/functionstore"
-	"github.com/contenox/runtime/libtracker"
+	"github.com/contenox/vibe/eventstore"
+	"github.com/contenox/vibe/functionservice"
+	"github.com/contenox/vibe/functionstore"
+	"github.com/contenox/vibe/libtracker"
 )
 
 type TriggerManager interface {

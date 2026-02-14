@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	libdb "github.com/contenox/runtime/libdbexec"
-	"github.com/contenox/runtime/runtimetypes"
-	"github.com/contenox/runtime/taskengine"
+	libdb "github.com/contenox/vibe/libdbexec"
+	"github.com/contenox/vibe/runtimetypes"
+	"github.com/contenox/vibe/taskengine"
 	"github.com/getkin/kin-openapi/openapi3"
 )
 

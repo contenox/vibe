@@ -3,7 +3,7 @@ package execservice
 import (
 	"context"
 
-	"github.com/contenox/runtime/taskengine"
+	"github.com/contenox/vibe/taskengine"
 )
 
 type TasksEnvService interface {

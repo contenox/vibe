@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	serverops "github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/hookproviderservice"
-	"github.com/contenox/runtime/runtimetypes"
+	serverops "github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/hookproviderservice"
+	"github.com/contenox/vibe/runtimetypes"
 )
 
 func AddRemoteHookRoutes(mux *http.ServeMux, service hookproviderservice.Service) {

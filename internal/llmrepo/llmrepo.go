@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/contenox/runtime/internal/llmresolver"
-	libmodelprovider "github.com/contenox/runtime/internal/modelrepo"
-	"github.com/contenox/runtime/internal/ollamatokenizer"
-	"github.com/contenox/runtime/internal/runtimestate"
-	"github.com/contenox/runtime/libtracker"
+	"github.com/contenox/vibe/internal/llmresolver"
+	libmodelprovider "github.com/contenox/vibe/internal/modelrepo"
+	"github.com/contenox/vibe/internal/ollamatokenizer"
+	"github.com/contenox/vibe/internal/runtimestate"
+	"github.com/contenox/vibe/libtracker"
 )
 
 var _ ModelRepo = (*modelManager)(nil)

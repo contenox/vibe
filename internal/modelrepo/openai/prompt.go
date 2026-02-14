@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/runtime/internal/modelrepo"
+	"github.com/contenox/vibe/internal/modelrepo"
 )
 
 type OpenAIPromptClient struct {

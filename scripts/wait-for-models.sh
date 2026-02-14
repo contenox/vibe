@@ -2,7 +2,7 @@
 
 #
 # This script monitors the real-time download progress of specified models
-# from the contenox/runtime API and displays a progress bar.
+# from the contenox/vibe API and displays a progress bar.
 #
 # Usage: ./wait-for-models.sh "embed_model:tag" "task_model:tag" "chat_model:tag"
 #

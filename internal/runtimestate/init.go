@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	libdb "github.com/contenox/runtime/libdbexec"
-	"github.com/contenox/runtime/runtimetypes"
+	libdb "github.com/contenox/vibe/libdbexec"
+	"github.com/contenox/vibe/runtimetypes"
 	"github.com/google/uuid"
 )
 

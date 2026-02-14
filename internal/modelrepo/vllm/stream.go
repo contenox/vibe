@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/contenox/runtime/internal/modelrepo"
-	"github.com/contenox/runtime/libtracker"
+	"github.com/contenox/vibe/internal/modelrepo"
+	"github.com/contenox/vibe/libtracker"
 )
 
 type VLLMStreamClient struct {

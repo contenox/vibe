@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"strconv"
 
-	serverops "github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/embedservice"
-	"github.com/contenox/runtime/execservice"
-	"github.com/contenox/runtime/libtracker"
-	"github.com/contenox/runtime/taskengine"
+	serverops "github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/embedservice"
+	"github.com/contenox/vibe/execservice"
+	"github.com/contenox/vibe/libtracker"
+	"github.com/contenox/vibe/taskengine"
 )
 
 func AddExecRoutes(mux *http.ServeMux, promptService execservice.ExecService, taskService execservice.TasksEnvService, embedService embedservice.Service) {

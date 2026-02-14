@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/eventsourceservice"
-	"github.com/contenox/runtime/eventstore"
+	"github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/eventsourceservice"
+	"github.com/contenox/vibe/eventstore"
 )
 
 // HTTPEvenSourceService implements the eventsourceservice.Service interface

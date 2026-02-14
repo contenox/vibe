@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/contenox/runtime/apiframework"
-	libdb "github.com/contenox/runtime/libdbexec"
-	"github.com/contenox/runtime/runtimetypes"
-	"github.com/contenox/runtime/taskengine"
+	"github.com/contenox/vibe/apiframework"
+	libdb "github.com/contenox/vibe/libdbexec"
+	"github.com/contenox/vibe/runtimetypes"
+	"github.com/contenox/vibe/taskengine"
 	"github.com/getkin/kin-openapi/openapi3"
 )
 

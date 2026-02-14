@@ -68,8 +68,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/runtime:${{ steps.vars.outputs.TAG }}
-            ghcr.io/${{ github.repository_owner }}/runtime:latest
+            ghcr.io/${{ github.repository_owner }}/vibe:${{ steps.vars.outputs.TAG }}
+            ghcr.io/${{ github.repository_owner }}/vibe:latest
 
       - name: Deploy to contenox.github.io/docs
         uses: peaceiris/actions-gh-pages@v4

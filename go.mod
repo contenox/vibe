@@ -1,4 +1,4 @@
-module github.com/contenox/runtime
+module github.com/contenox/vibe
 
 go 1.24.5
 
@@ -12,6 +12,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/nats v0.39.0
 	github.com/testcontainers/testcontainers-go/modules/valkey v0.39.0
 	github.com/valkey-io/valkey-go v1.0.67
+	modernc.org/sqlite v1.45.0
 )
 
 require (
@@ -47,7 +48,6 @@ require (
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.45.0 // indirect
 )
 
 require (
@@ -99,7 +99,7 @@ require (
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
+	golang.org/x/crypto v0.43.0
 	golang.org/x/sys v0.37.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1
 )

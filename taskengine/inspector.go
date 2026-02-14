@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	libkv "github.com/contenox/runtime/libkvstore"
-	"github.com/contenox/runtime/libtracker"
+	libkv "github.com/contenox/vibe/libkvstore"
+	"github.com/contenox/vibe/libtracker"
 )
 
 type Inspector interface {

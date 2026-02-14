@@ -3,8 +3,8 @@ package backendapi
 import (
 	"net/http"
 
-	serverops "github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/stateservice"
+	serverops "github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/stateservice"
 )
 
 func AddStateRoutes(mux *http.ServeMux, stateService stateservice.Service) {

@@ -3,7 +3,7 @@ package eventstore_test
 import (
 	"testing"
 
-	"github.com/contenox/runtime/eventstore"
+	"github.com/contenox/vibe/eventstore"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )

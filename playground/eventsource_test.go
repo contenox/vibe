@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/runtime/eventstore"
-	"github.com/contenox/runtime/playground"
+	"github.com/contenox/vibe/eventstore"
+	"github.com/contenox/vibe/playground"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

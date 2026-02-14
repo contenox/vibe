@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/openaichatservice"
-	"github.com/contenox/runtime/taskengine"
+	"github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/openaichatservice"
+	"github.com/contenox/vibe/taskengine"
 )
 
 const streamSpeed = 50 * time.Millisecond

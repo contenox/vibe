@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
-	serverops "github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/eventmappingservice"
-	"github.com/contenox/runtime/eventstore"
+	serverops "github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/eventmappingservice"
+	"github.com/contenox/vibe/eventstore"
 )
 
 // AddMappingRoutes registers all event mapping API endpoints

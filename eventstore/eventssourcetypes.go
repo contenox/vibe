@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/runtime/libdbexec"
+	"github.com/contenox/vibe/libdbexec"
 )
 
 var ErrNotFound = errors.New("not found")

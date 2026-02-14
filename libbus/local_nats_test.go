@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	libbus "github.com/contenox/runtime/libbus"
+	libbus "github.com/contenox/vibe/libbus"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
 )

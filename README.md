@@ -1,9 +1,9 @@
-# contenox/runtime: GenAI Orchestration Runtime
+# contenox/vibe: GenAI Orchestration Runtime
 
 ![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)
 
-**contenox/runtime** is an open-source runtime for orchestrating generative AI workflows. It treats AI workflows as state machines, enabling:
+**contenox/vibe** is an open-source runtime for orchestrating generative AI workflows. It treats AI workflows as state machines, enabling:
 
 ✅ **Declarative workflow definition**
 ✅ **Built-in state management**
@@ -30,8 +30,8 @@ This single command will start all necessary services, configure the backend, an
 
 ```bash
 # Clone the repository
-git clone https://github.com/contenox/runtime.git
-cd runtime
+git clone https://github.com/contenox/vibe.git
+cd vibe
 
 # Configure the systems fallback models
 export EMBED_MODEL=nomic-embed-text:latest
@@ -127,7 +127,7 @@ curl -X POST http://localhost:8081/tasks \
 All runtime activity is captured in structured logs:
 
 ```bash
-docker logs contenox-runtime-kernel
+docker logs contenox-vibe-kernel
 ```
 
 -----
@@ -210,7 +210,7 @@ graph TD
         U[User / Client Application]
     end
 
-    subgraph "contenox/runtime"
+    subgraph "contenox/vibe"
         API[API Layer]
         OE["Orchestration Engine <br/> Task Execution <br/> & State Management"]
         CONN["Connectors <br/> Model Resolver <br/> & Hook Client"]

@@ -8,12 +8,12 @@ package runtimestate_test
 // 	"testing"
 // 	"time"
 
-// 	libbus "github.com/contenox/runtime/bus"
-// 	libdb "github.com/contenox/runtime/dbexec"
-// 	"github.com/contenox/runtime-mvp/core/runtimestate"
-// 	"github.com/contenox/runtime/store"
-// 	"github.com/contenox/runtime-mvp/libs/libroutine"
-// 	"github.com/contenox/runtime-mvp/libs/libtestenv"
+// 	libbus "github.com/contenox/vibe/bus"
+// 	libdb "github.com/contenox/vibe/dbexec"
+// 	"github.com/contenox/vibe-mvp/core/runtimestate"
+// 	"github.com/contenox/vibe/store"
+// 	"github.com/contenox/vibe-mvp/libs/libroutine"
+// 	"github.com/contenox/vibe-mvp/libs/libtestenv"
 // 	"github.com/google/uuid"
 // 	"github.com/stretchr/testify/require"
 // )

@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/contenox/runtime/eventbridgeservice"
-	"github.com/contenox/runtime/eventstore"
+	"github.com/contenox/vibe/eventbridgeservice"
+	"github.com/contenox/vibe/eventstore"
 
-	serverops "github.com/contenox/runtime/apiframework"
+	serverops "github.com/contenox/vibe/apiframework"
 )
 
 // AddEventBridgeRoutes registers HTTP routes for event bridge operations

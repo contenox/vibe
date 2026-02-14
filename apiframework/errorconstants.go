@@ -4,10 +4,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/contenox/runtime/eventstore"
-	"github.com/contenox/runtime/libauth"
-	libdb "github.com/contenox/runtime/libdbexec"
-	"github.com/contenox/runtime/runtimetypes"
+	"github.com/contenox/vibe/eventstore"
+	"github.com/contenox/vibe/libauth"
+	libdb "github.com/contenox/vibe/libdbexec"
+	"github.com/contenox/vibe/runtimetypes"
 )
 
 // Standard error constants

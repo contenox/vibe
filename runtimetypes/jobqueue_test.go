@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/runtime/runtimetypes"
+	"github.com/contenox/vibe/runtimetypes"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/contenox/runtime/libtracker"
+	"github.com/contenox/vibe/libtracker"
 	"github.com/google/uuid"
 )
 

@@ -3,7 +3,7 @@ package eventstore
 import (
 	"context"
 
-	"github.com/contenox/runtime/libdbexec"
+	"github.com/contenox/vibe/libdbexec"
 )
 
 // InitSchema creates the main events table, raw_events table, and initial partitions

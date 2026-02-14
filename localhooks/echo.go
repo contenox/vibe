@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/contenox/runtime/taskengine"
+	"github.com/contenox/vibe/taskengine"
 	"github.com/getkin/kin-openapi/openapi3"
 )
 

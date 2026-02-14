@@ -7,8 +7,8 @@ import (
 	"math/rand"
 	"strings"
 
-	libmodelprovider "github.com/contenox/runtime/internal/modelrepo"
-	"github.com/contenox/runtime/libtracker"
+	libmodelprovider "github.com/contenox/vibe/internal/modelrepo"
+	"github.com/contenox/vibe/libtracker"
 )
 
 type RequestResolver struct {

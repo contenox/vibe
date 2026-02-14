@@ -3,8 +3,8 @@ package downloadservice
 import (
 	"context"
 
-	"github.com/contenox/runtime/libtracker"
-	"github.com/contenox/runtime/runtimetypes"
+	"github.com/contenox/vibe/libtracker"
+	"github.com/contenox/vibe/runtimetypes"
 )
 
 type activityTrackerDecorator struct {

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/runtime/jseval"
-	"github.com/contenox/runtime/libtracker"
-	"github.com/contenox/runtime/taskengine"
+	"github.com/contenox/vibe/jseval"
+	"github.com/contenox/vibe/libtracker"
+	"github.com/contenox/vibe/taskengine"
 	"github.com/dop251/goja"
 	"github.com/getkin/kin-openapi/openapi3"
 )

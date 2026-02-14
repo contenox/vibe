@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/runtime/jseval"
-	"github.com/contenox/runtime/libtracker"
-	"github.com/contenox/runtime/taskengine"
+	"github.com/contenox/vibe/jseval"
+	"github.com/contenox/vibe/libtracker"
+	"github.com/contenox/vibe/taskengine"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

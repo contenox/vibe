@@ -7,8 +7,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/contenox/runtime/libtracker"
-	libkv "github.com/contenox/runtime/libkvstore"
+	"github.com/contenox/vibe/libtracker"
+	libkv "github.com/contenox/vibe/libkvstore"
 	"github.com/google/uuid"
 )
 

@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/contenox/runtime/functionstore"
-	libdb "github.com/contenox/runtime/libdbexec"
+	"github.com/contenox/vibe/functionstore"
+	libdb "github.com/contenox/vibe/libdbexec"
 	"github.com/stretchr/testify/require"
 )
 

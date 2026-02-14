@@ -3,8 +3,8 @@ package eventmappingservice
 import (
 	"context"
 
-	"github.com/contenox/runtime/eventstore"
-	"github.com/contenox/runtime/libtracker"
+	"github.com/contenox/vibe/eventstore"
+	"github.com/contenox/vibe/libtracker"
 )
 
 // activityTrackerDecorator implements Service with activity tracking

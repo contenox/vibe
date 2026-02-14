@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/contenox/runtime/libtracker"
+	"github.com/contenox/vibe/libtracker"
 )
 
 // HTTPClient implements the Tokenizer interface using HTTP calls to the tokenizer service.

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/contenox/runtime/internal/modelrepo"
-	"github.com/contenox/runtime/libtracker"
+	"github.com/contenox/vibe/internal/modelrepo"
+	"github.com/contenox/vibe/libtracker"
 	"github.com/ollama/ollama/api"
 )
 

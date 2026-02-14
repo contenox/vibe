@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/contenox/runtime/eventstore"
-	libdb "github.com/contenox/runtime/libdbexec"
+	"github.com/contenox/vibe/eventstore"
+	libdb "github.com/contenox/vibe/libdbexec"
 )
 
 var (

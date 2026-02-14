@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/url"
 
-	libdb "github.com/contenox/runtime/libdbexec"
-	"github.com/contenox/runtime/runtimetypes"
+	libdb "github.com/contenox/vibe/libdbexec"
+	"github.com/contenox/vibe/runtimetypes"
 
 	"github.com/ollama/ollama/api"
 )

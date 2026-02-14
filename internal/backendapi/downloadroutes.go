@@ -6,9 +6,9 @@ import (
 	"log"
 	"net/http"
 
-	serverops "github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/downloadservice"
-	"github.com/contenox/runtime/runtimetypes"
+	serverops "github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/downloadservice"
+	"github.com/contenox/vibe/runtimetypes"
 )
 
 func AddQueueRoutes(mux *http.ServeMux, dwService downloadservice.Service) {

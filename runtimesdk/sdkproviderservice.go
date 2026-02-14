@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/internal/runtimestate"
-	"github.com/contenox/runtime/providerservice"
+	"github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/internal/runtimestate"
+	"github.com/contenox/vibe/providerservice"
 )
 
 // HTTPProviderService implements the providerservice.Service interface

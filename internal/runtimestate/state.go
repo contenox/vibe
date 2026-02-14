@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	libbus "github.com/contenox/runtime/libbus"
-	libdb "github.com/contenox/runtime/libdbexec"
-	"github.com/contenox/runtime/runtimetypes"
-	"github.com/contenox/runtime/statetype"
+	libbus "github.com/contenox/vibe/libbus"
+	libdb "github.com/contenox/vibe/libdbexec"
+	"github.com/contenox/vibe/runtimetypes"
+	"github.com/contenox/vibe/statetype"
 	"github.com/ollama/ollama/api"
 )
 

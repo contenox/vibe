@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/embedservice"
+	"github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/embedservice"
 )
 
 // HTTPEmbedService implements the embedservice.Service interface

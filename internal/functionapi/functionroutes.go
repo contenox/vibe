@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	serverops "github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/functionservice"
-	"github.com/contenox/runtime/functionstore"
+	serverops "github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/functionservice"
+	"github.com/contenox/vibe/functionstore"
 )
 
 // AddFunctionRoutes registers all function and event trigger API endpoints

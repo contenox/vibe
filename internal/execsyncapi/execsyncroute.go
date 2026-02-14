@@ -3,9 +3,9 @@ package execsyncapi
 import (
 	"net/http"
 
-	"github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/executor"
-	"github.com/contenox/runtime/internal/eventdispatch"
+	"github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/executor"
+	"github.com/contenox/vibe/internal/eventdispatch"
 )
 
 // Add this struct near the other handler structs

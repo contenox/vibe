@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/runtime/libtracker"
+	"github.com/contenox/vibe/libtracker"
 	"github.com/dop251/goja"
 )
 

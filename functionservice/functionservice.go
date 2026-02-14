@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/contenox/runtime/functionstore"
-	libdb "github.com/contenox/runtime/libdbexec"
+	"github.com/contenox/vibe/functionstore"
+	libdb "github.com/contenox/vibe/libdbexec"
 )
 
 var ErrInvalidFunction = errors.New("invalid function data")

@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/playground"
-	"github.com/contenox/runtime/runtimetypes"
+	"github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/playground"
+	"github.com/contenox/vibe/runtimetypes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

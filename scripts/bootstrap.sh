@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-# This script automates the entire bootstrapping process for the contenox/runtime.
+# This script automates the entire bootstrapping process for the contenox/vibe.
 # It starts the necessary services, configures the backend and affinity groups, and
 # ensures the required models are downloaded and ready for use.
 #
@@ -78,7 +78,7 @@ MAX_ATTEMPTS=60 # Wait for up to 60 seconds
 while ! curl -s -f "${API_BASE_URL}/health" > /dev/null; do
   ATTEMPTS=$((ATTEMPTS + 1))
   if [ $ATTEMPTS -ge $MAX_ATTEMPTS ]; then
-    error_exit "Runtime API did not become healthy after $MAX_ATTEMPTS seconds. Please check the container logs with 'docker logs contenox-runtime-kernel'."
+    error_exit "Runtime API did not become healthy after $MAX_ATTEMPTS seconds. Please check the container logs with 'docker logs contenox-vibe-kernel'."
   fi
   sleep 1
 done
@@ -197,7 +197,7 @@ log "Handing off to model download monitor..."
 
 # Final success message
 echo ""
-echo "🎉 Bootstrap complete! Your contenox/runtime environment is ready to use."
+echo "🎉 Bootstrap complete! Your contenox/vibe environment is ready to use."
 echo "   Using models:"
 echo "   - Embedding: ${EMBED_MODEL}"
 echo "   - Task: ${TASK_MODEL}"

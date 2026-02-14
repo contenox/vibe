@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/runtime/affinitygroupservice"
-	"github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/runtimetypes"
+	"github.com/contenox/vibe/affinitygroupservice"
+	"github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/runtimetypes"
 )
 
 // HTTPgroupService implements the groupservice.Service interface

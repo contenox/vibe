@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/contenox/runtime/internal/modelrepo"
+	"github.com/contenox/vibe/internal/modelrepo"
 )
 
 type GeminiChatClient struct {

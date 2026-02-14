@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/runtime/execservice"
-	"github.com/contenox/runtime/libdbexec"
-	"github.com/contenox/runtime/taskchainservice"
-	"github.com/contenox/runtime/taskengine"
+	"github.com/contenox/vibe/execservice"
+	"github.com/contenox/vibe/libdbexec"
+	"github.com/contenox/vibe/taskchainservice"
+	"github.com/contenox/vibe/taskengine"
 	"github.com/google/uuid"
 )
 

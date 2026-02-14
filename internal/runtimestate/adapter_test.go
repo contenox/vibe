@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/runtime/internal/runtimestate"
-	"github.com/contenox/runtime/runtimetypes"
-	"github.com/contenox/runtime/statetype"
+	"github.com/contenox/vibe/internal/runtimestate"
+	"github.com/contenox/vibe/runtimetypes"
+	"github.com/contenox/vibe/statetype"
 	"github.com/stretchr/testify/require"
 )
 

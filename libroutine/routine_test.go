@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/runtime/libroutine"
+	"github.com/contenox/vibe/libroutine"
 )
 
 func quiet() func() {

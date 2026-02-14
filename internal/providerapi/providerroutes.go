@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	serverops "github.com/contenox/runtime/apiframework"
-	"github.com/contenox/runtime/internal/runtimestate"
-	libdb "github.com/contenox/runtime/libdbexec"
-	"github.com/contenox/runtime/providerservice"
+	serverops "github.com/contenox/vibe/apiframework"
+	"github.com/contenox/vibe/internal/runtimestate"
+	libdb "github.com/contenox/vibe/libdbexec"
+	"github.com/contenox/vibe/providerservice"
 )
 
 func AddProviderRoutes(mux *http.ServeMux, providerService providerservice.Service) {

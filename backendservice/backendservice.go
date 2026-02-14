@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	libdb "github.com/contenox/runtime/libdbexec"
-	"github.com/contenox/runtime/runtimetypes"
+	libdb "github.com/contenox/vibe/libdbexec"
+	"github.com/contenox/vibe/runtimetypes"
 )
 
 var ErrInvalidBackend = errors.New("invalid backend data")

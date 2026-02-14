@@ -3,8 +3,8 @@ package playground_test
 import (
 	"testing"
 
-	"github.com/contenox/runtime/playground"
-	"github.com/contenox/runtime/runtimetypes"
+	"github.com/contenox/vibe/playground"
+	"github.com/contenox/vibe/runtimetypes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	libkv "github.com/contenox/runtime/libkvstore"
+	libkv "github.com/contenox/vibe/libkvstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
