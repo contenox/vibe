@@ -15,7 +15,7 @@ ARG TENANCY="54882f1d-3788-44f9-aed6-19a793c4568f"
 # Build the application with ldflags
 RUN go build -ldflags "\
     -X 'main.cliSetTenancy=$TENANCY'" \
-    -o runtime-api ./cmd/runtime-api
+    -o runtime-api ./cmd/runtime
 
 # Runtime stage
 FROM alpine:3.20

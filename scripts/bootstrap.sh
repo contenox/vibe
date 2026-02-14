@@ -78,7 +78,7 @@ MAX_ATTEMPTS=60 # Wait for up to 60 seconds
 while ! curl -s -f "${API_BASE_URL}/health" > /dev/null; do
   ATTEMPTS=$((ATTEMPTS + 1))
   if [ $ATTEMPTS -ge $MAX_ATTEMPTS ]; then
-    error_exit "Runtime API did not become healthy after $MAX_ATTEMPTS seconds. Please check the container logs with 'docker logs contenox-vibe-kernel'."
+    error_exit "Runtime API did not become healthy after $MAX_ATTEMPTS seconds. Please check the container logs with 'docker logs contenox-runtime-api'."
   fi
   sleep 1
 done

@@ -21,7 +21,8 @@ export TENANCY
 COMPOSE_CMD ?= docker compose -f compose.yaml -f compose.local.yaml
 
 .PHONY: run up down build clear logs \
-        build-vibe run-vibe vibe-ollama-pull vibe-ollama-ready \
+        build-vibe run-vibe build-runtime-api run-runtime-api \
+        vibe-ollama-pull vibe-ollama-ready \
         test test-unit test-system \
         test-api test-api-full test-api-init wait-for-server \
         docs-gen docs-markdown docs-html \
@@ -48,15 +49,27 @@ clear:
 	$(COMPOSE_CMD) down --volumes --remove-orphans
 
 logs:
-	$(COMPOSE_CMD) logs -f runtime
+	$(COMPOSE_CMD) logs -f runtime-api
 
-# Contenox Vibe: single binary, SQLite + in-memory bus + estimate tokenizer
+# --------------------------------------------------------------------
+# Vibe: local CLI, SQLite + in-memory bus# --------------------------------------------------------------------
 build-vibe:
-	go build -o $(PROJECT_ROOT)/bin/contenox-vibe $(PROJECT_ROOT)/cmd/vibe
+	go build -o $(PROJECT_ROOT)/bin/vibe $(PROJECT_ROOT)/cmd/vibe
 
-# Run the vibe binary (builds if needed). Example: make run-vibe ARGS="-input 'hello'"
+# Run the Vibe binary (builds if needed). Example: make run-vibe ARGS="-input 'hello'"
 run-vibe: build-vibe
-	$(PROJECT_ROOT)/bin/contenox-vibe $(ARGS)
+	$(PROJECT_ROOT)/bin/vibe $(ARGS)
+
+# --------------------------------------------------------------------
+# Runtime API: HTTP server (Postgres, NATS, tokenizer). Normal run: make run (compose)
+# --------------------------------------------------------------------
+build-runtime-api:
+	go build -o $(PROJECT_ROOT)/bin/runtime-api $(PROJECT_ROOT)/cmd/runtime
+
+run-runtime-api: build-runtime-api
+	@echo "Run with env: DATABASE_URL, NATS_URL, TOKENIZER_SERVICE_URL, PORT, etc. Example:"
+	@echo "  DATABASE_URL=postgres://... NATS_URL=nats://... TOKENIZER_SERVICE_URL=... ./bin/runtime-api"
+	$(PROJECT_ROOT)/bin/runtime-api
 
 # Pull the Ollama model used by contenox-vibe (default: phi3:3.8b). Start Ollama first if needed: ollama serve
 vibe-ollama-pull:

@@ -325,8 +325,8 @@ func updateComposeFile(newVersion string) error {
 	}
 
 	// Replace the runtime image tag
-	re := regexp.MustCompile(`image: ghcr\.io/contenox/vibe:[^\s]+`)
-	updatedContent := re.ReplaceAllString(string(content), "image: ghcr.io/contenox/vibe:"+newVersion)
+	re := regexp.MustCompile(`image: ghcr\.io/contenox/runtime-api:[^\s]+`)
+	updatedContent := re.ReplaceAllString(string(content), "image: ghcr.io/contenox/runtime-api:"+newVersion)
 
 	// Write the updated content
 	if err := os.WriteFile(composePath, []byte(updatedContent), 0644); err != nil {
@@ -399,8 +399,8 @@ func (tx *bumpTransaction) Rollback() {
 		}
 
 		// Replace the runtime image tag back to current version
-		re := regexp.MustCompile(`image: ghcr\.io/contenox/vibe:[^\s]+`)
-		updatedContent := re.ReplaceAllString(string(content), "image: ghcr.io/contenox/vibe:"+tx.currentVersion)
+		re := regexp.MustCompile(`image: ghcr\.io/contenox/runtime-api:[^\s]+`)
+		updatedContent := re.ReplaceAllString(string(content), "image: ghcr.io/contenox/runtime-api:"+tx.currentVersion)
 
 		// Write the restored content
 		if err := os.WriteFile(composePath, []byte(updatedContent), 0644); err != nil {

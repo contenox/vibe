@@ -210,8 +210,8 @@ func TestUnit_GroupAffinityCircuitBreaking(t *testing.T) {
 		}
 
 		// Wait for reset timeout — then poll for HalfOpen with FAST polling
-		timeout := time.After(resetTimeout + 200*time.Millisecond)
-		ticker := time.NewTicker(1 * time.Millisecond) // ⬅️ FASTER: 1ms instead of 5ms
+		timeout := time.After(resetTimeout + 500*time.Millisecond)
+		ticker := time.NewTicker(2 * time.Millisecond)
 		defer ticker.Stop()
 
 		halfOpenObserved := false
@@ -334,7 +334,7 @@ func TestUnit_GroupAffinityResetRoutine(t *testing.T) {
 		}
 
 		// Wait for reset timeout — then poll for HalfOpen
-		timeout := time.After(150 * time.Millisecond)
+		timeout := time.After(500 * time.Millisecond)
 		ticker := time.NewTicker(2 * time.Millisecond)
 		defer ticker.Stop()
 

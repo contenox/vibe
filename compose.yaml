@@ -1,7 +1,7 @@
 services:
-  vibe:
-    image: ghcr.io/contenox/vibe:v0.0.76
-    container_name: contenox-vibe-kernel
+  runtime-api:
+    image: ghcr.io/contenox/runtime-api:v0.0.76
+    container_name: contenox-runtime-api
     environment:
       - DATABASE_URL=postgres://username:password@postgres:5432/postgres?sslmode=disable
       - PORT=8080

@@ -1,9 +1,9 @@
 services:
-  vibe:
+  runtime-api:
     build:
       context: .
       dockerfile: Dockerfile
-    image: contenox/vibe:local
+    image: contenox/runtime-api:local
     environment:
       - DATABASE_URL=postgres://username:password@postgres:5432/postgres?sslmode=disable
       - PORT=8080

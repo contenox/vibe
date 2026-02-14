@@ -50,9 +50,12 @@ func TestLocalExecHook_GetToolsForHookByName_Unknown(t *testing.T) {
 	assert.Nil(t, tools)
 }
 
+// testAllowedCommands allows the commands used by Exec tests (echo, cat, sleep, shell, exit for shell mode).
+var testAllowedCommands = []string{"echo", "cat", "sleep", "/bin/sh", "exit"}
+
 func TestLocalExecHook_Exec_Success(t *testing.T) {
 	ctx := context.Background()
-	h := NewLocalExecHook().(*LocalExecHook)
+	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
 		Name: "local_exec",
@@ -74,7 +77,7 @@ func TestLocalExecHook_Exec_Success(t *testing.T) {
 
 func TestLocalExecHook_Exec_Success_InputAsStdin(t *testing.T) {
 	ctx := context.Background()
-	h := NewLocalExecHook().(*LocalExecHook)
+	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
 		Name: "local_exec",
@@ -92,7 +95,7 @@ func TestLocalExecHook_Exec_Success_InputAsStdin(t *testing.T) {
 
 func TestLocalExecHook_Exec_ShellMode(t *testing.T) {
 	ctx := context.Background()
-	h := NewLocalExecHook().(*LocalExecHook)
+	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
 		Name: "local_exec",
@@ -170,6 +173,7 @@ func TestLocalExecHook_Exec_AllowlistDirAllow(t *testing.T) {
 func TestLocalExecHook_Exec_Timeout(t *testing.T) {
 	ctx := context.Background()
 	h := NewLocalExecHook(
+		WithLocalExecAllowedCommands(testAllowedCommands),
 		WithLocalExecTimeout(50 * time.Millisecond),
 	).(*LocalExecHook)
 	start := time.Now().UTC()
@@ -192,7 +196,7 @@ func TestLocalExecHook_Exec_Timeout(t *testing.T) {
 
 func TestLocalExecHook_Exec_MissingCommand(t *testing.T) {
 	ctx := context.Background()
-	h := NewLocalExecHook().(*LocalExecHook)
+	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	hookCall := &taskengine.HookCall{
 		Name: "local_exec",
 		Args: map[string]string{},
@@ -211,7 +215,7 @@ func TestLocalExecHook_Exec_NilHook(t *testing.T) {
 
 func TestLocalExecHook_Exec_NonZeroExit(t *testing.T) {
 	ctx := context.Background()
-	h := NewLocalExecHook().(*LocalExecHook)
+	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	hookCall := &taskengine.HookCall{
 		Name: "local_exec",
 		Args: map[string]string{
