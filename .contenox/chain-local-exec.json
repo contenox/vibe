@@ -1,0 +1,26 @@
+{
+    "id": "local-exec-test",
+    "description": "Test local_exec hook: runs echo",
+    "tasks": [
+        {
+            "id": "run_echo",
+            "handler": "hook",
+            "hook": {
+                "name": "local_exec",
+                "args": {
+                    "command": "echo",
+                    "args": "hello from local_exec"
+                }
+            },
+            "transition": {
+                "branches": [
+                    {
+                        "operator": "default",
+                        "goto": "end"
+                    }
+                ]
+            }
+        }
+    ],
+    "token_limit": 2048
+}

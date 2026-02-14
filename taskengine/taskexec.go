@@ -621,11 +621,15 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 				break
 			}
 
+			hookArgs := make(map[string]string)
+			if currentTask.Hook != nil && currentTask.Hook.Args != nil {
+				hookArgs = currentTask.Hook.Args
+			}
 			hookCall := &HookCall{
 				Name:     resolutionInfo.HookName,
 				ToolName: toolCall.Function.Name,
-				// NOTE: dynamic args are passed as `input` to Exec; Hook.Args stays static/template-level
-				Args: currentTask.Hook.Args,
+				// NOTE: dynamic args are passed as `input` to Exec; Hook.Args is static/template-level (may be empty for execute_tool_calls)
+				Args: hookArgs,
 			}
 
 			// `args` are the per-call dynamic tool arguments

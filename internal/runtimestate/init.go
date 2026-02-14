@@ -262,6 +262,53 @@ func initChatModel(ctx context.Context, config *Config, tx libdb.Exec, contextLe
 	return initOrUpdateModel(ctx, tx, config.TenantID, config.ChatModel, contextLength, canChat)
 }
 
+// ExtraModelSpec describes an extra model to ensure exists in ollama_models (e.g. for contenox-vibe extra_models config).
+type ExtraModelSpec struct {
+	Name          string
+	ContextLength int
+	CanChat       bool
+	CanPrompt     bool
+	CanEmbed      bool
+}
+
+// EnsureModels ensures each given model exists in ollama_models with the specified context length and capabilities.
+// It is intended for contenox-vibe so that extra models (e.g. qwen2.5:7b for the vibes chain) are declared and
+// get correct context/capabilities during backend sync. Call after InitEmbeder/InitPromptExec/InitChatExec and before RunBackendCycle.
+func EnsureModels(ctx context.Context, dbInstance libdb.DBManager, tenantID string, specs []ExtraModelSpec) error {
+	if len(specs) == 0 {
+		return nil
+	}
+	tx, com, r, err := dbInstance.WithTransaction(ctx)
+	if err != nil {
+		return err
+	}
+	defer r()
+	for _, spec := range specs {
+		if spec.Name == "" {
+			return fmt.Errorf("extra_models entry has empty name")
+		}
+		if spec.ContextLength <= 0 {
+			return fmt.Errorf("extra_models entry %q has invalid context length %d", spec.Name, spec.ContextLength)
+		}
+		if spec.CanEmbed {
+			if _, err := initOrUpdateModel(ctx, tx, tenantID, spec.Name, spec.ContextLength, canEmbed); err != nil {
+				return fmt.Errorf("extra model %s: %w", spec.Name, err)
+			}
+		}
+		if spec.CanPrompt {
+			if _, err := initOrUpdateModel(ctx, tx, tenantID, spec.Name, spec.ContextLength, canPrompt); err != nil {
+				return fmt.Errorf("extra model %s: %w", spec.Name, err)
+			}
+		}
+		if spec.CanChat {
+			if _, err := initOrUpdateModel(ctx, tx, tenantID, spec.Name, spec.ContextLength, canChat); err != nil {
+				return fmt.Errorf("extra model %s: %w", spec.Name, err)
+			}
+		}
+	}
+	return com(ctx)
+}
+
 func assignModelTogroup(ctx context.Context, _ *Config, tx libdb.Exec, model *runtimetypes.Model, group *runtimetypes.AffinityGroup) error {
 	storeInstance := runtimetypes.New(tx)
 	models, err := storeInstance.ListModelsForAffinityGroup(ctx, group.ID)

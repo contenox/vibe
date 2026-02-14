@@ -256,6 +256,84 @@ Hooks are the bridge between AI workflows and any external system. They allow ag
   * **Secure Credential Injection**: Securely manage API keys, tokens, and other configuration. Configure hooks to automatically inject headers (`Authorization: Bearer ...`) or other properties into every API call, keeping them hidden from the LLM and the workflow definition.
   * **Scoping & Controlling**: Control what Tools are available to the LLMs in which state and branch of the task-chain.
 
+#### contenox-vibe (CLI for local chains)
+
+**contenox-vibe** is a local CLI that runs the same task-chain engine without the full stack (no Postgres, NATS, or tokenizer). It uses SQLite and a local Ollama instance. Chains can use hooks (e.g. **local_exec**, **js_sandbox**, **ssh**) and macros (e.g. `{{hookservice:list}}`, `{{var:model}}`) so the model sees which tools are available and can script actions—run shell commands, execute JS that calls other models, etc. Use it for development, testing chains, or admin-style automation on a single machine. See [docs/contenox-vibe.md](docs/contenox-vibe.md) for a brief overview.
+
+  * **Build & run**: `make run-vibe` (or `make build-vibe` then `./bin/contenox-vibe`). Requires a chain file and input, e.g. `make run-vibe ARGS="-chain .contenox/default-chain.json -input 'Hello'"`.
+  * **Requirements**: Ollama running (e.g. `ollama serve`) and a model pulled (e.g. `ollama pull phi3:3.8b`). Chains live under `.contenox/`; optional `.contenox/config.yaml` supplies defaults (see below).
+  * **Output**: Default is quiet (no telemetry on stderr; only errors and the result block). Use `--tracing` for operation telemetry; use `--steps` to print execution steps after the result.
+
+#### Local exec hook (contenox-vibe)
+
+The **local_exec** hook runs commands on the same host as the process (real side effects: execute a binary or script, optional stdin/env). It is available only when using **contenox-vibe** and is **opt-in** for security.
+
+  * **Enable**: Pass `-enable-local-exec` when starting contenox-vibe. Without this flag, the hook is not registered.
+  * **Sensitive default**: When local_exec is enabled, you **must** set an allow list; otherwise no commands run. Set at least one of `local_exec_allowed_commands` or `local_exec_allowed_dir` in `.contenox/config.yaml` (or via `-local-exec-allowed-*` flags) for any command to be allowed.
+  * **Security**: Use only in trusted environments. Policy is config-first; flags override config.
+    * **Allow list** (required for any execution): `local_exec_allowed_dir` (only run scripts/binaries under this directory) and/or `local_exec_allowed_commands` (comma-separated list or YAML list of allowed executable paths or names). At least one must be set when local_exec is enabled.
+    * **Deny list** (optional): `local_exec_denied_commands` (YAML list or comma-separated via flag) — executable basenames or paths that are never allowed, even if they appear in the allow list. Checked first. Example: `[rm, dd, mkfs, curl, wget]`.
+  * **Behaviour**: Input is passed as stdin. Args: `command` (required), `args` (optional), `cwd`, `timeout` (e.g. `30s`), `shell` (default `false`; set `true` to run via `/bin/sh -c`). Result is JSON: `exit_code`, `stdout`, `stderr`, `success`, `error`, `duration_seconds`.
+
+Example chain task using the local_exec hook:
+
+```json
+{
+  "id": "run_echo",
+  "handler": "hook",
+  "hook": {
+    "name": "local_exec",
+    "args": {
+      "command": "/usr/bin/echo",
+      "args": "hello"
+    }
+  },
+  "transition": { "branches": [{ "operator": "default", "goto": "end" }] }
+}
+```
+
+Run with: `./contenox-vibe -chain chain.json -enable-local-exec` (and other flags as needed).
+
+#### Vibes chain (contenox-vibe)
+
+The **vibes** chain turns natural language into command execution: you send a single message (e.g. "list files in /tmp" or "what's in my home directory?"), and the model uses the **local_exec** tool to run the right commands (e.g. `ls`), then replies in natural language. It requires **local_exec** to be enabled (`-enable-local-exec` or `enable_local_exec: true` in config) and an **Ollama model that supports tools** (e.g. `qwen2.5:7b`, `llama3.1:8b`). Models like `phi3:3.8b` do not support tool calling. Pull a tool-capable model first, e.g. `ollama pull qwen2.5:7b`. The chain defaults to `qwen2.5:7b`; if that is not your default `model`, add it under `extra_models` in `.contenox/config.yaml` with `name` and `context` so the runtime can resolve it.
+
+Example:
+
+```bash
+make run-vibe ARGS="-chain .contenox/chain-vibes.json -input 'list files in /tmp' -enable-local-exec"
+```
+
+Or with the binary: `./contenox-vibe -chain .contenox/chain-vibes.json -input 'list files in /tmp' -enable-local-exec`. The `-input` string is treated as a single user message; the chain loops chat_completion and execute_tool_calls until the model responds without tool calls.
+
+#### Default config and chain (contenox-vibe)
+
+You can omit `-chain` and other flags by using a **default config** and/or a **default chain** under `.contenox/`.
+
+  * **Config lookup**: The CLI looks for `.contenox/config.yaml` in the current directory, then in `~/.contenox/config.yaml`. The first file found is loaded. All keys are optional; flags override config when provided.
+  * **Chains inside .contenox**: Chain paths from config are **relative to the .contenox directory** where the config was found. Chains must live inside `.contenox/` (e.g. `.contenox/default-chain.json` or `.contenox/chains/my-chain.json`) so they are always found regardless of where you run the command.
+  * **Default chain**: If `-chain` is not set, the CLI uses `default_chain` from config (path relative to `.contenox/`), or the file `.contenox/default-chain.json` if it exists. If neither is set, the CLI exits with a short message.
+  * **Config keys** (all optional): `default_chain`, `db`, `ollama`, `model`, `context`, `no_delete_models`, `enable_local_exec`, `local_exec_allowed_dir`, `local_exec_allowed_commands`, `local_exec_denied_commands`, `extra_models`, `tracing`, `steps`, `raw`, `template_vars_from_env` (vibe-only: env var names to expose as `{{var:name}}` in chains).
+  * **Extra models**: Chains that use a model other than the default (e.g. the vibes chain with `qwen2.5:7b`) must declare that model so the runtime knows its context and capabilities. Add it under `extra_models` with at least `name` and `context`; optional `can_chat`, `can_prompt`, `can_embed` (defaults: chat and prompt true, embed false).
+
+Example `.contenox/config.yaml`:
+
+```yaml
+default_chain: default-chain.json
+ollama: http://127.0.0.1:11434
+model: phi3:3.8b
+enable_local_exec: false
+# When enable_local_exec is true, you must set an allow list (no command runs without it):
+# local_exec_allowed_commands: "ls,pwd,cat,head,tail,date"
+# Optional deny list (block these even if allowed): local_exec_denied_commands: [rm, dd, mkfs, curl, wget]
+# Optional: register extra models (e.g. for vibes chain)
+extra_models:
+  - name: qwen2.5:7b
+    context: 32768
+```
+
+Then you can run: `./contenox-vibe -input "Say hello"` without passing `-chain` (and other options come from config).
+
 -----
 
 > for further information contact: **hello@contenox.com**

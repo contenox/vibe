@@ -21,6 +21,7 @@ export TENANCY
 COMPOSE_CMD ?= docker compose -f compose.yaml -f compose.local.yaml
 
 .PHONY: run up down build clear logs \
+        build-vibe run-vibe vibe-ollama-pull vibe-ollama-ready \
         test test-unit test-system \
         test-api test-api-full test-api-init wait-for-server \
         docs-gen docs-markdown docs-html \
@@ -48,6 +49,22 @@ clear:
 
 logs:
 	$(COMPOSE_CMD) logs -f runtime
+
+# Contenox Vibe: single binary, SQLite + in-memory bus + estimate tokenizer
+build-vibe:
+	go build -o $(PROJECT_ROOT)/bin/contenox-vibe $(PROJECT_ROOT)/cmd/vibe
+
+# Run the vibe binary (builds if needed). Example: make run-vibe ARGS="-input 'hello'"
+run-vibe: build-vibe
+	$(PROJECT_ROOT)/bin/contenox-vibe $(ARGS)
+
+# Pull the Ollama model used by contenox-vibe (default: phi3:3.8b). Start Ollama first if needed: ollama serve
+vibe-ollama-pull:
+	ollama pull $(TASK_MODEL)
+
+# Ensure Ollama is ready for contenox-vibe: pull the model. Run "ollama serve" in another terminal if the server is not running.
+vibe-ollama-ready: vibe-ollama-pull
+	@echo "Model $(TASK_MODEL) ready. If you see 'connection refused', start Ollama in another terminal: ollama serve"
 
 
 # --------------------------------------------------------------------

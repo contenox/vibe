@@ -7,10 +7,20 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // MacroEnv is a transparent decorator around EnvExecutor that expands
-// special macros like {{hookservice:list}} in task templates before execution.
+// special macros in task templates before execution. Supported macros:
+//
+//   - {{hookservice:list}}              -> JSON map of hook name -> tool names
+//   - {{hookservice:hooks}}             -> JSON array of hook names
+//   - {{hookservice:tools <hook_name>}} -> JSON array of tool names for that hook
+//   - {{var:<name>}}                    -> value from context template vars (set by caller via WithTemplateVars; engine never reads env)
+//   - {{now}} or {{now:<layout>}}       -> current time (default RFC3339; layout e.g. 2006-01-02)
+//   - {{chain:id}}                      -> chain ID of the chain being executed
+//
+// The engine does not expand any env:VAR-style macro; var:* is populated only by the caller.
 type MacroEnv struct {
 	inner        EnvExecutor
 	hookProvider HookRepo
@@ -48,25 +58,25 @@ func (m *MacroEnv) ExecEnv(
 
 		var err error
 		if t.PromptTemplate != "" {
-			t.PromptTemplate, err = m.expandSpecialTemplates(ctx, t.PromptTemplate)
+			t.PromptTemplate, err = m.expandSpecialTemplates(ctx, &clone, t.PromptTemplate)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: prompt_template macro error: %w", t.ID, err)
 			}
 		}
 		if t.Print != "" {
-			t.Print, err = m.expandSpecialTemplates(ctx, t.Print)
+			t.Print, err = m.expandSpecialTemplates(ctx, &clone, t.Print)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: print macro error: %w", t.ID, err)
 			}
 		}
 		if t.OutputTemplate != "" {
-			t.OutputTemplate, err = m.expandSpecialTemplates(ctx, t.OutputTemplate)
+			t.OutputTemplate, err = m.expandSpecialTemplates(ctx, &clone, t.OutputTemplate)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: output_template macro error: %w", t.ID, err)
 			}
 		}
 		if t.SystemInstruction != "" {
-			t.SystemInstruction, err = m.expandSpecialTemplates(ctx, t.SystemInstruction)
+			t.SystemInstruction, err = m.expandSpecialTemplates(ctx, &clone, t.SystemInstruction)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: system_instruction macro error: %w", t.ID, err)
 			}
@@ -77,21 +87,10 @@ func (m *MacroEnv) ExecEnv(
 	return m.inner.ExecEnv(ctx, &clone, input, dataType)
 }
 
-// Precompile once at package level if you like:
-var macroRe = regexp.MustCompile(`\{\{hookservice:([a-zA-Z0-9_]+)(?:\s+([^}]+))?\}\}`)
+// unified macro: {{namespace}} or {{namespace:payload}}
+var macroRe = regexp.MustCompile(`\{\{([a-zA-Z0-9_]+)(?::([^}]*))?\}\}`)
 
-// expandSpecialTemplates finds and replaces our custom macros.
-// Right now it supports:
-//
-//	{{hookservice:list}}              -> JSON with hooks + tools
-//	{{hookservice:hooks}}             -> JSON array of hook names
-//	{{hookservice:tools <hook_name>}} -> JSON array of tool names for that hook
-func (m *MacroEnv) expandSpecialTemplates(ctx context.Context, in string) (string, error) {
-	if m.hookProvider == nil {
-		// If there's no hookProvider, just leave macros as-is.
-		return in, nil
-	}
-
+func (m *MacroEnv) expandSpecialTemplates(ctx context.Context, chain *TaskChainDefinition, in string) (string, error) {
 	matches := macroRe.FindAllStringSubmatchIndex(in, -1)
 	if len(matches) == 0 {
 		return in, nil
@@ -102,48 +101,82 @@ func (m *MacroEnv) expandSpecialTemplates(ctx context.Context, in string) (strin
 
 	for _, loc := range matches {
 		start, end := loc[0], loc[1]
-		cmdStart, cmdEnd := loc[2], loc[3]
-		argStart, argEnd := loc[4], loc[5]
+		nsStart, nsEnd := loc[2], loc[3]
+		payloadStart, payloadEnd := loc[4], loc[5]
 
-		// Write text before the macro
 		buf.WriteString(in[last:start])
 
-		cmd := in[cmdStart:cmdEnd]
-		var arg string
-		if argStart != -1 && argEnd != -1 {
-			arg = strings.TrimSpace(in[argStart:argEnd])
+		namespace := in[nsStart:nsEnd]
+		var payload string
+		if payloadStart != -1 && payloadEnd != -1 {
+			payload = strings.TrimSpace(in[payloadStart:payloadEnd])
 		}
 
-		var replacement string
-		var err error
-
-		switch cmd {
-		case "list":
-			replacement, err = m.renderHooksAndToolsJSON(ctx)
-		case "hooks":
-			replacement, err = m.renderHookNamesJSON(ctx)
-		case "tools":
-			if arg == "" {
-				err = fmt.Errorf("hookservice:tools requires a hook name argument")
-			} else {
-				replacement, err = m.renderToolsForHookJSON(ctx, arg)
-			}
-		default:
-			// unknown command: leave as-is
-			replacement = in[start:end]
-		}
-
+		replacement, err := m.expandOne(ctx, chain, namespace, payload, in[start:end])
 		if err != nil {
 			return "", err
 		}
-
 		buf.WriteString(replacement)
 		last = end
 	}
 
-	// Tail
 	buf.WriteString(in[last:])
 	return buf.String(), nil
+}
+
+func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, namespace, payload, original string) (string, error) {
+	switch namespace {
+	case "hookservice":
+		if m.hookProvider == nil {
+			return original, nil
+		}
+		parts := strings.SplitN(payload, " ", 2)
+		cmd := strings.TrimSpace(parts[0])
+		var arg string
+		if len(parts) > 1 {
+			arg = strings.TrimSpace(parts[1])
+		}
+		switch cmd {
+		case "list":
+			return m.renderHooksAndToolsJSON(ctx)
+		case "hooks":
+			return m.renderHookNamesJSON(ctx)
+		case "tools":
+			if arg == "" {
+				return "", fmt.Errorf("hookservice:tools requires a hook name argument")
+			}
+			return m.renderToolsForHookJSON(ctx, arg)
+		default:
+			return original, nil
+		}
+	case "var":
+		vars := TemplateVarsFromContext(ctx)
+		if vars == nil {
+			return "", nil
+		}
+		if v, ok := vars[payload]; ok {
+			return v, nil
+		}
+		return "", nil // missing key -> empty string
+	case "now":
+		layout := time.RFC3339
+		if payload != "" {
+			layout = payload
+		}
+		return time.Now().Format(layout), nil
+	case "chain":
+		if chain == nil {
+			return "", nil
+		}
+		switch payload {
+		case "id":
+			return chain.ID, nil
+		default:
+			return original, nil
+		}
+	default:
+		return original, nil
+	}
 }
 
 func (m *MacroEnv) renderHookNamesJSON(ctx context.Context) (string, error) {

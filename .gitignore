@@ -230,6 +230,9 @@ temp/
 # Project-specific
 # ==============================
 
+# Vibe CLI build output and local DB
+bin/
+.contenox/*.db
 
 # Local AI context control (Cursor)
 .cursorignore

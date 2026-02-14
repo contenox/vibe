@@ -1,0 +1,52 @@
+{
+  "id": "chain-vibes",
+  "description": "Natural language to directory/command: model uses local_exec to run e.g. ls, then responds in text",
+  "tasks": [
+    {
+      "id": "vibe_chat",
+      "description": "Chat completion with local_exec tool; model may call tool or respond with text",
+      "handler": "chat_completion",
+      "system_instruction": "You are a helpful assistant. Model in use: {{var:model}}. Available hooks and tools: {{hookservice:list}}. Use the local_exec tool to run shell commands on the machine (e.g. ls, pwd) when the user asks to list files, show a directory, or run a command. Interpret natural language (e.g. 'list files in /tmp', 'what is in my home directory') and run the appropriate commands, then summarize the results for the user in natural language.",
+      "execute_config": {
+        "model": "qwen2.5:7b",
+        "provider": "ollama",
+        "pass_clients_tools": false,
+        "hooks": [
+          "local_exec"
+        ]
+      },
+      "transition": {
+        "on_failure": "",
+        "branches": [
+          {
+            "operator": "equals",
+            "when": "tool-call",
+            "goto": "run_tools"
+          },
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "run_tools",
+      "description": "Execute tool calls from the last message and append results to chat history",
+      "handler": "execute_tool_calls",
+      "input_var": "vibe_chat",
+      "transition": {
+        "on_failure": "",
+        "branches": [
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "vibe_chat"
+          }
+        ]
+      }
+    }
+  ],
+  "token_limit": 8192
+}

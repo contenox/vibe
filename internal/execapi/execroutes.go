@@ -9,6 +9,7 @@ import (
 	serverops "github.com/contenox/runtime/apiframework"
 	"github.com/contenox/runtime/embedservice"
 	"github.com/contenox/runtime/execservice"
+	"github.com/contenox/runtime/libtracker"
 	"github.com/contenox/runtime/taskengine"
 )
 
@@ -52,9 +53,10 @@ func (tm *taskManager) executeSimpleTask(w http.ResponseWriter, r *http.Request)
 }
 
 type taskExecutionRequest struct {
-	Input     any                             `json:"input" example:"What is the capital of France"`
-	InputType string                          `json:"inputType" example:"string"`
-	Chain     *taskengine.TaskChainDefinition `json:"chain" openapi_include_type:"taskengine.TaskChainDefinition"`
+	Input         any                             `json:"input" example:"What is the capital of France"`
+	InputType     string                          `json:"inputType" example:"string"`
+	Chain         *taskengine.TaskChainDefinition `json:"chain" openapi_include_type:"taskengine.TaskChainDefinition"`
+	TemplateVars  map[string]string                `json:"templateVars,omitempty"` // optional; merged with request_id for {{var:...}} macro expansion
 }
 
 type taskExecutionResponse struct {
@@ -229,7 +231,19 @@ func (tm *taskManager) executeTaskChain(w http.ResponseWriter, r *http.Request) 
 		convertedInput = req.Input
 	}
 
-	resp, outputType, capturedStateUnits, err := tm.taskService.Execute(r.Context(), req.Chain, convertedInput, inputType)
+	// Template vars for {{var:...}} macro expansion. Engine never reads server env.
+	templateVars := make(map[string]string)
+	if req.TemplateVars != nil {
+		for k, v := range req.TemplateVars {
+			templateVars[k] = v
+		}
+	}
+	if reqID, ok := r.Context().Value(libtracker.ContextKeyRequestID).(string); ok && reqID != "" {
+		templateVars["request_id"] = reqID
+	}
+	ctx := taskengine.WithTemplateVars(r.Context(), templateVars)
+
+	resp, outputType, capturedStateUnits, err := tm.taskService.Execute(ctx, req.Chain, convertedInput, inputType)
 	if err != nil {
 		_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
 		return

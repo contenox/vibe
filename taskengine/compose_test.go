@@ -110,14 +110,14 @@ func TestUnit_BranchComposeAppendStringToChatHistory(t *testing.T) {
 	output, _, _, err := env.ExecEnv(context.Background(), chain, nil, taskengine.DataTypeAny)
 	require.NoError(t, err)
 
-	// Verify composition
+	// Verify composition: append_string_to_chat_history appends the string as assistant to the end of the history
 	ch, ok := output.(taskengine.ChatHistory)
 	require.True(t, ok, "output should be ChatHistory")
 	require.Len(t, ch.Messages, 2)
-	assert.Equal(t, "assistant", ch.Messages[0].Role)
-	assert.Equal(t, "New system message", ch.Messages[0].Content)
-	assert.Equal(t, "user", ch.Messages[1].Role)
-	assert.Equal(t, "Hello", ch.Messages[1].Content)
+	assert.Equal(t, "user", ch.Messages[0].Role)
+	assert.Equal(t, "Hello", ch.Messages[0].Content)
+	assert.Equal(t, "assistant", ch.Messages[1].Role)
+	assert.Equal(t, "New system message", ch.Messages[1].Content)
 }
 
 func TestUnit_BranchComposeMergeChatHistories(t *testing.T) {

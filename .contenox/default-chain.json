@@ -1,0 +1,24 @@
+{
+    "id": "qa-ollama",
+    "debug": true,
+    "description": "Single prompt with Ollama (for contenox-vibe)",
+    "tasks": [
+        {
+            "id": "generate_response",
+            "description": "Generate answer",
+            "handler": "prompt_to_string",
+            "system_instruction": "You are a helpful assistant. Reply concisely.",
+            "prompt_template": "{{.input}}",
+            "input_var": "input",
+            "transition": {
+                "branches": [
+                    {
+                        "operator": "default",
+                        "goto": "end"
+                    }
+                ]
+            }
+        }
+    ],
+    "token_limit": 2048
+}

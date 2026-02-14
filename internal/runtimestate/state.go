@@ -39,12 +39,13 @@ type providerCacheEntry struct {
 // and the actual state of the backends, including providing the mechanism
 // for model downloads via the dwqueue component.
 type State struct {
-	dbInstance    libdb.DBManager
-	state         sync.Map
-	psInstance    libbus.Messenger
-	dwQueue       dwqueue
-	withgroups    bool
-	providerCache sync.Map
+	dbInstance           libdb.DBManager
+	state                sync.Map
+	psInstance           libbus.Messenger
+	dwQueue              dwqueue
+	withgroups           bool
+	skipDeleteUndeclared bool // when true, do not delete Ollama models that are not declared (for pre-pulled models)
+	providerCache        sync.Map
 }
 
 type Option func(*State)
@@ -52,6 +53,14 @@ type Option func(*State)
 func WithGroups() Option {
 	return func(s *State) {
 		s.withgroups = true
+	}
+}
+
+// WithSkipDeleteUndeclaredModels prevents deletion of backend models that are not in the declared set.
+// Use when models are pre-pulled (e.g. ollama pull phi3:3.8b) and you do not want sync to remove them.
+func WithSkipDeleteUndeclaredModels() Option {
+	return func(s *State) {
+		s.skipDeleteUndeclared = true
 	}
 }
 
@@ -441,19 +450,21 @@ func (s *State) processOllamaBackend(ctx context.Context, backend *runtimetypes.
 		}
 	}
 
-	// For each model in the backend that is not declared, trigger deletion.
+	// For each model in the backend that is not declared, trigger deletion (unless skipDeleteUndeclared).
 	// NOTE: We have to delete otherwise we have keep track of not desired model in each backend to
 	// ensure some backend-nodes don't just run out of space.
-	for existingModel := range existingModelSet {
-		if _, ok := declaredModelSet[existingModel]; !ok {
-			// log.Printf("Model %s exists in backend %s but is not declared. Triggering deletion.", existingModel, backend.ID)
-			err := client.Delete(ctx, &api.DeleteRequest{
-				Model: existingModel,
-			})
-			if err != nil {
-				// log.Printf("Error deleting model %s for backend %s: %v", existingModel, backend.ID, err)
-			} else {
-				// log.Printf("Successfully deleted model %s for backend %s", existingModel, backend.ID)
+	if !s.skipDeleteUndeclared {
+		for existingModel := range existingModelSet {
+			if _, ok := declaredModelSet[existingModel]; !ok {
+				// log.Printf("Model %s exists in backend %s but is not declared. Triggering deletion.", existingModel, backend.ID)
+				err := client.Delete(ctx, &api.DeleteRequest{
+					Model: existingModel,
+				})
+				if err != nil {
+					// log.Printf("Error deleting model %s for backend %s: %v", existingModel, backend.ID, err)
+				} else {
+					// log.Printf("Successfully deleted model %s for backend %s", existingModel, backend.ID)
+				}
 			}
 		}
 	}

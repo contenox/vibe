@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -190,6 +191,9 @@ type Store interface {
 //go:embed schema.sql
 var Schema string
 
+//go:embed schema_sqlite.sql
+var SchemaSQLite string
+
 type store struct {
 	libdb.Exec
 }
@@ -203,11 +207,28 @@ func New(exec libdb.Exec) Store {
 
 const MaxRowsCount = 100000
 
+// sqliteCountableTables is the whitelist for SELECT COUNT(*) fallback when estimate_row_count is not available (e.g. SQLite).
+var sqliteCountableTables = map[string]bool{
+	"job_queue_v2": true, "kv": true, "remote_hooks": true,
+	"ollama_models": true, "llm_affinity_group": true, "llm_backends": true,
+}
+
 func (s *store) estimateCount(ctx context.Context, table string) (int64, error) {
 	var count int64
 	err := s.Exec.QueryRowContext(ctx, `
 		SELECT estimate_row_count($1)
 	`, table).Scan(&count)
+	if err == nil {
+		return count, nil
+	}
+	// SQLite has no estimate_row_count; fall back to COUNT(*) for whitelisted tables only.
+	if !strings.Contains(err.Error(), "no such function") {
+		return 0, err
+	}
+	if !sqliteCountableTables[table] {
+		return 0, err
+	}
+	err = s.Exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count)
 	return count, err
 }
 
