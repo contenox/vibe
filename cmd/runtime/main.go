@@ -191,10 +191,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("%s initializing llm repo failed: %v", nodeInstanceID, err)
 	}
-	jsEnv := jseval.NewEnv(serveropsChainedTracker, jseval.BuiltinHandlers{})
+	jsEnv := jseval.NewEnv(serveropsChainedTracker, jseval.BuiltinHandlers{}, jseval.DefaultBuiltins())
 	jsHookRepo := localhooks.NewJSSandboxHook(jsEnv, serveropsChainedTracker)
 	localHookrepoInstance := map[string]taskengine.HookRepo{}
-	localHookrepoInstance["js_sandbox"] = jsHookRepo
+	localHookrepoInstance["js_execution"] = jsHookRepo
 	localHookrepoInstance["echo"] = localhooks.NewEchoHook()
 	localHookrepoInstance["print"] = localhooks.NewPrint(serveropsChainedTracker)
 	localHookrepoInstance["webhook"] = localhooks.NewWebCaller()

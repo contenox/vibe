@@ -115,6 +115,7 @@ func (e *GojaExecutor) AddBuildInServices(
 			FunctionService:      e.functionService,
 			HookRepo:             e.hookRepo,
 		},
+		jseval.DefaultBuiltins(),
 	)
 }
 

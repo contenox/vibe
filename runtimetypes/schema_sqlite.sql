@@ -93,3 +93,28 @@ CREATE TABLE IF NOT EXISTS remote_hooks (
 -- For fresh installs the table has headers/properties above. body_properties omitted for minimal local.
 
 CREATE INDEX IF NOT EXISTS idx_job_queue_v2_task_type ON job_queue_v2(task_type);
+
+-- Event-dispatched functions and triggers (used by vibe CLI event dispatcher / Goja executor).
+CREATE TABLE IF NOT EXISTS functions (
+    name TEXT PRIMARY KEY,
+    description TEXT,
+    script_type TEXT NOT NULL,
+    script TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_triggers (
+    name TEXT PRIMARY KEY,
+    description TEXT,
+    listen_for_type TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    function_name TEXT NOT NULL REFERENCES functions(name) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_functions_created_at ON functions(created_at);
+CREATE INDEX IF NOT EXISTS idx_event_triggers_created_at ON event_triggers(created_at);
+CREATE INDEX IF NOT EXISTS idx_event_triggers_listen_for_type ON event_triggers(listen_for_type);
+CREATE INDEX IF NOT EXISTS idx_event_triggers_function_name ON event_triggers(function_name);

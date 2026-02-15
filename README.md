@@ -20,10 +20,10 @@ esac
 curl -sL "https://github.com/contenox/vibe/releases/download/${TAG}/vibe_${TAG}_${OS}_${ARCH}.tar.gz" -o vibe.tar.gz
 tar xzf vibe.tar.gz
 ./vibe init
-./vibe -input 'Hello'
+./vibe list files in my home directory
 ```
 
-For the default (Ollama) setup: run Ollama (`ollama serve`) and pull a model (e.g. `ollama pull phi3:3.8b`). Run `vibe init` once to create `.contenox/` with a default config and chain; then use `vibe -input '…'` or pass `-chain` and other options. To use OpenAI, vLLM, or Gemini, add `backends` and `default_provider` / `default_model` in `.contenox/config.yaml` (see [docs/contenox-vibe.md](docs/contenox-vibe.md)).
+The default chain is **vibes**: natural language → shell commands (the model uses `local_shell` to run e.g. `ls`, `pwd`). Run Ollama (`ollama serve`) and pull a tool-capable model (e.g. `ollama pull qwen2.5:7b`). Run `vibe init` once to create `.contenox/` with the vibes default; then use `vibe <input>`, `vibe --input '…'`, or pipe stdin. To use OpenAI, vLLM, or Gemini, add `backends` and `default_provider` / `default_model` in `.contenox/config.yaml` (see [docs/contenox-vibe.md](docs/contenox-vibe.md)).
 
 Manual download: [Releases](https://github.com/contenox/vibe/releases) — pick `vibe_<tag>_<os>_<arch>.tar.gz` for your platform.
 

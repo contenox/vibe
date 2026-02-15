@@ -10,42 +10,49 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/contenox/vibe/backendservice"
+	"github.com/contenox/vibe/eventsourceservice"
+	"github.com/contenox/vibe/executor"
 	"github.com/contenox/vibe/execservice"
+	"github.com/contenox/vibe/functionservice"
+	"github.com/contenox/vibe/internal/eventdispatch"
 	"github.com/contenox/vibe/internal/hooks"
-	"github.com/contenox/vibe/jseval"
 	"github.com/contenox/vibe/internal/llmrepo"
 	"github.com/contenox/vibe/internal/ollamatokenizer"
 	"github.com/contenox/vibe/internal/runtimestate"
+	"github.com/contenox/vibe/jseval"
 	libbus "github.com/contenox/vibe/libbus"
 	libdb "github.com/contenox/vibe/libdbexec"
 	"github.com/contenox/vibe/libtracker"
 	"github.com/contenox/vibe/localhooks"
 	"github.com/contenox/vibe/runtimetypes"
+	"github.com/contenox/vibe/taskchainservice"
 	"github.com/contenox/vibe/taskengine"
 )
 
 // runOpts carries all effective config and flags needed by the run pipeline.
 type runOpts struct {
 	EffectiveDB                       string
-	EffectiveChain                     string
-	EffectiveDefaultModel              string
-	EffectiveDefaultProvider           string
+	EffectiveChain                    string
+	EffectiveDefaultModel             string
+	EffectiveDefaultProvider          string
 	EffectiveContext                  int
-	EffectiveNoDeleteModels            bool
-	EffectiveEnableLocalExec           bool
-	EffectiveLocalExecAllowedDir       string
-	EffectiveLocalExecAllowedCommands  string
-	EffectiveLocalExecDeniedCommands   []string
-	EffectiveTracing                   bool
-	EffectiveSteps                     bool
-	EffectiveRaw                       bool
-	InputValue                         string
-	InputFlagPassed                    bool
-	Cfg                                localConfig
-	ResolvedBackends                   []resolvedBackend
-	ContenoxDir                        string
+	EffectiveNoDeleteModels           bool
+	EffectiveEnableLocalExec          bool
+	EffectiveLocalExecAllowedDir      string
+	EffectiveLocalExecAllowedCommands string
+	EffectiveLocalExecDeniedCommands  []string
+	EffectiveTracing                  bool
+	EffectiveSteps                    bool
+	EffectiveRaw                      bool
+	InputValue                        string
+	InputFlagPassed                   bool
+	Cfg                               localConfig
+	ResolvedBackends                  []resolvedBackend
+	ContenoxDir                       string
 }
 
 func run(ctx context.Context, opts runOpts) {
@@ -212,17 +219,23 @@ func run(ctx context.Context, opts runOpts) {
 	// ------------------------------------------------------------------------
 	// 8. Local hooks
 	// ------------------------------------------------------------------------
-	jsEnv := jseval.NewEnv(tracker, jseval.BuiltinHandlers{})
+	jsEnv := jseval.NewEnv(tracker, jseval.BuiltinHandlers{}, jseval.DefaultBuiltins())
 	localHooks := map[string]taskengine.HookRepo{
+		// "echo":       localhooks.NewEchoHook(),
+		// "print":      localhooks.NewPrint(tracker),
+		// "webhook":    localhooks.NewWebCaller(),
+		"js_execution": localhooks.NewJSSandboxHook(jsEnv, tracker),
+	}
+	jsHooks := map[string]taskengine.HookRepo{
 		"echo":       localhooks.NewEchoHook(),
 		"print":      localhooks.NewPrint(tracker),
 		"webhook":    localhooks.NewWebCaller(),
-		"js_sandbox": localhooks.NewJSSandboxHook(jsEnv, tracker),
+		"js_execution": localhooks.NewJSSandboxHook(jsEnv, tracker),
 	}
 	if sshHook, err := localhooks.NewSSHHook(); err != nil {
 		slog.Debug("SSH hook not registered (e.g. no known_hosts)", "error", err)
 	} else {
-		localHooks["ssh"] = sshHook
+		jsHooks["ssh"] = sshHook
 	}
 	if opts.EffectiveEnableLocalExec {
 		hookOpts := []localhooks.LocalExecOption{}
@@ -238,9 +251,10 @@ func run(ctx context.Context, opts runOpts) {
 		if len(opts.EffectiveLocalExecDeniedCommands) > 0 {
 			hookOpts = append(hookOpts, localhooks.WithLocalExecDeniedCommands(opts.EffectiveLocalExecDeniedCommands))
 		}
-		localHooks["local_exec"] = localhooks.NewLocalExecHook(hookOpts...)
+		jsHooks["local_shell"] = localhooks.NewLocalExecHook(hookOpts...)
 	}
 	hookRepo := hooks.NewPersistentRepo(localHooks, db, http.DefaultClient)
+	jsHookRepo := hooks.NewSimpleProvider(jsHooks)
 
 	// ------------------------------------------------------------------------
 	// 9. Task engine
@@ -261,7 +275,31 @@ func run(ctx context.Context, opts runOpts) {
 		os.Exit(1)
 	}
 	taskService := execservice.NewTasksEnv(ctx, envExec, hookRepo)
-
+	execSvc := execservice.NewExec(ctx, repo)
+	chainSvc := taskchainservice.New(db)
+	functionSvc := functionservice.New(db)
+	gojaExec := executor.NewGojaExecutor(tracker, functionSvc)
+	dispatcher, err := eventdispatch.New(ctx, functionSvc, func(ctx context.Context, err error) {
+		slog.ErrorContext(ctx, "event dispatch error", "error", err)
+	}, time.Second, gojaExec, tracker)
+	if err != nil {
+		slog.Error("Failed to create event dispatcher", "error", err)
+		os.Exit(1)
+	}
+	_ = dispatcher // not used with no-op event source; kept for consistent wiring
+	// Use no-op event source: CLI does not persist events (SQLite has no partition support).
+	eventsource := eventsourceservice.NewNoopService()
+	gojaExec.AddBuildInServices(eventsource, execSvc, chainSvc, taskService, jsHookRepo)
+	gojaExec.StartSync(ctx, time.Second*3)
+	defer gojaExec.StopSync()
+	jsEnv.SetBuiltinHandlers(jseval.BuiltinHandlers{
+		Eventsource:          eventsource,
+		TaskService:         execSvc,
+		TaskchainService:    chainSvc,
+		TaskchainExecService: taskService,
+		FunctionService:     functionSvc,
+		HookRepo:            jsHookRepo,
+	})
 	// ------------------------------------------------------------------------
 	// 10. Load chain from file
 	// ------------------------------------------------------------------------
@@ -295,7 +333,7 @@ func run(ctx context.Context, opts runOpts) {
 		}
 	}
 	if in == "" {
-		slog.Error("No input for chain", "hint", "pass -input \"your prompt\" or pipe input (e.g. echo 'hello' | vibe)")
+		slog.Error("No input for chain", "hint", "pass input as args (e.g. vibe hello), or --input \"your prompt\", or pipe (e.g. echo 'hello' | vibe)")
 		os.Exit(1)
 	}
 
@@ -306,6 +344,27 @@ func run(ctx context.Context, opts runOpts) {
 		"model":    opts.EffectiveDefaultModel,
 		"provider": opts.EffectiveDefaultProvider,
 		"chain":    chain.ID,
+	}
+	if builtins := jsEnv.GetBuiltinSignatures(); len(builtins) > 0 {
+		var b strings.Builder
+		for _, t := range builtins {
+			if t.Function.Name != "console" {
+				b.WriteString(t.Function.Name)
+				b.WriteString(": ")
+				b.WriteString(t.Function.Description)
+				b.WriteString("\n")
+			}
+		}
+		if hookTools, err := jsEnv.GetExecuteHookToolDescriptions(ctx); err == nil && len(hookTools) > 0 {
+			b.WriteString("executeHook tools: ")
+			for i, t := range hookTools {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteString(t.Function.Name)
+			}
+		}
+		templateVars["sandbox_api"] = b.String()
 	}
 	for _, key := range opts.Cfg.TemplateVarsFromEnv {
 		if v := os.Getenv(key); v != "" {

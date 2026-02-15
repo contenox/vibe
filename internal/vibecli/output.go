@@ -1,9 +1,8 @@
-// output.go holds CLI output helpers and flag check.
+// output.go holds CLI output helpers.
 package vibecli
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"strings"
 	"time"
@@ -82,15 +81,4 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%.0fms", d.Seconds()*1000)
 	}
 	return fmt.Sprintf("%.2fs", d.Seconds())
-}
-
-// isFlagPassed returns true if the flag with the given name was explicitly set on the command line.
-func isFlagPassed(name string) bool {
-	found := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == name {
-			found = true
-		}
-	})
-	return found
 }

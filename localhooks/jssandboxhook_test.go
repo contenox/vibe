@@ -19,7 +19,7 @@ func newTestJSSandboxHook(t *testing.T) *JSSandboxHook {
 	t.Helper()
 
 	tracker := libtracker.NewLogActivityTracker(slog.Default())
-	env := jseval.NewEnv(tracker, jseval.BuiltinHandlers{})
+	env := jseval.NewEnv(tracker, jseval.BuiltinHandlers{}, nil)
 
 	hookRepo := NewJSSandboxHook(env, tracker)
 	jsHook, ok := hookRepo.(*JSSandboxHook)
@@ -84,6 +84,24 @@ func TestUnit_JSSandboxHook_GetToolsForHookByName_Unknown(t *testing.T) {
 	assert.Nil(t, tools)
 }
 
+func TestUnit_JSSandboxHook_GetToolsForHookByName_EnrichedDescription(t *testing.T) {
+	ctx := context.Background()
+	tracker := libtracker.NewLogActivityTracker(slog.Default())
+	env := jseval.NewEnv(tracker, jseval.BuiltinHandlers{}, jseval.DefaultBuiltins())
+	h := NewJSSandboxHook(env, tracker)
+
+	tools, err := h.GetToolsForHookByName(ctx, jsSandboxHookName)
+	require.NoError(t, err)
+	require.Len(t, tools, 1)
+	desc := tools[0].Function.Description
+
+	// When env has default builtins, description should include builtin names.
+	assert.Contains(t, desc, "sendEvent", "description should document sendEvent builtin")
+	assert.Contains(t, desc, "httpFetch", "description should document httpFetch builtin")
+	assert.Contains(t, desc, "executeHook", "description should document executeHook builtin")
+	assert.Contains(t, desc, "Available globals", "description should mention available globals")
+}
+
 func TestUnit_JSSandboxHook_Exec_SimpleScript(t *testing.T) {
 	ctx := context.Background()
 	h := newTestJSSandboxHook(t)
@@ -91,7 +109,7 @@ func TestUnit_JSSandboxHook_Exec_SimpleScript(t *testing.T) {
 	code := `
 		// simple sandbox test
 		const result = { value: 42 };
-		console.log("hello from js_sandbox", result);
+		console.log("hello from js_execution", result);
 	`
 
 	input := map[string]any{

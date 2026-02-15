@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,8 +15,20 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// Hook name used in chains: HookCall.Name: "js_sandbox"
-const jsSandboxHookName = "js_sandbox"
+// safeExport runs val.Export() and recovers any panic, returning an error instead.
+// Some goja values can cause Export() to panic (e.g. nil pointer dereference).
+func safeExport(val goja.Value) (exported any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			exported = nil
+			err = fmt.Errorf("export panic: %v", r)
+		}
+	}()
+	return val.Export(), nil
+}
+
+// Hook name used in chains: HookCall.Name: "js_execution"
+const jsSandboxHookName = "js_execution"
 
 // Tool name exposed to LLMs when using this hook as a tool.
 const jsSandboxToolName = "execute_js"
@@ -28,7 +41,7 @@ const jsSandboxToolName = "execute_js"
 //  1. A task with handler "prompt_to_js" generates code:
 //     output: { "code": "<javascript>" } (DataTypeJSON)
 //
-//  2. Next task uses handler "hook" with Hook.Name = "js_sandbox"
+//  2. Next task uses handler "hook" with Hook.Name = "js_execution"
 //     and passes the previous output as input.
 //
 //  3. This hook executes the code in a fresh goja VM, with:
@@ -91,7 +104,7 @@ func (h *JSSandboxHook) Exec(
 	reportErr, reportChange, end := h.tracker.Start(
 		ctx,
 		"exec",
-		"js_sandbox",
+		"js_execution",
 		"hook_name", hook.Name,
 	)
 	defer end()
@@ -128,7 +141,7 @@ func (h *JSSandboxHook) Exec(
 
 	code = strings.TrimSpace(code)
 	if code == "" {
-		err := fmt.Errorf("js_sandbox: empty or missing code in input")
+		err := fmt.Errorf("js_execution: empty or missing code in input")
 		reportErr(err)
 		// This is a structural error, not a script error -> surface as hook error
 		return nil, taskengine.DataTypeAny, err
@@ -141,7 +154,7 @@ func (h *JSSandboxHook) Exec(
 
 	// Setup builtins + console / event / task functions with collector
 	if err := h.env.SetupVM(ctx, vm, collector); err != nil {
-		err = fmt.Errorf("js_sandbox: failed to setup VM: %w", err)
+		err = fmt.Errorf("js_execution: failed to setup VM: %w", err)
 		reportErr(err)
 		return nil, taskengine.DataTypeAny, err
 	}
@@ -154,7 +167,7 @@ func (h *JSSandboxHook) Exec(
 		exportedRes any
 	)
 
-	prog, err := jseval.Compile("js_sandbox", code)
+	prog, err := jseval.Compile("js_execution", code)
 	if err != nil {
 		// treat as script error
 		execErr = fmt.Errorf("compile error: %w", err)
@@ -164,10 +177,17 @@ func (h *JSSandboxHook) Exec(
 		if runErr != nil {
 			execErr = fmt.Errorf("runtime error: %w", runErr)
 		} else {
-			// try to read global "result" if set
+			// try to read global "result" if set (Export can panic on some goja values)
 			val := vm.Get("result")
 			if !goja.IsUndefined(val) && !goja.IsNull(val) {
-				exportedRes = val.Export()
+				var exportErr error
+				exportedRes, exportErr = safeExport(val)
+				// treat export panic as "no exportable result", not script error, so
+				// scripts that only do console.log() get ok: true
+				if exportErr != nil {
+					exportedRes = nil
+					// do not set execErr: script ran successfully
+				}
 			}
 		}
 	}
@@ -192,7 +212,7 @@ func (h *JSSandboxHook) Exec(
 	}
 
 	// Track successful hook execution (even if JS had an error; that is part of resp)
-	reportChange("js_sandbox", map[string]any{
+	reportChange("js_execution", map[string]any{
 		"ok":         execErr == nil,
 		"has_result": exportedRes != nil,
 		"logs_len":   len(logs),
@@ -202,17 +222,65 @@ func (h *JSSandboxHook) Exec(
 }
 
 // GetSchemasForSupportedHooks returns OpenAPI schemas for supported hooks.
-// For now we return an empty map (no full OpenAPI spec), which is acceptable.
+// TODO.
 func (h *JSSandboxHook) GetSchemasForSupportedHooks(ctx context.Context) (map[string]*openapi3.T, error) {
 	return map[string]*openapi3.T{}, nil
 }
 
 // GetToolsForHookByName exposes the JS sandbox as a single function-tool
 // ("execute_js") so models can call it directly when tools are wired
-// via ExecuteConfig.Hooks / hook resolution.
+// via ExecuteConfig.Hooks / hook resolution. The tool description includes
+// the available builtins and executeHook-callable tools for the model.
 func (h *JSSandboxHook) GetToolsForHookByName(ctx context.Context, name string) ([]taskengine.Tool, error) {
 	if name != jsSandboxHookName {
 		return nil, fmt.Errorf("unknown hook: %s", name)
+	}
+
+	desc := "Executes generated JavaScript in a sandbox - ECMAScript only, Goja - and returns result + logs. YOU ONLY CAN USE THE BUILTINS AND THE TOOLS THAT ARE LISTED BELOW."
+	builtins := h.env.GetBuiltinSignatures()
+	hookTools, _ := h.env.GetExecuteHookToolDescriptions(ctx)
+	if len(builtins) > 0 || len(hookTools) > 0 {
+		desc += " Available globals in the sandbox:"
+		for _, t := range builtins {
+			if t.Function.Name != "console" {
+				desc += " " + t.Function.Name + "("
+				if params, ok := t.Function.Parameters.(map[string]any); ok {
+					if props, _ := params["properties"].(map[string]any); props != nil {
+						var keys []string
+						switch req := params["required"].(type) {
+						case []string:
+							for _, s := range req {
+								if props[s] != nil {
+									keys = append(keys, s)
+								}
+							}
+						case []any:
+							for _, r := range req {
+								if s, ok := r.(string); ok && props[s] != nil {
+									keys = append(keys, s)
+								}
+							}
+						}
+						if len(keys) == 0 {
+							for k := range props {
+								keys = append(keys, k)
+							}
+							sort.Strings(keys)
+						}
+						desc += strings.Join(keys, ", ")
+					}
+				}
+				desc += ") — " + t.Function.Description + ";"
+			}
+		}
+		if len(hookTools) > 0 {
+			desc += " executeHook(hookName, toolName, args) can call: "
+			var names []string
+			for _, t := range hookTools {
+				names = append(names, t.Function.Name)
+			}
+			desc += strings.Join(names, ", ") + "."
+		}
 	}
 
 	return []taskengine.Tool{
@@ -220,7 +288,7 @@ func (h *JSSandboxHook) GetToolsForHookByName(ctx context.Context, name string) 
 			Type: "function",
 			Function: taskengine.FunctionTool{
 				Name:        jsSandboxToolName,
-				Description: "Executes generated JavaScript in a sandbox and returns result + logs.",
+				Description: desc,
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{

@@ -14,9 +14,9 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-const localExecHookName = "local_exec"
+const localExecHookName = "local_shell"
 
-// LocalExecResult is the structured result returned by the local_exec hook.
+// LocalExecResult is the structured result returned by the local_shell hook.
 type LocalExecResult struct {
 	ExitCode        int     `json:"exit_code"`
 	Stdout          string  `json:"stdout"`
@@ -84,7 +84,7 @@ func NewLocalExecHook(opts ...LocalExecOption) taskengine.HookRepo {
 // Args (when set): command (required), args (optional space-separated), cwd, timeout, shell (default false).
 func (h *LocalExecHook) Exec(ctx context.Context, startTime time.Time, input any, debug bool, hook *taskengine.HookCall) (any, taskengine.DataType, error) {
 	if hook == nil {
-		return nil, taskengine.DataTypeAny, errors.New("local_exec: hook required")
+		return nil, taskengine.DataTypeAny, errors.New("local_shell: hook required")
 	}
 	if hook.Args == nil {
 		hook.Args = make(map[string]string)
@@ -143,7 +143,7 @@ func (h *LocalExecHook) parseArgs(hook *taskengine.HookCall, input any) (command
 		}
 	}
 	if command == "" {
-		return "", nil, "", 0, false, "", errors.New("local_exec: command is required (hook.args.command or input)")
+		return "", nil, "", 0, false, "", errors.New("local_shell: command is required (hook.args.command or input)")
 	}
 	return command, argsSlice, cwd, timeout, useShell, stdin, nil
 }
@@ -176,27 +176,27 @@ func (h *LocalExecHook) checkAllowlist(command string, useShell bool) error {
 		for _, d := range h.deniedCommands {
 			dClean := filepath.Clean(d)
 			if dClean == resolved || dClean == command || filepath.Base(dClean) == base || dClean == base {
-				return fmt.Errorf("local_exec: command %s is denied by policy", command)
+				return fmt.Errorf("local_shell: command %s is denied by policy", command)
 			}
 		}
 	}
 	// 2. Sensitive default: no allow list configured = deny all
 	if h.allowedDir == "" && len(h.allowedCommands) == 0 {
-		return fmt.Errorf("local_exec: no allow list configured; set local_exec_allowed_commands or local_exec_allowed_dir in .contenox/config.yaml (or via -local-exec-allowed-*)")
+		return fmt.Errorf("local_shell: no allow list configured; set local_shell_allowed_commands or local_shell_allowed_dir in .contenox/config.yaml (or via -local-exec-allowed-*)")
 	}
 	// 3. Allowlist checks
 	if h.allowedDir != "" {
 		absDir, err := filepath.Abs(h.allowedDir)
 		if err != nil {
-			return fmt.Errorf("local_exec: allowed dir invalid: %w", err)
+			return fmt.Errorf("local_shell: allowed dir invalid: %w", err)
 		}
 		absCmd, err := filepath.Abs(resolved)
 		if err != nil {
-			return fmt.Errorf("local_exec: command path invalid: %w", err)
+			return fmt.Errorf("local_shell: command path invalid: %w", err)
 		}
 		rel, err := filepath.Rel(absDir, absCmd)
 		if err != nil || strings.HasPrefix(rel, "..") {
-			return fmt.Errorf("local_exec: command %s is not under allowed dir %s", command, h.allowedDir)
+			return fmt.Errorf("local_shell: command %s is not under allowed dir %s", command, h.allowedDir)
 		}
 	}
 	if len(h.allowedCommands) > 0 {
@@ -213,7 +213,7 @@ func (h *LocalExecHook) checkAllowlist(command string, useShell bool) error {
 			}
 		}
 		if !allowed {
-			return fmt.Errorf("local_exec: command %s is not in allowlist", command)
+			return fmt.Errorf("local_shell: command %s is not in allowlist", command)
 		}
 	}
 	return nil
@@ -284,7 +284,7 @@ func (h *LocalExecHook) GetSchemasForSupportedHooks(ctx context.Context) (map[st
 							"args":    {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Space-separated arguments"}},
 							"cwd":     {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Working directory"}},
 							"timeout": {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Duration e.g. 30s"}},
-							"shell":   {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeBoolean}, Description: "Run via /bin/sh -c"}},
+							"shell":   {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeBoolean}, Description: "Run via /bin/sh -c. Set to true if you need ~ expansion, environment variables ($HOME), wildcards, pipes, or redirection. Default false."}},
 						},
 						Required: []string{"command"},
 					},
@@ -293,13 +293,13 @@ func (h *LocalExecHook) GetSchemasForSupportedHooks(ctx context.Context) (map[st
 					Value: &openapi3.Schema{
 						Type: &openapi3.Types{openapi3.TypeObject},
 						Properties: map[string]*openapi3.SchemaRef{
-							"exit_code":         {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}}},
-							"stdout":            {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
-							"stderr":            {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
-							"success":           {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeBoolean}}},
-							"error":             {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
-							"duration_seconds":  {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeNumber}}},
-							"command":           {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
+							"exit_code":        {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}}},
+							"stdout":           {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
+							"stderr":           {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
+							"success":          {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeBoolean}}},
+							"error":            {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
+							"duration_seconds": {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeNumber}}},
+							"command":          {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
 						},
 					},
 				},
@@ -318,8 +318,8 @@ func (h *LocalExecHook) GetToolsForHookByName(ctx context.Context, name string) 
 		{
 			Type: "function",
 			Function: taskengine.FunctionTool{
-				Name:        "local_exec",
-				Description: "Run a command on the local host. Input is passed as stdin. Use only in trusted environments.",
+				Name:        "local_shell",
+				Description: "Run a terminal command on the local host. Input is passed as stdin.",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -341,7 +341,7 @@ func (h *LocalExecHook) GetToolsForHookByName(ctx context.Context, name string) 
 						},
 						"shell": map[string]interface{}{
 							"type":        "boolean",
-							"description": "Run via /bin/sh -c (default false)",
+							"description": "Run via /bin/sh -c (default false). Set to true if you need ~ expansion, environment variables ($HOME), wildcards, pipes, or redirection. Default false.",
 						},
 					},
 					"required": []string{"command"},

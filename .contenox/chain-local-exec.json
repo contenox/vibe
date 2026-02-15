@@ -1,15 +1,15 @@
 {
     "id": "local-exec-test",
-    "description": "Test local_exec hook: runs echo",
+    "description": "Test local_shell hook: runs echo",
     "tasks": [
         {
             "id": "run_echo",
             "handler": "hook",
             "hook": {
-                "name": "local_exec",
+                "name": "local_shell",
                 "args": {
                     "command": "echo",
-                    "args": "hello from local_exec"
+                    "args": "hello from local_shell"
                 }
             },
             "transition": {

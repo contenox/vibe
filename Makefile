@@ -20,9 +20,9 @@ export TENANCY
 # Allow user override of COMPOSE_CMD
 COMPOSE_CMD ?= docker compose -f compose.yaml -f compose.local.yaml
 
-.PHONY: run up down build clear logs \
+.PHONY: run-runtime-api up-runtime-api down-runtime-api clear-runtime-api logs-runtime-api \
         build-vibe run-vibe build-runtime-api run-runtime-api \
-        vibe-ollama-pull vibe-ollama-ready \
+        start-ollama-pull start-ollama \
         test test-unit test-system test-vibecli \
         test-api test-api-full test-api-init wait-for-server \
         docs-gen docs-markdown docs-html \
@@ -33,26 +33,25 @@ COMPOSE_CMD ?= docker compose -f compose.yaml -f compose.local.yaml
 # --------------------------------------------------------------------
 # Runtime lifecycle
 # --------------------------------------------------------------------
-
-build:
+build-runtime-api:
 	$(COMPOSE_CMD) build --build-arg TENANCY=$(TENANCY)
 
-up:
+up-runtime-api:
 	$(COMPOSE_CMD) up -d
 
-run: down build up
+run-runtime-api: down build-runtime-api up-runtime-api
 
-down:
+down-runtime:
 	$(COMPOSE_CMD) down
 
-clear:
+clear-runtime-api:
 	$(COMPOSE_CMD) down --volumes --remove-orphans
 
-logs:
+logs-runtime-api:
 	$(COMPOSE_CMD) logs -f runtime-api
 
 # --------------------------------------------------------------------
-# Vibe: local CLI, SQLite + in-memory bus# --------------------------------------------------------------------
+# Vibe CLI --------------------------------------------------------------------
 build-vibe:
 	go build -o $(PROJECT_ROOT)/bin/vibe $(PROJECT_ROOT)/cmd/vibe
 
@@ -72,11 +71,11 @@ run-runtime-api: build-runtime-api
 	$(PROJECT_ROOT)/bin/runtime-api
 
 # Pull the Ollama model used by contenox-vibe (default: phi3:3.8b). Start Ollama first if needed: ollama serve
-vibe-ollama-pull:
+start-ollama-pull:
 	ollama pull $(TASK_MODEL)
 
 # Ensure Ollama is ready for contenox-vibe: pull the model. Run "ollama serve" in another terminal if the server is not running.
-vibe-ollama-ready: vibe-ollama-pull
+start-ollama: start-ollama-pull
 	@echo "Model $(TASK_MODEL) ready. If you see 'connection refused', start Ollama in another terminal: ollama serve"
 
 
@@ -93,7 +92,6 @@ test-unit:
 test-system:
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -run '^TestSystem_' ./...
 
-# Unit tests for the vibe CLI (internal/vibecli).
 test-vibecli:
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -v ./internal/vibecli/...
 

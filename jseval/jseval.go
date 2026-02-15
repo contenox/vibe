@@ -2,13 +2,10 @@ package jseval
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/contenox/vibe/eventsourceservice"
-	"github.com/contenox/vibe/eventstore"
 	"github.com/contenox/vibe/execservice"
 	"github.com/contenox/vibe/functionservice"
 	"github.com/contenox/vibe/libtracker"
@@ -161,21 +158,79 @@ type BuiltinHandlers struct {
 
 // Env = configured JS environment with tracker + services.
 type Env struct {
-	tracker libtracker.ActivityTracker
-	deps    BuiltinHandlers
+	tracker  libtracker.ActivityTracker
+	deps     BuiltinHandlers
+	builtins []Builtin
 }
 
 func NewEnv(
 	tracker libtracker.ActivityTracker,
 	deps BuiltinHandlers,
+	builtins []Builtin,
 ) *Env {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
 	}
 	return &Env{
-		tracker: tracker,
+		tracker:  tracker,
 		deps:    deps,
+		builtins: builtins,
 	}
+}
+
+// GetBuiltinSignatures returns tool-shaped descriptions for all registered builtins,
+// for use in sandbox API documentation to the model.
+func (e *Env) GetBuiltinSignatures() []taskengine.Tool {
+	if e == nil || len(e.builtins) == 0 {
+		return nil
+	}
+	out := make([]taskengine.Tool, 0, len(e.builtins))
+	for _, b := range e.builtins {
+		out = append(out, taskengine.Tool{
+			Type: "function",
+			Function: taskengine.FunctionTool{
+				Name:        b.Name(),
+				Description: b.Description(),
+				Parameters:  b.ParametersSchema(),
+			},
+		})
+	}
+	return out
+}
+
+// GetExecuteHookToolDescriptions returns tool-shaped descriptions for all tools
+// callable via executeHook(hookName, toolName, args), using the env's HookRepo.
+// Used to document the sandbox API for the model.
+func (e *Env) GetExecuteHookToolDescriptions(ctx context.Context) ([]taskengine.Tool, error) {
+	if e == nil || e.deps.HookRepo == nil {
+		return nil, nil
+	}
+	supported, err := e.deps.HookRepo.Supports(ctx)
+	if err != nil || len(supported) == 0 {
+		return nil, err
+	}
+	var out []taskengine.Tool
+	for _, hookName := range supported {
+		if hookName == "js_execution" {
+			continue // avoid recursion: js_execution's GetToolsForHookByName calls us
+		}
+		tools, err := e.deps.HookRepo.GetToolsForHookByName(ctx, hookName)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range tools {
+			name := "executeHook:" + hookName + "." + t.Function.Name
+			out = append(out, taskengine.Tool{
+				Type: "function",
+				Function: taskengine.FunctionTool{
+					Name:        name,
+					Description: "Call executeHook(\"" + hookName + "\", \"" + t.Function.Name + "\", args). " + t.Function.Description,
+					Parameters:  t.Function.Parameters,
+				},
+			})
+		}
+	}
+	return out, nil
 }
 
 // SetupVM wires console + builtins into the given VM using the env’s deps.
@@ -185,512 +240,50 @@ func (e *Env) SetupVM(ctx context.Context, vm *goja.Runtime, col *Collector) err
 		return fmt.Errorf("vm is nil")
 	}
 
-	// console.log
+	if len(e.builtins) > 0 {
+		for _, b := range e.builtins {
+			if err := b.Register(vm, ctx, e.tracker, col, e.deps); err != nil {
+				return fmt.Errorf("failed to register builtin %s: %w", b.Name(), err)
+			}
+		}
+		return nil
+	}
+
+	// Legacy path: no builtins slice, wire inline (backward compatibility).
 	if err := setupConsoleLogger(vm, ctx, e.tracker, col); err != nil {
 		reportErr, _, end := e.tracker.Start(ctx, "setup", "console_logger_error", "err", err.Error())
 		defer end()
 		reportErr(err)
 	}
-
-	// sendEvent
 	if e.deps.Eventsource != nil {
-		if err := vm.Set("sendEvent", func(eventType string, data map[string]any) goja.Value {
-			extra := map[string]any{"event_type": eventType, "data": data}
-			return withErrorReporting(vm, ctx, e.tracker, "send", "event", extra, func() (interface{}, error) {
-				if col != nil {
-					col.Add(ExecLogEntry{
-						Timestamp: time.Now().UTC(),
-						Kind:      "sendEvent",
-						Name:      "sendEvent",
-						Args:      []any{eventType, data},
-						Meta: map[string]any{
-							"event_type": eventType,
-						},
-					})
-				}
-
-				_, reportChange, end := e.tracker.Start(ctx, "send", "event",
-					"event_type", eventType, "data", data)
-				defer end()
-
-				dataBytes, err := json.Marshal(data)
-				if err != nil {
-					if col != nil {
-						col.Add(ExecLogEntry{
-							Timestamp: time.Now().UTC(),
-							Kind:      "sendEvent",
-							Name:      "sendEvent",
-							Error:     err.Error(),
-							Meta: map[string]any{
-								"event_type": eventType,
-							},
-						})
-					}
-					return nil, fmt.Errorf("failed to marshal event data: %w", err)
-				}
-
-				event := &eventstore.Event{
-					ID:            fmt.Sprintf("func-gen-%d", time.Now().UnixNano()),
-					CreatedAt:     time.Now().UTC(),
-					EventType:     eventType,
-					EventSource:   "function_execution",
-					AggregateID:   "function",
-					AggregateType: "function",
-					Version:       1,
-					Data:          dataBytes,
-					Metadata:      json.RawMessage(`{"source": "function_execution"}`),
-				}
-
-				if err := e.deps.Eventsource.AppendEvent(ctx, event); err != nil {
-					if col != nil {
-						col.Add(ExecLogEntry{
-							Timestamp: time.Now().UTC(),
-							Kind:      "sendEvent",
-							Name:      "sendEvent",
-							Error:     err.Error(),
-							Meta: map[string]any{
-								"event_type": eventType,
-							},
-						})
-					}
-					return nil, fmt.Errorf("failed to send event: %w", err)
-				}
-
-				reportChange("event_sent", map[string]any{
-					"event_type": eventType,
-					"event_id":   event.ID,
-				})
-
-				if col != nil {
-					col.Add(ExecLogEntry{
-						Timestamp: time.Now().UTC(),
-						Kind:      "sendEvent",
-						Name:      "sendEvent",
-						Meta: map[string]any{
-							"event_type": eventType,
-							"event_id":   event.ID,
-						},
-					})
-				}
-
-				return map[string]any{
-					"success":  true,
-					"event_id": event.ID,
-				}, nil
-			})
-		}); err != nil {
+		if err := (SendEventBuiltin{}).Register(vm, ctx, e.tracker, col, e.deps); err != nil {
 			return err
 		}
 	}
 
-	// callTaskChain
 	if e.deps.TaskchainService != nil {
-		if err := vm.Set("callTaskChain", func(chainID string, input map[string]any) goja.Value {
-			extra := map[string]any{"chain_id": chainID, "input": input}
-			return withErrorReporting(vm, ctx, e.tracker, "call", "task_chain", extra, func() (interface{}, error) {
-				if col != nil {
-					col.Add(ExecLogEntry{
-						Timestamp: time.Now().UTC(),
-						Kind:      "callTaskChain",
-						Name:      "callTaskChain",
-						Args:      []any{chainID, input},
-					})
-				}
-
-				_, reportChange, end := e.tracker.Start(ctx, "call", "task_chain",
-					"chain_id", chainID, "input", input)
-				defer end()
-
-				chain, err := e.deps.TaskchainService.Get(ctx, chainID)
-				if err != nil {
-					if col != nil {
-						col.Add(ExecLogEntry{
-							Timestamp: time.Now().UTC(),
-							Kind:      "callTaskChain",
-							Name:      "callTaskChain",
-							Error:     err.Error(),
-						})
-					}
-					return nil, fmt.Errorf("failed to get task chain %s: %w", chainID, err)
-				}
-
-				reportChange("task_chain_called", map[string]any{
-					"chain_id": chainID,
-					"chain":    chain,
-					"input":    input,
-				})
-
-				return map[string]any{
-					"success":  true,
-					"chain_id": chainID,
-				}, nil
-			})
-		}); err != nil {
+		if err := (CallTaskChainBuiltin{}).Register(vm, ctx, e.tracker, col, e.deps); err != nil {
 			return err
 		}
 	}
 
-	// executeTask
 	if e.deps.TaskService != nil {
-		if err := vm.Set("executeTask", func(prompt, modelName, modelProvider string) goja.Value {
-			extra := map[string]any{
-				"prompt":         prompt,
-				"model_name":     modelName,
-				"model_provider": modelProvider,
-			}
-			return withErrorReporting(vm, ctx, e.tracker, "execute", "task", extra, func() (interface{}, error) {
-				if col != nil {
-					col.Add(ExecLogEntry{
-						Timestamp: time.Now().UTC(),
-						Kind:      "executeTask",
-						Name:      "executeTask",
-						Args:      []any{prompt, modelName, modelProvider},
-					})
-				}
-
-				_, reportChange, end := e.tracker.Start(ctx, "execute", "task",
-					"prompt", prompt, "model_name", modelName, "model_provider", modelProvider)
-				defer end()
-
-				req := &execservice.TaskRequest{
-					Prompt:        prompt,
-					ModelName:     modelName,
-					ModelProvider: modelProvider,
-				}
-
-				resp, err := e.deps.TaskService.Execute(ctx, req)
-				if err != nil {
-					if col != nil {
-						col.Add(ExecLogEntry{
-							Timestamp: time.Now().UTC(),
-							Kind:      "executeTask",
-							Name:      "executeTask",
-							Error:     err.Error(),
-						})
-					}
-					return nil, fmt.Errorf("failed to execute task: %w", err)
-				}
-
-				reportChange("task_executed", map[string]any{
-					"task_id":  resp.ID,
-					"response": resp.Response,
-				})
-
-				if col != nil {
-					col.Add(ExecLogEntry{
-						Timestamp: time.Now().UTC(),
-						Kind:      "executeTask",
-						Name:      "executeTask",
-						Meta: map[string]any{
-							"task_id": resp.ID,
-						},
-					})
-				}
-
-				return map[string]any{
-					"success":  true,
-					"task_id":  resp.ID,
-					"response": resp.Response,
-				}, nil
-			})
-		}); err != nil {
+		if err := (ExecuteTaskBuiltin{}).Register(vm, ctx, e.tracker, col, e.deps); err != nil {
 			return err
 		}
 	}
 
-	// executeTaskChain
 	if e.deps.TaskchainService != nil && e.deps.TaskchainExecService != nil {
-		if err := vm.Set("executeTaskChain", func(chainID string, input map[string]any) goja.Value {
-			extra := map[string]any{"chain_id": chainID, "input": input}
-			return withErrorReporting(vm, ctx, e.tracker, "execute", "task_chain", extra, func() (interface{}, error) {
-				if col != nil {
-					col.Add(ExecLogEntry{
-						Timestamp: time.Now().UTC(),
-						Kind:      "executeTaskChain",
-						Name:      "executeTaskChain",
-						Args:      []any{chainID, input},
-					})
-				}
-
-				_, reportChange, end := e.tracker.Start(ctx, "execute", "task_chain",
-					"chain_id", chainID, "input", input)
-				defer end()
-
-				chain, err := e.deps.TaskchainService.Get(ctx, chainID)
-				if err != nil {
-					if col != nil {
-						col.Add(ExecLogEntry{
-							Timestamp: time.Now().UTC(),
-							Kind:      "executeTaskChain",
-							Name:      "executeTaskChain",
-							Error:     err.Error(),
-						})
-					}
-					return nil, fmt.Errorf("failed to get task chain %s: %w", chainID, err)
-				}
-
-				result, resultType, history, err := e.deps.TaskchainExecService.Execute(
-					ctx,
-					chain,
-					input,
-					taskengine.DataTypeJSON,
-				)
-				if err != nil {
-					if col != nil {
-						col.Add(ExecLogEntry{
-							Timestamp: time.Now().UTC(),
-							Kind:      "executeTaskChain",
-							Name:      "executeTaskChain",
-							Error:     err.Error(),
-						})
-					}
-					return nil, fmt.Errorf("failed to execute task chain %s: %w", chainID, err)
-				}
-
-				var jsResult interface{}
-				switch resultType {
-				case taskengine.DataTypeString:
-					jsResult = result.(string)
-				case taskengine.DataTypeJSON:
-					if jsonBytes, ok := result.([]byte); ok {
-						var jsonData map[string]any
-						if err := json.Unmarshal(jsonBytes, &jsonData); err == nil {
-							jsResult = jsonData
-						} else {
-							jsResult = string(jsonBytes)
-						}
-					} else if str, ok := result.(string); ok {
-						var jsonData map[string]any
-						if err := json.Unmarshal([]byte(str), &jsonData); err == nil {
-							jsResult = jsonData
-						} else {
-							jsResult = str
-						}
-					} else {
-						jsResult = result
-					}
-				default:
-					jsResult = result
-				}
-
-				reportChange("task_chain_executed", map[string]any{
-					"chain_id": chainID,
-					"result":   jsResult,
-					"history":  history,
-				})
-
-				if col != nil {
-					col.Add(ExecLogEntry{
-						Timestamp: time.Now().UTC(),
-						Kind:      "executeTaskChain",
-						Name:      "executeTaskChain",
-						Meta: map[string]any{
-							"chain_id": chainID,
-						},
-					})
-				}
-
-				return map[string]any{
-					"success":  true,
-					"chain_id": chainID,
-					"result":   jsResult,
-					"history":  history,
-				}, nil
-			})
-		}); err != nil {
+		if err := (ExecuteTaskChainBuiltin{}).Register(vm, ctx, e.tracker, col, e.deps); err != nil {
 			return err
 		}
 	}
 
-	// executeHook
 	if e.deps.HookRepo != nil {
-		if err := vm.Set("executeHook", func(hookName, toolName string, args map[string]any) goja.Value {
-			extra := map[string]any{
-				"hook_name": hookName,
-				"tool_name": toolName,
-				"args":      args,
-			}
-
-			return withErrorReporting(vm, ctx, e.tracker, "execute", "hook", extra, func() (interface{}, error) {
-				if col != nil {
-					col.Add(ExecLogEntry{
-						Timestamp: time.Now().UTC(),
-						Kind:      "executeHook",
-						Name:      "executeHook",
-						Args:      []any{hookName, toolName, args},
-						Meta: map[string]any{
-							"hook_name": hookName,
-							"tool_name": toolName,
-						},
-					})
-				}
-
-				// 1) Validate hookName against supported hooks (if we can).
-				if e.deps.HookRepo != nil {
-					if supportedHooks, err := e.deps.HookRepo.Supports(ctx); err == nil && len(supportedHooks) > 0 {
-						found := false
-						for _, h := range supportedHooks {
-							if h == hookName {
-								found = true
-								break
-							}
-						}
-						if !found {
-							msg := fmt.Sprintf(
-								"INVALID_HOOK_NAME: %q is not registered; available hooks: %s",
-								hookName,
-								strings.Join(supportedHooks, ", "),
-							)
-
-							if col != nil {
-								col.Add(ExecLogEntry{
-									Timestamp: time.Now().UTC(),
-									Kind:      "executeHook",
-									Name:      "executeHook",
-									Error:     msg,
-									Meta: map[string]any{
-										"hook_name": hookName,
-										"tool_name": toolName,
-									},
-								})
-							}
-
-							return nil, fmt.Errorf("%s", msg)
-						}
-					}
-				}
-
-				// 2) Validate toolName against tools for this hook (if we can).
-				if e.deps.HookRepo != nil {
-					if tools, err := e.deps.HookRepo.GetToolsForHookByName(ctx, hookName); err == nil && len(tools) > 0 {
-						validTool := false
-						availableToolNames := make([]string, 0, len(tools))
-						for _, t := range tools {
-							availableToolNames = append(availableToolNames, t.Function.Name)
-							if t.Function.Name == toolName {
-								validTool = true
-							}
-						}
-						if !validTool {
-							msg := fmt.Sprintf(
-								"INVALID_HOOK_TOOL: %q is not a valid tool for hook %q; available tools: %s",
-								toolName,
-								hookName,
-								strings.Join(availableToolNames, ", "),
-							)
-
-							if col != nil {
-								col.Add(ExecLogEntry{
-									Timestamp: time.Now().UTC(),
-									Kind:      "executeHook",
-									Name:      "executeHook",
-									Error:     msg,
-									Meta: map[string]any{
-										"hook_name": hookName,
-										"tool_name": toolName,
-									},
-								})
-							}
-
-							return nil, fmt.Errorf("%s", msg)
-						}
-					}
-				}
-
-				_, reportChange, end := e.tracker.Start(
-					ctx,
-					"execute",
-					"hook",
-					"hook_name", hookName,
-					"tool_name", toolName,
-					"args", args,
-				)
-				defer end()
-
-				argsStr := map[string]string{}
-				for k, v := range args {
-					argsStr[k] = fmt.Sprintf("%v", v)
-				}
-				call := &taskengine.HookCall{
-					Name:     hookName,
-					ToolName: toolName,
-					Args:     argsStr,
-				}
-
-				// `input` is nil here, but you can extend the JS signature later if needed.
-				result, dataType, err := e.deps.HookRepo.Exec(
-					ctx,
-					time.Now().UTC(),
-					nil,   // input
-					false, // debug
-					call,
-				)
-				if err != nil {
-					if col != nil {
-						col.Add(ExecLogEntry{
-							Timestamp: time.Now().UTC(),
-							Kind:      "executeHook",
-							Name:      "executeHook",
-							Error:     err.Error(),
-							Meta: map[string]any{
-								"hook_name": hookName,
-								"tool_name": toolName,
-							},
-						})
-					}
-					return nil, fmt.Errorf("failed to execute hook %s/%s: %w", hookName, toolName, err)
-				}
-
-				// Normalize result for JS (similar to executeTaskChain)
-				var jsResult any = result
-				switch dataType {
-				case taskengine.DataTypeJSON:
-					switch r := result.(type) {
-					case []byte:
-						var v any
-						if err := json.Unmarshal(r, &v); err == nil {
-							jsResult = v
-						}
-					case string:
-						var v any
-						if err := json.Unmarshal([]byte(r), &v); err == nil {
-							jsResult = v
-						}
-					}
-				}
-
-				reportChange("hook_executed", map[string]any{
-					"hook_name": hookName,
-					"tool_name": toolName,
-					"type":      dataType,
-					"result":    jsResult,
-				})
-
-				if col != nil {
-					col.Add(ExecLogEntry{
-						Timestamp: time.Now().UTC(),
-						Kind:      "executeHook",
-						Name:      "executeHook",
-						Meta: map[string]any{
-							"hook_name": hookName,
-							"tool_name": toolName,
-						},
-					})
-				}
-
-				return map[string]any{
-					"success":   true,
-					"hook_name": hookName,
-					"tool_name": toolName,
-					"type":      dataType,
-					"result":    jsResult,
-				}, nil
-			})
-		}); err != nil {
-			return fmt.Errorf("failed to set executeHook builtin: %w", err)
+		if err := (ExecuteHookBuiltin{}).Register(vm, ctx, e.tracker, col, e.deps); err != nil {
+			return err
 		}
 	}
-
 	if err := setupHTTPFetch(vm, ctx, e.tracker, col, nil); err != nil {
 		return err
 	}

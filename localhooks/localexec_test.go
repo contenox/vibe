@@ -18,7 +18,7 @@ func TestLocalExecHook_Supports(t *testing.T) {
 	names, err := h.Supports(ctx)
 	require.NoError(t, err)
 	require.Len(t, names, 1)
-	assert.Equal(t, "local_exec", names[0])
+	assert.Equal(t, "local_shell", names[0])
 }
 
 func TestLocalExecHook_GetSchemasForSupportedHooks(t *testing.T) {
@@ -27,18 +27,18 @@ func TestLocalExecHook_GetSchemasForSupportedHooks(t *testing.T) {
 	schemas, err := h.GetSchemasForSupportedHooks(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, schemas)
-	require.Contains(t, schemas, "local_exec")
-	assert.NotNil(t, schemas["local_exec"])
+	require.Contains(t, schemas, "local_shell")
+	assert.NotNil(t, schemas["local_shell"])
 }
 
 func TestLocalExecHook_GetToolsForHookByName_OK(t *testing.T) {
 	ctx := context.Background()
 	h := NewLocalExecHook().(*LocalExecHook)
-	tools, err := h.GetToolsForHookByName(ctx, "local_exec")
+	tools, err := h.GetToolsForHookByName(ctx, "local_shell")
 	require.NoError(t, err)
 	require.Len(t, tools, 1)
 	assert.Equal(t, "function", tools[0].Type)
-	assert.Equal(t, "local_exec", tools[0].Function.Name)
+	assert.Equal(t, "local_shell", tools[0].Function.Name)
 	assert.Contains(t, tools[0].Function.Description, "Run a command")
 }
 
@@ -58,7 +58,7 @@ func TestLocalExecHook_Exec_Success(t *testing.T) {
 	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
-		Name: "local_exec",
+		Name: "local_shell",
 		Args: map[string]string{
 			"command": "echo",
 			"args":    "hello world",
@@ -80,7 +80,7 @@ func TestLocalExecHook_Exec_Success_InputAsStdin(t *testing.T) {
 	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
-		Name: "local_exec",
+		Name: "local_shell",
 		Args: map[string]string{
 			"command": "cat",
 		},
@@ -98,7 +98,7 @@ func TestLocalExecHook_Exec_ShellMode(t *testing.T) {
 	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
-		Name: "local_exec",
+		Name: "local_shell",
 		Args: map[string]string{
 			"command": "echo shell test",
 			"shell":   "true",
@@ -120,7 +120,7 @@ func TestLocalExecHook_Exec_AllowlistReject(t *testing.T) {
 	).(*LocalExecHook)
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
-		Name: "local_exec",
+		Name: "local_shell",
 		Args: map[string]string{
 			"command": "echo",
 			"args":    "forbidden",
@@ -140,7 +140,7 @@ func TestLocalExecHook_Exec_AllowlistDirReject(t *testing.T) {
 	ctx := context.Background()
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
-		Name: "local_exec",
+		Name: "local_shell",
 		Args: map[string]string{"command": "echo", "args": "x"},
 	}
 	_, _, err := h.Exec(ctx, start, nil, false, hookCall)
@@ -159,7 +159,7 @@ func TestLocalExecHook_Exec_AllowlistDirAllow(t *testing.T) {
 	ctx := context.Background()
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
-		Name: "local_exec",
+		Name: "local_shell",
 		Args: map[string]string{"command": scriptPath},
 	}
 	out, _, err := h.Exec(ctx, start, nil, false, hookCall)
@@ -178,7 +178,7 @@ func TestLocalExecHook_Exec_Timeout(t *testing.T) {
 	).(*LocalExecHook)
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{
-		Name: "local_exec",
+		Name: "local_shell",
 		Args: map[string]string{
 			"command": "sleep",
 			"args":    "2",
@@ -198,7 +198,7 @@ func TestLocalExecHook_Exec_MissingCommand(t *testing.T) {
 	ctx := context.Background()
 	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	hookCall := &taskengine.HookCall{
-		Name: "local_exec",
+		Name: "local_shell",
 		Args: map[string]string{},
 	}
 	_, _, err := h.Exec(ctx, time.Now().UTC(), nil, false, hookCall)
@@ -217,7 +217,7 @@ func TestLocalExecHook_Exec_NonZeroExit(t *testing.T) {
 	ctx := context.Background()
 	h := NewLocalExecHook(WithLocalExecAllowedCommands(testAllowedCommands)).(*LocalExecHook)
 	hookCall := &taskengine.HookCall{
-		Name: "local_exec",
+		Name: "local_shell",
 		Args: map[string]string{
 			"command": "exit 3",
 			"shell":   "true",

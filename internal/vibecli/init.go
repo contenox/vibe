@@ -2,33 +2,21 @@
 package vibecli
 
 import (
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 )
 
-const initConfigYAML = `# Default config created by 'vibe init'. Edit as needed.
-default_chain: default-chain.json
-backends:
-  - name: default
-    type: ollama
-    base_url: http://127.0.0.1:11434
-default_provider: ollama
-default_model: phi3:3.8b
-`
+//go:embed config.yaml
+var initConfig string
 
-const initDefaultChainJSON = `{"id":"qa-ollama","debug":true,"description":"Single prompt with Ollama","tasks":[{"id":"generate_response","description":"Generate answer","handler":"prompt_to_string","system_instruction":"You are a helpful assistant. Reply concisely.","prompt_template":"{{.input}}","input_var":"input","transition":{"branches":[{"operator":"default","goto":"end"}]}}],"token_limit":2048}
-`
+//go:embed chain-vibes.json
+var initChain string
 
-func runInit(args []string) {
-	force := false
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-force" || args[i] == "--force" {
-			force = true
-			break
-		}
-	}
+// RunInit scaffolds .contenox/ (config and default chain). If force is true, overwrites existing files.
+func RunInit(force bool) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		slog.Error("Cannot get current directory", "error", err)
@@ -44,7 +32,7 @@ func runInit(args []string) {
 	writeFile := func(path, content string) bool {
 		if !force {
 			if _, err := os.Stat(path); err == nil {
-				fmt.Printf("  %s already exists (use -force to overwrite)\n", path)
+				fmt.Printf("  %s already exists (use --force to overwrite)\n", path)
 				return false
 			}
 		}
@@ -55,8 +43,11 @@ func runInit(args []string) {
 		fmt.Printf("  Created %s\n", path)
 		return true
 	}
-	writeFile(configPath, initConfigYAML)
-	writeFile(chainPath, initDefaultChainJSON)
-	fmt.Println("Done. Next: start Ollama (ollama serve), pull a model (e.g. ollama pull phi3:3.8b), then run: vibe -input 'Hello'")
+	writeFile(configPath, initConfig)
+	writeFile(chainPath, initChain)
+	fmt.Println("Done. The default chain is vibes: natural language → shell commands (e.g. list files, run commands).")
+	fmt.Println("Next: start Ollama (ollama serve), pull a tool-capable model (e.g. ollama pull qwen2.5:7b), then run:")
+	fmt.Println("  vibe list files in my home directory")
+	fmt.Println("  vibe what is in /tmp")
 	fmt.Println("To use OpenAI, vLLM, or Gemini, add backends and set default_provider/default_model in .contenox/config.yaml.")
 }

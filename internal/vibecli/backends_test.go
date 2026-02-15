@@ -3,6 +3,7 @@ package vibecli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -22,6 +23,14 @@ func setupSQLiteStore(t *testing.T) (context.Context, libdb.DBManager, runtimety
 	t.Cleanup(func() { _ = db.Close() })
 	store := runtimetypes.New(db.WithoutTransaction())
 	return ctx, db, store
+}
+
+func Test_isUniqueConstraintBaseURLError(t *testing.T) {
+	require.True(t, isUniqueConstraintBaseURLError(fmt.Errorf("constraint failed: UNIQUE constraint failed: llm_backends.base_url (2067)")))
+	require.True(t, isUniqueConstraintBaseURLError(fmt.Errorf("libdb: unexpected database error: UNIQUE constraint failed: llm_backends.base_url")))
+	require.False(t, isUniqueConstraintBaseURLError(nil))
+	require.False(t, isUniqueConstraintBaseURLError(fmt.Errorf("other error")))
+	require.False(t, isUniqueConstraintBaseURLError(fmt.Errorf("UNIQUE constraint failed: llm_backends.name")))
 }
 
 func Test_setProviderConfigKV(t *testing.T) {
@@ -115,6 +124,27 @@ func Test_ensureBackendsFromConfig_skipsEmptyBaseURL(t *testing.T) {
 	require.Equal(t, "valid", list[0].Name)
 
 	_ = store
+}
+
+func Test_ensureBackendsFromConfig_sameBaseURLDifferentName_updatesExisting(t *testing.T) {
+	ctx, db, _ := setupSQLiteStore(t)
+	backendSvc := backendservice.New(db)
+
+	// Create a backend with name "ollama" (e.g. from an old config).
+	resolved1, _, _ := resolveEffectiveBackends(localConfig{
+		Backends: []backendEntry{{Name: "ollama", Type: "ollama", BaseURL: "http://127.0.0.1:11434"}},
+	}, "http://x:11434", "m")
+	require.NoError(t, ensureBackendsFromConfig(ctx, db, backendSvc, resolved1))
+
+	// Config now wants "default" with the same base_url (DB has UNIQUE on base_url).
+	resolved2, _, _ := resolveEffectiveBackends(localConfig{}, "http://127.0.0.1:11434", "phi3:3.8b")
+	require.NoError(t, ensureBackendsFromConfig(ctx, db, backendSvc, resolved2))
+
+	list, err := backendSvc.List(ctx, nil, 10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, "default", list[0].Name)
+	require.Equal(t, "http://127.0.0.1:11434", list[0].BaseURL)
 }
 
 func Test_ensureBackendsFromConfig_storesOpenAIKeyInKV(t *testing.T) {

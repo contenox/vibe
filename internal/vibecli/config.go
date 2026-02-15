@@ -39,10 +39,10 @@ type localConfig struct {
 	DefaultModel             string            `yaml:"default_model"`
 	Context                  *int              `yaml:"context"`
 	NoDeleteModels           *bool             `yaml:"no_delete_models"`
-	EnableLocalExec          *bool             `yaml:"enable_local_exec"`
-	LocalExecAllowedDir      string            `yaml:"local_exec_allowed_dir"`
-	LocalExecAllowedCommands string            `yaml:"local_exec_allowed_commands"`
-	LocalExecDeniedCommands  []string          `yaml:"local_exec_denied_commands"`
+	EnableLocalExec          *bool             `yaml:"enable_local_shell"`
+	LocalExecAllowedDir      string            `yaml:"local_shell_allowed_dir"`
+	LocalExecAllowedCommands string            `yaml:"local_shell_allowed_commands"`
+	LocalExecDeniedCommands  []string          `yaml:"local_shell_denied_commands"`
 	ExtraModels              []extraModelEntry `yaml:"extra_models"`
 	Tracing                  *bool             `yaml:"tracing"`
 	Steps                    *bool             `yaml:"steps"`

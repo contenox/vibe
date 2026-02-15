@@ -3,17 +3,18 @@
 # Flags override these values.
 default_chain: default-chain.json
 ollama: http://127.0.0.1:11434
-model: phi3:3.8b
-# Set to true to test the local_exec hook (e.g. with chain-vibes.json). When true, an allow list is required (no command runs without it).
-enable_local_exec: true
-# Allow list (required when enable_local_exec is true). Comma-separated list of allowed executables.
-local_exec_allowed_commands: "ls,pwd,cat,head,tail,date"
+model: qwen2.5:7b
+context: 32768
+# Set to true to test the local_shell hook (e.g. with chain-vibes.json). When true, an allow list is required (no command runs without it).
+enable_local_shell: true
+# Allow list (required when enable_local_shell is true). Comma-separated list of allowed executables.
+local_shell_allowed_commands: "ls,pwd,cat,head,tail,date"
 # Optional deny list (block these even if allowed):
-# local_exec_denied_commands:
+# local_shell_denied_commands:
 #   - rm
 #   - dd
 #   - mkfs
 # Register extra models so chains can use them (e.g. vibes chain uses qwen2.5:7b).
-extra_models:
-  - name: qwen2.5:7b
-    context: 32768
+# extra_models:
+#   - name: qwen2.5:7b
+#     context: 32768
