@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	libdb "github.com/contenox/vibe/libdbexec"
@@ -77,8 +78,10 @@ func validate(backend *runtimetypes.Backend) error {
 	if backend.BaseURL == "" {
 		return fmt.Errorf("%w: baseURL is required", ErrInvalidBackend)
 	}
-	if backend.Type != "ollama" && backend.Type != "vllm" {
-		return fmt.Errorf("%w: Type is required to be ollama or vllm", ErrInvalidBackend)
+	switch strings.ToLower(backend.Type) {
+	case "ollama", "vllm", "openai", "gemini":
+	default:
+		return fmt.Errorf("%w: Type must be ollama, vllm, openai, or gemini", ErrInvalidBackend)
 	}
 
 	return nil

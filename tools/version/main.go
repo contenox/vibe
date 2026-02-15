@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -122,6 +123,12 @@ func bumpVersion(bumpType string) error {
 		return fmt.Errorf("failed to update version file: %w", err)
 	}
 	tx.versionFileUpdated = true
+
+	// 6b. Update README install snippet TAG so copy-paste URL stays correct
+	if err := updateReadmeTag(newVersion); err != nil {
+		return fmt.Errorf("failed to update README TAG: %w", err)
+	}
+	tx.readmeUpdated = true
 
 	// 7. Commit changes
 	if err := commitVersionFile(newVersion); err != nil {
@@ -278,10 +285,10 @@ func updateVersionFile(newVersion string) error {
 }
 
 func commitVersionFile(newVersion string) error {
-	fmt.Println("📦 Committing version and compose files...")
+	fmt.Println("📦 Committing version, compose, and README...")
 
-	// Add both files to the commit
-	cmd := exec.Command("git", "add", getVersionFile(), "compose.yaml")
+	// Add version file, compose, and README (install snippet TAG) to the commit
+	cmd := exec.Command("git", "add", getVersionFile(), "compose.yaml", "README.md")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to add version and compose files: %w\nOutput: %s", err, string(output))
 	}
@@ -336,12 +343,34 @@ func updateComposeFile(newVersion string) error {
 	return nil
 }
 
+func updateReadmeTag(newVersion string) error {
+	readmePath := "README.md"
+	content, err := os.ReadFile(readmePath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", readmePath, err)
+	}
+	re := regexp.MustCompile(`TAG=v\d+\.\d+\.\d+`)
+	if !re.Match(content) {
+		return fmt.Errorf("README.md has no TAG=vX.Y.Z line for install snippet")
+	}
+	updated := re.ReplaceAll(content, []byte("TAG="+newVersion))
+	if bytes.Equal(updated, content) {
+		return nil
+	}
+	if err := os.WriteFile(readmePath, updated, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", readmePath, err)
+	}
+	fmt.Printf("   📝 Updated README install snippet to %s\n", newVersion)
+	return nil
+}
+
 // BumpTransaction represents a version bump operation with state tracking for proper cleanup
 type bumpTransaction struct {
 	currentVersion      string
 	newVersion          string
 	composeUpdated      bool
 	versionFileUpdated  bool
+	readmeUpdated       bool
 	commitCreated       bool
 	tagCreated          bool
 	hasError            bool
@@ -405,6 +434,14 @@ func (tx *bumpTransaction) Rollback() {
 		// Write the restored content
 		if err := os.WriteFile(composePath, []byte(updatedContent), 0644); err != nil {
 			fmt.Printf("   Failed to restore compose file: %v\n", err)
+		}
+	}
+
+	// If we updated the README TAG line, revert it
+	if tx.readmeUpdated {
+		fmt.Println("   Restoring README TAG...")
+		if err := updateReadmeTag(tx.currentVersion); err != nil {
+			fmt.Printf("   Failed to restore README: %v\n", err)
 		}
 	}
 

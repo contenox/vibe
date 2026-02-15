@@ -23,7 +23,7 @@ COMPOSE_CMD ?= docker compose -f compose.yaml -f compose.local.yaml
 .PHONY: run up down build clear logs \
         build-vibe run-vibe build-runtime-api run-runtime-api \
         vibe-ollama-pull vibe-ollama-ready \
-        test test-unit test-system \
+        test test-unit test-system test-vibecli \
         test-api test-api-full test-api-init wait-for-server \
         docs-gen docs-markdown docs-html \
         set-version bump-major bump-minor bump-patch \
@@ -93,6 +93,10 @@ test-unit:
 test-system:
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -run '^TestSystem_' ./...
 
+# Unit tests for the vibe CLI (internal/vibecli).
+test-vibecli:
+	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -v ./internal/vibecli/...
+
 
 # --------------------------------------------------------------------
 # API tests
@@ -140,6 +144,16 @@ docs-html: docs-gen
 
 set-version:
 	go run $(PROJECT_ROOT)/tools/version/main.go set
+
+# Bump version and create release commit + tag. Then: git push && git push origin vX.Y.Z
+bump-patch:
+	go run $(PROJECT_ROOT)/tools/version/main.go bump patch
+
+bump-minor:
+	go run $(PROJECT_ROOT)/tools/version/main.go bump minor
+
+bump-major:
+	go run $(PROJECT_ROOT)/tools/version/main.go bump major
 
 commit-docs: docs-markdown docs-html
 	git add $(PROJECT_ROOT)/docs
