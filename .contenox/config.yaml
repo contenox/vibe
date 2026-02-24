@@ -2,7 +2,9 @@
 # default_chain is relative to this .contenox directory; chains must live inside .contenox.
 # Flags override these values.
 default_chain: default-chain.json
-ollama: http://127.0.0.1:11434
+default_model: "qwen2.5:7b"
+default_provider: "ollama"
+ollama: http://172.17.0.1:11434
 model: qwen2.5:7b
 context: 32768
 # Set to true to test the local_shell hook (e.g. with chain-vibes.json). When true, an allow list is required (no command runs without it).
@@ -15,6 +17,6 @@ local_shell_allowed_commands: "ls,pwd,cat,head,tail,date"
 #   - dd
 #   - mkfs
 # Register extra models so chains can use them (e.g. vibes chain uses qwen2.5:7b).
-# extra_models:
-#   - name: qwen2.5:7b
-#     context: 32768
+extra_models:
+  - name: qwen2.5:7b
+    context: 32768

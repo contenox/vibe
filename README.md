@@ -17,15 +17,15 @@ case "$ARCH" in
   x86_64) ARCH=amd64 ;;
   aarch64|arm64) ARCH=arm64 ;;
 esac
-curl -sL "https://github.com/contenox/vibe/releases/download/${TAG}/vibe_${TAG}_${OS}_${ARCH}.tar.gz" -o vibe.tar.gz
-tar xzf vibe.tar.gz
+curl -sL "https://github.com/contenox/vibe/releases/download/${TAG}/vibe-${TAG}-${OS}-${ARCH}" -o vibe
+chmod +x vibe
 ./vibe init
 ./vibe list files in my home directory
 ```
 
 The default chain is **vibes**: natural language → shell commands (the model uses `local_shell` to run e.g. `ls`, `pwd`). Run Ollama (`ollama serve`) and pull a tool-capable model (e.g. `ollama pull qwen2.5:7b`). Run `vibe init` once to create `.contenox/` with the vibes default; then use `vibe <input>`, `vibe --input '…'`, or pipe stdin. To use OpenAI, vLLM, or Gemini, add `backends` and `default_provider` / `default_model` in `.contenox/config.yaml` (see [docs/contenox-vibe.md](docs/contenox-vibe.md)).
 
-Manual download: [Releases](https://github.com/contenox/vibe/releases) — pick `vibe_<tag>_<os>_<arch>.tar.gz` for your platform.
+Manual download: [Releases](https://github.com/contenox/vibe/releases) — pick `vibe-<tag>-<os>-<arch>` for your platform.
 
 -----
 

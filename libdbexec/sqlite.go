@@ -53,7 +53,7 @@ func NewSQLiteDBManager(ctx context.Context, path string, schema string) (DBMana
 
 // WithoutTransaction returns an executor that uses the connection pool directly.
 func (sm *sqliteDBManager) WithoutTransaction() Exec {
-	return &txAwareDB{db: sm.dbInstance}
+	return &txAwareDB{db: sm.dbInstance, errTranslate: translateSQLiteError}
 }
 
 // WithTransaction starts a SQLite transaction and returns executor, commit, and release.
@@ -63,7 +63,7 @@ func (sm *sqliteDBManager) WithTransaction(ctx context.Context, onRollback ...fu
 		return nil, nil, func() error { return nil }, fmt.Errorf("%w: begin transaction failed: %w", ErrTxFailed, translateSQLiteError(err))
 	}
 
-	store := &txAwareDB{tx: tx}
+	store := &txAwareDB{tx: tx, errTranslate: translateSQLiteError}
 	committed := false
 	rollback := func() {
 		for _, f := range onRollback {

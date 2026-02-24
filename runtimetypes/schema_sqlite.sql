@@ -114,6 +114,23 @@ CREATE TABLE IF NOT EXISTS event_triggers (
     updated_at TIMESTAMP NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS message_indices (
+    id VARCHAR(255) PRIMARY KEY,
+    identity VARCHAR(512) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id VARCHAR(255),
+    idx_id VARCHAR(255) NOT NULL REFERENCES message_indices(id) ON DELETE CASCADE,
+    payload TEXT NOT NULL,
+    added_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (id, idx_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_idx_id ON messages (idx_id);
+CREATE INDEX IF NOT EXISTS idx_messages_added_at ON messages (added_at);
+CREATE INDEX IF NOT EXISTS idx_message_indices_identity ON message_indices (identity);
+
 CREATE INDEX IF NOT EXISTS idx_functions_created_at ON functions(created_at);
 CREATE INDEX IF NOT EXISTS idx_event_triggers_created_at ON event_triggers(created_at);
 CREATE INDEX IF NOT EXISTS idx_event_triggers_listen_for_type ON event_triggers(listen_for_type);

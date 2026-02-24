@@ -11,18 +11,22 @@ CHAT_MODEL ?= phi3:3.8b
 CHAT_PROVIDER ?= ollama
 CHAT_MODEL_CONTEXT_LENGTH ?= 2048
 TENANCY ?= 54882f1d-3788-44f9-aed6-19a793c4568f
+OLLAMA_HOST ?= 172.17.0.1:11434
 
 export EMBED_MODEL EMBED_PROVIDER EMBED_MODEL_CONTEXT_LENGTH
 export TASK_MODEL TASK_MODEL_CONTEXT_LENGTH TASK_PROVIDER
 export CHAT_MODEL CHAT_MODEL_CONTEXT_LENGTH CHAT_PROVIDER
 export TENANCY
+export OLLAMA_HOST
 
 # Allow user override of COMPOSE_CMD
 COMPOSE_CMD ?= docker compose -f compose.yaml -f compose.local.yaml
 
-.PHONY: run-runtime-api up-runtime-api down-runtime-api clear-runtime-api logs-runtime-api \
-        build-vibe run-vibe build-runtime-api run-runtime-api \
-        start-ollama-pull start-ollama \
+.PHONY: run-runtime-api build-runtime-api \
+        docker-build-runtime docker-up-runtime docker-run-runtime \
+        docker-down-runtime docker-clear-runtime docker-logs-runtime \
+        build-vibe run-vibe \
+        start-ollama-pull start-ollama ollama-status \
         test test-unit test-system test-vibecli \
         test-api test-api-full test-api-init wait-for-server \
         docs-gen docs-markdown docs-html \
@@ -31,23 +35,23 @@ COMPOSE_CMD ?= docker compose -f compose.yaml -f compose.local.yaml
 
 
 # --------------------------------------------------------------------
-# Runtime lifecycle
+# Docker Runtime lifecycle
 # --------------------------------------------------------------------
-build-runtime-api:
+docker-build-runtime:
 	$(COMPOSE_CMD) build --build-arg TENANCY=$(TENANCY)
 
-up-runtime-api:
+docker-up-runtime:
 	$(COMPOSE_CMD) up -d
 
-run-runtime-api: down build-runtime-api up-runtime-api
+docker-run-runtime: docker-down-runtime docker-build-runtime docker-up-runtime
 
-down-runtime:
+docker-down-runtime:
 	$(COMPOSE_CMD) down
 
-clear-runtime-api:
+docker-clear-runtime:
 	$(COMPOSE_CMD) down --volumes --remove-orphans
 
-logs-runtime-api:
+docker-logs-runtime:
 	$(COMPOSE_CMD) logs -f runtime-api
 
 # --------------------------------------------------------------------
@@ -60,7 +64,7 @@ run-vibe: build-vibe
 	$(PROJECT_ROOT)/bin/vibe $(ARGS)
 
 # --------------------------------------------------------------------
-# Runtime API: HTTP server (Postgres, NATS, tokenizer). Normal run: make run (compose)
+# Local Runtime API: HTTP server
 # --------------------------------------------------------------------
 build-runtime-api:
 	go build -o $(PROJECT_ROOT)/bin/runtime-api $(PROJECT_ROOT)/cmd/runtime
@@ -70,13 +74,23 @@ run-runtime-api: build-runtime-api
 	@echo "  DATABASE_URL=postgres://... NATS_URL=nats://... TOKENIZER_SERVICE_URL=... ./bin/runtime-api"
 	$(PROJECT_ROOT)/bin/runtime-api
 
-# Pull the Ollama model used by contenox-vibe (default: phi3:3.8b). Start Ollama first if needed: ollama serve
-start-ollama-pull:
-	ollama pull $(TASK_MODEL)
+# --------------------------------------------------------------------
+# Ollama
+# --------------------------------------------------------------------
 
-# Ensure Ollama is ready for contenox-vibe: pull the model. Run "ollama serve" in another terminal if the server is not running.
+# Check if Ollama is reachable
+ollama-status:
+	@echo "Checking Ollama status at $(OLLAMA_HOST)..."
+	@curl -s -f http://$(OLLAMA_HOST)/api/tags > /dev/null || (echo "Error: Ollama server not responding at $(OLLAMA_HOST). Start it with 'ollama serve' or check OLLAMA_HOST." && exit 1)
+	@echo "Ollama is reachable."
+
+# Pull the Ollama model used by contenox-vibe (default: phi3:3.8b).
+start-ollama-pull: ollama-status
+	OLLAMA_HOST=$(OLLAMA_HOST) ollama pull $(TASK_MODEL)
+
+# Ensure Ollama is ready: check connection and pull the model.
 start-ollama: start-ollama-pull
-	@echo "Model $(TASK_MODEL) ready. If you see 'connection refused', start Ollama in another terminal: ollama serve"
+	@echo "Model $(TASK_MODEL) ready at $(OLLAMA_HOST)."
 
 
 # --------------------------------------------------------------------
@@ -116,7 +130,7 @@ wait-for-server:
 test-api: test-api-init wait-for-server
 	. $(APITEST_ACTIVATE) && pytest $(PROJECT_ROOT)/apitests/$(TEST_FILE)
 
-test-api-full: run test-api
+test-api-full: docker-run-runtime test-api
 
 
 # --------------------------------------------------------------------

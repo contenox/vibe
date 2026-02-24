@@ -4,6 +4,7 @@ package vibecli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,9 +15,10 @@ import (
 	"time"
 
 	"github.com/contenox/vibe/backendservice"
+	"github.com/contenox/vibe/chatservice"
 	"github.com/contenox/vibe/eventsourceservice"
-	"github.com/contenox/vibe/executor"
 	"github.com/contenox/vibe/execservice"
+	"github.com/contenox/vibe/executor"
 	"github.com/contenox/vibe/functionservice"
 	"github.com/contenox/vibe/internal/eventdispatch"
 	"github.com/contenox/vibe/internal/hooks"
@@ -25,9 +27,11 @@ import (
 	"github.com/contenox/vibe/internal/runtimestate"
 	"github.com/contenox/vibe/jseval"
 	libbus "github.com/contenox/vibe/libbus"
+	"github.com/contenox/vibe/libdbexec"
 	libdb "github.com/contenox/vibe/libdbexec"
 	"github.com/contenox/vibe/libtracker"
 	"github.com/contenox/vibe/localhooks"
+	"github.com/contenox/vibe/messagestore"
 	"github.com/contenox/vibe/runtimetypes"
 	"github.com/contenox/vibe/taskchainservice"
 	"github.com/contenox/vibe/taskengine"
@@ -221,15 +225,16 @@ func run(ctx context.Context, opts runOpts) {
 	// ------------------------------------------------------------------------
 	jsEnv := jseval.NewEnv(tracker, jseval.BuiltinHandlers{}, jseval.DefaultBuiltins())
 	localHooks := map[string]taskengine.HookRepo{
-		// "echo":       localhooks.NewEchoHook(),
-		// "print":      localhooks.NewPrint(tracker),
-		// "webhook":    localhooks.NewWebCaller(),
+		"echo":         localhooks.NewEchoHook(),
+		"print":        localhooks.NewPrint(tracker),
+		"webhook":      localhooks.NewWebCaller(),
 		"js_execution": localhooks.NewJSSandboxHook(jsEnv, tracker),
+		"local_fs":     localhooks.NewLocalFSHook(opts.EffectiveLocalExecAllowedDir),
 	}
 	jsHooks := map[string]taskengine.HookRepo{
-		"echo":       localhooks.NewEchoHook(),
-		"print":      localhooks.NewPrint(tracker),
-		"webhook":    localhooks.NewWebCaller(),
+		"echo":         localhooks.NewEchoHook(),
+		"print":        localhooks.NewPrint(tracker),
+		"webhook":      localhooks.NewWebCaller(),
 		"js_execution": localhooks.NewJSSandboxHook(jsEnv, tracker),
 	}
 	if sshHook, err := localhooks.NewSSHHook(); err != nil {
@@ -251,7 +256,9 @@ func run(ctx context.Context, opts runOpts) {
 		if len(opts.EffectiveLocalExecDeniedCommands) > 0 {
 			hookOpts = append(hookOpts, localhooks.WithLocalExecDeniedCommands(opts.EffectiveLocalExecDeniedCommands))
 		}
-		jsHooks["local_shell"] = localhooks.NewLocalExecHook(hookOpts...)
+		localExecHook := localhooks.NewLocalExecHook(hookOpts...)
+		jsHooks["local_shell"] = localExecHook
+		localHooks["local_shell"] = localExecHook
 	}
 	hookRepo := hooks.NewPersistentRepo(localHooks, db, http.DefaultClient)
 	jsHookRepo := hooks.NewSimpleProvider(jsHooks)
@@ -294,11 +301,11 @@ func run(ctx context.Context, opts runOpts) {
 	defer gojaExec.StopSync()
 	jsEnv.SetBuiltinHandlers(jseval.BuiltinHandlers{
 		Eventsource:          eventsource,
-		TaskService:         execSvc,
-		TaskchainService:    chainSvc,
+		TaskService:          execSvc,
+		TaskchainService:     chainSvc,
 		TaskchainExecService: taskService,
-		FunctionService:     functionSvc,
-		HookRepo:            jsHookRepo,
+		FunctionService:      functionSvc,
+		HookRepo:             jsHookRepo,
 	})
 	// ------------------------------------------------------------------------
 	// 10. Load chain from file
@@ -373,9 +380,33 @@ func run(ctx context.Context, opts runOpts) {
 	}
 	ctx = taskengine.WithTemplateVars(ctx, templateVars)
 
-	chainInput := taskengine.ChatHistory{
-		Messages: []taskengine.Message{{Role: "user", Content: in}},
+	// Persistent Session Management
+	identity := "local-user"
+	sessionID := "default-" + identity
+	chatMgr := chatservice.NewManager(nil)
+
+	// Ensure index exists (creates if absent, ignores unique-violation if already there)
+	if err := messagestore.New(db.WithoutTransaction()).CreateMessageIndex(ctx, sessionID, identity); err != nil {
+		if !errors.Is(err, libdbexec.ErrUniqueViolation) {
+			slog.Warn("Failed to ensure chat session index", "error", err)
+			sessionID = ""
+		}
 	}
+
+	var history []taskengine.Message
+	if sessionID != "" {
+		history, err = chatMgr.ListMessages(ctx, db.WithoutTransaction(), sessionID)
+		if err != nil {
+			slog.Warn("Failed to load chat history", "sessionID", sessionID, "error", err)
+		}
+	}
+
+	// Prepare Input
+	userMsg := taskengine.Message{Role: "user", Content: in, Timestamp: time.Now()}
+	chainInput := taskengine.ChatHistory{
+		Messages: append(history, userMsg),
+	}
+
 	if opts.EffectiveTracing {
 		slog.Info("Executing chain", "chain", chainPathAbs)
 	} else {
@@ -385,6 +416,28 @@ func run(ctx context.Context, opts runOpts) {
 	if err != nil {
 		slog.Error("Chain execution failed", "error", err)
 		os.Exit(1)
+	}
+
+	// Persist Results Surgically
+	if sessionID != "" && outputType == taskengine.DataTypeChatHistory {
+		if updatedHistory, ok := output.(taskengine.ChatHistory); ok {
+			exec, commit, release, txErr := db.WithTransaction(ctx)
+			if txErr == nil {
+				defer release()
+				if err := chatMgr.PersistDiff(ctx, exec, sessionID, updatedHistory.Messages); err != nil {
+					slog.Error("Failed to persist chat diff", "sessionID", sessionID, "error", err)
+				} else {
+					if err := commit(ctx); err != nil {
+						slog.Error("Failed to commit chat persistence transaction", "error", err)
+					}
+				}
+			} else {
+				slog.Error("Failed to start transaction for chat persistence", "error", txErr)
+			}
+		} else {
+			slog.Error("BUG: chain returned DataTypeChatHistory but output is not ChatHistory", "type", fmt.Sprintf("%T", output))
+			os.Exit(1)
+		}
 	}
 
 	// ------------------------------------------------------------------------

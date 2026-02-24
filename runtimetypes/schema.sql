@@ -93,6 +93,7 @@ ALTER TABLE remote_hooks ADD COLUMN IF NOT EXISTS headers JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_job_queue_v2_task_type ON job_queue_v2 USING hash(task_type);
 
+
 CREATE OR REPLACE FUNCTION estimate_row_count(table_name TEXT)
 RETURNS BIGINT AS $$
 DECLARE
@@ -106,3 +107,20 @@ BEGIN
     RETURN COALESCE(result, 0);
 END;
 $$ LANGUAGE plpgsql STABLE;
+
+CREATE TABLE IF NOT EXISTS message_indices (
+    id VARCHAR(255) PRIMARY KEY,
+    identity VARCHAR(512) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id VARCHAR(255),
+    idx_id VARCHAR(255) NOT NULL REFERENCES message_indices(id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,
+    added_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (id, idx_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_idx_id ON messages (idx_id);
+CREATE INDEX IF NOT EXISTS idx_messages_added_at ON messages (added_at);
+CREATE INDEX IF NOT EXISTS idx_message_indices_identity ON message_indices (identity);

@@ -12,7 +12,8 @@
         "provider": "ollama",
         "pass_clients_tools": false,
         "hooks": [
-          "local_shell"
+          "local_shell",
+          "local_fs"
         ]
       },
       "transition": {

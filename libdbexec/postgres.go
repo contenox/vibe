@@ -47,7 +47,7 @@ func NewPostgresDBManager(ctx context.Context, dsn string, schema string) (DBMan
 
 // WithoutTransaction returns an executor that operates directly on the connection group.
 func (sm *postgresDBManager) WithoutTransaction() Exec {
-	return &txAwareDB{db: sm.dbInstance}
+	return &txAwareDB{db: sm.dbInstance, errTranslate: translateError}
 }
 
 // WithTransaction starts a PostgreSQL transaction and returns the associated
@@ -61,7 +61,7 @@ func (sm *postgresDBManager) WithTransaction(ctx context.Context, onRollback ...
 	}
 
 	// Executor bound to the transaction
-	store := &txAwareDB{tx: tx}
+	store := &txAwareDB{tx: tx, errTranslate: translateError}
 	committed := false
 	rollback := func() {
 		for _, f := range onRollback {
@@ -123,10 +123,14 @@ func (sm *postgresDBManager) Close() error {
 }
 
 // txAwareDB implements the Exec interface, delegating to an underlying
-// *sql.DB or *sql.Tx and translating errors.
+// *sql.DB or *sql.Tx and translating errors via an injected translator.
+// This allows each database driver (Postgres, SQLite, etc.) to wire
+// in its own error mapping so sentinel errors like ErrUniqueViolation
+// are always returned correctly regardless of driver.
 type txAwareDB struct {
-	db *sql.DB // Used if not in a transaction
-	tx *sql.Tx // Used if in a transaction
+	db           *sql.DB
+	tx           *sql.Tx
+	errTranslate func(error) error // driver-specific error translator
 }
 
 // ExecContext delegates to the underlying DB or Tx and translates errors.
@@ -140,8 +144,7 @@ func (s *txAwareDB) ExecContext(ctx context.Context, query string, args ...any) 
 	} else {
 		return nil, errors.New("libdb: Exec called on uninitialized txAwareDB")
 	}
-	// Translate error before returning
-	return res, translateError(err)
+	return res, s.errTranslate(err)
 }
 
 // QueryContext delegates to the underlying DB or Tx and translates errors.
@@ -155,9 +158,8 @@ func (s *txAwareDB) QueryContext(ctx context.Context, query string, args ...any)
 	} else {
 		return nil, errors.New("libdb: Query called on uninitialized txAwareDB")
 	}
-	// Translate error before returning rows
 	if err != nil {
-		return nil, translateError(err)
+		return nil, s.errTranslate(err)
 	}
 	return rows, nil
 }
@@ -170,30 +172,27 @@ func (s *txAwareDB) QueryRowContext(ctx context.Context, query string, args ...a
 	} else if s.db != nil {
 		r = s.db.QueryRowContext(ctx, query, args...)
 	} else {
-		// Return a QueryRower that will error on Scan
 		return &row{err: errors.New("libdb: QueryRow called on uninitialized txAwareDB")}
 	}
-	return &row{inner: r}
+	return &row{inner: r, errTranslate: s.errTranslate}
 }
 
 // row implements QueryRower, wrapping *sql.Row to translate Scan errors.
 type row struct {
-	inner *sql.Row
-	err   error // Pre-capture error if creation failed
+	inner        *sql.Row
+	err          error
+	errTranslate func(error) error
 }
 
 // Scan calls the underlying Scan method and translates the error.
 func (r *row) Scan(dest ...any) error {
 	if r.err != nil {
-		return r.err // Return error from QueryRowContext if txAwareDB was invalid
+		return r.err
 	}
 	if r.inner == nil {
-		// Should not happen if QueryRowContext worked, let's keep it just in case
 		return errors.New("libdb: Scan called on nil row wrapper")
 	}
-	// Translate sql.ErrNoRows and other potential scan errors
-	err := r.inner.Scan(dest...)
-	return translateError(err)
+	return r.errTranslate(r.inner.Scan(dest...))
 }
 
 // translateError translates common sql and pq errors into package-defined errors.

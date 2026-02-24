@@ -6,12 +6,15 @@
       "id": "vibe_chat",
       "description": "Chat completion with local_shell tool; model may call tool or respond with text",
       "handler": "chat_completion",
-      "system_instruction": "You are a helpful assistant contenox-vibe. Model in use: {{var:model}}. Available tools: {{hookservice:list}}. Use the execute_js to interact with the enviroment. Craft proper code and iterate over turns until the user request is fulfilled.",
+      "system_instruction": "You are a helpful assistant contenox-vibe. Model in use: {{var:model}}. Available tools: {{hookservice:list}}.",
       "execute_config": {
         "model": "qwen2.5:7b",
         "provider": "ollama",
         "pass_clients_tools": false,
-        "hooks": ["js_execution"]
+        "hooks": [
+          "local_shell",
+          "local_fs"
+        ]
       },
       "transition": {
         "on_failure": "",
