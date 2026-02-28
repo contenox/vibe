@@ -250,7 +250,7 @@ docs/
 # ==============================
 # Enterprise Code
 # ==============================
-enterprise/
+# enterprise/ is a git submodule — do NOT gitignore it
 .apikey.txt
 
 # dependencies
