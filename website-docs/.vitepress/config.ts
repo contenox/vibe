@@ -18,7 +18,7 @@ try {
 
 export default defineConfig({
     title: 'Contenox Docs',
-    description: 'Documentation for Contenox — the self-hostable runtime for sovereign GenAI workflows.',
+    description: 'Documentation for Contenox Vibe — AI workflows at your fingertips.',
     base: '/docs/',
 
     head: [
@@ -88,7 +88,7 @@ export default defineConfig({
 
         footer: {
             message: 'Released under the Apache 2.0 License.',
-            copyright: `Copyright © 2024–${new Date().getFullYear()} Contenox contributors · Runtime ${runtimeVersion}`,
+            copyright: `Copyright © ${new Date().getFullYear()} Contenox · Vibe ${runtimeVersion}`,
         },
 
         search: {
