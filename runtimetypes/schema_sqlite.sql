@@ -116,8 +116,14 @@ CREATE TABLE IF NOT EXISTS event_triggers (
 
 CREATE TABLE IF NOT EXISTS message_indices (
     id VARCHAR(255) PRIMARY KEY,
-    identity VARCHAR(512) NOT NULL
+    identity VARCHAR(512) NOT NULL,
+    name VARCHAR(255)  -- human-readable session name; NULL = unnamed
 );
+
+-- Partial unique index: only enforce uniqueness when name IS NOT NULL
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_indices_name
+    ON message_indices (name)
+    WHERE name IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS messages (
     id VARCHAR(255),
@@ -135,3 +141,26 @@ CREATE INDEX IF NOT EXISTS idx_functions_created_at ON functions(created_at);
 CREATE INDEX IF NOT EXISTS idx_event_triggers_created_at ON event_triggers(created_at);
 CREATE INDEX IF NOT EXISTS idx_event_triggers_listen_for_type ON event_triggers(listen_for_type);
 CREATE INDEX IF NOT EXISTS idx_event_triggers_function_name ON event_triggers(function_name);
+
+CREATE TABLE IF NOT EXISTS plans (
+    id VARCHAR(255) PRIMARY KEY,
+    name VARCHAR(255) UNIQUE NOT NULL,
+    goal TEXT NOT NULL,
+    status VARCHAR(50) DEFAULT 'active', -- active | completed | archived
+    session_id VARCHAR(255),             -- optional FK to message_indices
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plan_steps (
+    id VARCHAR(255) PRIMARY KEY,
+    plan_id VARCHAR(255) REFERENCES plans(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    status VARCHAR(50) DEFAULT 'pending', -- pending | completed | failed | skipped
+    execution_result TEXT,                -- summary / error / full output
+    executed_at TIMESTAMP,
+    UNIQUE(plan_id, ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_steps_plan ON plan_steps(plan_id, ordinal);

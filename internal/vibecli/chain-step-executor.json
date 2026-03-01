@@ -1,0 +1,53 @@
+{
+    "id": "chain-step-executor",
+    "description": "Executes a single step. Uses local_shell tools. Outputs ===STEP_DONE=== when complete.",
+    "tasks": [
+        {
+            "id": "step_execution",
+            "description": "Chat completion with local_shell tool to execute the current step in the plan.",
+            "handler": "chat_completion",
+            "system_instruction": "You are an autonomous agent executing steps from a software engineering plan. You have tools available — USE THEM to complete each step.\n\nWhen using local_shell: always set shell=true so you can use pipes and redirects. The allowed first command word must be one of: bash, echo, cat, ls, chmod, sh, date, pwd, head, tail.\n\nWhen the step is fully done and verified, output EXACTLY this on its own line:\n===STEP_DONE===\n\nDo NOT describe what you would do — actually do it using tool calls.",
+            "execute_config": {
+                "model": "{{var:model}}",
+                "provider": "{{var:provider}}",
+                "pass_clients_tools": true,
+                "hooks": [
+                    "local_shell",
+                    "local_fs"
+                ]
+            },
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "equals",
+                        "when": "tool-call",
+                        "goto": "run_tools"
+                    },
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "end"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "run_tools",
+            "description": "Execute tool calls from the last message and append results to chat history",
+            "handler": "execute_tool_calls",
+            "input_var": "step_execution",
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "step_execution"
+                    }
+                ]
+            }
+        }
+    ],
+    "token_limit": 8192
+}

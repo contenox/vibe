@@ -142,11 +142,9 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		reportErr(err)
 		return modelrepo.ChatResult{}, err
 	case "stop":
-		if finalResponse.Message.Content == "" && len(finalResponse.Message.ToolCalls) == 0 {
-			err := fmt.Errorf("empty content from model %s despite normal completion", c.modelName)
-			reportErr(err)
-			return modelrepo.ChatResult{}, err
-		}
+		// Allow empty content if there are tool calls — the model is signalling it wants to call tools.
+		// Also allow empty content with no tool calls — some models (e.g. qwen2.5) emit this as a
+		// "done" signal after completing a tool-use loop. Callers can detect this from content and tool_calls being empty.
 	default:
 		err := fmt.Errorf("unexpected completion reason %q for model %s", finalResponse.DoneReason, c.modelName)
 		reportErr(err)

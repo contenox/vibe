@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -62,8 +62,19 @@ jobs:
         run: |
           make docs-html
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Build VitePress docs
+        run: |
+          cd enterprise/vitepress-docs
+          npm ci
+          npm run docs:build
+
       - name: Build and push to GHCR
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -71,15 +82,14 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/runtime-api:${{ steps.vars.outputs.TAG }}
             ghcr.io/${{ github.repository_owner }}/runtime-api:latest
 
-      - name: Deploy to contenox.github.io/docs
+      - name: Deploy to contenox.github.io
         uses: peaceiris/actions-gh-pages@v4
         with:
           deploy_key: ${{ secrets.DEPLOY_KEY }}
           user_name: "github-actions[bot]"
           user_email: "github-actions[bot]@users.noreply.github.com"
           external_repository: contenox/contenox.github.io
-          publish_dir: ./docs
-          destination_dir: docs
+          publish_dir: ./enterprise/contenox.github.io
           publish_branch: main
 
   release:
@@ -110,7 +120,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26"
 
       - name: Build Vibe binaries
         run: |

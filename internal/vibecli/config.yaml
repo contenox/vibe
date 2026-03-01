@@ -1,20 +1,54 @@
-# Default config for contenox-vibe (optional).
-# default_chain is relative to this .contenox directory; chains must live inside .contenox.
-# Flags override these values.
+# Vibe config. Edit this file to connect to your LLM provider.
+# Run 'vibe init' to create this file, then 'vibe --help' for usage.
+# All fields are optional; CLI flags override config values.
 default_chain: default-chain.json
-ollama: http://127.0.0.1:11434
-model: qwen2.5:7b
+
+# ──────────────────────────────────────────────────────
+# OPTION A: Local model via Ollama (default)
+# Prerequisites: ollama serve && ollama pull qwen2.5:7b
+# ──────────────────────────────────────────────────────
+backends:
+  - name: local
+    type: ollama
+    base_url: http://127.0.0.1:11434
+default_provider: local
+default_model: qwen2.5:7b
 context: 32768
-# Set to true to test the local_shell hook (e.g. with chain-vibes.json). When true, an allow list is required (no command runs without it).
+
+# ──────────────────────────────────────────────────────
+# OPTION B: OpenAI
+# Prerequisites: export OPENAI_API_KEY=sk-...
+# Uncomment and replace the backend block above with this:
+# ──────────────────────────────────────────────────────
+# backends:
+#   - name: openai
+#     type: openai
+#     base_url: https://api.openai.com/v1
+#     api_key_from_env: OPENAI_API_KEY
+# default_provider: openai
+# default_model: gpt-4o-mini
+
+# ──────────────────────────────────────────────────────
+# OPTION C: Google Gemini
+# Prerequisites: export GEMINI_API_KEY=...
+# Uncomment and replace the backend block above with this:
+# ──────────────────────────────────────────────────────
+# backends:
+#   - name: gemini
+#     type: gemini
+#     api_key_from_env: GEMINI_API_KEY
+# default_provider: gemini
+# default_model: gemini-2.0-flash
+
+# NOTE: for 'vibe plan', the model MUST support tool calling.
+# Recommended: qwen2.5:7b (Ollama), gpt-4o-mini (OpenAI), gemini-2.0-flash (Gemini)
+
+# Shell execution hook — required for 'vibe plan' and natural language → shell commands.
+# When true, you must set an allow list (no command runs without it).
 enable_local_shell: true
-# Allow list (required when enable_local_shell is true). Comma-separated list of allowed executables.
-local_shell_allowed_commands: "ls,pwd,cat,head,tail,date"
-# Optional deny list (block these even if allowed):
+local_shell_allowed_commands: "bash,echo,cat,ls,chmod,sh,date,pwd,head,tail,grep,find,mkdir,cp,mv"
+# Optional deny list (always blocked even if in the allow list):
 # local_shell_denied_commands:
 #   - rm
 #   - dd
 #   - mkfs
-# Register extra models so chains can use them (e.g. vibes chain uses qwen2.5:7b).
-extra_models:
-  - name: qwen2.5:7b
-    context: 32768

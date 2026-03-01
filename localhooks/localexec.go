@@ -141,6 +141,23 @@ func (h *LocalExecHook) parseArgs(hook *taskengine.HookCall, input any) (command
 		if s, ok := v["stdin"].(string); ok {
 			stdin = s
 		}
+		// Read shell, args, cwd, timeout from dynamic tool args if not already set by hook.Args
+		if s, ok := v["shell"].(bool); ok && !useShell {
+			useShell = s
+		} else if s, ok := v["shell"].(string); ok && !useShell {
+			useShell = strings.EqualFold(s, "true") || s == "1"
+		}
+		if a, ok := v["args"].(string); ok && len(argsSlice) == 0 {
+			argsSlice = strings.Fields(a)
+		}
+		if d, ok := v["cwd"].(string); ok && cwd == "" {
+			cwd = filepath.Clean(d)
+		}
+		if t, ok := v["timeout"].(string); ok {
+			if d, e := time.ParseDuration(t); e == nil && timeout == h.defaultTimeout {
+				timeout = d
+			}
+		}
 	}
 	if command == "" {
 		return "", nil, "", 0, false, "", errors.New("local_shell: command is required (hook.args.command or input)")

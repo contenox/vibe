@@ -107,6 +107,9 @@ type EnvExecutor interface {
 // ErrUnsupportedTaskType indicates unrecognized task type
 var ErrUnsupportedTaskType = errors.New("executor does not support the task type")
 
+// ErrHookNotFound is returned when a named hook is not registered in any repo.
+var ErrHookNotFound = errors.New("hook not found")
+
 // HookRepo defines interface for external system integrations and side effects.
 type HookRepo interface {
 	Exec(ctx context.Context, startingTime time.Time, input any, debug bool, args *HookCall) (any, DataType, error)
@@ -213,7 +216,12 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 			for _, hookName := range task.ExecuteConfig.Hooks {
 				hookTools, err := env.hookProvider.GetToolsForHookByName(ctx, hookName)
 				if err != nil {
-					return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: failed to get tools for hook %s: %v", currentTask.ID, hookName, err)
+					if errors.Is(err, ErrHookNotFound) {
+						// Hook not registered (e.g. local_shell disabled via --enable-local-exec=false).
+						// The model simply won't see this tool.
+						continue
+					}
+					return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: failed to get tools for hook %s: %w", currentTask.ID, hookName, err)
 				}
 				for _, tool := range hookTools {
 					tool.Function.Name = hookName + "." + tool.Function.Name
@@ -579,7 +587,7 @@ func renderTemplate(tmplStr string, vars any) (string, error) {
 	return buf.String(), nil
 }
 
-func (exe SimpleEnv) evaluateTransitions(ctx context.Context, taskID string, transition TaskTransition, eval string) (string, *TransitionBranch, error) {
+func (exe SimpleEnv) evaluateTransitions(_ context.Context, _ string, transition TaskTransition, eval string) (string, *TransitionBranch, error) {
 	// First check explicit matches
 	for _, branch := range transition.Branches {
 		if branch.Operator == OpDefault {

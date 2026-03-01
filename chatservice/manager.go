@@ -118,6 +118,21 @@ func (m *Manager) PersistDiff(ctx context.Context, tx libdb.Exec, subjectID stri
 	return nil
 }
 
+// DeleteSession removes all messages and the index for a session.
+func (m *Manager) DeleteSession(ctx context.Context, tx libdb.Exec, sessionID string, identity string) error {
+	store := messagestore.New(tx)
+	// DeleteMessageIndex cascades to messages via ON DELETE CASCADE.
+	if err := store.DeleteMessageIndex(ctx, sessionID, identity); err != nil {
+		return fmt.Errorf("failed to delete session index: %w", err)
+	}
+	return nil
+}
+
+// RenameSession updates the human-readable name of a session.
+func (m *Manager) RenameSession(ctx context.Context, tx libdb.Exec, sessionID string, name string) error {
+	return messagestore.New(tx).RenameSession(ctx, sessionID, name)
+}
+
 // generateMessageID creates a deterministic ID from the message content.
 func generateMessageID(subjectID string, msg *taskengine.Message) string {
 	h := sha1.New()

@@ -39,7 +39,7 @@ func TestLocalExecHook_GetToolsForHookByName_OK(t *testing.T) {
 	require.Len(t, tools, 1)
 	assert.Equal(t, "function", tools[0].Type)
 	assert.Equal(t, "local_shell", tools[0].Function.Name)
-	assert.Contains(t, tools[0].Function.Description, "Run a command")
+	assert.Contains(t, tools[0].Function.Description, "Run a terminal command")
 }
 
 func TestLocalExecHook_GetToolsForHookByName_Unknown(t *testing.T) {
@@ -174,7 +174,7 @@ func TestLocalExecHook_Exec_Timeout(t *testing.T) {
 	ctx := context.Background()
 	h := NewLocalExecHook(
 		WithLocalExecAllowedCommands(testAllowedCommands),
-		WithLocalExecTimeout(50 * time.Millisecond),
+		WithLocalExecTimeout(50*time.Millisecond),
 	).(*LocalExecHook)
 	start := time.Now().UTC()
 	hookCall := &taskengine.HookCall{

@@ -9,6 +9,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/nats-io/nats.go v1.47.0
 	github.com/ollama/ollama v0.12.9
+	github.com/spf13/cobra v1.10.2
 	github.com/testcontainers/testcontainers-go/modules/nats v0.39.0
 	github.com/testcontainers/testcontainers-go/modules/valkey v0.39.0
 	github.com/valkey-io/valkey-go v1.0.67
@@ -41,7 +42,6 @@ require (
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/woodsbury/decimal128 v1.4.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect

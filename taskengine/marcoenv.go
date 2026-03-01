@@ -81,6 +81,23 @@ func (m *MacroEnv) ExecEnv(
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: system_instruction macro error: %w", t.ID, err)
 			}
 		}
+
+		// Expand {{var:*}} in execute_config model/provider so chains can use
+		// {{var:model}} and {{var:provider}} without callers doing manual string replacement.
+		if t.ExecuteConfig != nil {
+			if t.ExecuteConfig.Model != "" {
+				t.ExecuteConfig.Model, err = m.expandSpecialTemplates(ctx, &clone, t.ExecuteConfig.Model)
+				if err != nil {
+					return nil, DataTypeAny, nil, fmt.Errorf("task %s: execute_config.model macro error: %w", t.ID, err)
+				}
+			}
+			if t.ExecuteConfig.Provider != "" {
+				t.ExecuteConfig.Provider, err = m.expandSpecialTemplates(ctx, &clone, t.ExecuteConfig.Provider)
+				if err != nil {
+					return nil, DataTypeAny, nil, fmt.Errorf("task %s: execute_config.provider macro error: %w", t.ID, err)
+				}
+			}
+		}
 	}
 
 	// Delegate to the real EnvExecutor with the rewritten chain.

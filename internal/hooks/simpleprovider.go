@@ -65,7 +65,7 @@ func (m *SimpleRepo) GetToolsForHookByName(ctx context.Context, name string) ([]
 	if hook, ok := m.hooks[name]; ok {
 		return hook.GetToolsForHookByName(ctx, name)
 	}
-	return nil, fmt.Errorf("unknown hook type: %s", name)
+	return nil, fmt.Errorf("unknown hook type %q: %w", name, taskengine.ErrHookNotFound)
 }
 
 var _ taskengine.HookRepo = (*SimpleRepo)(nil)

@@ -4,13 +4,13 @@
 default_chain: default-chain.json
 default_model: "qwen2.5:7b"
 default_provider: "ollama"
-ollama: http://172.17.0.1:11434
+ollama: http://localhost:11434
 model: qwen2.5:7b
 context: 32768
 # Set to true to test the local_shell hook (e.g. with chain-vibes.json). When true, an allow list is required (no command runs without it).
 enable_local_shell: true
 # Allow list (required when enable_local_shell is true). Comma-separated list of allowed executables.
-local_shell_allowed_commands: "ls,pwd,cat,head,tail,date"
+local_shell_allowed_commands: "ls,pwd,cat,head,tail,date,echo,bash,chmod,sh"
 # Optional deny list (block these even if allowed):
 # local_shell_denied_commands:
 #   - rm

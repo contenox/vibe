@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"strings"
 	"time"
 
 	libdb "github.com/contenox/vibe/libdbexec"
@@ -90,10 +91,17 @@ func (p *PersistentRepo) execRemoteHook(
 			In:    ArgLocationHeader,
 		}
 	}
+	// Strip the hook-name prefix that taskengine adds to tool names
+	// (e.g. "nws.obs_stations" → "obs_stations" when hook.Name == "nws").
+	bareName := args.ToolName
+	if prefix := hook.Name + "."; strings.HasPrefix(bareName, prefix) {
+		bareName = strings.TrimPrefix(bareName, prefix)
+	}
+
 	// Construct ToolCall
 	toolCall := taskengine.ToolCall{
 		Function: taskengine.FunctionCall{
-			Name:      args.ToolName,
+			Name:      bareName,
 			Arguments: "{}", // Will be replaced
 		},
 	}
@@ -141,8 +149,9 @@ func (p *PersistentRepo) GetToolsForHookByName(ctx context.Context, name string)
 	store := runtimetypes.New(p.dbInstance.WithoutTransaction())
 	remoteHook, err := store.GetRemoteHookByName(ctx, name)
 	if err != nil {
-		return nil, fmt.Errorf("unknown hook: %s", name)
+		return nil, fmt.Errorf("unknown hook %q: %w", name, taskengine.ErrHookNotFound)
 	}
+
 	injectParams := make(map[string]ParamArg)
 	if remoteHook.Properties.Name != "" {
 		loc := p.mapLocation(remoteHook.Properties.In)

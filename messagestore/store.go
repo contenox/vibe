@@ -22,7 +22,7 @@ func New(exec libdbexec.Exec) Store {
 	return &store{Exec: exec}
 }
 
-// CreateMessageIndex creates a new message index.
+// CreateMessageIndex creates a new message index (unnamed).
 func (s *store) CreateMessageIndex(ctx context.Context, id string, identity string) error {
 	_, err := s.Exec.ExecContext(ctx, `
 		INSERT INTO message_indices(id, identity)
@@ -32,6 +32,21 @@ func (s *store) CreateMessageIndex(ctx context.Context, id string, identity stri
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create message index: %w", err)
+	}
+	return nil
+}
+
+// CreateNamedMessageIndex creates a new message index with a human-readable name.
+func (s *store) CreateNamedMessageIndex(ctx context.Context, id string, identity string, name string) error {
+	_, err := s.Exec.ExecContext(ctx, `
+		INSERT INTO message_indices(id, identity, name)
+		VALUES ($1, $2, $3)`,
+		id,
+		identity,
+		name,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create named message index: %w", err)
 	}
 	return nil
 }
@@ -84,6 +99,68 @@ func (s *store) listMessageIndicesByIdentity(ctx context.Context, identity strin
 		return nil, fmt.Errorf("rows iteration error: %w", err)
 	}
 	return streams, nil
+}
+
+// ListAllSessions lists all session info rows for an identity.
+func (s *store) ListAllSessions(ctx context.Context, identity string) ([]SessionInfo, error) {
+	rows, err := s.Exec.QueryContext(ctx, `
+		SELECT id, identity, COALESCE(name, '')
+		FROM message_indices
+		WHERE identity = $1
+		ORDER BY id ASC`,
+		identity,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []SessionInfo
+	for rows.Next() {
+		var si SessionInfo
+		if err := rows.Scan(&si.ID, &si.Identity, &si.Name); err != nil {
+			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+		sessions = append(sessions, si)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+	return sessions, nil
+}
+
+// GetSessionByName returns the session with the given name for an identity.
+func (s *store) GetSessionByName(ctx context.Context, identity string, name string) (*SessionInfo, error) {
+	var si SessionInfo
+	err := s.Exec.QueryRowContext(ctx, `
+		SELECT id, identity, COALESCE(name, '')
+		FROM message_indices
+		WHERE identity = $1 AND name = $2`,
+		identity,
+		name,
+	).Scan(&si.ID, &si.Identity, &si.Name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session by name: %w", err)
+	}
+	return &si, nil
+}
+
+// RenameSession updates the human-readable name of a session.
+func (s *store) RenameSession(ctx context.Context, id string, name string) error {
+	result, err := s.Exec.ExecContext(ctx, `
+		UPDATE message_indices
+		SET name = $2
+		WHERE id = $1`,
+		id,
+		name,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to rename session: %w", err)
+	}
+	return checkRowsAffected(result)
 }
 
 // AppendMessages appends multiple messages in a single batch insert.
@@ -177,6 +254,21 @@ func (s *store) LastMessage(ctx context.Context, stream string) (*Message, error
 		return nil, fmt.Errorf("failed to get last message: %w", err)
 	}
 	return &msg, nil
+}
+
+// CountMessages returns the number of messages for a stream.
+func (s *store) CountMessages(ctx context.Context, stream string) (int, error) {
+	var count int
+	err := s.Exec.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM messages
+		WHERE idx_id = $1`,
+		stream,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count messages: %w", err)
+	}
+	return count, nil
 }
 
 func checkRowsAffected(result sql.Result) error {

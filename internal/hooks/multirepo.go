@@ -72,5 +72,5 @@ func (m *MultiRepo) GetToolsForHookByName(ctx context.Context, name string) ([]t
 			return tools, nil
 		}
 	}
-	return nil, fmt.Errorf("no tools found for hook %q", name)
+	return nil, fmt.Errorf("%w: %q", taskengine.ErrHookNotFound, name)
 }

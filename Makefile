@@ -145,7 +145,7 @@ docs-gen:
 docs-markdown: docs-gen
 	docker run --rm \
 		-v $(PROJECT_ROOT)/docs:/local \
-		node:18-alpine sh -c "\
+		node:24-alpine sh -c "\
 			npm install -g widdershins@4 && \
 			widdershins /local/openapi.json -o /local/api-reference.md \
 			--summary --resolve --verbose \
@@ -166,10 +166,13 @@ bump-minor:
 
 bump-major:
 	go run $(PROJECT_ROOT)/tools/version/main.go bump major
+vitepress-build:
+	cd $(PROJECT_ROOT)/enterprise/vitepress-docs && npm install && npm run docs:build
 
-commit-docs: docs-markdown docs-html
+commit-docs: docs-markdown docs-html vitepress-build
 	git add $(PROJECT_ROOT)/docs
-	git commit -m "Update API reference"
+	git add $(PROJECT_ROOT)/enterprise/contenox.github.io/docs
+	git commit -m "chore: update docs"
 
 release: docs-markdown docs-html set-version
 	@echo "Release assets prepared."

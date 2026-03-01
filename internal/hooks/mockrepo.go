@@ -134,7 +134,7 @@ func (m *MockHookRepo) GetToolsForHookByName(ctx context.Context, name string) (
 	if _, ok := m.ResponseMap[name]; ok {
 		return nil, fmt.Errorf("not implemented")
 	}
-	return nil, fmt.Errorf("unknown hook: %s", name)
+	return nil, fmt.Errorf("%w: %q", taskengine.ErrHookNotFound, name)
 }
 
 // Ensure MockHookRepo correctly implements the updated HookRepo interface.

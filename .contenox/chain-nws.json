@@ -1,0 +1,47 @@
+{
+    "id": "chain-nws",
+    "description": "Query the US National Weather Service (api.weather.gov) via natural language. No API key required.",
+    "tasks": [
+        {
+            "id": "nws_chat",
+            "handler": "chat_completion",
+            "system_instruction": "You are a weather assistant with access to the US National Weather Service API. Use the tools to answer weather questions. Summarise results concisely — do NOT dump raw JSON or lists of hundreds of items. For forecasts you may need two calls: first the 'point' tool with latitude and longitude, then 'gridpoint_forecast' with the returned grid reference. For alerts, use 'alerts_active_area' with the two-letter state code. Today is {{now:2006-01-02}}.",
+            "execute_config": {
+                "model": "{{var:model}}",
+                "provider": "{{var:provider}}",
+                "hooks": [
+                    "nws"
+                ]
+            },
+            "transition": {
+                "branches": [
+                    {
+                        "operator": "equals",
+                        "when": "tool-call",
+                        "goto": "run_tools"
+                    },
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "end"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "run_tools",
+            "handler": "execute_tool_calls",
+            "input_var": "nws_chat",
+            "transition": {
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "nws_chat"
+                    }
+                ]
+            }
+        }
+    ],
+    "token_limit": 32768
+}

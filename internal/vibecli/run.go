@@ -4,7 +4,6 @@ package vibecli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -27,11 +26,9 @@ import (
 	"github.com/contenox/vibe/internal/runtimestate"
 	"github.com/contenox/vibe/jseval"
 	libbus "github.com/contenox/vibe/libbus"
-	"github.com/contenox/vibe/libdbexec"
 	libdb "github.com/contenox/vibe/libdbexec"
 	"github.com/contenox/vibe/libtracker"
 	"github.com/contenox/vibe/localhooks"
-	"github.com/contenox/vibe/messagestore"
 	"github.com/contenox/vibe/runtimetypes"
 	"github.com/contenox/vibe/taskchainservice"
 	"github.com/contenox/vibe/taskengine"
@@ -381,17 +378,12 @@ func run(ctx context.Context, opts runOpts) {
 	ctx = taskengine.WithTemplateVars(ctx, templateVars)
 
 	// Persistent Session Management
-	identity := "local-user"
-	sessionID := "default-" + identity
-	chatMgr := chatservice.NewManager(nil)
-
-	// Ensure index exists (creates if absent, ignores unique-violation if already there)
-	if err := messagestore.New(db.WithoutTransaction()).CreateMessageIndex(ctx, sessionID, identity); err != nil {
-		if !errors.Is(err, libdbexec.ErrUniqueViolation) {
-			slog.Warn("Failed to ensure chat session index", "error", err)
-			sessionID = ""
-		}
+	sessionID, err := ensureDefaultSession(ctx, db)
+	if err != nil {
+		slog.Warn("Failed to resolve active session — history will not be persisted", "error", err)
+		sessionID = ""
 	}
+	chatMgr := chatservice.NewManager(nil)
 
 	var history []taskengine.Message
 	if sessionID != "" {
@@ -443,15 +435,11 @@ func run(ctx context.Context, opts runOpts) {
 	// ------------------------------------------------------------------------
 	// 12. Print results
 	// ------------------------------------------------------------------------
-	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━")
 	printRelevantOutput(output, outputType, opts.EffectiveRaw)
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━")
 	if opts.EffectiveSteps && len(stateUnits) > 0 {
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━")
-		fmt.Println("📋 Steps:")
+		fmt.Fprintln(os.Stderr, "\n📋 Steps:")
 		for i, u := range stateUnits {
-			fmt.Printf("  %d. %s (%s) %s %s\n", i+1, u.TaskID, u.TaskHandler, formatDuration(u.Duration), u.Transition)
+			fmt.Fprintf(os.Stderr, "  %d. %s (%s) %s %s\n", i+1, u.TaskID, u.TaskHandler, formatDuration(u.Duration), u.Transition)
 		}
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━")
 	}
 }

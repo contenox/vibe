@@ -143,9 +143,10 @@ func (p *OpenAPIToolProtocol) ExecuteTool(
 		param := paramRef.Value
 		if argVal, ok := finalArgs[param.Name]; ok {
 			valStr := fmt.Sprintf("%v", argVal)
-			if param.In == "path" {
+			switch param.In {
+			case "path":
 				finalURL = strings.Replace(finalURL, "{"+param.Name+"}", valStr, 1)
-			} else if param.In == "query" {
+			case "query":
 				queryParams.Add(param.Name, valStr)
 			}
 			delete(finalArgs, param.Name)

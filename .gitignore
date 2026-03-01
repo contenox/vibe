@@ -234,6 +234,8 @@ temp/
 # Vibe CLI build output and local DB
 bin/
 .contenox/*.db
+.contenox/plans/
+
 
 # Local AI context control (Cursor)
 .cursorignore
@@ -245,8 +247,7 @@ bin/
 vald/
 
 # Docs
-docs/
-
+# (manual markdown files should be tracked; openapi specs are ignored below)
 # ==============================
 # Enterprise Code
 # ==============================
@@ -295,4 +296,6 @@ next-env.d.ts
 
 docs/openapi.json
 docs/openapi.yaml
+docs/api-reference.md
+docs/openapi.html
 openapi.json
