@@ -23,25 +23,25 @@ hero:
 
 features:
   - icon:
-      src: /icons/cpu.svg
+      src: /vibe.svg
     title: vibe — local AI agent CLI
     details: Run AI workflows locally with full observability. Autonomous planning, stateless execution, remote hooks. No cloud required.
     link: /guide/quickstart
     linkText: Get started with vibe
   - icon:
-      src: /icons/link.svg
+      src: /chains.svg
     title: Task chains
     details: Define AI behaviour as composable JSON state machines — not prompt soup. Every step, branch, and tool call is explicit.
     link: /chains/
     linkText: Learn about chains
   - icon:
-      src: /icons/webhook.svg
+      src: /hooks.svg
     title: Remote hooks
     details: Point vibe at any OpenAPI service and the model gets its operations as callable tools automatically.
     link: /hooks/remote
     linkText: Add your first hook
   - icon:
-      src: /icons/shuffle.svg
+      src: /vendors.svg
     title: Vendor-agnostic
     details: Ollama, OpenAI, vLLM, Gemini — swap providers per task. No lock-in.
     link: /reference/config
