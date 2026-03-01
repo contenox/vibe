@@ -23,7 +23,7 @@ export default defineConfig({
 
     head: [
         ['link', { rel: 'icon', href: '/docs/favicon.png', type: 'image/png' }],
-        ['meta', { name: 'theme-color', content: '#1ac3c9' }],
+        ['meta', { name: 'theme-color', content: '#980000' }],
         ['meta', { property: 'og:type', content: 'website' }],
         ['meta', { property: 'og:site_name', content: 'Contenox Docs' }],
     ],
@@ -83,12 +83,12 @@ export default defineConfig({
         },
 
         socialLinks: [
-            { icon: 'github', link: 'https://github.com/contenox/runtime' },
+            { icon: 'github', link: 'https://github.com/contenox/vibe' },
         ],
 
         footer: {
             message: 'Released under the Apache 2.0 License.',
-            copyright: `Copyright © 2024-present Contenox contributors · Runtime ${runtimeVersion}`,
+            copyright: `Copyright © 2024–${new Date().getFullYear()} Contenox contributors · Runtime ${runtimeVersion}`,
         },
 
         search: {

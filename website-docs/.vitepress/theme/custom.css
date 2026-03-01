@@ -139,3 +139,12 @@
     max-height: 180px !important;
     width: 180px !important;
 }
+
+/* Hero image — vertically center with heading row, not bottom */
+.VPHero .image-container {
+    align-self: flex-start !important;
+    margin-top: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
