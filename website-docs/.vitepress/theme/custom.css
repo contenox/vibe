@@ -119,3 +119,12 @@
 .dark .VPFeature .icon img {
     filter: invert(50%) sepia(60%) saturate(1000%) hue-rotate(330deg) brightness(110%);
 }
+
+/* Diagrams in doc content — remove white background via blend mode */
+.vp-doc img {
+    mix-blend-mode: multiply;
+    border-radius: 6px;
+}
+.dark .vp-doc img {
+    mix-blend-mode: screen;
+}

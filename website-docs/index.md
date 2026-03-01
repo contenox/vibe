@@ -7,8 +7,8 @@ hero:
   text: "Sovereign GenAI Workflows"
   tagline: Build, run, and observe AI workflows as explicit state machines — on your infra, with full control.
   image:
-    src: /chain_flow_diagram.png
-    alt: Contenox workflow diagram
+    src: /vibe.svg
+    alt: vibe CLI logo
   actions:
     - theme: brand
       text: Get Started →
@@ -22,27 +22,19 @@ hero:
       target: _blank
 
 features:
-  - icon:
-      src: /vibe.svg
-    title: vibe — local AI agent CLI
+  - title: vibe — local AI agent CLI
     details: Run AI workflows locally with full observability. Autonomous planning, stateless execution, remote hooks. No cloud required.
     link: /guide/quickstart
     linkText: Get started with vibe
-  - icon:
-      src: /icons/git-branch.svg
-    title: Task chains
+  - title: Task chains
     details: Define AI behaviour as composable JSON state machines — not prompt soup. Every step, branch, and tool call is explicit.
     link: /chains/
     linkText: Learn about chains
-  - icon:
-      src: /icons/plug-zap.svg
-    title: Remote hooks
+  - title: Remote hooks
     details: Point vibe at any OpenAPI service and the model gets its operations as callable tools automatically.
     link: /hooks/remote
     linkText: Add your first hook
-  - icon:
-      src: /icons/layers.svg
-    title: Vendor-agnostic
+  - title: Vendor-agnostic
     details: Ollama, OpenAI, vLLM, Gemini — swap providers per task. No lock-in.
     link: /reference/config
     linkText: Configure backends
