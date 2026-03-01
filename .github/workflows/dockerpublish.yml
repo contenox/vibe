@@ -82,6 +82,10 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/runtime-api:${{ steps.vars.outputs.TAG }}
             ghcr.io/${{ github.repository_owner }}/runtime-api:latest
 
+      - name: Prepare website for deploy (include build output)
+        run: |
+          rm -f website/.gitignore
+
       - name: Deploy to contenox.github.io
         uses: peaceiris/actions-gh-pages@v4
         with:

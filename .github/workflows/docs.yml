@@ -35,6 +35,12 @@ jobs:
         run: |
           make docs-html
 
+      - name: Prepare website for deploy (include build output)
+        run: |
+          # peaceiris/actions-gh-pages uses `git add` which respects .gitignore.
+          # Remove it so that website/docs/ (VitePress build) is included in the deploy.
+          rm -f website/.gitignore
+
       - name: Deploy to contenox.github.io
         uses: peaceiris/actions-gh-pages@v4
         with:
