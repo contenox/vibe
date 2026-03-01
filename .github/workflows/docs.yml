@@ -1,4 +1,4 @@
-name: Build API docs
+name: Build and Deploy Site
 
 on:
   push:
@@ -7,24 +7,35 @@ on:
 jobs:
   build-docs:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "24"
 
-      - name: Generate OpenAPI spec
+      - name: Build VitePress docs
+        run: |
+          cd website-docs
+          npm ci
+          npm run docs:build
+
+      - name: Generate OpenAPI spec + openapi.html
         run: |
           make docs-html
 
-      - name: Deploy to contenox.github.io/docs
+      - name: Deploy to contenox.github.io
         uses: peaceiris/actions-gh-pages@v4
         with:
           deploy_key: ${{ secrets.DEPLOY_KEY }}
           user_name: "github-actions[bot]"
           user_email: "github-actions[bot]@users.noreply.github.com"
           external_repository: contenox/contenox.github.io
-          publish_dir: ./docs
-          destination_dir: docs
+          publish_dir: ./website
           publish_branch: main
