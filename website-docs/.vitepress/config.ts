@@ -95,10 +95,6 @@ export default defineConfig({
             provider: 'local',
         },
 
-        editLink: {
-            pattern: 'https://github.com/contenox/vibe/edit/main/website-docs/:path',
-            text: 'Edit this page on GitHub',
-        },
     },
 
     vite: {
