@@ -96,3 +96,26 @@
     position: relative;
     z-index: 1;
 }
+
+/* Nav site title — match brand red */
+.VPNavBarTitle .title {
+    color: var(--vp-c-brand-1) !important;
+    font-weight: 700;
+}
+
+/* Hero image — transparent background via blend mode */
+.VPHero .image-src {
+    mix-blend-mode: multiply;
+    background: transparent;
+}
+.dark .VPHero .image-src {
+    mix-blend-mode: screen;
+}
+
+/* Feature card icons — tint Lucide SVGs with brand color */
+.VPFeature .icon img {
+    filter: invert(13%) sepia(96%) saturate(5000%) hue-rotate(0deg) brightness(80%) contrast(110%);
+}
+.dark .VPFeature .icon img {
+    filter: invert(50%) sepia(60%) saturate(1000%) hue-rotate(330deg) brightness(110%);
+}

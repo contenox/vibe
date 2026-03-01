@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="610" height="610" viewBox="0 0 610 610" shape-rendering="geometricPrecision"
+     xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title">
+  <title id="title">contenox</title>
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#212121"/>
+      <stop offset="100%" stop-color="#0d1117"/>
+    </linearGradient>
+    <radialGradient id="redGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#991b1b"/>
+      <stop offset="100%" stop-color="#7f1d1d"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <rect x="5" y="5" width="600" height="600" rx="260" ry="260"  fill="url(#grad)"
+        stroke="#e2e5e9" stroke-width="5"/>
+
+  <!-- Inner red dot -->
+  <circle cx="438" cy="400" r="55" fill="url(#redGrad)" stroke="rgba(255,255,255,0.15)" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
+
+  <!-- Outer arrow shape -->
+  <path
+    d="M158,168 L358,300 L158,432"
+    fill="none"
+    stroke="#e2e5e9"
+    stroke-width="70"
+    stroke-linecap="round"
+    stroke-linejoin="round"/>
+
+  <!-- Soft halo behind arrow -->
+  <path
+    d="M158,168 L358,300 L158,432"
+    fill="none"
+    stroke="rgba(255,255,255,0.15)"
+    stroke-width="80"
+    stroke-linecap="round"
+    stroke-linejoin="round"/>
+
+  <!-- Dashed overlay -->
+  <path
+    d="M158,168 L358,300 L158,432"
+    fill="none"
+    stroke="#2c3540"
+    stroke-width="60"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+    opacity="0.6"/>
+</svg>
