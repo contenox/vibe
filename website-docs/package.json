@@ -5,8 +5,8 @@
     "type": "module",
     "scripts": {
         "docs:dev": "vitepress dev . --port 5174",
-        "docs:build": "vitepress build . --outDir ../../website/docs",
-        "docs:preview": "vitepress preview . --outDir ../../website/docs"
+        "docs:build": "vitepress build . --outDir ../website/docs",
+        "docs:preview": "vitepress preview . --outDir ../website/docs"
     },
     "devDependencies": {
         "@types/node": "^25.3.3",
