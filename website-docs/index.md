@@ -7,7 +7,7 @@ hero:
   text: "Sovereign GenAI Workflows"
   tagline: Build, run, and observe AI workflows as explicit state machines — on your infra, with full control.
   image:
-    src: /hero-diagram.svg
+    src: /chain_flow_diagram.png
     alt: Contenox workflow diagram
   actions:
     - theme: brand
@@ -18,8 +18,8 @@ hero:
       link: /guide/quickstart
     - theme: alt
       text: API Reference
-      link: /docs/openapi.html
-      target: _self
+      link: https://contenox.com/docs/openapi.html
+      target: _blank
 
 features:
   - icon: 🧠

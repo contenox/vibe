@@ -1,23 +1,38 @@
 /* Load Open Sans from Google Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
 
-/* Contenox brand override for VitePress default theme */
+/* Contenox brand override for VitePress default theme
+   Colors sourced from website/css/style-vars.css */
 :root {
-    --vp-c-brand-1: #1ac3c9;
-    --vp-c-brand-2: #15a8ad;
-    --vp-c-brand-3: #45d0d5;
-    --vp-c-brand-soft: rgba(26, 195, 201, 0.14);
+    --vp-c-brand-1: #980000;
+    --vp-c-brand-2: #5f0000;
+    --vp-c-brand-3: #c24a4a;
+    --vp-c-brand-soft: rgba(152, 0, 0, 0.12);
 
     --vp-font-family-base: 'Open Sans', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     --vp-font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    --vp-c-bg: #fcf9f9;
+    --vp-c-bg-soft: #f5eeee;
+    --vp-c-bg-mute: #fffdfd;
+    --vp-c-divider: #c9b4b8;
+    --vp-c-text-1: #22181f;
+    --vp-c-text-2: #6a636a;
 }
 
 /* Dark mode brand */
 .dark {
-    --vp-c-brand-1: #45d0d5;
-    --vp-c-brand-2: #1ac3c9;
-    --vp-c-brand-3: #0da8ae;
-    --vp-c-brand-soft: rgba(69, 208, 213, 0.14);
+    --vp-c-brand-1: #c24a4a;
+    --vp-c-brand-2: #980000;
+    --vp-c-brand-3: #5f0000;
+    --vp-c-brand-soft: rgba(194, 74, 74, 0.14);
+
+    --vp-c-bg: #060608;
+    --vp-c-bg-soft: #101016;
+    --vp-c-bg-mute: #171720;
+    --vp-c-divider: #27272f;
+    --vp-c-text-1: #f4f4f5;
+    --vp-c-text-2: #d4d4d8;
 }
 
 /* Nav active link */
@@ -34,7 +49,7 @@
 /* Inline code */
 :not(pre)>code {
     background-color: var(--vp-c-brand-soft);
-    color: var(--vp-c-brand-2);
+    color: var(--vp-c-brand-1);
     border-radius: 4px;
     padding: 1px 5px;
 }
@@ -42,4 +57,15 @@
 /* Badge / tip callouts */
 .vp-doc .tip {
     border-color: var(--vp-c-brand-1);
+}
+
+/* Button overrides */
+.VPButton.medium.brand {
+    background-color: var(--vp-c-brand-1);
+    border-color: var(--vp-c-brand-1);
+}
+
+.VPButton.medium.brand:hover {
+    background-color: var(--vp-c-brand-2);
+    border-color: var(--vp-c-brand-2);
 }

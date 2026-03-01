@@ -29,7 +29,7 @@ export default defineConfig({
     ],
 
     themeConfig: {
-        logo: { light: '/logo.svg', dark: '/logo.svg', alt: 'Contenox' },
+        logo: { light: '/logo.png', dark: '/logo.png', alt: 'Contenox' },
         siteTitle: 'Contenox',
 
         nav: [
@@ -37,7 +37,7 @@ export default defineConfig({
             { text: 'Chains', link: '/chains/' },
             { text: 'Hooks', link: '/hooks/' },
             { text: 'CLI Reference', link: '/reference/vibe-cli' },
-            { text: 'API Reference', link: '/docs/openapi.html', target: '_self' },
+            { text: 'API Reference', link: 'https://contenox.com/docs/openapi.html', target: '_blank' },
             {
                 text: 'GitHub',
                 link: 'https://github.com/contenox/runtime',
@@ -101,7 +101,7 @@ export default defineConfig({
         },
 
         editLink: {
-            pattern: 'https://github.com/contenox/runtime/edit/main/enterprise/vitepress-docs/:path',
+            pattern: 'https://github.com/contenox/vibe/edit/main/website-docs/:path',
             text: 'Edit this page on GitHub',
         },
     },
