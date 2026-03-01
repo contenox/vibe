@@ -155,6 +155,8 @@ docs-markdown: docs-gen
 docs-html: docs-gen
 	mkdir -p $(PROJECT_ROOT)/website/docs
 	cp $(PROJECT_ROOT)/scripts/openapi-rapidoc.html $(PROJECT_ROOT)/website/docs/openapi.html
+	cp $(PROJECT_ROOT)/docs/openapi.json $(PROJECT_ROOT)/website/docs/openapi.json
+	cp $(PROJECT_ROOT)/docs/openapi.yaml $(PROJECT_ROOT)/website/docs/openapi.yaml
 
 set-version:
 	go run $(PROJECT_ROOT)/tools/version/main.go set

@@ -69,3 +69,30 @@
     background-color: var(--vp-c-brand-2);
     border-color: var(--vp-c-brand-2);
 }
+/* Hero background — matches contenox.com landing page banner.svg */
+.VPHome .VPHero {
+    position: relative;
+    overflow: hidden;
+}
+
+.VPHome .VPHero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url('/docs/banner.svg');
+    background-size: cover;
+    background-position: center top;
+    background-repeat: no-repeat;
+    opacity: 0.18;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.dark .VPHome .VPHero::before {
+    opacity: 0.12;
+}
+
+.VPHome .VPHero .container {
+    position: relative;
+    z-index: 1;
+}
