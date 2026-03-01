@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Contenox — Archived Runtime for Sovereign GenAI Workflows</title>
+    <meta name="description"
+        content="Contenox was a self-hostable runtime for building observable, deterministic AI workflows as state machines. The venture has been shut down; the kernel remains available as open-source reference software." />
+    <meta name="author" content="Contenox" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Contenox — Archived Runtime for Sovereign GenAI Workflows" />
+    <meta property="og:description"
+        content="Contenox was a self-hostable, vendor-agnostic runtime for sovereign GenAI applications. The project is no longer under active development; the code remains open source on GitHub." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://contenox.com/" />
+    <meta property="og:image" content="https://contenox.com/assets/images/contenox-ui-screenshot-1.png" />
+
+    <link rel="alternate" hreflang="en" href="https://contenox.com/" />
+    <link rel="alternate" hreflang="de" href="https://contenox.com/de.html" />
+    <link rel="canonical" href="https://contenox.com/" />
+
+    <link rel="icon" href="assets/images/logo.png" type="image/png" />
+
+    <!-- Ertli CSS stack -->
+    <link rel="stylesheet" href="css/style-vars.css" />
+    <link rel="stylesheet" href="css/global.css" />
+    <link rel="stylesheet" href="css/components.css" />
+</head>
+
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <div class="document">
+        <!-- Header -->
+        <header class="site-header" role="banner">
+            <nav class="main-nav" aria-label="Main navigation">
+                <div class="nav-brand">
+                    <a class="brand-name" href="#hero" aria-label="Contenox home">
+                        Contenox
+                    </a>
+                    <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu">
+                        <span class="hamburger" aria-hidden="true"></span>
+                        <span class="sr-only">Menu</span>
+                    </button>
+                </div>
+                <ul class="nav-links" id="nav-menu">
+                    <li><a href="#what-it-is">What it is</a></li>
+                    <li><a href="#why-it-matters">Why it matters</a></li>
+                    <li><a href="#when-to-use">When to use</a></li>
+                    <li><a href="#how-it-works">How it works</a></li>
+                    <li><a href="#architecture">Architecture</a></li>
+                    <li><a href="#status">Status</a></li>
+                    <li><a href="/docs/">Docs</a></li>
+                    <li>
+                        <a href="https://github.com/contenox/runtime" target="_blank"
+                            rel="noopener noreferrer">GitHub</a>
+                    </li>
+                    <li>
+                        <a href="de.html" class="language-switch" hreflang="de" lang="de">DE</a>
+                    </li>
+                </ul>
+            </nav>
+        </header>
+
+        <main id="main-content">
+            <!-- HERO -->
+            <section id="hero" class="hero-section" aria-labelledby="hero-heading">
+                <div class="hero-background">
+                    <img src="assets/images/banner.svg" alt="" class="hero-banner" role="presentation"
+                        loading="eager" />
+                </div>
+                <div class="hero-content container">
+                    <p class="hero-subtitle" style="margin-bottom: 0.75rem">
+                        Archived runtime project for sovereign GenAI
+                        applications
+                    </p>
+                    <h1 id="hero-heading">
+                        Build and operate AI workflows as
+                        <span class="text-accent">observable state machines.</span>
+                    </h1>
+                    <p class="hero-subtitle">
+                        Contenox was a self-hostable runtime for
+                        deterministic, chat-native AI applications. It
+                        orchestrated language models, tools, and business
+                        logic without giving up control over data, routing,
+                        or behaviour.
+                    </p>
+                    <p class="hero-subtitle" style="font-size: 0.95rem">
+                        The Contenox venture has been shut down. The kernel
+                        remains available as open-source software and can be
+                        used as a reference implementation or for
+                        experiments in AI workflow runtimes.
+                    </p>
+                    <div class="hero-actions">
+                        <a href="https://github.com/contenox/runtime" target="_blank" rel="noopener noreferrer"
+                            class="btn btn-primary">
+                            View repository on GitHub
+                        </a>
+                        <a href="#demo" class="btn btn-secondary">
+                            Watch product demo
+                        </a>
+                    </div>
+
+                    <ul class="hero-badges" aria-label="Contenox capabilities">
+                        <li class="badge-item">
+                            ⚙️
+                            <span class="badge-text">Runtime, not a library</span>
+                        </li>
+                        <li class="badge-item">
+                            🧩
+                            <span class="badge-text">Explicit state machines</span>
+                        </li>
+                        <li class="badge-item">
+                            🧠
+                            <span class="badge-text">Built-in RAG &amp; tools</span>
+                        </li>
+                        <li class="badge-item">
+                            🛡️
+                            <span class="badge-text">Self-hosted &amp; sovereign</span>
+                        </li>
+                    </ul>
+
+                    <p class="smallprint">
+                        Contenox is no longer under active development. This
+                        page remains as documentation and context for
+                        engineers, analysts, and curious people exploring
+                        the ideas and architecture behind the project.
+                    </p>
+                </div>
+            </section>
+
+            <!-- DEMO -->
+            <section id="demo" class="section section-alt">
+                <div class="container">
+                    <h2>See Contenox in action</h2>
+                    <p class="section-lead">
+                        A short walkthrough of the chat interface,
+                        state-machine workflows, and observability tools.
+                        The demo reflects the state of the project before it
+                        was sunset.
+                    </p>
+                    <div class="card" style="max-width: 960px; margin: 0 auto">
+                        <video controls poster="assets/video/product-demo-poster.png"
+                            style="width: 100%; border-radius: 0.75rem">
+                            <source src="assets/video/product-demo.mp4" type="video/mp4" />
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
+
+                    <!-- UI screenshot below the video -->
+                    <div class="card" style="
+                                max-width: 960px;
+                                margin: 2rem auto 0;
+                                padding: 1.25rem;
+                            ">
+                        <h3 style="margin-bottom: 0.75rem">
+                            Chat-native interface &amp; workflow inspector
+                        </h3>
+                        <p class="smallprint" style="margin-bottom: 0.75rem">
+                            The Contenox UI combines a chat client with a
+                            visual workflow inspector and execution traces –
+                            so you can see exactly which states, tools, and
+                            hooks were involved in each conversation.
+                        </p>
+                        <img src="assets/images/contenox-ui-screenshot-1.png"
+                            alt="Screenshot of the Contenox chat interface and workflow inspector."
+                            style="width: 100%; border-radius: 0.75rem" loading="lazy" />
+                    </div>
+                </div>
+            </section>
+
+            <!-- WHAT IT IS -->
+            <section id="what-it-is" class="section">
+                <div class="container">
+                    <h2>What was Contenox?</h2>
+                    <p class="section-lead">
+                        Contenox was a self-hostable runtime for building
+                        and operating enterprise-grade AI agents, semantic
+                        search systems, and chat-driven applications. It
+                        modelled AI behaviour as explicit, observable state
+                        machines instead of opaque prompt chains.
+                    </p>
+
+                    <div class="services-grid">
+                        <article class="card service-card">
+                            <h3>Runtime, not just a library</h3>
+                            <p>
+                                Contenox was a complete runtime environment
+                                – with API gateway, background workers,
+                                storage, and observability – not just a
+                                collection of helper functions.
+                            </p>
+                        </article>
+                        <article class="card service-card">
+                            <h3>State machines, not black boxes</h3>
+                            <p>
+                                Workflows were explicit graphs of tasks,
+                                handlers, and transitions. Every step was
+                                visible, controllable, and replayable.
+                            </p>
+                        </article>
+                        <article class="card service-card">
+                            <h3>Chat-native interface</h3>
+                            <p>
+                                Users interacted via chat, but under the
+                                hood each message drove a deterministic
+                                workflow – from RAG queries to tool calls
+                                and side effects.
+                            </p>
+                        </article>
+                        <article class="card service-card">
+                            <h3>Vendor-agnostic &amp; self-hosted</h3>
+                            <p>
+                                It could run on-prem, in your cloud, or
+                                air-gapped. Requests could be routed across
+                                OpenAI, Ollama, vLLM, or custom backends
+                                without lock-in.
+                            </p>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <!-- WHY IT MATTERS -->
+            <section id="why-it-matters" class="section section-alt">
+                <div class="container">
+                    <h2>Why the idea still matters</h2>
+                    <p class="section-lead">
+                        Even though the Contenox venture has ended, the core
+                        thesis remains relevant: modern AI systems drift
+                        into opacity. Runtimes that make logic, data flow,
+                        and side effects explicit help teams reason about
+                        behaviour instead of guessing.
+                    </p>
+
+                    <div class="capabilities-grid">
+                        <div class="card capability-card">
+                            <h4>Sovereignty</h4>
+                            <p>
+                                The runtime was designed so teams could own
+                                data, execution, and decision boundaries –
+                                with no hidden SaaS layer that might change
+                                behaviour unexpectedly.
+                            </p>
+                        </div>
+                        <div class="card capability-card">
+                            <h4>Reliability &amp; control</h4>
+                            <p>
+                                Workflows were deterministic state machines:
+                                tasks, transitions, retries, and human
+                                approvals were defined explicitly instead of
+                                being buried in prompts.
+                            </p>
+                        </div>
+                        <div class="card capability-card">
+                            <h4>Transparency &amp; compliance</h4>
+                            <p>
+                                Every state change, model call, and hook
+                                invocation was logged and traceable – a
+                                foundation for auditing, governance, and
+                                regulation.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- WHEN TO USE -->
+            <section id="when-to-use" class="section">
+                <div class="container">
+                    <h2>When Contenox was a fit</h2>
+                    <p class="section-lead">
+                        During its active lifetime, Contenox complemented
+                        APIs like OpenAI’s tools or MCP. It was most useful
+                        once single AI calls turned into real workflows.
+                    </p>
+
+                    <div class="services-grid">
+                        <article class="card service-card">
+                            <h3>It made sense when…</h3>
+                            <ul class="tech-list">
+                                <li>
+                                    Agents triggered real side effects in
+                                    production systems.
+                                </li>
+                                <li>
+                                    You needed multi-step logic, branching,
+                                    retries, or approvals.
+                                </li>
+                                <li>
+                                    Production observability and replay
+                                    mattered.
+                                </li>
+                                <li>
+                                    Self-hosting or regulated environments
+                                    were requirements.
+                                </li>
+                            </ul>
+                        </article>
+                        <article class="card service-card">
+                            <h3>It was probably overkill when…</h3>
+                            <ul class="tech-list">
+                                <li>
+                                    You were building a simple Q&amp;A
+                                    chatbot.
+                                </li>
+                                <li>
+                                    A single OpenAI tools / MCP call per
+                                    request was enough.
+                                </li>
+                                <li>
+                                    You were just exploring ideas without
+                                    persistence or complex workflows.
+                                </li>
+                            </ul>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <!-- HOW IT WORKS -->
+            <section id="how-it-works" class="section section-alt">
+                <div class="container">
+                    <h2>AI workflows as explicit state machines</h2>
+                    <p class="section-lead">
+                        Contenox executed AI workflows as explicit state
+                        machines. Every step – LLM call, data fetch, or
+                        external action – was a task with defined inputs,
+                        outputs, and transitions.
+                    </p>
+
+                    <div class="capabilities-grid">
+                        <div class="card capability-card">
+                            <h4>Hooks: connect to anything</h4>
+                            <p>
+                                Agents were extended with hooks – remote
+                                services that integrated external APIs,
+                                databases, or tools. Any OpenAPI-compatible
+                                endpoint could be registered and turned into
+                                callable tools for models.
+                            </p>
+                        </div>
+                        <div class="card capability-card">
+                            <h4>Declarative &amp; observable</h4>
+                            <p>
+                                Workflows were defined in YAML or via API.
+                                Each execution was logged and traceable:
+                                transitions, model calls, hook results, and
+                                intermediate state were all visible.
+                            </p>
+                        </div>
+                        <div class="card capability-card">
+                            <h4>Knowledge-grounded workflows</h4>
+                            <p>
+                                Built-in RAG pipeline with document
+                                ingestion, embeddings, and vector search
+                                (e.g. via Vald) enabled agents to answer
+                                based on your data.
+                            </p>
+                        </div>
+                        <div class="card capability-card">
+                            <h4>Multi-model orchestration</h4>
+                            <p>
+                                Requests could be routed across Ollama,
+                                vLLM, OpenAI, or other providers, with
+                                configurable fallbacks and policies per
+                                task.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ARCHITECTURE -->
+            <section id="architecture" class="section">
+                <div class="container">
+                    <h2>Architecture at a glance</h2>
+                    <p class="section-lead">
+                        Contenox was built as a modular, container-first
+                        system. The runtime could be embedded into existing
+                        stacks or deployed as its own AI infrastructure
+                        layer.
+                    </p>
+
+                    <div class="capabilities-grid">
+                        <div class="card capability-card">
+                            <h4>Core components</h4>
+                            <ul class="tech-list">
+                                <li>
+                                    <strong>Backend:</strong> Go runtime
+                                    &amp; API gateway.
+                                </li>
+                                <li>
+                                    <strong>Workers:</strong> Python for
+                                    parsing, embeddings, and long-running
+                                    jobs.
+                                </li>
+                                <li>
+                                    <strong>Storage:</strong> PostgreSQL for
+                                    metadata and state.
+                                </li>
+                                <li>
+                                    <strong>Cache &amp; queues:</strong>
+                                    Valkey / Redis.
+                                </li>
+                                <li>
+                                    <strong>Vector search:</strong> Vald for
+                                    RAG indices.
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="card capability-card">
+                            <h4>Interface &amp; deployment</h4>
+                            <ul class="tech-list">
+                                <li>
+                                    <strong>Frontend:</strong> React +
+                                    TypeScript chat client and visual
+                                    builder.
+                                </li>
+                                <li>
+                                    Backend-for-frontend pattern for the UI.
+                                </li>
+                                <li>
+                                    Containerised and designed for
+                                    Kubernetes.
+                                </li>
+                                <li>
+                                    Suitable for on-prem, cloud, or
+                                    air-gapped setups.
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <p class="smallprint" style="margin-top: 2rem">
+                        Contenox was not a black-box SaaS, but software you
+                        could run and adapt – a runtime that sat between
+                        LLMs and real systems.
+                    </p>
+                </div>
+            </section>
+
+            <!-- STATUS -->
+            <section id="status" class="section section-alt">
+                <div class="container">
+                    <h2>Project status</h2>
+                    <div class="card">
+                        <p>
+                            The core kernel of Contenox remains open-sourced
+                            at
+                            <a href="https://github.com/contenox/runtime" target="_blank" rel="noopener noreferrer">
+                                github.com/contenox/runtime </a>.
+                        </p>
+                        <p>
+                            A preliminary OpenAPI specification for the
+                            runtime API is available as
+                            <a href="docs/openapi.json">JSON</a> and
+                            <a href="docs/openapi.yaml">YAML</a>. It
+                            reflects the last public state of the project.
+                        </p>
+                        <p>
+                            The Contenox venture has been shut down. There
+                            is no hosted product, no commercial offering,
+                            and the code is not actively maintained. Issues
+                            and pull requests on GitHub may only be reviewed
+                            occasionally.
+                        </p>
+                        <p>
+                            For occasional questions or historical context
+                            about the project, you can still reach out at
+                            <a href="mailto:hello@contenox.com">hello@contenox.com</a>, but replies cannot be
+                            guaranteed.
+                        </p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- FOOTER -->
+        <footer class="site-footer" role="contentinfo">
+            <div class="container">
+                <div class="footer-content">
+                    <nav class="footer-nav" aria-label="Footer navigation">
+                        <ul class="footer-links">
+                            <li><a href="#what-it-is">What it is</a></li>
+                            <li>
+                                <a href="#why-it-matters">Why it matters</a>
+                            </li>
+                            <li><a href="#when-to-use">When to use</a></li>
+                            <li>
+                                <a href="#how-it-works">How it works</a>
+                            </li>
+                            <li>
+                                <a href="#architecture">Architecture</a>
+                            </li>
+                            <li><a href="#status">Status</a></li>
+                            <li>
+                                <a href="https://github.com/contenox/runtime" target="_blank"
+                                    rel="noopener noreferrer">GitHub</a>
+                            </li>
+                            <li>
+                                <a href="https://www.linkedin.com/company/contenox/" target="_blank"
+                                    rel="noopener noreferrer">LinkedIn</a>
+                            </li>
+                            <li>
+                                <a href="docs/openapi.html">API spec</a>
+                            </li>
+                            <li><a href="de.html">Deutsch</a></li>
+                        </ul>
+                    </nav>
+
+                    <p class="copyright">
+                        &copy; 2025 Contenox. All rights reserved.
+                    </p>
+
+                    <div class="card" style="margin-top: 1.5rem">
+                        <h3 class="text-sm font-semibold" style="margin-bottom: 0.75rem">
+                            Legal information
+                        </h3>
+                        <div class="contact-content" style="margin: 0; gap: 1.5rem">
+                            <div class="contact-info">
+                                <h4 class="form-label" style="margin-bottom: 0.5rem">
+                                    According to § 5 TMG
+                                </h4>
+                                <p class="smallprint" style="margin-top: 0">
+                                    Contenox – Alexander Ertli<br />
+                                    21073 Hamburg<br />
+                                    Germany
+                                </p>
+                            </div>
+                            <div class="contact-info">
+                                <h4 class="form-label" style="margin-bottom: 0.5rem">
+                                    Contact
+                                </h4>
+                                <p class="smallprint" style="margin-top: 0">
+                                    Email:
+                                    <a href="mailto:hello@contenox.com">hello@contenox.com</a>
+                                    <br />
+                                    VAT ID: DE429161583-00001<br />
+                                    Tax Number: 2247005603265
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Mobile nav toggle -->
+    <script>
+        (function () {
+            const navToggle = document.querySelector(".nav-toggle");
+            const navMenu = document.getElementById("nav-menu");
+            if (!navToggle || !navMenu) return;
+            navToggle.addEventListener("click", () => {
+                const expanded =
+                    navToggle.getAttribute("aria-expanded") === "true";
+                navToggle.setAttribute("aria-expanded", String(!expanded));
+                navMenu.classList.toggle("is-active");
+            });
+        })();
+
+        // Smooth scroll for same-page anchors
+        document.querySelectorAll('a[href^="#"]').forEach((a) => {
+            a.addEventListener("click", (e) => {
+                const id = a.getAttribute("href");
+                const target = document.querySelector(id);
+                if (target) {
+                    e.preventDefault();
+                    target.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                    });
+                }
+            });
+        });
+    </script>
+
+    <!-- Schema.org: SoftwareApplication -->
+    <script type="application/ld+json">
+            {
+                "@context": "https://schema.org",
+                "@type": "SoftwareApplication",
+                "name": "Contenox",
+                "applicationCategory": "AI workflow runtime",
+                "description": "Self-hostable runtime for building observable AI workflows as state machines. The project is archived and no longer actively maintained.",
+                "operatingSystem": "Linux, Kubernetes, Docker",
+                "url": "https://contenox.com/",
+                "creator": {
+                    "@type": "Person",
+                    "name": "Alexander Ertli"
+                }
+            }
+        </script>
+</body>
+
+</html>

@@ -30,8 +30,9 @@ COMPOSE_CMD ?= docker compose -f compose.yaml -f compose.local.yaml
         test test-unit test-system test-vibecli \
         test-api test-api-full test-api-init wait-for-server \
         docs-gen docs-markdown docs-html \
+        website-dev website-build website-install website-clean \
         set-version bump-major bump-minor bump-patch \
-        commit-docs release
+        commit-docs release vitepress-build enterprise-clean
 
 
 # --------------------------------------------------------------------
@@ -152,7 +153,8 @@ docs-markdown: docs-gen
 		"
 
 docs-html: docs-gen
-	cp $(PROJECT_ROOT)/scripts/openapi-rapidoc.html $(PROJECT_ROOT)/docs/openapi.html
+	mkdir -p $(PROJECT_ROOT)/website/docs
+	cp $(PROJECT_ROOT)/scripts/openapi-rapidoc.html $(PROJECT_ROOT)/website/docs/openapi.html
 
 set-version:
 	go run $(PROJECT_ROOT)/tools/version/main.go set
@@ -166,13 +168,37 @@ bump-minor:
 
 bump-major:
 	go run $(PROJECT_ROOT)/tools/version/main.go bump major
-vitepress-build:
-	cd $(PROJECT_ROOT)/enterprise/vitepress-docs && npm install && npm run docs:build
 
-commit-docs: docs-markdown docs-html vitepress-build
+vitepress-build: website-install
+	cd $(PROJECT_ROOT)/website-docs && npm run docs:build
+
+## Local development server for the docs site (hot-reload)
+website-dev: website-install
+	cd $(PROJECT_ROOT)/website-docs && npm run docs:dev
+
+## Install npm deps for website-docs (idempotent)
+website-install:
+	cd $(PROJECT_ROOT)/website-docs && npm install
+
+## Wipe the VitePress build output (website/docs/)
+website-clean:
+	rm -rf $(PROJECT_ROOT)/website/docs
+
+## Remove old enterprise/vitepress-docs and deinit contenox.github.io submodule.
+## Run this once after the migration, from inside the enterprise/ repo.
+## NOTE: run these commands manually in the enterprise repo — not from here.
+enterprise-clean:
+	@echo "Run the following commands inside the enterprise/ repo:"
+	@echo "  git submodule deinit -f contenox.github.io"
+	@echo "  git rm -f contenox.github.io"
+	@echo "  rm -rf .git/modules/contenox.github.io"
+	@echo "  rm -rf vitepress-docs/"
+	@echo "  git commit -m 'chore: remove contenox.github.io submodule and vitepress-docs (moved to runtime repo)'"
+
+commit-docs: docs-markdown vitepress-build docs-html
 	git add $(PROJECT_ROOT)/docs
-	git add $(PROJECT_ROOT)/enterprise/contenox.github.io/docs
+	git add $(PROJECT_ROOT)/website
 	git commit -m "chore: update docs"
 
-release: docs-markdown docs-html set-version
+release: docs-markdown vitepress-build docs-html set-version
 	@echo "Release assets prepared."
