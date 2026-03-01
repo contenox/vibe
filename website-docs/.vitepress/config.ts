@@ -37,11 +37,6 @@ export default defineConfig({
             { text: 'Chains', link: '/chains/' },
             { text: 'Hooks', link: '/hooks/' },
             { text: 'CLI Reference', link: '/reference/vibe-cli' },
-            { text: 'API Reference', link: 'https://contenox.com/docs/openapi.html', target: '_blank' },
-            {
-                text: 'GitHub',
-                link: 'https://github.com/contenox/runtime',
-            },
         ],
 
         sidebar: {
