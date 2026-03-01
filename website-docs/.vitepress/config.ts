@@ -22,7 +22,7 @@ export default defineConfig({
     base: '/docs/',
 
     head: [
-        ['link', { rel: 'icon', href: '/docs/favicon.ico' }],
+        ['link', { rel: 'icon', href: '/docs/favicon.png', type: 'image/png' }],
         ['meta', { name: 'theme-color', content: '#1ac3c9' }],
         ['meta', { property: 'og:type', content: 'website' }],
         ['meta', { property: 'og:site_name', content: 'Contenox Docs' }],
