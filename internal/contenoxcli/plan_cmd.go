@@ -175,26 +175,6 @@ func openPlanDB(cmd *cobra.Command) (context.Context, libdbexec.DBManager, strin
 	return ctx, db, contenoxDir, cleanup, nil
 }
 
-// WithTransaction is the exported helper for DB writes used by sub-packages.
-func WithTransaction(ctx context.Context, db libdbexec.DBManager, fn func(tx libdbexec.Exec) error) error {
-	return withTransaction(ctx, db, fn)
-}
-
-// withTransaction is the single source of truth for all plan DB writes.
-func withTransaction(ctx context.Context, db libdbexec.DBManager, fn func(tx libdbexec.Exec) error) error {
-	txExec, commit, release, err := db.WithTransaction(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer release()
-	if err := fn(txExec); err != nil {
-		return err
-	}
-	if err := commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-	return nil
-}
 
 func buildPlanOpts(cmd *cobra.Command, db libdbexec.DBManager, input string) chatOpts {
 	flags := cmd.Root().Flags()

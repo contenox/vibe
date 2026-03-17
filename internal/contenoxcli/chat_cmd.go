@@ -81,7 +81,7 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	in := opts.InputValue
 	if !opts.InputFlagPassed {
 		if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-			stdinBytes, err := io.ReadAll(os.Stdin)
+			stdinBytes, err := io.ReadAll(io.LimitReader(os.Stdin, 50<<20)) // cap at 50 MB
 			if err != nil {
 				return fmt.Errorf("failed to read from stdin: %w", err)
 			}

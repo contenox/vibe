@@ -25,3 +25,26 @@ func openDBAt(ctx context.Context, dbPath string) (libdb.DBManager, error) {
 	}
 	return db, nil
 }
+
+// withTransaction is a convenience wrapper around DBManager.WithTransaction.
+// It handles the boilerplate (defer release, check commit) so callers only
+// supply the work function.
+func withTransaction(ctx context.Context, db libdb.DBManager, fn func(tx libdb.Exec) error) error {
+	txExec, commit, release, err := db.WithTransaction(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer release()
+	if err := fn(txExec); err != nil {
+		return err
+	}
+	if err := commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	return nil
+}
+
+// WithTransaction is the exported version for use by sub-packages.
+func WithTransaction(ctx context.Context, db libdb.DBManager, fn func(tx libdb.Exec) error) error {
+	return withTransaction(ctx, db, fn)
+}

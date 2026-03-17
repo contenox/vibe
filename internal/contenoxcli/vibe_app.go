@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/contenox/contenox/chatservice"
 	libdb "github.com/contenox/contenox/libdbexec"
@@ -336,20 +337,47 @@ func (m vibeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case vibeShellMsg:
 		m.waiting = false
 		if msg.err != nil {
-			m.push(vibeStyleShell.Render("$") + " " + msg.cmd + "\n" + vibeStyleError.Render(msg.stderr))
+			// Bug B fix: show stdout first (may contain useful progress), then stderr.
+			display := msg.stdout
+			if msg.stderr != "" {
+				if display != "" {
+					display += "\nstderr: " + msg.stderr
+				} else {
+					display = "stderr: " + msg.stderr
+				}
+			}
+			m.push(vibeStyleShell.Render("$") + " " + msg.cmd + "\n" + vibeStyleError.Render(display))
 		} else {
 			m.push(vibeStyleShell.Render("$") + " " + msg.cmd + "\n" + msg.stdout)
 		}
-		// Inject shell output into context as a tool message.
-		content := msg.stdout
+		// Inject shell output into LLM context as a user message.
+		// Bug B fix: include both stdout and stderr so the model has full context.
+		var content string
 		if msg.err != nil {
-			content = "stderr: " + msg.stderr
+			if msg.stdout != "" {
+				content = msg.stdout + "\nstderr: " + msg.stderr
+			} else {
+				content = "stderr: " + msg.stderr
+			}
+		} else {
+			content = msg.stdout
 		}
 		m.history.Messages = append(m.history.Messages, taskengine.Message{
-					// Inject as "user" role: strict LLM APIs (OpenAI, Anthropic) reject
-					// "tool" messages that lack a preceding tool_calls array.
-					Role: "user", Content: "Shell output:\n" + content,
+			// Inject as "user" role: strict LLM APIs (OpenAI, Anthropic) reject
+			// "tool" messages that lack a preceding tool_calls array.
+			Role: "user", Content: "Shell output:\n" + content,
 		})
+		// Bug A fix: persist shell output to SQLite so it survives Ctrl+C.
+		if m.sessionID != "" && m.db != nil {
+			chatMgr := chatservice.NewManager(nil)
+			snap := m.history.Messages // capture before goroutine runs
+			go func() {
+				saveCtx := context.WithoutCancel(m.ctx)
+				_ = withTransaction(saveCtx, m.db, func(tx libdb.Exec) error {
+					return chatMgr.PersistDiff(saveCtx, tx, m.sessionID, snap)
+				})
+			}()
+		}
 		m.sync()
 
 	case vibePlanCreatedMsg:
@@ -494,7 +522,7 @@ func (m vibeModel) dispatch(raw string) (tea.Model, tea.Cmd) {
 }
 
 func (m vibeModel) slash(raw string) (tea.Model, tea.Cmd) {
-	parts := strings.Fields(raw)
+	parts := shellSplit(raw)
 	if len(parts) == 0 {
 		return m, nil
 	}
@@ -595,8 +623,6 @@ func (m vibeModel) slash(raw string) (tea.Model, tea.Cmd) {
 	// ── /run --chain <file> [input] ────────────────────────────────────────────
 	case parts[0] == "/run":
 		return m, m.statelessRun(parts[1:])
-
-
 
 	// ── /session ──────────────────────────────────────────────────────────────
 	case parts[0] == "/session":
@@ -1179,6 +1205,17 @@ type vibeCobraOutputMsg struct {
 	err   error
 }
 
+// resetCobraFlags resets all flags on cmd to their default values and clears
+// the Changed bit. This is necessary because global cobra commands are reused
+// across TUI slash-command invocations — without a reset, flag state from a
+// prior call bleeds into subsequent calls.
+func resetCobraFlags(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		_ = f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
+}
+
 // runCobraCmd executes a cobra RunE handler with output redirected to a buffer.
 // Each line of output (stdout + stderr merged) is pushed into the TUI log.
 // The given cobraCmd MUST have its --db persistent flag set correctly so
@@ -1188,6 +1225,9 @@ func (m vibeModel) runCobraCmd(cobraCmd *cobra.Command, args []string) tea.Cmd {
 		var buf bytes.Buffer
 		cobraCmd.SetOut(&buf)
 		cobraCmd.SetErr(&buf)
+		// Bug F fix: reset flag state from any previous TUI invocation of this
+		// same cobra command before parsing new args.
+		resetCobraFlags(cobraCmd)
 		// ParseFlags must be called before RunE so that flag values are populated.
 		// Calling RunE directly (without going through cmd.Execute) skips Cobra's
 		// normal flag-parsing path.
@@ -1459,4 +1499,32 @@ func (m *vibeModel) showPlanInline() {
 		}
 		m.push(vibeStyleMuted.Render(fmt.Sprintf("  %d. %s %s", s.Ordinal, box, s.Description)))
 	}
+}
+
+// shellSplit splits a string into tokens respecting single and double quoted spans.
+// Unlike strings.Fields it does not break on spaces inside quotes, so slash
+// commands like /run --chain "my file.json" parse correctly.
+func shellSplit(s string) []string {
+	var tokens []string
+	var cur strings.Builder
+	inQ := rune(0)
+	for _, r := range s {
+		switch {
+		case inQ != 0 && r == inQ:
+			inQ = 0 // close quote
+		case inQ == 0 && (r == '"' || r == '\''):
+			inQ = r // open quote
+		case inQ == 0 && r == ' ':
+			if cur.Len() > 0 {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
 }

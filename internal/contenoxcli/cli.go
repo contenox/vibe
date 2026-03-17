@@ -4,7 +4,6 @@ package contenoxcli
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -120,16 +119,23 @@ No daemon, no cloud required. State is stored in SQLite.
     # Local (Ollama)
     ollama serve && ollama pull qwen2.5:7b
     contenox backend add local --type ollama
+    # Then set your default:
+    contenox config set default-model qwen2.5:7b
 
-    # OpenAI — key is read from the environment automatically
-    contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
-
-    # Google Gemini — key is read from the environment automatically
+    # Google Gemini (no GPU required)
     contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
+    contenox config set default-model  gemini-2.5-flash
+    contenox config set default-provider gemini
 
-  Persist CLI defaults:
-    contenox config set default-model  qwen2.5:7b
-    contenox config set default-chain  .contenox/default-chain.json
+    # OpenAI
+    contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
+    contenox config set default-model    gpt-4o-mini
+    contenox config set default-provider openai
+
+  Scope note:
+    Backends and config are GLOBAL (stored in ~/.contenox/local.db).
+    Chain files (.contenox/) are LOCAL to each project directory — like .git/.
+    Run 'contenox init' once per project to create the local chain files.
 
   Note: contenox plan requires a model that supports tool calling.`,
 	SilenceUsage:  true,
@@ -341,7 +347,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if effectiveChain == "" {
-		slog.Error("No chain file specified", "hint", "use --chain <path>, or run: contenox config set default-chain <path>")
+		// No chain found anywhere in the directory tree — guide the user.
+		fmt.Fprintln(os.Stderr, "No .contenox/ project found in this directory or any parent directory.")
+		fmt.Fprintln(os.Stderr, "Run 'contenox init' to get started, or pass --chain explicitly.")
 		return errChainRequired
 	}
 
@@ -393,7 +401,27 @@ func runChat(cmd *cobra.Command, args []string) error {
 		InputFlagPassed:                   inputPassed,
 		ContenoxDir:                       contenoxDir,
 	}
-	return execChat(ctx, db, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+	// Gap 7: quick pre-flight hint for the obvious case: model was explicitly set
+	// to something non-default, but provider was never configured.
+	if effectiveDefaultProvider == "" && effectiveModel != defaultModel {
+		fmt.Fprintln(os.Stderr, "default-provider is not set.")
+		fmt.Fprintln(os.Stderr, "Run: contenox config set default-provider <ollama|gemini|openai>")
+		return errInvalidConfig
+	}
+	if err := execChat(ctx, db, opts, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+		// Gap 7 fallback: when the engine can't find any model and provider is
+		// not configured, the root cause is almost always a missing default-provider.
+		if effectiveDefaultProvider == "" &&
+			(strings.Contains(err.Error(), "no models found") ||
+				strings.Contains(err.Error(), "model name cannot be empty") ||
+				strings.Contains(err.Error(), "client resolution failed")) {
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "Hint: default-provider is not set. If you are using Gemini or OpenAI, run:")
+			fmt.Fprintln(os.Stderr, "  contenox config set default-provider <ollama|gemini|openai>")
+		}
+		return err
+	}
+	return nil
 }
 
 // Sentinel errors so RunE can return and main can os.Exit(1).

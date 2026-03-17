@@ -78,7 +78,9 @@ Examples:
 			}
 		}
 		if chainPath == "" {
-			return fmt.Errorf("--chain is required for 'contenox run'\n  Example: contenox run --chain .contenox/my-chain.json \"your input\"")
+			fmt.Fprintln(os.Stderr, "No .contenox/ project found in this directory or any parent directory.")
+			fmt.Fprintln(os.Stderr, "Run 'contenox init' to get started, or pass --chain explicitly.")
+			return errChainRequired
 		}
 
 		// Resolve input
@@ -167,7 +169,18 @@ Examples:
 		}
 
 		output, outputType, stateUnits, err := engine.TaskService.Execute(execCtx, &chain, inputVal, inputType)
+		cancel()
 		if err != nil {
+			// Gap 7: when the engine can't find any model and no default-provider
+			// is set, the root cause is almost always a missing default-provider.
+			if o.EffectiveDefaultProvider == "" &&
+				(strings.Contains(err.Error(), "no models found") ||
+					strings.Contains(err.Error(), "model name cannot be empty") ||
+					strings.Contains(err.Error(), "client resolution failed")) {
+				fmt.Fprintln(cmd.ErrOrStderr(), "")
+				fmt.Fprintln(cmd.ErrOrStderr(), "Hint: default-provider is not set. If you are using Gemini or OpenAI, run:")
+				fmt.Fprintln(cmd.ErrOrStderr(), "  contenox config set default-provider <ollama|gemini|openai>")
+			}
 			return fmt.Errorf("chain execution failed: %w", err)
 		}
 
@@ -217,7 +230,7 @@ func resolveRunInput(cmd *cobra.Command, args []string) (string, error) {
 		// If stdin is also piped, combine: args = instruction, stdin = data.
 		// e.g. git diff | contenox run "suggest a commit message"
 		if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-			data, err := io.ReadAll(os.Stdin)
+			data, err := io.ReadAll(io.LimitReader(os.Stdin, 50<<20)) // cap at 50 MB
 			if err != nil {
 				return "", fmt.Errorf("failed to read from stdin: %w", err)
 			}
@@ -229,7 +242,7 @@ func resolveRunInput(cmd *cobra.Command, args []string) (string, error) {
 	}
 
 	if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-		data, err := io.ReadAll(os.Stdin)
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, 50<<20)) // cap at 50 MB
 		if err != nil {
 			return "", fmt.Errorf("failed to read from stdin: %w", err)
 		}
@@ -250,7 +263,7 @@ func parseRunInput(raw, typeName string) (any, taskengine.DataType, error) {
 		return taskengine.ChatHistory{Messages: []taskengine.Message{msg}}, taskengine.DataTypeChatHistory, nil
 
 	case "json":
-		var v map[string]any
+		var v any
 		if err := json.Unmarshal([]byte(raw), &v); err != nil {
 			return nil, taskengine.DataTypeAny, fmt.Errorf("input is not valid JSON: %w", err)
 		}
