@@ -19,6 +19,7 @@ import (
 	"github.com/contenox/contenox/jseval"
 	libbus "github.com/contenox/contenox/libbus"
 	"github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libkvstore"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/localhooks"
 	"github.com/contenox/contenox/mcpworker"
@@ -71,6 +72,10 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	if opts.EffectiveNoDeleteModels {
 		stateOpts = append(stateOpts, runtimestate.WithSkipDeleteUndeclaredModels())
 	}
+	// Wire the SQLite-backed KV store so the provider model-list cache (Gemini/OpenAI)
+	// survives across CLI invocations.
+	kvMgr := libkvstore.NewSQLiteManager(db)
+	stateOpts = append(stateOpts, runtimestate.WithKVStore(kvMgr))
 	state, err := runtimestate.New(engineCtx, db, bus, stateOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime state: %w", err)

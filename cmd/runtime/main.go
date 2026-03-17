@@ -26,6 +26,7 @@ import (
 	libbus "github.com/contenox/contenox/libbus"
 	libdb "github.com/contenox/contenox/libdbexec"
 	libroutine "github.com/contenox/contenox/libroutine"
+	"github.com/contenox/contenox/libkvstore"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/localhooks"
 	"github.com/contenox/contenox/runtimetypes"
@@ -114,7 +115,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("%s initializing OpenSearch failed: %v", nodeInstanceID, err)
 	}
-	state, err := runtimestate.New(ctx, dbInstance, ps, runtimestate.WithGroups())
+	rstateOpts := []runtimestate.Option{runtimestate.WithGroups()}
+	// Wire Valkey-backed KV store for provider model-list caching when VALKEY_ADDR is configured.
+	// Falls back to in-memory sync.Map when not set (fine for single-node deployments).
+	if config.ValkeyAddr != "" {
+		kvMgr, err := libkvstore.NewManager(libkvstore.Config{
+			KVAddr:     config.ValkeyAddr,
+			KVPassword: config.ValkeyPassword,
+		}, runtimestate.ProviderCacheDuration)
+		if err != nil {
+			log.Printf("%s valkey KV store unavailable, using in-memory cache: %v", nodeInstanceID, err)
+		} else {
+			rstateOpts = append(rstateOpts, runtimestate.WithKVStore(kvMgr))
+			defer kvMgr.Close()
+		}
+	}
+	state, err := runtimestate.New(ctx, dbInstance, ps, rstateOpts...)
 	// state, err := runtimestate.New(ctx, dbInstance, ps)
 	if err != nil {
 		log.Fatalf("%s initializing runtime state failed: %v", nodeInstanceID, err)

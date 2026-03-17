@@ -239,6 +239,31 @@ func init() {
 	chatCmd.Flags().Int("last", 0, "Print last N user/assistant turns after the reply (0 = only print new reply)")
 }
 
+// ResolveContenoxDir finds the closest .contenox directory by walking up from the
+// current working directory. If it hits the root without finding one, it returns
+// the .contenox directory in the current working directory as a fallback.
+func ResolveContenoxDir() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	dir := cwd
+	for {
+		candidate := filepath.Join(dir, ".contenox")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate, nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Hit root without finding it. Fallback to cwd/.contenox
+			return filepath.Join(cwd, ".contenox"), nil
+		}
+		dir = parent
+	}
+}
+
 func runInitCmd(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 	provider := ""
@@ -259,8 +284,10 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	cwd, _ := os.Getwd()
-	contenoxDir := filepath.Join(cwd, ".contenox")
+	contenoxDir, err := ResolveContenoxDir()
+	if err != nil {
+		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
+	}
 
 	// Resolve DB path (needed for KV reads below).
 	dbPath, err := resolveDBPath(cmd)

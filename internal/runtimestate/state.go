@@ -18,20 +18,21 @@ import (
 
 	libbus "github.com/contenox/contenox/libbus"
 	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libkvstore"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/statetype"
 	"github.com/ollama/ollama/api"
 )
 
-// providerCacheDuration defines how long the state of models from an external
+// ProviderCacheDuration defines how long the state of models from an external
 // provider (like OpenAI or Gemini) is cached to avoid frequent API calls.
-const providerCacheDuration = 24 * time.Hour
+const ProviderCacheDuration = 1 * time.Hour
 
 // providerCacheEntry holds the data and metadata for a cached provider state.
+// APIKey is stored so we can detect key rotation and invalidate the cache.
 type providerCacheEntry struct {
-	models    []statetype.ModelPullStatus
-	timestamp time.Time
-	apiKey    string
+	Models []statetype.ModelPullStatus `json:"models"`
+	APIKey string                      `json:"api_key"`
 }
 
 // State manages the overall runtime status of multiple LLM backends.
@@ -46,7 +47,9 @@ type State struct {
 	withgroups           bool
 	skipDeleteUndeclared bool // when true, do not delete Ollama models that are not declared (for pre-pulled models)
 	autoDiscoverModels   bool // when true, expose all live backend models without requiring declaration
-	providerCache        sync.Map
+	// kvStore is used for persistent provider-model caching (nil = fall back to in-memory sync.Map)
+	kvStore       libkvstore.KVManager
+	providerCache sync.Map // fallback when kvStore is nil
 }
 
 type Option func(*State)
@@ -54,6 +57,15 @@ type Option func(*State)
 func WithGroups() Option {
 	return func(s *State) {
 		s.withgroups = true
+	}
+}
+
+// WithKVStore injects a persistent KV store for provider model-list caching.
+// For the CLI use libkvstore.NewSQLiteManager; for the runtime API use libkvstore.NewManager (Valkey).
+// When not provided the cache falls back to an in-memory sync.Map.
+func WithKVStore(kv libkvstore.KVManager) Option {
+	return func(s *State) {
+		s.kvStore = kv
 	}
 }
 
@@ -82,11 +94,10 @@ func WithAutoDiscoverModels() Option {
 // Returns an initialized State ready for use.
 func New(ctx context.Context, dbInstance libdb.DBManager, psInstance libbus.Messenger, options ...Option) (*State, error) {
 	s := &State{
-		dbInstance:    dbInstance,
-		state:         sync.Map{},
-		dwQueue:       dwqueue{dbInstance: dbInstance},
-		psInstance:    psInstance,
-		providerCache: sync.Map{},
+		dbInstance: dbInstance,
+		state:      sync.Map{},
+		dwQueue:    dwqueue{dbInstance: dbInstance},
+		psInstance: psInstance,
 	}
 	if psInstance == nil {
 		return nil, errors.New("psInstance cannot be nil")
@@ -753,19 +764,36 @@ func (s *State) processGeminiBackend(ctx context.Context, backend *runtimetypes.
 		return
 	}
 
-	// Check cache first: use if recent and API key is unchanged
-	if cached, ok := s.providerCache.Load(backend.ID); ok {
+	// Check cache: prefer kvStore (persistent + TTL-aware); fall back to in-memory sync.Map.
+	if s.kvStore != nil {
+		if exec, err := s.kvStore.Executor(ctx); err == nil {
+			if raw, err := exec.Get(ctx, "prov:"+backend.ID); err == nil {
+				var entry providerCacheEntry
+				if json.Unmarshal(raw, &entry) == nil && entry.APIKey == cfg.APIKey && len(entry.Models) > 0 {
+					modelNames := make([]string, 0, len(entry.Models))
+					for _, m := range entry.Models {
+						modelNames = append(modelNames, m.Model)
+					}
+					stateInstance.Models = modelNames
+					stateInstance.PulledModels = entry.Models
+					stateInstance.SetAPIKey(entry.APIKey)
+					s.state.Store(backend.ID, stateInstance)
+					return
+				}
+			}
+		}
+	} else if cached, ok := s.providerCache.Load(backend.ID); ok {
 		if entry, ok := cached.(providerCacheEntry); ok {
-			if time.Since(entry.timestamp) < providerCacheDuration && entry.apiKey == cfg.APIKey {
-				modelNames := make([]string, 0, len(entry.models))
-				for _, m := range entry.models {
+			if entry.APIKey == cfg.APIKey && len(entry.Models) > 0 {
+				modelNames := make([]string, 0, len(entry.Models))
+				for _, m := range entry.Models {
 					modelNames = append(modelNames, m.Model)
 				}
 				stateInstance.Models = modelNames
-				stateInstance.PulledModels = entry.models
-				stateInstance.SetAPIKey(entry.apiKey)
+				stateInstance.PulledModels = entry.Models
+				stateInstance.SetAPIKey(entry.APIKey)
 				s.state.Store(backend.ID, stateInstance)
-				return // Return early using cached data
+				return
 			}
 		}
 	}
@@ -838,11 +866,16 @@ func (s *State) processGeminiBackend(ctx context.Context, backend *runtimetypes.
 	s.state.Store(backend.ID, stateInstance)
 
 	// Store successful result in cache
-	s.providerCache.Store(backend.ID, providerCacheEntry{
-		models:    pulledModels,
-		timestamp: time.Now().UTC(),
-		apiKey:    cfg.APIKey,
-	})
+	newEntry := providerCacheEntry{Models: pulledModels, APIKey: cfg.APIKey}
+	if s.kvStore != nil {
+		if exec, err := s.kvStore.Executor(ctx); err == nil {
+			if data, err := json.Marshal(newEntry); err == nil {
+				_ = exec.SetWithTTL(ctx, "prov:"+backend.ID, data, ProviderCacheDuration)
+			}
+		}
+	} else {
+		s.providerCache.Store(backend.ID, newEntry)
+	}
 }
 
 func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.Backend, models []*runtimetypes.Model) {
@@ -873,19 +906,60 @@ func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.
 		declaredModels[model.Model] = model
 	}
 
-	// Check cache first: use if recent and API key is unchanged
-	if cached, ok := s.providerCache.Load(backend.ID); ok {
+	// Check cache: prefer kvStore (persistent + TTL-aware); fall back to in-memory sync.Map.
+	if s.kvStore != nil {
+		if exec, err := s.kvStore.Executor(ctx); err == nil {
+			if raw, err := exec.Get(ctx, "prov:"+backend.ID); err == nil {
+				var entry providerCacheEntry
+				if json.Unmarshal(raw, &entry) == nil && entry.APIKey == cfg.APIKey && len(entry.Models) > 0 {
+					allModelNames := make([]string, 0, len(entry.Models))
+					for _, m := range entry.Models {
+						allModelNames = append(allModelNames, m.Model)
+					}
+					pulledModels := make([]statetype.ModelPullStatus, 0, len(entry.Models))
+					for _, m := range entry.Models {
+						if declaredModel, exists := declaredModels[m.Name]; exists {
+							enhancedModel := m
+							enhancedModel.Name = declaredModel.ID
+							enhancedModel.Model = declaredModel.Model
+							enhancedModel.ContextLength = declaredModel.ContextLength
+							enhancedModel.CanChat = declaredModel.CanChat
+							enhancedModel.CanEmbed = declaredModel.CanEmbed
+							enhancedModel.CanPrompt = declaredModel.CanPrompt
+							enhancedModel.CanStream = declaredModel.CanStream
+							pulledModels = append(pulledModels, enhancedModel)
+						} else if s.autoDiscoverModels {
+							pulledModels = append(pulledModels, inferOpenAICapabilities(m.Model))
+						}
+					}
+					stateInstance.Models = allModelNames
+					stateInstance.PulledModels = pulledModels
+					stateInstance.SetAPIKey(entry.APIKey)
+					if len(declaredModels) > 0 && len(pulledModels) == 0 && !s.autoDiscoverModels {
+						declaredMap := []string{}
+						for k, n := range declaredModels {
+							p := "model-data==nil"
+							if n != nil {
+								p = n.ID + " " + n.Model
+							}
+							declaredMap = append(declaredMap, k+":"+p)
+						}
+						stateInstance.Error = fmt.Sprintf("None of the declared models are available in the OpenAI API: declared models: %v \navailable models %s", strings.Join(declaredMap, ", "), allModelNames)
+					}
+					s.state.Store(backend.ID, stateInstance)
+					return
+				}
+			}
+		}
+	} else if cached, ok := s.providerCache.Load(backend.ID); ok {
 		if entry, ok := cached.(providerCacheEntry); ok {
-			if time.Since(entry.timestamp) < providerCacheDuration && entry.apiKey == cfg.APIKey {
-				// Use all models from cache for stateInstance.Models
-				allModelNames := make([]string, 0, len(entry.models))
-				for _, m := range entry.models {
+			if entry.APIKey == cfg.APIKey && len(entry.Models) > 0 {
+				allModelNames := make([]string, 0, len(entry.Models))
+				for _, m := range entry.Models {
 					allModelNames = append(allModelNames, m.Model)
 				}
-
-				// Filter pulledModels: always include declared ones; also include all when autoDiscover.
-				pulledModels := make([]statetype.ModelPullStatus, 0, len(entry.models))
-				for _, m := range entry.models {
+				pulledModels := make([]statetype.ModelPullStatus, 0, len(entry.Models))
+				for _, m := range entry.Models {
 					if declaredModel, exists := declaredModels[m.Name]; exists {
 						enhancedModel := m
 						enhancedModel.Name = declaredModel.ID
@@ -900,10 +974,9 @@ func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.
 						pulledModels = append(pulledModels, inferOpenAICapabilities(m.Model))
 					}
 				}
-
 				stateInstance.Models = allModelNames
 				stateInstance.PulledModels = pulledModels
-				stateInstance.SetAPIKey(entry.apiKey)
+				stateInstance.SetAPIKey(entry.APIKey)
 				if len(declaredModels) > 0 && len(pulledModels) == 0 && !s.autoDiscoverModels {
 					declaredMap := []string{}
 					for k, n := range declaredModels {
@@ -916,7 +989,7 @@ func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.
 					stateInstance.Error = fmt.Sprintf("None of the declared models are available in the OpenAI API: declared models: %v \navailable models %s", strings.Join(declaredMap, ", "), allModelNames)
 				}
 				s.state.Store(backend.ID, stateInstance)
-				return // Return early using cached data
+				return
 			}
 		}
 	}
@@ -1018,11 +1091,16 @@ func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.
 
 	s.state.Store(backend.ID, stateInstance)
 	// Store successful result in cache (all models + pulled models)
-	s.providerCache.Store(backend.ID, providerCacheEntry{
-		models:    allModels, // All models from API
-		timestamp: time.Now().UTC(),
-		apiKey:    cfg.APIKey,
-	})
+	newEntry := providerCacheEntry{Models: allModels, APIKey: cfg.APIKey}
+	if s.kvStore != nil {
+		if exec, err := s.kvStore.Executor(ctx); err == nil {
+			if data, err := json.Marshal(newEntry); err == nil {
+				_ = exec.SetWithTTL(ctx, "prov:"+backend.ID, data, ProviderCacheDuration)
+			}
+		}
+	} else {
+		s.providerCache.Store(backend.ID, newEntry)
+	}
 }
 
 func fetchGeminiModelInfo(ctx context.Context, baseURL, modelName, apiKey string, httpClient *http.Client) (*statetype.ModelPullStatus, error) {

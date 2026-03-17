@@ -242,6 +242,8 @@ type Config struct {
 	VectorStoreURL          string `json:"vector_store_url"`
 	Token                   string `json:"token"`
 	UIBaseURL               string `json:"ui_base_url"`
+	ValkeyAddr              string `json:"valkey_addr"`
+	ValkeyPassword          string `json:"valkey_password"`
 }
 
 func LoadConfig[T any](cfg *T) error {

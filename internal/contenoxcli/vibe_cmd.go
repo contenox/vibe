@@ -67,11 +67,10 @@ func init() {
 func runVibe(cmd *cobra.Command, _ []string) error {
 	flags := cmd.Root().PersistentFlags()
 
-	cwd, err := os.Getwd()
+	contenoxDir, err := ResolveContenoxDir()
 	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
+		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
 	}
-	contenoxDir := filepath.Join(cwd, ".contenox")
 
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -93,6 +92,8 @@ func runVibe(cmd *cobra.Command, _ []string) error {
 	if !flags.Changed("model") || effectiveModel == defaultModel {
 		if kv, _ := getConfigKV(ctx, store, "default-model"); kv != "" {
 			effectiveModel = kv
+		} else {
+			effectiveModel = defaultModel
 		}
 	}
 	effectiveProvider := ""

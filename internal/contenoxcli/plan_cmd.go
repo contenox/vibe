@@ -155,8 +155,10 @@ func init() {
 
 // openPlanDB is similar to openSessionDB but for plans.
 func openPlanDB(cmd *cobra.Command) (context.Context, libdbexec.DBManager, string, func(), error) {
-	cwd, _ := os.Getwd()
-	contenoxDir := filepath.Join(cwd, ".contenox")
+	contenoxDir, err := ResolveContenoxDir()
+	if err != nil {
+		return nil, nil, "", nil, fmt.Errorf("failed to resolve .contenox dir: %w", err)
+	}
 
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -204,9 +206,11 @@ func buildPlanOpts(cmd *cobra.Command, db libdbexec.DBManager, input string) cha
 	kvProvider, _ := getConfigKV(ctx, store, "default-provider")
 
 	effectiveModel, _ := flags.GetString("model")
-	if !flags.Changed("model") && effectiveModel == defaultModel {
+	if !flags.Changed("model") && (effectiveModel == "" || effectiveModel == defaultModel) {
 		if kvModel != "" {
 			effectiveModel = kvModel
+		} else {
+			effectiveModel = defaultModel
 		}
 	}
 

@@ -217,12 +217,13 @@ func resolveDBPath(cmd *cobra.Command) (string, error) {
 	if dbFlag != "" {
 		return filepath.Abs(dbFlag)
 	}
-	cwd, _ := os.Getwd()
 	// Prefer project-local DB if a .contenox directory exists (even if local.db
 	// doesn't yet — e.g. right after `contenox init`).
-	localDir := filepath.Join(cwd, ".contenox")
-	if _, err := os.Stat(localDir); err == nil {
-		return filepath.Join(localDir, "local.db"), nil
+	localDir, err := ResolveContenoxDir()
+	if err == nil {
+		if _, statErr := os.Stat(localDir); statErr == nil {
+			return filepath.Join(localDir, "local.db"), nil
+		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		globalDB := filepath.Join(home, ".contenox", "local.db")
@@ -230,7 +231,11 @@ func resolveDBPath(cmd *cobra.Command) (string, error) {
 			return globalDB, nil
 		}
 	}
-	// Default: create in local .contenox/
+	// Default: create in local .contenox/ (even if it's the cwd fallback)
+	if localDir == "" {	
+	    cwd, _ := os.Getwd()
+	    localDir = filepath.Join(cwd, ".contenox")
+	}
 	return filepath.Abs(filepath.Join(localDir, "local.db"))
 }
 

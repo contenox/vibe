@@ -63,12 +63,11 @@ Examples:
 
 		flags := cmd.Flags()
 
-		// Resolve contenox dir from cwd convention.
-		cwd, err := os.Getwd()
+		// Resolve .contenox dir using Git-style parent walk.
+		contenoxDir, err := ResolveContenoxDir()
 		if err != nil {
-			return fmt.Errorf("failed to get current working directory: %w", err)
+			return fmt.Errorf("failed to resolve .contenox dir: %w", err)
 		}
-		contenoxDir := filepath.Join(cwd, ".contenox")
 
 		// Resolve chain path (fallback to default chain if not specified)
 		chainPath, _ := flags.GetString("chain")
@@ -298,7 +297,11 @@ func buildRunOpts(cmd *cobra.Command, db libdbexec.DBManager, contenoxDir string
 
 	effectiveModel, _ := flags.GetString("model")
 	if !flags.Changed("model") && (effectiveModel == "" || effectiveModel == defaultModel) {
-		effectiveModel = kvModel
+		if kvModel != "" {
+			effectiveModel = kvModel
+		} else {
+			effectiveModel = defaultModel
+		}
 	}
 
 	effectiveDefaultProvider := kvProvider
