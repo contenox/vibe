@@ -58,16 +58,6 @@ jobs:
           fi
           echo "✓ Version verification passed: $VERSION_IN_FILE matches tag"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Build VitePress docs
-        run: |
-          cd website-docs
-          npm ci
-          npm run docs:build
 
       - name: Generate OpenAPI spec + restore openapi.html
         run: |
