@@ -358,7 +358,12 @@ func geminiSanitiseSchema(params any) any {
 	clean = func(v any) {
 		switch t := v.(type) {
 		case map[string]any:
+			// Gemini rejects these JSON Schema fields in function_declarations.
+			// MCP servers (e.g. Linear) routinely include them.
 			delete(t, "additionalProperties")
+			delete(t, "$schema")
+			delete(t, "$defs")
+			delete(t, "definitions")
 			for _, val := range t {
 				clean(val)
 			}
