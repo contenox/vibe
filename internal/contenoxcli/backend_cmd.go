@@ -76,6 +76,8 @@ Examples:
 		}
 		if baseURL == "" {
 			switch typ {
+			case "ollama":
+				baseURL = "http://localhost:11434"
 			case "openai":
 				baseURL = "https://api.openai.com/v1"
 			case "gemini":
