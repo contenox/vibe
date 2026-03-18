@@ -36,7 +36,7 @@ Examples:
   contenox model remove qwen2.5:7b
 
 Set the default model:
-  contenox config set default-model    models/gemini-2.0-flash
+  contenox config set default-model    gemini-2.5-flash
   contenox config set default-provider gemini`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -240,7 +240,7 @@ For OpenAI/Gemini/vLLM, the model name is validated against the backend at runti
 
 Examples:
   contenox model add qwen2.5:7b
-  contenox model add gemini-2.0-flash
+  contenox model add gemini-2.5-flash
   contenox model add gpt-4o`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

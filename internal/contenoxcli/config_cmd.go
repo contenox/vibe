@@ -49,7 +49,7 @@ Valid keys:
 Examples:
   contenox config set default-model    qwen2.5:7b
   contenox config set default-provider ollama
-  contenox config set default-model    gemini-2.0-flash
+  contenox config set default-model    gemini-2.5-flash
   contenox config set default-chain    .contenox/chain-vibes.json`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {

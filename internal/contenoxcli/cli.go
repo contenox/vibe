@@ -276,8 +276,7 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		provider = args[0]
 	}
-	RunInit(force, provider)
-	return nil
+	return RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, provider)
 }
 
 func runChat(cmd *cobra.Command, args []string) error {

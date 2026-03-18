@@ -3,11 +3,15 @@ package contenoxcli
 
 import (
 	_ "embed"
+	"context"
 	"fmt"
-	"log/slog"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/contenox/contenox/libtracker"
+	"github.com/contenox/contenox/runtimetypes"
 )
 
 //go:embed chain-contenox.json
@@ -43,7 +47,7 @@ var providerConfigs = map[string]providerConfig{
 
 // RunInit scaffolds .contenox/ with default chain files.
 // provider is "" (default = ollama), "ollama", "gemini", or "openai".
-func RunInit(force bool, provider string) {
+func RunInit(out, errOut io.Writer, force bool, provider string) error {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		provider = "ollama"
@@ -51,76 +55,113 @@ func RunInit(force bool, provider string) {
 
 	pc, ok := providerConfigs[provider]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "Unknown provider %q. Valid options: ollama, gemini, openai\n", provider)
-		os.Exit(1)
+		return fmt.Errorf("unknown provider %q — valid options: ollama, gemini, openai", provider)
 	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		slog.Error("Cannot get current directory", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("cannot get current directory: %w", err)
 	}
 	contenoxDir := filepath.Join(cwd, ".contenox")
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
-		slog.Error("Failed to create .contenox directory", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to create .contenox directory: %w", err)
 	}
 	chainPath := filepath.Join(contenoxDir, "default-chain.json")
 	runChainPath := filepath.Join(contenoxDir, "default-run-chain.json")
-	writeFile := func(path, content string) bool {
+	writeFile := func(path, content string) error {
 		if !force {
 			if _, err := os.Stat(path); err == nil {
-				fmt.Printf("  %s already exists (use --force to overwrite)\n", path)
-				return false
+				fmt.Fprintf(out, "  %s already exists (use --force to overwrite)\n", path)
+				return nil
 			}
 		}
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			slog.Error("Failed to write file", "path", path, "error", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to write %s: %w", path, err)
 		}
-		fmt.Printf("  Created %s\n", path)
-		return true
+		fmt.Fprintf(out, "  Created %s\n", path)
+		return nil
 	}
 
-	writeFile(chainPath, initChain)
-	writeFile(runChainPath, initRunChain)
+	if err := writeFile(chainPath, initChain); err != nil {
+		return err
+	}
+	if err := writeFile(runChainPath, initRunChain); err != nil {
+		return err
+	}
 
-	fmt.Println("Done.")
-	fmt.Println("")
+	fmt.Fprintln(out, "Done.")
+	fmt.Fprintln(out, "")
+
+	// Surface the currently configured model so users immediately know
+	// if they have a stale entry from a previous install.
+	dbPath := filepath.Join(contenoxDir, "local.db")
+	if _, statErr := os.Stat(dbPath); statErr == nil {
+		if db, openErr := openDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
+			store := runtimetypes.New(db.WithoutTransaction())
+			ctx := libtracker.WithNewRequestID(context.Background())
+			curModel, _ := getConfigKV(ctx, store, "default-model")
+			curProvider, _ := getConfigKV(ctx, store, "default-provider")
+			db.Close()
+			if curModel != "" || curProvider != "" {
+				fmt.Fprintln(out, "Current config (from local.db):")
+				if curProvider != "" {
+					fmt.Fprintf(out, "  default-provider = %s\n", curProvider)
+				}
+				if curModel != "" {
+					fmt.Fprintf(out, "  default-model    = %s\n", curModel)
+				}
+				fmt.Fprintln(out, "  To change: contenox config set default-model <model>")
+				fmt.Fprintln(out, "")
+			}
+		}
+	}
 
 	// If a cloud provider is selected, check for the API key and instruct if missing.
 	if pc.envKey != "" {
 		if os.Getenv(pc.envKey) == "" {
-			fmt.Printf("⚠️  %s API key not found in environment.\n", pc.name)
-			fmt.Printf("   Set it before running contenox:\n\n")
-			fmt.Printf("     export %s=your-key-here\n\n", pc.envKey)
+			fmt.Fprintf(out, "⚠️  %s API key not found in environment.\n", pc.name)
+			fmt.Fprintf(out, "   Set it before running contenox:\n\n")
+			fmt.Fprintf(out, "     export %s=your-key-here\n\n", pc.envKey)
 		} else {
-			fmt.Printf("✓  %s API key detected (%s).\n\n", pc.name, pc.envKey)
+			fmt.Fprintf(out, "✓  %s API key detected (%s).\n\n", pc.name, pc.envKey)
 		}
 	}
 
-	fmt.Println("Next steps:")
-	fmt.Println("")
+	fmt.Fprintln(out, "Next steps:")
+	fmt.Fprintln(out, "")
 	if provider == "ollama" {
-		fmt.Println("  1. Start Ollama and pull the default model:")
-		fmt.Println("       ollama serve && ollama pull qwen2.5:7b")
-		fmt.Println("")
+		fmt.Fprintln(out, "  1. Install Ollama (if not already):")
+		fmt.Fprintln(out, "       curl -fsSL https://ollama.com/install.sh | sh")
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "  2. Start Ollama and pull the default model:")
+		fmt.Fprintln(out, "       ollama serve && ollama pull qwen2.5:7b")
+		fmt.Fprintln(out, "")
 	} else {
-		fmt.Printf("  1. Register the %s backend:\n", pc.name)
-		fmt.Printf("       contenox backend add %s --type %s --api-key-env %s\n", provider, provider, pc.envKey)
-		fmt.Printf("       contenox config set default-model %s\n", pc.defaultModel)
-		fmt.Println("")
+		fmt.Fprintf(out, "  1. Register the %s backend:\n", pc.name)
+		fmt.Fprintf(out, "       contenox backend add %s --type %s --api-key-env %s\n", provider, provider, pc.envKey)
+		fmt.Fprintf(out, "       contenox config set default-model %s\n", pc.defaultModel)
+		fmt.Fprintln(out, "")
 	}
-	fmt.Printf("  %d. Chat with your model:\n", map[bool]int{true: 1, false: 2}[provider != "ollama"])
-	fmt.Println("       contenox hey, what can you do?")
-	fmt.Println("       echo 'fix the typos in README.md' | contenox")
-	fmt.Println("")
-	fmt.Println("  Plan and execute a multi-step task:")
-	fmt.Println("       contenox plan new \"create a TODOS.md from all TODO comments in the codebase\"")
-	fmt.Println("       contenox plan next --auto")
-	fmt.Println("")
-	fmt.Println("  To enable shell and filesystem tools pass --shell to any command, e.g.:")
-	fmt.Println("       contenox --shell \"run the tests\"")
-	fmt.Println("")
-	fmt.Println("  Run 'contenox --help' for full usage.")
+	// Print API key link for cloud providers
+	switch provider {
+	case "gemini":
+		fmt.Fprintln(out, "  Get a free Gemini API key: https://aistudio.google.com/apikey")
+		fmt.Fprintln(out, "")
+	case "openai":
+		fmt.Fprintln(out, "  Get an OpenAI API key: https://platform.openai.com/api-keys")
+		fmt.Fprintln(out, "")
+	}
+	fmt.Fprintf(out, "  %d. Chat with your model:\n", map[bool]int{true: 2, false: 3}[provider != "ollama"])
+	fmt.Fprintln(out, "       contenox hey, what can you do?")
+	fmt.Fprintln(out, "       echo 'fix the typos in README.md' | contenox")
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, "  Plan and execute a multi-step task:")
+	fmt.Fprintln(out, "       contenox plan new \"create a TODOS.md from all TODO comments in the codebase\"")
+	fmt.Fprintln(out, "       contenox plan next --auto")
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, "  To enable shell and filesystem tools pass --shell to any command, e.g.:")
+	fmt.Fprintln(out, "       contenox --shell \"run the tests\"")
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, "  Run 'contenox --help' for full usage.")
+	return nil
 }
