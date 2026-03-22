@@ -132,7 +132,7 @@ func (c *geminiClient) sendRequest(ctx context.Context, endpoint string, request
 }
 
 // buildGeminiRequest builds a proper Gemini generateContent request using modelrepo args & tools
-func buildGeminiRequest(_ string, messages []modelrepo.Message, systemInstruction *geminiSystemInstruction, args []modelrepo.ChatArgument) geminiGenerateContentRequest {
+func buildGeminiRequest(_ string, messages []modelrepo.Message, systemInstruction *geminiSystemInstruction, args []modelrepo.ChatArgument) (geminiGenerateContentRequest, error) {
 	// Collect chat args
 	cfg := &modelrepo.ChatConfig{}
 	for _, a := range args {
@@ -144,12 +144,16 @@ func buildGeminiRequest(_ string, messages []modelrepo.Message, systemInstructio
 	if len(cfg.Tools) > 0 {
 		decls := make([]geminiFunctionDeclaration, 0, len(cfg.Tools))
 		for _, t := range cfg.Tools {
+			toolschema, err := geminiSanitiseSchema(t.Function.Parameters)
+			if err != nil {
+				return geminiGenerateContentRequest{}, err
+			}
 			if t.Type == "function" && t.Function != nil {
 				decls = append(decls, geminiFunctionDeclaration{
 					Name:        t.Function.Name,
 					Description: t.Function.Description,
 					// Gemini rejects additionalProperties in function schemas.
-					Parameters: geminiSanitiseSchema(t.Function.Parameters),
+					Parameters: toolschema,
 				})
 			}
 		}
@@ -188,7 +192,7 @@ func buildGeminiRequest(_ string, messages []modelrepo.Message, systemInstructio
 		}
 	}
 
-	return req
+	return req, nil
 }
 
 // convert modelrepo messages to Gemini "contents"
@@ -220,15 +224,14 @@ func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 
 		parts := make([]geminiPart, 0)
 
-		// --- FIX 1: Add text part FIRST if it's not a tool role ---
+		// Add text part FIRST if it's not a tool role ---
 		// Handle text content for user/assistant messages.
 		// This ensures text is included even if tool calls/responses follow.
 		if m.Content != "" && m.Role != "tool" {
 			parts = append(parts, geminiPart{Text: m.Content})
 		}
-		// --- END FIX 1 ---
 
-		// 1) Assistant tool calls: encode as functionCall parts
+		// Assistant tool calls: encode as functionCall parts
 		if len(m.ToolCalls) > 0 {
 			for _, tc := range m.ToolCalls {
 				// Remember mapping from tool_call_id -> function name
@@ -270,8 +273,8 @@ func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 			}
 		}
 
-		// --- FIX 2: Properly handle tool responses ---
-		// 2) Tool responses: encode as functionResponse parts if we can
+		// Properly handle tool responses
+		// Tool responses: encode as functionResponse parts if we can
 		if m.Role == "tool" {
 			// Try to find the function name associated with this tool_call_id
 			fnName := ""
@@ -310,14 +313,8 @@ func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 				},
 			})
 		}
-		// --- END FIX 2 ---
 
 		// 3) Normal text content (user/assistant/system-like)
-		// -- THIS BLOCK IS NOW REMOVED and handled by FIX 1 --
-		// if m.Content != "" && len(parts) == 0 {
-		// 	parts = append(parts, geminiPart{Text: m.Content})
-		// }
-
 		// If we somehow ended up with no parts at all, skip this message
 		if len(parts) == 0 {
 			continue
@@ -336,71 +333,98 @@ func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 	return out
 }
 
-// geminiSanitiseSchema recursively removes JSON Schema fields that the Gemini API rejects
-// (currently: `additionalProperties`). The previous shallow delete only cleaned the root
-// object; MCP servers often return deeply nested schemas that also triggered 400 errors.
-// This is intentionally private to the gemini package — other providers are unaffected.
-func geminiSanitiseSchema(params any) any {
+// geminiSanitiseSchema converts arbitrary JSON Schema to Gemini's exact schema format
+// Uses double-marshal to drop any fields Gemini doesn't accept
+func geminiSanitiseSchema(params any) (*geminiSchema, error) {
 	if params == nil {
-		return nil
+		return nil, nil
 	}
+
+	// Step 1: Marshal input to JSON (normalizes the data)
 	raw, err := json.Marshal(params)
 	if err != nil {
-		return params
+		return nil, err
 	}
 
-	var data any
-	if err := json.Unmarshal(raw, &data); err != nil {
-		return params
+	// Step 2: Unmarshal into Gemini's exact schema type
+	var schema geminiSchema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, err
 	}
 
-	var clean func(v any)
-	clean = func(v any) {
-		switch t := v.(type) {
-		case map[string]any:
-			// Gemini rejects these JSON Schema fields in function_declarations.
-			delete(t, "additionalProperties")
-			delete(t, "$schema")
-			delete(t, "$defs")
-			delete(t, "definitions")
+	// Step 3: Recursively sanitize nested schemas (properties, items)
+	schema = sanitizeSchemaRecursive(schema)
 
-			// Normalize "type" field - Gemini only accepts string, not array
-			if typeVal, ok := t["type"]; ok {
-				switch v := typeVal.(type) {
-				case []any:
-					// type: ["string", "null"] → pick first non-null type
-					for _, item := range v {
-						if s, ok := item.(string); ok && s != "null" {
-							t["type"] = s
-							break
-						}
-					}
-					// Fallback if all were "null" or invalid
-					if _, stillArray := t["type"].([]any); stillArray {
-						t["type"] = "string"
-					}
-				case string:
-					// Already a string, keep it
-				default:
-					// Unexpected type, default to string
-					t["type"] = "string"
-				}
-			}
+	return &schema, nil
+}
 
-			for _, val := range t {
-				clean(val)
-			}
-		case []any:
-			for _, val := range t {
-				clean(val)
+// sanitizeSchemaRecursive walks the schema tree and sanitizes all nested schemas
+func sanitizeSchemaRecursive(schema geminiSchema) geminiSchema {
+	// Normalize type field first
+	switch schema.Type {
+	case "string", "integer", "number", "boolean", "array", "object":
+		// Valid
+	default:
+		schema.Type = "string"
+	}
+
+	// Normalize enum - ensure it's a flat array of primitives
+	if schema.Enum != nil {
+		cleanedEnum := make([]any, 0, len(schema.Enum))
+		for _, item := range schema.Enum {
+			switch item.(type) {
+			case string, float64, bool, nil:
+				cleanedEnum = append(cleanedEnum, item)
 			}
 		}
+		if len(cleanedEnum) > 0 {
+			schema.Enum = cleanedEnum
+		} else {
+			schema.Enum = nil
+		}
 	}
-	clean(data)
 
-	out, err := json.Marshal(data)
-	if err != nil {
-		return params
+	// Sanitize items (for arrays) - recurse and convert back to map for consistent marshaling
+	if schema.Items != nil {
+		cleaned := sanitizeSchemaRecursive(*schema.Items)
+		// Convert struct back to map for consistent type in Properties
+		itemsRaw, _ := json.Marshal(cleaned)
+		var itemsMap map[string]any
+		json.Unmarshal(itemsRaw, &itemsMap)
+		schema.Items = &geminiSchema{}
+		json.Unmarshal(itemsRaw, schema.Items)
 	}
-	return json.RawMessage(out)
+
+	// Sanitize properties (for objects)
+	if schema.Properties != nil {
+		cleanedProps := make(map[string]any, len(schema.Properties))
+		for key, val := range schema.Properties {
+			// Try to unmarshal property value as schema
+			raw, err := json.Marshal(val)
+			if err != nil {
+				// Can't marshal, keep as-is (shouldn't happen)
+				cleanedProps[key] = val
+				continue
+			}
+
+			var propSchema geminiSchema
+			if err := json.Unmarshal(raw, &propSchema); err != nil {
+				// Not a valid schema object, keep original
+				cleanedProps[key] = val
+				continue
+			}
+
+			// Recursively clean nested property
+			cleaned := sanitizeSchemaRecursive(propSchema)
+
+			// Convert back to map[string]any for consistent marshaling
+			cleanedRaw, _ := json.Marshal(cleaned)
+			var cleanedMap map[string]any
+			json.Unmarshal(cleanedRaw, &cleanedMap)
+			cleanedProps[key] = cleanedMap
+		}
+		schema.Properties = cleanedProps
+	}
+
+	return schema
 }

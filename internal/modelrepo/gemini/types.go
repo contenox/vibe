@@ -1,13 +1,5 @@
 package gemini
 
-// --- Tool calling (request) ---
-
-type geminiFunctionDeclaration struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description,omitempty"`
-	Parameters  interface{} `json:"parameters,omitempty"`
-}
-
 type geminiToolRequest struct {
 	FunctionDeclarations []geminiFunctionDeclaration `json:"functionDeclarations,omitempty"`
 }
@@ -52,4 +44,24 @@ type geminiGenerateContentResponse struct {
 	PromptFeedback struct {
 		BlockReason string `json:"blockReason,omitempty"`
 	} `json:"promptFeedback"`
+}
+
+// geminiFunctionDeclaration matches Gemini API's FunctionDeclaration exactly
+// https://ai.google.dev/gemini-api/docs/function-calling [[15]]
+type geminiFunctionDeclaration struct {
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Parameters  *geminiSchema `json:"parameters,omitempty"`
+}
+
+// geminiSchema matches Gemini API's Schema object exactly
+// Only these fields are valid - anything else gets dropped on marshal [[15]]
+type geminiSchema struct {
+	Type        string         `json:"type"`
+	Description string         `json:"description,omitempty"`
+	Enum        []any          `json:"enum,omitempty"`
+	Items       *geminiSchema  `json:"items,omitempty"`
+	Properties  map[string]any `json:"properties,omitempty"`
+	Required    []string       `json:"required,omitempty"`
+	Nullable    *bool          `json:"nullable,omitempty"`
 }

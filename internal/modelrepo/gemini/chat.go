@@ -34,7 +34,11 @@ func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		filtered = append(filtered, m)
 	}
 
-	req := buildGeminiRequest(c.modelName, filtered, systemInstruction, args)
+	req, err := buildGeminiRequest(c.modelName, filtered, systemInstruction, args)
+	if err != nil {
+		reportErr(err)
+		return modelrepo.ChatResult{}, err
+	}
 
 	endpoint := fmt.Sprintf("/v1beta/models/%s:generateContent", c.modelName)
 	var resp geminiGenerateContentResponse

@@ -23,7 +23,10 @@ func (c *GeminiStreamClient) Stream(ctx context.Context, prompt string, args ...
 	messages := []modelrepo.Message{
 		{Role: "user", Content: prompt},
 	}
-	request := buildGeminiRequest(c.modelName, messages, nil, args)
+	request, err := buildGeminiRequest(c.modelName, messages, nil, args)
+	if err != nil {
+		return nil, err
+	}
 
 	go func() {
 		defer close(parcels)
