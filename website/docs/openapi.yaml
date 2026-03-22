@@ -111,6 +111,10 @@ components:
             items:
                 $ref: '#/components/schemas/eventstore_RawEvent'
             type: array
+        array_filesapi_FileResponse:
+            items:
+                $ref: '#/components/schemas/filesapi_FileResponse'
+            type: array
         array_functionstore_EventTrigger:
             items:
                 $ref: '#/components/schemas/functionstore_EventTrigger'
@@ -166,10 +170,6 @@ components:
         array_taskengine_TaskChainDefinition:
             items:
                 $ref: '#/components/schemas/taskengine_TaskChainDefinition'
-            type: array
-        array_vfsapi_FileResponse:
-            items:
-                $ref: '#/components/schemas/vfsapi_FileResponse'
             type: array
         backendapi_OpenAICompatibleModelList:
             properties:
@@ -596,6 +596,95 @@ components:
                 - prompt
                 - model_name
                 - model_provider
+            type: object
+        filesapi_FileResponse:
+            properties:
+                contentType:
+                    example: application/pdf
+                    type: string
+                createdAt:
+                    example: "2024-06-01T12:00:00Z"
+                    format: date-time
+                    type: string
+                id:
+                    example: file_abc123
+                    type: string
+                name:
+                    example: report.pdf
+                    type: string
+                path:
+                    example: /documents/report.pdf
+                    type: string
+                size:
+                    example: 102400
+                    type: integer
+                updatedAt:
+                    example: "2024-06-01T12:00:00Z"
+                    format: date-time
+                    type: string
+            required:
+                - id
+                - path
+                - name
+                - size
+                - createdAt
+                - updatedAt
+            type: object
+        filesapi_FolderResponse:
+            properties:
+                createdAt:
+                    example: "2024-06-01T12:00:00Z"
+                    format: date-time
+                    type: string
+                id:
+                    example: folder_xyz789
+                    type: string
+                name:
+                    example: projects
+                    type: string
+                parentId:
+                    example: folder_root
+                    type: string
+                path:
+                    example: /documents/projects
+                    type: string
+                updatedAt:
+                    example: "2024-06-01T12:00:00Z"
+                    format: date-time
+                    type: string
+            required:
+                - id
+                - path
+                - name
+                - createdAt
+                - updatedAt
+            type: object
+        filesapi_folderCreateRequest:
+            properties:
+                name:
+                    example: New Folder
+                    type: string
+                parentId:
+                    example: folder_root
+                    type: string
+            required:
+                - name
+            type: object
+        filesapi_moveRequest:
+            properties:
+                newParentId:
+                    example: folder_abc123
+                    type: string
+            required:
+                - newParentId
+            type: object
+        filesapi_nameUpdateRequest:
+            properties:
+                name:
+                    example: new-name.txt
+                    type: string
+            required:
+                - name
             type: object
         functionstore_EventTrigger:
             properties:
@@ -1621,95 +1710,6 @@ components:
             required:
                 - password
             type: object
-        vfsapi_FileResponse:
-            properties:
-                contentType:
-                    example: application/pdf
-                    type: string
-                createdAt:
-                    example: "2024-06-01T12:00:00Z"
-                    format: date-time
-                    type: string
-                id:
-                    example: file_abc123
-                    type: string
-                name:
-                    example: report.pdf
-                    type: string
-                path:
-                    example: /documents/report.pdf
-                    type: string
-                size:
-                    example: 102400
-                    type: integer
-                updatedAt:
-                    example: "2024-06-01T12:00:00Z"
-                    format: date-time
-                    type: string
-            required:
-                - id
-                - path
-                - name
-                - size
-                - createdAt
-                - updatedAt
-            type: object
-        vfsapi_FolderResponse:
-            properties:
-                createdAt:
-                    example: "2024-06-01T12:00:00Z"
-                    format: date-time
-                    type: string
-                id:
-                    example: folder_xyz789
-                    type: string
-                name:
-                    example: projects
-                    type: string
-                parentId:
-                    example: folder_root
-                    type: string
-                path:
-                    example: /documents/projects
-                    type: string
-                updatedAt:
-                    example: "2024-06-01T12:00:00Z"
-                    format: date-time
-                    type: string
-            required:
-                - id
-                - path
-                - name
-                - createdAt
-                - updatedAt
-            type: object
-        vfsapi_folderCreateRequest:
-            properties:
-                name:
-                    example: New Folder
-                    type: string
-                parentId:
-                    example: folder_root
-                    type: string
-            required:
-                - name
-            type: object
-        vfsapi_moveRequest:
-            properties:
-                newParentId:
-                    example: folder_abc123
-                    type: string
-            required:
-                - newParentId
-            type: object
-        vfsapi_nameUpdateRequest:
-            properties:
-                name:
-                    example: new-name.txt
-                    type: string
-            required:
-                - name
-            type: object
     securitySchemes:
         X-API-Key:
             in: header
@@ -1717,7 +1717,7 @@ components:
             type: apiKey
 info:
     title: contenox – LLM Backend Management API
-    version: v0.6.1
+    version: v0.6.2
 openapi: 3.1.0
 paths:
     /access-control:
@@ -2750,6 +2750,12 @@ paths:
                 Retrieves events for a specific aggregate within a time range.
                 Useful for rebuilding aggregate state or auditing changes.
             parameters:
+                - description: Maximum number of events to return.
+                  in: query
+                  name: limit
+                  schema:
+                    default: "100"
+                    type: string
                 - description: The type of event to filter by.
                   in: query
                   name: event_type
@@ -2764,12 +2770,6 @@ paths:
                   in: query
                   name: aggregate_id
                   schema:
-                    type: string
-                - description: Maximum number of events to return.
-                  in: query
-                  name: limit
-                  schema:
-                    default: "100"
                     type: string
             responses:
                 "200":
@@ -2791,6 +2791,12 @@ paths:
                 Retrieves events from a specific source within a time range.
                 Useful for auditing or monitoring events from specific subsystems.
             parameters:
+                - description: Maximum number of events to return.
+                  in: query
+                  name: limit
+                  schema:
+                    default: "100"
+                    type: string
                 - description: The type of event to filter by.
                   in: query
                   name: event_type
@@ -2800,12 +2806,6 @@ paths:
                   in: query
                   name: event_source
                   schema:
-                    type: string
-                - description: Maximum number of events to return.
-                  in: query
-                  name: limit
-                  schema:
-                    default: "100"
                     type: string
             responses:
                 "200":
@@ -3006,7 +3006,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/array_vfsapi_FileResponse'
+                                $ref: '#/components/schemas/array_filesapi_FileResponse'
                     description: OK
                 default:
                     content:
@@ -3019,13 +3019,13 @@ paths:
             description: |-
                 Creates a new file by uploading binary content via multipart/form-data.
                 The 'file' field is required. Optional 'name' and 'parentid' fields control naming and placement.
-                Files are limited to 100 MiB (configurable via vfsservice.MaxUploadSize).
+                Files are limited to 100 MiB (configurable via fileservice.MaxUploadSize).
             responses:
                 "201":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/vfsapi_FileResponse'
+                                $ref: '#/components/schemas/filesapi_FileResponse'
                     description: Created
                 default:
                     content:
@@ -3062,7 +3062,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/vfsapi_FileResponse'
+                                $ref: '#/components/schemas/filesapi_FileResponse'
                     description: OK
                 default:
                     content:
@@ -3087,7 +3087,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/vfsapi_FileResponse'
+                                $ref: '#/components/schemas/filesapi_FileResponse'
                     description: OK
                 default:
                     content:
@@ -3141,14 +3141,14 @@ paths:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/vfsapi_moveRequest'
+                            $ref: '#/components/schemas/filesapi_moveRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/vfsapi_FileResponse'
+                                $ref: '#/components/schemas/filesapi_FileResponse'
                     description: OK
                 default:
                     content:
@@ -3173,14 +3173,14 @@ paths:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/vfsapi_nameUpdateRequest'
+                            $ref: '#/components/schemas/filesapi_nameUpdateRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/vfsapi_FileResponse'
+                                $ref: '#/components/schemas/filesapi_FileResponse'
                     description: OK
                 default:
                     content:
@@ -3198,14 +3198,14 @@ paths:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/vfsapi_folderCreateRequest'
+                            $ref: '#/components/schemas/filesapi_folderCreateRequest'
                 required: true
             responses:
                 "201":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/vfsapi_FolderResponse'
+                                $ref: '#/components/schemas/filesapi_FolderResponse'
                     description: Created
                 default:
                     content:
@@ -3256,14 +3256,14 @@ paths:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/vfsapi_moveRequest'
+                            $ref: '#/components/schemas/filesapi_moveRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/vfsapi_FolderResponse'
+                                $ref: '#/components/schemas/filesapi_FolderResponse'
                     description: OK
                 default:
                     content:
@@ -3288,14 +3288,14 @@ paths:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/vfsapi_nameUpdateRequest'
+                            $ref: '#/components/schemas/filesapi_nameUpdateRequest'
                 required: true
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/vfsapi_FolderResponse'
+                                $ref: '#/components/schemas/filesapi_FolderResponse'
                     description: OK
                 default:
                     content:
@@ -3632,16 +3632,16 @@ paths:
                 Lists remote hooks, optionally filtering by a unique name.
                 Returns a list of remote hooks.
             parameters:
+                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
+                  in: query
+                  name: cursor
+                  schema:
+                    type: string
                 - description: The maximum number of items to return per page.
                   in: query
                   name: limit
                   schema:
                     default: "100"
-                    type: string
-                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
-                  in: query
-                  name: cursor
-                  schema:
                     type: string
             responses:
                 "200":
@@ -3920,16 +3920,16 @@ paths:
                 Lists all jobs currently in progress.
                 Returns jobs in paginated format using cursor-based pagination.
             parameters:
-                - description: RFC3339 timestamp for pagination cursor.
-                  in: query
-                  name: cursor
-                  schema:
-                    type: string
                 - description: Maximum number of jobs to return.
                   in: query
                   name: limit
                   schema:
                     default: "100"
+                    type: string
+                - description: RFC3339 timestamp for pagination cursor.
+                  in: query
+                  name: cursor
+                  schema:
                     type: string
             responses:
                 "200":
@@ -3982,16 +3982,16 @@ paths:
                 Lists all extracted keywords from indexed content.
                 Returns keywords in paginated format for browsing and discovery.
             parameters:
-                - description: RFC3339 timestamp for pagination cursor.
-                  in: query
-                  name: cursor
-                  schema:
-                    type: string
                 - description: Maximum number of keywords to return.
                   in: query
                   name: limit
                   schema:
                     default: "100"
+                    type: string
+                - description: RFC3339 timestamp for pagination cursor.
+                  in: query
+                  name: cursor
+                  schema:
                     type: string
             responses:
                 "200":
@@ -4442,16 +4442,16 @@ paths:
                 This endpoint returns full model details including timestamps and capabilities.
                 Intended for administrative and debugging purposes.
             parameters:
+                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
+                  in: query
+                  name: cursor
+                  schema:
+                    type: string
                 - description: The maximum number of items to return per page.
                   in: query
                   name: limit
                   schema:
                     default: "100"
-                    type: string
-                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
-                  in: query
-                  name: cursor
-                  schema:
                     type: string
             responses:
                 "200":
@@ -4969,16 +4969,16 @@ paths:
         get:
             description: Lists all configured external providers with pagination support.
             parameters:
-                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
-                  in: query
-                  name: cursor
-                  schema:
-                    type: string
                 - description: The maximum number of items to return per page.
                   in: query
                   name: limit
                   schema:
                     default: "100"
+                    type: string
+                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
+                  in: query
+                  name: cursor
+                  schema:
                     type: string
             responses:
                 "200":
@@ -5257,6 +5257,16 @@ paths:
                 Supports keyword queries with optional parameters for result tuning.
                 Can expand file metadata in results when requested.
             parameters:
+                - description: Search radius for vector similarity.
+                  in: query
+                  name: radius
+                  schema:
+                    type: string
+                - description: Epsilon parameter for search precision.
+                  in: query
+                  name: epsilon
+                  schema:
+                    type: string
                 - description: Set to 'files' to expand file metadata in results.
                   in: query
                   name: expand
@@ -5272,16 +5282,6 @@ paths:
                   name: topk
                   schema:
                     default: "10"
-                    type: string
-                - description: Search radius for vector similarity.
-                  in: query
-                  name: radius
-                  schema:
-                    type: string
-                - description: Epsilon parameter for search precision.
-                  in: query
-                  name: epsilon
-                  schema:
                     type: string
             responses:
                 "200":
