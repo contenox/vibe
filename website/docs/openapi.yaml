@@ -1717,7 +1717,7 @@ components:
             type: apiKey
 info:
     title: contenox – LLM Backend Management API
-    version: v0.6.2
+    version: v0.6.4
 openapi: 3.1.0
 paths:
     /access-control:
@@ -1728,14 +1728,14 @@ paths:
                 Use 'expand=user' to include full user details.
                 Use 'from' (RFC3339) for pagination cursor.
             parameters:
-                - description: Filter by identity (user or service ID).
-                  in: query
-                  name: identity
-                  schema:
-                    type: string
                 - description: Expand related resources (e.g., 'user').
                   in: query
                   name: expand
+                  schema:
+                    type: string
+                - description: Filter by identity (user or service ID).
+                  in: query
+                  name: identity
                   schema:
                     type: string
             responses:
@@ -2161,16 +2161,16 @@ paths:
                 NOTE: Only backends assigned to at least one group will be used for request processing.
                 Backends not assigned to any group exist in the configuration but are completely ignored by the routing system.
             parameters:
+                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
+                  in: query
+                  name: cursor
+                  schema:
+                    type: string
                 - description: The maximum number of items to return per page.
                   in: query
                   name: limit
                   schema:
                     default: "100"
-                    type: string
-                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
-                  in: query
-                  name: cursor
-                  schema:
                     type: string
             responses:
                 "200":
@@ -2750,6 +2750,11 @@ paths:
                 Retrieves events for a specific aggregate within a time range.
                 Useful for rebuilding aggregate state or auditing changes.
             parameters:
+                - description: The unique ID of the aggregate.
+                  in: query
+                  name: aggregate_id
+                  schema:
+                    type: string
                 - description: Maximum number of events to return.
                   in: query
                   name: limit
@@ -2764,11 +2769,6 @@ paths:
                 - description: The aggregate type (e.g., 'user', 'order').
                   in: query
                   name: aggregate_type
-                  schema:
-                    type: string
-                - description: The unique ID of the aggregate.
-                  in: query
-                  name: aggregate_id
                   schema:
                     type: string
             responses:
@@ -2791,12 +2791,6 @@ paths:
                 Retrieves events from a specific source within a time range.
                 Useful for auditing or monitoring events from specific subsystems.
             parameters:
-                - description: Maximum number of events to return.
-                  in: query
-                  name: limit
-                  schema:
-                    default: "100"
-                    type: string
                 - description: The type of event to filter by.
                   in: query
                   name: event_type
@@ -2806,6 +2800,12 @@ paths:
                   in: query
                   name: event_source
                   schema:
+                    type: string
+                - description: Maximum number of events to return.
+                  in: query
+                  name: limit
+                  schema:
+                    default: "100"
                     type: string
             responses:
                 "200":
@@ -3632,16 +3632,16 @@ paths:
                 Lists remote hooks, optionally filtering by a unique name.
                 Returns a list of remote hooks.
             parameters:
-                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
-                  in: query
-                  name: cursor
-                  schema:
-                    type: string
                 - description: The maximum number of items to return per page.
                   in: query
                   name: limit
                   schema:
                     default: "100"
+                    type: string
+                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
+                  in: query
+                  name: cursor
+                  schema:
                     type: string
             responses:
                 "200":
@@ -3920,16 +3920,16 @@ paths:
                 Lists all jobs currently in progress.
                 Returns jobs in paginated format using cursor-based pagination.
             parameters:
+                - description: RFC3339 timestamp for pagination cursor.
+                  in: query
+                  name: cursor
+                  schema:
+                    type: string
                 - description: Maximum number of jobs to return.
                   in: query
                   name: limit
                   schema:
                     default: "100"
-                    type: string
-                - description: RFC3339 timestamp for pagination cursor.
-                  in: query
-                  name: cursor
-                  schema:
                     type: string
             responses:
                 "200":
@@ -4442,16 +4442,16 @@ paths:
                 This endpoint returns full model details including timestamps and capabilities.
                 Intended for administrative and debugging purposes.
             parameters:
-                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
-                  in: query
-                  name: cursor
-                  schema:
-                    type: string
                 - description: The maximum number of items to return per page.
                   in: query
                   name: limit
                   schema:
                     default: "100"
+                    type: string
+                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
+                  in: query
+                  name: cursor
+                  schema:
                     type: string
             responses:
                 "200":
@@ -5052,14 +5052,14 @@ paths:
                 Example: /queue/cancel?url=http://localhost:11434
                 /queue/cancel?model=mistral:latest
             parameters:
-                - description: The base URL of a specific backend to cancel downloads on.
-                  in: query
-                  name: url
-                  schema:
-                    type: string
                 - description: The model name to cancel downloads for across all backends.
                   in: query
                   name: model
+                  schema:
+                    type: string
+                - description: The base URL of a specific backend to cancel downloads on.
+                  in: query
+                  name: url
                   schema:
                     type: string
             responses:
@@ -5221,11 +5221,6 @@ paths:
                 This endpoint fetches a raw event by its numeric ID (NID) and time range,
                 applies the current mapping configuration, and appends the resulting domain event.
             parameters:
-                - description: Numeric ID of the raw event
-                  in: query
-                  name: nid
-                  schema:
-                    type: string
                 - description: Start time (RFC3339)
                   in: query
                   name: from
@@ -5234,6 +5229,11 @@ paths:
                 - description: End time (RFC3339)
                   in: query
                   name: to
+                  schema:
+                    type: string
+                - description: Numeric ID of the raw event
+                  in: query
+                  name: nid
                   schema:
                     type: string
             responses:
@@ -5257,6 +5257,12 @@ paths:
                 Supports keyword queries with optional parameters for result tuning.
                 Can expand file metadata in results when requested.
             parameters:
+                - description: 'Maximum number of results to return (default: 10).'
+                  in: query
+                  name: topk
+                  schema:
+                    default: "10"
+                    type: string
                 - description: Search radius for vector similarity.
                   in: query
                   name: radius
@@ -5276,12 +5282,6 @@ paths:
                   in: query
                   name: q
                   schema:
-                    type: string
-                - description: 'Maximum number of results to return (default: 10).'
-                  in: query
-                  name: topk
-                  schema:
-                    default: "10"
                     type: string
             responses:
                 "200":
@@ -5391,16 +5391,16 @@ paths:
         get:
             description: Lists all task chain definitions with pagination.
             parameters:
+                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
+                  in: query
+                  name: cursor
+                  schema:
+                    type: string
                 - description: The maximum number of items to return per page.
                   in: query
                   name: limit
                   schema:
                     default: "100"
-                    type: string
-                - description: An optional RFC3339Nano timestamp to fetch the next page of results.
-                  in: query
-                  name: cursor
-                  schema:
                     type: string
             responses:
                 "200":
