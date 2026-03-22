@@ -1,6 +1,8 @@
 package taskengine
 
-import "strings"
+import (
+	"strings"
+)
 
 // StripCodeFences removes leading and trailing Markdown code fences from LLM
 // output. It handles ` ``` `, ` ```json `, ` ```javascript ` etc.

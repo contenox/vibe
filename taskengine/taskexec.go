@@ -761,67 +761,15 @@ func (exe *SimpleExec) executeLLM(
 		"provider_types", llmCall.Providers,
 		"provider_type", llmCall.Provider)
 	defer end()
-	providerNames := []string{}
-	if llmCall.Provider != "" {
-		providerNames = append(providerNames, llmCall.Provider)
-	}
-	if llmCall.Providers != nil {
-		providerNames = append(providerNames, llmCall.Providers...)
-	}
 
-	// Count tokens if not already counted
-	if input.InputTokens <= 0 {
-		modelName := getPrimaryModel(llmCall)
-		for _, m := range input.Messages {
-			InputCount, err := exe.repo.CountTokens(ctx, modelName, m.Content)
-			if err != nil {
-				reportErr(fmt.Errorf("token count failed: %w", err))
-				return nil, DataTypeAny, "", fmt.Errorf("token count failed: %w", err)
-			}
-			input.InputTokens += InputCount
-		}
-	}
-
-	if ctxLength > 0 && input.InputTokens > ctxLength {
-		reportErr(fmt.Errorf("input token count %d exceeds context length %d", input.InputTokens, ctxLength))
-		err := fmt.Errorf("input token count %d exceeds context length %d", input.InputTokens, ctxLength)
-		return nil, DataTypeAny, "", err
-	}
-	modelNames := []string{}
-	if llmCall.Model != "" {
-		modelNames = append(modelNames, llmCall.Model)
-	}
-	if llmCall.Models != nil {
-		modelNames = append(modelNames, llmCall.Models...)
-	}
-
-	messagesC := make([]libmodelprovider.Message, 0, len(input.Messages))
-	for _, m := range input.Messages {
-		var toolCalls []libmodelprovider.ToolCall
-		if len(m.CallTools) > 0 {
-			toolCalls = make([]libmodelprovider.ToolCall, len(m.CallTools))
-			for i, tc := range m.CallTools {
-				toolCalls[i].ID = tc.ID
-				toolCalls[i].Type = tc.Type
-				toolCalls[i].Function.Name = tc.Function.Name
-				toolCalls[i].Function.Arguments = tc.Function.Arguments
-				toolCalls[i].ProviderMeta = tc.ProviderMeta
-			}
-		}
-
-		messagesC = append(messagesC, libmodelprovider.Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCalls:  toolCalls,
-			ToolCallID: m.ToolCallID,
-		})
-	}
-
+	// Build the full list of tools
 	tools := []libmodelprovider.Tool{}
 	hiddenTools := map[string]struct{}{}
 	for _, toolName := range llmCall.HideTools {
 		hiddenTools[toolName] = struct{}{}
 	}
+
+	// 1. Client tools (if allowed)
 	if llmCall.PassClientsTools {
 		for _, t := range clientTools {
 			if _, ok := hiddenTools[t.Function.Name]; ok {
@@ -838,9 +786,8 @@ func (exe *SimpleExec) executeLLM(
 		}
 	}
 
+	// 2. Hook tools (if any hooks are allowed)
 	if len(llmCall.Hooks) > 0 {
-		// Use the same resolveHookNames helper used in taskenv.go so that
-		// "*" / "!name" semantics are honoured correctly.
 		resolvedNames, err := resolveHookNames(ctx, llmCall.Hooks, exe.hookProvider)
 		if err != nil {
 			return nil, DataTypeAny, "", fmt.Errorf("failed to resolve hooks for LLM call: %w", err)
@@ -863,6 +810,74 @@ func (exe *SimpleExec) executeLLM(
 		}
 	}
 
+	// Token counting
+	modelName := getPrimaryModel(llmCall)
+	var messagesTokens int
+
+	// Count messages tokens if not already set
+	if input.InputTokens > 0 {
+		messagesTokens = input.InputTokens
+	} else {
+		var total int
+		for _, m := range input.Messages {
+			cnt, err := exe.repo.CountTokens(ctx, modelName, m.Content)
+			if err != nil {
+				reportErr(fmt.Errorf("token count failed: %w", err))
+				return nil, DataTypeAny, "", fmt.Errorf("token count failed: %w", err)
+			}
+			total += cnt
+		}
+		messagesTokens = total
+	}
+
+	// Count tool tokens
+	toolTokens, err := exe.countToolTokens(ctx, modelName, tools)
+	if err != nil {
+		reportErr(err)
+		return nil, DataTypeAny, "", fmt.Errorf("failed to count tool tokens: %w", err)
+	}
+
+	totalTokens := messagesTokens + toolTokens
+
+	// Log token usage
+	reportChange("token_usage", map[string]any{
+		"messages_tokens": messagesTokens,
+		"tool_tokens":     toolTokens,
+		"total_tokens":    totalTokens,
+		"limit":           ctxLength,
+	})
+
+	// Check limit
+	if ctxLength > 0 && totalTokens > ctxLength {
+		err := fmt.Errorf("total token count %d (messages: %d, tools: %d) exceeds context length %d",
+			totalTokens, messagesTokens, toolTokens, ctxLength)
+		reportErr(err)
+		return nil, DataTypeAny, "", err
+	}
+
+	// Convert chat history to model repo messages
+	messagesC := make([]libmodelprovider.Message, 0, len(input.Messages))
+	for _, m := range input.Messages {
+		var toolCalls []libmodelprovider.ToolCall
+		if len(m.CallTools) > 0 {
+			toolCalls = make([]libmodelprovider.ToolCall, len(m.CallTools))
+			for i, tc := range m.CallTools {
+				toolCalls[i].ID = tc.ID
+				toolCalls[i].Type = tc.Type
+				toolCalls[i].Function.Name = tc.Function.Name
+				toolCalls[i].Function.Arguments = tc.Function.Arguments
+				toolCalls[i].ProviderMeta = tc.ProviderMeta
+			}
+		}
+		messagesC = append(messagesC, libmodelprovider.Message{
+			Role:       m.Role,
+			Content:    m.Content,
+			ToolCalls:  toolCalls,
+			ToolCallID: m.ToolCallID,
+		})
+	}
+
+	// Prepare chat arguments
 	chatArgs := []libmodelprovider.ChatArgument{libmodelprovider.WithTools(tools...)}
 	reportChange("tools_prepared", map[string]any{
 		"count": len(tools),
@@ -874,16 +889,34 @@ func (exe *SimpleExec) executeLLM(
 	if llmCall.Shift {
 		chatArgs = append(chatArgs, libmodelprovider.WithShift{})
 	}
+
+	// Execute chat
+	providerNames := []string{}
+	if llmCall.Provider != "" {
+		providerNames = append(providerNames, llmCall.Provider)
+	}
+	if llmCall.Providers != nil {
+		providerNames = append(providerNames, llmCall.Providers...)
+	}
+	modelNames := []string{}
+	if llmCall.Model != "" {
+		modelNames = append(modelNames, llmCall.Model)
+	}
+	if llmCall.Models != nil {
+		modelNames = append(modelNames, llmCall.Models...)
+	}
+
 	resp, meta, err := exe.repo.Chat(ctx, llmrepo.Request{
 		ProviderTypes: providerNames,
 		ModelNames:    modelNames,
-		ContextLength: input.InputTokens,
+		ContextLength: totalTokens,
 		Tracker:       exe.tracker,
 	}, messagesC, chatArgs...)
 	if err != nil {
 		return nil, DataTypeAny, "", fmt.Errorf("chat failed: %w", err)
 	}
 
+	// Process response
 	callTools := make([]ToolCall, len(resp.ToolCalls))
 	for i, tc := range resp.ToolCalls {
 		function := FunctionCall{
@@ -905,6 +938,8 @@ func (exe *SimpleExec) executeLLM(
 		CallTools: callTools,
 		Timestamp: time.Now().UTC(),
 	})
+
+	// Count output tokens (only for the response content, not tool calls)
 	var outputTokensCount int
 	if message := resp.Message; len(message.Content) != 0 {
 		outputTokensCount, err = exe.repo.CountTokens(ctx, meta.ModelName, message.Content)
@@ -919,7 +954,6 @@ func (exe *SimpleExec) executeLLM(
 	if len(callTools) > 0 {
 		return input, DataTypeChatHistory, "tool-call", nil
 	}
-
 	return input, DataTypeChatHistory, "executed", nil
 }
 
@@ -1130,4 +1164,20 @@ func normalizeJSResponse(raw string) string {
 
 	// Step 3: fall back to treating the stripped text as JS
 	return trimmed
+}
+
+// countToolTokens serializes the tools to JSON and counts tokens using the model's tokenizer.
+func (exe *SimpleExec) countToolTokens(ctx context.Context, modelName string, tools []libmodelprovider.Tool) (int, error) {
+	if len(tools) == 0 {
+		return 0, nil
+	}
+	toolsJSON, err := json.Marshal(tools)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal tools: %w", err)
+	}
+	tokenCount, err := exe.repo.CountTokens(ctx, modelName, string(toolsJSON))
+	if err != nil {
+		return 0, fmt.Errorf("failed to count tool tokens: %w", err)
+	}
+	return tokenCount, nil
 }
