@@ -77,9 +77,6 @@ func New(db libdb.DBManager, engine execservice.TasksEnvService, vfs vfsservice.
 
 var _ Service = (*service)(nil)
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-// activePlan returns the active plan and its steps using a single targeted query.
 func (s *service) activePlan(ctx context.Context) (*planstore.Plan, []*planstore.PlanStep, error) {
 	st := planstore.New(s.db.WithoutTransaction())
 	plan, err := st.GetActivePlan(ctx)
@@ -96,9 +93,6 @@ func (s *service) activePlan(ctx context.Context) (*planstore.Plan, []*planstore
 	return plan, steps, nil
 }
 
-// callPlanner calls plannerChain with goal and returns the parsed step list.
-// It uses taskengine.ExtractJSONArray to robustly extract the JSON array from
-// the LLM response regardless of preamble text or Markdown code fences.
 func (s *service) callPlanner(ctx context.Context, goal string, chain *taskengine.TaskChainDefinition) ([]string, error) {
 	out, outType, _, err := s.engine.Execute(ctx, chain, goal, taskengine.DataTypeString)
 	if err != nil {
@@ -122,8 +116,6 @@ func (s *service) callPlanner(ctx context.Context, goal string, chain *taskengin
 	default:
 		raw = fmt.Sprintf("%v", out)
 	}
-	// Extract the outermost [...] block from the raw response.
-	// This handles preamble text, code fences, and trailing commentary.
 	extracted := taskengine.ExtractJSONArray(raw)
 	var steps []string
 	if err := json.Unmarshal([]byte(extracted), &steps); err != nil {
@@ -132,7 +124,6 @@ func (s *service) callPlanner(ctx context.Context, goal string, chain *taskengin
 	return steps, nil
 }
 
-// callExecutor calls executorChain with the step description and returns result text.
 func (s *service) callExecutor(ctx context.Context, step string, chain *taskengine.TaskChainDefinition) (string, error) {
 	out, _, _, err := s.engine.Execute(ctx, chain, step, taskengine.DataTypeString)
 	if err != nil {
@@ -141,13 +132,49 @@ func (s *service) callExecutor(ctx context.Context, step string, chain *taskengi
 	switch v := out.(type) {
 	case string:
 		return v, nil
+
+	case taskengine.ChatHistory:
+		if len(v.Messages) > 0 {
+			for i := len(v.Messages) - 1; i >= 0; i-- {
+				if v.Messages[i].Role == "assistant" && v.Messages[i].Content != "" {
+					return v.Messages[i].Content, nil
+				}
+			}
+			return v.Messages[len(v.Messages)-1].Content, nil
+		}
+		return "", nil
+
+	case map[string]any:
+		b, _ := json.MarshalIndent(v, "", "  ")
+		return string(b), nil
+
+	case []any:
+		var parts []string
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				parts = append(parts, s)
+			} else {
+				b, _ := json.Marshal(item)
+				parts = append(parts, string(b))
+			}
+		}
+		return strings.Join(parts, "\n"), nil
+
+	case taskengine.OpenAIChatResponse:
+		if len(v.Choices) > 0 && v.Choices[0].Message.Content != nil {
+			return *v.Choices[0].Message.Content, nil
+		}
+		if len(v.Choices) > 0 && len(v.Choices[0].Message.ToolCalls) > 0 {
+			return fmt.Sprintf("[tool call: %s]", v.Choices[0].Message.ToolCalls[0].Function.Name), nil
+		}
+		return "", nil
+
 	default:
-		b, _ := json.Marshal(v)
+		b, _ := json.MarshalIndent(v, "", "  ")
 		return string(b), nil
 	}
 }
 
-// renderMarkdown produces a Markdown checklist for the plan.
 func renderMarkdown(plan *planstore.Plan, steps []*planstore.PlanStep) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# Plan: %s\n\n", plan.Name))
@@ -167,7 +194,6 @@ func renderMarkdown(plan *planstore.Plan, steps []*planstore.PlanStep) string {
 			marker = " "
 		}
 		sb.WriteString(fmt.Sprintf("- [%s] %d. %s\n", marker, st.Ordinal, st.Description))
-		// Fix 11: TrimSpace prevents dangling empty blockquote lines.
 		if result := strings.TrimSpace(st.ExecutionResult); result != "" {
 			for _, line := range strings.Split(result, "\n") {
 				sb.WriteString(fmt.Sprintf("  > %s\n", line))
@@ -177,14 +203,12 @@ func renderMarkdown(plan *planstore.Plan, steps []*planstore.PlanStep) string {
 	return sb.String()
 }
 
-// writePlanVFS writes (or updates) plans/{name}.md in the VFS.
 func (s *service) writePlanVFS(ctx context.Context, plan *planstore.Plan, steps []*planstore.PlanStep) {
 	if s.vfs == nil {
 		return
 	}
 	md := renderMarkdown(plan, steps)
 	fileName := plan.Name + ".md"
-	// Try to find existing file.
 	existing, err := s.vfs.GetFilesByPath(ctx, fileName)
 	if err == nil && len(existing) > 0 {
 		f := existing[0]
@@ -206,8 +230,6 @@ func (s *service) writePlanVFS(ctx context.Context, plan *planstore.Plan, steps 
 		log.Printf("planservice: vfs create %s: %v", fileName, err)
 	}
 }
-
-// ── Service implementation ────────────────────────────────────────────────────
 
 func (s *service) New(ctx context.Context, goal string, plannerChain *taskengine.TaskChainDefinition) (*planstore.Plan, []*planstore.PlanStep, string, error) {
 	if goal == "" {
@@ -266,12 +288,6 @@ func (s *service) New(ctx context.Context, goal string, plannerChain *taskengine
 	return plan, stepSlice, md, nil
 }
 
-// ── checkAndComplete (Fix 3 + 4) ─────────────────────────────────────────────
-
-// checkAndComplete inspects allSteps and marks the plan as completed when all
-// steps are done and none have failed. A plan with a failed step stays active
-// so the user can call Retry or Skip.
-// Must be called inside an open transaction (txSt).
 func checkAndComplete(ctx context.Context, txSt planstore.Store, plan *planstore.Plan, allSteps []*planstore.PlanStep) error {
 	allDone, hasFailed := true, false
 	for _, step := range allSteps {
@@ -303,8 +319,6 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 		return nil, "", fmt.Errorf("no active plan")
 	}
 
-	// Fix 6a: include failed steps (and their error) so the LLM understands what went wrong.
-	// Fix 6b: maxOrdinal only counts completed/skipped — pending steps will be deleted.
 	var sb strings.Builder
 	sb.WriteString(plan.Goal)
 	sb.WriteString("\n\nProgress so far:\n")
@@ -362,7 +376,6 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 		return nil, "", err
 	}
 
-	// Reload all steps for markdown.
 	allSteps, err := planstore.New(s.db.WithoutTransaction()).ListPlanSteps(ctx, plan.ID)
 	if err != nil {
 		return nil, "", err
@@ -377,7 +390,6 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 		return "", "", fmt.Errorf("executorChain is required")
 	}
 
-	// 1. Read active plan (no lock: just a SELECT LIMIT 1).
 	st := planstore.New(s.db.WithoutTransaction())
 	plan, err := st.GetActivePlan(ctx)
 	if errors.Is(err, planstore.ErrNotFound) {
@@ -387,7 +399,6 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 		return "", "", err
 	}
 
-	// 2. Atomically claim the next pending step (FOR UPDATE SKIP LOCKED).
 	pending, err := st.ClaimNextPendingStep(ctx, plan.ID)
 	if errors.Is(err, planstore.ErrNotFound) {
 		return "", "", fmt.Errorf("no pending steps remaining")
@@ -396,7 +407,6 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 		return "", "", err
 	}
 
-	// 3. Execute LLM outside any transaction (can be long-running).
 	result, execErr := s.callExecutor(ctx, pending.Description, executorChain)
 
 	finalStatus := planstore.StepStatusCompleted
@@ -407,8 +417,6 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 		result = ""
 	}
 
-	// Fix 1: Use WithoutCancel so cleanup always succeeds even if the caller's
-	// context was canceled during the (potentially long) LLM call.
 	cleanupCtx := context.WithoutCancel(ctx)
 	tx, commit, rTx, txErr := s.db.WithTransaction(cleanupCtx)
 	if txErr != nil {
@@ -423,7 +431,6 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 	if err != nil {
 		return "", "", fmt.Errorf("list steps: %w", err)
 	}
-	// Fix 3: use checkAndComplete — plan stays active if any step failed.
 	if err := checkAndComplete(cleanupCtx, txSt, plan, allSteps); err != nil {
 		return "", "", err
 	}
@@ -456,7 +463,6 @@ func (s *service) Retry(ctx context.Context, ordinal int) (string, error) {
 	if target == nil {
 		return "", fmt.Errorf("step %d not found", ordinal)
 	}
-	// Fix 5: wrap in transaction to keep step + plan updated_at in sync.
 	tx, commit, rTx, err := s.db.WithTransaction(ctx)
 	if err != nil {
 		return "", err
@@ -469,7 +475,6 @@ func (s *service) Retry(ctx context.Context, ordinal int) (string, error) {
 	if err := commit(ctx); err != nil {
 		return "", err
 	}
-	// Fix 9: propagate errors, don't silently use a wrong plan's steps.
 	allSteps, err := planstore.New(s.db.WithoutTransaction()).ListPlanSteps(ctx, plan.ID)
 	if err != nil {
 		return "", err
@@ -497,8 +502,6 @@ func (s *service) Skip(ctx context.Context, ordinal int) (string, error) {
 	if target == nil {
 		return "", fmt.Errorf("step %d not found", ordinal)
 	}
-	// Fix 5: wrap in transaction.
-	// Fix 4: run checkAndComplete in same tx to handle last-step-skip.
 	tx, commit, rTx, err := s.db.WithTransaction(ctx)
 	if err != nil {
 		return "", err
@@ -518,7 +521,6 @@ func (s *service) Skip(ctx context.Context, ordinal int) (string, error) {
 	if err := commit(ctx); err != nil {
 		return "", err
 	}
-	// Fix 9: propagate errors.
 	md := renderMarkdown(plan, allSteps)
 	s.writePlanVFS(ctx, plan, allSteps)
 	return md, nil
@@ -562,7 +564,6 @@ func (s *service) SetActive(ctx context.Context, planName string) error {
 	}
 	defer rTx()
 	st := planstore.New(tx)
-	// Fix 8: single UPDATE instead of load-all + N individual UPDATEs.
 	if err := st.ArchiveActivePlans(ctx); err != nil {
 		return err
 	}
@@ -594,8 +595,6 @@ func (s *service) Delete(ctx context.Context, planName string) error {
 }
 
 func (s *service) Clean(ctx context.Context) (int, error) {
-	// Fix 7: return 0 on error (not a misleading partial count).
-	// Fix 8: single DELETE IN ('completed','archived') RETURNING instead of N+1 loops.
 	n, err := planstore.New(s.db.WithoutTransaction()).DeleteFinishedPlans(ctx)
 	if err != nil {
 		return 0, err

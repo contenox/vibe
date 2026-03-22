@@ -100,14 +100,20 @@ func (h *PlanManagerHook) createPlan(ctx context.Context, input any, hook *taske
 	// Write the active-plan KV pointer so the TUI sidebar refreshes.
 	kvStore := runtimetypes.New(h.db.WithoutTransaction())
 	raw, _ := json.Marshal(plan.ID)
-	_ = kvStore.SetKV(ctx, "contenox.plan.active", json.RawMessage(raw))
+	err = kvStore.SetKV(ctx, "contenox.plan.active", json.RawMessage(raw))
+	if err != nil {
+		return nil, taskengine.DataTypeAny, fmt.Errorf("plan_manager create_plan: %w", err)
+	}
 
 	result := map[string]any{
 		"plan_name": plan.Name,
 		"goal":      plan.Goal,
 		"steps":     len(steps),
 	}
-	out, _ := json.Marshal(result)
+	out, err := json.Marshal(result)
+	if err != nil {
+		return nil, taskengine.DataTypeAny, fmt.Errorf("plan_manager create_plan: %w", err)
+	}
 	return string(out), taskengine.DataTypeString, nil
 }
 
@@ -196,7 +202,10 @@ func (h *PlanManagerHook) retryStep(ctx context.Context, input any, hook *tasken
 	if err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("plan_manager retry_step: %w", err)
 	}
-	out, _ := json.Marshal(map[string]any{"ordinal": ordinal, "status": "reset_to_pending"})
+	out, err := json.Marshal(map[string]any{"ordinal": ordinal, "status": "reset_to_pending"})
+	if err != nil {
+		return nil, taskengine.DataTypeAny, fmt.Errorf("plan_manager retry_step: %w", err)
+	}
 	return string(out), taskengine.DataTypeString, nil
 }
 
@@ -210,11 +219,12 @@ func (h *PlanManagerHook) skipStep(ctx context.Context, input any, hook *taskeng
 	if err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("plan_manager skip_step: %w", err)
 	}
-	out, _ := json.Marshal(map[string]any{"ordinal": ordinal, "status": "skipped"})
+	out, err := json.Marshal(map[string]any{"ordinal": ordinal, "status": "skipped"})
+	if err != nil {
+		return nil, taskengine.DataTypeAny, fmt.Errorf("plan_manager skip_step: %w", err)
+	}
 	return string(out), taskengine.DataTypeString, nil
 }
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 // extractGoal reads the "goal" field from the tool call args or falls back to
 // treating a plain string input as the goal.
@@ -255,8 +265,6 @@ func extractOrdinal(input any, hook *taskengine.HookCall) int {
 	}
 	return 0
 }
-
-// ── HookRepo interface ────────────────────────────────────────────────────────
 
 // Supports implements taskengine.HookRepo.
 func (h *PlanManagerHook) Supports(_ context.Context) ([]string, error) {
