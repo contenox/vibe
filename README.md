@@ -112,7 +112,7 @@ Any service that speaks HTTP and exposes an OpenAPI spec becomes a first-class a
 
 **Ubuntu / Linux**
 ```bash
-TAG=v0.6.2
+TAG=v0.6.3
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 curl -sL "https://github.com/contenox/contenox/releases/download/${TAG}/contenox-${TAG}-linux-${ARCH}" -o contenox
 chmod +x contenox && sudo mv contenox /usr/local/bin/contenox
@@ -121,7 +121,7 @@ contenox --version
 
 **macOS**
 ```bash
-TAG=v0.6.2
+TAG=v0.6.3
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/')
 curl -sL "https://github.com/contenox/contenox/releases/download/${TAG}/contenox-${TAG}-darwin-${ARCH}" -o contenox
 chmod +x contenox && sudo mv contenox /usr/local/bin/contenox
