@@ -359,11 +359,34 @@ func geminiSanitiseSchema(params any) any {
 		switch t := v.(type) {
 		case map[string]any:
 			// Gemini rejects these JSON Schema fields in function_declarations.
-			// MCP servers (e.g. Linear) routinely include them.
 			delete(t, "additionalProperties")
 			delete(t, "$schema")
 			delete(t, "$defs")
 			delete(t, "definitions")
+
+			// Normalize "type" field - Gemini only accepts string, not array
+			if typeVal, ok := t["type"]; ok {
+				switch v := typeVal.(type) {
+				case []any:
+					// type: ["string", "null"] → pick first non-null type
+					for _, item := range v {
+						if s, ok := item.(string); ok && s != "null" {
+							t["type"] = s
+							break
+						}
+					}
+					// Fallback if all were "null" or invalid
+					if _, stillArray := t["type"].([]any); stillArray {
+						t["type"] = "string"
+					}
+				case string:
+					// Already a string, keep it
+				default:
+					// Unexpected type, default to string
+					t["type"] = "string"
+				}
+			}
+
 			for _, val := range t {
 				clean(val)
 			}
