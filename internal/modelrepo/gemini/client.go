@@ -333,98 +333,129 @@ func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 	return out
 }
 
-// geminiSanitiseSchema converts arbitrary JSON Schema to Gemini's exact schema format
-// Uses double-marshal to drop any fields Gemini doesn't accept
+// allowedGeminiSchemaFields lists the only JSON fields Gemini accepts in a Schema.
+var allowedGeminiSchemaFields = map[string]bool{
+	"type":        true,
+	"description": true,
+	"enum":        true,
+	"items":       true,
+	"properties":  true,
+	"required":    true,
+	"nullable":    true,
+}
+
+// sanitizeGeminiSchema transforms a JSON Schema map into a form compatible with Gemini.
+// It converts "type" arrays to a single string, sets "nullable" when appropriate,
+// and removes any unsupported fields.
+func sanitizeGeminiSchema(schema map[string]any) map[string]any {
+	if schema == nil {
+		return nil
+	}
+
+	result := make(map[string]any)
+
+	// Handle "type" field specially
+	if typeVal, ok := schema["type"]; ok {
+		switch v := typeVal.(type) {
+		case string:
+			result["type"] = v
+		case []interface{}:
+			// Convert array to string, and optionally set nullable
+			var typeStr string
+			nullable := false
+			for _, elem := range v {
+				if s, ok := elem.(string); ok {
+					if s == "null" {
+						nullable = true
+						continue
+					}
+					// Take first non-null type as the primary type
+					if typeStr == "" {
+						typeStr = s
+					}
+				}
+			}
+			if typeStr == "" {
+				typeStr = "string" // fallback
+			}
+			result["type"] = typeStr
+			if nullable {
+				result["nullable"] = true
+			}
+		}
+	}
+
+	// Handle other allowed fields
+	for _, field := range []string{"description", "enum", "required"} {
+		if val, ok := schema[field]; ok {
+			result[field] = val
+		}
+	}
+
+	// Recursively handle "items"
+	if items, ok := schema["items"]; ok {
+		if itemsMap, ok := items.(map[string]any); ok {
+			result["items"] = sanitizeGeminiSchema(itemsMap)
+		}
+	}
+
+	// Recursively handle "properties"
+	if props, ok := schema["properties"]; ok {
+		if propsMap, ok := props.(map[string]any); ok {
+			cleanProps := make(map[string]any)
+			for k, v := range propsMap {
+				if subSchema, ok := v.(map[string]any); ok {
+					cleanProps[k] = sanitizeGeminiSchema(subSchema)
+				} else {
+					// If not a map, keep as is (unlikely)
+					cleanProps[k] = v
+				}
+			}
+			result["properties"] = cleanProps
+		}
+	}
+
+	// "nullable" may already be set, but if it wasn't, we don't add it.
+	// If it was set originally and not overwritten, preserve it.
+	if nullable, ok := schema["nullable"]; ok && nullable != nil {
+		if _, exists := result["nullable"]; !exists {
+			result["nullable"] = nullable
+		}
+	}
+
+	return result
+}
+
+// geminiSanitiseSchema converts arbitrary JSON Schema to Gemini's exact schema format.
 func geminiSanitiseSchema(params any) (*geminiSchema, error) {
 	if params == nil {
 		return nil, nil
 	}
 
-	// Step 1: Marshal input to JSON (normalizes the data)
+	// Step 1: Marshal to JSON to get a clean representation.
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
 	}
 
-	// Step 2: Unmarshal into Gemini's exact schema type
-	var schema geminiSchema
-	if err := json.Unmarshal(raw, &schema); err != nil {
+	// Step 2: Unmarshal into a map to manipulate.
+	var schemaMap map[string]any
+	if err := json.Unmarshal(raw, &schemaMap); err != nil {
+		// If it's not an object (e.g., a primitive), we can't do much; treat as empty.
+		schemaMap = make(map[string]any)
+	}
+
+	// Step 3: Recursively sanitize.
+	cleanedMap := sanitizeGeminiSchema(schemaMap)
+
+	// Step 4: Marshal back to JSON and then unmarshal into the strict struct.
+	cleanedRaw, err := json.Marshal(cleanedMap)
+	if err != nil {
 		return nil, err
 	}
-
-	// Step 3: Recursively sanitize nested schemas (properties, items)
-	schema = sanitizeSchemaRecursive(schema)
-
+	var schema geminiSchema
+	if err := json.Unmarshal(cleanedRaw, &schema); err != nil {
+		return nil, err
+	}
 	return &schema, nil
-}
-
-// sanitizeSchemaRecursive walks the schema tree and sanitizes all nested schemas
-func sanitizeSchemaRecursive(schema geminiSchema) geminiSchema {
-	// Normalize type field first
-	switch schema.Type {
-	case "string", "integer", "number", "boolean", "array", "object":
-		// Valid
-	default:
-		schema.Type = "string"
-	}
-
-	// Normalize enum - ensure it's a flat array of primitives
-	if schema.Enum != nil {
-		cleanedEnum := make([]any, 0, len(schema.Enum))
-		for _, item := range schema.Enum {
-			switch item.(type) {
-			case string, float64, bool, nil:
-				cleanedEnum = append(cleanedEnum, item)
-			}
-		}
-		if len(cleanedEnum) > 0 {
-			schema.Enum = cleanedEnum
-		} else {
-			schema.Enum = nil
-		}
-	}
-
-	// Sanitize items (for arrays) - recurse and convert back to map for consistent marshaling
-	if schema.Items != nil {
-		cleaned := sanitizeSchemaRecursive(*schema.Items)
-		// Convert struct back to map for consistent type in Properties
-		itemsRaw, _ := json.Marshal(cleaned)
-		var itemsMap map[string]any
-		json.Unmarshal(itemsRaw, &itemsMap)
-		schema.Items = &geminiSchema{}
-		json.Unmarshal(itemsRaw, schema.Items)
-	}
-
-	// Sanitize properties (for objects)
-	if schema.Properties != nil {
-		cleanedProps := make(map[string]any, len(schema.Properties))
-		for key, val := range schema.Properties {
-			// Try to unmarshal property value as schema
-			raw, err := json.Marshal(val)
-			if err != nil {
-				// Can't marshal, keep as-is (shouldn't happen)
-				cleanedProps[key] = val
-				continue
-			}
-
-			var propSchema geminiSchema
-			if err := json.Unmarshal(raw, &propSchema); err != nil {
-				// Not a valid schema object, keep original
-				cleanedProps[key] = val
-				continue
-			}
-
-			// Recursively clean nested property
-			cleaned := sanitizeSchemaRecursive(propSchema)
-
-			// Convert back to map[string]any for consistent marshaling
-			cleanedRaw, _ := json.Marshal(cleaned)
-			var cleanedMap map[string]any
-			json.Unmarshal(cleanedRaw, &cleanedMap)
-			cleanedProps[key] = cleanedMap
-		}
-		schema.Properties = cleanedProps
-	}
-
-	return schema
 }
