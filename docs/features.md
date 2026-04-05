@@ -152,22 +152,7 @@ contenox plan next          # one step at a time
 contenox plan next --auto   # run to completion
 ```
 
-**Interactive TUI** (`contenox vibe`) — Full terminal UI with sidebar, chat log, and slash commands:
-```bash
-contenox vibe
-```
-
-TUI slash commands cover the full CLI surface — plan management, model introspection, config — all without leaving the TUI:
-
-| Command | Description |
-|---------|-------------|
-| `/plan new <goal>` | Generate a new plan |
-| `/plan next [--auto]` | Execute the next step |
-| `/plan step <N>` | Show the full output of step N |
-| `/plan retry/skip/replan/delete/clean` | Full plan lifecycle |
-| `/model list\|add\|remove` | Manage declared models |
-| `/config get\|set <key>` | Read/write persistent config |
-| `$ <cmd>` | Shell — stdout injected into LLM context |
+**Beam web UI** (`contenox beam`) — Runs the HTTP server and serves the Beam React app for chains, admin, hooks, and MCP in the browser.
 
 **Stateless pipeline** — Run any chain with explicit input type control:
 ```bash

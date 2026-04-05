@@ -12,7 +12,7 @@ import (
 )
 
 func TestLocalFSHook(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "vibe-fs-test-*")
+	tempDir, err := os.MkdirTemp("", "contenox-fs-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

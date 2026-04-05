@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	ProviderTypeOllama = "ollama"
 	ProviderTypeOpenAI = "openai"
 	ProviderTypeGemini = "gemini"
 )
@@ -34,7 +35,7 @@ func New(dbInstance libdb.DBManager) Service {
 
 func (s *service) SetProviderConfig(ctx context.Context, providerType string, replace bool, config *runtimestate.ProviderConfig) error {
 	// Input validation
-	if providerType != ProviderTypeOpenAI && providerType != ProviderTypeGemini {
+	if providerType != ProviderTypeOllama && providerType != ProviderTypeOpenAI && providerType != ProviderTypeGemini {
 		return fmt.Errorf("invalid provider type: %s", providerType)
 	}
 	if config == nil {
@@ -84,6 +85,8 @@ func (s *service) SetProviderConfig(ctx context.Context, providerType string, re
 	// Handle backend configuration
 	backendURL := ""
 	switch providerType {
+	case ProviderTypeOllama:
+		backendURL = "https://ollama.com/api"
 	case ProviderTypeOpenAI:
 		backendURL = "https://api.openai.com/v1"
 	case ProviderTypeGemini:

@@ -5,7 +5,7 @@ import uuid
 def test_create_backend(base_url):
     # Use a test-specific URL
     payload = {
-        "name": "Test backend",
+        "name": f"Test backend {uuid.uuid4().hex[:10]}",
         "baseUrl": "http://test-backend:11434",
         "type": "ollama",
     }
@@ -44,7 +44,7 @@ def test_update_backend(base_url, with_ollama_backend):
 
     # 1. Create a temporary backend
     payload = {
-        "name": "Temp backend",
+        "name": f"Temp backend {uuid.uuid4().hex[:10]}",
         "baseUrl": unique_url,  # Unique URL
         "type": "ollama",
     }
@@ -54,15 +54,16 @@ def test_update_backend(base_url, with_ollama_backend):
     backend_id = backend["id"]
 
     # 2. Update with new valid URL (using the same URL is fine)
+    new_name = f"Updated Backend {uuid.uuid4().hex[:10]}"
     update_payload = {
-        "name": "Updated Backend",
+        "name": new_name,
         "baseUrl": unique_url,  # Keep same URL
         "type": "ollama"
     }
     update_response = requests.put(f"{base_url}/backends/{backend_id}", json=update_payload)
     assert_status_code(update_response, 200)
     updated = update_response.json()
-    assert updated["name"] == "Updated Backend"
+    assert updated["name"] == new_name
 
     # 3. Clean up
     delete_response = requests.delete(f"{base_url}/backends/{backend_id}")

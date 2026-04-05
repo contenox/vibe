@@ -5,10 +5,6 @@ import (
 	"net/http"
 
 	"github.com/contenox/contenox/internal/modelrepo"
-	"github.com/contenox/contenox/internal/modelrepo/gemini"
-	"github.com/contenox/contenox/internal/modelrepo/ollama"
-	"github.com/contenox/contenox/internal/modelrepo/openai"
-	"github.com/contenox/contenox/internal/modelrepo/vllm"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/statetype"
 )
@@ -24,68 +20,27 @@ func LocalProviderAdapter(ctx context.Context, tracker libtracker.ActivityTracke
 		}
 
 		backendType := state.Backend.Type
+		catalog, err := modelrepo.NewCatalogProvider(
+			modelrepo.BackendSpec{
+				Type:    backendType,
+				BaseURL: state.Backend.BaseURL,
+				APIKey:  state.GetAPIKey(),
+			},
+			modelrepo.WithCatalogHTTPClient(http.DefaultClient),
+			modelrepo.WithCatalogTracker(tracker),
+		)
+		if err != nil {
+			continue
+		}
 		if _, ok := providersByType[backendType]; !ok {
 			providersByType[backendType] = []modelrepo.Provider{}
 		}
 
 		for _, model := range state.PulledModels {
-			capability := modelrepo.CapabilityConfig{
-				ContextLength: model.ContextLength,
-				CanChat:       model.CanChat,
-				CanEmbed:      model.CanEmbed,
-				CanStream:     model.CanStream,
-				CanPrompt:     model.CanPrompt,
-			}
-
-			switch backendType {
-			case "ollama":
-				providersByType[backendType] = append(
-					providersByType[backendType],
-					ollama.NewOllamaProvider(
-						model.Model,
-						[]string{state.Backend.BaseURL},
-						http.DefaultClient,
-						capability,
-						tracker,
-					),
-				)
-			case "vllm":
-				providersByType[backendType] = append(
-					providersByType[backendType],
-					vllm.NewVLLMProvider(
-						model.Model,
-						[]string{state.Backend.BaseURL},
-						http.DefaultClient,
-						capability,
-						state.GetAPIKey(),
-						tracker,
-					),
-				)
-			case "openai":
-				providersByType[backendType] = append(
-					providersByType[backendType],
-					openai.NewOpenAIProvider(
-						state.GetAPIKey(),
-						model.Model,
-						[]string{state.Backend.BaseURL},
-						capability,
-						http.DefaultClient,
-						tracker,
-					),
-				)
-			case "gemini":
-				providersByType[backendType] = append(
-					providersByType[backendType],
-					gemini.NewGeminiProvider(
-						state.GetAPIKey(),
-						model.Model,
-						[]string{state.Backend.BaseURL},
-						capability,
-						http.DefaultClient,
-						tracker,
-					),
-				)
-			}
+			providersByType[backendType] = append(
+				providersByType[backendType],
+				catalog.ProviderFor(observedModelFromPullStatus(model)),
+			)
 		}
 	}
 

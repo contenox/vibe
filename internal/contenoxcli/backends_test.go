@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/backendservice"
+	"github.com/contenox/contenox/internal/clikv"
 	"github.com/contenox/contenox/internal/runtimestate"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/runtimetypes"
@@ -161,7 +162,7 @@ func Test_backendService_uniqueBaseURL_rejected(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// getConfigKV / cliKVPrefix (new config cmd helpers)
+// getConfigKV / clikv.Prefix (new config cmd helpers)
 // ---------------------------------------------------------------------------
 
 func Test_getConfigKV_emptyIfNotSet(t *testing.T) {
@@ -176,7 +177,7 @@ func Test_getConfigKV_roundTrip(t *testing.T) {
 
 	// Simulate what `contenox config set` does.
 	data, _ := json.Marshal("qwen2.5:7b")
-	require.NoError(t, store.SetKV(ctx, cliKVPrefix+"default-model", data))
+	require.NoError(t, store.SetKV(ctx, clikv.Prefix+"default-model", data))
 
 	val, err := getConfigKV(ctx, store, "default-model")
 	require.NoError(t, err)
@@ -192,7 +193,7 @@ func Test_getConfigKV_multipleKeys(t *testing.T) {
 		"default-chain":    "default-chain.json",
 	} {
 		data, _ := json.Marshal(v)
-		require.NoError(t, store.SetKV(ctx, cliKVPrefix+k, data))
+		require.NoError(t, store.SetKV(ctx, clikv.Prefix+k, data))
 	}
 
 	for k, want := range map[string]string{

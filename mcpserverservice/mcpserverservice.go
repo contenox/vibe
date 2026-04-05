@@ -9,6 +9,7 @@ import (
 	"time"
 
 	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/localhooks"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/google/uuid"
 )
@@ -21,15 +22,31 @@ type Service interface {
 	Update(ctx context.Context, srv *runtimetypes.MCPServer) error
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*runtimetypes.MCPServer, error)
+	AuthenticateOAuth(ctx context.Context, name string, oauthCfg *localhooks.MCPOAuthConfig) error
+	StartOAuth(ctx context.Context, id, redirectBase string) (*OAuthStartResult, error)
+	CompleteOAuth(ctx context.Context, req OAuthCallbackRequest) (*OAuthCallbackResult, error)
 }
 
 type service struct {
-	db libdb.DBManager
+	db        libdb.DBManager
+	uiBaseURL string
 }
 
 // New creates a new MCP server service backed by the given database manager.
-func New(db libdb.DBManager) Service {
-	return &service{db: db}
+func New(db libdb.DBManager, opts ...Option) Service {
+	s := &service{db: db}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+type Option func(*service)
+
+func WithUIBaseURL(uiBaseURL string) Option {
+	return func(s *service) {
+		s.uiBaseURL = uiBaseURL
+	}
 }
 
 func (s *service) store() runtimetypes.Store {

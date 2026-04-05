@@ -9,11 +9,9 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/localhooks"
-	"github.com/contenox/contenox/localhooks/mcpoauth"
 	"github.com/contenox/contenox/mcpserverservice"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/spf13/cobra"
-	"golang.org/x/oauth2"
 )
 
 var mcpCmd = &cobra.Command{
@@ -280,7 +278,7 @@ func openMCPService(cmd *cobra.Command) (libdb.DBManager, mcpserverservice.Servi
 		return nil, nil, fmt.Errorf("invalid database path: %w", err)
 	}
 	dbCtx := libtracker.WithNewRequestID(context.Background())
-	db, err := openDBAt(dbCtx, dbPath)
+	db, err := OpenDBAt(dbCtx, dbPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -365,64 +363,8 @@ Example:
 		}
 		defer db.Close()
 
-		srv, err := svc.GetByName(ctx, name)
-		if err != nil {
-			return fmt.Errorf("mcp server %q not found: %w", name, err)
-		}
-		if srv.AuthType != string(localhooks.MCPAuthOAuth) {
-			return fmt.Errorf("mcp server %q does not use oauth auth (auth_type=%q)\n\nRe-register with:\n  contenox mcp remove %s\n  contenox mcp add %s %s --auth-type oauth",
-				name, srv.AuthType, name, name, srv.URL)
-		}
-
-		// Build the KV-backed token store using the same DB.
-		store := runtimetypes.New(db.WithoutTransaction())
-		tokenStore := mcpoauth.NewKVTokenStore(store)
-
-		// Discover auth server + do registration if needed.
-		meta, err := mcpoauth.DiscoverAuthServer(ctx, srv.URL)
-		if err != nil {
-			return fmt.Errorf("discover auth server: %w", err)
-		}
-
-		oauthCfg := &localhooks.MCPOAuthConfig{
-			TokenStore: tokenStore,
-		}
-
-		// Resolve client ID.
-		clientID := ""
-		reg, _ := tokenStore.GetClientRegistration(ctx, name)
-		if reg != nil {
-			clientID = reg.ClientID
-		} else if meta.RegistrationEndpoint != "" {
-			_, redirectURI, _, portErr := mcpoauth.StartCallbackServer(oauthCfg.ResolveCallbackPort())
-			if portErr != nil {
-				return fmt.Errorf("probe callback port: %w", portErr)
-			}
-			reg, err = mcpoauth.RegisterClient(ctx, meta.RegistrationEndpoint, "contenox", redirectURI)
-			if err != nil {
-				return fmt.Errorf("register client: %w", err)
-			}
-			_ = tokenStore.SetClientRegistration(ctx, name, reg)
-			clientID = reg.ClientID
-		}
-		if clientID == "" {
-			return fmt.Errorf("could not obtain client_id — server may not support dynamic registration")
-		}
-
-		o2cfg := &oauth2.Config{
-			ClientID: clientID,
-			Endpoint: oauth2.Endpoint{
-				AuthURL:  meta.AuthorizationEndpoint,
-				TokenURL: meta.TokenEndpoint,
-			},
-		}
-
-		tok, err := localhooks.RunOAuthFlow(ctx, o2cfg, oauthCfg, meta)
-		if err != nil {
-			return fmt.Errorf("oauth flow: %w", err)
-		}
-		if err := tokenStore.SetOAuthToken(ctx, name, tok); err != nil {
-			return fmt.Errorf("save token: %w", err)
+		if err := svc.AuthenticateOAuth(ctx, name, &localhooks.MCPOAuthConfig{}); err != nil {
+			return fmt.Errorf("mcp oauth auth: %w", err)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "%s: authenticated successfully.\n", name)
 		return nil
@@ -456,4 +398,3 @@ func init() {
 	mcpCmd.AddCommand(mcpUpdateCmd)
 	mcpCmd.AddCommand(mcpAuthCmd)
 }
-

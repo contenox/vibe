@@ -30,27 +30,15 @@ No pending steps. Plan is complete!
 
 ---
 
-### 📺 `contenox vibe` — Interactive TUI
+### 🌐 `contenox beam` — Web UI + API server
 
-When you want more than a shell prompt:
+When you want a browser UI on top of the same runtime:
 
 ```bash
-contenox vibe
+contenox beam
 ```
 
-A full-screen terminal dashboard (Bubble Tea) with:
-- **Live plan sidebar** — watch steps execute with `⟳` / `✓` / `✗` indicators in real time
-- **Interactive approvals** — approve or deny sensitive filesystem actions with `y`/`n` before they run
-- **Full CLI parity** — every `contenox` subcommand is a slash command inside vibe: `/plan`, `/model`, `/session`, `/backend`, `/hook`, `/mcp`, `/config`, `/run`
-
-```
-/plan new "add prometheus metrics to the HTTP server"
-/plan next --auto              ← run to completion
-/model set-context gpt-5-mini --context 128k
-/backend add local --type ollama --url http://127.0.0.1:11434
-/mcp add memory --transport stdio --command npx --args "-y,@modelcontextprotocol/server-memory"
-/help
-```
+Starts the full Contenox HTTP server and serves the **Beam** React app (task chains, admin, hooks, MCP, and more). Use `contenox chat`, `contenox plan`, and `contenox run` from the terminal when you prefer the CLI.
 
 ---
 
@@ -112,7 +100,7 @@ Any service that speaks HTTP and exposes an OpenAPI spec becomes a first-class a
 
 **Ubuntu / Linux**
 ```bash
-TAG=v0.6.5
+TAG=$(curl -sL https://api.github.com/repos/contenox/contenox/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 curl -sL "https://github.com/contenox/contenox/releases/download/${TAG}/contenox-${TAG}-linux-${ARCH}" -o contenox
 chmod +x contenox && sudo mv contenox /usr/local/bin/contenox
@@ -121,7 +109,7 @@ contenox --version
 
 **macOS**
 ```bash
-TAG=v0.6.5
+TAG=$(curl -sL https://api.github.com/repos/contenox/contenox/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/arm64/arm64/')
 curl -sL "https://github.com/contenox/contenox/releases/download/${TAG}/contenox-${TAG}-darwin-${ARCH}" -o contenox
 chmod +x contenox && sudo mv contenox /usr/local/bin/contenox
@@ -302,29 +290,6 @@ contenox backend remove myvllm
 - **Chain-scoped policy** — allowed and denied commands are declared in the chain's `hook_policies` field; the default chains ship with a sensible allowlist out of the box
 - **Human-in-the-loop** — `plan next` executes one step and stops; `--auto` requires explicit intent
 - **Local-first** — with Ollama, nothing leaves your machine
-
----
-
-## Architecture
-
-```
-contenox CLI
-  ├── plan new       → LLM planner chain → SQLite plan + steps
-  ├── plan next      → LLM executor chain → local_shell / local_fs → result persisted
-  ├── vibe           → Bubble Tea TUI: chat + live plan sidebar + HITL approvals
-  ├── run            → run any chain, any input type, stateless
-  ├── (bare)         → stateless run via default-run-chain.json (same as run)
-  └── chat           → LLM chat chain → session history persisted in SQLite
-
-SQLite (.contenox/local.db)
-  ├── plans + plan_steps   (autonomous plan state)
-  ├── message_index        (chat sessions)
-  └── kv                   (active session + config)
-```
-
-Chains are JSON files in `.contenox/`. They define the LLM workflow: model, hooks, branching logic. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture.
-
-Contenox is powered by a battle-tested enterprise workflow engine. The [Runtime API](docs/server-quickstart.md) is also available as a self-hostable Docker deployment for teams who want the full server with REST API, observability, and multi-tenant support.
 
 ---
 

@@ -1,6 +1,7 @@
 import uuid
 import requests
-from urllib.parse import urlparse
+
+from helpers import hook_mock_endpoint_url
 
 
 def check_openapi_tool_call_request(request):
@@ -36,10 +37,6 @@ def test_remote_hook_with_headers(
         request_validator=check_openapi_tool_call_request,
         tool_name=tool_name  # Changed from tool_handler_name to tool_name
     )
-
-    # Get the endpoint path from the mock server's URL
-    parsed_url = urlparse(mock_server["url"])
-    endpoint_path = tool_name
 
     # Define and serve OpenAPI schema
     openapi_schema = {
@@ -88,8 +85,7 @@ def test_remote_hook_with_headers(
     ).respond_with_json(expected_response_json)
 
     hook_name = f"test-headers-hook-{uuid.uuid4().hex[:8]}"
-    parsed_mock_url = urlparse(mock_server["url"])
-    endpoint_url = f"http://host.docker.internal:{parsed_mock_url.port}{mock_server['base_path']}"
+    endpoint_url = hook_mock_endpoint_url(mock_server["url"], mock_server["base_path"])
 
     create_response = requests.post(
         f"{base_url}/hooks/remote",
@@ -170,10 +166,6 @@ def test_remote_hook_without_headers(
         tool_name=tool_name  # Changed from tool_handler_name to tool_name
     )
 
-    # Get the endpoint path from the mock server's URL
-    parsed_url = urlparse(mock_server["url"])
-    endpoint_path = tool_name
-
     # Define and serve OpenAPI schema
     openapi_schema = {
         "openapi": "3.0.0",
@@ -220,8 +212,7 @@ def test_remote_hook_without_headers(
     ).respond_with_json(expected_response_json)
 
     hook_name = f"test-no-headers-hook-{uuid.uuid4().hex[:8]}"
-    parsed_mock_url = urlparse(mock_server["url"])
-    endpoint_url = f"http://host.docker.internal:{parsed_mock_url.port}{mock_server['base_path']}"
+    endpoint_url = hook_mock_endpoint_url(mock_server["url"], mock_server["base_path"])
 
     create_response = requests.post(
         f"{base_url}/hooks/remote",

@@ -53,7 +53,7 @@ func TestSystem_Ollama(t *testing.T) {
 			CanStream:     true,
 			CanPrompt:     true,
 		}
-		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, nil)
+		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
 		// Verify provider metadata
 		assert.Equal(t, chatModel, provider.ModelName())
@@ -75,7 +75,7 @@ func TestSystem_Ollama(t *testing.T) {
 		caps := modelrepo.CapabilityConfig{
 			CanChat: true,
 		}
-		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, nil)
+		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
 		// Verify chat works
 		_, err := provider.GetChatConnection(ctx, uri)
@@ -94,7 +94,7 @@ func TestSystem_Ollama(t *testing.T) {
 			ContextLength: 2048,
 			CanChat:       true,
 		}
-		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, nil)
+		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
 		chatClient, err := provider.GetChatConnection(ctx, uri)
 		require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestSystem_Ollama(t *testing.T) {
 			ContextLength: 2048,
 			CanChat:       true,
 		}
-		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, nil)
+		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
 		chatClient, err := provider.GetChatConnection(ctx, uri)
 		require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestSystem_Ollama(t *testing.T) {
 			ContextLength: 8192,
 			CanEmbed:      true,
 		}
-		provider := ollama.NewOllamaProvider(embedModel, []string{uri}, http.DefaultClient, caps, nil)
+		provider := ollama.NewOllamaProvider(embedModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
 		embedClient, err := provider.GetEmbedConnection(ctx, uri)
 		require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestSystem_Ollama(t *testing.T) {
 			ContextLength: 2048,
 			CanPrompt:     true,
 		}
-		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, nil)
+		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
 		promptClient, err := provider.GetPromptConnection(ctx, uri)
 		require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestSystem_Ollama(t *testing.T) {
 			ContextLength: 2048,
 			CanPrompt:     true,
 		}
-		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, nil)
+		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
 		promptClient, err := provider.GetPromptConnection(ctx, uri)
 		require.NoError(t, err)

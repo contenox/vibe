@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/contenox/contenox/execservice"
 	libdbexec "github.com/contenox/contenox/libdbexec"
@@ -155,7 +156,7 @@ func init() {
 
 // openPlanDB is similar to openSessionDB but for plans.
 func openPlanDB(cmd *cobra.Command) (context.Context, libdbexec.DBManager, string, func(), error) {
-	contenoxDir, err := ResolveContenoxDir()
+	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {
 		return nil, nil, "", nil, fmt.Errorf("failed to resolve .contenox dir: %w", err)
 	}
@@ -165,16 +166,29 @@ func openPlanDB(cmd *cobra.Command) (context.Context, libdbexec.DBManager, strin
 		return nil, nil, "", nil, fmt.Errorf("invalid database path: %w", err)
 	}
 
-	ctx := libtracker.WithNewRequestID(context.Background())
-	db, err := openDBAt(ctx, dbPath)
+	baseCtx := cmd.Context()
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	reqCtx := libtracker.WithNewRequestID(baseCtx)
+	timeout, _ := cmd.Root().Flags().GetDuration("timeout")
+	timeoutCtx, cancel := context.WithTimeout(reqCtx, timeout)
+	ctx, stop := signal.NotifyContext(timeoutCtx, syscall.SIGINT, syscall.SIGTERM)
+
+	db, err := OpenDBAt(ctx, dbPath)
 	if err != nil {
+		stop()
+		cancel()
 		return nil, nil, "", nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	cleanup := func() { _ = db.Close() }
+	cleanup := func() {
+		stop()
+		cancel()
+		_ = db.Close()
+	}
 
 	return ctx, db, contenoxDir, cleanup, nil
 }
-
 
 func buildPlanOpts(cmd *cobra.Command, db libdbexec.DBManager, input string) chatOpts {
 	flags := cmd.Root().Flags()
@@ -250,12 +264,15 @@ func execCtxForPlan(ctx context.Context, opts chatOpts, chainID string) context.
 func runPlanNew(cmd *cobra.Command, args []string) error {
 	// Resolve goal from arg or stdin; combine both if they coexist.
 	var goal string
-	if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-		stdinBytes, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("failed to read from stdin: %w", err)
-		}
-		stdinStr := strings.TrimSpace(string(stdinBytes))
+	if len(args) > 0 {
+		goal = args[0]
+	}
+	stdinData, ok, err := readStdinIfAvailable(maxCLIStdinBytes)
+	if err != nil {
+		return err
+	}
+	if ok {
+		stdinStr := strings.TrimSpace(stdinData)
 		if stdinStr != "" {
 			if goal != "" {
 				goal = goal + "\n\n" + stdinStr
@@ -263,9 +280,6 @@ func runPlanNew(cmd *cobra.Command, args []string) error {
 				goal = stdinStr
 			}
 		}
-	}
-	if len(args) > 0 {
-		goal = args[0]
 	}
 	if goal == "" {
 		return fmt.Errorf("goal cannot be empty; provide an argument or pipe via stdin")
@@ -283,6 +297,16 @@ func runPlanNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build engine: %w", err)
 	}
 	defer engine.Stop()
+
+	if err := PreflightLLMSetup(cmd.ErrOrStderr(), engine.SetupCheck); err != nil {
+		return err
+	}
+
+	stopTaskEvents := startCLITaskEventStream(ctx, engine, cmd.ErrOrStderr(), cliTaskEventRenderOptions{
+		Trace:        o.EffectiveTracing,
+		ShowThinking: true,
+	})
+	defer stopTaskEvents()
 
 	plannerPath, _, err := ensurePlanChains(cDir)
 	if err != nil {
@@ -424,6 +448,16 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 	}
 	defer engine.Stop()
 
+	if err := PreflightLLMSetup(cmd.ErrOrStderr(), engine.SetupCheck); err != nil {
+		return err
+	}
+
+	stopTaskEvents := startCLITaskEventStream(ctx, engine, cmd.ErrOrStderr(), cliTaskEventRenderOptions{
+		Trace:        o.EffectiveTracing,
+		ShowThinking: true,
+	})
+	defer stopTaskEvents()
+
 	_, executorPath, err := ensurePlanChains(cDir)
 	if err != nil {
 		return err
@@ -547,6 +581,16 @@ func runPlanReplan(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer engine.Stop()
+
+	if err := PreflightLLMSetup(cmd.ErrOrStderr(), engine.SetupCheck); err != nil {
+		return err
+	}
+
+	stopTaskEvents := startCLITaskEventStream(ctx, engine, cmd.ErrOrStderr(), cliTaskEventRenderOptions{
+		Trace:        o.EffectiveTracing,
+		ShowThinking: true,
+	})
+	defer stopTaskEvents()
 
 	plannerPath, _, err := ensurePlanChains(cDir)
 	if err != nil {

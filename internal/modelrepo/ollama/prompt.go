@@ -10,7 +10,7 @@ import (
 )
 
 type OllamaPromptClient struct {
-	ollamaClient *api.Client
+	ollamaClient *ollamaHTTPClient
 	modelName    string
 	backendURL   string
 	tracker      libtracker.ActivityTracker
@@ -23,18 +23,16 @@ func (o *OllamaPromptClient) Prompt(ctx context.Context, systemInstruction strin
 	defer end()
 
 	stream := false
-	think := api.ThinkValue{
-		Value: false,
-	}
+	config := &modelrepo.ChatConfig{}
+	modelrepo.WithTemperature(float64(temperature)).Apply(config)
+	think := buildOllamaThink(config)
 	req := &api.GenerateRequest{
-		Model:  o.modelName,
-		Prompt: prompt,
-		System: systemInstruction,
-		Stream: &stream,
-		Options: map[string]any{
-			"temperature": temperature,
-		},
-		Think: &think,
+		Model:   o.modelName,
+		Prompt:  prompt,
+		System:  systemInstruction,
+		Stream:  &stream,
+		Options: buildOllamaOptions(config),
+		Think:   &think,
 	}
 
 	var (

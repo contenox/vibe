@@ -2,27 +2,15 @@ import requests
 from helpers import assert_status_code
 
 
-def test_create_model(base_url):
-    """Test that an admin user can create a model."""
-
+def test_model_mutation_endpoints_are_not_exposed(base_url):
     payload = {
-        "model": "test-model",
-        "name": "Test Model",
+        "model": "should-not-be-created",
         "canPrompt": True,
         "contextLength": 2048,
     }
-
-    response = requests.post(f"{base_url}/models", json=payload)
-    assert_status_code(response, 201)
-
-    model = response.json()
-    assert model["model"] == payload["model"], "Model name does not match"
-    assert "id" in model, "Missing model ID"
-
-    model_id = model["model"]
-    delete_url = f"{base_url}/models/{model_id}"
-    del_response = requests.delete(delete_url, params={"purge": "true"})
-    assert_status_code(del_response, 200)
+    assert requests.post(f"{base_url}/models", json=payload).status_code == 404
+    assert requests.put(f"{base_url}/models/should-not-be-created", json=payload).status_code == 404
+    assert requests.delete(f"{base_url}/models/should-not-be-created").status_code == 404
 
 
 def test_list_models(base_url):
@@ -33,119 +21,50 @@ def test_list_models(base_url):
     assert data["object"] == "list", "Expected list object"
     assert isinstance(data["data"], list), "Data should be a list"
     assert len(data["data"]) > 0, "No models found"
-    model_ids = [model["id"] for model in data["data"]]
-    assert "nomic-embed-text:latest" in model_ids, "nomic-embed-text:latest model not found in the list of model IDs"
-
-def test_delete_model(base_url):
-    payload = {"model": "temp-delete-model", "canPrompt": True, "contextLength": 2048}
-    response = requests.post(f"{base_url}/models", json=payload)
-    assert_status_code(response, 201)
-    model = response.json()
-
-    model_id = model["model"]
-    delete_url = f"{base_url}/models/{model_id}"
-    del_response = requests.delete(delete_url, params={"purge": "true"})
-    assert_status_code(del_response, 200)
-
-    get_response = requests.get(f"{base_url}/openai/v1/models")
-    models = get_response.json()["data"]
-    assert not any(m["id"] == model_id for m in models), "Model was not deleted"
+    for model in data["data"]:
+        assert "id" in model
+        assert model["object"] == "model"
 
 
-def test_delete_immutable_model_fails(base_url):
-    immutable_model_name = "nomic-embed-text:latest"  # This depends on config
-
-    delete_url = f"{base_url}/models/{immutable_model_name}"
-    response = requests.delete(delete_url, params={"purge": "true"})
-    assert_status_code(response, 403)
-
-def test_model_assigned_to_group(base_url, create_model_and_assign_to_group):
-    data = create_model_and_assign_to_group
-    model_id = data["model_id"]
-    group_id = data["group_id"]
-
-    list_url = f"{base_url}/model-affinity/{group_id}/models"
-    response = requests.get(list_url)
-    assert response.status_code == 200
-    models_in_group = response.json()
-
-    assert any(m['id'] == model_id for m in models_in_group), "Model not found in group"
-
-def test_update_model(base_url):
-    """Test that an admin user can update an existing model."""
-
-    create_payload = {
-        "model": "test-update-model",
-        "contextLength": 2048,
-        "canChat": False,
-        "canPrompt": True,
-        "canEmbed": False,
-        "canStream": False,
-    }
-
-    create_response = requests.post(f"{base_url}/models", json=create_payload)
-    assert_status_code(create_response, 201)
-    created_model = create_response.json()
-
-    assert created_model["model"] == create_payload["model"]
-    assert created_model["contextLength"] == create_payload["contextLength"]
-    assert not created_model["canChat"]
-    assert created_model["canPrompt"]
-    assert not created_model["canEmbed"]
-    assert not created_model["canStream"]
-
-    model_id = created_model["model"]
-
-    # Step 2: Update the model
-    update_payload = {
-        "model": "test-update-model",  # Should match ID
-        "contextLength": 4096,
-        "canChat": True,
-        "canPrompt": False,
-        "canEmbed": True,
-        "canStream": True,
-    }
-
-    update_url = f"{base_url}/models/{model_id}"
-    update_response = requests.put(update_url, json=update_payload)
-    assert_status_code(update_response, 200)
-
-    updated_model = update_response.json()
-
-    assert updated_model["model"] == update_payload["model"], "Model name should remain unchanged"
-    assert updated_model["contextLength"] == update_payload["contextLength"], "Context length should be updated"
-    assert updated_model["canChat"] == update_payload["canChat"], "canChat flag should be updated"
-    assert updated_model["canPrompt"] == update_payload["canPrompt"], "canPrompt flag should be updated"
-    assert updated_model["canEmbed"] == update_payload["canEmbed"], "canEmbed flag should be updated"
-    assert updated_model["canStream"] == update_payload["canStream"], "canStream flag should be updated"
-
-    assert updated_model["updatedAt"] >= updated_model["createdAt"], "UpdatedAt should be >= CreatedAt"
-
-    get_url = f"{base_url}/models"
-    get_response = requests.get(get_url)
-    assert_status_code(get_response, 200)
-    models = get_response.json()
-    updated_model_in_list = next((m for m in models if m["id"] == model_id), None)
-    assert updated_model_in_list is not None, "Updated model not found in list"
-    assert updated_model_in_list["contextLength"] == 4096
-    assert updated_model_in_list["canChat"] is True
-
-    delete_url = f"{base_url}/models/{model_id}"
-    del_response = requests.delete(delete_url, params={"purge": "true"})
-    assert_status_code(del_response, 200)
-
-def test_internal_models_endpoint(base_url):
-    """Test the internal models endpoint that returns full details"""
+def test_internal_models_endpoint_returns_observed_inventory(base_url):
     response = requests.get(f"{base_url}/models")
     assert_status_code(response, 200)
 
     models = response.json()
     assert isinstance(models, list)
-    if len(models) > 0:
-        model = models[0]
+    assert len(models) > 0
+
+    for model in models:
         assert "id" in model
         assert "model" in model
         assert "contextLength" in model
+        assert "canChat" in model
+
+
+def test_internal_models_match_openai_compatible_listing(base_url):
+    internal_models = requests.get(f"{base_url}/models")
+    assert_status_code(internal_models, 200)
+    internal_names = {model["model"] for model in internal_models.json()}
+
+    openai_models = requests.get(f"{base_url}/openai/v1/models")
+    assert_status_code(openai_models, 200)
+    openai_names = {model["id"] for model in openai_models.json()["data"]}
+
+    assert internal_names == openai_names
+
+def test_internal_models_endpoint(base_url):
+    response = requests.get(f"{base_url}/backends")
+    assert_status_code(response, 200)
+
+    backends = response.json()
+    assert isinstance(backends, list)
+    for backend in backends:
+        if backend.get("error"):
+            assert backend.get("models", []) == []
+            continue
+
+        observed_names = {model["model"] for model in backend.get("pulledModels", [])}
+        assert set(backend.get("models", [])) == observed_names
 
 def test_get_default_model(base_url):
     """Test getting the default model"""

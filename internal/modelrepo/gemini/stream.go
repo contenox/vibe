@@ -17,12 +17,8 @@ type GeminiStreamClient struct {
 	geminiClient
 }
 
-func (c *GeminiStreamClient) Stream(ctx context.Context, prompt string, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
+func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	parcels := make(chan *modelrepo.StreamParcel)
-
-	messages := []modelrepo.Message{
-		{Role: "user", Content: prompt},
-	}
 	request, err := buildGeminiRequest(c.modelName, messages, nil, args)
 	if err != nil {
 		return nil, err
@@ -111,10 +107,21 @@ func (c *GeminiStreamClient) Stream(ctx context.Context, prompt string, args ...
 				return
 			}
 			if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
-				text := chunk.Candidates[0].Content.Parts[0].Text
-				if text != "" {
+				var outText, thinkingText string
+				for _, part := range chunk.Candidates[0].Content.Parts {
+					switch {
+					case part.Thought && part.Text != "":
+						thinkingText += part.Text
+					case part.Text != "":
+						outText += part.Text
+					}
+				}
+				if outText != "" || thinkingText != "" {
 					select {
-					case parcels <- &modelrepo.StreamParcel{Data: text}:
+					case parcels <- &modelrepo.StreamParcel{
+						Data:     outText,
+						Thinking: thinkingText,
+					}:
 					case <-ctx.Done():
 						return
 					}

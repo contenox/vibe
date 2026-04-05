@@ -34,30 +34,13 @@ func NewVLLMStreamClient(ctx context.Context, baseURL, modelName string, context
 }
 
 // Stream implements LLMStreamClient interface
-func (c *VLLMStreamClient) Stream(ctx context.Context, prompt string, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
+func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "vllm", "model", c.modelName)
 	// Note: We don't defer end() here because the stream is asynchronous
 
-	// Convert prompt to message format
-	messages := []modelrepo.Message{
-		{Role: "user", Content: prompt},
-	}
-
-	config := &modelrepo.ChatConfig{}
-	for _, arg := range args {
-		arg.Apply(config)
-	}
-
-	request := chatRequest{
-		Model:       c.modelName,
-		Messages:    messages,
-		Temperature: config.Temperature,
-		MaxTokens:   config.MaxTokens,
-		TopP:        config.TopP,
-		Seed:        config.Seed,
-		Stream:      true,
-	}
+	request := buildChatRequest(c.modelName, messages, args)
+	request.Stream = true
 
 	// Prepare the request
 	url := c.baseURL + "/v1/chat/completions"
@@ -148,11 +131,17 @@ func (c *VLLMStreamClient) Stream(ctx context.Context, prompt string, args ...mo
 				// Process the chunk
 				if len(chunk.Choices) > 0 {
 					delta := chunk.Choices[0].Delta
-					if delta.Content != "" {
-						chunkCount++
-						totalContent.WriteString(delta.Content)
+					thinking := delta.Thinking()
+					if delta.Content != "" || thinking != "" {
+						if delta.Content != "" {
+							chunkCount++
+							totalContent.WriteString(delta.Content)
+						}
 						select {
-						case streamCh <- &modelrepo.StreamParcel{Data: delta.Content}:
+						case streamCh <- &modelrepo.StreamParcel{
+							Data:     delta.Content,
+							Thinking: thinking,
+						}:
 						case <-ctx.Done():
 							return
 						}
@@ -190,14 +179,25 @@ type chatStreamResponse struct {
 	Created int    `json:"created"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Delta struct {
-			Role    string `json:"role,omitempty"`
-			Content string `json:"content,omitempty"`
-		} `json:"delta"`
-		Index        int    `json:"index"`
-		FinishReason string `json:"finish_reason,omitempty"`
+		Delta        chatStreamDelta `json:"delta"`
+		Index        int             `json:"index"`
+		FinishReason string          `json:"finish_reason,omitempty"`
 	} `json:"choices,omitempty"`
 	Error *string `json:"error,omitempty"`
+}
+
+type chatStreamDelta struct {
+	Role             string `json:"role,omitempty"`
+	Content          string `json:"content,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Reasoning        string `json:"reasoning,omitempty"`
+}
+
+func (d chatStreamDelta) Thinking() string {
+	if d.Reasoning != "" {
+		return d.Reasoning
+	}
+	return d.ReasoningContent
 }
 
 func truncateString(s string, maxLen int) string {

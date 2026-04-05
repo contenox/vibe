@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract tag
+        id: vars
+        run: echo "TAG=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify version matches tag
+        run: |
+          TAG="${{ steps.vars.outputs.TAG }}"
+          VERSION_IN_FILE=$(cat apiframework/version.txt | tr -d '\n' | tr -d '\r')
+          if [ "$VERSION_IN_FILE" != "$TAG" ]; then
+            echo "ERROR: Version in file ($VERSION_IN_FILE) does NOT match tag ($TAG)"
+            echo "This means the tag was created without updating the version file first."
+            echo "Proper release process:"
+            echo "  1. Update version file with new version"
+            echo "  2. Commit the change"
+            echo "  3. Create tag pointing to THAT commit"
+            echo "  4. Push tag"
+            echo ""
+            echo "To fix this:"
+            echo "  git checkout $TAG"
+            echo "  echo -n '$TAG' > apiframework/version.txt"
+            echo "  git commit -m 'Update version to $TAG' apiframework/version.txt"
+            echo "  git tag -d $TAG"
+            echo "  git tag $TAG"
+            echo "  git push -f origin $TAG"
+            exit 1
+          fi
+          echo "✓ Version verification passed: $VERSION_IN_FILE matches tag"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Build Contenox binaries
+        run: |
+          TAG="${{ steps.vars.outputs.TAG }}"
+          LDFLAGS="-X github.com/contenox/contenox/internal/contenoxcli.Version=${TAG}"
+          for goos in linux darwin; do
+            for goarch in amd64 arm64; do
+              GOOS=$goos GOARCH=$goarch go build -ldflags="${LDFLAGS}" -o "contenox-${TAG}-${goos}-${goarch}" ./cmd/contenox
+            done
+          done
+
+      - name: Create GitHub Release and upload assets
+        run: |
+          TAG="${{ steps.vars.outputs.TAG }}"
+          gh release create "$TAG" contenox-* \
+            --title "$TAG" \
+            --notes "" \
+            --latest \
+            --verify-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

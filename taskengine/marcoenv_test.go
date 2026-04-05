@@ -44,7 +44,7 @@ func tool(name string) taskengine.Tool {
 	return taskengine.Tool{Type: "function", Function: taskengine.FunctionTool{Name: name}}
 }
 
-func newMacroChain(sysInstruction string, hooks []string) *taskengine.TaskChainDefinition {
+func newMacroChain(template string, hooks []string) *taskengine.TaskChainDefinition {
 	cfg := &taskengine.LLMExecutionConfig{
 		Model:  "test",
 		Hooks:  hooks,
@@ -53,11 +53,11 @@ func newMacroChain(sysInstruction string, hooks []string) *taskengine.TaskChainD
 		ID: "test-chain",
 		Tasks: []taskengine.TaskDefinition{
 			{
-				ID:                "task1",
-				Handler:           taskengine.HandlePromptToString,
-				SystemInstruction: sysInstruction,
-				ExecuteConfig:     cfg,
-				Transition:        taskengine.TaskTransition{Branches: []taskengine.TransitionBranch{{Operator: "default", Goto: "end"}}},
+				ID:             "task1",
+				Handler:        taskengine.HandlePromptToString,
+				PromptTemplate: template,
+				ExecuteConfig:  cfg,
+				Transition:     taskengine.TaskTransition{Branches: []taskengine.TransitionBranch{{Operator: "default", Goto: "end"}}},
 			},
 		},
 	}
@@ -89,7 +89,7 @@ type noopEnv struct{}
 
 func (n *noopEnv) ExecEnv(_ context.Context, chain *taskengine.TaskChainDefinition, input any, _ taskengine.DataType) (any, taskengine.DataType, []taskengine.CapturedStateUnit, error) {
 	if len(chain.Tasks) > 0 {
-		return chain.Tasks[0].SystemInstruction, taskengine.DataTypeString, nil, nil
+		return chain.Tasks[0].PromptTemplate, taskengine.DataTypeString, nil, nil
 	}
 	return input, taskengine.DataTypeString, nil, nil
 }

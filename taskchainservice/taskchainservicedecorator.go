@@ -3,7 +3,6 @@ package taskchainservice
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/taskengine"
@@ -14,20 +13,39 @@ type activityTrackerDecorator struct {
 	tracker libtracker.ActivityTracker
 }
 
-func (d *activityTrackerDecorator) Create(ctx context.Context, chain *taskengine.TaskChainDefinition) error {
+func (d *activityTrackerDecorator) Get(ctx context.Context, ref string) (*taskengine.TaskChainDefinition, error) {
+	reportErrFn, _, endFn := d.tracker.Start(
+		ctx,
+		"get",
+		"taskchain",
+		"ref", ref,
+	)
+	defer endFn()
+
+	chain, err := d.service.Get(ctx, ref)
+	if err != nil {
+		reportErrFn(err)
+	}
+
+	return chain, err
+}
+
+func (d *activityTrackerDecorator) CreateAtPath(ctx context.Context, path string, chain *taskengine.TaskChainDefinition) error {
 	reportErrFn, reportChangeFn, endFn := d.tracker.Start(
 		ctx,
 		"create",
 		"taskchain",
+		"path", path,
 		"id", chain.ID,
 	)
 	defer endFn()
 
-	err := d.service.Create(ctx, chain)
+	err := d.service.CreateAtPath(ctx, path, chain)
 	if err != nil {
 		reportErrFn(err)
 	} else {
 		reportChangeFn(chain.ID, map[string]interface{}{
+			"path":        path,
 			"id":          chain.ID,
 			"description": chain.Description,
 			"taskCount":   len(chain.Tasks),
@@ -37,95 +55,69 @@ func (d *activityTrackerDecorator) Create(ctx context.Context, chain *taskengine
 	return err
 }
 
-func (d *activityTrackerDecorator) Get(ctx context.Context, id string) (*taskengine.TaskChainDefinition, error) {
-	reportErrFn, _, endFn := d.tracker.Start(
-		ctx,
-		"get",
-		"taskchain",
-		"id", id,
-	)
-	defer endFn()
-
-	chain, err := d.service.Get(ctx, id)
-	if err != nil {
-		reportErrFn(err)
-	}
-
-	return chain, err
-}
-
-func (d *activityTrackerDecorator) Update(ctx context.Context, chain *taskengine.TaskChainDefinition) error {
+func (d *activityTrackerDecorator) UpdateAtPath(ctx context.Context, path string, chain *taskengine.TaskChainDefinition) error {
 	reportErrFn, reportChangeFn, endFn := d.tracker.Start(
 		ctx,
 		"update",
 		"taskchain",
+		"path", path,
 		"id", chain.ID,
 	)
 	defer endFn()
 
-	err := d.service.Update(ctx, chain)
+	err := d.service.UpdateAtPath(ctx, path, chain)
 	if err != nil {
 		reportErrFn(err)
 	} else {
-		// Only report metadata to avoid logging sensitive task details
-		changes := map[string]interface{}{
+		reportChangeFn(chain.ID, map[string]interface{}{
+			"path":        path,
 			"description": chain.Description,
 			"debug":       chain.Debug,
 			"tokenLimit":  chain.TokenLimit,
 			"taskCount":   len(chain.Tasks),
-		}
-		reportChangeFn(chain.ID, changes)
+		})
 	}
 
 	return err
 }
 
-func (d *activityTrackerDecorator) Delete(ctx context.Context, id string) error {
+func (d *activityTrackerDecorator) DeleteByPath(ctx context.Context, path string) error {
 	reportErrFn, reportChangeFn, endFn := d.tracker.Start(
 		ctx,
 		"delete",
 		"taskchain",
-		"id", id,
+		"path", path,
 	)
 	defer endFn()
 
-	err := d.service.Delete(ctx, id)
+	err := d.service.DeleteByPath(ctx, path)
 	if err != nil {
 		reportErrFn(err)
 	} else {
-		reportChangeFn(id, nil)
+		reportChangeFn(path, nil)
 	}
 
 	return err
 }
 
-func (d *activityTrackerDecorator) List(ctx context.Context, cursor *time.Time, limit int) ([]*taskengine.TaskChainDefinition, error) {
-	cursorStr := "nil"
-	if cursor != nil {
-		cursorStr = cursor.Format(time.RFC3339)
-	}
-
-	reportErrFn, _, endFn := d.tracker.Start(
-		ctx,
-		"list",
-		"taskchains",
-		"cursor", cursorStr,
-		"limit", fmt.Sprintf("%d", limit),
-	)
-	defer endFn()
-
-	chains, err := d.service.List(ctx, cursor, limit)
-	if err != nil {
-		reportErrFn(err)
-	}
-
-	return chains, err
-}
-
-// WithActivityTracker wraps a task chain service with activity tracking capabilities
+// WithActivityTracker wraps a task chain service with activity tracking capabilities.
 func WithActivityTracker(service Service, tracker libtracker.ActivityTracker) Service {
+	if tracker == nil {
+		return service
+	}
 	return &activityTrackerDecorator{
 		service: service,
 		tracker: tracker,
 	}
+}
+
+var _ Service = (*activityTrackerDecorator)(nil)
+
+// Compile-time guard: activityTrackerDecorator must implement the full interface.
+func _noopChainDecoratorInterface() {
+	var _ Service = (*activityTrackerDecorator)(nil)
+}
+
+func _unusedChainFmt() {
+	_ = fmt.Sprint()
 }

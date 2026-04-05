@@ -8,22 +8,17 @@ Please treat all contributors with respect. Engage in constructive discussions a
 
 ## Repository Structure
 
-This repository contains:
-1. **`contenox-cli`** (CLI): A local workflow engine and LLM interface using SQLite and an in-memory bus.
-2. **`runtime-api`** (Server): The full HTTP server API utilizing PostgreSQL and NATS.
-3. **`enterprise/`** (Submodule): Optional, private enterprise code. If you don't have access, ignore it—the OSS runtime works perfectly without it.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for a deeper conceptual breakdown.
+The **`contenox`** binary is the main entrypoint: plans, chat, and other CLI commands, plus **`contenox beam`**, which runs the HTTP server that **serves the Beam web UI** (embedded in the binary) and backs it with the same engine.
 
 ## Local Development Setup
 
 ### Prerequisites
 - [Go](https://go.dev/doc/install) 1.24+
 - Access to an LLM provider (e.g. OpenAI API key, or locally via [Ollama](https://ollama.ai/), [vLLM](https://docs.vllm.ai/), etc.)
-- Docker & Docker Compose (if you are working on the `runtime-api` server)
+- Docker & Docker Compose (only if you are working on containerized or multi-service deployments)
 - `make`
 
-### Building the CLI (`contenox-cli`)
+### Building the CLI
 ```bash
 # Build the binary into ./bin/contenox
 make build-contenox
@@ -32,14 +27,10 @@ make build-contenox
 ./bin/contenox "list files in my home directory"
 ```
 
-### Building the Server (`runtime-api`)
+### Running Beam (HTTP server + UI)
 ```bash
-# Start the supporting infrastructure (Postgres, NATS)
-docker compose up -d
-
-# Build and run the server
-make build-runtime-api
-make run-runtime-api
+make build-contenox
+./bin/contenox beam   # default :8081 — Beam UI; HTTP contract in docs/openapi.json (run make docs-gen after route changes)
 ```
 
 ## Running Tests
@@ -60,7 +51,7 @@ go test -race ./...
 2. **Branch Naming:** Create a branch from `main` with a descriptive name (`feature/xyz`, `fix/abc`, `docs/def`).
 3. **Commit Messages:** Follow [Conventional Commits](https://www.conventionalcommits.org/). For example, `feat: add support for local mode`, `fix: correct token count logic`, `docs: clarify CLI usage`.
 4. **Style checks:** Ensure your code runs successfully through `gofmt` and standard linters like `golangci-lint` if available.
-5. **No Breaking Changes:** Avoid breaking existing workflows or changing the API schema unexpectedly. Keep `runtime-api` backward compatible.
+5. **No Breaking Changes:** Avoid breaking existing workflows or changing the API schema unexpectedly. Keep the HTTP API backward compatible when you change routes or DTOs.
 
 ## Generating Documentation
 

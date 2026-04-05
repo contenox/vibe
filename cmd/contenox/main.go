@@ -1,5 +1,4 @@
-// Contenox Vibe: run task chains locally with SQLite, in-memory bus, and estimate tokenizer.
-// No Postgres, no NATS, no tokenizer service. Use for dev/admin shadow orchestration.
+// Contenox CLI: run task chains locally with SQLite-backed state and optional Beam server.
 package main
 
 import (

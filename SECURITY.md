@@ -6,7 +6,7 @@ Currently, only the latest `main` branch and the most recent `v*` release tag re
 
 ## Reporting a Vulnerability
 
-Security is incredibly important to us. If you discover a vulnerability in Contenox (either the `contenox-cli` or the `runtime-api`), please **do not** report it by creating a public GitHub Issue.
+Security is incredibly important to us. If you discover a vulnerability in Contenox (the `contenox` CLI or the HTTP server, e.g. `contenox beam`), please **do not** report it by creating a public GitHub Issue.
 
 Instead, please email us directly to report security vulnerabilities:
 

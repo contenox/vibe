@@ -2,6 +2,12 @@ package taskengine
 
 import "time"
 
+// NormalizeFinalChainOutput upgrades DataTypeAny to a concrete DataType and coerces the value.
+// ExecEnv calls this before returning so API layers see stable output types.
+func NormalizeFinalChainOutput(value any, dt DataType) (any, DataType, error) {
+	return NormalizeDataType(value, dt)
+}
+
 // ConvertChatHistoryToOpenAI converts the internal ChatHistory format to an OpenAI-compatible response.
 // This is useful for adapting the task engine's output to systems expecting an OpenAI API format.
 func ConvertChatHistoryToOpenAI(id string, chatHistory ChatHistory) OpenAIChatResponse {

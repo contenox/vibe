@@ -1,7 +1,6 @@
-// Package sessionservice provides CRUD operations for CLI/TUI chat sessions.
-// It encapsulates messagestore + runtimetypes KV orchestration so that
-// both session_cmd.go and vibe_app.go can share logic without duplicating
-// raw transaction management.
+// Package sessionservice provides CRUD operations for CLI chat sessions.
+// It encapsulates messagestore + runtimetypes KV orchestration so session_cmd
+// and chat flows can share logic without duplicating raw transaction management.
 package sessionservice
 
 import (
@@ -66,7 +65,6 @@ func New(db libdb.DBManager) Service {
 	return &service{db: db}
 }
 
-// ── interface implementation ──────────────────────────────────────────────────
 
 func (s *service) New(ctx context.Context, identity, name string) (string, error) {
 	if name == "" {

@@ -3,8 +3,8 @@
   "description": "Fast, creative, exploratory chat mode. Model uses tools aggressively to explore and prototype.",
   "tasks": [
     {
-      "id": "vibe_chat",
-      "description": "Chat completion in vibe mode — fast, creative, tool-aggressive",
+      "id": "explore_chat",
+      "description": "Chat completion — fast, creative, tool-aggressive",
       "handler": "chat_completion",
       "system_instruction": "You are Contenox — fast, creative, a bit cheeky. Embrace the flow: experiment, iterate quickly, use tools aggressively to explore. Keep answers short and sharp unless asked for depth. Think out loud, show your work, make it fun. You can output ===STEP_DONE=== if a user asks you to complete a concrete step, but don't feel forced — stay loose unless directed.",
       "execute_config": {
@@ -33,14 +33,14 @@
       "id": "run_tools",
       "description": "Execute tool calls from the last message and append results to chat history",
       "handler": "execute_tool_calls",
-      "input_var": "vibe_chat",
+      "input_var": "explore_chat",
       "transition": {
         "on_failure": "",
         "branches": [
           {
             "operator": "default",
             "when": "",
-            "goto": "vibe_chat"
+            "goto": "explore_chat"
           }
         ]
       }

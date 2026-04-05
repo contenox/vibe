@@ -202,3 +202,48 @@ func TestUnit_ModelProviderAdapter_HandlesMissingCapabilities(t *testing.T) {
 	require.False(t, p.CanStream(), "should default to no streaming support")
 	require.Equal(t, 0, p.GetContextLength(), "should default to zero context length")
 }
+
+func TestUnit_ModelProviderAdapter_CreatesOpenAIProviderViaCatalog(t *testing.T) {
+	ctx := context.Background()
+	backendID := "openai-backend"
+	backendURL := "http://openai.local"
+
+	state := statetype.BackendRuntimeState{
+		ID:   backendID,
+		Name: "OpenAI Backend",
+		Backend: runtimetypes.Backend{
+			ID:      backendID,
+			Name:    "OpenAI",
+			Type:    "openai",
+			BaseURL: backendURL,
+		},
+		PulledModels: []statetype.ModelPullStatus{
+			{
+				Name:          "gpt-5",
+				Model:         "gpt-5",
+				ContextLength: 0,
+				CanChat:       true,
+				CanPrompt:     true,
+				CanStream:     true,
+			},
+		},
+	}
+	state.SetAPIKey("test-key")
+
+	runtime := map[string]statetype.BackendRuntimeState{
+		backendID: state,
+	}
+
+	adapterFunc := runtimestate.LocalProviderAdapter(ctx, nil, runtime)
+	providers, err := adapterFunc(ctx, "openai")
+	require.NoError(t, err)
+	require.Len(t, providers, 1)
+
+	provider := providers[0]
+	require.Equal(t, "openai", provider.GetType())
+	require.Equal(t, "gpt-5", provider.ModelName())
+	require.Equal(t, []string{backendURL}, provider.GetBackendIDs())
+	require.True(t, provider.CanChat())
+	require.True(t, provider.CanPrompt())
+	require.True(t, provider.CanStream())
+}

@@ -1,9 +1,17 @@
-import pytest
+import uuid
+import urllib.parse
+
 import requests
 from openai import OpenAI
+
 from helpers import assert_status_code
-import uuid
-import time
+
+
+def _taskchains_post_url(base_url: str, vfs_path: str) -> str:
+    """base_url already includes /api (see CONTENOX_API_URL)."""
+    root = base_url.rstrip("/")
+    q = urllib.parse.urlencode({"path": vfs_path})
+    return f"{root}/taskchains?{q}"
 
 def test_openai_sdk_compatibility(
     base_url,
@@ -54,14 +62,12 @@ def test_openai_sdk_compatibility(
         ]
     }
 
-    # Create task chain
-    response = requests.post(f"{base_url}/taskchains", json=task_chain)
+    vfs_path = f"{chain_id}.json"
+    response = requests.post(_taskchains_post_url(base_url, vfs_path), json=task_chain)
     assert_status_code(response, 201)
 
-
-    # Configure OpenAI client to point to our endpoint
     client = OpenAI(
-        base_url=f"{base_url}/openai/{chain_id}/v1",
+        base_url=f"{base_url.rstrip('/')}/openai/{chain_id}/v1",
         api_key="empty-key-for-now"
     )
 
@@ -101,16 +107,18 @@ def test_openai_sdk_streaming_compatibility(
     chain_id = f"openai-sdk-stream-test-{str(uuid.uuid4())[:8]}"
     task_chain = {
         "id": chain_id, "debug": True,
+        "token_limit": 4096,
         "tasks": [
             {"id": "main_task", "handler": "chat_completion", "transition": {"branches": [{"operator": "default", "goto": "format_response"}]}},
             {"id": "format_response", "handler": "convert_to_openai_chat_response", "transition": {"branches": [{"operator": "default", "goto": "end"}]}}
         ]
     }
-    response = requests.post(f"{base_url}/taskchains", json=task_chain)
+    vfs_path = f"{chain_id}.json"
+    response = requests.post(_taskchains_post_url(base_url, vfs_path), json=task_chain)
     assert_status_code(response, 201)
 
     client = OpenAI(
-        base_url=f"{base_url}/openai/{chain_id}/v1",
+        base_url=f"{base_url.rstrip('/')}/openai/{chain_id}/v1",
         api_key="a-key"
     )
 

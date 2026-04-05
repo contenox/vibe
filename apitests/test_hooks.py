@@ -3,15 +3,18 @@ import requests
 import uuid
 from helpers import assert_status_code
 
-# Test data constants
+# Unique per process so repeated runs / shared DBs do not hit UNIQUE on remote_hooks.name
+_RUN = uuid.uuid4().hex[:10]
+
+# Test data constants (names include _RUN for idempotency)
 VALID_HOOK = {
-    "name": "test-hook",
+    "name": f"test-hook-{_RUN}",
     "endpointUrl": "https://example.com/webhook",
     "timeoutMs": 5000,
 }
 
 VALID_HOOK_2 = {
-    "name": "test-hook_2",
+    "name": f"test-hook_2-{_RUN}",
     "endpointUrl": "https://example.com/webhook",
     "timeoutMs": 5000,
 }
@@ -80,9 +83,10 @@ def test_list_remote_hooks(base_url):
         delete_url = f"{base_url}/hooks/remote/{hook['id']}"
         requests.delete(delete_url)
 
-    # Create two hooks
-    hook1 = {**VALID_HOOK, "name": "hook-1"}
-    hook2 = {**VALID_HOOK, "name": "hook-2"}
+    # Create two hooks (names unique to this run)
+    n1, n2 = f"hook-1-{_RUN}", f"hook-2-{_RUN}"
+    hook1 = {**VALID_HOOK, "name": n1}
+    hook2 = {**VALID_HOOK, "name": n2}
 
     requests.post(list_url, json=hook1)
     requests.post(list_url, json=hook2)
@@ -94,7 +98,7 @@ def test_list_remote_hooks(base_url):
     hooks = list_response.json()
     assert len(hooks) == 2, "Should return 2 hooks"
     names = {h["name"] for h in hooks}
-    assert "hook-1" in names and "hook-2" in names, "Both hooks should be present"
+    assert n1 in names and n2 in names, "Both hooks should be present"
 
 def test_update_remote_hook(base_url):
     """Test updating an existing hook"""
@@ -105,8 +109,9 @@ def test_update_remote_hook(base_url):
 
     # Update hook
     update_url = f"{base_url}/hooks/remote/{hook_id}"
+    new_name = f"updated-name-{_RUN}"
     update_payload = {
-        "name": "updated-name",
+        "name": new_name,
         "endpointUrl": "https://new.example.com/webhook",
         "timeoutMs": 10000,
     }
@@ -116,7 +121,7 @@ def test_update_remote_hook(base_url):
     # Verify update
     get_response = requests.get(update_url)
     data = get_response.json()
-    assert data["name"] == "updated-name", "Name should be updated"
+    assert data["name"] == new_name, "Name should be updated"
     assert data["endpointUrl"] == update_payload["endpointUrl"], "Endpoint should be updated"
     assert data["timeoutMs"] == 10000, "Timeout should be updated"
 

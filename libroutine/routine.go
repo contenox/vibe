@@ -237,7 +237,15 @@ func (rm *Routine) ExecuteWithRetry(ctx context.Context, interval time.Duration,
 //     Note: `ErrCircuitOpen` will also be passed here when calls are blocked.
 func (rm *Routine) Loop(ctx context.Context, interval time.Duration, triggerChan <-chan struct{}, fn func(ctx context.Context) error, errHandling func(err error)) {
 	var lastErr error
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		err := rm.Execute(ctx, fn)
 		lastErr = err
 		if err != nil {
@@ -252,7 +260,7 @@ func (rm *Routine) Loop(ctx context.Context, interval time.Duration, triggerChan
 				time.Sleep(interval)
 			}
 			// log.Println("Trigger received, executing immediately")
-		case <-time.After(interval):
+		case <-ticker.C:
 			// log.Println("Interval elapsed, executing next cycle")
 		}
 	}

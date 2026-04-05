@@ -240,11 +240,11 @@ func (p *PersistentRepo) GetToolsForHookByName(ctx context.Context, name string)
 		reqPayload, _ := json.Marshal(mcpworker.MCPToolRequest{SessionID: sessionID})
 		replyData, err := p.messenger.Request(ctx, mcpworker.SubjectListTools(mcpSrv.Name), reqPayload)
 		if err != nil {
-			return nil, fmt.Errorf("mcp list-tools for %q: %w", name, err)
+			return nil, taskengine.HookToolsUnavailable(name, fmt.Errorf("mcp list-tools request: %w", err))
 		}
 		mcpTools, err := mcpworker.DecodeListToolsReply(replyData)
 		if err != nil {
-			return nil, fmt.Errorf("mcp list-tools decode for %q: %w", name, err)
+			return nil, taskengine.HookToolsUnavailable(name, err)
 		}
 		tools := make([]taskengine.Tool, 0, len(mcpTools))
 		for _, t := range mcpTools {
@@ -277,7 +277,7 @@ func (p *PersistentRepo) GetToolsForHookByName(ctx context.Context, name string)
 	}
 	tools, err := p.toolProtocol.FetchTools(ctx, remoteHook.EndpointURL, injectParams, p.httpClient)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch tools for hook '%s': %w", name, err)
+		return nil, taskengine.HookToolsUnavailable(name, fmt.Errorf("remote hook fetch tools: %w", err))
 	}
 
 	return tools, nil

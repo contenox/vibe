@@ -4,6 +4,7 @@ import "encoding/json"
 
 const (
 	ProviderKeyPrefix = "cloud-provider:"
+	OllamaKey         = ProviderKeyPrefix + "ollama"
 	OpenaiKey         = ProviderKeyPrefix + "openai"
 	GeminiKey         = ProviderKeyPrefix + "gemini"
 )

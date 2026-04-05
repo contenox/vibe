@@ -1,32 +1,46 @@
-import requests
-from helpers import assert_status_code
 import uuid
-import time
-from typing import Dict, Any, List
+import urllib.parse
+from typing import Any, Dict
+
+import requests
+
+from helpers import assert_status_code
+
+
+def _taskchains_url(base_url: str, vfs_path: str) -> str:
+    """base_url already includes /api (see CONTENOX_API_URL)."""
+    root = base_url.rstrip("/")
+    q = urllib.parse.urlencode({"path": vfs_path})
+    return f"{root}/taskchains?{q}"
+
 
 def generate_test_chain(id_suffix: str = "") -> Dict[str, Any]:
-    """Generate a test task chain definition with unique ID"""
     if id_suffix is None:
         id_suffix = str(uuid.uuid4())[:8]
-
+    chain_id = f"test-chain-{id_suffix}"
     return {
-        "id": f"test-chain-{id_suffix}",
+        "id": chain_id,
+        "debug": False,
         "description": "A test task chain for API testing",
+        "token_limit": 4096,
         "tasks": [
             {
                 "id": "task1",
-                "type": "llm",
-                "model": "phi3:3.8b",
-                "prompt": "Hello, world!"
+                "handler": "prompt_to_string",
+                "prompt_template": "Hello, world!",
+                "transition": {
+                    "branches": [{"when": "", "operator": "default", "goto": "end"}],
+                },
             }
-        ]
+        ],
     }
 
-def test_create_task_chain(base_url):
-    """Test that a task chain can be created successfully."""
-    chain = generate_test_chain()
 
-    response = requests.post(f"{base_url}/taskchains", json=chain)
+def test_create_task_chain(base_url):
+    chain = generate_test_chain()
+    vfs_path = f"apitest-{chain['id']}.json"
+
+    response = requests.post(_taskchains_url(base_url, vfs_path), json=chain)
     assert_status_code(response, 201)
 
     created_chain = response.json()
@@ -35,19 +49,17 @@ def test_create_task_chain(base_url):
     assert len(created_chain["tasks"]) == 1, "Task count mismatch"
     assert created_chain["tasks"][0]["id"] == "task1", "Task ID mismatch"
 
-    # Clean up
-    delete_response = requests.delete(f"{base_url}/taskchains/{chain['id']}")
+    delete_response = requests.delete(_taskchains_url(base_url, vfs_path))
     assert_status_code(delete_response, 200)
 
+
 def test_get_task_chain(base_url):
-    """Test retrieving an existing task chain."""
-    # First create a task chain
     chain = generate_test_chain()
-    create_response = requests.post(f"{base_url}/taskchains", json=chain)
+    vfs_path = f"apitest-{chain['id']}.json"
+    create_response = requests.post(_taskchains_url(base_url, vfs_path), json=chain)
     assert_status_code(create_response, 201)
 
-    # Now get it
-    get_response = requests.get(f"{base_url}/taskchains/{chain['id']}")
+    get_response = requests.get(_taskchains_url(base_url, vfs_path))
     assert_status_code(get_response, 200)
 
     retrieved_chain = get_response.json()
@@ -55,139 +67,119 @@ def test_get_task_chain(base_url):
     assert retrieved_chain["description"] == chain["description"], "Description mismatch"
     assert len(retrieved_chain["tasks"]) == 1, "Task count mismatch"
 
-    # Clean up
-    delete_response = requests.delete(f"{base_url}/taskchains/{chain['id']}")
+    delete_response = requests.delete(_taskchains_url(base_url, vfs_path))
     assert_status_code(delete_response, 200)
 
+
 def test_update_task_chain(base_url):
-    """Test updating an existing task chain."""
-    # Create a task chain first
     chain = generate_test_chain()
-    create_response = requests.post(f"{base_url}/taskchains", json=chain)
+    vfs_path = f"apitest-{chain['id']}.json"
+    create_response = requests.post(_taskchains_url(base_url, vfs_path), json=chain)
     assert_status_code(create_response, 201)
     created_chain = create_response.json()
 
-    # Modify the chain
     updated_chain = {
         "id": created_chain["id"],
+        "debug": False,
         "description": "Updated description",
+        "token_limit": 4096,
         "tasks": [
             {
                 "id": "task1",
-                "type": "llm",
-                "model": "phi3:3.8b",
-                "prompt": "Hello, updated world!"
+                "handler": "prompt_to_string",
+                "prompt_template": "Hello, updated world!",
+                "transition": {
+                    "branches": [{"when": "", "operator": "default", "goto": "end"}],
+                },
             },
             {
                 "id": "task2",
-                "type": "hook",
-                "url": "http://example.com/hook"
-            }
-        ]
+                "handler": "noop",
+                "prompt_template": "",
+                "transition": {
+                    "branches": [{"when": "", "operator": "default", "goto": "end"}],
+                },
+            },
+        ],
     }
 
-    # Update it
-    update_response = requests.put(
-        f"{base_url}/taskchains/{created_chain['id']}",
-        json=updated_chain
-    )
+    update_response = requests.put(_taskchains_url(base_url, vfs_path), json=updated_chain)
     assert_status_code(update_response, 200)
 
-    # Verify the update
     actual_updated = update_response.json()
     assert actual_updated["description"] == "Updated description"
     assert len(actual_updated["tasks"]) == 2
     assert actual_updated["tasks"][1]["id"] == "task2"
 
-    # Clean up
-    delete_response = requests.delete(f"{base_url}/taskchains/{created_chain['id']}")
+    delete_response = requests.delete(_taskchains_url(base_url, vfs_path))
     assert_status_code(delete_response, 200)
+
 
 def test_delete_task_chain(base_url):
-    """Test deleting a task chain."""
-    # Create a task chain first
     chain = generate_test_chain()
-    create_response = requests.post(f"{base_url}/taskchains", json=chain)
+    vfs_path = f"apitest-{chain['id']}.json"
+    create_response = requests.post(_taskchains_url(base_url, vfs_path), json=chain)
     assert_status_code(create_response, 201)
 
-    # Delete it
-    delete_response = requests.delete(f"{base_url}/taskchains/{chain['id']}")
+    delete_response = requests.delete(_taskchains_url(base_url, vfs_path))
     assert_status_code(delete_response, 200)
 
-    # Verify it's gone
-    get_response = requests.get(f"{base_url}/taskchains/{chain['id']}")
+    get_response = requests.get(_taskchains_url(base_url, vfs_path))
     assert_status_code(get_response, 404)
 
-def test_list_task_chains(base_url):
-    """Test listing task chains with pagination."""
-    # Create several test chains
-    chain_ids = []
-    for i in range(5):
-        chain = generate_test_chain(f"list-test-{i}")
-        response = requests.post(f"{base_url}/taskchains", json=chain)
-        assert_status_code(response, 201)
-        chain_ids.append(chain["id"])
 
-    # List all chains
-    list_response = requests.get(f"{base_url}/taskchains?limit=10")
-    assert_status_code(list_response, 200)
-    chains = list_response.json()
+def test_taskchains_get_requires_path(base_url):
+    root = base_url.rstrip("/")
+    r = requests.get(f"{root}/taskchains")
+    assert_status_code(r, 400)
 
-    # Verify we got at least the chains we created
-    assert isinstance(chains, list)
-    assert len(chains) >= 5
 
 def test_get_nonexistent_task_chain(base_url):
-    """Test getting a task chain that doesn't exist."""
-    nonexistent_id = f"nonexistent-chain-{uuid.uuid4()}"
-    response = requests.get(f"{base_url}/taskchains/{nonexistent_id}")
+    vfs_path = f"nonexistent-chain-{uuid.uuid4()}.json"
+    response = requests.get(_taskchains_url(base_url, vfs_path))
     assert_status_code(response, 404)
+
 
 def test_delete_nonexistent_task_chain(base_url):
-    """Test deleting a task chain that doesn't exist."""
-    nonexistent_id = f"nonexistent-chain-{uuid.uuid4()}"
-    response = requests.delete(f"{base_url}/taskchains/{nonexistent_id}")
+    vfs_path = f"nonexistent-chain-{uuid.uuid4()}.json"
+    response = requests.delete(_taskchains_url(base_url, vfs_path))
     assert_status_code(response, 404)
 
+
 def test_task_chain_full_workflow(base_url):
-    """Test a complete workflow with task chain creation, update, and deletion."""
-    # 1. Create a task chain
     chain = generate_test_chain()
-    create_response = requests.post(f"{base_url}/taskchains", json=chain)
+    vfs_path = f"apitest-{chain['id']}.json"
+    create_response = requests.post(_taskchains_url(base_url, vfs_path), json=chain)
     assert_status_code(create_response, 201)
     created_chain = create_response.json()
 
-    # 2. Verify creation
     assert created_chain["id"] == chain["id"]
     assert len(created_chain["tasks"]) == 1
 
-    # 3. Update the task chain
-    created_chain["tasks"].append({
-        "id": "task2",
-        "type": "embed",
-        "model": "nomic-embed-text:latest"
-    })
-
-    update_response = requests.put(
-        f"{base_url}/taskchains/{created_chain['id']}",
-        json=created_chain
+    created_chain["tasks"].append(
+        {
+            "id": "task2",
+            "handler": "noop",
+            "prompt_template": "",
+            "transition": {
+                "branches": [{"when": "", "operator": "default", "goto": "end"}],
+            },
+        }
     )
+
+    update_response = requests.put(_taskchains_url(base_url, vfs_path), json=created_chain)
     assert_status_code(update_response, 200)
     updated_chain = update_response.json()
 
-    # 4. Verify update
     assert len(updated_chain["tasks"]) == 2
 
-    # 5. Verify persistence by fetching again
-    get_response = requests.get(f"{base_url}/taskchains/{created_chain['id']}")
+    get_response = requests.get(_taskchains_url(base_url, vfs_path))
     assert_status_code(get_response, 200)
     fetched_chain = get_response.json()
     assert len(fetched_chain["tasks"]) == 2
 
-    # 6. Delete the task chain
-    delete_response = requests.delete(f"{base_url}/taskchains/{created_chain['id']}")
+    delete_response = requests.delete(_taskchains_url(base_url, vfs_path))
     assert_status_code(delete_response, 200)
 
-    # 7. Verify deletion
-    final_get_response = requests.get(f"{base_url}/taskchains/{created_chain['id']}")
+    final_get_response = requests.get(_taskchains_url(base_url, vfs_path))
     assert_status_code(final_get_response, 404)

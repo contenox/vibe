@@ -1,10 +1,10 @@
 {
     "id": "chain-run",
-    "description": "Stateless execution chain for 'contenox run'. Takes a string or chat input, returns a string output. Supports local_shell and local_fs hooks when enabled via --shell.",
+    "description": "Stateless execution chain for 'contenox run'. Takes a string or chat input, returns a string output. Exposes registered hooks by default and adds local_shell when enabled via --shell.",
     "tasks": [
         {
             "id": "contenox_run",
-            "description": "Stateless chat completion with optional shell/fs tools. Model may call tools or respond directly.",
+            "description": "Stateless chat completion with registered hooks available by default. Model may call tools or respond directly.",
             "handler": "chat_completion",
             "system_instruction": "You are Contenox, a helpful AI assistant. Answer the user's questions clearly and helpfully. If you have tools available, use them when appropriate to complete the task.",
             "execute_config": {
@@ -12,8 +12,7 @@
                 "provider": "{{var:provider}}",
                 "pass_clients_tools": false,
                 "hooks": [
-                    "local_shell",
-                    "local_fs"
+                    "*"
                 ],
                 "hook_policies": {
                     "local_shell": {

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" shape-rendering="geometricPrecision"
+     xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="favicon_title">
+  <title id="favicon_title">contenox Favicon</title>
+
+  <rect x="2" y="2" width="60" height="60" rx="26" ry="26" fill="#1A1A1A"/>
+
+  <circle cx="45.3" cy="41.5" r="5.5" fill="#b12027"/>
+
+  <path
+    d="M17.3,18.3 L37.3,31.5 L17.3,44.7"
+    fill="none"
+    stroke="#e2e5e9"
+    stroke-width="7"
+    stroke-linecap="round"
+    stroke-linejoin="round"/>
+</svg>

@@ -51,7 +51,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+#lib/ ui uses lib...
 lib64/
 parts/
 sdist/
@@ -194,6 +194,7 @@ next-env.d.ts
 .envrc
 .env.*
 !.env.example
+!.env.proxy
 
 # Logs
 *.log
@@ -231,7 +232,7 @@ temp/
 # Project-specific
 # ==============================
 
-# Vibe CLI build output and local config
+# Contenox CLI build output and local config
 bin/
 .contenox/
 
@@ -285,6 +286,7 @@ yarn-error.log*
 
 # env files
 .env*
+!.env.proxy
 
 # vercel
 .vercel

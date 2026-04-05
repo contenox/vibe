@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -64,7 +63,7 @@ Examples:
 		flags := cmd.Flags()
 
 		// Resolve .contenox dir using Git-style parent walk.
-		contenoxDir, err := ResolveContenoxDir()
+		contenoxDir, err := ResolveContenoxDir(cmd)
 		if err != nil {
 			return fmt.Errorf("failed to resolve .contenox dir: %w", err)
 		}
@@ -111,7 +110,7 @@ Examples:
 			return fmt.Errorf("invalid database path: %w", err)
 		}
 		dbCtx := libtracker.WithNewRequestID(context.Background())
-		db, err := openDBAt(dbCtx, dbPathAbs)
+		db, err := OpenDBAt(dbCtx, dbPathAbs)
 		if err != nil {
 			return fmt.Errorf("failed to open database: %w", err)
 		}
@@ -126,6 +125,10 @@ Examples:
 			return fmt.Errorf("failed to build engine: %w", err)
 		}
 		defer engine.Stop()
+
+		if err := PreflightLLMSetup(cmd.ErrOrStderr(), engine.SetupCheck); err != nil {
+			return err
+		}
 
 		// Load chain
 		chainPathAbs, err := filepath.Abs(chainPath)
@@ -155,12 +158,22 @@ Examples:
 
 		// Set timeout
 		timeout, _ := flags.GetDuration("timeout")
-		execCtx, cancel := context.WithTimeout(execCtx, timeout)
-		defer cancel()
+		timeoutCtx, timeoutCancel := context.WithTimeout(execCtx, timeout)
+		defer timeoutCancel()
 
 		// Use signal.NotifyContext so the goroutine is cleaned up automatically
 		// when the command returns, instead of leaking a blocked goroutine.
-		execCtx, cancel = signal.NotifyContext(execCtx, syscall.SIGINT, syscall.SIGTERM)
+		execCtx, stop := signal.NotifyContext(timeoutCtx, syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		effectiveThink, err := flags.GetBool("think")
+		if err != nil {
+			return fmt.Errorf("failed to get think flag: %w", err)
+		}
+		stopTaskEvents := startCLITaskEventStream(execCtx, engine, cmd.ErrOrStderr(), cliTaskEventRenderOptions{
+			Trace:        o.EffectiveTracing,
+			ShowThinking: effectiveThink,
+		})
+		defer stopTaskEvents()
 
 		if o.EffectiveTracing {
 			slog.Info("Executing chain", "chain", chainPathAbs, "input_type", inputTypeName)
@@ -169,24 +182,15 @@ Examples:
 		}
 
 		output, outputType, stateUnits, err := engine.TaskService.Execute(execCtx, &chain, inputVal, inputType)
-		cancel()
 		if err != nil {
-			// Gap 7: when the engine can't find any model and no default-provider
-			// is set, the root cause is almost always a missing default-provider.
-			if o.EffectiveDefaultProvider == "" &&
-				(strings.Contains(err.Error(), "no models found") ||
-					strings.Contains(err.Error(), "model name cannot be empty") ||
-					strings.Contains(err.Error(), "client resolution failed")) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "")
-				fmt.Fprintln(cmd.ErrOrStderr(), "Hint: default-provider is not set. If you are using Gemini or OpenAI, run:")
-				fmt.Fprintln(cmd.ErrOrStderr(), "  contenox config set default-provider <ollama|gemini|openai>")
+			if isModelResolverFailure(err) {
+				PrintSetupIssues(cmd.ErrOrStderr(), engine.SetupCheck)
 			}
 			return fmt.Errorf("chain execution failed: %w", err)
 		}
 
 		effectiveRaw, _ := flags.GetBool("raw")
 		effectiveSteps, _ := flags.GetBool("steps")
-		effectiveThink, _ := flags.GetBool("think")
 		if effectiveThink {
 			if hist, ok := output.(taskengine.ChatHistory); ok {
 				for _, msg := range hist.Messages {
@@ -229,24 +233,22 @@ func resolveRunInput(cmd *cobra.Command, args []string) (string, error) {
 		argsInput := strings.Join(args, " ")
 		// If stdin is also piped, combine: args = instruction, stdin = data.
 		// e.g. git diff | contenox run "suggest a commit message"
-		if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-			data, err := io.ReadAll(io.LimitReader(os.Stdin, 50<<20)) // cap at 50 MB
-			if err != nil {
-				return "", fmt.Errorf("failed to read from stdin: %w", err)
-			}
-			if len(strings.TrimSpace(string(data))) > 0 {
-				return argsInput + "\n\n" + string(data), nil
-			}
+		data, ok, err := readStdinIfAvailable(maxCLIStdinBytes)
+		if err != nil {
+			return "", err
+		}
+		if ok && len(strings.TrimSpace(data)) > 0 {
+			return argsInput + "\n\n" + data, nil
 		}
 		return argsInput, nil
 	}
 
-	if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-		data, err := io.ReadAll(io.LimitReader(os.Stdin, 50<<20)) // cap at 50 MB
-		if err != nil {
-			return "", fmt.Errorf("failed to read from stdin: %w", err)
-		}
-		return string(data), nil
+	data, ok, err := readStdinIfAvailable(maxCLIStdinBytes)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return data, nil
 	}
 
 	return "", nil
@@ -331,16 +333,16 @@ func buildRunOpts(cmd *cobra.Command, db libdbexec.DBManager, contenoxDir string
 	effectiveLocalExecAllowedDir, _ := flags.GetString("local-exec-allowed-dir")
 
 	return chatOpts{
-		EffectiveDB:                       "", // resolved separately in RunE
-		EffectiveChain:                    "", // unused — run loads chain directly
-		EffectiveContext:                  effectiveContext,
-		EffectiveDefaultModel:             effectiveModel,
-		EffectiveDefaultProvider:          effectiveDefaultProvider,
-		EffectiveNoDeleteModels:           true,
-		EffectiveEnableLocalExec:          effectiveEnableLocalExec,
-		EffectiveLocalExecAllowedDir:      effectiveLocalExecAllowedDir,
-		EffectiveTracing:                  effectiveTracing,
-		ContenoxDir:                       contenoxDir,
+		EffectiveDB:                  "", // resolved separately in RunE
+		EffectiveChain:               "", // unused — run loads chain directly
+		EffectiveContext:             effectiveContext,
+		EffectiveDefaultModel:        effectiveModel,
+		EffectiveDefaultProvider:     effectiveDefaultProvider,
+		EffectiveNoDeleteModels:      true,
+		EffectiveEnableLocalExec:     effectiveEnableLocalExec,
+		EffectiveLocalExecAllowedDir: effectiveLocalExecAllowedDir,
+		EffectiveTracing:             effectiveTracing,
+		ContenoxDir:                  contenoxDir,
 	}
 }
 

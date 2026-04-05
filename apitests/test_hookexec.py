@@ -1,8 +1,7 @@
 import requests
-from helpers import assert_status_code
+from helpers import assert_status_code, hook_mock_endpoint_url
 import uuid
 import json
-from urllib.parse import urlparse
 
 
 def check_openapi_request(request):
@@ -90,8 +89,7 @@ def test_hook_task_in_chain(
 
     # Create a remote hook
     hook_name = f"test-hook-{uuid.uuid4().hex[:8]}"
-    parsed_mock_url = urlparse(mock_server["url"])
-    endpoint = f"http://host.docker.internal:{parsed_mock_url.port}{mock_server['base_path']}"
+    endpoint = hook_mock_endpoint_url(mock_server["url"], mock_server["base_path"])
 
     create_response = requests.post(
         f"{base_url}/hooks/remote",

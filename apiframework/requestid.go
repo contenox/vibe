@@ -16,6 +16,7 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 			requestID = uuid.New().String()
 		}
 
+		w.Header().Set("X-Request-ID", requestID)
 		ctx := context.WithValue(r.Context(), libtracker.ContextKeyRequestID, requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

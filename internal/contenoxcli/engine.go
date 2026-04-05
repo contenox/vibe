@@ -2,21 +2,19 @@ package contenoxcli
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
+	"strings"
 
-	"github.com/contenox/contenox/eventsourceservice"
 	"github.com/contenox/contenox/execservice"
-	"github.com/contenox/contenox/executor"
-	"github.com/contenox/contenox/functionservice"
-	"github.com/contenox/contenox/internal/eventdispatch"
 	"github.com/contenox/contenox/internal/hooks"
 	"github.com/contenox/contenox/internal/llmrepo"
 	"github.com/contenox/contenox/internal/ollamatokenizer"
 	"github.com/contenox/contenox/internal/runtimestate"
-	"github.com/contenox/contenox/jseval"
+	"github.com/contenox/contenox/internal/setupcheck"
 	libbus "github.com/contenox/contenox/libbus"
 	"github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libkvstore"
@@ -24,18 +22,20 @@ import (
 	"github.com/contenox/contenox/localhooks"
 	"github.com/contenox/contenox/mcpworker"
 	"github.com/contenox/contenox/runtimetypes"
-	"github.com/contenox/contenox/taskchainservice"
+	"github.com/contenox/contenox/stateservice"
 	"github.com/contenox/contenox/taskengine"
 )
 
 type Engine struct {
 	TaskService execservice.TasksEnvService
 	Tracker     libtracker.ActivityTracker
-	JSEnv       *jseval.Env
 	Stop        func()
+	Bus         libbus.Messenger
 	MCPManager  *mcpworker.Manager
 	// LocalHooks lists the names of all registered local hook handlers.
 	LocalHooks []string
+	// SetupCheck is the last SetupStatus evaluation after RunBackendCycle (for resolver-failure hints).
+	SetupCheck setupcheck.Result
 }
 
 // BuildEngine scaffolds the complex dependency graph needed to run task chains.
@@ -61,7 +61,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	engine := &Engine{Stop: func() {
 		engineCancel() // signal all goroutines to stop
 		bus.Close()
-	}}
+	}, Bus: bus}
 
 	// Runtime state — always enable auto-discover for the CLI so users don't
 	// need to run 'model add' before using Ollama, OpenAI or vLLM models.
@@ -75,7 +75,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	// Wire the SQLite-backed KV store so the provider model-list cache (Gemini/OpenAI)
 	// survives across CLI invocations.
 	kvMgr := libkvstore.NewSQLiteManager(db)
-	stateOpts = append(stateOpts, runtimestate.WithKVStore(kvMgr))
+	stateOpts = append(stateOpts, runtimestate.WithKVStore(kvMgr), runtimestate.WithAutoDiscoverModels())
 	state, err := runtimestate.New(engineCtx, db, bus, stateOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime state: %w", err)
@@ -98,7 +98,8 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		return nil, fmt.Errorf("failed to init chat executor: %w", err)
 	}
 
-	// 4b. Ensure the default model is registered in the local tenant.
+	// 4b. Keep an internal row for the effective default model so bootstrap groups
+	// and local overrides keep working, even though OSS no longer exposes model CRUD.
 	specs := []runtimestate.ExtraModelSpec{
 		{
 			Name:          opts.EffectiveDefaultModel,
@@ -116,11 +117,13 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 
 	// 5. Backends are already in SQLite from `contenox backend add`; just run the sync cycle.
 	// 6. Run backend cycle
-	if opts.EffectiveTracing {
-		slog.Info("Running backend cycle to sync models...")
-	}
-	if err := state.RunBackendCycle(ctx); err != nil {
-		slog.Warn("Backend cycle encountered errors", "error", err)
+	if !opts.EffectiveSkipBackendCycle {
+		if opts.EffectiveTracing {
+			slog.Info("Running backend cycle to sync models...")
+		}
+		if err := state.RunBackendCycle(ctx); err != nil {
+			slog.Warn("Backend cycle encountered errors", "error", err)
+		}
 	}
 	rt := state.Get(ctx)
 	anyReachable := false
@@ -135,6 +138,14 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	}
 	if !anyReachable && opts.EffectiveTracing {
 		slog.Warn("No reachable backends – subsequent model operations may fail")
+	}
+
+	ss := stateservice.New(state, db)
+	res, err := ss.SetupStatus(ctx)
+	if err != nil {
+		slog.Debug("setup status failed", "error", err)
+	} else {
+		engine.SetupCheck = res
 	}
 
 	// 7. Tokenizer and model manager
@@ -155,19 +166,16 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	}
 
 	// 8. Local hooks
-	jsEnv := jseval.NewEnv(tracker, jseval.BuiltinHandlers{}, jseval.DefaultBuiltins())
 	localHooks := map[string]taskengine.HookRepo{
-		"echo":         localhooks.NewEchoHook(),
-		"print":        localhooks.NewPrint(tracker),
-		"webhook":      localhooks.NewWebCaller(),
-		"js_execution": localhooks.NewJSSandboxHook(jsEnv, tracker),
-		"local_fs":     localhooks.NewLocalFSHook(opts.EffectiveLocalExecAllowedDir),
+		"echo":     localhooks.NewEchoHook(),
+		"print":    localhooks.NewPrint(tracker),
+		"webhook":  localhooks.NewWebCaller(),
+		"local_fs": localhooks.NewLocalFSHook(opts.EffectiveLocalExecAllowedDir),
 	}
 	jsHooks := map[string]taskengine.HookRepo{
-		"echo":         localhooks.NewEchoHook(),
-		"print":        localhooks.NewPrint(tracker),
-		"webhook":      localhooks.NewWebCaller(),
-		"js_execution": localhooks.NewJSSandboxHook(jsEnv, tracker),
+		"echo":    localhooks.NewEchoHook(),
+		"print":   localhooks.NewPrint(tracker),
+		"webhook": localhooks.NewWebCaller(),
 	}
 	if sshHook, err := localhooks.NewSSHHook(); err != nil {
 		slog.Debug("SSH hook not registered", "error", err)
@@ -182,29 +190,6 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		localExecHook := localhooks.NewLocalExecHook(hookOpts...)
 		jsHooks["local_shell"] = localExecHook
 		localHooks["local_shell"] = localExecHook
-	}
-	// Wrap mutating local hooks with the HITL approval gate when the vibe TUI
-	// wants interactive confirmation before every file write or shell command.
-	if opts.AskApproval != nil {
-		wrap := func(inner taskengine.HookRepo, tools map[string]bool) taskengine.HookRepo {
-			return &localhooks.HITLWrapper{
-				Inner:          inner,
-				Ask:            opts.AskApproval,
-				RequireApprove: tools,
-			}
-		}
-		if h, ok := localHooks["local_fs"]; ok {
-			localHooks["local_fs"] = wrap(h, map[string]bool{
-				"write_file": true,
-				"sed":        true,
-			})
-		}
-		if h, ok := localHooks["local_shell"]; ok {
-			localHooks["local_shell"] = wrap(h, map[string]bool{
-				"local_shell": true,
-			})
-			jsHooks["local_shell"] = localHooks["local_shell"]
-		}
 	}
 	// Start mcpworker.Manager — loads MCP servers from SQLite and serves them
 	// via the SQLite bus. This is the same code path as the runtime-API (which uses NATS).
@@ -223,14 +208,14 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		engine.LocalHooks = append(engine.LocalHooks, name)
 	}
 	hookRepo := hooks.NewPersistentRepo(localHooks, db, http.DefaultClient, bus)
-	jsHookRepo := hooks.NewSimpleProvider(jsHooks)
 
 	// 9. Task engine
-	exec, err := taskengine.NewExec(engineCtx, repo, hookRepo, tracker)
+	taskEngineCtx := taskengine.WithTaskEventSink(engineCtx, taskengine.NewBusTaskEventSink(bus))
+	exec, err := taskengine.NewExec(taskEngineCtx, repo, hookRepo, tracker)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create task executor: %w", err)
 	}
-	envExec, err := taskengine.NewEnv(engineCtx, tracker, exec, taskengine.NewSimpleInspector(), hookRepo)
+	envExec, err := taskengine.NewEnv(taskEngineCtx, tracker, exec, taskengine.NewSimpleInspector(), hookRepo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create environment executor: %w", err)
 	}
@@ -239,59 +224,60 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		return nil, fmt.Errorf("failed to create macro environment: %w", err)
 	}
 	taskService := execservice.NewTasksEnv(engineCtx, envExec, hookRepo)
-	// Register plan_manager after taskService is built.
-	// PersistentRepo holds localHooks by map reference, so this addition is
-	// visible to hookRepo and all callers going forward.
-	if opts.PlannerChain != nil && opts.ExecutorChain != nil {
-		planHook := localhooks.NewPlanManagerHook(
-			db, opts.PlannerChain, opts.ExecutorChain, taskService, opts.ContenoxDir,
-		)
-		if opts.AskApproval != nil {
-			planHook = &localhooks.HITLWrapper{
-				Inner: planHook,
-				Ask:   opts.AskApproval,
-				RequireApprove: map[string]bool{
-					"run_next_step": true,
-				},
-			}
-		}
-		localHooks["plan_manager"] = planHook
-		engine.LocalHooks = append(engine.LocalHooks, "plan_manager")
-	}
-	execSvc := execservice.NewExec(engineCtx, repo)
-	chainSvc := taskchainservice.New(db)
-	functionSvc := functionservice.New(db)
-	gojaExec := executor.NewGojaExecutor(tracker, functionSvc)
-	dispatcher, err := eventdispatch.New(engineCtx, functionSvc, func(ctx context.Context, err error) {
-		slog.ErrorContext(ctx, "event dispatch error", "error", err)
-	}, time.Second, gojaExec, tracker)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create event dispatcher: %w", err)
-	}
-	_ = dispatcher
-	eventsource := eventsourceservice.NewNoopService()
-	gojaExec.AddBuildInServices(eventsource, execSvc, chainSvc, taskService, jsHookRepo)
-	gojaExec.StartSync(engineCtx, time.Second*3)
-
-	jsEnv.SetBuiltinHandlers(jseval.BuiltinHandlers{
-		Eventsource:          eventsource,
-		TaskService:          execSvc,
-		TaskchainService:     chainSvc,
-		TaskchainExecService: taskService,
-		FunctionService:      functionSvc,
-		HookRepo:             jsHookRepo,
-	})
 
 	engine.TaskService = taskService
 	engine.Tracker = tracker
-	engine.JSEnv = jsEnv
 
 	oldStop := engine.Stop
 	engine.Stop = func() {
-		gojaExec.StopSync()
 		mgr.StopAll() // terminates all stdio MCP child processes
 		oldStop()
 	}
 	success = true
 	return engine, nil
+}
+
+var errTaskEventsRequireRequestID = errors.New("request id is required for task event subscriptions")
+
+// WatchTaskEvents subscribes to request-scoped taskengine events and decodes them
+// into structured TaskEvent values for CLI consumers.
+func (e *Engine) WatchTaskEvents(ctx context.Context, requestID string, ch chan<- taskengine.TaskEvent) (libbus.Subscription, error) {
+	if e == nil || e.Bus == nil {
+		return nil, fmt.Errorf("task event bus unavailable")
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil, errTaskEventsRequireRequestID
+	}
+
+	rawCh := make(chan []byte, 32)
+	sub, err := e.Bus.Stream(ctx, taskengine.TaskEventRequestSubject(requestID), rawCh)
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case payload, ok := <-rawCh:
+				if !ok {
+					return
+				}
+				var event taskengine.TaskEvent
+				if err := json.Unmarshal(payload, &event); err != nil {
+					slog.Warn("failed to decode task event", "error", err)
+					continue
+				}
+				select {
+				case ch <- event:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return sub, nil
 }

@@ -60,7 +60,6 @@ func InitSchema(ctx context.Context, exec libdbexec.Exec) error {
 		return err
 	}
 
-	// Fix 5: FK constraints ensure referential integrity (idempotent via IF NOT EXISTS guard).
 	// vfs_filestree.id → vfs_files.id   (CASCADE: delete file record removes tree entry)
 	// vfs_files.blobs_id → vfs_blobs.id (SET NULL: deleting a blob marks file as blob-less)
 	_, err = exec.ExecContext(ctx, `

@@ -118,11 +118,11 @@ func openHookService(cmd *cobra.Command) (libdb.DBManager, hookproviderservice.S
 		return nil, nil, fmt.Errorf("invalid database path: %w", err)
 	}
 	ctx := libtracker.WithNewRequestID(context.Background())
-	db, err := openDBAt(ctx, dbPath)
+	db, err := OpenDBAt(ctx, dbPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	return db, hookproviderservice.New(db, nil), nil
+	return db, hookproviderservice.New(db, nil, nil), nil
 }
 
 // parseHeaders parses a []string of "Key: Value" into a map[string]string.

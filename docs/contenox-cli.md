@@ -1,6 +1,6 @@
 # Contenox CLI
 
-**Contenox CLI** is the local CLI layer over the Contenox task engine. It runs without Postgres, NATS, or a tokenizer service — just SQLite and an in-memory bus. Point it at Ollama, OpenAI, vLLM, or Gemini, and run AI workflows from the terminal: interactive chat, multi-step autonomous plans, or arbitrary chain pipelines.
+**Contenox CLI** is the local CLI layer over the Contenox task engine. It runs without Postgres, NATS, or a tokenizer service — just SQLite and an in-memory bus. Point it at local Ollama, Ollama Cloud, OpenAI, vLLM, or Gemini, and run AI workflows from the terminal: interactive chat, multi-step autonomous plans, or arbitrary chain pipelines.
 
 ---
 
@@ -18,24 +18,38 @@ go build -o contenox ./cmd/contenox
 contenox init
 ```
 
-**Requirements:** Ollama running (`ollama serve`) and a model that supports tool calling:
+**Requirements (quickest local path):** Ollama running (`ollama serve`) and a model that supports tool calling:
+
 ```bash
 ollama pull qwen2.5:7b
 ```
+
+For hosted providers instead, use `contenox backend add ...` with `--api-key-env` as shown below. For Ollama Cloud, set `--url https://ollama.com/api --api-key-env OLLAMA_API_KEY`.
 
 ---
 
 ## Subcommands
 
-### `contenox` / `contenox chat` — interactive chat
+### Bare `contenox …` — stateless run (injected `run`)
+
+When the first argument is **not** a reserved subcommand (`chat`, `init`, `run`, `plan`, …), the CLI prepends `run`. That is the same as `contenox run …`: **no chat session**; input is passed to the **default run chain** if present.
+
+- Chain file: `<resolved .contenox>/default-run-chain.json`, where `.contenox` is discovered by walking up from the current directory (see `contenox run --help`). Override with `--chain`.
+- Global settings and backends still live in `~/.contenox/local.db`; chain JSON files are project-local under `.contenox/`.
 
 ```bash
-contenox "what is the current directory?"
+contenox "what is the current directory?"   # → contenox run … when no subcommand
 contenox --input "explain this error" < build.log
 echo "summarise this" | contenox
 ```
 
-Input comes from positional args, `--input`, or stdin (in that order of priority). The result is printed to stdout. Uses `.contenox/default-chain.json` by default; override with `--chain`.
+### `contenox chat` — interactive chat (session history)
+
+```bash
+contenox chat "hello"
+```
+
+Input comes from positional args, `--input`, or stdin. History is stored in SQLite. Uses the configured default chain (KV `default-chain` or `.contenox/default-chain.json`); override with `--chain`.
 
 ---
 
@@ -72,103 +86,22 @@ Plan names are derived from the goal text (`fix-auth-token-expiry-a3f9e12b`), so
 
 ---
 
-### `contenox vibe` — interactive TUI
+### `contenox beam` — web UI and HTTP API
 
-A full terminal UI: chat on the left, plan sidebar on the right. Everything `contenox chat` and `contenox plan` can do is available as a slash command — no context-switching required.
+Starts the Contenox runtime as an HTTP server and serves the **Beam** React app in the browser. Configuration uses the same environment variables as the standalone server (see server docs). Use `--tenant` to set the tenant ID.
 
 ```bash
-contenox vibe
+contenox beam
+contenox beam --tenant 96ed1c59-ffc1-4545-b3c3-191079c68d79
 ```
 
-The sidebar tracks the active plan live. The step currently executing shows `⟳`; completed steps show `✓` or `✗`. Use `Ctrl+B` to cycle sidebar width; `Ctrl+C` to quit.
-
-**Chat and shell**
-
-```
-hey, what's in this repo?          ← plain text = chat (same session as contenox chat)
-$ git log --oneline -10            ← $ prefix = shell; stdout injected into LLM context
-```
-
-**Plan workflow**
-
-```
-/plan new "add prometheus metrics to the HTTP server"
-/plan next                          ← execute one step, inspect result
-/plan step 3                        ← show the full output recorded for step 3
-/plan next --auto                   ← run to completion (careful)
-/plan retry 3                       ← reset step 3 to pending
-/plan skip 2                        ← mark step 2 skipped and move on
-/plan replan                        ← regenerate remaining steps with the LLM
-/plan list                          ← all plans (* = active)
-/plan show                          ← active plan steps and statuses in the log
-/plan delete what-is-this-repo-...  ← remove a plan
-/plan clean                         ← remove all completed plans
-```
-
-**Models and config — same handlers as the CLI, no duplication**
-
-```
-/model list                         ← all registered models across all backends
-/model add gpt-5-mini               ← declare a model (resolved by backend sync)
-/model remove gpt-5-mini
-/model set-context gpt-5-mini --context 128k   ← override stored context window
-/config list                        ← all persistent config keys
-/config get default-model
-/config set default-model qwen2.5:7b
-```
-
-**Run any chain statelessly**
-
-```
-/run --chain .contenox/review.json diff.txt
-```
-
-**Sessions**
-
-```
-/session list                       ← all sessions (* = active)
-/session new [name]                 ← create a new session (auto-named if no name given)
-/session switch <name>              ← switch the active session
-/session delete <name>              ← delete a session and its history
-/session show                       ← current session ID + message count
-```
-
-**Backends, hooks, MCP**
-
-```
-/backend list                       ← list registered backends
-/backend show <name>                ← show backend details
-/backend add <name> --type <ollama|openai|gemini|vllm> [--url <url>] [--api-key-env <env>]
-/backend remove <name>
-
-/hook list                          ← list registered remote hooks + tool count
-/hook show <name>                   ← hook details and live tool list
-/hook add <name> --url <url> [--timeout <ms>] [--header <h>] [--inject <k=v>]
-/hook remove <name>
-/hook update <name> [--timeout <ms>] [--header <h>] [--inject <k=v>]
-
-/mcp list                           ← list registered MCP servers
-/mcp show <name>                    ← MCP server config and tools
-/mcp add <name> --transport <stdio|sse|http> [--url <url>] [--command <cmd>] [--args <a,b>]
-/mcp remove <name>
-/mcp update <name> [--inject <k=v>] [--header <h>]
-/mcp                                ← refresh MCP worker list in sidebar
-```
-
-**Utility**
-
-```
-/clear                              ← wipe the viewport log
-/help                               ← full command reference
-```
-
-> The TUI uses the exact same cobra command handlers as the CLI — `/model list`, `/config get`, `/session list`, `/backend list` etc. all call the same code as their CLI counterparts, with output captured into the viewport.
+For terminal-only workflows, use `contenox chat`, `contenox plan`, and `contenox run` as documented below.
 
 ---
 
 ### `contenox run` — run any chain, any input type
 
-For scripting and pipeline use cases where you want full control:
+For scripting and pipeline use cases where you want full control. **`--chain` is optional** if `<resolved .contenox>/default-run-chain.json` exists (same discovery as a bare `contenox` invocation).
 
 ```bash
 # String input (default)
@@ -214,12 +147,14 @@ contenox hook show nws
 ```
 
 Run a query using the included example chain:
+
 ```bash
 contenox run --chain .contenox/chain-nws.json --input-type chat \
   "how many active weather alerts are there right now?"
 ```
 
 Manage hooks:
+
 ```bash
 contenox hook list                                    # NAME  URL  TIMEOUT
 contenox hook update nws --timeout 30000              # update timeout
@@ -228,6 +163,7 @@ contenox hook remove nws                              # remove
 ```
 
 **Use in any chain** — reference by name in `execute_config.hooks`:
+
 ```json
 "execute_config": {
   "model": "qwen2.5:7b",
@@ -238,13 +174,13 @@ contenox hook remove nws                              # remove
 
 The `hooks` array is an **allowlist** with pattern support:
 
-| Value | Meaning |
-|---|---|
-| field absent (`null`) | All registered hooks (backward compat default) |
-| `[]` | No hooks exposed to the model |
-| `["*"]` | All registered hooks (explicit) |
-| `["nws", "local_shell"]` | Only the named hooks |
-| `["*", "!plan_manager"]` | All except `plan_manager` |
+| Value                    | Meaning                                        |
+| ------------------------ | ---------------------------------------------- |
+| field absent (`null`)    | All registered hooks (backward compat default) |
+| `[]`                     | No hooks exposed to the model                  |
+| `["*"]`                  | All registered hooks (explicit)                |
+| `["nws", "local_shell"]` | Only the named hooks                           |
+| `["*", "!plan_manager"]` | All except `plan_manager`                      |
 
 Unknown names in an exact list are silently ignored (e.g. if `local_shell` is disabled the chain still runs).
 
@@ -263,6 +199,7 @@ No YAML file — use CLI commands to register backends and set defaults.
 
 ```bash
 contenox backend add local   --type ollama
+contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
 contenox backend add openai  --type openai  --api-key-env OPENAI_API_KEY
 contenox backend add gemini  --type gemini  --api-key-env GEMINI_API_KEY
 contenox backend add myvllm --type vllm    --url http://gpu-host:8000
@@ -275,6 +212,7 @@ contenox backend remove myvllm
 ### Set persistent defaults
 
 ```bash
+contenox model list                         # confirm the runtime can see a model first
 contenox config set default-model    qwen2.5:7b
 contenox config set default-provider ollama
 contenox config set default-chain    .contenox/default-chain.json
@@ -284,23 +222,19 @@ contenox config list   # review current settings
 
 ### Supported backends
 
-| `--type` | Provider | Notes |
-|----------|----------|-------|
-| `ollama` | Ollama   | Local. Run `ollama serve` first. |
-| `openai` | OpenAI   | Use `--api-key-env OPENAI_API_KEY` |
-| `vllm`   | vLLM     | Self-hosted OpenAI-compatible endpoint, requires `--url` |
-| `gemini` | Gemini   | Use `--api-key-env GEMINI_API_KEY` |
+| `--type` | Provider | Notes                                                                                                     |
+| -------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `ollama` | Ollama   | Local: run `ollama serve` first. Hosted: use `--url https://ollama.com/api --api-key-env OLLAMA_API_KEY`. |
+| `openai` | OpenAI   | Use `--api-key-env OPENAI_API_KEY`                                                                        |
+| `vllm`   | vLLM     | Self-hosted OpenAI-compatible endpoint, requires `--url`                                                  |
+| `gemini` | Gemini   | Use `--api-key-env GEMINI_API_KEY`                                                                        |
 
 ### Model management
 
 ```bash
-contenox model list                              # query live backends
-contenox model list --declared                   # show DB-declared models only
+contenox model list                              # query live backends (runtime-observed inventory)
 
-contenox model add gpt-5-mini                    # declare a model
-contenox model remove qwen2.5:7b                 # remove a declared model
-
-# Override the context window for a model.
+# Store a local context override for a model that already has a local row.
 # Accepts a bare integer or a k/m shorthand (case-insensitive):
 #   k = ×1 000  →  12k = 12 000
 #   m = ×1 000 000  →  1m = 1 000 000
@@ -309,20 +243,24 @@ contenox model set-context gemini-3.1-pro-preview --context 1m
 contenox model set-context qwen2.5:7b             --context 32k
 ```
 
+OSS no longer exposes model CRUD. The runtime discovers models from registered backends; use
+`contenox backend add ...`, provider configuration, and `contenox model list` to manage what is available.
+
 ### Global flags reference
 
-| Flag | Purpose |
-|-----|---------|
-| `--chain` | Path to chain JSON (overrides `config default-chain`) |
-| `--db` | SQLite path (default: `.contenox/local.db`) |
-| `--provider` | Provider type override |
-| `--model` | Model name override |
-| `--context` | Context length in tokens — bare int or shorthand (`12k`, `128k`, `1m`) |
-| `--shell` | Enable `local_shell` hook (opt-in; policy is set in the chain, not here) |
-| `--local-exec-allowed-dir` | Restrict `local_fs` to this directory |
-| `--trace` | Emit structured operation telemetry to stderr |
-| `--steps` | Print execution steps after result |
-| `--raw` | Print full output instead of last assistant message |
+| Flag                       | Purpose                                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------ |
+| `--chain`                  | Path to chain JSON (overrides `config default-chain`)                                            |
+| `--db`                     | SQLite path (default: `.contenox/local.db`)                                                      |
+| `--data-dir`               | Override the `.contenox` data directory (skips walk-up search; DB defaults to `<path>/local.db`) |
+| `--provider`               | Provider type override                                                                           |
+| `--model`                  | Model name override                                                                              |
+| `--context`                | Context length in tokens — bare int or shorthand (`12k`, `128k`, `1m`)                           |
+| `--shell`                  | Enable `local_shell` hook (opt-in; policy is set in the chain, not here)                         |
+| `--local-exec-allowed-dir` | Restrict `local_fs` to this directory                                                            |
+| `--trace`                  | Emit structured operation telemetry to stderr                                                    |
+| `--steps`                  | Print execution steps after result                                                               |
+| `--raw`                    | Print full output instead of last assistant message                                              |
 
 ---
 
@@ -338,6 +276,7 @@ contenox plan next --shell
 ```
 
 The default chains (`default-chain.json`, `default-run-chain.json`) ship with a sensible baseline:
+
 - **Allowed:** `ls`, `cat`, `echo`, `git`, `go`, `python3`, `node`, `npm`, `make`, `cargo`, `curl`, `wget`, `jq`, and common read-only tools
 - **Denied:** `sudo`, `su`, `dd`, `mkfs`, `fdisk`, `parted`, `shred`
 
@@ -363,12 +302,12 @@ When `--shell` is not passed, the `local_shell` hook is simply not registered �
 
 ## Output and flags
 
-| Flag | Effect |
-|------|--------|
-| *(default)* | Quiet: "Thinking…" on stderr while running, result on stdout |
-| `--trace` | Structured operation telemetry on stderr (op_id, duration, model selected, etc.) |
-| `--steps` | Print task list with handler and duration after the result |
-| `--raw` | Print the full output value (e.g. full chat history JSON) |
+| Flag        | Effect                                                                           |
+| ----------- | -------------------------------------------------------------------------------- |
+| _(default)_ | Quiet: "Thinking…" on stderr while running, result on stdout                     |
+| `--trace`   | Structured operation telemetry on stderr (op_id, duration, model selected, etc.) |
+| `--steps`   | Print task list with handler and duration after the result                       |
+| `--raw`     | Print the full output value (e.g. full chat history JSON)                        |
 
 ---
 
@@ -380,17 +319,17 @@ Chains are JSON files that define the LLM workflow: which model, which hooks, ho
 
 Chain fields like `system_instruction` and `prompt_template` support macros expanded before execution:
 
-| Macro | Expands to |
-|-------|-----------|
-| `{{var:model}}` | Current model name |
-| `{{var:provider}}` | Current provider name |
-| `{{var:chain}}` | Chain ID |
-| `{{var:NAME}}` | Value from `template_vars_from_env` config (contenox only) |
-| `{{now}}` / `{{now:layout}}` | Current time |
-| `{{chain:id}}` | Chain ID (same as `{{var:chain}}`) |
-| `{{hookservice:list}}` | All **allowed** hooks + tools as JSON, filtered by this task's `hooks` allowlist |
-| `{{hookservice:hooks}}` | Allowed hook names only |
-| `{{hookservice:tools <hook>}}` | Tool names for a specific hook (empty if hook not in allowlist) |
+| Macro                          | Expands to                                                                       |
+| ------------------------------ | -------------------------------------------------------------------------------- |
+| `{{var:model}}`                | Current model name                                                               |
+| `{{var:provider}}`             | Current provider name                                                            |
+| `{{var:chain}}`                | Chain ID                                                                         |
+| `{{var:NAME}}`                 | Value from `template_vars_from_env` config (contenox only)                       |
+| `{{now}}` / `{{now:layout}}`   | Current time                                                                     |
+| `{{chain:id}}`                 | Chain ID (same as `{{var:chain}}`)                                               |
+| `{{hookservice:list}}`         | All **allowed** hooks + tools as JSON, filtered by this task's `hooks` allowlist |
+| `{{hookservice:hooks}}`        | Allowed hook names only                                                          |
+| `{{hookservice:tools <hook>}}` | Tool names for a specific hook (empty if hook not in allowlist)                  |
 
 ### `--chain` and `contenox plan`
 
@@ -403,6 +342,19 @@ Chain fields like `system_instruction` and `prompt_template` support macros expa
 ```bash
 git clone https://github.com/contenox/contenox.git
 cd contenox
-go build -o contenox ./cmd/contenox
+make build-contenox
+# binary: ./bin/contenox
 contenox init
 ```
+
+The release version string is **`apiframework/version.txt`**, embedded at compile time through `apiframework.GetVersion()` and shown in `contenox --help`, `contenox --version`, and the root command `Short` line. Optional link-time override: `-ldflags "-X github.com/contenox/contenox/internal/contenoxcli.Version=…"`.
+
+### Check that CLI help still works
+
+After changing Cobra commands or flags, run:
+
+```bash
+make verify-cli-help
+```
+
+This rebuilds the binary and smoke-tests `contenox <command> --help` for each primary subcommand. If you maintain a second copy of this reference elsewhere, keep behavior descriptions aligned when you change defaults or chain resolution.

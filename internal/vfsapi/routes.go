@@ -9,10 +9,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
+	"strings"
 	"time"
 
-	serverops "github.com/contenox/contenox/apiframework"
+	apiframework "github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/vfsservice"
 )
 
@@ -35,11 +37,13 @@ func AddRoutes(mux *http.ServeMux, fileService vfsservice.Service) {
 	mux.HandleFunc("DELETE /files/{id}", f.deleteFile)     // Delete a file
 	mux.HandleFunc("GET /files/{id}/download", f.download) // Download file content
 	mux.HandleFunc("PUT /files/{id}/name", f.renameFile)   // Rename a file
+	mux.HandleFunc("PUT /files/{id}/path", f.renameFile)   // UI-compat alias
 	mux.HandleFunc("PUT /files/{id}/move", f.moveFile)     // Move a file
 
 	// Folder operations
 	mux.HandleFunc("POST /folders", f.createFolder)          // Create a new folder
 	mux.HandleFunc("PUT /folders/{id}/name", f.renameFolder) // Rename a folder
+	mux.HandleFunc("PUT /folders/{id}/path", f.renameFolder) // UI-compat alias
 	mux.HandleFunc("DELETE /folders/{id}", f.deleteFolder)   // Delete a folder
 	mux.HandleFunc("PUT /folders/{id}/move", f.moveFolder)   // Move a folder
 
@@ -75,6 +79,7 @@ type FolderResponse struct {
 // nameUpdateRequest is used for rename operations.
 type nameUpdateRequest struct {
 	Name string `json:"name" example:"new-name.txt"`
+	Path string `json:"path,omitempty" example:"new-name.txt"`
 }
 
 // moveRequest is used for move operations.
@@ -85,6 +90,7 @@ type moveRequest struct {
 // folderCreateRequest is used to create a new folder.
 type folderCreateRequest struct {
 	Name     string `json:"name" example:"New Folder"`
+	Path     string `json:"path,omitempty" example:"New Folder"`
 	ParentID string `json:"parentId,omitempty" example:"folder_root"`
 }
 
@@ -103,38 +109,38 @@ func (f *fileManager) processAndReadFileUpload(w http.ResponseWriter, r *http.Re
 	if err := r.ParseMultipartForm(multipartFormMemory); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			return nil, nil, "", "", "", fmt.Errorf("request body too large (limit %d bytes): %w", maxBytesErr.Limit, serverops.ErrFileSizeLimitExceeded)
+			return nil, nil, "", "", "", fmt.Errorf("request body too large (limit %d bytes): %w", maxBytesErr.Limit, apiframework.ErrFileSizeLimitExceeded)
 		}
 		if errors.Is(err, http.ErrNotMultipart) {
-			return nil, nil, "", "", "", fmt.Errorf("invalid request format (not multipart): %w", serverops.ErrUnprocessableEntity)
+			return nil, nil, "", "", "", fmt.Errorf("invalid request format (not multipart): %w", apiframework.ErrUnprocessableEntity)
 		}
-		return nil, nil, "", "", "", fmt.Errorf("failed to parse multipart form: %w", serverops.ErrUnprocessableEntity)
+		return nil, nil, "", "", "", fmt.Errorf("failed to parse multipart form: %w", apiframework.ErrUnprocessableEntity)
 	}
 
 	filePart, header, err := r.FormFile(formFieldFile)
 	if err != nil {
 		if errors.Is(err, http.ErrMissingFile) {
-			return nil, nil, "", "", "", fmt.Errorf("missing required file field '%s': %w", formFieldFile, serverops.ErrUnprocessableEntity)
+			return nil, nil, "", "", "", fmt.Errorf("missing required file field '%s': %w", formFieldFile, apiframework.ErrUnprocessableEntity)
 		}
-		return nil, nil, "", "", "", fmt.Errorf("invalid file upload: %w", serverops.ErrUnprocessableEntity)
+		return nil, nil, "", "", "", fmt.Errorf("invalid file upload: %w", apiframework.ErrUnprocessableEntity)
 	}
 	defer filePart.Close()
 
 	if header.Size == 0 {
-		return nil, nil, "", "", "", serverops.ErrFileEmpty
+		return nil, nil, "", "", "", apiframework.ErrFileEmpty
 	}
 	if header.Size > vfsservice.MaxUploadSize {
-		return nil, nil, "", "", "", serverops.ErrFileSizeLimitExceeded
+		return nil, nil, "", "", "", apiframework.ErrFileSizeLimitExceeded
 	}
 
 	limitedReader := io.LimitReader(filePart, vfsservice.MaxUploadSize+1)
 	fileData, err = io.ReadAll(limitedReader)
 	if err != nil {
-		return nil, nil, "", "", "", fmt.Errorf("failed to read file content: %w", serverops.ErrUnprocessableEntity)
+		return nil, nil, "", "", "", fmt.Errorf("failed to read file content: %w", apiframework.ErrUnprocessableEntity)
 	}
 
 	if int64(len(fileData)) > vfsservice.MaxUploadSize {
-		return nil, nil, "", "", "", serverops.ErrFileSizeLimitExceeded
+		return nil, nil, "", "", "", apiframework.ErrFileSizeLimitExceeded
 	}
 
 	mimeType = http.DetectContentType(fileData)
@@ -156,7 +162,7 @@ func (f *fileManager) create(w http.ResponseWriter, r *http.Request) {
 
 	header, fileData, name, parentID, mimeType, err := f.processAndReadFileUpload(w, r)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.CreateOperation)
+		apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 
@@ -170,7 +176,7 @@ func (f *fileManager) create(w http.ResponseWriter, r *http.Request) {
 
 	file, err := f.service.CreateFile(ctx, &req)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.CreateOperation)
+		apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 
@@ -184,7 +190,7 @@ func (f *fileManager) create(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   file.UpdatedAt,
 	}
 
-	serverops.Encode(w, r, http.StatusCreated, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusCreated, resp) // @response vfsapi.FileResponse
 }
 
 // Retrieves metadata for a specific file.
@@ -193,15 +199,15 @@ func (f *fileManager) create(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) getMetadata(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id := serverops.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("file ID is required: %w", serverops.ErrBadPathValue), serverops.GetOperation)
+		apiframework.Error(w, r, fmt.Errorf("file ID is required: %w", apiframework.ErrBadPathValue), apiframework.GetOperation)
 		return
 	}
 
 	file, err := f.service.GetFileByID(ctx, id)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.GetOperation)
+		apiframework.Error(w, r, err, apiframework.GetOperation)
 		return
 	}
 
@@ -215,7 +221,7 @@ func (f *fileManager) getMetadata(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   file.UpdatedAt,
 	}
 
-	serverops.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
 }
 
 // Updates an existing file's content via multipart/form-data.
@@ -224,15 +230,15 @@ func (f *fileManager) getMetadata(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) update(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id := serverops.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("file ID is required: %w", serverops.ErrBadPathValue), serverops.UpdateOperation)
+		apiframework.Error(w, r, fmt.Errorf("file ID is required: %w", apiframework.ErrBadPathValue), apiframework.UpdateOperation)
 		return
 	}
 
 	header, fileData, _, parentID, mimeType, err := f.processAndReadFileUpload(w, r)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
@@ -246,7 +252,7 @@ func (f *fileManager) update(w http.ResponseWriter, r *http.Request) {
 
 	file, err := f.service.UpdateFile(ctx, &req)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
@@ -260,7 +266,7 @@ func (f *fileManager) update(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   file.UpdatedAt,
 	}
 
-	serverops.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
 }
 
 // Deletes a file from the system.
@@ -269,18 +275,18 @@ func (f *fileManager) update(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) deleteFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id := serverops.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("file ID is required: %w", serverops.ErrBadPathValue), serverops.DeleteOperation)
+		apiframework.Error(w, r, fmt.Errorf("file ID is required: %w", apiframework.ErrBadPathValue), apiframework.DeleteOperation)
 		return
 	}
 
 	if err := f.service.DeleteFile(ctx, id); err != nil {
-		serverops.Error(w, r, err, serverops.DeleteOperation)
+		apiframework.Error(w, r, err, apiframework.DeleteOperation)
 		return
 	}
 
-	serverops.Encode(w, r, http.StatusOK, map[string]string{"message": "file removed"}) // @response map[string]string
+	apiframework.Encode(w, r, http.StatusOK, apiframework.MessageResponse{Message: "file removed"}) // @response apiframework.MessageResponse
 }
 
 // Downloads the raw content of a file.
@@ -289,17 +295,17 @@ func (f *fileManager) deleteFile(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) download(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id := serverops.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("file ID is required: %w", serverops.ErrBadPathValue), serverops.GetOperation)
+		apiframework.Error(w, r, fmt.Errorf("file ID is required: %w", apiframework.ErrBadPathValue), apiframework.GetOperation)
 		return
 	}
 
-	skip := serverops.GetQueryParam(r, "skip", "false", "If 'true', skips Content-Disposition header.") // @query skip string
+	skip := apiframework.GetQueryParam(r, "skip", "false", "If 'true', skips Content-Disposition header.") // @query skip string
 
 	file, err := f.service.GetFileByID(ctx, id)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.GetOperation)
+		apiframework.Error(w, r, err, apiframework.GetOperation)
 		return
 	}
 
@@ -324,16 +330,16 @@ func (f *fileManager) download(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) listFiles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	pathFilter := serverops.GetQueryParam(r, "path", "", "Filter results by file path prefix.") // @query path string
+	pathFilter := apiframework.GetQueryParam(r, "path", "", "Filter results by file path prefix.") // @query path string
 	decodedPath, err := url.QueryUnescape(pathFilter)
 	if err != nil {
-		serverops.Error(w, r, fmt.Errorf("invalid 'path' parameter: %w", serverops.ErrUnprocessableEntity), serverops.ListOperation)
+		apiframework.Error(w, r, fmt.Errorf("invalid 'path' parameter: %w", apiframework.ErrUnprocessableEntity), apiframework.ListOperation)
 		return
 	}
 
 	files, err := f.service.GetFilesByPath(ctx, decodedPath)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.ListOperation)
+		apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
 
@@ -350,7 +356,7 @@ func (f *fileManager) listFiles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	serverops.Encode(w, r, http.StatusOK, response) // @response []vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusOK, response) // @response []vfsapi.FileResponse
 }
 
 // Creates a new folder.
@@ -359,20 +365,21 @@ func (f *fileManager) listFiles(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) createFolder(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	req, err := serverops.Decode[folderCreateRequest](r) // @request vfsapi.folderCreateRequest
+	req, err := apiframework.Decode[folderCreateRequest](r) // @request vfsapi.folderCreateRequest
 	if err != nil {
-		serverops.Error(w, r, err, serverops.CreateOperation)
+		apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 
-	if req.Name == "" {
-		serverops.Error(w, r, fmt.Errorf("'name' is required: %w", serverops.ErrUnprocessableEntity), serverops.CreateOperation)
+	name := resolveName(req.Name, req.Path)
+	if name == "" {
+		apiframework.Error(w, r, fmt.Errorf("'name' is required: %w", apiframework.ErrUnprocessableEntity), apiframework.CreateOperation)
 		return
 	}
 
-	folder, err := f.service.CreateFolder(ctx, req.ParentID, req.Name)
+	folder, err := f.service.CreateFolder(ctx, req.ParentID, name)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.CreateOperation)
+		apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 
@@ -385,7 +392,7 @@ func (f *fileManager) createFolder(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: folder.UpdatedAt,
 	}
 
-	serverops.Encode(w, r, http.StatusCreated, resp) // @response vfsapi.FolderResponse
+	apiframework.Encode(w, r, http.StatusCreated, resp) // @response vfsapi.FolderResponse
 }
 
 // Renames a folder.
@@ -394,26 +401,27 @@ func (f *fileManager) createFolder(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) renameFolder(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id := serverops.GetPathParam(r, "id", "The unique identifier of the folder.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the folder.") // @param id string
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("folder ID is required: %w", serverops.ErrBadPathValue), serverops.UpdateOperation)
+		apiframework.Error(w, r, fmt.Errorf("folder ID is required: %w", apiframework.ErrBadPathValue), apiframework.UpdateOperation)
 		return
 	}
 
-	req, err := serverops.Decode[nameUpdateRequest](r) // @request vfsapi.nameUpdateRequest
+	req, err := apiframework.Decode[nameUpdateRequest](r) // @request vfsapi.nameUpdateRequest
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
-	if req.Name == "" {
-		serverops.Error(w, r, fmt.Errorf("'name' is required: %w", serverops.ErrUnprocessableEntity), serverops.UpdateOperation)
+	name := resolveName(req.Name, req.Path)
+	if name == "" {
+		apiframework.Error(w, r, fmt.Errorf("'name' is required: %w", apiframework.ErrUnprocessableEntity), apiframework.UpdateOperation)
 		return
 	}
 
-	folder, err := f.service.RenameFolder(ctx, id, req.Name)
+	folder, err := f.service.RenameFolder(ctx, id, name)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
@@ -426,7 +434,7 @@ func (f *fileManager) renameFolder(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: folder.UpdatedAt,
 	}
 
-	serverops.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FolderResponse
+	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FolderResponse
 }
 
 // Renames a file.
@@ -435,26 +443,27 @@ func (f *fileManager) renameFolder(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) renameFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id := serverops.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("file ID is required: %w", serverops.ErrBadPathValue), serverops.UpdateOperation)
+		apiframework.Error(w, r, fmt.Errorf("file ID is required: %w", apiframework.ErrBadPathValue), apiframework.UpdateOperation)
 		return
 	}
 
-	req, err := serverops.Decode[nameUpdateRequest](r) // @request vfsapi.nameUpdateRequest
+	req, err := apiframework.Decode[nameUpdateRequest](r) // @request vfsapi.nameUpdateRequest
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
-	if req.Name == "" {
-		serverops.Error(w, r, fmt.Errorf("'name' is required: %w", serverops.ErrUnprocessableEntity), serverops.UpdateOperation)
+	name := resolveName(req.Name, req.Path)
+	if name == "" {
+		apiframework.Error(w, r, fmt.Errorf("'name' is required: %w", apiframework.ErrUnprocessableEntity), apiframework.UpdateOperation)
 		return
 	}
 
-	file, err := f.service.RenameFile(ctx, id, req.Name)
+	file, err := f.service.RenameFile(ctx, id, name)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
@@ -468,7 +477,7 @@ func (f *fileManager) renameFile(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   file.UpdatedAt,
 	}
 
-	serverops.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
 }
 
 // Deletes a folder and all its contents.
@@ -477,18 +486,18 @@ func (f *fileManager) renameFile(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) deleteFolder(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id := serverops.GetPathParam(r, "id", "The unique identifier of the folder.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the folder.") // @param id string
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("folder ID is required: %w", serverops.ErrBadPathValue), serverops.DeleteOperation)
+		apiframework.Error(w, r, fmt.Errorf("folder ID is required: %w", apiframework.ErrBadPathValue), apiframework.DeleteOperation)
 		return
 	}
 
 	if err := f.service.DeleteFolder(ctx, id); err != nil {
-		serverops.Error(w, r, err, serverops.DeleteOperation)
+		apiframework.Error(w, r, err, apiframework.DeleteOperation)
 		return
 	}
 
-	serverops.Encode(w, r, http.StatusOK, map[string]string{"message": "folder removed"}) // @response map[string]string
+	apiframework.Encode(w, r, http.StatusOK, apiframework.MessageResponse{Message: "folder removed"}) // @response apiframework.MessageResponse
 }
 
 // Moves a file to a new parent folder.
@@ -497,21 +506,21 @@ func (f *fileManager) deleteFolder(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) moveFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id := serverops.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the file.") // @param id string
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("file ID is required: %w", serverops.ErrBadPathValue), serverops.UpdateOperation)
+		apiframework.Error(w, r, fmt.Errorf("file ID is required: %w", apiframework.ErrBadPathValue), apiframework.UpdateOperation)
 		return
 	}
 
-	req, err := serverops.Decode[moveRequest](r) // @request vfsapi.moveRequest
+	req, err := apiframework.Decode[moveRequest](r) // @request vfsapi.moveRequest
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
 	movedFile, err := f.service.MoveFile(ctx, id, req.NewParentID)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
@@ -525,7 +534,7 @@ func (f *fileManager) moveFile(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   movedFile.UpdatedAt,
 	}
 
-	serverops.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
 }
 
 // Moves a folder to a new parent folder.
@@ -534,21 +543,21 @@ func (f *fileManager) moveFile(w http.ResponseWriter, r *http.Request) {
 func (f *fileManager) moveFolder(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	id := serverops.GetPathParam(r, "id", "The unique identifier of the folder.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the folder.") // @param id string
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("folder ID is required: %w", serverops.ErrBadPathValue), serverops.UpdateOperation)
+		apiframework.Error(w, r, fmt.Errorf("folder ID is required: %w", apiframework.ErrBadPathValue), apiframework.UpdateOperation)
 		return
 	}
 
-	req, err := serverops.Decode[moveRequest](r) // @request vfsapi.moveRequest
+	req, err := apiframework.Decode[moveRequest](r) // @request vfsapi.moveRequest
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
 	movedFolder, err := f.service.MoveFolder(ctx, id, req.NewParentID)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.UpdateOperation)
+		apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
@@ -561,5 +570,21 @@ func (f *fileManager) moveFolder(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: movedFolder.UpdatedAt,
 	}
 
-	serverops.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FolderResponse
+	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FolderResponse
+}
+
+func resolveName(name string, fromPath string) string {
+	candidate := strings.TrimSpace(name)
+	if candidate != "" {
+		return candidate
+	}
+	clean := strings.TrimSpace(fromPath)
+	if clean == "" {
+		return ""
+	}
+	trimmed := strings.Trim(path.Clean(clean), "/")
+	if trimmed == "." || trimmed == "" {
+		return ""
+	}
+	return path.Base(trimmed)
 }

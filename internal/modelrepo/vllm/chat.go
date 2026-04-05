@@ -35,27 +35,7 @@ func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message,
 
 	request := buildChatRequest(c.modelName, messages, args)
 
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-				// ReasoningContent contains the model's chain-of-thought trace.
-				// Populated by vLLM when --reasoning-parser is set (DeepSeek-R1)
-				// or when enable_thinking is passed via extra_body (Qwen3, Granite).
-				ReasoningContent string `json:"reasoning_content"`
-				ToolCalls        []struct {
-					ID       string `json:"id"`
-					Type     string `json:"type"`
-					Function struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
-					} `json:"function"`
-				} `json:"tool_calls"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
-	}
+	var response chatResponse
 
 	if err := c.sendRequest(ctx, "/v1/chat/completions", request, &response); err != nil {
 		reportErr(err)
@@ -74,24 +54,11 @@ func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message,
 	message := modelrepo.Message{
 		Role:     choice.Message.Role,
 		Content:  choice.Message.Content,
-		Thinking: choice.Message.ReasoningContent,
+		Thinking: choice.Message.Thinking(),
 	}
 
 	// Convert tool calls
-	var toolCalls []modelrepo.ToolCall
-	for _, tc := range choice.Message.ToolCalls {
-		toolCalls = append(toolCalls, modelrepo.ToolCall{
-			ID:   tc.ID,
-			Type: tc.Type,
-			Function: struct {
-				Name      string `json:"name"`
-				Arguments string `json:"arguments"`
-			}{
-				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
-			},
-		})
-	}
+	toolCalls := convertChatToolCalls(choice.Message.ToolCalls)
 
 	result := modelrepo.ChatResult{
 		Message:   message,
@@ -99,10 +66,11 @@ func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message,
 	}
 
 	switch choice.FinishReason {
-	case "stop":
+	case "stop", "tool_calls":
 		reportChange("chat_completed", map[string]any{
-			"finish_reason":    "stop",
+			"finish_reason":    choice.FinishReason,
 			"content_length":   len(message.Content),
+			"thinking_length":  len(message.Thinking),
 			"tool_calls_count": len(toolCalls),
 		})
 		return result, nil

@@ -43,17 +43,10 @@ func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, tempe
 		{Role: "user", Content: prompt},
 	}
 
-	// Convert to pointers for API request
-	tempVal := float64(temperature)
-	maxTokensVal := c.maxTokens
-
-	request := chatRequest{
-		Model:       c.modelName,
-		Messages:    messages,
-		Temperature: &tempVal,
-		MaxTokens:   &maxTokensVal,
-		Stream:      false,
-	}
+	request := buildChatRequest(c.modelName, messages, []modelrepo.ChatArgument{
+		modelrepo.WithTemperature(float64(temperature)),
+		modelrepo.WithMaxTokens(c.maxTokens),
+	})
 
 	// Send request to the chat completions endpoint
 	var response chatResponse
@@ -80,6 +73,7 @@ func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, tempe
 		reportChange("prompt_completed", map[string]any{
 			"finish_reason":     "stop",
 			"content_length":    len(choice.Message.Content),
+			"thinking_length":   len(choice.Message.Thinking()),
 			"prompt_tokens":     response.Usage.PromptTokens,
 			"completion_tokens": response.Usage.CompletionTokens,
 		})
@@ -97,20 +91,4 @@ func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, tempe
 		reportErr(err)
 		return "", err
 	}
-}
-
-type chatResponse struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int    `json:"created"`
-	Choices []struct {
-		Index        int               `json:"index"`
-		Message      modelrepo.Message `json:"message"`
-		FinishReason string            `json:"finish_reason"`
-	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
 }

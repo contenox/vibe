@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-# This script automates the entire bootstrapping process for the contenox/vibe.
+# This script automates the entire bootstrapping process for the contenox CLI.
 # It starts the necessary services, configures the backend and affinity groups, and
 # ensures the required models are downloaded and ready for use.
 #
@@ -197,7 +197,7 @@ log "Handing off to model download monitor..."
 
 # Final success message
 echo ""
-echo "🎉 Bootstrap complete! Your contenox/vibe environment is ready to use."
+echo "🎉 Bootstrap complete! Your contenox environment is ready to use."
 echo "   Using models:"
 echo "   - Embedding: ${EMBED_MODEL}"
 echo "   - Task: ${TASK_MODEL}"

@@ -110,6 +110,38 @@ var ErrUnsupportedTaskType = errors.New("executor does not support the task type
 // ErrHookNotFound is returned when a named hook is not registered in any repo.
 var ErrHookNotFound = errors.New("hook not found")
 
+// ErrHookToolsUnavailable is returned when a hook is registered but its tool
+// list cannot be loaded (e.g. MCP server unreachable or list-tools failed).
+// ExecEnv treats this like a missing hook for tool preload: skip tools, continue the chain.
+var ErrHookToolsUnavailable = errors.New("hook tools unavailable")
+
+type hookToolsUnavailableError struct {
+	hookName string
+	cause    error
+}
+
+func (e *hookToolsUnavailableError) Error() string {
+	return fmt.Sprintf("%s: hook %q: %v", ErrHookToolsUnavailable, e.hookName, e.cause)
+}
+
+func (e *hookToolsUnavailableError) Unwrap() []error {
+	if e == nil {
+		return nil
+	}
+	return []error{ErrHookToolsUnavailable, e.cause}
+}
+
+// HookToolsUnavailable wraps cause as ErrHookToolsUnavailable for hookName (for errors.Is).
+func HookToolsUnavailable(hookName string, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	return &hookToolsUnavailableError{
+		hookName: hookName,
+		cause:    cause,
+	}
+}
+
 // HookRepo defines interface for external system integrations and side effects.
 type HookRepo interface {
 	Exec(ctx context.Context, startingTime time.Time, input any, debug bool, args *HookCall) (any, DataType, error)
@@ -137,11 +169,12 @@ type SimpleEnv struct {
 	tracker      libtracker.ActivityTracker
 	inspector    Inspector
 	hookProvider HookRepo
+	eventSink    TaskEventSink
 }
 
 // NewEnv creates a new SimpleEnv with the given tracker and task executor.
 func NewEnv(
-	_ context.Context,
+	ctx context.Context,
 	tracker libtracker.ActivityTracker,
 	exec TaskExecutor,
 	inspector Inspector,
@@ -155,6 +188,7 @@ func NewEnv(
 		tracker:      tracker,
 		inspector:    inspector,
 		hookProvider: hookProvider,
+		eventSink:    taskEventSinkFromContext(ctx),
 	}, nil
 }
 
@@ -170,8 +204,26 @@ type ToolWithResolution struct {
 }
 
 // ExecEnv executes the given chain with the provided input.
-func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, input any, dataType DataType) (any, DataType, []CapturedStateUnit, error) {
+func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, input any, dataType DataType) (result any, resultType DataType, history []CapturedStateUnit, retErr error) {
+	reportErrChain, _, endChain := env.tracker.Start(ctx, "chain_exec", chain.ID, "chain_id", chain.ID)
+	defer endChain()
+
 	stack := env.inspector.Start(ctx)
+	defer func() {
+		history = stack.GetExecutionHistory()
+		chainEvent := NewTaskEvent(ctx, TaskEventChainCompleted)
+		chainEvent.ChainID = chain.ID
+		chainEvent.OutputType = resultType.String()
+		if retErr != nil {
+			chainEvent.Kind = TaskEventChainFailed
+			chainEvent.Error = retErr.Error()
+			chainEvent.OutputType = ""
+		}
+		publishTaskEventBestEffort(ctx, env.eventSink, chainEvent)
+	}()
+	chainStarted := NewTaskEvent(ctx, TaskEventChainStarted)
+	chainStarted.ChainID = chain.ID
+	publishTaskEventBestEffort(ctx, env.eventSink, chainStarted)
 
 	vars := map[string]any{
 		"input": input,
@@ -242,6 +294,10 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 					// The model simply won't see this tool.
 					continue
 				}
+				if errors.Is(err, ErrHookToolsUnavailable) {
+					reportErrChain(err)
+					continue
+				}
 				return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: failed to get tools for hook %s: %w", currentTask.ID, hookName, err)
 			}
 			for _, tool := range hookTools {
@@ -290,15 +346,14 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 		}
 		maxRetries := max(currentTask.RetryOnFailure, 0)
 
-	retryLoop:
 		for retry := 0; retry <= maxRetries; retry++ {
 			if stack.HasBreakpoint(currentTask.ID) {
 				return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: breakpoint set", currentTask.ID)
 			}
 
-			// Track task attempt start
-			taskCtx := context.Background()
-			taskCtx = libtracker.CopyTrackingValues(ctx, taskCtx)
+			// Keep task execution attached to the caller so cancellation from
+			// Ctrl+C, request shutdown, or parent timeouts stops in-flight work.
+			taskCtx := ctx
 
 			var cancel context.CancelFunc
 			if currentTask.Timeout != "" {
@@ -306,8 +361,16 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 				if err != nil {
 					return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: invalid timeout: %v", currentTask.ID, err)
 				}
-				taskCtx, cancel = context.WithTimeout(ctx, timeout)
+				taskCtx, cancel = context.WithTimeout(taskCtx, timeout)
 			}
+			taskCtx = WithTaskEventScope(taskCtx, TaskEventScope{
+				ChainID:     chain.ID,
+				TaskID:      currentTask.ID,
+				TaskHandler: currentTask.Handler.String(),
+				Retry:       retry,
+			})
+			stepStarted := NewTaskEvent(taskCtx, TaskEventStepStarted)
+			publishTaskEventBestEffort(taskCtx, env.eventSink, stepStarted)
 			reportErrAttempt, reportChangeAttempt, endAttempt := env.tracker.Start(
 				taskCtx,
 				"task_attempt",
@@ -355,15 +418,23 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 				}
 			}
 			stack.RecordStep(step)
+			stepEvent := NewTaskEvent(taskCtx, TaskEventStepCompleted)
+			stepEvent.OutputType = outputType.String()
+			stepEvent.Transition = transitionEval
 
 			if taskErr != nil {
+				stepEvent.Kind = TaskEventStepFailed
+				stepEvent.Error = taskErr.Error()
+				stepEvent.OutputType = ""
+				publishTaskEventBestEffort(taskCtx, env.eventSink, stepEvent)
 				reportErrAttempt(taskErr)
-				continue retryLoop
+				continue
 			}
+			publishTaskEventBestEffort(taskCtx, env.eventSink, stepEvent)
 
 			// Report successful attempt
 			reportChangeAttempt(currentTask.ID, output)
-			break retryLoop
+			break
 		}
 
 		if taskErr != nil {
@@ -473,7 +544,11 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 		}
 	}
 
-	return finalOutput, outputType, stack.GetExecutionHistory(), nil
+	normOut, normDT, normErr := NormalizeFinalChainOutput(finalOutput, outputType)
+	if normErr != nil {
+		return nil, DataTypeAny, nil, normErr
+	}
+	return normOut, normDT, nil, nil
 }
 
 // Helper methods for compose operations

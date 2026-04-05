@@ -6,14 +6,12 @@ import (
 	"fmt"
 	"text/tabwriter"
 
+	"github.com/contenox/contenox/internal/clikv"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/spf13/cobra"
 )
-
-// cliKVPrefix is used for all CLI-level persistent settings stored in the SQLite KV table.
-const cliKVPrefix = "cli."
 
 // validConfigKeys lists the keys users can set via `contenox config set`.
 var validConfigKeys = map[string]string{
@@ -50,7 +48,7 @@ Examples:
   contenox config set default-model    qwen2.5:7b
   contenox config set default-provider ollama
   contenox config set default-model    gemini-2.5-flash
-  contenox config set default-chain    .contenox/chain-vibes.json`,
+  contenox config set default-chain    .contenox/default-chain.json`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key, value := args[0], args[1]
@@ -64,7 +62,7 @@ Examples:
 		defer db.Close()
 
 		ctx := libtracker.WithNewRequestID(context.Background())
-		kvKey := cliKVPrefix + key
+		kvKey := clikv.Prefix + key
 		data, _ := json.Marshal(value)
 		if err := store.SetKV(ctx, kvKey, json.RawMessage(data)); err != nil {
 			return fmt.Errorf("failed to set %q: %w", key, err)
@@ -135,11 +133,7 @@ Example:
 
 // getConfigKV retrieves a CLI setting from the KV store, returning "" if not set.
 func getConfigKV(ctx context.Context, store runtimetypes.Store, key string) (string, error) {
-	var val string
-	if err := store.GetKV(ctx, cliKVPrefix+key, &val); err != nil {
-		return "", nil // Not set is not an error.
-	}
-	return val, nil
+	return clikv.Read(ctx, store, key), nil
 }
 
 func openConfigDB(cmd *cobra.Command) (libdb.DBManager, runtimetypes.Store, error) {
@@ -148,7 +142,7 @@ func openConfigDB(cmd *cobra.Command) (libdb.DBManager, runtimetypes.Store, erro
 		return nil, nil, err
 	}
 	ctx := libtracker.WithNewRequestID(context.Background())
-	db, err := openDBAt(ctx, dbPath)
+	db, err := OpenDBAt(ctx, dbPath)
 	if err != nil {
 		return nil, nil, err
 	}

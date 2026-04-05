@@ -2,8 +2,8 @@
 package contenoxcli
 
 import (
-	_ "embed"
 	"context"
+	_ "embed"
 	"fmt"
 	"io"
 	"os"
@@ -47,7 +47,8 @@ var providerConfigs = map[string]providerConfig{
 
 // RunInit scaffolds .contenox/ with default chain files.
 // provider is "" (default = ollama), "ollama", "gemini", or "openai".
-func RunInit(out, errOut io.Writer, force bool, provider string) error {
+// contenoxDir is the target data directory (e.g. from --data-dir or the default .contenox/).
+func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir string) error {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		provider = "ollama"
@@ -57,12 +58,6 @@ func RunInit(out, errOut io.Writer, force bool, provider string) error {
 	if !ok {
 		return fmt.Errorf("unknown provider %q — valid options: ollama, gemini, openai", provider)
 	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("cannot get current directory: %w", err)
-	}
-	contenoxDir := filepath.Join(cwd, ".contenox")
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
 		return fmt.Errorf("failed to create .contenox directory: %w", err)
 	}
@@ -96,11 +91,17 @@ func RunInit(out, errOut io.Writer, force bool, provider string) error {
 	// if they have a stale entry from a previous install.
 	dbPath := filepath.Join(contenoxDir, "local.db")
 	if _, statErr := os.Stat(dbPath); statErr == nil {
-		if db, openErr := openDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
+		if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
 			store := runtimetypes.New(db.WithoutTransaction())
 			ctx := libtracker.WithNewRequestID(context.Background())
-			curModel, _ := getConfigKV(ctx, store, "default-model")
-			curProvider, _ := getConfigKV(ctx, store, "default-provider")
+			curModel, err := getConfigKV(ctx, store, "default-model")
+			if err != nil {
+				return err
+			}
+			curProvider, err := getConfigKV(ctx, store, "default-provider")
+			if err != nil {
+				return err
+			}
 			db.Close()
 			if curModel != "" || curProvider != "" {
 				fmt.Fprintln(out, "Current config (from local.db):")
@@ -133,17 +134,25 @@ func RunInit(out, errOut io.Writer, force bool, provider string) error {
 		fmt.Fprintln(out, "  1. Install Ollama (if not already):")
 		fmt.Fprintln(out, "       curl -fsSL https://ollama.com/install.sh | sh")
 		fmt.Fprintln(out, "")
-		fmt.Fprintln(out, "  2. Start Ollama and pull the default model:")
+		fmt.Fprintln(out, "  2. Start Ollama and pull a model the runtime can observe:")
 		fmt.Fprintln(out, "       ollama serve && ollama pull qwen2.5:7b")
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "  Optional: use hosted Ollama Cloud instead of a local server:")
+		fmt.Fprintln(out, "       export OLLAMA_API_KEY=your-key-here")
+		fmt.Fprintln(out, "       contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY")
 		fmt.Fprintln(out, "")
 	} else {
 		fmt.Fprintf(out, "  1. Register the %s backend:\n", pc.name)
 		fmt.Fprintf(out, "       contenox backend add %s --type %s --api-key-env %s\n", provider, provider, pc.envKey)
+		fmt.Fprintf(out, "       contenox model list   # confirm the runtime can see %s models\n", pc.name)
 		fmt.Fprintf(out, "       contenox config set default-model %s\n", pc.defaultModel)
 		fmt.Fprintln(out, "")
 	}
 	// Print API key link for cloud providers
 	switch provider {
+	case "ollama":
+		fmt.Fprintln(out, "  Get an Ollama API key for direct cloud access: https://ollama.com/settings/keys")
+		fmt.Fprintln(out, "")
 	case "gemini":
 		fmt.Fprintln(out, "  Get a free Gemini API key: https://aistudio.google.com/apikey")
 		fmt.Fprintln(out, "")

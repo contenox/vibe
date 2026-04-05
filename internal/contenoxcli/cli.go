@@ -11,14 +11,29 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/spf13/cobra"
 )
 
-// Version is set at build time via -ldflags "-X github.com/contenox/contenox/internal/contenoxcli.Version=vX.Y.Z".
-// Falls back to "dev" when building without the flag (e.g. go run).
-var Version = "dev"
+// Version is an optional link-time override via
+// -ldflags "-X github.com/contenox/contenox/internal/contenoxcli.Version=…"
+// (e.g. distro packagers). When empty, CLIVersion uses apiframework/version.txt
+// embedded in package apiframework.
+var Version string
+
+// CLIVersion returns the effective CLI version string (embedded file or link override).
+func CLIVersion() string {
+	return cliVersion()
+}
+
+func cliVersion() string {
+	if v := strings.TrimSpace(Version); v != "" {
+		return v
+	}
+	return apiframework.GetVersion()
+}
 
 const localTenantID = "00000000-0000-0000-0000-000000000001"
 
@@ -30,7 +45,7 @@ const (
 )
 
 // reservedSubcommands are first-arg names that must not be treated as run input (Cobra or our subcommands).
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "vibe": true, "help": true, "completion": true, "session": true, "plan": true, "run": true, "hook": true, "mcp": true, "backend": true, "config": true, "model": true, "models": true}
+var reservedSubcommands = map[string]bool{beamCmd.Use: true, "init": true, "chat": true, "help": true, "completion": true, "session": true, "plan": true, "run": true, "hook": true, "mcp": true, "backend": true, "config": true, "model": true, "models": true, "doctor": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
@@ -111,7 +126,7 @@ No daemon, no cloud required. State is stored in SQLite.
   Quickstart:
     contenox init                          # scaffold .contenox/ with default chains
     contenox "list files in my home dir"   # one-shot natural language → shell
-    contenox vibe                          # interactive TUI: chat + plans + shell
+    contenox beam                          # HTTP server + Beam web UI
     contenox plan new "some multi-step goal"  # create an autonomous multi-step plan
     contenox plan next --auto              # execute plan steps until done
 
@@ -121,6 +136,10 @@ No daemon, no cloud required. State is stored in SQLite.
     contenox backend add local --type ollama
     # Then set your default:
     contenox config set default-model qwen2.5:7b
+
+    # Hosted Ollama Cloud
+    contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
+    contenox config set default-provider ollama
 
     # Google Gemini (no GPU required)
     contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
@@ -188,11 +207,15 @@ var initCmd = &cobra.Command{
 	Short: "Scaffold .contenox/ with default chain files.",
 	Long: `Create the .contenox/ directory and populate it with default chain files.
 
-After init, register a backend and set your default model:
+After init, register a backend, make sure the runtime can see a model, then set your defaults:
 
   # Local Ollama:
   contenox backend add local --type ollama
   contenox config set default-model qwen2.5:7b
+
+  # Hosted Ollama Cloud:
+  contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
+  contenox config set default-model gpt-oss:20b
 
   # OpenAI:
   contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
@@ -207,19 +230,35 @@ Use --force to overwrite existing files.`,
 	RunE: runInitCmd,
 }
 
+var beamCmd = &cobra.Command{
+	Use:   "beam",
+	Short: "Start the Contenox Beam.",
+	Long: `Runs the full Contenox runtime as an HTTP server, exposing the same API as the
+standalone server binary. The server reads its configuration from environment
+variables (DATABASE_URL, NATS_URL, etc.). Use --tenant to override the tenant ID.
+
+Examples:
+  contenox beam
+  contenox beam --tenant 96ed1c59-ffc1-4545-b3c3-191079c68d79`,
+	RunE: runServer,
+}
+
 func init() {
-	// Wire the ldflags-injected version into cobra's built-in --version/-v flag.
-	// Must be done here (not in the struct literal) so the ldflags value is used.
-	rootCmd.Version = Version
+	v := cliVersion()
+	rootCmd.Version = v
+	rootCmd.Short = fmt.Sprintf("AI agent CLI v%s: plan and execute tasks using your LLM of choice.", v)
+	// Cobra prints Long for --help when set; include version so it matches apiframework/version.txt.
+	rootCmd.Long = fmt.Sprintf("Version: %s\n\n%s", v, rootCmd.Long)
 
 	// Run flags on root so "contenox --input x" and "contenox hi" both work.
 	f := rootCmd.PersistentFlags()
 	f.String("db", "", "SQLite database path (default: .contenox/local.db)")
+	f.String("data-dir", "", "Override the .contenox data directory path")
 	f.String("ollama", defaultOllama, "Ollama base URL")
 	f.String("model", defaultModel, "Model name (task/chat/embed)")
 	f.String("provider", "", "Provider type override (ollama, openai, vllm, gemini). Overrides config default_provider.")
 	f.Int("context", defaultContext, "Context length")
-	f.Bool("no-delete-models", true, "Do not delete Ollama models that are not declared (default true for contenox)")
+	f.Bool("no-delete-models", true, "Legacy compatibility flag; OSS runtime model deletion is disabled.")
 	f.String("chain", "", "Path to a task chain JSON file. Chains define the LLM workflow: which model, which hooks, how to branch. Falls back to default_chain in config, then .contenox/default-chain.json")
 	f.String("input", "", "Input for the chain (default: positional args or stdin if piped)")
 	f.Bool("shell", false, "Enable the local_shell hook (use only in trusted environments)")
@@ -231,11 +270,12 @@ func init() {
 	f.Bool("raw", false, "Print full output (e.g. entire chat JSON)")
 	f.Bool("think", false, "Print model reasoning trace to stderr (for thinking models)")
 
-	rootCmd.AddCommand(initCmd, chatCmd, sessionCmd, planCmd, runCmd, hookCmd)
+	rootCmd.AddCommand(initCmd, chatCmd, sessionCmd, planCmd, runCmd, hookCmd, doctorCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(backendCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(modelCmd)
+	rootCmd.AddCommand(beamCmd)
 
 	rootCmd.InitDefaultHelpCmd() // so "contenox help" is handled by Cobra, not passed as run input
 	initCmd.Flags().BoolP("force", "f", false, "Overwrite existing files")
@@ -243,12 +283,24 @@ func init() {
 	// Chat-specific local flags (not exposed globally).
 	chatCmd.Flags().Int("trim", 0, "Only send the last N messages from session history to the model (0 = send all)")
 	chatCmd.Flags().Int("last", 0, "Print last N user/assistant turns after the reply (0 = only print new reply)")
+
+	// Server command flags
+	beamCmd.Flags().String("tenant", localTenantID, "Tenant ID to use for the server (defaults to local tenant)")
 }
 
 // ResolveContenoxDir finds the closest .contenox directory by walking up from the
-// current working directory. If it hits the root without finding one, it returns
-// the .contenox directory in the current working directory as a fallback.
-func ResolveContenoxDir() (string, error) {
+// current working directory. If cmd is non-nil and --data-dir is set, that value
+// is returned directly. Otherwise it walks up from cwd; if it hits the root
+// without finding one, it returns the .contenox directory in the current working
+// directory as a fallback.
+func ResolveContenoxDir(cmd *cobra.Command) (string, error) {
+	if cmd != nil {
+		dataDir, _ := cmd.Root().PersistentFlags().GetString("data-dir")
+		if dataDir != "" {
+			return filepath.Abs(dataDir)
+		}
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -276,7 +328,11 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		provider = args[0]
 	}
-	return RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, provider)
+	contenoxDir, err := ResolveContenoxDir(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
+	}
+	return RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, provider, contenoxDir)
 }
 
 func runChat(cmd *cobra.Command, args []string) error {
@@ -289,7 +345,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	contenoxDir, err := ResolveContenoxDir()
+	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
 	}
@@ -300,7 +356,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	dbCtx := libtracker.WithNewRequestID(context.Background())
-	db, err := openDBAt(dbCtx, dbPath)
+	db, err := OpenDBAt(dbCtx, dbPath)
 	if err != nil {
 		return err
 	}
@@ -369,13 +425,13 @@ func runChat(cmd *cobra.Command, args []string) error {
 	}
 
 	timeout, _ := flags.GetDuration("timeout")
-	ctx, cancel := context.WithTimeout(libtracker.WithNewRequestID(context.Background()), timeout)
-	defer cancel()
+	timeoutCtx, timeoutCancel := context.WithTimeout(libtracker.WithNewRequestID(context.Background()), timeout)
+	defer timeoutCancel()
 
 	// Use signal.NotifyContext so cleanup is automatic when the cmd returns;
 	// avoids leaking a goroutine blocked forever on <-sigCh.
-	ctx, cancel = signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
+	ctx, stop := signal.NotifyContext(timeoutCtx, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	effectiveThink, _ := flags.GetBool("think")
 	historyTrim, _ := cmd.Flags().GetInt("trim")
@@ -400,33 +456,12 @@ func runChat(cmd *cobra.Command, args []string) error {
 		InputFlagPassed:              inputPassed,
 		ContenoxDir:                  contenoxDir,
 	}
-	// Gap 7: quick pre-flight hint for the obvious case: model was explicitly set
-	// to something non-default, but provider was never configured.
-	if effectiveDefaultProvider == "" && effectiveModel != defaultModel {
-		fmt.Fprintln(os.Stderr, "default-provider is not set.")
-		fmt.Fprintln(os.Stderr, "Run: contenox config set default-provider <ollama|gemini|openai>")
-		return errInvalidConfig
-	}
-	if err := execChat(ctx, db, opts, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
-		// Gap 7 fallback: when the engine can't find any model and provider is
-		// not configured, the root cause is almost always a missing default-provider.
-		if effectiveDefaultProvider == "" &&
-			(strings.Contains(err.Error(), "no models found") ||
-				strings.Contains(err.Error(), "model name cannot be empty") ||
-				strings.Contains(err.Error(), "client resolution failed")) {
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Hint: default-provider is not set. If you are using Gemini or OpenAI, run:")
-			fmt.Fprintln(os.Stderr, "  contenox config set default-provider <ollama|gemini|openai>")
-		}
-		return err
-	}
-	return nil
+	return execChat(ctx, db, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 }
 
 // Sentinel errors so RunE can return and main can os.Exit(1).
 var (
 	errChainRequired = &exitError{1}
-	errInvalidConfig = &exitError{1}
 )
 
 type exitError struct{ code int }

@@ -4,12 +4,30 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/contenox/contenox/internal/hooks"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/taskengine"
 	"github.com/stretchr/testify/require"
 )
+
+type cancelAwareExecutor struct{}
+
+func (cancelAwareExecutor) TaskExec(
+	ctx context.Context,
+	_ time.Time,
+	_ int,
+	_ *taskengine.ChainContext,
+	_ *taskengine.TaskDefinition,
+	_ any,
+	_ taskengine.DataType,
+) (any, taskengine.DataType, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, taskengine.DataTypeAny, "", err
+	}
+	return nil, taskengine.DataTypeAny, "", errors.New("task context was not canceled")
+}
 
 func TestUnit_SimpleEnv_ExecEnv_SingleTask(t *testing.T) {
 	mockExec := &taskengine.MockTaskExecutor{
@@ -44,6 +62,34 @@ func TestUnit_SimpleEnv_ExecEnv_SingleTask(t *testing.T) {
 	result, _, _, err := env.ExecEnv(context.Background(), chain, "6 * 7", taskengine.DataTypeString)
 	require.NoError(t, err)
 	require.Equal(t, "42", result)
+}
+
+func TestUnit_SimpleEnv_ExecEnv_UsesParentCancellation(t *testing.T) {
+	tracker := libtracker.NoopTracker{}
+	env, err := taskengine.NewEnv(context.Background(), tracker, cancelAwareExecutor{}, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	require.NoError(t, err)
+
+	chain := &taskengine.TaskChainDefinition{
+		Tasks: []taskengine.TaskDefinition{
+			{
+				ID:             "task1",
+				Handler:        taskengine.HandlePromptToString,
+				PromptTemplate: `What is {{.input}}?`,
+				Transition: taskengine.TaskTransition{
+					Branches: []taskengine.TransitionBranch{
+						{Operator: taskengine.OpDefault, Goto: taskengine.TermEnd},
+					},
+				},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, _, err = env.ExecEnv(ctx, chain, "6 * 7", taskengine.DataTypeString)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), context.Canceled.Error())
 }
 
 func TestUnit_SimpleEnv_ExecEnv_FailsAfterRetries(t *testing.T) {

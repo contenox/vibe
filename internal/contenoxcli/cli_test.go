@@ -34,7 +34,7 @@ func TestResolveContenoxDir(t *testing.T) {
 		t.Fatalf("Failed to chdir: %v", err)
 	}
 
-	resolvedDir, err := ResolveContenoxDir()
+	resolvedDir, err := ResolveContenoxDir(nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -53,7 +53,7 @@ func TestResolveContenoxDir(t *testing.T) {
 		t.Fatalf("Failed to chdir: %v", err)
 	}
 
-	resolvedDir2, err := ResolveContenoxDir()
+	resolvedDir2, err := ResolveContenoxDir(nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}

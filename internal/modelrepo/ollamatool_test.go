@@ -37,7 +37,7 @@ func TestSystem_Ollama_Tools(t *testing.T) {
 			ContextLength: 2048,
 			CanChat:       true,
 		}
-		provider := ollama.NewOllamaProvider(toolModel, []string{uri}, http.DefaultClient, caps, nil)
+		provider := ollama.NewOllamaProvider(toolModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
 		chatClient, err := provider.GetChatConnection(ctx, uri)
 		require.NoError(t, err)
@@ -110,7 +110,7 @@ func TestSystem_Ollama_Tools(t *testing.T) {
 			ContextLength: 2048,
 			CanChat:       true,
 		}
-		provider := ollama.NewOllamaProvider(toolModel, []string{uri}, http.DefaultClient, caps, nil)
+		provider := ollama.NewOllamaProvider(toolModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
 		chatClient, err := provider.GetChatConnection(ctx, uri)
 		require.NoError(t, err)

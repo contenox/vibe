@@ -22,18 +22,14 @@ import (
 var modelCmd = &cobra.Command{
 	Use:     "model",
 	Aliases: []string{"models"},
-	Short:   "Manage LLM models (list live, add, remove).",
-	Long: `Manage models available to LLM backends.
+	Short:   "Inspect LLM models served by backends.",
+	Long: `Inspect models available from LLM backends.
 
 By default, 'model list' queries each registered backend in real-time and
-shows the models it is currently serving. Use --declared to see only what
-is recorded in the local database.
+shows the models it is currently serving.
 
 Examples:
   contenox model list
-  contenox model list --declared
-  contenox model add qwen2.5:7b
-  contenox model remove qwen2.5:7b
 
 Set the default model:
   contenox config set default-model    gemini-2.5-flash
@@ -50,31 +46,22 @@ Set the default model:
 var modelListCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
-	Short:   "List models available from live backends (or --declared for DB view).",
+	Short:   "List models available from live backends.",
 	Long: `Query each registered backend in real time and show its available models.
 
 Shows model name, backend it comes from, and capabilities discovered at runtime
 (chat, embed, prompt, stream, context length).
 
-Use --declared to show the models recorded in the local SQLite database instead
-of performing live backend queries.
-
 Examples:
-  contenox model list
-  contenox model list --declared`,
+  contenox model list`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		declared, _ := cmd.Flags().GetBool("declared")
 		ctx := libtracker.WithNewRequestID(context.Background())
 		db, _, err := openBackendDB(cmd)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
-
-		if declared {
-			return printDeclaredModels(ctx, db, cmd.OutOrStdout())
-		}
 		return printLiveModels(ctx, db, cmd.OutOrStdout(), cmd.ErrOrStderr())
 	},
 }
@@ -136,11 +123,9 @@ func printLiveModels(ctx context.Context, db libdb.DBManager, out, errW io.Write
 			e.canPrompt[pm.Model] = pm.CanPrompt
 			e.ctx[pm.Model] = pm.ContextLength
 		}
-		// For backends where PulledModels is empty (e.g. OpenAI — no capability
-		// info available without declaration), fall back to the raw model list so
-		// users can at least see what models exist and use model add + config set
-		// to start using them.
-		if len(e.pulled) == 0 && len(bs.Models) > 0 {
+		// Some providers only report model names; when the backend is healthy,
+		// keep those visible even if no detailed PulledModels entries were built.
+		if len(e.pulled) == 0 && bs.Error == "" && len(bs.Models) > 0 {
 			e.pulled = append(e.pulled, bs.Models...)
 		}
 		sort.Strings(e.pulled)
@@ -183,117 +168,12 @@ func printLiveModels(ctx context.Context, db libdb.DBManager, out, errW io.Write
 		return err
 	}
 	if !any {
-		fmt.Fprintln(out, "\nNo models found. Add a model with: contenox model add <model-name>")
+		fmt.Fprintln(out, "\nNo models found on any backend.")
 	}
 	if preferredModel != "" {
 		fmt.Fprintln(out, "\n* = default model (contenox config set default-model <name>)")
 	}
 	return nil
-}
-
-// printDeclaredModels lists the models stored in the local SQLite database.
-// Delegates to modelservice to leverage validation and row-count policies.
-func printDeclaredModels(ctx context.Context, db libdb.DBManager, out io.Writer) error {
-	store := runtimetypes.New(db.WithoutTransaction())
-	preferredModel, _ := getConfigKV(ctx, store, "default-model")
-
-	svc := modelservice.New(db, "")
-	models, err := svc.List(ctx, nil, 1000)
-	if err != nil {
-		return fmt.Errorf("failed to list models: %w", err)
-	}
-	if len(models) == 0 {
-		fmt.Fprintln(out, "No models declared. Run: contenox model add <model-name>")
-		return nil
-	}
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "MODEL\tCHAT\tEMBED\tPROMPT\tCTX")
-	for _, m := range models {
-		displayName := m.Model
-		if preferredModel != "" && m.Model == preferredModel {
-			displayName = m.Model + " *"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n",
-			displayName,
-			boolMark(m.CanChat),
-			boolMark(m.CanEmbed),
-			boolMark(m.CanPrompt),
-			m.ContextLength,
-		)
-	}
-	if err := w.Flush(); err != nil {
-		return err
-	}
-	if preferredModel != "" {
-		fmt.Fprintln(out, "\n* = default model (contenox config set default-model <name>)")
-	}
-	return nil
-}
-
-var modelAddCmd = &cobra.Command{
-	Use:   "add <model-name>",
-	Short: "Declare a model for use by LLM backends.",
-	Long: `Register a model name in the local database.
-
-For Ollama backends, this also triggers download if the model is not yet pulled.
-For OpenAI/Gemini/vLLM, the model name is validated against the backend at runtime.
-
-Examples:
-  contenox model add qwen2.5:7b
-  contenox model add gemini-2.5-flash
-  contenox model add gpt-4o`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := libtracker.WithNewRequestID(context.Background())
-		db, _, err := openBackendDB(cmd)
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-
-		modelName := args[0]
-		svc := modelservice.New(db, "")
-		// Idempotent: check if already declared before trying to create.
-		existing, _ := runtimetypes.New(db.WithoutTransaction()).GetModelByName(ctx, modelName)
-		if existing != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "Model %q is already declared.\n", modelName)
-			return nil
-		}
-		if err := svc.Append(ctx, &runtimetypes.Model{Model: modelName}); err != nil {
-			return fmt.Errorf("failed to add model: %w", err)
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Model %q declared.\n", modelName)
-		return nil
-	},
-}
-
-var modelRemoveCmd = &cobra.Command{
-	Use:     "remove <model-name>",
-	Aliases: []string{"rm"},
-	Short:   "Remove a declared model.",
-	Long: `Unregister a model from the local database.
-
-For Ollama-backed models this does not delete the model from Ollama itself,
-only removes the declaration from Contenox.
-
-Example:
-  contenox model remove qwen2.5:7b`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := libtracker.WithNewRequestID(context.Background())
-		db, _, err := openBackendDB(cmd)
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-
-		modelName := args[0]
-		if err := modelservice.New(db, "").Delete(ctx, modelName); err != nil {
-			return fmt.Errorf("failed to remove model %q: %w", modelName, err)
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Model %q removed.\n", modelName)
-		return nil
-	},
 }
 
 func boolMark(b bool) string {
@@ -343,8 +223,8 @@ func parseContextSize(s string) (int, error) {
 
 var modelSetContextCmd = &cobra.Command{
 	Use:   "set-context <model-name>",
-	Short: "Set the context window for a declared model.",
-	Long: `Override the registered context window for a model.
+	Short: "Set a local context override for a model.",
+	Long: `Override the locally stored context window for a model already known to the local runtime state.
 
 Accepts a bare integer or a k/m shorthand (case-insensitive):
   k  – thousands   (12k  = 12 000)
@@ -372,7 +252,7 @@ Examples:
 		store := runtimetypes.New(db.WithoutTransaction())
 		m, err := store.GetModelByName(ctx, modelName)
 		if err != nil {
-			return fmt.Errorf("model %q not found: %w", modelName, err)
+			return fmt.Errorf("model %q has no local override row yet: %w", modelName, err)
 		}
 		m.ContextLength = ctxLen
 		if err := modelservice.New(db, "").Update(ctx, m); err != nil {
@@ -388,11 +268,8 @@ Examples:
 }
 
 func init() {
-	modelListCmd.Flags().Bool("declared", false, "Show models recorded in the local database instead of querying live backends")
 	modelSetContextCmd.Flags().String("context", "", "Context window size: bare int or shorthand (12k, 128k, 1m).")
 	_ = modelSetContextCmd.MarkFlagRequired("context")
 	modelCmd.AddCommand(modelListCmd)
-	modelCmd.AddCommand(modelAddCmd)
-	modelCmd.AddCommand(modelRemoveCmd)
 	modelCmd.AddCommand(modelSetContextCmd)
 }

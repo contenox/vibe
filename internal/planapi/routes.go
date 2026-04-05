@@ -100,7 +100,7 @@ type cleanResponse struct {
 // The new plan becomes the active plan.
 func (h *handler) newPlan(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	req, err := apiframework.Decode[newPlanRequest](r) // @request newPlanRequest
+	req, err := apiframework.Decode[newPlanRequest](r) // @request planapi.newPlanRequest
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
@@ -119,7 +119,7 @@ func (h *handler) newPlan(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusCreated, newPlanResponse{Plan: plan, Steps: steps, Markdown: md}) // @response newPlanResponse
+	_ = apiframework.Encode(w, r, http.StatusCreated, newPlanResponse{Plan: plan, Steps: steps, Markdown: md}) // @response planapi.newPlanResponse
 }
 
 // Lists all plans.
@@ -145,7 +145,7 @@ func (h *handler) getActive(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, fmt.Errorf("%w: no active plan", apiframework.ErrNotFound), apiframework.GetOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, activeResponse{Plan: plan, Steps: steps}) // @response activeResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, activeResponse{Plan: plan, Steps: steps}) // @response planapi.activeResponse
 }
 
 // Executes the next pending step of the active plan.
@@ -154,7 +154,7 @@ func (h *handler) getActive(w http.ResponseWriter, r *http.Request) {
 // description string and returns the execution result.
 func (h *handler) nextStep(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	req, err := apiframework.Decode[nextStepRequest](r) // @request nextStepRequest
+	req, err := apiframework.Decode[nextStepRequest](r) // @request planapi.nextStepRequest
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
@@ -169,7 +169,7 @@ func (h *handler) nextStep(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, nextStepResponse{Result: result, Markdown: md}) // @response nextStepResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, nextStepResponse{Result: result, Markdown: md}) // @response planapi.nextStepResponse
 }
 
 // Replaces remaining pending steps with a freshly generated plan.
@@ -178,7 +178,7 @@ func (h *handler) nextStep(w http.ResponseWriter, r *http.Request) {
 // original goal plus the completed steps to produce the new remaining steps.
 func (h *handler) replan(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	req, err := apiframework.Decode[replanRequest](r) // @request replanRequest
+	req, err := apiframework.Decode[replanRequest](r) // @request planapi.replanRequest
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
@@ -193,13 +193,14 @@ func (h *handler) replan(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, replanResponse{Steps: steps, Markdown: md}) // @response replanResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, replanResponse{Steps: steps, Markdown: md}) // @response planapi.replanResponse
 }
 
 // Resets a step to pending so it will be retried on the next Next call.
 func (h *handler) retryStep(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ordinal, err := parseOrdinal(r)
+	rawOrdinal := apiframework.GetPathParam(r, "ordinal", "The 1-based step ordinal.")
+	ordinal, err := parseOrdinal(rawOrdinal)
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
@@ -209,13 +210,14 @@ func (h *handler) retryStep(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, markdownResponse{Markdown: md}) // @response markdownResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, markdownResponse{Markdown: md}) // @response planapi.markdownResponse
 }
 
 // Marks a step as intentionally skipped.
 func (h *handler) skipStep(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ordinal, err := parseOrdinal(r)
+	rawOrdinal := apiframework.GetPathParam(r, "ordinal", "The 1-based step ordinal.")
+	ordinal, err := parseOrdinal(rawOrdinal)
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
@@ -225,7 +227,7 @@ func (h *handler) skipStep(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, markdownResponse{Markdown: md}) // @response markdownResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, markdownResponse{Markdown: md}) // @response planapi.markdownResponse
 }
 
 // Switches the active plan to the named plan (archives the previous active).
@@ -266,13 +268,12 @@ func (h *handler) cleanPlans(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.DeleteOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, cleanResponse{Removed: n}) // @response cleanResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, cleanResponse{Removed: n}) // @response planapi.cleanResponse
 }
 
 // ── private helpers ───────────────────────────────────────────────────────────
 
-func parseOrdinal(r *http.Request) (int, error) {
-	raw := apiframework.GetPathParam(r, "ordinal", "The 1-based step ordinal.")
+func parseOrdinal(raw string) (int, error) {
 	if raw == "" {
 		return 0, fmt.Errorf("%w: ordinal is required", apiframework.ErrBadPathValue)
 	}

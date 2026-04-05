@@ -174,7 +174,7 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 
 				t.Log("Testing streaming response...")
 				start := time.Now()
-				stream, err := streamClient.Stream(ctx, prompt)
+				stream, err := streamClient.Stream(ctx, []modelrepo.Message{{Role: "user", Content: prompt}})
 				require.NoError(t, err, "failed to start stream")
 
 				t.Logf("Stream setup took %v", time.Since(start))

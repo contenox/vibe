@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	serverops "github.com/contenox/contenox/apiframework"
+	apiframework "github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/hookproviderservice"
 	"github.com/contenox/contenox/runtimetypes"
 )
@@ -41,26 +41,27 @@ func (s *remoteHookService) listLocal(w http.ResponseWriter, r *http.Request) {
 
 	localHooks, err := s.service.ListLocalHooks(ctx)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ListOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, localHooks) // @response []hookproviderservice.LocalHook
+	_ = apiframework.Encode(w, r, http.StatusOK, localHooks) // @response []hookproviderservice.LocalHook
 }
 
-// Retrieves the JSON openAPI schemas for all supported hook types.
+// Retrieves the OpenAPI schema documents for all supported hook types.
 //
-// Returns a list of hook openAPI schemas.
+// This response is intentionally dynamic: it returns a map keyed by hook name
+// whose values are full OpenAPI schema documents for that hook.
 func (s *remoteHookService) getSchemas(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	schemas, err := s.service.GetSchemasForSupportedHooks(ctx)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ListOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, schemas) // @response any
+	_ = apiframework.Encode(w, r, http.StatusOK, schemas) // @response object
 }
 
 // Creates a new remote hook configuration.
@@ -69,17 +70,17 @@ func (s *remoteHookService) getSchemas(w http.ResponseWriter, r *http.Request) {
 func (s *remoteHookService) create(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	hook, err := serverops.Decode[runtimetypes.RemoteHook](r) // @request runtimetypes.RemoteHook
+	hook, err := apiframework.Decode[runtimetypes.RemoteHook](r) // @request runtimetypes.RemoteHook
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.CreateOperation)
+		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 	if err := s.service.Create(ctx, &hook); err != nil {
-		_ = serverops.Error(w, r, err, serverops.CreateOperation)
+		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusCreated, hook) // @response runtimetypes.RemoteHook
+	_ = apiframework.Encode(w, r, http.StatusCreated, hook) // @response runtimetypes.RemoteHook
 }
 
 // Lists remote hooks, optionally filtering by a unique name.
@@ -88,14 +89,14 @@ func (s *remoteHookService) create(w http.ResponseWriter, r *http.Request) {
 func (s *remoteHookService) list(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	limitStr := serverops.GetQueryParam(r, "limit", "100", "The maximum number of items to return per page.")
-	cursorStr := serverops.GetQueryParam(r, "cursor", "", "An optional RFC3339Nano timestamp to fetch the next page of results.")
+	limitStr := apiframework.GetQueryParam(r, "limit", "100", "The maximum number of items to return per page.")
+	cursorStr := apiframework.GetQueryParam(r, "cursor", "", "An optional RFC3339Nano timestamp to fetch the next page of results.")
 
 	var cursor *time.Time
 	if cursorStr != "" {
 		parsedTime, err := time.Parse(time.RFC3339Nano, cursorStr)
 		if err != nil {
-			_ = serverops.Error(w, r, fmt.Errorf("invalid cursor format: %w", err), serverops.ListOperation)
+			_ = apiframework.Error(w, r, fmt.Errorf("invalid cursor format: %w", err), apiframework.ListOperation)
 			return
 		}
 		cursor = &parsedTime
@@ -103,17 +104,17 @@ func (s *remoteHookService) list(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil {
-		_ = serverops.Error(w, r, fmt.Errorf("invalid limit format: %w", err), serverops.ListOperation)
+		_ = apiframework.Error(w, r, fmt.Errorf("invalid limit format: %w", err), apiframework.ListOperation)
 		return
 	}
 
 	hooks, err := s.service.List(ctx, cursor, limit)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ListOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, hooks) // @response []runtimetypes.RemoteHook
+	_ = apiframework.Encode(w, r, http.StatusOK, hooks) // @response []runtimetypes.RemoteHook
 }
 
 // Retrieves a specific remote hook configuration by ID.
@@ -121,15 +122,15 @@ func (s *remoteHookService) list(w http.ResponseWriter, r *http.Request) {
 // Returns a simple "deleted" confirmation message on success.
 func (s *remoteHookService) get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := serverops.GetPathParam(r, "id", "The unique identifier for the remote hook.")
+	id := apiframework.GetPathParam(r, "id", "The unique identifier for the remote hook.")
 
 	hook, err := s.service.Get(ctx, id)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.GetOperation)
+		_ = apiframework.Error(w, r, err, apiframework.GetOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, hook) // @response runtimetypes.RemoteHook
+	_ = apiframework.Encode(w, r, http.StatusOK, hook) // @response runtimetypes.RemoteHook
 }
 
 // Updates an existing remote hook configuration.
@@ -137,21 +138,21 @@ func (s *remoteHookService) get(w http.ResponseWriter, r *http.Request) {
 // The ID from the URL path overrides any ID in the request body.
 func (s *remoteHookService) update(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := serverops.GetPathParam(r, "id", "The unique identifier for the remote hook.")
+	id := apiframework.GetPathParam(r, "id", "The unique identifier for the remote hook.")
 
-	hook, err := serverops.Decode[runtimetypes.RemoteHook](r) // @request runtimetypes.RemoteHook
+	hook, err := apiframework.Decode[runtimetypes.RemoteHook](r) // @request runtimetypes.RemoteHook
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.UpdateOperation)
+		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
 	hook.ID = id
 	if err := s.service.Update(ctx, &hook); err != nil {
-		_ = serverops.Error(w, r, err, serverops.UpdateOperation)
+		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, hook) // @response runtimetypes.RemoteHook
+	_ = apiframework.Encode(w, r, http.StatusOK, hook) // @response runtimetypes.RemoteHook
 }
 
 // Deletes a remote hook configuration by ID.
@@ -159,14 +160,14 @@ func (s *remoteHookService) update(w http.ResponseWriter, r *http.Request) {
 // Returns a simple "deleted" confirmation message on success.
 func (s *remoteHookService) delete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := serverops.GetPathParam(r, "id", "The unique identifier for the remote hook.")
+	id := apiframework.GetPathParam(r, "id", "The unique identifier for the remote hook.")
 
 	if err := s.service.Delete(ctx, id); err != nil {
-		_ = serverops.Error(w, r, err, serverops.DeleteOperation)
+		_ = apiframework.Error(w, r, err, apiframework.DeleteOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, "deleted") // @response string
+	_ = apiframework.Encode(w, r, http.StatusOK, "deleted") // @response string
 }
 
 // Retrieves a remote hook configuration by name.
@@ -174,11 +175,11 @@ func (s *remoteHookService) delete(w http.ResponseWriter, r *http.Request) {
 // Returns a simple "deleted" confirmation message on success.
 func (s *remoteHookService) getByName(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	name := serverops.GetPathParam(r, "name", "The unique name for the remote hook.")
+	name := apiframework.GetPathParam(r, "name", "The unique name for the remote hook.")
 	hook, err := s.service.GetByName(ctx, name)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.GetOperation)
+		_ = apiframework.Error(w, r, err, apiframework.GetOperation)
 		return
 	}
-	_ = serverops.Encode(w, r, http.StatusOK, hook) // @response runtimetypes.RemoteHook
+	_ = apiframework.Encode(w, r, http.StatusOK, hook) // @response runtimetypes.RemoteHook
 }

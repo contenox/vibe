@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/libtracker"
+	"github.com/contenox/contenox/localhooks"
 	"github.com/contenox/contenox/runtimetypes"
 )
 
@@ -75,4 +76,36 @@ func (d *activityTrackerDecorator) List(ctx context.Context, createdAtCursor *ti
 	_, _, endFn := d.tracker.Start(ctx, "list", "mcp_servers")
 	defer endFn()
 	return d.service.List(ctx, createdAtCursor, limit)
+}
+
+func (d *activityTrackerDecorator) AuthenticateOAuth(ctx context.Context, name string, oauthCfg *localhooks.MCPOAuthConfig) error {
+	reportErrFn, _, endFn := d.tracker.Start(ctx, "oauth_cli_auth", "mcp_server", "name", name)
+	defer endFn()
+	if err := d.service.AuthenticateOAuth(ctx, name, oauthCfg); err != nil {
+		reportErrFn(err)
+		return err
+	}
+	return nil
+}
+
+func (d *activityTrackerDecorator) StartOAuth(ctx context.Context, id, redirectBase string) (*OAuthStartResult, error) {
+	reportErrFn, _, endFn := d.tracker.Start(ctx, "oauth_start", "mcp_server", "id", id)
+	defer endFn()
+	res, err := d.service.StartOAuth(ctx, id, redirectBase)
+	if err != nil {
+		reportErrFn(err)
+		return nil, err
+	}
+	return res, nil
+}
+
+func (d *activityTrackerDecorator) CompleteOAuth(ctx context.Context, req OAuthCallbackRequest) (*OAuthCallbackResult, error) {
+	reportErrFn, _, endFn := d.tracker.Start(ctx, "oauth_complete", "mcp_server", "state", req.State)
+	defer endFn()
+	res, err := d.service.CompleteOAuth(ctx, req)
+	if err != nil {
+		reportErrFn(err)
+		return res, err
+	}
+	return res, nil
 }

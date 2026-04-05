@@ -91,7 +91,7 @@ func openSessionService(cmd *cobra.Command) (context.Context, libdb.DBManager, s
 		return nil, nil, nil, nil, fmt.Errorf("invalid database path: %w", err)
 	}
 	ctx := libtracker.WithNewRequestID(context.Background())
-	db, err := openDBAt(ctx, dbPath)
+	db, err := OpenDBAt(ctx, dbPath)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}

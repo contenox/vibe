@@ -29,6 +29,9 @@ Examples:
   # Register a local Ollama server (default URL inferred):
   contenox backend add local --type ollama
 
+  # Register Ollama Cloud directly:
+  contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
+
   # Register OpenAI using an environment variable for the key:
   contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
 
@@ -50,12 +53,14 @@ var backendAddCmd = &cobra.Command{
 
 The --type flag determines which provider protocol is used.
 For openai and gemini, the base URL is inferred automatically if --url is omitted.
+For hosted Ollama, use --url https://ollama.com/api together with --api-key-env OLLAMA_API_KEY.
 
 API keys should be passed via --api-key-env (reads from environment) rather than
 --api-key (inline literal) to avoid leaking secrets into shell history.
 
 Examples:
   contenox backend add local   --type ollama
+  contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
   contenox backend add openai  --type openai  --api-key-env OPENAI_API_KEY
   contenox backend add gemini  --type gemini  --api-key-env GEMINI_API_KEY
   contenox backend add myvllm --type vllm    --url http://gpu-host:8000`,
@@ -203,7 +208,7 @@ func openBackendDB(cmd *cobra.Command) (libdb.DBManager, backendservice.Service,
 		return nil, nil, err
 	}
 	ctx := libtracker.WithNewRequestID(context.Background())
-	db, err := openDBAt(ctx, dbPath)
+	db, err := OpenDBAt(ctx, dbPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -221,7 +226,7 @@ func resolveDBPath(cmd *cobra.Command) (string, error) {
 	}
 	// Prefer project-local DB if a .contenox directory exists (even if local.db
 	// doesn't yet — e.g. right after `contenox init`).
-	localDir, err := ResolveContenoxDir()
+	localDir, err := ResolveContenoxDir(cmd)
 	if err == nil {
 		if _, statErr := os.Stat(localDir); statErr == nil {
 			return filepath.Join(localDir, "local.db"), nil
@@ -234,16 +239,16 @@ func resolveDBPath(cmd *cobra.Command) (string, error) {
 		}
 	}
 	// Default: create in local .contenox/ (even if it's the cwd fallback)
-	if localDir == "" {	
-	    cwd, _ := os.Getwd()
-	    localDir = filepath.Join(cwd, ".contenox")
+	if localDir == "" {
+		cwd, _ := os.Getwd()
+		localDir = filepath.Join(cwd, ".contenox")
 	}
 	return filepath.Abs(filepath.Join(localDir, "local.db"))
 }
 
 func init() {
 	backendAddCmd.Flags().String("type", "ollama", "Backend type: ollama, openai, gemini, vllm")
-	backendAddCmd.Flags().String("url", "", "Base URL of the backend (auto-inferred for openai/gemini if omitted)")
+	backendAddCmd.Flags().String("url", "", "Base URL of the backend (auto-inferred for openai/gemini if omitted; set https://ollama.com/api for hosted Ollama)")
 	backendAddCmd.Flags().String("api-key-env", "", "Name of the environment variable holding the API key (preferred over --api-key)")
 	backendAddCmd.Flags().String("api-key", "", "API key literal — prefer --api-key-env to avoid leaking into shell history")
 

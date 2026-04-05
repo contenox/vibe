@@ -11,6 +11,34 @@ type OpenAIChatClient struct {
 	openAIClient
 }
 
+// openAIChatCompletionResponse matches the /v1/chat/completions JSON body.
+// Some OpenAI-compatible chat-completions backends expose `reasoning_content`.
+// Official OpenAI reasoning summaries live in the Responses API, so this field
+// is treated as best-effort compatibility rather than a guaranteed contract.
+type openAIChatCompletionResponse struct {
+	Choices []openAIChatCompletionChoice `json:"choices"`
+}
+
+type openAIChatCompletionChoice struct {
+	Index        int                      `json:"index"`
+	Message      openAIChatCompletionMsg  `json:"message"`
+	FinishReason string                   `json:"finish_reason"`
+}
+
+type openAIChatCompletionMsg struct {
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content"`
+	ToolCalls        []struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Function struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"function"`
+	} `json:"tool_calls"`
+}
+
 func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (modelrepo.ChatResult, error) {
 	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "openai", "model", c.modelName)
@@ -18,24 +46,7 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 
 	req, nameMap := buildOpenAIRequest(c.modelName, messages, args)
 
-	var response struct {
-		Choices []struct {
-			Index   int `json:"index"`
-			Message struct {
-				Role      string `json:"role"`
-				Content   string `json:"content"`
-				ToolCalls []struct {
-					ID       string `json:"id"`
-					Type     string `json:"type"`
-					Function struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
-					} `json:"function"`
-				} `json:"tool_calls"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
-	}
+	var response openAIChatCompletionResponse
 
 	if err := c.sendRequest(ctx, "/chat/completions", req, &response); err != nil {
 		reportErr(err)
@@ -49,7 +60,7 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	}
 
 	choice := response.Choices[0]
-	if choice.Message.Content == "" && len(choice.Message.ToolCalls) == 0 {
+	if choice.Message.Content == "" && len(choice.Message.ToolCalls) == 0 && choice.Message.ReasoningContent == "" {
 		err := fmt.Errorf("empty content from model %s despite normal completion. Finish reason: %s", c.modelName, choice.FinishReason)
 		reportErr(err)
 		return modelrepo.ChatResult{}, err
@@ -57,8 +68,9 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 
 	// Convert to our format
 	message := modelrepo.Message{
-		Role:    choice.Message.Role,
-		Content: choice.Message.Content,
+		Role:     choice.Message.Role,
+		Content:  choice.Message.Content,
+		Thinking: choice.Message.ReasoningContent,
 	}
 
 	// Convert tool calls and translate sanitized names back to the original the caller provided

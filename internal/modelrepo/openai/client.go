@@ -23,17 +23,17 @@ type openAIClient struct {
 }
 
 type openAIChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []apiChatMessage `json:"messages"`
-	Temperature *float64         `json:"temperature,omitempty"`
-	MaxTokens   *int             `json:"max_tokens,omitempty"`
-	TopP        *float64         `json:"top_p,omitempty"`
-	Seed        *int             `json:"seed,omitempty"`
-	Stream      bool             `json:"stream,omitempty"`
-	Tools       []openAITool     `json:"tools,omitempty"`
-	// ReasoningEffort controls thinking depth for o-series models (o1, o3, o4-mini etc.).
-	// Accepted values: "low", "medium", "high". Empty = omitted (non-reasoning models).
-	// Note: when set, Temperature must be omitted (OpenAI rejects temperature on o-series).
+	Model               string           `json:"model"`
+	Messages            []apiChatMessage `json:"messages"`
+	Temperature         *float64         `json:"temperature,omitempty"`
+	MaxCompletionTokens *int             `json:"max_completion_tokens,omitempty"`
+	TopP                *float64         `json:"top_p,omitempty"`
+	Seed                *int             `json:"seed,omitempty"`
+	Stream              bool             `json:"stream,omitempty"`
+	Tools               []openAITool     `json:"tools,omitempty"`
+	// ReasoningEffort maps the existing modelrepo.WithThink values onto OpenAI's
+	// chat-completions `reasoning_effort` parameter without widening the public
+	// package API. Supported values are model-dependent.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
@@ -179,25 +179,18 @@ func buildOpenAIRequest(modelName string, messages []modelrepo.Message, args []m
 		a.Apply(cfg)
 	}
 	req.Temperature = cfg.Temperature
-	req.MaxTokens = cfg.MaxTokens
+	req.MaxCompletionTokens = cfg.MaxTokens
 	req.TopP = cfg.TopP
 	req.Seed = cfg.Seed
 
-	// Wire reasoning_effort for o-series models.
-	// "true"/"high" = "high", "medium" = "medium", "low" = "low".
-	// When reasoning_effort is set, temperature must be cleared (OpenAI rejects it on o-series).
-	if cfg.Think != nil {
-		switch *cfg.Think {
-		case "true", "high":
-			req.ReasoningEffort = "high"
-			req.Temperature = nil
-		case "medium":
-			req.ReasoningEffort = "medium"
-			req.Temperature = nil
-		case "low":
-			req.ReasoningEffort = "low"
-			req.Temperature = nil
-		}
+	req.ReasoningEffort = openAIReasoningEffort(modelName, cfg.Think)
+
+	// OpenAI's sampling parameter support depends on both model family and
+	// reasoning mode. Keep this logic internal and driven by the existing Think
+	// abstraction so callers do not need provider-specific branches.
+	if openAIShouldOmitSamplingParams(modelName, req.ReasoningEffort) {
+		req.Temperature = nil
+		req.TopP = nil
 	}
 
 	// Convert tools to OpenAI tools with sanitized/unique function names.
@@ -281,6 +274,112 @@ func buildOpenAIRequest(modelName string, messages []modelrepo.Message, args []m
 	return req, nameMap
 }
 
+// openAIAPIBaseModelID returns the model id segment OpenAI expects, without provider/namespace
+// prefixes (e.g. "openai/gpt-5" -> "gpt-5"). Runtime state may store namespaced ids.
+func openAIAPIBaseModelID(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if i := strings.LastIndex(m, "/"); i >= 0 {
+		m = m[i+1:]
+	}
+	return m
+}
+
+func openAIReasoningEffort(model string, think *string) string {
+	if think == nil {
+		return ""
+	}
+
+	level := strings.ToLower(strings.TrimSpace(*think))
+	switch level {
+	case "", "false":
+		if openAIModelSupportsNoneReasoning(model) {
+			return "none"
+		}
+		return ""
+	case "true":
+		level = "high"
+	}
+
+	switch level {
+	case "none":
+		if openAIModelSupportsNoneReasoning(model) {
+			return "none"
+		}
+		return ""
+	case "minimal":
+		if openAIModelSupportsMinimalReasoning(model) {
+			return "minimal"
+		}
+		return "low"
+	case "low", "medium":
+		if openAIModelOnlyHighReasoning(model) {
+			return "high"
+		}
+		return level
+	case "high":
+		return "high"
+	case "xhigh":
+		if openAIModelSupportsXHighReasoning(model) {
+			return "xhigh"
+		}
+		return "high"
+	default:
+		return ""
+	}
+}
+
+func openAIShouldOmitSamplingParams(model, reasoningEffort string) bool {
+	base := openAIAPIBaseModelID(model)
+	switch {
+	case strings.HasPrefix(base, "o"):
+		return reasoningEffort != ""
+	case strings.HasPrefix(base, "gpt-5"):
+		return !openAIGPT5AllowsSamplingParams(model, reasoningEffort)
+	default:
+		return false
+	}
+}
+
+func openAIGPT5AllowsSamplingParams(model, reasoningEffort string) bool {
+	if !strings.HasPrefix(openAIAPIBaseModelID(model), "gpt-5") {
+		return true
+	}
+	return openAIModelSupportsNoneReasoning(model) && (reasoningEffort == "" || reasoningEffort == "none")
+}
+
+func openAIModelOnlyHighReasoning(model string) bool {
+	base := openAIAPIBaseModelID(model)
+	return base == "gpt-5-pro" || strings.HasPrefix(base, "gpt-5-pro-")
+}
+
+func openAIModelSupportsNoneReasoning(model string) bool {
+	base := openAIAPIBaseModelID(model)
+	if openAIModelOnlyHighReasoning(base) {
+		return false
+	}
+	return strings.HasPrefix(base, "gpt-5.1") ||
+		strings.HasPrefix(base, "gpt-5.2") ||
+		strings.HasPrefix(base, "gpt-5.3") ||
+		strings.HasPrefix(base, "gpt-5.4")
+}
+
+func openAIModelSupportsMinimalReasoning(model string) bool {
+	base := openAIAPIBaseModelID(model)
+	if strings.HasPrefix(base, "gpt-5") {
+		return openAIModelSupportsNoneReasoning(model) && !strings.HasPrefix(base, "gpt-5.1")
+	}
+	return false
+}
+
+func openAIModelSupportsXHighReasoning(model string) bool {
+	base := openAIAPIBaseModelID(model)
+	if openAIModelOnlyHighReasoning(model) {
+		return false
+	}
+	return strings.HasPrefix(base, "gpt-5.2") ||
+		strings.HasPrefix(base, "gpt-5.3") ||
+		strings.HasPrefix(base, "gpt-5.4")
+}
 
 // sanitizeToolName replaces invalid characters with '_' and trims leading/trailing separators.
 // Allowed: letters, digits, underscore, hyphen.

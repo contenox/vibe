@@ -3,7 +3,7 @@ package backendapi
 import (
 	"net/http"
 
-	serverops "github.com/contenox/contenox/apiframework"
+	apiframework "github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/stateservice"
 )
 
@@ -27,8 +27,8 @@ func (s *statemux) list(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	internalModels, err := s.stateService.Get(ctx)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ListOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
-	serverops.Encode(w, r, http.StatusOK, internalModels) // @response []statetype.BackendRuntimeState
+	apiframework.Encode(w, r, http.StatusOK, sanitizeRuntimeStates(internalModels)) // @response []statetype.BackendRuntimeState
 }

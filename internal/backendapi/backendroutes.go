@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	serverops "github.com/contenox/contenox/apiframework"
+	apiframework "github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/backendservice"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/stateservice"
@@ -50,18 +50,18 @@ type backendManager struct {
 func (b *backendManager) createBackend(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	backend, err := serverops.Decode[runtimetypes.Backend](r) // @request runtimetypes.Backend
+	backend, err := apiframework.Decode[runtimetypes.Backend](r) // @request runtimetypes.Backend
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.CreateOperation)
+		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 	backend.ID = uuid.NewString()
 	if err := b.service.Create(ctx, &backend); err != nil {
-		_ = serverops.Error(w, r, err, serverops.CreateOperation)
+		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusCreated, backend) // @response runtimetypes.Backend
+	_ = apiframework.Encode(w, r, http.StatusCreated, backend) // @response runtimetypes.Backend
 }
 
 // Lists all configured backend connections with runtime status.
@@ -72,15 +72,15 @@ func (b *backendManager) listBackends(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Parse pagination parameters using the helper
-	limitStr := serverops.GetQueryParam(r, "limit", "100", "The maximum number of items to return per page.")
-	cursorStr := serverops.GetQueryParam(r, "cursor", "", "An optional RFC3339Nano timestamp to fetch the next page of results.")
+	limitStr := apiframework.GetQueryParam(r, "limit", "100", "The maximum number of items to return per page.")
+	cursorStr := apiframework.GetQueryParam(r, "cursor", "", "An optional RFC3339Nano timestamp to fetch the next page of results.")
 
 	var cursor *time.Time
 	if cursorStr != "" {
 		t, err := time.Parse(time.RFC3339Nano, cursorStr)
 		if err != nil {
-			err = fmt.Errorf("%w: invalid cursor format, expected RFC3339Nano", serverops.ErrUnprocessableEntity)
-			_ = serverops.Error(w, r, err, serverops.ListOperation)
+			err = fmt.Errorf("%w: invalid cursor format, expected RFC3339Nano", apiframework.ErrUnprocessableEntity)
+			_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 			return
 		}
 		cursor = &t
@@ -88,20 +88,20 @@ func (b *backendManager) listBackends(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil {
-		err = fmt.Errorf("%w: invalid limit format, expected integer", serverops.ErrUnprocessableEntity)
-		_ = serverops.Error(w, r, err, serverops.ListOperation)
+		err = fmt.Errorf("%w: invalid limit format, expected integer", apiframework.ErrUnprocessableEntity)
+		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
 
 	backends, err := b.service.List(ctx, cursor, limit)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ListOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
 
 	backendState, err := b.stateService.Get(ctx)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ListOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
 
@@ -124,14 +124,14 @@ func (b *backendManager) listBackends(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if ok {
-			item.Models = itemState.Models
+			item.Models = observedModelNames(itemState)
 			item.PulledModels = itemState.PulledModels
 			item.Error = itemState.Error
 		}
 		resp = append(resp, item)
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, resp) // @response []backendapi.backendSummary
+	_ = apiframework.Encode(w, r, http.StatusOK, resp) // @response []backendapi.backendSummary
 }
 
 type backendDetails struct {
@@ -149,23 +149,23 @@ type backendDetails struct {
 // Retrieves complete information for a specific backend
 func (b *backendManager) getBackend(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := serverops.GetPathParam(r, "id", "The unique identifier for the backend.")
+	id := apiframework.GetPathParam(r, "id", "The unique identifier for the backend.")
 	if id == "" {
-		serverops.Error(w, r, fmt.Errorf("missing id parameter %w", serverops.ErrBadPathValue), serverops.GetOperation)
+		apiframework.Error(w, r, fmt.Errorf("missing id parameter %w", apiframework.ErrBadPathValue), apiframework.GetOperation)
 		return
 	}
 
 	// Get static backend info
 	backend, err := b.service.Get(ctx, id)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.GetOperation)
+		apiframework.Error(w, r, err, apiframework.GetOperation)
 		return
 	}
 
 	// Get dynamic runtime state
 	state, err := b.stateService.Get(ctx)
 	if err != nil {
-		serverops.Error(w, r, err, serverops.GetOperation)
+		apiframework.Error(w, r, err, apiframework.GetOperation)
 		return
 	}
 	ok := false
@@ -192,12 +192,12 @@ func (b *backendManager) getBackend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ok {
-		resp.Models = itemState.Models
+		resp.Models = observedModelNames(itemState)
 		resp.PulledModels = itemState.PulledModels
 		resp.Error = itemState.Error
 	}
 
-	serverops.Encode(w, r, http.StatusOK, resp) // @response backendapi.backendDetails
+	apiframework.Encode(w, r, http.StatusOK, resp) // @response backendapi.backendDetails
 }
 
 // Updates an existing backend configuration.
@@ -206,24 +206,24 @@ func (b *backendManager) getBackend(w http.ResponseWriter, r *http.Request) {
 // Note: Updating a backend will be provisioned on the next synchronization cycle.
 func (b *backendManager) updateBackend(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := serverops.GetPathParam(r, "id", "The unique identifier for the backend.")
+	id := apiframework.GetPathParam(r, "id", "The unique identifier for the backend.")
 	if id == "" {
-		_ = serverops.Error(w, r, fmt.Errorf("missing id parameter %w", serverops.ErrBadPathValue), serverops.UpdateOperation)
+		_ = apiframework.Error(w, r, fmt.Errorf("missing id parameter %w", apiframework.ErrBadPathValue), apiframework.UpdateOperation)
 		return
 	}
-	backend, err := serverops.Decode[runtimetypes.Backend](r) // @request runtimetypes.Backend
+	backend, err := apiframework.Decode[runtimetypes.Backend](r) // @request runtimetypes.Backend
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.UpdateOperation)
+		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
 	backend.ID = id
 	if err := b.service.Update(ctx, &backend); err != nil {
-		_ = serverops.Error(w, r, err, serverops.UpdateOperation)
+		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, backend) // @response runtimetypes.Backend
+	_ = apiframework.Encode(w, r, http.StatusOK, backend) // @response runtimetypes.Backend
 }
 
 // Removes a backend connection.
@@ -232,15 +232,15 @@ func (b *backendManager) updateBackend(w http.ResponseWriter, r *http.Request) {
 // Returns a simple "backend removed" confirmation message on success.
 func (b *backendManager) deleteBackend(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	id := serverops.GetPathParam(r, "id", "The unique identifier for the backend.")
+	id := apiframework.GetPathParam(r, "id", "The unique identifier for the backend.")
 	if id == "" {
-		_ = serverops.Error(w, r, fmt.Errorf("missing id parameter %w", serverops.ErrBadPathValue), serverops.DeleteOperation)
+		_ = apiframework.Error(w, r, fmt.Errorf("missing id parameter %w", apiframework.ErrBadPathValue), apiframework.DeleteOperation)
 		return
 	}
 	if err := b.service.Delete(ctx, id); err != nil {
-		_ = serverops.Error(w, r, err, serverops.DeleteOperation)
+		_ = apiframework.Error(w, r, err, apiframework.DeleteOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, "backend removed") // @response string
+	_ = apiframework.Encode(w, r, http.StatusOK, "backend removed") // @response string
 }

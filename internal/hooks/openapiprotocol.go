@@ -212,7 +212,7 @@ func (p *OpenAPIToolProtocol) ExecuteTool(
 		return nil, taskengine.DataTypeAny, fmt.Errorf("failed to read response body: %w", err)
 	}
 	if len(responseBody) == 0 {
-		return nil, taskengine.DataTypeAny, nil
+		return nil, taskengine.DataTypeNil, nil
 	}
 
 	// Return structured JSON if possible, otherwise fall back to a raw string.

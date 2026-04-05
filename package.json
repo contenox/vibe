@@ -1,0 +1,15 @@
+{
+  "name": "@contenox/beam",
+  "private": true,
+  "version": "0.6.5",
+  "workspaces": [
+    "packages/beam",
+    "packages/ui"
+  ],
+  "scripts": {
+    "openapi:client-smoke": "bash ./scripts/verify_openapi_client.sh"
+  },
+  "devDependencies": {
+    "openapi-typescript-codegen": "^0.30.0"
+  }
+}

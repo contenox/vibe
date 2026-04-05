@@ -3,6 +3,7 @@ package stateservice
 import (
 	"context"
 
+	"github.com/contenox/contenox/internal/setupcheck"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/statetype"
 )
@@ -13,15 +14,13 @@ type activityTrackerDecorator struct {
 }
 
 func (d *activityTrackerDecorator) Get(ctx context.Context) ([]statetype.BackendRuntimeState, error) {
-	// Start tracking the operation
 	reportErrFn, _, endFn := d.tracker.Start(
 		ctx,
-		"read",  // operation type
-		"state", // resource type
+		"read",
+		"state",
 	)
 	defer endFn()
 
-	// Execute the actual service call
 	stateMap, err := d.service.Get(ctx)
 
 	if err != nil {
@@ -29,6 +28,36 @@ func (d *activityTrackerDecorator) Get(ctx context.Context) ([]statetype.Backend
 	}
 
 	return stateMap, err
+}
+
+func (d *activityTrackerDecorator) SetupStatus(ctx context.Context) (setupcheck.Result, error) {
+	reportErrFn, _, endFn := d.tracker.Start(
+		ctx,
+		"read",
+		"setup_status",
+	)
+	defer endFn()
+
+	res, err := d.service.SetupStatus(ctx)
+	if err != nil {
+		reportErrFn(err)
+	}
+	return res, err
+}
+
+func (d *activityTrackerDecorator) SetCLIConfig(ctx context.Context, patch CLIConfigPatch) (CLIConfigSnapshot, error) {
+	reportErrFn, _, endFn := d.tracker.Start(
+		ctx,
+		"update",
+		"cli_config",
+	)
+	defer endFn()
+
+	snap, err := d.service.SetCLIConfig(ctx, patch)
+	if err != nil {
+		reportErrFn(err)
+	}
+	return snap, err
 }
 
 // WithActivityTracker wraps a StateService with activity tracking

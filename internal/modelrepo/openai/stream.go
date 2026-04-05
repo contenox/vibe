@@ -25,9 +25,10 @@ type openAIChatStreamResponseChunk struct {
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {
-			Role      string `json:"role,omitempty"`
-			Content   string `json:"content,omitempty"`
-			ToolCalls []struct {
+			Role             string `json:"role,omitempty"`
+			Content          string `json:"content,omitempty"`
+			ReasoningContent string `json:"reasoning_content,omitempty"`
+			ToolCalls        []struct {
 				ID       string `json:"id,omitempty"`
 				Type     string `json:"type,omitempty"`
 				Function struct {
@@ -40,12 +41,10 @@ type openAIChatStreamResponseChunk struct {
 	} `json:"choices"`
 }
 
-func (c *OpenAIStreamClient) Stream(ctx context.Context, prompt string, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
+func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "openai", "model", c.modelName)
 	// Note: We don't defer end() here because the stream is asynchronous
-
-	messages := []modelrepo.Message{{Role: "user", Content: prompt}}
 
 	// buildOpenAIRequest now returns (request, nameMap); we only need the request here.
 	request, _ := buildOpenAIRequest(c.modelName, messages, args)
@@ -129,11 +128,16 @@ func (c *OpenAIStreamClient) Stream(ctx context.Context, prompt string, args ...
 				// Process the chunk
 				if len(chunk.Choices) > 0 {
 					delta := chunk.Choices[0].Delta
-					if delta.Content != "" {
-						chunkCount++
-						totalContent.WriteString(delta.Content)
+					if delta.Content != "" || delta.ReasoningContent != "" {
+						if delta.Content != "" {
+							chunkCount++
+							totalContent.WriteString(delta.Content)
+						}
 						select {
-						case streamCh <- &modelrepo.StreamParcel{Data: delta.Content}:
+						case streamCh <- &modelrepo.StreamParcel{
+							Data:     delta.Content,
+							Thinking: delta.ReasoningContent,
+						}:
 						case <-ctx.Done():
 							return
 						}

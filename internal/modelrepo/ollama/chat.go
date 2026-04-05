@@ -11,7 +11,7 @@ import (
 )
 
 type OllamaChatClient struct {
-	ollamaClient *api.Client
+	ollamaClient *ollamaHTTPClient
 	modelName    string
 	backendURL   string
 	tracker      libtracker.ActivityTracker
@@ -57,77 +57,14 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		arg.Apply(config)
 	}
 
-	// Prepare Ollama options
-	llamaOptions := make(map[string]any)
-
-	if config.Temperature != nil {
-		llamaOptions["temperature"] = *config.Temperature
-	}
-
-	if config.MaxTokens != nil {
-		llamaOptions["num_predict"] = *config.MaxTokens
-	}
-
-	if config.TopP != nil {
-		llamaOptions["top_p"] = *config.TopP
-	}
-
-	if config.Seed != nil {
-		llamaOptions["seed"] = *config.Seed
-	}
-
-	think := api.ThinkValue{Value: false}
-	if config.Think != nil {
-		s := *config.Think
-		switch s {
-		case "true", "high", "medium", "low":
-			think = api.ThinkValue{Value: s}
-		case "false":
-			think = api.ThinkValue{Value: false}
-		default:
-			think = api.ThinkValue{Value: false}
-		}
-	}
+	llamaOptions := buildOllamaOptions(config)
+	think := buildOllamaThink(config)
 	stream := false
 
-	// Convert modelrepo tools → Ollama tools using ToolFunctionParameters
-	var apiTools api.Tools
-	if len(config.Tools) > 0 {
-		apiTools = make(api.Tools, 0, len(config.Tools))
-		for _, tool := range config.Tools {
-			// must be a function tool with a name
-			if tool.Type == "" || tool.Function == nil || tool.Function.Name == "" {
-				continue
-			}
-
-			var params api.ToolFunctionParameters
-			if tool.Function.Parameters != nil {
-				raw, err := json.Marshal(tool.Function.Parameters)
-				if err != nil {
-					reportErr(err)
-					return modelrepo.ChatResult{}, fmt.Errorf(
-						"failed to marshal tool parameters for %s: %w",
-						tool.Function.Name, err,
-					)
-				}
-				if err := json.Unmarshal(raw, &params); err != nil {
-					reportErr(err)
-					return modelrepo.ChatResult{}, fmt.Errorf(
-						"failed to unmarshal tool parameters into ollama ToolFunctionParameters for %s: %w",
-						tool.Function.Name, err,
-					)
-				}
-			}
-
-			apiTools = append(apiTools, api.Tool{
-				Type: tool.Type,
-				Function: api.ToolFunction{
-					Name:        tool.Function.Name,
-					Description: tool.Function.Description,
-					Parameters:  params,
-				},
-			})
-		}
+	apiTools, err := buildOllamaTools(config)
+	if err != nil {
+		reportErr(err)
+		return modelrepo.ChatResult{}, err
 	}
 
 	req := &api.ChatRequest{
@@ -148,7 +85,7 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	var finalResponse api.ChatResponse
 
 	// Handle the API call
-	err := c.ollamaClient.Chat(ctx, req, func(res api.ChatResponse) error {
+	err = c.ollamaClient.Chat(ctx, req, func(res api.ChatResponse) error {
 		// We keep only the final frame; Ollama includes the full message there
 		if res.Done {
 			finalResponse = res

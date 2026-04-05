@@ -3,6 +3,7 @@ package hooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -70,6 +71,9 @@ func (m *MultiRepo) GetToolsForHookByName(ctx context.Context, name string) ([]t
 		tools, err := r.GetToolsForHookByName(ctx, name)
 		if err == nil && len(tools) > 0 {
 			return tools, nil
+		}
+		if errors.Is(err, taskengine.ErrHookToolsUnavailable) {
+			return nil, err
 		}
 	}
 	return nil, fmt.Errorf("%w: %q", taskengine.ErrHookNotFound, name)

@@ -39,8 +39,12 @@ type ChatArgument interface {
 }
 
 type StreamParcel struct {
-	Data  string
-	Error error
+	Data string
+	// Thinking carries a streamed reasoning/thinking delta separate from the
+	// visible output text. Like Message.Thinking, it is provider-facing output
+	// and must never be sent back as conversation history.
+	Thinking string
+	Error    error
 }
 
 type Tool struct {
@@ -61,7 +65,8 @@ type ChatConfig struct {
 	Seed        *int     `json:"seed,omitempty"`
 	Tools       []Tool   `json:"tools,omitempty"`
 	// Think controls reasoning-model behaviour. nil = use provider default (off).
-	// Accepts "true"/"false" or "high"/"medium"/"low" where supported.
+	// Accepts provider-specific levels such as "none", "minimal", "low",
+	// "medium", "high", and "xhigh" where supported.
 	Think *string `json:"think,omitempty"`
 	// Shift instructs the provider to slide the context window on overflow
 	// instead of returning a token-limit error.
@@ -96,7 +101,7 @@ type LLMEmbedClient interface {
 }
 
 type LLMStreamClient interface {
-	Stream(ctx context.Context, prompt string, args ...ChatArgument) (<-chan *StreamParcel, error)
+	Stream(ctx context.Context, messages []Message, args ...ChatArgument) (<-chan *StreamParcel, error)
 }
 
 type LLMPromptExecClient interface {

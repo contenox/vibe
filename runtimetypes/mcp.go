@@ -32,7 +32,7 @@ type MCPServer struct {
 	Command               string            `json:"command,omitempty" example:"npx"`
 	Args                  []string          `json:"args,omitempty" example:"['-y','@modelcontextprotocol/server-filesystem','/tmp']" openapi_include_type:"string"`
 	URL                   string            `json:"url,omitempty" example:"http://mcp-fs:8080/sse"`
-	AuthType              string            `json:"authType,omitempty" example:"bearer"`         // "" | "bearer"
+	AuthType              string            `json:"authType,omitempty" example:"bearer"`         // "" | "bearer" | "oauth"
 	AuthToken             string            `json:"authToken,omitempty"`                         // literal token (avoid in prod)
 	AuthEnvKey            string            `json:"authEnvKey,omitempty" example:"MCP_FS_TOKEN"` // env var name
 	ConnectTimeoutSeconds int               `json:"connectTimeoutSeconds" example:"30"`

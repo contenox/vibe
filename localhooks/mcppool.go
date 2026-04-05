@@ -27,6 +27,27 @@ const (
 	MCPTransportHTTP  MCPTransport = "http"
 )
 
+var (
+	errMCPTransportSetupFailed   = errors.New("mcp transport setup failed")
+	errMCPConnectFailed          = errors.New("mcp connect failed")
+	errMCPReconnectFailed        = errors.New("mcp reconnect failed")
+	errMCPToolReturnedError      = errors.New("mcp tool returned an error")
+	errMCPOAuthConfigMissing     = errors.New("mcp oauth config missing")
+	errMCPOAuthTokenStoreMissing = errors.New("mcp oauth token store missing")
+	errMCPOAuthDiscoveryFailed   = errors.New("mcp oauth discovery failed")
+
+	// ErrMCPSessionUnavailable indicates the pool could not establish an MCP session.
+	ErrMCPSessionUnavailable = errors.New("mcp session unavailable")
+	// ErrMCPToolCallFailed indicates the transport-level MCP tool call failed.
+	ErrMCPToolCallFailed = errors.New("mcp tool call failed")
+	// ErrMCPListToolsFailed indicates the transport-level MCP list-tools call failed.
+	ErrMCPListToolsFailed = errors.New("mcp list-tools failed")
+	// ErrMCPOAuthNotAuthenticated indicates the server needs `contenox mcp auth`.
+	ErrMCPOAuthNotAuthenticated = errors.New("mcp oauth not authenticated")
+	// ErrOAuthNotAuthenticated is kept as a backwards-compatible alias.
+	ErrOAuthNotAuthenticated = ErrMCPOAuthNotAuthenticated
+)
+
 // MCPAuthType identifies the auth mechanism for remote MCP servers.
 type MCPAuthType string
 
@@ -86,6 +107,47 @@ type MCPOAuthConfig struct {
 	OpenBrowser func(url string) error
 }
 
+type mcpError struct {
+	kind    error
+	message string
+	cause   error
+}
+
+func newMCPError(kind error, message string, cause error) error {
+	return &mcpError{
+		kind:    kind,
+		message: message,
+		cause:   cause,
+	}
+}
+
+func (e *mcpError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.cause == nil {
+		return e.message
+	}
+	return e.message + ": " + e.cause.Error()
+}
+
+func (e *mcpError) Unwrap() []error {
+	if e == nil {
+		return nil
+	}
+	errs := make([]error, 0, 2)
+	if e.kind != nil {
+		errs = append(errs, e.kind)
+	}
+	if e.cause != nil {
+		errs = append(errs, e.cause)
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errs
+}
+
 // ResolveClientName returns ClientName or the default.
 func (c *MCPOAuthConfig) ResolveClientName() string {
 	if c.ClientName != "" {
@@ -136,7 +198,6 @@ type MCPServerConfig struct {
 	// Tracker is the activity tracker for observing MCP pool operations.
 	Tracker libtracker.ActivityTracker
 }
-
 
 // MCPSessionPool manages a single MCP client session with reconnect support.
 // Mirrors the SSHClientCache pattern: mutex-protected, reconnects on failure.
@@ -197,8 +258,9 @@ func (p *MCPSessionPool) connectLocked(ctx context.Context) error {
 
 	transport, err := p.buildTransport()
 	if err != nil {
-		reportErr(err)
-		return fmt.Errorf("mcp: build transport for %q: %w", p.cfg.Name, err)
+		userErr := newMCPError(errMCPTransportSetupFailed, fmt.Sprintf("mcp %q: transport setup failed", p.cfg.Name), err)
+		reportErr(userErr)
+		return userErr
 	}
 
 	client := mcp.NewClient(&mcp.Implementation{
@@ -208,15 +270,15 @@ func (p *MCPSessionPool) connectLocked(ctx context.Context) error {
 
 	session, err := client.Connect(connectCtx, transport, nil)
 	if err != nil {
-		reportErr(err)
-		return fmt.Errorf("mcp: connect to %q: %w", p.cfg.Name, err)
+		userErr := newMCPError(errMCPConnectFailed, fmt.Sprintf("mcp %q: connect failed", p.cfg.Name), err)
+		reportErr(userErr)
+		return userErr
 	}
 
 	p.session = session
 	reportChange(p.cfg.Name, map[string]any{"transport": string(p.cfg.Transport), "url": p.cfg.URL})
 	return nil
 }
-
 
 func (p *MCPSessionPool) buildTransport() (mcp.Transport, error) {
 	// Closures let sessionRoundTripper safely read/write the live session ID
@@ -319,8 +381,9 @@ func (p *MCPSessionPool) Reconnect(ctx context.Context) error {
 	}
 	reportChange(p.cfg.Name, "reconnecting")
 	if err := p.connectLocked(ctx); err != nil {
-		reportErr(err)
-		return err
+		userErr := newMCPError(errMCPReconnectFailed, fmt.Sprintf("mcp %q: reconnect failed", p.cfg.Name), err)
+		reportErr(userErr)
+		return userErr
 	}
 	return nil
 }
@@ -417,19 +480,20 @@ func (p *MCPSessionPool) CallTool(ctx context.Context, toolName string, args map
 	}
 	result, err := p.callTool(ctx, toolName, args)
 	if err != nil {
-		// App-level errors (bad LLM arguments, method not found, context cancel)
-		// must NOT trigger reconnect — the underlying session is still healthy.
-		if isAppError(err) {
-			reportErr(err)
-			return nil, err
+		if shouldReconnectAfterMCPError(err) {
+			// Transport error on an established session: attempt one reconnect.
+			if reconnectErr := p.Reconnect(ctx); reconnectErr != nil {
+				p.reportReconnectCascade(ctx, err, reconnectErr, toolName)
+				userErr := newMCPError(
+					ErrMCPToolCallFailed,
+					fmt.Sprintf("mcp %q.%q: call failed after reconnect attempt", p.cfg.Name, toolName),
+					reconnectErr,
+				)
+				reportErr(userErr)
+				return nil, userErr
+			}
+			result, err = p.callTool(ctx, toolName, args)
 		}
-		// Transport error: attempt one reconnect.
-		if reconnectErr := p.Reconnect(ctx); reconnectErr != nil {
-			mergedErr := fmt.Errorf("mcp %q.%q: call failed and reconnect failed: %w (original: %v)", p.cfg.Name, toolName, reconnectErr, err)
-			reportErr(mergedErr)
-			return nil, mergedErr
-		}
-		result, err = p.callTool(ctx, toolName, args)
 	}
 	if err != nil {
 		reportErr(err)
@@ -442,17 +506,33 @@ func (p *MCPSessionPool) CallTool(ctx context.Context, toolName string, args map
 func (p *MCPSessionPool) callTool(ctx context.Context, toolName string, args map[string]any) (any, error) {
 	session, err := p.Session(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("mcp %q.%q: session: %w", p.cfg.Name, toolName, err)
+		return nil, newMCPError(
+			ErrMCPSessionUnavailable,
+			fmt.Sprintf("mcp %q.%q: session unavailable", p.cfg.Name, toolName),
+			err,
+		)
 	}
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: args,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("mcp %q.%q: call: %w", p.cfg.Name, toolName, err)
+		return nil, newMCPError(
+			ErrMCPToolCallFailed,
+			fmt.Sprintf("mcp %q.%q: call failed", p.cfg.Name, toolName),
+			err,
+		)
 	}
 	if result.IsError {
-		return nil, fmt.Errorf("mcp %q.%q: tool error: %s", p.cfg.Name, toolName, mcpCollectText(result.Content))
+		toolErr := strings.TrimSpace(mcpCollectText(result.Content))
+		if toolErr == "" {
+			toolErr = "tool returned an empty error response"
+		}
+		return nil, newMCPError(
+			errMCPToolReturnedError,
+			fmt.Sprintf("mcp %q.%q: tool error", p.cfg.Name, toolName),
+			errors.New(toolErr),
+		)
 	}
 	if result.StructuredContent != nil {
 		return result.StructuredContent, nil
@@ -467,16 +547,19 @@ func (p *MCPSessionPool) ListTools(ctx context.Context) ([]*mcp.Tool, error) {
 	defer end()
 	tools, err := p.listTools(ctx)
 	if err != nil {
-		if isAppError(err) {
-			reportErr(err)
-			return nil, err
+		if shouldReconnectAfterMCPError(err) {
+			if reconnectErr := p.Reconnect(ctx); reconnectErr != nil {
+				p.reportReconnectCascade(ctx, err, reconnectErr, "")
+				userErr := newMCPError(
+					ErrMCPListToolsFailed,
+					fmt.Sprintf("mcp %q: list-tools failed after reconnect attempt", p.cfg.Name),
+					reconnectErr,
+				)
+				reportErr(userErr)
+				return nil, userErr
+			}
+			tools, err = p.listTools(ctx)
 		}
-		if reconnectErr := p.Reconnect(ctx); reconnectErr != nil {
-			mergedErr := fmt.Errorf("mcp %q: list-tools failed and reconnect failed: %w (original: %v)", p.cfg.Name, reconnectErr, err)
-			reportErr(mergedErr)
-			return nil, mergedErr
-		}
-		tools, err = p.listTools(ctx)
 	}
 	if err != nil {
 		reportErr(err)
@@ -489,11 +572,19 @@ func (p *MCPSessionPool) ListTools(ctx context.Context) ([]*mcp.Tool, error) {
 func (p *MCPSessionPool) listTools(ctx context.Context) ([]*mcp.Tool, error) {
 	session, err := p.Session(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("mcp %q: list-tools session: %w", p.cfg.Name, err)
+		return nil, newMCPError(
+			ErrMCPSessionUnavailable,
+			fmt.Sprintf("mcp %q: list-tools session unavailable", p.cfg.Name),
+			err,
+		)
 	}
 	result, err := session.ListTools(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("mcp %q: list-tools: %w", p.cfg.Name, err)
+		return nil, newMCPError(
+			ErrMCPListToolsFailed,
+			fmt.Sprintf("mcp %q: list-tools failed", p.cfg.Name),
+			err,
+		)
 	}
 	return result.Tools, nil
 }
@@ -512,12 +603,34 @@ func mcpCollectText(contents []mcp.Content) string {
 	return string(sb)
 }
 
+// reportReconnectCascade logs the original transport error and reconnect failure on the
+// activity tracker so callers can still receive a shorter named error.
+func (p *MCPSessionPool) reportReconnectCascade(ctx context.Context, originalErr, reconnectErr error, toolName string) {
+	kv := []any{
+		"name", p.cfg.Name,
+		"original_error", originalErr.Error(),
+		"reconnect_error", reconnectErr.Error(),
+	}
+	if toolName != "" {
+		kv = append(kv, "tool", toolName)
+	}
+	_, reportChange, end := p.tracker.Start(ctx, "mcp_reconnect_cascade", "mcp_server", kv...)
+	defer end()
+	reportChange(p.cfg.Name, map[string]any{
+		"original_error":  originalErr.Error(),
+		"reconnect_error": reconnectErr.Error(),
+		"tool":            toolName,
+	})
+}
 
 // isAppError determines if the error returned by the MCP SDK is an application-level
 // JSON-RPC rejection (like invalid schema) or context cancellation, rather than a network drop.
 func isAppError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, errMCPToolReturnedError) {
+		return true
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "invalid params") ||
@@ -529,16 +642,21 @@ func isAppError(err error) bool {
 		errors.Is(err, context.DeadlineExceeded)
 }
 
-// ErrOAuthNotAuthenticated is returned by buildOAuthRoundTripper when no
-// stored token exists for an OAuth-configured MCP server. The caller (or the
-// CLI error handler) should surface this as an actionable message.
-var ErrOAuthNotAuthenticated = fmt.Errorf("not authenticated")
+func shouldReconnectAfterMCPError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isAppError(err) {
+		return false
+	}
+	return !errors.Is(err, ErrMCPSessionUnavailable)
+}
 
 // buildOAuthRoundTripper constructs a non-interactive oauth2.Transport.
 //
 // It ONLY injects a previously-stored token and auto-refreshes it.
 // It never opens a browser or binds a long-lived port — if no valid token is
-// found in the store it returns ErrOAuthNotAuthenticated so the caller can
+// found in the store it returns ErrMCPOAuthNotAuthenticated so the caller can
 // tell the user to run `contenox mcp auth <name>`.
 func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.RoundTripper, error) {
 	reportErr, reportChange, end := p.tracker.Start(
@@ -550,12 +668,12 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 
 	cfg := p.cfg.OAuth
 	if cfg == nil {
-		err := fmt.Errorf("mcp oauth: OAuth config is nil")
+		err := newMCPError(errMCPOAuthConfigMissing, "mcp oauth: config missing", nil)
 		reportErr(err)
 		return nil, err
 	}
 	if cfg.TokenStore == nil {
-		err := fmt.Errorf("mcp oauth: TokenStore is not set")
+		err := newMCPError(errMCPOAuthTokenStoreMissing, "mcp oauth: token store missing", nil)
 		reportErr(err)
 		return nil, err
 	}
@@ -565,8 +683,9 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 	meta, err := mcpoauth.DiscoverAuthServer(ctx, p.cfg.URL)
 	if err != nil {
 		discoverEnd()
-		reportErr(err)
-		return nil, fmt.Errorf("mcp oauth: discover auth server: %w", err)
+		userErr := newMCPError(errMCPOAuthDiscoveryFailed, "mcp oauth: discover auth server", err)
+		reportErr(userErr)
+		return nil, userErr
 	}
 	discoverReport("auth_endpoint", map[string]any{
 		"authorization_endpoint": meta.AuthorizationEndpoint,
@@ -589,7 +708,11 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 
 	if stored == nil || stored.AccessToken == "" {
 		// No token at all — the user needs to authenticate first.
-		err := fmt.Errorf("%w: run 'contenox mcp auth %s' to authenticate", ErrOAuthNotAuthenticated, p.cfg.Name)
+		err := newMCPError(
+			ErrMCPOAuthNotAuthenticated,
+			fmt.Sprintf("mcp %q: authentication required; run 'contenox mcp auth %s'", p.cfg.Name, p.cfg.Name),
+			nil,
+		)
 		reportErr(err)
 		return nil, err
 	}
@@ -686,8 +809,6 @@ func (l *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	return resp, err
 }
 
-
-
 // RunOAuthFlow performs the full PKCE authorization code flow interactively:
 // opens a browser at the authorization URL, waits for the callback, and
 // exchanges the code for a token set. It is also used by the `mcp auth` CLI
@@ -714,7 +835,11 @@ func RunOAuthFlow(ctx context.Context, o2cfg *oauth2.Config, oauthCfg *MCPOAuthC
 		openFn = oauthCfg.OpenBrowser
 	}
 
-	fmt.Printf("\nOpening browser for Notion authorization...\nIf the browser doesn't open, visit:\n\n  %s\n\n", authURL)
+	clientName := "MCP server"
+	if oauthCfg != nil && strings.TrimSpace(oauthCfg.ResolveClientName()) != "" {
+		clientName = oauthCfg.ResolveClientName()
+	}
+	fmt.Printf("\nOpening browser for %s authorization...\nIf the browser doesn't open, visit:\n\n  %s\n\n", clientName, authURL)
 	_ = openFn(authURL)
 
 	select {
@@ -773,4 +898,3 @@ func commandExists(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
 }
-

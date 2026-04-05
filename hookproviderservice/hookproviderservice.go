@@ -4,17 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/contenox/contenox/apiframework"
 	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/taskengine"
 	"github.com/getkin/kin-openapi/openapi3"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
 	ErrInvalidHook = errors.New("invalid remote hook data")
+)
+
+var (
+	localHookListConcurrency = 8
+	localHookToolListTimeout = 5 * time.Second
 )
 
 // Service defines the interface for managing remote hooks and querying hook capabilities.
@@ -34,18 +42,27 @@ type LocalHook struct {
 	Description string            `json:"description"`
 	Type        string            `json:"type"`
 	Tools       []taskengine.Tool `json:"tools,omitempty"`
+	// Source is builtin (in-process), mcp (persisted MCP server), or remote (HTTP hook in DB).
+	Source string `json:"source,omitempty"`
+	// UnavailableReason is set when tools could not be loaded (e.g. unreachable MCP); other hooks still list.
+	UnavailableReason string `json:"unavailableReason,omitempty"`
 }
 
 type service struct {
 	dbInstance   libdb.DBManager
 	hookRegistry taskengine.HookProvider
+	tracker      libtracker.ActivityTracker
 }
 
-// New creates a new service instance.
-func New(dbInstance libdb.DBManager, hookRegistry taskengine.HookProvider) Service {
+// New creates a new service instance. tracker may be nil (no-op tracking).
+func New(dbInstance libdb.DBManager, hookRegistry taskengine.HookProvider, tracker libtracker.ActivityTracker) Service {
+	if tracker == nil {
+		tracker = libtracker.NoopTracker{}
+	}
 	return &service{
 		dbInstance:   dbInstance,
 		hookRegistry: hookRegistry,
+		tracker:      tracker,
 	}
 }
 
@@ -59,36 +76,93 @@ func (s *service) GetSchemasForSupportedHooks(ctx context.Context) (map[string]*
 
 // ListLocalHooks returns all locally registered hooks
 func (s *service) ListLocalHooks(ctx context.Context) ([]LocalHook, error) {
+	reportErr, reportChange, end := s.tracker.Start(ctx, "list_tools", "local_hooks")
+	defer end()
+
 	if s.hookRegistry == nil {
-		return nil, errors.New("hook registry is not configured for this service")
+		err := errors.New("hook registry is not configured for this service")
+		reportErr(err)
+		return nil, err
 	}
 
 	supported, err := s.hookRegistry.Supports(ctx)
 	if err != nil {
+		reportErr(err)
 		return nil, fmt.Errorf("failed to get supported hooks: %w", err)
 	}
 
-	localHooks := make([]LocalHook, 0, len(supported))
-	for _, name := range supported {
-		tools, err := s.hookRegistry.GetToolsForHookByName(ctx, name)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get tool for hook %s %w", name, err)
-		}
+	localHooks := make([]LocalHook, len(supported))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(localHookListConcurrency)
 
-		description := ""
-		if len(tools) > 0 && tools[0].Function.Description != "" {
-			description = tools[0].Function.Description
-		}
+	for idx, name := range supported {
+		idx, name := idx, name
+		g.Go(func() error {
+			src := s.hookSource(gctx, name)
+			hookCtx, cancel := context.WithTimeout(gctx, localHookToolListTimeout)
+			defer cancel()
 
-		localHooks = append(localHooks, LocalHook{
-			Name:        name,
-			Description: description,
-			Type:        "local",
-			Tools:       tools,
+			tools, err := s.hookRegistry.GetToolsForHookByName(hookCtx, name)
+			if err != nil {
+				reportChange(name, map[string]any{
+					"detail": "tools_unavailable",
+					"error":  err.Error(),
+				})
+				localHooks[idx] = LocalHook{
+					Name:              name,
+					Type:              "local",
+					Source:            src,
+					UnavailableReason: shortenHookListError(err),
+				}
+				return nil
+			}
+
+			description := ""
+			if len(tools) > 0 && tools[0].Function.Description != "" {
+				description = tools[0].Function.Description
+			}
+
+			localHooks[idx] = LocalHook{
+				Name:        name,
+				Description: description,
+				Type:        "local",
+				Source:      src,
+				Tools:       tools,
+			}
+			return nil
 		})
 	}
 
+	if err := g.Wait(); err != nil {
+		reportErr(err)
+		return nil, err
+	}
+
 	return localHooks, nil
+}
+
+func (s *service) hookSource(ctx context.Context, name string) string {
+	st := runtimetypes.New(s.dbInstance.WithoutTransaction())
+	if _, err := st.GetMCPServerByName(ctx, name); err == nil {
+		return "mcp"
+	}
+	if _, err := st.GetRemoteHookByName(ctx, name); err == nil {
+		return "remote"
+	}
+	return "builtin"
+}
+
+// shortenHookListError produces a short UI-safe message from a tool-listing failure.
+func shortenHookListError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	const max = 200
+	if len(msg) > max {
+		return msg[:max-3] + "..."
+	}
+	return msg
 }
 
 func (s *service) Create(ctx context.Context, hook *runtimetypes.RemoteHook) error {

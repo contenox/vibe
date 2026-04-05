@@ -3,6 +3,7 @@ package taskengine
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -30,9 +31,97 @@ func ConvertToType(value interface{}, dataType DataType) (interface{}, error) {
 		return convertToFloatSlice(value)
 	case DataTypeJSON:
 		return convertToJSON(value)
+	case DataTypeNil:
+		return nil, nil
+	case DataTypeAny:
+		if value == nil {
+			return nil, nil
+		}
+		inferred := InferDataType(value)
+		if inferred == DataTypeNil {
+			return nil, nil
+		}
+		return ConvertToType(value, inferred)
 	default:
-		return value, nil // For DataTypeAny, return as-is
+		return value, nil
 	}
+}
+
+// InferDataType picks the narrowest concrete DataType for a runtime value.
+func InferDataType(v any) DataType {
+	if v == nil {
+		return DataTypeNil
+	}
+	switch v.(type) {
+	case ChatHistory:
+		return DataTypeChatHistory
+	case OpenAIChatRequest:
+		return DataTypeOpenAIChat
+	case OpenAIChatResponse:
+		return DataTypeOpenAIChatResponse
+	case []SearchResult:
+		return DataTypeSearchResults
+	case []float64:
+		return DataTypeVector
+	case string, []byte, json.RawMessage:
+		return DataTypeString
+	case bool:
+		return DataTypeBool
+	case int, int8, int16, int32, int64:
+		return DataTypeInt
+	case uint, uint8, uint16, uint32, uint64, uintptr:
+		return DataTypeInt
+	case float32, float64:
+		return DataTypeFloat
+	case map[string]any:
+		return DataTypeJSON
+	case []any:
+		return DataTypeJSON
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Array:
+		return DataTypeJSON
+	case reflect.Struct:
+		return DataTypeJSON
+	case reflect.Pointer:
+		if rv.IsNil() {
+			return DataTypeNil
+		}
+		return InferDataType(rv.Elem().Interface())
+	case reflect.String:
+		return DataTypeString
+	case reflect.Bool:
+		return DataTypeBool
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return DataTypeInt
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return DataTypeInt
+	case reflect.Float32, reflect.Float64:
+		return DataTypeFloat
+	default:
+		return DataTypeString
+	}
+}
+
+// NormalizeDataType upgrades DataTypeAny to a concrete type and coerces the value with ConvertToType.
+func NormalizeDataType(v any, dt DataType) (any, DataType, error) {
+	if dt != DataTypeAny {
+		return v, dt, nil
+	}
+	inferred := InferDataType(v)
+	if inferred == DataTypeNil {
+		return nil, DataTypeNil, nil
+	}
+	out, err := ConvertToType(v, inferred)
+	if err != nil {
+		s, err2 := convertToString(v)
+		if err2 != nil {
+			return fmt.Sprint(v), DataTypeString, nil
+		}
+		return s, DataTypeString, nil
+	}
+	return out, inferred, nil
 }
 
 func convertToChatHistory(value interface{}) (ChatHistory, error) {

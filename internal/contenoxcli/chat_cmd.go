@@ -1,4 +1,4 @@
-// run.go contains the main execution pipeline for the vibe CLI (steps 1–12).
+// chat_cmd.go implements contenox chat (session-backed chain execution).
 package contenoxcli
 
 import (
@@ -14,39 +14,31 @@ import (
 
 	"github.com/contenox/contenox/chatservice"
 	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/localhooks"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/taskengine"
 )
 
 // chatOpts carries all effective config and flags needed by the run pipeline.
 type chatOpts struct {
-	EffectiveDB                       string
-	EffectiveChain                    string
-	EffectiveDefaultModel             string
-	EffectiveDefaultProvider          string
-	EffectiveContext                  int
-	EffectiveNoDeleteModels           bool
-	EffectiveEnableLocalExec          bool
-	EffectiveLocalExecAllowedDir      string
-	EffectiveTracing                  bool
-	EffectiveSteps                    bool
-	EffectiveRaw                      bool
-	EffectiveThink                    bool
-	HistoryTrim                       int
-	LastN                             int
-	InputValue                        string
-	InputFlagPassed                   bool
-	ContenoxDir                       string
-	// AskApproval is an optional HITL callback. When non-nil, BuildEngine wraps
-	// local_fs and local_shell with a HITLWrapper that requests human approval
-	// before executing mutating or shell tools. Used only by the vibe TUI.
-	AskApproval localhooks.AskApproval
-	// PlannerChain and ExecutorChain, when both non-nil, cause BuildEngine to
-	// register the plan_manager hook so the chat LLM can create and run plans
-	// via tool calls. Used only by the vibe TUI.
-	PlannerChain  *taskengine.TaskChainDefinition
-	ExecutorChain *taskengine.TaskChainDefinition
+	EffectiveDB                  string
+	EffectiveChain               string
+	EffectiveDefaultModel        string
+	EffectiveDefaultProvider     string
+	EffectiveContext             int
+	EffectiveNoDeleteModels      bool
+	EffectiveEnableLocalExec     bool
+	EffectiveLocalExecAllowedDir string
+	EffectiveTracing             bool
+	EffectiveSteps               bool
+	EffectiveRaw                 bool
+	EffectiveThink               bool
+	HistoryTrim                  int
+	LastN                        int
+	InputValue                   string
+	InputFlagPassed              bool
+	ContenoxDir                  string
+	// EffectiveSkipBackendCycle skips state.RunBackendCycle (e.g. contenox doctor --skip-cycle).
+	EffectiveSkipBackendCycle bool
 }
 
 // execChat runs the full chat pipeline and returns any error encountered.
@@ -60,6 +52,10 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 		return fmt.Errorf("failed to build engine: %w", err)
 	}
 	defer engine.Stop()
+
+	if err := PreflightLLMSetup(errW, engine.SetupCheck); err != nil {
+		return err
+	}
 
 	// ------------------------------------------------------------------------
 	// 10. Load chain from file
@@ -80,18 +76,16 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	// Determine input: from flag, positional args (+optional stdin), or stdin alone.
 	in := opts.InputValue
 	if !opts.InputFlagPassed {
-		if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-			stdinBytes, err := io.ReadAll(io.LimitReader(os.Stdin, 50<<20)) // cap at 50 MB
-			if err != nil {
-				return fmt.Errorf("failed to read from stdin: %w", err)
-			}
-			stdinStr := strings.TrimSpace(string(stdinBytes))
-			if stdinStr != "" {
-				if in != "" {
-					in = in + "\n\n" + stdinStr
-				} else {
-					in = stdinStr
-				}
+		stdinData, ok, err := readStdinIfAvailable(maxCLIStdinBytes)
+		if err != nil {
+			return err
+		}
+		stdinStr := strings.TrimSpace(stdinData)
+		if ok && stdinStr != "" {
+			if in != "" {
+				in = in + "\n\n" + stdinStr
+			} else {
+				in = stdinStr
 			}
 		}
 	}
@@ -107,27 +101,6 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 		"provider": opts.EffectiveDefaultProvider,
 		"chain":    chain.ID,
 	}
-	if builtins := engine.JSEnv.GetBuiltinSignatures(); len(builtins) > 0 {
-		var b strings.Builder
-		for _, t := range builtins {
-			if t.Function.Name != "console" {
-				b.WriteString(t.Function.Name)
-				b.WriteString(": ")
-				b.WriteString(t.Function.Description)
-				b.WriteString("\n")
-			}
-		}
-		if hookTools, err := engine.JSEnv.GetExecuteHookToolDescriptions(ctx); err == nil && len(hookTools) > 0 {
-			b.WriteString("executeHook tools: ")
-			for i, t := range hookTools {
-				if i > 0 {
-					b.WriteString(", ")
-				}
-				b.WriteString(t.Function.Name)
-			}
-		}
-		templateVars["sandbox_api"] = b.String()
-	}
 	ctx = taskengine.WithTemplateVars(ctx, templateVars)
 
 	// Persistent Session Management
@@ -140,6 +113,12 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 		ctx = context.WithValue(ctx, runtimetypes.SessionIDContextKey, sessionID)
 	}
 	chatMgr := chatservice.NewManager(nil)
+
+	stopTaskEvents := startCLITaskEventStream(ctx, engine, errW, cliTaskEventRenderOptions{
+		Trace:        opts.EffectiveTracing,
+		ShowThinking: opts.EffectiveThink,
+	})
+	defer stopTaskEvents()
 
 	var history []taskengine.Message
 	if sessionID != "" {
@@ -167,6 +146,9 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	}
 	output, outputType, stateUnits, err := engine.TaskService.Execute(ctx, &chain, chainInput, taskengine.DataTypeChatHistory)
 	if err != nil {
+		if isModelResolverFailure(err) {
+			PrintSetupIssues(errW, engine.SetupCheck)
+		}
 		return fmt.Errorf("chain execution failed: %w", err)
 	}
 

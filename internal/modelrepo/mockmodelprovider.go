@@ -144,7 +144,7 @@ func (m *MockEmbedClient) Close() error {
 type MockStreamClient struct{}
 
 // Stream returns a channel with mock stream parcels.
-func (m *MockStreamClient) Stream(ctx context.Context, prompt string, args ...ChatArgument) (<-chan *StreamParcel, error) {
+func (m *MockStreamClient) Stream(ctx context.Context, messages []Message, args ...ChatArgument) (<-chan *StreamParcel, error) {
 	ch := make(chan *StreamParcel)
 	go func() {
 		defer close(ch)

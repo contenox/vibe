@@ -56,7 +56,8 @@ type ModelRepo interface {
 	Stream(
 		ctx context.Context,
 		req Request,
-		prompt string,
+		messages []libmodelprovider.Message,
+		opts ...libmodelprovider.ChatArgument,
 	) (<-chan *libmodelprovider.StreamParcel, Meta, error)
 }
 
@@ -276,10 +277,11 @@ func (e *modelManager) Embed(
 func (e *modelManager) Stream(
 	ctx context.Context,
 	req Request,
-	prompt string,
+	messages []libmodelprovider.Message,
+	opts ...libmodelprovider.ChatArgument,
 ) (<-chan *libmodelprovider.StreamParcel, Meta, error) {
-	if prompt == "" {
-		return nil, Meta{}, errors.New("prompt cannot be empty")
+	if len(messages) == 0 {
+		return nil, Meta{}, errors.New("messages cannot be empty")
 	}
 
 	if err := validateRequest(req); err != nil {
@@ -306,7 +308,7 @@ func (e *modelManager) Stream(
 		return nil, Meta{}, fmt.Errorf("stream: client resolution failed: %w", err)
 	}
 
-	stream, err := client.Stream(ctx, prompt)
+	stream, err := client.Stream(ctx, messages, opts...)
 	if err != nil {
 		safeClose(client)
 		return nil, Meta{}, fmt.Errorf("stream initialization failed: %w", err)

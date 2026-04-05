@@ -41,7 +41,71 @@ type chatRequest struct {
 	Stream      bool                `json:"stream,omitempty"`
 	Tools       []modelrepo.Tool    `json:"tools,omitempty"`
 	// ExtraBody passes provider-specific parameters (e.g. enable_thinking for Qwen3/Granite).
+	// We intentionally defer vLLM-only request fields such as tool_choice,
+	// parallel_tool_calls, response_format, structured_outputs, and /v1/responses
+	// until modelrepo grows matching shared request fields.
 	ExtraBody map[string]any `json:"extra_body,omitempty"`
+}
+
+type chatResponse struct {
+	ID      string       `json:"id"`
+	Object  string       `json:"object"`
+	Created int          `json:"created"`
+	Choices []chatChoice `json:"choices"`
+	Usage   struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+type chatChoice struct {
+	Index        int         `json:"index"`
+	Message      chatMessage `json:"message"`
+	FinishReason string      `json:"finish_reason"`
+}
+
+type chatMessage struct {
+	Role             string         `json:"role"`
+	Content          string         `json:"content"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Reasoning        string         `json:"reasoning,omitempty"`
+	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
+}
+
+func (m chatMessage) Thinking() string {
+	if m.Reasoning != "" {
+		return m.Reasoning
+	}
+	return m.ReasoningContent
+}
+
+type chatToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Index    *int   `json:"index,omitempty"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+func convertChatToolCalls(toolCalls []chatToolCall) []modelrepo.ToolCall {
+	out := make([]modelrepo.ToolCall, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		out = append(out, modelrepo.ToolCall{
+			ID:   tc.ID,
+			Type: tc.Type,
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{
+				Name:      tc.Function.Name,
+				Arguments: tc.Function.Arguments,
+			},
+		})
+	}
+	return out
 }
 
 func (c *vLLMClient) sendRequest(ctx context.Context, endpoint string, request interface{}, response interface{}) error {
@@ -110,6 +174,10 @@ func buildChatRequest(modelName string, messages []modelrepo.Message, args []mod
 		arg.Apply(config)
 	}
 
+	return buildChatRequestFromConfig(modelName, messages, config)
+}
+
+func buildChatRequestFromConfig(modelName string, messages []modelrepo.Message, config *modelrepo.ChatConfig) chatRequest {
 	req := chatRequest{
 		Model:       modelName,
 		Messages:    messages,
@@ -124,18 +192,26 @@ func buildChatRequest(modelName string, messages []modelrepo.Message, args []mod
 	// Wire enable_thinking for Qwen3, Granite, and DeepSeek-V3.1 served via vLLM.
 	// DeepSeek-R1 reasoning output is enabled server-side (--reasoning-parser deepseek_r1);
 	// it doesn't need this flag but harmlessly ignores it.
-	if config.Think != nil {
-		switch *config.Think {
-		case "true", "high", "medium", "low":
-			req.ExtraBody = map[string]any{
-				"chat_template_kwargs": map[string]any{"enable_thinking": true},
-			}
-		case "false":
-			req.ExtraBody = map[string]any{
-				"chat_template_kwargs": map[string]any{"enable_thinking": false},
-			}
+	if thinkEnabled, ok := vllmThinkingEnabled(config.Think); ok {
+		req.ExtraBody = map[string]any{
+			"chat_template_kwargs": map[string]any{"enable_thinking": thinkEnabled},
 		}
 	}
 
 	return req
+}
+
+func vllmThinkingEnabled(think *string) (bool, bool) {
+	if think == nil {
+		return false, false
+	}
+
+	switch *think {
+	case "", "default":
+		return false, false
+	case "false", "none", "off", "disabled":
+		return false, true
+	default:
+		return true, true
+	}
 }

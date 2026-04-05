@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	serverops "github.com/contenox/contenox/apiframework"
+	apiframework "github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/embedservice"
 	"github.com/contenox/contenox/execservice"
 	"github.com/contenox/contenox/libtracker"
@@ -38,18 +38,18 @@ type taskManager struct {
 // Requests are routed ONLY to backends that have the default model available in any shared group.
 // If groups are enabled, models and backends not assigned to any group will be completely ignored by the routing system.
 func (tm *taskManager) executeSimpleTask(w http.ResponseWriter, r *http.Request) {
-	req, err := serverops.Decode[execservice.TaskRequest](r) // @request execservice.TaskRequest
+	req, err := apiframework.Decode[execservice.TaskRequest](r) // @request execservice.TaskRequest
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ExecuteOperation)
 		return
 	}
 
 	resp, err := tm.promptService.Execute(r.Context(), &req)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ExecuteOperation)
 		return
 	}
-	_ = serverops.Encode(w, r, http.StatusOK, resp) // @response execservice.SimpleExecutionResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, resp) // @response execservice.SimpleExecutionResponse
 }
 
 type taskExecutionRequest struct {
@@ -72,14 +72,14 @@ type taskExecutionResponse struct {
 // Requests are routed ONLY to backends that have the requested model available in any shared group.
 // If groups are enabled, models and backends not assigned to any group will be completely ignored by the routing system.
 func (tm *taskManager) executeTaskChain(w http.ResponseWriter, r *http.Request) {
-	req, err := serverops.Decode[taskExecutionRequest](r) // @request execapi.taskExecutionRequest
+	req, err := apiframework.Decode[taskExecutionRequest](r) // @request execapi.taskExecutionRequest
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ExecuteOperation)
 		return
 	}
 	inputType, err := taskengine.DataTypeFromString(req.InputType)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ExecuteOperation)
 		return
 	}
 
@@ -90,12 +90,12 @@ func (tm *taskManager) executeTaskChain(w http.ResponseWriter, r *http.Request) 
 		// Convert req.Input (map) to ChatHistory
 		data, err := json.Marshal(req.Input)
 		if err != nil {
-			_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
+			_ = apiframework.Error(w, r, err, apiframework.ExecuteOperation)
 			return
 		}
 		var chatHistory taskengine.ChatHistory
 		if err := json.Unmarshal(data, &chatHistory); err != nil {
-			_ = serverops.Error(w, r, fmt.Errorf("failed to convert to ChatHistory: %w", err), serverops.ExecuteOperation)
+			_ = apiframework.Error(w, r, fmt.Errorf("failed to convert to ChatHistory: %w", err), apiframework.ExecuteOperation)
 			return
 		}
 		convertedInput = chatHistory
@@ -104,12 +104,12 @@ func (tm *taskManager) executeTaskChain(w http.ResponseWriter, r *http.Request) 
 		// Convert req.Input (map) to OpenAIChatRequest
 		data, err := json.Marshal(req.Input)
 		if err != nil {
-			_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
+			_ = apiframework.Error(w, r, err, apiframework.ExecuteOperation)
 			return
 		}
 		var openAIChat taskengine.OpenAIChatRequest
 		if err := json.Unmarshal(data, &openAIChat); err != nil {
-			_ = serverops.Error(w, r, fmt.Errorf("failed to convert to OpenAIChatRequest: %w", err), serverops.ExecuteOperation)
+			_ = apiframework.Error(w, r, fmt.Errorf("failed to convert to OpenAIChatRequest: %w", err), apiframework.ExecuteOperation)
 			return
 		}
 		convertedInput = openAIChat
@@ -118,12 +118,12 @@ func (tm *taskManager) executeTaskChain(w http.ResponseWriter, r *http.Request) 
 		// Convert req.Input (map) to OpenAIChatResponse
 		data, err := json.Marshal(req.Input)
 		if err != nil {
-			_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
+			_ = apiframework.Error(w, r, err, apiframework.ExecuteOperation)
 			return
 		}
 		var openAIChatResponse taskengine.OpenAIChatResponse
 		if err := json.Unmarshal(data, &openAIChatResponse); err != nil {
-			_ = serverops.Error(w, r, fmt.Errorf("failed to convert to OpenAIChatResponse: %w", err), serverops.ExecuteOperation)
+			_ = apiframework.Error(w, r, fmt.Errorf("failed to convert to OpenAIChatResponse: %w", err), apiframework.ExecuteOperation)
 			return
 		}
 		convertedInput = openAIChatResponse
@@ -132,12 +132,12 @@ func (tm *taskManager) executeTaskChain(w http.ResponseWriter, r *http.Request) 
 		// Convert req.Input to []SearchResult
 		data, err := json.Marshal(req.Input)
 		if err != nil {
-			_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
+			_ = apiframework.Error(w, r, err, apiframework.ExecuteOperation)
 			return
 		}
 		var searchResults []taskengine.SearchResult
 		if err := json.Unmarshal(data, &searchResults); err != nil {
-			_ = serverops.Error(w, r, fmt.Errorf("failed to convert to []SearchResult: %w", err), serverops.ExecuteOperation)
+			_ = apiframework.Error(w, r, fmt.Errorf("failed to convert to []SearchResult: %w", err), apiframework.ExecuteOperation)
 			return
 		}
 		convertedInput = searchResults
@@ -245,14 +245,14 @@ func (tm *taskManager) executeTaskChain(w http.ResponseWriter, r *http.Request) 
 
 	resp, outputType, capturedStateUnits, err := tm.taskService.Execute(ctx, req.Chain, convertedInput, inputType)
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ExecuteOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ExecuteOperation)
 		return
 	}
 	var response taskExecutionResponse
 	response.Output = resp
 	response.OutputType = outputType.String()
 	response.State = capturedStateUnits
-	_ = serverops.Encode(w, r, http.StatusOK, response) // @response execapi.taskExecutionResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, response) // @response execapi.taskExecutionResponse
 }
 
 // Lists available task-chain hook types.
@@ -261,11 +261,11 @@ func (tm *taskManager) executeTaskChain(w http.ResponseWriter, r *http.Request) 
 func (tm *taskManager) supported(w http.ResponseWriter, r *http.Request) {
 	resp, err := tm.taskService.Supports(r.Context())
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.ListOperation)
+		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, resp) // @response []string
+	_ = apiframework.Encode(w, r, http.StatusOK, resp) // @response []string
 }
 
 type EmbedRequest struct {
@@ -282,19 +282,19 @@ type EmbedResponse struct {
 // Requests are routed ONLY to backends that have the default model available in any shared group.
 // If groups are enabled, models and backends not assigned to any group will be completely ignored by the routing system.
 func (tm *taskManager) generateEmbeddings(w http.ResponseWriter, r *http.Request) {
-	req, err := serverops.Decode[EmbedRequest](r) // @request execapi.EmbedRequest
+	req, err := apiframework.Decode[EmbedRequest](r) // @request execapi.EmbedRequest
 	if err != nil {
-		_ = serverops.Error(w, r, err, serverops.CreateOperation)
+		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 
 	vector, err := tm.embedService.Embed(r.Context(), req.Text)
 	if err != nil {
-		_ = serverops.Error(w, r, fmt.Errorf("embedding failed: %w", err), serverops.CreateOperation)
+		_ = apiframework.Error(w, r, fmt.Errorf("embedding failed: %w", err), apiframework.CreateOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, EmbedResponse{Vector: vector}) // @response execapi.EmbedResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, EmbedResponse{Vector: vector}) // @response execapi.EmbedResponse
 }
 
 type DefaultModelResponse struct {
@@ -305,9 +305,9 @@ type DefaultModelResponse struct {
 func (tm *taskManager) defaultModel(w http.ResponseWriter, r *http.Request) {
 	modelName, err := tm.embedService.DefaultModelName(r.Context())
 	if err != nil {
-		_ = serverops.Error(w, r, fmt.Errorf("failed to get default model: %w", err), serverops.GetOperation)
+		_ = apiframework.Error(w, r, fmt.Errorf("failed to get default model: %w", err), apiframework.GetOperation)
 		return
 	}
 
-	_ = serverops.Encode(w, r, http.StatusOK, DefaultModelResponse{ModelName: modelName}) // @response execapi.DefaultModelResponse
+	_ = apiframework.Encode(w, r, http.StatusOK, DefaultModelResponse{ModelName: modelName}) // @response execapi.DefaultModelResponse
 }

@@ -112,19 +112,13 @@ func bumpVersion(bumpType string) error {
 	fmt.Printf("New version will be: %s\n", newVersion)
 	tx.newVersion = newVersion
 
-	// 5. Update compose file
-	if err := updateComposeFile(newVersion); err != nil {
-		return fmt.Errorf("failed to update compose file: %w", err)
-	}
-	tx.composeUpdated = true
-
-	// 6. Update version file
+	// 5. Update version file
 	if err := updateVersionFile(newVersion); err != nil {
 		return fmt.Errorf("failed to update version file: %w", err)
 	}
 	tx.versionFileUpdated = true
 
-	// 6b. Update README install snippet TAG so copy-paste URL stays correct
+	// 6. Update README install snippet TAG so copy-paste URL stays correct
 	if err := updateReadmeTag(newVersion); err != nil {
 		return fmt.Errorf("failed to update README TAG: %w", err)
 	}
@@ -285,12 +279,11 @@ func updateVersionFile(newVersion string) error {
 }
 
 func commitVersionFile(newVersion string) error {
-	fmt.Println("📦 Committing version, compose, and README...")
+	fmt.Println("📦 Committing version and README...")
 
-	// Add version file, compose, and README (install snippet TAG) to the commit
-	cmd := exec.Command("git", "add", getVersionFile(), "compose.yaml", "README.md")
+	cmd := exec.Command("git", "add", getVersionFile(), "README.md")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to add version and compose files: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("failed to stage version and README: %w\nOutput: %s", err, string(output))
 	}
 
 	// Commit the change
@@ -309,35 +302,6 @@ func createTag(newVersion string) error {
 	cmd := exec.Command("git", "tag", "-s", "-a", newVersion, "-m", fmt.Sprintf("Release %s", newVersion))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to create tag: %w\nOutput: %s", err, string(output))
-	}
-
-	return nil
-}
-
-func updateComposeFile(newVersion string) error {
-	composePath := "compose.yaml"
-
-	// Check if compose file exists
-	if _, err := os.Stat(composePath); os.IsNotExist(err) {
-		fmt.Println("   ⚠️  compose.yaml not found, skipping compose update")
-		return nil
-	}
-
-	fmt.Printf("   🔄 Updating %s to use version %s...\n", composePath, newVersion)
-
-	// Read the compose file
-	content, err := os.ReadFile(composePath)
-	if err != nil {
-		return fmt.Errorf("failed to read compose file: %w", err)
-	}
-
-	// Replace the runtime image tag
-	re := regexp.MustCompile(`image: ghcr\.io/contenox/runtime-api:[^\s]+`)
-	updatedContent := re.ReplaceAllString(string(content), "image: ghcr.io/contenox/runtime-api:"+newVersion)
-
-	// Write the updated content
-	if err := os.WriteFile(composePath, []byte(updatedContent), 0644); err != nil {
-		return fmt.Errorf("failed to write compose file: %w", err)
 	}
 
 	return nil
@@ -366,17 +330,14 @@ func updateReadmeTag(newVersion string) error {
 
 // BumpTransaction represents a version bump operation with state tracking for proper cleanup
 type bumpTransaction struct {
-	currentVersion      string
-	newVersion          string
-	composeUpdated      bool
-	versionFileUpdated  bool
-	readmeUpdated       bool
-	commitCreated       bool
-	tagCreated          bool
-	hasError            bool
-	successful          bool
-	previousComposePath string
-	previousVersionPath string
+	currentVersion     string
+	newVersion         string
+	versionFileUpdated bool
+	readmeUpdated      bool
+	commitCreated      bool
+	tagCreated         bool
+	hasError           bool
+	successful         bool
 }
 
 // newBumpTransaction creates a new transaction context
@@ -413,28 +374,6 @@ func (tx *bumpTransaction) Rollback() {
 	if tx.versionFileUpdated {
 		fmt.Printf("   Restoring version file to %s...\n", tx.currentVersion)
 		os.WriteFile(getVersionFile(), []byte(tx.currentVersion), 0644)
-	}
-
-	// If we updated the compose file, revert it
-	if tx.composeUpdated {
-		fmt.Println("   Restoring compose file...")
-		composePath := "compose.yaml"
-
-		// Read the compose file
-		content, err := os.ReadFile(composePath)
-		if err != nil {
-			fmt.Printf("   Failed to read compose file: %v\n", err)
-			return
-		}
-
-		// Replace the runtime image tag back to current version
-		re := regexp.MustCompile(`image: ghcr\.io/contenox/runtime-api:[^\s]+`)
-		updatedContent := re.ReplaceAllString(string(content), "image: ghcr.io/contenox/runtime-api:"+tx.currentVersion)
-
-		// Write the restored content
-		if err := os.WriteFile(composePath, []byte(updatedContent), 0644); err != nil {
-			fmt.Printf("   Failed to restore compose file: %v\n", err)
-		}
 	}
 
 	// If we updated the README TAG line, revert it

@@ -1,0 +1,7 @@
+# frontend/.prettierignore
+dist
+node_modules
+*.md
+*.html
+*.json
+*.lock

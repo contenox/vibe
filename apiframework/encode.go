@@ -1,3 +1,9 @@
+// Package apiframework provides HTTP request/response helpers used by the runtime API.
+//
+// Handlers should use Encode, Decode, Error, GetPathParam, and GetQueryParam for JSON I/O and errors.
+// For OpenAPI generation (tools/openapi-gen), place // @request pkg.Type after Decode and // @response pkg.Type
+// after Encode; path and query documentation uses the description arguments on GetPathParam / GetQueryParam.
+// Keep those helper calls in the route handler body so the static generator can discover them directly.
 package apiframework
 
 import (

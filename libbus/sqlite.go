@@ -41,8 +41,8 @@ type SQLiteBus struct {
 }
 
 const (
-	defaultEventPoll   = 50 * time.Millisecond
-	defaultRequestPoll = 20 * time.Millisecond
+	defaultEventPoll   = 200 * time.Millisecond
+	defaultRequestPoll = 100 * time.Millisecond
 	defaultTimeout     = 10 * time.Second
 )
 
