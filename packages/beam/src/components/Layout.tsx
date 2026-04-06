@@ -1,4 +1,4 @@
-import { Button, Card, Panel, SidebarToggle, Span, UserMenu } from '@contenox/ui';
+import { Button, Panel, SidebarToggle, Span, UserMenu } from '@contenox/ui';
 import React, { useContext, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import logoUrl from '../assets/logo.png';
@@ -91,7 +91,7 @@ export function Layout({
           {sidebarContent}
         </Sidebar>
 
-        <Card className="min-h-0 min-w-0 flex-1 overflow-hidden bg-inherit">{mainContent}</Card>
+        <main className="bg-background min-h-0 min-w-0 flex-1 overflow-hidden">{mainContent}</main>
       </div>
     </div>
   );

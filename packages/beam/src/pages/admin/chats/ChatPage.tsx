@@ -2,30 +2,53 @@ import {
   Badge,
   Button,
   EmptyState,
-  Panel,
+  InlineNotice,
+  InsetPanel,
+  P,
   Section,
   Select,
+  SidePanelBody,
+  SidePanelColumn,
+  SidePanelHeader,
+  SidePanelRailButton,
   Span,
   Spinner,
   Tooltip,
 } from '@contenox/ui';
-import { PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { FolderOpen, PanelRightClose, PanelRightOpen, X } from 'lucide-react';
 import { t } from 'i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Fill, Page } from '../../../components/Page';
+import { useChain } from '../../../hooks/useChains';
 import { useListFiles } from '../../../hooks/useFiles';
+import { useActivePlan, useCompilePlanPreview } from '../../../hooks/usePlans';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';
+import { parseCompiledChainJSON } from '../../../lib/planCompiledChain';
+import { planKeys } from '../../../lib/queryKeys';
 import { useChatHistory, useCreateChat, useSendMessage } from '../../../hooks/useChats';
 import { useTaskEvents } from '../../../hooks/useTaskEvents';
 import { createTaskEventRequestId } from '../../../lib/taskEvents';
-import { CapturedStateUnit, ChatMessage as ApiChatMessage } from '../../../lib/types';
-import { ChatInterface } from './components/ChatInterface';
+import { cn } from '../../../lib/utils';
+import {
+  CapturedStateUnit,
+  ChatMessage as ApiChatMessage,
+  type ChatContextPayload,
+  type ChatModeId,
+} from '../../../lib/types';
+import { buildChatThreadItems } from './chatThreadItems';
+import BuildModeChainGraph from './components/BuildModeChainGraph';
+import { ChatInterface, type ChatWorkbenchTabId } from './components/ChatInterface';
+import { CompiledPlanThreadEmbed } from './components/CompiledPlanThreadEmbed';
 import { MessageInputForm } from './components/MessageInputForm';
 import { StateVisualizer } from './components/StateVisualizer';
 import { TaskEventFeed } from './components/TaskEventFeed';
+import WorkspaceSplitPanel, { type WorkspaceSplitHandle } from './components/WorkspaceSplitPanel';
 
 const STATE_PANEL_STORAGE_KEY = 'beam_chat_state_panel_open';
+const WORKSPACE_PANEL_STORAGE_KEY = 'beam_chat_workspace_panel_open';
+const WORKBENCH_TAB_STORAGE_KEY = 'beam_chat_workbench_tab';
 
 type BeamChatLocationState = {
   beamInitialMessage?: string;
@@ -40,6 +63,7 @@ export default function ChatPage() {
   const [chatId, setChatId] = useState<string | null>(paramChatId || null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [selectedChainId, setSelectedChainId] = useState('');
+  const [selectedMode, setSelectedMode] = useState<ChatModeId>('chat');
   const [latestState, setLatestState] = useState<CapturedStateUnit[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
@@ -52,15 +76,47 @@ export default function ChatPage() {
     requestId: string;
     message: string;
     chainId: string;
+    mode: ChatModeId;
     signal: AbortSignal;
+    context?: ChatContextPayload;
   } | null>(null);
   const sendDispatchedRef = useRef(false);
   const landingInitialSendKeyRef = useRef<string | null>(null);
+  const workspaceRef = useRef<WorkspaceSplitHandle>(null);
 
   const [statePanelOpen, setStatePanelOpen] = useState(() => {
     if (typeof window === 'undefined') return true;
     return window.localStorage.getItem(STATE_PANEL_STORAGE_KEY) !== '0';
   });
+
+  const [workbenchTab, setWorkbenchTab] = useState<ChatWorkbenchTabId>(() => {
+    if (typeof window === 'undefined') return 'chat';
+    return window.localStorage.getItem(WORKBENCH_TAB_STORAGE_KEY) === 'chain' ? 'chain' : 'chat';
+  });
+
+  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem(WORKSPACE_PANEL_STORAGE_KEY) !== '0';
+  });
+  const [mobileWorkspaceOpen, setMobileWorkspaceOpen] = useState(false);
+
+  const persistWorkspacePanelOpen = useCallback((open: boolean) => {
+    setWorkspacePanelOpen(open);
+    try {
+      window.localStorage.setItem(WORKSPACE_PANEL_STORAGE_KEY, open ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const persistWorkbenchTab = useCallback((tab: ChatWorkbenchTabId) => {
+    setWorkbenchTab(tab);
+    try {
+      window.localStorage.setItem(WORKBENCH_TAB_STORAGE_KEY, tab);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const toggleStatePanel = () => {
     setStatePanelOpen(open => {
@@ -84,8 +140,67 @@ export default function ChatPage() {
     if (paramChatId) setChatId(paramChatId);
   }, [paramChatId]);
 
+  const queryClient = useQueryClient();
   const { data: chatHistory, isLoading: historyLoading, error } = useChatHistory(chatId || '');
   const { mutate: sendMessage, error: sendError } = useSendMessage(chatId || '');
+
+  const { data: activePlan, isLoading: activePlanLoading } = useActivePlan({
+    enabled: selectedMode === 'plan' && !!chatId,
+  });
+  const chainPathForExecutorPreview =
+    chatId && selectedChainId.trim() ? selectedChainId : '';
+  const {
+    data: executorChainPreview,
+    isLoading: executorChainLoading,
+    error: executorChainError,
+  } = useChain(chainPathForExecutorPreview);
+
+  const compiledChainFromPlan = useMemo(
+    () => parseCompiledChainJSON(activePlan?.plan.compiled_chain_json),
+    [activePlan?.plan.compiled_chain_json],
+  );
+
+  const compilePlanPreview = useCompilePlanPreview({
+    enabled:
+      selectedMode === 'plan' &&
+      !!chatId &&
+      !!selectedChainId.trim() &&
+      !!activePlan?.steps?.length &&
+      !compiledChainFromPlan,
+    plan: activePlan?.plan,
+    steps: activePlan?.steps,
+    executorChainId: selectedChainId,
+  });
+
+  const compiledWorkflowChain = useMemo(
+    () => compiledChainFromPlan ?? compilePlanPreview.data?.chain ?? null,
+    [compiledChainFromPlan, compilePlanPreview.data?.chain],
+  );
+
+  const executorGraphCaption = useMemo(() => {
+    if (!selectedChainId.trim()) return null;
+    return selectedMode === 'plan'
+      ? t('chat.build_graph_executor_caption')
+      : t('chat.chain_executor_caption');
+  }, [selectedChainId, selectedMode, t]);
+
+  const compiledGraphCaption = useMemo(() => {
+    if (!compiledChainFromPlan && compilePlanPreview.data?.chain) {
+      return t('chat.build_compiled_preview_note');
+    }
+    return null;
+  }, [compiledChainFromPlan, compilePlanPreview.data?.chain, t]);
+
+  const compiledGraphLoading =
+    !!selectedChainId.trim() &&
+    !!activePlan?.steps?.length &&
+    !compiledChainFromPlan &&
+    compilePlanPreview.isLoading;
+
+  const compiledGraphError =
+    !compiledChainFromPlan && compilePlanPreview.error instanceof Error
+      ? compilePlanPreview.error
+      : null;
 
   const {
     mutate: createChat,
@@ -105,14 +220,21 @@ export default function ChatPage() {
       {
         message: pending.message,
         chainId: pending.chainId,
+        mode: pending.mode,
         signal: pending.signal,
         requestId: pending.requestId,
+        context: pending.context,
       },
       {
         onSuccess: response => {
+          const wasBuild = pendingSendRef.current?.mode === 'build';
           setLatestState(response.state || []);
           if (response.error) {
             setOperationError(response.error);
+          }
+          if (wasBuild) {
+            void queryClient.invalidateQueries({ queryKey: planKeys.active() });
+            void queryClient.invalidateQueries({ queryKey: planKeys.compilePreviewPrefix() });
           }
           abortRef.current = null;
           setIsProcessing(false);
@@ -136,7 +258,7 @@ export default function ChatPage() {
         },
       },
     );
-  }, [sendMessage, t]);
+  }, [queryClient, sendMessage, t]);
 
   const { state: liveTask, connectionState: sseConnection } = useTaskEvents(activeRequestId, {
       enabled: !!activeRequestId && isProcessing,
@@ -182,12 +304,11 @@ export default function ChatPage() {
   }, [httpDispatched, isProcessing, liveTask.error, liveTask.status, sseConnection, t]);
 
   const submitOutgoingMessage = useCallback(
-    (text: string, chainIdForSend: string) => {
+    (text: string, chainIdForSend: string, modeForSend: ChatModeId) => {
       setOperationError(null);
-      if (!text.trim()) return;
-
-      if (!chainIdForSend) {
-        setOperationError(t('chat.select_chain_first', 'Please select a task chain before sending.'));
+      if (modeForSend !== 'build' && !text.trim()) return;
+      if (modeForSend === 'build' && !chainIdForSend.trim()) {
+        setOperationError(t('chat.build_chain_required'));
         return;
       }
 
@@ -197,11 +318,15 @@ export default function ChatPage() {
       cancelledRef.current = false;
       abortRef.current = controller;
 
+      const context = workspaceRef.current?.buildChatContext();
+
       pendingSendRef.current = {
         requestId,
         message: text.trim(),
-        chainId: chainIdForSend,
+        chainId: chainIdForSend.trim(),
+        mode: modeForSend,
         signal: controller.signal,
+        context,
       };
       sendDispatchedRef.current = false;
       setHttpDispatched(false);
@@ -215,7 +340,7 @@ export default function ChatPage() {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    submitOutgoingMessage(message, selectedChainId);
+    submitOutgoingMessage(message, selectedChainId, selectedMode);
   };
 
   /** After `/chat` creates a session and navigates here with state, send the first message once. */
@@ -233,7 +358,7 @@ export default function ChatPage() {
     navigate({ pathname: location.pathname }, { replace: true, state: null });
     setSelectedChainId(chain);
     queueMicrotask(() => {
-      submitOutgoingMessage(text, chain);
+      submitOutgoingMessage(text, chain, 'chat');
     });
   }, [paramChatId, location.state, location.pathname, navigate, submitOutgoingMessage]);
 
@@ -255,6 +380,12 @@ export default function ChatPage() {
     { value: '', label: t('chat.no_chain') },
     ...chainPaths.map(p => ({ value: p, label: p })),
   ];
+  const modeOptions: { value: ChatModeId; label: string }[] = [
+    { value: 'chat', label: t('chat.mode_chat') },
+    { value: 'prompt', label: t('chat.mode_prompt') },
+    { value: 'plan', label: t('chat.mode_plan') },
+    { value: 'build', label: t('chat.mode_build') },
+  ];
   const displayHistory = useMemo<ApiChatMessage[]>(() => {
     const base = chatHistory ?? [];
     if (!isProcessing || !activeRequestId) {
@@ -275,17 +406,98 @@ export default function ChatPage() {
     ];
   }, [activeRequestId, chatHistory, isProcessing, liveTask.content, liveTask.error]);
 
+  const compiledPlanEmbedKey = useMemo(
+    () =>
+      `${activePlan?.plan?.id ?? 'noplan'}-${compiledWorkflowChain?.id ?? 'nochain'}-${compiledGraphLoading}-${compilePlanPreview.isPending}`,
+    [
+      activePlan?.plan?.id,
+      compiledWorkflowChain?.id,
+      compiledGraphLoading,
+      compilePlanPreview.isPending,
+    ],
+  );
+
+  const threadItems = useMemo(
+    () =>
+      buildChatThreadItems({
+        displayHistory,
+        insertCompiledPlanEmbed: selectedMode === 'plan' && !!chatId,
+        embedKey: compiledPlanEmbedKey,
+      }),
+    [displayHistory, selectedMode, chatId, compiledPlanEmbedKey],
+  );
+
+  const compiledPlanEmbedContent = useMemo(
+    () => (
+      <CompiledPlanThreadEmbed
+        chain={compiledWorkflowChain}
+        caption={compiledGraphCaption}
+        isLoading={compiledGraphLoading}
+        error={compiledGraphError}
+        activePlanLoading={activePlanLoading}
+        hasActivePlan={!!activePlan}
+        hasSteps={!!activePlan?.steps?.length}
+      />
+    ),
+    [
+      compiledWorkflowChain,
+      compiledGraphCaption,
+      compiledGraphLoading,
+      compiledGraphError,
+      activePlanLoading,
+      activePlan,
+    ],
+  );
+
+  const chainPanel = useMemo(
+    () =>
+      !selectedChainId.trim() ? (
+        <P className="text-text-secondary dark:text-dark-text-muted p-3 text-sm">
+          {t('chat.build_graph_select_chain')}
+        </P>
+      ) : (
+        <BuildModeChainGraph
+          chain={
+            executorChainPreview ?? {
+              id: 'executor-preview',
+              description: '',
+              tasks: [],
+            }
+          }
+          caption={executorGraphCaption}
+          isLoading={executorChainLoading}
+          error={executorChainError instanceof Error ? executorChainError : null}
+        />
+      ),
+    [
+      selectedChainId,
+      executorChainPreview,
+      executorGraphCaption,
+      executorChainLoading,
+      executorChainError,
+      t,
+    ],
+  );
+
   const streamScrollSignature = useMemo(
     () =>
-      `${liveTask.content.length}\0${liveTask.thinking.length}\0${liveTask.events.length}\0${liveTask.status}`,
-    [liveTask.content.length, liveTask.events.length, liveTask.status, liveTask.thinking.length],
+      `${liveTask.content.length}\0${liveTask.thinking.length}\0${liveTask.events.length}\0${liveTask.status}\0${workbenchTab}\0${threadItems.length}`,
+    [
+      liveTask.content.length,
+      liveTask.events.length,
+      liveTask.status,
+      liveTask.thinking.length,
+      workbenchTab,
+      threadItems.length,
+    ],
   );
 
   return (
     <Page bodyScroll="hidden" className="h-full">
-      <Fill className="flex">
-        {/* Main Chat Area */}
-        <div className="flex min-w-0 flex-1 flex-col">
+      <Fill className="flex min-h-0">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-row">
+          {/* Main Chat Area */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Chat Content */}
           <Fill className="bg-surface-50 dark:bg-dark-surface-100 flex flex-col">
             {chatId ? (
@@ -310,6 +522,23 @@ export default function ChatPage() {
                       disabled={chainsLoading}
                     />
                     {chainsLoading && <Spinner size="sm" />}
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Span variant="muted" className="text-xs sm:text-sm">
+                        {t('chat.mode')}
+                      </Span>
+                      <Tooltip content={t('chat.mode_tooltip')} position="top">
+                        <Badge variant="outline" size="sm" className="cursor-help px-1.5">
+                          ?
+                        </Badge>
+                      </Tooltip>
+                    </div>
+                    <Select
+                      options={modeOptions}
+                      value={selectedMode}
+                      onChange={e => setSelectedMode(e.target.value as ChatModeId)}
+                      className="min-w-[7rem] max-w-[12rem] shrink-0"
+                      disabled={isProcessing}
+                    />
                   </div>
                   <span
                     className="text-text-muted dark:text-dark-text-muted shrink-0 text-xs"
@@ -319,16 +548,59 @@ export default function ChatPage() {
                       state: latestState.length,
                     })}
                   </span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Tooltip content={t('chat.workspace_toggle_tooltip')}>
+                      <Button
+                        type="button"
+                        variant={workspacePanelOpen ? 'secondary' : 'outline'}
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => persistWorkspacePanelOpen(!workspacePanelOpen)}
+                        aria-pressed={workspacePanelOpen}
+                        aria-label={t('chat.workspace_toggle_aria')}>
+                        <FolderOpen className="h-4 w-4" />
+                      </Button>
+                    </Tooltip>
+                    {workspacePanelOpen ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="lg:hidden"
+                        onClick={() => setMobileWorkspaceOpen(true)}>
+                        {t('chat.workspace_open_mobile')}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
+
+                {selectedMode === 'build' && (
+                  <InsetPanel
+                    tone="strip"
+                    role="region"
+                    aria-label={t('chat.build_graph_aria_panel')}>
+                    <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
+                      <Span variant="body" className="text-sm font-medium">
+                        {t('chat.build_workflow_title')}
+                      </Span>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={isProcessing || !selectedChainId.trim()}
+                        onClick={() => submitOutgoingMessage('', selectedChainId, 'build')}>
+                        {t('chat.build_run_button')}
+                      </Button>
+                    </div>
+                  </InsetPanel>
+                )}
 
                 <Fill className="relative">
                   {httpDispatched && sseConnection === 'error' && (
-                    <div className="bg-warning-50 dark:bg-dark-surface-300 text-warning-900 dark:text-dark-text border-warning-200 dark:border-dark-surface-500 shrink-0 border-b px-3 py-1.5 text-xs">
-                      {t('chat.sse_stream_lost')}
-                    </div>
+                    <InlineNotice variant="warning">{t('chat.sse_stream_lost')}</InlineNotice>
                   )}
                   {operationError && (
-                    <Panel className="bg-error-500 dark:bg-dark-error-100 text-error-800 dark:text-dark-text absolute top-4 right-4 left-4 z-10">
+                    <InlineNotice variant="error">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Span variant="body">{operationError}</Span>
@@ -341,13 +613,18 @@ export default function ChatPage() {
                           {t('common.dismiss')}
                         </Button>
                       </div>
-                    </Panel>
+                    </InlineNotice>
                   )}
 
                   <div className="h-full overflow-auto">
                     {chatHistory && Array.isArray(chatHistory) && (
                       <ChatInterface
-                        chatHistory={displayHistory}
+                        threadItems={threadItems}
+                        compiledPlanEmbedContent={compiledPlanEmbedContent}
+                        workbenchTab={workbenchTab}
+                        onWorkbenchTabChange={persistWorkbenchTab}
+                        showWorkbenchTabs={!!selectedChainId.trim()}
+                        chainPanel={chainPanel}
                         isLoading={historyLoading}
                         error={error}
                         isProcessing={isProcessing}
@@ -362,16 +639,28 @@ export default function ChatPage() {
                   </div>
                 </Fill>
 
-                <Panel className="bg-surface-50 dark:bg-dark-surface-200 shrink-0 border-t">
+                <div className="bg-surface-50 dark:bg-dark-surface-200 shrink-0">
                   <MessageInputForm
                     value={message}
                     onChange={setMessage}
                     onSubmit={handleSendMessage}
                     isPending={isProcessing}
-                    placeholder={t('chat.input_placeholder')}
-                    canSubmit={!!selectedChainId}
+                    variant="workbench"
+                    placeholder={
+                      selectedMode === 'build'
+                        ? t('chat.build_placeholder')
+                        : t('chat.workbench_placeholder')
+                    }
+                    buttonLabel={t('chat.run_button')}
+                    canSubmit={
+                      !isProcessing &&
+                      (selectedMode === 'build'
+                        ? !!selectedChainId.trim()
+                        : !!message.trim())
+                    }
+                    allowEmptyMessage={selectedMode === 'build'}
                   />
-                </Panel>
+                </div>
               </>
             ) : (
               <Section
@@ -387,19 +676,44 @@ export default function ChatPage() {
                   </Button>
                 </div>
                 {isError && (
-                  <Panel className="bg-error-50 dark:bg-dark-error-400 text-error-800 dark:text-dark-text mt-4">
+                  <InlineNotice variant="errorSoft" className="mt-4">
                     {createError?.message || t('chat.error_create_chat')}
-                  </Panel>
+                  </InlineNotice>
                 )}
               </Section>
             )}
           </Fill>
+          </div>
+
+          {chatId && workspacePanelOpen ? (
+            <div
+              className={cn(
+                'border-border bg-surface-50 dark:bg-dark-surface-100 flex min-h-0 w-full shrink-0 flex-col border-l',
+                mobileWorkspaceOpen
+                  ? 'fixed inset-0 z-50 flex flex-col lg:static lg:inset-auto lg:z-auto lg:w-[min(420px,38vw)]'
+                  : 'hidden lg:flex lg:w-[min(420px,38vw)]',
+              )}>
+              {mobileWorkspaceOpen ? (
+                <div className="flex items-center justify-end gap-2 border-b px-2 py-1.5 lg:hidden">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setMobileWorkspaceOpen(false)}
+                    aria-label={t('chat.workspace_close_mobile')}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : null}
+              <WorkspaceSplitPanel ref={workspaceRef} className="min-h-0 flex-1 border-0" />
+            </div>
+          ) : null}
         </div>
 
         {/* Run log (task state): collapsible to reclaim horizontal space */}
         {statePanelOpen ? (
-          <div className="bg-surface-50 dark:bg-dark-surface-200 flex w-[min(100%,20rem)] flex-shrink-0 flex-col border-l sm:w-80">
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b px-2 py-2">
+          <SidePanelColumn>
+            <SidePanelHeader>
               <div className="flex min-w-0 items-center gap-2">
                 <Span variant="body" className="text-text dark:text-dark-text truncate font-medium">
                   {t('chat.run_log')}
@@ -419,8 +733,8 @@ export default function ChatPage() {
                   <PanelRightClose className="h-4 w-4" />
                 </Button>
               </Tooltip>
-            </div>
-            <Fill className="flex flex-col gap-2 overflow-auto p-2">
+            </SidePanelHeader>
+            <SidePanelBody>
               {liveTask.events.length > 0 ? (
                 <div className="shrink-0">
                   <Span variant="muted" className="mb-1 block text-xs font-medium">
@@ -450,22 +764,18 @@ export default function ChatPage() {
                   {t('chat.captured_state_pending')}
                 </Span>
               )}
-            </Fill>
-          </div>
+            </SidePanelBody>
+          </SidePanelColumn>
         ) : (
           <Tooltip content={t('chat.show_run_log')} position="left">
-            <button
-              type="button"
-              onClick={toggleStatePanel}
-              className="bg-surface-50 dark:bg-dark-surface-200 text-secondary-600 hover:bg-surface-100 dark:text-dark-secondary-400 dark:hover:bg-dark-surface-300 flex w-9 shrink-0 flex-col items-center justify-center border-l"
-              aria-label={t('chat.show_run_log')}>
+            <SidePanelRailButton onClick={toggleStatePanel} aria-label={t('chat.show_run_log')}>
               <PanelRightOpen className="h-4 w-4" />
               {(isProcessing ? liveTask.events.length : latestState.length) > 0 ? (
                 <Badge variant="success" size="sm" className="mt-1">
                   {isProcessing ? liveTask.events.length : latestState.length}
                 </Badge>
               ) : null}
-            </button>
+            </SidePanelRailButton>
           </Tooltip>
         )}
       </Fill>

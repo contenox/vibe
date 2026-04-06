@@ -11,7 +11,7 @@ export function MobileSidebar({ isOpen, setIsOpen, items = [], children }: Sideb
         className="bg-surface-100 dark:bg-dark-surface-100 fixed inset-x-0 top-20 bottom-0 z-40 min-h-0"
         onClick={() => setIsOpen(false)}
       />
-      <div className="border-surface-300 dark:border-dark-surface-300 bg-surface dark:bg-dark-surface relative z-50 flex h-full min-h-0 flex-col border-r shadow-lg">
+      <div className="border-surface-300 dark:border-dark-surface-700 bg-surface dark:bg-dark-surface-100 relative z-50 flex h-full min-h-0 flex-col border-r shadow-lg">
         {children ?? <SidebarNav items={items} setIsOpen={setIsOpen} />}
       </div>
     </div>

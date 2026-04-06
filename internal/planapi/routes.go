@@ -1,11 +1,16 @@
 package planapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/contenox/contenox/apiframework"
+	"github.com/contenox/contenox/execservice"
+	libbus "github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/plancompile"
 	"github.com/contenox/contenox/planservice"
 	"github.com/contenox/contenox/planstore"
 	"github.com/contenox/contenox/taskchainservice"
@@ -13,13 +18,15 @@ import (
 )
 
 // AddPlanRoutes registers all /plans routes on mux.
-func AddPlanRoutes(mux *http.ServeMux, svc planservice.Service, chains taskchainservice.Service) {
-	h := &handler{svc: svc, chains: chains}
+func AddPlanRoutes(mux *http.ServeMux, svc planservice.Service, chains taskchainservice.Service, tasks execservice.TasksEnvService, pubsub libbus.Messenger) {
+	h := &handler{svc: svc, chains: chains, tasks: tasks, pubsub: pubsub}
 
 	mux.HandleFunc("POST /plans", h.newPlan)
+	mux.HandleFunc("POST /plans/compile", h.compilePlan)
 	mux.HandleFunc("GET /plans", h.listPlans)
 	mux.HandleFunc("POST /plans/clean", h.cleanPlans)
 	mux.HandleFunc("GET /plans/active", h.getActive)
+	mux.HandleFunc("POST /plans/active/run-compiled", h.runCompiledActive)
 	mux.HandleFunc("POST /plans/active/next", h.nextStep)
 	mux.HandleFunc("POST /plans/active/replan", h.replan)
 	mux.HandleFunc("POST /plans/active/steps/{ordinal}/retry", h.retryStep)
@@ -31,6 +38,8 @@ func AddPlanRoutes(mux *http.ServeMux, svc planservice.Service, chains taskchain
 type handler struct {
 	svc    planservice.Service
 	chains taskchainservice.Service
+	tasks  execservice.TasksEnvService
+	pubsub libbus.Messenger
 }
 
 // lookupChain fetches a TaskChainDefinition by ID from the chain service.
@@ -91,6 +100,36 @@ type cleanResponse struct {
 	Removed int `json:"removed"`
 }
 
+type compileRequest struct {
+	Markdown        string `json:"markdown"`
+	ExecutorChainID string `json:"executor_chain_id"`
+	ChainID         string `json:"chain_id"`
+	WritePath       string `json:"write_path,omitempty"`
+}
+
+type compileResponse struct {
+	Goal  string                          `json:"goal"`
+	Steps []string                        `json:"steps"`
+	Chain *taskengine.TaskChainDefinition `json:"chain"`
+	Path  string                          `json:"path,omitempty"`
+}
+
+type runCompiledRequest struct {
+	ExecutorChainID string `json:"executor_chain_id"`
+	ChainID         string `json:"chain_id"`
+	WritePath       string `json:"write_path,omitempty"`
+}
+
+type runCompiledResponse struct {
+	Goal       string                          `json:"goal"`
+	Steps      []string                        `json:"steps"`
+	Chain      *taskengine.TaskChainDefinition `json:"chain,omitempty"`
+	Path       string                          `json:"path,omitempty"`
+	Output     any                             `json:"output"`
+	OutputType string                          `json:"output_type"`
+	State      []taskengine.CapturedStateUnit  `json:"state"`
+}
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 // Creates a new plan from a free-text goal.
@@ -120,6 +159,96 @@ func (h *handler) newPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = apiframework.Encode(w, r, http.StatusCreated, newPlanResponse{Plan: plan, Steps: steps, Markdown: md}) // @response planapi.newPlanResponse
+}
+
+// Compiles plan Markdown into a linear TaskChainDefinition (one executor-chain copy per step).
+//
+// markdown must match the shape produced by planservice renderMarkdown. executor_chain_id must
+// reference an existing task chain. Optional write_path persists the JSON via the chain VFS.
+func (h *handler) compilePlan(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	req, err := apiframework.Decode[compileRequest](r) // @request planapi.compileRequest
+	if err != nil {
+		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
+		return
+	}
+	if strings.TrimSpace(req.Markdown) == "" {
+		_ = apiframework.Error(w, r, fmt.Errorf("%w: markdown is required", apiframework.ErrBadRequest), apiframework.CreateOperation)
+		return
+	}
+	if strings.TrimSpace(req.ChainID) == "" {
+		_ = apiframework.Error(w, r, fmt.Errorf("%w: chain_id is required", apiframework.ErrBadRequest), apiframework.CreateOperation)
+		return
+	}
+	parsed, err := plancompile.ParseMarkdown(req.Markdown)
+	if err != nil {
+		_ = apiframework.Error(w, r, fmt.Errorf("%w: %v", apiframework.ErrBadRequest, err), apiframework.CreateOperation)
+		return
+	}
+	execChain, err := h.lookupChain(r, req.ExecutorChainID)
+	if err != nil {
+		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
+		return
+	}
+	compiled, err := plancompile.Compile(execChain, req.ChainID, parsed)
+	if err != nil {
+		_ = apiframework.Error(w, r, fmt.Errorf("%w: %v", apiframework.ErrBadRequest, err), apiframework.CreateOperation)
+		return
+	}
+	resp := compileResponse{
+		Goal:  parsed.Goal,
+		Steps: parsed.Steps,
+		Chain: compiled,
+	}
+	if wp := strings.TrimSpace(req.WritePath); wp != "" {
+		if err := h.chains.CreateAtPath(ctx, wp, compiled); err != nil {
+			_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
+			return
+		}
+		resp.Path = wp
+	}
+	_ = apiframework.Encode(w, r, http.StatusCreated, resp) // @response planapi.compileResponse
+}
+
+// Compiles the active plan (same markdown as Show) and executes the resulting linear chain.
+//
+// executor_chain_id and chain_id are required. Optional write_path persists the compiled chain JSON.
+func (h *handler) runCompiledActive(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	req, err := apiframework.Decode[runCompiledRequest](r) // @request planapi.runCompiledRequest
+	if err != nil {
+		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
+		return
+	}
+	var precompiled *taskengine.TaskChainDefinition
+	plan, _, aerr := h.svc.Active(ctx)
+	if aerr == nil && plan != nil &&
+		strings.TrimSpace(plan.CompileExecutorChainID) == strings.TrimSpace(req.ExecutorChainID) &&
+		strings.TrimSpace(plan.CompiledChainJSON) != "" {
+		var c taskengine.TaskChainDefinition
+		if json.Unmarshal([]byte(plan.CompiledChainJSON), &c) == nil && len(c.Tasks) > 0 {
+			precompiled = &c
+		}
+	}
+	res, err := plancompile.RunActiveCompiled(ctx, h.svc, h.chains, h.tasks, req.ExecutorChainID, req.ChainID, req.WritePath, precompiled, taskengine.NewBusTaskEventSink(h.pubsub))
+	if err != nil {
+		if strings.Contains(err.Error(), "no active plan") {
+			_ = apiframework.Error(w, r, fmt.Errorf("%w: %v", apiframework.ErrNotFound, err), apiframework.CreateOperation)
+			return
+		}
+		_ = apiframework.Error(w, r, fmt.Errorf("%w: %v", apiframework.ErrBadRequest, err), apiframework.CreateOperation)
+		return
+	}
+	out := runCompiledResponse{
+		Goal:       res.Goal,
+		Steps:      res.Steps,
+		Chain:      res.Chain,
+		Path:       res.Path,
+		Output:     res.Output,
+		OutputType: res.OutputType.String(),
+		State:      res.State,
+	}
+	_ = apiframework.Encode(w, r, http.StatusCreated, out) // @response planapi.runCompiledResponse
 }
 
 // Lists all plans.

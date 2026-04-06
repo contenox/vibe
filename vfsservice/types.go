@@ -13,6 +13,8 @@ type File struct {
 	Data        []byte    `json:"data"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+	// IsDirectory is set for directory entries returned by GetFilesByPath; omitted for normal files.
+	IsDirectory bool `json:"isDirectory,omitempty"`
 }
 
 // Folder represents a directory in the VFS.

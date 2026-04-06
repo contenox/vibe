@@ -35,4 +35,6 @@ export type ChatMessageBaseProps = {
   className?: string;
   /** Accessible label for the message article */
   "aria-label"?: string;
+  /** Bubble (chat) vs transcript (workbench / full-width blocks). Default bubble. */
+  appearance?: "bubble" | "transcript";
 };

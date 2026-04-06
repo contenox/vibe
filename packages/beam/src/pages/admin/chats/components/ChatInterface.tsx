@@ -5,10 +5,15 @@ import {
   ChatThread,
   ChatThreadSkeleton,
   EmptyState,
+  InlineNotice,
+  TabPanel,
+  TabPanels,
+  Tabs,
   useChatScroll,
 } from '@contenox/ui';
 import { t } from 'i18next';
-import { ChatMessage as ApiChatMessage } from '../../../../lib/types';
+import type { ReactNode } from 'react';
+import type { ChatThreadItem } from '../chatThreadItems';
 import { ChatMessage } from './ChatMessage';
 
 function formatDateLabel(date: Date): string {
@@ -26,25 +31,33 @@ function dateKey(iso: string): string {
   return iso.slice(0, 10);
 }
 
+export type ChatWorkbenchTabId = 'chat' | 'chain';
+
 export type ChatInterfaceProps = {
-  chatHistory?: ApiChatMessage[];
+  /** When workbench tabs are shown, maps messages and optional compiled-plan embed. Otherwise pass messages-only items. */
+  threadItems: ChatThreadItem[];
   isLoading: boolean;
   error: Error | null;
   isProcessing?: boolean;
-  /** Primary label for the processing bar (task status, SSE phase, etc.). */
   processingBarLabel?: string;
-  /** When true, task-event thinking is shown inside the live assistant bubble only. */
   embedStreamThinkingInThread?: boolean;
-  /** Legacy: thinking shown above thread when not embedded. */
   liveThinking?: string;
   canStop?: boolean;
   onStop?: () => void;
-  /** Drives auto-scroll while tokens arrive. */
   streamScrollSignature?: string;
+  liveStatus?: string;
+  /** Renders the compiled plan embed row (only used when `threadItems` contains `compiledPlanEmbed`). */
+  compiledPlanEmbedContent: ReactNode;
+  /** When set with `chainPanel`, shows Chat | Chain tabs above the thread / graph. */
+  workbenchTab?: ChatWorkbenchTabId;
+  onWorkbenchTabChange?: (tab: ChatWorkbenchTabId) => void;
+  showWorkbenchTabs?: boolean;
+  /** Executor chain preview (Chain tab). Use `lazy` mounting via TabPanel. */
+  chainPanel?: ReactNode;
 };
 
 export const ChatInterface = ({
-  chatHistory,
+  threadItems,
   isLoading,
   error,
   isProcessing = false,
@@ -55,9 +68,14 @@ export const ChatInterface = ({
   canStop = false,
   onStop,
   streamScrollSignature = '',
+  compiledPlanEmbedContent,
+  workbenchTab = 'chat',
+  onWorkbenchTabChange,
+  showWorkbenchTabs = false,
+  chainPanel,
 }: ChatInterfaceProps) => {
   const { containerRef, endRef, scrollToEnd, isNearBottom } = useChatScroll({
-    deps: [chatHistory, streamScrollSignature],
+    deps: [threadItems, streamScrollSignature, workbenchTab],
   });
 
   if (isLoading) {
@@ -79,8 +97,92 @@ export const ChatInterface = ({
   const barLabel =
     processingBarLabel ?? (isProcessing ? liveStatus || t('chat.thinking') : '');
 
+  const workbenchTabs = [
+    { id: 'chat' as const, label: t('chat.workbench_tab_chat') },
+    { id: 'chain' as const, label: t('chat.workbench_tab_chain') },
+  ];
+
+  let lastMessageIndex = -1;
+  for (let k = threadItems.length - 1; k >= 0; k--) {
+    if (threadItems[k].kind === 'message') {
+      lastMessageIndex = k;
+      break;
+    }
+  }
+
+  const threadBody = (
+    <div className="relative min-h-0 flex-1">
+      <ChatThread
+        containerRef={containerRef}
+        endRef={endRef}
+        className="h-full"
+        scrollClassName="flex-1 space-y-4 overflow-auto px-4 py-4 sm:px-5">
+        {!threadItems.length ? (
+          <EmptyState
+            title={t('chat.no_messages')}
+            description={t('chat.empty_workbench_hint')}
+            icon="⌁"
+            orientation="vertical"
+            className="h-full"
+          />
+        ) : (
+          threadItems.map((item, index) => {
+            if (item.kind === 'compiledPlanEmbed') {
+              return (
+                <div
+                  key={`compiled-${item.key}`}
+                  className="animate-in fade-in-0 duration-150">
+                  {compiledPlanEmbedContent}
+                </div>
+              );
+            }
+
+            const message = item.message;
+            let prevMessageSentAt: string | undefined;
+            for (let j = index - 1; j >= 0; j--) {
+              const it = threadItems[j];
+              if (it.kind === 'message') {
+                prevMessageSentAt = it.message.sentAt;
+                break;
+              }
+            }
+            const prevDate = prevMessageSentAt != null ? dateKey(prevMessageSentAt) : null;
+            const curDate = dateKey(message.sentAt);
+            const showSeparator = prevDate == null || curDate !== prevDate;
+            const isLatest = index === lastMessageIndex;
+
+            return (
+              <div
+                key={message.id ?? `${message.sentAt}-${index}`}
+                className="animate-in fade-in-0 duration-150">
+                {showSeparator && (
+                  <ChatDateSeparator
+                    label={formatDateLabel(new Date(message.sentAt))}
+                    className="mb-4"
+                  />
+                )}
+                <ChatMessage
+                  message={message}
+                  isLatest={isLatest}
+                  streamThinking={message.streaming ? liveThinking : undefined}
+                />
+              </div>
+            );
+          })
+        )}
+      </ChatThread>
+      <ChatScrollToLatest
+        visible={!isNearBottom}
+        onClick={scrollToEnd}
+        label={t('chat.scroll_to_latest')}
+      />
+    </div>
+  );
+
+  const showTabs = showWorkbenchTabs && chainPanel != null && onWorkbenchTabChange;
+
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {isProcessing && (
         <>
           <ChatProcessingBar
@@ -89,56 +191,36 @@ export const ChatInterface = ({
             stopLabel={t('chat.stop')}
           />
           {liveThinking && !embedStreamThinkingInThread && (
-            <div className="border-primary-200 bg-primary-50 text-text dark:bg-dark-surface-200 dark:text-dark-text mx-4 mt-3 rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap">
+            <InlineNotice variant="info" className="mx-4 mt-3">
               {liveThinking}
-            </div>
+            </InlineNotice>
           )}
         </>
       )}
 
-      <div className="relative min-h-0 flex-1">
-        <ChatThread containerRef={containerRef} endRef={endRef} className="h-full">
-          {!chatHistory?.length ? (
-            <EmptyState
-              title={t('chat.no_messages')}
-              description={t('chat.start_conversation')}
-              icon="💭"
-              orientation="vertical"
-              className="h-full"
+      {showTabs ? (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="border-border shrink-0 border-b px-3 pt-2 pb-0 sm:px-4">
+            <Tabs
+              tabs={workbenchTabs}
+              activeTab={workbenchTab}
+              onTabChange={id => onWorkbenchTabChange(id as ChatWorkbenchTabId)}
             />
-          ) : (
-            chatHistory.map((message, index) => {
-              const prevDate = index > 0 ? dateKey(chatHistory[index - 1].sentAt) : null;
-              const curDate = dateKey(message.sentAt);
-              const showSeparator = curDate !== prevDate;
-
-              return (
-                <div
-                  key={message.id ?? `${message.sentAt}-${index}`}
-                  className="animate-in fade-in-0 slide-in-from-bottom-2 duration-300"
-                >
-                  {showSeparator && (
-                    <ChatDateSeparator
-                      label={formatDateLabel(new Date(message.sentAt))}
-                      className="mb-4"
-                    />
-                  )}
-                  <ChatMessage
-                    message={message}
-                    isLatest={index === chatHistory.length - 1}
-                    streamThinking={message.streaming ? liveThinking : undefined}
-                  />
-                </div>
-              );
-            })
-          )}
-        </ChatThread>
-        <ChatScrollToLatest
-          visible={!isNearBottom}
-          onClick={scrollToEnd}
-          label={t('chat.scroll_to_latest')}
-        />
-      </div>
+          </div>
+          <TabPanels className="min-h-0 flex-1">
+            <TabPanel tabId="chat" activeTab={workbenchTab} className="min-h-0 flex-1 flex-col">
+              {threadBody}
+            </TabPanel>
+            <TabPanel tabId="chain" activeTab={workbenchTab} className="min-h-0 flex-1 flex-col" lazy>
+              <div className="text-text dark:text-dark-text h-full min-h-0 overflow-auto p-3 sm:p-4">
+                {chainPanel}
+              </div>
+            </TabPanel>
+          </TabPanels>
+        </div>
+      ) : (
+        threadBody
+      )}
     </div>
   );
 };

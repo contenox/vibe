@@ -36,15 +36,21 @@ func (s *store) CreatePlan(ctx context.Context, plan *Plan) error {
 	}
 
 	sessionID := sql.NullString{String: plan.SessionID, Valid: plan.SessionID != ""}
+	ccJSON := sql.NullString{String: plan.CompiledChainJSON, Valid: plan.CompiledChainJSON != ""}
+	ccID := sql.NullString{String: plan.CompiledChainID, Valid: plan.CompiledChainID != ""}
+	exID := sql.NullString{String: plan.CompileExecutorChainID, Valid: plan.CompileExecutorChainID != ""}
 
 	_, err := s.Exec.ExecContext(ctx, `
-		INSERT INTO plans (id, name, goal, status, session_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		INSERT INTO plans (id, name, goal, status, session_id, compiled_chain_json, compiled_chain_id, compile_executor_chain_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		plan.ID,
 		plan.Name,
 		plan.Goal,
 		string(plan.Status),
 		sessionID,
+		ccJSON,
+		ccID,
+		exID,
 		plan.CreatedAt,
 		plan.UpdatedAt,
 	)
@@ -65,10 +71,11 @@ func (s *store) GetPlanByName(ctx context.Context, name string) (*Plan, error) {
 func (s *store) getPlanByCondition(ctx context.Context, condition string, arg any) (*Plan, error) {
 	var p Plan
 	var sessionID sql.NullString
+	var ccJSON, ccID, exID sql.NullString
 	var status string
 
 	query := fmt.Sprintf(`
-		SELECT id, name, goal, status, session_id, created_at, updated_at
+		SELECT id, name, goal, status, session_id, compiled_chain_json, compiled_chain_id, compile_executor_chain_id, created_at, updated_at
 		FROM plans
 		WHERE %s`, condition)
 
@@ -78,6 +85,9 @@ func (s *store) getPlanByCondition(ctx context.Context, condition string, arg an
 		&p.Goal,
 		&status,
 		&sessionID,
+		&ccJSON,
+		&ccID,
+		&exID,
 		&p.CreatedAt,
 		&p.UpdatedAt,
 	)
@@ -91,6 +101,15 @@ func (s *store) getPlanByCondition(ctx context.Context, condition string, arg an
 	if sessionID.Valid {
 		p.SessionID = sessionID.String
 	}
+	if ccJSON.Valid {
+		p.CompiledChainJSON = ccJSON.String
+	}
+	if ccID.Valid {
+		p.CompiledChainID = ccID.String
+	}
+	if exID.Valid {
+		p.CompileExecutorChainID = exID.String
+	}
 	return &p, nil
 }
 
@@ -99,13 +118,14 @@ func (s *store) GetActivePlan(ctx context.Context) (*Plan, error) {
 	var p Plan
 	var sessionID sql.NullString
 	var status string
+	var ccJSON, ccID, exID sql.NullString
 	err := s.Exec.QueryRowContext(ctx, `
-		SELECT id, name, goal, status, session_id, created_at, updated_at
+		SELECT id, name, goal, status, session_id, compiled_chain_json, compiled_chain_id, compile_executor_chain_id, created_at, updated_at
 		FROM plans
 		WHERE status = 'active'
 		ORDER BY updated_at DESC
 		LIMIT 1`,
-	).Scan(&p.ID, &p.Name, &p.Goal, &status, &sessionID, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.Name, &p.Goal, &status, &sessionID, &ccJSON, &ccID, &exID, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -115,6 +135,15 @@ func (s *store) GetActivePlan(ctx context.Context) (*Plan, error) {
 	p.Status = PlanStatus(status)
 	if sessionID.Valid {
 		p.SessionID = sessionID.String
+	}
+	if ccJSON.Valid {
+		p.CompiledChainJSON = ccJSON.String
+	}
+	if ccID.Valid {
+		p.CompiledChainID = ccID.String
+	}
+	if exID.Valid {
+		p.CompileExecutorChainID = exID.String
 	}
 	return &p, nil
 }
@@ -161,7 +190,7 @@ func (s *store) ClaimNextPendingStep(ctx context.Context, planID string) (*PlanS
 
 func (s *store) ListPlans(ctx context.Context) ([]*Plan, error) {
 	rows, err := s.Exec.QueryContext(ctx, `
-		SELECT id, name, goal, status, session_id, created_at, updated_at
+		SELECT id, name, goal, status, session_id, compiled_chain_json, compiled_chain_id, compile_executor_chain_id, created_at, updated_at
 		FROM plans
 		ORDER BY created_at ASC`,
 	)
@@ -174,13 +203,23 @@ func (s *store) ListPlans(ctx context.Context) ([]*Plan, error) {
 	for rows.Next() {
 		var p Plan
 		var sessionID sql.NullString
+		var ccJSON, ccID, exID sql.NullString
 		var status string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Goal, &status, &sessionID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Goal, &status, &sessionID, &ccJSON, &ccID, &exID, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan plan: %w", err)
 		}
 		p.Status = PlanStatus(status)
 		if sessionID.Valid {
 			p.SessionID = sessionID.String
+		}
+		if ccJSON.Valid {
+			p.CompiledChainJSON = ccJSON.String
+		}
+		if ccID.Valid {
+			p.CompiledChainID = ccID.String
+		}
+		if exID.Valid {
+			p.CompileExecutorChainID = exID.String
 		}
 		plans = append(plans, &p)
 	}
@@ -280,6 +319,26 @@ func (s *store) UpdatePlanStatus(ctx context.Context, planID string, status Plan
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update plan status: %w", err)
+	}
+	return nil
+}
+
+func (s *store) UpdatePlanCompiledChain(ctx context.Context, planID string, compiledChainJSON, compiledChainID, executorChainID string) error {
+	ccJSON := sql.NullString{String: compiledChainJSON, Valid: compiledChainJSON != ""}
+	ccID := sql.NullString{String: compiledChainID, Valid: compiledChainID != ""}
+	exID := sql.NullString{String: executorChainID, Valid: executorChainID != ""}
+	_, err := s.Exec.ExecContext(ctx, `
+		UPDATE plans
+		SET compiled_chain_json = $2, compiled_chain_id = $3, compile_executor_chain_id = $4, updated_at = $5
+		WHERE id = $1`,
+		planID,
+		ccJSON,
+		ccID,
+		exID,
+		time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update plan compiled chain: %w", err)
 	}
 	return nil
 }

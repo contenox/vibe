@@ -38,7 +38,7 @@ export function Sidebar({ disabled, isOpen, setIsOpen, items = [], children, cla
       : children;
 
   return (
-    <div className="min-h-0 overflow-y-auto">
+    <div className="flex h-full min-h-0 flex-col">
       <DesktopSidebar
         isOpen={isOpen}
         setIsOpen={setIsOpen}

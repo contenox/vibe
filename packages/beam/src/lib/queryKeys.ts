@@ -229,4 +229,7 @@ export const planKeys = {
   all: ['plans'] as const,
   list: () => [...planKeys.all, 'list'] as const,
   active: () => [...planKeys.all, 'active'] as const,
+  compilePreviewPrefix: () => [...planKeys.all, 'compile-preview'] as const,
+  compilePreview: (planId: string, executorChainId: string, stepsDigest: string) =>
+    [...planKeys.compilePreviewPrefix(), planId, executorChainId, stepsDigest] as const,
 };

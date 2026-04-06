@@ -149,6 +149,9 @@ CREATE TABLE IF NOT EXISTS plans (
     goal TEXT NOT NULL,
     status VARCHAR(50) DEFAULT 'active', -- active | completed | archived
     session_id VARCHAR(255),             -- optional FK to message_indices
+    compiled_chain_json          TEXT,
+    compiled_chain_id            VARCHAR(255),
+    compile_executor_chain_id    VARCHAR(255),
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
@@ -220,4 +223,9 @@ ALTER TABLE remote_hooks ADD COLUMN inject_params_json TEXT NOT NULL DEFAULT '{}
 -- mcp_servers columns added after initial release
 ALTER TABLE mcp_servers ADD COLUMN headers_json        TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE mcp_servers ADD COLUMN inject_params_json  TEXT NOT NULL DEFAULT '{}';
+
+-- plans: cached plancompile output (must match planstore + planstore/store queries)
+ALTER TABLE plans ADD COLUMN compiled_chain_json TEXT;
+ALTER TABLE plans ADD COLUMN compiled_chain_id VARCHAR(255);
+ALTER TABLE plans ADD COLUMN compile_executor_chain_id VARCHAR(255);
 

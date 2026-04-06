@@ -5,37 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/apiframework/middleware"
-	"github.com/contenox/contenox/chatservice"
-	"github.com/contenox/contenox/execservice"
-	"github.com/contenox/contenox/internal/clikv"
-	"github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libtracker"
-	"github.com/contenox/contenox/messagestore"
-	"github.com/contenox/contenox/runtimetypes"
-	"github.com/contenox/contenox/taskchainservice"
+	"github.com/contenox/contenox/chatsessionmodes"
 	"github.com/contenox/contenox/taskengine"
-	"github.com/google/uuid"
 )
 
 func AddChatRoutes(
 	mux *http.ServeMux,
-	db libdbexec.DBManager,
-	taskService execservice.TasksEnvService,
-	taskChainService taskchainservice.Service,
+	chat *chatsessionmodes.Service,
 	auth middleware.AuthZReader,
 ) {
 	h := &chatManagerHandler{
-		db:           db,
-		taskService:  taskService,
-		chainService: taskChainService,
-		auth:         auth,
-		chatManager:  chatservice.NewManager(nil),
+		chatSvc: chat,
+		auth:    auth,
 	}
 
 	mux.HandleFunc("POST /chats", h.createChat)
@@ -45,11 +31,8 @@ func AddChatRoutes(
 }
 
 type chatManagerHandler struct {
-	db           libdbexec.DBManager
-	taskService  execservice.TasksEnvService
-	chainService taskchainservice.Service
-	auth         middleware.AuthZReader
-	chatManager  *chatservice.Manager
+	chatSvc *chatsessionmodes.Service
+	auth    middleware.AuthZReader
 }
 
 type newChatInstanceRequest struct {
@@ -73,15 +56,15 @@ func (h *chatManagerHandler) createChat(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	chatID := uuid.NewString()
-	if err := messagestore.New(h.db.WithoutTransaction()).CreateMessageIndex(ctx, chatID, identity); err != nil {
+	chatID, startedAt, err := h.chatSvc.CreateChatSession(ctx, identity)
+	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
 
 	resp := chatSession{
 		ID:        chatID,
-		StartedAt: time.Now().UTC(),
+		StartedAt: startedAt,
 		Model:     req.Model,
 	}
 	_ = apiframework.Encode(w, r, http.StatusCreated, resp) // @response internalchatapi.chatSession
@@ -105,6 +88,20 @@ type chatMessage struct {
 
 type chatRequest struct {
 	Message string `json:"message"`
+	// Mode selects default task chain when chainId query is omitted: chat, prompt, plan, build.
+	// build compiles the active plan and runs the compiled chain; chainId must be the executor chain ref; message may be empty.
+	Mode string `json:"mode,omitempty"`
+	// Context carries structured artifacts merged as system messages before this user turn.
+	Context *chatContextPayload `json:"context,omitempty"`
+}
+
+type chatContextPayload struct {
+	Artifacts []contextArtifact `json:"artifacts,omitempty"`
+}
+
+type contextArtifact struct {
+	Kind    string          `json:"kind"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 type chatResponse struct {
@@ -113,6 +110,17 @@ type chatResponse struct {
 	InputTokenCount  int                            `json:"inputTokenCount"`
 	OutputTokenCount int                            `json:"outputTokenCount"`
 	Error            string                         `json:"error,omitempty"`
+}
+
+func toTurnContext(c *chatContextPayload) *chatsessionmodes.ContextPayload {
+	if c == nil {
+		return nil
+	}
+	out := &chatsessionmodes.ContextPayload{Artifacts: make([]chatsessionmodes.ContextArtifact, len(c.Artifacts))}
+	for i := range c.Artifacts {
+		out.Artifacts[i] = chatsessionmodes.ContextArtifact{Kind: c.Artifacts[i].Kind, Payload: c.Artifacts[i].Payload}
+	}
+	return out
 }
 
 // Sends a message to a chat session and gets AI response.
@@ -127,7 +135,7 @@ func (h *chatManagerHandler) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chainID := apiframework.GetQueryParam(r, "chainId", "", "The ID of the taskchain to be used to compute the response.") // @param chainId string
+	chainIDQuery := apiframework.GetQueryParam(r, "chainId", "", "The ID of the taskchain to be used to compute the response. When omitted, mode in the body selects a default chain.") // @param chainId string
 
 	req, err := apiframework.Decode[chatRequest](r) // @request internalchatapi.chatRequest
 	if err != nil {
@@ -135,152 +143,76 @@ func (h *chatManagerHandler) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Message == "" {
+	if req.Message == "" && !strings.EqualFold(strings.TrimSpace(req.Mode), "build") {
 		_ = apiframework.Error(w, r, apiframework.BadRequest("Message body is required."), apiframework.CreateOperation)
 		return
 	}
 
-	tx := h.db.WithoutTransaction()
-	messages, err := h.chatManager.ListMessages(ctx, tx, idStr)
-	if err != nil {
-		_ = apiframework.Error(w, r, err, apiframework.GetOperation)
-		return
+	model := apiframework.GetQueryParam(r, "model", "", "Optional model override used when the task chain references {{var:model}}.")             // @param model string
+	provider := apiframework.GetQueryParam(r, "provider", "", "Optional provider override used when the task chain references {{var:provider}}.") // @param provider string
+
+	turnIn := chatsessionmodes.TurnInput{
+		SessionID:        idStr,
+		Message:          req.Message,
+		ExplicitChainRef: chainIDQuery,
+		Mode:             req.Mode,
+		Context:          toTurnContext(req.Context),
+		Model:            strings.TrimSpace(model),
+		Provider:         strings.TrimSpace(provider),
 	}
-	messages, err = h.chatManager.AppendMessage(ctx, messages, time.Now().UTC(), req.Message, "user")
+
+	result, err := h.chatSvc.SendTurn(ctx, turnIn)
 	if err != nil {
+		if isBadRequestChatErr(err) {
+			_ = apiframework.Error(w, r, apiframework.BadRequest(err.Error()), apiframework.CreateOperation)
+			return
+		}
+		if isChainResolveErr(err) {
+			_ = apiframework.Error(w, r, apiframework.BadRequest(err.Error()), apiframework.CreateOperation)
+			return
+		}
+		if errors.Is(err, chatsessionmodes.ErrMissingModelProvider) {
+			_ = apiframework.Error(w, r, apiframework.BadRequest(
+				"Model and provider are required for task chains that use {{var:model}} / {{var:provider}}. "+
+					"Set them with `contenox config set default-model <name>` and `contenox config set default-provider <type>` "+
+					"(for example ollama), or pass ?model=...&provider=... on the chat request.",
+			), apiframework.CreateOperation)
+			return
+		}
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
-	chain, err := h.chainService.Get(ctx, chainID)
-	if err != nil {
-		_ = apiframework.Error(w, r, err, apiframework.GetOperation)
-		return
-	}
 
-	rtStore := runtimetypes.New(h.db.WithoutTransaction())
-	model := strings.TrimSpace(apiframework.GetQueryParam(r, "model", "", "Optional model override used when the task chain references {{var:model}}."))
-	provider := strings.TrimSpace(apiframework.GetQueryParam(r, "provider", "", "Optional provider override used when the task chain references {{var:provider}}."))
-	if model == "" {
-		model = clikv.Read(ctx, rtStore, "default-model")
-	}
-	if provider == "" {
-		provider = clikv.Read(ctx, rtStore, "default-provider")
-	}
-	if model == "" || provider == "" {
-		_ = apiframework.Error(w, r, apiframework.BadRequest(
-			"Model and provider are required for task chains that use {{var:model}} / {{var:provider}}. "+
-				"Set them with `contenox config set default-model <name>` and `contenox config set default-provider <type>` "+
-				"(for example ollama), or pass ?model=...&provider=... on the chat request.",
-		), apiframework.CreateOperation)
-		return
-	}
-	templateVars := map[string]string{
-		"model":    model,
-		"provider": provider,
-	}
-	if reqID, ok := ctx.Value(libtracker.ContextKeyRequestID).(string); ok && reqID != "" {
-		templateVars["request_id"] = reqID
-	}
-	execCtx := taskengine.WithTemplateVars(ctx, templateVars)
-
-	result, dt, capturedStateUnits, err := h.taskService.Execute(execCtx, chain, taskengine.ChatHistory{Messages: messages}, taskengine.DataTypeChatHistory)
-	if err != nil {
-		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
-		return
-	}
 	resp := chatResponse{
-		State:            capturedStateUnits,
+		Response:         result.Response,
+		State:            result.State,
+		InputTokenCount:  result.InputTokenCount,
+		OutputTokenCount: result.OutputTokenCount,
 	}
-	switch dt {
-	case taskengine.DataTypeChatHistory:
-		history, ok := result.(taskengine.ChatHistory)
-		if !ok || len(history.Messages) == 0 {
-			_ = apiframework.Error(w, r, apiframework.UnprocessableEntity(
-				"The task chain did not return a valid chat history (missing or empty messages).",
-			), apiframework.CreateOperation)
-			return
-		}
-		last := history.Messages[len(history.Messages)-1]
-		resp.Response = last.Content
-		resp.InputTokenCount = history.InputTokens
-		resp.OutputTokenCount = history.OutputTokens
-		if perr := h.chatManager.PersistDiff(ctx, tx, idStr, history.Messages); perr != nil {
-			_ = apiframework.Error(w, r, perr, apiframework.UpdateOperation)
-			return
-		}
-	case taskengine.DataTypeOpenAIChatResponse:
-		openaiResp, ok := result.(taskengine.OpenAIChatResponse)
-		if !ok || len(openaiResp.Choices) == 0 || openaiResp.Choices[0].Message.Content == nil {
-			_ = apiframework.Error(w, r, apiframework.UnprocessableEntity(
-				"The task chain returned an OpenAI-style response without assistant text.",
-			), apiframework.CreateOperation)
-			return
-		}
-		resp.Response = *openaiResp.Choices[0].Message.Content
-		resp.InputTokenCount = openaiResp.Usage.PromptTokens
-		resp.OutputTokenCount = openaiResp.Usage.CompletionTokens
-		messages = append(messages, taskengine.Message{
-			ID:        uuid.NewString(),
-			Role:      "assistant",
-			Content:   resp.Response,
-			Timestamp: time.Now().UTC(),
-		})
-		if perr := h.chatManager.PersistDiff(ctx, tx, idStr, messages); perr != nil {
-			_ = apiframework.Error(w, r, perr, apiframework.UpdateOperation)
-			return
-		}
-	case taskengine.DataTypeString, taskengine.DataTypeJSON, taskengine.DataTypeAny, taskengine.DataTypeNil,
-		taskengine.DataTypeBool, taskengine.DataTypeInt, taskengine.DataTypeFloat,
-		taskengine.DataTypeVector, taskengine.DataTypeSearchResults:
-		resp.Response = formatChainResultForChat(result)
-		messages = append(messages, taskengine.Message{
-			ID:        uuid.NewString(),
-			Role:      "assistant",
-			Content:   resp.Response,
-			Timestamp: time.Now().UTC(),
-		})
-		if perr := h.chatManager.PersistDiff(ctx, tx, idStr, messages); perr != nil {
-			_ = apiframework.Error(w, r, perr, apiframework.UpdateOperation)
-			return
-		}
-	default:
-		_ = apiframework.Error(w, r, apiframework.UnprocessableEntity(
-			fmt.Sprintf("This chat endpoint does not support task chain output type %q (chain %q).", dt.String(), chainID),
-		), apiframework.CreateOperation)
-		return
-	}
-
 	_ = apiframework.Encode(w, r, http.StatusOK, resp) // @response internalchatapi.chatResponse
 }
 
-// formatChainResultForChat turns arbitrary chain outputs into a single assistant message string.
-func formatChainResultForChat(result any) string {
-	if result == nil {
-		return ""
+func isBadRequestChatErr(err error) bool {
+	if err == nil {
+		return false
 	}
-	switch v := result.(type) {
-	case string:
-		return v
-	case []byte:
-		return string(v)
-	case json.RawMessage:
-		return string(v)
-	case bool:
-		return strconv.FormatBool(v)
-	case int:
-		return strconv.Itoa(v)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case float64:
-		return strconv.FormatFloat(v, 'g', -1, 64)
-	case float32:
-		return strconv.FormatFloat(float64(v), 'g', -1, 32)
-	default:
-		if b, err := json.Marshal(v); err == nil {
-			return string(b)
-		}
-		return fmt.Sprint(v)
+	s := err.Error()
+	return strings.Contains(s, "context.artifacts") ||
+		strings.Contains(s, "injected context exceeds") ||
+		strings.Contains(s, "internal error: empty thread") ||
+		strings.Contains(s, "internal error: expected last message") ||
+		strings.Contains(s, "no active plan") ||
+		strings.Contains(s, "plancompile:")
+}
+
+func isChainResolveErr(err error) bool {
+	if err == nil {
+		return false
 	}
+	s := err.Error()
+	return strings.Contains(s, "chainId query parameter") ||
+		strings.Contains(s, "unknown chat mode") ||
+		strings.Contains(s, "required for build mode")
 }
 
 // Retrieves the complete chat history for a session.
@@ -295,7 +227,7 @@ func (h *chatManagerHandler) history(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	history, err := h.chatManager.ListMessages(ctx, h.db.WithoutTransaction(), idStr)
+	history, err := h.chatSvc.ListChatMessages(ctx, idStr)
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.GetOperation)
 		return
@@ -328,8 +260,7 @@ func (h *chatManagerHandler) listChats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := messagestore.New(h.db.WithoutTransaction())
-	sessions, err := store.ListAllSessions(ctx, identity)
+	sessions, err := h.chatSvc.ListChatSessions(ctx, identity)
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
@@ -337,23 +268,15 @@ func (h *chatManagerHandler) listChats(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]chatSession, 0, len(sessions))
 	for _, session := range sessions {
-		item := chatSession{ID: session.ID, StartedAt: time.Now().UTC()}
-		last, lerr := store.LastMessage(ctx, session.ID)
-		if lerr == nil && last != nil {
-			var parsed taskengine.Message
-			if jerr := json.Unmarshal(last.Payload, &parsed); jerr == nil {
-				item.LastMessage = &chatMessage{
-					ID:      parsed.ID,
-					Role:    parsed.Role,
-					Content: parsed.Content,
-					SentAt:  last.AddedAt,
-					IsUser:  parsed.Role == "user",
-				}
-				item.StartedAt = last.AddedAt
+		item := chatSession{ID: session.ID, StartedAt: session.StartedAt}
+		if session.LastMessage != nil {
+			item.LastMessage = &chatMessage{
+				ID:      session.LastMessage.ID,
+				Role:    session.LastMessage.Role,
+				Content: session.LastMessage.Content,
+				SentAt:  session.LastMessage.SentAt,
+				IsUser:  session.LastMessage.IsUser,
 			}
-		} else if lerr != nil && !errors.Is(lerr, messagestore.ErrNotFound) {
-			_ = apiframework.Error(w, r, lerr, apiframework.ListOperation)
-			return
 		}
 		resp = append(resp, item)
 	}

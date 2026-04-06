@@ -64,6 +64,20 @@ type FileResponse struct {
 	Size        int64     `json:"size" example:"102400"`
 	CreatedAt   time.Time `json:"createdAt" example:"2024-06-01T12:00:00Z"`
 	UpdatedAt   time.Time `json:"updatedAt" example:"2024-06-01T12:00:00Z"`
+	IsDirectory bool      `json:"isDirectory,omitempty" example:"false"`
+}
+
+func fileToResponse(f vfsservice.File) FileResponse {
+	return FileResponse{
+		ID:          f.ID,
+		Path:        f.Path,
+		Name:        f.Name,
+		ContentType: f.ContentType,
+		Size:        f.Size,
+		CreatedAt:   f.CreatedAt,
+		UpdatedAt:   f.UpdatedAt,
+		IsDirectory: f.IsDirectory,
+	}
 }
 
 // FolderResponse represents a folder in API responses.
@@ -180,17 +194,7 @@ func (f *fileManager) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := FileResponse{
-		ID:          file.ID,
-		Path:        file.Path,
-		Name:        file.Name,
-		ContentType: file.ContentType,
-		Size:        file.Size,
-		CreatedAt:   file.CreatedAt,
-		UpdatedAt:   file.UpdatedAt,
-	}
-
-	apiframework.Encode(w, r, http.StatusCreated, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusCreated, fileToResponse(*file)) // @response vfsapi.FileResponse
 }
 
 // Retrieves metadata for a specific file.
@@ -211,17 +215,7 @@ func (f *fileManager) getMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := FileResponse{
-		ID:          file.ID,
-		Path:        file.Path,
-		Name:        file.Name,
-		ContentType: file.ContentType,
-		Size:        file.Size,
-		CreatedAt:   file.CreatedAt,
-		UpdatedAt:   file.UpdatedAt,
-	}
-
-	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusOK, fileToResponse(*file)) // @response vfsapi.FileResponse
 }
 
 // Updates an existing file's content via multipart/form-data.
@@ -256,17 +250,7 @@ func (f *fileManager) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := FileResponse{
-		ID:          file.ID,
-		Path:        file.Path,
-		Name:        file.Name,
-		ContentType: file.ContentType,
-		Size:        file.Size,
-		CreatedAt:   file.CreatedAt,
-		UpdatedAt:   file.UpdatedAt,
-	}
-
-	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusOK, fileToResponse(*file)) // @response vfsapi.FileResponse
 }
 
 // Deletes a file from the system.
@@ -345,15 +329,7 @@ func (f *fileManager) listFiles(w http.ResponseWriter, r *http.Request) {
 
 	response := make([]FileResponse, len(files))
 	for i, file := range files {
-		response[i] = FileResponse{
-			ID:          file.ID,
-			Path:        file.Path,
-			Name:        file.Name,
-			ContentType: file.ContentType,
-			Size:        file.Size,
-			CreatedAt:   file.CreatedAt,
-			UpdatedAt:   file.UpdatedAt,
-		}
+		response[i] = fileToResponse(file)
 	}
 
 	apiframework.Encode(w, r, http.StatusOK, response) // @response []vfsapi.FileResponse
@@ -467,17 +443,7 @@ func (f *fileManager) renameFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := FileResponse{
-		ID:          file.ID,
-		Path:        file.Path,
-		Name:        file.Name,
-		ContentType: file.ContentType,
-		Size:        file.Size,
-		CreatedAt:   file.CreatedAt,
-		UpdatedAt:   file.UpdatedAt,
-	}
-
-	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusOK, fileToResponse(*file)) // @response vfsapi.FileResponse
 }
 
 // Deletes a folder and all its contents.
@@ -524,17 +490,7 @@ func (f *fileManager) moveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := FileResponse{
-		ID:          movedFile.ID,
-		Path:        movedFile.Path,
-		Name:        movedFile.Name,
-		ContentType: movedFile.ContentType,
-		Size:        movedFile.Size,
-		CreatedAt:   movedFile.CreatedAt,
-		UpdatedAt:   movedFile.UpdatedAt,
-	}
-
-	apiframework.Encode(w, r, http.StatusOK, resp) // @response vfsapi.FileResponse
+	apiframework.Encode(w, r, http.StatusOK, fileToResponse(*movedFile)) // @response vfsapi.FileResponse
 }
 
 // Moves a folder to a new parent folder.

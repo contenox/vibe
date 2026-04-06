@@ -29,7 +29,7 @@ export function ChatSessionSidebar({ setIsOpen }: { setIsOpen: (open: boolean) =
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-surface-200 dark:border-dark-surface-600 border-b p-3">
+      <div className="border-surface-300 dark:border-dark-surface-700 shrink-0 border-b p-3">
         <Button
           variant="primary"
           size="sm"
@@ -44,7 +44,9 @@ export function ChatSessionSidebar({ setIsOpen }: { setIsOpen: (open: boolean) =
           <Span>{t('chat.start_new_chat')}</Span>
         </Button>
       </div>
-      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3" aria-label={t('chat.personal_chat_list_title')}>
+      <nav
+        className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3"
+        aria-label={t('chat.personal_chat_list_title')}>
         {isLoading ? (
           <div className="flex items-center justify-center gap-2 py-8">
             <Spinner size="md" />
@@ -63,7 +65,7 @@ export function ChatSessionSidebar({ setIsOpen }: { setIsOpen: (open: boolean) =
                 to={`/chat/${chat.id}`}
                 onClick={() => setIsOpen(false)}
                 className={cn(
-                  'block rounded-lg px-3 py-2 text-left transition-colors',
+                  'block rounded-lg py-2 pr-2 pl-4 text-left transition-colors',
                   isActive
                     ? 'bg-primary-100 dark:bg-dark-primary-900 text-text font-medium'
                     : 'text-text hover:bg-surface-100 dark:hover:bg-dark-surface-100',

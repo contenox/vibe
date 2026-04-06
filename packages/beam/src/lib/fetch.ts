@@ -118,3 +118,45 @@ export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T
     throw new ApiError(i18n.t('errors.unknown'), 0);
   }
 }
+
+/** GET binary body (e.g. VFS download); same origin, timeout, and error handling as apiFetch. */
+export async function apiFetchBinary(url: string, init?: RequestInit): Promise<ArrayBuffer> {
+  const externalSignal = init?.signal ?? null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  try {
+    const headers = new Headers(init?.headers);
+    headers.set('Accept-Language', i18n.language);
+    const response = await fetch(new URL(url, API_BASE_URL).toString(), {
+      ...init,
+      credentials: 'same-origin',
+      headers,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!response.ok) {
+      let errorMessage = i18n.t('errors.unknown');
+      try {
+        errorMessage = await response.text();
+      } catch {
+        errorMessage = response.statusText || errorMessage;
+      }
+      throw new ApiError(errorMessage, response.status);
+    }
+    return await response.arrayBuffer();
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof ApiError) throw error;
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new ApiError(i18n.t('errors.timeout'), 0);
+    }
+    if (error instanceof Error) {
+      throw new ApiError(error.message, 0);
+    }
+    throw new ApiError(i18n.t('errors.unknown'), 0);
+  }
+}

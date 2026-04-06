@@ -18,3 +18,11 @@ export { ChatDateSeparator } from "./ChatDateSeparator";
 export type { ChatScrollToLatestProps } from "./ChatScrollToLatest";
 export { ChatScrollToLatest } from "./ChatScrollToLatest";
 export { copyTextToClipboard } from "./clipboard";
+export {
+  ChatStreamThinkingBox,
+  ChatStreamingCaret,
+  ChatTranscriptStreamingPlaceholder,
+  chatTranscriptMarkdownComponents,
+} from "./chatTranscript";
+export type { TranscriptEmbedCardProps } from "./TranscriptEmbedCard";
+export { TranscriptEmbedCard } from "./TranscriptEmbedCard";

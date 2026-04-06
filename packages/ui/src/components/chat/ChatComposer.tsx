@@ -19,12 +19,16 @@ export type ChatComposerProps = {
   pendingLabel?: React.ReactNode;
   title?: string;
   className?: string;
-  variant?: "default" | "compact";
+  variant?: "default" | "compact" | "workbench";
+  /** Outer shell: panel (default) or plain border-top (workbench). */
+  shell?: "panel" | "plain";
   maxLength?: number;
   showCharCount?: boolean;
   charCountFormatter?: (length: number, max: number) => string;
   /** When false, submit is disabled regardless of value */
   canSubmit?: boolean;
+  /** When true, an empty message can be submitted (e.g. build mode). */
+  allowEmptyMessage?: boolean;
   footerStart?: React.ReactNode;
   /** When set, wraps the character counter in a Tooltip */
   charCountTooltip?: string;
@@ -51,10 +55,12 @@ export function ChatComposer({
   title,
   className,
   variant = "default",
+  shell,
   maxLength = 4000,
   showCharCount = true,
   charCountFormatter = (len, max) => `${len}/${max}`,
   canSubmit = true,
+  allowEmptyMessage = false,
   footerStart,
   charCountTooltip,
   textareaProps,
@@ -68,7 +74,13 @@ export function ChatComposer({
   } = textareaProps ?? {};
 
   const submitDisabled =
-    disabled || isPending || !value.trim() || !canSubmit;
+    disabled ||
+    isPending ||
+    (!allowEmptyMessage && !value.trim()) ||
+    !canSubmit;
+
+  const effectiveShell: "panel" | "plain" =
+    shell ?? (variant === "workbench" ? "plain" : "panel");
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     onKeyDownProp?.(e);
@@ -92,13 +104,15 @@ export function ChatComposer({
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        required
+        required={!allowEmptyMessage}
         disabled={disabled}
         className={cn(
           baseTextarea,
           variant === "compact"
             ? "resize-vertical min-h-[60px]"
-            : "resize-vertical min-h-[80px]",
+            : variant === "workbench"
+              ? "min-h-[180px] max-h-[50vh] resize-y md:min-h-[200px]"
+              : "resize-vertical min-h-[80px]",
           textareaClassName,
         )}
         maxLength={maxLength}
@@ -122,13 +136,16 @@ export function ChatComposer({
     </div>
   );
 
-  const submitButton = (compactHeight?: boolean) => (
+  const submitButton = (compactHeight?: boolean, workbenchTall?: boolean) => (
     <Button
       type="submit"
       variant="primary"
       disabled={submitDisabled}
       size="lg"
-      className={compactHeight ? "h-[60px]" : undefined}
+      className={cn(
+        compactHeight && "h-[60px]",
+        workbenchTall && "min-h-[3rem] self-end",
+      )}
     >
       {isPending ? (
         <>
@@ -161,6 +178,45 @@ export function ChatComposer({
     );
   }
 
+  const formInner = (
+    <form ref={formRef} onSubmit={handleFormSubmit} className="space-y-6">
+      {title != null && title !== "" && variant !== "workbench" && (
+        <H2 className="text-text dark:text-dark-text text-2xl font-semibold">
+          {title}
+        </H2>
+      )}
+
+      <div className="space-y-4">
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            {textareaBlock}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              {footerStart}
+            </div>
+            {submitButton(false, variant === "workbench")}
+          </div>
+        </div>
+      </div>
+    </form>
+  );
+
+  if (variant === "workbench" && effectiveShell === "plain") {
+    return (
+      <div
+        className={cn(
+          "border-surface-200 dark:border-dark-surface-600 bg-surface-50/80 dark:bg-dark-surface-100/80 border-t px-3 py-3 transition-all duration-200 sm:px-4",
+          isFocused && "ring-primary-100 dark:ring-dark-primary-500 ring-2 ring-inset",
+          className,
+        )}
+      >
+        {formInner}
+      </div>
+    );
+  }
+
   return (
     <Panel
       variant="default"
@@ -170,28 +226,7 @@ export function ChatComposer({
         className,
       )}
     >
-      <form ref={formRef} onSubmit={handleFormSubmit} className="space-y-6">
-        {title != null && title !== "" && (
-          <H2 className="text-text dark:text-dark-text text-2xl font-semibold">
-            {title}
-          </H2>
-        )}
-
-        <div className="space-y-4">
-          <div className="space-y-3">
-            <div className="flex gap-2">
-              {textareaBlock}
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                {footerStart}
-              </div>
-              {submitButton()}
-            </div>
-          </div>
-        </div>
-      </form>
+      {formInner}
     </Panel>
   );
 }

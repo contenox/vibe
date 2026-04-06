@@ -16,6 +16,8 @@ import (
 
 	"github.com/contenox/contenox/execservice"
 	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libtracker"
+	"github.com/contenox/contenox/plancompile"
 	"github.com/contenox/contenox/planstore"
 	"github.com/contenox/contenox/taskengine"
 	"github.com/contenox/contenox/vfsservice"
@@ -124,29 +126,26 @@ func (s *service) callPlanner(ctx context.Context, goal string, chain *taskengin
 	return steps, nil
 }
 
-func (s *service) callExecutor(ctx context.Context, step string, chain *taskengine.TaskChainDefinition) (string, error) {
-	out, _, _, err := s.engine.Execute(ctx, chain, step, taskengine.DataTypeString)
-	if err != nil {
-		return "", fmt.Errorf("executorChain execute: %w", err)
-	}
+// formatTaskOutput turns a task-chain Execute result into a single string for plan step storage.
+func formatTaskOutput(out any) string {
 	switch v := out.(type) {
 	case string:
-		return v, nil
+		return v
 
 	case taskengine.ChatHistory:
 		if len(v.Messages) > 0 {
 			for i := len(v.Messages) - 1; i >= 0; i-- {
 				if v.Messages[i].Role == "assistant" && v.Messages[i].Content != "" {
-					return v.Messages[i].Content, nil
+					return v.Messages[i].Content
 				}
 			}
-			return v.Messages[len(v.Messages)-1].Content, nil
+			return v.Messages[len(v.Messages)-1].Content
 		}
-		return "", nil
+		return ""
 
 	case map[string]any:
 		b, _ := json.MarshalIndent(v, "", "  ")
-		return string(b), nil
+		return string(b)
 
 	case []any:
 		var parts []string
@@ -158,21 +157,86 @@ func (s *service) callExecutor(ctx context.Context, step string, chain *taskengi
 				parts = append(parts, string(b))
 			}
 		}
-		return strings.Join(parts, "\n"), nil
+		return strings.Join(parts, "\n")
 
 	case taskengine.OpenAIChatResponse:
 		if len(v.Choices) > 0 && v.Choices[0].Message.Content != nil {
-			return *v.Choices[0].Message.Content, nil
+			return *v.Choices[0].Message.Content
 		}
 		if len(v.Choices) > 0 && len(v.Choices[0].Message.ToolCalls) > 0 {
-			return fmt.Sprintf("[tool call: %s]", v.Choices[0].Message.ToolCalls[0].Function.Name), nil
+			return fmt.Sprintf("[tool call: %s]", v.Choices[0].Message.ToolCalls[0].Function.Name)
 		}
-		return "", nil
+		return ""
 
 	default:
 		b, _ := json.MarshalIndent(v, "", "  ")
-		return string(b), nil
+		return string(b)
 	}
+}
+
+func previousStepOutput(steps []*planstore.PlanStep, pendingOrdinal int) string {
+	if pendingOrdinal <= 1 {
+		return ""
+	}
+	want := pendingOrdinal - 1
+	for _, st := range steps {
+		if st.Ordinal == want {
+			return strings.TrimSpace(st.ExecutionResult)
+		}
+	}
+	return ""
+}
+
+func (s *service) getOrCompileChain(ctx context.Context, plan *planstore.Plan, steps []*planstore.PlanStep, executor *taskengine.TaskChainDefinition, executorID string) (*taskengine.TaskChainDefinition, error) {
+	if plan.CompiledChainJSON != "" && plan.CompileExecutorChainID == executorID {
+		var c taskengine.TaskChainDefinition
+		if err := json.Unmarshal([]byte(plan.CompiledChainJSON), &c); err == nil && c.ID != "" && len(c.Tasks) > 0 {
+			return &c, nil
+		}
+	}
+	md := renderMarkdown(plan, steps)
+	parsed, err := plancompile.ParseMarkdown(md)
+	if err != nil {
+		return nil, fmt.Errorf("parse plan markdown for compile: %w", err)
+	}
+	compiledID := plan.ID + "-compiled"
+	compiled, err := plancompile.Compile(executor, compiledID, parsed)
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(compiled)
+	if err != nil {
+		return nil, err
+	}
+	st := planstore.New(s.db.WithoutTransaction())
+	if err := st.UpdatePlanCompiledChain(ctx, plan.ID, string(b), compiledID, executorID); err != nil {
+		return nil, err
+	}
+	return compiled, nil
+}
+
+func (s *service) abortNextWithFailure(ctx context.Context, plan *planstore.Plan, pending *planstore.PlanStep, cause error) (string, string, error) {
+	cleanupCtx := context.WithoutCancel(ctx)
+	tx, commit, rTx, txErr := s.db.WithTransaction(cleanupCtx)
+	if txErr != nil {
+		return "", "", txErr
+	}
+	defer rTx()
+	txSt := planstore.New(tx)
+	msg := cause.Error()
+	if err := txSt.UpdatePlanStepStatus(cleanupCtx, pending.ID, planstore.StepStatusFailed, msg); err != nil {
+		return "", "", fmt.Errorf("update step after failure: %w", err)
+	}
+	allSteps, err := txSt.ListPlanSteps(cleanupCtx, plan.ID)
+	if err != nil {
+		return "", "", err
+	}
+	if err := commit(cleanupCtx); err != nil {
+		return "", "", err
+	}
+	md := renderMarkdown(plan, allSteps)
+	s.writePlanVFS(ctx, plan, allSteps)
+	return "", md, fmt.Errorf("next step: %w", cause)
 }
 
 func renderMarkdown(plan *planstore.Plan, steps []*planstore.PlanStep) string {
@@ -366,6 +430,9 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 	}
 	defer rTx()
 	st := planstore.New(tx)
+	if err := st.UpdatePlanCompiledChain(ctx, plan.ID, "", "", ""); err != nil {
+		return nil, "", fmt.Errorf("clear compiled chain: %w", err)
+	}
 	if err := st.DeletePendingPlanSteps(ctx, plan.ID); err != nil {
 		return nil, "", fmt.Errorf("delete pending: %w", err)
 	}
@@ -386,8 +453,13 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 }
 
 func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine.TaskChainDefinition) (string, string, error) {
+	_ = args // reserved (WithShell / WithAuto); subgraph execution uses template vars from context
 	if executorChain == nil {
 		return "", "", fmt.Errorf("executorChain is required")
+	}
+	executorID := strings.TrimSpace(executorChain.ID)
+	if executorID == "" {
+		return "", "", fmt.Errorf("executorChain id is required for compile cache")
 	}
 
 	st := planstore.New(s.db.WithoutTransaction())
@@ -407,7 +479,36 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 		return "", "", err
 	}
 
-	result, execErr := s.callExecutor(ctx, pending.Description, executorChain)
+	plan, err = st.GetPlanByID(ctx, plan.ID)
+	if err != nil {
+		return "", "", err
+	}
+	steps, err := st.ListPlanSteps(ctx, plan.ID)
+	if err != nil {
+		return "", "", err
+	}
+
+	compiled, err := s.getOrCompileChain(ctx, plan, steps, executorChain, executorID)
+	if err != nil {
+		return s.abortNextWithFailure(ctx, plan, pending, err)
+	}
+
+	stepChain, err := plancompile.ExtractStepChain(compiled, pending.Ordinal)
+	if err != nil {
+		return s.abortNextWithFailure(ctx, plan, pending, err)
+	}
+
+	tv := map[string]string{}
+	if reqID, ok := ctx.Value(libtracker.ContextKeyRequestID).(string); ok && reqID != "" {
+		tv["request_id"] = reqID
+	}
+	if pending.Ordinal > 1 {
+		tv["previous_output"] = previousStepOutput(steps, pending.Ordinal)
+	}
+	execCtx := taskengine.WithTemplateVars(ctx, tv)
+
+	out, _, _, execErr := s.engine.Execute(execCtx, stepChain, plan.Goal, taskengine.DataTypeString)
+	result := formatTaskOutput(out)
 
 	finalStatus := planstore.StepStatusCompleted
 	finalResult := result

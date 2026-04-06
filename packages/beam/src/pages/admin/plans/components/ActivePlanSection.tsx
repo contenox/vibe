@@ -3,6 +3,7 @@ import {
   Checkbox,
   Collapsible,
   FormField,
+  Input,
   P,
   Panel,
   Section,
@@ -19,6 +20,7 @@ import {
   usePlanNext,
   usePlanReplan,
   useRetryPlanStep,
+  useRunCompiledActivePlan,
   useSkipPlanStep,
 } from '../../../../hooks/usePlans';
 import type { ActivePlanResponse } from '../../../../lib/types';
@@ -42,11 +44,15 @@ export default function ActivePlanSection({
   const [withShell, setWithShell] = useState(false);
   const [withAuto, setWithAuto] = useState(false);
   const [lastMarkdown, setLastMarkdown] = useState<string | null>(null);
+  const [compiledChainId, setCompiledChainId] = useState('compiled-active-beam');
+  const [writePathCompiled, setWritePathCompiled] = useState('');
+  const [runCompiledOutput, setRunCompiledOutput] = useState<string | null>(null);
 
   const nextMutation = usePlanNext();
   const replanMutation = usePlanReplan();
   const retryMutation = useRetryPlanStep();
   const skipMutation = useSkipPlanStep();
+  const runCompiledMutation = useRunCompiledActivePlan();
 
   const executorEmpty = { value: '', label: t('plans.select_executor_chain') };
   const plannerEmpty = { value: '', label: t('plans.select_planner_chain') };
@@ -62,6 +68,38 @@ export default function ActivePlanSection({
       {
         onSuccess: data => {
           setLastMarkdown(data.markdown);
+        },
+      },
+    );
+  };
+
+  const handleRunCompiled = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!executorChainId) return;
+    setRunCompiledOutput(null);
+    const cid = compiledChainId.trim() || 'compiled-active-beam';
+    runCompiledMutation.mutate(
+      {
+        executor_chain_id: executorChainId,
+        chain_id: cid,
+        write_path: writePathCompiled.trim() || undefined,
+      },
+      {
+        onSuccess: data => {
+          setRunCompiledOutput(
+            JSON.stringify(
+              {
+                goal: data.goal,
+                steps: data.steps,
+                output: data.output,
+                output_type: data.output_type,
+                path: data.path,
+                state: data.state,
+              },
+              null,
+              2,
+            ),
+          );
         },
       },
     );
@@ -106,7 +144,8 @@ export default function ActivePlanSection({
     nextMutation.isPending ||
     replanMutation.isPending ||
     retryMutation.isPending ||
-    skipMutation.isPending;
+    skipMutation.isPending ||
+    runCompiledMutation.isPending;
 
   return (
     <Section className="space-y-6">
@@ -168,6 +207,52 @@ export default function ActivePlanSection({
           <Panel variant="error">{replanMutation.error?.message}</Panel>
         )}
       </form>
+
+      <form onSubmit={handleRunCompiled} className="space-y-4 rounded-lg border p-4">
+        <Span className="text-sm font-medium">{t('plans.run_compiled_title')}</Span>
+        <P variant="muted" className="text-xs">
+          {t('plans.run_compiled_description')}
+        </P>
+        <FormField label={t('plans.executor_chain_label')}>
+          <Select
+            options={chainOptions}
+            value={executorChainId}
+            onChange={e => setExecutorChainId(e.target.value)}
+            disabled={chainsLoading || chainPaths.length === 0}
+            className="max-w-xl"
+          />
+        </FormField>
+        <FormField label={t('plans.compiled_chain_id_label')}>
+          <Input
+            value={compiledChainId}
+            onChange={e => setCompiledChainId(e.target.value)}
+            className="max-w-xl font-mono text-sm"
+            placeholder="compiled-active-beam"
+          />
+        </FormField>
+        <FormField label={t('plans.write_path_optional_label')}>
+          <Input
+            value={writePathCompiled}
+            onChange={e => setWritePathCompiled(e.target.value)}
+            className="max-w-xl font-mono text-sm"
+            placeholder="compiled/my-plan.json"
+          />
+        </FormField>
+        <Button type="submit" variant="secondary" disabled={!executorChainId || busy}>
+          {t('plans.run_compiled_submit')}
+        </Button>
+        {runCompiledMutation.isError && (
+          <Panel variant="error">{runCompiledMutation.error?.message}</Panel>
+        )}
+      </form>
+
+      {runCompiledOutput && (
+        <Collapsible title={t('plans.run_compiled_output')} defaultExpanded>
+          <pre className="text-muted-foreground max-h-96 overflow-auto text-xs whitespace-pre-wrap">
+            {runCompiledOutput}
+          </pre>
+        </Collapsible>
+      )}
 
       {lastMarkdown && (
         <Collapsible title={t('plans.markdown_output')} defaultExpanded>

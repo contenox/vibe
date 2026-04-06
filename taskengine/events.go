@@ -26,6 +26,11 @@ const (
 	TaskEventStepFailed     TaskEventKind = "step_failed"
 	TaskEventChainCompleted TaskEventKind = "chain_completed"
 	TaskEventChainFailed    TaskEventKind = "chain_failed"
+
+	// Plan run lifecycle (load/compile before chain execution); same bus + SSE as other task events.
+	TaskEventPlanRunStarted  TaskEventKind = "plan_run_started"
+	TaskEventPlanRunCompiled TaskEventKind = "plan_run_compiled"
+	TaskEventPlanRunFailed   TaskEventKind = "plan_run_failed"
 )
 
 type TaskEvent struct {
@@ -171,4 +176,25 @@ func publishTaskEventBestEffort(ctx context.Context, sink TaskEventSink, event T
 	if err := sink.PublishTaskEvent(ctx, event); err != nil {
 		log.Printf("task event publish failed: %v", err)
 	}
+}
+
+// PublishPlanRunEvent emits a plan run lifecycle event on the given sink (e.g. NewBusTaskEventSink).
+// No-op when sink is nil or disabled. Uses request ID from ctx when present for per-request SSE subjects.
+func PublishPlanRunEvent(ctx context.Context, sink TaskEventSink, kind TaskEventKind, content string) {
+	if sink == nil || !sink.Enabled() {
+		return
+	}
+	ev := NewTaskEvent(ctx, kind)
+	ev.Content = content
+	publishTaskEventBestEffort(ctx, sink, ev)
+}
+
+// PublishPlanRunFailed emits plan_run_failed with err.Error() on the Error field.
+func PublishPlanRunFailed(ctx context.Context, sink TaskEventSink, err error) {
+	if err == nil || sink == nil || !sink.Enabled() {
+		return
+	}
+	ev := NewTaskEvent(ctx, TaskEventPlanRunFailed)
+	ev.Error = err.Error()
+	publishTaskEventBestEffort(ctx, sink, ev)
 }

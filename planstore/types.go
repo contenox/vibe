@@ -32,8 +32,14 @@ type Plan struct {
 	Goal      string     `json:"goal"`
 	Status    PlanStatus `json:"status"`
 	SessionID string     `json:"session_id"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	// CompiledChainJSON is the full [plancompile.Compile] output JSON for incremental Next (optional).
+	CompiledChainJSON string `json:"compiled_chain_json,omitempty"`
+	// CompiledChainID is the TaskChainDefinition.ID used when compiling (for invalidation).
+	CompiledChainID string `json:"compiled_chain_id,omitempty"`
+	// CompileExecutorChainID is the executor chain ID used when compiling (for invalidation).
+	CompileExecutorChainID string `json:"compile_executor_chain_id,omitempty"`
+	CreatedAt                time.Time `json:"created_at"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 
 // PlanStep maps to the plan_steps table.
@@ -58,6 +64,8 @@ type Store interface {
 	ListPlans(ctx context.Context) ([]*Plan, error)
 	DeletePlan(ctx context.Context, id string) error
 	UpdatePlanStatus(ctx context.Context, planID string, status PlanStatus) error
+	// UpdatePlanCompiledChain persists compile output for the plan (empty json clears compile cache).
+	UpdatePlanCompiledChain(ctx context.Context, planID string, compiledChainJSON, compiledChainID, executorChainID string) error
 
 	// Step operations
 	CreatePlanSteps(ctx context.Context, steps ...*PlanStep) error

@@ -151,9 +151,15 @@ CREATE TABLE IF NOT EXISTS plans (
     goal       TEXT         NOT NULL,
     status     VARCHAR(50)  NOT NULL DEFAULT 'active',
     session_id VARCHAR(255),
+    compiled_chain_json          TEXT,
+    compiled_chain_id            VARCHAR(255),
+    compile_executor_chain_id    VARCHAR(255),
     created_at TIMESTAMP    NOT NULL,
     updated_at TIMESTAMP    NOT NULL
 );
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS compiled_chain_json TEXT;
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS compiled_chain_id VARCHAR(255);
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS compile_executor_chain_id VARCHAR(255);
 
 CREATE TABLE IF NOT EXISTS plan_steps (
     id               VARCHAR(255) PRIMARY KEY,

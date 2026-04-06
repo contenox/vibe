@@ -15,6 +15,7 @@ import (
 	"github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/apiframework/middleware"
 	"github.com/contenox/contenox/backendservice"
+	"github.com/contenox/contenox/chatsessionmodes"
 	"github.com/contenox/contenox/embedservice"
 	"github.com/contenox/contenox/execservice"
 	"github.com/contenox/contenox/hookproviderservice"
@@ -149,13 +150,20 @@ func New(
 	)
 	chatService = openaichatservice.WithActivityTracker(chatService, serveropsChainedTracker)
 	chatapi.AddChatRoutes(mux, chatService)
-	internalchatapi.AddChatRoutes(mux, dbInstance, taskService, taskChainService, auth)
 
 	vfsSvc = vfsservice.WithActivityTracker(vfsSvc, serveropsChainedTracker)
 	vfsapi.AddRoutes(mux, vfsSvc)
 
 	planSvc := planservice.New(dbInstance, taskService, vfsSvc)
-	planapi.AddPlanRoutes(mux, planSvc, taskChainService)
+	planapi.AddPlanRoutes(mux, planSvc, taskChainService, taskService, pubsub)
+
+	chatTurnSvc := chatsessionmodes.New(chatsessionmodes.Deps{
+		DB:           dbInstance,
+		TaskService:  taskService,
+		ChainService: taskChainService,
+		PlanService:  planSvc,
+	})
+	internalchatapi.AddChatRoutes(mux, chatTurnSvc, auth)
 
 	return cleanup, nil
 }

@@ -11,6 +11,14 @@ const CollapsibleContext = createContext<CollapsibleContextType | undefined>(
   undefined,
 );
 
+export function useCollapsibleContext(): CollapsibleContextType {
+  const ctx = useContext(CollapsibleContext);
+  if (!ctx) {
+    throw new Error("useCollapsibleContext must be used within Collapsible");
+  }
+  return ctx;
+}
+
 interface CollapsibleProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;

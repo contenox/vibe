@@ -8,6 +8,7 @@ import {
   ChatMessage,
   ChatSession,
   CleanPlansResponse,
+  CompilePlanResponse,
   CLIConfigUpdateResponse,
   CloudProviderType,
   Exec,
@@ -24,8 +25,11 @@ import {
   Pool,
   RemoteHook,
   ReplanResponse,
+  RunCompiledActiveResponse,
   SetupStatus,
   StateResponse,
+  ChatContextPayload,
+  ChatModeId,
   StatusResponse,
   TaskExecutionRequest,
   TaskExecutionResponse,
@@ -179,14 +183,25 @@ export const api = {
     id: string,
     message: string,
     chainId: string,
-    opts?: { model?: string; provider?: string; signal?: AbortSignal; requestId?: string },
+    opts?: {
+      model?: string;
+      provider?: string;
+      signal?: AbortSignal;
+      requestId?: string;
+      mode?: ChatModeId;
+      context?: ChatContextPayload;
+    },
   ) => {
     const params = new URLSearchParams();
     if (chainId) params.append('chainId', chainId);
     if (opts?.model) params.append('model', opts.model);
     if (opts?.provider) params.append('provider', opts.provider);
 
-    const requestOptions = options('POST', { message });
+    const body: Record<string, unknown> = { message };
+    if (opts?.mode) body.mode = opts.mode;
+    if (opts?.context && Object.keys(opts.context).length > 0) body.context = opts.context;
+
+    const requestOptions = options('POST', body);
     if (opts?.requestId) {
       requestOptions.headers = {
         ...requestOptions.headers,
@@ -255,18 +270,18 @@ export const api = {
   getCurrentUser: async (): Promise<AuthenticatedUser> =>
     normalizeAuthenticatedUser(await apiFetch<RawAuthenticatedUser>('/api/ui/me')),
 
-  // File management
-  getFileMetadata: (id: string) => apiFetch<FileResponse>(`/api/files/${id}`),
+  // File management (ids are VFS paths; encode so nested segments work as a single path param)
+  getFileMetadata: (id: string) => apiFetch<FileResponse>(`/api/files/${encodeURIComponent(id)}`),
 
   createFile: (formData: FormData) =>
     apiFetch<FileResponse>('/api/files', formDataOptions('POST', formData)),
 
   updateFile: (id: string, formData: FormData) =>
-    apiFetch<FileResponse>(`/api/files/${id}`, formDataOptions('PUT', formData)),
+    apiFetch<FileResponse>(`/api/files/${encodeURIComponent(id)}`, formDataOptions('PUT', formData)),
 
-  deleteFile: (id: string) => apiFetch<void>(`/api/files/${id}`, options('DELETE')),
+  deleteFile: (id: string) => apiFetch<void>(`/api/files/${encodeURIComponent(id)}`, options('DELETE')),
 
-  getDownloadFileUrl: (id: string) => `/api/files/${id}/download`,
+  getDownloadFileUrl: (id: string) => `/api/files/${encodeURIComponent(id)}/download`,
 
   listFiles: (path?: string) => {
     const query = path ? `?path=${encodeURIComponent(path)}` : '';
@@ -280,7 +295,7 @@ export const api = {
     apiFetch<FolderResponse>(`/api/folders/${id}/path`, options('PUT', data)),
 
   renameFile: (id: string, data: { path: string }) =>
-    apiFetch<FileResponse>(`/api/files/${id}/path`, options('PUT', data)),
+    apiFetch<FileResponse>(`/api/files/${encodeURIComponent(id)}/path`, options('PUT', data)),
   execPrompt: (data: Exec) => apiFetch<ExecResp>(`/api/execute`, options('POST', data)),
   executeTaskChain: (
     data: TaskExecutionRequest,
@@ -333,4 +348,16 @@ export const api = {
   deletePlan: (name: string) =>
     apiFetch<string>(`/api/plans/${encodeURIComponent(name)}`, options('DELETE')),
   cleanPlans: () => apiFetch<CleanPlansResponse>('/api/plans/clean', options('POST', {})),
+  compilePlan: (body: {
+    markdown: string;
+    executor_chain_id: string;
+    chain_id: string;
+    write_path?: string;
+  }) => apiFetch<CompilePlanResponse>('/api/plans/compile', options('POST', body)),
+  runCompiledActivePlan: (body: {
+    executor_chain_id: string;
+    chain_id: string;
+    write_path?: string;
+  }) =>
+    apiFetch<RunCompiledActiveResponse>('/api/plans/active/run-compiled', options('POST', body)),
 };

@@ -44,6 +44,19 @@ export type StateResponse = {
   error?: string;
 };
 
+/** POST /api/chats/:id/chat — optional body fields (server resolves chain from mode when chainId omitted). */
+export type ChatModeId = 'chat' | 'prompt' | 'plan' | 'build';
+
+export type ChatContextArtifact = {
+  kind: string;
+  /** JSON value serialized per artifact */
+  payload?: unknown;
+};
+
+export type ChatContextPayload = {
+  artifacts?: ChatContextArtifact[];
+};
+
 export type TaskEventKind =
   | 'chain_started'
   | 'step_started'
@@ -123,6 +136,10 @@ export type Plan = {
   goal: string;
   status: PlanStatus;
   session_id: string;
+  /** Full plancompile.Compile output JSON when cached (server). */
+  compiled_chain_json?: string;
+  compiled_chain_id?: string;
+  compile_executor_chain_id?: string;
   created_at: string;
   updated_at: string;
 };
@@ -164,6 +181,25 @@ export type PlanMarkdownResponse = {
 
 export type CleanPlansResponse = {
   removed: number;
+};
+
+/** POST /api/plans/compile */
+export type CompilePlanResponse = {
+  goal: string;
+  steps: string[];
+  chain: ChainDefinition;
+  path?: string;
+};
+
+/** POST /api/plans/active/run-compiled */
+export type RunCompiledActiveResponse = {
+  goal: string;
+  steps: string[];
+  chain?: ChainDefinition;
+  path?: string;
+  output: unknown;
+  output_type: string;
+  state: CapturedStateUnit[];
 };
 
 export type SearchResult = {
@@ -363,13 +399,6 @@ export type UpdateAccessEntryRequest = {
   permission?: string;
 };
 
-export interface FileResponse {
-  id: string;
-  path: string;
-  content_type: string;
-  size: number;
-}
-
 export type FolderResponse = {
   id: string;
   path: string;
@@ -381,13 +410,17 @@ export type PathUpdateRequest = {
   path: string;
 };
 
+/** VFS file row from GET /api/files and related routes. */
 export interface FileResponse {
   id: string;
   path: string;
+  name?: string;
   contentType: string;
   size: number;
   createdAt?: string;
   updatedAt?: string;
+  /** Present for directory entries in directory listings. */
+  isDirectory?: boolean;
 }
 
 // Beam auth is backed by /api/ui/login and /api/ui/me, which currently return

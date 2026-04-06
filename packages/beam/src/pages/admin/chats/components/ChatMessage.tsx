@@ -1,6 +1,13 @@
-import { Button, ChatMessage as ChatMessageUI } from '@contenox/ui';
+import {
+  Button,
+  ChatMessage as ChatMessageUI,
+  ChatStreamThinkingBox,
+  ChatStreamingCaret,
+  ChatTranscriptStreamingPlaceholder,
+  chatTranscriptMarkdownComponents,
+} from '@contenox/ui';
 import { t } from 'i18next';
-import React, { type Components } from 'react';
+import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ChatMessage as ChatMessageModel } from '../../../../lib/types';
@@ -28,6 +35,7 @@ export const ChatMessage = ({ message, isLatest = false, streamThinking }: ChatM
 
   return (
     <ChatMessageUI
+      appearance="transcript"
       role={message.role}
       roleLabel={roleLabel}
       timestamp={new Date(message.sentAt).toLocaleTimeString()}
@@ -50,66 +58,19 @@ export const ChatMessage = ({ message, isLatest = false, streamThinking }: ChatM
       }
     >
       {message.streaming && streamThinking ? (
-        <div className="border-primary-200 bg-primary-50/80 dark:bg-dark-surface-600/50 text-text-muted dark:text-dark-text-muted mb-3 max-h-48 overflow-auto rounded-md border px-3 py-2 font-mono text-xs whitespace-pre-wrap">
-          {streamThinking}
-        </div>
+        <ChatStreamThinkingBox>{streamThinking}</ChatStreamThinkingBox>
       ) : null}
       {message.streaming && !message.content && !message.error && !streamThinking ? (
-        <p className="text-text-muted dark:text-dark-text-muted text-sm italic">
+        <ChatTranscriptStreamingPlaceholder>
           {t('chat.streaming_placeholder')}
-        </p>
+        </ChatTranscriptStreamingPlaceholder>
       ) : null}
       {message.content ? (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatTranscriptMarkdownComponents}>
           {message.content}
         </ReactMarkdown>
       ) : null}
-      {message.streaming && message.content && !message.error ? (
-        <span
-          className="bg-primary-500 ml-0.5 inline-block h-3 w-1.5 animate-pulse rounded-sm align-middle"
-          aria-hidden
-        />
-      ) : null}
+      {message.streaming && message.content && !message.error ? <ChatStreamingCaret /> : null}
     </ChatMessageUI>
   );
-};
-
-const markdownComponents: Components = {
-  code: (props => {
-    const { inline, className, children, ...rest } = props as {
-      inline?: boolean;
-      className?: string;
-      children?: React.ReactNode;
-      [key: string]: unknown;
-    };
-    const isInline = inline ?? false;
-
-    if (!isInline) {
-      return (
-        <pre className="bg-surface-200 text-text dark:bg-dark-surface-700 dark:text-dark-text overflow-auto rounded-lg p-4 text-sm">
-          <code className={className} {...rest}>
-            {children}
-          </code>
-        </pre>
-      );
-    }
-
-    return (
-      <code
-        className="bg-surface-200 text-text dark:bg-dark-surface-700 dark:text-dark-text rounded px-1.5 py-0.5 font-mono text-xs"
-        {...rest}
-      >
-        {children}
-      </code>
-    );
-  }) as Components['code'],
-
-  blockquote: ({ children, ...props }) => (
-    <blockquote
-      className="border-primary-300 dark:border-dark-primary-400 bg-primary-50 text-text dark:bg-dark-surface-600 dark:text-dark-text my-3 rounded-r-lg border-l-4 py-2 pl-4"
-      {...props}
-    >
-      {children}
-    </blockquote>
-  ),
 };

@@ -5,7 +5,7 @@
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts --external react,react-dom,clsx,tailwind-merge,lucide-react,tailwindcss --tsconfig tsconfig.json",
+    "build": "tsup src/index.ts --format cjs,esm --dts --external react,react-dom,clsx,tailwind-merge,lucide-react,tailwindcss,react-markdown --tsconfig tsconfig.json",
     "prettier:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
     "prettier": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
   },
@@ -13,6 +13,7 @@
     "clsx": "^2.1.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.0.0",
     "tailwind-merge": "^3.0.2",
     "tailwindcss": "^4.0.0"
   },
@@ -27,7 +28,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.0.2",
-    "tailwindcss": "^4.0.12",
+    "tailwindcss": "^4.0.0",
     "tsc": "^2.0.4",
     "tsup": "^8.4.0",
     "typescript": "^5.8.2"
@@ -48,6 +49,7 @@
     "dist"
   ],
   "devDependencies": {
-    "postcss": "^8.5.3"
+    "postcss": "^8.5.3",
+    "react-markdown": "^10.1.0"
   }
 }

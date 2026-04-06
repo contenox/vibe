@@ -12,8 +12,11 @@ type MessageInputFormProps = {
   /** Omit or leave empty to hide the composer heading (preferred on chat thread pages). */
   title?: string;
   className?: string;
-  variant?: 'default' | 'compact';
+  variant?: 'default' | 'compact' | 'workbench';
+  maxLength?: number;
   canSubmit?: boolean;
+  /** When true, submit is allowed with an empty message (e.g. chat mode build). */
+  allowEmptyMessage?: boolean;
 };
 
 export const MessageInputForm = ({
@@ -26,8 +29,12 @@ export const MessageInputForm = ({
   title = '',
   className,
   variant = 'default',
+  maxLength,
   canSubmit,
+  allowEmptyMessage = false,
 }: MessageInputFormProps) => {
+  const effectiveMax =
+    maxLength ?? (variant === 'workbench' ? 8000 : 4000);
   return (
     <ChatComposer
       value={value}
@@ -40,9 +47,14 @@ export const MessageInputForm = ({
       title={title}
       className={className}
       variant={variant}
-      maxLength={4000}
+      maxLength={effectiveMax}
       canSubmit={canSubmit}
-      charCountTooltip={variant === 'default' ? t('chat.char_count_tooltip') : undefined}
+      allowEmptyMessage={allowEmptyMessage}
+      charCountTooltip={
+        variant === 'default' || variant === 'workbench'
+          ? t('chat.char_count_tooltip')
+          : undefined
+      }
       footerStart={
         variant === 'default' ? (
           <>

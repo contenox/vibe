@@ -409,14 +409,15 @@ func (s *service) GetFilesByPath(ctx context.Context, path string) ([]File, erro
 		var meta Metadata
 		_ = json.Unmarshal(child.Meta, &meta)
 		files = append(files, File{
-			ID:          child.ID,
-			Path:        childPath,
-			Name:        child.Name,
-			ContentType: child.Type,
-			Size:        meta.Size,
-			ParentID:    parentIDForListing,
-			CreatedAt:   child.CreatedAt,
-			UpdatedAt:   child.UpdatedAt,
+			ID:            child.ID,
+			Path:          childPath,
+			Name:          child.Name,
+			ContentType:   child.Type,
+			Size:          meta.Size,
+			ParentID:      parentIDForListing,
+			CreatedAt:     child.CreatedAt,
+			UpdatedAt:     child.UpdatedAt,
+			IsDirectory:   child.IsFolder,
 		})
 	}
 	if err := commit(ctx); err != nil {

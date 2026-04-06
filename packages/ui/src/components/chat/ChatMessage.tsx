@@ -61,6 +61,20 @@ function bubbleBgClass(role: ChatMessageBaseProps["role"]): string {
   return "bg-surface-100 text-text dark:bg-dark-surface-500 dark:text-dark-text";
 }
 
+/** Left border + surface for transcript / workbench layout */
+function transcriptBlockClass(role: ChatMessageBaseProps["role"]): string {
+  switch (role) {
+    case "user":
+      return "border-primary-600 bg-primary-50/70 text-text dark:border-primary-500 dark:bg-dark-primary-900/30 dark:text-dark-text";
+    case "system":
+      return "border-accent-600 bg-accent-50/80 text-text dark:border-accent-500 dark:bg-dark-accent-900/25 dark:text-dark-text";
+    case "tool":
+      return "border-secondary-600 bg-secondary-50/80 text-text dark:border-secondary-500 dark:bg-dark-surface-600/40 dark:text-dark-text";
+    default:
+      return "border-secondary-500 bg-surface-100/90 text-text dark:border-dark-secondary-500 dark:bg-dark-surface-600/35 dark:text-dark-text";
+  }
+}
+
 export function ChatMessage({
   role,
   roleLabel,
@@ -83,6 +97,7 @@ export function ChatMessage({
   copiedLabel,
   className,
   "aria-label": ariaLabel,
+  appearance = "bubble",
 }: ChatMessageBaseProps) {
   const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
@@ -91,6 +106,11 @@ export function ChatMessage({
   const bubbleRing =
     isLatest && highlightLatest
       ? "ring-2 ring-primary-300 dark:ring-dark-primary-400"
+      : "";
+
+  const transcriptRing =
+    isLatest && highlightLatest
+      ? "ring-2 ring-primary-300/70 dark:ring-dark-primary-500/60"
       : "";
 
   const handleOpenChange = (next: boolean) => {
@@ -132,6 +152,90 @@ export function ChatMessage({
 
   const articleLabel =
     ariaLabel ?? (typeof roleLabel === "string" ? roleLabel : "message");
+
+  if (appearance === "transcript") {
+    return (
+      <article aria-label={articleLabel} className={cn("group", className)}>
+        <Collapsible
+          open={open}
+          onOpenChange={handleOpenChange}
+          className="flex flex-col gap-1.5"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={roleBadgeVariant(role)} size="sm">
+              {roleLabel}
+            </Badge>
+            {timestamp != null && ts}
+            {isLatest && latestLabel != null && (
+              <Badge variant="success" size="sm">
+                {latestLabel}
+              </Badge>
+            )}
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="h-6 px-2 text-xs"
+                type="button"
+              >
+                {open ? collapseLabels.open : collapseLabels.closed}
+              </Button>
+            </CollapsibleTrigger>
+          </div>
+
+          <CollapsibleContent>
+            <div
+              className={cn(
+                "rounded-r-lg border-l-4 py-3 pr-3 pl-4",
+                transcriptBlockClass(role),
+                transcriptRing,
+              )}
+            >
+              <div className="prose prose-sm dark:prose-invert max-w-none min-w-0">
+                {children}
+              </div>
+
+              {error != null && (
+                <Panel className="bg-error-50 dark:bg-dark-error-600/30 text-error-800 dark:text-dark-text mt-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Span className="text-sm">{error}</Span>
+                    {onRetry != null && (
+                      <Button variant="ghost" size="sm" onClick={onRetry}>
+                        {retryLabel ?? "Retry"}
+                      </Button>
+                    )}
+                  </div>
+                </Panel>
+              )}
+            </div>
+
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              {copyText != null && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs"
+                  onClick={() => void handleCopy()}
+                  aria-live="polite"
+                  type="button"
+                  aria-label={
+                    copied
+                      ? (copiedLabel != null ? String(copiedLabel) : "Copied")
+                      : (copyLabel != null ? String(copyLabel) : "Copy")
+                  }
+                >
+                  {copied
+                    ? (copiedLabel ?? "Copied!")
+                    : (copyLabel ?? "Copy")}
+                </Button>
+              )}
+              {secondaryActions}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      </article>
+    );
+  }
 
   return (
     <article aria-label={articleLabel} className={cn("group", className)}>

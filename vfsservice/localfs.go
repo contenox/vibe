@@ -141,9 +141,10 @@ func (l *localFS) GetFilesByPath(ctx context.Context, path string) ([]File, erro
 		rel, _ := filepath.Rel(l.root, filepath.Join(dir, e.Name()))
 		info, _ := e.Info()
 		f := File{
-			ID:   rel,
-			Path: filepath.ToSlash(rel),
-			Name: e.Name(),
+			ID:          rel,
+			Path:        filepath.ToSlash(rel),
+			Name:        e.Name(),
+			IsDirectory: e.IsDir(),
 		}
 		if info != nil {
 			f.Size = info.Size()
