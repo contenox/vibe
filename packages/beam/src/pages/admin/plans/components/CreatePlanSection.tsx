@@ -1,15 +1,23 @@
 import { Button, Form, FormField, P, Panel, Section, Select, Textarea } from '@contenox/ui';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { useCreatePlan } from '../../../../hooks/usePlans';
 
 type Props = {
   chainPaths: string[];
   chainsLoading: boolean;
+  /** After a successful create, open the active-plan workspace. */
+  navigateToWorkspaceOnSuccess?: boolean;
 };
 
-export default function CreatePlanSection({ chainPaths, chainsLoading }: Props) {
+export default function CreatePlanSection({
+  chainPaths,
+  chainsLoading,
+  navigateToWorkspaceOnSuccess = false,
+}: Props) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [goal, setGoal] = useState('');
   const [plannerChainId, setPlannerChainId] = useState('');
   const createMutation = useCreatePlan();
@@ -28,6 +36,9 @@ export default function CreatePlanSection({ chainPaths, chainsLoading }: Props) 
       {
         onSuccess: () => {
           setGoal('');
+          if (navigateToWorkspaceOnSuccess) {
+            navigate('/plans/active');
+          }
         },
       },
     );

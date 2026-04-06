@@ -48,9 +48,10 @@ export default function ActivePlanSection({
   const retryMutation = useRetryPlanStep();
   const skipMutation = useSkipPlanStep();
 
-  const emptyOption = { value: '', label: t('plans.select_executor_chain') };
-  const chainOptions = [emptyOption, ...chainPaths.map(p => ({ value: p, label: p }))];
-  const replanOptions = [emptyOption, ...chainPaths.map(p => ({ value: p, label: p }))];
+  const executorEmpty = { value: '', label: t('plans.select_executor_chain') };
+  const plannerEmpty = { value: '', label: t('plans.select_planner_chain') };
+  const chainOptions = [executorEmpty, ...chainPaths.map(p => ({ value: p, label: p }))];
+  const replanOptions = [plannerEmpty, ...chainPaths.map(p => ({ value: p, label: p }))];
 
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();

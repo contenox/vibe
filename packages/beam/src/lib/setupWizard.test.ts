@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SetupStatus } from './types';
-import { deriveSetupWizardSteps } from './setupWizard';
+import { deriveSetupWizardSteps, getRecommendedSetupStepIndex } from './setupWizard';
 
 function status(partial: Partial<SetupStatus>): SetupStatus {
   return {
@@ -82,5 +82,34 @@ describe('deriveSetupWizardSteps', () => {
     const steps = deriveSetupWizardSteps(s);
     expect(steps.every(x => x.status === 'complete')).toBe(true);
     expect(steps.every(x => !x.active)).toBe(true);
+  });
+});
+
+describe('getRecommendedSetupStepIndex', () => {
+  it('returns 0 when defaults need attention', () => {
+    const s = status({
+      issues: [{ code: 'missing_default_model', severity: 'error', category: 'defaults', message: 'm' }],
+    });
+    expect(getRecommendedSetupStepIndex(s)).toBe(0);
+  });
+
+  it('returns 1 when only registration needs attention', () => {
+    const s = status({
+      defaultModel: 'm',
+      defaultProvider: 'openai',
+      issues: [{ code: 'no_backends', severity: 'warning', category: 'registration', message: 'n' }],
+    });
+    expect(getRecommendedSetupStepIndex(s)).toBe(1);
+  });
+
+  it('returns 2 when only health needs attention', () => {
+    const s = status({
+      defaultModel: 'm',
+      defaultProvider: 'ollama',
+      backendCount: 1,
+      reachableBackendCount: 0,
+      issues: [{ code: 'all_backends_unreachable', severity: 'error', category: 'health', message: 'x' }],
+    });
+    expect(getRecommendedSetupStepIndex(s)).toBe(2);
   });
 });

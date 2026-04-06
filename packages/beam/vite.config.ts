@@ -69,7 +69,8 @@ export default defineConfig(({ mode }) => {
       outDir: '../../internal/web/beam/dist',
       emptyOutDir: true,
     },
-    base: './',
+    /** Root-relative URLs so deep links (e.g. /chat/:id) still load /assets/* from the server root. */
+    base: '/',
     server: devApiProxy
       ? {
           proxy: {

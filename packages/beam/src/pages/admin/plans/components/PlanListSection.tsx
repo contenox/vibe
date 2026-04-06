@@ -1,15 +1,19 @@
 import { Button, Panel, Section, Span, Table, TableCell, TableRow, Tooltip } from '@contenox/ui';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link, useNavigate } from 'react-router-dom';
 import { useActivatePlan, useDeletePlan } from '../../../../hooks/usePlans';
 import type { Plan } from '../../../../lib/types';
 
 type Props = {
   plans: Plan[] | undefined;
+  /** Name of the currently active plan (for workspace link). */
+  activePlanName?: string | null;
 };
 
-export default function PlanListSection({ plans }: Props) {
+export default function PlanListSection({ plans, activePlanName = null }: Props) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const activateMutation = useActivatePlan();
   const deleteMutation = useDeletePlan();
 
@@ -21,7 +25,9 @@ export default function PlanListSection({ plans }: Props) {
   }, [plans]);
 
   const handleActivate = (name: string) => {
-    activateMutation.mutate(name);
+    activateMutation.mutate(name, {
+      onSuccess: () => navigate('/plans/active'),
+    });
   };
 
   const handleDelete = (name: string) => {
@@ -46,6 +52,7 @@ export default function PlanListSection({ plans }: Props) {
             t('plans.col_status'),
             t('plans.col_updated'),
             t('plans.col_actions'),
+            t('plans.col_workspace'),
           ]}>
           {sorted.map(plan => (
             <TableRow key={plan.id}>
@@ -86,6 +93,19 @@ export default function PlanListSection({ plans }: Props) {
                     {t('common.delete')}
                   </Button>
                 </div>
+              </TableCell>
+              <TableCell>
+                {activePlanName === plan.name ? (
+                  <Link to="/plans/active">
+                    <Button variant="outline" size="sm" type="button">
+                      {t('plans.workspace_open_short')}
+                    </Button>
+                  </Link>
+                ) : (
+                  <Span variant="muted" className="text-sm">
+                    —
+                  </Span>
+                )}
               </TableCell>
             </TableRow>
           ))}

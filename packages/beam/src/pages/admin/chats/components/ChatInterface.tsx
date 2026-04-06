@@ -31,10 +31,16 @@ export type ChatInterfaceProps = {
   isLoading: boolean;
   error: Error | null;
   isProcessing?: boolean;
+  /** Primary label for the processing bar (task status, SSE phase, etc.). */
+  processingBarLabel?: string;
+  /** When true, task-event thinking is shown inside the live assistant bubble only. */
+  embedStreamThinkingInThread?: boolean;
+  /** Legacy: thinking shown above thread when not embedded. */
   liveThinking?: string;
-  liveStatus?: string;
   canStop?: boolean;
   onStop?: () => void;
+  /** Drives auto-scroll while tokens arrive. */
+  streamScrollSignature?: string;
 };
 
 export const ChatInterface = ({
@@ -42,13 +48,16 @@ export const ChatInterface = ({
   isLoading,
   error,
   isProcessing = false,
+  processingBarLabel,
+  embedStreamThinkingInThread = false,
   liveThinking,
   liveStatus,
   canStop = false,
   onStop,
+  streamScrollSignature = '',
 }: ChatInterfaceProps) => {
   const { containerRef, endRef, scrollToEnd, isNearBottom } = useChatScroll({
-    deps: [chatHistory],
+    deps: [chatHistory, streamScrollSignature],
   });
 
   if (isLoading) {
@@ -67,16 +76,19 @@ export const ChatInterface = ({
     );
   }
 
+  const barLabel =
+    processingBarLabel ?? (isProcessing ? liveStatus || t('chat.thinking') : '');
+
   return (
     <div className="flex h-full flex-col">
       {isProcessing && (
         <>
           <ChatProcessingBar
-            label={liveStatus || t('chat.thinking')}
+            label={barLabel}
             onStop={canStop ? onStop : undefined}
             stopLabel={t('chat.stop')}
           />
-          {liveThinking && (
+          {liveThinking && !embedStreamThinkingInThread && (
             <div className="border-primary-200 bg-primary-50 text-text dark:bg-dark-surface-200 dark:text-dark-text mx-4 mt-3 rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap">
               {liveThinking}
             </div>
@@ -114,6 +126,7 @@ export const ChatInterface = ({
                   <ChatMessage
                     message={message}
                     isLatest={index === chatHistory.length - 1}
+                    streamThinking={message.streaming ? liveThinking : undefined}
                   />
                 </div>
               );

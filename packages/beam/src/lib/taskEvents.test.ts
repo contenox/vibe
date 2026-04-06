@@ -39,4 +39,13 @@ describe('reduceTaskEventState', () => {
     expect(state.status).toBe('Failed');
     expect(state.error).toBe('boom');
   });
+
+  it('records active chain id from chain_started', () => {
+    const state = reduceTaskEventState(createEmptyTaskEventState(), {
+      kind: 'chain_started',
+      timestamp: new Date().toISOString(),
+      chain_id: 'default-chain.json',
+    });
+    expect(state.activeChainId).toBe('default-chain.json');
+  });
 });

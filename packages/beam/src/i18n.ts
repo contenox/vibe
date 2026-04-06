@@ -17,6 +17,12 @@ const resources = {
       app: {
         name: 'Beam',
       },
+      settings: {
+        page_title: 'Settings',
+        page_description:
+          'Default model, provider, and chain; backend registration; and runtime health — same guided flow as the setup banner.',
+        setup_load_error: 'Could not load setup status.',
+      },
       setup: {
         banner_title: 'Finish setup before using chat',
         banner_title_warnings: 'Recommended: add an LLM backend',
@@ -34,7 +40,18 @@ const resources = {
           title_blocking: 'Finish setup before using chat',
           title_warnings: 'Recommended: finish LLM setup',
           intro:
-            'Step 1 sets chat defaults. Step 2 depends on how the provider is reached: OpenAI, Gemini, and Ollama Cloud auto-create a backend when you save an API key on Cloud providers. Self-hosted Ollama and vLLM need a backend added on the Backends tab. Step 3 confirms the runtime can see models.',
+            'Work through each step in order. You can go back to change defaults or recheck status.',
+          progress_label: 'Setup wizard progress',
+          step_of: 'Step {{current}} of {{total}}',
+          back: 'Back',
+          next: 'Next',
+          continue: 'Continue',
+          save_and_continue: 'Save and continue',
+          continue_to_register: 'Continue to backends',
+          continue_to_health: 'Continue to health check',
+          refresh_status: 'Refresh status',
+          defaults_done_hint:
+            'Default model and provider are set. Continue when you are ready to register or verify backends.',
           step_defaults_title: 'Set default model & provider',
           step_defaults_desc:
             'Used by internal chat and task chains that reference {{var:model}} and {{var:provider}}.',
@@ -330,6 +347,13 @@ const resources = {
         plans: 'Plans',
         chain_detail: 'Chain Detail',
         bots: 'Bots',
+      },
+      control_plane: {
+        hub_title: 'Control plane',
+        hub_description:
+          'Backends, hooks, files, chains, plans, prompt execution, and settings — same routes as in the menu.',
+        menu_aria: 'Open control plane menu',
+        all_tools: 'All tools',
       },
       common: {
         none: 'None',
@@ -1115,6 +1139,21 @@ const resources = {
         task_id: 'Task ID',
         conversation: 'Chat Conversation',
         state_visualizer: 'State Visualizer',
+        run_log: 'Run log',
+        show_run_log: 'Show run log',
+        hide_run_log: 'Hide run log',
+        stats_compact: '{{messages}} msgs · {{state}} steps',
+        sse_connecting: 'Connecting to task event stream…',
+        sse_sending_http: 'Sending message…',
+        sse_degraded: 'Event stream unavailable — sending request (streaming may be limited)',
+        sse_queued: 'Preparing task events…',
+        sse_stream_lost: 'Task event stream disconnected; the reply may be incomplete.',
+        task_failed: 'Task failed',
+        streaming_placeholder: 'Waiting for model output…',
+        task_events_omitted: '{{count}} earlier events not shown',
+        task_events_feed_title: 'Task events',
+        captured_state_title: 'Captured state',
+        captured_state_pending: 'Captured state will appear when the chain finishes.',
         input_title: 'Message',
         error_create_chat: 'Chat creation error',
         task_chain: 'Task Chain',
@@ -1179,6 +1218,11 @@ const resources = {
         date_today: 'Today',
         date_yesterday: 'Yesterday',
         scroll_to_latest: 'Jump to latest',
+        landing_title: 'Start a conversation',
+        landing_description:
+          'Pick a task chain, type your first message, and send — a new chat opens and runs it. You can also open an existing session from the list on the left.',
+        landing_input_placeholder: 'First message…',
+        sidebar_empty_hint: 'No chats yet. Start one with the button above.',
       },
       users: {
         manage_title: 'Manage Users',
@@ -1319,6 +1363,15 @@ const resources = {
         clean_confirm:
           'Remove all completed and archived plans? Active plan is not deleted by this action.',
         clean_result: 'Removed {{count}} plan(s).',
+        workspace_nav: 'Active plan workspace',
+        workspace_open: 'Open workspace',
+        workspace_open_short: 'Open',
+        workspace_page_title: 'Active plan',
+        workspace_page_description:
+          'Run the next step, replan, or retry/skip steps. Activate or create plans from the Plans list.',
+        back_to_list: 'All plans',
+        active_summary_label: 'Currently active',
+        col_workspace: 'Workspace',
       },
       prompt: {
         title: 'Execute Prompt',
@@ -1336,6 +1389,12 @@ const resources = {
     translation: {
       app: {
         name: 'Beam',
+      },
+      settings: {
+        page_title: 'Einstellungen',
+        page_description:
+          'Standard-Modell, Anbieter und Chain; Backend-Registrierung und Laufzeitstatus — dieselbe geführte Ansicht wie im Einrichtungs-Banner.',
+        setup_load_error: 'Setup-Status konnte nicht geladen werden.',
       },
       setup: {
         banner_title: 'Einrichtung abschließen, bevor Sie chatten',
@@ -1355,7 +1414,18 @@ const resources = {
           title_blocking: 'Einrichtung abschließen, bevor Sie chatten',
           title_warnings: 'Empfohlen: LLM-Einrichtung abschließen',
           intro:
-            'Schritt 1: Standardwerte. Schritt 2 hängt davon ab, wie der Anbieter erreicht wird: OpenAI, Gemini und Ollama Cloud legen beim Speichern eines API-Schlüssels unter „Cloud providers“ automatisch ein Backend an. Selbst gehostetes Ollama und vLLM brauchen einen Eintrag unter „Backends“. Schritt 3: Laufzeit-Status.',
+            'Gehen Sie die Schritte der Reihe nach durch. Sie können zurückgehen, um Standardwerte anzupassen oder den Status erneut zu prüfen.',
+          progress_label: 'Fortschritt der Einrichtung',
+          step_of: 'Schritt {{current}} von {{total}}',
+          back: 'Zurück',
+          next: 'Weiter',
+          continue: 'Weiter',
+          save_and_continue: 'Speichern und weiter',
+          continue_to_register: 'Weiter zu Backends',
+          continue_to_health: 'Weiter zur Laufzeitprüfung',
+          refresh_status: 'Status aktualisieren',
+          defaults_done_hint:
+            'Standard-Modell und Anbieter sind gesetzt. Fahren Sie fort, um Backends zu registrieren oder zu prüfen.',
           step_defaults_title: 'Standard-Modell & Anbieter',
           step_defaults_desc:
             'Wird für internen Chat und Task-Chains mit {{var:model}} und {{var:provider}} verwendet.',
@@ -1623,6 +1693,13 @@ const resources = {
         plans: 'Pläne',
         chain_detail: 'Kettendetails',
         bots: 'Bots',
+      },
+      control_plane: {
+        hub_title: 'Control Plane',
+        hub_description:
+          'Backends, Hooks, Dateien, Ketten, Pläne, Prompt-Ausführung und Einstellungen — dieselben Routen wie im Menü.',
+        menu_aria: 'Control-Plane-Menü öffnen',
+        all_tools: 'Alle Werkzeuge',
       },
       common: {
         none: 'Keine',
@@ -2067,6 +2144,21 @@ const resources = {
         conversation: 'Chat-Konversation',
         error_create_chat: 'Chat-Erstellungsfehler',
         state_visualizer: 'Zustände',
+        run_log: 'Ablauf',
+        show_run_log: 'Ablauf einblenden',
+        hide_run_log: 'Ablauf ausblenden',
+        stats_compact: '{{messages}} Nachr. · {{state}} Schritte',
+        sse_connecting: 'Verbinde mit Aufgaben-Ereignisstrom…',
+        sse_sending_http: 'Nachricht wird gesendet…',
+        sse_degraded: 'Ereignisstrom nicht verfügbar — Anfrage wird gesendet (Streaming ggf. eingeschränkt)',
+        sse_queued: 'Bereite Aufgabenereignisse vor…',
+        sse_stream_lost: 'Ereignisstrom getrennt; die Antwort kann unvollständig sein.',
+        task_failed: 'Aufgabe fehlgeschlagen',
+        streaming_placeholder: 'Warte auf Modellausgabe…',
+        task_events_omitted: '{{count}} frühere Ereignisse ausgeblendet',
+        task_events_feed_title: 'Aufgabenereignisse',
+        captured_state_title: 'Erfasster Zustand',
+        captured_state_pending: 'Der erfasste Zustand erscheint, wenn die Kette endet.',
         input_title: 'Nachricht',
         no_chat_selected: 'Kein Chat ausgewählt',
         loading_chats: 'Lade Chats',
@@ -2127,6 +2219,11 @@ const resources = {
           'Starten Sie eine neue Konversation oder wählen Sie einen bestehenden Chat aus',
         view_examples: 'Beispiele anzeigen',
         create_error: 'Chat-Erstellung fehlgeschlagen: {{error}}',
+        landing_title: 'Konversation starten',
+        landing_description:
+          'Wählen Sie eine Aufgabenkette, geben Sie die erste Nachricht ein und senden Sie — ein neuer Chat wird geöffnet und ausgeführt. Bestehende Sitzungen finden Sie links in der Liste.',
+        landing_input_placeholder: 'Erste Nachricht…',
+        sidebar_empty_hint: 'Noch keine Chats. Starten Sie einen mit der Schaltfläche oben.',
       },
       users: {
         manage_title: 'Benutzer verwalten',
@@ -2286,6 +2383,15 @@ const resources = {
         clean_confirm:
           'Alle abgeschlossenen und archivierten Pläne entfernen? Der aktive Plan wird dadurch nicht gelöscht.',
         clean_result: '{{count}} Plan/Pläne entfernt.',
+        workspace_nav: 'Aktiver Plan — Arbeitsbereich',
+        workspace_open: 'Arbeitsbereich öffnen',
+        workspace_open_short: 'Öffnen',
+        workspace_page_title: 'Aktiver Plan',
+        workspace_page_description:
+          'Nächsten Schritt ausführen, neu planen oder Schritte wiederholen/überspringen. Aktivieren oder anlegen in der Planliste.',
+        back_to_list: 'Alle Pläne',
+        active_summary_label: 'Derzeit aktiv',
+        col_workspace: 'Arbeitsbereich',
       },
       prompt: {
         title: 'Prompt ausführen',

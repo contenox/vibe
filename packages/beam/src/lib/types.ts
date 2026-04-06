@@ -228,6 +228,8 @@ export type ChatMessage = {
   isLatest: boolean;
   state?: CapturedStateUnit[];
   error?: string;
+  /** Assistant message still receiving task-event stream (Beam live row). */
+  streaming?: boolean;
 };
 
 export type QueueItem = {

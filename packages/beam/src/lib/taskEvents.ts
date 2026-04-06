@@ -7,6 +7,8 @@ export type TaskEventViewState = {
   status: string;
   error: string | null;
   lastTaskID: string | null;
+  /** From chain_started (VFS path or chain id). */
+  activeChainId: string | null;
 };
 
 export function createEmptyTaskEventState(): TaskEventViewState {
@@ -17,6 +19,7 @@ export function createEmptyTaskEventState(): TaskEventViewState {
     status: '',
     error: null,
     lastTaskID: null,
+    activeChainId: null,
   };
 }
 
@@ -31,6 +34,9 @@ export function reduceTaskEventState(
 
   switch (event.kind) {
     case 'chain_started':
+      if (event.chain_id) {
+        next.activeChainId = event.chain_id;
+      }
       next.status = event.chain_id ? `Running ${event.chain_id}` : 'Running';
       break;
     case 'step_started':

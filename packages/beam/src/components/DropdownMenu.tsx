@@ -1,4 +1,5 @@
 import { Button, Dropdown, Section, Span } from '@contenox/ui';
+import type { ReactElement } from 'react';
 import { t } from 'i18next';
 import { ChevronDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -14,19 +15,24 @@ type NavDropdownProps = {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
   items: MenuItem[];
+  /** When set, replaces the default chevron menu trigger. */
+  trigger?: ReactElement;
+  contentClassName?: string;
 };
 
-export function DropdownMenu({ isOpen, setIsOpen, items }: NavDropdownProps) {
+export function DropdownMenu({ isOpen, setIsOpen, items, trigger, contentClassName }: NavDropdownProps) {
   return (
     <Dropdown
       isOpen={isOpen}
       onToggle={setIsOpen}
       trigger={
-        <Button variant="ghost" size="sm" aria-label={t('common.menu')} className="gap-1">
-          <ChevronDown className={cn('h-8 w-4 transition-transform', isOpen && 'rotate-180')} />
-        </Button>
+        trigger ?? (
+          <Button variant="ghost" size="sm" aria-label={t('common.menu')} className="gap-1">
+            <ChevronDown className={cn('h-8 w-4 transition-transform', isOpen && 'rotate-180')} />
+          </Button>
+        )
       }
-      contentClassName="absolute right-0 top-full mt-2 min-w-[160px]">
+      contentClassName={cn('absolute right-0 top-full mt-2 min-w-[160px]', contentClassName)}>
       <Section>
         <nav className="py-2">
           {items.map(item => (

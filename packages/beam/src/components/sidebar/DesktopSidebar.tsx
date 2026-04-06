@@ -3,7 +3,7 @@ import { cn } from '../../lib/utils';
 import { SidebarProps } from './Sidebar';
 import { SidebarNav } from './SidebarNav';
 
-export function DesktopSidebar({ isOpen, setIsOpen, items, className }: SidebarProps) {
+export function DesktopSidebar({ isOpen, setIsOpen, items = [], className, children }: SidebarProps) {
   return (
     <div
       className={cn(
@@ -14,8 +14,8 @@ export function DesktopSidebar({ isOpen, setIsOpen, items, className }: SidebarP
         'bg-surface dark:bg-dark-surface-100 overflow-x-hidden',
         className,
       )}>
-      <div className="flex h-full w-full flex-col">
-        <SidebarNav items={items} setIsOpen={setIsOpen} />
+      <div className="flex h-full min-h-0 w-full flex-col">
+        {children ?? <SidebarNav items={items} setIsOpen={setIsOpen} />}
       </div>
     </div>
   );

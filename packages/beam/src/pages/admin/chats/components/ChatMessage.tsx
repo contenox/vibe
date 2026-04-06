@@ -8,9 +8,11 @@ import type { ChatMessage as ChatMessageModel } from '../../../../lib/types';
 type ChatMessageProps = {
   message: ChatMessageModel;
   isLatest?: boolean;
+  /** Task-event reasoning stream, shown only for the live assistant row. */
+  streamThinking?: string;
 };
 
-export const ChatMessage = ({ message, isLatest = false }: ChatMessageProps) => {
+export const ChatMessage = ({ message, isLatest = false, streamThinking }: ChatMessageProps) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const isTool = message.role === 'tool';
@@ -47,9 +49,27 @@ export const ChatMessage = ({ message, isLatest = false }: ChatMessageProps) => 
         </Button>
       }
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {message.content}
-      </ReactMarkdown>
+      {message.streaming && streamThinking ? (
+        <div className="border-primary-200 bg-primary-50/80 dark:bg-dark-surface-600/50 text-text-muted dark:text-dark-text-muted mb-3 max-h-48 overflow-auto rounded-md border px-3 py-2 font-mono text-xs whitespace-pre-wrap">
+          {streamThinking}
+        </div>
+      ) : null}
+      {message.streaming && !message.content && !message.error && !streamThinking ? (
+        <p className="text-text-muted dark:text-dark-text-muted text-sm italic">
+          {t('chat.streaming_placeholder')}
+        </p>
+      ) : null}
+      {message.content ? (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          {message.content}
+        </ReactMarkdown>
+      ) : null}
+      {message.streaming && message.content && !message.error ? (
+        <span
+          className="bg-primary-500 ml-0.5 inline-block h-3 w-1.5 animate-pulse rounded-sm align-middle"
+          aria-hidden
+        />
+      ) : null}
     </ChatMessageUI>
   );
 };

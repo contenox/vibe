@@ -9,7 +9,8 @@ type MessageInputFormProps = {
   placeholder?: string;
   isPending: boolean;
   buttonLabel?: string;
-  title: string;
+  /** Omit or leave empty to hide the composer heading (preferred on chat thread pages). */
+  title?: string;
   className?: string;
   variant?: 'default' | 'compact';
   canSubmit?: boolean;
@@ -22,7 +23,7 @@ export const MessageInputForm = ({
   placeholder = t('chat.input_placeholder'),
   isPending,
   buttonLabel = t('chat.send_button'),
-  title,
+  title = '',
   className,
   variant = 'default',
   canSubmit,

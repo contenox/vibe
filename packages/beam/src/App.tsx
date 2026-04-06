@@ -1,24 +1,21 @@
 import { Spinner } from '@contenox/ui';
 import '@contenox/ui/styles.css';
-import { Suspense, useMemo } from 'react';
+import { Suspense } from 'react';
 import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import './app.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { ChatSessionSidebar } from './components/sidebar/ChatSessionSidebar';
 import { routes } from './config/routes';
 import { AuthProvider } from './lib/AuthProvider';
 
 export default function App() {
-  const [navItems, shelfItems] = useMemo(() => {
-    return [routes.filter(route => route.showInNav), routes.filter(route => route.showInShelf)];
-  }, []);
-
   return (
     <Router>
       <AuthProvider>
         <Layout
-          routes={{ shelf: shelfItems, nav: navItems }}
+          sidebarContent={<ChatSessionSidebar />}
           defaultOpen={true}
           mainContent={
             <ErrorBoundary>

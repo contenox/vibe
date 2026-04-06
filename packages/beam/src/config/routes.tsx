@@ -1,28 +1,33 @@
-import { P } from '@contenox/ui';
 import {
   ChevronsRight,
   Database,
   File,
-  Link,
+  Link as LinkIcon,
   ListChecks,
-  MessageCircleCode,
   Settings,
+  type LucideIcon,
 } from 'lucide-react';
 import { lazy } from 'react';
+import { Navigate } from 'react-router-dom';
 import i18n from '../i18n';
 import HomeRedirect from '../pages/HomeRedirect.tsx';
 import { LOGIN_ROUTE } from './routeConstants.ts';
 
 const BackendsPage = lazy(() => import('../pages/admin/backends/BackendPage.tsx'));
 const ChainsPage = lazy(() => import('../pages/admin/chains/ChainsPage.tsx'));
-const PlansPage = lazy(() => import('../pages/admin/plans/PlansPage.tsx'));
+const PlansListPage = lazy(() => import('../pages/admin/plans/PlansListPage.tsx'));
+const PlanActivePage = lazy(() => import('../pages/admin/plans/PlanActivePage.tsx'));
 const ChatPage = lazy(() => import('../pages/admin/chats/ChatPage.tsx'));
-const ChatsListPage = lazy(() => import('../pages/admin/chats/components/ChatListPage.tsx'));
+const ChatLandingPage = lazy(() => import('../pages/admin/chats/ChatLandingPage.tsx'));
+const ControlPlanePage = lazy(() => import('../pages/admin/control/ControlPlanePage.tsx'));
 const FilesPage = lazy(() => import('../pages/admin/files/FilesPage.tsx'));
 const ExecPromptPage = lazy(() => import('../pages/admin/prompt/ExecPromptPage.tsx'));
 const RemoteHooksPage = lazy(() => import('../pages/admin/remotehooks/RemoteHooksPage.tsx'));
+const SettingsPage = lazy(() => import('../pages/admin/settings/SettingsPage.tsx'));
 const ByePage = lazy(() => import('../pages/public/bye/Bye.tsx'));
 const AuthPage = lazy(() => import('../pages/public/login/AuthPage.tsx'));
+
+const LegacyChatsRedirect = () => <Navigate to="/chat" replace />;
 
 interface RouteConfig {
   path: string;
@@ -35,6 +40,48 @@ interface RouteConfig {
   showInShelf?: boolean;
 }
 
+export type AdminNavItem = {
+  path: string;
+  label: string;
+  icon?: React.ReactNode;
+};
+
+type AdminRouteDefinition = {
+  path: string;
+  element: React.ComponentType;
+  labelKey: string;
+  Icon: LucideIcon;
+};
+
+const adminRouteDefinitions: AdminRouteDefinition[] = [
+  { path: '/backends', element: BackendsPage, labelKey: 'navbar.backends', Icon: Database },
+  { path: '/hooks/remote', element: RemoteHooksPage, labelKey: 'navbar.hooks', Icon: LinkIcon },
+  { path: '/files', element: FilesPage, labelKey: 'navbar.files', Icon: File },
+  { path: '/chains', element: ChainsPage, labelKey: 'navbar.chains', Icon: LinkIcon },
+  { path: '/plans', element: PlansListPage, labelKey: 'navbar.plans', Icon: ListChecks },
+  { path: '/exec', element: ExecPromptPage, labelKey: 'navbar.prompt', Icon: ChevronsRight },
+  { path: '/settings', element: SettingsPage, labelKey: 'navbar.settings', Icon: Settings },
+];
+
+/** Admin destinations for the control-plane menu and hub; route paths unchanged. */
+export const adminNavItems: AdminNavItem[] = adminRouteDefinitions.map(
+  ({ path, labelKey, Icon }) => ({
+    path,
+    label: i18n.t(labelKey),
+    icon: <Icon className="h-[1em] w-[1em]" />,
+  }),
+);
+
+const adminRoutes: RouteConfig[] = adminRouteDefinitions.map(def => ({
+  path: def.path,
+  element: def.element,
+  label: i18n.t(def.labelKey),
+  icon: <def.Icon className="h-[1em] w-[1em]" />,
+  showInNav: false,
+  protected: true,
+  showInShelf: false,
+}));
+
 export const routes: RouteConfig[] = [
   {
     path: '/',
@@ -45,30 +92,10 @@ export const routes: RouteConfig[] = [
     showInShelf: false,
   },
   {
-    path: '/backends',
-    element: BackendsPage,
-    label: i18n.t('navbar.backends'),
-    icon: <Database className="h-[1em] w-[1em]" />,
-    showInNav: true,
-    protected: true,
-    showInShelf: false,
-  },
-
-  {
-    path: '/hooks/remote',
-    element: RemoteHooksPage,
-    label: i18n.t('navbar.hooks'),
-    icon: <Link className="h-[1em] w-[1em]" />,
-    showInNav: true,
-    protected: true,
-    showInShelf: false,
-  },
-  {
-    path: '/files',
-    element: FilesPage,
-    label: i18n.t('navbar.files'),
-    icon: <File className="h-[1em] w-[1em]" />,
-    showInNav: true,
+    path: '/chat',
+    element: ChatLandingPage,
+    label: '',
+    showInNav: false,
     protected: true,
     showInShelf: false,
   },
@@ -82,46 +109,26 @@ export const routes: RouteConfig[] = [
   },
   {
     path: '/chats',
-    element: ChatsListPage,
-    label: i18n.t('navbar.chats'),
-    icon: <MessageCircleCode className="h-[1em] w-[1em]" />,
-    showInNav: true,
+    element: LegacyChatsRedirect,
+    label: '',
+    showInNav: false,
     protected: true,
     showInShelf: false,
   },
   {
-    path: '/chains',
-    element: ChainsPage,
-    label: i18n.t('navbar.chains'),
-    icon: <Link className="h-[1em] w-[1em]" />,
-    showInNav: true,
+    path: '/control',
+    element: ControlPlanePage,
+    label: '',
+    showInNav: false,
     protected: true,
     showInShelf: false,
   },
+  ...adminRoutes,
   {
-    path: '/plans',
-    element: PlansPage,
-    label: i18n.t('navbar.plans'),
-    icon: <ListChecks className="h-[1em] w-[1em]" />,
-    showInNav: true,
-    protected: true,
-    showInShelf: false,
-  },
-  {
-    path: '/exec',
-    element: ExecPromptPage,
-    label: i18n.t('navbar.prompt'),
-    icon: <ChevronsRight className="h-[1em] w-[1em]" />,
-    showInNav: true,
-    protected: true,
-    showInShelf: false,
-  },
-  {
-    path: '/settings',
-    element: () => <P>{i18n.t('navbar.settings')}</P>,
-    label: i18n.t('navbar.settings'),
-    icon: <Settings className="h-[1em] w-[1em]" />,
-    showInNav: true,
+    path: '/plans/active',
+    element: PlanActivePage,
+    label: '',
+    showInNav: false,
     protected: true,
     showInShelf: false,
   },

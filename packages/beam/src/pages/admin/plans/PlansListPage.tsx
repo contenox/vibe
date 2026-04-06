@@ -1,16 +1,19 @@
 import { Button, GridLayout, P, Panel, Section } from '@contenox/ui';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { ErrorState, LoadingState } from '../../../components/LoadingState';
 import { Page } from '../../../components/Page';
 import { useListFiles } from '../../../hooks/useFiles';
 import { useActivePlan, useCleanPlans, usePlansList } from '../../../hooks/usePlans';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';
-import ActivePlanSection from './components/ActivePlanSection';
 import CreatePlanSection from './components/CreatePlanSection';
 import PlanListSection from './components/PlanListSection';
 
-export default function PlansPage() {
+/**
+ * Plans index: create, list, cleanup. Active plan execution lives on `/plans/active`.
+ */
+export default function PlansListPage() {
   const { t } = useTranslation();
   const { data: files = [], isLoading: filesLoading, error: filesError, refetch: refetchFiles } =
     useListFiles();
@@ -35,7 +38,7 @@ export default function PlansPage() {
   );
 
   const listError = plansError || filesError;
-  const listLoading = plansLoading || filesLoading;
+  const activePlanName = activePlan?.plan?.name ?? null;
 
   const handleRetry = () => {
     void refetchPlans();
@@ -69,10 +72,19 @@ export default function PlansPage() {
     <Page bodyScroll="auto">
       <GridLayout variant="body" className="gap-8 pb-8">
         <Section>
-          <h1 className="text-2xl font-semibold">{t('plans.page_title')}</h1>
-          <P variant="muted" className="mt-2 max-w-3xl">
-            {t('plans.page_description')}
-          </P>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold">{t('plans.page_title')}</h1>
+              <P variant="muted" className="mt-2">
+                {t('plans.page_description')}
+              </P>
+            </div>
+            <Link to="/plans/active">
+              <Button variant="outline" size="sm" type="button">
+                {t('plans.workspace_nav')}
+              </Button>
+            </Link>
+          </div>
         </Section>
 
         {activeError && activeError instanceof Error && (
@@ -81,16 +93,32 @@ export default function PlansPage() {
           </Panel>
         )}
 
-        <CreatePlanSection chainPaths={chainPaths} chainsLoading={filesLoading} />
+        {activePlan && !activeLoading && (
+          <Panel variant="bordered" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <P variant="muted" className="text-xs font-medium tracking-wide uppercase">
+                {t('plans.active_summary_label')}
+              </P>
+              <P className="mt-1 truncate font-mono text-sm">{activePlan.plan.name}</P>
+              <P variant="muted" className="mt-1 line-clamp-2 text-sm">
+                {activePlan.plan.goal}
+              </P>
+            </div>
+            <Link to="/plans/active">
+              <Button variant="primary" size="sm" type="button">
+                {t('plans.workspace_open')}
+              </Button>
+            </Link>
+          </Panel>
+        )}
 
-        <PlanListSection plans={plans} />
-
-        <ActivePlanSection
-          active={activePlan}
-          isLoading={activeLoading}
+        <CreatePlanSection
           chainPaths={chainPaths}
           chainsLoading={filesLoading}
+          navigateToWorkspaceOnSuccess
         />
+
+        <PlanListSection plans={plans} activePlanName={activePlanName} />
 
         <Section>
           <h2 className="text-lg font-semibold">{t('plans.cleanup_title')}</h2>

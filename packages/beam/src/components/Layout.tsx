@@ -5,28 +5,26 @@ import logoUrl from '../assets/logo.png';
 import { useLogout } from '../hooks/useLogout';
 import { AuthContext } from '../lib/authContext';
 import { cn } from '../lib/utils';
+import { ControlPlaneDropdown } from './ControlPlaneDropdown';
 import { SetupWizard } from './setup/SetupWizard';
-import { DropdownMenu } from './DropdownMenu';
 import { Sidebar } from './sidebar/Sidebar';
 
-type MenuItem = { path: string; label: string; icon?: React.ReactNode };
-type Routes = { nav: MenuItem[]; shelf: MenuItem[] };
-
 type Props = {
-  routes: Routes;
   defaultOpen?: boolean;
   mainContent: React.ReactNode;
+  /** Left rail content (e.g. chat sessions). */
+  sidebarContent: React.ReactNode;
   className?: string;
 };
 
 export function Layout({
-  routes: { nav, shelf },
   defaultOpen = true,
   mainContent,
+  sidebarContent,
   className,
 }: Props) {
   const [isSidebarOpen, setSidebarIsOpen] = useState(defaultOpen);
-  const [isNavOpen, setNavIsOpen] = useState(false);
+  const [isControlPlaneOpen, setControlPlaneOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
@@ -60,13 +58,16 @@ export function Layout({
 
         <div className="flex items-center gap-2">
           {user ? (
-            <UserMenu
-              isOpen={isUserMenuOpen}
-              friendlyName={user.friendlyName}
-              mail={user.email}
-              logout={logout}
-              onToggle={setIsUserMenuOpen}
-            />
+            <>
+              <ControlPlaneDropdown isOpen={isControlPlaneOpen} setIsOpen={setControlPlaneOpen} />
+              <UserMenu
+                isOpen={isUserMenuOpen}
+                friendlyName={user.friendlyName}
+                mail={user.email}
+                logout={logout}
+                onToggle={setIsUserMenuOpen}
+              />
+            </>
           ) : (
             !isOnLoginPage && (
               <Button onClick={() => navigate('/login')} variant="primary" size="sm">
@@ -74,9 +75,6 @@ export function Layout({
               </Button>
             )
           )}
-          {shelf.length > 0 ? (
-            <DropdownMenu isOpen={isNavOpen} setIsOpen={setNavIsOpen} items={shelf} />
-          ) : null}
         </div>
       </Panel>
 
@@ -89,8 +87,9 @@ export function Layout({
           disabled={sidebarDisabled}
           isOpen={isSidebarOpen}
           setIsOpen={setSidebarIsOpen}
-          items={nav}
-        />
+          items={[]}>
+          {sidebarContent}
+        </Sidebar>
 
         <Card className="min-h-0 min-w-0 flex-1 overflow-hidden bg-inherit">{mainContent}</Card>
       </div>

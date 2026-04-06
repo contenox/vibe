@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { cloneElement, isValidElement, useEffect } from 'react';
 import { DesktopSidebar } from './DesktopSidebar';
 import { MobileSidebar } from './MobileSidebar';
 
@@ -12,11 +12,14 @@ export type SidebarProps = {
   disabled: boolean;
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
-  items: MenuItem[];
+  /** When omitted and `children` is not set, the rail is empty. */
+  items?: MenuItem[];
+  /** Replaces the default nav list when provided. */
+  children?: React.ReactNode;
   className?: string;
 };
 
-export function Sidebar({ disabled, isOpen, setIsOpen, items, className }: SidebarProps) {
+export function Sidebar({ disabled, isOpen, setIsOpen, items = [], children, className }: SidebarProps) {
   useEffect(() => {
     if (disabled && isOpen) {
       setIsOpen(false);
@@ -27,6 +30,13 @@ export function Sidebar({ disabled, isOpen, setIsOpen, items, className }: Sideb
     return <div />;
   }
 
+  const rail =
+    children && isValidElement(children)
+      ? cloneElement(children as React.ReactElement<{ setIsOpen?: (open: boolean) => void }>, {
+          setIsOpen,
+        })
+      : children;
+
   return (
     <div className="min-h-0 overflow-y-auto">
       <DesktopSidebar
@@ -34,9 +44,12 @@ export function Sidebar({ disabled, isOpen, setIsOpen, items, className }: Sideb
         setIsOpen={setIsOpen}
         items={items}
         className={className}
-        disabled={disabled}
-      />
-      <MobileSidebar isOpen={isOpen} setIsOpen={setIsOpen} items={items} disabled={disabled} />
+        disabled={disabled}>
+        {rail}
+      </DesktopSidebar>
+      <MobileSidebar isOpen={isOpen} setIsOpen={setIsOpen} items={items} disabled={disabled}>
+        {rail}
+      </MobileSidebar>
     </div>
   );
 }
