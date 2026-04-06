@@ -5,6 +5,9 @@ import {
   InlineNotice,
   InsetPanel,
   P,
+  ResizablePanel,
+  ResizablePanelGroup,
+  ResizablePanelHandle,
   Section,
   Select,
   SidePanelBody,
@@ -14,13 +17,14 @@ import {
   Span,
   Spinner,
   Tooltip,
+  Fill,
+  Page,
 } from '@contenox/ui';
 import { FolderOpen, PanelRightClose, PanelRightOpen, X } from 'lucide-react';
 import { t } from 'i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Fill, Page } from '../../../components/Page';
 import { useChain } from '../../../hooks/useChains';
 import { useListFiles } from '../../../hooks/useFiles';
 import { useActivePlan, useCompilePlanPreview } from '../../../hooks/usePlans';
@@ -49,6 +53,20 @@ import WorkspaceSplitPanel, { type WorkspaceSplitHandle } from './components/Wor
 const STATE_PANEL_STORAGE_KEY = 'beam_chat_state_panel_open';
 const WORKSPACE_PANEL_STORAGE_KEY = 'beam_chat_workspace_panel_open';
 const WORKBENCH_TAB_STORAGE_KEY = 'beam_chat_workbench_tab';
+const WORKSPACE_SPLIT_STORAGE_KEY = 'beam_chat_workspace_split_px';
+
+function useIsMinLg(): boolean {
+  const [lg, setLg] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const fn = () => setLg(mq.matches);
+    mq.addEventListener('change', fn);
+    return () => mq.removeEventListener('change', fn);
+  }, []);
+  return lg;
+}
 
 type BeamChatLocationState = {
   beamInitialMessage?: string;
@@ -83,6 +101,31 @@ export default function ChatPage() {
   const sendDispatchedRef = useRef(false);
   const landingInitialSendKeyRef = useRef<string | null>(null);
   const workspaceRef = useRef<WorkspaceSplitHandle>(null);
+  const chatSplitRef = useRef<HTMLDivElement | null>(null);
+  const isLg = useIsMinLg();
+
+  const chatSplitInitialPx = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(WORKSPACE_SPLIT_STORAGE_KEY);
+      const n = raw ? parseInt(raw, 10) : NaN;
+      return Number.isFinite(n) && n >= 280 && n <= 2400 ? n : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const persistChatWorkspaceSplit = useCallback(() => {
+    const el = chatSplitRef.current;
+    if (!el) return;
+    const w = Math.round(el.getBoundingClientRect().width);
+    if (w < 280 || w > 2400) return;
+    try {
+      window.localStorage.setItem(WORKSPACE_SPLIT_STORAGE_KEY, String(w));
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const [statePanelOpen, setStatePanelOpen] = useState(() => {
     if (typeof window === 'undefined') return true;
@@ -492,14 +535,8 @@ export default function ChatPage() {
     ],
   );
 
-  return (
-    <Page bodyScroll="hidden" className="h-full">
-      <Fill className="flex min-h-0">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-row">
-          {/* Main Chat Area */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* Chat Content */}
-          <Fill className="bg-surface-50 dark:bg-dark-surface-100 flex flex-col">
+  const chatMainFill = (
+    <Fill className="bg-surface-50 dark:bg-dark-surface-100 flex flex-col">
             {chatId ? (
               <>
                 <div className="bg-surface-50 dark:bg-dark-surface-200 text-text dark:text-dark-text flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
@@ -683,31 +720,56 @@ export default function ChatPage() {
               </Section>
             )}
           </Fill>
-          </div>
+  );
 
-          {chatId && workspacePanelOpen ? (
-            <div
-              className={cn(
-                'border-border bg-surface-50 dark:bg-dark-surface-100 flex min-h-0 w-full shrink-0 flex-col border-l',
-                mobileWorkspaceOpen
-                  ? 'fixed inset-0 z-50 flex flex-col lg:static lg:inset-auto lg:z-auto lg:w-[min(420px,38vw)]'
-                  : 'hidden lg:flex lg:w-[min(420px,38vw)]',
-              )}>
-              {mobileWorkspaceOpen ? (
-                <div className="flex items-center justify-end gap-2 border-b px-2 py-1.5 lg:hidden">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setMobileWorkspaceOpen(false)}
-                    aria-label={t('chat.workspace_close_mobile')}>
-                    <X className="h-4 w-4" />
-                  </Button>
+  return (
+    <Page bodyScroll="hidden" className="h-full">
+      <Fill className="flex min-h-0">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-row">
+          {chatId && workspacePanelOpen && isLg ? (
+            <ResizablePanelGroup className="flex min-h-0 min-w-0 flex-1 flex-row">
+              <ResizablePanel
+                ref={chatSplitRef}
+                defaultSize={chatSplitInitialPx != null ? `${chatSplitInitialPx}px` : undefined}
+                minSize={280}
+                className="flex min-h-0 min-w-0 flex-col">
+                {chatMainFill}
+              </ResizablePanel>
+              <ResizablePanelHandle onResizeEnd={persistChatWorkspaceSplit} />
+              <ResizablePanel
+                defaultSize="min(420px,38vw)"
+                minSize={260}
+                maxSize={900}
+                className="border-border bg-surface-50 dark:bg-dark-surface-100 flex min-h-0 min-w-0 flex-col border-l">
+                <WorkspaceSplitPanel ref={workspaceRef} className="min-h-0 flex-1 border-0" />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          ) : (
+            <>
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chatMainFill}</div>
+              {chatId && workspacePanelOpen && !isLg ? (
+                <div
+                  className={cn(
+                    'border-border bg-surface-50 dark:bg-dark-surface-100 flex min-h-0 w-full shrink-0 flex-col border-l',
+                    mobileWorkspaceOpen ? 'fixed inset-0 z-50 flex flex-col' : 'hidden',
+                  )}>
+                  {mobileWorkspaceOpen ? (
+                    <div className="flex items-center justify-end gap-2 border-b px-2 py-1.5">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setMobileWorkspaceOpen(false)}
+                        aria-label={t('chat.workspace_close_mobile')}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : null}
+                  <WorkspaceSplitPanel ref={workspaceRef} className="min-h-0 flex-1 border-0" />
                 </div>
               ) : null}
-              <WorkspaceSplitPanel ref={workspaceRef} className="min-h-0 flex-1 border-0" />
-            </div>
-          ) : null}
+            </>
+          )}
         </div>
 
         {/* Run log (task state): collapsible to reclaim horizontal space */}

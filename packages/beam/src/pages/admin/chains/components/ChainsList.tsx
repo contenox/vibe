@@ -131,11 +131,10 @@ export default function ChainsList({
                   )}
 
                   <Button
-                    variant="ghost"
+                    variant="danger"
                     size="sm"
                     onClick={() => handleDelete(vfsPath)}
-                    disabled={isDeleting}
-                    className="text-error hover:bg-error/10">
+                    disabled={isDeleting}>
                     {isDeleting ? (
                       <Spinner size="sm" />
                     ) : (

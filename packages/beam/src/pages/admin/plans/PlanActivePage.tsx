@@ -1,10 +1,8 @@
-import { Button, GridLayout, P, Panel, Section } from '@contenox/ui';
+import { Button, ErrorState, GridLayout, P, Page, Panel, Section } from '@contenox/ui';
 import { ArrowLeft } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { ErrorState } from '../../../components/LoadingState';
-import { Page } from '../../../components/Page';
 import { useListFiles } from '../../../hooks/useFiles';
 import { useActivePlan } from '../../../hooks/usePlans';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';

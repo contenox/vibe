@@ -1,7 +1,6 @@
-import { GridLayout, Panel, Section, Span } from '@contenox/ui';
+import { ErrorState, GridLayout, LoadingState, Panel, Section, Span } from '@contenox/ui';
 import { t } from 'i18next';
 import { useState } from 'react';
-import { ErrorState, LoadingState } from '../../../../components/LoadingState';
 import {
   useCreateRemoteHook,
   useDeleteRemoteHook,

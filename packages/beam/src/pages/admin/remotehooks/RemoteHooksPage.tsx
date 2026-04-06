@@ -1,8 +1,7 @@
-import { Panel, TabbedPage } from '@contenox/ui';
+import { Page, Panel, TabbedPage } from '@contenox/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { Page } from '../../../components/Page';
 import LocalHooksSection from './components/LocalHooksSection';
 import McpServersSection from './components/McpServersSection';
 import RemoteHooksSection from './components/RemoteHooksSection';

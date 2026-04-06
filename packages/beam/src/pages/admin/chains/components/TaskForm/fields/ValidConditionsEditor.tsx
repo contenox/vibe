@@ -54,7 +54,8 @@ export default function ValidConditionsEditor({ value, onChange }: ValidConditio
           <Button
             type="button"
             onClick={() => removeCondition(key)}
-            className="text-error hover:bg-error rounded-md px-3 py-2 transition-colors hover:text-white">
+            variant="danger"
+            size="sm">
             ×
           </Button>
         </div>

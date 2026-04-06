@@ -1,6 +1,13 @@
-import { Button, P, Panel, Spinner } from '@contenox/ui';
+import { Button } from "./Button";
+import { Panel } from "./Panel";
+import { P } from "./Typography";
+import { Spinner } from "./Spinner";
 
-export function LoadingState({ message = 'Loading...' }: { message?: string }) {
+export function LoadingState({
+  message = "Loading...",
+}: {
+  message?: string;
+}) {
   return (
     <div className="flex items-center justify-center py-12">
       <div className="text-center">
@@ -14,8 +21,8 @@ export function LoadingState({ message = 'Loading...' }: { message?: string }) {
 export function ErrorState({
   error,
   onRetry,
-  title = 'Error',
-  description = 'An error occurred while loading data.',
+  title = "Error",
+  description = "An error occurred while loading data.",
 }: {
   error?: Error | string;
   onRetry?: () => void;
@@ -27,7 +34,7 @@ export function ErrorState({
       <div className="text-center">
         <P className="mb-2 font-medium">{title}</P>
         <P variant="muted" className="mb-4">
-          {typeof error === 'string' ? error : error?.message || description}
+          {typeof error === "string" ? error : error?.message || description}
         </P>
         {onRetry && (
           <Button variant="outline" onClick={onRetry}>

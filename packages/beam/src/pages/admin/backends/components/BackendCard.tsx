@@ -1,7 +1,6 @@
-import { Badge, Label, P } from '@contenox/ui';
+import { Badge, Label, Panel, ResourceCard } from '@contenox/ui';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ResourceCard } from '../../../../components/ResourceCard';
 import { Backend } from '../../../../lib/types';
 import { ModelStatusDisplay } from './ModelStatusDisplay';
 
@@ -47,11 +46,9 @@ export function BackendCard({ backend, onEdit, onDelete }: BackendCardProps) {
       </div>
 
       {backend.error && (
-        <div className="bg-error/10 border-error/20 mb-3 rounded-lg border p-3">
-          <P variant="muted" className="text-error text-sm">
-            {backend.error}
-          </P>
-        </div>
+        <Panel variant="error" className="mb-3 m-0 p-3 text-sm">
+          {backend.error}
+        </Panel>
       )}
 
       {observedModels.length > 0 && (

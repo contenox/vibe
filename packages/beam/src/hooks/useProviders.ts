@@ -7,7 +7,7 @@ export function useProviderStatus(provider: CloudProviderType) {
   return useQuery({
     queryKey: providerKeys.status(provider),
     queryFn: () => api.getProviderStatus(provider),
-    refetchInterval: 5000, // Refresh every 5 seconds
+    refetchInterval: 15_000,
   });
 }
 

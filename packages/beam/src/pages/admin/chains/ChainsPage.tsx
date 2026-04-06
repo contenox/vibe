@@ -1,10 +1,8 @@
 // src/pages/admin/chains/ChainsPage.tsx
-import { Button, Panel, Section, Tabs } from '@contenox/ui';
+import { Button, ErrorState, Fill, LoadingState, Page, Panel, Section, Tabs } from '@contenox/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { ErrorState, LoadingState } from '../../../components/LoadingState';
-import { Fill, Page } from '../../../components/Page';
 import { useListFiles } from '../../../hooks/useFiles';
 import {
   useChain,

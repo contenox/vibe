@@ -287,7 +287,7 @@ export function SetupWizardFlow({ variant }: SetupWizardFlowProps) {
         </div>
       </div>
 
-      <div className="border-surface-200 dark:border-dark-surface-600 rounded-lg border bg-inherit p-4">
+      <Panel variant="surface" className="m-0 p-4">
         <h4 className="text-text dark:text-dark-text text-base font-semibold">{stepTitle}</h4>
         {stepDescription ? (
           <P variant="muted" className="mt-1 text-sm">
@@ -453,15 +453,13 @@ export function SetupWizardFlow({ variant }: SetupWizardFlowProps) {
             </>
           )}
         </div>
-      </div>
+      </Panel>
     </div>
   );
 
   if (variant === 'page') {
     return (
-      <Panel
-        variant="bordered"
-        className="bg-surface dark:bg-dark-surface-100 border-surface-200 dark:border-dark-surface-600">
+      <Panel variant="surface" className="m-0">
         <header className="mb-4 space-y-1">
           <h2 className="text-text dark:text-dark-text text-lg font-semibold">{wizardTitle}</h2>
           <P variant="muted" className="text-sm">

@@ -93,9 +93,11 @@ export default function ExecPromptPage() {
               <Span variant="sectionTitle">{liveTask.status}</Span>
             )}
             {liveTask.thinking && (
-              <pre className="bg-surface-100 dark:bg-dark-surface-200 text-text dark:text-dark-text overflow-auto rounded-lg p-3 text-sm whitespace-pre-wrap">
-                {liveTask.thinking}
-              </pre>
+              <Panel variant="surface" className="m-0 overflow-auto p-3">
+                <pre className="text-text dark:text-dark-text text-sm whitespace-pre-wrap">
+                  {liveTask.thinking}
+                </pre>
+              </Panel>
             )}
             {liveTask.content && <Span>{liveTask.content}</Span>}
           </Panel>

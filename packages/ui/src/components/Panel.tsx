@@ -31,7 +31,7 @@ export const Panel = forwardRef<HTMLDivElement, PanelProps>(
           "p-4 m-2 border border-surface-300 dark:border-dark-surface-700":
             variant === "bordered",
           "p-0 m-0 border-0 shadow-none": variant === "flat",
-          "p-4 m-2bg-error-50 dark:bg-dark-error-900 text-error dark:text-dark-error":
+          "p-4 m-2 bg-error-50 dark:bg-dark-error-900 text-error dark:text-dark-error":
             variant === "error",
           "p-4 m-2 bg-gradient-to-br from-primary-600 to-accent-700 !text-white":
             variant === "gradient",

@@ -1,7 +1,6 @@
-import { GridLayout, P, Section, Span } from '@contenox/ui';
+import { GridLayout, P, Page, Section, Span } from '@contenox/ui';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Page } from '../../../components/Page';
 import { adminNavItems } from '../../../config/routes';
 import { cn } from '../../../lib/utils';
 

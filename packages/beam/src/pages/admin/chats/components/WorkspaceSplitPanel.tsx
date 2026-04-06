@@ -1,6 +1,6 @@
 import Editor, { type OnMount } from '@monaco-editor/react';
-import { Button, InlineNotice, Panel, Span, Spinner } from '@contenox/ui';
-import { ChevronRight, Folder, Save } from 'lucide-react';
+import { Button, FileTree, type FileTreeNode, InlineNotice, Panel, Span, Spinner } from '@contenox/ui';
+import { ChevronRight, Save } from 'lucide-react';
 import { t } from 'i18next';
 import {
   forwardRef,
@@ -13,6 +13,8 @@ import {
 import { useListFiles, useUpdateFile } from '../../../../hooks/useFiles';
 import { cn } from '../../../../lib/utils';
 import type { ChatContextPayload, FileResponse } from '../../../../lib/types';
+import { useMonacoAppTheme } from '../../../../lib/monacoAppTheme';
+import { toFileTreeNodes } from '../../../../lib/vfsFileTree';
 import {
   buildWorkspaceChatContext,
   readWorkspaceFileText,
@@ -47,24 +49,6 @@ function monacoLanguageForPath(p: string): string {
     sql: 'sql',
   };
   return map[ext] ?? 'plaintext';
-}
-
-/** Match Beam `dark:` Tailwind — Monaco defaults to light theme otherwise. */
-function useMonacoAppTheme(): 'vs-dark' | 'vs' {
-  const [dark, setDark] = useState(() =>
-    typeof document !== 'undefined' ? document.documentElement.classList.contains('dark') : false,
-  );
-
-  useEffect(() => {
-    const el = document.documentElement;
-    const sync = () => setDark(el.classList.contains('dark'));
-    sync();
-    const mo = new MutationObserver(sync);
-    mo.observe(el, { attributes: true, attributeFilter: ['class'] });
-    return () => mo.disconnect();
-  }, []);
-
-  return dark ? 'vs-dark' : 'vs';
 }
 
 type Props = {
@@ -186,6 +170,16 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
     setSelectedFileId(entry.id);
   }, []);
 
+  const fileTreeNodes = useMemo(() => toFileTreeNodes(sortedEntries), [sortedEntries]);
+
+  const onTreeNodeSelect = useCallback(
+    (node: FileTreeNode) => {
+      const entry = sortedEntries.find(e => e.id === node.id);
+      if (entry) onEntryClick(entry);
+    },
+    [sortedEntries, onEntryClick],
+  );
+
   const handleSave = useCallback(() => {
     if (!selectedFileId || !dirty) return;
     setSaveError(null);
@@ -213,7 +207,7 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
   return (
     <div
       className={cn(
-        'border-border bg-surface-50 dark:bg-dark-surface-100 flex min-h-0 w-[min(100%,420px)] shrink-0 flex-col border-l',
+        'border-border bg-surface-50 dark:bg-dark-surface-100 flex min-h-0 w-full min-w-0 shrink-0 flex-col border-l',
         className,
       )}>
       <div className="border-border flex shrink-0 flex-col gap-1 border-b px-3 py-2">
@@ -273,28 +267,13 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
               {t('chat.workspace_empty_dir')}
             </Span>
           ) : (
-            <ul className="space-y-0.5">
-              {sortedEntries.map(entry => (
-                <li key={entry.id}>
-                  <button
-                    type="button"
-                    onClick={() => onEntryClick(entry)}
-                    className={cn(
-                      'hover:bg-secondary/60 dark:hover:bg-dark-surface-200 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm',
-                      selectedFileId === entry.id && !entry.isDirectory
-                        ? 'bg-secondary/80 dark:bg-dark-surface-300'
-                        : '',
-                    )}>
-                    {entry.isDirectory ? (
-                      <Folder className="text-text-muted h-4 w-4 shrink-0" />
-                    ) : (
-                      <span className="w-4 shrink-0 text-center text-[10px] opacity-60">{'\u2022'}</span>
-                    )}
-                    <span className="truncate font-mono">{entry.name ?? entry.path.split('/').pop()}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <FileTree
+              nodes={fileTreeNodes}
+              selectedId={selectedFileId}
+              onNodeSelect={onTreeNodeSelect}
+              directoryClickMode="navigate"
+              className="py-0.5"
+            />
           )}
         </Panel>
 

@@ -1,11 +1,30 @@
-import { MonoLogList, MonoLogListItem, Span } from '@contenox/ui';
+import { Span, TerminalOutput } from '@contenox/ui';
 import { t } from 'i18next';
 import { TaskEvent } from '../../../../lib/types';
 
 const TAIL = 40;
 
-function formatKind(kind: TaskEvent['kind']): string {
-  return kind;
+function extrasLine(e: TaskEvent): string | null {
+  const parts: string[] = [];
+  if (e.request_id) parts.push(`request=${e.request_id}`);
+  if (e.chain_id) parts.push(`chain=${e.chain_id}`);
+  if (e.task_handler) parts.push(`handler=${e.task_handler}`);
+  if (e.model_name) parts.push(`model=${e.model_name}`);
+  if (e.transition) parts.push(`transition=${e.transition}`);
+  if (e.content && e.kind === 'step_chunk') {
+    const c = e.content.trim().replace(/\s+/g, ' ');
+    parts.push(c.length > 120 ? `${c.slice(0, 120)}…` : c);
+  }
+  return parts.length ? parts.join(' ') : null;
+}
+
+function eventToLines(e: TaskEvent): string[] {
+  const base = `[${e.timestamp}] ${e.kind}${e.task_id ? ` ${e.task_id}` : ''}`;
+  const lines = [base];
+  const extra = extrasLine(e);
+  if (extra) lines.push(`  ${extra}`);
+  if (e.error) lines.push(`  error: ${e.error}`);
+  return lines;
 }
 
 /**
@@ -16,6 +35,8 @@ export function TaskEventFeed({ events }: { events: TaskEvent[] }) {
   const tail = events.length > TAIL ? events.slice(-TAIL) : events;
   const omitted = events.length - tail.length;
 
+  const lines = tail.flatMap(eventToLines);
+
   return (
     <div className="flex flex-col gap-1">
       {omitted > 0 ? (
@@ -23,21 +44,7 @@ export function TaskEventFeed({ events }: { events: TaskEvent[] }) {
           {t('chat.task_events_omitted', { count: omitted })}
         </Span>
       ) : null}
-      <MonoLogList>
-        {tail.map((e, i) => (
-          <MonoLogListItem key={`${e.timestamp}-${e.kind}-${i}`}>
-            <span className="text-secondary-600 dark:text-dark-secondary-400">{formatKind(e.kind)}</span>
-            {e.task_id ? (
-              <span className="text-text-muted dark:text-dark-text-muted ml-1 truncate">
-                {e.task_id}
-              </span>
-            ) : null}
-            {e.error ? (
-              <span className="text-error-600 dark:text-dark-error-100 ml-1 block">{e.error}</span>
-            ) : null}
-          </MonoLogListItem>
-        ))}
-      </MonoLogList>
+      <TerminalOutput lines={lines} maxHeight="min(320px, 40vh)" className="min-h-[120px]" />
     </div>
   );
 }

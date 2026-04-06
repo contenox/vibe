@@ -1,8 +1,7 @@
 // src/pages/admin/backends/index.tsx
-import { TabbedPage } from '@contenox/ui';
+import { Page, TabbedPage } from '@contenox/ui';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { Page } from '../../../components/Page';
 import { useRuntimeBackendState } from '../../../hooks/useRuntimeBackendState';
 import BackendsSection from './components/BackendsSection';
 import CloudProvidersSection from './components/CloudProvidersSection';
@@ -51,6 +50,7 @@ export default function BackendsPage() {
       <TabbedPage
         tabs={tabs}
         className="h-full"
+        mountActivePanelOnly
         activeTab={activeTab}
         onTabChange={id => {
           setSearchParams(

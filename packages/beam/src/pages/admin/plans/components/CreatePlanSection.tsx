@@ -1,4 +1,4 @@
-import { Button, Form, FormField, P, Panel, Section, Select, Textarea } from '@contenox/ui';
+import { Button, Form, FormField, P, Panel, Select, Textarea } from '@contenox/ui';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -45,15 +45,11 @@ export default function CreatePlanSection({
   };
 
   return (
-    <Section>
-      <h2 className="text-lg font-semibold">{t('plans.create_title')}</h2>
-      <P variant="muted" className="mb-4 text-sm">
-        {t('plans.chain_id_hint')}
-      </P>
-      <Form
-        onSubmit={handleSubmit}
-        title={t('plans.create_form_title')}
-        actions={
+    <Form
+      onSubmit={handleSubmit}
+      title={t('plans.create_title')}
+      variant="surface"
+      actions={
           <Button
             type="submit"
             variant="primary"
@@ -87,8 +83,8 @@ export default function CreatePlanSection({
         </Panel>
       )}
       {createMutation.isSuccess && createMutation.data && (
-        <Panel variant="raised" className="mt-4">
-          <pre className="text-muted-foreground max-h-48 overflow-auto text-xs whitespace-pre-wrap">
+        <Panel variant="surface" className="m-0 mt-4 max-h-48 overflow-auto p-3">
+          <pre className="text-text-muted dark:text-dark-text-muted text-xs whitespace-pre-wrap">
             {createMutation.data.markdown}
           </pre>
         </Panel>

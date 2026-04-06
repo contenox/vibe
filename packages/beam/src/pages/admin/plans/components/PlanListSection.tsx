@@ -1,4 +1,4 @@
-import { Button, Panel, Section, Span, Table, TableCell, TableRow, Tooltip } from '@contenox/ui';
+import { Badge, Button, Panel, Section, Span, Table, TableCell, TableRow, Tooltip } from '@contenox/ui';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
@@ -67,9 +67,9 @@ export default function PlanListSection({ plans, activePlanName = null }: Props)
                 </Tooltip>
               </TableCell>
               <TableCell>
-                <Span className="bg-secondary inline-flex rounded-full px-2 py-0.5 text-xs">
+                <Badge variant="secondary" size="sm">
                   {plan.status}
-                </Span>
+                </Badge>
               </TableCell>
               <TableCell className="text-muted-foreground text-sm whitespace-nowrap">
                 {new Date(plan.updated_at).toLocaleString()}

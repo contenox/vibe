@@ -1,9 +1,13 @@
-import { Button, ButtonGroup, P, Section, Spinner } from '@contenox/ui';
+import { Button } from "./Button";
+import { ButtonGroup } from "./ButtonGroup";
+import { Section } from "./Section";
+import { Spinner } from "./Spinner";
+import { P } from "./Typography";
 
 interface ResourceCardProps {
   title: string;
   subtitle?: string;
-  status?: 'default' | 'success' | 'error' | 'warning';
+  status?: "default" | "success" | "error" | "warning";
   children: React.ReactNode;
   actions?: {
     edit?: () => void;
@@ -14,26 +18,30 @@ interface ResourceCardProps {
   className?: string;
 }
 
+const statusBorderStyles: Record<
+  NonNullable<ResourceCardProps["status"]>,
+  string
+> = {
+  default: "border-l-4 border-l-border dark:border-l-dark-surface-600",
+  success: "border-l-4 border-l-success dark:border-l-dark-success",
+  error: "border-l-4 border-l-error dark:border-l-dark-error",
+  warning: "border-l-4 border-l-warning dark:border-l-dark-warning",
+};
+
 export function ResourceCard({
   title,
   subtitle,
-  status = 'default',
+  status = "default",
   children,
   actions,
   isLoading = false,
-  className = '',
+  className = "",
 }: ResourceCardProps) {
-  const statusVariants = {
-    default: 'border-l-4 border-l-border',
-    success: 'border-l-4 border-l-success',
-    error: 'border-l-4 border-l-error',
-    warning: 'border-l-4 border-l-warning',
-  };
-
   return (
     <Section
       title={title}
-      className={`bg-surface relative rounded-lg ${statusVariants[status]} ${className}`}>
+      className={`bg-surface dark:bg-dark-surface-100 relative rounded-lg ${statusBorderStyles[status]} ${className}`}
+    >
       {subtitle && (
         <P variant="muted" className="mb-3 text-sm">
           {subtitle}
@@ -47,7 +55,12 @@ export function ResourceCard({
           <ButtonGroup className="flex items-center justify-between">
             <div className="flex gap-2">
               {actions.edit && (
-                <Button variant="outline" size="sm" onClick={actions.edit} disabled={isLoading}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={actions.edit}
+                  disabled={isLoading}
+                >
                   Edit
                 </Button>
               )}
@@ -56,18 +69,18 @@ export function ResourceCard({
 
             {actions.delete && (
               <Button
-                variant="ghost"
+                variant="danger"
                 size="sm"
                 onClick={actions.delete}
                 disabled={isLoading}
-                className="text-error hover:bg-error/10">
+              >
                 {isLoading ? (
                   <>
                     <Spinner size="sm" className="mr-2" />
                     Deleting
                   </>
                 ) : (
-                  'Delete'
+                  "Delete"
                 )}
               </Button>
             )}

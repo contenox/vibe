@@ -242,8 +242,7 @@ export default function TransitionEditor({
             <div className="mt-4 flex justify-end">
               <Button
                 size="sm"
-                variant="ghost"
-                className="text-error hover:bg-error/10"
+                variant="danger"
                 onClick={() => removeBranch(i)}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 {t('common.delete_branch')}

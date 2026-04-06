@@ -1,5 +1,4 @@
-import { Card } from '@contenox/ui';
-import { Page } from '../../../components/Page';
+import { Card, Page } from '@contenox/ui';
 import { LoginForm } from './LoginForm';
 
 export default function AuthPage() {

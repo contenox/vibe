@@ -102,7 +102,8 @@ export default function HookFields({ task, onChange }: HookFieldsProps) {
               <Button
                 type="button"
                 onClick={() => updateArg(key, '')}
-                className="text-error hover:bg-error rounded-md px-3 py-2 transition-colors hover:text-white">
+                variant="danger"
+                size="sm">
                 ×
               </Button>
             </div>

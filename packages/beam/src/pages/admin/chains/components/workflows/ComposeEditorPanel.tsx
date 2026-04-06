@@ -166,7 +166,7 @@ export const ComposeEditorPanel: React.FC<ComposeEditorPanelProps> = ({
         <div className="flex items-center justify-between">
           <div>
             {composeConfig && (
-              <Button variant="ghost" onClick={onDelete} className="text-error hover:bg-error/10">
+              <Button variant="danger" onClick={onDelete}>
                 {t('common.delete')}
               </Button>
             )}

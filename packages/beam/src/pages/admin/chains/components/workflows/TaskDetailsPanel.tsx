@@ -163,9 +163,11 @@ const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
       {value?.args && Object.keys(value.args).length > 0 && (
         <div>
           <strong>Arguments:</strong>
-          <pre className="bg-surface-100 mt-1 rounded p-2 text-xs">
-            {JSON.stringify(value.args, null, 2)}
-          </pre>
+          <Panel variant="surface" className="m-0 mt-1 p-2">
+            <pre className="text-text dark:text-dark-text overflow-auto font-mono text-xs">
+              {JSON.stringify(value.args, null, 2)}
+            </pre>
+          </Panel>
         </div>
       )}
     </div>

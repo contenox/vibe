@@ -1,4 +1,4 @@
-import { Button, Input, Label, P, Select, Span } from '@contenox/ui';
+import { Button, Input, Label, P, Panel, Select, Span } from '@contenox/ui';
 import { useTranslation } from 'react-i18next';
 import { BranchCompose, ComposeStrategy } from '../../../../../../lib/types';
 
@@ -77,9 +77,9 @@ export default function ComposeEditor({ taskId, compose, onChange }: ComposeEdit
       </div>
 
       {compose.strategy ? (
-        <div className="bg-surface rounded-md p-3">
+        <Panel variant="surface" className="m-0 p-3">
           <P className="text-text-muted text-sm">{compose.strategy}</P>
-        </div>
+        </Panel>
       ) : null}
 
       <div className="flex items-center justify-between">

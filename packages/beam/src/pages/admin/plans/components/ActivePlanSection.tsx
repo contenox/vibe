@@ -8,6 +8,7 @@ import {
   Panel,
   Section,
   Select,
+  Badge,
   Span,
   Table,
   TableCell,
@@ -152,13 +153,14 @@ export default function ActivePlanSection({
       <div>
         <h2 className="text-lg font-semibold">{t('plans.active_title')}</h2>
         <P variant="muted" className="mt-1 text-sm">
-          <Span className="font-medium text-foreground">{plan.name}</Span>
+          <Span className="text-text dark:text-dark-text font-medium">{plan.name}</Span>
           {' — '}
           {plan.goal}
         </P>
       </div>
 
-      <form onSubmit={handleNext} className="space-y-4 rounded-lg border p-4">
+      <Panel variant="surface" className="m-0 p-4">
+        <form onSubmit={handleNext} className="space-y-4">
         <Span className="text-sm font-medium">{t('plans.run_next_step')}</Span>
         <FormField label={t('plans.executor_chain_label')}>
           <Select
@@ -187,9 +189,11 @@ export default function ActivePlanSection({
         {nextMutation.isError && (
           <Panel variant="error">{nextMutation.error?.message}</Panel>
         )}
-      </form>
+        </form>
+      </Panel>
 
-      <form onSubmit={handleReplan} className="space-y-4 rounded-lg border p-4">
+      <Panel variant="surface" className="m-0 p-4">
+        <form onSubmit={handleReplan} className="space-y-4">
         <Span className="text-sm font-medium">{t('plans.replan_title')}</Span>
         <FormField label={t('plans.planner_chain_label')}>
           <Select
@@ -206,9 +210,11 @@ export default function ActivePlanSection({
         {replanMutation.isError && (
           <Panel variant="error">{replanMutation.error?.message}</Panel>
         )}
-      </form>
+        </form>
+      </Panel>
 
-      <form onSubmit={handleRunCompiled} className="space-y-4 rounded-lg border p-4">
+      <Panel variant="surface" className="m-0 p-4">
+        <form onSubmit={handleRunCompiled} className="space-y-4">
         <Span className="text-sm font-medium">{t('plans.run_compiled_title')}</Span>
         <P variant="muted" className="text-xs">
           {t('plans.run_compiled_description')}
@@ -244,21 +250,26 @@ export default function ActivePlanSection({
         {runCompiledMutation.isError && (
           <Panel variant="error">{runCompiledMutation.error?.message}</Panel>
         )}
-      </form>
+        </form>
+      </Panel>
 
       {runCompiledOutput && (
         <Collapsible title={t('plans.run_compiled_output')} defaultExpanded>
-          <pre className="text-muted-foreground max-h-96 overflow-auto text-xs whitespace-pre-wrap">
-            {runCompiledOutput}
-          </pre>
+          <Panel variant="surface" className="m-0 mt-2 max-h-96 overflow-auto p-3">
+            <pre className="text-text-muted dark:text-dark-text-muted text-xs whitespace-pre-wrap">
+              {runCompiledOutput}
+            </pre>
+          </Panel>
         </Collapsible>
       )}
 
       {lastMarkdown && (
         <Collapsible title={t('plans.markdown_output')} defaultExpanded>
-          <pre className="text-muted-foreground max-h-64 overflow-auto text-xs whitespace-pre-wrap">
-            {lastMarkdown}
-          </pre>
+          <Panel variant="surface" className="m-0 mt-2 max-h-64 overflow-auto p-3">
+            <pre className="text-text-muted dark:text-dark-text-muted text-xs whitespace-pre-wrap">
+              {lastMarkdown}
+            </pre>
+          </Panel>
         </Collapsible>
       )}
 
@@ -281,9 +292,9 @@ export default function ActivePlanSection({
                 </Tooltip>
               </TableCell>
               <TableCell>
-                <Span className="bg-secondary inline-flex rounded-full px-2 py-0.5 text-xs">
+                <Badge variant="secondary" size="sm">
                   {step.status}
-                </Span>
+                </Badge>
               </TableCell>
               <TableCell className="max-w-[200px]">
                 <Tooltip content={step.execution_result || '—'}>

@@ -1,6 +1,5 @@
-import { P } from '@contenox/ui';
+import { P, Page } from '@contenox/ui';
 import { useTranslation } from 'react-i18next';
-import { Page } from '../../../components/Page';
 import { SetupWizardFlow } from '../../../components/setup/SetupWizardFlow';
 
 export default function SettingsPage() {

@@ -1,8 +1,7 @@
-import { P, Panel, Section, Select, Span, Spinner } from '@contenox/ui';
+import { P, Page, Panel, Section, Select, Span, Spinner } from '@contenox/ui';
 import { useMemo, useState, useEffect, FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Page } from '../../../components/Page';
 import { useListFiles } from '../../../hooks/useFiles';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';
 import { useCreateChat } from '../../../hooks/useChats';
@@ -76,7 +75,7 @@ export default function ChatLandingPage() {
             />
             {chainsLoading && <Spinner size="sm" />}
           </div>
-          <Panel className="bg-surface-50 dark:bg-dark-surface-100">
+          <Panel variant="surface" className="m-0">
             <MessageInputForm
               value={message}
               onChange={setMessage}

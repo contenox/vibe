@@ -136,9 +136,8 @@ export default function TaskForm({
           <div>
             {onDelete && (
               <Button
-                variant="ghost"
-                onClick={handleDelete}
-                className="text-error hover:bg-error/10">
+                variant="danger"
+                onClick={handleDelete}>
                 {t('common.delete')}
               </Button>
             )}

@@ -1,9 +1,7 @@
-import { Button, GridLayout, P, Panel, Section } from '@contenox/ui';
+import { Button, ErrorState, GridLayout, LoadingState, P, Page, Panel, Section } from '@contenox/ui';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { ErrorState, LoadingState } from '../../../components/LoadingState';
-import { Page } from '../../../components/Page';
 import { useListFiles } from '../../../hooks/useFiles';
 import { useActivePlan, useCleanPlans, usePlansList } from '../../../hooks/usePlans';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';
@@ -121,7 +119,7 @@ export default function PlansListPage() {
         <PlanListSection plans={plans} activePlanName={activePlanName} />
 
         <Section>
-          <h2 className="text-lg font-semibold">{t('plans.cleanup_title')}</h2>
+          <H2>{t('plans.cleanup_title')}</H2>
           <P variant="muted" className="mb-4 text-sm">
             {t('plans.cleanup_description')}
           </P>
