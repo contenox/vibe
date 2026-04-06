@@ -118,11 +118,7 @@ export default function PlansListPage() {
 
         <PlanListSection plans={plans} activePlanName={activePlanName} />
 
-        <Section>
-          <H2>{t('plans.cleanup_title')}</H2>
-          <P variant="muted" className="mb-4 text-sm">
-            {t('plans.cleanup_description')}
-          </P>
+        <Section title={t('plans.cleanup_title')} description={t('plans.cleanup_description')}>
           <Button
             type="button"
             variant="outline"

@@ -1,4 +1,4 @@
-import { Accordion, Button, Input, P, Panel, Spinner, Wizard } from '@contenox/ui';
+import { Accordion, Button, H2, Input, P, Panel, Span, Spinner, Wizard } from '@contenox/ui';
 import React, { useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
@@ -288,7 +288,7 @@ export function SetupWizardFlow({ variant }: SetupWizardFlowProps) {
       </div>
 
       <Panel variant="surface" className="m-0 p-4">
-        <h4 className="text-text dark:text-dark-text text-base font-semibold">{stepTitle}</h4>
+        <Span className="text-text dark:text-dark-text text-base font-semibold">{stepTitle}</Span>
         {stepDescription ? (
           <P variant="muted" className="mt-1 text-sm">
             {stepDescription}
@@ -461,7 +461,7 @@ export function SetupWizardFlow({ variant }: SetupWizardFlowProps) {
     return (
       <Panel variant="surface" className="m-0">
         <header className="mb-4 space-y-1">
-          <h2 className="text-text dark:text-dark-text text-lg font-semibold">{wizardTitle}</h2>
+          <H2>{wizardTitle}</H2>
           <P variant="muted" className="text-sm">
             {wizardIntro}
           </P>

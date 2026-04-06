@@ -37,8 +37,7 @@ export default function PlanListSection({ plans, activePlanName = null }: Props)
   };
 
   return (
-    <Section>
-      <h2 className="text-lg font-semibold">{t('plans.list_title')}</h2>
+    <Section title={t('plans.list_title')}>
       {!sorted.length ? (
         <Panel variant="bordered" className="mt-4 py-8 text-center">
           <Span variant="muted">{t('plans.list_empty')}</Span>

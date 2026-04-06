@@ -1,4 +1,4 @@
-import { Button, Card, FormField, Input, Select, Tooltip } from '@contenox/ui';
+import { Button, Card, FormField, H3, Input, Select, Span, Tooltip } from '@contenox/ui';
 import { HelpCircle, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { FormTransition, OperatorTerm } from '../../../../../../lib/types';
@@ -98,7 +98,7 @@ export default function TransitionEditor({
     <div className="space-y-6">
       <div>
         <div className="mb-2 flex items-center gap-2">
-          <h3 className="text-sm font-medium">{t('workflow.on_failure')}</h3>
+          <H3>{t('workflow.on_failure')}</H3>
           <Tooltip content="Task to execute when this task fails (after retries)">
             <HelpCircle className="text-muted-foreground h-4 w-4 cursor-help" />
           </Tooltip>
@@ -172,7 +172,7 @@ export default function TransitionEditor({
             {/* Compose Configuration Section */}
             <div className="mt-4 border-t pt-4">
               <div className="mb-3 flex items-center gap-2">
-                <h4 className="text-sm font-medium">Compose Configuration</h4>
+                <Span className="text-sm font-medium">Compose Configuration</Span>
                 <Tooltip content="Configure how the output should be transformed before transitioning">
                   <HelpCircle className="text-muted-foreground h-4 w-4 cursor-help" />
                 </Tooltip>

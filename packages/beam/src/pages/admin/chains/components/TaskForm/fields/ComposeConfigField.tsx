@@ -1,4 +1,4 @@
-import { FormField, Select } from '@contenox/ui';
+import { FormField, Select, Span } from '@contenox/ui';
 import { useTranslation } from 'react-i18next';
 import type { BranchCompose } from '../../../../../../lib/types';
 
@@ -40,7 +40,7 @@ export default function ComposeConfigField({
 
   return (
     <div className="space-y-4 border-t pt-4">
-      <h4 className="font-medium">{t('chains.compose_configuration')}</h4>
+      <Span className="font-medium">{t('chains.compose_configuration')}</Span>
 
       <FormField label={t('chains.compose_strategy')}>
         <Select

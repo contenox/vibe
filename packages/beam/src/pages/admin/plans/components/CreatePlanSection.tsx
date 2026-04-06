@@ -1,4 +1,4 @@
-import { Button, Form, FormField, P, Panel, Select, Textarea } from '@contenox/ui';
+import { Button, Form, FormField, Panel, Select, Textarea } from '@contenox/ui';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -45,20 +45,22 @@ export default function CreatePlanSection({
   };
 
   return (
-    <Form
-      onSubmit={handleSubmit}
-      title={t('plans.create_title')}
-      variant="surface"
-      actions={
+    <>
+      <Form
+        onSubmit={handleSubmit}
+        title={t('plans.create_title')}
+        variant="surface"
+        error={createMutation.isError ? (createMutation.error?.message ?? t('errors.generic_fetch')) : undefined}
+        actions={
           <Button
             type="submit"
             variant="primary"
-            disabled={
-              !goal.trim() || !plannerChainId || createMutation.isPending || chainsLoading
-            }>
+            disabled={!goal.trim() || !plannerChainId || createMutation.isPending || chainsLoading}
+          >
             {t('plans.create_submit')}
           </Button>
-        }>
+        }
+      >
         <FormField label={t('plans.goal_label')} required>
           <Textarea
             value={goal}
@@ -77,18 +79,13 @@ export default function CreatePlanSection({
           />
         </FormField>
       </Form>
-      {createMutation.isError && (
-        <Panel variant="error" className="mt-4">
-          {createMutation.error?.message ?? t('errors.generic_fetch')}
-        </Panel>
-      )}
       {createMutation.isSuccess && createMutation.data && (
         <Panel variant="surface" className="m-0 mt-4 max-h-48 overflow-auto p-3">
-          <pre className="text-text-muted dark:text-dark-text-muted text-xs whitespace-pre-wrap">
+          <pre className="font-mono text-xs text-text-muted dark:text-dark-text-muted whitespace-pre-wrap">
             {createMutation.data.markdown}
           </pre>
         </Panel>
       )}
-    </Section>
+    </>
   );
 }

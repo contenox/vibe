@@ -1,3 +1,4 @@
+import { Button, H1, P } from '@contenox/ui';
 import { Component, ErrorInfo, ReactNode } from 'react';
 
 interface Props {
@@ -32,18 +33,9 @@ export class ErrorBoundary extends Component<Props, State> {
         fallback ?? (
           <div className="flex min-h-screen items-center justify-center">
             <div className="text-center">
-              <h1 className="mb-4 text-2xl font-semibold text-text dark:text-dark-text">
-                Something went wrong
-              </h1>
-              <p className="mb-4 text-text-muted dark:text-dark-text-muted">
-                {this.state.error.message}
-              </p>
-              <button
-                onClick={this.reset}
-                className="rounded-lg bg-primary-500 px-4 py-2 text-white hover:bg-primary-600"
-              >
-                Try again
-              </button>
+              <H1 className="mb-4">Something went wrong</H1>
+              <P variant="muted" className="mb-4">{this.state.error.message}</P>
+              <Button variant="primary" onClick={this.reset}>Try again</Button>
             </div>
           </div>
         )

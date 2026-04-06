@@ -1,4 +1,4 @@
-import { Button, Form, FormField, Input, Panel } from '@contenox/ui';
+import { Button, Form, FormField, H3, Input, Panel } from '@contenox/ui';
 import { t } from 'i18next';
 import React from 'react';
 import { InjectionArg, RemoteHook } from '../../../../lib/types';
@@ -148,7 +148,7 @@ export default function RemoteHookForm({
       </FormField>
 
       <div className="mt-6 border-t pt-4">
-        <h3 className="mb-3 text-sm font-medium">{t('remote_hooks.properties')}</h3>
+        <H3 className="mb-3">{t('remote_hooks.properties')}</H3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <FormField label={t('remote_hooks.arg_name')}>
             <Input

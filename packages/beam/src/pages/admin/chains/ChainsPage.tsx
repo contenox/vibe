@@ -326,13 +326,11 @@ export default function ChainsPage() {
       )}
 
       {(activeTab === 'visualize' || activeTab === 'json') && !selectedChain && (
-        <Panel variant="surface" className="m-6 py-12 text-center">
-          <h3 className="mb-2 text-lg font-semibold">{t('chains.no_chain_selected')}</h3>
-          <p className="text-muted-foreground mb-4">{t('chains.select_or_create_chain')}</p>
+        <Section title={t('chains.no_chain_selected')} description={t('chains.select_or_create_chain')} className="m-6 py-12 text-center">
           <Button variant="primary" onClick={handleCreateNew}>
             {t('chains.create_new')}
           </Button>
-        </Panel>
+        </Section>
       )}
     </Page>
   );

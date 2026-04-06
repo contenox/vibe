@@ -1,4 +1,4 @@
-import { Page, Panel, TabbedPage } from '@contenox/ui';
+import { InlineNotice, Page, TabbedPage } from '@contenox/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -72,17 +72,14 @@ export default function RemoteHooksPage() {
   return (
     <Page bodyScroll="auto">
       {oauthBanner && (
-        <Panel
-          variant="flat"
-          className={
-            oauthBanner.status === 'success'
-              ? 'mb-4 border-emerald-600/30 bg-emerald-950/20 text-sm'
-              : 'mb-4 border-red-600/30 bg-red-950/20 text-sm'
-          }>
+        <InlineNotice
+          variant={oauthBanner.status === 'success' ? 'info' : 'error'}
+          className="mb-4"
+        >
           {oauthBanner.status === 'success'
             ? t('mcp_servers.oauth_success_banner', { name: oauthBanner.name })
             : t('mcp_servers.oauth_error_banner', { message: oauthBanner.message })}
-        </Panel>
+        </InlineNotice>
       )}
       <TabbedPage
         tabs={tabs}

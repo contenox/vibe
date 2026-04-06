@@ -1,4 +1,4 @@
-import { Button, FormField, Panel, Section, Select, Tooltip } from '@contenox/ui';
+import { Button, FormField, H3, P, Panel, Section, Select, Span, Tooltip } from '@contenox/ui';
 import { HelpCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -128,38 +128,38 @@ export const ComposeEditorPanel: React.FC<ComposeEditorPanelProps> = ({
 
         {/* Strategy Description */}
         {getCurrentStrategy() && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-            <h4 className="mb-2 flex items-center gap-2 font-medium text-blue-900">
+          <Panel variant="info" className="m-0">
+            <H3 className="mb-2 flex items-center gap-2">
               <span>{getCurrentStrategy()?.label}</span>
               <Tooltip content="This strategy determines how the values are combined">
-                <HelpCircle className="h-4 w-4 text-blue-500" />
+                <HelpCircle className="h-4 w-4 text-info dark:text-dark-info" />
               </Tooltip>
-            </h4>
-            <p className="text-sm text-blue-800">{getCurrentStrategy()?.description}</p>
-            <div className="mt-3 rounded-md bg-blue-100 p-3">
-              <p className="text-xs font-medium text-blue-900">
+            </H3>
+            <P className="text-sm">{getCurrentStrategy()?.description}</P>
+            <Panel variant="surface" className="m-0 mt-3 p-3">
+              <Span className="text-xs font-medium">
                 {formData.strategy === 'override' &&
                   `${sourceTaskId} will replace ${formData.with_var}`}
                 {formData.strategy === 'merge_chat_histories' &&
                   `Chat histories from ${sourceTaskId} and ${formData.with_var} will be combined`}
                 {formData.strategy === 'append_string_to_chat_history' &&
                   `${sourceTaskId} will be added as a message to ${formData.with_var}'s history`}
-              </p>
-            </div>
-          </div>
+              </Span>
+            </Panel>
+          </Panel>
         )}
 
         {/* Usage Notes */}
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <h4 className="mb-2 font-medium text-amber-900">Important Notes</h4>
-          <ul className="space-y-1 text-xs text-amber-800">
+        <Panel variant="warning" className="m-0">
+          <H3 className="mb-2">Important Notes</H3>
+          <ul className="space-y-1 text-xs">
             <li>• Compose operations happen BEFORE the transition to the next task</li>
             <li>
               • The result is stored in a variable named <code>{sourceTaskId}_composed</code>
             </li>
             <li>• For transitions to "end", compose prepares the final output of the workflow</li>
           </ul>
-        </div>
+        </Panel>
       </div>
 
       <div className="bg-background/50 border-t p-6">

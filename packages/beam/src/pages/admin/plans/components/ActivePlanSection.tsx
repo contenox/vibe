@@ -1,14 +1,15 @@
 import {
+  Badge,
   Button,
   Checkbox,
   Collapsible,
+  Form,
   FormField,
   Input,
   P,
   Panel,
   Section,
   Select,
-  Badge,
   Span,
   Table,
   TableCell,
@@ -122,8 +123,7 @@ export default function ActivePlanSection({
 
   if (isLoading) {
     return (
-      <Section>
-        <h2 className="text-lg font-semibold">{t('plans.active_title')}</h2>
+      <Section title={t('plans.active_title')}>
         <P variant="muted">{t('plans.active_loading')}</P>
       </Section>
     );
@@ -131,8 +131,7 @@ export default function ActivePlanSection({
 
   if (active == null) {
     return (
-      <Section>
-        <h2 className="text-lg font-semibold">{t('plans.active_title')}</h2>
+      <Section title={t('plans.active_title')}>
         <Panel variant="bordered" className="mt-4 py-8 text-center">
           <Span variant="muted">{t('plans.no_active')}</Span>
         </Panel>
@@ -149,19 +148,23 @@ export default function ActivePlanSection({
     runCompiledMutation.isPending;
 
   return (
-    <Section className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold">{t('plans.active_title')}</h2>
-        <P variant="muted" className="mt-1 text-sm">
-          <Span className="text-text dark:text-dark-text font-medium">{plan.name}</Span>
-          {' — '}
-          {plan.goal}
-        </P>
-      </div>
+    <Section
+      title={t('plans.active_title')}
+      description={`${plan.name} — ${plan.goal}`}
+      className="space-y-6"
+    >
 
-      <Panel variant="surface" className="m-0 p-4">
-        <form onSubmit={handleNext} className="space-y-4">
-        <Span className="text-sm font-medium">{t('plans.run_next_step')}</Span>
+      <Form
+        onSubmit={handleNext}
+        title={t('plans.run_next_step')}
+        variant="surface"
+        error={nextMutation.isError ? nextMutation.error?.message : undefined}
+        actions={
+          <Button type="submit" variant="primary" disabled={!executorChainId || busy}>
+            {t('plans.next_submit')}
+          </Button>
+        }
+      >
         <FormField label={t('plans.executor_chain_label')}>
           <Select
             options={chainOptions}
@@ -183,18 +186,19 @@ export default function ActivePlanSection({
             label={t('plans.with_auto')}
           />
         </div>
-        <Button type="submit" variant="primary" disabled={!executorChainId || busy}>
-          {t('plans.next_submit')}
-        </Button>
-        {nextMutation.isError && (
-          <Panel variant="error">{nextMutation.error?.message}</Panel>
-        )}
-        </form>
-      </Panel>
+      </Form>
 
-      <Panel variant="surface" className="m-0 p-4">
-        <form onSubmit={handleReplan} className="space-y-4">
-        <Span className="text-sm font-medium">{t('plans.replan_title')}</Span>
+      <Form
+        onSubmit={handleReplan}
+        title={t('plans.replan_title')}
+        variant="surface"
+        error={replanMutation.isError ? replanMutation.error?.message : undefined}
+        actions={
+          <Button type="submit" variant="outline" disabled={!replanChainId || busy}>
+            {t('plans.replan_submit')}
+          </Button>
+        }
+      >
         <FormField label={t('plans.planner_chain_label')}>
           <Select
             options={replanOptions}
@@ -204,18 +208,19 @@ export default function ActivePlanSection({
             className="max-w-xl"
           />
         </FormField>
-        <Button type="submit" variant="outline" disabled={!replanChainId || busy}>
-          {t('plans.replan_submit')}
-        </Button>
-        {replanMutation.isError && (
-          <Panel variant="error">{replanMutation.error?.message}</Panel>
-        )}
-        </form>
-      </Panel>
+      </Form>
 
-      <Panel variant="surface" className="m-0 p-4">
-        <form onSubmit={handleRunCompiled} className="space-y-4">
-        <Span className="text-sm font-medium">{t('plans.run_compiled_title')}</Span>
+      <Form
+        onSubmit={handleRunCompiled}
+        title={t('plans.run_compiled_title')}
+        variant="surface"
+        error={runCompiledMutation.isError ? runCompiledMutation.error?.message : undefined}
+        actions={
+          <Button type="submit" variant="secondary" disabled={!executorChainId || busy}>
+            {t('plans.run_compiled_submit')}
+          </Button>
+        }
+      >
         <P variant="muted" className="text-xs">
           {t('plans.run_compiled_description')}
         </P>
@@ -244,14 +249,7 @@ export default function ActivePlanSection({
             placeholder="compiled/my-plan.json"
           />
         </FormField>
-        <Button type="submit" variant="secondary" disabled={!executorChainId || busy}>
-          {t('plans.run_compiled_submit')}
-        </Button>
-        {runCompiledMutation.isError && (
-          <Panel variant="error">{runCompiledMutation.error?.message}</Panel>
-        )}
-        </form>
-      </Panel>
+      </Form>
 
       {runCompiledOutput && (
         <Collapsible title={t('plans.run_compiled_output')} defaultExpanded>
@@ -273,8 +271,7 @@ export default function ActivePlanSection({
         </Collapsible>
       )}
 
-      <div>
-        <h3 className="mb-2 text-sm font-medium">{t('plans.steps_title')}</h3>
+      <Section title={t('plans.steps_title')}>
         <Table
           columns={[
             t('plans.col_ordinal'),
@@ -339,7 +336,7 @@ export default function ActivePlanSection({
             {retryMutation.error?.message || skipMutation.error?.message}
           </Panel>
         )}
-      </div>
+      </Section>
     </Section>
   );
 }

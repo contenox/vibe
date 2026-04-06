@@ -8,6 +8,8 @@ interface PanelProps extends React.HTMLAttributes<HTMLDivElement> {
     | "flat"
     | "bordered"
     | "error"
+    | "warning"
+    | "info"
     | "gradient"
     | "surface"
     | "ghost"
@@ -31,8 +33,12 @@ export const Panel = forwardRef<HTMLDivElement, PanelProps>(
           "p-4 m-2 border border-surface-300 dark:border-dark-surface-700":
             variant === "bordered",
           "p-0 m-0 border-0 shadow-none": variant === "flat",
-          "p-4 m-2 bg-error-50 dark:bg-dark-error-900 text-error dark:text-dark-error":
+          "p-4 m-2 bg-error-50 dark:bg-dark-error-900 text-error dark:text-dark-error border border-error-200 dark:border-dark-error-200":
             variant === "error",
+          "p-4 m-2 bg-warning-50 dark:bg-dark-warning-50 text-warning-900 dark:text-dark-warning-800 border border-warning-200 dark:border-dark-warning-200":
+            variant === "warning",
+          "p-4 m-2 bg-info-50 dark:bg-dark-surface-200 text-info-900 dark:text-dark-text border border-info-200 dark:border-dark-surface-500":
+            variant === "info",
           "p-4 m-2 bg-gradient-to-br from-primary-600 to-accent-700 !text-white":
             variant === "gradient",
           "p-4 m-2 bg-surface-50 dark:bg-dark-surface-100 border border-surface-200 dark:border-dark-surface-700":

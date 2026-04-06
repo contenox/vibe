@@ -85,13 +85,10 @@ export default function RemoteHooksSection() {
   return (
     <GridLayout variant="body" columns={2} responsive={{ base: 1, lg: 2 }} className="gap-6">
       {/* Left Column - Hooks List */}
-      <Section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{t('remote_hooks.manage_title')}</h2>
-          <span className="text-muted text-sm">
-            {t('remote_hooks.count', { count: hooks?.length || 0 })}
-          </span>
-        </div>
+      <Section title={t('remote_hooks.manage_title')} className="space-y-4">
+        <Span variant="muted" className="text-sm">
+          {t('remote_hooks.count', { count: hooks?.length || 0 })}
+        </Span>
 
         <div className="max-h-[600px] space-y-4 overflow-y-auto">
           {hooks && hooks.length > 0 ? (

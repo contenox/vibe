@@ -1,6 +1,7 @@
 import {
   Button,
   EmptyState,
+  ErrorState,
   Input,
   Panel,
   Spinner,
@@ -62,12 +63,7 @@ export default function ChainsList({
 
   if (error) {
     return (
-      <Panel variant="error" className="m-6">
-        <div className="text-center">
-          <h3 className="mb-2 font-medium">{t('chains.list_error')}</h3>
-          <p className="text-muted-foreground">{error.message}</p>
-        </div>
-      </Panel>
+      <ErrorState title={t('chains.list_error')} error={error} />
     );
   }
 

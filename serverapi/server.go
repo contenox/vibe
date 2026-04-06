@@ -33,6 +33,7 @@ import (
 	"github.com/contenox/contenox/internal/setupapi"
 	"github.com/contenox/contenox/internal/taskchainapi"
 	"github.com/contenox/contenox/internal/taskeventsapi"
+	"github.com/contenox/contenox/internal/terminalapi"
 	"github.com/contenox/contenox/internal/vfsapi"
 	libbus "github.com/contenox/contenox/libbus"
 	libdb "github.com/contenox/contenox/libdbexec"
@@ -47,6 +48,7 @@ import (
 	"github.com/contenox/contenox/stateservice"
 	"github.com/contenox/contenox/taskchainservice"
 	"github.com/contenox/contenox/taskengine"
+	"github.com/contenox/contenox/terminalservice"
 	"github.com/contenox/contenox/vfsservice"
 )
 
@@ -165,6 +167,26 @@ func New(
 	})
 	internalchatapi.AddChatRoutes(mux, chatTurnSvc, auth)
 
+	termCfg, err := terminalservice.ParseEnv(
+		config.TerminalEnabled,
+		config.TerminalAllowedRoot,
+		config.TerminalMaxSessions,
+		config.TerminalShell,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("terminal config: %w", err)
+	}
+	termSvc, err := terminalservice.New(termCfg, dbInstance, nodeInstanceID)
+	if err != nil {
+		return nil, fmt.Errorf("terminal service: %w", err)
+	}
+	terminalapi.AddRoutes(mux, termSvc, auth, termCfg.Enabled)
+	termPrevCleanup := cleanup
+	cleanup = func() error {
+		_ = termSvc.CloseAll(context.Background())
+		return termPrevCleanup()
+	}
+
 	return cleanup, nil
 }
 
@@ -190,6 +212,11 @@ type Config struct {
 	UIBaseURL               string `json:"ui_base_url"`
 	ValkeyAddr              string `json:"valkey_addr"`
 	ValkeyPassword          string `json:"valkey_password"`
+	// Interactive PTY terminal (Beam / UI). See terminalservice.ParseEnv.
+	TerminalEnabled     string `json:"terminal_enabled"`
+	TerminalAllowedRoot string `json:"terminal_allowed_root"`
+	TerminalMaxSessions string `json:"terminal_max_sessions"`
+	TerminalShell       string `json:"terminal_shell"`
 }
 
 func LoadConfig[T any](cfg *T) error {

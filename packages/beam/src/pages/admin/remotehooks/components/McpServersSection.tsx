@@ -178,13 +178,10 @@ export default function McpServersSection() {
 
   return (
     <GridLayout variant="body" columns={2} responsive={{ base: 1, lg: 2 }} className="gap-6">
-      <Section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{t('mcp_servers.manage_title')}</h2>
-          <span className="text-muted text-sm">
-            {t('mcp_servers.count', { count: servers?.length ?? 0 })}
-          </span>
-        </div>
+      <Section title={t('mcp_servers.manage_title')} className="space-y-4">
+        <Span variant="muted" className="text-sm">
+          {t('mcp_servers.count', { count: servers?.length ?? 0 })}
+        </Span>
         <p className="text-muted text-sm">{t('mcp_servers.description')}</p>
 
         <div className="max-h-[600px] space-y-4 overflow-y-auto">
