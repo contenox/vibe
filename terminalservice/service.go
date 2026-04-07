@@ -3,10 +3,10 @@ package terminalservice
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	apiframework "github.com/contenox/contenox/apiframework"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/terminalstore"
@@ -33,10 +33,16 @@ type Service interface {
 	Create(ctx context.Context, principal string, req CreateRequest) (*CreateResponse, error)
 	Close(ctx context.Context, principal, id string) error
 	CloseAll(ctx context.Context) error
-	Attach(ctx context.Context, principal, id string, conn *websocket.Conn) error
+	Attach(ctx context.Context, principal, id string, conn io.ReadWriteCloser, resizeCh <-chan ResizeMsg) error
 	Get(ctx context.Context, principal, id string) (*SessionInfo, error)
 	List(ctx context.Context, principal string, createdAtCursor *time.Time, limit int) ([]*SessionInfo, error)
 	UpdateGeometry(ctx context.Context, principal, id string, cols, rows int) error
+}
+
+// ResizeMsg carries terminal dimension changes from the WebSocket handler.
+type ResizeMsg struct {
+	Cols int
+	Rows int
 }
 
 type service struct {
@@ -83,7 +89,7 @@ func (disabledService) Create(context.Context, string, CreateRequest) (*CreateRe
 }
 func (disabledService) Close(context.Context, string, string) error { return ErrDisabled }
 func (disabledService) CloseAll(context.Context) error              { return ErrDisabled }
-func (disabledService) Attach(context.Context, string, string, *websocket.Conn) error {
+func (disabledService) Attach(context.Context, string, string, io.ReadWriteCloser, <-chan ResizeMsg) error {
 	return ErrDisabled
 }
 func (disabledService) Get(context.Context, string, string) (*SessionInfo, error) {

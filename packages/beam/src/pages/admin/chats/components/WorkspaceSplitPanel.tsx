@@ -314,14 +314,16 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
       />
 
       {workspaceTab === 'terminal' ? (
-        <Suspense
-          fallback={
-            <div className="flex flex-1 items-center justify-center">
-              <Spinner size="md" />
-            </div>
-          }>
-          <TerminalPanel className="min-h-0 flex-1" />
-        </Suspense>
+        <div className="flex min-h-[min(40vh,280px)] w-full min-w-0 flex-1 flex-col">
+          <Suspense
+            fallback={
+              <div className="flex flex-1 items-center justify-center">
+                <Spinner size="md" />
+              </div>
+            }>
+            <TerminalPanel className="min-h-0 flex-1" />
+          </Suspense>
+        </div>
       ) : (
       <>
       {/* Breadcrumbs */}
@@ -437,7 +439,7 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
                       fontSize: 14,
                       lineHeight: 22,
                       padding: { top: 12, bottom: 12 },
-                      fontFamily: 'var(--font-mono)',
+                      fontFamily: '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
                       fontLigatures: false,
                       renderWhitespace: 'selection',
                       scrollBeyondLastLine: false,

@@ -2,22 +2,31 @@ import '@xterm/xterm/css/xterm.css';
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useLayoutEffect } from 'react';
 import { useXtermTheme } from '../lib/xtermTheme';
 import { cn } from '../lib/utils';
 
 export interface XTerminalProps {
   /** WebSocket URL path, e.g. "/api/terminal/sessions/{id}/ws" */
   wsUrl: string;
+  /** Called when the WebSocket opens successfully. */
+  onOpen?: () => void;
   /** Called when the WebSocket closes (session ended or connection lost). */
   onDisconnect?: () => void;
   className?: string;
 }
 
-export function XTerminal({ wsUrl, onDisconnect, className }: XTerminalProps) {
+export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const onDisconnectRef = useRef(onDisconnect);
+  const onOpenRef = useRef(onOpen);
   const theme = useXtermTheme();
+
+  useLayoutEffect(() => {
+    onDisconnectRef.current = onDisconnect;
+    onOpenRef.current = onOpen;
+  });
 
   // Update theme in-place without recreating terminal
   useEffect(() => {
@@ -31,10 +40,13 @@ export function XTerminal({ wsUrl, onDisconnect, className }: XTerminalProps) {
     const container = containerRef.current;
     if (!container) return;
 
+    /** When true, ws.close() is from React cleanup — must not run onDisconnect (would spawn new sessions). */
+    let closedByCleanup = false;
+
     // ── Terminal instance ──────────────────────────────────────────
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: 'var(--font-mono)',
+      fontFamily: '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
       fontSize: 14,
       lineHeight: 1.2,
       theme,
@@ -44,15 +56,42 @@ export function XTerminal({ wsUrl, onDisconnect, className }: XTerminalProps) {
     term.loadAddon(fit);
     term.open(container);
 
-    // Defer initial fit so the container has its final size
-    requestAnimationFrame(() => {
+    const focusTerm = () => {
       try {
+        term.focus();
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const safeFit = () => {
+      try {
+        if (container.clientWidth < 8 || container.clientHeight < 8) {
+          term.resize(80, 24);
+          return;
+        }
         fit.fit();
       } catch {
-        /* container may not be visible yet */
+        try {
+          term.resize(80, 24);
+        } catch {
+          /* ignore */
+        }
       }
+    };
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        safeFit();
+        focusTerm();
+      });
     });
     termRef.current = term;
+
+    const onContainerPointerDown = () => {
+      focusTerm();
+    };
+    container.addEventListener('pointerdown', onContainerPointerDown);
 
     // ── WebSocket ─────────────────────────────────────────────────
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -61,6 +100,9 @@ export function XTerminal({ wsUrl, onDisconnect, className }: XTerminalProps) {
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
+      onOpenRef.current?.();
+      safeFit();
+      focusTerm();
       // Send initial terminal dimensions
       ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
     };
@@ -73,7 +115,9 @@ export function XTerminal({ wsUrl, onDisconnect, className }: XTerminalProps) {
 
     ws.onclose = () => {
       term.write('\r\n\x1b[90m[session ended]\x1b[0m\r\n');
-      onDisconnect?.();
+      if (!closedByCleanup) {
+        onDisconnectRef.current?.();
+      }
     };
 
     // ── Terminal input → WebSocket ────────────────────────────────
@@ -104,17 +148,15 @@ export function XTerminal({ wsUrl, onDisconnect, className }: XTerminalProps) {
 
     const ro = new ResizeObserver(() => {
       requestAnimationFrame(() => {
-        try {
-          fit.fit();
-        } catch {
-          /* container hidden */
-        }
+        safeFit();
       });
     });
     ro.observe(container);
 
     // ── Cleanup ───────────────────────────────────────────────────
     return () => {
+      closedByCleanup = true;
+      container.removeEventListener('pointerdown', onContainerPointerDown);
       ro.disconnect();
       dataDisposable.dispose();
       binaryDisposable.dispose();
@@ -130,7 +172,7 @@ export function XTerminal({ wsUrl, onDisconnect, className }: XTerminalProps) {
   return (
     <div
       ref={containerRef}
-      className={cn('h-full w-full min-h-0 overflow-hidden', className)}
+      className={cn('h-full w-full min-h-0 min-w-0 cursor-text overflow-hidden', className)}
     />
   );
 }

@@ -2,9 +2,9 @@ package terminalservice
 
 import (
 	"context"
+	"io"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/contenox/contenox/libtracker"
 )
 
@@ -57,10 +57,10 @@ func (d *activityTrackerDecorator) CloseAll(ctx context.Context) error {
 	return nil
 }
 
-func (d *activityTrackerDecorator) Attach(ctx context.Context, principal, id string, conn *websocket.Conn) error {
+func (d *activityTrackerDecorator) Attach(ctx context.Context, principal, id string, conn io.ReadWriteCloser, resizeCh <-chan ResizeMsg) error {
 	reportErr, _, end := d.tracker.Start(ctx, "attach", "terminal_session", "sessionID", id)
 	defer end()
-	err := d.svc.Attach(ctx, principal, id, conn)
+	err := d.svc.Attach(ctx, principal, id, conn, resizeCh)
 	if err != nil {
 		reportErr(err)
 	}

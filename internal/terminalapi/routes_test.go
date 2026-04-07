@@ -18,6 +18,7 @@ import (
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/terminalservice"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/websocket"
 )
 
 func testTerminalDB(t *testing.T) libdb.DBManager {
@@ -61,7 +62,7 @@ func TestAddRoutes_CreateRequiresAuth(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{err: errors.New("nope")}, true, nil, false)
+	AddRoutes(mux, svc, fakeAuthReader{err: errors.New("nope")}, true)
 
 	req := httptest.NewRequest(http.MethodPost, "/terminal/sessions", strings.NewReader(`{"cwd":"`+root+`"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -78,7 +79,7 @@ func TestAddRoutes_CreateBadCwd(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{}, true, nil, false)
+	AddRoutes(mux, svc, fakeAuthReader{}, true)
 
 	outside := filepath.Join(t.TempDir(), "escape")
 	req := httptest.NewRequest(http.MethodPost, "/terminal/sessions", strings.NewReader(`{"cwd":"`+outside+`"}`))
@@ -96,7 +97,7 @@ func TestAddRoutes_ListSessionsEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{}, true, nil, false)
+	AddRoutes(mux, svc, fakeAuthReader{}, true)
 
 	req := httptest.NewRequest(http.MethodGet, "/terminal/sessions", nil)
 	rec := httptest.NewRecorder()
@@ -104,7 +105,6 @@ func TestAddRoutes_ListSessionsEmpty(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "[]\n", rec.Body.String())
 }
-
 
 func TestAddRoutes_DeleteNotFound(t *testing.T) {
 	root := t.TempDir()
@@ -114,7 +114,7 @@ func TestAddRoutes_DeleteNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{}, true, nil, false)
+	AddRoutes(mux, svc, fakeAuthReader{}, true)
 
 	req := httptest.NewRequest(http.MethodDelete, "/terminal/sessions/does-not-exist", nil)
 	rec := httptest.NewRecorder()
@@ -122,15 +122,12 @@ func TestAddRoutes_DeleteNotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestAddRoutes_CreateSessionUnix(t *testing.T) {
+func TestWebSocket_DataFlow(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY not implemented on Windows")
 	}
 	if _, err := os.Stat("/bin/bash"); err != nil {
 		t.Skip("no /bin/bash")
-	}
-	if testing.Short() {
-		t.Skip("short mode")
 	}
 
 	root := t.TempDir()
@@ -140,23 +137,68 @@ func TestAddRoutes_CreateSessionUnix(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{}, true, nil, false)
+	AddRoutes(mux, svc, fakeAuthReader{}, true)
 
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	createReq, err := http.NewRequest(http.MethodPost, srv.URL+"/terminal/sessions", strings.NewReader(`{"cwd":"`+root+`","cols":80,"rows":24}`))
+	// Create session
+	createReq, err := http.NewRequest(http.MethodPost, srv.URL+"/terminal/sessions",
+		strings.NewReader(`{"cwd":"`+root+`","cols":80,"rows":24}`))
 	require.NoError(t, err)
 	createReq.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(createReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
 	var out struct {
 		ID     string `json:"id"`
 		WSPath string `json:"wsPath"`
 	}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
-	require.NotEmpty(t, out.ID)
-	require.Contains(t, out.WSPath, out.ID)
+
+	// Connect WebSocket
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + out.WSPath
+	t.Logf("WS URL: %s", wsURL)
+
+	// Verify the WS endpoint is reachable (should get upgrade-required or similar, not 404)
+	probeResp, probeErr := http.Get(srv.URL + out.WSPath)
+	if probeErr == nil {
+		t.Logf("Probe: status=%d", probeResp.StatusCode)
+		probeResp.Body.Close()
+	}
+
+	ws, err := websocket.Dial(wsURL, "", srv.URL)
+	require.NoError(t, err)
+	defer ws.Close()
+
+	// Wait for shell to initialize, then send a command
+	time.Sleep(300 * time.Millisecond)
+	_, err = ws.Write([]byte("echo WSTEST_OK\n"))
+	require.NoError(t, err)
+
+	// Read output — should contain our echo
+	buf := make([]byte, 4096)
+	received := ""
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_ = ws.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, err := ws.Read(buf)
+		if n > 0 {
+			chunk := string(buf[:n])
+			t.Logf("WS read: %d bytes: %q", n, chunk)
+			received += chunk
+		}
+		if strings.Contains(received, "WSTEST_OK") {
+			break
+		}
+		if err != nil {
+			t.Logf("WS read error: %v", err)
+			break
+		}
+	}
+
+	t.Logf("Total received: %q", received)
+	require.Contains(t, received, "WSTEST_OK", "Expected echo output in WebSocket data")
 }

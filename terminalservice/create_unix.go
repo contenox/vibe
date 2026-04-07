@@ -44,14 +44,16 @@ func (s *service) Create(ctx context.Context, principal string, req CreateReques
 	}
 	s.mu.Unlock()
 
+	// Use Background context — the shell must outlive the HTTP Create request.
+	// The session is terminated explicitly via Close/CloseAll.
 	var cmd *exec.Cmd
 	switch shell {
 	case "/bin/bash", "/usr/bin/bash":
-		cmd = exec.CommandContext(ctx, shell, "-i")
+		cmd = exec.Command(shell, "-i")
 	case "/bin/zsh", "/usr/bin/zsh":
-		cmd = exec.CommandContext(ctx, shell, "-i")
+		cmd = exec.Command(shell, "-i")
 	default:
-		cmd = exec.CommandContext(ctx, shell)
+		cmd = exec.Command(shell)
 	}
 	cmd.Dir = req.CWD
 	cmd.Env = append(execEnv(), "TERM=xterm-256color")

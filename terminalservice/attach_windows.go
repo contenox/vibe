@@ -4,10 +4,9 @@ package terminalservice
 
 import (
 	"context"
-
-	"github.com/coder/websocket"
+	"io"
 )
 
-func (s *service) Attach(_ context.Context, _, _ string, _ *websocket.Conn) error {
+func (s *service) Attach(_ context.Context, _, _ string, _ io.ReadWriteCloser, _ <-chan ResizeMsg) error {
 	return ErrNotImplemented
 }

@@ -51,7 +51,7 @@ export default function ChainJsonEditor({ chain, className, onChangeText }: Prop
           minimap: { enabled: false },
           tabSize: 2,
           padding: { top: 12, bottom: 12 },
-          fontFamily: 'var(--font-mono)',
+          fontFamily: '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
           renderWhitespace: 'selection',
           scrollBeyondLastLine: false,
         }}

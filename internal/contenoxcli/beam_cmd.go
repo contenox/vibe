@@ -117,8 +117,11 @@ func buildServerComponents(ctx context.Context, db libdb.DBManager, tenantID str
 	if err := serverapi.LoadConfig(config); err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
-	// When the PTY terminal is enabled without an explicit ceiling, default to the project
-	// root (parent of .contenox) so terminal cwd and file listing cover the whole project.
+	// Beam always enables the terminal — it's an IDE experience.
+	if strings.TrimSpace(config.TerminalEnabled) == "" {
+		config.TerminalEnabled = "true"
+	}
+	// Default the terminal ceiling to the project root (parent of .contenox).
 	if strings.EqualFold(strings.TrimSpace(config.TerminalEnabled), "true") && strings.TrimSpace(config.TerminalAllowedRoot) == "" {
 		abs, err := filepath.Abs(filepath.Dir(contenoxPath))
 		if err != nil {

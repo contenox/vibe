@@ -1,17 +1,21 @@
-import { Button, P, Span, Spinner } from '@contenox/ui';
+import { Button, Span, Spinner } from '@contenox/ui';
 import { RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { t } from 'i18next';
 import { XTerminal } from '../../../../components/XTerminal';
 import { api } from '../../../../lib/api';
+import { ApiError } from '../../../../lib/fetch';
 
 const SESSION_KEY = 'beam_terminal_session_id';
+const DISCONNECT_RECREATE_MS = 350;
 
 export function TerminalPanel({ className }: { className?: string }) {
   const [wsUrl, setWsUrl] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const createGenRef = useRef(0);
+  const disconnectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const persist = useCallback((sessionId: string | null) => {
     sessionIdRef.current = sessionId;
@@ -23,19 +27,52 @@ export function TerminalPanel({ className }: { className?: string }) {
     }
   }, []);
 
-  const createSession = useCallback(async () => {
+  const clearDisconnectDebounce = useCallback(() => {
+    if (disconnectDebounceRef.current) {
+      clearTimeout(disconnectDebounceRef.current);
+      disconnectDebounceRef.current = null;
+    }
+  }, []);
+
+  const createSession = useCallback(async (retryAfterPrune = true) => {
+    const gen = ++createGenRef.current;
     setInitializing(true);
     setError(null);
     setWsUrl(null);
     try {
-      // Empty cwd → server defaults to project root (parent of .contenox)
-      const res = await api.createTerminalSession({ cwd: '' });
+      let res: Awaited<ReturnType<typeof api.createTerminalSession>>;
+      try {
+        res = await api.createTerminalSession({ cwd: '' });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to create terminal session';
+        const tooMany =
+          e instanceof ApiError &&
+          e.status === 422 &&
+          (msg.toLowerCase().includes('too many') || msg.toLowerCase().includes('concurrent'));
+        if (tooMany && retryAfterPrune) {
+          try {
+            const list = await api.listTerminalSessions();
+            await Promise.all(list.map(s => api.deleteTerminalSession(s.id).catch(() => undefined)));
+          } catch {
+            /* ignore prune errors */
+          }
+          res = await api.createTerminalSession({ cwd: '' });
+        } else {
+          throw e;
+        }
+      }
+      if (gen !== createGenRef.current) return;
       persist(res.id);
       setWsUrl(`/api${res.wsPath}`);
+      setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create terminal session');
+      if (gen !== createGenRef.current) return;
+      const msg = e instanceof Error ? e.message : 'Failed to create terminal session';
+      setError(msg);
     } finally {
-      setInitializing(false);
+      if (gen === createGenRef.current) {
+        setInitializing(false);
+      }
     }
   }, [persist]);
 
@@ -74,16 +111,41 @@ export function TerminalPanel({ className }: { className?: string }) {
     })();
     return () => {
       cancelled = true;
+      createGenRef.current++;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(
+    () => () => {
+      clearDisconnectDebounce();
+    },
+    [clearDisconnectDebounce]
+  );
+
   const handleDisconnect = useCallback(() => {
+    const id = sessionIdRef.current;
     persist(null);
     setWsUrl(null);
-    createSession();
-  }, [persist, createSession]);
+    setInitializing(true);
+    setError(null);
+    clearDisconnectDebounce();
+    disconnectDebounceRef.current = setTimeout(() => {
+      disconnectDebounceRef.current = null;
+      void (async () => {
+        if (id) {
+          try {
+            await api.deleteTerminalSession(id);
+          } catch {
+            /* session may already be gone */
+          }
+        }
+        await createSession();
+      })();
+    }, DISCONNECT_RECREATE_MS);
+  }, [persist, createSession, clearDisconnectDebounce]);
 
   const handleRestart = useCallback(async () => {
+    clearDisconnectDebounce();
     const oldId = sessionIdRef.current;
     persist(null);
     setWsUrl(null);
@@ -95,9 +157,10 @@ export function TerminalPanel({ className }: { className?: string }) {
       }
     }
     await createSession();
-  }, [persist, createSession]);
+  }, [persist, createSession, clearDisconnectDebounce]);
 
   const handleClose = useCallback(async () => {
+    clearDisconnectDebounce();
     const oldId = sessionIdRef.current;
     persist(null);
     setWsUrl(null);
@@ -109,7 +172,12 @@ export function TerminalPanel({ className }: { className?: string }) {
         /* already gone */
       }
     }
-  }, [persist]);
+  }, [persist, clearDisconnectDebounce]);
+
+  const handleOpenTerminal = useCallback(() => {
+    clearDisconnectDebounce();
+    void createSession();
+  }, [createSession, clearDisconnectDebounce]);
 
   if (initializing) {
     return (
@@ -125,7 +193,7 @@ export function TerminalPanel({ className }: { className?: string }) {
         <Span variant="muted" className="text-sm">
           {error}
         </Span>
-        <Button variant="secondary" size="sm" onClick={createSession}>
+        <Button variant="secondary" size="sm" onClick={handleOpenTerminal}>
           {t('terminal.retry', 'Retry')}
         </Button>
       </div>
@@ -138,7 +206,7 @@ export function TerminalPanel({ className }: { className?: string }) {
         <Span variant="muted" className="text-sm">
           {t('terminal.no_session', 'No terminal session')}
         </Span>
-        <Button variant="primary" size="sm" onClick={createSession}>
+        <Button variant="primary" size="sm" onClick={handleOpenTerminal}>
           {t('terminal.create', 'Open Terminal')}
         </Button>
       </div>
@@ -146,7 +214,7 @@ export function TerminalPanel({ className }: { className?: string }) {
   }
 
   return (
-    <div className={`flex h-full flex-col ${className ?? ''}`}>
+    <div className={`flex h-full min-h-0 flex-col ${className ?? ''}`}>
       {/* Title bar */}
       <div className="border-border bg-surface-100 dark:bg-dark-surface-200 flex shrink-0 items-center justify-between gap-2 border-b px-2 py-1.5">
         <Span variant="muted" className="text-xs font-medium">

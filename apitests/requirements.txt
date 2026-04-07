@@ -6,3 +6,4 @@ testcontainers[postgresql]
 testcontainers[nats]
 openai
 pytest_httpserver
+websocket-client

@@ -4,20 +4,16 @@ package terminalservice
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
-	"syscall"
 
-	"github.com/coder/websocket"
 	apiframework "github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/terminalstore"
 	"github.com/creack/pty"
-	"golang.org/x/sync/errgroup"
 )
 
-func (s *service) Attach(ctx context.Context, principal, id string, conn *websocket.Conn) error {
+func (s *service) Attach(ctx context.Context, principal, id string, conn io.ReadWriteCloser, resizeCh <-chan ResizeMsg) error {
 	ts := s.store()
 	row, err := ts.GetByIDAndPrincipal(ctx, id, principal)
 	if err != nil {
@@ -39,76 +35,67 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn *websoc
 		return apiframework.BadRequest("session already has an active connection")
 	}
 	defer sess.busy.Store(false)
-	defer func() { _ = s.Close(ctx, principal, id) }()
+	defer func() { _ = s.Close(context.Background(), principal, id) }()
 
 	tty := sess.tty
 	if tty == nil {
 		return ErrSessionNotFound
 	}
 
-	g, ctx := errgroup.WithContext(ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	g.Go(func() error {
-		// Closing the PTY master unblocks the reader goroutine.
-		defer func() {
-			if sess.tty != nil {
-				_ = sess.tty.Close()
-			}
-		}()
-		for {
-			typ, data, err := conn.Read(ctx)
-			if err != nil {
-				closeSt := websocket.CloseStatus(err)
-				if closeSt == websocket.StatusNormalClosure || closeSt == -1 {
-					return nil
-				}
-				return err
-			}
-			switch typ {
-			case websocket.MessageText:
-				var msg struct {
-					Type string `json:"type"`
-					Cols int    `json:"cols"`
-					Rows int    `json:"rows"`
-				}
-				if json.Unmarshal(data, &msg) == nil && msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
-					if err := pty.Setsize(tty, &pty.Winsize{
-						Rows: uint16(msg.Rows),
-						Cols: uint16(msg.Cols),
-					}); err != nil {
-						slog.Debug("terminal pty resize", "error", err)
-					}
-				}
-			case websocket.MessageBinary:
-				if _, err := tty.Write(data); err != nil {
-					return err
-				}
-			}
-		}
-	})
-
-	g.Go(func() error {
+	// PTY → WebSocket (stdout)
+	go func() {
+		defer cancel()
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := tty.Read(buf)
 			if n > 0 {
-				werr := conn.Write(ctx, websocket.MessageBinary, buf[:n])
-				if werr != nil {
-					return werr
+				if _, werr := conn.Write(buf[:n]); werr != nil {
+					slog.Debug("attach: pty->ws write error", "error", werr)
+					return
 				}
 			}
 			if err != nil {
-				if err == io.EOF || errors.Is(err, syscall.EIO) {
-					return nil
-				}
-				return err
+				slog.Debug("attach: pty read done", "error", err)
+				return
 			}
 		}
-	})
+	}()
 
-	err = g.Wait()
-	if err != nil && errors.Is(err, context.Canceled) {
-		err = nil
+	// WebSocket → PTY (stdin)
+	go func() {
+		defer cancel()
+		n, err := io.Copy(tty, conn)
+		slog.Debug("attach: ws->pty copy done", "bytes", n, "error", err)
+	}()
+
+	// Resize handler
+	if resizeCh != nil {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case msg, ok := <-resizeCh:
+					if !ok {
+						return
+					}
+					if msg.Cols > 0 && msg.Rows > 0 {
+						if err := pty.Setsize(tty, &pty.Winsize{
+							Rows: uint16(msg.Rows),
+							Cols: uint16(msg.Cols),
+						}); err != nil {
+							slog.Debug("terminal pty resize", "error", err)
+						}
+					}
+				}
+			}
+		}()
 	}
-	return err
+
+	// Block until session ends.
+	<-ctx.Done()
+	return nil
 }

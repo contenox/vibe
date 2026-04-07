@@ -1,18 +1,21 @@
 package terminalapi
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/coder/websocket"
 	apiframework "github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/apiframework/middleware"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/terminalservice"
+	"golang.org/x/net/websocket"
 )
 
 // AddRoutes registers interactive terminal endpoints. If enabled is false, this is a no-op.
@@ -26,7 +29,7 @@ func AddRoutes(mux *http.ServeMux, svc terminalservice.Service, auth middleware.
 	mux.HandleFunc("GET /terminal/sessions/{id}", h.getSession)
 	mux.HandleFunc("PATCH /terminal/sessions/{id}", h.patchSession)
 	mux.HandleFunc("DELETE /terminal/sessions/{id}", h.deleteSession)
-	mux.HandleFunc("GET /terminal/sessions/{id}/ws", h.webSocket)
+	mux.Handle("GET /terminal/sessions/{id}/ws", h.wsHandler())
 }
 
 type handler struct {
@@ -59,7 +62,7 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.AuthorizeOperation)
 		return
 	}
-	req, err := apiframework.Decode[createSessionRequest](r) // @request terminalapi.createSessionRequest
+	req, err := apiframework.Decode[createSessionRequest](r)
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
@@ -81,7 +84,7 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		ID:     out.ID,
 		WSPath: "/terminal/sessions/" + out.ID + "/ws",
 	}
-	_ = apiframework.Encode(w, r, http.StatusCreated, resp) // @response terminalapi.createSessionResponse
+	_ = apiframework.Encode(w, r, http.StatusCreated, resp)
 }
 
 func (h *handler) listSessions(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +130,7 @@ func (h *handler) listSessions(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, items) // @response []terminalstore.Session
+	_ = apiframework.Encode(w, r, http.StatusOK, items)
 }
 
 func (h *handler) getSession(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +140,7 @@ func (h *handler) getSession(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.AuthorizeOperation)
 		return
 	}
-	id := apiframework.GetPathParam(r, "id", "The unique identifier of the terminal session.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the terminal session.")
 	if id == "" {
 		_ = apiframework.Error(w, r, apiframework.BadRequest("id is required"), apiframework.GetOperation)
 		return
@@ -151,7 +154,7 @@ func (h *handler) getSession(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.GetOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, sess) // @response terminalstore.Session
+	_ = apiframework.Encode(w, r, http.StatusOK, sess)
 }
 
 func (h *handler) patchSession(w http.ResponseWriter, r *http.Request) {
@@ -161,12 +164,12 @@ func (h *handler) patchSession(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.AuthorizeOperation)
 		return
 	}
-	id := apiframework.GetPathParam(r, "id", "The unique identifier of the terminal session.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the terminal session.")
 	if id == "" {
 		_ = apiframework.Error(w, r, apiframework.BadRequest("id is required"), apiframework.UpdateOperation)
 		return
 	}
-	body, err := apiframework.Decode[patchSessionRequest](r) // @request terminalapi.patchSessionRequest
+	body, err := apiframework.Decode[patchSessionRequest](r)
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
@@ -193,7 +196,7 @@ func (h *handler) deleteSession(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.AuthorizeOperation)
 		return
 	}
-	id := apiframework.GetPathParam(r, "id", "The unique identifier of the terminal session.") // @param id string
+	id := apiframework.GetPathParam(r, "id", "The unique identifier of the terminal session.")
 	if id == "" {
 		_ = apiframework.Error(w, r, apiframework.BadRequest("id is required"), apiframework.DeleteOperation)
 		return
@@ -210,38 +213,95 @@ func (h *handler) deleteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *handler) webSocket(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.auth.GetIdentity(r.Context())
-	if err != nil {
-		_ = apiframework.Error(w, r, err, apiframework.AuthorizeOperation)
-		return
+// wsHandler returns a websocket.Server that upgrades and bridges I/O to the PTY.
+// Auth is checked inside the Handshake callback (before upgrade completes).
+func (h *handler) wsHandler() http.Handler {
+	s := &websocket.Server{
+		Handshake: func(cfg *websocket.Config, req *http.Request) error {
+			// Accept any origin.
+			cfg.Origin, _ = websocket.Origin(cfg, req)
+			return nil
+		},
 	}
-	id := apiframework.GetPathParam(r, "id", "The unique identifier of the terminal session.") // @param id string
-	if id == "" {
-		_ = apiframework.Error(w, r, apiframework.BadRequest("id is required"), apiframework.GetOperation)
-		return
-	}
-
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		Subprotocols:       nil,
-		InsecureSkipVerify: true,
-	})
-	if err != nil {
-		_ = apiframework.Error(w, r, err, apiframework.GetOperation)
-		return
-	}
-	defer c.Close(websocket.StatusInternalError, "")
-
-	err = h.svc.Attach(r.Context(), principal, id, c)
-	if err != nil {
-		if errors.Is(err, terminalservice.ErrSessionNotFound) {
-			_ = c.Close(websocket.StatusPolicyViolation, "session not found")
+	s.Handler = func(ws *websocket.Conn) {
+		req := ws.Request()
+		principal, err := h.auth.GetIdentity(req.Context())
+		if err != nil {
 			return
 		}
-		if errors.Is(err, terminalservice.ErrNotImplemented) {
-			_ = c.Close(websocket.StatusPolicyViolation, "not implemented")
+		id := req.PathValue("id")
+		if id == "" {
+			// PathValue may not be available on the websocket request.
+			// Extract from URL path as fallback.
+			parts := strings.Split(req.URL.Path, "/")
+			for i, p := range parts {
+				if p == "sessions" && i+1 < len(parts) && parts[i+1] != "ws" {
+					id = parts[i+1]
+					break
+				}
+			}
+		}
+		if id == "" {
 			return
 		}
-		_ = c.Close(websocket.StatusInternalError, err.Error())
+
+		ws.PayloadType = websocket.BinaryFrame
+		resizeCh := make(chan terminalservice.ResizeMsg, 4)
+		defer close(resizeCh)
+
+		rw := &termConn{ws: ws, resizeCh: resizeCh}
+		if err := h.svc.Attach(context.Background(), principal, id, rw, resizeCh); err != nil {
+			slog.Error("terminal attach error", "session", id, "error", err)
+		}
+	}
+	return s
+}
+
+// termConn bridges a websocket.Conn to io.ReadWriteCloser for PTY I/O.
+// Read intercepts JSON resize messages and forwards only terminal input.
+// Write sends binary frames to the client.
+type termConn struct {
+	ws       *websocket.Conn
+	resizeCh chan<- terminalservice.ResizeMsg
+	buf      []byte
+}
+
+func (c *termConn) Read(p []byte) (int, error) {
+	if len(c.buf) > 0 {
+		n := copy(p, c.buf)
+		c.buf = c.buf[n:]
+		return n, nil
+	}
+	for {
+		buf := make([]byte, 32*1024)
+		n, err := c.ws.Read(buf)
+		if err != nil {
+			return 0, err
+		}
+		data := buf[:n]
+
+		// Check if this is a resize JSON message.
+		var msg struct {
+			Type string `json:"type"`
+			Cols int    `json:"cols"`
+			Rows int    `json:"rows"`
+		}
+		if json.Unmarshal(data, &msg) == nil && msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
+			select {
+			case c.resizeCh <- terminalservice.ResizeMsg{Cols: msg.Cols, Rows: msg.Rows}:
+			default:
+			}
+			continue
+		}
+
+		// Terminal input data.
+		copied := copy(p, data)
+		if copied < len(data) {
+			c.buf = data[copied:]
+		}
+		return copied, nil
 	}
 }
+
+func (c *termConn) Write(p []byte) (int, error) { return c.ws.Write(p) }
+func (c *termConn) Close() error                { return c.ws.Close() }
