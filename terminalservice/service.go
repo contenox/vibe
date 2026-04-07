@@ -14,11 +14,10 @@ import (
 
 // CreateRequest is input for an interactive shell session.
 type CreateRequest struct {
-	CWD         string
-	WorkspaceID string // optional; persisted on the session row when set
-	Cols        int
-	Rows        int
-	Shell       string // optional; defaults from config
+	CWD   string
+	Cols  int
+	Rows  int
+	Shell string // optional; defaults from config
 }
 
 // CreateResponse is returned after a session is allocated.

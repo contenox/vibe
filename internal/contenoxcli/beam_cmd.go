@@ -75,7 +75,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		components.execService,
 		components.taskChainService,
 		components.vfsSvc,
-		contenoxPath,
+		filepath.Dir(contenoxPath),
 	)
 	defer func() {
 		if cleanupServer != nil {
@@ -117,10 +117,10 @@ func buildServerComponents(ctx context.Context, db libdb.DBManager, tenantID str
 	if err := serverapi.LoadConfig(config); err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
-	// When the PTY terminal is enabled without an explicit ceiling, default to the same
-	// directory tree Beam uses for VFS (contenox path) so cwd and file listing stay aligned.
+	// When the PTY terminal is enabled without an explicit ceiling, default to the project
+	// root (parent of .contenox) so terminal cwd and file listing cover the whole project.
 	if strings.EqualFold(strings.TrimSpace(config.TerminalEnabled), "true") && strings.TrimSpace(config.TerminalAllowedRoot) == "" {
-		abs, err := filepath.Abs(contenoxPath)
+		abs, err := filepath.Abs(filepath.Dir(contenoxPath))
 		if err != nil {
 			return nil, fmt.Errorf("default terminal_allowed_root: %w", err)
 		}
@@ -261,8 +261,10 @@ func buildServerComponents(ctx context.Context, db libdb.DBManager, tenantID str
 	embedService := embedservice.New(repo, defaultModel, defaultProvider)
 	execService := execservice.NewExec(ctx, repo)
 
-	vfsSvc := vfsservice.NewLocalFS(contenoxPath)
-	taskChainService := taskchainservice.NewVFS(vfsSvc)
+	projectRoot := filepath.Dir(contenoxPath)
+	vfsSvc := vfsservice.NewLocalFS(projectRoot)
+	chainVFS := vfsservice.NewLocalFS(contenoxPath)
+	taskChainService := taskchainservice.NewVFS(chainVFS)
 	taskChainService = taskchainservice.WithActivityTracker(taskChainService, tracker)
 
 	// Cleanup function.

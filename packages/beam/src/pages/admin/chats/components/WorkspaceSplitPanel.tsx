@@ -1,5 +1,5 @@
 import Editor, { type OnMount } from '@monaco-editor/react';
-import { Button, FileTree, type FileTreeNode, InlineNotice, Panel, Span, Spinner } from '@contenox/ui';
+import { Button, FileTree, type FileTreeNode, InlineNotice, Panel, Span, Spinner, Tabs, type Tab } from '@contenox/ui';
 import { ChevronRight, Save, TerminalSquare, FolderOpen } from 'lucide-react';
 import { t } from 'i18next';
 import {
@@ -33,27 +33,101 @@ export type WorkspaceSplitHandle = {
 function monacoLanguageForPath(p: string): string {
   const ext = p.split('.').pop()?.toLowerCase() ?? '';
   const map: Record<string, string> = {
-    md: 'markdown',
-    mdx: 'markdown',
-    json: 'json',
-    ts: 'typescript',
-    tsx: 'typescript',
+    // Web
+    html: 'html',
+    htm: 'html',
+    css: 'css',
+    scss: 'scss',
+    less: 'less',
+    // JavaScript / TypeScript
     js: 'javascript',
     jsx: 'javascript',
     mjs: 'javascript',
     cjs: 'javascript',
-    css: 'css',
-    scss: 'scss',
-    html: 'html',
-    go: 'go',
-    py: 'python',
-    rs: 'rust',
+    ts: 'typescript',
+    tsx: 'typescript',
+    mts: 'typescript',
+    cts: 'typescript',
+    // Data / Config
+    json: 'json',
+    jsonc: 'json',
+    json5: 'json',
     yml: 'yaml',
     yaml: 'yaml',
     toml: 'ini',
+    ini: 'ini',
+    env: 'ini',
+    xml: 'xml',
+    svg: 'xml',
+    csv: 'plaintext',
+    // Markdown
+    md: 'markdown',
+    mdx: 'markdown',
+    // Systems
+    go: 'go',
+    rs: 'rust',
+    c: 'c',
+    h: 'c',
+    cpp: 'cpp',
+    cc: 'cpp',
+    cxx: 'cpp',
+    hpp: 'cpp',
+    cs: 'csharp',
+    java: 'java',
+    kt: 'kotlin',
+    kts: 'kotlin',
+    swift: 'swift',
+    // Scripting
+    py: 'python',
+    pyi: 'python',
+    rb: 'ruby',
+    php: 'php',
+    pl: 'perl',
+    lua: 'lua',
+    r: 'r',
+    R: 'r',
+    // Shell
     sh: 'shell',
+    bash: 'shell',
+    zsh: 'shell',
+    fish: 'shell',
+    ps1: 'powershell',
+    bat: 'bat',
+    cmd: 'bat',
+    // Database
     sql: 'sql',
+    // DevOps / Infra
+    dockerfile: 'dockerfile',
+    tf: 'hcl',
+    hcl: 'hcl',
+    proto: 'protobuf',
+    graphql: 'graphql',
+    gql: 'graphql',
+    // Misc
+    makefile: 'plaintext',
+    mk: 'plaintext',
+    gitignore: 'plaintext',
+    dockerignore: 'plaintext',
+    mod: 'go',
+    sum: 'plaintext',
+    lock: 'json',
+    txt: 'plaintext',
+    log: 'plaintext',
+    diff: 'plaintext',
+    patch: 'plaintext',
   };
+  // Handle extensionless filenames like Dockerfile, Makefile
+  const basename = p.split('/').pop()?.toLowerCase() ?? '';
+  if (ext === '' || !map[ext]) {
+    const nameMap: Record<string, string> = {
+      dockerfile: 'dockerfile',
+      makefile: 'plaintext',
+      gemfile: 'ruby',
+      rakefile: 'ruby',
+      vagrantfile: 'ruby',
+    };
+    return nameMap[basename] ?? map[ext] ?? 'plaintext';
+  }
   return map[ext] ?? 'plaintext';
 }
 
@@ -229,32 +303,15 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
         className,
       )}>
       {/* Tab bar */}
-      <div className="border-border flex shrink-0 items-center gap-0 border-b">
-        <button
-          type="button"
-          onClick={() => switchTab('files')}
-          className={cn(
-            'flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors',
-            workspaceTab === 'files'
-              ? 'border-primary text-primary dark:border-dark-primary dark:text-dark-primary'
-              : 'border-transparent text-text-muted dark:text-dark-text-muted hover:text-text dark:hover:text-dark-text',
-          )}>
-          <FolderOpen className="h-3.5 w-3.5" />
-          {t('chat.workspace_tab_files', 'Files')}
-        </button>
-        <button
-          type="button"
-          onClick={() => switchTab('terminal')}
-          className={cn(
-            'flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors',
-            workspaceTab === 'terminal'
-              ? 'border-primary text-primary dark:border-dark-primary dark:text-dark-primary'
-              : 'border-transparent text-text-muted dark:text-dark-text-muted hover:text-text dark:hover:text-dark-text',
-          )}>
-          <TerminalSquare className="h-3.5 w-3.5" />
-          {t('chat.workspace_tab_terminal', 'Terminal')}
-        </button>
-      </div>
+      <Tabs
+        tabs={[
+          { id: 'files', label: <><FolderOpen className="h-3.5 w-3.5" /> {t('chat.workspace_tab_files', 'Files')}</> },
+          { id: 'terminal', label: <><TerminalSquare className="h-3.5 w-3.5" /> {t('chat.workspace_tab_terminal', 'Terminal')}</> },
+        ] satisfies Tab[]}
+        activeTab={workspaceTab}
+        onTabChange={switchTab}
+        className="border-border shrink-0 border-b"
+      />
 
       {workspaceTab === 'terminal' ? (
         <Suspense
@@ -380,7 +437,7 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
                       fontSize: 14,
                       lineHeight: 22,
                       padding: { top: 12, bottom: 12 },
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontFamily: 'var(--font-mono)',
                       fontLigatures: false,
                       renderWhitespace: 'selection',
                       scrollBeyondLastLine: false,

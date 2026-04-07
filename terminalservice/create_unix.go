@@ -16,6 +16,9 @@ import (
 )
 
 func (s *service) Create(ctx context.Context, principal string, req CreateRequest) (*CreateResponse, error) {
+	if req.CWD == "" {
+		req.CWD = s.cfg.AllowedRoot
+	}
 	if err := CwdUnderRoot(s.cfg.AllowedRoot, req.CWD); err != nil {
 		return nil, apiframework.BadRequest(err.Error())
 	}
@@ -74,7 +77,7 @@ func (s *service) Create(ctx context.Context, principal string, req CreateReques
 		Rows:           rows,
 		Status:         terminalstore.SessionStatusActive,
 		NodeInstanceID: s.nodeInstanceID,
-		WorkspaceID:    req.WorkspaceID,
+		WorkspaceID:    "",
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

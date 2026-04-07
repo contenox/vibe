@@ -1,10 +1,8 @@
 import {
   EmptyState,
-  H2,
-  P,
+  LoadingState,
   Panel,
   Section,
-  Spinner,
   Table,
   TableCell,
   TableRow,
@@ -28,17 +26,9 @@ export default function RuntimeStateSection({
   const { t } = useTranslation();
 
   return (
-    <Section>
-      <H2 variant="sectionTitle" className="mb-2">
-        {t('state.runtime_title')}
-      </H2>
-      <P variant="muted" className="mb-4 max-w-2xl text-sm">
-        {t('state.runtime_intro')}
-      </P>
+    <Section title={t('state.runtime_title')} description={t('state.runtime_intro')}>
       {isLoading && (
-        <div className="flex justify-center py-8">
-          <Spinner size="lg" />
-        </div>
+        <LoadingState />
       )}
       {isError && (
         <Panel variant="error" className="mb-4">

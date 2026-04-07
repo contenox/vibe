@@ -3,18 +3,19 @@
 
 @theme {
   /* ========== Light Mode Palettes ========== */
-  /* Light Mode - Blue Primary */
-  --color-primary-50: #f0f4ff;
-  --color-primary-100: #d6e4ff;
-  --color-primary-200: #adc8ff;
-  --color-primary-300: #85a8f8;
-  --color-primary-400: #6690f0;
-  --color-primary-500: #3b82f6; /* Base (WCAG AA compliant) */
-  --color-primary-600: #2563eb;
-  --color-primary-700: #1d4ed8;
-  --color-primary-800: #1e40af;
-  --color-primary-900: #1e3a8a;
+  /* Light Mode - Emerald Primary (brand color) */
+  --color-primary-50: #ecfdf5;
+  --color-primary-100: #d1fae5;
+  --color-primary-200: #a7f3d0;
+  --color-primary-300: #6ee7b7;
+  --color-primary-400: #34d399;
+  --color-primary-500: #10b981; /* Base — Tailwind emerald-500 */
+  --color-primary-600: #059669;
+  --color-primary-700: #047857;
+  --color-primary-800: #065f46;
+  --color-primary-900: #064e3b;
   --color-primary: var(--color-primary-500);
+  --color-brand: var(--color-primary-500);
 
   /* Light Mode Secondary - Neutral Slate */
   --color-secondary-50: #f8fafc;
@@ -29,17 +30,17 @@
   --color-secondary-900: #0f172a;
   --color-secondary: var(--color-secondary-500);
 
-  /* Dark Mode Secondary - Cooler Gray */
-  --color-dark-secondary-50: #f8fafc; /* Very light blue-gray */
-  --color-dark-secondary-100: #f1f5f9; /* Light blue-gray */
-  --color-dark-secondary-200: #e2e8f0; /* Soft blue-gray */
-  --color-dark-secondary-300: #cbd5e1; /* Gentle blue-gray */
-  --color-dark-secondary-400: #94a3b8; /* Muted steel */
-  --color-dark-secondary-500: #64748b; /* Cool slate (Base) */
-  --color-dark-secondary-600: #475569; /* Steely dark slate */
-  --color-dark-secondary-700: #334155; /* Deep gray-blue */
-  --color-dark-secondary-800: #1e293b; /* Dark navy-slate */
-  --color-dark-secondary-900: #0f172a; /* Almost black navy */
+  /* Dark Mode Secondary — near-black depth */
+  --color-dark-secondary-50: #f5f5f3;
+  --color-dark-secondary-100: #e8e8e4;
+  --color-dark-secondary-200: #d0d0cb;
+  --color-dark-secondary-300: #a8a8a0;
+  --color-dark-secondary-400: #7e7e76;
+  --color-dark-secondary-500: #5a5a54;
+  --color-dark-secondary-600: #424240;
+  --color-dark-secondary-700: #2a2a28;
+  --color-dark-secondary-800: #1a1a18;
+  --color-dark-secondary-900: #0f0f0e;
   --color-dark-secondary: var(--color-dark-secondary-500);
 
   /* ========== Light Mode Error Colors ========== */
@@ -70,31 +71,31 @@
   );
 
   /* ========== Dark Mode Palettes ========== */
-  /* Primary (2b1a31) */
-  /* ========== Dark Mode Primary Colors (Cool Blue) ========== */
-  --color-dark-primary-50: #e8f1ff;
-  --color-dark-primary-100: #c5d7f2;
-  --color-dark-primary-200: #9fbde5;
-  --color-dark-primary-300: #7aa3d8;
-  --color-dark-primary-400: #5689cb;
-  --color-dark-primary-500: #3b82f6; /*  */
-  --color-dark-primary-600: #2563eb;
-  --color-dark-primary-700: #1d4ed8;
-  --color-dark-primary-800: #1e40af;
-  --color-dark-primary-900: #1e3a8a;
+  /* ========== Dark Mode Primary Colors (Emerald) ========== */
+  --color-dark-primary-50: #ecfdf5;
+  --color-dark-primary-100: #d1fae5;
+  --color-dark-primary-200: #a7f3d0;
+  --color-dark-primary-300: #6ee7b7;
+  --color-dark-primary-400: #34d399;
+  --color-dark-primary-500: #10b981; /* Emerald-500 */
+  --color-dark-primary-600: #059669;
+  --color-dark-primary-700: #047857;
+  --color-dark-primary-800: #065f46;
+  --color-dark-primary-900: #064e3b;
   --color-dark-primary: var(--color-dark-primary-500);
+  --color-dark-brand: var(--color-dark-primary-500);
 
-  /* Dark Mode Secondary - Cooler Gray */
-  --color-dark-secondary-50: #f8fafc; /* Very light blue-gray */
-  --color-dark-secondary-100: #f1f5f9; /* Light blue-gray */
-  --color-dark-secondary-200: #e2e8f0; /* Soft blue-gray */
-  --color-dark-secondary-300: #cbd5e1; /* Gentle blue-gray */
-  --color-dark-secondary-400: #94a3b8; /* Muted steel */
-  --color-dark-secondary-500: #64748b; /* Cool slate (Base) */
-  --color-dark-secondary-600: #475569; /* Steely dark slate */
-  --color-dark-secondary-700: #334155; /* Deep gray-blue */
-  --color-dark-secondary-800: #1e293b; /* Dark navy-slate */
-  --color-dark-secondary-900: #0f172a; /* Almost black navy */
+  /* Dark Mode Secondary — near-black depth */
+  --color-dark-secondary-50: #f5f5f3;
+  --color-dark-secondary-100: #e8e8e4;
+  --color-dark-secondary-200: #d0d0cb;
+  --color-dark-secondary-300: #a8a8a0;
+  --color-dark-secondary-400: #7e7e76;
+  --color-dark-secondary-500: #5a5a54;
+  --color-dark-secondary-600: #424240;
+  --color-dark-secondary-700: #2a2a28;
+  --color-dark-secondary-800: #1a1a18;
+  --color-dark-secondary-900: #0f0f0e;
   --color-dark-secondary: var(--color-dark-secondary-500);
 
   /* Accent (teal) */
@@ -215,10 +216,11 @@
   );
 
   /* ========== Typography ========== */
-  --font-display: "Satoshi", system-ui, sans-serif;
-  --font-body: "Inter", -apple-system, sans-serif;
+  --font-display: "Geist", system-ui, sans-serif;
+  --font-body: "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
   --color-text: var(--color-dark-text);
-  --color-dark-text: #e2e5e9; /* Soft white */
+  --color-dark-text: #ededea; /* Near-white, slight warmth */
   --color-dark-text-surface: var(--color-dark-text);
   --color-dark-text-surface-inverted: var(--color-dark-text-inverted);
 
@@ -239,9 +241,9 @@
   --color-dark-text-primary: var(--color-dark-primary-500); /* Purple accent */
   --color-dark-text-primary-hover: var(--color-dark-primary-200);
   --color-dark-text-secondary: var(--color-dark-secondary-700);
-  --color-dark-text-accent: #6cf0c1; /* Complementary teal */
+  --color-dark-text-accent: #6ee7b7; /* Emerald-300 — matches primary family */
   --color-dark-text-error: var(--color-dark-error-400);
-  --color-dark-text-muted: #8b929d; /* Cool gray */
+  --color-dark-text-muted: #7a7a72; /* Muted — visible on near-black */
   --color-dark-text-inverted: var(--color-dark-surface-50);
   --color-dark-text-surface: var(--color-dark-text);
   --color-dark-text-surface-inverted: var(--color-dark-text-inverted);
@@ -259,18 +261,20 @@
   --color-surface-900: #212529; /* Darkest gray */
   --color-surface: var(--color-surface-50);
 
-  /* ========== Dark Mode Surface Colors (Cool Blue-Gray) ========== */
-  --color-dark-surface-50: #0d1117; /* Bridge between bg-light and surface-100 */
-  --color-dark-surface-100: #111827; /* rich slate-blue */
-  --color-dark-surface-200: #182032; /* Dark steel blue */
-  --color-dark-surface-300: #1f283d; /* Medium navy */
-  --color-dark-surface-400: #263048; /* Soft blue-gray */
-  --color-dark-surface-500: #2d3853; /* Neutral slate */
-  --color-dark-surface-600: #34405e; /* Muted cobalt */
-  --color-dark-surface-700: #3b4869; /* Twilight blue */
-  --color-dark-surface-800: #425075; /* Stone blue */
-  --color-dark-surface-900: #495880; /* Dusty periwinkle */
-  --color-dark-surface: var(--color-dark-surface-300);
+  /* ========== Dark Mode Surface Colors (Near-Black) ========== */
+  /* Matches enterprise/site slate overrides: oklch(0.10-0.52, 0.002, 60) */
+  /* True near-black for the "neon terminal" aesthetic                     */
+  --color-dark-surface-50: #080808;  /* True black */
+  --color-dark-surface-100: #0c0c0b; /* App background */
+  --color-dark-surface-200: #111110; /* Card/panel bg */
+  --color-dark-surface-300: #181817; /* Elevated surface */
+  --color-dark-surface-400: #222221; /* Borders, dividers */
+  --color-dark-surface-500: #2e2e2c; /* Subtle contrast */
+  --color-dark-surface-600: #3a3a38; /* Muted interactive */
+  --color-dark-surface-700: #4a4a47; /* Mid gray */
+  --color-dark-surface-800: #5e5e5a; /* Light slate */
+  --color-dark-surface-900: #737370; /* Lightest surface */
+  --color-dark-surface: var(--color-dark-surface-200);
 
   /* ========== Text Surface Colors ========== */
   --color-surface: var(--color-surface-50);
@@ -279,12 +283,18 @@
   --color-dark-text-surface: var(--color-dark-text);
   --color-dark-text-surface-inverted: var(--color-dark-text-inverted);
 
-  /* ========== Fonts, Spacing, Easing ========== */
-  --font-display: "Satoshi", sans-serif;
-  --font-body: "Inter", sans-serif;
+  /* ========== Fonts, Spacing, Radius, Easing ========== */
+  --font-display: "Geist", system-ui, sans-serif;
+  --font-body: "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
   --spacing-18: 4.5rem;
   --spacing-22: 5.5rem;
   --spacing-30: 7.5rem;
+  --radius: 0.625rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
   --breakpoint-3xl: 1920px;
   --breakpoint-short: 720px;
   --ease-fluid: cubic-bezier(0.3, 0, 0, 1);

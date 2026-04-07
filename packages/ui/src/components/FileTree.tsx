@@ -142,7 +142,7 @@ function FileTreeItem({
     "text-text dark:text-dark-text",
     "hover:bg-surface-100 dark:hover:bg-dark-surface-200",
     isSelected &&
-      "bg-primary-50 text-primary-700 dark:bg-dark-primary-900 dark:text-dark-primary-300",
+      "bg-primary-50/50 text-primary-700 dark:bg-dark-primary-900/30 dark:text-dark-primary-400",
   );
 
   return (

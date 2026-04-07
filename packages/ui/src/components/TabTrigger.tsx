@@ -18,9 +18,9 @@ export const TabTrigger = forwardRef<HTMLButtonElement, TabTriggerProps>(
         "focus:outline-none focus-visible:ring-1 focus-visible:ring-primary/20",
         "hover:bg-white/5",
         active
-          ? "text-primary-500 after:scale-x-100"
+          ? "text-primary-500 dark:text-dark-primary-400 after:scale-x-100"
           : "text-foreground/80 after:scale-x-0 group-hover:after:scale-x-100",
-        "after:absolute after:inset-x-3 after:bottom-0 after:h-px after:bg-primary-400/60 after:transition-transform after:origin-left",
+        "after:absolute after:inset-x-3 after:bottom-0 after:h-px after:bg-primary-500/60 dark:after:bg-dark-primary-400/60 after:transition-transform after:origin-left",
         className,
       )}
     >

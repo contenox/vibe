@@ -21,12 +21,7 @@ func WithActivityTracker(svc Service, tracker libtracker.ActivityTracker) Servic
 var _ Service = (*activityTrackerDecorator)(nil)
 
 func (d *activityTrackerDecorator) Create(ctx context.Context, principal string, req CreateRequest) (*CreateResponse, error) {
-	kv := []any{"cols", req.Cols, "rows", req.Rows}
-	if req.WorkspaceID != "" {
-		kv = append(kv, "workspaceId", req.WorkspaceID)
-	} else {
-		kv = append(kv, "cwdSet", true)
-	}
+	kv := []any{"cols", req.Cols, "rows", req.Rows, "cwd", req.CWD}
 	reportErr, reportChange, end := d.tracker.Start(ctx, "create", "terminal_session", kv...)
 	defer end()
 	out, err := d.svc.Create(ctx, principal, req)
@@ -34,7 +29,7 @@ func (d *activityTrackerDecorator) Create(ctx context.Context, principal string,
 		reportErr(err)
 		return nil, err
 	}
-	reportChange(out.ID, map[string]string{"id": out.ID, "workspaceId": req.WorkspaceID})
+	reportChange(out.ID, map[string]string{"id": out.ID})
 	return out, nil
 }
 

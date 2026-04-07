@@ -3,8 +3,7 @@ import {
   EmptyState,
   ErrorState,
   Input,
-  Panel,
-  Spinner,
+  LoadingState,
   Table,
   TableCell,
   TableRow,
@@ -54,11 +53,7 @@ export default function ChainsList({
   };
 
   if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Spinner size="lg" />
-      </div>
-    );
+    return <LoadingState />;
   }
 
   if (error) {

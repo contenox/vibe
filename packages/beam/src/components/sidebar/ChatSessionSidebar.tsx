@@ -67,7 +67,7 @@ export function ChatSessionSidebar({ setIsOpen }: { setIsOpen: (open: boolean) =
                 className={cn(
                   'block rounded-lg py-2 pr-2 pl-4 text-left transition-colors',
                   isActive
-                    ? 'bg-primary-100 dark:bg-dark-primary-900 text-text font-medium'
+                    ? 'bg-primary-50/50 dark:bg-dark-primary-900/30 text-primary-700 dark:text-dark-primary-400 font-medium'
                     : 'text-text hover:bg-surface-100 dark:hover:bg-dark-surface-100',
                 )}>
                 <Span className="line-clamp-1 block text-sm">{chat.model || chat.id}</Span>

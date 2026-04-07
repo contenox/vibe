@@ -3,9 +3,11 @@ import {
   Button,
   Checkbox,
   Collapsible,
+  EmptyState,
   Form,
   FormField,
   Input,
+  LoadingState,
   P,
   Panel,
   Section,
@@ -124,7 +126,7 @@ export default function ActivePlanSection({
   if (isLoading) {
     return (
       <Section title={t('plans.active_title')}>
-        <P variant="muted">{t('plans.active_loading')}</P>
+        <LoadingState message={t('plans.active_loading')} />
       </Section>
     );
   }
@@ -132,9 +134,7 @@ export default function ActivePlanSection({
   if (active == null) {
     return (
       <Section title={t('plans.active_title')}>
-        <Panel variant="bordered" className="mt-4 py-8 text-center">
-          <Span variant="muted">{t('plans.no_active')}</Span>
-        </Panel>
+        <EmptyState title={t('plans.no_active')} className="mt-4" />
       </Section>
     );
   }

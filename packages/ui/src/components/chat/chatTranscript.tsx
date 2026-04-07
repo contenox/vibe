@@ -35,7 +35,7 @@ export const chatTranscriptMarkdownComponents: Components = {
 
   blockquote: ({ children, ...props }: React.ComponentPropsWithoutRef<"blockquote">) => (
     <blockquote
-      className="border-primary-300 dark:border-dark-primary-400 bg-primary-50 text-text dark:bg-dark-surface-600 dark:text-dark-text my-3 rounded-r-lg border-l-4 py-2 pl-4"
+      className="border-primary-400 dark:border-dark-primary-500 bg-surface-50/50 text-text dark:bg-dark-surface-300/20 dark:text-dark-text my-3 rounded-r-lg border-l-4 py-2 pl-4"
       {...props}
     >
       {children}
@@ -53,7 +53,7 @@ export function ChatStreamThinkingBox({
   return (
     <div
       className={cn(
-        "border-primary-200 bg-primary-50/80 dark:bg-dark-surface-600/50 text-text-muted dark:text-dark-text-muted mb-3 max-h-48 overflow-auto rounded-md border px-3 py-2 font-mono text-xs whitespace-pre-wrap",
+        "border-primary-300/50 bg-surface-50/60 dark:border-dark-primary-600/40 dark:bg-dark-surface-300/30 text-text-muted dark:text-dark-text-muted mb-3 max-h-48 overflow-auto rounded-md border px-3 py-2 font-mono text-xs whitespace-pre-wrap",
         className,
       )}
     >

@@ -1,4 +1,4 @@
-import { Button, Card, FormField, H3, Input, Select, Span, Tooltip } from '@contenox/ui';
+import { Button, Card, FormField, H3, InlineNotice, Input, Select, Span, Tooltip } from '@contenox/ui';
 import { HelpCircle, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { FormTransition, OperatorTerm } from '../../../../../../lib/types';
@@ -120,7 +120,7 @@ export default function TransitionEditor({
                   value={b.when || ''}
                   onChange={e => updateBranch(i, { when: e.target.value })}
                   placeholder={t('workflow.condition_placeholder')}
-                  className={b.operator !== 'default' ? 'border-blue-300' : ''}
+                  className={b.operator !== 'default' ? 'border-info-300' : ''}
                 />
                 {b.operator !== 'default' && (
                   <p className="text-muted-foreground mt-1 text-xs">
@@ -226,16 +226,14 @@ export default function TransitionEditor({
               </div>
 
               {b.compose?.strategy && b.compose?.with_var && (
-                <div className="mt-3 rounded-md bg-blue-50 p-3">
-                  <p className="text-sm text-blue-800">
-                    {b.compose.strategy === 'override' &&
-                      `Output will override ${b.compose.with_var}`}
-                    {b.compose.strategy === 'merge_chat_histories' &&
-                      `Chat histories will be merged`}
-                    {b.compose.strategy === 'append_string_to_chat_history' &&
-                      `Output will be appended to chat history`}
-                  </p>
-                </div>
+                <InlineNotice variant="info" className="mt-3">
+                  {b.compose.strategy === 'override' &&
+                    `Output will override ${b.compose.with_var}`}
+                  {b.compose.strategy === 'merge_chat_histories' &&
+                    `Chat histories will be merged`}
+                  {b.compose.strategy === 'append_string_to_chat_history' &&
+                    `Output will be appended to chat history`}
+                </InlineNotice>
               )}
             </div>
 
@@ -256,13 +254,11 @@ export default function TransitionEditor({
           {t('workflow.add_branch')}
         </Button>
 
-        <div className="mt-2 rounded-md bg-amber-50 p-3">
-          <p className="text-xs text-amber-800">
-            <strong>Note:</strong> Compose operations happen BEFORE the transition. For branches
-            going to "end", compose configurations prepare the final workflow output (e.g.,
-            appending messages to chat history).
-          </p>
-        </div>
+        <InlineNotice variant="warning" className="mt-2">
+          <strong>Note:</strong> Compose operations happen BEFORE the transition. For branches
+          going to &quot;end&quot;, compose configurations prepare the final workflow output (e.g.,
+          appending messages to chat history).
+        </InlineNotice>
       </Card>
     </div>
   );

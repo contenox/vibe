@@ -35,7 +35,6 @@ import (
 	"github.com/contenox/contenox/internal/taskeventsapi"
 	"github.com/contenox/contenox/internal/terminalapi"
 	"github.com/contenox/contenox/internal/vfsapi"
-	"github.com/contenox/contenox/internal/workspaceapi"
 	libbus "github.com/contenox/contenox/libbus"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libroutine"
@@ -51,7 +50,6 @@ import (
 	"github.com/contenox/contenox/taskengine"
 	"github.com/contenox/contenox/terminalservice"
 	"github.com/contenox/contenox/vfsservice"
-	"github.com/contenox/contenox/workspaceservice"
 )
 
 func New(
@@ -181,22 +179,12 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("terminal config: %w", err)
 	}
-	workspaceCeiling := strings.TrimSpace(config.WorkspaceAllowedRoot)
-	if workspaceCeiling == "" {
-		workspaceCeiling = termCfg.AllowedRoot
-	}
-	var wsSvc workspaceservice.Service
-	if workspaceCeiling != "" {
-		wsSvc = workspaceservice.New(dbInstance, workspaceCeiling, strings.TrimSpace(vfsRoot))
-		wsSvc = workspaceservice.WithActivityTracker(wsSvc, serveropsChainedTracker)
-		workspaceapi.AddRoutes(mux, wsSvc, auth)
-	}
 	termSvc, err := terminalservice.New(termCfg, dbInstance, nodeInstanceID)
 	if err != nil {
 		return nil, fmt.Errorf("terminal service: %w", err)
 	}
 	termSvc = terminalservice.WithActivityTracker(termSvc, serveropsChainedTracker)
-	terminalapi.AddRoutes(mux, termSvc, auth, termCfg.Enabled, wsSvc, workspaceCeiling != "")
+	terminalapi.AddRoutes(mux, termSvc, auth, termCfg.Enabled)
 	termPrevCleanup := cleanup
 	cleanup = func() error {
 		_ = termSvc.CloseAll(context.Background())
@@ -230,12 +218,10 @@ type Config struct {
 	ValkeyPassword          string `json:"valkey_password"`
 	// Interactive PTY terminal (Beam / UI). See terminalservice.ParseEnv.
 	TerminalEnabled string `json:"terminal_enabled"`
-	// Filesystem ceiling for terminal cwd and (by default) workspace paths. Beam CLI defaults this to the contenox directory when terminal_enabled=true and this is unset.
+	// Filesystem ceiling for terminal cwd. Beam CLI defaults to the project root (parent of .contenox) when terminal_enabled=true and this is unset.
 	TerminalAllowedRoot string `json:"terminal_allowed_root"`
 	TerminalMaxSessions string `json:"terminal_max_sessions"`
-	TerminalShell       string `json:"terminal_shell"`
-	// Optional security ceiling for user workspaces; defaults to terminal_allowed_root when unset.
-	WorkspaceAllowedRoot string `json:"workspace_allowed_root"`
+	TerminalShell string `json:"terminal_shell"`
 }
 
 func LoadConfig[T any](cfg *T) error {

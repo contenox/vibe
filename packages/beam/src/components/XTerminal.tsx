@@ -34,7 +34,7 @@ export function XTerminal({ wsUrl, onDisconnect, className }: XTerminalProps) {
     // ── Terminal instance ──────────────────────────────────────────
     const term = new Terminal({
       cursorBlink: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontFamily: 'var(--font-mono)',
       fontSize: 14,
       lineHeight: 1.2,
       theme,

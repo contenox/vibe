@@ -1,4 +1,4 @@
-import { Badge, Button, Panel, Section, Span, Table, TableCell, TableRow, Tooltip } from '@contenox/ui';
+import { Badge, Button, EmptyState, Section, Span, Table, TableCell, TableRow, Tooltip } from '@contenox/ui';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
@@ -39,9 +39,7 @@ export default function PlanListSection({ plans, activePlanName = null }: Props)
   return (
     <Section title={t('plans.list_title')}>
       {!sorted.length ? (
-        <Panel variant="bordered" className="mt-4 py-8 text-center">
-          <Span variant="muted">{t('plans.list_empty')}</Span>
-        </Panel>
+        <EmptyState title={t('plans.list_empty')} className="mt-4" />
       ) : (
         <Table
           className="mt-4"

@@ -4,6 +4,7 @@ import { cn } from "../utils";
 type TypographyVariant =
   | "hero"
   | "lead"
+  | "page"
   | "cardTitle"
   | "cardSubtitle"
   | "footerTitle"
@@ -25,12 +26,14 @@ export function H1({ children, className, variant }: TypographyProps) {
   return (
     <h1
       className={cn(
-        "font-bold text-text dark:text-dark-text",
+        "text-text dark:text-dark-text",
         variant === "hero"
-          ? "text-5xl md:text-6xl leading-tight"
+          ? "text-5xl md:text-6xl font-bold leading-tight"
           : variant === "sectionTitle"
             ? "text-4xl font-display font-bold"
-            : "text-2xl",
+            : variant === "page"
+              ? "text-2xl font-semibold"
+              : "text-2xl font-bold",
         className,
       )}
     >

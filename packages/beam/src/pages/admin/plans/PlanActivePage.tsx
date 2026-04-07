@@ -1,4 +1,4 @@
-import { Button, ErrorState, GridLayout, P, Page, Panel, Section } from '@contenox/ui';
+import { Button, ErrorState, GridLayout, H1, P, Page, Panel, Section } from '@contenox/ui';
 import { ArrowLeft } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -50,7 +50,7 @@ export default function PlanActivePage() {
               {t('plans.back_to_list')}
             </Button>
           </Link>
-          <h1 className="text-2xl font-semibold">{t('plans.workspace_page_title')}</h1>
+          <H1 variant="page">{t('plans.workspace_page_title')}</H1>
           <P variant="muted" className="mt-2 text-sm">
             {t('plans.workspace_page_description')}
           </P>

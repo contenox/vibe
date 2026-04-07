@@ -1,4 +1,4 @@
-import { ErrorState, GridLayout, H2, LoadingState, P, Panel } from '@contenox/ui';
+import { EmptyState, ErrorState, GridLayout, LoadingState, Section } from '@contenox/ui';
 import { t } from 'i18next';
 import { useState } from 'react';
 import {
@@ -66,11 +66,7 @@ export default function BackendsSection() {
   return (
     <GridLayout variant="body" columns={2} responsive={{ base: 1, lg: 2 }} className="gap-6">
       <div className="space-y-6">
-        <Panel variant="surface" className="m-0 p-6">
-          <H2 variant="sectionTitle" className="mb-4">
-            {t('backends.manage_title')}
-          </H2>
-
+        <Section title={t('backends.manage_title')}>
           <div className="space-y-4">
             {backends && backends.length > 0 ? (
               backends.map(backend => (
@@ -82,19 +78,13 @@ export default function BackendsSection() {
                 />
               ))
             ) : (
-              <Panel variant="bordered" className="py-12 text-center">
-                <div className="text-text-muted dark:text-dark-text-muted">
-                  <P variant="muted" className="mb-2">
-                    {t('backends.empty_title')}
-                  </P>
-                  <P variant="muted" className="text-sm">
-                    {t('backends.empty_description')}
-                  </P>
-                </div>
-              </Panel>
+              <EmptyState
+                title={t('backends.empty_title')}
+                description={t('backends.empty_description')}
+              />
             )}
           </div>
-        </Panel>
+        </Section>
       </div>
 
       <div className="space-y-6">

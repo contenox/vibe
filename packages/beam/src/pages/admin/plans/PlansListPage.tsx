@@ -1,4 +1,4 @@
-import { Button, ErrorState, GridLayout, LoadingState, P, Page, Panel, Section } from '@contenox/ui';
+import { Button, ErrorState, GridLayout, H1, LoadingState, P, Page, Panel, Section } from '@contenox/ui';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -72,7 +72,7 @@ export default function PlansListPage() {
         <Section>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold">{t('plans.page_title')}</h1>
+              <H1 variant="page">{t('plans.page_title')}</H1>
               <P variant="muted" className="mt-2">
                 {t('plans.page_description')}
               </P>

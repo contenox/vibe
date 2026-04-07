@@ -1,4 +1,4 @@
-import { ErrorState, GridLayout, LoadingState, Panel, Section, Span } from '@contenox/ui';
+import { EmptyState, ErrorState, GridLayout, LoadingState, Section, Span } from '@contenox/ui';
 import { t } from 'i18next';
 import { useState } from 'react';
 import {
@@ -206,14 +206,10 @@ export default function McpServersSection() {
               />
             ))
           ) : (
-            <Panel variant="bordered" className="py-12 text-center">
-              <div className="text-muted-foreground">
-                <Span className="mb-2 block">{t('mcp_servers.list_empty_title')}</Span>
-                <Span variant="muted" className="text-sm">
-                  {t('mcp_servers.list_empty_description')}
-                </Span>
-              </div>
-            </Panel>
+            <EmptyState
+              title={t('mcp_servers.list_empty_title')}
+              description={t('mcp_servers.list_empty_description')}
+            />
           )}
         </div>
       </Section>

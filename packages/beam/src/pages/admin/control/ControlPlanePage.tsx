@@ -1,4 +1,4 @@
-import { GridLayout, P, Page, Section, Span } from '@contenox/ui';
+import { GridLayout, H1, P, Page, Section, Span } from '@contenox/ui';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { adminNavItems } from '../../../config/routes';
@@ -11,7 +11,7 @@ export default function ControlPlanePage() {
     <Page bodyScroll="auto">
       <GridLayout variant="body" className="gap-8 pb-8">
         <Section>
-          <h1 className="text-2xl font-semibold">{t('control_plane.hub_title')}</h1>
+          <H1 variant="page">{t('control_plane.hub_title')}</H1>
           <P variant="muted" className="mt-2">
             {t('control_plane.hub_description')}
           </P>

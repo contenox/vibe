@@ -158,16 +158,16 @@ export const ResizablePanelHandle = forwardRef<
       className={cn(
         "flex shrink-0 items-center justify-center",
         "bg-surface-200 dark:bg-dark-surface-400",
-        "hover:bg-primary-200 dark:hover:bg-dark-primary-800",
-        "active:bg-primary-300 dark:active:bg-dark-primary-700",
+        "hover:bg-surface-300 dark:hover:bg-dark-surface-500",
+        "active:bg-surface-400 dark:active:bg-dark-surface-600",
         "transition-colors",
         isHorizontal
           ? "w-1.5 cursor-col-resize"
           : "h-1.5 cursor-row-resize",
         dragging &&
           (isHorizontal
-            ? "bg-primary-300 dark:bg-dark-primary-700"
-            : "bg-primary-300 dark:bg-dark-primary-700"),
+            ? "bg-surface-400 dark:bg-dark-surface-600"
+            : "bg-surface-400 dark:bg-dark-surface-600"),
         className,
       )}
       onPointerDown={handlePointerDown}

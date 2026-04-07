@@ -50,28 +50,23 @@ function roleBadgeVariant(
 
 function bubbleBgClass(role: ChatMessageBaseProps["role"]): string {
   const isUser = role === "user";
-  const isSystem = role === "system";
-  const isTool = role === "tool";
   if (isUser) {
-    return "bg-primary-100 text-text dark:bg-dark-primary-700 dark:text-dark-text";
+    return "bg-surface-100 text-text dark:bg-dark-surface-300 dark:text-dark-text";
   }
-  if (isSystem || isTool) {
-    return "bg-accent-100 text-text dark:bg-dark-accent-700 dark:text-dark-text";
-  }
-  return "bg-surface-100 text-text dark:bg-dark-surface-500 dark:text-dark-text";
+  return "bg-surface-50 text-text dark:bg-dark-surface-200 dark:text-dark-text";
 }
 
 /** Left border + surface for transcript / workbench layout */
 function transcriptBlockClass(role: ChatMessageBaseProps["role"]): string {
   switch (role) {
     case "user":
-      return "border-primary-600 bg-primary-50/70 text-text dark:border-primary-500 dark:bg-dark-primary-900/30 dark:text-dark-text";
+      return "border-primary-500 bg-surface-50/50 text-text dark:border-dark-primary-500 dark:bg-dark-surface-300/20 dark:text-dark-text";
     case "system":
-      return "border-accent-600 bg-accent-50/80 text-text dark:border-accent-500 dark:bg-dark-accent-900/25 dark:text-dark-text";
+      return "border-primary-400 bg-surface-50/40 text-text dark:border-dark-primary-600 dark:bg-dark-surface-300/15 dark:text-dark-text";
     case "tool":
-      return "border-secondary-600 bg-secondary-50/80 text-text dark:border-secondary-500 dark:bg-dark-surface-600/40 dark:text-dark-text";
+      return "border-secondary-500 bg-surface-50/40 text-text dark:border-dark-surface-500 dark:bg-dark-surface-300/15 dark:text-dark-text";
     default:
-      return "border-secondary-500 bg-surface-100/90 text-text dark:border-dark-secondary-500 dark:bg-dark-surface-600/35 dark:text-dark-text";
+      return "border-secondary-500 bg-surface-50/40 text-text dark:border-dark-surface-500 dark:bg-dark-surface-300/15 dark:text-dark-text";
   }
 }
 
@@ -105,12 +100,12 @@ export function ChatMessage({
 
   const bubbleRing =
     isLatest && highlightLatest
-      ? "ring-2 ring-primary-300 dark:ring-dark-primary-400"
+      ? "ring-2 ring-surface-300 dark:ring-dark-surface-500"
       : "";
 
   const transcriptRing =
     isLatest && highlightLatest
-      ? "ring-2 ring-primary-300/70 dark:ring-dark-primary-500/60"
+      ? "ring-2 ring-surface-300/70 dark:ring-dark-surface-500/60"
       : "";
 
   const handleOpenChange = (next: boolean) => {

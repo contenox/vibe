@@ -10,17 +10,19 @@ export default function ComposeEdgeBadge({
   onClick: () => void;
   position: { x: number; y: number };
 }) {
-  // Map strategy to color
+  // Map strategy to semantic token colors (CSS variables from @contenox/ui)
   const colorFor = useCallback((s?: string | null) => {
+    const style = getComputedStyle(document.documentElement);
+    const get = (v: string) => style.getPropertyValue(v).trim() || undefined;
     switch ((s || 'default').toLowerCase()) {
       case 'override':
-        return { fill: '#10b981', stroke: '#064e3b' }; // emerald
+        return { fill: get('--color-primary-500') ?? '#10b981', stroke: get('--color-primary-900') ?? '#064e3b' };
       case 'merge_chat_histories':
-        return { fill: '#0ea5e9', stroke: '#075985' }; // sky
+        return { fill: get('--color-info-500') ?? '#0ea5e9', stroke: get('--color-info-800') ?? '#075985' };
       case 'append_string_to_chat_history':
-        return { fill: '#a78bfa', stroke: '#5b21b6' }; // violet
+        return { fill: '#a78bfa', stroke: '#5b21b6' }; // violet — no semantic token yet
       default:
-        return { fill: '#64748b', stroke: '#334155' }; // slate
+        return { fill: get('--color-secondary-500') ?? '#64748b', stroke: get('--color-secondary-700') ?? '#334155' };
     }
   }, []);
 

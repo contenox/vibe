@@ -13,16 +13,14 @@ import (
 	"github.com/contenox/contenox/apiframework/middleware"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/terminalservice"
-	"github.com/contenox/contenox/workspaceservice"
 )
 
 // AddRoutes registers interactive terminal endpoints. If enabled is false, this is a no-op.
-// When workspacesConfigured is true, ws must be non-nil; create accepts workspaceId or cwd (exactly one).
-func AddRoutes(mux *http.ServeMux, svc terminalservice.Service, auth middleware.AuthZReader, enabled bool, ws workspaceservice.Service, workspacesConfigured bool) {
+func AddRoutes(mux *http.ServeMux, svc terminalservice.Service, auth middleware.AuthZReader, enabled bool) {
 	if !enabled {
 		return
 	}
-	h := &handler{svc: svc, auth: auth, ws: ws, workspacesOn: workspacesConfigured}
+	h := &handler{svc: svc, auth: auth}
 	mux.HandleFunc("GET /terminal/sessions", h.listSessions)
 	mux.HandleFunc("POST /terminal/sessions", h.createSession)
 	mux.HandleFunc("GET /terminal/sessions/{id}", h.getSession)
@@ -32,18 +30,15 @@ func AddRoutes(mux *http.ServeMux, svc terminalservice.Service, auth middleware.
 }
 
 type handler struct {
-	svc            terminalservice.Service
-	auth           middleware.AuthZReader
-	ws             workspaceservice.Service
-	workspacesOn   bool
+	svc  terminalservice.Service
+	auth middleware.AuthZReader
 }
 
 type createSessionRequest struct {
-	WorkspaceID string `json:"workspaceId"`
-	CWD         string `json:"cwd"`
-	Cols        int    `json:"cols"`
-	Rows        int    `json:"rows"`
-	Shell       string `json:"shell,omitempty"`
+	CWD   string `json:"cwd"`
+	Cols  int    `json:"cols"`
+	Rows  int    `json:"rows"`
+	Shell string `json:"shell,omitempty"`
 }
 
 type createSessionResponse struct {
@@ -70,45 +65,13 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cwd := strings.TrimSpace(req.CWD)
-	wsID := strings.TrimSpace(req.WorkspaceID)
-	if wsID != "" && cwd != "" {
-		_ = apiframework.Error(w, r, apiframework.BadRequest("set exactly one of workspaceId or cwd"), apiframework.CreateOperation)
-		return
-	}
-	if wsID == "" && cwd == "" {
-		_ = apiframework.Error(w, r, apiframework.BadRequest("workspaceId or cwd is required"), apiframework.CreateOperation)
-		return
-	}
-
-	var workspaceIDPersist string
 	shell := strings.TrimSpace(req.Shell)
-	if wsID != "" {
-		if !h.workspacesOn || h.ws == nil {
-			_ = apiframework.Error(w, r, apiframework.BadRequest("workspaces are not configured on this server"), apiframework.CreateOperation)
-			return
-		}
-		dto, err := h.ws.Get(ctx, principal, wsID)
-		if err != nil {
-			if errors.Is(err, workspaceservice.ErrNotFound) {
-				_ = apiframework.Error(w, r, apiframework.ErrNotFound, apiframework.CreateOperation)
-				return
-			}
-			_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
-			return
-		}
-		cwd = dto.Path
-		workspaceIDPersist = wsID
-		if shell == "" {
-			shell = strings.TrimSpace(dto.Shell)
-		}
-	}
 
 	out, err := h.svc.Create(ctx, principal, terminalservice.CreateRequest{
-		CWD:         cwd,
-		WorkspaceID: workspaceIDPersist,
-		Cols:        req.Cols,
-		Rows:        req.Rows,
-		Shell:       shell,
+		CWD:   cwd,
+		Cols:  req.Cols,
+		Rows:  req.Rows,
+		Shell: shell,
 	})
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)

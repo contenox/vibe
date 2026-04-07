@@ -279,7 +279,7 @@ export function SetupWizardFlow({ variant }: SetupWizardFlowProps) {
                 i === currentStep
                   ? 'bg-primary-600 dark:bg-primary-500'
                   : i < currentStep
-                    ? 'bg-emerald-500/80 dark:bg-emerald-600/70'
+                    ? 'bg-primary-500/80 dark:bg-primary-600/70'
                     : 'bg-surface-200 dark:bg-dark-surface-600',
               )}
             />

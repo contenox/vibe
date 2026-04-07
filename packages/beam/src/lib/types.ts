@@ -1368,18 +1368,7 @@ export type TerminalSession = {
   rows: number;
   status: string;
   nodeInstanceId: string;
-  workspaceId?: string;
   createdAt: string;
   updatedAt: string;
 };
 
-/** User-owned directory binding (server-validated under terminal_allowed_root / VFS root). */
-export type Workspace = {
-  id: string;
-  name: string;
-  path: string;
-  vfsPath: string;
-  shell?: string;
-  createdAt: string;
-  updatedAt: string;
-};
