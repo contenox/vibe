@@ -16,7 +16,7 @@ import (
 
 func AddChatRoutes(
 	mux *http.ServeMux,
-	chat *chatsessionmodes.Service,
+	chat chatsessionmodes.HTTPChat,
 	auth middleware.AuthZReader,
 ) {
 	h := &chatManagerHandler{
@@ -31,7 +31,7 @@ func AddChatRoutes(
 }
 
 type chatManagerHandler struct {
-	chatSvc *chatsessionmodes.Service
+	chatSvc chatsessionmodes.HTTPChat
 	auth    middleware.AuthZReader
 }
 

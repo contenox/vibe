@@ -23,6 +23,7 @@ type Session struct {
 	Rows           int           `json:"rows"`
 	Status         SessionStatus `json:"status"`
 	NodeInstanceID string        `json:"nodeInstanceId"`
+	WorkspaceID    string        `json:"workspaceId,omitempty"`
 	CreatedAt      time.Time     `json:"createdAt"`
 	UpdatedAt      time.Time     `json:"updatedAt"`
 }

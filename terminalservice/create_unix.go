@@ -74,6 +74,7 @@ func (s *service) Create(ctx context.Context, principal string, req CreateReques
 		Rows:           rows,
 		Status:         terminalstore.SessionStatusActive,
 		NodeInstanceID: s.nodeInstanceID,
+		WorkspaceID:    req.WorkspaceID,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

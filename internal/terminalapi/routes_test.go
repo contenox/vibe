@@ -61,7 +61,7 @@ func TestAddRoutes_CreateRequiresAuth(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{err: errors.New("nope")}, true)
+	AddRoutes(mux, svc, fakeAuthReader{err: errors.New("nope")}, true, nil, false)
 
 	req := httptest.NewRequest(http.MethodPost, "/terminal/sessions", strings.NewReader(`{"cwd":"`+root+`"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -78,7 +78,7 @@ func TestAddRoutes_CreateBadCwd(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{}, true)
+	AddRoutes(mux, svc, fakeAuthReader{}, true, nil, false)
 
 	outside := filepath.Join(t.TempDir(), "escape")
 	req := httptest.NewRequest(http.MethodPost, "/terminal/sessions", strings.NewReader(`{"cwd":"`+outside+`"}`))
@@ -96,7 +96,7 @@ func TestAddRoutes_ListSessionsEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{}, true)
+	AddRoutes(mux, svc, fakeAuthReader{}, true, nil, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/terminal/sessions", nil)
 	rec := httptest.NewRecorder()
@@ -114,7 +114,7 @@ func TestAddRoutes_DeleteNotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{}, true)
+	AddRoutes(mux, svc, fakeAuthReader{}, true, nil, false)
 
 	req := httptest.NewRequest(http.MethodDelete, "/terminal/sessions/does-not-exist", nil)
 	rec := httptest.NewRecorder()
@@ -140,7 +140,7 @@ func TestAddRoutes_CreateSessionUnix(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	AddRoutes(mux, svc, fakeAuthReader{}, true)
+	AddRoutes(mux, svc, fakeAuthReader{}, true, nil, false)
 
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

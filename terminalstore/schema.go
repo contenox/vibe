@@ -18,6 +18,7 @@ func InitSchema(ctx context.Context, exec libdbexec.Exec) error {
 			rows INT NOT NULL,
 			status VARCHAR(50) NOT NULL DEFAULT 'active',
 			node_instance_id VARCHAR(255) NOT NULL,
+			workspace_id VARCHAR(255),
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
 		);

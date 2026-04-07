@@ -1351,3 +1351,35 @@ export const HandleParseKeyValue: TaskHandler = 'parse_key_value';
 export const HandleConvertToOpenAIChatResponse: TaskHandler = 'convert_to_openai_chat_response';
 export const HandleNoop: TaskHandler = 'noop';
 export const HandleHook: TaskHandler = 'hook';
+
+// ── Terminal ──────────────────────────────────────────────────────────
+
+export type TerminalSessionCreate = {
+  id: string;
+  wsPath: string;
+};
+
+export type TerminalSession = {
+  id: string;
+  principal: string;
+  cwd: string;
+  shell: string;
+  cols: number;
+  rows: number;
+  status: string;
+  nodeInstanceId: string;
+  workspaceId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** User-owned directory binding (server-validated under terminal_allowed_root / VFS root). */
+export type Workspace = {
+  id: string;
+  name: string;
+  path: string;
+  vfsPath: string;
+  shell?: string;
+  createdAt: string;
+  updatedAt: string;
+};

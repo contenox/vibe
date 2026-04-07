@@ -46,6 +46,7 @@ func Run(
 	execService execservice.ExecService,
 	taskChainService taskchainservice.Service,
 	vfsSvc vfsservice.Service,
+	vfsRoot string,
 ) (error, func() error) {
 	if tenantID == "" {
 		tenantID = "00000000-0000-0000-0000-000000000001"
@@ -86,6 +87,7 @@ func Run(
 		taskChainService,
 		vfsSvc,
 		authManager,
+		vfsRoot,
 	)
 	if err != nil {
 		return fmt.Errorf("init API handler: %w", err), cleanupAPI

@@ -33,9 +33,15 @@ func (s *store) Insert(ctx context.Context, sess *Session) error {
 	if sess.Status == "" {
 		sess.Status = SessionStatusActive
 	}
+	var wsID any
+	if sess.WorkspaceID != "" {
+		wsID = sess.WorkspaceID
+	} else {
+		wsID = nil
+	}
 	_, err := s.Exec.ExecContext(ctx, `
-		INSERT INTO terminal_sessions (id, principal, cwd, shell, cols, rows, status, node_instance_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		INSERT INTO terminal_sessions (id, principal, cwd, shell, cols, rows, status, node_instance_id, workspace_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 		sess.ID,
 		sess.Principal,
 		sess.CWD,
@@ -44,6 +50,7 @@ func (s *store) Insert(ctx context.Context, sess *Session) error {
 		sess.Rows,
 		string(sess.Status),
 		sess.NodeInstanceID,
+		wsID,
 		sess.CreatedAt,
 		sess.UpdatedAt,
 	)
@@ -64,8 +71,9 @@ func (s *store) GetByIDAndPrincipal(ctx context.Context, id, principal string) (
 func (s *store) getByCondition(ctx context.Context, condition string, args ...any) (*Session, error) {
 	var sess Session
 	var status string
+	var wsID sql.NullString
 	q := fmt.Sprintf(`
-		SELECT id, principal, cwd, shell, cols, rows, status, node_instance_id, created_at, updated_at
+		SELECT id, principal, cwd, shell, cols, rows, status, node_instance_id, workspace_id, created_at, updated_at
 		FROM terminal_sessions
 		WHERE %s`, condition)
 	err := s.Exec.QueryRowContext(ctx, q, args...).Scan(
@@ -77,6 +85,7 @@ func (s *store) getByCondition(ctx context.Context, condition string, args ...an
 		&sess.Rows,
 		&status,
 		&sess.NodeInstanceID,
+		&wsID,
 		&sess.CreatedAt,
 		&sess.UpdatedAt,
 	)
@@ -87,6 +96,9 @@ func (s *store) getByCondition(ctx context.Context, condition string, args ...an
 		return nil, fmt.Errorf("terminalstore: get: %w", err)
 	}
 	sess.Status = SessionStatus(status)
+	if wsID.Valid {
+		sess.WorkspaceID = wsID.String
+	}
 	return &sess, nil
 }
 
@@ -99,7 +111,7 @@ func (s *store) ListByPrincipal(ctx context.Context, principal string, createdAt
 		cursor = *createdAtCursor
 	}
 	rows, err := s.Exec.QueryContext(ctx, `
-		SELECT id, principal, cwd, shell, cols, rows, status, node_instance_id, created_at, updated_at
+		SELECT id, principal, cwd, shell, cols, rows, status, node_instance_id, workspace_id, created_at, updated_at
 		FROM terminal_sessions
 		WHERE principal = $1 AND status = $2 AND created_at < $3
 		ORDER BY created_at DESC, id DESC
@@ -115,6 +127,7 @@ func (s *store) ListByPrincipal(ctx context.Context, principal string, createdAt
 	for rows.Next() {
 		var sess Session
 		var status string
+		var wsID sql.NullString
 		if err := rows.Scan(
 			&sess.ID,
 			&sess.Principal,
@@ -124,12 +137,16 @@ func (s *store) ListByPrincipal(ctx context.Context, principal string, createdAt
 			&sess.Rows,
 			&status,
 			&sess.NodeInstanceID,
+			&wsID,
 			&sess.CreatedAt,
 			&sess.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("terminalstore: list scan: %w", err)
 		}
 		sess.Status = SessionStatus(status)
+		if wsID.Valid {
+			sess.WorkspaceID = wsID.String
+		}
 		out = append(out, &sess)
 	}
 	if err := rows.Err(); err != nil {

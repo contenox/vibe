@@ -33,9 +33,12 @@ import {
   StatusResponse,
   TaskExecutionRequest,
   TaskExecutionResponse,
+  TerminalSession,
+  TerminalSessionCreate,
+  Workspace,
 } from './types';
 
-type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 interface ApiOptions {
   method?: HttpMethod;
@@ -360,4 +363,29 @@ export const api = {
     write_path?: string;
   }) =>
     apiFetch<RunCompiledActiveResponse>('/api/plans/active/run-compiled', options('POST', body)),
+
+  // ── Workspaces ───────────────────────────────────────────────────
+  listWorkspaces: () => apiFetch<Workspace[]>('/api/workspaces'),
+  getWorkspace: (id: string) =>
+    apiFetch<Workspace>(`/api/workspaces/${encodeURIComponent(id)}`),
+  createWorkspace: (body: { name: string; path: string; shell?: string }) =>
+    apiFetch<Workspace>('/api/workspaces', options('POST', body)),
+  updateWorkspace: (id: string, body: { name: string; path: string; shell?: string }) =>
+    apiFetch<Workspace>(`/api/workspaces/${encodeURIComponent(id)}`, options('PATCH', body)),
+  deleteWorkspace: (id: string) =>
+    apiFetch<void>(`/api/workspaces/${encodeURIComponent(id)}`, options('DELETE')),
+
+  // ── Terminal ──────────────────────────────────────────────────────
+  listTerminalSessions: () =>
+    apiFetch<TerminalSession[]>('/api/terminal/sessions'),
+  getTerminalSession: (id: string) =>
+    apiFetch<TerminalSession>(`/api/terminal/sessions/${encodeURIComponent(id)}`),
+  createTerminalSession: (body: {
+    workspaceId?: string;
+    cwd?: string;
+    cols?: number;
+    rows?: number;
+  }) => apiFetch<TerminalSessionCreate>('/api/terminal/sessions', options('POST', body)),
+  deleteTerminalSession: (id: string) =>
+    apiFetch<void>(`/api/terminal/sessions/${encodeURIComponent(id)}`, options('DELETE')),
 };

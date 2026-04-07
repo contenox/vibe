@@ -2,6 +2,7 @@ import {
   ChevronsRight,
   Database,
   File,
+  FolderRoot,
   Link as LinkIcon,
   ListChecks,
   Settings,
@@ -24,6 +25,7 @@ const FilesPage = lazy(() => import('../pages/admin/files/FilesPage.tsx'));
 const ExecPromptPage = lazy(() => import('../pages/admin/prompt/ExecPromptPage.tsx'));
 const RemoteHooksPage = lazy(() => import('../pages/admin/remotehooks/RemoteHooksPage.tsx'));
 const SettingsPage = lazy(() => import('../pages/admin/settings/SettingsPage.tsx'));
+const WorkspacePage = lazy(() => import('../pages/admin/workspaces/WorkspacePage.tsx'));
 const ByePage = lazy(() => import('../pages/public/bye/Bye.tsx'));
 const AuthPage = lazy(() => import('../pages/public/login/AuthPage.tsx'));
 
@@ -54,6 +56,7 @@ type AdminRouteDefinition = {
 };
 
 const adminRouteDefinitions: AdminRouteDefinition[] = [
+  { path: '/workspaces', element: WorkspacePage, labelKey: 'navbar.workspaces', Icon: FolderRoot },
   { path: '/backends', element: BackendsPage, labelKey: 'navbar.backends', Icon: Database },
   { path: '/hooks/remote', element: RemoteHooksPage, labelKey: 'navbar.hooks', Icon: LinkIcon },
   { path: '/files', element: FilesPage, labelKey: 'navbar.files', Icon: File },

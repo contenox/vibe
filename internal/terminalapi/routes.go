@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -12,14 +13,16 @@ import (
 	"github.com/contenox/contenox/apiframework/middleware"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/terminalservice"
+	"github.com/contenox/contenox/workspaceservice"
 )
 
 // AddRoutes registers interactive terminal endpoints. If enabled is false, this is a no-op.
-func AddRoutes(mux *http.ServeMux, svc terminalservice.Service, auth middleware.AuthZReader, enabled bool) {
+// When workspacesConfigured is true, ws must be non-nil; create accepts workspaceId or cwd (exactly one).
+func AddRoutes(mux *http.ServeMux, svc terminalservice.Service, auth middleware.AuthZReader, enabled bool, ws workspaceservice.Service, workspacesConfigured bool) {
 	if !enabled {
 		return
 	}
-	h := &handler{svc: svc, auth: auth}
+	h := &handler{svc: svc, auth: auth, ws: ws, workspacesOn: workspacesConfigured}
 	mux.HandleFunc("GET /terminal/sessions", h.listSessions)
 	mux.HandleFunc("POST /terminal/sessions", h.createSession)
 	mux.HandleFunc("GET /terminal/sessions/{id}", h.getSession)
@@ -29,15 +32,18 @@ func AddRoutes(mux *http.ServeMux, svc terminalservice.Service, auth middleware.
 }
 
 type handler struct {
-	svc  terminalservice.Service
-	auth middleware.AuthZReader
+	svc            terminalservice.Service
+	auth           middleware.AuthZReader
+	ws             workspaceservice.Service
+	workspacesOn   bool
 }
 
 type createSessionRequest struct {
-	CWD   string `json:"cwd"`
-	Cols  int    `json:"cols"`
-	Rows  int    `json:"rows"`
-	Shell string `json:"shell,omitempty"`
+	WorkspaceID string `json:"workspaceId"`
+	CWD         string `json:"cwd"`
+	Cols        int    `json:"cols"`
+	Rows        int    `json:"rows"`
+	Shell       string `json:"shell,omitempty"`
 }
 
 type createSessionResponse struct {
@@ -52,7 +58,8 @@ type patchSessionRequest struct {
 
 // Creates a PTY-backed shell session. Connect with WebSocket to wsPath.
 func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.auth.GetIdentity(r.Context())
+	ctx := r.Context()
+	principal, err := h.auth.GetIdentity(ctx)
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.AuthorizeOperation)
 		return
@@ -62,16 +69,46 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
-	if req.CWD == "" {
-		_ = apiframework.Error(w, r, apiframework.BadRequest("cwd is required"), apiframework.CreateOperation)
+	cwd := strings.TrimSpace(req.CWD)
+	wsID := strings.TrimSpace(req.WorkspaceID)
+	if wsID != "" && cwd != "" {
+		_ = apiframework.Error(w, r, apiframework.BadRequest("set exactly one of workspaceId or cwd"), apiframework.CreateOperation)
+		return
+	}
+	if wsID == "" && cwd == "" {
+		_ = apiframework.Error(w, r, apiframework.BadRequest("workspaceId or cwd is required"), apiframework.CreateOperation)
 		return
 	}
 
-	out, err := h.svc.Create(r.Context(), principal, terminalservice.CreateRequest{
-		CWD:   req.CWD,
-		Cols:  req.Cols,
-		Rows:  req.Rows,
-		Shell: req.Shell,
+	var workspaceIDPersist string
+	shell := strings.TrimSpace(req.Shell)
+	if wsID != "" {
+		if !h.workspacesOn || h.ws == nil {
+			_ = apiframework.Error(w, r, apiframework.BadRequest("workspaces are not configured on this server"), apiframework.CreateOperation)
+			return
+		}
+		dto, err := h.ws.Get(ctx, principal, wsID)
+		if err != nil {
+			if errors.Is(err, workspaceservice.ErrNotFound) {
+				_ = apiframework.Error(w, r, apiframework.ErrNotFound, apiframework.CreateOperation)
+				return
+			}
+			_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
+			return
+		}
+		cwd = dto.Path
+		workspaceIDPersist = wsID
+		if shell == "" {
+			shell = strings.TrimSpace(dto.Shell)
+		}
+	}
+
+	out, err := h.svc.Create(ctx, principal, terminalservice.CreateRequest{
+		CWD:         cwd,
+		WorkspaceID: workspaceIDPersist,
+		Cols:        req.Cols,
+		Rows:        req.Rows,
+		Shell:       shell,
 	})
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)

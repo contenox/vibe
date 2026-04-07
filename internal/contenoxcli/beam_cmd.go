@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/contenox/contenox/embedservice"
@@ -73,6 +75,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		components.execService,
 		components.taskChainService,
 		components.vfsSvc,
+		contenoxPath,
 	)
 	defer func() {
 		if cleanupServer != nil {
@@ -113,6 +116,15 @@ func buildServerComponents(ctx context.Context, db libdb.DBManager, tenantID str
 	config := &serverapi.Config{}
 	if err := serverapi.LoadConfig(config); err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
+	}
+	// When the PTY terminal is enabled without an explicit ceiling, default to the same
+	// directory tree Beam uses for VFS (contenox path) so cwd and file listing stay aligned.
+	if strings.EqualFold(strings.TrimSpace(config.TerminalEnabled), "true") && strings.TrimSpace(config.TerminalAllowedRoot) == "" {
+		abs, err := filepath.Abs(contenoxPath)
+		if err != nil {
+			return nil, fmt.Errorf("default terminal_allowed_root: %w", err)
+		}
+		config.TerminalAllowedRoot = abs
 	}
 	// Override any database URL that might be set in env; we're using SQLite.
 	config.DatabaseURL = ""

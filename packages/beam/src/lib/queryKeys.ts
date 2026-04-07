@@ -225,6 +225,18 @@ export const mcpServerKeys = {
   byName: (name: string) => [...mcpServerKeys.all, 'name', name] as const,
 };
 
+export const workspaceKeys = {
+  all: ['workspaces'] as const,
+  list: () => [...workspaceKeys.all, 'list'] as const,
+  detail: (id: string) => [...workspaceKeys.all, id] as const,
+};
+
+export const terminalKeys = {
+  all: ['terminal'] as const,
+  sessions: () => [...terminalKeys.all, 'sessions'] as const,
+  session: (id: string) => [...terminalKeys.all, 'session', id] as const,
+};
+
 export const planKeys = {
   all: ['plans'] as const,
   list: () => [...planKeys.all, 'list'] as const,

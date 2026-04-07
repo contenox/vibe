@@ -1,15 +1,21 @@
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { Button, FileTree, type FileTreeNode, InlineNotice, Panel, Span, Spinner } from '@contenox/ui';
-import { ChevronRight, Save } from 'lucide-react';
+import { ChevronRight, Save, TerminalSquare, FolderOpen } from 'lucide-react';
 import { t } from 'i18next';
 import {
   forwardRef,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
   useState,
 } from 'react';
+
+const TerminalPanel = lazy(() =>
+  import('./TerminalPanel').then(m => ({ default: m.TerminalPanel })),
+);
 import { useListFiles, useUpdateFile } from '../../../../hooks/useFiles';
 import { cn } from '../../../../lib/utils';
 import type { ChatContextPayload, FileResponse } from '../../../../lib/types';
@@ -66,6 +72,18 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isTextFile, setIsTextFile] = useState(true);
+  const [workspaceTab, setWorkspaceTab] = useState<'files' | 'terminal'>(() => {
+    try {
+      return (localStorage.getItem('beam_workspace_tab') as 'files' | 'terminal') || 'files';
+    } catch {
+      return 'files';
+    }
+  });
+
+  const switchTab = useCallback((tab: 'files' | 'terminal') => {
+    setWorkspaceTab(tab);
+    try { localStorage.setItem('beam_workspace_tab', tab); } catch { /* quota */ }
+  }, []);
 
   const listPath = currentDir || undefined;
   const { data: entries = [], isLoading, error: listError } = useListFiles(listPath);
@@ -210,10 +228,47 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
         'border-border bg-surface-50 dark:bg-dark-surface-100 flex min-h-0 w-full min-w-0 shrink-0 flex-col border-l',
         className,
       )}>
-      <div className="border-border flex shrink-0 flex-col gap-1 border-b px-3 py-2">
-        <Span variant="body" className="text-text dark:text-dark-text font-medium">
-          {t('chat.workspace_title')}
-        </Span>
+      {/* Tab bar */}
+      <div className="border-border flex shrink-0 items-center gap-0 border-b">
+        <button
+          type="button"
+          onClick={() => switchTab('files')}
+          className={cn(
+            'flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors',
+            workspaceTab === 'files'
+              ? 'border-primary text-primary dark:border-dark-primary dark:text-dark-primary'
+              : 'border-transparent text-text-muted dark:text-dark-text-muted hover:text-text dark:hover:text-dark-text',
+          )}>
+          <FolderOpen className="h-3.5 w-3.5" />
+          {t('chat.workspace_tab_files', 'Files')}
+        </button>
+        <button
+          type="button"
+          onClick={() => switchTab('terminal')}
+          className={cn(
+            'flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors',
+            workspaceTab === 'terminal'
+              ? 'border-primary text-primary dark:border-dark-primary dark:text-dark-primary'
+              : 'border-transparent text-text-muted dark:text-dark-text-muted hover:text-text dark:hover:text-dark-text',
+          )}>
+          <TerminalSquare className="h-3.5 w-3.5" />
+          {t('chat.workspace_tab_terminal', 'Terminal')}
+        </button>
+      </div>
+
+      {workspaceTab === 'terminal' ? (
+        <Suspense
+          fallback={
+            <div className="flex flex-1 items-center justify-center">
+              <Spinner size="md" />
+            </div>
+          }>
+          <TerminalPanel className="min-h-0 flex-1" />
+        </Suspense>
+      ) : (
+      <>
+      {/* Breadcrumbs */}
+      <div className="border-border flex shrink-0 flex-col gap-1 px-3 py-1.5">
         <div className="text-text-muted dark:text-dark-text-muted flex min-w-0 flex-wrap items-center gap-0.5 text-xs">
           <button
             type="button"
@@ -349,6 +404,8 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 });
