@@ -2,7 +2,6 @@ package apiframework
 
 import (
 	"net/http"
-	"net/url"
 )
 
 // GetPathParam retrieves a URL path parameter by name and is used to enforce
@@ -11,7 +10,7 @@ import (
 func GetPathParam(r *http.Request, name string, description string) string {
 	// The description parameter exists solely for the static analysis tool.
 	// It has no effect on the runtime execution of this function.
-	return url.PathEscape(r.PathValue(name))
+	return r.PathValue(name)
 }
 
 // GetQueryParam retrieves a URL query parameter by name. If the parameter is not

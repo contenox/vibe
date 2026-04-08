@@ -66,6 +66,14 @@ func TestGeneratedSpecIsValidAndClientSafe(t *testing.T) {
 	assertRequestRef(t, doc, "/execute", "post", "#/components/schemas/execservice_TaskRequest")
 	assertResponseRef(t, doc, "/execute", "post", "200", "#/components/schemas/execservice_SimpleExecutionResponse")
 
+	assertRequestRef(t, doc, "/terminal/sessions", "post", "#/components/schemas/terminalapi_createSessionRequest")
+	assertResponseRef(t, doc, "/terminal/sessions", "post", "201", "#/components/schemas/terminalapi_createSessionResponse")
+	assertResponseRef(t, doc, "/terminal/sessions", "get", "200", "#/components/schemas/array_terminalstore_Session")
+	assertResponseRef(t, doc, "/terminal/sessions/{id}", "get", "200", "#/components/schemas/terminalstore_Session")
+	assertRequestRef(t, doc, "/terminal/sessions/{id}", "patch", "#/components/schemas/terminalapi_patchSessionRequest")
+	assertResponseNoContent(t, doc, "/terminal/sessions/{id}", "patch", "204")
+	assertResponseNoContent(t, doc, "/terminal/sessions/{id}", "delete", "204")
+
 	assertParameterDescriptions(t, doc)
 	assertOnlyAllowedInlineObjectResponses(t, doc)
 }
@@ -111,6 +119,18 @@ func assertResponseRef(t *testing.T, doc *openapi3.T, path, method, status, want
 	}
 }
 
+func assertResponseNoContent(t *testing.T, doc *openapi3.T, path, method, status string) {
+	t.Helper()
+	op := mustOperation(t, doc, path, method)
+	resp := op.Responses.Map()[status]
+	if resp == nil || resp.Value == nil {
+		t.Fatalf("%s %s missing response %s", method, path, status)
+	}
+	if resp.Value.Content != nil && len(resp.Value.Content) > 0 {
+		t.Fatalf("%s %s response %s must have no body", method, path, status)
+	}
+}
+
 func mustOperation(t *testing.T, doc *openapi3.T, path, method string) *openapi3.Operation {
 	t.Helper()
 	item := doc.Paths.Find(path)
@@ -133,6 +153,11 @@ func mustOperation(t *testing.T, doc *openapi3.T, path, method string) *openapi3
 			t.Fatalf("missing PUT %s", path)
 		}
 		return item.Put
+	case "patch":
+		if item.Patch == nil {
+			t.Fatalf("missing PATCH %s", path)
+		}
+		return item.Patch
 	case "delete":
 		if item.Delete == nil {
 			t.Fatalf("missing DELETE %s", path)

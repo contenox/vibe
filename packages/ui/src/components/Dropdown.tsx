@@ -115,7 +115,7 @@ export function Dropdown({
       {isOpen && (
         <div
           className={cn(
-            "absolute z-50 mt-2 w-full rounded-lg border shadow-lg",
+            "absolute z-50 mt-2 w-full rounded-lg border bg-surface-50 dark:bg-dark-surface-200 shadow-lg",
             contentClassName,
           )}
           role="menu"

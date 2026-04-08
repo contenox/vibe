@@ -182,13 +182,13 @@ const BuildModeChainGraph: React.FC<BuildModeChainGraphProps> = ({
   }
 
   return (
-    <InsetPanel>
+    <InsetPanel className="min-h-0 flex-1">
       {caption ? (
         <InsetPanelHeader density="comfortable">
           <P className="text-text-secondary dark:text-dark-text-muted text-xs">{caption}</P>
         </InsetPanelHeader>
       ) : null}
-      <div className="relative min-h-[240px] flex-1 overflow-hidden">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {hasTasks ? (
           <WorkflowVisualizer
             debug={!!chain.debug}

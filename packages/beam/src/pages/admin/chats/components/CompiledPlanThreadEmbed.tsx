@@ -1,4 +1,4 @@
-import { InsetPanel, P, Span, TranscriptEmbedCard } from '@contenox/ui';
+import { InsetPanel, P, Span } from '@contenox/ui';
 import { useTranslation } from 'react-i18next';
 import type { ChainDefinition } from '../../../../lib/types';
 import BuildModeChainGraph from './BuildModeChainGraph';
@@ -14,7 +14,7 @@ type Props = {
 };
 
 /**
- * Client-only compiled plan preview inside the transcript (not a persisted message).
+ * Compiled plan preview shown in the Plan tab.
  */
 export function CompiledPlanThreadEmbed({
   chain,
@@ -27,21 +27,33 @@ export function CompiledPlanThreadEmbed({
 }: Props) {
   const { t } = useTranslation();
 
-  const body = activePlanLoading && !hasActivePlan ? (
-    <InsetPanel tone="muted" className="flex min-h-[200px] items-center justify-center">
-      <Span variant="muted" className="text-sm">
-        {t('chat.build_graph_loading')}
-      </Span>
-    </InsetPanel>
-  ) : !hasActivePlan ? (
-    <P className="text-text-secondary dark:text-dark-text-muted p-3 text-sm">
-      {t('chat.build_compiled_no_plan')}
-    </P>
-  ) : !hasSteps ? (
-    <P className="text-text-secondary dark:text-dark-text-muted p-3 text-sm">
-      {t('chat.build_compiled_no_steps')}
-    </P>
-  ) : (
+  if (activePlanLoading && !hasActivePlan) {
+    return (
+      <InsetPanel tone="muted" className="flex min-h-[200px] items-center justify-center">
+        <Span variant="muted" className="text-sm">
+          {t('chat.build_graph_loading')}
+        </Span>
+      </InsetPanel>
+    );
+  }
+
+  if (!hasActivePlan) {
+    return (
+      <P className="text-text-secondary dark:text-dark-text-muted p-3 text-sm">
+        {t('chat.build_compiled_no_plan')}
+      </P>
+    );
+  }
+
+  if (!hasSteps) {
+    return (
+      <P className="text-text-secondary dark:text-dark-text-muted p-3 text-sm">
+        {t('chat.build_compiled_no_steps')}
+      </P>
+    );
+  }
+
+  return (
     <BuildModeChainGraph
       chain={
         chain ?? {
@@ -54,11 +66,5 @@ export function CompiledPlanThreadEmbed({
       isLoading={isLoading}
       error={error}
     />
-  );
-
-  return (
-    <TranscriptEmbedCard title={t('chat.compiled_plan_embed_title')}>
-      <div className="min-h-[200px] min-w-0">{body}</div>
-    </TranscriptEmbedCard>
   );
 }

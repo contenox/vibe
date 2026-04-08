@@ -62,7 +62,7 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.AuthorizeOperation)
 		return
 	}
-	req, err := apiframework.Decode[createSessionRequest](r)
+	req, err := apiframework.Decode[createSessionRequest](r) // @request terminalapi.createSessionRequest
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
@@ -84,9 +84,10 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		ID:     out.ID,
 		WSPath: "/terminal/sessions/" + out.ID + "/ws",
 	}
-	_ = apiframework.Encode(w, r, http.StatusCreated, resp)
+	_ = apiframework.Encode(w, r, http.StatusCreated, resp) // @response terminalapi.createSessionResponse
 }
 
+// Lists terminal sessions for the authenticated principal (paginated).
 func (h *handler) listSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	principal, err := h.auth.GetIdentity(ctx)
@@ -130,9 +131,10 @@ func (h *handler) listSessions(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.ListOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, items)
+	_ = apiframework.Encode(w, r, http.StatusOK, items) // @response []*terminalstore.Session
 }
 
+// Returns metadata for a single terminal session.
 func (h *handler) getSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	principal, err := h.auth.GetIdentity(ctx)
@@ -154,9 +156,10 @@ func (h *handler) getSession(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.GetOperation)
 		return
 	}
-	_ = apiframework.Encode(w, r, http.StatusOK, sess)
+	_ = apiframework.Encode(w, r, http.StatusOK, sess) // @response *terminalstore.Session
 }
 
+// Updates PTY geometry from a prior resize (cols/rows).
 func (h *handler) patchSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	principal, err := h.auth.GetIdentity(ctx)
@@ -169,7 +172,7 @@ func (h *handler) patchSession(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, apiframework.BadRequest("id is required"), apiframework.UpdateOperation)
 		return
 	}
-	body, err := apiframework.Decode[patchSessionRequest](r)
+	body, err := apiframework.Decode[patchSessionRequest](r) // @request terminalapi.patchSessionRequest
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
@@ -190,6 +193,7 @@ func (h *handler) patchSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Deletes a terminal session and tears down its PTY.
 func (h *handler) deleteSession(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.auth.GetIdentity(r.Context())
 	if err != nil {

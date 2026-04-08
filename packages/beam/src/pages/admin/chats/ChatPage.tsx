@@ -34,6 +34,7 @@ import { planKeys } from '../../../lib/queryKeys';
 import { useChatHistory, useCreateChat, useSendMessage } from '../../../hooks/useChats';
 import { useTaskEvents } from '../../../hooks/useTaskEvents';
 import { createTaskEventRequestId } from '../../../lib/taskEvents';
+import { BEAM_LAYOUT_CHANGED_EVENT } from '../../../lib/beamLayout';
 import { cn } from '../../../lib/utils';
 import {
   CapturedStateUnit,
@@ -101,31 +102,36 @@ export default function ChatPage() {
   const sendDispatchedRef = useRef(false);
   const landingInitialSendKeyRef = useRef<string | null>(null);
   const workspaceRef = useRef<WorkspaceSplitHandle>(null);
-  const chatSplitRef = useRef<HTMLDivElement | null>(null);
+  const workspacePanelRef = useRef<HTMLDivElement | null>(null);
   const isLg = useIsMinLg();
 
-  const chatSplitInitialPx = useMemo(() => {
+  const workspaceSplitInitialPx = useMemo(() => {
     if (typeof window === 'undefined') return null;
     try {
       const raw = window.localStorage.getItem(WORKSPACE_SPLIT_STORAGE_KEY);
       const n = raw ? parseInt(raw, 10) : NaN;
-      return Number.isFinite(n) && n >= 280 && n <= 2400 ? n : null;
+      return Number.isFinite(n) && n >= 260 && n <= 900 ? n : null;
     } catch {
       return null;
     }
   }, []);
 
   const persistChatWorkspaceSplit = useCallback(() => {
-    const el = chatSplitRef.current;
+    const el = workspacePanelRef.current;
     if (!el) return;
     const w = Math.round(el.getBoundingClientRect().width);
-    if (w < 280 || w > 2400) return;
+    if (w < 260 || w > 900) return;
     try {
       window.localStorage.setItem(WORKSPACE_SPLIT_STORAGE_KEY, String(w));
     } catch {
       /* ignore */
     }
   }, []);
+
+  const onWorkspaceSplitResizeEnd = useCallback(() => {
+    persistChatWorkspaceSplit();
+    window.dispatchEvent(new CustomEvent(BEAM_LAYOUT_CHANGED_EVENT));
+  }, [persistChatWorkspaceSplit]);
 
   const [statePanelOpen, setStatePanelOpen] = useState(() => {
     if (typeof window === 'undefined') return true;
@@ -134,7 +140,9 @@ export default function ChatPage() {
 
   const [workbenchTab, setWorkbenchTab] = useState<ChatWorkbenchTabId>(() => {
     if (typeof window === 'undefined') return 'chat';
-    return window.localStorage.getItem(WORKBENCH_TAB_STORAGE_KEY) === 'chain' ? 'chain' : 'chat';
+    const stored = window.localStorage.getItem(WORKBENCH_TAB_STORAGE_KEY);
+    if (stored === 'chain' || stored === 'plan') return stored;
+    return 'chat';
   });
 
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(() => {
@@ -173,9 +181,9 @@ export default function ChatPage() {
     });
   };
 
-  const { data: files = [], isLoading: chainsLoading } = useListFiles();
+  const { data: files = [], isLoading: chainsLoading } = useListFiles('.contenox');
   const chainPaths = useMemo(
-    () => files.filter(f => isChainLikeVfsPath(f.path)).map(f => f.path),
+    () => files.filter(f => isChainLikeVfsPath(f.path)).map(f => f.path.split('/').pop()!),
     [files],
   );
 
@@ -637,19 +645,8 @@ export default function ChatPage() {
                     <InlineNotice variant="warning">{t('chat.sse_stream_lost')}</InlineNotice>
                   )}
                   {operationError && (
-                    <InlineNotice variant="error">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Span variant="body">{operationError}</Span>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setOperationError(null)}
-                          className="text-error dark:text-dark-text">
-                          {t('common.dismiss')}
-                        </Button>
-                      </div>
+                    <InlineNotice variant="error" onDismiss={() => setOperationError(null)}>
+                      {operationError}
                     </InlineNotice>
                   )}
 
@@ -662,6 +659,7 @@ export default function ChatPage() {
                         onWorkbenchTabChange={persistWorkbenchTab}
                         showWorkbenchTabs={!!selectedChainId.trim()}
                         chainPanel={chainPanel}
+                        showPlanTab={selectedMode === 'plan'}
                         isLoading={historyLoading}
                         error={error}
                         isProcessing={isProcessing}
@@ -729,15 +727,14 @@ export default function ChatPage() {
           {chatId && workspacePanelOpen && isLg ? (
             <ResizablePanelGroup className="flex min-h-0 min-w-0 flex-1 flex-row">
               <ResizablePanel
-                ref={chatSplitRef}
-                defaultSize={chatSplitInitialPx != null ? `${chatSplitInitialPx}px` : undefined}
                 minSize={280}
                 className="flex min-h-0 min-w-0 flex-col">
                 {chatMainFill}
               </ResizablePanel>
-              <ResizablePanelHandle onResizeEnd={persistChatWorkspaceSplit} />
+              <ResizablePanelHandle onResizeEnd={onWorkspaceSplitResizeEnd} />
               <ResizablePanel
-                defaultSize="min(420px,38vw)"
+                ref={workspacePanelRef}
+                defaultSize={workspaceSplitInitialPx != null ? `${workspaceSplitInitialPx}px` : 'min(420px,38vw)'}
                 minSize={260}
                 maxSize={900}
                 className="border-border bg-surface-50 dark:bg-dark-surface-100 flex min-h-0 min-w-0 flex-col border-l">
@@ -798,7 +795,7 @@ export default function ChatPage() {
             </SidePanelHeader>
             <SidePanelBody>
               {liveTask.events.length > 0 ? (
-                <div className="shrink-0">
+                <div className="min-h-0 flex-1 overflow-auto">
                   <Span variant="muted" className="mb-1 block text-xs font-medium">
                     {t('chat.task_events_feed_title')}
                   </Span>
@@ -821,11 +818,7 @@ export default function ChatPage() {
                   iconSize="md"
                   className="text-text dark:text-dark-text-muted h-full"
                 />
-              ) : (
-                <Span variant="muted" className="text-xs">
-                  {t('chat.captured_state_pending')}
-                </Span>
-              )}
+              ) : null}
             </SidePanelBody>
           </SidePanelColumn>
         ) : (

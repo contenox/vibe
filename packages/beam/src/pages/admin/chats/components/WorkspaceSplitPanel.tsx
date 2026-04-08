@@ -1,5 +1,5 @@
 import Editor, { type OnMount } from '@monaco-editor/react';
-import { Button, FileTree, type FileTreeNode, InlineNotice, Panel, Span, Spinner, Tabs, type Tab } from '@contenox/ui';
+import { Button, FileTree, type FileTreeNode, InlineNotice, Panel, Span, Spinner, Tabs } from '@contenox/ui';
 import { ChevronRight, Save, TerminalSquare, FolderOpen } from 'lucide-react';
 import { t } from 'i18next';
 import {
@@ -10,6 +10,7 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -19,7 +20,8 @@ const TerminalPanel = lazy(() =>
 import { useListFiles, useUpdateFile } from '../../../../hooks/useFiles';
 import { cn } from '../../../../lib/utils';
 import type { ChatContextPayload, FileResponse } from '../../../../lib/types';
-import { useMonacoAppTheme } from '../../../../lib/monacoAppTheme';
+import { BEAM_LAYOUT_CHANGED_EVENT } from '../../../../lib/beamLayout';
+import { defineBeamMonacoThemes, useMonacoAppTheme } from '../../../../lib/monacoAppTheme';
 import { toFileTreeNodes } from '../../../../lib/vfsFileTree';
 import {
   buildWorkspaceChatContext,
@@ -163,6 +165,7 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
   const { data: entries = [], isLoading, error: listError } = useListFiles(listPath);
   const updateFile = useUpdateFile();
   const monacoTheme = useMonacoAppTheme();
+  const monacoApiRef = useRef<Parameters<OnMount>[1] | null>(null);
 
   const sortedEntries = useMemo(() => {
     const copy = [...entries];
@@ -292,7 +295,18 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
     );
   }, [selectedFileId, dirty, editorText, selectedPath, updateFile, t]);
 
-  const handleEditorMount: OnMount = editor => {
+  useEffect(() => {
+    monacoApiRef.current?.editor.setTheme(monacoTheme);
+  }, [monacoTheme]);
+
+  useEffect(() => {
+    if (workspaceTab === 'terminal') {
+      queueMicrotask(() => window.dispatchEvent(new CustomEvent(BEAM_LAYOUT_CHANGED_EVENT)));
+    }
+  }, [workspaceTab]);
+
+  const handleEditorMount: OnMount = (editor, monaco) => {
+    monacoApiRef.current = monaco;
     requestAnimationFrame(() => editor.layout());
   };
 
@@ -305,27 +319,34 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
       {/* Tab bar */}
       <Tabs
         tabs={[
-          { id: 'files', label: <><FolderOpen className="h-3.5 w-3.5" /> {t('chat.workspace_tab_files', 'Files')}</> },
-          { id: 'terminal', label: <><TerminalSquare className="h-3.5 w-3.5" /> {t('chat.workspace_tab_terminal', 'Terminal')}</> },
-        ] satisfies Tab[]}
+          { id: 'files' as const, label: <><FolderOpen className="h-3.5 w-3.5" /> {t('chat.workspace_tab_files', 'Files')}</> },
+          { id: 'terminal' as const, label: <><TerminalSquare className="h-3.5 w-3.5" /> {t('chat.workspace_tab_terminal', 'Terminal')}</> },
+        ]}
         activeTab={workspaceTab}
         onTabChange={switchTab}
         className="border-border shrink-0 border-b"
       />
 
-      {workspaceTab === 'terminal' ? (
-        <div className="flex min-h-[min(40vh,280px)] w-full min-w-0 flex-1 flex-col">
-          <Suspense
-            fallback={
-              <div className="flex flex-1 items-center justify-center">
-                <Spinner size="md" />
-              </div>
-            }>
-            <TerminalPanel className="min-h-0 flex-1" />
-          </Suspense>
-        </div>
-      ) : (
-      <>
+      {/* Terminal tab — always mounted so the session survives tab switches */}
+      <div className={cn(
+        'min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden',
+        workspaceTab === 'terminal' ? 'flex' : 'hidden',
+      )}>
+        <Suspense
+          fallback={
+            <div className="flex flex-1 items-center justify-center">
+              <Spinner size="md" />
+            </div>
+          }>
+          <TerminalPanel className="min-h-0 flex-1" />
+        </Suspense>
+      </div>
+
+      {/* Files tab */}
+      <div className={cn(
+        'min-h-0 min-w-0 flex-1 flex-col',
+        workspaceTab === 'files' ? 'flex' : 'hidden',
+      )}>
       {/* Breadcrumbs */}
       <div className="border-border flex shrink-0 flex-col gap-1 px-3 py-1.5">
         <div className="text-text-muted dark:text-dark-text-muted flex min-w-0 flex-wrap items-center gap-0.5 text-xs">
@@ -392,12 +413,12 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
         </Panel>
 
         {loadError && !isTextFile ? (
-          <InlineNotice variant="warning">{loadError}</InlineNotice>
+          <InlineNotice variant="warning" onDismiss={() => setLoadError(null)}>{loadError}</InlineNotice>
         ) : loadError ? (
-          <InlineNotice variant="error">{loadError}</InlineNotice>
+          <InlineNotice variant="error" onDismiss={() => setLoadError(null)}>{loadError}</InlineNotice>
         ) : null}
 
-        {saveError ? <InlineNotice variant="error">{saveError}</InlineNotice> : null}
+        {saveError ? <InlineNotice variant="error" onDismiss={() => setSaveError(null)}>{saveError}</InlineNotice> : null}
 
         <div className="border-border bg-surface-100/50 dark:bg-dark-surface-200/40 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border">
           {selectedFileId && isTextFile ? (
@@ -421,6 +442,7 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
                 <div className="absolute inset-0 min-h-[200px]">
                   <Editor
                     height="100%"
+                    beforeMount={defineBeamMonacoThemes}
                     theme={monacoTheme}
                     language={monacoLanguageForPath(selectedPath)}
                     value={editorText}
@@ -451,7 +473,7 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
                 </div>
               </div>
               {canAttachContext ? (
-                <div className="border-border bg-surface-50 dark:bg-dark-surface-300/50 text-text-secondary dark:text-dark-secondary-300 border-t px-2 py-2 text-xs leading-snug">
+                <div className="border-border border-t bg-surface-100 dark:bg-dark-surface-200 text-text-muted dark:text-dark-text-muted px-2 py-2 text-xs leading-snug">
                   {t('chat.workspace_context_hint')}
                 </div>
               ) : null}
@@ -463,8 +485,7 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
           )}
         </div>
       </div>
-      </>
-      )}
+      </div>
     </div>
   );
 });

@@ -30,17 +30,17 @@
   --color-secondary-900: #0f172a;
   --color-secondary: var(--color-secondary-500);
 
-  /* Dark Mode Secondary — near-black depth */
-  --color-dark-secondary-50: #f5f5f3;
-  --color-dark-secondary-100: #e8e8e4;
-  --color-dark-secondary-200: #d0d0cb;
-  --color-dark-secondary-300: #a8a8a0;
-  --color-dark-secondary-400: #7e7e76;
-  --color-dark-secondary-500: #5a5a54;
-  --color-dark-secondary-600: #424240;
-  --color-dark-secondary-700: #2a2a28;
-  --color-dark-secondary-800: #1a1a18;
-  --color-dark-secondary-900: #0f0f0e;
+  /* Dark Mode Secondary — graphite neutral */
+  --color-dark-secondary-50: #f4f5f7;
+  --color-dark-secondary-100: #e5e7eb;
+  --color-dark-secondary-200: #cdd0d5;
+  --color-dark-secondary-300: #a4a8b0;
+  --color-dark-secondary-400: #7a7f88;
+  --color-dark-secondary-500: #585d66;
+  --color-dark-secondary-600: #40444b;
+  --color-dark-secondary-700: #292c32;
+  --color-dark-secondary-800: #191b20;
+  --color-dark-secondary-900: #0e1014;
   --color-dark-secondary: var(--color-dark-secondary-500);
 
   /* ========== Light Mode Error Colors ========== */
@@ -85,17 +85,17 @@
   --color-dark-primary: var(--color-dark-primary-500);
   --color-dark-brand: var(--color-dark-primary-500);
 
-  /* Dark Mode Secondary — near-black depth */
-  --color-dark-secondary-50: #f5f5f3;
-  --color-dark-secondary-100: #e8e8e4;
-  --color-dark-secondary-200: #d0d0cb;
-  --color-dark-secondary-300: #a8a8a0;
-  --color-dark-secondary-400: #7e7e76;
-  --color-dark-secondary-500: #5a5a54;
-  --color-dark-secondary-600: #424240;
-  --color-dark-secondary-700: #2a2a28;
-  --color-dark-secondary-800: #1a1a18;
-  --color-dark-secondary-900: #0f0f0e;
+  /* Dark Mode Secondary — graphite neutral */
+  --color-dark-secondary-50: #f4f5f7;
+  --color-dark-secondary-100: #e5e7eb;
+  --color-dark-secondary-200: #cdd0d5;
+  --color-dark-secondary-300: #a4a8b0;
+  --color-dark-secondary-400: #7a7f88;
+  --color-dark-secondary-500: #585d66;
+  --color-dark-secondary-600: #40444b;
+  --color-dark-secondary-700: #292c32;
+  --color-dark-secondary-800: #191b20;
+  --color-dark-secondary-900: #0e1014;
   --color-dark-secondary: var(--color-dark-secondary-500);
 
   /* Accent (teal) */
@@ -220,7 +220,7 @@
   --font-body: "Geist", system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
   --color-text: var(--color-dark-text);
-  --color-dark-text: #ededea; /* Near-white, slight warmth */
+  --color-dark-text: #e8eaed; /* Near-white, cool neutral */
   --color-dark-text-surface: var(--color-dark-text);
   --color-dark-text-surface-inverted: var(--color-dark-text-inverted);
 
@@ -243,17 +243,17 @@
   --color-dark-text-secondary: var(--color-dark-secondary-700);
   --color-dark-text-accent: #6ee7b7; /* Emerald-300 — matches primary family */
   --color-dark-text-error: var(--color-dark-error-400);
-  --color-dark-text-muted: #7a7a72; /* Muted — visible on near-black */
+  --color-dark-text-muted: #787c85; /* Muted — cool graphite */
   --color-dark-text-inverted: var(--color-dark-surface-50);
   --color-dark-text-surface: var(--color-dark-text);
   --color-dark-text-surface-inverted: var(--color-dark-text-inverted);
 
   /* ========== Light Mode Surface Colors ========== */
   --color-surface-50: #f8f9fa; /* Soft off-white (previously pure white) */
-  --color-surface-100: #f1f3f5; /* Warm very light gray */
+  --color-surface-100: #f1f3f5; /* Very light gray */
   --color-surface-200: #e9ecef; /* Light pearl gray */
-  --color-surface-300: #dee2e6; /* Soft warm gray */
-  --color-surface-400: #ced4da; /* Medium warm gray */
+  --color-surface-300: #dee2e6; /* Soft gray */
+  --color-surface-400: #ced4da; /* Medium gray */
   --color-surface-500: #adb5bd; /* Muted slate */
   --color-surface-600: #6c757d; /* Darker slate */
   --color-surface-700: #495057; /* Deep charcoal */
@@ -261,19 +261,18 @@
   --color-surface-900: #212529; /* Darkest gray */
   --color-surface: var(--color-surface-50);
 
-  /* ========== Dark Mode Surface Colors (Near-Black) ========== */
-  /* Matches enterprise/site slate overrides: oklch(0.10-0.52, 0.002, 60) */
-  /* True near-black for the "neon terminal" aesthetic                     */
-  --color-dark-surface-50: #080808;  /* True black */
-  --color-dark-surface-100: #0c0c0b; /* App background */
-  --color-dark-surface-200: #111110; /* Card/panel bg */
-  --color-dark-surface-300: #181817; /* Elevated surface */
-  --color-dark-surface-400: #222221; /* Borders, dividers */
-  --color-dark-surface-500: #2e2e2c; /* Subtle contrast */
-  --color-dark-surface-600: #3a3a38; /* Muted interactive */
-  --color-dark-surface-700: #4a4a47; /* Mid gray */
-  --color-dark-surface-800: #5e5e5a; /* Light slate */
-  --color-dark-surface-900: #737370; /* Lightest surface */
+  /* ========== Dark Mode Surface Colors (Graphite) ========== */
+  /* Cool neutral near-blacks — no warm/brown shift             */
+  --color-dark-surface-50: #08090a;  /* True black */
+  --color-dark-surface-100: #0d0e10; /* App background */
+  --color-dark-surface-200: #121416; /* Card/panel bg */
+  --color-dark-surface-300: #1a1c1f; /* Elevated surface */
+  --color-dark-surface-400: #24262a; /* Borders, dividers */
+  --color-dark-surface-500: #2f3237; /* Subtle contrast */
+  --color-dark-surface-600: #3b3e44; /* Muted interactive */
+  --color-dark-surface-700: #4b4f56; /* Mid gray */
+  --color-dark-surface-800: #5f636b; /* Light slate */
+  --color-dark-surface-900: #757980; /* Lightest surface */
   --color-dark-surface: var(--color-dark-surface-200);
 
   /* ========== Text Surface Colors ========== */

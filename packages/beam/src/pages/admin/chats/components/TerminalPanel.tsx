@@ -214,7 +214,7 @@ export function TerminalPanel({ className }: { className?: string }) {
   }
 
   return (
-    <div className={`flex h-full min-h-0 flex-col ${className ?? ''}`}>
+    <div className={`flex h-full min-h-0 w-full min-w-0 flex-col ${className ?? ''}`}>
       {/* Title bar */}
       <div className="border-border bg-surface-100 dark:bg-dark-surface-200 flex shrink-0 items-center justify-between gap-2 border-b px-2 py-1.5">
         <Span variant="muted" className="text-xs font-medium">
@@ -241,9 +241,8 @@ export function TerminalPanel({ className }: { className?: string }) {
           </Button>
         </div>
       </div>
-      {/* Terminal */}
-      <div className="min-h-0 flex-1">
-        <XTerminal wsUrl={wsUrl} onDisconnect={handleDisconnect} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <XTerminal className="min-h-0 min-w-0 flex-1" wsUrl={wsUrl} onDisconnect={handleDisconnect} />
       </div>
     </div>
   );

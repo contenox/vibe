@@ -48,5 +48,5 @@
       }
     }
   ],
-  "token_limit": 8192
+  "token_limit": 65536
 }

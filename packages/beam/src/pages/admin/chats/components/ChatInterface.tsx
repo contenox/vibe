@@ -31,10 +31,9 @@ function dateKey(iso: string): string {
   return iso.slice(0, 10);
 }
 
-export type ChatWorkbenchTabId = 'chat' | 'chain';
+export type ChatWorkbenchTabId = 'chat' | 'chain' | 'plan';
 
 export type ChatInterfaceProps = {
-  /** When workbench tabs are shown, maps messages and optional compiled-plan embed. Otherwise pass messages-only items. */
   threadItems: ChatThreadItem[];
   isLoading: boolean;
   error: Error | null;
@@ -46,14 +45,15 @@ export type ChatInterfaceProps = {
   onStop?: () => void;
   streamScrollSignature?: string;
   liveStatus?: string;
-  /** Renders the compiled plan embed row (only used when `threadItems` contains `compiledPlanEmbed`). */
+  /** Rendered inside the Plan tab. */
   compiledPlanEmbedContent: ReactNode;
-  /** When set with `chainPanel`, shows Chat | Chain tabs above the thread / graph. */
   workbenchTab?: ChatWorkbenchTabId;
   onWorkbenchTabChange?: (tab: ChatWorkbenchTabId) => void;
   showWorkbenchTabs?: boolean;
-  /** Executor chain preview (Chain tab). Use `lazy` mounting via TabPanel. */
+  /** Executor chain preview (Chain tab). */
   chainPanel?: ReactNode;
+  /** Show the Plan tab (only when plan mode is active). */
+  showPlanTab?: boolean;
 };
 
 export const ChatInterface = ({
@@ -73,6 +73,7 @@ export const ChatInterface = ({
   onWorkbenchTabChange,
   showWorkbenchTabs = false,
   chainPanel,
+  showPlanTab = false,
 }: ChatInterfaceProps) => {
   const { containerRef, endRef, scrollToEnd, isNearBottom } = useChatScroll({
     deps: [threadItems, streamScrollSignature, workbenchTab],
@@ -100,6 +101,9 @@ export const ChatInterface = ({
   const workbenchTabs = [
     { id: 'chat' as const, label: t('chat.workbench_tab_chat') },
     { id: 'chain' as const, label: t('chat.workbench_tab_chain') },
+    ...(showPlanTab
+      ? [{ id: 'plan' as const, label: t('chat.workbench_tab_plan', 'Plan') }]
+      : []),
   ];
 
   let lastMessageIndex = -1;
@@ -127,14 +131,9 @@ export const ChatInterface = ({
           />
         ) : (
           threadItems.map((item, index) => {
+            // Skip compiled plan embeds in the thread — they're in their own tab now
             if (item.kind === 'compiledPlanEmbed') {
-              return (
-                <div
-                  key={`compiled-${item.key}`}
-                  className="animate-in fade-in-0 duration-150">
-                  {compiledPlanEmbedContent}
-                </div>
-              );
+              return null;
             }
 
             const message = item.message;
@@ -212,10 +211,17 @@ export const ChatInterface = ({
               {threadBody}
             </TabPanel>
             <TabPanel tabId="chain" activeTab={workbenchTab} className="min-h-0 flex-1 flex-col" lazy>
-              <div className="text-text dark:text-dark-text h-full min-h-0 overflow-auto p-3 sm:p-4">
+              <div className="text-text dark:text-dark-text flex min-h-0 flex-1 flex-col p-3 sm:p-4">
                 {chainPanel}
               </div>
             </TabPanel>
+            {showPlanTab && (
+              <TabPanel tabId="plan" activeTab={workbenchTab} className="min-h-0 flex-1 flex-col" lazy>
+                <div className="text-text dark:text-dark-text flex min-h-0 flex-1 flex-col p-3 sm:p-4">
+                  {compiledPlanEmbedContent}
+                </div>
+              </TabPanel>
+            )}
           </TabPanels>
         </div>
       ) : (

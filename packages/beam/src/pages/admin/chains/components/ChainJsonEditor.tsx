@@ -2,7 +2,7 @@
 import Editor, { OnMount } from '@monaco-editor/react';
 import type { editor as MonacoEditor } from 'monaco-editor';
 import { useEffect, useRef, useState } from 'react';
-import { useMonacoAppTheme } from '../../../../lib/monacoAppTheme';
+import { defineBeamMonacoThemes, useMonacoAppTheme } from '../../../../lib/monacoAppTheme';
 import type { ChainDefinition } from '../../../../lib/types';
 
 interface Props {
@@ -15,6 +15,7 @@ interface Props {
 export default function ChainJsonEditor({ chain, className, onChangeText }: Props) {
   const [text, setText] = useState('');
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
+  const monacoApiRef = useRef<Parameters<OnMount>[1] | null>(null);
   const monacoTheme = useMonacoAppTheme();
 
   useEffect(() => {
@@ -23,8 +24,13 @@ export default function ChainJsonEditor({ chain, className, onChangeText }: Prop
     onChangeText?.(initial);
   }, [chain, onChangeText]);
 
+  useEffect(() => {
+    monacoApiRef.current?.editor.setTheme(monacoTheme);
+  }, [monacoTheme]);
+
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    monacoApiRef.current = monaco;
     monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
       validate: true,
       allowComments: false,
@@ -36,6 +42,7 @@ export default function ChainJsonEditor({ chain, className, onChangeText }: Prop
     <div className={`flex min-h-0 flex-1 rounded-lg border ${className ?? ''}`}>
       <Editor
         height="100%"
+        beforeMount={defineBeamMonacoThemes}
         theme={monacoTheme}
         defaultLanguage="json"
         value={text}

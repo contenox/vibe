@@ -3,6 +3,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { useEffect, useRef, useLayoutEffect } from 'react';
+import { BEAM_LAYOUT_CHANGED_EVENT } from '../lib/beamLayout';
 import { useXtermTheme } from '../lib/xtermTheme';
 import { cn } from '../lib/utils';
 
@@ -22,39 +23,43 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
   const onDisconnectRef = useRef(onDisconnect);
   const onOpenRef = useRef(onOpen);
   const theme = useXtermTheme();
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
   useLayoutEffect(() => {
     onDisconnectRef.current = onDisconnect;
     onOpenRef.current = onOpen;
   });
 
-  // Update theme in-place without recreating terminal
   useEffect(() => {
-    if (termRef.current) {
-      termRef.current.options.theme = theme;
+    const t = termRef.current;
+    const el = containerRef.current;
+    if (t) {
+      t.options.theme = theme;
+    }
+    if (el && theme.background != null) {
+      el.style.backgroundColor = theme.background;
     }
   }, [theme]);
 
-  // Main effect: create terminal, connect WebSocket, wire I/O
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    /** When true, ws.close() is from React cleanup — must not run onDisconnect (would spawn new sessions). */
     let closedByCleanup = false;
 
-    // ── Terminal instance ──────────────────────────────────────────
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
       fontSize: 14,
       lineHeight: 1.2,
-      theme,
+      theme: themeRef.current,
       allowProposedApi: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
+    term.options.theme = themeRef.current;
 
     const focusTerm = () => {
       try {
@@ -80,6 +85,26 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
       }
     };
 
+    let roTimer: number | null = null;
+    const scheduleFit = () => {
+      if (roTimer != null) window.clearTimeout(roTimer);
+      roTimer = window.setTimeout(() => {
+        roTimer = null;
+        requestAnimationFrame(safeFit);
+      }, 50);
+    };
+
+    const onWindowResize = () => scheduleFit();
+    const onBeamLayout = () => scheduleFit();
+
+    window.addEventListener('resize', onWindowResize);
+    window.addEventListener(BEAM_LAYOUT_CHANGED_EVENT, onBeamLayout);
+
+    const ro = new ResizeObserver(() => {
+      scheduleFit();
+    });
+    ro.observe(container);
+
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         safeFit();
@@ -93,7 +118,6 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
     };
     container.addEventListener('pointerdown', onContainerPointerDown);
 
-    // ── WebSocket ─────────────────────────────────────────────────
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${window.location.host}${wsUrl}`;
     const ws = new WebSocket(url);
@@ -103,7 +127,6 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
       onOpenRef.current?.();
       safeFit();
       focusTerm();
-      // Send initial terminal dimensions
       ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
     };
 
@@ -120,7 +143,6 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
       }
     };
 
-    // ── Terminal input → WebSocket ────────────────────────────────
     const encoder = new TextEncoder();
 
     const dataDisposable = term.onData((data: string) => {
@@ -139,23 +161,17 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
       }
     });
 
-    // ── Resize: FitAddon → terminal.onResize → WebSocket ─────────
     const resizeDisposable = term.onResize(({ cols, rows }) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }));
       }
     });
 
-    const ro = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        safeFit();
-      });
-    });
-    ro.observe(container);
-
-    // ── Cleanup ───────────────────────────────────────────────────
     return () => {
       closedByCleanup = true;
+      if (roTimer != null) window.clearTimeout(roTimer);
+      window.removeEventListener('resize', onWindowResize);
+      window.removeEventListener(BEAM_LAYOUT_CHANGED_EVENT, onBeamLayout);
       container.removeEventListener('pointerdown', onContainerPointerDown);
       ro.disconnect();
       dataDisposable.dispose();
@@ -167,12 +183,19 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
       term.dispose();
       termRef.current = null;
     };
-  }, [wsUrl]); // Recreate only when wsUrl changes; theme handled separately
+  }, [wsUrl]);
 
   return (
     <div
       ref={containerRef}
-      className={cn('h-full w-full min-h-0 min-w-0 cursor-text overflow-hidden', className)}
+      data-xterm-host=""
+      className={cn(
+        'box-border min-h-0 min-w-0 h-full w-full flex-1 cursor-text overflow-hidden',
+        className,
+      )}
+      style={{
+        backgroundColor: theme.background ?? '#f8f9fa',
+      }}
     />
   );
 }

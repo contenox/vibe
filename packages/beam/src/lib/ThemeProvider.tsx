@@ -1,4 +1,4 @@
-import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import React, { createContext, ReactNode, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 
 interface ThemeContextType {
   theme: string;
@@ -11,21 +11,30 @@ interface ThemeProviderProps {
   children: ReactNode;
 }
 
+/** Subscribe to OS prefers-color-scheme changes via matchMedia. */
+const darkMQ = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+function subscribeToScheme(cb: () => void) {
+  darkMQ?.addEventListener('change', cb);
+  return () => darkMQ?.removeEventListener('change', cb);
+}
+
+function getSystemTheme(): string {
+  return darkMQ?.matches ? 'dark' : 'light';
+}
+
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
-  const [theme, setTheme] = useState<string>('light');
+  const systemTheme = useSyncExternalStore(subscribeToScheme, getSystemTheme, () => 'light');
+  const [theme, setTheme] = useState(systemTheme);
+
+  // Sync with OS preference changes
+  useEffect(() => {
+    setTheme(systemTheme);
+  }, [systemTheme]);
 
   const toggleTheme = () => {
-    const newTheme = theme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
+    setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
   };
-
-  useEffect(() => {
-    const storedTheme = localStorage.getItem('theme');
-    if (storedTheme) {
-      setTheme(storedTheme);
-    }
-  }, []);
 
   useEffect(() => {
     document.documentElement.className = theme;

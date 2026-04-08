@@ -1,14 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import type { ITheme } from '@xterm/xterm';
-
-function isDark(): boolean {
-  if (typeof document === 'undefined') return false;
-  const root = document.documentElement;
-  // Check explicit class first (user toggle), fall back to OS preference
-  if (root.classList.contains('dark')) return true;
-  if (root.classList.contains('light')) return false;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
+import { useTheme } from './ThemeProvider';
 
 // Colors pulled from ui/src/index.css design tokens.
 const LIGHT_THEME: ITheme = {
@@ -37,21 +29,21 @@ const LIGHT_THEME: ITheme = {
 };
 
 const DARK_THEME: ITheme = {
-  background: '#0d1117', // dark-surface-50
-  foreground: '#e2e5e9', // dark-text
-  cursor: '#e2e5e9',
-  cursorAccent: '#0d1117',
+  background: '#0d0e10', // dark-surface-100
+  foreground: '#e8eaed', // dark-text
+  cursor: '#e8eaed',
+  cursorAccent: '#0d0e10',
   selectionBackground: '#3b82f633',
   selectionForeground: undefined,
-  black: '#0d1117', // dark-surface-50
+  black: '#08090a', // dark-surface-50
   red: '#f87171', // dark-error-800
   green: '#4ade80', // dark-success-600
   yellow: '#facc15', // dark-warning-600
   blue: '#60a5fa', // dark-primary-300 approx
   magenta: '#c084fc',
   cyan: '#22d3ee',
-  white: '#e2e5e9', // dark-text
-  brightBlack: '#495880', // dark-surface-900
+  white: '#e8eaed', // dark-text
+  brightBlack: '#4b4f56', // dark-surface-700
   brightRed: '#fca5a5', // dark-error-900
   brightGreen: '#86efac', // dark-success-700
   brightYellow: '#fde047', // dark-warning-700
@@ -61,26 +53,8 @@ const DARK_THEME: ITheme = {
   brightWhite: '#ffffff',
 };
 
+/** Matches Beam [ThemeProvider] (`html.dark` / `html.light`) so xterm matches Monaco and the shell. */
 export function useXtermTheme(): ITheme {
-  const [theme, setTheme] = useState<ITheme>(() => (isDark() ? DARK_THEME : LIGHT_THEME));
-
-  useEffect(() => {
-    const sync = () => setTheme(isDark() ? DARK_THEME : LIGHT_THEME);
-
-    // Watch for class="dark" toggle on <html>
-    const el = document.documentElement;
-    const mo = new MutationObserver(sync);
-    mo.observe(el, { attributes: true, attributeFilter: ['class'] });
-
-    // Watch for OS preference change
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    mq.addEventListener('change', sync);
-
-    return () => {
-      mo.disconnect();
-      mq.removeEventListener('change', sync);
-    };
-  }, []);
-
-  return theme;
+  const { theme } = useTheme();
+  return useMemo(() => (theme === 'dark' ? DARK_THEME : LIGHT_THEME), [theme]);
 }

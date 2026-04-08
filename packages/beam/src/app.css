@@ -17,3 +17,18 @@
 
 @import 'tailwindcss';
 @tailwind utilities;
+
+/* xterm injects .xterm under the host — not React-rendered; scope with data-xterm-host */
+@layer components {
+  [data-xterm-host] .xterm {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    padding: 0;
+  }
+
+  [data-xterm-host] .xterm-viewport {
+    width: 100%;
+  }
+}

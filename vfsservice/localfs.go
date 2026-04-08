@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	libdb "github.com/contenox/contenox/libdbexec"
 )
 
 // localFS implements Service against the local filesystem under a root directory.
@@ -79,7 +81,7 @@ func (l *localFS) GetFileByID(ctx context.Context, id string) (*File, error) {
 	}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("file not found: %w", ErrNotSupported)
+		return nil, fmt.Errorf("file not found: %w", libdb.ErrNotFound)
 	}
 	if err != nil {
 		return nil, err
@@ -104,7 +106,7 @@ func (l *localFS) GetFolderByID(ctx context.Context, id string) (*Folder, error)
 	}
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("folder not found: %w", ErrNotSupported)
+		return nil, fmt.Errorf("folder not found: %w", libdb.ErrNotFound)
 	}
 	if err != nil {
 		return nil, err

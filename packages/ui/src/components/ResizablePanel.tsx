@@ -51,7 +51,11 @@ export const ResizablePanel = forwardRef<HTMLDivElement, ResizablePanelProps>(
     return (
       <div
         ref={ref}
-        className={cn("min-h-0 min-w-0 overflow-auto", className)}
+        className={cn(
+          // not overflow-auto: scroll containers break flex sizing for children (e.g. xterm FitAddon)
+          "min-h-0 min-w-0 overflow-hidden",
+          className,
+        )}
         style={{
           flexBasis: defaultSize,
           flexGrow: defaultSize ? 0 : 1,
@@ -78,7 +82,9 @@ interface ResizablePanelHandleProps
 
 /**
  * Draggable divider between two `ResizablePanel`s.
- * Resizes the **previous** sibling by the pointer‐move delta.
+ *
+ * Resizes the **next** sibling by the inverse of the pointer‐move delta so
+ * the first (previous) panel can keep `flex-grow: 1` and fill remaining space.
  */
 export const ResizablePanelHandle = forwardRef<
   HTMLDivElement,
@@ -119,16 +125,16 @@ export const ResizablePanelHandle = forwardRef<
       const delta = current - lastPos.current;
       lastPos.current = current;
 
-      const prev = innerRef.current?.previousElementSibling as HTMLElement | null;
-      if (prev && delta !== 0) {
+      const next = innerRef.current?.nextElementSibling as HTMLElement | null;
+      if (next && delta !== 0) {
         const currentSize =
           orientation === "horizontal"
-            ? prev.getBoundingClientRect().width
-            : prev.getBoundingClientRect().height;
-        const newSize = currentSize + delta;
-        prev.style.flexBasis = `${newSize}px`;
-        prev.style.flexGrow = "0";
-        prev.style.flexShrink = "0";
+            ? next.getBoundingClientRect().width
+            : next.getBoundingClientRect().height;
+        const newSize = currentSize - delta;
+        next.style.flexBasis = `${newSize}px`;
+        next.style.flexGrow = "0";
+        next.style.flexShrink = "0";
         onResize?.(delta);
       }
     },
@@ -142,10 +148,13 @@ export const ResizablePanelHandle = forwardRef<
 
   useEffect(() => {
     if (!dragging) return;
-    const up = () => setDragging(false);
+    const up = () => {
+      setDragging(false);
+      onResizeEnd?.();
+    };
     window.addEventListener("pointerup", up);
     return () => window.removeEventListener("pointerup", up);
-  }, [dragging]);
+  }, [dragging, onResizeEnd]);
 
   const isHorizontal = orientation === "horizontal";
 

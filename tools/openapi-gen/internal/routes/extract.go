@@ -13,6 +13,9 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
+// openAPIResponseNoContent marks a 204 response with no response body in the spec.
+const openAPIResponseNoContent = "noContent"
+
 // Process extracts route operations from Add*Routes functions and appends them to swagger.
 func Process(fset *token.FileSet, pkgs map[string]*ast.Package, swagger *openapi3.T) {
 	pkgNames := make([]string, 0, len(pkgs))
@@ -158,15 +161,17 @@ func extractRoute(_ *token.FileSet, file *ast.File, call *ast.CallExpr, swagger 
 
 	statusCodes := extractStatusCodes(handler, file)
 	for status, respType := range statusCodes {
-		content := openapi3.Content{
-			"application/json": &openapi3.MediaType{
-				Schema: schema.RefForAnnotation(respType),
-			},
-		}
 		response := openapi3.NewResponse()
 		description := httpStatusToDescription(status)
 		response.Description = &description
-		response.Content = content
+		if respType != openAPIResponseNoContent {
+			content := openapi3.Content{
+				"application/json": &openapi3.MediaType{
+					Schema: schema.RefForAnnotation(respType),
+				},
+			}
+			response.Content = content
+		}
 		op.AddResponse(status, response)
 	}
 
@@ -283,6 +288,23 @@ func extractStatusCodes(handler *ast.FuncDecl, file *ast.File) map[int]string {
 		}
 
 		statusCodes[status] = normalizeTypeExpr(call.Args[3])
+		return true
+	})
+	ast.Inspect(handler.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "WriteHeader" || len(call.Args) < 1 {
+			return true
+		}
+		arg := call.Args[0]
+		if s, ok := arg.(*ast.SelectorExpr); ok {
+			if id, ok := s.X.(*ast.Ident); ok && id.Name == "http" && s.Sel.Name == "StatusNoContent" {
+				statusCodes[204] = openAPIResponseNoContent
+			}
+		}
 		return true
 	})
 	return statusCodes
