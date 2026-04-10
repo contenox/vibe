@@ -46,15 +46,34 @@ const (
 	defaultTimeout     = 10 * time.Second
 )
 
+// SQLiteBusOptions overrides poll intervals (e.g. tests use 1ms so request/reply is deterministic).
+type SQLiteBusOptions struct {
+	EventPoll   time.Duration
+	RequestPoll time.Duration
+}
+
 // NewSQLite creates a SQLite-backed Messenger.
 // exec must be the result of dbManager.WithoutTransaction() — it satisfies sqlExec.
 func NewSQLite(exec sqlExec) *SQLiteBus {
+	return NewSQLiteWithOptions(exec, SQLiteBusOptions{})
+}
+
+// NewSQLiteWithOptions is like NewSQLite but allows tuning poll intervals for tests.
+func NewSQLiteWithOptions(exec sqlExec, opt SQLiteBusOptions) *SQLiteBus {
 	ctx, cancel := context.WithCancel(context.Background())
+	ep := opt.EventPoll
+	if ep == 0 {
+		ep = defaultEventPoll
+	}
+	rp := opt.RequestPoll
+	if rp == 0 {
+		rp = defaultRequestPoll
+	}
 	b := &SQLiteBus{
 		db:          exec,
 		cancel:      cancel,
-		eventPoll:   defaultEventPoll,
-		requestPoll: defaultRequestPoll,
+		eventPoll:   ep,
+		requestPoll: rp,
 	}
 	// Background cleanup: remove stale events and orphaned requests older than 5 minutes.
 	b.wg.Add(1)
@@ -93,6 +112,19 @@ func (b *SQLiteBus) Stream(ctx context.Context, subject string, ch chan<- []byte
 	}
 	b.mu.Unlock()
 
+	// Snapshot max(id) before returning so a caller Publish cannot be counted as
+	// "historical" (race: Publish before this query ran inside the goroutine used to
+	// set cursor == new row id and skip the event forever).
+	var cursor int64 = -1
+	rows, err := b.db.QueryContext(ctx,
+		`SELECT COALESCE(MAX(id), 0) FROM bus_events WHERE subject = ?`, subject)
+	if err == nil {
+		if rows.Next() {
+			_ = rows.Scan(&cursor)
+		}
+		_ = rows.Close()
+	}
+
 	subCtx, subCancel := context.WithCancel(ctx)
 	sub := &sqliteSubscription{cancel: subCancel}
 
@@ -100,17 +132,6 @@ func (b *SQLiteBus) Stream(ctx context.Context, subject string, ch chan<- []byte
 	go func() {
 		defer b.wg.Done()
 		defer subCancel()
-
-		var cursor int64 = -1
-		// Initialise cursor to current max so we only deliver new events.
-		rows, err := b.db.QueryContext(subCtx,
-			`SELECT COALESCE(MAX(id), 0) FROM bus_events WHERE subject = ?`, subject)
-		if err == nil {
-			if rows.Next() {
-				_ = rows.Scan(&cursor)
-			}
-			_ = rows.Close()
-		}
 
 		ticker := time.NewTicker(b.eventPoll)
 		defer ticker.Stop()

@@ -493,7 +493,7 @@ func TestUnit_groups_ListEmptyAssociations(t *testing.T) {
 	require.Len(t, groups, 0)
 
 	// 3. Test for a new model
-	model := &runtimetypes.Model{Model: "empty-model", ContextLength: 1024}
+	model := &runtimetypes.Model{Model: "empty-model", ContextLength: 1024, CanChat: true}
 	err = s.AppendModel(ctx, model)
 	require.NoError(t, err)
 

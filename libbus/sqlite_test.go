@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,7 +44,16 @@ func newTestDB(t *testing.T) *sql.DB {
 	// Use a temp-file SQLite so all connections in the *sql.DB pool see the same data.
 	// :memory: databases are per-connection and cause cross-goroutine isolation issues.
 	dbPath := filepath.Join(t.TempDir(), "bus_test.db")
-	db, err := sql.Open("sqlite", dbPath)
+	// Match libdbexec.NewSQLiteDBManager: WAL + busy_timeout so concurrent
+	// Request/Serve goroutines do not fail transient SQLITE_BUSY (same as prod).
+	dsn := dbPath
+	if !strings.Contains(dsn, "?") {
+		dsn += "?"
+	} else {
+		dsn += "&"
+	}
+	dsn += "_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
 	require.NoError(t, err)
 	_, err = db.Exec(schema)
 	require.NoError(t, err)
@@ -52,7 +63,11 @@ func newTestDB(t *testing.T) *sql.DB {
 
 func newTestBus(t *testing.T) *libbus.SQLiteBus {
 	t.Helper()
-	b := libbus.NewSQLite(newTestDB(t))
+	// Faster-than-default polls keep tests fast without relying on wall-clock timeouts.
+	b := libbus.NewSQLiteWithOptions(newTestDB(t), libbus.SQLiteBusOptions{
+		RequestPoll: 5 * time.Millisecond,
+		EventPoll:   5 * time.Millisecond,
+	})
 	t.Cleanup(func() { _ = b.Close() })
 	return b
 }
@@ -60,8 +75,7 @@ func newTestBus(t *testing.T) *libbus.SQLiteBus {
 // ── TestUnit_SQLiteBus_Publish_Stream ─────────────────────────────────────
 
 func TestUnit_SQLiteBus_Publish_Stream(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
+	ctx := t.Context()
 
 	b := newTestBus(t)
 
@@ -74,13 +88,12 @@ func TestUnit_SQLiteBus_Publish_Stream(t *testing.T) {
 	require.NoError(t, b.Publish(ctx, "test.subject", []byte("world")))
 
 	received := make([]string, 0, 2)
-	timeout := time.After(2 * time.Second)
 	for len(received) < 2 {
 		select {
 		case msg := <-ch:
 			received = append(received, string(msg))
-		case <-timeout:
-			t.Fatalf("timed out waiting for messages; got %d/2", len(received))
+		case <-ctx.Done():
+			t.Fatalf("stopped waiting for messages; got %d/2: %v", len(received), ctx.Err())
 		}
 	}
 	assert.Equal(t, []string{"hello", "world"}, received)
@@ -96,8 +109,7 @@ func TestUnit_SQLiteBus_Publish_NoSubscriberIsNoError(t *testing.T) {
 // ── TestUnit_SQLiteBus_Serve_Request ──────────────────────────────────────
 
 func TestUnit_SQLiteBus_Serve_Request(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 
 	b := newTestBus(t)
 
@@ -123,8 +135,7 @@ func TestUnit_SQLiteBus_Request_NoHandler_Timeout(t *testing.T) {
 }
 
 func TestUnit_SQLiteBus_Serve_ErrorReply(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 
 	b := newTestBus(t)
 
@@ -143,8 +154,7 @@ func TestUnit_SQLiteBus_Serve_ErrorReply(t *testing.T) {
 // ── TestUnit_SQLiteBus_MultipleRequests ───────────────────────────────────
 
 func TestUnit_SQLiteBus_MultipleSequentialRequests(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
+	ctx := t.Context()
 
 	b := newTestBus(t)
 
@@ -182,8 +192,7 @@ func TestUnit_SQLiteBus_Close_Idempotent(t *testing.T) {
 // ── TestUnit_SQLiteBus_Unsubscribe ────────────────────────────────────────
 
 func TestUnit_SQLiteBus_Stream_UnsubscribeStopsDelivery(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
+	ctx := t.Context()
 
 	b := newTestBus(t)
 
@@ -196,7 +205,7 @@ func TestUnit_SQLiteBus_Stream_UnsubscribeStopsDelivery(t *testing.T) {
 	select {
 	case msg := <-ch:
 		assert.Equal(t, "before", string(msg))
-	case <-time.After(2 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("did not receive message before unsubscribe")
 	}
 
@@ -204,10 +213,12 @@ func TestUnit_SQLiteBus_Stream_UnsubscribeStopsDelivery(t *testing.T) {
 	require.NoError(t, sub.Unsubscribe())
 	require.NoError(t, b.Publish(ctx, "unsub.subject", []byte("after")))
 
-	select {
-	case msg := <-ch:
-		t.Fatalf("received message after Unsubscribe: %q", string(msg))
-	case <-time.After(150 * time.Millisecond):
-		// expected: nothing delivered
+	for range 200 {
+		select {
+		case msg := <-ch:
+			t.Fatalf("received message after Unsubscribe: %q", string(msg))
+		default:
+		}
+		runtime.Gosched()
 	}
 }

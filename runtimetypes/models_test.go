@@ -98,7 +98,7 @@ func TestUnit_Models_GetAllModelsOrder(t *testing.T) {
 		ID:            uuid.New().String(),
 		Model:         "model2",
 		ContextLength: 8192,
-		CanChat:       false,
+		CanChat:       true,
 		CanEmbed:      false,
 		CanPrompt:     false,
 		CanStream:     false,
@@ -111,7 +111,7 @@ func TestUnit_Models_GetAllModelsOrder(t *testing.T) {
 	require.Len(t, models, 2)
 	require.Equal(t, "model2", models[0].Model)
 	require.Equal(t, 8192, models[0].ContextLength)
-	require.False(t, models[0].CanChat)
+	require.True(t, models[0].CanChat)
 	require.False(t, models[0].CanEmbed)
 	require.False(t, models[0].CanPrompt)
 	require.False(t, models[0].CanStream)
@@ -194,6 +194,9 @@ func TestUnit_Models_ListHandlesPagination(t *testing.T) {
 			CanPrompt:     i%4 == 0,
 			CanStream:     i%5 == 0,
 		}
+		if !model.CanChat && !model.CanEmbed && !model.CanPrompt && !model.CanStream {
+			model.CanChat = true
+		}
 		err := s.AppendModel(ctx, model)
 		require.NoError(t, err)
 		createdModels = append(createdModels, model)
@@ -257,6 +260,7 @@ func TestUnit_Models_ZeroContextLength(t *testing.T) {
 		ID:            uuid.New().String(),
 		Model:         "auto-detect-model",
 		ContextLength: 0,
+		CanChat:       true,
 	}
 	err := s.AppendModel(ctx, model)
 	require.NoError(t, err)
