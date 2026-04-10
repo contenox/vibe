@@ -57,8 +57,7 @@ help:
 ci-prepare-embeds:
 	bash $(PROJECT_ROOT)/scripts/ci_prepare_embeds.sh
 
-build-cli:
-	@test -f $(PROJECT_ROOT)/internal/openapidocs/openapi.json || $(MAKE) docs-gen
+build-cli: docs-gen
 	go build -o $(PROJECT_ROOT)/bin/contenox $(PROJECT_ROOT)/cmd/contenox
 
 build-web:
@@ -66,17 +65,16 @@ build-web:
 	npm run build --workspace=@contenox/beam
 
 # —— test ————————————————————————————————————————————————————————————————
-test:
+test: docs-gen
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) ./...
 
-test-unit:
-	@test -f $(PROJECT_ROOT)/internal/openapidocs/openapi.json || $(MAKE) docs-gen
+test-unit: docs-gen
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -short -timeout 15m -run '^TestUnit_' ./...
 
-test-system:
+test-system: docs-gen
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -run '^TestSystem_' ./...
 
-test-cli-verbose:
+test-cli-verbose: docs-gen
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -v ./internal/contenoxcli/...
 
 test-cli-help: build-cli
@@ -108,7 +106,13 @@ test-openapi-client-codegen: docs-gen
 	@OPENAPI_SPEC=$(PROJECT_ROOT)/docs/openapi.json $(PROJECT_ROOT)/scripts/verify_openapi_client.sh
 
 # —— docs ————————————————————————————————————————————————————————————————
+# Minimal JSON so //go:embed in internal/openapidocs is satisfied before `go list` (openapi-gen).
+OPENAPI_EMBED_STUB := {"openapi":"3.1.0","info":{"title":"pre-docs-gen-stub","version":"0"},"paths":{}}
+
 docs-gen:
+	mkdir -p $(PROJECT_ROOT)/docs $(PROJECT_ROOT)/internal/openapidocs
+	@test -f $(PROJECT_ROOT)/internal/openapidocs/openapi.json || \
+		printf '%s' '$(OPENAPI_EMBED_STUB)' >$(PROJECT_ROOT)/internal/openapidocs/openapi.json
 	go run $(PROJECT_ROOT)/tools/openapi-gen \
 		--project="$(PROJECT_ROOT)" \
 		--output="$(PROJECT_ROOT)/docs"

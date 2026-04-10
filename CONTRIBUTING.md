@@ -149,4 +149,6 @@ make docs-html        # standalone RapiDoc HTML under docs/ (depends on docs-gen
 make docs-markdown    # optional: large api-reference.md (Docker or npx)
 ```
 
-Do **not** commit generated OpenAPI/embed outputs (`docs/openapi.*`, `internal/openapidocs/openapi.json`, `internal/web/beam/dist/`). GitHub Actions runs **`make ci-prepare-embeds`** then **`make docs-gen`** before building Go.
+Do **not** commit generated OpenAPI/embed outputs (`docs/openapi.*`, `internal/openapidocs/openapi.json`, `internal/web/beam/dist/`). Those paths are gitignored where applicable. **`make docs-gen`** drops a tiny stub JSON if needed, runs codegen, then copies the real spec into `internal/openapidocs/` for `//go:embed`. **`make build-cli`**, **`make test`**, **`make test-unit`**, and related test targets run **`docs-gen` first** so you do not commit or hand-maintain that file.
+
+GitHub Actions runs **`make ci-prepare-embeds`** (Beam UI + stub) then **`make docs-gen`** before **`make build-cli`**.
