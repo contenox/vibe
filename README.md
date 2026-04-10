@@ -42,6 +42,8 @@ contenox beam
 
 Starts the full Contenox HTTP server and serves the **Beam** React app (task chains, admin, hooks, MCP, and more). Use `contenox chat`, `contenox plan`, and `contenox run` from the terminal when you prefer the CLI.
 
+**Beam login** (`/login`): default username **`admin`**, password **`admin`** (local dev; see the [quickstart](https://contenox.com/docs/guide/quickstart/) for context).
+
 ---
 
 ## Why Contenox?

@@ -60,6 +60,8 @@ make build-cli
 ./bin/contenox beam   # default :8081 — regenerate OpenAPI after HTTP/route changes: make docs-gen
 ```
 
+**Beam sign-in** (`http://127.0.0.1:8081/login`): default username **`admin`**, password **`admin`** (matches `internal/auth/simple.go`). Development-only; do not rely on this for exposed deployments.
+
 ### Beam UI: full-stack development (recommended for frontend)
 
 Use **two terminals** so the browser gets Vite HMR while talking to a real API:
