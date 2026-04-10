@@ -1,7 +1,7 @@
 #:schema https://json.schemastore.org/any.json
 # Air — live reload for Go: https://github.com/air-verse/air
-# Run: make air-beam  (after: make install-air)
-# Pairs with Vite: terminal 2 → make dev-server-proxy
+# Run: make dev-go-watch  (after: make deps-go-watch)
+# Pair with Vite: make dev-web-proxy
 
 root = "."
 tmp_dir = "tmp"

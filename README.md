@@ -4,9 +4,11 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/release/contenox/contenox.svg)](https://github.com/contenox/contenox/releases)
 
-**AI workflows at your fingertips**
+📖 **[Read the full documentation at contenox.com](https://contenox.com)**
 
-Contenox is a lightning-fast, fully-local CLI that turns natural language goals into **persistent, step-by-step plans** and executes them with real shell + custom hooks like filesystem tools. Powered by any LLM (Ollama, OpenAI, Gemini, vLLM, etc.). Zero cloud required.
+**Industrial-grade AI automation, right at your fingertips.**
+
+Built for environments where you can't just copy-paste from a browser window. Contenox is a fully-local CLI that turns natural language goals into **persistent, step-by-step plans** and executes them safely using real shell and filesystem tools. Powered by any LLM (Ollama, OpenAI, Gemini, vLLM, etc.). Zero cloud required.
 
 ```bash
 $ contenox plan new "install a git pre-commit hook that prevents commits when go build fails"
@@ -26,7 +28,7 @@ No pending steps. Plan is complete!
 
 ---
 
-⭐ Leave us a star if you like it! | 🌟 We welcome any suggestions, and contributions!
+⭐ Leave a star if you like it, and we welcome contributions!
 
 ---
 
@@ -51,7 +53,7 @@ Contenox is different:
 - **Real tools** — shell commands and filesystem, not just code suggestions
 - **Fully offline** with Ollama — no data leaves your machine
 - **Chains are just JSON** — write your own LLM workflows
-- **Workflow Engine** — Contenox is not a toy, a complete statemachine lives under the hood.
+- **Industrial-Grade State Machine** — Under the hood, Contenox is a robust workflow engine, not a brittle chat-loop wrapper. Plans survive reboots and network drops.
 - **Native MCP Support** — connect to local filesystems, memory servers, and remote tools instantly via the Model Context Protocol.
 
 ---

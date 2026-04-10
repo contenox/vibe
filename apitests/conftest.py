@@ -146,6 +146,22 @@ def base_url():
     logger.debug("Providing base URL: %s", BASE_URL)
     return BASE_URL
 
+
+def _beam_origin_url() -> str:
+    """Origin for routes outside /api (embedded OpenAPI, /docs, SPA)."""
+    api = os.environ.get("CONTENOX_API_URL", "http://localhost:8081/api").rstrip("/")
+    if api.endswith("/api"):
+        return api[: -len("/api")] or "http://localhost:8081"
+    return os.environ.get("CONTENOX_BEAM_ORIGIN", "http://localhost:8081").rstrip("/")
+
+
+@pytest.fixture(scope="session")
+def beam_origin():
+    o = _beam_origin_url()
+    logger.debug("Beam origin (non-/api routes): %s", o)
+    return o
+
+
 @pytest.fixture(scope="session")
 def with_ollama_backend():
     """Check if the Ollama backend is reachable and return its base URL."""
@@ -158,7 +174,7 @@ def with_ollama_backend():
         logger.error("Ollama backend not reachable: %s", e)
         pytest.fail(
             f"Ollama backend check failed: {e}. "
-            f"Ensure Ollama is running and OLLAMA_HOST matches (see make ollama-status)."
+            f"Ensure Ollama is running and OLLAMA_HOST matches (e.g. curl http://$OLLAMA_HOST/api/tags)."
         )
     return base
 

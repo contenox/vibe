@@ -14,6 +14,7 @@ import (
 	"github.com/contenox/contenox/internal/auth"
 	usersapi "github.com/contenox/contenox/internal/authapi"
 	"github.com/contenox/contenox/internal/llmrepo"
+	"github.com/contenox/contenox/internal/openapidocs"
 	"github.com/contenox/contenox/internal/ollamatokenizer"
 	"github.com/contenox/contenox/internal/runtimestate"
 	"github.com/contenox/contenox/internal/web/beam"
@@ -120,8 +121,9 @@ func Run(
 	apiHandler = middleware.JWTRefreshMiddleware(authManager, apiHandler)    // refresh browser token before auth validation
 	apiHandler = middleware.ExtractAndSetTokenMiddleware(apiHandler)         // outermost: pulls token from cookie/header first
 
-	// Mount under /api/
+	// Root mux: embedded OpenAPI spec + RapiDoc (/openapi.json, /docs), then API, then Beam SPA.
 	mux := http.NewServeMux()
+	openapidocs.Register(mux)
 	mux.Handle("/api/", http.StripPrefix("/api", apiHandler))
 	mux.Handle("/", beam.Handler())
 

@@ -342,7 +342,7 @@ Chain fields like `system_instruction` and `prompt_template` support macros expa
 ```bash
 git clone https://github.com/contenox/contenox.git
 cd contenox
-make build-contenox
+make build-cli
 # binary: ./bin/contenox
 contenox init
 ```
@@ -354,7 +354,7 @@ The release version string is **`apiframework/version.txt`**, embedded at compil
 After changing Cobra commands or flags, run:
 
 ```bash
-make verify-cli-help
+make test-cli-help
 ```
 
 This rebuilds the binary and smoke-tests `contenox <command> --help` for each primary subcommand. If you maintain a second copy of this reference elsewhere, keep behavior descriptions aligned when you change defaults or chain resolution.

@@ -7,7 +7,7 @@
     "packages/ui"
   ],
   "scripts": {
-    "openapi:client-smoke": "bash ./scripts/verify_openapi_client.sh"
+    "test:openapi-client-codegen": "bash ./scripts/verify_openapi_client.sh"
   },
   "devDependencies": {
     "openapi-typescript-codegen": "^0.30.0"

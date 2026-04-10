@@ -275,9 +275,12 @@ make docs-gen
 # Generate Markdown documentation
 make docs-markdown
 
-# Set version and commit documentation updates
-make set-version
-make commit-docs
+# Set version (optional; maintainer Makefile)
+make -f Makefile.version set-version
+
+# Regenerate HTML viewer + optional Markdown API reference (then commit via your normal git flow / CI)
+make docs-html
+make docs-markdown
 ```
 
 The generated files will be placed in the `docs/` directory:
