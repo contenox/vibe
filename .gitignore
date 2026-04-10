@@ -172,7 +172,8 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-dist/
+# JS build outputs — do not use blanket `dist/` (Go embeds packages/beam → internal/web/beam/dist)
+packages/ui/dist/
 dist-ssr/
 frontend/dist/
 .cache/
@@ -301,7 +302,7 @@ docs/openapi.json
 docs/openapi.yaml
 docs/api-reference.md
 docs/openapi.html
-openapi.json
+# docs/openapi.json above; do not ignore internal/openapidocs/openapi.json (embedded in binary)
 /contenox
 
 .notes/

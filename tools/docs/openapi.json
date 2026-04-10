@@ -1,0 +1,6094 @@
+{
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "description": "A specific error code identifier (e.g., 'invalid_parameter_value', 'unauthorized')",
+                "type": "string"
+              },
+              "message": {
+                "description": "A human-readable error message",
+                "type": "string"
+              },
+              "param": {
+                "description": "The parameter that caused the error, if applicable",
+                "nullable": true,
+                "type": "string"
+              },
+              "type": {
+                "description": "The error type category (e.g., 'invalid_request_error', 'authentication_error')",
+                "type": "string"
+              }
+            },
+            "required": [
+              "message",
+              "type",
+              "code"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "apiframework_AboutServer": {
+        "properties": {
+          "nodeInstanceID": {
+            "type": "string"
+          },
+          "tenancy": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "nodeInstanceID",
+          "tenancy"
+        ],
+        "type": "object"
+      },
+      "apiframework_MessageResponse": {
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "array_backendapi_ObservedModel": {
+        "items": {
+          "$ref": "#/components/schemas/backendapi_ObservedModel"
+        },
+        "type": "array"
+      },
+      "array_backendapi_backendSummary": {
+        "items": {
+          "$ref": "#/components/schemas/backendapi_backendSummary"
+        },
+        "type": "array"
+      },
+      "array_hookproviderservice_LocalHook": {
+        "items": {
+          "$ref": "#/components/schemas/hookproviderservice_LocalHook"
+        },
+        "type": "array"
+      },
+      "array_internalchatapi_chatMessage": {
+        "items": {
+          "$ref": "#/components/schemas/internalchatapi_chatMessage"
+        },
+        "type": "array"
+      },
+      "array_internalchatapi_chatSession": {
+        "items": {
+          "$ref": "#/components/schemas/internalchatapi_chatSession"
+        },
+        "type": "array"
+      },
+      "array_planstore_Plan": {
+        "items": {
+          "$ref": "#/components/schemas/planstore_Plan"
+        },
+        "type": "array"
+      },
+      "array_runtimestate_ProviderConfig": {
+        "items": {
+          "$ref": "#/components/schemas/runtimestate_ProviderConfig"
+        },
+        "type": "array"
+      },
+      "array_runtimetypes_AffinityGroup": {
+        "items": {
+          "$ref": "#/components/schemas/runtimetypes_AffinityGroup"
+        },
+        "type": "array"
+      },
+      "array_runtimetypes_Backend": {
+        "items": {
+          "$ref": "#/components/schemas/runtimetypes_Backend"
+        },
+        "type": "array"
+      },
+      "array_runtimetypes_MCPServer": {
+        "items": {
+          "$ref": "#/components/schemas/runtimetypes_MCPServer"
+        },
+        "type": "array"
+      },
+      "array_runtimetypes_Model": {
+        "items": {
+          "$ref": "#/components/schemas/runtimetypes_Model"
+        },
+        "type": "array"
+      },
+      "array_runtimetypes_RemoteHook": {
+        "items": {
+          "$ref": "#/components/schemas/runtimetypes_RemoteHook"
+        },
+        "type": "array"
+      },
+      "array_statetype_BackendRuntimeState": {
+        "items": {
+          "$ref": "#/components/schemas/statetype_BackendRuntimeState"
+        },
+        "type": "array"
+      },
+      "array_string": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "array_terminalstore_Session": {
+        "items": {
+          "$ref": "#/components/schemas/terminalstore_Session"
+        },
+        "type": "array"
+      },
+      "array_vfsapi_FileResponse": {
+        "items": {
+          "$ref": "#/components/schemas/vfsapi_FileResponse"
+        },
+        "type": "array"
+      },
+      "backendapi_ObservedModel": {
+        "properties": {
+          "canChat": {
+            "example": true,
+            "type": "boolean"
+          },
+          "canEmbed": {
+            "example": false,
+            "type": "boolean"
+          },
+          "canPrompt": {
+            "example": true,
+            "type": "boolean"
+          },
+          "canStream": {
+            "example": true,
+            "type": "boolean"
+          },
+          "contextLength": {
+            "example": 8192,
+            "type": "integer"
+          },
+          "id": {
+            "example": "mistral:instruct",
+            "type": "string"
+          },
+          "model": {
+            "example": "mistral:instruct",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "contextLength",
+          "canChat",
+          "canEmbed",
+          "canPrompt",
+          "canStream"
+        ],
+        "type": "object"
+      },
+      "backendapi_OpenAICompatibleModelList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/backendapi_OpenAIModel"
+            },
+            "type": "array"
+          },
+          "object": {
+            "example": "list",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "data"
+        ],
+        "type": "object"
+      },
+      "backendapi_OpenAIModel": {
+        "properties": {
+          "created": {
+            "example": 1717020800,
+            "type": "integer"
+          },
+          "id": {
+            "example": "mistral:latest",
+            "type": "string"
+          },
+          "object": {
+            "example": "mistral:latest",
+            "type": "string"
+          },
+          "owned_by": {
+            "example": "system",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "owned_by"
+        ],
+        "type": "object"
+      },
+      "backendapi_backendDetails": {
+        "properties": {
+          "baseUrl": {
+            "example": "http://ollama-prod.internal:11434",
+            "type": "string"
+          },
+          "createdAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "example": "connection timeout: context deadline exceeded",
+            "type": "string"
+          },
+          "id": {
+            "example": "b7d9e1a3-8f0c-4a7d-9b1e-2f3a4b5c6d7e",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "example": "ollama-production",
+            "type": "string"
+          },
+          "pulledModels": {
+            "$ref": "#/components/schemas/statetype_ModelPullStatus"
+          },
+          "type": {
+            "example": "ollama",
+            "type": "string"
+          },
+          "updatedAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "baseUrl",
+          "type",
+          "models",
+          "pulledModels",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "backendapi_backendSummary": {
+        "properties": {
+          "baseUrl": {
+            "example": "http://localhost:11434",
+            "type": "string"
+          },
+          "createdAt": {
+            "example": "2023-01-01T00:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "example": "error-message",
+            "type": "string"
+          },
+          "id": {
+            "example": "backend-id",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "example": "backend-name",
+            "type": "string"
+          },
+          "pulledModels": {
+            "$ref": "#/components/schemas/statetype_ModelPullStatus"
+          },
+          "type": {
+            "example": "ollama",
+            "type": "string"
+          },
+          "updatedAt": {
+            "example": "2023-01-01T00:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "baseUrl",
+          "type",
+          "models",
+          "pulledModels",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "chatapi_OpenAIChatResponse": {
+        "properties": {
+          "choices": {
+            "$ref": "#/components/schemas/taskengine_OpenAIChatResponseChoice"
+          },
+          "created": {
+            "example": 1690000000,
+            "type": "integer"
+          },
+          "id": {
+            "example": "chat_123",
+            "type": "string"
+          },
+          "model": {
+            "example": "mistral:instruct",
+            "type": "string"
+          },
+          "object": {
+            "example": "chat.completion",
+            "type": "string"
+          },
+          "stackTrace": {
+            "items": {
+              "$ref": "#/components/schemas/taskengine_CapturedStateUnit"
+            },
+            "type": "array"
+          },
+          "system_fingerprint": {
+            "example": "system_456",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/taskengine_OpenAITokenUsage"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices",
+          "usage"
+        ],
+        "type": "object"
+      },
+      "execapi_DefaultModelResponse": {
+        "properties": {
+          "modelName": {
+            "example": "mistral:latest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "modelName"
+        ],
+        "type": "object"
+      },
+      "execapi_EmbedRequest": {
+        "properties": {
+          "text": {
+            "example": "Hello, world!",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "execapi_EmbedResponse": {
+        "properties": {
+          "vector": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "vector"
+        ],
+        "type": "object"
+      },
+      "execapi_taskExecutionRequest": {
+        "properties": {
+          "chain": {
+            "$ref": "#/components/schemas/taskengine_TaskChainDefinition"
+          },
+          "input": {
+            "type": "object"
+          },
+          "inputType": {
+            "example": "string",
+            "type": "string"
+          },
+          "templateVars": {
+            "additionalProperties": true,
+            "description": "optional; merged with request_id for {{var:...}} macro expansion",
+            "type": "object"
+          }
+        },
+        "required": [
+          "input",
+          "inputType",
+          "chain"
+        ],
+        "type": "object"
+      },
+      "execapi_taskExecutionResponse": {
+        "properties": {
+          "output": {
+            "type": "object"
+          },
+          "outputType": {
+            "example": "string",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/taskengine_CapturedStateUnit"
+          }
+        },
+        "required": [
+          "output",
+          "outputType",
+          "state"
+        ],
+        "type": "object"
+      },
+      "execservice_SimpleExecutionResponse": {
+        "properties": {
+          "id": {
+            "example": "123e4567-e89b-12d3-a456-426614174000",
+            "type": "string"
+          },
+          "response": {
+            "example": "I'm doing well, thank you!",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "response"
+        ],
+        "type": "object"
+      },
+      "execservice_TaskRequest": {
+        "properties": {
+          "model_name": {
+            "example": "gpt-3.5-turbo",
+            "type": "string"
+          },
+          "model_provider": {
+            "example": "openai",
+            "type": "string"
+          },
+          "prompt": {
+            "example": "Hello, how are you?",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "model_name",
+          "model_provider"
+        ],
+        "type": "object"
+      },
+      "hookproviderservice_LocalHook": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "description": "Source is builtin (in-process), mcp (persisted MCP server), or remote (HTTP hook in DB).",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/taskengine_Tool"
+            },
+            "type": "array"
+          },
+          "type": {
+            "type": "string"
+          },
+          "unavailableReason": {
+            "description": "UnavailableReason is set when tools could not be loaded (e.g. unreachable MCP); other hooks still list.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "type"
+        ],
+        "type": "object"
+      },
+      "internalchatapi_chatContextPayload": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/internalchatapi_contextArtifact"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "internalchatapi_chatMessage": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isLatest": {
+            "type": "boolean"
+          },
+          "isUser": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "sentAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "sentAt",
+          "isUser",
+          "isLatest"
+        ],
+        "type": "object"
+      },
+      "internalchatapi_chatRequest": {
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/internalchatapi_chatContextPayload"
+          },
+          "message": {
+            "type": "string"
+          },
+          "mode": {
+            "description": "Mode selects default task chain when chainId query is omitted: chat, prompt, plan, build.\nbuild compiles the active plan and runs the compiled chain; chainId must be the executor chain ref; message may be empty.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "internalchatapi_chatResponse": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "inputTokenCount": {
+            "type": "integer"
+          },
+          "outputTokenCount": {
+            "type": "integer"
+          },
+          "response": {
+            "type": "string"
+          },
+          "state": {
+            "items": {
+              "$ref": "#/components/schemas/taskengine_CapturedStateUnit"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "response",
+          "state",
+          "inputTokenCount",
+          "outputTokenCount"
+        ],
+        "type": "object"
+      },
+      "internalchatapi_chatSession": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "lastMessage": {
+            "$ref": "#/components/schemas/internalchatapi_chatMessage"
+          },
+          "model": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "startedAt",
+          "model"
+        ],
+        "type": "object"
+      },
+      "internalchatapi_contextArtifact": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "payload": {
+            "description": "JSON-encoded string",
+            "format": "json",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "internalchatapi_newChatInstanceRequest": {
+        "properties": {
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "type": "object"
+      },
+      "middleware_LoginResponse": {
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_at",
+          "user_id",
+          "username"
+        ],
+        "type": "object"
+      },
+      "planapi_activeResponse": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/planstore_Plan"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/planstore_PlanStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "plan",
+          "steps"
+        ],
+        "type": "object"
+      },
+      "planapi_cleanResponse": {
+        "properties": {
+          "removed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "removed"
+        ],
+        "type": "object"
+      },
+      "planapi_compileRequest": {
+        "properties": {
+          "chain_id": {
+            "type": "string"
+          },
+          "executor_chain_id": {
+            "type": "string"
+          },
+          "markdown": {
+            "type": "string"
+          },
+          "write_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "markdown",
+          "executor_chain_id",
+          "chain_id"
+        ],
+        "type": "object"
+      },
+      "planapi_compileResponse": {
+        "properties": {
+          "chain": {
+            "$ref": "#/components/schemas/taskengine_TaskChainDefinition"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "goal",
+          "steps",
+          "chain"
+        ],
+        "type": "object"
+      },
+      "planapi_markdownResponse": {
+        "properties": {
+          "markdown": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "markdown"
+        ],
+        "type": "object"
+      },
+      "planapi_newPlanRequest": {
+        "properties": {
+          "goal": {
+            "type": "string"
+          },
+          "planner_chain_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "goal",
+          "planner_chain_id"
+        ],
+        "type": "object"
+      },
+      "planapi_newPlanResponse": {
+        "properties": {
+          "markdown": {
+            "type": "string"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/planstore_Plan"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/planstore_PlanStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "plan",
+          "steps",
+          "markdown"
+        ],
+        "type": "object"
+      },
+      "planapi_nextStepRequest": {
+        "properties": {
+          "executor_chain_id": {
+            "type": "string"
+          },
+          "with_auto": {
+            "type": "boolean"
+          },
+          "with_shell": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "executor_chain_id",
+          "with_shell",
+          "with_auto"
+        ],
+        "type": "object"
+      },
+      "planapi_nextStepResponse": {
+        "properties": {
+          "markdown": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result",
+          "markdown"
+        ],
+        "type": "object"
+      },
+      "planapi_replanRequest": {
+        "properties": {
+          "planner_chain_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "planner_chain_id"
+        ],
+        "type": "object"
+      },
+      "planapi_replanResponse": {
+        "properties": {
+          "markdown": {
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/planstore_PlanStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps",
+          "markdown"
+        ],
+        "type": "object"
+      },
+      "planapi_runCompiledRequest": {
+        "properties": {
+          "chain_id": {
+            "type": "string"
+          },
+          "executor_chain_id": {
+            "type": "string"
+          },
+          "write_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "executor_chain_id",
+          "chain_id"
+        ],
+        "type": "object"
+      },
+      "planapi_runCompiledResponse": {
+        "properties": {
+          "chain": {
+            "$ref": "#/components/schemas/taskengine_TaskChainDefinition"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "output": {
+            "type": "object"
+          },
+          "output_type": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "state": {
+            "items": {
+              "$ref": "#/components/schemas/taskengine_CapturedStateUnit"
+            },
+            "type": "array"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "goal",
+          "steps",
+          "output",
+          "output_type",
+          "state"
+        ],
+        "type": "object"
+      },
+      "planstore_Plan": {
+        "properties": {
+          "compile_executor_chain_id": {
+            "description": "CompileExecutorChainID is the executor chain ID used when compiling (for invalidation).",
+            "type": "string"
+          },
+          "compiled_chain_id": {
+            "description": "CompiledChainID is the TaskChainDefinition.ID used when compiling (for invalidation).",
+            "type": "string"
+          },
+          "compiled_chain_json": {
+            "description": "CompiledChainJSON is the full [plancompile.Compile] output JSON for incremental Next (optional).",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/planstore_PlanStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "goal",
+          "status",
+          "session_id",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "planstore_PlanStatus": {
+        "type": "string"
+      },
+      "planstore_PlanStep": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "executed_at": {
+            "description": "Zero time if not executed",
+            "format": "date-time",
+            "type": "string"
+          },
+          "execution_result": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ordinal": {
+            "type": "integer"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/planstore_StepStatus"
+          }
+        },
+        "required": [
+          "id",
+          "plan_id",
+          "ordinal",
+          "description",
+          "status",
+          "execution_result",
+          "executed_at"
+        ],
+        "type": "object"
+      },
+      "planstore_StepStatus": {
+        "type": "string"
+      },
+      "runtimestate_ProviderConfig": {
+        "properties": {
+          "APIKey": {
+            "type": "string"
+          },
+          "Type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "APIKey",
+          "Type"
+        ],
+        "type": "object"
+      },
+      "runtimetypes_AffinityGroup": {
+        "properties": {
+          "createdAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "example": "p9a8b7c6-d5e4-f3a2-b1c0-d9e8f7a6b5c4",
+            "type": "string"
+          },
+          "name": {
+            "example": "production-chat",
+            "type": "string"
+          },
+          "purposeType": {
+            "example": "Internal Tasks",
+            "type": "string"
+          },
+          "updatedAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "purposeType",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "runtimetypes_Backend": {
+        "properties": {
+          "baseUrl": {
+            "example": "http://ollama-prod.internal:11434",
+            "type": "string"
+          },
+          "createdAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "example": "b7d9e1a3-8f0c-4a7d-9b1e-2f3a4b5c6d7e",
+            "type": "string"
+          },
+          "name": {
+            "example": "ollama-production",
+            "type": "string"
+          },
+          "type": {
+            "example": "ollama",
+            "type": "string"
+          },
+          "updatedAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "baseUrl",
+          "type",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "runtimetypes_InjectionArg": {
+        "properties": {
+          "in": {
+            "example": "body",
+            "type": "string"
+          },
+          "name": {
+            "example": "access_token",
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "in"
+        ],
+        "type": "object"
+      },
+      "runtimetypes_MCPServer": {
+        "properties": {
+          "args": {
+            "type": "string"
+          },
+          "authEnvKey": {
+            "description": "env var name",
+            "example": "MCP_FS_TOKEN",
+            "type": "string"
+          },
+          "authToken": {
+            "description": "literal token (avoid in prod)",
+            "type": "string"
+          },
+          "authType": {
+            "description": "\"\" | \"bearer\" | \"oauth\"",
+            "example": "bearer",
+            "type": "string"
+          },
+          "command": {
+            "example": "npx",
+            "type": "string"
+          },
+          "connectTimeoutSeconds": {
+            "example": 30,
+            "type": "integer"
+          },
+          "createdAt": {
+            "example": "2024-01-15T10:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": true,
+            "description": "additional HTTP headers for SSE/HTTP transports",
+            "type": "object"
+          },
+          "id": {
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "type": "string"
+          },
+          "injectParams": {
+            "additionalProperties": true,
+            "description": "injected as tool call args, hidden from model schema",
+            "type": "object"
+          },
+          "name": {
+            "example": "filesystem",
+            "type": "string"
+          },
+          "transport": {
+            "description": "sse | http | stdio",
+            "example": "sse",
+            "type": "string"
+          },
+          "updatedAt": {
+            "example": "2024-01-15T10:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "example": "http://mcp-fs:8080/sse",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "transport",
+          "connectTimeoutSeconds",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "runtimetypes_Model": {
+        "properties": {
+          "canChat": {
+            "example": true,
+            "type": "boolean"
+          },
+          "canEmbed": {
+            "example": false,
+            "type": "boolean"
+          },
+          "canPrompt": {
+            "example": true,
+            "type": "boolean"
+          },
+          "canStream": {
+            "example": true,
+            "type": "boolean"
+          },
+          "contextLength": {
+            "example": 8192,
+            "type": "integer"
+          },
+          "createdAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "example": "m7d8e9f0a-1b2c-3d4e-5f6a-7b8c9d0e1f2a",
+            "type": "string"
+          },
+          "model": {
+            "example": "mistral:instruct",
+            "type": "string"
+          },
+          "updatedAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "contextLength",
+          "canChat",
+          "canEmbed",
+          "canPrompt",
+          "canStream",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "runtimetypes_RemoteHook": {
+        "properties": {
+          "createdAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "endpointUrl": {
+            "example": "http://hooks-endpoint:port",
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "id": {
+            "example": "h1a2b3c4-d5e6-f7g8-h9i0-j1k2l3m4n5o6",
+            "type": "string"
+          },
+          "injectParams": {
+            "additionalProperties": true,
+            "description": "injected as tool call args, hidden from model schema",
+            "type": "object"
+          },
+          "name": {
+            "example": "mailing-tools",
+            "type": "string"
+          },
+          "properties": {
+            "$ref": "#/components/schemas/runtimetypes_InjectionArg"
+          },
+          "timeoutMs": {
+            "example": 5000,
+            "type": "integer"
+          },
+          "updatedAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "endpointUrl",
+          "timeoutMs",
+          "properties",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "setupapi_putCLIConfigRequest": {
+        "properties": {
+          "default-chain": {
+            "type": "string"
+          },
+          "default-model": {
+            "type": "string"
+          },
+          "default-provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "default-model",
+          "default-provider",
+          "default-chain"
+        ],
+        "type": "object"
+      },
+      "setupapi_putCLIConfigResponse": {
+        "properties": {
+          "defaultChain": {
+            "type": "string"
+          },
+          "defaultModel": {
+            "type": "string"
+          },
+          "defaultProvider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "defaultModel",
+          "defaultProvider",
+          "defaultChain"
+        ],
+        "type": "object"
+      },
+      "setupcheck_BackendCheck": {
+        "properties": {
+          "baseUrl": {
+            "type": "string"
+          },
+          "chatModelCount": {
+            "type": "integer"
+          },
+          "chatModels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "defaultProvider": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "modelCount": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "baseUrl",
+          "status",
+          "reachable",
+          "defaultProvider",
+          "modelCount",
+          "chatModelCount"
+        ],
+        "type": "object"
+      },
+      "setupcheck_Issue": {
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "cliCommand": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "fixPath": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "type": "object"
+      },
+      "setupcheck_Result": {
+        "properties": {
+          "backendChecks": {
+            "items": {
+              "$ref": "#/components/schemas/setupcheck_BackendCheck"
+            },
+            "type": "array"
+          },
+          "backendCount": {
+            "type": "integer"
+          },
+          "defaultChain": {
+            "type": "string"
+          },
+          "defaultModel": {
+            "type": "string"
+          },
+          "defaultProvider": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/setupcheck_Issue"
+            },
+            "type": "array"
+          },
+          "reachableBackendCount": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "defaultModel",
+          "defaultProvider",
+          "defaultChain",
+          "backendCount",
+          "reachableBackendCount",
+          "issues"
+        ],
+        "type": "object"
+      },
+      "statetype_BackendRuntimeState": {
+        "properties": {
+          "backend": {
+            "$ref": "#/components/schemas/runtimetypes_Backend"
+          },
+          "error": {
+            "description": "Error stores a description of the last encountered error when\ninteracting with or reconciling this backend's state, if any.",
+            "example": "connection timeout: context deadline exceeded",
+            "type": "string"
+          },
+          "id": {
+            "example": "b7d9e1a3-8f0c-4a7d-9b1e-2f3a4b5c6d7e",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "example": "ollama-production",
+            "type": "string"
+          },
+          "pulledModels": {
+            "$ref": "#/components/schemas/statetype_ModelPullStatus"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "models",
+          "pulledModels",
+          "backend"
+        ],
+        "type": "object"
+      },
+      "statetype_ModelDetails": {
+        "properties": {
+          "families": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "family": {
+            "example": "Mistral",
+            "type": "string"
+          },
+          "format": {
+            "example": "gguf",
+            "type": "string"
+          },
+          "parameterSize": {
+            "example": "7B",
+            "type": "string"
+          },
+          "parentModel": {
+            "example": "mistral:7b",
+            "type": "string"
+          },
+          "quantizationLevel": {
+            "example": "Q4_K_M",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parentModel",
+          "format",
+          "family",
+          "families",
+          "parameterSize",
+          "quantizationLevel"
+        ],
+        "type": "object"
+      },
+      "statetype_ModelPullStatus": {
+        "properties": {
+          "canChat": {
+            "example": true,
+            "type": "boolean"
+          },
+          "canEmbed": {
+            "example": false,
+            "type": "boolean"
+          },
+          "canPrompt": {
+            "example": true,
+            "type": "boolean"
+          },
+          "canStream": {
+            "example": true,
+            "type": "boolean"
+          },
+          "contextLength": {
+            "example": 4096,
+            "type": "integer"
+          },
+          "details": {
+            "$ref": "#/components/schemas/statetype_ModelDetails"
+          },
+          "digest": {
+            "example": "sha256:9e3a6c0d3b5e7f8a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a",
+            "type": "string"
+          },
+          "model": {
+            "example": "mistral:instruct",
+            "type": "string"
+          },
+          "modifiedAt": {
+            "example": "2023-11-15T14:30:45Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "example": "Mistral 7B Instruct",
+            "type": "string"
+          },
+          "size": {
+            "example": 4709611008,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "model",
+          "modifiedAt",
+          "size",
+          "digest",
+          "details",
+          "contextLength",
+          "canChat",
+          "canEmbed",
+          "canPrompt",
+          "canStream"
+        ],
+        "type": "object"
+      },
+      "taskengine_BranchCompose": {
+        "properties": {
+          "strategy": {
+            "description": "Strategy defines how values should be merged (\"override\", \"merge_chat_histories\", \"append_string_to_chat_history\").\nOptional; defaults to \"override\" or \"merge_chat_histories\" if both output and WithVar values are ChatHistory.\n\"merge_chat_histories\": If both output and WithVar values are ChatHistory,\nappends the WithVar's Messages to the output's Messages.",
+            "type": "string"
+          },
+          "with_var": {
+            "description": "Selects the variable to compose the current input with.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "taskengine_CapturedStateUnit": {
+        "properties": {
+          "duration": {
+            "description": "in nanoseconds",
+            "example": 452000000,
+            "format": "nanoseconds",
+            "type": "integer"
+          },
+          "error": {
+            "$ref": "#/components/schemas/taskengine_ErrorResponse"
+          },
+          "input": {
+            "example": "This is a test input that needs validation",
+            "type": "string"
+          },
+          "inputType": {
+            "example": "string",
+            "type": "string"
+          },
+          "inputVar": {
+            "description": "Which variable was used as input",
+            "example": "input",
+            "type": "string"
+          },
+          "output": {
+            "example": "valid",
+            "type": "string"
+          },
+          "outputType": {
+            "example": "string",
+            "type": "string"
+          },
+          "taskHandler": {
+            "example": "condition_key",
+            "type": "string"
+          },
+          "taskID": {
+            "example": "validate_input",
+            "type": "string"
+          },
+          "transition": {
+            "example": "valid_input",
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskID",
+          "taskHandler",
+          "inputType",
+          "outputType",
+          "transition",
+          "duration",
+          "error",
+          "input",
+          "output",
+          "inputVar"
+        ],
+        "type": "object"
+      },
+      "taskengine_ErrorResponse": {
+        "properties": {
+          "error": {
+            "example": "validation failed: input contains prohibited content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "taskengine_FunctionCall": {
+        "properties": {
+          "arguments": {
+            "example": "{\\n  \\\"location\\\": \\\"San Francisco, CA\\\",\\n  \\\"unit\\\": \\\"celsius\\\"\\n}",
+            "type": "string"
+          },
+          "name": {
+            "example": "get_current_weather",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "arguments"
+        ],
+        "type": "object"
+      },
+      "taskengine_FunctionTool": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parameters": {
+            "description": "JSON Schema object"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "taskengine_HookCall": {
+        "properties": {
+          "args": {
+            "additionalProperties": true,
+            "description": "Args are key-value pairs to parameterize the hook call.\nExample: {\"to\": \"user@example.com\", \"subject\": \"Notification\"}",
+            "type": "object"
+          },
+          "name": {
+            "description": "Name is the registered hook-service (e.g., \"send_email\").",
+            "example": "slack",
+            "type": "string"
+          },
+          "tool_name": {
+            "description": "ToolName is the name of the tool to invoke (e.g., \"send_slack_notification\").",
+            "example": "send_slack_notification",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "tool_name",
+          "args"
+        ],
+        "type": "object"
+      },
+      "taskengine_LLMExecutionConfig": {
+        "properties": {
+          "hide_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "hook_policies": {
+            "additionalProperties": true,
+            "description": "HookPolicies carries per-hook policy overrides for this task.\nKeys are hook names; values are maps of policy key → value pairs.\nThese are injected into the context before GetToolsForHookByName is called,\nso hooks can produce dynamic tool descriptions and enforce the policy at Exec time.\nExample (local_shell):\nhook_policies:\nlocal_shell:\n_allowed_commands: \"git,go,ls,cat,grep\"\n_denied_commands:  \"sudo,su,dd,mkfs\"",
+            "type": "object"
+          },
+          "hooks": {
+            "description": "Hooks is the allowlist of hook names this task may invoke.\nPatterns supported:\n- absent/null   — all registered hooks (backward-compatible default)\n- []            — no hooks exposed to the model\n- [\"*\"]         — all registered hooks (explicit)\n- [\"a\",\"b\"]     — only the named hooks (unknown names silently ignored)\n- [\"*\",\"!name\"] — all hooks except the excluded name(s)\nExclusions (\"!name\") are only meaningful when combined with \"*\".",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "model": {
+            "example": "mistral:instruct",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pass_clients_tools": {
+            "type": "boolean"
+          },
+          "provider": {
+            "example": "ollama",
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "shift": {
+            "description": "Shift allows the context window to slide on overflow instead of erroring.",
+            "type": "boolean"
+          },
+          "temperature": {
+            "example": 0.7,
+            "type": "number"
+          },
+          "think": {
+            "description": "Think enables reasoning mode for supported models.\nAccepts \"true\"/\"false\" or \"high\"/\"medium\"/\"low\". Empty = provider default (off).",
+            "example": "high",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "pass_clients_tools"
+        ],
+        "type": "object"
+      },
+      "taskengine_OpenAIChatRequest": {
+        "properties": {
+          "frequency_penalty": {
+            "example": 0,
+            "type": "number"
+          },
+          "max_tokens": {
+            "example": 512,
+            "type": "integer"
+          },
+          "messages": {
+            "$ref": "#/components/schemas/taskengine_OpenAIChatRequestMessage"
+          },
+          "model": {
+            "example": "mistral:instruct",
+            "type": "string"
+          },
+          "n": {
+            "example": 1,
+            "type": "integer"
+          },
+          "presence_penalty": {
+            "example": 0,
+            "type": "number"
+          },
+          "stop": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "stream": {
+            "example": false,
+            "type": "boolean"
+          },
+          "temperature": {
+            "example": 0.7,
+            "type": "number"
+          },
+          "tool_choice": {
+            "description": "Can be \"none\", \"auto\", or {\"type\": \"function\", \"function\": {\"name\": \"my_function\"}}"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/taskengine_Tool"
+            },
+            "type": "array"
+          },
+          "top_p": {
+            "example": 1,
+            "type": "number"
+          },
+          "user": {
+            "example": "user_123",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "messages"
+        ],
+        "type": "object"
+      },
+      "taskengine_OpenAIChatRequestMessage": {
+        "properties": {
+          "content": {
+            "example": "Hello, how are you?",
+            "type": "string"
+          },
+          "role": {
+            "example": "user",
+            "type": "string"
+          },
+          "thinking": {
+            "description": "Thinking allows clients to supply their own reasoning traces for assistant messages.",
+            "example": "The user is asking a greeting.",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "description": "ToolCallID links a tool-result message back to its originating call.",
+            "type": "string"
+          },
+          "tool_calls": {
+            "$ref": "#/components/schemas/taskengine_ToolCall"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "type": "object"
+      },
+      "taskengine_OpenAIChatResponseChoice": {
+        "properties": {
+          "finish_reason": {
+            "example": "stop",
+            "type": "string"
+          },
+          "index": {
+            "example": 0,
+            "type": "integer"
+          },
+          "message": {
+            "$ref": "#/components/schemas/taskengine_OpenAIChatResponseMessage"
+          }
+        },
+        "required": [
+          "index",
+          "message",
+          "finish_reason"
+        ],
+        "type": "object"
+      },
+      "taskengine_OpenAIChatResponseMessage": {
+        "properties": {
+          "content": {
+            "example": "I can help with that.",
+            "type": "string"
+          },
+          "role": {
+            "example": "assistant",
+            "type": "string"
+          },
+          "thinking": {
+            "example": "The user asked for help. I should respond positively.",
+            "type": "string"
+          },
+          "tool_calls": {
+            "$ref": "#/components/schemas/taskengine_ToolCall"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "type": "object"
+      },
+      "taskengine_OpenAITokenUsage": {
+        "properties": {
+          "completion_tokens": {
+            "example": 50,
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "example": 100,
+            "type": "integer"
+          },
+          "total_tokens": {
+            "example": 150,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "type": "object"
+      },
+      "taskengine_TaskChainDefinition": {
+        "properties": {
+          "debug": {
+            "description": "Enables capturing user input and output.",
+            "type": "boolean"
+          },
+          "description": {
+            "description": "Description provides a human-readable summary of the chain's purpose.",
+            "type": "string"
+          },
+          "id": {
+            "description": "ID uniquely identifies the chain.",
+            "type": "string"
+          },
+          "tasks": {
+            "$ref": "#/components/schemas/taskengine_TaskDefinition"
+          },
+          "token_limit": {
+            "description": "TokenLimit is the token limit for the context window (used during execution).",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "debug",
+          "description",
+          "tasks",
+          "token_limit"
+        ],
+        "type": "object"
+      },
+      "taskengine_TaskDefinition": {
+        "properties": {
+          "description": {
+            "description": "Description is a human-readable summary of what the task does.",
+            "example": "Validates user input meets quality requirements",
+            "type": "string"
+          },
+          "execute_config": {
+            "$ref": "#/components/schemas/taskengine_LLMExecutionConfig"
+          },
+          "handler": {
+            "description": "Handler determines how the LLM output (or hook) will be interpreted.",
+            "example": "condition_key",
+            "type": "string"
+          },
+          "hook": {
+            "$ref": "#/components/schemas/taskengine_HookCall"
+          },
+          "id": {
+            "description": "ID uniquely identifies the task within the chain.",
+            "example": "validate_input",
+            "type": "string"
+          },
+          "input_var": {
+            "description": "InputVar is the name of the variable to use as input for the task.\nExample: \"input\" for the original input.\nEach task stores its output in a variable named with it's task id.",
+            "example": "input",
+            "type": "string"
+          },
+          "output_template": {
+            "description": "OutputTemplate is an optional go template to format the output of a hook.\nIf specified, the hook's JSON output will be used as data for the template.\nThe final output of the task will be the rendered string.\nExample: \"The weather is {{.weather}} with a temperature of {{.temperature}}.\"",
+            "example": "Hook result: {{.status}}",
+            "type": "string"
+          },
+          "print": {
+            "description": "Print optionally formats the output for display/logging.\nSupports template variables from previous task outputs.\nOptional for all task types except Hook where it's rarely used.\nExample: \"The score is: {{.previous_output}}\"",
+            "example": "Validation result: {{.validate_input}}",
+            "type": "string"
+          },
+          "prompt_template": {
+            "description": "PromptTemplate is the text prompt sent to the LLM.\nIt's Required and only applicable for the prompt_to_string type.\nSupports template variables from previous task outputs.\nExample: \"Rate the quality from 1-10: {{.input}}\"",
+            "example": "Is this input valid? {{.input}}",
+            "type": "string"
+          },
+          "retry_on_failure": {
+            "description": "RetryOnFailure sets how many times to retry this task on failure.\nApplies to all task types including Hooks.\nDefault: 0 (no retries)",
+            "example": 2,
+            "type": "integer"
+          },
+          "system_instruction": {
+            "description": "SystemInstruction provides additional instructions to the LLM, if applicable system level will be used.",
+            "example": "You are a quality control assistant. Respond only with 'valid' or 'invalid'.",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "Timeout optionally sets a timeout for task execution.\nFormat: \"10s\", \"2m\", \"1h\" etc.\nOptional for all task types.",
+            "example": "30s",
+            "type": "string"
+          },
+          "transition": {
+            "$ref": "#/components/schemas/taskengine_TaskTransition"
+          },
+          "valid_conditions": {
+            "additionalProperties": true,
+            "description": "ValidConditions defines allowed values for ConditionKey tasks.\nRequired for ConditionKey tasks, ignored for all other types.\nExample: {\"yes\": true, \"no\": true} for a yes/no condition.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "handler",
+          "prompt_template",
+          "transition"
+        ],
+        "type": "object"
+      },
+      "taskengine_TaskTransition": {
+        "properties": {
+          "branches": {
+            "$ref": "#/components/schemas/taskengine_TransitionBranch"
+          },
+          "on_failure": {
+            "description": "OnFailure is the task ID to jump to in case of failure.",
+            "example": "error_handler",
+            "type": "string"
+          }
+        },
+        "required": [
+          "on_failure",
+          "branches"
+        ],
+        "type": "object"
+      },
+      "taskengine_Tool": {
+        "properties": {
+          "function": {
+            "$ref": "#/components/schemas/taskengine_FunctionTool"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "function"
+        ],
+        "type": "object"
+      },
+      "taskengine_ToolCall": {
+        "properties": {
+          "function": {
+            "$ref": "#/components/schemas/taskengine_FunctionCall"
+          },
+          "id": {
+            "example": "call_abc123",
+            "type": "string"
+          },
+          "provider_meta": {
+            "additionalProperties": true,
+            "description": "ProviderMeta carries opaque provider-specific data (e.g. Gemini thought_signature)\nthat must be round-tripped back on the next turn.",
+            "type": "object"
+          },
+          "type": {
+            "example": "function",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "function"
+        ],
+        "type": "object"
+      },
+      "taskengine_TransitionBranch": {
+        "properties": {
+          "compose": {
+            "$ref": "#/components/schemas/taskengine_BranchCompose"
+          },
+          "goto": {
+            "description": "Goto specifies the target task ID if this branch is taken.\nLeave empty or use taskengine.TermEnd to end the chain.",
+            "example": "positive_response",
+            "type": "string"
+          },
+          "operator": {
+            "description": "Operator defines how to compare the task's output to When.",
+            "example": "equals",
+            "type": "string"
+          },
+          "when": {
+            "description": "When specifies the condition that must be met to follow this branch.\nFormat depends on the task type:\n- For condition_key: exact string match\n- For prompt_to_int: numeric comparison (using Operator)",
+            "example": "yes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "when",
+          "goto"
+        ],
+        "type": "object"
+      },
+      "terminalapi_createSessionRequest": {
+        "properties": {
+          "cols": {
+            "type": "integer"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "integer"
+          },
+          "shell": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cwd",
+          "cols",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "terminalapi_createSessionResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "wsPath": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "wsPath"
+        ],
+        "type": "object"
+      },
+      "terminalapi_patchSessionRequest": {
+        "properties": {
+          "cols": {
+            "type": "integer"
+          },
+          "rows": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cols",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "terminalstore_Session": {
+        "properties": {
+          "cols": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "nodeInstanceId": {
+            "type": "string"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "integer"
+          },
+          "shell": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/terminalstore_SessionStatus"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "principal",
+          "cwd",
+          "shell",
+          "cols",
+          "rows",
+          "status",
+          "nodeInstanceId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "terminalstore_SessionStatus": {
+        "type": "string"
+      },
+      "usersapi_LoginRequest": {
+        "properties": {
+          "email": {
+            "example": "user@example.com",
+            "type": "string"
+          },
+          "password": {
+            "example": "s3cr3t!",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "usersapi_LoginResponse": {
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at",
+          "user_id",
+          "username"
+        ],
+        "type": "object"
+      },
+      "usersapi_tokenRefreshRequest": {
+        "properties": {
+          "token": {
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "usersapi_tokenRefreshResponse": {
+        "properties": {
+          "token": {
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "vfsapi_FileResponse": {
+        "properties": {
+          "contentType": {
+            "example": "application/pdf",
+            "type": "string"
+          },
+          "createdAt": {
+            "example": "2024-06-01T12:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "example": "file_abc123",
+            "type": "string"
+          },
+          "isDirectory": {
+            "example": false,
+            "type": "boolean"
+          },
+          "name": {
+            "example": "report.pdf",
+            "type": "string"
+          },
+          "path": {
+            "example": "/documents/report.pdf",
+            "type": "string"
+          },
+          "size": {
+            "example": 102400,
+            "type": "integer"
+          },
+          "updatedAt": {
+            "example": "2024-06-01T12:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "name",
+          "size",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "vfsapi_FolderResponse": {
+        "properties": {
+          "createdAt": {
+            "example": "2024-06-01T12:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "example": "folder_xyz789",
+            "type": "string"
+          },
+          "name": {
+            "example": "projects",
+            "type": "string"
+          },
+          "parentId": {
+            "example": "folder_root",
+            "type": "string"
+          },
+          "path": {
+            "example": "/documents/projects",
+            "type": "string"
+          },
+          "updatedAt": {
+            "example": "2024-06-01T12:00:00Z",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "name",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "vfsapi_folderCreateRequest": {
+        "properties": {
+          "name": {
+            "example": "New Folder",
+            "type": "string"
+          },
+          "parentId": {
+            "example": "folder_root",
+            "type": "string"
+          },
+          "path": {
+            "example": "New Folder",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "vfsapi_moveRequest": {
+        "properties": {
+          "newParentId": {
+            "example": "folder_abc123",
+            "type": "string"
+          }
+        },
+        "required": [
+          "newParentId"
+        ],
+        "type": "object"
+      },
+      "vfsapi_nameUpdateRequest": {
+        "properties": {
+          "name": {
+            "example": "new-name.txt",
+            "type": "string"
+          },
+          "path": {
+            "example": "new-name.txt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "X-API-Key": {
+        "in": "header",
+        "name": "X-API-Key",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "contenox – LLM Backend Management API",
+    "version": "v0.6.5"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/backend-affinity/{backendID}/groups": {
+      "get": {
+        "description": "Lists all affinity groups that a specific backend belongs to.\nUseful for understanding which model sets a backend has access to.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_runtimetypes_AffinityGroup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all affinity groups that a specific backend belongs to."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the backend.",
+          "in": "path",
+          "name": "backendID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/backend-affinity/{groupID}/backends": {
+      "get": {
+        "description": "Lists all backends associated with a specific affinity group.\nReturns basic backend information without runtime state.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_runtimetypes_Backend"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all backends associated with a specific affinity group."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the affinity group.",
+          "in": "path",
+          "name": "groupID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/backend-affinity/{groupID}/backends/{backendID}": {
+      "delete": {
+        "description": "Removes a backend from an affinity group.\nAfter removal, the backend will no longer be eligible to process requests for models in this affinity group.\nRequests requiring models from this affinity group will no longer be routed to this backend.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Removes a backend from an affinity group."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the affinity group.",
+          "in": "path",
+          "name": "groupID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "The unique identifier of the backend to be assigned.",
+          "in": "path",
+          "name": "backendID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Associates a backend with an affinity group.\nAfter assignment, the backend can process requests for all models in the affinity group.\nThis enables request routing between the backend and models that share this affinity group.",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Associates a backend with an affinity group."
+      }
+    },
+    "/backends": {
+      "get": {
+        "description": "Lists all configured backend connections with runtime status.\nNOTE: Only backends assigned to at least one group will be used for request processing.\nBackends not assigned to any group exist in the configuration but are completely ignored by the routing system.",
+        "parameters": [
+          {
+            "description": "An optional RFC3339Nano timestamp to fetch the next page of results.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The maximum number of items to return per page.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "100",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_backendapi_backendSummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all configured backend connections with runtime status."
+      },
+      "post": {
+        "description": "Creates a new backend connection to an LLM provider.\nBackends represent connections to LLM services (e.g., Ollama, OpenAI) that can host models.\nNote: Creating a backend will be provisioned on the next synchronization cycle.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/runtimetypes_Backend"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_Backend"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a new backend connection to an LLM provider."
+      }
+    },
+    "/backends/{id}": {
+      "delete": {
+        "description": "Removes a backend connection.\nThis does not deleteBackend models from the remote provider, only removes the connection.\nReturns a simple \"backend removed\" confirmation message on success.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Removes a backend connection."
+      },
+      "get": {
+        "description": "Retrieves complete information for a specific backend",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backendapi_backendDetails"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves complete information for a specific backend"
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier for the backend.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Updates an existing backend configuration.\nThe ID from the URL path overrides any ID in the request body.\nNote: Updating a backend will be provisioned on the next synchronization cycle.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/runtimetypes_Backend"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_Backend"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Updates an existing backend configuration."
+      }
+    },
+    "/chats": {
+      "get": {
+        "description": "Lists all available chat sessions.\nReturns basic information about each chat session in the system.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_internalchatapi_chatSession"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all available chat sessions."
+      },
+      "post": {
+        "description": "Creates a new chat instance for the specified subject.\nReturns the unique identifier for the new chat session.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/internalchatapi_newChatInstanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/internalchatapi_chatSession"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a new chat instance for the specified subject."
+      }
+    },
+    "/chats/{id}": {
+      "get": {
+        "description": "Retrieves the complete chat history for a session.\nReturns all messages and interactions in chronological order.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_internalchatapi_chatMessage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves the complete chat history for a session."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the chat session.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/chats/{id}/chat": {
+      "parameters": [
+        {
+          "description": "The unique identifier of the chat session.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Sends a message to a chat session and gets AI response.\nSupports multiple AI models and providers with token counting and state capture.",
+        "parameters": [
+          {
+            "description": "The ID of the taskchain to be used to compute the response. When omitted, mode in the body selects a default chain.",
+            "in": "query",
+            "name": "chainId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional model override used when the task chain references {{var:model}}.",
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional provider override used when the task chain references {{var:provider}}.",
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/internalchatapi_chatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/internalchatapi_chatResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Sends a message to a chat session and gets AI response."
+      }
+    },
+    "/cli-config": {
+      "put": {
+        "description": "Updates one or both CLI default model/provider keys (same as contenox config set).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/setupapi_putCLIConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/setupapi_putCLIConfigResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Updates one or both CLI default model/provider keys (same as contenox config set)."
+      }
+    },
+    "/defaultmodel": {
+      "get": {
+        "description": "Returns the default model configured during system initialization.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/execapi_DefaultModelResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Returns the default model configured during system initialization."
+      }
+    },
+    "/embed": {
+      "post": {
+        "description": "Generates vector embeddings for text.\nUses the system's default embedding model configured at startup.\nRequests are routed ONLY to backends that have the default model available in any shared group.\nIf groups are enabled, models and backends not assigned to any group will be completely ignored by the routing system.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/execapi_EmbedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/execapi_EmbedResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Generates vector embeddings for text."
+      }
+    },
+    "/execute": {
+      "post": {
+        "description": "Runs the prompt through the default LLM.\nThis endpoint provides basic chat completion optimized for machine-to-machine (M2M) communication.\nRequests are routed ONLY to backends that have the default model available in any shared group.\nIf groups are enabled, models and backends not assigned to any group will be completely ignored by the routing system.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/execservice_TaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/execservice_SimpleExecutionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Runs the prompt through the default LLM."
+      }
+    },
+    "/files": {
+      "get": {
+        "description": "Lists files and folders, optionally filtered by path.\nUse the 'path' query parameter to list contents of a specific directory.",
+        "parameters": [
+          {
+            "description": "Filter results by file path prefix.",
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_vfsapi_FileResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists files and folders, optionally filtered by path."
+      },
+      "post": {
+        "description": "Creates a new file by uploading binary content via multipart/form-data.\nThe 'file' field is required. Optional 'name' and 'parentid' fields control naming and placement.\nFiles are limited to 100 MiB (configurable via vfsservice.MaxUploadSize).",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FileResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a new file by uploading binary content via multipart/form-data."
+      }
+    },
+    "/files/{id}": {
+      "delete": {
+        "description": "Deletes a file from the system.\nReturns a confirmation message on success.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/apiframework_MessageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Deletes a file from the system."
+      },
+      "get": {
+        "description": "Retrieves metadata for a specific file.\nReturns 404 if the file does not exist.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FileResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves metadata for a specific file."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the file.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Updates an existing file's content via multipart/form-data.\nReplaces the entire file content. The file ID is taken from the URL path.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FileResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Updates an existing file's content via multipart/form-data."
+      }
+    },
+    "/files/{id}/download": {
+      "get": {
+        "description": "Downloads the raw content of a file.\nThe 'skip' query parameter (if \"true\") omits the Content-Disposition header.",
+        "parameters": [
+          {
+            "description": "If 'true', skips Content-Disposition header.",
+            "in": "query",
+            "name": "skip",
+            "schema": {
+              "default": "false",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Downloads the raw content of a file."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the file.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/files/{id}/move": {
+      "parameters": [
+        {
+          "description": "The unique identifier of the file.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Moves a file to a new parent folder.\nAccepts a JSON body with 'newParentId'.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/vfsapi_moveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FileResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Moves a file to a new parent folder."
+      }
+    },
+    "/files/{id}/name": {
+      "parameters": [
+        {
+          "description": "The unique identifier of the file.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Renames a file.\nAccepts a JSON body with the new 'name'.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/vfsapi_nameUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FileResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Renames a file."
+      }
+    },
+    "/files/{id}/path": {
+      "parameters": [
+        {
+          "description": "The unique identifier of the file.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Renames a file.\nAccepts a JSON body with the new 'name'.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/vfsapi_nameUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FileResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Renames a file."
+      }
+    },
+    "/folders": {
+      "post": {
+        "description": "Creates a new folder.\nRequires a 'name'. Optionally accepts 'parentId' to place it inside another folder.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/vfsapi_folderCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FolderResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a new folder."
+      }
+    },
+    "/folders/{id}": {
+      "delete": {
+        "description": "Deletes a folder and all its contents.\nReturns a confirmation message on success.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/apiframework_MessageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Deletes a folder and all its contents."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the folder.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/folders/{id}/move": {
+      "parameters": [
+        {
+          "description": "The unique identifier of the folder.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Moves a folder to a new parent folder.\nAccepts a JSON body with 'newParentId'.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/vfsapi_moveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FolderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Moves a folder to a new parent folder."
+      }
+    },
+    "/folders/{id}/name": {
+      "parameters": [
+        {
+          "description": "The unique identifier of the folder.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Renames a folder.\nAccepts a JSON body with the new 'name'.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/vfsapi_nameUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FolderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Renames a folder."
+      }
+    },
+    "/folders/{id}/path": {
+      "parameters": [
+        {
+          "description": "The unique identifier of the folder.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Renames a folder.\nAccepts a JSON body with the new 'name'.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/vfsapi_nameUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/vfsapi_FolderResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Renames a folder."
+      }
+    },
+    "/group-by-name/{name}": {
+      "get": {
+        "description": "Retrieves an affinity group by its human-readable name.\nUseful for configuration where ID might not be known but name is consistent.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_AffinityGroup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves an affinity group by its human-readable name."
+      },
+      "parameters": [
+        {
+          "description": "The unique, human-readable name of the affinity group.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/group-by-purpose/{purpose}": {
+      "get": {
+        "description": "Lists groups filtered by purpose type with pagination support.\nPurpose types categorize groups (e.g., \"Internal Embeddings\", \"Internal Tasks\").\nAccepts 'cursor' (RFC3339Nano timestamp) and 'limit' parameters for pagination.",
+        "parameters": [
+          {
+            "description": "An optional RFC3339Nano timestamp to fetch the next page of results.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The maximum number of items to return per page.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "100",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_runtimetypes_AffinityGroup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists groups filtered by purpose type with pagination support."
+      },
+      "parameters": [
+        {
+          "description": "The purpose category to filter groups by (e.g., 'embeddings').",
+          "in": "path",
+          "name": "purpose",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/groups": {
+      "get": {
+        "description": "Lists all affinity groups in the system.\nReturns basic group information without associated backends or models.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_runtimetypes_AffinityGroup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all affinity groups in the system."
+      },
+      "post": {
+        "description": "Creates a new affinity group for organizing backends and models.\ngroup names must be unique within the system.\ngroups allow grouping of backends and models for specific operational purposes (e.g., embeddings, tasks).\nWhen affinity groups are enabled in the system, request routing ONLY considers resources that share a affinity group.\n- Models not assigned to any group will NOT be available for execution\n- Backends not assigned to any group will NOT receive models or process requests\n- Resources must be explicitly associated with the same group to work together\nThis is a fundamental operational requirement - resources outside groups are effectively invisible to the routing system.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/runtimetypes_AffinityGroup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_AffinityGroup"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a new affinity group for organizing backends and models."
+      }
+    },
+    "/groups/{id}": {
+      "delete": {
+        "description": "Removes an affinity group from the system.\nThis does not delete the group's backends or models, only the group relationship.\nReturns a simple \"deleted\" confirmation message on success.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Removes an affinity group from the system."
+      },
+      "get": {
+        "description": "Retrieves an specific affinity group by its unique ID.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_AffinityGroup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves an specific affinity group by its unique ID."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the affinity group.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Updates an existing affinity group configuration.\nThe ID from the URL path overrides any ID in the request body.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/runtimetypes_AffinityGroup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_AffinityGroup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Updates an existing affinity group configuration."
+      }
+    },
+    "/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "r"
+      }
+    },
+    "/hooks/local": {
+      "get": {
+        "description": "Lists local hooks supported by the runtime.\nReturns a list of locally registered hooks and their tools.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_hookproviderservice_LocalHook"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists local hooks supported by the runtime."
+      }
+    },
+    "/hooks/remote": {
+      "get": {
+        "description": "Lists remote hooks, optionally filtering by a unique name.\nReturns a list of remote hooks.",
+        "parameters": [
+          {
+            "description": "An optional RFC3339Nano timestamp to fetch the next page of results.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The maximum number of items to return per page.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "100",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_runtimetypes_RemoteHook"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists remote hooks, optionally filtering by a unique name."
+      },
+      "post": {
+        "description": "Creates a new remote hook configuration.\nRemote hooks allow task-chains to trigger external HTTP services during execution.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/runtimetypes_RemoteHook"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_RemoteHook"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a new remote hook configuration."
+      }
+    },
+    "/hooks/remote/by-name/{name}": {
+      "get": {
+        "description": "Retrieves a remote hook configuration by name.\nReturns a simple \"deleted\" confirmation message on success.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_RemoteHook"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves a remote hook configuration by name."
+      },
+      "parameters": [
+        {
+          "description": "The unique name for the remote hook.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/hooks/remote/{id}": {
+      "delete": {
+        "description": "Deletes a remote hook configuration by ID.\nReturns a simple \"deleted\" confirmation message on success.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Deletes a remote hook configuration by ID."
+      },
+      "get": {
+        "description": "Retrieves a specific remote hook configuration by ID.\nReturns a simple \"deleted\" confirmation message on success.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_RemoteHook"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves a specific remote hook configuration by ID."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier for the remote hook.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Updates an existing remote hook configuration.\nThe ID from the URL path overrides any ID in the request body.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/runtimetypes_RemoteHook"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_RemoteHook"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Updates an existing remote hook configuration."
+      }
+    },
+    "/hooks/schemas": {
+      "get": {
+        "description": "Retrieves the OpenAPI schema documents for all supported hook types.\nThis response is intentionally dynamic: it returns a map keyed by hook name\nwhose values are full OpenAPI schema documents for that hook.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves the OpenAPI schema documents for all supported hook types."
+      }
+    },
+    "/login": {
+      "post": {
+        "description": "Authenticates a user using email and password (for machine-to-machine or backend-for-frontend flows).\nReturns a JWT token and user details on success.\nWARNING: Do not use this endpoint directly from browser-based clients.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/usersapi_LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/middleware_LoginResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Authenticates a user using email and password (for machine-to-machine or backend-for-frontend flows)."
+      }
+    },
+    "/mcp-servers": {
+      "get": {
+        "description": "Lists all MCP server configurations.\nReturns a paginated list of MCP server configurations.",
+        "parameters": [
+          {
+            "description": "RFC3339Nano timestamp for pagination cursor.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "100",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_runtimetypes_MCPServer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all MCP server configurations."
+      },
+      "post": {
+        "description": "Creates a new MCP server configuration.\nMCP servers allow task-chains to call tools on external Model Context Protocol servers.\nSupported transports: stdio (command + args), sse (url), http (url).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/runtimetypes_MCPServer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_MCPServer"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a new MCP server configuration."
+      }
+    },
+    "/mcp-servers/by-name/{name}": {
+      "get": {
+        "description": "Retrieves an MCP server configuration by its unique name.\nReturns the MCP server configuration.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_MCPServer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves an MCP server configuration by its unique name."
+      },
+      "parameters": [
+        {
+          "description": "The unique name of the MCP server.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/mcp-servers/{id}": {
+      "delete": {
+        "description": "Deletes an MCP server configuration by its unique ID.\nReturns \"deleted\" on success. All nodes stop their session worker for this server.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Deletes an MCP server configuration by its unique ID."
+      },
+      "get": {
+        "description": "Retrieves an MCP server configuration by its unique ID.\nReturns the MCP server configuration.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_MCPServer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves an MCP server configuration by its unique ID."
+      },
+      "parameters": [
+        {
+          "description": "The unique ID of the MCP server.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Updates an existing MCP server configuration.\nThe ID in the URL path takes precedence over any ID in the request body.\nAll nodes restart their session worker for this server to pick up the new config.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/runtimetypes_MCPServer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimetypes_MCPServer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Updates an existing MCP server configuration."
+      }
+    },
+    "/model-affinity/{groupID}/models": {
+      "get": {
+        "description": "Lists all models associated with a specific affinity group.\nReturns basic model information without backend-specific details.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_runtimetypes_Model"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all models associated with a specific affinity group."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the affinity group.",
+          "in": "path",
+          "name": "groupID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/model-affinity/{groupID}/models/{modelID}": {
+      "delete": {
+        "description": "Removes a model from an affinity group.\nAfter removal, requests for this model will no longer be routed to backends in this affinity group.\nThis model can still be used with backends in other groups where it remains assigned.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Removes a model from an affinity group."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the affinity group.",
+          "in": "path",
+          "name": "groupID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "The unique identifier of the model to be assigned.",
+          "in": "path",
+          "name": "modelID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Associates a model with an affinity group.\nAfter assignment, requests for this model can be routed to any backend in the affinity group.\nThis enables request routing between the model and backends that share this affinity group.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Associates a model with an affinity group."
+      }
+    },
+    "/model-affinity/{modelID}/groups": {
+      "get": {
+        "description": "Lists all affinity groups that a specific model belongs to.\nUseful for understanding where a model is deployed across the system.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_runtimetypes_AffinityGroup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all affinity groups that a specific model belongs to."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the model.",
+          "in": "path",
+          "name": "modelID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/models": {
+      "get": {
+        "description": "Lists all runtime-observed models in internal format.\nThis endpoint returns observed model details merged across reachable backends.\nIntended for debugging and inventory views, not CRUD.",
+        "parameters": [
+          {
+            "description": "The maximum number of items to return per page.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "100",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_backendapi_ObservedModel"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all runtime-observed models in internal format."
+      }
+    },
+    "/openai/v1/models": {
+      "get": {
+        "description": "Lists all runtime-observed models in OpenAI-compatible format.\nReturns models observed on reachable backends as they would appear in OpenAI's /v1/models endpoint.\nThe chainID parameter is currently unused.",
+        "parameters": [
+          {
+            "description": "The maximum number of items to return per page.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "100",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backendapi_OpenAICompatibleModelList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all runtime-observed models in OpenAI-compatible format."
+      }
+    },
+    "/openai/{chainID}/v1/chat/completions": {
+      "parameters": [
+        {
+          "description": "The ID of the task chain to use.",
+          "in": "path",
+          "name": "chainID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Processes chat requests using the configured task chain.\nThis endpoint provides OpenAI-compatible chat completions by executing\nthe configured task chain with the provided request data.\nThe task chain must be configured first using the /chat/taskchain endpoint.\n--- SSE Streaming ---\nWhen 'stream: true' is set in the request body, the endpoint streams the response\nusing Server-Sent Events (SSE) in the OpenAI-compatible format.\nClients should concatenate the 'content' from the 'delta' object in each 'data' event\nto reconstruct the full message. The stream is terminated by a 'data: [DONE]' message.\nExample event stream:\ndata: {\"id\":\"chat_123\",\"object\":\"chat.completion.chunk\",\"created\":1690000000,\"model\":\"mistral:instruct\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\ndata: {\"id\":\"chat_123\",\"object\":\"chat.completion.chunk\",\"created\":1690000000,\"model\":\"mistral:instruct\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"},\"finish_reason\":null}]}\ndata: [DONE]",
+        "parameters": [
+          {
+            "description": "If provided the stacktraces will be added to the response.",
+            "in": "query",
+            "name": "stackTrace",
+            "schema": {
+              "default": "false",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/taskengine_OpenAIChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/chatapi_OpenAIChatResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Processes chat requests using the configured task chain."
+      }
+    },
+    "/openai/{chainID}/v1/models": {
+      "get": {
+        "description": "Lists all runtime-observed models in OpenAI-compatible format.\nReturns models observed on reachable backends as they would appear in OpenAI's /v1/models endpoint.\nThe chainID parameter is currently unused.",
+        "parameters": [
+          {
+            "description": "The maximum number of items to return per page.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "100",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backendapi_OpenAICompatibleModelList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all runtime-observed models in OpenAI-compatible format."
+      },
+      "parameters": [
+        {
+          "description": "The ID of the chain that links to the openAI completion API. Currently unused.",
+          "in": "path",
+          "name": "chainID",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/plans": {
+      "get": {
+        "description": "Lists all plans.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_planstore_Plan"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all plans."
+      },
+      "post": {
+        "description": "Creates a new plan from a free-text goal.\nThe planner_chain_id must reference an existing TaskChainDefinition.\nThe chain is called with the goal text; it must return a JSON array of step strings.\nThe new plan becomes the active plan.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/planapi_newPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/planapi_newPlanResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a new plan from a free-text goal."
+      }
+    },
+    "/plans/active": {
+      "get": {
+        "description": "Returns the active plan and all its steps.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/planapi_activeResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Returns the active plan and all its steps."
+      }
+    },
+    "/plans/active/next": {
+      "post": {
+        "description": "Executes the next pending step of the active plan.\nexecutor_chain_id must reference a TaskChainDefinition that accepts a step\ndescription string and returns the execution result.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/planapi_nextStepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/planapi_nextStepResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Executes the next pending step of the active plan."
+      }
+    },
+    "/plans/active/replan": {
+      "post": {
+        "description": "Replaces remaining pending steps with a freshly generated plan.\nCompleted steps are preserved; the planner is called with a recap of the\noriginal goal plus the completed steps to produce the new remaining steps.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/planapi_replanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/planapi_replanResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Replaces remaining pending steps with a freshly generated plan."
+      }
+    },
+    "/plans/active/run-compiled": {
+      "post": {
+        "description": "Compiles the active plan (same markdown as Show) and executes the resulting linear chain.\nexecutor_chain_id and chain_id are required. Optional write_path persists the compiled chain JSON.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/planapi_runCompiledRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/planapi_runCompiledResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Compiles the active plan (same markdown as Show) and executes the resulting linear chain."
+      }
+    },
+    "/plans/active/steps/{ordinal}/retry": {
+      "parameters": [
+        {
+          "description": "The 1-based step ordinal.",
+          "in": "path",
+          "name": "ordinal",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Resets a step to pending so it will be retried on the next Next call.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/planapi_markdownResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Resets a step to pending so it will be retried on the next Next call."
+      }
+    },
+    "/plans/active/steps/{ordinal}/skip": {
+      "parameters": [
+        {
+          "description": "The 1-based step ordinal.",
+          "in": "path",
+          "name": "ordinal",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Marks a step as intentionally skipped.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/planapi_markdownResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Marks a step as intentionally skipped."
+      }
+    },
+    "/plans/clean": {
+      "post": {
+        "description": "Removes all completed or archived plans.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/planapi_cleanResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Removes all completed or archived plans."
+      }
+    },
+    "/plans/compile": {
+      "post": {
+        "description": "Compiles plan Markdown into a linear TaskChainDefinition (one executor-chain copy per step).\nmarkdown must match the shape produced by planservice renderMarkdown. executor_chain_id must\nreference an existing task chain. Optional write_path persists the JSON via the chain VFS.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/planapi_compileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/planapi_compileResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Compiles plan Markdown into a linear TaskChainDefinition (one executor-chain copy per step)."
+      }
+    },
+    "/plans/{name}": {
+      "delete": {
+        "description": "Permanently deletes a plan by name.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Permanently deletes a plan by name."
+      },
+      "parameters": [
+        {
+          "description": "The plan name to delete.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/plans/{name}/activate": {
+      "parameters": [
+        {
+          "description": "The plan name to activate.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Switches the active plan to the named plan (archives the previous active).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Switches the active plan to the named plan (archives the previous active)."
+      }
+    },
+    "/providers/configs": {
+      "get": {
+        "description": "Lists all configured external providers with pagination support.",
+        "parameters": [
+          {
+            "description": "An optional RFC3339Nano timestamp to fetch the next page of results.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The maximum number of items to return per page.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "100",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_runtimestate_ProviderConfig"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists all configured external providers with pagination support."
+      }
+    },
+    "/providers/{providerType}/config": {
+      "delete": {
+        "description": "Removes provider configuration from the system.\nAfter deletion, the provider will no longer be available for model execution.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Removes provider configuration from the system."
+      },
+      "get": {
+        "description": "Retrieves configuration details for a specific external provider.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/runtimestate_ProviderConfig"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves configuration details for a specific external provider."
+      },
+      "parameters": [
+        {
+          "description": "The type of the provider to delete (e.g., 'ollama', 'openai', 'gemini').",
+          "in": "path",
+          "name": "providerType",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/setup-status": {
+      "get": {
+        "description": "Returns runtime readiness: CLI defaults, backend counts, and actionable issues for Beam.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/setupcheck_Result"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Returns runtime readiness: CLI defaults, backend counts, and actionable issues for Beam."
+      }
+    },
+    "/state": {
+      "get": {
+        "description": "Retrieves the current runtime state of all LLM backends.\nIncludes connection status, loaded models, and error information.\nNOTE: This shows the physical state of backends, but the routing system only considers\nbackends and models that are assigned to the same group. Resources not in groups are ignored\nfor request processing even if they appear in this response.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_statetype_BackendRuntimeState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves the current runtime state of all LLM backends."
+      }
+    },
+    "/supported": {
+      "get": {
+        "description": "Lists available task-chain hook types.\nReturns all registered external action types that can be used in task-chain hooks.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists available task-chain hook types."
+      }
+    },
+    "/task-events": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Task request ID to subscribe to.",
+            "in": "query",
+            "name": "requestId",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "stream"
+      }
+    },
+    "/taskchains": {
+      "delete": {
+        "description": "Deletes the task chain file at path.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Deletes the task chain file at path."
+      },
+      "get": {
+        "description": "Retrieves a task chain JSON document at the given VFS path.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/taskengine_TaskChainDefinition"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Retrieves a task chain JSON document at the given VFS path."
+      },
+      "post": {
+        "description": "Creates a new task chain file at path (must not exist).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/taskengine_TaskChainDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/taskengine_TaskChainDefinition"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a new task chain file at path (must not exist)."
+      },
+      "put": {
+        "description": "Updates the task chain file at path.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/taskengine_TaskChainDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/taskengine_TaskChainDefinition"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Updates the task chain file at path."
+      }
+    },
+    "/tasks": {
+      "post": {
+        "description": "Executes dynamic task-chain workflows.\nTask-chains are state-machine workflows (DAGs) with conditional branches,\nexternal hooks, and captured execution state.\nRequests are routed ONLY to backends that have the requested model available in any shared group.\nIf groups are enabled, models and backends not assigned to any group will be completely ignored by the routing system.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/execapi_taskExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/execapi_taskExecutionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Executes dynamic task-chain workflows."
+      }
+    },
+    "/terminal/sessions": {
+      "get": {
+        "description": "Lists terminal sessions for the authenticated principal (paginated).",
+        "parameters": [
+          {
+            "description": "An optional RFC3339Nano timestamp to fetch the next page of results.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The maximum number of items to return per page.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": "100",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_terminalstore_Session"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists terminal sessions for the authenticated principal (paginated)."
+      },
+      "post": {
+        "description": "Creates a PTY-backed shell session. Connect with WebSocket to wsPath.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/terminalapi_createSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/terminalapi_createSessionResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Creates a PTY-backed shell session. Connect with WebSocket to wsPath."
+      }
+    },
+    "/terminal/sessions/{id}": {
+      "delete": {
+        "description": "Deletes a terminal session and tears down its PTY.",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Deletes a terminal session and tears down its PTY."
+      },
+      "get": {
+        "description": "Returns metadata for a single terminal session.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/terminalstore_Session"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Returns metadata for a single terminal session."
+      },
+      "parameters": [
+        {
+          "description": "The unique identifier of the terminal session.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "description": "Updates PTY geometry from a prior resize (cols/rows).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/terminalapi_patchSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Updates PTY geometry from a prior resize (cols/rows)."
+      }
+    },
+    "/token_refresh": {
+      "post": {
+        "description": "Refreshes an expired or expiring JWT token.\nAccepts a valid token and returns a new one with extended expiration.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/usersapi_tokenRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/usersapi_tokenRefreshResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Refreshes an expired or expiring JWT token."
+      }
+    },
+    "/ui/login": {
+      "post": {
+        "description": "Authenticates a user and sets an HTTP-only authentication cookie (for UI clients).\nThe cookie is secure, HTTP-only, and has a strict SameSite policy.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/usersapi_LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/usersapi_LoginResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Authenticates a user and sets an HTTP-only authentication cookie (for UI clients)."
+      }
+    },
+    "/ui/logout": {
+      "post": {
+        "description": "Clears the authentication cookie and logs the user out.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Clears the authentication cookie and logs the user out."
+      }
+    },
+    "/ui/me": {
+      "get": {
+        "description": "Returns the currently authenticated user (for UI clients).\nRequires a valid authentication cookie.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/middleware_LoginResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Returns the currently authenticated user (for UI clients)."
+      }
+    },
+    "/ui/token_refresh": {
+      "post": {
+        "description": "Refreshes the authentication token stored in the cookie (for UI clients).\nReads the current token from the cookie, refreshes it, and updates the cookie.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Refreshes the authentication token stored in the cookie (for UI clients)."
+      }
+    },
+    "/version": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/apiframework_AboutServer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "r"
+      }
+    }
+  },
+  "security": [
+    {
+      "X-API-Key": []
+    }
+  ]
+}

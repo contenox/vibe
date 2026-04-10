@@ -21,6 +21,14 @@ jobs:
         with:
           go-version: "1.24"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Prepare embed inputs (Beam UI + OpenAPI stub)
+        run: make ci-prepare-embeds
+
       - name: Generate OpenAPI (embedded in binary)
         run: make docs-gen
 

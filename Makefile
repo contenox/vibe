@@ -28,7 +28,7 @@ APITEST_ACTIVATE := $(APITEST_VENV)/bin/activate
 DEV_CLI_BIN := $(HOME)/.local/bin/contenox
 
 .PHONY: help \
-	build-cli build-web \
+	build-cli build-web ci-prepare-embeds \
 	clean \
 	deps-go-watch deps-npm \
 	dev-cli dev-cli-link dev-cli-unlink \
@@ -41,7 +41,7 @@ DEV_CLI_BIN := $(HOME)/.local/bin/contenox
 
 # -----------------------------------------------------------------------------
 help:
-	@echo "build-*    build-cli build-web"
+	@echo "build-*    build-cli build-web  |  ci-prepare-embeds (CI: Beam dist + OpenAPI stub)"
 	@echo "test-*     test test-unit test-system test-cli-verbose test-cli-help"
 	@echo "           test-http-api test-http-api-venv test-openapi-client-codegen"
 	@echo "docs-*     docs-gen docs-html docs-markdown"
@@ -53,6 +53,10 @@ help:
 	@echo "See CONTRIBUTING.md for the two-terminal web + API workflow."
 
 # —— build ————————————————————————————————————————————————————————————————
+# CI: generate gitignored embed inputs (Beam dist + OpenAPI stub) before docs-gen / go build.
+ci-prepare-embeds:
+	bash $(PROJECT_ROOT)/scripts/ci_prepare_embeds.sh
+
 build-cli:
 	@test -f $(PROJECT_ROOT)/internal/openapidocs/openapi.json || $(MAKE) docs-gen
 	go build -o $(PROJECT_ROOT)/bin/contenox $(PROJECT_ROOT)/cmd/contenox
