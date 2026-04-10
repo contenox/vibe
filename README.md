@@ -2,7 +2,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![GitHub release](https://img.shields.io/github/release/contenox/contenox.svg)](https://github.com/contenox/contenox/releases)
+[![Version](https://img.shields.io/github/v/release/contenox/contenox?label=version&logo=github)](https://github.com/contenox/contenox/releases)
 
 📖 **[Read the full documentation at contenox.com](https://contenox.com)**
 
@@ -97,6 +97,9 @@ Any service that speaks HTTP and exposes an OpenAPI spec becomes a first-class a
 ---
 
 ## Quick Start
+
+<!-- Release tooling: keep next line in sync with apiframework/version.txt (updated by `make -f Makefile.version bump-*`). -->
+<!-- TAG=v0.6.5 -->
 
 ### Install
 

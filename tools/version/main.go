@@ -315,7 +315,7 @@ func updateReadmeTag(newVersion string) error {
 	}
 	re := regexp.MustCompile(`TAG=v\d+\.\d+\.\d+`)
 	if !re.Match(content) {
-		return fmt.Errorf("README.md has no TAG=vX.Y.Z line for install snippet")
+		return fmt.Errorf("README.md has no TAG=vX.Y.Z substring for release tooling (add e.g. `<!-- TAG=v0.6.5 -->` near Quick Start; keep in sync with apiframework/version.txt)")
 	}
 	updated := re.ReplaceAll(content, []byte("TAG="+newVersion))
 	if bytes.Equal(updated, content) {
