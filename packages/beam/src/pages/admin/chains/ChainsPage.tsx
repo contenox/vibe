@@ -1,15 +1,14 @@
 // src/pages/admin/chains/ChainsPage.tsx
-import { Button, ErrorState, Fill, LoadingState, Page, Panel, Section, Tabs } from '@contenox/ui';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button, ErrorState, Fill, LoadingState, Page, Section, Tabs } from '@contenox/ui';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { useListFiles } from '../../../hooks/useFiles';
 import {
   useChain,
   useCreateChain,
+  useListChains,
   useUpdateChain,
 } from '../../../hooks/useChains';
-import { isChainLikeVfsPath } from '../../../lib/chainPaths';
 import type { ChainDefinition, ChainTask } from '../../../lib/types';
 import ChainJsonEditor from './components/ChainJsonEditor';
 import ChainsList from './components/ChainsList';
@@ -26,12 +25,12 @@ export default function ChainsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const pathParam = searchParams.get('path') ?? '';
 
-  const { data: files = [], isLoading: filesLoading, error: filesError, refetch: refetchFiles } =
-    useListFiles();
-  const chainPaths = useMemo(
-    () => files.filter(f => isChainLikeVfsPath(f.path)).map(f => f.path),
-    [files],
-  );
+  const {
+    data: chainPaths = [],
+    isLoading: chainsLoading,
+    error: chainsError,
+    refetch: refetchChains,
+  } = useListChains();
 
   const { data: loadedChain, isLoading: chainLoading, error: chainError, refetch: refetchChain } =
     useChain(pathParam);
@@ -233,9 +232,9 @@ export default function ChainsPage() {
   };
 
   const refetch = useCallback(() => {
-    void refetchFiles();
+    void refetchChains();
     if (pathParam) void refetchChain();
-  }, [refetchFiles, refetchChain, pathParam]);
+  }, [refetchChains, refetchChain, pathParam]);
 
   const tabs: Tab[] = [
     { id: 'list', label: t('chains.tabs.list') },
@@ -243,8 +242,8 @@ export default function ChainsPage() {
     { id: 'json', label: t('chains.tabs.json'), disabled: !selectedChain },
   ];
 
-  const isLoading = filesLoading || (!!pathParam && chainLoading);
-  const error = filesError ?? chainError ?? null;
+  const isLoading = chainsLoading || (!!pathParam && chainLoading);
+  const error = chainsError ?? chainError ?? null;
 
   if (isLoading) return <LoadingState message={t('chains.loading')} />;
   if (error)

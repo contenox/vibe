@@ -316,7 +316,8 @@ export const api = {
     });
   },
 
-  /** Task chains live in the VFS; list files with GET /api/files. Path is relative (e.g. default-chain.json). */
+  /** Task chains live in their own VFS root (e.g. .contenox/), separate from /api/files. */
+  listChains: () => apiFetch<string[]>('/api/taskchains/list'),
   getChain: (path: string) =>
     apiFetch<ChainDefinition>(`/api/taskchains?path=${encodeURIComponent(path)}`),
   createChain: (path: string, data: Partial<ChainDefinition>) =>

@@ -30,6 +30,17 @@ func (d *activityTrackerDecorator) Get(ctx context.Context, ref string) (*tasken
 	return chain, err
 }
 
+func (d *activityTrackerDecorator) List(ctx context.Context) ([]string, error) {
+	reportErrFn, _, endFn := d.tracker.Start(ctx, "list", "taskchain")
+	defer endFn()
+
+	paths, err := d.service.List(ctx)
+	if err != nil {
+		reportErrFn(err)
+	}
+	return paths, err
+}
+
 func (d *activityTrackerDecorator) CreateAtPath(ctx context.Context, path string, chain *taskengine.TaskChainDefinition) error {
 	reportErrFn, reportChangeFn, endFn := d.tracker.Start(
 		ctx,

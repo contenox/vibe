@@ -11,6 +11,7 @@ import (
 // (inner JSON "id") by scanning root-level *.json files.
 type Service interface {
 	Get(ctx context.Context, ref string) (*taskengine.TaskChainDefinition, error)
+	List(ctx context.Context) ([]string, error)
 	CreateAtPath(ctx context.Context, path string, chain *taskengine.TaskChainDefinition) error
 	UpdateAtPath(ctx context.Context, path string, chain *taskengine.TaskChainDefinition) error
 	DeleteByPath(ctx context.Context, path string) error

@@ -97,6 +97,7 @@ export const typeKeys = {
 
 export const chainKeys = {
   all: ['chains'] as const,
+  list: () => [...chainKeys.all, 'list'] as const,
   /** VFS-relative path (e.g. my-chain.json) */
   byPath: (vfsPath: string) => [...chainKeys.all, 'path', vfsPath] as const,
   triggers: (vfsPath: string) => [...chainKeys.byPath(vfsPath), 'triggers'] as const,

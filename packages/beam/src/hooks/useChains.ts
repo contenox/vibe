@@ -2,11 +2,20 @@ import {
   useMutation,
   UseMutationResult,
   useQuery,
+  UseQueryResult,
   useQueryClient,
 } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { chainKeys, fileKeys } from '../lib/queryKeys';
+import { chainKeys } from '../lib/queryKeys';
 import { ChainDefinition, ChainTask } from '../lib/types';
+
+/** Lists all chain file paths from the chain VFS (GET /api/taskchains). */
+export function useListChains(): UseQueryResult<string[], Error> {
+  return useQuery<string[], Error>({
+    queryKey: chainKeys.list(),
+    queryFn: () => api.listChains(),
+  });
+}
 
 /** Load a single chain JSON from the VFS path (required query param on GET /api/taskchains). */
 export function useChain(vfsPath: string) {
@@ -29,7 +38,7 @@ export function useCreateChain(): UseMutationResult<
   return useMutation<ChainDefinition, Error, CreateChainInput>({
     mutationFn: ({ vfsPath, chain }) => api.createChain(vfsPath, chain),
     onSuccess: (_data, { vfsPath }) => {
-      queryClient.invalidateQueries({ queryKey: fileKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: chainKeys.list() });
       queryClient.invalidateQueries({ queryKey: chainKeys.byPath(vfsPath) });
     },
   });
@@ -40,7 +49,7 @@ export function useUpdateChain(vfsPath: string) {
   return useMutation<ChainDefinition, Error, Partial<ChainDefinition>, unknown>({
     mutationFn: data => api.updateChain(vfsPath, data),
     onSuccess: updatedChain => {
-      queryClient.invalidateQueries({ queryKey: fileKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: chainKeys.list() });
       queryClient.setQueryData(chainKeys.byPath(vfsPath), updatedChain);
     },
   });
@@ -51,7 +60,7 @@ export function useDeleteChain(): UseMutationResult<void, Error, string, unknown
   return useMutation<void, Error, string>({
     mutationFn: vfsPath => api.deleteChain(vfsPath),
     onSuccess: (_, vfsPath) => {
-      queryClient.invalidateQueries({ queryKey: fileKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: chainKeys.list() });
       queryClient.removeQueries({ queryKey: chainKeys.byPath(vfsPath) });
     },
   });

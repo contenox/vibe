@@ -134,6 +134,19 @@ func (s *vfsStore) Get(ctx context.Context, ref string) (*taskengine.TaskChainDe
 	return nil, fmt.Errorf("task chain %q: %w", ref, libdb.ErrNotFound)
 }
 
+// List returns the relative paths of all *.json files in the chain VFS root.
+func (s *vfsStore) List(ctx context.Context) ([]string, error) {
+	files, err := s.listRootJSON(ctx)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	return paths, nil
+}
+
 // CreateAtPath writes a new JSON file at the given VFS path. Fails if the file already exists.
 func (s *vfsStore) CreateAtPath(ctx context.Context, path string, chain *taskengine.TaskChainDefinition) error {
 	if err := validateChain(chain); err != nil {
