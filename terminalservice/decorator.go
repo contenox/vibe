@@ -101,3 +101,13 @@ func (d *activityTrackerDecorator) UpdateGeometry(ctx context.Context, principal
 	reportChange(id, map[string]any{"cols": cols, "rows": rows})
 	return nil
 }
+
+func (d *activityTrackerDecorator) ReapIdle(ctx context.Context) error {
+	reportErr, _, end := d.tracker.Start(ctx, "reap_idle", "terminal_session")
+	defer end()
+	if err := d.svc.ReapIdle(ctx); err != nil {
+		reportErr(err)
+		return err
+	}
+	return nil
+}

@@ -1,10 +1,11 @@
+// Package terminalservice hosts a single PTY-backed shell session per process.
 package terminalservice
 
 import (
 	"context"
 	"errors"
 	"io"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	apiframework "github.com/contenox/contenox/apiframework"
@@ -37,6 +38,9 @@ type Service interface {
 	Get(ctx context.Context, principal, id string) (*SessionInfo, error)
 	List(ctx context.Context, principal string, createdAtCursor *time.Time, limit int) ([]*SessionInfo, error)
 	UpdateGeometry(ctx context.Context, principal, id string, cols, rows int) error
+	// ReapIdle closes the session if it has been detached longer than [Config.IdleTimeout].
+	// A zero IdleTimeout disables reaping.
+	ReapIdle(ctx context.Context) error
 }
 
 // ResizeMsg carries terminal dimension changes from the WebSocket handler.
@@ -49,8 +53,7 @@ type service struct {
 	cfg            Config
 	db             libdb.DBManager
 	nodeInstanceID string
-	mu             sync.Mutex
-	sessions       map[string]*session
+	current        atomic.Pointer[session] // active session, or nil
 }
 
 // New constructs a terminal [Service]. When cfg.Enabled is false, returns [NewDisabled] with a nil error.
@@ -67,7 +70,6 @@ func New(cfg Config, db libdb.DBManager, nodeInstanceID string) (Service, error)
 		cfg:            cfg,
 		db:             db,
 		nodeInstanceID: nodeInstanceID,
-		sessions:       make(map[string]*session),
 	}
 	st := terminalstore.New(s.db.WithoutTransaction())
 	// Remove orphaned rows from a previous process on this node (PTY state is gone).
@@ -101,15 +103,19 @@ func (disabledService) List(context.Context, string, *time.Time, int) ([]*Sessio
 func (disabledService) UpdateGeometry(context.Context, string, string, int, int) error {
 	return ErrDisabled
 }
+func (disabledService) ReapIdle(context.Context) error { return nil }
 
 func (s *service) store() terminalstore.Store {
 	return terminalstore.New(s.db.WithoutTransaction())
 }
 
-func (s *service) getSession(id string) *session {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sessions[id]
+// localByID returns the active session if its id matches.
+func (s *service) localByID(id string) *session {
+	sess := s.current.Load()
+	if sess == nil || sess.id != id {
+		return nil
+	}
+	return sess
 }
 
 func (s *service) Get(ctx context.Context, principal, id string) (*SessionInfo, error) {
@@ -164,19 +170,17 @@ func (s *service) Close(ctx context.Context, principal, id string) error {
 	if row.Status != terminalstore.SessionStatusActive {
 		return ErrSessionNotFound
 	}
+	return s.closeByID(ctx, id)
+}
 
-	s.mu.Lock()
-	sess, ok := s.sessions[id]
-	if ok {
-		delete(s.sessions, id)
+// closeByID releases the active session and deletes its row. Idempotent.
+func (s *service) closeByID(ctx context.Context, id string) error {
+	if sess := s.current.Load(); sess != nil && sess.id == id {
+		if s.current.CompareAndSwap(sess, nil) {
+			_ = sess.shutdown(ctx)
+		}
 	}
-	s.mu.Unlock()
-
-	if ok && sess != nil {
-		_ = sess.shutdown(ctx)
-	}
-
-	if err := st.Delete(ctx, id); err != nil {
+	if err := s.store().Delete(ctx, id); err != nil {
 		if errors.Is(err, terminalstore.ErrNotFound) {
 			return nil
 		}
@@ -185,18 +189,36 @@ func (s *service) Close(ctx context.Context, principal, id string) error {
 	return nil
 }
 
-func (s *service) CloseAll(ctx context.Context) error {
-	s.mu.Lock()
-	sessions := make([]*session, 0, len(s.sessions))
-	for _, sess := range s.sessions {
-		sessions = append(sessions, sess)
+func (s *service) ReapIdle(ctx context.Context) error {
+	if s.cfg.IdleTimeout <= 0 {
+		return nil
 	}
-	s.sessions = make(map[string]*session)
-	s.mu.Unlock()
-	for _, sess := range sessions {
-		if sess != nil {
-			_ = sess.shutdown(ctx)
-		}
+	sess := s.current.Load()
+	if sess == nil {
+		return nil
+	}
+	if time.Since(sess.lastActivity()) < s.cfg.IdleTimeout {
+		return nil
+	}
+	// Claim busy before clearing the slot so a concurrent Attach either wins
+	// the CAS first (and the reap is a no-op) or finds an empty slot.
+	if !sess.busy.CompareAndSwap(false, true) {
+		return nil
+	}
+	if !s.current.CompareAndSwap(sess, nil) {
+		sess.busy.Store(false)
+		return nil
+	}
+	_ = sess.shutdown(ctx)
+	if err := s.store().Delete(ctx, sess.id); err != nil && !errors.Is(err, terminalstore.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
+func (s *service) CloseAll(ctx context.Context) error {
+	if sess := s.current.Swap(nil); sess != nil {
+		_ = sess.shutdown(ctx)
 	}
 	st := terminalstore.New(s.db.WithoutTransaction())
 	return st.DeleteByNodeInstanceID(ctx, s.nodeInstanceID)

@@ -28,7 +28,7 @@ APITEST_ACTIVATE := $(APITEST_VENV)/bin/activate
 DEV_CLI_BIN := $(HOME)/.local/bin/contenox
 
 .PHONY: help \
-	build-cli build-web ci-prepare-embeds \
+	build-cli build-ui build-web ci-prepare-embeds \
 	clean \
 	deps-go-watch deps-npm \
 	dev-cli dev-cli-link dev-cli-unlink \
@@ -155,7 +155,11 @@ dev-web:
 dev-web-proxy:
 	npm run dev:proxy --workspace=@contenox/beam
 
-dev-web-fresh: clean deps-npm dev-web
+# Builds the @contenox/ui workspace package; required by dev-web after a clean.
+build-ui:
+	npm run build --workspace=@contenox/ui
+
+dev-web-fresh: clean deps-npm build-ui dev-web
 
 wait-http-ready:
 	@until curl -sf -o /dev/null http://localhost:8081/api/health; do sleep 2; done

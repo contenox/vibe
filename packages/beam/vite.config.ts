@@ -1,8 +1,12 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 import { defineConfig, loadEnv } from 'vite';
+
+/** Always load `.env`, `.env.proxy`, etc. from this package — not `process.cwd()` (monorepo / tooling can start Vite from the repo root). */
+const beamPackageRoot = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * When using the dev API proxy, the browser only talks to the Vite origin.
@@ -49,12 +53,13 @@ function beamSpaFallback(): Plugin {
 }
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
+  const env = loadEnv(mode, beamPackageRoot, '');
   const devApiProxy =
     env.VITE_DEV_API_PROXY === '1' || env.VITE_DEV_API_PROXY === 'true';
   const proxyTarget = env.VITE_DEV_PROXY_TARGET || 'http://127.0.0.1:8081';
 
   return {
+    envDir: beamPackageRoot,
     plugins: [
       react(),
       tailwindcss(),
@@ -62,7 +67,7 @@ export default defineConfig(({ mode }) => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, './src'),
+        '@': path.resolve(beamPackageRoot, './src'),
       },
     },
     build: {

@@ -8,6 +8,8 @@ import { ApiError } from '../../../../lib/fetch';
 
 const SESSION_KEY = 'beam_terminal_session_id';
 const DISCONNECT_RECREATE_MS = 350;
+/** Maximum consecutive connection failures before the retry loop stops. */
+const MAX_CONNECT_FAILURES = 3;
 
 export function TerminalPanel({ className }: { className?: string }) {
   const [wsUrl, setWsUrl] = useState<string | null>(null);
@@ -16,6 +18,7 @@ export function TerminalPanel({ className }: { className?: string }) {
   const sessionIdRef = useRef<string | null>(null);
   const createGenRef = useRef(0);
   const disconnectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectFailuresRef = useRef(0);
 
   const persist = useCallback((sessionId: string | null) => {
     sessionIdRef.current = sessionId;
@@ -144,8 +147,33 @@ export function TerminalPanel({ className }: { className?: string }) {
     }, DISCONNECT_RECREATE_MS);
   }, [persist, createSession, clearDisconnectDebounce]);
 
+  /** Recreate the session on connection failure, up to {@link MAX_CONNECT_FAILURES} consecutive attempts. */
+  const handleConnectionFailed = useCallback(() => {
+    connectFailuresRef.current += 1;
+    if (connectFailuresRef.current > MAX_CONNECT_FAILURES) {
+      persist(null);
+      setWsUrl(null);
+      setInitializing(false);
+      setError(
+        t(
+          'terminal.connect_failed',
+          'Could not connect to terminal after several attempts. Check that the backend is reachable and try again.',
+        ),
+      );
+      return;
+    }
+    persist(null);
+    void createSession();
+  }, [persist, createSession]);
+
+  /** Reset the failure counter on a successful connection. */
+  const handleOpen = useCallback(() => {
+    connectFailuresRef.current = 0;
+  }, []);
+
   const handleRestart = useCallback(async () => {
     clearDisconnectDebounce();
+    connectFailuresRef.current = 0;
     const oldId = sessionIdRef.current;
     persist(null);
     setWsUrl(null);
@@ -176,6 +204,7 @@ export function TerminalPanel({ className }: { className?: string }) {
 
   const handleOpenTerminal = useCallback(() => {
     clearDisconnectDebounce();
+    connectFailuresRef.current = 0;
     void createSession();
   }, [createSession, clearDisconnectDebounce]);
 
@@ -242,7 +271,13 @@ export function TerminalPanel({ className }: { className?: string }) {
         </div>
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <XTerminal className="min-h-0 min-w-0 flex-1" wsUrl={wsUrl} onDisconnect={handleDisconnect} />
+        <XTerminal
+          className="min-h-0 min-w-0 flex-1"
+          wsUrl={wsUrl}
+          onOpen={handleOpen}
+          onDisconnect={handleDisconnect}
+          onConnectionFailed={handleConnectionFailed}
+        />
       </div>
     </div>
   );

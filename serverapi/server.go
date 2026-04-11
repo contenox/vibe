@@ -173,8 +173,8 @@ func New(
 	termCfg, err := terminalservice.ParseEnv(
 		config.TerminalEnabled,
 		config.TerminalAllowedRoot,
-		config.TerminalMaxSessions,
 		config.TerminalShell,
+		config.TerminalIdleTimeout,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("terminal config: %w", err)
@@ -185,6 +185,18 @@ func New(
 	}
 	termSvc = terminalservice.WithActivityTracker(termSvc, serveropsChainedTracker)
 	terminalapi.AddRoutes(mux, termSvc, auth, termCfg.Enabled)
+	if termCfg.Enabled && termCfg.IdleTimeout > 0 {
+		group.StartLoop(
+			ctx,
+			&libroutine.LoopConfig{
+				Key:          "terminalReapIdle",
+				Threshold:    3,
+				ResetTimeout: time.Minute,
+				Interval:     terminalReapInterval(termCfg.IdleTimeout),
+				Operation:    termSvc.ReapIdle,
+			},
+		)
+	}
 	termPrevCleanup := cleanup
 	cleanup = func() error {
 		_ = termSvc.CloseAll(context.Background())
@@ -192,6 +204,20 @@ func New(
 	}
 
 	return cleanup, nil
+}
+
+// terminalReapInterval returns a reaper tick of one quarter of idleTimeout, clamped to [30s, 5m].
+func terminalReapInterval(idleTimeout time.Duration) time.Duration {
+	const minInterval = 30 * time.Second
+	const maxInterval = 5 * time.Minute
+	d := idleTimeout / 4
+	if d < minInterval {
+		return minInterval
+	}
+	if d > maxInterval {
+		return maxInterval
+	}
+	return d
 }
 
 type Config struct {
@@ -220,8 +246,9 @@ type Config struct {
 	TerminalEnabled string `json:"terminal_enabled"`
 	// Filesystem ceiling for terminal cwd. Beam CLI defaults to the project root (parent of .contenox) when terminal_enabled=true and this is unset.
 	TerminalAllowedRoot string `json:"terminal_allowed_root"`
-	TerminalMaxSessions string `json:"terminal_max_sessions"`
-	TerminalShell string `json:"terminal_shell"`
+	TerminalShell       string `json:"terminal_shell"`
+	// TerminalIdleTimeout is a [time.ParseDuration] string; empty defaults to terminalservice.DefaultIdleTimeout.
+	TerminalIdleTimeout string `json:"terminal_idle_timeout"`
 }
 
 func LoadConfig[T any](cfg *T) error {

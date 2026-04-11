@@ -14,14 +14,22 @@ export interface XTerminalProps {
   onOpen?: () => void;
   /** Called when the WebSocket closes (session ended or connection lost). */
   onDisconnect?: () => void;
+  /**
+   * Called when the socket closed before `open` (proxy down, Strict Mode teardown, etc.).
+   * Server-side `Attach` may already have deleted the session — parent should create a new one.
+   */
+  onConnectionFailed?: () => void;
   className?: string;
 }
 
-export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalProps) {
+export function XTerminal({ wsUrl, onOpen, onDisconnect, onConnectionFailed, className }: XTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const onDisconnectRef = useRef(onDisconnect);
   const onOpenRef = useRef(onOpen);
+  const onConnectionFailedRef = useRef(onConnectionFailed);
+  /** Set in ws.onopen; read in ws.onclose — ref so we don’t fire onDisconnect when connect never succeeded. */
+  const wsOpenedRef = useRef(false);
   const theme = useXtermTheme();
   const themeRef = useRef(theme);
   themeRef.current = theme;
@@ -29,6 +37,7 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
   useLayoutEffect(() => {
     onDisconnectRef.current = onDisconnect;
     onOpenRef.current = onOpen;
+    onConnectionFailedRef.current = onConnectionFailed;
   });
 
   useEffect(() => {
@@ -120,39 +129,58 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${window.location.host}${wsUrl}`;
-    const ws = new WebSocket(url);
-    ws.binaryType = 'arraybuffer';
+    /** Populated after the deferred connect runs; null until then. */
+    let ws: WebSocket | null = null;
+    /**
+     * Defer `new WebSocket` so React 18 Strict Mode can cancel the first scheduled connect on teardown.
+     * Without this, cleanup closes a CONNECTING socket and the browser logs
+     * "WebSocket is closed before the connection is established" for every mount.
+     */
+    let connectTimer: number | null = window.setTimeout(() => {
+      connectTimer = null;
+      const socket = new WebSocket(url);
+      ws = socket;
+      socket.binaryType = 'arraybuffer';
 
-    ws.onopen = () => {
-      onOpenRef.current?.();
-      safeFit();
-      focusTerm();
-      ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-    };
+      wsOpenedRef.current = false;
 
-    ws.onmessage = (event: MessageEvent) => {
-      if (event.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(event.data));
-      }
-    };
+      socket.onopen = () => {
+        wsOpenedRef.current = true;
+        onOpenRef.current?.();
+        safeFit();
+        focusTerm();
+        socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      };
 
-    ws.onclose = () => {
-      term.write('\r\n\x1b[90m[session ended]\x1b[0m\r\n');
-      if (!closedByCleanup) {
-        onDisconnectRef.current?.();
-      }
-    };
+      socket.onmessage = (event: MessageEvent) => {
+        if (event.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(event.data));
+        }
+      };
+
+      socket.onclose = () => {
+        if (wsOpenedRef.current) {
+          term.write('\r\n\x1b[90m[session ended]\x1b[0m\r\n');
+        }
+        if (!closedByCleanup && !wsOpenedRef.current) {
+          onConnectionFailedRef.current?.();
+        }
+        if (!closedByCleanup && wsOpenedRef.current) {
+          onDisconnectRef.current?.();
+        }
+      };
+    }, 0);
 
     const encoder = new TextEncoder();
 
     const dataDisposable = term.onData((data: string) => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(encoder.encode(data));
       }
     });
 
     const binaryDisposable = term.onBinary((data: string) => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         const buf = new Uint8Array(data.length);
         for (let i = 0; i < data.length; i++) {
           buf[i] = data.charCodeAt(i) & 0xff;
@@ -162,13 +190,17 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
     });
 
     const resizeDisposable = term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }));
       }
     });
 
     return () => {
       closedByCleanup = true;
+      if (connectTimer != null) {
+        window.clearTimeout(connectTimer);
+        connectTimer = null;
+      }
       if (roTimer != null) window.clearTimeout(roTimer);
       window.removeEventListener('resize', onWindowResize);
       window.removeEventListener(BEAM_LAYOUT_CHANGED_EVENT, onBeamLayout);
@@ -177,7 +209,7 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, className }: XTerminalP
       dataDisposable.dispose();
       binaryDisposable.dispose();
       resizeDisposable.dispose();
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
         ws.close();
       }
       term.dispose();

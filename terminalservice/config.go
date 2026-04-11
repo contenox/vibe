@@ -2,24 +2,26 @@ package terminalservice
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
+	"time"
 )
 
-// Config holds interactive terminal settings (from env / server config).
+// Config holds terminal service settings.
 type Config struct {
 	Enabled      bool
 	AllowedRoot  string
-	MaxSessions  int
 	DefaultShell string
+	// IdleTimeout is the maximum time a detached session is kept alive.
+	// Zero disables idle reaping.
+	IdleTimeout time.Duration
 }
 
-// DefaultMaxSessions is used when max sessions is unset.
-const DefaultMaxSessions = 8
+// DefaultIdleTimeout is used when [Config.IdleTimeout] is unset.
+const DefaultIdleTimeout = 30 * time.Minute
 
-// ParseEnv builds a [Config] from raw string fields (e.g. [serverapi.Config] terminal_*).
-// When Enabled is false, AllowedRoot may be empty.
-func ParseEnv(terminalEnabled, terminalAllowedRoot, terminalMaxSessions, terminalShell string) (Config, error) {
+// ParseEnv builds a [Config] from raw string fields.
+// terminalIdleTimeout accepts any [time.ParseDuration] string; empty defaults to [DefaultIdleTimeout].
+func ParseEnv(terminalEnabled, terminalAllowedRoot, terminalShell, terminalIdleTimeout string) (Config, error) {
 	cfg := Config{
 		Enabled: strings.EqualFold(strings.TrimSpace(terminalEnabled), "true"),
 	}
@@ -30,19 +32,19 @@ func ParseEnv(terminalEnabled, terminalAllowedRoot, terminalMaxSessions, termina
 	if cfg.AllowedRoot == "" {
 		return Config{}, fmt.Errorf("terminalservice: terminal_enabled=true requires terminal_allowed_root")
 	}
-	maxStr := strings.TrimSpace(terminalMaxSessions)
-	if maxStr == "" {
-		cfg.MaxSessions = DefaultMaxSessions
-	} else {
-		n, err := strconv.Atoi(maxStr)
-		if err != nil || n < 1 {
-			return Config{}, fmt.Errorf("terminalservice: invalid terminal_max_sessions %q", maxStr)
-		}
-		cfg.MaxSessions = n
-	}
 	cfg.DefaultShell = strings.TrimSpace(terminalShell)
 	if cfg.DefaultShell == "" {
 		cfg.DefaultShell = "/bin/bash"
+	}
+	idleStr := strings.TrimSpace(terminalIdleTimeout)
+	if idleStr == "" {
+		cfg.IdleTimeout = DefaultIdleTimeout
+	} else {
+		d, err := time.ParseDuration(idleStr)
+		if err != nil || d < 0 {
+			return Config{}, fmt.Errorf("terminalservice: invalid terminal_idle_timeout %q", idleStr)
+		}
+		cfg.IdleTimeout = d
 	}
 	return cfg, nil
 }

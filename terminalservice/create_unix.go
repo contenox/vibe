@@ -37,15 +37,13 @@ func (s *service) Create(ctx context.Context, principal string, req CreateReques
 		rows = 24
 	}
 
-	s.mu.Lock()
-	if len(s.sessions) >= s.cfg.MaxSessions {
-		s.mu.Unlock()
+	// Reserve the slot with a placeholder while the PTY is being allocated.
+	placeholder := &session{}
+	if !s.current.CompareAndSwap(nil, placeholder) {
 		return nil, ErrTooManySessions
 	}
-	s.mu.Unlock()
 
-	// Use Background context — the shell must outlive the HTTP Create request.
-	// The session is terminated explicitly via Close/CloseAll.
+	// The shell must outlive the HTTP Create request; teardown is via Close or CloseAll.
 	var cmd *exec.Cmd
 	switch shell {
 	case "/bin/bash", "/usr/bin/bash":
@@ -60,11 +58,13 @@ func (s *service) Create(ctx context.Context, principal string, req CreateReques
 
 	tty, err := pty.Start(cmd)
 	if err != nil {
+		s.current.CompareAndSwap(placeholder, nil)
 		return nil, fmt.Errorf("terminalservice: pty start: %w", err)
 	}
 	if err := pty.Setsize(tty, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}); err != nil {
 		_ = tty.Close()
 		_ = cmd.Process.Kill()
+		s.current.CompareAndSwap(placeholder, nil)
 		return nil, fmt.Errorf("terminalservice: pty resize: %w", err)
 	}
 
@@ -86,19 +86,23 @@ func (s *service) Create(ctx context.Context, principal string, req CreateReques
 	if err := s.store().Insert(ctx, sessRow); err != nil {
 		_ = tty.Close()
 		_ = cmd.Process.Kill()
+		s.current.CompareAndSwap(placeholder, nil)
 		return nil, err
 	}
 
 	sess := &session{id: id, tty: tty, cmd: cmd}
-	s.mu.Lock()
-	if len(s.sessions) >= s.cfg.MaxSessions {
-		s.mu.Unlock()
+	sess.touch()
+	if !s.current.CompareAndSwap(placeholder, sess) {
 		_ = sess.shutdown(ctx)
 		_ = s.store().Delete(ctx, id)
 		return nil, ErrTooManySessions
 	}
-	s.sessions[id] = sess
-	s.mu.Unlock()
+
+	// Reap the session when the shell exits.
+	go func() {
+		_ = cmd.Wait()
+		_ = s.closeByID(context.Background(), id)
+	}()
 
 	return &CreateResponse{ID: id}, nil
 }

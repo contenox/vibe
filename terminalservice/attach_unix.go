@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"time"
 
 	apiframework "github.com/contenox/contenox/apiframework"
 	"github.com/contenox/contenox/terminalstore"
@@ -26,16 +27,26 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 		return ErrSessionNotFound
 	}
 
-	sess := s.getSession(id)
+	sess := s.localByID(id)
 	if sess == nil {
+		// Stale row with no live session in this process.
 		_ = ts.Delete(ctx, id)
 		return ErrSessionNotFound
 	}
 	if !sess.busy.CompareAndSwap(false, true) {
 		return apiframework.BadRequest("session already has an active connection")
 	}
-	defer sess.busy.Store(false)
-	defer func() { _ = s.Close(context.Background(), principal, id) }()
+	sess.touch()
+	// Re-check the slot in case Close or ReapIdle replaced it after localByID.
+	if s.current.Load() != sess {
+		sess.busy.Store(false)
+		return ErrSessionNotFound
+	}
+
+	defer func() {
+		sess.touch()
+		sess.busy.Store(false)
+	}()
 
 	tty := sess.tty
 	if tty == nil {
@@ -45,8 +56,12 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// ptyDone closes when the PTY→WS goroutine exits, gating the next attach.
+	ptyDone := make(chan struct{})
+
 	// PTY → WebSocket (stdout)
 	go func() {
+		defer close(ptyDone)
 		defer cancel()
 		buf := make([]byte, 32*1024)
 		for {
@@ -95,7 +110,11 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 		}()
 	}
 
-	// Block until session ends.
 	<-ctx.Done()
+
+	// Wake the blocked PTY read so the goroutine exits before the next attach.
+	_ = tty.SetReadDeadline(time.Unix(1, 0))
+	<-ptyDone
+	_ = tty.SetReadDeadline(time.Time{})
 	return nil
 }

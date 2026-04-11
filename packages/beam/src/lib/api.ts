@@ -1,4 +1,4 @@
-import { apiFetch } from './fetch';
+import { apiFetch, ApiError } from './fetch';
 import {
   ActivePlanResponse,
   AuthenticatedUser,
@@ -373,6 +373,13 @@ export const api = {
     cols?: number;
     rows?: number;
   }) => apiFetch<TerminalSessionCreate>('/api/terminal/sessions', options('POST', body)),
-  deleteTerminalSession: (id: string) =>
-    apiFetch<void>(`/api/terminal/sessions/${encodeURIComponent(id)}`, options('DELETE')),
+  /** Idempotent: 404 means session already gone (e.g. after `contenox beam` / Air restart). */
+  deleteTerminalSession: async (id: string) => {
+    try {
+      await apiFetch<void>(`/api/terminal/sessions/${encodeURIComponent(id)}`, options('DELETE'));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return;
+      throw e;
+    }
+  },
 };

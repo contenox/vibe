@@ -9,7 +9,7 @@ import (
 )
 
 func (s *service) resizeLocalPTY(id string, cols, rows int) {
-	sess := s.getSession(id)
+	sess := s.localByID(id)
 	if sess == nil || sess.tty == nil {
 		return
 	}

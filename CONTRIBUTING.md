@@ -67,11 +67,11 @@ make build-cli
 Use **two terminals** so the browser gets Vite HMR while talking to a real API:
 
 1. **Terminal 1 — Go live reload:** `make deps-go-watch` once, then **`make dev-go-watch`** (runs `contenox beam` on `:8081` and rebuilds on Go changes).
-2. **Terminal 2 — Vite with API proxy:** **`make dev-web-proxy`** (uses `packages/beam/.env.proxy`; proxies `/api` to the backend).
+2. **Terminal 2 — Vite with API proxy:** **`make dev-web-proxy`** (uses `packages/beam/.env.proxy`; proxies `/api` to the backend). Start (1) before (2), or Vite logs `ECONNREFUSED 127.0.0.1:8081` until the API is listening.
 
 Open the **Vite dev server URL** in the browser (e.g. `http://localhost:5173`), not `http://localhost:8081`, so hot reload and same-origin `/api` work.
 
-For Vite only without the proxy (API calls go to `:8081` from the browser origin), use **`make dev-web`**. **`make dev-web-fresh`** runs **`clean`**, **`deps-npm`**, and **`dev-web`** — it does **not** enable the proxy workflow above.
+**`make dev-web`** (Vite without proxy) does not register the `/api` → `:8081` proxy. For API access from the Beam UI in that mode, set `VITE_API_BASE_URL=http://127.0.0.1:8081` in `packages/beam/.env.local`, or use **`make dev-web-proxy`** (recommended for full-stack).
 
 Optional: **`make dev-cli`** builds and symlinks `contenox` to `~/.local/bin/contenox` for a system-wide command during development.
 
@@ -133,6 +133,31 @@ make test-openapi-client-codegen
 3. **Commit messages:** Follow [Conventional Commits](https://www.conventionalcommits.org/). For example, `feat: add support for local mode`, `fix: correct token count logic`, `docs: clarify CLI usage`.
 4. **Style checks:** Ensure your code runs successfully through `gofmt` and standard linters like `golangci-lint` if available.
 5. **No breaking changes:** Avoid breaking existing workflows or changing the API schema unexpectedly. Keep the HTTP API backward compatible when you change routes or DTOs.
+
+## Code conventions
+
+### Go doc comments
+
+- Start exported declaration comments with the symbol name and a present-tense verb (`// Service manages …`, `// ParseEnv builds …`).
+- Prefer one sentence. Add more lines only when a caller cannot use the API correctly without them.
+- No narrative, change history, or first-person ("we used to", "I added"). The git log is the changelog.
+- Reference other symbols with `[Pkg.Name]` so godoc can link them.
+- Unexported helpers usually need no doc comment; inline `// ...` only when the logic is non-obvious.
+
+### API-spec annotations
+
+`make docs-gen` extracts the OpenAPI spec from Go types using inline markers on the lines that decode requests and encode responses. Two forms are required on every HTTP handler:
+
+```go
+req, err := apiframework.Decode[createSessionRequest](r) // @request terminalapi.createSessionRequest
+...
+_ = apiframework.Encode(w, r, http.StatusCreated, resp)  // @response terminalapi.createSessionResponse
+```
+
+- The marker must sit on the same line as the `Decode` / `Encode` call.
+- Use the fully qualified Go type name (`pkg.Type`, `*pkg.Type`, or `[]*pkg.Type`).
+- Path and query parameters are picked up from `apiframework.GetPathParam` / `GetQueryParam` — pass a human-readable description as the last argument so it lands in the spec.
+- After touching a handler signature, request type, response type, or marker, run `make docs-gen` and check the diff under `docs/openapi.*` is what you intended (it is gitignored, so it will not be committed).
 
 ## Generating API documentation
 

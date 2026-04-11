@@ -1,18 +1,20 @@
 import i18n from '../i18n';
 
-/** Default to the current browser origin in embedded/BFF mode; override with `VITE_API_BASE_URL`. */
+/**
+ * API base URL for `apiFetch`.
+ * - Prefer `VITE_API_BASE_URL` when set (e.g. pointing at a remote API).
+ * - In the browser, always use `window.location.origin` so `/api` stays same-origin:
+ *   Vite dev (`make dev-web-proxy`) proxies `/api` → Beam on :8081 and auth cookies apply.
+ * - Falling back to hardcoded :8081 while the app runs on :5173 breaks cookies and yields 403
+ *   on protected routes (previous bug when env vars failed to load).
+ */
 function resolveApiOrigin(): string {
   const explicit = import.meta.env.VITE_API_BASE_URL;
   if (explicit !== undefined && explicit !== '') {
     return explicit;
   }
-  const useProxy =
-    import.meta.env.VITE_DEV_API_PROXY === 'true' ||
-    import.meta.env.VITE_DEV_API_PROXY === '1';
   if (typeof window !== 'undefined' && window.location?.origin) {
-    if (useProxy || !import.meta.env.DEV) {
-      return window.location.origin;
-    }
+    return window.location.origin;
   }
   return 'http://localhost:8081';
 }
