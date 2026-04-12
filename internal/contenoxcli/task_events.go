@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/taskengine"
@@ -23,6 +24,10 @@ type cliTaskEventRenderer struct {
 	lastTaskID     string
 	contentActive  bool
 	thinkingActive bool
+	// streamApproxBytes is approximate output size (UTF-8 bytes) seen for the current step stream.
+	streamApproxBytes int
+	lastStreamAt      time.Time
+	streamMu          sync.Mutex
 }
 
 func startCLITaskEventStream(
@@ -64,6 +69,20 @@ func startCLITaskEventStream(
 		}
 	}()
 
+	// Idle + size hints live in the CLI only (no taskengine changes).
+	go func() {
+		t := time.NewTicker(8 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-t.C:
+				renderer.printIdleHintIfStale()
+			}
+		}
+	}()
+
 	return func() {
 		once.Do(func() {
 			cancel()
@@ -97,6 +116,10 @@ func (r *cliTaskEventRenderer) Render(event taskengine.TaskEvent) {
 		}
 	case taskengine.TaskEventStepStarted:
 		r.finishChunkLine()
+		r.streamMu.Lock()
+		r.streamApproxBytes = 0
+		r.lastStreamAt = time.Now()
+		r.streamMu.Unlock()
 		if r.trace {
 			fmt.Fprintf(r.w, "[step:%s] %s started\n", event.TaskID, event.TaskHandler)
 		}
@@ -119,6 +142,13 @@ func (r *cliTaskEventRenderer) Render(event taskengine.TaskEvent) {
 			}
 			fmt.Fprint(r.w, event.Content)
 			r.contentActive = true
+		}
+		add := len(event.Content) + len(event.Thinking)
+		if add > 0 {
+			r.streamMu.Lock()
+			r.streamApproxBytes += add
+			r.lastStreamAt = time.Now()
+			r.streamMu.Unlock()
 		}
 	case taskengine.TaskEventStepCompleted:
 		r.finishChunkLine()
@@ -150,7 +180,39 @@ func (r *cliTaskEventRenderer) Close() {
 	r.finishChunkLine()
 }
 
+// printIdleHintIfStale writes a status line when no step_chunk has arrived for a while (e.g. blocking
+// LLM request). Purely CLI-side; does not touch taskengine.
+func (r *cliTaskEventRenderer) printIdleHintIfStale() {
+	if r == nil || r.w == nil {
+		return
+	}
+	r.streamMu.Lock()
+	defer r.streamMu.Unlock()
+	if r.lastStreamAt.IsZero() {
+		return
+	}
+	since := time.Since(r.lastStreamAt)
+	if since < 8*time.Second {
+		return
+	}
+	r.finishChunkLineUnlocked()
+	fmt.Fprintf(r.w, "[… still working — quiet for %s; ~%d bytes streamed this step]\n",
+		since.Round(time.Second), r.streamApproxBytes)
+	r.lastStreamAt = time.Now()
+	r.contentActive = false
+	r.thinkingActive = false
+}
+
 func (r *cliTaskEventRenderer) finishChunkLine() {
+	if r == nil {
+		return
+	}
+	r.streamMu.Lock()
+	defer r.streamMu.Unlock()
+	r.finishChunkLineUnlocked()
+}
+
+func (r *cliTaskEventRenderer) finishChunkLineUnlocked() {
 	if r == nil {
 		return
 	}

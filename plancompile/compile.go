@@ -39,7 +39,7 @@ func Compile(executor *taskengine.TaskChainDefinition, outChainID string, p *Par
 		}
 
 		firstDup := prefixID(stepIdx, entryID)
-		seedTmpl := seedPromptTemplate(stepIdx == 1, p.Goal, stepText)
+		seedTmpl := seedPromptTemplate()
 
 		seed := taskengine.TaskDefinition{
 			ID:                fmt.Sprintf("seed_step_%d", stepIdx),
@@ -179,18 +179,30 @@ func cloneTask(t *taskengine.TaskDefinition) (*taskengine.TaskDefinition, error)
 	return &out, nil
 }
 
-func seedPromptTemplate(isFirst bool, goal, stepText string) string {
-	g := strings.TrimSpace(goal)
-	if isFirst {
-		if g == "" {
-			return fmt.Sprintf("Current plan step:\n%s", stepText)
-		}
-		return fmt.Sprintf("Goal:\n%s\n\nCurrent plan step:\n%s", g, stepText)
-	}
-	if g == "" {
-		return fmt.Sprintf("Previous step output:\n{{.previous_output}}\n\nCurrent plan step:\n%s", stepText)
-	}
-	return fmt.Sprintf("Goal:\n%s\n\nPrevious step output:\n{{.previous_output}}\n\nCurrent plan step:\n%s", g, stepText)
+// seedPromptTemplate returns the noop seed PromptTemplate for every compiled step.
+// Runtime strings (goal, full plan, current/next step, handover, previous output) come from
+// planservice via taskengine.MergeTemplateVars / MacroEnv {{var:…}} — not from compile-time text.
+func seedPromptTemplate() string {
+	return `## Plan execution context
+
+**Goal:** {{var:plan_goal}}
+
+**Full plan:**
+{{var:plan_overview}}
+
+**Progress:** step {{var:step_ordinal}} of {{var:step_total}}
+
+**Current step (execute only this now):**
+{{var:current_step}}
+
+**Next step (orientation only — do not start until the next plan run):**
+{{var:next_step}}
+we shou
+{{var:plan_handover}}
+
+**Previous step output (context; may be empty):**
+{{var:previous_output}}
+`
 }
 
 func validateStepText(s string) error {

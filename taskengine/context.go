@@ -27,3 +27,80 @@ func TemplateVarsFromContext(ctx context.Context) (map[string]string, error) {
 	}
 	return v, nil
 }
+
+// MergeTemplateVars overlays keys onto any template vars already in ctx, then
+// attaches the combined map. Use this when a nested step (e.g. plan execution)
+// must add request_id / previous_output without dropping caller-supplied vars
+// like model and provider.
+func MergeTemplateVars(ctx context.Context, overlay map[string]string) context.Context {
+	base := make(map[string]string)
+	if existing, err := TemplateVarsFromContext(ctx); err == nil && existing != nil {
+		for k, v := range existing {
+			base[k] = v
+		}
+	}
+	if overlay != nil {
+		for k, v := range overlay {
+			base[k] = v
+		}
+	}
+	return WithTemplateVars(ctx, base)
+}
+
+type runtimeHookAllowlistKey struct{}
+
+type runtimeHookAllowlist struct {
+	list []string
+}
+
+// WithRuntimeHookAllowlist attaches a caller-supplied hook allowlist to ctx that
+// is intersected with each task's own allowlist inside resolveHookNames. A caller
+// can only further restrict — never expand — what a chain JSON permits. Grammar
+// matches TaskDefinition.Hooks: nil/[]/["*"]/exact names/["*","!name"].
+//
+// Use this when a host (e.g. planservice) must enforce per-call policy (such as
+// disabling local_shell for a step) regardless of what the chain JSON declares.
+// Absent key means "no runtime restriction" — behavior matches pre-feature code.
+func WithRuntimeHookAllowlist(ctx context.Context, allowlist []string) context.Context {
+	return context.WithValue(ctx, runtimeHookAllowlistKey{}, runtimeHookAllowlist{list: allowlist})
+}
+
+// RuntimeHookAllowlistFromContext returns (allowlist, true) when an allowlist was
+// attached via WithRuntimeHookAllowlist. The returned slice follows the same
+// grammar as TaskDefinition.Hooks. Returns (nil, false) when no runtime
+// allowlist is attached — callers should treat this as "no restriction".
+func RuntimeHookAllowlistFromContext(ctx context.Context) ([]string, bool) {
+	v, ok := ctx.Value(runtimeHookAllowlistKey{}).(runtimeHookAllowlist)
+	if !ok {
+		return nil, false
+	}
+	return v.list, true
+}
+
+type planStepContextKey struct{}
+
+type planStepContext struct {
+	planID string
+	stepID string
+}
+
+// WithPlanStepContext attaches plan + step identity to ctx. Hooks compiled into
+// a plan's per-step DAG (e.g. plan_summary persist/fallback) read this to know
+// which DB row to write, since the identity is chosen at ClaimNextPendingStep
+// time — not at plancompile time — and cannot live in the compiled chain JSON.
+// Mirrors the WithTemplateVars / WithRuntimeHookAllowlist pattern: unexported
+// key struct, wrapper value, ok-convention getter.
+func WithPlanStepContext(ctx context.Context, planID, stepID string) context.Context {
+	return context.WithValue(ctx, planStepContextKey{}, planStepContext{planID: planID, stepID: stepID})
+}
+
+// PlanStepContextFromContext returns (planID, stepID, true) when attached.
+// Returns ("", "", false) when not set — callers should fail cleanly in that case
+// rather than write to an unknown row.
+func PlanStepContextFromContext(ctx context.Context) (string, string, bool) {
+	v, ok := ctx.Value(planStepContextKey{}).(planStepContext)
+	if !ok {
+		return "", "", false
+	}
+	return v.planID, v.stepID, true
+}

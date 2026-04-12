@@ -162,6 +162,59 @@ func TestLocalFSHook(t *testing.T) {
 		}
 	})
 
+	t.Run("maxReadBytesRejectsLargeFile", func(t *testing.T) {
+		bigPath := filepath.Join(tempDir, "big.bin")
+		f, err := os.Create(bigPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write(make([]byte, 2*1024*1024)); err != nil {
+			t.Fatal(err)
+		}
+		_ = f.Close()
+
+		args := map[string]any{"path": "big.bin"}
+		hookCall := &taskengine.HookCall{ToolName: "read_file"}
+		_, _, err = h.Exec(ctx, now, args, false, hookCall)
+		if err == nil {
+			t.Fatal("expected error for file over default max read size")
+		}
+		if !strings.Contains(err.Error(), "max") {
+			t.Fatalf("expected max size hint: %v", err)
+		}
+	})
+
+	t.Run("maxReadBytesUnlimited", func(t *testing.T) {
+		ctxUnlimited := taskengine.WithHookArgs(ctx, localFSHookName, map[string]string{
+			"_max_read_bytes": "-1",
+		})
+		args := map[string]any{"path": "big.bin"}
+		hookCall := &taskengine.HookCall{ToolName: "read_file"}
+		_, _, err := h.Exec(ctxUnlimited, now, args, false, hookCall)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("deniedPathSubstrings", func(t *testing.T) {
+		ctxDeny := taskengine.WithHookArgs(ctx, localFSHookName, map[string]string{
+			"_denied_path_substrings": "node_modules,secret",
+		})
+		args := map[string]any{"path": "pkg/node_modules/foo.txt"}
+		_ = os.MkdirAll(filepath.Join(tempDir, "pkg/node_modules"), 0755)
+		if err := os.WriteFile(filepath.Join(tempDir, "pkg/node_modules/foo.txt"), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		hookCall := &taskengine.HookCall{ToolName: "read_file"}
+		_, _, err := h.Exec(ctxDeny, now, args, false, hookCall)
+		if err == nil {
+			t.Fatal("expected denied path error")
+		}
+		if !strings.Contains(err.Error(), "denied") {
+			t.Fatalf("expected denied: %v", err)
+		}
+	})
+
 	t.Run("statFile", func(t *testing.T) {
 		args := map[string]any{"path": "test.txt"}
 		hookCall := &taskengine.HookCall{ToolName: "stat_file"}

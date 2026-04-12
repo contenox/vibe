@@ -84,6 +84,23 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 		return err
 	}
 
+	plannerPath, executorPath, wrotePlanner, wroteExecutor, err := writeEmbeddedPlanChains(contenoxDir, force)
+	if err != nil {
+		return err
+	}
+	if !wrotePlanner {
+		fmt.Fprintf(out, "  %s already exists (use --force to overwrite)\n", plannerPath)
+	} else {
+		fmt.Fprintf(out, "  Created %s\n", plannerPath)
+	}
+	if !wroteExecutor {
+		fmt.Fprintf(out, "  %s already exists (use --force to overwrite)\n", executorPath)
+	} else {
+		fmt.Fprintf(out, "  Created %s\n", executorPath)
+	}
+	fmt.Fprintln(out, "  Plan commands use these chains; running 'contenox plan new' or 'plan next' refreshes them from the binary.")
+	fmt.Fprintln(out, "  After registering a backend, run 'contenox doctor' to verify setup before planning.")
+
 	fmt.Fprintln(out, "Done.")
 	fmt.Fprintln(out, "")
 

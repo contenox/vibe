@@ -20,3 +20,15 @@ func ExtractJSONArray(s string) string {
 	}
 	return s[start : end+1]
 }
+
+// ExtractJSONObject scans s for the outermost {...} block and returns it.
+// It strips code fences first, same spirit as ExtractJSONArray.
+func ExtractJSONObject(s string) string {
+	s = strings.TrimSpace(StripCodeFences(s))
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start < 0 || end < 0 || end <= start {
+		return s
+	}
+	return s[start : end+1]
+}

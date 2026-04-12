@@ -7,6 +7,8 @@ package planservice
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,6 +63,20 @@ type Service interface {
 }
 
 // Args controls Next execution behaviour.
+//
+// WithShell is a hard gate enforced inside the task engine: when false, Next
+// attaches a runtime hook allowlist ["*", "!local_shell"] to the execution
+// context, so resolveHookNames will remove local_shell from whatever the
+// executor chain declared. A chain JSON that tries to invoke local_shell when
+// the caller disallowed it fails at hook-dispatch time, regardless of what the
+// chain author wrote. The flag can only further restrict; when true, the
+// chain's own allowlist governs.
+//
+// WithAuto is a telemetry/audit signal only: the caller claims this step is
+// part of an unattended auto-run loop. It is NOT an execution gate — iteration
+// is a client-loop concern (see contenoxcli runPlanNext). The flag is forwarded
+// to the tracker so plan-run logs/metrics can distinguish interactive vs.
+// auto-run steps.
 type Args struct {
 	WithShell bool
 	WithAuto  bool
@@ -118,60 +134,55 @@ func (s *service) callPlanner(ctx context.Context, goal string, chain *taskengin
 	default:
 		raw = fmt.Sprintf("%v", out)
 	}
-	extracted := taskengine.ExtractJSONArray(raw)
-	var steps []string
-	if err := json.Unmarshal([]byte(extracted), &steps); err != nil {
-		return nil, fmt.Errorf("plannerChain output is not a JSON string array: %w (raw: %.500s)", err, raw)
+	steps, err := parsePlannerJSONRaw(raw)
+	if err != nil {
+		return nil, err
 	}
 	return steps, nil
 }
 
-// formatTaskOutput turns a task-chain Execute result into a single string for plan step storage.
-func formatTaskOutput(out any) string {
-	switch v := out.(type) {
-	case string:
-		return v
-
-	case taskengine.ChatHistory:
-		if len(v.Messages) > 0 {
-			for i := len(v.Messages) - 1; i >= 0; i-- {
-				if v.Messages[i].Role == "assistant" && v.Messages[i].Content != "" {
-					return v.Messages[i].Content
-				}
-			}
-			return v.Messages[len(v.Messages)-1].Content
-		}
-		return ""
-
-	case map[string]any:
-		b, _ := json.MarshalIndent(v, "", "  ")
-		return string(b)
-
-	case []any:
-		var parts []string
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				parts = append(parts, s)
-			} else {
-				b, _ := json.Marshal(item)
-				parts = append(parts, string(b))
-			}
-		}
-		return strings.Join(parts, "\n")
-
-	case taskengine.OpenAIChatResponse:
-		if len(v.Choices) > 0 && v.Choices[0].Message.Content != nil {
-			return *v.Choices[0].Message.Content
-		}
-		if len(v.Choices) > 0 && len(v.Choices[0].Message.ToolCalls) > 0 {
-			return fmt.Sprintf("[tool call: %s]", v.Choices[0].Message.ToolCalls[0].Function.Name)
-		}
-		return ""
-
-	default:
-		b, _ := json.MarshalIndent(v, "", "  ")
-		return string(b)
+// parsePlannerJSONRaw extracts a string-array plan from model output. It accepts:
+//   - a JSON array of strings (preferred; see chain-planner.json)
+//   - {"steps":["a","b"]}
+//   - {"steps":[{"description":"a"},{"description":"b"}]}
+func parsePlannerJSONRaw(raw string) ([]string, error) {
+	trim := strings.TrimSpace(raw)
+	if trim == "" {
+		return nil, fmt.Errorf("empty planner output")
 	}
+
+	arrStr := taskengine.ExtractJSONArray(trim)
+	var steps []string
+	if err := json.Unmarshal([]byte(arrStr), &steps); err == nil {
+		return steps, nil
+	}
+
+	objStr := taskengine.ExtractJSONObject(trim)
+	var wrapStrings struct {
+		Steps []string `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(objStr), &wrapStrings); err == nil && len(wrapStrings.Steps) > 0 {
+		return wrapStrings.Steps, nil
+	}
+	var wrapObjs struct {
+		Steps []struct {
+			Description string `json:"description"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(objStr), &wrapObjs); err == nil {
+		out := make([]string, 0, len(wrapObjs.Steps))
+		for _, s := range wrapObjs.Steps {
+			if d := strings.TrimSpace(s.Description); d != "" {
+				out = append(out, d)
+			}
+		}
+		if len(out) > 0 {
+			return out, nil
+		}
+	}
+
+	arrErr := json.Unmarshal([]byte(arrStr), &steps)
+	return nil, fmt.Errorf("plannerChain output is not a JSON string array: %w (raw: %.500s)", arrErr, raw)
 }
 
 func previousStepOutput(steps []*planstore.PlanStep, pendingOrdinal int) string {
@@ -187,8 +198,27 @@ func previousStepOutput(steps []*planstore.PlanStep, pendingOrdinal int) string 
 	return ""
 }
 
-func (s *service) getOrCompileChain(ctx context.Context, plan *planstore.Plan, steps []*planstore.PlanStep, executor *taskengine.TaskChainDefinition, executorID string) (*taskengine.TaskChainDefinition, error) {
-	if plan.CompiledChainJSON != "" && plan.CompileExecutorChainID == executorID {
+// executorCompileCacheKey combines the executor chain id with a hash of the full executor JSON so
+// edits to token_limit, tasks, or hook_policies invalidate cached compiled plans (same id was
+// previously reused forever).
+func executorCompileCacheKey(ex *taskengine.TaskChainDefinition) (string, error) {
+	if ex == nil {
+		return "", fmt.Errorf("executor chain is nil")
+	}
+	id := strings.TrimSpace(ex.ID)
+	if id == "" {
+		return "", fmt.Errorf("executorChain id is required for compile cache")
+	}
+	raw, err := json.Marshal(ex)
+	if err != nil {
+		return "", fmt.Errorf("executor chain marshal: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return id + ":" + hex.EncodeToString(sum[:12]), nil
+}
+
+func (s *service) getOrCompileChain(ctx context.Context, plan *planstore.Plan, steps []*planstore.PlanStep, executor *taskengine.TaskChainDefinition, executorCacheKey string) (*taskengine.TaskChainDefinition, error) {
+	if plan.CompiledChainJSON != "" && plan.CompileExecutorChainID == executorCacheKey {
 		var c taskengine.TaskChainDefinition
 		if err := json.Unmarshal([]byte(plan.CompiledChainJSON), &c); err == nil && c.ID != "" && len(c.Tasks) > 0 {
 			return &c, nil
@@ -209,7 +239,7 @@ func (s *service) getOrCompileChain(ctx context.Context, plan *planstore.Plan, s
 		return nil, err
 	}
 	st := planstore.New(s.db.WithoutTransaction())
-	if err := st.UpdatePlanCompiledChain(ctx, plan.ID, string(b), compiledID, executorID); err != nil {
+	if err := st.UpdatePlanCompiledChain(ctx, plan.ID, string(b), compiledID, executorCacheKey); err != nil {
 		return nil, err
 	}
 	return compiled, nil
@@ -453,13 +483,12 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 }
 
 func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine.TaskChainDefinition) (string, string, error) {
-	_ = args // reserved (WithShell / WithAuto); subgraph execution uses template vars from context
 	if executorChain == nil {
 		return "", "", fmt.Errorf("executorChain is required")
 	}
-	executorID := strings.TrimSpace(executorChain.ID)
-	if executorID == "" {
-		return "", "", fmt.Errorf("executorChain id is required for compile cache")
+	executorCacheKey, err := executorCompileCacheKey(executorChain)
+	if err != nil {
+		return "", "", err
 	}
 
 	st := planstore.New(s.db.WithoutTransaction())
@@ -488,7 +517,7 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 		return "", "", err
 	}
 
-	compiled, err := s.getOrCompileChain(ctx, plan, steps, executorChain, executorID)
+	compiled, err := s.getOrCompileChain(ctx, plan, steps, executorChain, executorCacheKey)
 	if err != nil {
 		return s.abortNextWithFailure(ctx, plan, pending, err)
 	}
@@ -498,14 +527,14 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 		return s.abortNextWithFailure(ctx, plan, pending, err)
 	}
 
-	tv := map[string]string{}
+	overlay := NewPlanStepMacroVars(plan, steps, pending).TemplateVars()
 	if reqID, ok := ctx.Value(libtracker.ContextKeyRequestID).(string); ok && reqID != "" {
-		tv["request_id"] = reqID
+		overlay["request_id"] = reqID
 	}
-	if pending.Ordinal > 1 {
-		tv["previous_output"] = previousStepOutput(steps, pending.Ordinal)
+	execCtx := taskengine.MergeTemplateVars(ctx, overlay)
+	if !args.WithShell {
+		execCtx = taskengine.WithRuntimeHookAllowlist(execCtx, []string{"*", "!local_shell"})
 	}
-	execCtx := taskengine.WithTemplateVars(ctx, tv)
 
 	out, _, _, execErr := s.engine.Execute(execCtx, stepChain, plan.Goal, taskengine.DataTypeString)
 	result := formatTaskOutput(out)

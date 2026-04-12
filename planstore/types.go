@@ -51,6 +51,22 @@ type PlanStep struct {
 	Status          StepStatus `json:"status"`
 	ExecutionResult string     `json:"execution_result"`
 	ExecutedAt      time.Time  `json:"executed_at"` // Zero time if not executed
+
+	// Summary is a JSON document (schema: outcome/summary/artifacts/handover_for_next/caveats)
+	// produced by the summarizer chain and persisted by the plan_summary persist hook.
+	// Empty string means NULL (legacy row or summarizer fell through to fallback).
+	Summary string `json:"summary,omitempty"`
+	// ChatHistoryJSON is the raw taskengine.ChatHistory from the executor subgraph,
+	// preserved for debugging and for Retry prior-attempt context.
+	ChatHistoryJSON string `json:"chat_history_json,omitempty"`
+	// SummaryError is the raw summarizer output + parse/validation error when
+	// both the first summarizer attempt and its repair attempt failed validation.
+	// Populated only on fallback-path persistence.
+	SummaryError string `json:"summary_error,omitempty"`
+	// LastFailureSummary is the Summary (or ExecutionResult fallback) from the
+	// previous failed attempt of this step, moved here by Retry. Lets the next
+	// attempt's summarizer see why the prior try failed.
+	LastFailureSummary string `json:"last_failure_summary,omitempty"`
 }
 
 // Store defines the data access interface for plans and steps.
@@ -75,6 +91,18 @@ type Store interface {
 	// ClaimNextPendingStep atomically marks the next pending step as running
 	// and returns it. Returns ErrNotFound when no pending step exists.
 	ClaimNextPendingStep(ctx context.Context, planID string) (*PlanStep, error)
+
+	// UpdatePlanStepSummary persists a validated summary JSON + raw chat history for the step.
+	// Called by the plan_summary persist hook on successful validation.
+	UpdatePlanStepSummary(ctx context.Context, stepID string, summaryJSON, chatHistoryJSON string) error
+	// UpdatePlanStepSummaryFailure persists the raw summarizer output + parse/validation error
+	// and updates ExecutionResult to a fallback string so the next step still has context.
+	// Called by the plan_summary fallback hook when validation failed twice.
+	UpdatePlanStepSummaryFailure(ctx context.Context, stepID string, rawOutput, errMsg, fallbackExecResult string) error
+	// MoveSummaryToLastFailure atomically copies the current Summary (or ExecutionResult
+	// fallback) into LastFailureSummary and clears Summary/ChatHistoryJSON/SummaryError.
+	// Called by Retry so the re-run's summarizer can see the prior failed attempt's context.
+	MoveSummaryToLastFailure(ctx context.Context, stepID string) error
 
 	// Bulk operations for efficiency
 	// DeleteFinishedPlans removes all completed/archived plans; returns count.

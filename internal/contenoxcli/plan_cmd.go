@@ -39,6 +39,23 @@ On failure:
   contenox plan skip  <N>    # mark step N as skipped and continue
   contenox plan replan       # ask the LLM to regenerate remaining steps
 
+Long runs (monitoring):
+  Before: contenox doctor — confirm backend, API keys, and default model/provider.
+  During: use contenox --trace plan next … for telemetry on stderr; log the session (e.g. tee plan.log).
+  Timeouts: pass contenox --timeout 25m … so one step cannot hang forever; increase for huge repos.
+  Shell + FS: use plan next --shell and contenox --local-exec-allowed-dir <project-root> so local_shell
+  and local_fs policies match your tree.
+
+Chain JSON (under the resolved .contenox directory):
+  chain-planner.json         — planner for 'plan new' (must return a JSON array of step strings)
+  chain-step-executor.json   — executor for 'plan next': one agentic loop per ordinal (chat_completion
+                               ↔ execute_tool_calls until the model stops requesting tools; same
+                               pattern as chain-contenox). Uses {{var:model}} and {{var:provider}}.
+'contenox init' writes these files; any plan subcommand refreshes them from built-in defaults.
+To customize them permanently, change the embedded chain definitions in the contenox source tree
+and rebuild, or maintain a fork. Set model/provider via --model, --provider, and
+'contenox config set default-model' so {{var:model}} / {{var:provider}} resolve.
+
 Note: plan execution requires a model that supports tool calling.
 The active plan is tracked automatically; use 'contenox plan list' to see all plans.`,
 	SilenceUsage: true,
@@ -80,9 +97,19 @@ var planShowCmd = &cobra.Command{
 var planNextCmd = &cobra.Command{
 	Use:   "next",
 	Short: "Execute the next pending step of the active plan.",
-	Long: `Run the next pending step using the LLM step-executor chain.
+	Long: `Run the next pending step using the LLM step-executor chain (.contenox/chain-step-executor.json).
 
-The step is marked completed if the model outputs ===STEP_DONE=== or failed otherwise.
+Each step runs one agentic subgraph: chat_completion alternates with execute_tool_calls (same
+engine pattern as chain-contenox) until the assistant responds without tool calls, then the subgraph
+ends. The step is marked completed when execution succeeds; use ===STEP_DONE=== in the prompt so
+the model signals completion.
+
+{{var:model}} and {{var:provider}} in that chain are filled from --model, --provider, and your
+config (e.g. contenox config set default-model). See 'contenox plan' help for chain file paths
+and how to customize them in source.
+
+Use contenox --trace plan next … to stream step telemetry to stderr. For a long unattended run,
+log output: contenox --timeout 30m plan next --auto --shell … 2>&1 | tee plan-run.log
 
 Flags:
   --auto     Continue executing steps until the plan is done or a step fails
@@ -477,6 +504,11 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 	planSvc := buildPlanService(db, engine, cDir)
 	execCtx := execCtxForPlan(ctx, o, chain.ID)
 
+	// After the last step, planservice marks the plan completed (status != active), so
+	// Active() returns nil — same as "never had a plan". Track that we ran at least one
+	// successful Next so --auto can exit successfully instead of "no active plan".
+	ranStepOK := false
+
 	for {
 		// Peek at the next pending step for display before execution.
 		plan, steps, err := planSvc.Active(ctx)
@@ -484,6 +516,10 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("failed to load active plan: %w", err)
 		}
 		if plan == nil {
+			if isAuto && ranStepOK {
+				fmt.Fprintln(cmd.OutOrStdout(), "All steps complete. Plan is done!")
+				return nil
+			}
 			return fmt.Errorf("no active plan; run 'contenox plan new <goal>'")
 		}
 
@@ -518,6 +554,7 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 
+		ranStepOK = true
 		fmt.Fprintf(cmd.OutOrStdout(), "✓ Step %d completed.\n", nextStep.Ordinal)
 		if !isAuto {
 			return nil

@@ -6,10 +6,11 @@
             "id": "contenox_planner",
             "description": "Chat completion to generate JSON plan",
             "handler": "chat_completion",
-            "system_instruction": "You are an expert software engineering planner. Break down the user's goal into a sequential, logical plan. Output ONLY a valid JSON array of strings, in the exact format:\n```json\n[\n  \"Clear, actionable task description\",\n  \"Another task description\"\n]\n```\nDo NOT surround the JSON with markdown formatting if possible, but if you do, ONLY use ```json.\nPrefer simple, reliable steps over clever or combined ones. Each step should be independently executable with no assumed context from previous steps.",
+            "system_instruction": "You are an expert software engineering planner. Your job is ONLY to break down the user's goal into a plan — do NOT answer the goal yourself, do NOT execute the task, and do not reply with prose or dialogue.\n\nOUTPUT RULES (critical):\n- Respond with ONLY a JSON array of strings (the step descriptions). No other text before or after.\n- The first non-whitespace character of your message MUST be '['.\n- Example shape:\n[\"First actionable step\", \"Second actionable step\"]\n\nOptional: you may wrap that array in a single ```json code fence, but do not add explanations.\n\nPrefer simple, reliable steps. Each step should be independently executable with no assumed context from previous steps.",
             "execute_config": {
                 "model": "{{var:model}}",
                 "provider": "{{var:provider}}",
+                "temperature": 0.2,
                 "pass_clients_tools": false,
                 "hooks": []
             },

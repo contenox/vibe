@@ -1,15 +1,16 @@
 {
     "id": "chain-step-executor",
-    "description": "Executes a single step. Uses local_shell tools. Outputs ===STEP_DONE=== when complete.",
+    "description": "One plan ordinal = one agentic loop (same pattern as chain-contenox): chat_completion alternates with execute_tool_calls until the assistant responds without tool calls (transition \"executed\"), then the subgraph ends. The compiled seed task injects the step prompt; the loop may run many model rounds inside that ordinal.",
     "tasks": [
         {
-            "id": "step_execution",
-            "description": "Chat completion with local_shell tool to execute the current step in the plan.",
+            "id": "plan_step_agent_loop_chat",
+            "description": "Agentic loop — chat turn: model may request tools (transition tool-call) or finish this step (transition executed → end).",
             "handler": "chat_completion",
-            "system_instruction": "You are an autonomous agent executing a single step from a plan.\n\nTOOL USAGE IS MANDATORY.\nDO NOT just describe what you will do. CALL THE TOOL.\nAfter you see the tool output, if the goal is achieved, output exactly:\n===STEP_DONE===",
+            "system_instruction": "You are in the agentic loop for a single plan step: you may use tools across multiple chat rounds until the step is done.\n\nSame mechanism as interactive chat: call tools when needed, read tool results, then continue or finish.\n\nCONTEXT BUDGET: After each read_file, reply briefly (bullet notes per file: sections, tone, constraints)—do NOT paste entire files in assistant messages or repeat tool output. For large files use read_file_range. This keeps the run within model context.\n\nTOOL USAGE IS MANDATORY when commands or filesystem work is required.\nDO NOT just describe what you will do. CALL THE TOOL.\nWhen the step goal is achieved, output exactly:\n===STEP_DONE===",
             "execute_config": {
                 "model": "{{var:model}}",
                 "provider": "{{var:provider}}",
+                "shift": true,
                 "pass_clients_tools": true,
                 "hooks": ["*", "!plan_manager"],
                 "hook_policies": {
@@ -18,7 +19,9 @@
                         "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
                     },
                     "local_fs": {
-                        "_allowed_dir": "."
+                        "_allowed_dir": ".",
+                        "_max_read_bytes": "1048576",
+                        "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json"
                     }
                 }
             },
@@ -28,7 +31,7 @@
                     {
                         "operator": "equals",
                         "when": "tool-call",
-                        "goto": "run_tools"
+                        "goto": "plan_step_agent_loop_tools"
                     },
                     {
                         "operator": "default",
@@ -39,21 +42,21 @@
             }
         },
         {
-            "id": "run_tools",
-            "description": "Execute tool calls from the last message and append results to chat history",
+            "id": "plan_step_agent_loop_tools",
+            "description": "Agentic loop — tool turn: run hook tools, append results, then return to plan_step_agent_loop_chat (engine pattern from chain-contenox run_tools).",
             "handler": "execute_tool_calls",
-            "input_var": "step_execution",
+            "input_var": "plan_step_agent_loop_chat",
             "transition": {
                 "on_failure": "",
                 "branches": [
                     {
                         "operator": "default",
                         "when": "",
-                        "goto": "step_execution"
+                        "goto": "plan_step_agent_loop_chat"
                     }
                 ]
             }
         }
     ],
-    "token_limit": 131072
+    "token_limit": 400000
 }

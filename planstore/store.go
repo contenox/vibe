@@ -279,7 +279,8 @@ func (s *store) CreatePlanSteps(ctx context.Context, steps ...*PlanStep) error {
 
 func (s *store) ListPlanSteps(ctx context.Context, planID string) ([]*PlanStep, error) {
 	rows, err := s.Exec.QueryContext(ctx, `
-		SELECT id, plan_id, ordinal, description, status, execution_result, executed_at
+		SELECT id, plan_id, ordinal, description, status, execution_result, executed_at,
+		       summary, chat_history_json, summary_error, last_failure_summary
 		FROM plan_steps
 		WHERE plan_id = $1
 		ORDER BY ordinal ASC`,
@@ -295,12 +296,26 @@ func (s *store) ListPlanSteps(ctx context.Context, planID string) ([]*PlanStep, 
 		var step PlanStep
 		var status string
 		var execAt sql.NullTime
-		if err := rows.Scan(&step.ID, &step.PlanID, &step.Ordinal, &step.Description, &status, &step.ExecutionResult, &execAt); err != nil {
+		var summary, chatHist, summaryErr, lastFail sql.NullString
+		if err := rows.Scan(&step.ID, &step.PlanID, &step.Ordinal, &step.Description, &status, &step.ExecutionResult, &execAt,
+			&summary, &chatHist, &summaryErr, &lastFail); err != nil {
 			return nil, fmt.Errorf("failed to scan plan step: %w", err)
 		}
 		step.Status = StepStatus(status)
 		if execAt.Valid {
 			step.ExecutedAt = execAt.Time
+		}
+		if summary.Valid {
+			step.Summary = summary.String
+		}
+		if chatHist.Valid {
+			step.ChatHistoryJSON = chatHist.String
+		}
+		if summaryErr.Valid {
+			step.SummaryError = summaryErr.String
+		}
+		if lastFail.Valid {
+			step.LastFailureSummary = lastFail.String
 		}
 		steps = append(steps, &step)
 	}
@@ -371,6 +386,71 @@ func (s *store) UpdatePlanStepStatus(ctx context.Context, stepID string, status 
 	}
 
 	return checkRowsAffected(res)
+}
+
+// UpdatePlanStepSummary persists the typed summary JSON + raw executor chat history.
+// Called by the plan_summary persist hook when summarizer output validated successfully.
+func (s *store) UpdatePlanStepSummary(ctx context.Context, stepID string, summaryJSON, chatHistoryJSON string) error {
+	summary := sql.NullString{String: summaryJSON, Valid: summaryJSON != ""}
+	chatHist := sql.NullString{String: chatHistoryJSON, Valid: chatHistoryJSON != ""}
+	now := time.Now().UTC()
+	res, err := s.Exec.ExecContext(ctx, `
+		UPDATE plan_steps
+		SET summary = $2, chat_history_json = $3, summary_error = NULL
+		WHERE id = $1`,
+		stepID, summary, chatHist,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update plan step summary: %w", err)
+	}
+	if err := s.touchPlanByStepID(ctx, stepID, now); err != nil {
+		return fmt.Errorf("failed to touch plan updated_at: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+// UpdatePlanStepSummaryFailure records that summarizer validation failed twice.
+// Persists the raw output + error alongside a fallback ExecutionResult string so
+// the next step still has human-readable context.
+func (s *store) UpdatePlanStepSummaryFailure(ctx context.Context, stepID string, rawOutput, errMsg, fallbackExecResult string) error {
+	payload := strings.TrimSpace(errMsg)
+	if rawOutput != "" {
+		payload = payload + "\n\n--- raw summarizer output ---\n" + rawOutput
+	}
+	errField := sql.NullString{String: payload, Valid: payload != ""}
+	now := time.Now().UTC()
+	res, err := s.Exec.ExecContext(ctx, `
+		UPDATE plan_steps
+		SET summary = NULL, summary_error = $2, execution_result = $3
+		WHERE id = $1`,
+		stepID, errField, fallbackExecResult,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update plan step summary failure: %w", err)
+	}
+	if err := s.touchPlanByStepID(ctx, stepID, now); err != nil {
+		return fmt.Errorf("failed to touch plan updated_at: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+// MoveSummaryToLastFailure copies current Summary (or ExecutionResult fallback) into
+// LastFailureSummary and clears the summary columns. Called by Retry so the re-run's
+// summarizer can see why the prior attempt failed.
+func (s *store) MoveSummaryToLastFailure(ctx context.Context, stepID string) error {
+	_, err := s.Exec.ExecContext(ctx, `
+		UPDATE plan_steps
+		SET last_failure_summary = COALESCE(NULLIF(summary, ''), NULLIF(execution_result, '')),
+		    summary = NULL,
+		    chat_history_json = NULL,
+		    summary_error = NULL
+		WHERE id = $1`,
+		stepID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to move summary to last failure: %w", err)
+	}
+	return nil
 }
 
 func (s *store) DeletePendingPlanSteps(ctx context.Context, planID string) error {

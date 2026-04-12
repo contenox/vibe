@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,19 +47,19 @@ func (h *LocalFSHook) Exec(ctx context.Context, startTime time.Time, input any, 
 
 	switch toolName {
 	case "read_file":
-		return h.readFile(args)
+		return h.readFile(ctx, args)
 	case "write_file":
-		return h.writeFile(args)
+		return h.writeFile(ctx, args)
 	case "list_dir":
 		return h.listDir(args)
 	case "grep":
-		return h.grep(args)
+		return h.grep(ctx, args)
 	case "sed":
-		return h.sed(args)
+		return h.sed(ctx, args)
 	case "count_stats":
-		return h.countStats(args)
+		return h.countStats(ctx, args)
 	case "read_file_range":
-		return h.readFileRange(args)
+		return h.readFileRange(ctx, args)
 	case "stat_file":
 		return h.statFile(args)
 	default:
@@ -108,7 +109,84 @@ func (h *LocalFSHook) checkPath(path string) (string, error) {
 	return absPath, nil
 }
 
-func (h *LocalFSHook) readFile(args map[string]any) (any, taskengine.DataType, error) {
+// maxReadBytesFromPolicy returns the max bytes for a full-file read. Non-positive means unlimited.
+// Chain policy keys (hook_policies.local_fs): _max_read_bytes — default 1048576 (1 MiB) when unset.
+func (h *LocalFSHook) maxReadBytesFromPolicy(ctx context.Context) (limit int64, unlimited bool) {
+	args := taskengine.HookArgsFromContext(ctx, localFSHookName)
+	if args == nil {
+		return 1024 * 1024, false
+	}
+	s := strings.TrimSpace(args["_max_read_bytes"])
+	if s == "" {
+		return 1024 * 1024, false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 1024 * 1024, false
+	}
+	if n <= 0 {
+		return 0, true
+	}
+	return n, false
+}
+
+func (h *LocalFSHook) checkDeniedSubstrings(ctx context.Context, absPath string) error {
+	base, err := filepath.Abs(h.allowedDir)
+	if err != nil {
+		return fmt.Errorf("local_fs: allowed dir: %w", err)
+	}
+	rel, err := filepath.Rel(base, absPath)
+	if err != nil {
+		return fmt.Errorf("local_fs: rel path: %w", err)
+	}
+	rel = filepath.ToSlash(rel)
+	args := taskengine.HookArgsFromContext(ctx, localFSHookName)
+	if args == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(args["_denied_path_substrings"])
+	if raw == "" {
+		return nil
+	}
+	for _, pat := range strings.Split(raw, ",") {
+		p := strings.TrimSpace(pat)
+		if p == "" {
+			continue
+		}
+		p = filepath.ToSlash(p)
+		if strings.Contains(rel, p) {
+			return fmt.Errorf("local_fs: path %q matches denied substring %q (hook_policies.local_fs._denied_path_substrings)", rel, p)
+		}
+	}
+	return nil
+}
+
+func (h *LocalFSHook) checkFileSizeLimit(ctx context.Context, absPath string) error {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return fmt.Errorf("local_fs: stat: %w", err)
+	}
+	if info.IsDir() {
+		return nil
+	}
+	limit, unlimited := h.maxReadBytesFromPolicy(ctx)
+	if unlimited {
+		return nil
+	}
+	if info.Size() > limit {
+		return fmt.Errorf("local_fs: file is %d bytes (max %d); use read_file_range or set _max_read_bytes in hook_policies.local_fs", info.Size(), limit)
+	}
+	return nil
+}
+
+func (h *LocalFSHook) precheckFullRead(ctx context.Context, absPath string) error {
+	if err := h.checkDeniedSubstrings(ctx, absPath); err != nil {
+		return err
+	}
+	return h.checkFileSizeLimit(ctx, absPath)
+}
+
+func (h *LocalFSHook) readFile(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return nil, taskengine.DataTypeAny, errors.New("local_fs: path required for read_file")
@@ -116,6 +194,9 @@ func (h *LocalFSHook) readFile(args map[string]any) (any, taskengine.DataType, e
 
 	absPath, err := h.checkPath(path)
 	if err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
+	if err := h.precheckFullRead(ctx, absPath); err != nil {
 		return nil, taskengine.DataTypeAny, err
 	}
 
@@ -127,7 +208,7 @@ func (h *LocalFSHook) readFile(args map[string]any) (any, taskengine.DataType, e
 	return string(content), taskengine.DataTypeString, nil
 }
 
-func (h *LocalFSHook) writeFile(args map[string]any) (any, taskengine.DataType, error) {
+func (h *LocalFSHook) writeFile(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return nil, taskengine.DataTypeAny, errors.New("local_fs: path required for write_file")
@@ -139,6 +220,9 @@ func (h *LocalFSHook) writeFile(args map[string]any) (any, taskengine.DataType, 
 
 	absPath, err := h.checkPath(path)
 	if err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
+	if err := h.checkDeniedSubstrings(ctx, absPath); err != nil {
 		return nil, taskengine.DataTypeAny, err
 	}
 
@@ -181,7 +265,7 @@ func (h *LocalFSHook) listDir(args map[string]any) (any, taskengine.DataType, er
 	return strings.Join(results, "\n"), taskengine.DataTypeString, nil
 }
 
-func (h *LocalFSHook) grep(args map[string]any) (any, taskengine.DataType, error) {
+func (h *LocalFSHook) grep(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return nil, taskengine.DataTypeAny, errors.New("local_fs: path required for grep")
@@ -193,6 +277,9 @@ func (h *LocalFSHook) grep(args map[string]any) (any, taskengine.DataType, error
 
 	absPath, err := h.checkPath(path)
 	if err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
+	if err := h.precheckFullRead(ctx, absPath); err != nil {
 		return nil, taskengine.DataTypeAny, err
 	}
 
@@ -212,7 +299,7 @@ func (h *LocalFSHook) grep(args map[string]any) (any, taskengine.DataType, error
 	return strings.Join(matches, "\n"), taskengine.DataTypeString, nil
 }
 
-func (h *LocalFSHook) sed(args map[string]any) (any, taskengine.DataType, error) {
+func (h *LocalFSHook) sed(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return nil, taskengine.DataTypeAny, errors.New("local_fs: path required for sed")
@@ -230,6 +317,9 @@ func (h *LocalFSHook) sed(args map[string]any) (any, taskengine.DataType, error)
 	if err != nil {
 		return nil, taskengine.DataTypeAny, err
 	}
+	if err := h.precheckFullRead(ctx, absPath); err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
 
 	content, err := os.ReadFile(absPath)
 	if err != nil {
@@ -245,7 +335,7 @@ func (h *LocalFSHook) sed(args map[string]any) (any, taskengine.DataType, error)
 	return "ok", taskengine.DataTypeString, nil
 }
 
-func (h *LocalFSHook) countStats(args map[string]any) (any, taskengine.DataType, error) {
+func (h *LocalFSHook) countStats(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return nil, taskengine.DataTypeAny, errors.New("local_fs: path required for count_stats")
@@ -253,6 +343,9 @@ func (h *LocalFSHook) countStats(args map[string]any) (any, taskengine.DataType,
 
 	absPath, err := h.checkPath(path)
 	if err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
+	if err := h.precheckFullRead(ctx, absPath); err != nil {
 		return nil, taskengine.DataTypeAny, err
 	}
 
@@ -273,7 +366,7 @@ func (h *LocalFSHook) countStats(args map[string]any) (any, taskengine.DataType,
 	return result, taskengine.DataTypeString, nil
 }
 
-func (h *LocalFSHook) readFileRange(args map[string]any) (any, taskengine.DataType, error) {
+func (h *LocalFSHook) readFileRange(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return nil, taskengine.DataTypeAny, errors.New("local_fs: path required for read_file_range")
@@ -286,6 +379,13 @@ func (h *LocalFSHook) readFileRange(args map[string]any) (any, taskengine.DataTy
 
 	absPath, err := h.checkPath(path)
 	if err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
+	if err := h.checkDeniedSubstrings(ctx, absPath); err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
+	// Line-range reads still load the full file internally; enforce size to avoid multi-GB reads.
+	if err := h.checkFileSizeLimit(ctx, absPath); err != nil {
 		return nil, taskengine.DataTypeAny, err
 	}
 

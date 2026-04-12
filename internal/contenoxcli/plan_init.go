@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/contenox/contenox/taskengine"
 )
@@ -15,24 +16,45 @@ var chainPlanner string
 //go:embed chain-step-executor.json
 var chainStepExecutor string
 
-// ensurePlanChains writes the planner and step executor chains to the contenoxDir (always overwriting).
-// Returns the absolute paths to the two chains.
-func ensurePlanChains(contenoxDir string) (plannerPath, executorPath string, err error) {
+// writeEmbeddedPlanChains writes chain-planner.json and chain-step-executor.json from the same
+// embedded bytes used by the plan subcommands. If overwrite is false, an existing file is left
+// untouched (returns wrotePlanner/wroteExecutor false for that file).
+func writeEmbeddedPlanChains(contenoxDir string, overwrite bool) (plannerPath, executorPath string, wrotePlanner, wroteExecutor bool, err error) {
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
-		return "", "", fmt.Errorf("failed to create config dir: %w", err)
+		return "", "", false, false, fmt.Errorf("failed to create config dir: %w", err)
 	}
 
 	plannerPath = filepath.Join(contenoxDir, "chain-planner.json")
-	if err := os.WriteFile(plannerPath, []byte(chainPlanner), 0644); err != nil {
-		return "", "", fmt.Errorf("failed to write %s: %w", plannerPath, err)
-	}
-
 	executorPath = filepath.Join(contenoxDir, "chain-step-executor.json")
-	if err := os.WriteFile(executorPath, []byte(chainStepExecutor), 0644); err != nil {
-		return "", "", fmt.Errorf("failed to write %s: %w", executorPath, err)
+
+	writeOne := func(path, content string) (bool, error) {
+		if !overwrite {
+			if _, statErr := os.Stat(path); statErr == nil {
+				return false, nil
+			}
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return false, fmt.Errorf("failed to write %s: %w", path, err)
+		}
+		return true, nil
 	}
 
-	return plannerPath, executorPath, nil
+	wrotePlanner, err = writeOne(plannerPath, chainPlanner)
+	if err != nil {
+		return "", "", false, false, err
+	}
+	wroteExecutor, err = writeOne(executorPath, chainStepExecutor)
+	if err != nil {
+		return "", "", wrotePlanner, false, err
+	}
+	return plannerPath, executorPath, wrotePlanner, wroteExecutor, nil
+}
+
+// ensurePlanChains writes the planner and step executor chains to the contenoxDir (always overwriting).
+// Returns the absolute paths to the two chains.
+func ensurePlanChains(contenoxDir string) (plannerPath, executorPath string, err error) {
+	p, e, _, _, err := writeEmbeddedPlanChains(contenoxDir, true)
+	return p, e, err
 }
 
 // validatePlannerChain checks that a chain meets the contract required by 'contenox plan new'.
@@ -66,6 +88,8 @@ func validatePlannerChain(chain *taskengine.TaskChainDefinition, path string) er
 //   - Have at least one chat_completion task
 //   - Have at least one execute_tool_calls task (to run local_shell/local_fs tools)
 //   - Have a branch that routes "tool-call" transitions to the execute_tool_calls task
+//   - Close the agentic loop: each execute_tool_calls task must branch back to its input_var
+//     chat task (same pattern as chain-contenox: chat ↔ tools until no tool calls).
 func validateExecutorChain(chain *taskengine.TaskChainDefinition, path string) error {
 	if len(chain.Tasks) == 0 {
 		return fmt.Errorf(
@@ -116,6 +140,42 @@ func validateExecutorChain(chain *taskengine.TaskChainDefinition, path string) e
 				"  Add a branch: {\"operator\": \"equals\", \"when\": \"tool-call\", \"goto\": \"<your_tool_exec_task_id>\"}",
 			path,
 		)
+	}
+	if err := validateAgenticLoopClosure(chain, path); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateAgenticLoopClosure ensures each execute_tool_calls task branches back to its chat task
+// (input_var), matching the engine's standard agentic loop used in chain-contenox.
+func validateAgenticLoopClosure(chain *taskengine.TaskChainDefinition, path string) error {
+	for _, task := range chain.Tasks {
+		if task.Handler != taskengine.HandleExecuteToolCalls {
+			continue
+		}
+		chatID := strings.TrimSpace(task.InputVar)
+		if chatID == "" {
+			return fmt.Errorf(
+				"executor chain %q: task %q has handler %q but empty input_var\n"+
+					"  Set input_var to your chat_completion task id so tool results append to the same history.",
+				path, task.ID, task.Handler,
+			)
+		}
+		loops := false
+		for _, b := range task.Transition.Branches {
+			if strings.TrimSpace(b.Goto) == chatID {
+				loops = true
+				break
+			}
+		}
+		if !loops {
+			return fmt.Errorf(
+				"executor chain %q: agentic loop not closed — task %q (execute_tool_calls) needs a transition branch with \"goto\": %q\n"+
+					"  After tools run, the chain must return to the chat task (same id as input_var), like chain-contenox run_tools → contenox_chat.",
+				path, task.ID, chatID,
+			)
+		}
 	}
 	return nil
 }

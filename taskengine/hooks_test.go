@@ -95,3 +95,78 @@ func TestResolveHookNames_StarExcludeMiss_ReturnsAll(t *testing.T) {
 		t.Errorf("[*, !hook_x]: expected 3, got %d: %v", len(names), names)
 	}
 }
+
+// Runtime allowlist intersection (WithRuntimeHookAllowlist) — caller can further
+// restrict but never expand what a task allowlist permits.
+
+func TestResolveHookNames_Runtime_Absent_TaskUnchanged(t *testing.T) {
+	repo := stubRepo()
+	names, err := taskengine.ExportedResolveHookNames(context.Background(), []string{"*"}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 3 {
+		t.Errorf("runtime absent: expected 3, got %d: %v", len(names), names)
+	}
+}
+
+func TestResolveHookNames_Runtime_StarExclude_RemovesEntry(t *testing.T) {
+	repo := stubRepo()
+	ctx := taskengine.WithRuntimeHookAllowlist(context.Background(), []string{"*", "!hook_b"})
+	names, err := taskengine.ExportedResolveHookNames(ctx, []string{"*"}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := sortedNames(names)
+	if len(got) != 2 || got[0] != "hook_a" || got[1] != "hook_c" {
+		t.Errorf("runtime [*, !hook_b] ∩ task [*]: expected [hook_a hook_c], got %v", got)
+	}
+}
+
+func TestResolveHookNames_Runtime_Empty_DeniesAll(t *testing.T) {
+	repo := stubRepo()
+	ctx := taskengine.WithRuntimeHookAllowlist(context.Background(), []string{})
+	names, err := taskengine.ExportedResolveHookNames(ctx, []string{"*"}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 0 {
+		t.Errorf("runtime [] ∩ task [*]: expected empty, got %v", names)
+	}
+}
+
+func TestResolveHookNames_Runtime_NilSlice_NoRestriction(t *testing.T) {
+	repo := stubRepo()
+	ctx := taskengine.WithRuntimeHookAllowlist(context.Background(), nil)
+	names, err := taskengine.ExportedResolveHookNames(ctx, []string{"hook_a"}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "hook_a" {
+		t.Errorf("runtime nil ∩ task [hook_a]: expected [hook_a], got %v", names)
+	}
+}
+
+func TestResolveHookNames_Runtime_CannotExpandTaskAllowlist(t *testing.T) {
+	repo := stubRepo()
+	ctx := taskengine.WithRuntimeHookAllowlist(context.Background(), []string{"*"})
+	names, err := taskengine.ExportedResolveHookNames(ctx, []string{"hook_a"}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "hook_a" {
+		t.Errorf("runtime [*] ∩ task [hook_a]: expected [hook_a], got %v", names)
+	}
+}
+
+func TestResolveHookNames_Runtime_StricterWins(t *testing.T) {
+	repo := stubRepo()
+	ctx := taskengine.WithRuntimeHookAllowlist(context.Background(), []string{"hook_a"})
+	names, err := taskengine.ExportedResolveHookNames(ctx, []string{"*"}, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "hook_a" {
+		t.Errorf("runtime [hook_a] ∩ task [*]: expected [hook_a], got %v", names)
+	}
+}

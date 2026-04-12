@@ -24,13 +24,17 @@ func InitSchema(ctx context.Context, exec libdbexec.Exec) error {
 		);
 
 		CREATE TABLE IF NOT EXISTS plan_steps (
-			id               VARCHAR(255) PRIMARY KEY,
-			plan_id          VARCHAR(255) NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
-			ordinal          INT          NOT NULL,
-			description      TEXT         NOT NULL,
-			status           VARCHAR(50)  NOT NULL DEFAULT 'pending',
-			execution_result TEXT         NOT NULL DEFAULT '',
-			executed_at      TIMESTAMP,
+			id                    VARCHAR(255) PRIMARY KEY,
+			plan_id               VARCHAR(255) NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+			ordinal               INT          NOT NULL,
+			description           TEXT         NOT NULL,
+			status                VARCHAR(50)  NOT NULL DEFAULT 'pending',
+			execution_result      TEXT         NOT NULL DEFAULT '',
+			executed_at           TIMESTAMP,
+			summary               TEXT,
+			chat_history_json     TEXT,
+			summary_error         TEXT,
+			last_failure_summary  TEXT,
 			UNIQUE (plan_id, ordinal)
 		);
 
@@ -39,7 +43,10 @@ func InitSchema(ctx context.Context, exec libdbexec.Exec) error {
 	if err != nil {
 		return err
 	}
-	return migratePlansCompiledColumns(ctx, exec)
+	if err := migratePlansCompiledColumns(ctx, exec); err != nil {
+		return err
+	}
+	return migratePlanStepSummaryColumns(ctx, exec)
 }
 
 // migratePlansCompiledColumns adds compile columns to existing databases created before they existed.
@@ -48,6 +55,24 @@ func migratePlansCompiledColumns(ctx context.Context, exec libdbexec.Exec) error
 		`ALTER TABLE plans ADD COLUMN compiled_chain_json TEXT`,
 		`ALTER TABLE plans ADD COLUMN compiled_chain_id VARCHAR(255)`,
 		`ALTER TABLE plans ADD COLUMN compile_executor_chain_id VARCHAR(255)`,
+	}
+	for _, q := range stmts {
+		_, err := exec.ExecContext(ctx, q)
+		if err != nil && !isDuplicateColumnError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// migratePlanStepSummaryColumns adds typed-handover columns (summary, chat history, summary error,
+// last failure summary) to plan_steps on databases created before they existed.
+func migratePlanStepSummaryColumns(ctx context.Context, exec libdbexec.Exec) error {
+	stmts := []string{
+		`ALTER TABLE plan_steps ADD COLUMN summary TEXT`,
+		`ALTER TABLE plan_steps ADD COLUMN chat_history_json TEXT`,
+		`ALTER TABLE plan_steps ADD COLUMN summary_error TEXT`,
+		`ALTER TABLE plan_steps ADD COLUMN last_failure_summary TEXT`,
 	}
 	for _, q := range stmts {
 		_, err := exec.ExecContext(ctx, q)

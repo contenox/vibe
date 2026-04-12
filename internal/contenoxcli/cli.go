@@ -45,7 +45,7 @@ const (
 )
 
 // reservedSubcommands are first-arg names that must not be treated as run input (Cobra or our subcommands).
-var reservedSubcommands = map[string]bool{beamCmd.Use: true, "init": true, "chat": true, "help": true, "completion": true, "session": true, "plan": true, "run": true, "hook": true, "mcp": true, "backend": true, "config": true, "model": true, "models": true, "doctor": true}
+var reservedSubcommands = map[string]bool{beamCmd.Use: true, "init": true, "chat": true, "help": true, "completion": true, "session": true, "plan": true, "run": true, "hook": true, "mcp": true, "backend": true, "config": true, "model": true, "models": true, "doctor": true, "version": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
@@ -207,6 +207,10 @@ var initCmd = &cobra.Command{
 	Short: "Scaffold .contenox/ with default chain files.",
 	Long: `Create the .contenox/ directory and populate it with default chain files.
 
+This writes default-chain.json, default-run-chain.json, chain-planner.json, and chain-step-executor.json
+(the same embedded planner and step-executor chains used by 'contenox plan'). Plan subcommands
+still refresh those JSON files from the binary when you run them.
+
 After init, register a backend, make sure the runtime can see a model, then set your defaults:
 
   # Local Ollama:
@@ -243,6 +247,16 @@ Examples:
 	RunE: runServer,
 }
 
+// versionCmd prints the same line as `contenox --version` so `contenox version`
+// is not mistaken for chat input (the default run command).
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print the contenox CLI version",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("%s version %s\n", cmd.Root().Name(), cmd.Root().Version)
+	},
+}
+
 func init() {
 	v := cliVersion()
 	rootCmd.Version = v
@@ -270,7 +284,7 @@ func init() {
 	f.Bool("raw", false, "Print full output (e.g. entire chat JSON)")
 	f.Bool("think", false, "Print model reasoning trace to stderr (for thinking models)")
 
-	rootCmd.AddCommand(initCmd, chatCmd, sessionCmd, planCmd, runCmd, hookCmd, doctorCmd)
+	rootCmd.AddCommand(initCmd, chatCmd, sessionCmd, planCmd, runCmd, hookCmd, doctorCmd, versionCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(backendCmd)
 	rootCmd.AddCommand(configCmd)

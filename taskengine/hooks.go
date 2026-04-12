@@ -16,22 +16,52 @@ import (
 //
 // Entries starting with "!" are exclusions and may only be combined with "*".
 // Unknown exact names (not returned by Supports) are silently ignored.
+//
+// If a runtime allowlist is attached to ctx via WithRuntimeHookAllowlist, the
+// task-resolved set is intersected with the runtime-resolved set (stricter
+// wins). Exclusions on either side are honored. Absent runtime allowlist keeps
+// the task allowlist unchanged (fully backward compatible).
 func resolveHookNames(ctx context.Context, allowlist []string, provider HookProvider) ([]string, error) {
-	// nil means the field was absent — expose everything (backward compat).
+	all, err := provider.Supports(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	taskSet := applyAllowlist(allowlist, all)
+
+	runtime, runtimeAttached := RuntimeHookAllowlistFromContext(ctx)
+	if !runtimeAttached {
+		return taskSet, nil
+	}
+	runtimeSet := applyAllowlist(runtime, all)
+
+	// Intersect: a hook is available iff both sides permit it.
+	permitted := make(map[string]struct{}, len(runtimeSet))
+	for _, n := range runtimeSet {
+		permitted[n] = struct{}{}
+	}
+	result := make([]string, 0, len(taskSet))
+	for _, n := range taskSet {
+		if _, ok := permitted[n]; ok {
+			result = append(result, n)
+		}
+	}
+	return result, nil
+}
+
+// applyAllowlist resolves a single allowlist against the full set of supported
+// hook names per the grammar documented on resolveHookNames.
+func applyAllowlist(allowlist []string, all []string) []string {
 	if allowlist == nil {
-		return provider.Supports(ctx)
+		return all
 	}
-
-	// Explicitly empty — no hooks.
 	if len(allowlist) == 0 {
-		return []string{}, nil
+		return []string{}
 	}
 
-	// Separate positives from exclusions.
 	hasStar := false
 	exact := make(map[string]struct{})
 	excluded := make(map[string]struct{})
-
 	for _, entry := range allowlist {
 		if entry == "*" {
 			hasStar = true
@@ -42,12 +72,6 @@ func resolveHookNames(ctx context.Context, allowlist []string, provider HookProv
 		}
 	}
 
-	all, err := provider.Supports(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build result set.
 	result := make([]string, 0, len(all))
 	for _, name := range all {
 		if _, skip := excluded[name]; skip {
@@ -61,7 +85,7 @@ func resolveHookNames(ctx context.Context, allowlist []string, provider HookProv
 			result = append(result, name)
 		}
 	}
-	return result, nil
+	return result
 }
 
 // ExportedResolveHookNames is a test-only export of resolveHookNames.

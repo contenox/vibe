@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+func TestFirstNonFlagIsReserved_version(t *testing.T) {
+	if !firstNonFlagIsReserved([]string{"version"}) {
+		t.Fatal(`expected "version" to be reserved so it is not passed to run/chat`)
+	}
+	if !firstNonFlagIsReserved([]string{"--db", "/tmp/x", "version"}) {
+		t.Fatal(`expected first positional after flags to be recognized as version subcommand`)
+	}
+}
+
 func TestResolveContenoxDir(t *testing.T) {
 	// Create a temporary directory structure for testing.
 	tempDir, err := os.MkdirTemp("", "contenox-test-*")
