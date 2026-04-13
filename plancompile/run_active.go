@@ -28,16 +28,19 @@ type RunActiveCompiledResult struct {
 	State      []taskengine.CapturedStateUnit
 }
 
-// RunActiveCompiled loads markdown via planservice.Show, parses and compiles it with the executor chain,
-// optionally persists the compiled JSON, then runs Execute with the plan goal as string input.
+// RunActiveCompiled loads markdown via planservice.Show, parses and compiles it with the executor
+// chain + summarizer chain, optionally persists the compiled JSON, then runs Execute with the plan
+// goal as string input.
 // precompiled, when non-empty, skips Compile (reuse planservice Next cache or explicit artifact).
-// eventSink publishes plan_run_* events to the same bus/TaskEvent pipeline as task execution (optional; nil disables).
+// eventSink publishes plan_run_* events to the same bus/TaskEvent pipeline as task execution
+// (optional; nil disables).
 func RunActiveCompiled(
 	ctx context.Context,
 	planSvc PlanShowActive,
 	chains taskchainservice.Service,
 	exec execservice.TasksEnvService,
 	executorChainID string,
+	summarizerChainID string,
 	compiledChainID string,
 	writePath string,
 	precompiled *taskengine.TaskChainDefinition,
@@ -47,9 +50,13 @@ func RunActiveCompiled(
 		return nil, fmt.Errorf("plancompile: RunActiveCompiled: missing dependency")
 	}
 	executorChainID = strings.TrimSpace(executorChainID)
+	summarizerChainID = strings.TrimSpace(summarizerChainID)
 	compiledChainID = strings.TrimSpace(compiledChainID)
 	if executorChainID == "" {
 		return nil, fmt.Errorf("plancompile: executor_chain_id is required")
+	}
+	if summarizerChainID == "" {
+		return nil, fmt.Errorf("plancompile: summarizer_chain_id is required")
 	}
 	if compiledChainID == "" {
 		return nil, fmt.Errorf("plancompile: chain_id is required")
@@ -80,8 +87,13 @@ func RunActiveCompiled(
 			taskengine.PublishPlanRunFailed(ctx, eventSink, err)
 			return nil, fmt.Errorf("load executor chain: %w", err)
 		}
+		sumChain, err := chains.Get(ctx, summarizerChainID)
+		if err != nil {
+			taskengine.PublishPlanRunFailed(ctx, eventSink, err)
+			return nil, fmt.Errorf("load summarizer chain: %w", err)
+		}
 
-		compiled, err = Compile(execChain, compiledChainID, parsed)
+		compiled, err = Compile(execChain, sumChain, compiledChainID, parsed)
 		if err != nil {
 			taskengine.PublishPlanRunFailed(ctx, eventSink, err)
 			return nil, fmt.Errorf("compile: %w", err)

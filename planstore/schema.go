@@ -8,6 +8,13 @@ import (
 )
 
 // InitSchema creates the plans and plan_steps tables if they do not exist.
+//
+// NOTE: In production the schema is applied by runtimetypes.SchemaSQLite /
+// runtimetypes.Schema (loaded in internal/contenoxcli/db_util.go and similar
+// call sites). This function exists for unit tests that spin up an in-memory
+// planstore without the full runtime. Keep the two schema shapes in sync
+// whenever a column is added — see runtimetypes/schema_sqlite.sql for the
+// canonical DDL.
 func InitSchema(ctx context.Context, exec libdbexec.Exec) error {
 	_, err := exec.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS plans (

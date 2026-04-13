@@ -16,16 +16,20 @@ var chainPlanner string
 //go:embed chain-step-executor.json
 var chainStepExecutor string
 
-// writeEmbeddedPlanChains writes chain-planner.json and chain-step-executor.json from the same
-// embedded bytes used by the plan subcommands. If overwrite is false, an existing file is left
-// untouched (returns wrotePlanner/wroteExecutor false for that file).
-func writeEmbeddedPlanChains(contenoxDir string, overwrite bool) (plannerPath, executorPath string, wrotePlanner, wroteExecutor bool, err error) {
+//go:embed chain-step-summarizer.json
+var chainStepSummarizer string
+
+// writeEmbeddedPlanChains writes chain-planner.json, chain-step-executor.json, and
+// chain-step-summarizer.json from the same embedded bytes used by the plan subcommands.
+// If overwrite is false, an existing file is left untouched (returns false for that file).
+func writeEmbeddedPlanChains(contenoxDir string, overwrite bool) (plannerPath, executorPath, summarizerPath string, wrotePlanner, wroteExecutor, wroteSummarizer bool, err error) {
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
-		return "", "", false, false, fmt.Errorf("failed to create config dir: %w", err)
+		return "", "", "", false, false, false, fmt.Errorf("failed to create config dir: %w", err)
 	}
 
 	plannerPath = filepath.Join(contenoxDir, "chain-planner.json")
 	executorPath = filepath.Join(contenoxDir, "chain-step-executor.json")
+	summarizerPath = filepath.Join(contenoxDir, "chain-step-summarizer.json")
 
 	writeOne := func(path, content string) (bool, error) {
 		if !overwrite {
@@ -41,20 +45,24 @@ func writeEmbeddedPlanChains(contenoxDir string, overwrite bool) (plannerPath, e
 
 	wrotePlanner, err = writeOne(plannerPath, chainPlanner)
 	if err != nil {
-		return "", "", false, false, err
+		return "", "", "", false, false, false, err
 	}
 	wroteExecutor, err = writeOne(executorPath, chainStepExecutor)
 	if err != nil {
-		return "", "", wrotePlanner, false, err
+		return "", "", "", wrotePlanner, false, false, err
 	}
-	return plannerPath, executorPath, wrotePlanner, wroteExecutor, nil
+	wroteSummarizer, err = writeOne(summarizerPath, chainStepSummarizer)
+	if err != nil {
+		return "", "", "", wrotePlanner, wroteExecutor, false, err
+	}
+	return plannerPath, executorPath, summarizerPath, wrotePlanner, wroteExecutor, wroteSummarizer, nil
 }
 
-// ensurePlanChains writes the planner and step executor chains to the contenoxDir (always overwriting).
-// Returns the absolute paths to the two chains.
-func ensurePlanChains(contenoxDir string) (plannerPath, executorPath string, err error) {
-	p, e, _, _, err := writeEmbeddedPlanChains(contenoxDir, true)
-	return p, e, err
+// ensurePlanChains writes the planner, step executor, and step summarizer chains to the
+// contenoxDir (always overwriting). Returns the absolute paths to all three chains.
+func ensurePlanChains(contenoxDir string) (plannerPath, executorPath, summarizerPath string, err error) {
+	p, e, s, _, _, _, err := writeEmbeddedPlanChains(contenoxDir, true)
+	return p, e, s, err
 }
 
 // validatePlannerChain checks that a chain meets the contract required by 'contenox plan new'.
@@ -143,6 +151,55 @@ func validateExecutorChain(chain *taskengine.TaskChainDefinition, path string) e
 	}
 	if err := validateAgenticLoopClosure(chain, path); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateSummarizerChain checks that a chain meets the contract required by plancompile.Compile
+// for the summarizer slot. The summarizer chain must:
+//   - Have at least one task.
+//   - Reference the plan_summary hook (persist or fallback) somewhere in its tasks, so
+//     the typed JSON actually gets persisted.
+// Full structural validation happens inside plancompile.Compile (edges, cross-references).
+func validateSummarizerChain(chain *taskengine.TaskChainDefinition, path string) error {
+	if len(chain.Tasks) == 0 {
+		return fmt.Errorf(
+			"summarizer chain %q has no tasks\n"+
+				"  The summarizer chain must have at least one chat_completion task and at least one\n"+
+				"  hook task invoking plan_summary (tool_name: persist or fallback).",
+			path,
+		)
+	}
+	hasPersist := false
+	hasFallback := false
+	for _, task := range chain.Tasks {
+		if task.Handler != taskengine.HandleHook || task.Hook == nil {
+			continue
+		}
+		if strings.TrimSpace(task.Hook.Name) != "plan_summary" {
+			continue
+		}
+		switch strings.TrimSpace(task.Hook.ToolName) {
+		case "persist":
+			hasPersist = true
+		case "fallback":
+			hasFallback = true
+		}
+	}
+	if !hasPersist {
+		return fmt.Errorf(
+			"summarizer chain %q: no task invokes hook plan_summary tool_name=persist\n"+
+				"  Without this, validated JSON summaries are never persisted to planstore.",
+			path,
+		)
+	}
+	if !hasFallback {
+		return fmt.Errorf(
+			"summarizer chain %q: no task invokes hook plan_summary tool_name=fallback\n"+
+				"  Without this, a step whose summarizer output fails validation twice will leave the\n"+
+				"  plan_step row with no summary at all — next step's handover would fall through to empty.",
+			path,
+		)
 	}
 	return nil
 }

@@ -1,0 +1,133 @@
+{
+    "id": "chain-step-summarizer",
+    "description": "After each plan step executor completes, this chain emits a typed-JSON summary (plan_summary persist/fallback hooks route it into planstore). Shape mirrors the enterprise generate→eval→repair→answer pattern: one chat_completion emits JSON, one hook validates+persists or returns 'invalid', an optional repair chat_completion retries once, a fallback hook records summary_error if repair still fails.",
+    "tasks": [
+        {
+            "id": "summarize",
+            "description": "Emit typed JSON summary of the just-completed step's executor history",
+            "handler": "chat_completion",
+            "input_var": "__exec_terminal__",
+            "system_instruction": "You are an extractive summarizer. You read a plan step's full execution transcript and emit a SINGLE JSON object describing what happened. Do NOT invent facts. Do NOT act on the step. Your job is to produce a handover artifact for the next step's executor to read.\n\nOUTPUT RULES (critical):\n- Respond with ONLY a JSON object. No prose, no markdown fences, no trailing text.\n- The first non-whitespace character MUST be '{'.\n- Schema:\n  {\n    \"outcome\": \"success\" | \"partial\" | \"blocked\",\n    \"summary\": \"1-3 sentence narrative of what the step produced\",\n    \"artifacts\": [ { \"kind\": \"file|url|resource\", \"ref\": \"path or identifier\", \"note\": \"why it matters\" } ],\n    \"handover_for_next\": \"what the NEXT step specifically needs to know from this one\",\n    \"caveats\": [ \"deferred work or caveats\" ]\n  }\n- Required fields: outcome, summary, handover_for_next.\n- outcome MUST be one of success, partial, blocked.\n- artifacts may be an empty array. caveats may be an empty array.\n- Do not include the ===STEP_DONE=== marker anywhere in your output.\n\nContext you are given:\n- Plan goal: {{var:plan_goal}}\n- The step you are summarizing: step {{var:step_ordinal}} of {{var:step_total}} — {{var:current_step}}\n- The next step (for the handover_for_next field to target): {{var:next_step}}",
+            "prompt_template": "Summarize the execution transcript above. Return ONLY the JSON object per the schema in your system instruction.",
+            "execute_config": {
+                "model": "{{var:summarizer_model}}",
+                "provider": "{{var:provider}}",
+                "temperature": 0.1,
+                "pass_clients_tools": false,
+                "hooks": []
+            },
+            "transition": {
+                "on_failure": "fallback",
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "persist"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "persist",
+            "description": "Validate the summarizer's JSON and write it to planstore; branch on ok|invalid",
+            "handler": "hook",
+            "hook": {
+                "name": "plan_summary",
+                "tool_name": "persist",
+                "args": {}
+            },
+            "transition": {
+                "on_failure": "fallback",
+                "branches": [
+                    {
+                        "operator": "equals",
+                        "when": "ok",
+                        "goto": "__next_step__"
+                    },
+                    {
+                        "operator": "equals",
+                        "when": "invalid",
+                        "goto": "repair"
+                    },
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "fallback"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "repair",
+            "description": "Re-emit the JSON summary after the first attempt failed validation",
+            "handler": "chat_completion",
+            "input_var": "summarize",
+            "system_instruction": "Your previous output was rejected by the summary validator. It must be a single JSON object matching this schema, with no prose, no code fences, and no ===STEP_DONE=== marker:\n\n{\n  \"outcome\": \"success\" | \"partial\" | \"blocked\",\n  \"summary\": \"...\",\n  \"artifacts\": [ { \"kind\": \"...\", \"ref\": \"...\", \"note\": \"...\" } ],\n  \"handover_for_next\": \"...\",\n  \"caveats\": [ \"...\" ]\n}\n\nRequired: outcome (one of the three enum values), summary, handover_for_next. Arrays may be empty. Your first non-whitespace character must be '{'.",
+            "prompt_template": "Re-emit the summary as valid JSON per the schema. Return ONLY the JSON object.",
+            "execute_config": {
+                "model": "{{var:summarizer_model}}",
+                "provider": "{{var:provider}}",
+                "temperature": 0.1,
+                "pass_clients_tools": false,
+                "hooks": []
+            },
+            "transition": {
+                "on_failure": "fallback",
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "persist_repair"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "persist_repair",
+            "description": "Second validation + write attempt; on invalid fall through to fallback",
+            "handler": "hook",
+            "hook": {
+                "name": "plan_summary",
+                "tool_name": "persist",
+                "args": {}
+            },
+            "transition": {
+                "on_failure": "fallback",
+                "branches": [
+                    {
+                        "operator": "equals",
+                        "when": "ok",
+                        "goto": "__next_step__"
+                    },
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "fallback"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "fallback",
+            "description": "Unconditional fallback: record summary_error + execution_result from the executor history",
+            "handler": "hook",
+            "input_var": "__exec_terminal__",
+            "hook": {
+                "name": "plan_summary",
+                "tool_name": "fallback",
+                "args": {}
+            },
+            "transition": {
+                "on_failure": "__next_step__",
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "__next_step__"
+                    }
+                ]
+            }
+        }
+    ],
+    "token_limit": 131072
+}

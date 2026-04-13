@@ -762,6 +762,9 @@
           "markdown": {
             "type": "string"
           },
+          "summarizer_chain_id": {
+            "type": "string"
+          },
           "write_path": {
             "type": "string"
           }
@@ -769,6 +772,7 @@
         "required": [
           "markdown",
           "executor_chain_id",
+          "summarizer_chain_id",
           "chain_id"
         ],
         "type": "object"
@@ -851,6 +855,9 @@
           "executor_chain_id": {
             "type": "string"
           },
+          "summarizer_chain_id": {
+            "type": "string"
+          },
           "with_auto": {
             "type": "boolean"
           },
@@ -860,6 +867,7 @@
         },
         "required": [
           "executor_chain_id",
+          "summarizer_chain_id",
           "with_shell",
           "with_auto"
         ],
@@ -917,12 +925,16 @@
           "executor_chain_id": {
             "type": "string"
           },
+          "summarizer_chain_id": {
+            "type": "string"
+          },
           "write_path": {
             "type": "string"
           }
         },
         "required": [
           "executor_chain_id",
+          "summarizer_chain_id",
           "chain_id"
         ],
         "type": "object"
@@ -1020,6 +1032,10 @@
       },
       "planstore_PlanStep": {
         "properties": {
+          "chat_history_json": {
+            "description": "ChatHistoryJSON is the raw taskengine.ChatHistory from the executor subgraph,\npreserved for debugging and for Retry prior-attempt context.",
+            "type": "string"
+          },
           "description": {
             "type": "string"
           },
@@ -1034,6 +1050,10 @@
           "id": {
             "type": "string"
           },
+          "last_failure_summary": {
+            "description": "LastFailureSummary is the Summary (or ExecutionResult fallback) from the\nprevious failed attempt of this step, moved here by Retry. Lets the next\nattempt's summarizer see why the prior try failed.",
+            "type": "string"
+          },
           "ordinal": {
             "type": "integer"
           },
@@ -1042,6 +1062,14 @@
           },
           "status": {
             "$ref": "#/components/schemas/planstore_StepStatus"
+          },
+          "summary": {
+            "description": "Summary is a JSON document (schema: outcome/summary/artifacts/handover_for_next/caveats)\nproduced by the summarizer chain and persisted by the plan_summary persist hook.\nEmpty string means NULL (legacy row or summarizer fell through to fallback).",
+            "type": "string"
+          },
+          "summary_error": {
+            "description": "SummaryError is the raw summarizer output + parse/validation error when\nboth the first summarizer attempt and its repair attempt failed validation.\nPopulated only on fallback-path persistence.",
+            "type": "string"
           }
         },
         "required": [
@@ -2514,7 +2542,7 @@
   },
   "info": {
     "title": "contenox – LLM Backend Management API",
-    "version": "v0.6.5"
+    "version": "v0.6.9"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -5567,6 +5595,16 @@
     "/taskchains": {
       "delete": {
         "description": "Deletes the task chain file at path.",
+        "parameters": [
+          {
+            "description": "Relative VFS path of the chain JSON file (e.g. default-chain.json).",
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5593,6 +5631,16 @@
       },
       "get": {
         "description": "Retrieves a task chain JSON document at the given VFS path.",
+        "parameters": [
+          {
+            "description": "Relative VFS path of the chain JSON file (e.g. default-chain.json).",
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5619,6 +5667,16 @@
       },
       "post": {
         "description": "Creates a new task chain file at path (must not exist).",
+        "parameters": [
+          {
+            "description": "Relative VFS path of the chain JSON file (e.g. default-chain.json).",
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5655,6 +5713,16 @@
       },
       "put": {
         "description": "Updates the task chain file at path.",
+        "parameters": [
+          {
+            "description": "Relative VFS path of the chain JSON file (e.g. default-chain.json).",
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5688,6 +5756,34 @@
           }
         },
         "summary": "Updates the task chain file at path."
+      }
+    },
+    "/taskchains/list": {
+      "get": {
+        "description": "Lists the relative paths of all task chain JSON files in the chain VFS root.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/array_string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Default error response"
+          }
+        },
+        "summary": "Lists the relative paths of all task chain JSON files in the chain VFS root."
       }
     },
     "/tasks": {

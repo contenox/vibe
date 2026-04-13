@@ -68,9 +68,10 @@ type newPlanResponse struct {
 }
 
 type nextStepRequest struct {
-	ExecutorChainID string `json:"executor_chain_id"`
-	WithShell       bool   `json:"with_shell"`
-	WithAuto        bool   `json:"with_auto"`
+	ExecutorChainID   string `json:"executor_chain_id"`
+	SummarizerChainID string `json:"summarizer_chain_id"`
+	WithShell         bool   `json:"with_shell"`
+	WithAuto          bool   `json:"with_auto"`
 }
 
 type nextStepResponse struct {
@@ -101,10 +102,11 @@ type cleanResponse struct {
 }
 
 type compileRequest struct {
-	Markdown        string `json:"markdown"`
-	ExecutorChainID string `json:"executor_chain_id"`
-	ChainID         string `json:"chain_id"`
-	WritePath       string `json:"write_path,omitempty"`
+	Markdown          string `json:"markdown"`
+	ExecutorChainID   string `json:"executor_chain_id"`
+	SummarizerChainID string `json:"summarizer_chain_id"`
+	ChainID           string `json:"chain_id"`
+	WritePath         string `json:"write_path,omitempty"`
 }
 
 type compileResponse struct {
@@ -115,9 +117,10 @@ type compileResponse struct {
 }
 
 type runCompiledRequest struct {
-	ExecutorChainID string `json:"executor_chain_id"`
-	ChainID         string `json:"chain_id"`
-	WritePath       string `json:"write_path,omitempty"`
+	ExecutorChainID   string `json:"executor_chain_id"`
+	SummarizerChainID string `json:"summarizer_chain_id"`
+	ChainID           string `json:"chain_id"`
+	WritePath         string `json:"write_path,omitempty"`
 }
 
 type runCompiledResponse struct {
@@ -190,7 +193,12 @@ func (h *handler) compilePlan(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
 		return
 	}
-	compiled, err := plancompile.Compile(execChain, req.ChainID, parsed)
+	sumChain, err := h.lookupChain(r, req.SummarizerChainID)
+	if err != nil {
+		_ = apiframework.Error(w, r, err, apiframework.CreateOperation)
+		return
+	}
+	compiled, err := plancompile.Compile(execChain, sumChain, req.ChainID, parsed)
 	if err != nil {
 		_ = apiframework.Error(w, r, fmt.Errorf("%w: %v", apiframework.ErrBadRequest, err), apiframework.CreateOperation)
 		return
@@ -230,7 +238,7 @@ func (h *handler) runCompiledActive(w http.ResponseWriter, r *http.Request) {
 			precompiled = &c
 		}
 	}
-	res, err := plancompile.RunActiveCompiled(ctx, h.svc, h.chains, h.tasks, req.ExecutorChainID, req.ChainID, req.WritePath, precompiled, taskengine.NewBusTaskEventSink(h.pubsub))
+	res, err := plancompile.RunActiveCompiled(ctx, h.svc, h.chains, h.tasks, req.ExecutorChainID, req.SummarizerChainID, req.ChainID, req.WritePath, precompiled, taskengine.NewBusTaskEventSink(h.pubsub))
 	if err != nil {
 		if strings.Contains(err.Error(), "no active plan") {
 			_ = apiframework.Error(w, r, fmt.Errorf("%w: %v", apiframework.ErrNotFound, err), apiframework.CreateOperation)
@@ -293,7 +301,12 @@ func (h *handler) nextStep(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
-	result, md, err := h.svc.Next(ctx, planservice.Args{WithShell: req.WithShell, WithAuto: req.WithAuto}, chain)
+	sumChain, err := h.lookupChain(r, req.SummarizerChainID)
+	if err != nil {
+		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
+		return
+	}
+	result, md, err := h.svc.Next(ctx, planservice.Args{WithShell: req.WithShell, WithAuto: req.WithAuto}, chain, sumChain)
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return

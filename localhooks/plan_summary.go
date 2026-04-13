@@ -37,31 +37,6 @@ import (
 
 const planSummaryHookName = "plan_summary"
 
-// validOutcomes locks the outcome enum per the handover-JSON contract.
-var validOutcomes = map[string]struct{}{
-	"success": {},
-	"partial": {},
-	"blocked": {},
-}
-
-// SummaryDoc is the contract the summarizer chain must emit. Required fields:
-// Outcome (enum), Summary, HandoverForNext. Artifacts and Caveats are optional.
-type SummaryDoc struct {
-	Outcome         string            `json:"outcome"`
-	Summary         string            `json:"summary"`
-	Artifacts       []SummaryArtifact `json:"artifacts"`
-	HandoverForNext string            `json:"handover_for_next"`
-	Caveats         []string          `json:"caveats"`
-}
-
-// SummaryArtifact is one entry in SummaryDoc.Artifacts. All fields optional
-// individually; a well-formed entry typically has at least Kind and Ref.
-type SummaryArtifact struct {
-	Kind string `json:"kind"`
-	Ref  string `json:"ref"`
-	Note string `json:"note"`
-}
-
 // PlanSummaryHook is registered under the "plan_summary" hook name and dispatches
 // to the persist/fallback tools compiled into the per-step summarizer subgraph.
 type PlanSummaryHook struct {
@@ -108,7 +83,7 @@ func (h *PlanSummaryHook) persist(ctx context.Context, input any) (any, taskengi
 		return "invalid", taskengine.DataTypeString, nil
 	}
 
-	var doc SummaryDoc
+	var doc planstore.SummaryDoc
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		return "invalid", taskengine.DataTypeString, nil
 	}
@@ -222,11 +197,11 @@ func stripStepDoneMarker(s string) string {
 
 // validateSummaryDoc enforces the locked contract: outcome must be in enum,
 // summary and handover_for_next must be non-empty.
-func validateSummaryDoc(d *SummaryDoc) bool {
+func validateSummaryDoc(d *planstore.SummaryDoc) bool {
 	if d == nil {
 		return false
 	}
-	if _, ok := validOutcomes[d.Outcome]; !ok {
+	if _, ok := planstore.ValidOutcomes()[d.Outcome]; !ok {
 		return false
 	}
 	if strings.TrimSpace(d.Summary) == "" {

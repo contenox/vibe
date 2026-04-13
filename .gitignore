@@ -302,6 +302,8 @@ docs/openapi.json
 docs/openapi.yaml
 docs/api-reference.md
 docs/openapi.html
+tools/docs/openapi.json
+tools/docs/openapi.yaml
 # Embedded copy of docs/openapi.json (produced by `make docs-gen`; do not commit)
 internal/openapidocs/openapi.json
 /contenox

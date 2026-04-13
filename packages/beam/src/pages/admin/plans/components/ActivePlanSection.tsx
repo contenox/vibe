@@ -44,6 +44,7 @@ export default function ActivePlanSection({
 }: Props) {
   const { t } = useTranslation();
   const [executorChainId, setExecutorChainId] = useState('');
+  const [summarizerChainId, setSummarizerChainId] = useState('chain-step-summarizer');
   const [replanChainId, setReplanChainId] = useState('');
   const [withShell, setWithShell] = useState(false);
   const [withAuto, setWithAuto] = useState(false);
@@ -65,10 +66,15 @@ export default function ActivePlanSection({
 
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!executorChainId) return;
+    if (!executorChainId || !summarizerChainId) return;
     setLastMarkdown(null);
     nextMutation.mutate(
-      { executor_chain_id: executorChainId, with_shell: withShell, with_auto: withAuto },
+      {
+        executor_chain_id: executorChainId,
+        summarizer_chain_id: summarizerChainId,
+        with_shell: withShell,
+        with_auto: withAuto,
+      },
       {
         onSuccess: data => {
           setLastMarkdown(data.markdown);
@@ -79,12 +85,13 @@ export default function ActivePlanSection({
 
   const handleRunCompiled = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!executorChainId) return;
+    if (!executorChainId || !summarizerChainId) return;
     setRunCompiledOutput(null);
     const cid = compiledChainId.trim() || 'compiled-active-beam';
     runCompiledMutation.mutate(
       {
         executor_chain_id: executorChainId,
+        summarizer_chain_id: summarizerChainId,
         chain_id: cid,
         write_path: writePathCompiled.trim() || undefined,
       },
@@ -160,7 +167,7 @@ export default function ActivePlanSection({
         variant="surface"
         error={nextMutation.isError ? nextMutation.error?.message : undefined}
         actions={
-          <Button type="submit" variant="primary" disabled={!executorChainId || busy}>
+          <Button type="submit" variant="primary" disabled={!executorChainId || !summarizerChainId || busy}>
             {t('plans.next_submit')}
           </Button>
         }
@@ -170,6 +177,15 @@ export default function ActivePlanSection({
             options={chainOptions}
             value={executorChainId}
             onChange={e => setExecutorChainId(e.target.value)}
+            disabled={chainsLoading || chainPaths.length === 0}
+            className="max-w-xl"
+          />
+        </FormField>
+        <FormField label={t('plans.summarizer_chain_label')}>
+          <Select
+            options={[{ value: '', label: t('plans.select_summarizer_chain') }, ...chainPaths.map(p => ({ value: p, label: p }))]}
+            value={summarizerChainId}
+            onChange={e => setSummarizerChainId(e.target.value)}
             disabled={chainsLoading || chainPaths.length === 0}
             className="max-w-xl"
           />

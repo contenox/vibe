@@ -23,6 +23,9 @@ func (s *Service) sendBuildTurn(ctx context.Context, in TurnInput) (*TurnResult,
 	if strings.TrimSpace(in.ExplicitChainRef) == "" {
 		return nil, fmt.Errorf("chainId query parameter is required for build mode")
 	}
+	if strings.TrimSpace(in.SummarizerChainRef) == "" {
+		return nil, fmt.Errorf("summarizerChainId query parameter is required for build mode")
+	}
 
 	now := time.Now().UTC()
 	userMsg := strings.TrimSpace(in.Message)
@@ -80,7 +83,7 @@ func (s *Service) sendBuildTurn(ctx context.Context, in TurnInput) (*TurnResult,
 	sum := sha256.Sum256([]byte(in.SessionID))
 	compiledID := "compiled-build-" + hex.EncodeToString(sum[:])[:16]
 
-	res, err := plancompile.RunActiveCompiled(execCtx, s.planService, s.chainService, s.taskService, in.ExplicitChainRef, compiledID, "", nil, nil)
+	res, err := plancompile.RunActiveCompiled(execCtx, s.planService, s.chainService, s.taskService, in.ExplicitChainRef, in.SummarizerChainRef, compiledID, "", nil, nil)
 	if err != nil {
 		return nil, err
 	}

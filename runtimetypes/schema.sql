@@ -162,16 +162,26 @@ ALTER TABLE plans ADD COLUMN IF NOT EXISTS compiled_chain_id VARCHAR(255);
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS compile_executor_chain_id VARCHAR(255);
 
 CREATE TABLE IF NOT EXISTS plan_steps (
-    id               VARCHAR(255) PRIMARY KEY,
-    plan_id          VARCHAR(255) NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
-    ordinal          INT          NOT NULL,
-    description      TEXT         NOT NULL,
-    status           VARCHAR(50)  NOT NULL DEFAULT 'pending',
-    execution_result TEXT         NOT NULL DEFAULT '',
-    executed_at      TIMESTAMP,
+    id                    VARCHAR(255) PRIMARY KEY,
+    plan_id               VARCHAR(255) NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    ordinal               INT          NOT NULL,
+    description           TEXT         NOT NULL,
+    status                VARCHAR(50)  NOT NULL DEFAULT 'pending',
+    execution_result      TEXT         NOT NULL DEFAULT '',
+    executed_at           TIMESTAMP,
+    summary               TEXT,
+    chat_history_json     TEXT,
+    summary_error         TEXT,
+    last_failure_summary  TEXT,
     UNIQUE (plan_id, ordinal)
 );
 CREATE INDEX IF NOT EXISTS idx_plan_steps_plan_id ON plan_steps(plan_id);
+
+-- plan_steps: typed-handover columns for existing DBs (see planstore/summary.go).
+ALTER TABLE plan_steps ADD COLUMN IF NOT EXISTS summary              TEXT;
+ALTER TABLE plan_steps ADD COLUMN IF NOT EXISTS chat_history_json    TEXT;
+ALTER TABLE plan_steps ADD COLUMN IF NOT EXISTS summary_error        TEXT;
+ALTER TABLE plan_steps ADD COLUMN IF NOT EXISTS last_failure_summary TEXT;
 
 CREATE TABLE IF NOT EXISTS terminal_sessions (
     id VARCHAR(255) PRIMARY KEY,

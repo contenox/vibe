@@ -34,8 +34,11 @@ type Service interface {
 	// Replan replaces remaining pending steps using plannerChain.
 	Replan(ctx context.Context, plannerChain *taskengine.TaskChainDefinition) ([]*planstore.PlanStep, string, error)
 
-	// Next executes the next pending step using executorChain.
-	Next(ctx context.Context, args Args, executorChain *taskengine.TaskChainDefinition) (string, string, error)
+	// Next executes the next pending step using executorChain + summarizerChain.
+	// The summarizer runs graph-natively as the post-executor subgraph compiled
+	// by plancompile.Compile; it produces the typed JSON handover that the next
+	// step reads via {{var:previous_output}} / {{var:previous_handover}} / etc.
+	Next(ctx context.Context, args Args, executorChain, summarizerChain *taskengine.TaskChainDefinition) (string, string, error)
 
 	// Retry puts a failed/skipped step back to pending (ordinal is 1-based).
 	Retry(ctx context.Context, ordinal int) (string, error)
@@ -185,40 +188,41 @@ func parsePlannerJSONRaw(raw string) ([]string, error) {
 	return nil, fmt.Errorf("plannerChain output is not a JSON string array: %w (raw: %.500s)", arrErr, raw)
 }
 
-func previousStepOutput(steps []*planstore.PlanStep, pendingOrdinal int) string {
-	if pendingOrdinal <= 1 {
-		return ""
-	}
-	want := pendingOrdinal - 1
-	for _, st := range steps {
-		if st.Ordinal == want {
-			return strings.TrimSpace(st.ExecutionResult)
-		}
-	}
-	return ""
-}
-
-// executorCompileCacheKey combines the executor chain id with a hash of the full executor JSON so
-// edits to token_limit, tasks, or hook_policies invalidate cached compiled plans (same id was
-// previously reused forever).
-func executorCompileCacheKey(ex *taskengine.TaskChainDefinition) (string, error) {
-	if ex == nil {
+// compileCacheKey combines the executor + summarizer chain ids with a hash of
+// each chain's full JSON so edits to token_limit, tasks, hook_policies, or
+// summarizer topology invalidate cached compiled plans. The key is persisted
+// in plan.compile_executor_chain_id (column kept for backwards compatibility;
+// it now holds the combined cache key, not just the executor id).
+func compileCacheKey(executor, summarizer *taskengine.TaskChainDefinition) (string, error) {
+	if executor == nil {
 		return "", fmt.Errorf("executor chain is nil")
 	}
-	id := strings.TrimSpace(ex.ID)
-	if id == "" {
+	if summarizer == nil {
+		return "", fmt.Errorf("summarizer chain is nil")
+	}
+	exID := strings.TrimSpace(executor.ID)
+	if exID == "" {
 		return "", fmt.Errorf("executorChain id is required for compile cache")
 	}
-	raw, err := json.Marshal(ex)
+	sumID := strings.TrimSpace(summarizer.ID)
+	if sumID == "" {
+		return "", fmt.Errorf("summarizerChain id is required for compile cache")
+	}
+	exRaw, err := json.Marshal(executor)
 	if err != nil {
 		return "", fmt.Errorf("executor chain marshal: %w", err)
 	}
-	sum := sha256.Sum256(raw)
-	return id + ":" + hex.EncodeToString(sum[:12]), nil
+	sumRaw, err := json.Marshal(summarizer)
+	if err != nil {
+		return "", fmt.Errorf("summarizer chain marshal: %w", err)
+	}
+	exSum := sha256.Sum256(exRaw)
+	sumSum := sha256.Sum256(sumRaw)
+	return exID + ":" + hex.EncodeToString(exSum[:12]) + "|" + sumID + ":" + hex.EncodeToString(sumSum[:12]), nil
 }
 
-func (s *service) getOrCompileChain(ctx context.Context, plan *planstore.Plan, steps []*planstore.PlanStep, executor *taskengine.TaskChainDefinition, executorCacheKey string) (*taskengine.TaskChainDefinition, error) {
-	if plan.CompiledChainJSON != "" && plan.CompileExecutorChainID == executorCacheKey {
+func (s *service) getOrCompileChain(ctx context.Context, plan *planstore.Plan, steps []*planstore.PlanStep, executor, summarizer *taskengine.TaskChainDefinition, cacheKey string) (*taskengine.TaskChainDefinition, error) {
+	if plan.CompiledChainJSON != "" && plan.CompileExecutorChainID == cacheKey {
 		var c taskengine.TaskChainDefinition
 		if err := json.Unmarshal([]byte(plan.CompiledChainJSON), &c); err == nil && c.ID != "" && len(c.Tasks) > 0 {
 			return &c, nil
@@ -230,7 +234,7 @@ func (s *service) getOrCompileChain(ctx context.Context, plan *planstore.Plan, s
 		return nil, fmt.Errorf("parse plan markdown for compile: %w", err)
 	}
 	compiledID := plan.ID + "-compiled"
-	compiled, err := plancompile.Compile(executor, compiledID, parsed)
+	compiled, err := plancompile.Compile(executor, summarizer, compiledID, parsed)
 	if err != nil {
 		return nil, err
 	}
@@ -239,10 +243,37 @@ func (s *service) getOrCompileChain(ctx context.Context, plan *planstore.Plan, s
 		return nil, err
 	}
 	st := planstore.New(s.db.WithoutTransaction())
-	if err := st.UpdatePlanCompiledChain(ctx, plan.ID, string(b), compiledID, executorCacheKey); err != nil {
+	if err := st.UpdatePlanCompiledChain(ctx, plan.ID, string(b), compiledID, cacheKey); err != nil {
 		return nil, err
 	}
 	return compiled, nil
+}
+
+// injectSummarizerModelDefault ensures {{var:summarizer_model}} is set in the
+// overlay so the compiled summarizer task's execute_config.model macro never
+// errors with "template var not set" when the caller didn't explicitly opt
+// into a separate summarizer model. If already present on ctx (caller set it
+// explicitly), we respect it; otherwise we copy {{var:model}} as the default.
+func injectSummarizerModelDefault(ctx context.Context, overlay map[string]string) {
+	if overlay == nil {
+		return
+	}
+	if _, already := overlay["summarizer_model"]; already {
+		return
+	}
+	if existing, err := taskengine.TemplateVarsFromContext(ctx); err == nil && existing != nil {
+		if v, ok := existing["summarizer_model"]; ok && v != "" {
+			overlay["summarizer_model"] = v
+			return
+		}
+		if v, ok := existing["model"]; ok && v != "" {
+			overlay["summarizer_model"] = v
+			return
+		}
+	}
+	if v, ok := overlay["model"]; ok && v != "" {
+		overlay["summarizer_model"] = v
+	}
 }
 
 func (s *service) abortNextWithFailure(ctx context.Context, plan *planstore.Plan, pending *planstore.PlanStep, cause error) (string, string, error) {
@@ -482,11 +513,14 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 	return newSteps, md, nil
 }
 
-func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine.TaskChainDefinition) (string, string, error) {
+func (s *service) Next(ctx context.Context, args Args, executorChain, summarizerChain *taskengine.TaskChainDefinition) (string, string, error) {
 	if executorChain == nil {
 		return "", "", fmt.Errorf("executorChain is required")
 	}
-	executorCacheKey, err := executorCompileCacheKey(executorChain)
+	if summarizerChain == nil {
+		return "", "", fmt.Errorf("summarizerChain is required")
+	}
+	cacheKey, err := compileCacheKey(executorChain, summarizerChain)
 	if err != nil {
 		return "", "", err
 	}
@@ -517,7 +551,7 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 		return "", "", err
 	}
 
-	compiled, err := s.getOrCompileChain(ctx, plan, steps, executorChain, executorCacheKey)
+	compiled, err := s.getOrCompileChain(ctx, plan, steps, executorChain, summarizerChain, cacheKey)
 	if err != nil {
 		return s.abortNextWithFailure(ctx, plan, pending, err)
 	}
@@ -531,7 +565,15 @@ func (s *service) Next(ctx context.Context, args Args, executorChain *taskengine
 	if reqID, ok := ctx.Value(libtracker.ContextKeyRequestID).(string); ok && reqID != "" {
 		overlay["request_id"] = reqID
 	}
+	// summarizer_model defaults to {{var:model}} when the caller did not set it
+	// explicitly, so operators can opt into a cheaper/faster model for summary
+	// work without forcing every caller to know about the new var.
+	injectSummarizerModelDefault(ctx, overlay)
 	execCtx := taskengine.MergeTemplateVars(ctx, overlay)
+	// Plan-step identity flows via ctx to the plan_summary hook so it knows
+	// which DB row to write (identity chosen at ClaimNextPendingStep time,
+	// not at plancompile time; cannot live in compiled chain JSON).
+	execCtx = taskengine.WithPlanStepContext(execCtx, plan.ID, pending.ID)
 	if !args.WithShell {
 		execCtx = taskengine.WithRuntimeHookAllowlist(execCtx, []string{"*", "!local_shell"})
 	}
@@ -599,6 +641,13 @@ func (s *service) Retry(ctx context.Context, ordinal int) (string, error) {
 	}
 	defer rTx()
 	txSt := planstore.New(tx)
+	// Preserve the failed attempt's summary (or ExecutionResult fallback) as
+	// LastFailureSummary so the re-run's summarizer can see why the prior try
+	// failed. Matches the repair_js pattern in the enterprise state machine:
+	// prior-attempt context feeds the repair attempt.
+	if err := txSt.MoveSummaryToLastFailure(ctx, target.ID); err != nil {
+		return "", err
+	}
 	if err := txSt.UpdatePlanStepStatus(ctx, target.ID, planstore.StepStatusPending, ""); err != nil {
 		return "", err
 	}

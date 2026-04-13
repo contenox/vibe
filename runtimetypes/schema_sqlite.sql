@@ -162,8 +162,12 @@ CREATE TABLE IF NOT EXISTS plan_steps (
     ordinal INTEGER NOT NULL,
     description TEXT NOT NULL,
     status VARCHAR(50) DEFAULT 'pending', -- pending | completed | failed | skipped
-    execution_result TEXT,                -- summary / error / full output
+    execution_result TEXT,                -- legacy single-string fallback; superseded by summary JSON
     executed_at TIMESTAMP,
+    summary TEXT,                         -- planstore.SummaryDoc JSON; written by plan_summary persist hook
+    chat_history_json TEXT,               -- raw executor ChatHistory (debug + Retry context)
+    summary_error TEXT,                   -- populated by plan_summary fallback when both validation attempts failed
+    last_failure_summary TEXT,            -- prior attempt's Summary/ExecutionResult, moved here by Retry
     UNIQUE(plan_id, ordinal)
 );
 
@@ -243,6 +247,13 @@ ALTER TABLE mcp_servers ADD COLUMN inject_params_json  TEXT NOT NULL DEFAULT '{}
 ALTER TABLE plans ADD COLUMN compiled_chain_json TEXT;
 ALTER TABLE plans ADD COLUMN compiled_chain_id VARCHAR(255);
 ALTER TABLE plans ADD COLUMN compile_executor_chain_id VARCHAR(255);
+
+-- plan_steps: typed-handover columns (planstore.SummaryDoc JSON + debug + Retry context).
+-- See planstore/summary.go for the schema and localhooks.PlanSummaryHook for the writers.
+ALTER TABLE plan_steps ADD COLUMN summary              TEXT;
+ALTER TABLE plan_steps ADD COLUMN chat_history_json    TEXT;
+ALTER TABLE plan_steps ADD COLUMN summary_error        TEXT;
+ALTER TABLE plan_steps ADD COLUMN last_failure_summary TEXT;
 
 ALTER TABLE terminal_sessions ADD COLUMN workspace_id VARCHAR(255);
 

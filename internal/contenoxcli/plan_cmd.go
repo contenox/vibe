@@ -335,7 +335,7 @@ func runPlanNew(cmd *cobra.Command, args []string) error {
 	})
 	defer stopTaskEvents()
 
-	plannerPath, _, err := ensurePlanChains(cDir)
+	plannerPath, _, _, err := ensurePlanChains(cDir)
 	if err != nil {
 		return fmt.Errorf("failed to ensure plan chains: %w", err)
 	}
@@ -485,7 +485,7 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 	})
 	defer stopTaskEvents()
 
-	_, executorPath, err := ensurePlanChains(cDir)
+	_, executorPath, summarizerPath, err := ensurePlanChains(cDir)
 	if err != nil {
 		return err
 	}
@@ -498,6 +498,17 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := validateExecutorChain(&chain, executorPath); err != nil {
+		return err
+	}
+	sumData, err := os.ReadFile(summarizerPath)
+	if err != nil {
+		return err
+	}
+	var sumChain taskengine.TaskChainDefinition
+	if err := json.Unmarshal(sumData, &sumChain); err != nil {
+		return err
+	}
+	if err := validateSummarizerChain(&sumChain, summarizerPath); err != nil {
 		return err
 	}
 
@@ -540,7 +551,7 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 		// Delegate execution entirely to planservice — it handles DB updates and
 		// markdown sync automatically.
 		args := planservice.Args{WithShell: o.EffectiveEnableLocalExec, WithAuto: isAuto}
-		result, _, execErr := planSvc.Next(execCtx, args, &chain)
+		result, _, execErr := planSvc.Next(execCtx, args, &chain, &sumChain)
 
 		if execErr != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "\nStep failed: %v\n", execErr)
@@ -629,7 +640,7 @@ func runPlanReplan(cmd *cobra.Command, _ []string) error {
 	})
 	defer stopTaskEvents()
 
-	plannerPath, _, err := ensurePlanChains(cDir)
+	plannerPath, _, _, err := ensurePlanChains(cDir)
 	if err != nil {
 		return err
 	}

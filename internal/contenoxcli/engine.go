@@ -21,6 +21,7 @@ import (
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/localhooks"
 	"github.com/contenox/contenox/mcpworker"
+	"github.com/contenox/contenox/planstore"
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/stateservice"
 	"github.com/contenox/contenox/taskengine"
@@ -167,10 +168,11 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 
 	// 8. Local hooks
 	localHooks := map[string]taskengine.HookRepo{
-		"echo":     localhooks.NewEchoHook(),
-		"print":    localhooks.NewPrint(tracker),
-		"webhook":  localhooks.NewWebCaller(),
-		"local_fs": localhooks.NewLocalFSHook(opts.EffectiveLocalExecAllowedDir),
+		"echo":         localhooks.NewEchoHook(),
+		"print":        localhooks.NewPrint(tracker),
+		"webhook":      localhooks.NewWebCaller(),
+		"local_fs":     localhooks.NewLocalFSHook(opts.EffectiveLocalExecAllowedDir),
+		"plan_summary": localhooks.NewPlanSummaryHook(planstore.New(db.WithoutTransaction())),
 	}
 	jsHooks := map[string]taskengine.HookRepo{
 		"echo":    localhooks.NewEchoHook(),

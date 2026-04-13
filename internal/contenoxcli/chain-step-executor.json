@@ -15,7 +15,7 @@
                 "hooks": ["*", "!plan_manager"],
                 "hook_policies": {
                     "local_shell": {
-                        "_allowed_commands": "bash,sh,ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq,touch,mkdir,rm,cp,mv,sed,awk,chmod",
+                        "_allowed_commands": "bash,sh,ls,cat,echo,pwd,which,find,grep,git,go,python,python3,pytest,node,npm,make,cargo,curl,wget,jq,touch,mkdir,rm,cp,mv,sed,awk,chmod",
                         "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
                     },
                     "local_fs": {

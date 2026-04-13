@@ -14,11 +14,14 @@ type TurnInput struct {
 	Message   string
 	// ExplicitChainRef is the chainId query param when set (wins over Mode).
 	ExplicitChainRef string
-	Mode             string
-	Context          *ContextPayload
-	Model            string
-	Provider         string
-	RequestID        string
+	// SummarizerChainRef is required for build-mode turns (they compile a plan DAG
+	// whose per-step terminals feed a summarizer subgraph). Ignored by other modes.
+	SummarizerChainRef string
+	Mode               string
+	Context            *ContextPayload
+	Model              string
+	Provider           string
+	RequestID          string
 }
 
 // ContextPayload mirrors the HTTP body; client artifacts become system messages.

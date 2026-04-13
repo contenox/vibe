@@ -338,7 +338,7 @@ export const api = {
   getActivePlan: () => apiFetch<ActivePlanResponse>('/api/plans/active'),
   createPlan: (body: { goal: string; planner_chain_id: string }) =>
     apiFetch<NewPlanResponse>('/api/plans', options('POST', body)),
-  planNext: (body: { executor_chain_id: string; with_shell?: boolean; with_auto?: boolean }) =>
+  planNext: (body: { executor_chain_id: string; summarizer_chain_id: string; with_shell?: boolean; with_auto?: boolean }) =>
     apiFetch<NextStepResponse>('/api/plans/active/next', options('POST', body)),
   planReplan: (body: { planner_chain_id: string }) =>
     apiFetch<ReplanResponse>('/api/plans/active/replan', options('POST', body)),
@@ -354,11 +354,13 @@ export const api = {
   compilePlan: (body: {
     markdown: string;
     executor_chain_id: string;
+    summarizer_chain_id: string;
     chain_id: string;
     write_path?: string;
   }) => apiFetch<CompilePlanResponse>('/api/plans/compile', options('POST', body)),
   runCompiledActivePlan: (body: {
     executor_chain_id: string;
+    summarizer_chain_id: string;
     chain_id: string;
     write_path?: string;
   }) =>

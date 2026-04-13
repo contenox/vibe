@@ -70,15 +70,19 @@ func (d *activityTrackerDecorator) Replan(ctx context.Context, plannerChain *tas
 	return steps, md, nil
 }
 
-func (d *activityTrackerDecorator) Next(ctx context.Context, args Args, executorChain *taskengine.TaskChainDefinition) (string, string, error) {
+func (d *activityTrackerDecorator) Next(ctx context.Context, args Args, executorChain, summarizerChain *taskengine.TaskChainDefinition) (string, string, error) {
 	execID := ""
 	if executorChain != nil {
 		execID = executorChain.ID
 	}
+	sumID := ""
+	if summarizerChain != nil {
+		sumID = summarizerChain.ID
+	}
 	reportErr, reportChange, end := d.tracker.Start(ctx, "next", "plan_step",
-		"executorChainID", execID, "withShell", args.WithShell, "withAuto", args.WithAuto)
+		"executorChainID", execID, "summarizerChainID", sumID, "withShell", args.WithShell, "withAuto", args.WithAuto)
 	defer end()
-	r1, r2, err := d.svc.Next(ctx, args, executorChain)
+	r1, r2, err := d.svc.Next(ctx, args, executorChain, summarizerChain)
 	if err != nil {
 		reportErr(err)
 		return r1, r2, err

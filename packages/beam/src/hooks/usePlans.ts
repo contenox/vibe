@@ -109,7 +109,7 @@ export function useCreatePlan(): UseMutationResult<
 export function usePlanNext(): UseMutationResult<
   NextStepResponse,
   Error,
-  { executor_chain_id: string; with_shell?: boolean; with_auto?: boolean },
+  { executor_chain_id: string; summarizer_chain_id: string; with_shell?: boolean; with_auto?: boolean },
   unknown
 > {
   const qc = useQueryClient();
@@ -200,7 +200,7 @@ export function useCompilePlan(): UseMutationResult<
 export function useRunCompiledActivePlan(): UseMutationResult<
   RunCompiledActiveResponse,
   Error,
-  { executor_chain_id: string; chain_id: string; write_path?: string },
+  { executor_chain_id: string; summarizer_chain_id: string; chain_id: string; write_path?: string },
   unknown
 > {
   const qc = useQueryClient();

@@ -32,28 +32,33 @@ const planManagerHookName = "plan_manager"
 
 // PlanManagerHook lets the chat LLM orchestrate plans via tool calls.
 type PlanManagerHook struct {
-	db            libdb.DBManager
-	plannerChain  *taskengine.TaskChainDefinition
-	executorChain *taskengine.TaskChainDefinition
-	svc           planservice.Service
-	contenoxDir   string
+	db              libdb.DBManager
+	plannerChain    *taskengine.TaskChainDefinition
+	executorChain   *taskengine.TaskChainDefinition
+	summarizerChain *taskengine.TaskChainDefinition
+	svc             planservice.Service
+	contenoxDir     string
 }
 
-// NewPlanManagerHook creates a PlanManagerHook.
+// NewPlanManagerHook creates a PlanManagerHook. The summarizer chain is the
+// same one planservice.Next uses at the CLI/HTTP layer — the hook must be
+// constructed with it so run_next_step produces typed-JSON handovers.
 func NewPlanManagerHook(
 	db libdb.DBManager,
 	plannerChain *taskengine.TaskChainDefinition,
 	executorChain *taskengine.TaskChainDefinition,
+	summarizerChain *taskengine.TaskChainDefinition,
 	engine execservice.TasksEnvService,
 	contenoxDir string,
 ) taskengine.HookRepo {
 	vfs := vfsservice.NewLocalFS(filepath.Join(contenoxDir, "plans"))
 	return &PlanManagerHook{
-		db:            db,
-		plannerChain:  plannerChain,
-		executorChain: executorChain,
-		contenoxDir:   contenoxDir,
-		svc:           planservice.New(db, engine, vfs),
+		db:              db,
+		plannerChain:    plannerChain,
+		executorChain:   executorChain,
+		summarizerChain: summarizerChain,
+		contenoxDir:     contenoxDir,
+		svc:             planservice.New(db, engine, vfs),
 	}
 }
 
@@ -140,7 +145,7 @@ func (h *PlanManagerHook) runNextStep(ctx context.Context) (any, taskengine.Data
 		return `{"status":"done","message":"no pending steps remaining"}`, taskengine.DataTypeString, nil
 	}
 
-	result, _, execErr := h.svc.Next(ctx, planservice.Args{}, h.executorChain)
+	result, _, execErr := h.svc.Next(ctx, planservice.Args{}, h.executorChain, h.summarizerChain)
 
 	status := "completed"
 	if execErr != nil {
