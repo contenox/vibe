@@ -25,7 +25,7 @@ func (s *stubPlanSvc) New(context.Context, string, *taskengine.TaskChainDefiniti
 func (s *stubPlanSvc) Replan(context.Context, *taskengine.TaskChainDefinition) ([]*planstore.PlanStep, string, error) {
 	return nil, "", nil
 }
-func (s *stubPlanSvc) Next(context.Context, planservice.Args, *taskengine.TaskChainDefinition) (string, string, error) {
+func (s *stubPlanSvc) Next(context.Context, planservice.Args, *taskengine.TaskChainDefinition, *taskengine.TaskChainDefinition) (string, string, error) {
 	return "", "", nil
 }
 func (s *stubPlanSvc) Retry(context.Context, int) (string, error) { return "", nil }
