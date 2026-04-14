@@ -559,6 +559,30 @@ export type FormTask = Partial<ChainTask> & {
   transition: TaskTransition;
 };
 
+// RetryPolicy mirrors taskengine/llmretry.RetryPolicy. Durations are expressed
+// as Go duration strings ("500ms", "30s", "2m"); the backend also accepts
+// nanoseconds as numbers but this editor writes strings for readability.
+export interface RetryPolicy {
+  max_attempts?: number;
+  initial_backoff?: string;
+  max_backoff?: string;
+  jitter?: number;
+  rate_limit_min_wait?: string;
+  fallback_model_id?: string;
+  fallback_after?: number;
+}
+
+// CompactPolicy mirrors taskengine/compact.Policy. Controls mid-run conversation
+// compaction on the executor's chat_completion task.
+export interface CompactPolicy {
+  trigger_fraction?: number;
+  keep_recent?: number;
+  model?: string;
+  provider?: string;
+  max_failures?: number;
+  min_replaced_messages?: number;
+}
+
 export interface ExecuteConfig {
   model?: string;
   models?: string[];
@@ -568,6 +592,19 @@ export interface ExecuteConfig {
   hooks?: string[];
   hide_tools?: string[];
   pass_clients_tools?: boolean;
+  // hook_policies maps hook name → (policy key → value). Free-form; edited as
+  // a collapsible JSON block in the chain editor when present.
+  hook_policies?: Record<string, Record<string, string>>;
+  // think: "", "low", "medium", "high", or "true" / "false" — provider-gated.
+  think?: string;
+  // shift: allow the context window to slide on overflow instead of erroring.
+  shift?: boolean;
+  // retry_policy: classified retry/backoff + optional fallback model.
+  // See taskengine/llmretry.RetryPolicy.
+  retry_policy?: RetryPolicy;
+  // compact_policy: mid-run conversation compaction.
+  // See taskengine/compact.Policy.
+  compact_policy?: CompactPolicy;
 }
 
 export interface ChainDefinition {

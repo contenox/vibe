@@ -186,11 +186,41 @@ func TestLocalFSHook(t *testing.T) {
 
 	t.Run("maxReadBytesUnlimited", func(t *testing.T) {
 		ctxUnlimited := taskengine.WithHookArgs(ctx, localFSHookName, map[string]string{
-			"_max_read_bytes": "-1",
+			"_max_read_bytes":   "-1",
+			"_max_output_bytes": "-1",
 		})
 		args := map[string]any{"path": "big.bin"}
 		hookCall := &taskengine.HookCall{ToolName: "read_file"}
 		_, _, err := h.Exec(ctxUnlimited, now, args, false, hookCall)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("maxOutputBytesRejectsOversizedResult", func(t *testing.T) {
+		ctxSmallOut := taskengine.WithHookArgs(ctx, localFSHookName, map[string]string{
+			"_max_read_bytes":   "-1",
+			"_max_output_bytes": "64",
+		})
+		args := map[string]any{"path": "big.bin"}
+		hookCall := &taskengine.HookCall{ToolName: "read_file"}
+		_, _, err := h.Exec(ctxSmallOut, now, args, false, hookCall)
+		if err == nil {
+			t.Fatal("expected error when tool output exceeds _max_output_bytes")
+		}
+		if !strings.Contains(err.Error(), "read_file output") || !strings.Contains(err.Error(), "max") {
+			t.Fatalf("expected output limit hint: %v", err)
+		}
+	})
+
+	t.Run("maxOutputBytesUnlimited", func(t *testing.T) {
+		ctxBoth := taskengine.WithHookArgs(ctx, localFSHookName, map[string]string{
+			"_max_read_bytes":   "-1",
+			"_max_output_bytes": "-1",
+		})
+		args := map[string]any{"path": "big.bin"}
+		hookCall := &taskengine.HookCall{ToolName: "read_file"}
+		_, _, err := h.Exec(ctxBoth, now, args, false, hookCall)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -228,6 +258,101 @@ func TestLocalFSHook(t *testing.T) {
 		statStr := res.(string)
 		if !strings.Contains(statStr, "\"name\":\"test.txt\"") {
 			t.Errorf("unexpected stat output: %q", statStr)
+		}
+	})
+
+	t.Run("grepLineRange", func(t *testing.T) {
+		args := map[string]any{
+			"path":        "test.txt",
+			"pattern":     "line",
+			"start_line":  float64(2),
+			"end_line":    float64(2),
+		}
+		hookCall := &taskengine.HookCall{ToolName: "grep"}
+		res, _, err := h.Exec(ctx, now, args, false, hookCall)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(res.(string), "2: line 2") {
+			t.Fatalf("expected line 2 only: %q", res)
+		}
+	})
+
+	t.Run("grepRegex", func(t *testing.T) {
+		args := map[string]any{
+			"path":    "test.txt",
+			"pattern": `^line \d$`,
+			"regex":   true,
+		}
+		hookCall := &taskengine.HookCall{ToolName: "grep"}
+		res, _, err := h.Exec(ctx, now, args, false, hookCall)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := res.(string)
+		if !strings.Contains(s, "2: line 2") || strings.Contains(s, "modified") {
+			t.Fatalf("unexpected regex grep: %q", s)
+		}
+	})
+
+	t.Run("grepInvalidRegex", func(t *testing.T) {
+		args := map[string]any{
+			"path":    "test.txt",
+			"pattern": "(",
+			"regex":   true,
+		}
+		hookCall := &taskengine.HookCall{ToolName: "grep"}
+		_, _, err := h.Exec(ctx, now, args, false, hookCall)
+		if err == nil {
+			t.Fatal("expected invalid regex error")
+		}
+	})
+
+	t.Run("grepMaxMatches", func(t *testing.T) {
+		ctxLim := taskengine.WithHookArgs(ctx, localFSHookName, map[string]string{
+			"_max_grep_matches": "1",
+		})
+		args := map[string]any{
+			"path":    "test.txt",
+			"pattern": "e",
+		}
+		hookCall := &taskengine.HookCall{ToolName: "grep"}
+		_, _, err := h.Exec(ctxLim, now, args, false, hookCall)
+		if err == nil {
+			t.Fatal("expected max grep matches error")
+		}
+		if !strings.Contains(err.Error(), "_max_grep_matches") {
+			t.Fatalf("expected policy hint: %v", err)
+		}
+	})
+
+	t.Run("listDirRecursive", func(t *testing.T) {
+		_ = os.MkdirAll(filepath.Join(tempDir, "walktree/sub"), 0755)
+		if err := os.WriteFile(filepath.Join(tempDir, "walktree/sub/leaf.txt"), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		args := map[string]any{
+			"path":        "walktree",
+			"recursive":   true,
+			"max_depth":   float64(3),
+		}
+		hookCall := &taskengine.HookCall{ToolName: "list_dir"}
+		res, _, err := h.Exec(ctx, now, args, false, hookCall)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := res.(string)
+		if !strings.Contains(s, "walktree/sub/") || !strings.Contains(s, "walktree/sub/leaf.txt") {
+			t.Fatalf("expected nested paths: %q", s)
+		}
+	})
+
+	t.Run("listDirMustBeDirectory", func(t *testing.T) {
+		args := map[string]any{"path": "test.txt"}
+		hookCall := &taskengine.HookCall{ToolName: "list_dir"}
+		_, _, err := h.Exec(ctx, now, args, false, hookCall)
+		if err == nil || !strings.Contains(err.Error(), "directory") {
+			t.Fatalf("expected not-a-directory: %v", err)
 		}
 	})
 }

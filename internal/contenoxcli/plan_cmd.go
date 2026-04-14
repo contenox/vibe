@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/contenox/contenox/execservice"
 	libdbexec "github.com/contenox/contenox/libdbexec"
@@ -22,6 +23,21 @@ import (
 	"github.com/contenox/contenox/vfsservice"
 	"github.com/spf13/cobra"
 )
+
+// planExecDefaultTimeout is used for plan subcommands when the user does not pass
+// contenox --timeout (the global default is short for one-shot runs).
+const planExecDefaultTimeout = 30 * time.Minute
+
+// planCommandTimeout returns the execution budget for plan CLI operations. If the user
+// set --timeout on the root command, that value is used; otherwise planExecDefaultTimeout
+// applies instead of the global defaultTimeout (5m).
+func planCommandTimeout(cmd *cobra.Command) time.Duration {
+	t, _ := cmd.Root().Flags().GetDuration("timeout")
+	if cmd.Root().Flags().Changed("timeout") {
+		return t
+	}
+	return planExecDefaultTimeout
+}
 
 var planCmd = &cobra.Command{
 	Use:   "plan",
@@ -42,15 +58,16 @@ On failure:
 Long runs (monitoring):
   Before: contenox doctor — confirm backend, API keys, and default model/provider.
   During: use contenox --trace plan next … for telemetry on stderr; log the session (e.g. tee plan.log).
-  Timeouts: pass contenox --timeout 25m … so one step cannot hang forever; increase for huge repos.
+  Timeouts: plan subcommands default to 30m per invocation unless you set contenox --timeout (e.g. 2h for huge repos).
   Shell + FS: use plan next --shell and contenox --local-exec-allowed-dir <project-root> so local_shell
   and local_fs policies match your tree.
 
 Chain JSON (under the resolved .contenox directory):
-  chain-planner.json         — planner for 'plan new' (must return a JSON array of step strings)
-  chain-step-executor.json   — executor for 'plan next': one agentic loop per ordinal (chat_completion
-                               ↔ execute_tool_calls until the model stops requesting tools; same
-                               pattern as chain-contenox). Uses {{var:model}} and {{var:provider}}.
+  chain-planner.json              — planner for 'plan new' (must return a JSON array of step strings)
+  chain-step-executor.json        — default executor for 'plan next' (chat ↔ tools loop)
+  chain-step-executor-gated.json — optional post-tool gate (plan next --gate); uses {{var:gate_model}}
+  chain-step-summarizer.json      — per-step summary into planstore
+Plan step seeds also receive {{var:execution_context}} (engine boundary) and {{var:gate_model}} when used.
 'contenox init' writes these files; any plan subcommand refreshes them from built-in defaults.
 To customize them permanently, change the embedded chain definitions in the contenox source tree
 and rebuild, or maintain a fork. Set model/provider via --model, --provider, and
@@ -97,28 +114,32 @@ var planShowCmd = &cobra.Command{
 var planNextCmd = &cobra.Command{
 	Use:   "next",
 	Short: "Execute the next pending step of the active plan.",
-	Long: `Run the next pending step using the LLM step-executor chain (.contenox/chain-step-executor.json).
+	Long: `Run the next pending step using the LLM step-executor chain (.contenox/chain-step-executor.json),
+or chain-step-executor-gated.json when you pass --gate.
 
 Each step runs one agentic subgraph: chat_completion alternates with execute_tool_calls (same
 engine pattern as chain-contenox) until the assistant responds without tool calls, then the subgraph
-ends. The step is marked completed when execution succeeds; use ===STEP_DONE=== in the prompt so
+ends. With --gate, a small model ({{var:gate_model}}, defaulting to the main model) scores each
+tool round before the next chat turn; non-zero aborts the step with a clear error.
+The step is marked completed when execution succeeds; use ===STEP_DONE=== in the prompt so
 the model signals completion.
 
-{{var:model}} and {{var:provider}} in that chain are filled from --model, --provider, and your
-config (e.g. contenox config set default-model). See 'contenox plan' help for chain file paths
-and how to customize them in source.
+{{var:model}}, {{var:provider}}, {{var:summarizer_model}}, {{var:gate_model}}, and {{var:execution_context}}
+are merged for the compiled seed and chains. See 'contenox plan' help for chain file paths.
 
 Use contenox --trace plan next … to stream step telemetry to stderr. For a long unattended run,
-log output: contenox --timeout 30m plan next --auto --shell … 2>&1 | tee plan-run.log
+log output: contenox plan next --auto --shell … 2>&1 | tee plan-run.log   (30m default; add --timeout 2h if needed)
 
 Flags:
   --auto     Continue executing steps until the plan is done or a step fails
   --shell    Enable the local_shell hook so the model can run commands
+  --gate     Use gated executor (post-tool LLM gate; extra cost/latency)
 
 Examples:
   contenox plan next
   contenox plan next --shell             # single step with shell access
-  contenox plan next --auto --shell      # run everything until done`,
+  contenox plan next --auto --shell      # run everything until done
+  contenox plan next --shell --gate      # post-tool gate after each tool round`,
 	Args: cobra.NoArgs,
 	RunE: runPlanNext,
 }
@@ -175,10 +196,32 @@ var planCleanCmd = &cobra.Command{
 	RunE:  runPlanClean,
 }
 
+var planExploreCmd = &cobra.Command{
+	Use:   "explore",
+	Short: "Run the read-only explorer to populate the active plan's RepoContext seed.",
+	Long: `Run chain-plan-explorer.json against the workspace and persist the produced
+RepoContext (typed JSON: languages, entry_points, build/test commands, conventions, key files)
+on the active plan.
+
+The RepoContext is rendered into every step's seed prompt as {{var:repo_context}},
+so steps see concrete file paths and conventions instead of cold-exploring on every run.
+
+The explorer is read-only by contract: only local_fs (and other read-only hooks) are
+allowlisted, and contenox plan explore validates this before running the chain.
+
+Example:
+  contenox plan explore                # explore for the active plan
+  contenox plan new --explore "..."    # explore as part of plan creation`,
+	Args: cobra.NoArgs,
+	RunE: runPlanExplore,
+}
+
 func init() {
-	planCmd.AddCommand(planNewCmd, planListCmd, planShowCmd, planNextCmd, planRetryCmd, planSkipCmd, planReplanCmd, planDeleteCmd, planCleanCmd)
+	planCmd.AddCommand(planNewCmd, planListCmd, planShowCmd, planNextCmd, planRetryCmd, planSkipCmd, planReplanCmd, planDeleteCmd, planCleanCmd, planExploreCmd)
 	planNextCmd.Flags().Bool("auto", false, "Continue executing steps automatically until the plan is done or a step fails")
 	planNextCmd.Flags().Bool("shell", false, "Enable the local_shell hook for this plan step (required for shell-based tasks)")
+	planNextCmd.Flags().Bool("gate", false, "Use chain-step-executor-gated.json: after each tool round, a small model scores whether to continue (extra latency/cost; aborts bad/corrupt tool output)")
+	planNewCmd.Flags().Bool("explore", false, "Also run 'plan explore' on the new plan to seed it with a RepoContext")
 }
 
 // openPlanDB is similar to openSessionDB but for plans.
@@ -198,8 +241,7 @@ func openPlanDB(cmd *cobra.Command) (context.Context, libdbexec.DBManager, strin
 		baseCtx = context.Background()
 	}
 	reqCtx := libtracker.WithNewRequestID(baseCtx)
-	timeout, _ := cmd.Root().Flags().GetDuration("timeout")
-	timeoutCtx, cancel := context.WithTimeout(reqCtx, timeout)
+	timeoutCtx, cancel := context.WithTimeout(reqCtx, planCommandTimeout(cmd))
 	ctx, stop := signal.NotifyContext(timeoutCtx, syscall.SIGINT, syscall.SIGTERM)
 
 	db, err := OpenDBAt(ctx, dbPath)
@@ -370,7 +412,82 @@ func runPlanNew(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Created plan %q with %d steps. Now active.\n", plan.Name, len(steps))
+
+	if explore, _ := cmd.Flags().GetBool("explore"); explore {
+		if err := runExplorerOnPlan(cmd, ctx, db, cDir, engine, o, plan.ID); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "explore failed: %v\n", err)
+			return nil
+		}
+	}
 	return nil
+}
+
+// runExplorerOnPlan is the shared implementation used by 'plan explore' and by
+// 'plan new --explore'. It loads chain-plan-explorer.json from the resolved
+// .contenox dir, validates it, and calls planservice.Explore against planID
+// (empty = active plan).
+func runExplorerOnPlan(
+	cmd *cobra.Command,
+	ctx context.Context,
+	db libdbexec.DBManager,
+	cDir string,
+	engine *Engine,
+	o chatOpts,
+	planID string,
+) error {
+	if _, _, _, err := ensurePlanChains(cDir); err != nil {
+		return fmt.Errorf("failed to ensure plan chains: %w", err)
+	}
+	explorerPath := resolvePlanExplorerPath(cDir)
+	chainData, err := os.ReadFile(explorerPath)
+	if err != nil {
+		return fmt.Errorf("failed to read explorer chain: %w", err)
+	}
+	var explorerChain taskengine.TaskChainDefinition
+	if err := json.Unmarshal(chainData, &explorerChain); err != nil {
+		return fmt.Errorf("failed to parse explorer chain: %w", err)
+	}
+	if err := validatePlanExplorerChain(&explorerChain, explorerPath); err != nil {
+		return err
+	}
+
+	planSvc := buildPlanService(db, engine, cDir)
+	execCtx := execCtxForPlan(ctx, o, explorerChain.ID)
+
+	fmt.Fprintln(cmd.OutOrStdout(), "Exploring workspace (read-only)...")
+	rc, err := planSvc.Explore(execCtx, planID, &explorerChain)
+	if err != nil {
+		return fmt.Errorf("explore failed: %w", err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "RepoContext seeded: languages=%v key_files=%d build_commands=%d test_commands=%d\n",
+		rc.Languages, len(rc.KeyFiles), len(rc.BuildCommands), len(rc.TestCommands))
+	return nil
+}
+
+func runPlanExplore(cmd *cobra.Command, _ []string) error {
+	ctx, db, cDir, cleanup, err := openPlanDB(cmd)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	o := buildPlanOpts(cmd, db, "")
+	engine, err := BuildEngine(ctx, db, o)
+	if err != nil {
+		return fmt.Errorf("failed to build engine: %w", err)
+	}
+	defer engine.Stop()
+
+	if err := PreflightLLMSetup(cmd.ErrOrStderr(), engine.SetupCheck); err != nil {
+		return err
+	}
+	stopTaskEvents := startCLITaskEventStream(ctx, engine, cmd.ErrOrStderr(), cliTaskEventRenderOptions{
+		Trace:        o.EffectiveTracing,
+		ShowThinking: true,
+	})
+	defer stopTaskEvents()
+
+	return runExplorerOnPlan(cmd, ctx, db, cDir, engine, o, "")
 }
 
 func runPlanList(cmd *cobra.Command, _ []string) error {
@@ -485,9 +602,14 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 	})
 	defer stopTaskEvents()
 
-	_, executorPath, summarizerPath, err := ensurePlanChains(cDir)
+	plannerPath, defaultExecutorPath, summarizerPath, err := ensurePlanChains(cDir)
 	if err != nil {
 		return err
+	}
+	useGate, _ := cmd.Flags().GetBool("gate")
+	executorPath := defaultExecutorPath
+	if useGate {
+		executorPath = filepath.Join(cDir, "chain-step-executor-gated.json")
 	}
 	chainData, err := os.ReadFile(executorPath)
 	if err != nil {
@@ -511,6 +633,22 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 	if err := validateSummarizerChain(&sumChain, summarizerPath); err != nil {
 		return err
 	}
+	// Lazily-loaded planner chain for auto-replan-on-capacity. Only parsed
+	// when a capacity-class failure actually triggers a replan.
+	loadPlannerChain := func() (*taskengine.TaskChainDefinition, error) {
+		raw, rerr := os.ReadFile(plannerPath)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var pc taskengine.TaskChainDefinition
+		if jerr := json.Unmarshal(raw, &pc); jerr != nil {
+			return nil, jerr
+		}
+		if verr := validatePlannerChain(&pc, plannerPath); verr != nil {
+			return nil, verr
+		}
+		return &pc, nil
+	}
 
 	planSvc := buildPlanService(db, engine, cDir)
 	execCtx := execCtxForPlan(ctx, o, chain.ID)
@@ -519,6 +657,9 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 	// Active() returns nil — same as "never had a plan". Track that we ran at least one
 	// successful Next so --auto can exit successfully instead of "no active plan".
 	ranStepOK := false
+	// autoReplannedOrdinals caps auto-replan-on-capacity to one attempt per
+	// step ordinal so a persistently-too-big step cannot loop forever.
+	autoReplannedOrdinals := map[int]bool{}
 
 	for {
 		// Peek at the next pending step for display before execution.
@@ -557,6 +698,44 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(cmd.ErrOrStderr(), "\nStep failed: %v\n", execErr)
 			if result != "" {
 				fmt.Fprintf(cmd.ErrOrStderr(), "\nStep output:\n%s\n", result)
+			}
+			// Auto-replan on capacity failure: when a step blew its context /
+			// token budget under --auto, ask the planner to split it into
+			// smaller substeps once. Limited to one attempt per ordinal to
+			// prevent oscillation. Other failure classes surface to the user
+			// because they are not a "step too big" problem.
+			if isAuto && !autoReplannedOrdinals[nextStep.Ordinal] {
+				_, freshSteps, aerr := planSvc.Active(ctx)
+				if aerr == nil {
+					var failed *planstore.PlanStep
+					for _, s := range freshSteps {
+						if s.ID == nextStep.ID {
+							failed = s
+							break
+						}
+					}
+					if failed != nil && failed.FailureClass == planstore.FailureClassCapacity {
+						pc, perr := loadPlannerChain()
+						if perr != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "auto-replan: planner chain unavailable: %v\n", perr)
+						} else {
+							fmt.Fprintf(cmd.OutOrStdout(), "Auto-replan: step %d failed for capacity reasons; asking planner to split it.\n", nextStep.Ordinal)
+							autoReplannedOrdinals[nextStep.Ordinal] = true
+							replanCtx := execCtxForPlan(ctx, o, pc.ID)
+							_, _, rerr := planSvc.ReplanScoped(replanCtx, planservice.ReplanScope{
+								OnlyOrdinal: nextStep.Ordinal,
+								Hint:        "Split this step into 2-5 smaller substeps. The previous attempt exceeded the model context window.",
+							}, pc)
+							if rerr != nil {
+								fmt.Fprintf(cmd.ErrOrStderr(), "auto-replan failed: %v\n", rerr)
+							} else {
+								// New substeps appended; resume the loop so the
+								// next iteration picks them up as pending work.
+								continue
+							}
+						}
+					}
+				}
 			}
 			fmt.Fprintln(cmd.ErrOrStderr(), "\nStep did not complete successfully.\n"+
 				"  • contenox plan show          → see current status\n"+

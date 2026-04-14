@@ -26,6 +26,7 @@ func InitSchema(ctx context.Context, exec libdbexec.Exec) error {
 			compiled_chain_json          TEXT,
 			compiled_chain_id            VARCHAR(255),
 			compile_executor_chain_id    VARCHAR(255),
+			repo_context_json            TEXT,
 			created_at TIMESTAMP    NOT NULL,
 			updated_at TIMESTAMP    NOT NULL
 		);
@@ -42,6 +43,7 @@ func InitSchema(ctx context.Context, exec libdbexec.Exec) error {
 			chat_history_json     TEXT,
 			summary_error         TEXT,
 			last_failure_summary  TEXT,
+			failure_class         VARCHAR(50),
 			UNIQUE (plan_id, ordinal)
 		);
 
@@ -62,6 +64,7 @@ func migratePlansCompiledColumns(ctx context.Context, exec libdbexec.Exec) error
 		`ALTER TABLE plans ADD COLUMN compiled_chain_json TEXT`,
 		`ALTER TABLE plans ADD COLUMN compiled_chain_id VARCHAR(255)`,
 		`ALTER TABLE plans ADD COLUMN compile_executor_chain_id VARCHAR(255)`,
+		`ALTER TABLE plans ADD COLUMN repo_context_json TEXT`,
 	}
 	for _, q := range stmts {
 		_, err := exec.ExecContext(ctx, q)
@@ -80,6 +83,7 @@ func migratePlanStepSummaryColumns(ctx context.Context, exec libdbexec.Exec) err
 		`ALTER TABLE plan_steps ADD COLUMN chat_history_json TEXT`,
 		`ALTER TABLE plan_steps ADD COLUMN summary_error TEXT`,
 		`ALTER TABLE plan_steps ADD COLUMN last_failure_summary TEXT`,
+		`ALTER TABLE plan_steps ADD COLUMN failure_class VARCHAR(50)`,
 	}
 	for _, q := range stmts {
 		_, err := exec.ExecContext(ctx, q)

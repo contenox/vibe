@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/contenox/contenox/taskengine/compact"
+	"github.com/contenox/contenox/taskengine/llmretry"
 	"gopkg.in/yaml.v3"
 )
 
@@ -277,6 +279,16 @@ type LLMExecutionConfig struct {
 	Think string `yaml:"think,omitempty" json:"think,omitempty" example:"high"`
 	// Shift allows the context window to slide on overflow instead of erroring.
 	Shift bool `yaml:"shift,omitempty" json:"shift,omitempty"`
+	// RetryPolicy wraps the underlying chat/prompt call with classified retry
+	// (rate-limit / server-error / timeout) and an optional model fallback.
+	// Nil or zero-value disables retry — current default. See [llmretry.Do].
+	RetryPolicy *llmretry.RetryPolicy `yaml:"retry_policy,omitempty" json:"retry_policy,omitempty"`
+	// CompactPolicy enables mid-run conversation compaction at the head of a
+	// chat_completion task: when the running ChatHistory exceeds
+	// TriggerFraction * token_limit, older messages are summarized and replaced
+	// with a single synthetic <compact-summary> user message. Nil disables
+	// compaction (current default). See [compact.Maybe].
+	CompactPolicy *compact.Policy `yaml:"compact_policy,omitempty" json:"compact_policy,omitempty"`
 }
 
 // HookCall represents an external integration or side-effect triggered during a task.

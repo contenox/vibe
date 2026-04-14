@@ -16,12 +16,20 @@ var chainPlanner string
 //go:embed chain-step-executor.json
 var chainStepExecutor string
 
+//go:embed chain-step-executor-gated.json
+var chainStepExecutorGated string
+
+//go:embed chain-plan-explorer.json
+var chainPlanExplorer string
+
 //go:embed chain-step-summarizer.json
 var chainStepSummarizer string
 
-// writeEmbeddedPlanChains writes chain-planner.json, chain-step-executor.json, and
-// chain-step-summarizer.json from the same embedded bytes used by the plan subcommands.
-// If overwrite is false, an existing file is left untouched (returns false for that file).
+// writeEmbeddedPlanChains writes chain-planner.json, chain-step-executor.json,
+// chain-step-executor-gated.json, chain-plan-explorer.json, and
+// chain-step-summarizer.json from the same embedded bytes used by the plan
+// subcommands. If overwrite is false, an existing file is left untouched
+// (returns false for that file).
 func writeEmbeddedPlanChains(contenoxDir string, overwrite bool) (plannerPath, executorPath, summarizerPath string, wrotePlanner, wroteExecutor, wroteSummarizer bool, err error) {
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
 		return "", "", "", false, false, false, fmt.Errorf("failed to create config dir: %w", err)
@@ -30,6 +38,8 @@ func writeEmbeddedPlanChains(contenoxDir string, overwrite bool) (plannerPath, e
 	plannerPath = filepath.Join(contenoxDir, "chain-planner.json")
 	executorPath = filepath.Join(contenoxDir, "chain-step-executor.json")
 	summarizerPath = filepath.Join(contenoxDir, "chain-step-summarizer.json")
+	executorGatedPath := filepath.Join(contenoxDir, "chain-step-executor-gated.json")
+	explorerPath := filepath.Join(contenoxDir, "chain-plan-explorer.json")
 
 	writeOne := func(path, content string) (bool, error) {
 		if !overwrite {
@@ -51,6 +61,12 @@ func writeEmbeddedPlanChains(contenoxDir string, overwrite bool) (plannerPath, e
 	if err != nil {
 		return "", "", "", wrotePlanner, false, false, err
 	}
+	if _, werr := writeOne(executorGatedPath, chainStepExecutorGated); werr != nil {
+		return "", "", "", wrotePlanner, wroteExecutor, false, werr
+	}
+	if _, werr := writeOne(explorerPath, chainPlanExplorer); werr != nil {
+		return "", "", "", wrotePlanner, wroteExecutor, false, werr
+	}
 	wroteSummarizer, err = writeOne(summarizerPath, chainStepSummarizer)
 	if err != nil {
 		return "", "", "", wrotePlanner, wroteExecutor, false, err
@@ -58,11 +74,21 @@ func writeEmbeddedPlanChains(contenoxDir string, overwrite bool) (plannerPath, e
 	return plannerPath, executorPath, summarizerPath, wrotePlanner, wroteExecutor, wroteSummarizer, nil
 }
 
-// ensurePlanChains writes the planner, step executor, and step summarizer chains to the
-// contenoxDir (always overwriting). Returns the absolute paths to all three chains.
+// ensurePlanChains writes the planner, step executor, gated executor, plan
+// explorer, and step summarizer chains to the contenoxDir (always overwriting).
+// Returns the absolute paths to the three primary chains (planner, executor,
+// summarizer). The gated executor and plan explorer files are written alongside
+// for use with plan next --gate and plan explore respectively.
 func ensurePlanChains(contenoxDir string) (plannerPath, executorPath, summarizerPath string, err error) {
 	p, e, s, _, _, _, err := writeEmbeddedPlanChains(contenoxDir, true)
 	return p, e, s, err
+}
+
+// resolvePlanExplorerPath returns the on-disk path for chain-plan-explorer.json
+// in the given contenoxDir. The file is written by [writeEmbeddedPlanChains];
+// callers must ensure that has run (e.g. via [ensurePlanChains]) first.
+func resolvePlanExplorerPath(contenoxDir string) string {
+	return filepath.Join(contenoxDir, "chain-plan-explorer.json")
 }
 
 // validatePlannerChain checks that a chain meets the contract required by 'contenox plan new'.
@@ -74,7 +100,8 @@ func validatePlannerChain(chain *taskengine.TaskChainDefinition, path string) er
 		return fmt.Errorf(
 			"planner chain %q has no tasks\n"+
 				"  The planner chain must have at least one task with handler \"chat_completion\".\n"+
-				"  The model output must be a JSON object: {\"steps\": [{\"description\": \"...\"}]}",
+				"  The model output must be a JSON array of step-description strings, e.g.\n"+
+				"  [\"First actionable step\", \"Second actionable step\"]",
 			path,
 		)
 	}
@@ -83,8 +110,8 @@ func validatePlannerChain(chain *taskengine.TaskChainDefinition, path string) er
 		return fmt.Errorf(
 			"planner chain %q: first task %q has handler %q, expected %q\n"+
 				"  'contenox plan new' sends the goal as a user message and expects the chain to return\n"+
-				"  a JSON object: {\"steps\": [{\"description\": \"...\"}]}\n"+
-				"  The first task must be a chat_completion that generates this structure.",
+				"  a JSON array of step-description strings, e.g. [\"step 1\", \"step 2\"].\n"+
+				"  The first task must be a chat_completion that generates this array.",
 			path, first.ID, first.Handler, taskengine.HandleChatCompletion,
 		)
 	}
@@ -204,8 +231,43 @@ func validateSummarizerChain(chain *taskengine.TaskChainDefinition, path string)
 	return nil
 }
 
-// validateAgenticLoopClosure ensures each execute_tool_calls task branches back to its chat task
-// (input_var), matching the engine's standard agentic loop used in chain-contenox.
+// validatePlanExplorerChain checks that a chain meets the contract required by
+// 'contenox plan explore'. The explorer chain must:
+//   - have at least one chat_completion task,
+//   - have an execute_tool_calls task and a "tool-call" branch on the chat,
+//   - close the agentic loop (same as executor),
+//   - declare ONLY read-only hooks (typically local_fs); local_shell is rejected
+//     because exploration is meant to be side-effect free.
+func validatePlanExplorerChain(chain *taskengine.TaskChainDefinition, path string) error {
+	if err := validateExecutorChain(chain, path); err != nil {
+		return err
+	}
+	for _, task := range chain.Tasks {
+		if task.Handler != taskengine.HandleChatCompletion || task.ExecuteConfig == nil {
+			continue
+		}
+		for _, h := range task.ExecuteConfig.Hooks {
+			if strings.TrimSpace(h) == "local_shell" {
+				return fmt.Errorf(
+					"explorer chain %q: task %q allowlists local_shell\n"+
+						"  Exploration must be read-only — restrict hooks to local_fs (and other read-only tools).",
+					path, task.ID,
+				)
+			}
+			if strings.TrimSpace(h) == "*" {
+				return fmt.Errorf(
+					"explorer chain %q: task %q uses wildcard hook %q\n"+
+						"  Exploration must be read-only — list only read-only hook names (e.g. \"local_fs\").",
+					path, task.ID, h,
+				)
+			}
+		}
+	}
+	return nil
+}
+
+// validateAgenticLoopClosure ensures each execute_tool_calls task eventually reaches its chat task
+// (input_var): either directly (chain-contenox) or via one intermediate task (e.g. post-tool gate).
 func validateAgenticLoopClosure(chain *taskengine.TaskChainDefinition, path string) error {
 	for _, task := range chain.Tasks {
 		if task.Handler != taskengine.HandleExecuteToolCalls {
@@ -221,18 +283,36 @@ func validateAgenticLoopClosure(chain *taskengine.TaskChainDefinition, path stri
 		}
 		loops := false
 		for _, b := range task.Transition.Branches {
-			if strings.TrimSpace(b.Goto) == chatID {
+			if toolBranchReturnsToChat(strings.TrimSpace(b.Goto), chatID, chain) {
 				loops = true
 				break
 			}
 		}
 		if !loops {
 			return fmt.Errorf(
-				"executor chain %q: agentic loop not closed — task %q (execute_tool_calls) needs a transition branch with \"goto\": %q\n"+
-					"  After tools run, the chain must return to the chat task (same id as input_var), like chain-contenox run_tools → contenox_chat.",
-				path, task.ID, chatID,
+				"executor chain %q: agentic loop not closed — task %q (execute_tool_calls) must branch to %q\n"+
+					"  or to a task that branches to %q (e.g. a post-tool gate), like chain-contenox run_tools → chat.",
+				path, task.ID, chatID, chatID,
 			)
 		}
 	}
 	return nil
+}
+
+// toolBranchReturnsToChat is true if gotoID is the chat task or some task's branch targets chatID in one step.
+func toolBranchReturnsToChat(gotoID, chatID string, chain *taskengine.TaskChainDefinition) bool {
+	if gotoID == chatID {
+		return true
+	}
+	for _, t := range chain.Tasks {
+		if t.ID != gotoID {
+			continue
+		}
+		for _, b := range t.Transition.Branches {
+			if strings.TrimSpace(b.Goto) == chatID {
+				return true
+			}
+		}
+	}
+	return false
 }

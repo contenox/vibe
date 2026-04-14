@@ -72,9 +72,10 @@ func (c *openAIClient) sendRequest(ctx context.Context, endpoint string, request
 	url := c.baseURL + endpoint
 
 	tracker := c.tracker
-	auth := "***"
-	if len(c.apiKey) > 24 {
-		auth = c.apiKey[:24]
+	// Never log API key material (even a prefix) in activity telemetry — trace logs are not secret-safe.
+	auth := "none"
+	if c.apiKey != "" {
+		auth = "bearer_set"
 	}
 	reportErr, reportChange, end := tracker.Start(
 		ctx,

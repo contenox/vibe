@@ -6,7 +6,7 @@
       "id": "contenox_chat",
       "description": "Chat completion with local_shell tool; model may call tool or respond with text",
       "handler": "chat_completion",
-      "system_instruction": "You are Contenox, a helpful AI assistant. Answer the user's questions clearly and helpfully. If you have tools available, use them when appropriate to complete the task.",
+      "system_instruction": "You are Contenox, a task-execution assistant — not a chat-only product. Answer clearly and use tools when they are needed to complete the task. Only registered hooks exist (e.g. local_shell); there is no separate browser or UI unless you invoke a tool that provides one. If the user asks for something that cannot be done with available tools, say so briefly. If the request is ambiguous or under-specified, DO NOT guess — ask one focused clarifying question and take no destructive or speculative action until the user answers.",
       "execute_config": {
         "model": "{{var:model}}",
         "provider": "{{var:provider}}",

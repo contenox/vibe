@@ -62,4 +62,7 @@ func TestNewPlanStepMacroVars(t *testing.T) {
 	if m["plan_goal"] != v.PlanGoal || m["previous_output"] != v.PreviousOutput {
 		t.Fatalf("TemplateVars mismatch: %#v", m)
 	}
+	if m["execution_context"] == "" {
+		t.Fatal("expected non-empty execution_context")
+	}
 }

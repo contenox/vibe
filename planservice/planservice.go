@@ -22,6 +22,7 @@ import (
 	"github.com/contenox/contenox/plancompile"
 	"github.com/contenox/contenox/planstore"
 	"github.com/contenox/contenox/taskengine"
+	"github.com/contenox/contenox/taskengine/llmretry"
 	"github.com/contenox/contenox/vfsservice"
 	"github.com/google/uuid"
 )
@@ -33,6 +34,11 @@ type Service interface {
 
 	// Replan replaces remaining pending steps using plannerChain.
 	Replan(ctx context.Context, plannerChain *taskengine.TaskChainDefinition) ([]*planstore.PlanStep, string, error)
+
+	// ReplanScoped is the generalized form of Replan: see [ReplanScope].
+	// Setting OnlyOrdinal>0 replaces only that step with substeps (the
+	// targeted step is marked skipped for audit; substeps are appended).
+	ReplanScoped(ctx context.Context, scope ReplanScope, plannerChain *taskengine.TaskChainDefinition) ([]*planstore.PlanStep, string, error)
 
 	// Next executes the next pending step using executorChain + summarizerChain.
 	// The summarizer runs graph-natively as the post-executor subgraph compiled
@@ -63,6 +69,12 @@ type Service interface {
 
 	// Clean removes all completed or archived plans; returns count removed.
 	Clean(ctx context.Context) (int, error)
+
+	// Explore runs explorerChain in read-only mode against the workspace and
+	// persists a typed [planstore.RepoContext] on the active plan (or on
+	// planID when non-empty). The returned RepoContext is also rendered into
+	// future step seed prompts via {{var:repo_context}}.
+	Explore(ctx context.Context, planID string, explorerChain *taskengine.TaskChainDefinition) (*planstore.RepoContext, error)
 }
 
 // Args controls Next execution behaviour.
@@ -114,6 +126,81 @@ func (s *service) activePlan(ctx context.Context) (*planstore.Plan, []*planstore
 	return plan, steps, nil
 }
 
+// Explore runs the read-only explorer chain and persists a typed RepoContext
+// on the target plan (active when planID is empty). Implements [Service.Explore].
+//
+// The chain itself is responsible for restricting tools to read-only via its
+// own execute_config.hooks (see chain-plan-explorer.json + validatePlanExplorerChain).
+// On success the RepoContext is also returned for the caller to display.
+func (s *service) Explore(ctx context.Context, planID string, explorerChain *taskengine.TaskChainDefinition) (*planstore.RepoContext, error) {
+	if explorerChain == nil {
+		return nil, fmt.Errorf("explorer chain is nil")
+	}
+	st := planstore.New(s.db.WithoutTransaction())
+
+	var plan *planstore.Plan
+	var err error
+	if strings.TrimSpace(planID) == "" {
+		plan, err = st.GetActivePlan(ctx)
+		if errors.Is(err, planstore.ErrNotFound) {
+			return nil, fmt.Errorf("no active plan; create one with 'contenox plan new <goal>' before explore")
+		}
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		plan, err = st.GetPlanByID(ctx, planID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Mirror callPlanner: extract the assistant's terminal text from the chain
+	// output regardless of typed shape, then parse as RepoContext JSON.
+	out, outType, _, execErr := s.engine.Execute(ctx, explorerChain, "", taskengine.DataTypeString)
+	if execErr != nil {
+		return nil, fmt.Errorf("explorerChain execute: %w", execErr)
+	}
+	raw := extractTerminalText(out, outType)
+	rc, parseErr := parseRepoContextRaw(raw)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	b, mErr := json.Marshal(rc)
+	if mErr != nil {
+		return nil, fmt.Errorf("marshal repo context: %w", mErr)
+	}
+	if err := st.UpdatePlanRepoContext(ctx, plan.ID, string(b)); err != nil {
+		return nil, fmt.Errorf("persist repo context: %w", err)
+	}
+	// Compile cache uses the seed prompt template, not its filled values, so
+	// repo_context changes propagate via the runtime overlay only — no need to
+	// invalidate the cached compiled chain here.
+	return rc, nil
+}
+
+// extractTerminalText reads the assistant's last message content from a chain
+// output regardless of typed shape — same logic as [callPlanner].
+func extractTerminalText(out any, outType taskengine.DataType) string {
+	switch outType {
+	case taskengine.DataTypeString:
+		if s, ok := out.(string); ok {
+			return s
+		}
+	case taskengine.DataTypeJSON:
+		b, _ := json.Marshal(out)
+		return string(b)
+	case taskengine.DataTypeChatHistory:
+		if hist, ok := out.(taskengine.ChatHistory); ok && len(hist.Messages) > 0 {
+			return hist.Messages[len(hist.Messages)-1].Content
+		}
+		if histPtr, ok := out.(*taskengine.ChatHistory); ok && len(histPtr.Messages) > 0 {
+			return histPtr.Messages[len(histPtr.Messages)-1].Content
+		}
+	}
+	return fmt.Sprintf("%v", out)
+}
+
 func (s *service) callPlanner(ctx context.Context, goal string, chain *taskengine.TaskChainDefinition) ([]string, error) {
 	out, outType, _, err := s.engine.Execute(ctx, chain, goal, taskengine.DataTypeString)
 	if err != nil {
@@ -157,7 +244,7 @@ func parsePlannerJSONRaw(raw string) ([]string, error) {
 	arrStr := taskengine.ExtractJSONArray(trim)
 	var steps []string
 	if err := json.Unmarshal([]byte(arrStr), &steps); err == nil {
-		return steps, nil
+		return normalizeAndValidatePlannerSteps(steps)
 	}
 
 	objStr := taskengine.ExtractJSONObject(trim)
@@ -165,7 +252,7 @@ func parsePlannerJSONRaw(raw string) ([]string, error) {
 		Steps []string `json:"steps"`
 	}
 	if err := json.Unmarshal([]byte(objStr), &wrapStrings); err == nil && len(wrapStrings.Steps) > 0 {
-		return wrapStrings.Steps, nil
+		return normalizeAndValidatePlannerSteps(wrapStrings.Steps)
 	}
 	var wrapObjs struct {
 		Steps []struct {
@@ -180,7 +267,7 @@ func parsePlannerJSONRaw(raw string) ([]string, error) {
 			}
 		}
 		if len(out) > 0 {
-			return out, nil
+			return normalizeAndValidatePlannerSteps(out)
 		}
 	}
 
@@ -274,6 +361,74 @@ func injectSummarizerModelDefault(ctx context.Context, overlay map[string]string
 	if v, ok := overlay["model"]; ok && v != "" {
 		overlay["summarizer_model"] = v
 	}
+}
+
+// injectGateModelDefault ensures {{var:gate_model}} is set for optional gated executor
+// chains (post-tool gate). Defaults to the main model when unset.
+func injectGateModelDefault(ctx context.Context, overlay map[string]string) {
+	injectModelVarDefault(ctx, overlay, "gate_model")
+}
+
+// injectCompactionModelDefault ensures {{var:compact_model}} is set for executor
+// chains that opt into mid-run conversation compaction. Defaults to the main
+// model when unset, mirroring [injectSummarizerModelDefault] / [injectGateModelDefault].
+func injectCompactionModelDefault(ctx context.Context, overlay map[string]string) {
+	injectModelVarDefault(ctx, overlay, "compact_model")
+}
+
+// injectModelVarDefault is the shared helper behind the per-role
+// inject*ModelDefault functions: if overlay[varName] is unset, it copies the
+// existing value from ctx (when present) or falls back to overlay["model"].
+func injectModelVarDefault(ctx context.Context, overlay map[string]string, varName string) {
+	if overlay == nil {
+		return
+	}
+	if _, already := overlay[varName]; already {
+		return
+	}
+	if existing, err := taskengine.TemplateVarsFromContext(ctx); err == nil && existing != nil {
+		if v, ok := existing[varName]; ok && v != "" {
+			overlay[varName] = v
+			return
+		}
+		if v, ok := existing["model"]; ok && v != "" {
+			overlay[varName] = v
+			return
+		}
+	}
+	if v, ok := overlay["model"]; ok && v != "" {
+		overlay[varName] = v
+	}
+}
+
+// classifyStepFailure picks a [planstore.FailureClass] for execErr.
+//
+// It first consults sink.LastErrorClass — set by [llmretry.Do] when the most
+// recent chat round failed for a known transient/capacity/auth class. If the
+// sink is empty (failure occurred outside a Chat call, e.g. tool-error,
+// summarizer-validation, raise_error), it falls back to substring matching on
+// execErr via [llmretry.ClassifyError].
+//
+// The mapping:
+//
+//	llmretry.ClassCapacity                                    → FailureClassCapacity
+//	llmretry.ClassRateLimit / ClassServerError / ClassTimeout → FailureClassTransient
+//	everything else                                           → FailureClassLogic
+func classifyStepFailure(execErr error, sink *taskengine.RetryOutcomeSink) planstore.FailureClass {
+	class := llmretry.ClassNone
+	if sink != nil {
+		class = sink.LastErrorClass()
+	}
+	if class == llmretry.ClassNone {
+		class = llmretry.ClassifyError(execErr)
+	}
+	switch class {
+	case llmretry.ClassCapacity:
+		return planstore.FailureClassCapacity
+	case llmretry.ClassRateLimit, llmretry.ClassServerError, llmretry.ClassTimeout:
+		return planstore.FailureClassTransient
+	}
+	return planstore.FailureClassLogic
 }
 
 func (s *service) abortNextWithFailure(ctx context.Context, plan *planstore.Plan, pending *planstore.PlanStep, cause error) (string, string, error) {
@@ -432,7 +587,42 @@ func checkAndComplete(ctx context.Context, txSt planstore.Store, plan *planstore
 	return nil
 }
 
-func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChainDefinition) ([]*planstore.PlanStep, string, error) {
+// maxOrdinalAmongRetainedPlanSteps is the highest ordinal among steps that remain after
+// DeletePendingPlanSteps (everything except pending). Replacing only pending rows with new
+// steps must start at this value + 1 so ordinals never collide with failed or running steps.
+func maxOrdinalAmongRetainedPlanSteps(steps []*planstore.PlanStep) int {
+	maxOrdinal := 0
+	for _, st := range steps {
+		if st.Status == planstore.StepStatusPending {
+			continue
+		}
+		if st.Ordinal > maxOrdinal {
+			maxOrdinal = st.Ordinal
+		}
+	}
+	return maxOrdinal
+}
+
+// ReplanScope selects what part of the plan to regenerate.
+//
+//   - OnlyOrdinal == 0: full replan of all remaining (pending) work — current
+//     [Service.Replan] semantics.
+//   - OnlyOrdinal > 0:  replace only that step with substeps. The targeted step
+//     is marked as skipped (audit-preserving) and the substeps are appended at
+//     the tail of the plan. The compile cache is invalidated.
+//
+// Hint, when non-empty, is appended to the planner's user message so the model
+// knows why we are replanning (e.g. "split into smaller steps; the previous
+// attempt exceeded capacity").
+type ReplanScope struct {
+	OnlyOrdinal int
+	Hint        string
+}
+
+// ReplanScoped is the generalized form of [Service.Replan]. ReplanScope{}
+// preserves the original whole-tail-replan behavior; setting OnlyOrdinal
+// targets a single step.
+func (s *service) ReplanScoped(ctx context.Context, scope ReplanScope, plannerChain *taskengine.TaskChainDefinition) ([]*planstore.PlanStep, string, error) {
 	if plannerChain == nil {
 		return nil, "", fmt.Errorf("plannerChain is required")
 	}
@@ -444,21 +634,27 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 		return nil, "", fmt.Errorf("no active plan")
 	}
 
+	var target *planstore.PlanStep
+	if scope.OnlyOrdinal > 0 {
+		for _, st := range steps {
+			if st.Ordinal == scope.OnlyOrdinal {
+				target = st
+				break
+			}
+		}
+		if target == nil {
+			return nil, "", fmt.Errorf("step %d not found", scope.OnlyOrdinal)
+		}
+	}
+
 	var sb strings.Builder
 	sb.WriteString(plan.Goal)
 	sb.WriteString("\n\nProgress so far:\n")
-	maxOrdinal := 0
 	for _, st := range steps {
 		switch st.Status {
 		case planstore.StepStatusCompleted:
-			if st.Ordinal > maxOrdinal {
-				maxOrdinal = st.Ordinal
-			}
 			sb.WriteString(fmt.Sprintf("- [done] %d. %s\n", st.Ordinal, st.Description))
 		case planstore.StepStatusSkipped:
-			if st.Ordinal > maxOrdinal {
-				maxOrdinal = st.Ordinal
-			}
 			sb.WriteString(fmt.Sprintf("- [skipped] %d. %s\n", st.Ordinal, st.Description))
 		case planstore.StepStatusFailed:
 			sb.WriteString(fmt.Sprintf("- [FAILED] %d. %s\n", st.Ordinal, st.Description))
@@ -467,11 +663,35 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 			}
 		}
 	}
-	sb.WriteString("\nGenerate only the remaining steps needed to achieve the goal.")
+	if target != nil {
+		sb.WriteString(fmt.Sprintf("\nReplace step %d (%q) with smaller substeps that accomplish the same thing. ", target.Ordinal, target.Description))
+		if strings.TrimSpace(scope.Hint) != "" {
+			sb.WriteString(strings.TrimSpace(scope.Hint))
+			sb.WriteString(" ")
+		}
+		sb.WriteString("Output ONLY the substeps for step ")
+		sb.WriteString(fmt.Sprintf("%d", target.Ordinal))
+		sb.WriteString(" — do not regenerate other steps.")
+	} else {
+		sb.WriteString("\nGenerate only the remaining steps needed to achieve the goal.")
+		if strings.TrimSpace(scope.Hint) != "" {
+			sb.WriteString(" ")
+			sb.WriteString(strings.TrimSpace(scope.Hint))
+		}
+	}
+
+	maxOrdinal := maxOrdinalAmongRetainedPlanSteps(steps)
 
 	newDescs, err := s.callPlanner(ctx, sb.String(), plannerChain)
 	if err != nil {
 		return nil, "", err
+	}
+	if target != nil {
+		// Reject the degenerate "split = the original step verbatim" replan so
+		// the auto-loop does not infinitely re-target the same ordinal.
+		if len(newDescs) == 1 && strings.TrimSpace(newDescs[0]) == strings.TrimSpace(target.Description) {
+			return nil, "", fmt.Errorf("scoped replan returned the original step text unchanged")
+		}
 	}
 
 	var newSteps []*planstore.PlanStep
@@ -494,8 +714,21 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 	if err := st.UpdatePlanCompiledChain(ctx, plan.ID, "", "", ""); err != nil {
 		return nil, "", fmt.Errorf("clear compiled chain: %w", err)
 	}
-	if err := st.DeletePendingPlanSteps(ctx, plan.ID); err != nil {
-		return nil, "", fmt.Errorf("delete pending: %w", err)
+	if target != nil {
+		// Audit-preserve the failed step: mark skipped with a brief reason so
+		// the timeline reads "step K was unsplittable as written; superseded
+		// by appended substeps". Do not delete; do not renumber.
+		reason := fmt.Sprintf("superseded by substeps appended after ordinal %d (replan-scoped)", maxOrdinal)
+		if err := st.UpdatePlanStepStatus(ctx, target.ID, planstore.StepStatusSkipped, reason); err != nil {
+			return nil, "", fmt.Errorf("mark target skipped: %w", err)
+		}
+		if err := st.SetPlanStepFailureClass(ctx, target.ID, planstore.FailureClassEmpty); err != nil {
+			return nil, "", fmt.Errorf("clear target failure class: %w", err)
+		}
+	} else {
+		if err := st.DeletePendingPlanSteps(ctx, plan.ID); err != nil {
+			return nil, "", fmt.Errorf("delete pending: %w", err)
+		}
 	}
 	if err := st.CreatePlanSteps(ctx, newSteps...); err != nil {
 		return nil, "", fmt.Errorf("create new steps: %w", err)
@@ -511,6 +744,10 @@ func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChain
 	md := renderMarkdown(plan, allSteps)
 	s.writePlanVFS(ctx, plan, allSteps)
 	return newSteps, md, nil
+}
+
+func (s *service) Replan(ctx context.Context, plannerChain *taskengine.TaskChainDefinition) ([]*planstore.PlanStep, string, error) {
+	return s.ReplanScoped(ctx, ReplanScope{}, plannerChain)
 }
 
 func (s *service) Next(ctx context.Context, args Args, executorChain, summarizerChain *taskengine.TaskChainDefinition) (string, string, error) {
@@ -569,7 +806,18 @@ func (s *service) Next(ctx context.Context, args Args, executorChain, summarizer
 	// explicitly, so operators can opt into a cheaper/faster model for summary
 	// work without forcing every caller to know about the new var.
 	injectSummarizerModelDefault(ctx, overlay)
+	injectGateModelDefault(ctx, overlay)
+	injectCompactionModelDefault(ctx, overlay)
 	execCtx := taskengine.MergeTemplateVars(ctx, overlay)
+	// Attach a compaction state registry so persistent circuit-breaker state
+	// survives across the agentic-loop's repeated chat invocations.
+	execCtx = taskengine.WithCompactionRegistry(execCtx, taskengine.NewCompactionStateRegistry())
+	// Retry-outcome sink: read by the failure-classification logic below to
+	// distinguish capacity / transient / logic errors and tag the step with a
+	// [planstore.FailureClass] so 'plan next --auto' can decide whether to
+	// auto-replan instead of giving up. Always attached; cheap when unused.
+	retrySink := &taskengine.RetryOutcomeSink{}
+	execCtx = taskengine.WithRetryOutcomeSink(execCtx, retrySink)
 	// Plan-step identity flows via ctx to the plan_summary hook so it knows
 	// which DB row to write (identity chosen at ClaimNextPendingStep time,
 	// not at plancompile time; cannot live in compiled chain JSON).
@@ -583,10 +831,12 @@ func (s *service) Next(ctx context.Context, args Args, executorChain, summarizer
 
 	finalStatus := planstore.StepStatusCompleted
 	finalResult := result
+	failureClass := planstore.FailureClassEmpty
 	if execErr != nil {
 		finalStatus = planstore.StepStatusFailed
 		finalResult = execErr.Error()
 		result = ""
+		failureClass = classifyStepFailure(execErr, retrySink)
 	}
 
 	cleanupCtx := context.WithoutCancel(ctx)
@@ -598,6 +848,9 @@ func (s *service) Next(ctx context.Context, args Args, executorChain, summarizer
 	txSt := planstore.New(tx)
 	if err := txSt.UpdatePlanStepStatus(cleanupCtx, pending.ID, finalStatus, finalResult); err != nil {
 		return "", "", fmt.Errorf("update step: %w", err)
+	}
+	if err := txSt.SetPlanStepFailureClass(cleanupCtx, pending.ID, failureClass); err != nil {
+		return "", "", fmt.Errorf("update step failure class: %w", err)
 	}
 	allSteps, err := txSt.ListPlanSteps(cleanupCtx, plan.ID)
 	if err != nil {

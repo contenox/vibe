@@ -30,6 +30,9 @@ func TestRunInit_writesAllDefaultChainsIncludingPlan(t *testing.T) {
 		"default-run-chain.json",
 		"chain-planner.json",
 		"chain-step-executor.json",
+		"chain-step-executor-gated.json",
+		"chain-plan-explorer.json",
+		"chain-step-summarizer.json",
 	}
 	for _, name := range expected {
 		p := filepath.Join(dir, name)

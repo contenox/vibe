@@ -25,6 +25,24 @@ const (
 	StepStatusSkipped   StepStatus = "skipped"
 )
 
+// FailureClass tags WHY a step failed, so callers (e.g. plan next --auto) can
+// decide whether to auto-replan, retry transparently, or surface to the user.
+//
+// FailureClassEmpty is the default for unknown / legacy rows. FailureClassLogic
+// is the catch-all for non-transient model/tool failures (e.g. the model said
+// "I can't do X"). FailureClassCapacity means the chain hit a context-length
+// or token-budget wall; the plan can usefully be replanned into smaller steps.
+// FailureClassTransient is reserved for retries-exhausted transient HTTP errors
+// (rate-limit / 5xx / timeout).
+type FailureClass string
+
+const (
+	FailureClassEmpty     FailureClass = ""
+	FailureClassLogic     FailureClass = "logic"
+	FailureClassCapacity  FailureClass = "capacity"
+	FailureClassTransient FailureClass = "transient"
+)
+
 // Plan maps to the plans table.
 type Plan struct {
 	ID        string     `json:"id"`
@@ -38,8 +56,12 @@ type Plan struct {
 	CompiledChainID string `json:"compiled_chain_id,omitempty"`
 	// CompileExecutorChainID is the executor chain ID used when compiling (for invalidation).
 	CompileExecutorChainID string `json:"compile_executor_chain_id,omitempty"`
-	CreatedAt                time.Time `json:"created_at"`
-	UpdatedAt                time.Time `json:"updated_at"`
+	// RepoContextJSON is a [RepoContext] document produced by the explorer chain
+	// and rendered into every step's seed prompt as {{var:repo_context}}.
+	// Empty string means the plan has no explored context (current default).
+	RepoContextJSON string    `json:"repo_context_json,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // PlanStep maps to the plan_steps table.
@@ -67,6 +89,10 @@ type PlanStep struct {
 	// previous failed attempt of this step, moved here by Retry. Lets the next
 	// attempt's summarizer see why the prior try failed.
 	LastFailureSummary string `json:"last_failure_summary,omitempty"`
+	// FailureClass classifies the most recent failure so callers can pick a
+	// recovery strategy (retry / replan / surface). Empty when the step is not
+	// failed or when the failure was not classified.
+	FailureClass FailureClass `json:"failure_class,omitempty"`
 }
 
 // Store defines the data access interface for plans and steps.
@@ -82,6 +108,10 @@ type Store interface {
 	UpdatePlanStatus(ctx context.Context, planID string, status PlanStatus) error
 	// UpdatePlanCompiledChain persists compile output for the plan (empty json clears compile cache).
 	UpdatePlanCompiledChain(ctx context.Context, planID string, compiledChainJSON, compiledChainID, executorChainID string) error
+	// UpdatePlanRepoContext persists the RepoContext JSON for the plan.
+	// Pass empty string to clear it. Compile cache is NOT invalidated by this
+	// call; the seed-prompt template var is read at run time.
+	UpdatePlanRepoContext(ctx context.Context, planID string, repoContextJSON string) error
 
 	// Step operations
 	CreatePlanSteps(ctx context.Context, steps ...*PlanStep) error
@@ -103,6 +133,9 @@ type Store interface {
 	// fallback) into LastFailureSummary and clears Summary/ChatHistoryJSON/SummaryError.
 	// Called by Retry so the re-run's summarizer can see the prior failed attempt's context.
 	MoveSummaryToLastFailure(ctx context.Context, stepID string) error
+	// SetPlanStepFailureClass records the [FailureClass] of the most recent
+	// failure on a step. Pass [FailureClassEmpty] to clear it (e.g. on retry).
+	SetPlanStepFailureClass(ctx context.Context, stepID string, class FailureClass) error
 
 	// Bulk operations for efficiency
 	// DeleteFinishedPlans removes all completed/archived plans; returns count.

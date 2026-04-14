@@ -70,6 +70,25 @@ func (d *activityTrackerDecorator) Replan(ctx context.Context, plannerChain *tas
 	return steps, md, nil
 }
 
+func (d *activityTrackerDecorator) ReplanScoped(ctx context.Context, scope ReplanScope, plannerChain *taskengine.TaskChainDefinition) ([]*planstore.PlanStep, string, error) {
+	chainID := ""
+	if plannerChain != nil {
+		chainID = plannerChain.ID
+	}
+	reportErr, reportChange, end := d.tracker.Start(ctx, "replan_scoped", "plan",
+		"plannerChainID", chainID, "onlyOrdinal", scope.OnlyOrdinal)
+	defer end()
+	steps, md, err := d.svc.ReplanScoped(ctx, scope, plannerChain)
+	if err != nil {
+		reportErr(err)
+		return nil, "", err
+	}
+	if len(steps) > 0 {
+		reportChange(steps[0].PlanID, map[string]any{"op": "replan_scoped", "only_ordinal": scope.OnlyOrdinal, "added": len(steps)})
+	}
+	return steps, md, nil
+}
+
 func (d *activityTrackerDecorator) Next(ctx context.Context, args Args, executorChain, summarizerChain *taskengine.TaskChainDefinition) (string, string, error) {
 	execID := ""
 	if executorChain != nil {
@@ -176,6 +195,28 @@ func (d *activityTrackerDecorator) Delete(ctx context.Context, planName string) 
 	}
 	reportChange(planName, nil)
 	return nil
+}
+
+func (d *activityTrackerDecorator) Explore(ctx context.Context, planID string, explorerChain *taskengine.TaskChainDefinition) (*planstore.RepoContext, error) {
+	chainID := ""
+	if explorerChain != nil {
+		chainID = explorerChain.ID
+	}
+	reportErr, reportChange, end := d.tracker.Start(ctx, "explore", "plan", "explorerChainID", chainID, "planID", planID)
+	defer end()
+	rc, err := d.svc.Explore(ctx, planID, explorerChain)
+	if err != nil {
+		reportErr(err)
+		return nil, err
+	}
+	if rc != nil {
+		reportChange(planID, map[string]any{
+			"languages":      rc.Languages,
+			"key_files":      len(rc.KeyFiles),
+			"build_commands": len(rc.BuildCommands),
+		})
+	}
+	return rc, nil
 }
 
 func (d *activityTrackerDecorator) Clean(ctx context.Context) (int, error) {

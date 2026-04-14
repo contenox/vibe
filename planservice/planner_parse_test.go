@@ -66,12 +66,29 @@ func Test_parsePlannerJSONRaw(t *testing.T) {
 
 func Test_parsePlannerJSONRaw_emptyArray(t *testing.T) {
 	t.Parallel()
-	got, err := parsePlannerJSONRaw(`[]`)
-	if err != nil {
-		t.Fatal(err)
+	_, err := parsePlannerJSONRaw(`[]`)
+	if err == nil {
+		t.Fatal("expected error for empty plan")
 	}
-	if len(got) != 0 {
-		t.Fatalf("got %v", got)
+	if !strings.Contains(err.Error(), "no steps") {
+		t.Fatalf("expected no steps error: %v", err)
+	}
+}
+
+func Test_parsePlannerJSONRaw_rejectsCorruptedStep(t *testing.T) {
+	t.Parallel()
+	raw := `["normal step","self.__next_f.push garbage"]`
+	_, err := parsePlannerJSONRaw(raw)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func Test_parsePlannerJSONRaw_emptyStepRejected(t *testing.T) {
+	t.Parallel()
+	_, err := parsePlannerJSONRaw(`["a","  "]`)
+	if err == nil {
+		t.Fatal("expected error for empty step after trim")
 	}
 }
 

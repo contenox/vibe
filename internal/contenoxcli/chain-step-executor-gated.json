@@ -1,6 +1,6 @@
 {
-    "id": "chain-step-executor",
-    "description": "One plan ordinal = one agentic loop (same pattern as chain-contenox): chat_completion alternates with execute_tool_calls until the assistant responds without tool calls (transition \"executed\"), then the subgraph ends. The compiled seed task injects the step prompt; the loop may run many model rounds inside that ordinal.",
+    "id": "chain-step-executor-gated",
+    "description": "Like chain-step-executor but runs a small post-tool gate (prompt_to_int) after each tool round; non-zero score aborts the step. Optional; use contenox plan next --gate.",
     "tasks": [
         {
             "id": "plan_step_agent_loop_chat",
@@ -61,7 +61,7 @@
         },
         {
             "id": "plan_step_agent_loop_tools",
-            "description": "Agentic loop — tool turn: run hook tools, append results, then return to plan_step_agent_loop_chat (engine pattern from chain-contenox run_tools).",
+            "description": "Agentic loop — tool turn: run hook tools, then post-tool gate (not directly back to chat).",
             "handler": "execute_tool_calls",
             "input_var": "plan_step_agent_loop_chat",
             "transition": {
@@ -70,7 +70,68 @@
                     {
                         "operator": "default",
                         "when": "",
+                        "goto": "plan_step_gate"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "plan_step_gate",
+            "description": "Post-tool gate: 0 = continue to chat, non-zero = abort step",
+            "handler": "prompt_to_int",
+            "system_instruction": "You review the last message in the conversation (usually a tool result). Reply with a single integer only:\n- 0 = safe to continue the assistant loop (success or acceptable failure).\n- 7 = output looks corrupted (e.g. HTML/JS stream data), dangerously wrong, or unusable.\n- 3–6 = questionable; prefer aborting if unsure.\nNo other text.",
+            "execute_config": {
+                "model": "{{var:gate_model}}",
+                "provider": "{{var:provider}}",
+                "temperature": 0,
+                "pass_clients_tools": false,
+                "hooks": []
+            },
+            "input_var": "plan_step_agent_loop_tools",
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "equals",
+                        "when": "0",
                         "goto": "plan_step_agent_loop_chat"
+                    },
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "plan_step_gate_fail_msg"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "plan_step_gate_fail_msg",
+            "description": "Static error string for raise_error after gate failure",
+            "handler": "noop",
+            "prompt_template": "post-tool gate: unsafe or corrupted tool output; refusing to continue this plan step",
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "plan_step_gate_raise"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "plan_step_gate_raise",
+            "description": "Fail the executor subgraph with a clear error",
+            "handler": "raise_error",
+            "input_var": "plan_step_gate_fail_msg",
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "end"
                     }
                 ]
             }

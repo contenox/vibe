@@ -346,12 +346,18 @@ func seedPromptTemplate() string {
 
 **Progress:** step {{var:step_ordinal}} of {{var:step_total}}
 
+**Engine boundary:**
+{{var:execution_context}}
+
+**Repo context (from explorer; may be empty):**
+{{var:repo_context}}
+
 **Current step (execute only this now):**
 {{var:current_step}}
 
 **Next step (orientation only — do not start until the next plan run):**
 {{var:next_step}}
-we shou
+
 {{var:plan_handover}}
 
 **Previous step output (context; may be empty):**

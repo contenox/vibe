@@ -1,0 +1,78 @@
+{
+    "id": "chain-plan-explorer",
+    "description": "Read-only workspace exploration that produces a typed RepoContext JSON for use as a context-seed by every plan step. Output is persisted on the active plan and rendered into seed prompts as {{var:repo_context}}.",
+    "tasks": [
+        {
+            "id": "plan_explorer_chat",
+            "description": "Agentic loop — chat turn: explorer may call read-only tools (list_dir, read_file, grep) or finish with a JSON RepoContext.",
+            "handler": "chat_completion",
+            "system_instruction": "You are a Contenox repo-context explorer. Your ONLY job is to investigate a workspace with READ-ONLY tools and emit a single JSON object describing what you learned, suitable as a seed for downstream plan steps.\n\nSCOPE: You may only call read-only filesystem and grep tools. You MUST NOT modify any file, run shell commands, make network calls, or invoke any tool that mutates state. If a tool would write or execute, do not call it.\n\nMETHODOLOGY:\n- Start by listing the repo root and identifying language(s) by looking at top-level files (e.g. go.mod, package.json, pyproject.toml, Cargo.toml).\n- Identify entry points (cmd/*, main.go, src/index.ts, etc.) and key directories.\n- Read README, CONTRIBUTING, AGENTS.md, CLAUDE.md, Makefile, and similar to extract build/test commands and conventions.\n- Read 3–8 key files end-to-end (or use read_file_range for large ones) to confirm structure; do NOT paste their contents back. Note their roles in 1 sentence.\n- Bound exploration: ~20 tool rounds maximum. After enough signal, stop and emit the JSON.\n\nOUTPUT RULES (critical):\n- When ready, respond with ONLY a JSON object — no prose, no markdown fences, no trailing text.\n- The first non-whitespace character MUST be '{'.\n- Schema:\n  {\n    \"schema_version\": 1,\n    \"repo_root\": \"absolute or relative root path\",\n    \"languages\": [\"go\", \"ts\"],\n    \"entry_points\": [\"cmd/server/main.go\"],\n    \"build_commands\": [\"go build ./...\"],\n    \"test_commands\": [\"go test ./...\"],\n    \"conventions\": [\"prefer table-driven tests\", \"...\"],\n    \"key_files\": [{\"path\": \"internal/foo/foo.go\", \"role\": \"core service\"}],\n    \"caveats\": [\"enterprise/ uses a separate go module\"]\n  }\n- Any field may be empty when you have no high-confidence answer. DO NOT fabricate.\n- Keep each string concise. Do not include log/build output or stream data.\n- If the workspace appears empty or inaccessible, return: {\"schema_version\": 1, \"caveats\": [\"workspace empty or unreadable\"]}.",
+            "prompt_template": "Explore the current workspace and produce the RepoContext JSON described in your system instruction.",
+            "execute_config": {
+                "model": "{{var:model}}",
+                "provider": "{{var:provider}}",
+                "temperature": 0.2,
+                "shift": true,
+                "pass_clients_tools": false,
+                "hooks": ["local_fs"],
+                "hook_policies": {
+                    "local_fs": {
+                        "_allowed_dir": ".",
+                        "_max_read_bytes": "524288",
+                        "_max_output_bytes": "262144",
+                        "_max_list_depth": "5",
+                        "_max_grep_matches": "2000",
+                        "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json"
+                    }
+                },
+                "retry_policy": {
+                    "max_attempts": 4,
+                    "initial_backoff": "1s",
+                    "max_backoff": "30s",
+                    "jitter": 0.25,
+                    "rate_limit_min_wait": "10s"
+                },
+                "compact_policy": {
+                    "trigger_fraction": 0.85,
+                    "keep_recent": 6,
+                    "model": "{{var:compact_model}}",
+                    "provider": "{{var:provider}}",
+                    "max_failures": 3,
+                    "min_replaced_messages": 4
+                }
+            },
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "equals",
+                        "when": "tool-call",
+                        "goto": "plan_explorer_tools"
+                    },
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "end"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "plan_explorer_tools",
+            "description": "Agentic loop — tool turn: run read-only hook tools, then return to plan_explorer_chat (engine pattern from chain-step-executor run_tools).",
+            "handler": "execute_tool_calls",
+            "input_var": "plan_explorer_chat",
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "plan_explorer_chat"
+                    }
+                ]
+            }
+        }
+    ],
+    "token_limit": 200000
+}

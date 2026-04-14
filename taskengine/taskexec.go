@@ -13,6 +13,8 @@ import (
 	"github.com/contenox/contenox/internal/llmrepo"
 	libmodelprovider "github.com/contenox/contenox/internal/modelrepo"
 	"github.com/contenox/contenox/libtracker"
+	"github.com/contenox/contenox/taskengine/compact"
+	"github.com/contenox/contenox/taskengine/llmretry"
 	"github.com/google/uuid"
 )
 
@@ -642,9 +644,11 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			}
 		}
 
-		// Call the final execution function with the prepared data
+		// Call the final execution function with the prepared data.
+		// Propagate the task ID so compaction state can be scoped per chat task
+		// across the agentic loop's repeated chat invocations.
 		output, outputType, transitionEval, taskErr = exe.executeLLM(
-			taskCtx,
+			withTaskCompactID(taskCtx, currentTask.ID),
 			chatHistory,
 			ctxLength,
 			finalExecConfig,
@@ -868,6 +872,31 @@ func (exe *SimpleExec) executeLLM(
 
 	// Token counting
 	modelName := getPrimaryModel(llmCall)
+
+	// Mid-run compaction: if a CompactPolicy is configured and the running
+	// history exceeds the trigger fraction of ctxLength, summarize older
+	// messages in place. Failures are swallowed (logged via tracker) so a
+	// broken compaction model never blocks the underlying chat call.
+	if llmCall.CompactPolicy != nil && ctxLength > 0 {
+		if res, cerr := exe.maybeCompact(ctx, llmCall, &input, ctxLength); cerr != nil {
+			reportChange("compaction_failed", map[string]any{
+				"error":            cerr.Error(),
+				"messages_before":  res.UsageBefore,
+				"replaced":         res.Replaced,
+			})
+		} else if res.Compacted {
+			// Token counts are now stale — force a recount below.
+			input.InputTokens = 0
+			input.OutputTokens = 0
+			reportChange("compacted_history", map[string]any{
+				"replaced":     res.Replaced,
+				"usage_before": res.UsageBefore,
+				"usage_after":  res.UsageAfter,
+				"summary_chars": res.SummaryChars,
+			})
+		}
+	}
+
 	var messagesTokens int
 
 	// Count messages tokens if not already set
@@ -1009,7 +1038,7 @@ func (exe *SimpleExec) executeLLM(
 		}
 	}
 
-	resp, meta, err := exe.repo.Chat(ctx, req, messagesC, chatArgs...)
+	resp, meta, err := exe.chatWithRetry(ctx, llmCall, req, messagesC, chatArgs)
 	if err != nil {
 		return nil, DataTypeAny, "", fmt.Errorf("chat failed: %w", err)
 	}
@@ -1268,6 +1297,178 @@ func normalizeJSResponse(raw string) string {
 
 	// Step 3: fall back to treating the stripped text as JS
 	return trimmed
+}
+
+// maybeCompact runs [compact.Maybe] on the chat history when llmCall.CompactPolicy
+// is set. The compaction call uses [llmretry.Do] with the same RetryPolicy
+// (when set) so transient provider errors during summarization don't blow the
+// circuit breaker on the first attempt.
+//
+// On a successful compaction the splice plan from compact.Result is applied
+// here on the typed [Message] slice — preserving CallTools, ToolCallID,
+// Timestamp, and Thinking on every kept message. Only the replaced range
+// becomes a single synthetic user message.
+func (exe *SimpleExec) maybeCompact(
+	ctx context.Context,
+	llmCall *LLMExecutionConfig,
+	history *ChatHistory,
+	ctxLength int,
+) (compact.Result, error) {
+	if llmCall == nil || llmCall.CompactPolicy == nil || history == nil {
+		return compact.Result{}, nil
+	}
+	policy := *llmCall.CompactPolicy
+	model := policy.Model
+	if model == "" {
+		model = getPrimaryModel(llmCall)
+	}
+	provider := policy.Provider
+	if provider == "" {
+		provider = llmCall.Provider
+	}
+
+	// Bridge taskengine.Message → compact.Message (read-only view).
+	view := make([]compact.Message, len(history.Messages))
+	for i, m := range history.Messages {
+		view[i] = compact.Message{
+			Role:         m.Role,
+			Content:      m.Content,
+			HasToolCalls: len(m.CallTools) > 0,
+			ToolCallID:   m.ToolCallID,
+		}
+	}
+
+	count := func(c context.Context, m, s string) (int, error) {
+		return exe.repo.CountTokens(c, m, s)
+	}
+
+	// Caller: a single non-streaming PromptExecute, optionally retried.
+	caller := func(c context.Context, m, sysInstruction, prompt string) (string, error) {
+		req := llmrepo.Request{
+			ProviderTypes: nonEmpty(provider),
+			ModelNames:    nonEmpty(m),
+			Tracker:       exe.tracker,
+		}
+		retry := llmretry.RetryPolicy{}
+		if llmCall.RetryPolicy != nil {
+			retry = *llmCall.RetryPolicy
+		}
+		out, _, callErr := llmretry.Do(c, retry, m, func(modelID string) (any, error) {
+			r := req
+			if modelID != "" && modelID != m {
+				r.ModelNames = []string{modelID}
+			}
+			resp, _, e := exe.repo.PromptExecute(c, r, sysInstruction, 0.2, prompt)
+			if e != nil {
+				return nil, e
+			}
+			return resp, nil
+		})
+		if callErr != nil {
+			return "", callErr
+		}
+		return out.(string), nil
+	}
+
+	reg := compactionRegistryFromContext(ctx)
+	state := reg.Get(getTaskCompactID(ctx))
+
+	res, err := compact.Maybe(ctx, policy, state, view, ctxLength, count, caller)
+	if err != nil {
+		return res, err
+	}
+	if !res.Compacted {
+		return res, nil
+	}
+	// Apply the splice plan on the typed slice so kept messages keep their
+	// CallTools, ToolCallID, Timestamps, and Thinking intact.
+	src := history.Messages
+	out := make([]Message, 0, res.ReplaceFrom+1+len(src)-res.ReplaceTo)
+	out = append(out, src[:res.ReplaceFrom]...)
+	out = append(out, Message{
+		Role:      "user",
+		Content:   res.SyntheticContent,
+		Timestamp: time.Now().UTC(),
+	})
+	out = append(out, src[res.ReplaceTo:]...)
+	history.Messages = out
+	return res, nil
+}
+
+// nonEmpty returns []string{s} when s != "", else nil. Convenience for
+// llmrepo.Request slice fields.
+func nonEmpty(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return []string{s}
+}
+
+// taskCompactIDKey scopes a compaction state key to the currently-executing
+// task ID so the registry can persist circuit-breaker state across the
+// agentic loop's chat iterations.
+type taskCompactIDKey struct{}
+
+// withTaskCompactID stamps the executing task's ID into ctx so maybeCompact
+// can look up persistent state for it.
+func withTaskCompactID(ctx context.Context, taskID string) context.Context {
+	if taskID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, taskCompactIDKey{}, taskID)
+}
+
+func getTaskCompactID(ctx context.Context) string {
+	v, _ := ctx.Value(taskCompactIDKey{}).(string)
+	if v == "" {
+		// Fallback so the registry still scopes per-call when no ID propagated.
+		return "_default"
+	}
+	return v
+}
+
+// chatWithRetry wraps repo.Chat with [llmretry.Do] when llmCall.RetryPolicy is
+// set; otherwise it issues a single call (preserving today's behavior). On
+// fallback, the request's ModelNames slice is replaced with the fallback id so
+// the underlying resolver targets that model directly.
+//
+// Every invocation appends an [llmretry.Outcome] to the context-bound sink
+// (see [WithRetryOutcomeSink]) so callers like planservice can inspect what
+// happened — used by §3 auto-replan-on-capacity.
+func (exe *SimpleExec) chatWithRetry(
+	ctx context.Context,
+	llmCall *LLMExecutionConfig,
+	req llmrepo.Request,
+	messages []libmodelprovider.Message,
+	chatArgs []libmodelprovider.ChatArgument,
+) (libmodelprovider.ChatResult, llmrepo.Meta, error) {
+	policy := llmretry.RetryPolicy{}
+	if llmCall != nil && llmCall.RetryPolicy != nil {
+		policy = *llmCall.RetryPolicy
+	}
+	primary := getPrimaryModel(llmCall)
+	type chatResult struct {
+		resp libmodelprovider.ChatResult
+		meta llmrepo.Meta
+	}
+	result, outcome, err := llmretry.Do(ctx, policy, primary, func(modelID string) (any, error) {
+		callReq := req
+		if modelID != "" && modelID != primary {
+			// Fallback path: target the fallback model exclusively.
+			callReq.ModelNames = []string{modelID}
+		}
+		r, m, e := exe.repo.Chat(ctx, callReq, messages, chatArgs...)
+		if e != nil {
+			return nil, e
+		}
+		return chatResult{resp: r, meta: m}, nil
+	})
+	appendRetryOutcome(ctx, outcome)
+	if err != nil {
+		return libmodelprovider.ChatResult{}, llmrepo.Meta{}, err
+	}
+	cr := result.(chatResult)
+	return cr.resp, cr.meta, nil
 }
 
 // countToolTokens serializes the tools to JSON and counts tokens using the model's tokenizer.

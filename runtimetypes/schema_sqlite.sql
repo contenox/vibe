@@ -247,6 +247,9 @@ ALTER TABLE mcp_servers ADD COLUMN inject_params_json  TEXT NOT NULL DEFAULT '{}
 ALTER TABLE plans ADD COLUMN compiled_chain_json TEXT;
 ALTER TABLE plans ADD COLUMN compiled_chain_id VARCHAR(255);
 ALTER TABLE plans ADD COLUMN compile_executor_chain_id VARCHAR(255);
+-- plans: typed repo_context_json produced by chain-plan-explorer.json and
+-- rendered into every step seed as {{var:repo_context}}.
+ALTER TABLE plans ADD COLUMN repo_context_json TEXT;
 
 -- plan_steps: typed-handover columns (planstore.SummaryDoc JSON + debug + Retry context).
 -- See planstore/summary.go for the schema and localhooks.PlanSummaryHook for the writers.
@@ -254,6 +257,9 @@ ALTER TABLE plan_steps ADD COLUMN summary              TEXT;
 ALTER TABLE plan_steps ADD COLUMN chat_history_json    TEXT;
 ALTER TABLE plan_steps ADD COLUMN summary_error        TEXT;
 ALTER TABLE plan_steps ADD COLUMN last_failure_summary TEXT;
+-- plan_steps: failure classification used by 'plan next --auto' to decide
+-- whether to auto-replan a failed step. See planstore.FailureClass.
+ALTER TABLE plan_steps ADD COLUMN failure_class        VARCHAR(50);
 
 ALTER TABLE terminal_sessions ADD COLUMN workspace_id VARCHAR(255);
 

@@ -40,6 +40,12 @@ func (s *stubPlanSvc) List(context.Context) ([]*planstore.Plan, error) {
 func (s *stubPlanSvc) SetActive(context.Context, string) error { return nil }
 func (s *stubPlanSvc) Delete(context.Context, string) error    { return nil }
 func (s *stubPlanSvc) Clean(context.Context) (int, error)       { return 0, nil }
+func (s *stubPlanSvc) ReplanScoped(context.Context, planservice.ReplanScope, *taskengine.TaskChainDefinition) ([]*planstore.PlanStep, string, error) {
+	return nil, "", nil
+}
+func (s *stubPlanSvc) Explore(context.Context, string, *taskengine.TaskChainDefinition) (*planstore.RepoContext, error) {
+	return nil, nil
+}
 
 func TestActivePlanInjector_NoPlan(t *testing.T) {
 	t.Parallel()

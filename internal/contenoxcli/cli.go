@@ -207,7 +207,8 @@ var initCmd = &cobra.Command{
 	Short: "Scaffold .contenox/ with default chain files.",
 	Long: `Create the .contenox/ directory and populate it with default chain files.
 
-This writes default-chain.json, default-run-chain.json, chain-planner.json, and chain-step-executor.json
+This writes default-chain.json, default-run-chain.json, chain-planner.json, chain-step-executor.json,
+chain-step-executor-gated.json, chain-plan-explorer.json, and chain-step-summarizer.json
 (the same embedded planner and step-executor chains used by 'contenox plan'). Plan subcommands
 still refresh those JSON files from the binary when you run them.
 

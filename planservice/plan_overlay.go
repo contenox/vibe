@@ -32,6 +32,10 @@ type PlanStepMacroVars struct {
 	PreviousArtifacts  string
 	PreviousCaveats    string
 	PriorFailureDetail string
+	// RepoContext is the rendered bullet block from the plan's persisted
+	// RepoContextJSON (see [planstore.RepoContext] / chain-plan-explorer.json).
+	// Empty when the plan was created without --explore.
+	RepoContext string
 }
 
 // NewPlanStepMacroVars fills macro vars for the pending plan step (goal, full plan, next step, handover, etc.).
@@ -54,6 +58,7 @@ func NewPlanStepMacroVars(plan *planstore.Plan, steps []*planstore.PlanStep, pen
 		PreviousArtifacts:  prev.artifacts,
 		PreviousCaveats:    prev.caveats,
 		PriorFailureDetail: strings.TrimSpace(pending.LastFailureSummary),
+		RepoContext:        renderRepoContextBlock(plan.RepoContextJSON),
 	}
 }
 
@@ -80,7 +85,19 @@ func (v PlanStepMacroVars) TemplateVars() map[string]string {
 		"previous_artifacts":   v.PreviousArtifacts,
 		"previous_caveats":     v.PreviousCaveats,
 		"prior_failure_detail": v.PriorFailureDetail,
+		// execution_context is static copy for the seed prompt so the executor
+		// sees task-engine boundaries (hooks-only) without relying on the model's persona alone.
+		"execution_context": planExecutionContextBlock(),
+		// repo_context is the rendered bullet block from chain-plan-explorer.json
+		// output. Always present (may be empty) so seed templates referencing
+		// {{var:repo_context}} never fail with "template var not set".
+		"repo_context": v.RepoContext,
 	}
+}
+
+// planExecutionContextBlock is injected into compiled plan seed prompts via {{var:execution_context}}.
+func planExecutionContextBlock() string {
+	return "Execution boundary: you run inside the Contenox task engine. Only registered hooks and tools exist (filesystem, shell, git, MCP, HTTP/OpenAPI as configured). There is no separate product UI or browser unless provided by a tool. If work needs a human-only action, say so briefly and stop; do not claim it is done."
 }
 
 // priorSummaryView is the set of rendered strings extracted from a prior step's
