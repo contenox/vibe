@@ -12,7 +12,14 @@
                 "provider": "{{var:provider}}",
                 "temperature": 0.2,
                 "pass_clients_tools": false,
-                "hooks": []
+                "hooks": [],
+                "retry_policy": {
+                    "max_attempts": 3,
+                    "initial_backoff": "1s",
+                    "max_backoff": "10s",
+                    "jitter": 0.25,
+                    "rate_limit_min_wait": "5s"
+                }
             },
             "transition": {
                 "on_failure": "",

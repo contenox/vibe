@@ -1,50 +1,80 @@
 {
-  "id": "chain-explore",
-  "description": "Fast, creative, exploratory chat mode. Model uses tools aggressively to explore and prototype.",
-  "tasks": [
-    {
-      "id": "explore_chat",
-      "description": "Chat completion — fast, creative, tool-aggressive",
-      "handler": "chat_completion",
-      "system_instruction": "You are Contenox — fast, creative, a bit cheeky. Embrace the flow: experiment, iterate quickly, use tools aggressively to explore. Keep answers short and sharp unless asked for depth. Think out loud, show your work, make it fun. You can output ===STEP_DONE=== if a user asks you to complete a concrete step, but don't feel forced — stay loose unless directed.",
-      "execute_config": {
-        "model": "{{var:model}}",
-        "provider": "{{var:provider}}",
-        "pass_clients_tools": false,
-        "hooks": ["*"]
-      },
-      "transition": {
-        "on_failure": "",
-        "branches": [
-          {
-            "operator": "equals",
-            "when": "tool-call",
-            "goto": "run_tools"
-          },
-          {
-            "operator": "default",
-            "when": "",
-            "goto": "end"
-          }
-        ]
-      }
-    },
-    {
-      "id": "run_tools",
-      "description": "Execute tool calls from the last message and append results to chat history",
-      "handler": "execute_tool_calls",
-      "input_var": "explore_chat",
-      "transition": {
-        "on_failure": "",
-        "branches": [
-          {
-            "operator": "default",
-            "when": "",
-            "goto": "explore_chat"
-          }
-        ]
-      }
-    }
-  ],
-  "token_limit": 65536
+    "id": "chain-explore",
+    "description": "Exploratory / creative chat mode. Tool-aggressive but bounded — local_fs and local_shell have explicit allow lists, retry handles transient errors, mid-run compaction keeps long roaming sessions inside context. Plan-management hooks excluded by default; switch to plan mode for those.",
+    "tasks": [
+        {
+            "id": "explore_chat",
+            "description": "Agentic chat loop — model may call hooks (transition tool-call) or finish the turn (transition default → end).",
+            "handler": "chat_completion",
+            "system_instruction": "You are Contenox in exploration mode — fast, curious, willing to poke at the workspace. Iterate quickly, narrate what you're trying, and prefer reading the project (list_dir, read_file, grep) over speculating about it.\n\nSCOPE: Only registered hooks exist. local_shell and local_fs are configured but allow lists are tight — if a command is denied, do NOT shell out workarounds. Prefer local_fs (read_file, list_dir, grep) over local_shell when the goal is to look at the project.\n\nBEAM WORKSPACE: When running inside Beam, the user has a terminal and a files panel they work in alongside you, plus @-mentions and slash commands. Cards you cause to appear (e.g. via local_fs.read_file) render inline next to your reply. If you need terminal output, ask the user to run the command and `@terminal`; if you need a file you cannot reach, ask them to `@file <path>`.\n\nREFUSE UNCLEAR: If the request is ambiguous, ask one focused clarifying question and take no destructive action. If a hook fails because a command or path is not allow-listed, say so plainly with a one-line suggestion (`use local_fs.list_dir instead`) — do not give up and tell the user to run things themselves when an allowed alternative exists.",
+            "execute_config": {
+                "model": "{{var:model}}",
+                "provider": "{{var:provider}}",
+                "shift": true,
+                "pass_clients_tools": false,
+                "hooks": ["*", "!plan_manager"],
+                "hook_policies": {
+                    "local_shell": {
+                        "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq,head,tail,wc,sed,awk",
+                        "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred,rm"
+                    },
+                    "local_fs": {
+                        "_allowed_dir": ".",
+                        "_max_read_bytes": "1048576",
+                        "_max_output_bytes": "524288",
+                        "_max_list_depth": "6",
+                        "_max_grep_matches": "5000",
+                        "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json"
+                    }
+                },
+                "retry_policy": {
+                    "max_attempts": 4,
+                    "initial_backoff": "1s",
+                    "max_backoff": "30s",
+                    "jitter": 0.25,
+                    "rate_limit_min_wait": "10s"
+                },
+                "compact_policy": {
+                    "trigger_fraction": 0.85,
+                    "keep_recent": 8,
+                    "model": "{{var:compact_model}}",
+                    "provider": "{{var:provider}}",
+                    "max_failures": 3,
+                    "min_replaced_messages": 4
+                }
+            },
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "equals",
+                        "when": "tool-call",
+                        "goto": "run_tools"
+                    },
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "end"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "run_tools",
+            "description": "Execute tool calls from the last message and append results to chat history.",
+            "handler": "execute_tool_calls",
+            "input_var": "explore_chat",
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "explore_chat"
+                    }
+                ]
+            }
+        }
+    ],
+    "token_limit": 131072
 }

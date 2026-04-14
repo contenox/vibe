@@ -1,24 +1,38 @@
 {
     "id": "chain-run",
-    "description": "Stateless execution chain for 'contenox run'. Takes a string or chat input, returns a string output. Exposes registered hooks by default and adds local_shell when enabled via --shell.",
+    "description": "Stateless one-shot chain for `contenox run`. Designed for scripted / pipeline use (`git diff | contenox run \"suggest a commit\"`). Includes classified retry so transient provider errors don't kill a CI step. Compaction is intentionally omitted — one-shot calls don't grow long enough to benefit. Plan-management hooks excluded by default.",
     "tasks": [
         {
             "id": "contenox_run",
-            "description": "Stateless chat completion with registered hooks available by default. Model may call tools or respond directly.",
+            "description": "Stateless agentic chat. Model may call hooks (transition tool-call) or respond directly (transition default → end).",
             "handler": "chat_completion",
-            "system_instruction": "You are Contenox, a helpful AI assistant. Answer the user's questions clearly and helpfully. If you have tools available, use them when appropriate to complete the task.",
+            "system_instruction": "You are Contenox, a task-execution assistant invoked from a CLI / pipeline. Be concise — your output is likely consumed by another script or piped to a file.\n\nSCOPE: Only registered hooks exist; there is no separate UI. If the user / caller asks for something that cannot be done with available hooks, say so briefly.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess — say briefly what is missing and stop. A non-interactive caller cannot answer a clarifying question, so just refuse cleanly.\n\nNo ===STEP_DONE=== marker — that is plan-execution semantics, not one-shot run.",
             "execute_config": {
                 "model": "{{var:model}}",
                 "provider": "{{var:provider}}",
+                "shift": true,
                 "pass_clients_tools": false,
-                "hooks": [
-                    "*"
-                ],
+                "hooks": ["*", "!plan_manager"],
                 "hook_policies": {
                     "local_shell": {
                         "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq",
                         "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+                    },
+                    "local_fs": {
+                        "_allowed_dir": ".",
+                        "_max_read_bytes": "1048576",
+                        "_max_output_bytes": "524288",
+                        "_max_list_depth": "6",
+                        "_max_grep_matches": "5000",
+                        "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json"
                     }
+                },
+                "retry_policy": {
+                    "max_attempts": 4,
+                    "initial_backoff": "1s",
+                    "max_backoff": "30s",
+                    "jitter": 0.25,
+                    "rate_limit_min_wait": "10s"
                 }
             },
             "transition": {
@@ -39,7 +53,7 @@
         },
         {
             "id": "run_tools",
-            "description": "Execute tool calls from the last message and append results to chat history",
+            "description": "Execute tool calls from the last message and append results to chat history.",
             "handler": "execute_tool_calls",
             "input_var": "contenox_run",
             "transition": {

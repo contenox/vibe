@@ -125,6 +125,10 @@ func (s *Service) SendTurn(ctx context.Context, in TurnInput) (*TurnResult, erro
 		templateVars["request_id"] = reqID
 	}
 	execCtx := taskengine.WithTemplateVars(ctx, templateVars)
+	// Attach a widget-hint sink so hooks (local_fs.read_file, etc.) can emit
+	// inline-rendering hints that the SSE event publisher drains into
+	// TaskEvent.Attachments. Phase 5 of the Beam canvas-vision plan.
+	execCtx = taskengine.WithWidgetHintSink(execCtx, &taskengine.WidgetHintSink{})
 
 	result, dt, capturedStateUnits, err := s.taskService.Execute(execCtx, chain, taskengine.ChatHistory{Messages: messages}, taskengine.DataTypeChatHistory)
 	if err != nil {

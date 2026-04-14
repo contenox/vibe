@@ -2,7 +2,7 @@ import '@xterm/xterm/css/xterm.css';
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { useEffect, useRef, useLayoutEffect } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useLayoutEffect } from 'react';
 import { BEAM_LAYOUT_CHANGED_EVENT } from '../lib/beamLayout';
 import { useXtermTheme } from '../lib/xtermTheme';
 import { cn } from '../lib/utils';
@@ -22,7 +22,24 @@ export interface XTerminalProps {
   className?: string;
 }
 
-export function XTerminal({ wsUrl, onOpen, onDisconnect, onConnectionFailed, className }: XTerminalProps) {
+/**
+ * Imperative handle exposed via forwardRef so parents can capture terminal
+ * state (e.g. for the "attach last output" artifact source in Phase 2 of the
+ * Beam canvas-vision plan).
+ */
+export type XTerminalHandle = {
+  /**
+   * Read the most recent N lines of terminal content (from the active buffer,
+   * not the raw socket stream — so ANSI is already applied and the caller sees
+   * exactly what the user saw). Returns null when the terminal is not ready.
+   */
+  captureRecentOutput: (maxLines?: number) => string | null;
+};
+
+export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XTerminal(
+  { wsUrl, onOpen, onDisconnect, onConnectionFailed, className },
+  handleRef,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const onDisconnectRef = useRef(onDisconnect);
@@ -39,6 +56,36 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, onConnectionFailed, cla
     onOpenRef.current = onOpen;
     onConnectionFailedRef.current = onConnectionFailed;
   });
+
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      captureRecentOutput: (maxLines = 200) => {
+        const term = termRef.current;
+        if (!term) return null;
+        try {
+          const buf = term.buffer.active;
+          const total = buf.length;
+          if (total === 0) return '';
+          const start = Math.max(0, total - maxLines);
+          const lines: string[] = [];
+          for (let i = start; i < total; i++) {
+            const line = buf.getLine(i);
+            if (!line) continue;
+            // translateToString(true) trims trailing whitespace per line.
+            lines.push(line.translateToString(true));
+          }
+          // Drop leading blank lines so a mostly-empty screen doesn't produce
+          // 200 newlines of padding.
+          while (lines.length > 0 && lines[0] === '') lines.shift();
+          return lines.join('\n');
+        } catch {
+          return null;
+        }
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const t = termRef.current;
@@ -230,4 +277,4 @@ export function XTerminal({ wsUrl, onOpen, onDisconnect, onConnectionFailed, cla
       }}
     />
   );
-}
+});

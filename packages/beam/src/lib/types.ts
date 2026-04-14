@@ -82,6 +82,13 @@ export type TaskEvent = {
   content?: string;
   thinking?: string;
   error?: string;
+  /**
+   * Widget hints emitted by hooks during the just-completed step (Phase 5
+   * of the Beam canvas-vision plan). Mirrors taskengine.WidgetHint on the
+   * Go side. The shape matches ChatContextArtifact so the same artifact →
+   * inline-attachment mapping handles both directions of state flow.
+   */
+  attachments?: Array<{ kind: string; payload?: unknown }>;
 };
 
 export type SetupIssue = {
@@ -266,7 +273,43 @@ export type ChatMessage = {
   error?: string;
   /** Assistant message still receiving task-event stream (Beam live row). */
   streaming?: boolean;
+  /**
+   * Inline attachments rendered alongside this message in the thread (Phase 4
+   * of the canvas-vision plan). Currently populated only client-side, only for
+   * optimistic outgoing user messages — the server does not yet persist them.
+   * Phase 5 will extend this to assistant/tool messages with widgets emitted
+   * by hooks (e.g. read_file → file_view).
+   */
+  attachments?: InlineAttachment[];
 };
+
+/**
+ * Inline attachments are typed renderer cards that appear adjacent to a
+ * message in the chat thread. They mirror artifact kinds 1:1 (see
+ * packages/beam/src/lib/artifacts/types.ts) but are oriented toward
+ * presentation (collapsibility, syntax highlighting, links) rather than the
+ * LLM-context shape.
+ */
+export type InlineAttachment =
+  | { kind: 'file_view'; path: string; text: string; truncated?: boolean }
+  | {
+      kind: 'terminal_excerpt';
+      output: string;
+      command?: string;
+      sessionId?: string;
+      capturedAt?: string;
+    }
+  | {
+      kind: 'plan_summary';
+      planId: string;
+      ordinal: number;
+      description: string;
+      status: string;
+      summary?: string;
+      failureClass?: string;
+    }
+  | { kind: 'dag'; chainJSON: string; description?: string }
+  | { kind: 'state_unit'; name: string; data?: unknown };
 
 export type QueueItem = {
   url: string;

@@ -1,10 +1,16 @@
 import { Button, Span, Spinner } from '@contenox/ui';
-import { RotateCcw, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Paperclip, RotateCcw, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { t } from 'i18next';
-import { XTerminal } from '../../../../components/XTerminal';
+import { XTerminal, type XTerminalHandle } from '../../../../components/XTerminal';
 import { api } from '../../../../lib/api';
 import { ApiError } from '../../../../lib/fetch';
+import {
+  Artifact,
+  useArtifactSource,
+  type ArtifactSource,
+} from '../../../../lib/artifacts';
+import { useSlashCommand, type SlashCommand } from '../../../../lib/slashCommands';
 
 const SESSION_KEY = 'beam_terminal_session_id';
 const DISCONNECT_RECREATE_MS = 350;
@@ -19,6 +25,95 @@ export function TerminalPanel({ className }: { className?: string }) {
   const createGenRef = useRef(0);
   const disconnectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectFailuresRef = useRef(0);
+  /** Imperative handle used to read the visible xterm buffer for context arming. */
+  const xtermRef = useRef<XTerminalHandle | null>(null);
+  /**
+   * When the user clicks "Attach last output", we capture the current buffer
+   * into state. The next send reads it, emits one artifact, and clears the
+   * armed state (one-shot). This keeps terminal output explicit and avoids
+   * leaking every byte of shell activity into every turn.
+   */
+  const [armedOutput, setArmedOutput] = useState<{ output: string; capturedAt: string } | null>(
+    null,
+  );
+
+  /**
+   * One-shot terminal_output source. Registered whenever armedOutput is set.
+   * collect() returns the artifact and immediately clears the armed state so
+   * a second send does not resend the same stale output.
+   */
+  const terminalSource = useMemo<ArtifactSource | null>(() => {
+    if (!armedOutput) return null;
+    return {
+      id: 'terminal:last_output',
+      label: t('terminal.attached_label', 'Terminal output attached'),
+      collect: () => {
+        const snapshot = armedOutput;
+        // Defer the clear so React doesn't flush mid-render. Uses microtask
+        // so the current send sees the artifact, the next render does not.
+        queueMicrotask(() => setArmedOutput(null));
+        return Artifact.terminalOutput({
+          session_id: sessionIdRef.current ?? undefined,
+          output: snapshot.output,
+          captured_at: snapshot.capturedAt,
+        });
+      },
+    };
+  }, [armedOutput]);
+  useArtifactSource(terminalSource);
+
+  const handleAttachOutput = useCallback(() => {
+    const snapshot = xtermRef.current?.captureRecentOutput(400);
+    if (snapshot == null) return;
+    const trimmed = snapshot.trimEnd();
+    if (!trimmed) return;
+    setArmedOutput({ output: trimmed, capturedAt: new Date().toISOString() });
+  }, []);
+
+  /**
+   * `@terminal` mention. Same effect as the header paperclip button: captures
+   * the current xterm buffer, arms a one-shot terminal_output source that
+   * fires on the next send. Fails gracefully when the terminal isn't mounted
+   * yet (e.g. user types `@terminal` before opening the workspace).
+   */
+  const terminalCommand = useMemo<SlashCommand>(
+    () => ({
+      trigger: '@',
+      name: 'terminal',
+      aliases: ['term'],
+      description: 'Mention the current terminal output as context.',
+      usage: '@terminal',
+      execute: (ctx) => {
+        const snapshot = xtermRef.current?.captureRecentOutput(400);
+        if (snapshot == null) {
+          ctx.notify('error', '@terminal: no terminal mounted in this workspace.');
+          return;
+        }
+        const trimmed = snapshot.trimEnd();
+        if (!trimmed) {
+          ctx.notify('error', '@terminal: nothing to attach (terminal is empty).');
+          return;
+        }
+        const capturedAt = new Date().toISOString();
+        ctx.armArtifact(
+          'mention:terminal:last_output',
+          '@terminal',
+          Artifact.terminalOutput({
+            session_id: sessionIdRef.current ?? undefined,
+            output: trimmed,
+            captured_at: capturedAt,
+          }),
+        );
+        ctx.notify('info', 'Terminal output attached (will send with your next message).');
+      },
+    }),
+    [],
+  );
+  useSlashCommand(terminalCommand);
+
+  const handleClearAttached = useCallback(() => {
+    setArmedOutput(null);
+  }, []);
 
   const persist = useCallback((sessionId: string | null) => {
     sessionIdRef.current = sessionId;
@@ -246,10 +341,36 @@ export function TerminalPanel({ className }: { className?: string }) {
     <div className={`flex h-full min-h-0 w-full min-w-0 flex-col ${className ?? ''}`}>
       {/* Title bar */}
       <div className="border-border bg-surface-100 dark:bg-dark-surface-200 flex shrink-0 items-center justify-between gap-2 border-b px-2 py-1.5">
-        <Span variant="muted" className="text-xs font-medium">
-          {t('terminal.title', 'Terminal')}
-        </Span>
+        <div className="flex items-center gap-2">
+          <Span variant="muted" className="text-xs font-medium">
+            {t('terminal.title', 'Terminal')}
+          </Span>
+          {armedOutput && (
+            <button
+              type="button"
+              onClick={handleClearAttached}
+              className="bg-success/10 text-success hover:bg-success/20 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
+              title={t('terminal.detach_attached', 'Detach (clear attached output)')}
+            >
+              <Paperclip className="h-3 w-3" />
+              {t('terminal.attached_pill', 'Attached')}
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
         <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={handleAttachOutput}
+            title={t(
+              'terminal.attach_output',
+              'Attach most recent terminal output as context for the next message',
+            )}
+          >
+            <Paperclip className="h-3.5 w-3.5" />
+          </Button>
           <Button
             type="button"
             variant="ghost"
@@ -272,6 +393,7 @@ export function TerminalPanel({ className }: { className?: string }) {
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <XTerminal
+          ref={xtermRef}
           className="min-h-0 min-w-0 flex-1"
           wsUrl={wsUrl}
           onOpen={handleOpen}

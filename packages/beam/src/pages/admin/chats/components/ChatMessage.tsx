@@ -11,6 +11,7 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ChatMessage as ChatMessageModel } from '../../../../lib/types';
+import { InlineAttachments } from './InlineAttachmentRenderer';
 
 type ChatMessageProps = {
   message: ChatMessageModel;
@@ -71,6 +72,7 @@ export const ChatMessage = ({ message, isLatest = false, streamThinking }: ChatM
         </ReactMarkdown>
       ) : null}
       {message.streaming && message.content && !message.error ? <ChatStreamingCaret /> : null}
+      <InlineAttachments attachments={message.attachments} />
     </ChatMessageUI>
   );
 };

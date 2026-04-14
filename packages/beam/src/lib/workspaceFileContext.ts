@@ -41,9 +41,12 @@ export async function readWorkspaceFileText(
 }
 
 /**
- * Build a single file_excerpt artifact; truncates `text` so JSON payload fits server limits.
+ * Binary-search the largest prefix of `text` whose JSON payload (with the
+ * supplied fixed keys) still fits under [MAX_ARTIFACT_PAYLOAD_UTF8_BYTES].
+ * Shared across both file_excerpt and open_file builders so they agree on the
+ * byte budget.
  */
-export function buildFileExcerptArtifact(path: string, text: string): ChatContextArtifact {
+function truncateTextToPayloadLimit(path: string, text: string): { text: string; truncated: boolean } {
   let lo = 0;
   let hi = text.length;
   let best = '';
@@ -58,25 +61,33 @@ export function buildFileExcerptArtifact(path: string, text: string): ChatContex
       hi = mid - 1;
     }
   }
+  return { text: best, truncated: best.length < text.length };
+}
+
+/**
+ * Build a single file_excerpt artifact; truncates `text` so JSON payload fits server limits.
+ */
+export function buildFileExcerptArtifact(path: string, text: string): ChatContextArtifact {
+  const { text: fitted } = truncateTextToPayloadLimit(path, text);
   return {
     kind: 'file_excerpt',
-    payload: { path, text: best },
+    payload: { path, text: fitted },
   };
 }
 
 /**
- * Wraps file_excerpt in ChatContextPayload for sendMessage; returns undefined if nothing to attach.
+ * Build an open_file artifact — used when the UI wants the LLM to know this is
+ * the file the user currently has open in the workspace (semantic: "this is
+ * live") as opposed to a file_excerpt (semantic: "a snapshot I pasted").
  */
-export function buildWorkspaceChatContext(
-  vfsPath: string | null,
-  editorText: string,
-  canAttach: boolean,
-): ChatContextPayload | undefined {
-  if (!canAttach || !vfsPath?.trim()) return undefined;
-  const artifact = buildFileExcerptArtifact(vfsPath.trim(), editorText);
-  const payloadStr = JSON.stringify(artifact.payload ?? {});
-  if (utf8ByteLength(payloadStr) > MAX_ARTIFACT_PAYLOAD_UTF8_BYTES) {
-    return undefined;
-  }
-  return { artifacts: [artifact] };
+export function buildOpenFileArtifact(path: string, text: string): ChatContextArtifact {
+  const { text: fitted } = truncateTextToPayloadLimit(path, text);
+  return {
+    kind: 'open_file',
+    payload: { path, text: fitted },
+  };
 }
+
+// buildWorkspaceChatContext was the legacy file_excerpt wrapper; superseded by
+// the sticky open_file ArtifactSource registered in WorkspaceSplitPanel.
+// Intentionally removed — add it back only if an external consumer surfaces.

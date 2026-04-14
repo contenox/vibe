@@ -228,7 +228,7 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 		}
 	}
 
-	response, meta, err := exe.repo.PromptExecute(ctx, req, systemInstruction, float32(llmCall.Temperature), prompt)
+	response, meta, err := exe.promptWithRetry(ctx, &llmCall, req, systemInstruction, prompt)
 	if err != nil {
 		err = fmt.Errorf("prompt execution failed: %w", err)
 		reportErr(err)
@@ -237,6 +237,49 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 	exe.publishStepChunk(ctx, meta, strings.TrimSpace(response), "")
 
 	return strings.TrimSpace(response), nil
+}
+
+// promptWithRetry wraps repo.PromptExecute with [llmretry.Do] when the task's
+// LLMExecutionConfig declares a RetryPolicy. Used by every prompt_to_*
+// handler (prompt_to_int / float / range / string / condition / js) and by
+// the planner-call path. The streaming branch in [Prompt] is intentionally
+// not retried because parcels may already have been published to the user;
+// only the non-streaming fallback path is wrapped.
+//
+// Mirrors [chatWithRetry] except it calls PromptExecute, which has no tool
+// dispatch.
+func (exe *SimpleExec) promptWithRetry(
+	ctx context.Context,
+	llmCall *LLMExecutionConfig,
+	req llmrepo.Request,
+	systemInstruction, prompt string,
+) (string, llmrepo.Meta, error) {
+	policy := llmretry.RetryPolicy{}
+	if llmCall != nil && llmCall.RetryPolicy != nil {
+		policy = *llmCall.RetryPolicy
+	}
+	primary := getPrimaryModel(llmCall)
+	type promptResult struct {
+		response string
+		meta     llmrepo.Meta
+	}
+	result, outcome, err := llmretry.Do(ctx, policy, primary, func(modelID string) (any, error) {
+		callReq := req
+		if modelID != "" && modelID != primary {
+			callReq.ModelNames = []string{modelID}
+		}
+		r, m, e := exe.repo.PromptExecute(ctx, callReq, systemInstruction, float32(llmCall.Temperature), prompt)
+		if e != nil {
+			return nil, e
+		}
+		return promptResult{response: r, meta: m}, nil
+	})
+	appendRetryOutcome(ctx, outcome)
+	if err != nil {
+		return "", llmrepo.Meta{}, err
+	}
+	pr := result.(promptResult)
+	return pr.response, pr.meta, nil
 }
 
 // Prompt resolves a model client and sends the prompt

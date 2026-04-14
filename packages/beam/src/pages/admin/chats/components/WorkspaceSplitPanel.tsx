@@ -1,6 +1,6 @@
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { Button, FileTree, type FileTreeNode, InlineNotice, Panel, Span, Spinner, Tabs } from '@contenox/ui';
-import { ChevronRight, Save, TerminalSquare, FolderOpen } from 'lucide-react';
+import { ChevronRight, Pin, PinOff, Save, TerminalSquare, FolderOpen } from 'lucide-react';
 import { t } from 'i18next';
 import {
   forwardRef,
@@ -24,9 +24,10 @@ import { BEAM_LAYOUT_CHANGED_EVENT } from '../../../../lib/beamLayout';
 import { defineBeamMonacoThemes, useMonacoAppTheme } from '../../../../lib/monacoAppTheme';
 import { toFileTreeNodes } from '../../../../lib/vfsFileTree';
 import {
-  buildWorkspaceChatContext,
+  buildOpenFileArtifact,
   readWorkspaceFileText,
 } from '../../../../lib/workspaceFileContext';
+import { useArtifactSource, type ArtifactSource } from '../../../../lib/artifacts';
 
 export type WorkspaceSplitHandle = {
   buildChatContext: () => ChatContextPayload | undefined;
@@ -137,6 +138,14 @@ type Props = {
   className?: string;
 };
 
+/**
+ * localStorage key for the workspace-global set of pinned file paths. Pinned
+ * files attach themselves as `open_file` artifacts to every chat turn while
+ * the workspace panel is mounted. Workspace-global rather than per-chat so a
+ * pin survives tab/session switches; clear by unpinning.
+ */
+const PINNED_FILES_STORAGE_KEY = 'beam_workspace_pinned_paths';
+
 const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function WorkspaceSplitPanel(
   { className },
   ref,
@@ -235,13 +244,71 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
   useImperativeHandle(
     ref,
     () => ({
-      buildChatContext: () => {
-        if (!canAttachContext) return undefined;
-        return buildWorkspaceChatContext(selectedPath, editorText, true);
-      },
+      // Legacy path: superseded by the sticky open_file ArtifactSource below.
+      // Kept so external callers that still invoke the handle see a no-op
+      // instead of breaking; remove once no consumers remain.
+      buildChatContext: () => undefined,
     }),
-    [canAttachContext, selectedPath, editorText],
+    [],
   );
+
+  /**
+   * Sticky open_file source — opt-in. Earlier this auto-attached the open
+   * file to every turn; the user pushed back ("sticky should be opt-in"),
+   * so registration now requires an explicit pin from the editor header.
+   *
+   * Pin state is workspace-global and persisted to localStorage as a string
+   * set so unrelated chat sessions can share pinned files without coordinating.
+   *
+   * collect() reads fresh editor text/path via refs, so unsaved edits land
+   * in context.
+   */
+  const editorTextRef = useRef(editorText);
+  editorTextRef.current = editorText;
+  const selectedPathRef = useRef(selectedPath);
+  selectedPathRef.current = selectedPath;
+  const [pinnedPaths, setPinnedPaths] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const raw = window.localStorage.getItem(PINNED_FILES_STORAGE_KEY);
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? new Set(arr.filter((s): s is string => typeof s === 'string')) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  const isPinned = !!selectedPath && pinnedPaths.has(selectedPath);
+  const togglePin = useCallback(() => {
+    if (!selectedPath) return;
+    setPinnedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(selectedPath)) next.delete(selectedPath);
+      else next.add(selectedPath);
+      try {
+        window.localStorage.setItem(
+          PINNED_FILES_STORAGE_KEY,
+          JSON.stringify(Array.from(next)),
+        );
+      } catch {
+        /* quota / disabled storage */
+      }
+      return next;
+    });
+  }, [selectedPath]);
+  const openFileSource = useMemo<ArtifactSource | null>(() => {
+    if (!canAttachContext || !isPinned) return null;
+    return {
+      id: 'workspace:open_file',
+      label: t('chat.open_file_artifact_label', 'Pinned file attached as context'),
+      collect: () => {
+        const path = selectedPathRef.current;
+        if (!path) return null;
+        return buildOpenFileArtifact(path, editorTextRef.current);
+      },
+    };
+  }, [canAttachContext, isPinned]);
+  useArtifactSource(openFileSource);
 
   const breadcrumbParts = useMemo(() => {
     if (!currentDir) return [];
@@ -424,19 +491,55 @@ const WorkspaceSplitPanel = forwardRef<WorkspaceSplitHandle, Props>(function Wor
           {selectedFileId && isTextFile ? (
             <>
               <div className="border-border bg-surface-100 dark:bg-dark-surface-200 flex shrink-0 items-center justify-between gap-2 border-b px-2 py-2">
-                <Span variant="muted" className="truncate font-mono text-xs">
-                  {selectedPath}
-                </Span>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={!dirty || updateFile.isPending}
-                  isLoading={updateFile.isPending}
-                  onClick={handleSave}>
-                  <Save className="mr-1 h-3.5 w-3.5" />
-                  {t('chat.workspace_save')}
-                </Button>
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <Span variant="muted" className="truncate font-mono text-xs">
+                    {selectedPath}
+                  </Span>
+                  {isPinned && (
+                    <span
+                      className="bg-primary/10 text-primary inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px]"
+                      title={t(
+                        'chat.workspace_pin_active',
+                        'Pinned: this file attaches as context on every message',
+                      )}
+                    >
+                      <Pin className="h-2.5 w-2.5" />
+                      {t('chat.workspace_pin_label', 'pinned')}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={togglePin}
+                    title={
+                      isPinned
+                        ? t('chat.workspace_unpin', 'Unpin from chat context')
+                        : t(
+                            'chat.workspace_pin',
+                            'Pin file: attach as context to every message in this chat',
+                          )
+                    }
+                  >
+                    {isPinned ? (
+                      <PinOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Pin className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={!dirty || updateFile.isPending}
+                    isLoading={updateFile.isPending}
+                    onClick={handleSave}>
+                    <Save className="mr-1 h-3.5 w-3.5" />
+                    {t('chat.workspace_save')}
+                  </Button>
+                </div>
               </div>
               <div className="relative min-h-[200px] flex-1 overflow-hidden">
                 <div className="absolute inset-0 min-h-[200px]">

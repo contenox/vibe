@@ -421,6 +421,15 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 			stepEvent := NewTaskEvent(taskCtx, TaskEventStepCompleted)
 			stepEvent.OutputType = outputType.String()
 			stepEvent.Transition = transitionEval
+			// Drain any UI hints emitted by hooks during this step (Phase 5
+			// of the canvas-vision plan). Hints go out exactly once per
+			// publish — Drain() also clears them so the next step starts
+			// clean. Failed steps still publish hints because a hook may
+			// have produced a useful widget before the step's terminal
+			// error (e.g. a partial file_view before a downstream parse fail).
+			if hints := drainWidgetHints(taskCtx); len(hints) > 0 {
+				stepEvent.Attachments = hints
+			}
 
 			if taskErr != nil {
 				stepEvent.Kind = TaskEventStepFailed

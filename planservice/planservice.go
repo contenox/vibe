@@ -818,6 +818,11 @@ func (s *service) Next(ctx context.Context, args Args, executorChain, summarizer
 	// auto-replan instead of giving up. Always attached; cheap when unused.
 	retrySink := &taskengine.RetryOutcomeSink{}
 	execCtx = taskengine.WithRetryOutcomeSink(execCtx, retrySink)
+	// Widget-hint sink — collects per-step inline-rendering hints emitted by
+	// hooks (local_fs.read_file → file_view, etc.). Drained per task by the
+	// task-event publisher into TaskEvent.Attachments. Phase 5 of the Beam
+	// canvas-vision plan.
+	execCtx = taskengine.WithWidgetHintSink(execCtx, &taskengine.WidgetHintSink{})
 	// Plan-step identity flows via ctx to the plan_summary hook so it knows
 	// which DB row to write (identity chosen at ClaimNextPendingStep time,
 	// not at plancompile time; cannot live in compiled chain JSON).

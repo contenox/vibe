@@ -1,58 +1,80 @@
 {
-  "id": "chain-contenox",
-  "description": "Natural language to directory/command: model uses local_shell to run e.g. ls, then responds in text",
-  "tasks": [
-    {
-      "id": "contenox_chat",
-      "description": "Chat completion with local_shell tool; model may call tool or respond with text",
-      "handler": "chat_completion",
-      "system_instruction": "You are Contenox, a task-execution assistant — not a chat-only product. Answer clearly and use tools when they are needed to complete the task. Only registered hooks exist (e.g. local_shell); there is no separate browser or UI unless you invoke a tool that provides one. If the user asks for something that cannot be done with available tools, say so briefly. If the request is ambiguous or under-specified, DO NOT guess — ask one focused clarifying question and take no destructive or speculative action until the user answers.",
-      "execute_config": {
-        "model": "{{var:model}}",
-        "provider": "{{var:provider}}",
-        "pass_clients_tools": false,
-        "hooks": [
-          "*"
-        ],
-        "hook_policies": {
-          "local_shell": {
-            "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq",
-            "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
-          }
+    "id": "chain-contenox",
+    "description": "Default Beam/CLI chat chain (chat mode). Wires classified retry, mid-run conversation compaction, sensible local_fs / local_shell policies, and emits inline widget hints (file_view, terminal_excerpt) the Beam canvas renders adjacent to the assistant's reply. Plan-management hooks are excluded by default; switch to plan mode for those.",
+    "tasks": [
+        {
+            "id": "contenox_chat",
+            "description": "Agentic chat loop — model may call hooks (transition tool-call) or finish the turn (transition default → end).",
+            "handler": "chat_completion",
+            "system_instruction": "You are Contenox, a task-execution assistant — not a chat-only product.\n\nSCOPE: Only registered hooks exist (filesystem, shell, MCP / OpenAPI as configured). There is no separate browser or product UI unless a tool you call provides one. If the user asks for something that cannot be done with available hooks, say so briefly.\n\nBEAM WORKSPACE: When running inside Beam, the user has a terminal and a files panel they work in alongside you, plus @-mentions and slash commands. If you need a specific file, ask them to `@file <path>`; if you need terminal output, ask them to run the command and `@terminal`. Do not paste long file contents back to them — they can see what's in their own workspace.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess. Ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nNo ===STEP_DONE=== marker — that is plan-execution semantics, not chat.",
+            "execute_config": {
+                "model": "{{var:model}}",
+                "provider": "{{var:provider}}",
+                "shift": true,
+                "pass_clients_tools": false,
+                "hooks": ["*", "!plan_manager"],
+                "hook_policies": {
+                    "local_shell": {
+                        "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq",
+                        "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+                    },
+                    "local_fs": {
+                        "_allowed_dir": ".",
+                        "_max_read_bytes": "1048576",
+                        "_max_output_bytes": "524288",
+                        "_max_list_depth": "6",
+                        "_max_grep_matches": "5000",
+                        "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json"
+                    }
+                },
+                "retry_policy": {
+                    "max_attempts": 4,
+                    "initial_backoff": "1s",
+                    "max_backoff": "30s",
+                    "jitter": 0.25,
+                    "rate_limit_min_wait": "10s"
+                },
+                "compact_policy": {
+                    "trigger_fraction": 0.85,
+                    "keep_recent": 8,
+                    "model": "{{var:compact_model}}",
+                    "provider": "{{var:provider}}",
+                    "max_failures": 3,
+                    "min_replaced_messages": 4
+                }
+            },
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "equals",
+                        "when": "tool-call",
+                        "goto": "run_tools"
+                    },
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "end"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "run_tools",
+            "description": "Execute tool calls from the last message and append results to chat history.",
+            "handler": "execute_tool_calls",
+            "input_var": "contenox_chat",
+            "transition": {
+                "on_failure": "",
+                "branches": [
+                    {
+                        "operator": "default",
+                        "when": "",
+                        "goto": "contenox_chat"
+                    }
+                ]
+            }
         }
-      },
-      "transition": {
-        "on_failure": "",
-        "branches": [
-          {
-            "operator": "equals",
-            "when": "tool-call",
-            "goto": "run_tools"
-          },
-          {
-            "operator": "default",
-            "when": "",
-            "goto": "end"
-          }
-        ]
-      }
-    },
-    {
-      "id": "run_tools",
-      "description": "Execute tool calls from the last message and append results to chat history",
-      "handler": "execute_tool_calls",
-      "input_var": "contenox_chat",
-      "transition": {
-        "on_failure": "",
-        "branches": [
-          {
-            "operator": "default",
-            "when": "",
-            "goto": "contenox_chat"
-          }
-        ]
-      }
-    }
-  ],
-  "token_limit": 131072
+    ],
+    "token_limit": 131072
 }

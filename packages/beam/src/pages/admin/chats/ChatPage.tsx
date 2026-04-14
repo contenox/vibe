@@ -31,6 +31,7 @@ import { useActivePlan, useCompilePlanPreview } from '../../../hooks/usePlans';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';
 import { parseCompiledChainJSON } from '../../../lib/planCompiledChain';
 import { planKeys } from '../../../lib/queryKeys';
+import { api } from '../../../lib/api';
 import { useChatHistory, useCreateChat, useSendMessage } from '../../../hooks/useChats';
 import { useTaskEvents } from '../../../hooks/useTaskEvents';
 import { createTaskEventRequestId } from '../../../lib/taskEvents';
@@ -39,9 +40,30 @@ import { cn } from '../../../lib/utils';
 import {
   CapturedStateUnit,
   ChatMessage as ApiChatMessage,
+  type ChatContextArtifact,
   type ChatContextPayload,
   type ChatModeId,
+  type InlineAttachment,
 } from '../../../lib/types';
+import { artifactsToInlineAttachments } from '../../../lib/inlineAttachments';
+import {
+  ArtifactRegistryProvider,
+  useArtifactRegistry,
+} from '../../../lib/artifacts';
+import {
+  SlashCommandRegistryProvider,
+  createFileCommand,
+  createHelpCommand,
+  createPlanCommand,
+  useSlashCommand,
+  useSlashCommandRegistry,
+  type FileResolver,
+  type PlanProvider,
+} from '../../../lib/slashCommands';
+import {
+  readWorkspaceFileText,
+  MAX_EDITOR_FILE_BYTES,
+} from '../../../lib/workspaceFileContext';
 import { buildChatThreadItems } from './chatThreadItems';
 import BuildModeChainGraph from './components/BuildModeChainGraph';
 import { ChatInterface, type ChatWorkbenchTabId } from './components/ChatInterface';
@@ -74,8 +96,77 @@ type BeamChatLocationState = {
   beamInitialChainId?: string;
 };
 
+/**
+ * Thin wrapper that establishes the ArtifactRegistry for this ChatPage
+ * instance, then renders the real component. The registry lives at this
+ * boundary so descendants (files tree, terminal, composer, etc.) can all
+ * register sources whose artifacts the composer collects at send time.
+ */
 export default function ChatPage() {
+  return (
+    <ArtifactRegistryProvider>
+      <SlashCommandRegistryProvider>
+        <ChatPageImpl />
+      </SlashCommandRegistryProvider>
+    </ArtifactRegistryProvider>
+  );
+}
+
+/**
+ * Merge the legacy workspace-derived context (today: file_excerpt built by
+ * WorkspaceSplitPanel.buildChatContext) with artifacts contributed by sources
+ * registered in the [ArtifactRegistry]. Registry sources appear AFTER the
+ * workspace artifact so the LLM sees them as supplementary, not overriding.
+ *
+ * Returns undefined when there is nothing to attach — keeping the send path
+ * byte-for-byte identical to the pre-registry behaviour when no sources are
+ * active.
+ */
+function buildTurnContext(
+  workspaceContext: ChatContextPayload | undefined,
+  registryArtifacts: ChatContextArtifact[],
+): ChatContextPayload | undefined {
+  const artifacts: ChatContextArtifact[] = [];
+  if (workspaceContext?.artifacts?.length) {
+    artifacts.push(...workspaceContext.artifacts);
+  }
+  if (registryArtifacts.length) {
+    artifacts.push(...registryArtifacts);
+  }
+  if (artifacts.length === 0) return undefined;
+  return { artifacts };
+}
+
+/**
+ * Optimistic user message awaiting echo from the persisted history. Carries
+ * inline attachments derived from slash-armed artifact sources so the user
+ * can see what they attached on this turn. Cleared once the persisted version
+ * arrives (matched by content + sentAt windowing).
+ */
+type OptimisticUserOutgoing = {
+  /** Synthetic id; not the eventual server id. */
+  id: string;
+  content: string;
+  attachments: InlineAttachment[];
+  sentAt: string;
+};
+
+function ChatPageImpl() {
   const { chatId: paramChatId } = useParams<{ chatId: string }>();
+  const artifactRegistry = useArtifactRegistry();
+  const slashRegistry = useSlashCommandRegistry();
+  const [optimisticOutgoing, setOptimisticOutgoing] = useState<OptimisticUserOutgoing | null>(
+    null,
+  );
+  /**
+   * Agent-emitted inline attachments keyed by persisted assistant message id
+   * (Phase 5 of the canvas-vision plan). Captured from the live SSE stream
+   * once the persisted echo arrives so attachments survive after the live
+   * row collapses. Cleared on chat session change.
+   */
+  const [agentAttachments, setAgentAttachments] = useState<Record<string, InlineAttachment[]>>(
+    {},
+  );
   const location = useLocation();
   const navigate = useNavigate();
   const [message, setMessage] = useState('');
@@ -210,6 +301,81 @@ export default function ChatPage() {
     () => parseCompiledChainJSON(activePlan?.plan.compiled_chain_json),
     [activePlan?.plan.compiled_chain_json],
   );
+
+  /**
+   * Slash command resolver: maps a user-supplied path to the VFS file +
+   * downloaded text. Stable identity (no React state captured) so the
+   * `/file` command object is memo-stable.
+   */
+  const fileResolver = useMemo<FileResolver>(
+    () => ({
+      resolve: async (input, signal) => {
+        const needle = input.trim().replace(/^\/+/, '').toLowerCase();
+        if (!needle) throw new Error('path required');
+        // Search the entire VFS root once. Beam's lists are typically small.
+        const all = await api.listFiles();
+        const candidates = all.filter((f) => !f.isDirectory);
+        const exact = candidates.filter(
+          (f) => f.path.toLowerCase() === needle || f.id.toLowerCase() === needle,
+        );
+        const suffix = exact.length
+          ? exact
+          : candidates.filter((f) => f.path.toLowerCase().endsWith(needle));
+        if (suffix.length === 0) {
+          throw new Error(`no file matched "${input}"`);
+        }
+        if (suffix.length > 1) {
+          const preview = suffix.slice(0, 5).map((f) => f.path).join(', ');
+          throw new Error(`ambiguous (${suffix.length} matches): ${preview}…`);
+        }
+        const f = suffix[0]!;
+        if (f.size > MAX_EDITOR_FILE_BYTES) {
+          throw new Error(`${f.path} too large to attach`);
+        }
+        const text = await readWorkspaceFileText(f.id, signal);
+        return { path: f.path, text };
+      },
+    }),
+    [],
+  );
+
+  /**
+   * `/plan` provider: pulls the active plan + steps fresh on every command
+   * invocation so the artifact reflects the latest server state, not whatever
+   * React Query happened to have cached.
+   */
+  const planProvider = useMemo<PlanProvider>(
+    () => ({
+      getActivePlanSteps: () => {
+        // useActivePlan is gated by selectedMode === 'plan'; in any other mode
+        // it returns undefined. The slash-command path fetches independently
+        // by reading from React Query's cached snapshot when available.
+        if (!activePlan?.plan?.id || !activePlan.steps?.length) return null;
+        return {
+          planId: activePlan.plan.id,
+          steps: activePlan.steps.map((s) => ({
+            ordinal: s.ordinal,
+            description: s.description,
+            status: s.status,
+            summary: s.summary,
+            failureClass: s.failure_class,
+            lastFailure: s.last_failure_summary,
+          })),
+        };
+      },
+    }),
+    [activePlan],
+  );
+
+  // Register built-in slash commands. The /help command reads the live
+  // registry, so commands added later (e.g. /terminal from TerminalPanel)
+  // are discoverable in the help output as soon as they register.
+  const helpCommand = useMemo(() => createHelpCommand(slashRegistry), [slashRegistry]);
+  const fileCommand = useMemo(() => createFileCommand(fileResolver), [fileResolver]);
+  const planCommand = useMemo(() => createPlanCommand(planProvider), [planProvider]);
+  useSlashCommand(helpCommand);
+  useSlashCommand(fileCommand);
+  useSlashCommand(planCommand);
 
   const compilePlanPreview = useCompilePlanPreview({
     enabled:
@@ -369,11 +535,40 @@ export default function ChatPage() {
       cancelledRef.current = false;
       abortRef.current = controller;
 
-      const context = workspaceRef.current?.buildChatContext();
+      // Collect the registry exactly once: one-shot slash sources unregister
+      // themselves on collect, so a second pass would yield nothing.
+      const collected = artifactRegistry.collectWithSources();
+      const allArtifacts = collected.map((p) => p.artifact);
+      // Inline-display attachments come ONLY from explicitly-armed sources
+      // (`mention:` from @-mentions, `slash:` legacy). Sticky sources
+      // (workspace open_file, terminal armed_output) already have indicators
+      // in their owning panels; rendering them on every user message would
+      // be visual noise.
+      const explicitArtifacts = collected
+        .filter((p) => p.source.id.startsWith('mention:') || p.source.id.startsWith('slash:'))
+        .map((p) => p.artifact);
+      const inlineAttachments = artifactsToInlineAttachments(explicitArtifacts);
+
+      const context = buildTurnContext(
+        workspaceRef.current?.buildChatContext(),
+        allArtifacts,
+      );
+
+      const trimmed = text.trim();
+      // Only show optimistic user message when there's something to show —
+      // empty body in build mode shouldn't manifest a blank bubble.
+      if (trimmed || inlineAttachments.length > 0) {
+        setOptimisticOutgoing({
+          id: `optimistic-${requestId}`,
+          content: trimmed,
+          attachments: inlineAttachments,
+          sentAt: new Date().toISOString(),
+        });
+      }
 
       pendingSendRef.current = {
         requestId,
-        message: text.trim(),
+        message: trimmed,
         chainId: chainIdForSend.trim(),
         mode: modeForSend,
         signal: controller.signal,
@@ -386,7 +581,7 @@ export default function ChatPage() {
       setIsProcessing(true);
       setMessage('');
     },
-    [t],
+    [artifactRegistry, t],
   );
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -439,23 +634,106 @@ export default function ChatPage() {
   ];
   const displayHistory = useMemo<ApiChatMessage[]>(() => {
     const base = chatHistory ?? [];
-    if (!isProcessing || !activeRequestId) {
-      return base;
+    // Augment persisted assistant messages with their agent-emitted
+    // attachments, when we captured any during their streaming turn.
+    const merged: ApiChatMessage[] = base.map((m) => {
+      if (m.role === 'assistant' && m.id && agentAttachments[m.id]) {
+        return { ...m, attachments: agentAttachments[m.id] };
+      }
+      return m;
+    });
+
+    // Optimistic user message: appended only when its content has not yet
+    // appeared in the persisted history. We match by content + a 5-minute
+    // sentAt window to tolerate clock skew between client and server.
+    if (optimisticOutgoing) {
+      const optAt = Date.parse(optimisticOutgoing.sentAt);
+      const matched = base.some((m) => {
+        if (m.role !== 'user') return false;
+        if (m.content !== optimisticOutgoing.content) return false;
+        const persistedAt = Date.parse(m.sentAt);
+        return Math.abs(persistedAt - optAt) < 5 * 60_000;
+      });
+      if (!matched) {
+        merged.push({
+          id: optimisticOutgoing.id,
+          role: 'user',
+          content: optimisticOutgoing.content,
+          sentAt: optimisticOutgoing.sentAt,
+          isUser: true,
+          isLatest: true,
+          attachments: optimisticOutgoing.attachments,
+        });
+      }
     }
-    return [
-      ...base,
-      {
-        id: `live-${activeRequestId}`,
-        role: 'assistant',
-        content: liveTask.content,
-        sentAt: new Date().toISOString(),
-        isUser: false,
-        isLatest: true,
-        streaming: true,
-        error: liveTask.error ?? undefined,
-      },
-    ];
-  }, [activeRequestId, chatHistory, isProcessing, liveTask.content, liveTask.error]);
+
+    if (!isProcessing || !activeRequestId) {
+      return merged;
+    }
+    merged.push({
+      id: `live-${activeRequestId}`,
+      role: 'assistant',
+      content: liveTask.content,
+      sentAt: new Date().toISOString(),
+      isUser: false,
+      isLatest: true,
+      streaming: true,
+      error: liveTask.error ?? undefined,
+      attachments: liveTask.attachments,
+    });
+    return merged;
+  }, [
+    activeRequestId,
+    agentAttachments,
+    chatHistory,
+    isProcessing,
+    liveTask.attachments,
+    liveTask.content,
+    liveTask.error,
+    optimisticOutgoing,
+  ]);
+
+  // Drop the optimistic outgoing once the persisted history echoes it back.
+  useEffect(() => {
+    if (!optimisticOutgoing) return;
+    const persisted = chatHistory ?? [];
+    const optAt = Date.parse(optimisticOutgoing.sentAt);
+    const matched = persisted.some(
+      (m) =>
+        m.role === 'user' &&
+        m.content === optimisticOutgoing.content &&
+        Math.abs(Date.parse(m.sentAt) - optAt) < 5 * 60_000,
+    );
+    if (matched) setOptimisticOutgoing(null);
+  }, [chatHistory, optimisticOutgoing]);
+
+  // Capture agent-emitted inline attachments onto the persisted assistant
+  // message that just landed. Heuristic: while liveTask still holds the
+  // streamed attachments, find the most recent persisted assistant message
+  // whose id we have not already claimed and bind the attachments to it.
+  // This lets the FileView / TerminalExcerpt cards survive after the live
+  // streaming row collapses into the persisted thread.
+  useEffect(() => {
+    if (!liveTask.attachments || liveTask.attachments.length === 0) return;
+    const persisted = chatHistory ?? [];
+    for (let i = persisted.length - 1; i >= 0; i--) {
+      const m = persisted[i];
+      if (m.role !== 'assistant' || !m.id) continue;
+      if (agentAttachments[m.id]) break; // already claimed; don't double-bind
+      const attachments = liveTask.attachments;
+      setAgentAttachments((prev) =>
+        prev[m.id!] ? prev : { ...prev, [m.id!]: attachments },
+      );
+      break;
+    }
+  }, [chatHistory, liveTask.attachments, agentAttachments]);
+
+  // Clear captured attachments when the active chat session changes — they
+  // are keyed by message ids that only make sense within one session.
+  useEffect(() => {
+    setAgentAttachments({});
+    setOptimisticOutgoing(null);
+  }, [chatId]);
 
   const compiledPlanEmbedKey = useMemo(
     () =>

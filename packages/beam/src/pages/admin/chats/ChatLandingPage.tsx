@@ -2,13 +2,29 @@ import { P, Page, Panel, Section, Select, Span, Spinner } from '@contenox/ui';
 import { useMemo, useState, useEffect, FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { ArtifactRegistryProvider } from '../../../lib/artifacts';
 import { useListFiles } from '../../../hooks/useFiles';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';
 import { useCreateChat } from '../../../hooks/useChats';
+import { SlashCommandRegistryProvider } from '../../../lib/slashCommands';
 import { ChatSession } from '../../../lib/types';
 import { MessageInputForm } from './components/MessageInputForm';
 
+/**
+ * Same provider boundary as [ChatPage]: MessageInputForm uses useSlashCommandRegistry
+ * and useArtifactRegistry and must render inside both providers.
+ */
 export default function ChatLandingPage() {
+  return (
+    <ArtifactRegistryProvider>
+      <SlashCommandRegistryProvider>
+        <ChatLandingPageImpl />
+      </SlashCommandRegistryProvider>
+    </ArtifactRegistryProvider>
+  );
+}
+
+function ChatLandingPageImpl() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [message, setMessage] = useState('');
@@ -97,3 +113,4 @@ export default function ChatLandingPage() {
     </Page>
   );
 }
+

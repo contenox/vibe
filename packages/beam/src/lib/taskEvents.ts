@@ -1,4 +1,5 @@
-import { TaskEvent } from './types';
+import { artifactsToInlineAttachments } from './inlineAttachments';
+import type { ChatContextArtifact, InlineAttachment, TaskEvent } from './types';
 
 export type TaskEventViewState = {
   events: TaskEvent[];
@@ -9,6 +10,13 @@ export type TaskEventViewState = {
   lastTaskID: string | null;
   /** From chain_started (VFS path or chain id). */
   activeChainId: string | null;
+  /**
+   * Inline attachments accumulated from `step_completed` / `step_failed`
+   * events for this run (Phase 5 of the canvas-vision plan). Mapped from
+   * raw widget hints via the same artifact→inline-attachment helper used
+   * by user-attached artifacts in Phase 4.
+   */
+  attachments: InlineAttachment[];
 };
 
 export function createEmptyTaskEventState(): TaskEventViewState {
@@ -20,6 +28,7 @@ export function createEmptyTaskEventState(): TaskEventViewState {
     error: null,
     lastTaskID: null,
     activeChainId: null,
+    attachments: [],
   };
 }
 
@@ -31,6 +40,18 @@ export function reduceTaskEventState(
     ...state,
     events: [...state.events, event],
   };
+
+  // Accumulate inline attachments from any event that carries them. Hooks
+  // emit hints during a step; the publisher attaches them to that step's
+  // step_completed (or step_failed when a hook fired before terminal error).
+  if (event.attachments && event.attachments.length > 0) {
+    const inline = artifactsToInlineAttachments(
+      event.attachments as ChatContextArtifact[],
+    );
+    if (inline.length > 0) {
+      next.attachments = [...state.attachments, ...inline];
+    }
+  }
 
   switch (event.kind) {
     case 'chain_started':

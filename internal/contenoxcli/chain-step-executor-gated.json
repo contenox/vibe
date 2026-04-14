@@ -85,7 +85,14 @@
                 "provider": "{{var:provider}}",
                 "temperature": 0,
                 "pass_clients_tools": false,
-                "hooks": []
+                "hooks": [],
+                "retry_policy": {
+                    "max_attempts": 3,
+                    "initial_backoff": "500ms",
+                    "max_backoff": "10s",
+                    "jitter": 0.25,
+                    "rate_limit_min_wait": "5s"
+                }
             },
             "input_var": "plan_step_agent_loop_tools",
             "transition": {
