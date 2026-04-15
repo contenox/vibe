@@ -101,7 +101,7 @@ Any service that speaks HTTP and exposes an OpenAPI spec becomes a first-class a
 ## Quick Start
 
 <!-- Release tooling: keep next line in sync with apiframework/version.txt (updated by `make -f Makefile.version bump-*`). -->
-<!-- TAG=v0.6.9 -->
+<!-- TAG=v0.7.0 -->
 
 ### Install
 
