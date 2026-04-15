@@ -248,13 +248,12 @@ vald/
 
 # Docs
 # (manual markdown files should be tracked; openapi specs are ignored below)
-# Enterprise site: generated at build/dev (see enterprise/site/package.json prebuild)
-enterprise/site/public/docs-search-index.json
 
 # ==============================
-# Enterprise Code
+# Enterprise (optional local checkout — not tracked)
 # ==============================
-# enterprise/ is a git submodule — do NOT gitignore it
+enterprise/
+
 .apikey.txt
 
 # dependencies
