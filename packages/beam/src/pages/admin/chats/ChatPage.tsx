@@ -20,7 +20,7 @@ import {
   Fill,
   Page,
 } from '@contenox/ui';
-import { FolderOpen, PanelRightClose, PanelRightOpen, X } from 'lucide-react';
+import { FolderOpen, PanelRightClose, PanelRightOpen, Pencil, X } from 'lucide-react';
 import { t } from 'i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -845,6 +845,35 @@ function ChatPageImpl() {
                       disabled={chainsLoading}
                     />
                     {chainsLoading && <Spinner size="sm" />}
+                    {/*
+                     * Edit-chain link — closes the dead end where a user can
+                     * see the active chain in the dropdown but had no path to
+                     * fix it when something like a missing hook_policies
+                     * surfaced mid-conversation. Disabled when no chain is
+                     * selected; query param matches what /chains expects.
+                     */}
+                    <Tooltip
+                      content={
+                        selectedChainId
+                          ? t('chat.edit_chain', 'Open this chain in the editor')
+                          : t('chat.edit_chain_disabled', 'Select a chain to edit')
+                      }
+                      position="top"
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        disabled={!selectedChainId.trim()}
+                        onClick={() =>
+                          navigate(
+                            `/chains?path=${encodeURIComponent(selectedChainId.trim())}`,
+                          )
+                        }
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </Tooltip>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <Span variant="muted" className="text-xs sm:text-sm">
                         {t('chat.mode')}

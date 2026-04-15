@@ -19,6 +19,12 @@ import { Settings, X } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { BranchCompose, ChainDefinition, ChainTask } from '../../../../../lib/types';
+import {
+  diagnosticCounts,
+  diagnosticsByTask,
+  lintChain,
+  type Diagnostic,
+} from '../../../../../lib/chainLint';
 import TaskForm from '../TaskForm/TaskForm';
 import ComposeEditorPanel from './ComposeEditorPanel';
 import EnhancedWorkflowEdge from './EnhancedWorkflowEdge';
@@ -86,18 +92,37 @@ const ChainVisualizer: React.FC<ChainVisualizerProps> = ({
     composeConfig?: BranchCompose;
   } | null>(null);
 
+  // Lint diagnostics — recomputed when the chain changes. Pure function so
+  // there's no async / loading state to manage. Surfaces as per-node badges
+  // (via metadata.diagnostics) plus a chain-level summary above the canvas.
+  const diagnostics = useMemo(() => lintChain(chain), [chain]);
+  const diagnosticsByTaskId = useMemo(() => diagnosticsByTask(diagnostics), [diagnostics]);
+  const counts = useMemo(() => diagnosticCounts(diagnostics), [diagnostics]);
+
   // NODES - including virtual end nodes
   const { nodes, endNodeMappings } = useMemo(() => {
-    const taskNodes = chain.tasks.map(task => ({
-      id: task.id,
-      label: task.id,
-      type: task.handler,
-      description: task.description,
-      metadata: {
-        branches: task.transition.branches.length,
-        status: statusFor(task),
-      },
-    }));
+    const taskNodes = chain.tasks.map(task => {
+      const taskDiagnostics: Diagnostic[] = diagnosticsByTaskId.get(task.id) ?? [];
+      // Diagnostic severity wins over the structural status from statusFor:
+      // a missing local_shell allowlist is more useful to surface than
+      // "task has on_failure handler". WorkflowNode renders this as the
+      // node's stroke color (warning = orange).
+      const worstSeverity: 'default' | 'success' | 'error' | 'warning' = taskDiagnostics.find(
+        (d) => d.severity === 'warning',
+      )
+        ? 'warning'
+        : statusFor(task);
+      return {
+        id: task.id,
+        label: task.id,
+        type: task.handler,
+        description: task.description,
+        metadata: {
+          branches: task.transition.branches.length,
+          status: worstSeverity,
+        },
+      };
+    });
 
     // Create virtual end nodes and track mappings
     const endNodeMappings: Record<string, string> = {};
@@ -277,6 +302,61 @@ const ChainVisualizer: React.FC<ChainVisualizerProps> = ({
     <div className="flex h-full">
       {/* MAIN CANVAS */}
       <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        {/*
+         * Lint summary above the canvas — soft signal only. Hidden when the
+         * chain is clean. Click an item to focus the offending task in the
+         * graph (selection drives the right-side TaskForm).
+         */}
+        {diagnostics.length > 0 && (
+          <div className="border-border bg-surface-100 dark:bg-dark-surface-200 shrink-0 border-b px-3 py-2">
+            <div className="mb-1 flex items-center gap-3 text-xs">
+              {counts.warnings > 0 && (
+                <Badge variant="warning" size="sm">
+                  ⚠ {counts.warnings}{' '}
+                  {counts.warnings === 1
+                    ? t('chains.lint.warning_one', 'warning')
+                    : t('chains.lint.warning_many', 'warnings')}
+                </Badge>
+              )}
+              {counts.infos > 0 && (
+                <Badge variant="outline" size="sm">
+                  ℹ {counts.infos}{' '}
+                  {counts.infos === 1
+                    ? t('chains.lint.info_one', 'suggestion')
+                    : t('chains.lint.info_many', 'suggestions')}
+                </Badge>
+              )}
+              <Span variant="muted" className="text-[11px]">
+                {t(
+                  'chains.lint.summary_help',
+                  'Soft signals — never block save. Click a row to focus the task.',
+                )}
+              </Span>
+            </div>
+            <ul className="space-y-0.5">
+              {diagnostics.map((d, i) => (
+                <li key={`${d.ruleId}-${d.taskId}-${i}`} className="text-[11px] leading-tight">
+                  <button
+                    type="button"
+                    className="text-text-muted hover:text-text dark:hover:text-dark-text inline text-left"
+                    onClick={() => {
+                      const task = chain.tasks.find((tt) => tt.id === d.taskId);
+                      if (task) onTaskSelect(task);
+                    }}>
+                    <span
+                      className={
+                        d.severity === 'warning' ? 'text-warning mr-1' : 'text-text-muted mr-1'
+                      }>
+                      {d.severity === 'warning' ? '⚠' : 'ℹ'}
+                    </span>
+                    <span className="font-mono">{d.taskId || '(chain)'}</span>
+                    <span className="ml-1.5">{d.message}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {hasTasks ? (
           <WorkflowVisualizer
             debug={!!chain.debug}

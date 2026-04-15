@@ -6,6 +6,7 @@ import {
   FormTask,
   RetryPolicy,
 } from '../../../../../../lib/types';
+import HookPoliciesFields from './HookPoliciesFields';
 
 interface LLMConfigFieldsProps {
   task: FormTask;
@@ -371,6 +372,8 @@ export default function LLMConfigFields({
             </div>
           </div>
         </Collapsible>
+
+        <HookPoliciesFields task={task} onChange={onChange} />
       </div>
     </Collapsible>
   );
