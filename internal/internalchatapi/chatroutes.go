@@ -78,12 +78,14 @@ type chatSession struct {
 }
 
 type chatMessage struct {
-	ID       string    `json:"id"`
-	Role     string    `json:"role"`
-	Content  string    `json:"content"`
-	SentAt   time.Time `json:"sentAt"`
-	IsUser   bool      `json:"isUser"`
-	IsLatest bool      `json:"isLatest"`
+	ID         string                `json:"id"`
+	Role       string                `json:"role"`
+	Content    string                `json:"content"`
+	SentAt     time.Time             `json:"sentAt"`
+	IsUser     bool                  `json:"isUser"`
+	IsLatest   bool                  `json:"isLatest"`
+	CallTools  []taskengine.ToolCall `json:"callTools,omitempty" openapi_include_type:"taskengine.ToolCall"`
+	ToolCallID string                `json:"toolCallId,omitempty"`
 }
 
 type chatRequest struct {
@@ -106,7 +108,7 @@ type contextArtifact struct {
 
 type chatResponse struct {
 	Response         string                         `json:"response"`
-	State            []taskengine.CapturedStateUnit `json:"state"`
+	State            []taskengine.CapturedStateUnit `json:"state" openapi_include_type:"taskengine.CapturedStateUnit"`
 	InputTokenCount  int                            `json:"inputTokenCount"`
 	OutputTokenCount int                            `json:"outputTokenCount"`
 	Error            string                         `json:"error,omitempty"`
@@ -236,11 +238,13 @@ func (h *chatManagerHandler) history(w http.ResponseWriter, r *http.Request) {
 	resp := make([]chatMessage, 0, len(history))
 	for _, msg := range history {
 		resp = append(resp, chatMessage{
-			ID:      msg.ID,
-			Role:    msg.Role,
-			Content: msg.Content,
-			SentAt:  msg.Timestamp,
-			IsUser:  msg.Role == "user",
+			ID:         msg.ID,
+			Role:       msg.Role,
+			Content:    msg.Content,
+			SentAt:     msg.Timestamp,
+			IsUser:     msg.Role == "user",
+			CallTools:  msg.CallTools,
+			ToolCallID: msg.ToolCallID,
 		})
 	}
 	if len(resp) > 0 {

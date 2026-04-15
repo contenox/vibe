@@ -137,8 +137,9 @@ func (m *Manager) RenameSession(ctx context.Context, tx libdb.Exec, sessionID st
 func generateMessageID(subjectID string, msg *taskengine.Message) string {
 	h := sha1.New()
 	h.Write([]byte(subjectID))
-	h.Write([]byte(msg.Content))
 	h.Write([]byte(msg.Role))
-	h.Write([]byte(msg.Timestamp.Format(time.RFC3339)))
+	h.Write([]byte(msg.ToolCallID))
+	h.Write([]byte(msg.Timestamp.Format(time.RFC3339Nano)))
+	h.Write([]byte(msg.Content))
 	return fmt.Sprintf("%x", h.Sum(nil))
 }

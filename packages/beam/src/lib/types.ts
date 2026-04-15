@@ -262,6 +262,17 @@ export type ErrorState = {
   error: string | null;
 };
 
+export type ToolCallFunction = {
+  name: string;
+  arguments: string;
+};
+
+export type ToolCallEntry = {
+  id: string;
+  type?: string;
+  function: ToolCallFunction;
+};
+
 export type ChatMessage = {
   id?: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -273,14 +284,12 @@ export type ChatMessage = {
   error?: string;
   /** Assistant message still receiving task-event stream (Beam live row). */
   streaming?: boolean;
-  /**
-   * Inline attachments rendered alongside this message in the thread (Phase 4
-   * of the canvas-vision plan). Currently populated only client-side, only for
-   * optimistic outgoing user messages — the server does not yet persist them.
-   * Phase 5 will extend this to assistant/tool messages with widgets emitted
-   * by hooks (e.g. read_file → file_view).
-   */
+  /** Inline attachments rendered alongside this message in the chat thread. */
   attachments?: InlineAttachment[];
+  /** Tool calls requested by this assistant message; used to label tool-result messages. */
+  callTools?: ToolCallEntry[];
+  /** For role=tool messages: links this result back to the assistant's callTools entry. */
+  toolCallId?: string;
 };
 
 /**

@@ -35,12 +35,26 @@ export class ApiError extends Error {
   }
 }
 
+export type ApiFetchOptions = RequestInit & {
+  /**
+   * Client-side abort timer in milliseconds.
+   * - Omit or pass undefined: use the global API_TIMEOUT default.
+   * - Pass null: no timer — only the caller's AbortSignal can cancel the request.
+   *   Use this for long-running requests (e.g. agentic chat) where the browser
+   *   tab lifetime is the natural timeout and the user has a Stop button.
+   */
+  timeoutMs?: number | null;
+};
+
 // --- API Fetch Helper ---
-export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
-  // If caller supplies a signal, we *merge* it with our timeout controller.
+export async function apiFetch<T>(url: string, options?: ApiFetchOptions): Promise<T> {
   const externalSignal = options?.signal ?? null;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+
+  // null → no timer; undefined → global default; number → caller-supplied value.
+  const timeout = options?.timeoutMs === null ? null : (options?.timeoutMs ?? API_TIMEOUT);
+  let timedOut = false;
+  const timeoutId = timeout !== null ? setTimeout(() => { timedOut = true; controller.abort(); }, timeout) : null;
 
   // If the caller's signal aborts, abort ours too.
   if (externalSignal) {
@@ -61,10 +75,9 @@ export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T
     const response = await fetch(new URL(url, API_BASE_URL).toString(), {
       ...options,
       headers,
-      // Use our controller so timeout *and* external abort both cancel the request.
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
+    if (timeoutId !== null) clearTimeout(timeoutId);
 
     if (!response.ok) {
       let errorMessage = i18n.t('errors.unknown');
@@ -104,13 +117,15 @@ export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T
       throw new ApiError(i18n.t('errors.invalidResponse'), response.status, { cause: error });
     }
   } catch (error) {
-    clearTimeout(timeoutId);
+    if (timeoutId !== null) clearTimeout(timeoutId);
 
     if (error instanceof ApiError) throw error;
 
     if (error instanceof DOMException && error.name === 'AbortError') {
-      // Distinguish timeout vs. manual abort is optional; message is fine as-is.
-      throw new ApiError(i18n.t('errors.timeout'), 0);
+      throw new ApiError(
+        timedOut ? i18n.t('errors.timeout') : i18n.t('errors.cancelled'),
+        0,
+      );
     }
 
     if (error instanceof Error) {

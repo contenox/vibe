@@ -214,6 +214,10 @@ export const api = {
     return apiFetch<StateResponse>(`/api/chats/${id}/chat?${params.toString()}`, {
       ...requestOptions,
       signal: opts?.signal,
+      // No client-side timer: agentic runs can take arbitrarily long.
+      // The user's Stop button (signal) and closing the tab are the only
+      // cancellation paths — both propagate through the Go request context.
+      timeoutMs: null,
     });
   },
 

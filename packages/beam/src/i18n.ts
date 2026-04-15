@@ -431,6 +431,7 @@ const resources = {
         backend_error: 'Error occurred: {{message}}',
         unknown: 'Unexpected error occurred',
         timeout: 'Timeout error occurred',
+        cancelled: 'Request cancelled',
         invalidResponse: 'Bad response',
         generic_delete: 'Data deletion failed',
         generic_fetch: 'Data fetch failed',
@@ -1234,6 +1235,8 @@ const resources = {
         title: 'Chat',
         active: 'Active',
         chain_tooltip: 'Select a task chain to process messages',
+        token_limit_tooltip: 'Context window limit for this chain. 0 = unlimited (disables compaction).',
+        token_limit_label: 'Token limit (0 = unlimited)',
         mode: 'Mode',
         mode_tooltip:
           'When no task chain is selected, the mode chooses the default chain (same as the API body `mode`). Explicit chain selection overrides.',
@@ -1861,6 +1864,7 @@ const resources = {
         backend_error: 'Fehler aufgetreten: {{message}}',
         unknown: 'Unerwarteter Fehler aufgetreten',
         timeout: 'Timeout-Fehler aufgetreten',
+        cancelled: 'Anfrage abgebrochen',
         invalidResponse: 'Ungültige Antwort',
         generic_delete: 'Datenlöschung fehlgeschlagen',
         generic_fetch: 'Datenabruf fehlgeschlagen',
@@ -2300,6 +2304,8 @@ const resources = {
         title: 'Chat',
         active: 'Aktiv',
         chain_tooltip: 'Wählen Sie eine Aufgabenkette zur Nachrichtenverarbeitung aus',
+        token_limit_tooltip: 'Kontextfensterlimit für diese Kette. 0 = unbegrenzt (deaktiviert Komprimierung).',
+        token_limit_label: 'Token-Limit (0 = unbegrenzt)',
         mode: 'Modus',
         mode_tooltip:
           'Ohne gewählte Kette wählt der Modus die Standardkette (wie API-Feld `mode`). Eine explizit gewählte Kette hat Vorrang.',

@@ -25,7 +25,7 @@ import { t } from 'i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useChain } from '../../../hooks/useChains';
+import { useChain, useUpdateChain } from '../../../hooks/useChains';
 import { useListFiles } from '../../../hooks/useFiles';
 import { useActivePlan, useCompilePlanPreview } from '../../../hooks/usePlans';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';
@@ -151,6 +151,54 @@ type OptimisticUserOutgoing = {
   sentAt: string;
 };
 
+/**
+ * Convert a tool call (function name + JSON arguments string + result content)
+ * into an inline attachment for rendering in the chat thread. Returns null for
+ * tool calls that have no meaningful visual form (e.g. write_file).
+ */
+function toolCallToInlineAttachment(
+  name: string,
+  argsJson: string,
+  content: string,
+): InlineAttachment | null {
+  try {
+    const args = JSON.parse(argsJson) as Record<string, unknown>;
+    switch (name) {
+      case 'read_file':
+      case 'read_file_range':
+        return {
+          kind: 'file_view',
+          path: String(args.path ?? args.file ?? ''),
+          text: content,
+          truncated: false,
+        };
+      case 'grep':
+        return {
+          kind: 'terminal_excerpt',
+          command: `grep ${String(args.pattern ?? '')} ${String(args.path ?? '')}`.trim(),
+          output: content,
+        };
+      case 'list_dir':
+        return {
+          kind: 'terminal_excerpt',
+          command: `ls ${String(args.path ?? '')}`.trim(),
+          output: content,
+        };
+      case 'stat_file':
+      case 'count_stats':
+        return {
+          kind: 'terminal_excerpt',
+          command: `${name} ${String(args.path ?? '')}`.trim(),
+          output: content,
+        };
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 function ChatPageImpl() {
   const { chatId: paramChatId } = useParams<{ chatId: string }>();
   const artifactRegistry = useArtifactRegistry();
@@ -182,6 +230,10 @@ function ChatPageImpl() {
   const abortRef = useRef<AbortController | null>(null);
   const cancelledRef = useRef(false);
   const activeRequestIdRef = useRef<string | null>(null);
+  const lastFailedSendRef = useRef<{ text: string; chainId: string; mode: ChatModeId } | null>(null);
+  const [editingTokenLimit, setEditingTokenLimit] = useState(false);
+  const [tokenLimitDraft, setTokenLimitDraft] = useState('');
+  const tokenLimitPopoverRef = useRef<HTMLDivElement>(null);
   const pendingSendRef = useRef<{
     requestId: string;
     message: string;
@@ -282,6 +334,15 @@ function ChatPageImpl() {
     if (paramChatId) setChatId(paramChatId);
   }, [paramChatId]);
 
+  // Preselect default-chain.json (or the first available chain) when no chain
+  // has been chosen yet. Mirrors what the server does via chain_resolve.go.
+  useEffect(() => {
+    if (selectedChainId || !chainPaths.length) return;
+    const def = chainPaths.find(p => p === 'default-chain.json') ?? chainPaths[0];
+    setSelectedChainId(def);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chainPaths]);
+
   const queryClient = useQueryClient();
   const { data: chatHistory, isLoading: historyLoading, error } = useChatHistory(chatId || '');
   const { mutate: sendMessage, error: sendError } = useSendMessage(chatId || '');
@@ -296,6 +357,7 @@ function ChatPageImpl() {
     isLoading: executorChainLoading,
     error: executorChainError,
   } = useChain(chainPathForExecutorPreview);
+  const { mutate: updateChain } = useUpdateChain(chainPathForExecutorPreview);
 
   const compiledChainFromPlan = useMemo(
     () => parseCompiledChainJSON(activePlan?.plan.compiled_chain_json),
@@ -447,7 +509,12 @@ function ChatPageImpl() {
           const wasBuild = pendingSendRef.current?.mode === 'build';
           setLatestState(response.state || []);
           if (response.error) {
+            lastFailedSendRef.current = pendingSendRef.current
+              ? { text: pendingSendRef.current.message, chainId: pendingSendRef.current.chainId, mode: pendingSendRef.current.mode }
+              : null;
             setOperationError(response.error);
+          } else {
+            lastFailedSendRef.current = null;
           }
           if (wasBuild) {
             void queryClient.invalidateQueries({ queryKey: planKeys.active() });
@@ -464,7 +531,12 @@ function ChatPageImpl() {
         onError: (_, variables) => {
           abortRef.current = null;
           if (variables.signal?.aborted) {
+            lastFailedSendRef.current = null;
             setOperationError(t('common.cancel', 'Cancel'));
+          } else {
+            lastFailedSendRef.current = pendingSendRef.current
+              ? { text: pendingSendRef.current.message, chainId: pendingSendRef.current.chainId, mode: pendingSendRef.current.mode }
+              : null;
           }
           setIsProcessing(false);
           setActiveRequestId(null);
@@ -494,10 +566,22 @@ function ChatPageImpl() {
   }, [activeRequestId, isProcessing, tryDispatchSend]);
 
   useEffect(() => {
+    if (!editingTokenLimit) return;
+    const handler = (e: MouseEvent) => {
+      if (tokenLimitPopoverRef.current && !tokenLimitPopoverRef.current.contains(e.target as Node)) {
+        setEditingTokenLimit(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [editingTokenLimit]);
+
+  useEffect(() => {
     const errorMessage = sendError?.message;
     if (errorMessage) {
       if (cancelledRef.current) {
         cancelledRef.current = false;
+        lastFailedSendRef.current = null;
         return;
       }
       setOperationError(errorMessage);
@@ -634,11 +718,34 @@ function ChatPageImpl() {
   ];
   const displayHistory = useMemo<ApiChatMessage[]>(() => {
     const base = chatHistory ?? [];
+
+    // Build a lookup from toolCallId → function metadata so tool-result
+    // messages can be rendered as typed cards rather than raw text blobs.
+    const callMap = new Map<string, { name: string; arguments: string }>();
+    for (const m of base) {
+      if (m.role === 'assistant' && m.callTools) {
+        for (const tc of m.callTools) {
+          callMap.set(tc.id, tc.function);
+        }
+      }
+    }
+
     // Augment persisted assistant messages with their agent-emitted
     // attachments, when we captured any during their streaming turn.
+    // Augment tool-result messages with typed inline attachments derived
+    // from the function name + arguments of their paired call.
     const merged: ApiChatMessage[] = base.map((m) => {
       if (m.role === 'assistant' && m.id && agentAttachments[m.id]) {
         return { ...m, attachments: agentAttachments[m.id] };
+      }
+      if (m.role === 'tool' && m.toolCallId) {
+        const fn = callMap.get(m.toolCallId);
+        if (fn) {
+          const attachment = toolCallToInlineAttachment(fn.name, fn.arguments, m.content);
+          if (attachment) {
+            return { ...m, attachments: [attachment] };
+          }
+        }
       }
       return m;
     });
@@ -845,6 +952,56 @@ function ChatPageImpl() {
                       disabled={chainsLoading}
                     />
                     {chainsLoading && <Spinner size="sm" />}
+                    {executorChainPreview && (
+                      <div className="relative" ref={tokenLimitPopoverRef}>
+                        <Tooltip content={t('chat.token_limit_tooltip')} position="top">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTokenLimitDraft(String(executorChainPreview.token_limit ?? 0));
+                              setEditingTokenLimit(v => !v);
+                            }}
+                            className="text-text-muted dark:text-dark-text-muted hover:bg-surface-100 dark:hover:bg-dark-surface-200 flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs"
+                          >
+                            <span>{executorChainPreview.token_limit ? `${Math.round(executorChainPreview.token_limit / 1000)}k` : '∞'}</span>
+                            <Pencil className="h-2.5 w-2.5" />
+                          </button>
+                        </Tooltip>
+                        {editingTokenLimit && (
+                          <div className="bg-surface-50 dark:bg-dark-surface-100 border-border absolute top-full left-0 z-50 mt-1 flex flex-col gap-2 rounded border p-3 shadow-md">
+                            <span className="text-text dark:text-dark-text text-xs font-medium">{t('chat.token_limit_label')}</span>
+                            <div className="flex gap-2">
+                              <input
+                                type="number"
+                                min={0}
+                                value={tokenLimitDraft}
+                                onChange={e => setTokenLimitDraft(e.target.value)}
+                                className="border-border bg-surface-50 dark:bg-dark-surface-200 text-text dark:text-dark-text w-28 rounded border px-2 py-1 text-xs"
+                                autoFocus
+                              />
+                              <Button
+                                size="xs"
+                                type="button"
+                                onClick={() => {
+                                  updateChain({ token_limit: Number(tokenLimitDraft) });
+                                  setEditingTokenLimit(false);
+                                }}
+                              >
+                                {t('common.save', 'Save')}
+                              </Button>
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                type="button"
+                                onClick={() => setEditingTokenLimit(false)}
+                              >
+                                {t('common.cancel', 'Cancel')}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {/*
                      * Edit-chain link — closes the dead end where a user can
                      * see the active chain in the dropdown but had no path to
@@ -947,17 +1104,40 @@ function ChatPageImpl() {
                   </InsetPanel>
                 )}
 
-                <Fill className="relative">
+                <Fill className="flex flex-col">
                   {httpDispatched && sseConnection === 'error' && (
                     <InlineNotice variant="warning">{t('chat.sse_stream_lost')}</InlineNotice>
                   )}
                   {operationError && (
-                    <InlineNotice variant="error" onDismiss={() => setOperationError(null)}>
-                      {operationError}
+                    <InlineNotice
+                      variant="error"
+                      onDismiss={() => {
+                        setOperationError(null);
+                        lastFailedSendRef.current = null;
+                      }}
+                    >
+                      <span>{operationError}</span>
+                      {lastFailedSendRef.current && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="ml-2 h-5 text-xs"
+                          type="button"
+                          onClick={() => {
+                            const failed = lastFailedSendRef.current;
+                            if (!failed) return;
+                            setOperationError(null);
+                            lastFailedSendRef.current = null;
+                            submitOutgoingMessage(failed.text, failed.chainId, failed.mode);
+                          }}
+                        >
+                          {t('plan.retry', 'Retry')}
+                        </Button>
+                      )}
                     </InlineNotice>
                   )}
 
-                  <div className="h-full overflow-auto">
+                  <div className="min-h-0 flex-1">
                     {chatHistory && Array.isArray(chatHistory) && (
                       <ChatInterface
                         threadItems={threadItems}
