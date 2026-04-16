@@ -83,7 +83,9 @@ var planNewCmd = &cobra.Command{
 	Short: "Create a new execution plan from a goal description.",
 	Long: `Ask the LLM to break a goal into ordered steps and save the plan to SQLite.
 
-The new plan becomes the active plan automatically.
+The new plan becomes the active plan only after generation succeeds. If the planner fails
+(OpenAI quota, network, malformed JSON, etc.), the previous active plan is left unchanged.
+
 Input can be provided as a positional argument, piped via stdin, or both:
 
   contenox plan new "set up a Go project with tests and CI"
@@ -539,7 +541,7 @@ func runPlanShow(cmd *cobra.Command, _ []string) error {
 	exec := db.WithoutTransaction()
 	activeID, err := getActivePlanID(ctx, exec)
 	if err != nil || activeID == "" {
-		return fmt.Errorf("no active plan; run 'contenox plan new' or 'contenox plan switch'")
+		return fmt.Errorf("no active plan; run 'contenox plan new <goal>' (or 'contenox plan list' to see existing plans)")
 	}
 
 	store := planstore.New(exec)
