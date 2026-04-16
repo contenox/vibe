@@ -12,19 +12,26 @@ import (
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Print local LLM setup readiness (same evaluation as Beam GET /setup-status).",
-	Long: `Runs the same backend sync and setup checks as the Beam onboarding API.
+	Short: "Check LLM setup: defaults, registered backends, and connectivity.",
+	Long: `Shows whether your default model and provider are set, lists every registered backend
+(OpenAI, Gemini, Ollama, vLLM, etc.), and reports reachability and setup issues for each.
+Use it after contenox init, after contenox backend add, or when chat/plan cannot resolve a model.
+
+Additionally, if you use local Ollama: when no Ollama backend is ready yet, doctor may probe
+your Ollama URL (OLLAMA_HOST, or http://127.0.0.1:11434) and suggest commands to pull a model
+(at least ollama pull qwen2.5:7b), register the backend, and set defaults—including --url for a
+non-default host or port.
 
 Examples:
   contenox doctor
   contenox doctor --json
-  contenox doctor --skip-cycle   # faster; may show stale runtime state`,
+  contenox doctor --skip-cycle`,
 	RunE: runDoctor,
 }
 
 func init() {
-	doctorCmd.Flags().Bool("json", false, "Print setupcheck.Result as JSON")
-	doctorCmd.Flags().Bool("skip-cycle", false, "Skip RunBackendCycle (faster; state may be stale)")
+	doctorCmd.Flags().Bool("json", false, "Print results as JSON")
+	doctorCmd.Flags().Bool("skip-cycle", false, "Skip syncing backends (faster; status may be outdated)")
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
@@ -57,12 +64,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	defer engine.Stop()
 
 	jsonOut, _ := cmd.Flags().GetBool("json")
+	res := setupcheck.EnrichResultWithOllamaProbe(ctx, engine.SetupCheck)
 	if jsonOut {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		return enc.Encode(engine.SetupCheck)
+		return enc.Encode(res)
 	}
-	printDoctorText(cmd.OutOrStdout(), engine.SetupCheck)
+	printDoctorText(cmd.OutOrStdout(), res)
 	return nil
 }
 

@@ -612,7 +612,7 @@ func noChatModelsCommand(provider string) string {
 	case "openai", "gemini":
 		return "contenox model list   # confirm which chat models the provider exposes"
 	default:
-		return "contenox model list   # if empty, pull a chat model (e.g. ollama pull llama3.2)"
+		return "contenox model list   # if empty, pull a chat model (e.g. ollama pull " + DefaultOllamaSuggestModel + ")"
 	}
 }
 

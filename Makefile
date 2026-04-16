@@ -141,6 +141,8 @@ dev-cli: build-cli dev-cli-link
 dev-cli-link: build-cli
 	@mkdir -p $(dir $(DEV_CLI_BIN))
 	@ln -sf $(PROJECT_ROOT)/bin/contenox $(DEV_CLI_BIN)
+	@echo "Linked $(DEV_CLI_BIN) -> $(PROJECT_ROOT)/bin/contenox"
+	@echo "Use this binary: ensure $(dir $(DEV_CLI_BIN)) is on PATH before other contenox installs (check: which contenox)"
 
 dev-cli-unlink:
 	@rm -f $(DEV_CLI_BIN)

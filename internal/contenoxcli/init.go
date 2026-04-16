@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/contenox/contenox/internal/setupcheck"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtimetypes"
 )
@@ -153,11 +154,21 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 	fmt.Fprintln(out, "Next steps:")
 	fmt.Fprintln(out, "")
 	if provider == "ollama" {
+		if base, ok := setupcheck.ProbeLocalOllamaAPI(context.Background()); ok {
+			fmt.Fprintf(out, "  Local Ollama is already reachable at %s. Skip steps 1-2 on this machine if install, ollama serve, and ollama pull (e.g. qwen2.5:7b) are already done.\n\n", base)
+		}
 		fmt.Fprintln(out, "  1. Install Ollama (if not already):")
 		fmt.Fprintln(out, "       curl -fsSL https://ollama.com/install.sh | sh")
 		fmt.Fprintln(out, "")
-		fmt.Fprintln(out, "  2. Start Ollama and pull a model the runtime can observe:")
-		fmt.Fprintln(out, "       ollama serve && ollama pull qwen2.5:7b")
+		fmt.Fprintln(out, "  2. Run the Ollama server (leave it running), then pull a model in another terminal:")
+		fmt.Fprintln(out, "       ollama serve")
+		fmt.Fprintln(out, "       ollama pull qwen2.5:7b")
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "  3. Register the local API and set defaults (URLs match contenox backend add defaults):")
+		fmt.Fprintln(out, "       contenox backend add local --type ollama")
+		fmt.Fprintln(out, "       contenox config set default-provider ollama")
+		fmt.Fprintln(out, "       contenox config set default-model qwen2.5:7b")
+		fmt.Fprintln(out, "       contenox doctor")
 		fmt.Fprintln(out, "")
 		fmt.Fprintln(out, "  Optional: use hosted Ollama Cloud instead of a local server:")
 		fmt.Fprintln(out, "       export OLLAMA_API_KEY=your-key-here")
@@ -182,7 +193,11 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 		fmt.Fprintln(out, "  Get an OpenAI API key: https://platform.openai.com/api-keys")
 		fmt.Fprintln(out, "")
 	}
-	fmt.Fprintf(out, "  %d. Chat with your model:\n", map[bool]int{true: 2, false: 3}[provider != "ollama"])
+	chatStep := 3
+	if provider == "ollama" {
+		chatStep = 4
+	}
+	fmt.Fprintf(out, "  %d. Chat with your model:\n", chatStep)
 	fmt.Fprintln(out, "       contenox hey, what can you do?")
 	fmt.Fprintln(out, "       echo 'fix the typos in README.md' | contenox")
 	fmt.Fprintln(out, "")
