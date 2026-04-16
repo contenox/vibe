@@ -93,7 +93,6 @@ const resources = {
         updated_at: 'Updated',
         name_required: 'Function name is required',
         script_required: 'Script is required',
-        goja: 'JavaScript (Goja)',
         placeholder_name: 'my-function',
         placeholder_description: 'Process user data and send welcome email',
         placeholder_script:
@@ -1566,7 +1565,6 @@ const resources = {
         updated_at: 'Aktualisiert',
         name_required: 'Funktionsname ist erforderlich',
         script_required: 'Skript ist erforderlich',
-        goja: 'JavaScript (Goja)',
         placeholder_name: 'meine-funktion',
         placeholder_description: 'Verarbeite Benutzerdaten und sende Willkommens-E-Mail',
         placeholder_script:

@@ -5,7 +5,6 @@ go 1.25.0
 require (
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/contenox/authz v0.0.1
-	github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/nats-io/nats.go v1.47.0
 	github.com/ollama/ollama v0.17.5

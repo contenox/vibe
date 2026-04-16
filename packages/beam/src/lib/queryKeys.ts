@@ -193,22 +193,6 @@ export const localHookKeys = {
   list: () => [...localHookKeys.all, 'list'] as const,
 };
 
-export const eventTriggerKeys = {
-  all: ['eventTriggers'] as const,
-  lists: () => [...eventTriggerKeys.all, 'list'] as const,
-  list: (params?: { limit?: number; cursor?: string }) =>
-    [...eventTriggerKeys.lists(), params] as const,
-  detail: (name: string) => [...eventTriggerKeys.all, 'detail', name] as const,
-  byEventType: (eventType: string) => [...eventTriggerKeys.all, 'byEventType', eventType] as const,
-  byFunction: (functionName: string) =>
-    [...eventTriggerKeys.all, 'byFunction', functionName] as const,
-};
-
-export const executorKeys = {
-  all: ['executor'] as const,
-  sync: () => [...executorKeys.all, 'sync'] as const,
-};
-
 export const remoteHookKeys = {
   all: ['remoteHooks'] as const,
   list: (params: { limit?: number; cursor?: string }) =>
