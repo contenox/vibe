@@ -13,9 +13,13 @@ import (
 )
 
 const (
-	ProviderTypeOllama = "ollama"
-	ProviderTypeOpenAI = "openai"
-	ProviderTypeGemini = "gemini"
+	ProviderTypeOllama        = "ollama"
+	ProviderTypeOpenAI        = "openai"
+	ProviderTypeGemini        = "gemini"
+	ProviderTypeVertexGoogle   = "vertex-google"
+	ProviderTypeVertexAnthropic = "vertex-anthropic"
+	ProviderTypeVertexMeta    = "vertex-meta"
+	ProviderTypeVertexMistral = "vertex-mistralai"
 )
 
 type Service interface {
@@ -35,14 +39,19 @@ func New(dbInstance libdb.DBManager) Service {
 
 func (s *service) SetProviderConfig(ctx context.Context, providerType string, replace bool, config *runtimestate.ProviderConfig) error {
 	// Input validation
-	if providerType != ProviderTypeOllama && providerType != ProviderTypeOpenAI && providerType != ProviderTypeGemini {
+	validTypes := map[string]bool{
+		ProviderTypeOllama: true, ProviderTypeOpenAI: true, ProviderTypeGemini: true,
+		ProviderTypeVertexGoogle: true, ProviderTypeVertexAnthropic: true,
+		ProviderTypeVertexMeta: true, ProviderTypeVertexMistral: true,
+	}
+	if !validTypes[providerType] {
 		return fmt.Errorf("invalid provider type: %s", providerType)
 	}
 	if config == nil {
 		return fmt.Errorf("missing config")
 	}
 	if config.APIKey == "" {
-		return fmt.Errorf("missing API key")
+		return fmt.Errorf("missing credentials")
 	}
 
 	tx, com, r, err := s.dbInstance.WithTransaction(ctx)

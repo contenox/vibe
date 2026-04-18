@@ -19,10 +19,11 @@ function issueSignature(issueCodes: string[]) {
   return [...issueCodes].sort().join(',');
 }
 
-function providerKind(provider: string): 'openai' | 'gemini' | 'local' {
+function providerKind(provider: string): 'openai' | 'gemini' | 'local' | 'vertex' {
   const p = provider.trim().toLowerCase();
   if (p === 'openai') return 'openai';
   if (p === 'gemini') return 'gemini';
+  if (p === 'vertex-google' || p === 'vertex-anthropic' || p === 'vertex-meta' || p === 'vertex-mistralai') return 'vertex';
   return 'local';
 }
 
@@ -137,7 +138,7 @@ export function SetupWizardFlow({ variant }: SetupWizardFlowProps) {
 
   const kind = providerKind(provider || (data?.defaultProvider ?? ''));
   const backendsTabLink =
-    kind === 'openai' || kind === 'gemini'
+    kind === 'openai' || kind === 'gemini' || kind === 'vertex'
       ? '/backends?tab=cloud-providers'
       : '/backends?tab=backends';
   const registerLink = registrationTarget || backendsTabLink;

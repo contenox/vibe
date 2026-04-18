@@ -269,7 +269,8 @@ export type StatusResponse = {
   provider: string;
 };
 
-export type CloudProviderType = 'ollama' | 'openai' | 'gemini';
+export type CloudProviderType = 'ollama' | 'openai' | 'gemini'
+  | 'vertex-google' | 'vertex-anthropic' | 'vertex-meta' | 'vertex-mistralai';
 
 export type SearchResponse = {
   results: SearchResult[];

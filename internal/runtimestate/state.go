@@ -285,6 +285,8 @@ func (s *State) processBackend(ctx context.Context, backend *runtimetypes.Backen
 		s.processOpenAIBackend(ctx, backend, declaredModels)
 	case "local":
 		s.processLocalBackend(ctx, backend, declaredModels)
+	case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+		s.processVertexBackend(ctx, backend, declaredModels)
 	default:
 		brokenService := &statetype.BackendRuntimeState{
 			ID:      backend.ID,
@@ -531,6 +533,52 @@ func (s *State) processGeminiBackend(ctx context.Context, backend *runtimetypes.
 
 	// Store successful result in cache
 	s.storeObservedModelCache(ctx, backend.ID, apiKey, observedModels)
+}
+
+// processVertexBackend handles state reconciliation for all vertex-* backend types.
+// Auth uses a stored service account JSON when available; falls back to ADC otherwise.
+func (s *State) processVertexBackend(ctx context.Context, backend *runtimetypes.Backend, _ []*runtimetypes.Model) {
+	stateInstance := &statetype.BackendRuntimeState{
+		ID:           backend.ID,
+		Name:         backend.Name,
+		Backend:      *backend,
+		PulledModels: []statetype.ModelPullStatus{},
+	}
+
+	// credJSON may be empty (ADC fallback) — that's fine, not an error.
+	credJSON, _ := s.loadProviderAPIKey(ctx, backend.Type)
+	stateInstance.SetAPIKey(credJSON)
+
+	if cachedModels, ok := s.loadObservedModelCache(ctx, backend.ID, credJSON); ok {
+		stateInstance.Models = observedModelNames(cachedModels)
+		stateInstance.PulledModels = make([]statetype.ModelPullStatus, 0, len(cachedModels))
+		for _, model := range cachedModels {
+			stateInstance.PulledModels = append(stateInstance.PulledModels, pullStatusFromObservedModel(model))
+		}
+		s.state.Store(backend.ID, stateInstance)
+		return
+	}
+
+	catalog, err := s.newCatalogProvider(backend, credJSON)
+	if err != nil {
+		stateInstance.Error = err.Error()
+		s.state.Store(backend.ID, stateInstance)
+		return
+	}
+	observedModels, err := catalog.ListModels(ctx)
+	if err != nil {
+		stateInstance.Error = err.Error()
+		s.state.Store(backend.ID, stateInstance)
+		return
+	}
+
+	stateInstance.Models = observedModelNames(observedModels)
+	stateInstance.PulledModels = make([]statetype.ModelPullStatus, 0, len(observedModels))
+	for _, model := range observedModels {
+		stateInstance.PulledModels = append(stateInstance.PulledModels, pullStatusFromObservedModel(model))
+	}
+	s.state.Store(backend.ID, stateInstance)
+	s.storeObservedModelCache(ctx, backend.ID, credJSON, observedModels)
 }
 
 func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.Backend, models []*runtimetypes.Model) {

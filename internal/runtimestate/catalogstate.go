@@ -23,6 +23,14 @@ func providerConfigKey(backendType string) (string, bool) {
 	case "vllm":
 		// vLLM reuses the OpenAI-compatible bearer token configuration.
 		return OpenaiKey, true
+	case "vertex-google":
+		return VertexGoogleKey, true
+	case "vertex-anthropic":
+		return VertexAnthropicKey, true
+	case "vertex-meta":
+		return VertexMetaKey, true
+	case "vertex-mistralai":
+		return VertexMistralaiKey, true
 	default:
 		return "", false
 	}

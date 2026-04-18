@@ -19,9 +19,17 @@ func AddProviderRoutes(mux *http.ServeMux, providerService providerservice.Servi
 	mux.HandleFunc("POST /providers/ollama/configure", p.configure("ollama"))
 	mux.HandleFunc("POST /providers/openai/configure", p.configure("openai"))
 	mux.HandleFunc("POST /providers/gemini/configure", p.configure("gemini"))
+	mux.HandleFunc("POST /providers/vertex-google/configure", p.configure("vertex-google"))
+	mux.HandleFunc("POST /providers/vertex-anthropic/configure", p.configure("vertex-anthropic"))
+	mux.HandleFunc("POST /providers/vertex-meta/configure", p.configure("vertex-meta"))
+	mux.HandleFunc("POST /providers/vertex-mistralai/configure", p.configure("vertex-mistralai"))
 	mux.HandleFunc("GET /providers/ollama/status", p.status("ollama"))
 	mux.HandleFunc("GET /providers/openai/status", p.status("openai"))
 	mux.HandleFunc("GET /providers/gemini/status", p.status("gemini"))
+	mux.HandleFunc("GET /providers/vertex-google/status", p.status("vertex-google"))
+	mux.HandleFunc("GET /providers/vertex-anthropic/status", p.status("vertex-anthropic"))
+	mux.HandleFunc("GET /providers/vertex-meta/status", p.status("vertex-meta"))
+	mux.HandleFunc("GET /providers/vertex-mistralai/status", p.status("vertex-mistralai"))
 	mux.HandleFunc("DELETE /providers/{providerType}/config", p.deleteConfig)
 	mux.HandleFunc("GET /providers/configs", p.listConfigs)
 	mux.HandleFunc("GET /providers/{providerType}/config", p.get)
@@ -59,7 +67,7 @@ func (p *providerManager) configure(providerType string) func(w http.ResponseWri
 		}
 
 		if req.APIKey == "" {
-			_ = apiframework.Error(w, r, fmt.Errorf("api key is required"), apiframework.CreateOperation)
+			_ = apiframework.Error(w, r, fmt.Errorf("credentials are required"), apiframework.CreateOperation)
 			return
 		}
 

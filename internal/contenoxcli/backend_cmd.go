@@ -87,6 +87,8 @@ Examples:
 				baseURL = "https://api.openai.com/v1"
 			case "gemini":
 				baseURL = "https://generativelanguage.googleapis.com"
+			case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+				return fmt.Errorf("--url is required for %s backends\n  Include project and location, e.g.:\n  --url \"https://us-central1-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/us-central1\"", typ)
 			}
 		}
 		apiKey := apiKeyLit
@@ -247,7 +249,7 @@ func resolveDBPath(cmd *cobra.Command) (string, error) {
 }
 
 func init() {
-	backendAddCmd.Flags().String("type", "ollama", "Backend type: ollama, openai, gemini, local, vllm")
+	backendAddCmd.Flags().String("type", "ollama", "Backend type: ollama, openai, gemini, local, vllm, vertex-google, vertex-anthropic, vertex-meta, vertex-mistralai")
 	backendAddCmd.Flags().String("url", "", "Base URL of the backend (auto-inferred for openai/gemini if omitted; set https://ollama.com/api for hosted Ollama)")
 	backendAddCmd.Flags().String("api-key-env", "", "Name of the environment variable holding the API key (preferred over --api-key)")
 	backendAddCmd.Flags().String("api-key", "", "API key literal — prefer --api-key-env to avoid leaking into shell history")

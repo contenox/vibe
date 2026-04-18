@@ -49,6 +49,26 @@ var providerConfigs = map[string]providerConfig{
 		defaultModel: "",
 		envKey:       "",
 	},
+	"vertex-google": {
+		name:         "Google Vertex AI (Gemini)",
+		defaultModel: "gemini-2.5-flash-preview-04-17",
+		envKey:       "",
+	},
+	"vertex-anthropic": {
+		name:         "Google Vertex AI (Anthropic)",
+		defaultModel: "claude-sonnet-4-5-20251029",
+		envKey:       "",
+	},
+	"vertex-meta": {
+		name:         "Google Vertex AI (Meta)",
+		defaultModel: "llama-3.1-405b-instruct-maas",
+		envKey:       "",
+	},
+	"vertex-mistralai": {
+		name:         "Google Vertex AI (Mistral)",
+		defaultModel: "mistral-large-2411",
+		envKey:       "",
+	},
 }
 
 // RunInit scaffolds .contenox/ with default chain files.
@@ -78,7 +98,7 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 
 	pc, ok := providerConfigs[provider]
 	if !ok {
-		return fmt.Errorf("unknown provider %q — valid options: ollama, gemini, openai, local", provider)
+		return fmt.Errorf("unknown provider %q — valid options: ollama, gemini, openai, local, vertex-google, vertex-anthropic, vertex-meta, vertex-mistralai", provider)
 	}
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
 		return fmt.Errorf("failed to create .contenox directory: %w", err)
@@ -180,6 +200,23 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 	fmt.Fprintln(out, "")
 	chatStep := 3
 	switch provider {
+	case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+		fmt.Fprintln(out, "  1. Authenticate with Google Cloud:")
+		fmt.Fprintln(out, "       gcloud auth application-default login")
+		fmt.Fprintln(out, "       export GOOGLE_CLOUD_PROJECT=my-project-id")
+		fmt.Fprintln(out, "")
+		fmt.Fprintf(out, "  2. Register the %s backend:\n", pc.name)
+		fmt.Fprintf(out, "       contenox backend add %s --type %s \\\n", provider, provider)
+		fmt.Fprintln(out, `         --url "https://us-central1-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/us-central1"`)
+		fmt.Fprintln(out, "       contenox doctor")
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "  3. Set defaults:")
+		fmt.Fprintf(out, "       contenox config set default-provider %s\n", provider)
+		fmt.Fprintf(out, "       contenox config set default-model %s\n", pc.defaultModel)
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "  Get started with Vertex AI: https://cloud.google.com/vertex-ai/generative-ai/docs/start/quickstarts")
+		fmt.Fprintln(out, "")
+		chatStep = 4
 	case "local":
 		fmt.Fprintln(out, "  1. Pull a model (choose by available VRAM):")
 		fmt.Fprintln(out, "")

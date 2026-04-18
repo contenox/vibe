@@ -3,10 +3,14 @@ package runtimestate
 import "encoding/json"
 
 const (
-	ProviderKeyPrefix = "cloud-provider:"
-	OllamaKey         = ProviderKeyPrefix + "ollama"
-	OpenaiKey         = ProviderKeyPrefix + "openai"
-	GeminiKey         = ProviderKeyPrefix + "gemini"
+	ProviderKeyPrefix    = "cloud-provider:"
+	OllamaKey            = ProviderKeyPrefix + "ollama"
+	OpenaiKey            = ProviderKeyPrefix + "openai"
+	GeminiKey            = ProviderKeyPrefix + "gemini"
+	VertexGoogleKey      = ProviderKeyPrefix + "vertex-google"
+	VertexAnthropicKey   = ProviderKeyPrefix + "vertex-anthropic"
+	VertexMetaKey        = ProviderKeyPrefix + "vertex-meta"
+	VertexMistralaiKey   = ProviderKeyPrefix + "vertex-mistralai"
 )
 
 type ProviderConfig struct {

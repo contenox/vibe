@@ -465,6 +465,8 @@ func backendHint(backend runtimetypes.Backend, kind backendErrorKind) string {
 		switch strings.ToLower(strings.TrimSpace(backend.Type)) {
 		case "openai", "gemini":
 			return fmt.Sprintf("Save credentials on Cloud providers, or re-add backend %q after exporting the provider API key.", backend.Name)
+		case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+			return fmt.Sprintf("Backend %q uses ADC (Application Default Credentials). Run: gcloud auth application-default login", backend.Name)
 		case "ollama":
 			if isHostedOllamaBackend(backend) {
 				return fmt.Sprintf("Save the Ollama Cloud API key on Cloud providers, or re-add backend %q after exporting OLLAMA_API_KEY.", backend.Name)
@@ -477,6 +479,8 @@ func backendHint(backend runtimetypes.Backend, kind backendErrorKind) string {
 		switch strings.ToLower(strings.TrimSpace(backend.Type)) {
 		case "openai", "gemini":
 			return fmt.Sprintf("The stored API key for backend %q was rejected. Update the key on Cloud providers.", backend.Name)
+		case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+			return fmt.Sprintf("ADC credentials for backend %q were rejected. Refresh with: gcloud auth application-default login", backend.Name)
 		case "ollama":
 			if isHostedOllamaBackend(backend) {
 				return fmt.Sprintf("The stored Ollama Cloud API key for backend %q was rejected. Update the key on Cloud providers.", backend.Name)
@@ -487,6 +491,8 @@ func backendHint(backend runtimetypes.Backend, kind backendErrorKind) string {
 		}
 	case backendErrorUnreachable:
 		switch strings.ToLower(strings.TrimSpace(backend.Type)) {
+		case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+			return fmt.Sprintf("Check connectivity to Vertex AI and confirm GOOGLE_CLOUD_PROJECT is set. Backend %q URL: %s", backend.Name, backend.BaseURL)
 		case "ollama":
 			if isHostedOllamaBackend(backend) {
 				return fmt.Sprintf("Check connectivity to Ollama Cloud and confirm the stored API key for backend %q.", backend.Name)
@@ -583,7 +589,7 @@ func modelNamePresent(available []string, wanted string) bool {
 
 func providerFixPath(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai", "gemini":
+	case "openai", "gemini", "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
 		return "/backends?tab=cloud-providers"
 	default:
 		return "/backends?tab=backends"
@@ -592,7 +598,7 @@ func providerFixPath(provider string) string {
 
 func providerFixPathForChecks(provider string, checks []BackendCheck) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai", "gemini":
+	case "openai", "gemini", "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
 		return "/backends?tab=cloud-providers"
 	case "ollama":
 		if anyHostedOllamaCheck(checks) {
@@ -610,6 +616,8 @@ func providerAddCommand(provider string) string {
 		return "contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY"
 	case "local":
 		return "contenox backend add local --type local --url ~/.contenox/models/"
+	case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+		return fmt.Sprintf("gcloud auth application-default login && contenox backend add %s --type %s --url \"https://us-central1-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/us-central1\"", provider, provider)
 	default:
 		return "contenox backend add local --type ollama  # or: contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY"
 	}
@@ -619,6 +627,10 @@ func noChatModelsCommand(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "openai", "gemini":
 		return "contenox model list   # confirm which chat models the provider exposes"
+	case "vertex-google":
+		return "contenox model list   # Gemini models from AI Studio metadata; set default-model to a gemini-* name"
+	case "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+		return "contenox model list && contenox model register <name> --backend <backend-name> --can-chat --can-stream --can-prompt   # publisher models have no capability metadata; register manually"
 	case "local":
 		return "contenox model pull granite-3.2-2b   # or: contenox model registry-list for full list"
 	default:
@@ -630,6 +642,8 @@ func primaryDiagnosticCommand(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "openai", "gemini":
 		return "contenox doctor --json   # inspect backendChecks.error for the provider backend"
+	case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+		return "gcloud auth application-default print-access-token   # verify ADC is working; also check GOOGLE_CLOUD_PROJECT is set"
 	case "local":
 		return "ls ~/.contenox/models/   # confirm at least one *.gguf model exists; run 'contenox model pull <name>' if empty"
 	default:
@@ -653,6 +667,8 @@ func repairBackendCommand(check *BackendCheck) string {
 		return fmt.Sprintf("export OPENAI_API_KEY=... && contenox backend remove %q && contenox backend add %q --type openai --url %q --api-key-env OPENAI_API_KEY", check.Name, check.Name, chooseBaseURL(check.BaseURL, "https://api.openai.com/v1"))
 	case "gemini":
 		return fmt.Sprintf("export GEMINI_API_KEY=... && contenox backend remove %q && contenox backend add %q --type gemini --url %q --api-key-env GEMINI_API_KEY", check.Name, check.Name, chooseBaseURL(check.BaseURL, "https://generativelanguage.googleapis.com"))
+	case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
+		return fmt.Sprintf("gcloud auth application-default login && contenox backend remove %q && contenox backend add %q --type %s --url %q", check.Name, check.Name, backendType, check.BaseURL)
 	default:
 		return ""
 	}
@@ -697,6 +713,14 @@ func providerDisplayName(provider string) string {
 		return "vLLM"
 	case "local":
 		return "Local (GGUF)"
+	case "vertex-google":
+		return "Vertex AI (Google)"
+	case "vertex-anthropic":
+		return "Vertex AI (Anthropic)"
+	case "vertex-meta":
+		return "Vertex AI (Meta)"
+	case "vertex-mistralai":
+		return "Vertex AI (Mistral)"
 	default:
 		return "backend"
 	}

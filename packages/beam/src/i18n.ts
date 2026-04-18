@@ -614,12 +614,30 @@ const resources = {
         gemini: {
           title: 'Gemini',
         },
+        vertex_google: {
+          title: 'Vertex AI (Google / Gemini)',
+        },
+        vertex_anthropic: {
+          title: 'Vertex AI (Anthropic / Claude)',
+        },
+        vertex_meta: {
+          title: 'Vertex AI (Meta / Llama)',
+        },
+        vertex_mistralai: {
+          title: 'Vertex AI (Mistral)',
+        },
         form_title: 'Configure Provider',
         configure_button: 'Save Configuration',
         api_key: 'API Key',
         api_key_placeholder: 'Enter API key',
         auto_backend_note:
           'Saving a key stores credentials and creates or updates the matching backend automatically.',
+        vertex_adc_note:
+          'Vertex AI authenticates via a service account key. Download the JSON key from Google Cloud Console → IAM → Service Accounts.',
+        backend_name: 'Backend Name',
+        vertex_url: 'Vertex AI Base URL (project + location)',
+        service_account_json: 'Service Account Key (JSON)',
+        service_account_json_placeholder: 'Paste the contents of your service account key JSON file here',
         model_name: 'Model Name',
         model_name_placeholder: 'Optional model name',
         status_configured: 'Configured',
@@ -2028,12 +2046,30 @@ const resources = {
         gemini: {
           title: 'Gemini',
         },
+        vertex_google: {
+          title: 'Vertex AI (Google / Gemini)',
+        },
+        vertex_anthropic: {
+          title: 'Vertex AI (Anthropic / Claude)',
+        },
+        vertex_meta: {
+          title: 'Vertex AI (Meta / Llama)',
+        },
+        vertex_mistralai: {
+          title: 'Vertex AI (Mistral)',
+        },
         form_title: 'Anbieter konfigurieren',
         configure_button: 'Konfiguration speichern',
         api_key: 'API-Schlüssel',
         api_key_placeholder: 'API-Schlüssel eingeben',
         auto_backend_note:
           'Beim Speichern werden Zugangsdaten gesichert und das passende Backend automatisch erstellt oder aktualisiert.',
+        vertex_adc_note:
+          'Vertex AI authentifiziert sich über einen Service-Account-Schlüssel. JSON-Schlüssel in der Google Cloud Console unter IAM → Service Accounts herunterladen.',
+        backend_name: 'Backend-Name',
+        vertex_url: 'Vertex AI Basis-URL (Projekt + Region)',
+        service_account_json: 'Service-Account-Schlüssel (JSON)',
+        service_account_json_placeholder: 'Inhalt der JSON-Schlüsseldatei hier einfügen',
         model_name: 'Modellname',
         model_name_placeholder: 'Optionaler Modellname',
         status_configured: 'Konfiguriert',
