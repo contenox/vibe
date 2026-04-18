@@ -494,6 +494,8 @@ func backendHint(backend runtimetypes.Backend, kind backendErrorKind) string {
 			return fmt.Sprintf("Verify that %s is running at %s.", providerDisplayName(backend.Type), backend.BaseURL)
 		case "vllm":
 			return fmt.Sprintf("Verify that %s is running at %s.", providerDisplayName(backend.Type), backend.BaseURL)
+		case "local":
+			return fmt.Sprintf("Verify the model directory exists and contains at least one .gguf file: ls %s", backend.BaseURL)
 		default:
 			return fmt.Sprintf("Check connectivity and base URL for backend %q (%s).", backend.Name, backend.BaseURL)
 		}
@@ -606,6 +608,8 @@ func providerAddCommand(provider string) string {
 		return "contenox backend add openai --type openai --api-key-env OPENAI_API_KEY"
 	case "gemini":
 		return "contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY"
+	case "local":
+		return "contenox backend add local --type local --url ~/.contenox/models/"
 	default:
 		return "contenox backend add local --type ollama  # or: contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY"
 	}
@@ -615,6 +619,8 @@ func noChatModelsCommand(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "openai", "gemini":
 		return "contenox model list   # confirm which chat models the provider exposes"
+	case "local":
+		return "contenox model pull granite-3.2-2b   # or: contenox model registry-list for full list"
 	default:
 		return "contenox model list   # if empty, pull a chat model (e.g. ollama pull " + DefaultOllamaSuggestModel + ")"
 	}
@@ -624,6 +630,8 @@ func primaryDiagnosticCommand(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "openai", "gemini":
 		return "contenox doctor --json   # inspect backendChecks.error for the provider backend"
+	case "local":
+		return "ls ~/.contenox/models/   # confirm at least one *.gguf model exists; run 'contenox model pull <name>' if empty"
 	default:
 		return "contenox backend list   # verify URL, then inspect runtime errors on the backend"
 	}
@@ -687,6 +695,8 @@ func providerDisplayName(provider string) string {
 		return "Gemini"
 	case "vllm":
 		return "vLLM"
+	case "local":
+		return "Local (GGUF)"
 	default:
 		return "backend"
 	}

@@ -44,20 +44,41 @@ var providerConfigs = map[string]providerConfig{
 		defaultModel: "gpt-5-mini",
 		envKey:       "OPENAI_API_KEY",
 	},
+	"local": {
+		name:         "Local (GGUF)",
+		defaultModel: "",
+		envKey:       "",
+	},
 }
 
 // RunInit scaffolds .contenox/ with default chain files.
-// provider is "" (default = ollama), "ollama", "gemini", or "openai".
+// provider is "" (defaults to the already-configured provider or "ollama"), "ollama", "gemini", "openai", or "local".
 // contenoxDir is the target data directory (e.g. from --data-dir or the default .contenox/).
 func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir string) error {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
-		provider = "ollama"
+		// Default to the provider already configured in the database so that
+		// re-running init doesn't show irrelevant setup steps.
+		dbPath := filepath.Join(contenoxDir, "local.db")
+		if _, statErr := os.Stat(dbPath); statErr == nil {
+			if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
+				store := runtimetypes.New(db.WithoutTransaction())
+				if cur, err := getConfigKV(libtracker.WithNewRequestID(context.Background()), store, "default-provider"); err == nil && cur != "" {
+					if _, known := providerConfigs[cur]; known {
+						provider = cur
+					}
+				}
+				db.Close()
+			}
+		}
+		if provider == "" {
+			provider = "ollama"
+		}
 	}
 
 	pc, ok := providerConfigs[provider]
 	if !ok {
-		return fmt.Errorf("unknown provider %q — valid options: ollama, gemini, openai", provider)
+		return fmt.Errorf("unknown provider %q — valid options: ollama, gemini, openai, local", provider)
 	}
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
 		return fmt.Errorf("failed to create .contenox directory: %w", err)
@@ -157,7 +178,29 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 
 	fmt.Fprintln(out, "Next steps:")
 	fmt.Fprintln(out, "")
-	if provider == "ollama" {
+	chatStep := 3
+	switch provider {
+	case "local":
+		fmt.Fprintln(out, "  1. Pull a model (choose by available VRAM):")
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "       VRAM     Model              Q4 size   Notes")
+		fmt.Fprintln(out, "       ~2 GB    granite-3.2-2b     ~1-2 GB   good tool use")
+		fmt.Fprintln(out, "       ~3 GB    qwen3-4b           ~3 GB")
+		fmt.Fprintln(out, "       ~3 GB    gemma4-e2b         ~3.2 GB   (BF16: 9.6 GB, SFP8: 4.6 GB, Q4: 3.2 GB)")
+		fmt.Fprintln(out, "       ~5 GB    gemma4-e4b         ~5 GB     (BF16: 15 GB, SFP8: 7.5 GB, Q4: 5 GB)")
+		fmt.Fprintln(out, "       ~17 GB   gemma4-31b         ~17 GB    (BF16: 58.3 GB, SFP8: 30.4 GB)")
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "       contenox model registry-list   # full list with sizes")
+		fmt.Fprintln(out, "       contenox model pull granite-3.2-2b")
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "  2. Register the local backend and set defaults:")
+		fmt.Fprintln(out, "       contenox backend add local --type local --url ~/.contenox/models/")
+		fmt.Fprintln(out, "       contenox config set default-provider local")
+		fmt.Fprintln(out, "       contenox config set default-model granite-3.2-2b")
+		fmt.Fprintln(out, "       contenox doctor")
+		fmt.Fprintln(out, "")
+		chatStep = 3
+	case "ollama":
 		if base, ok := setupcheck.ProbeLocalOllamaAPI(context.Background()); ok {
 			fmt.Fprintf(out, "  Local Ollama is already reachable at %s. Skip steps 1-2 on this machine if install, ollama serve, and ollama pull (e.g. qwen2.5:7b) are already done.\n\n", base)
 		}
@@ -178,28 +221,23 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 		fmt.Fprintln(out, "       export OLLAMA_API_KEY=your-key-here")
 		fmt.Fprintln(out, "       contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY")
 		fmt.Fprintln(out, "")
-	} else {
+		fmt.Fprintln(out, "  Get an Ollama API key for direct cloud access: https://ollama.com/settings/keys")
+		fmt.Fprintln(out, "")
+		chatStep = 4
+	default:
 		fmt.Fprintf(out, "  1. Register the %s backend:\n", pc.name)
 		fmt.Fprintf(out, "       contenox backend add %s --type %s --api-key-env %s\n", provider, provider, pc.envKey)
 		fmt.Fprintf(out, "       contenox model list   # confirm the runtime can see %s models\n", pc.name)
 		fmt.Fprintf(out, "       contenox config set default-model %s\n", pc.defaultModel)
 		fmt.Fprintln(out, "")
-	}
-	// Print API key link for cloud providers
-	switch provider {
-	case "ollama":
-		fmt.Fprintln(out, "  Get an Ollama API key for direct cloud access: https://ollama.com/settings/keys")
-		fmt.Fprintln(out, "")
-	case "gemini":
-		fmt.Fprintln(out, "  Get a free Gemini API key: https://aistudio.google.com/apikey")
-		fmt.Fprintln(out, "")
-	case "openai":
-		fmt.Fprintln(out, "  Get an OpenAI API key: https://platform.openai.com/api-keys")
-		fmt.Fprintln(out, "")
-	}
-	chatStep := 3
-	if provider == "ollama" {
-		chatStep = 4
+		switch provider {
+		case "gemini":
+			fmt.Fprintln(out, "  Get a free Gemini API key: https://aistudio.google.com/apikey")
+			fmt.Fprintln(out, "")
+		case "openai":
+			fmt.Fprintln(out, "  Get an OpenAI API key: https://platform.openai.com/api-keys")
+			fmt.Fprintln(out, "")
+		}
 	}
 	fmt.Fprintf(out, "  %d. Chat with your model:\n", chatStep)
 	fmt.Fprintln(out, "       contenox hey, what can you do?")

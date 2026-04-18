@@ -26,6 +26,23 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Install CGo dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc g++ nlohmann-json3-dev
+
+      - name: Fetch missing llama.cpp headers
+        run: |
+          OLLAMA_MOD="$(go env GOPATH)/pkg/mod/github.com/ollama/ollama@v0.17.5"
+          go mod download github.com/ollama/ollama@v0.17.5
+          chmod -R u+w "$OLLAMA_MOD/llama"
+          MTMD="$OLLAMA_MOD/llama/llama.cpp/tools/mtmd"
+          mkdir -p "$MTMD/miniaudio" "$MTMD/stb"
+          curl -fsSL https://raw.githubusercontent.com/mackron/miniaudio/master/miniaudio.h \
+               -o "$MTMD/miniaudio/miniaudio.h"
+          curl -fsSL https://raw.githubusercontent.com/nothings/stb/master/stb_image.h \
+               -o "$MTMD/stb/stb_image.h"
+
       - name: Prepare embed inputs (Beam UI + OpenAPI stub)
         run: make ci-prepare-embeds
 
