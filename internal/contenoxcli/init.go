@@ -85,6 +85,10 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 		return err
 	}
 
+	if err := writeEmbeddedHITLPolicies(contenoxDir, force); err != nil {
+		return err
+	}
+
 	plannerPath, executorPath, summarizerPath, wrotePlanner, wroteExecutor, wroteSummarizer, err := writeEmbeddedPlanChains(contenoxDir, force)
 	if err != nil {
 		return err

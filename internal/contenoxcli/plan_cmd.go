@@ -65,9 +65,11 @@ Long runs (monitoring):
 Chain JSON (under the resolved .contenox directory):
   chain-planner.json              — planner for 'plan new' (must return a JSON array of step strings)
   chain-step-executor.json        — default executor for 'plan next' (chat ↔ tools loop)
-  chain-step-executor-gated.json — optional post-tool gate (plan next --gate); uses {{var:gate_model}}
+  chain-step-executor-gated.json — optional post-tool LLM gate (plan next --gate); uses {{var:gate_model}}
   chain-step-summarizer.json      — per-step summary into planstore
 Plan step seeds also receive {{var:execution_context}} (engine boundary) and {{var:gate_model}} when used.
+HITL (human-in-the-loop): use plan next --hitl to require terminal approval before write_file, sed, and
+local_shell calls. For Beam, set CONTENOX_HITL_ENABLED=true before starting the server.
 'contenox init' writes these files; any plan subcommand refreshes them from built-in defaults.
 To customize them permanently, change the embedded chain definitions in the contenox source tree
 and rebuild, or maintain a fork. Set model/provider via --model, --provider, and
@@ -136,12 +138,14 @@ Flags:
   --auto     Continue executing steps until the plan is done or a step fails
   --shell    Enable the local_shell hook so the model can run commands
   --gate     Use gated executor (post-tool LLM gate; extra cost/latency)
+  --hitl     Pause before write_file, sed, and local_shell calls; require y/n approval in the terminal
 
 Examples:
   contenox plan next
   contenox plan next --shell             # single step with shell access
   contenox plan next --auto --shell      # run everything until done
-  contenox plan next --shell --gate      # post-tool gate after each tool round`,
+  contenox plan next --shell --gate      # post-tool LLM gate after each tool round
+  contenox plan next --shell --hitl      # human approval before each write/shell tool call`,
 	Args: cobra.NoArgs,
 	RunE: runPlanNext,
 }
@@ -223,6 +227,7 @@ func init() {
 	planNextCmd.Flags().Bool("auto", false, "Continue executing steps automatically until the plan is done or a step fails")
 	planNextCmd.Flags().Bool("shell", false, "Enable the local_shell hook for this plan step (required for shell-based tasks)")
 	planNextCmd.Flags().Bool("gate", false, "Use chain-step-executor-gated.json: after each tool round, a small model scores whether to continue (extra latency/cost; aborts bad/corrupt tool output)")
+	planNextCmd.Flags().Bool("hitl", false, "Pause before each write/shell tool call and require y/n approval in the terminal (human-in-the-loop)")
 	planNewCmd.Flags().Bool("explore", false, "Also run 'plan explore' on the new plan to seed it with a RepoContext")
 }
 
@@ -290,10 +295,14 @@ func buildPlanOpts(cmd *cobra.Command, db libdbexec.DBManager, input string) cha
 	effectiveTracing, _ := flags.GetBool("trace")
 	effectiveEnableLocalExec, _ := flags.GetBool("shell")
 
-	// Also check the subcommand's own local flags (e.g. plan next --shell).
+	// Also check the subcommand's own local flags (e.g. plan next --shell, --hitl).
+	effectiveHITL := false
 	if localFlags := cmd.Flags(); localFlags != flags {
 		if v, _ := localFlags.GetBool("shell"); localFlags.Changed("shell") {
 			effectiveEnableLocalExec = v
+		}
+		if v, _ := localFlags.GetBool("hitl"); localFlags.Changed("hitl") {
+			effectiveHITL = v
 		}
 	}
 
@@ -308,6 +317,7 @@ func buildPlanOpts(cmd *cobra.Command, db libdbexec.DBManager, input string) cha
 		EffectiveEnableLocalExec:     effectiveEnableLocalExec,
 		EffectiveLocalExecAllowedDir: effectiveLocalExecAllowedDir,
 		EffectiveTracing:             effectiveTracing,
+		EffectiveHITL:                effectiveHITL,
 	}
 }
 

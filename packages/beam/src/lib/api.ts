@@ -3,6 +3,8 @@ import {
   ActivePlanResponse,
   AuthenticatedUser,
   Backend,
+  ModelDescriptor,
+  ModelRegistryEntry,
   BackendRuntimeState,
   ChainDefinition,
   ChatMessage,
@@ -35,6 +37,7 @@ import {
   TaskExecutionResponse,
   TerminalSession,
   TerminalSessionCreate,
+  HITLPolicy,
 } from './types';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -175,7 +178,19 @@ export const api = {
     'default-model'?: string;
     'default-provider'?: string;
     'default-chain'?: string;
+    'hitl-policy-name'?: string;
   }) => apiFetch<CLIConfigUpdateResponse>('/api/cli-config', options('PUT', body)),
+
+  /** HITL policy presets stored in VFS (co-located with chains). */
+  listPolicies: () => apiFetch<string[]>('/api/hitl-policies/list'),
+  getPolicy: (name: string) =>
+    apiFetch<HITLPolicy>(`/api/hitl-policies?name=${encodeURIComponent(name)}`),
+  createPolicy: (name: string, policy: HITLPolicy) =>
+    apiFetch<HITLPolicy>(`/api/hitl-policies?name=${encodeURIComponent(name)}`, options('POST', policy)),
+  updatePolicy: (name: string, policy: HITLPolicy) =>
+    apiFetch<HITLPolicy>(`/api/hitl-policies?name=${encodeURIComponent(name)}`, options('PUT', policy)),
+  deletePolicy: (name: string) =>
+    apiFetch<string>(`/api/hitl-policies?name=${encodeURIComponent(name)}`, options('DELETE')),
 
   // Chats
   createChat: ({ model }: Partial<ChatSession>) =>
@@ -380,6 +395,14 @@ export const api = {
     cols?: number;
     rows?: number;
   }) => apiFetch<TerminalSessionCreate>('/api/terminal/sessions', options('POST', body)),
+  // ── HITL approvals ───────────────────────────────────────────────
+  /** Approve or deny a pending HITL tool call. Returns 204 on success, 404 if already resolved. */
+  respondToApproval: (approvalId: string, approved: boolean) =>
+    apiFetch<void>(
+      `/api/approvals/${encodeURIComponent(approvalId)}`,
+      options('POST', { approved }),
+    ),
+
   /** Idempotent: 404 means session already gone (e.g. after `contenox beam` / Air restart). */
   deleteTerminalSession: async (id: string) => {
     try {
@@ -389,4 +412,11 @@ export const api = {
       throw e;
     }
   },
+
+  // ── Model Registry ───────────────────────────────────────────────
+  listModelRegistry: () => apiFetch<ModelDescriptor[]>('/api/model-registry'),
+  createModelRegistryEntry: (data: Omit<ModelRegistryEntry, 'id' | 'createdAt' | 'updatedAt'>) =>
+    apiFetch<ModelRegistryEntry>('/api/model-registry', options('POST', data)),
+  deleteModelRegistryEntry: (id: string) =>
+    apiFetch<void>(`/api/model-registry/${encodeURIComponent(id)}`, options('DELETE')),
 };

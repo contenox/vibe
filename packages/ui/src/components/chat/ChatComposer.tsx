@@ -7,6 +7,11 @@ import { Textarea } from "../TextArea";
 import { H2 } from "../Typography";
 import { Tooltip } from "../Tooltip";
 import { Spinner } from "../Spinner";
+import {
+  DEFAULT_COMPOSER_SOFT_MAX,
+  isComposerCharCountWarning,
+  isOverComposerSoftMax,
+} from "./composerSoftLimit";
 
 export type ChatComposerProps = {
   value: string;
@@ -22,16 +27,26 @@ export type ChatComposerProps = {
   variant?: "default" | "compact" | "workbench";
   /** Outer shell: panel (default) or plain border-top (workbench). */
   shell?: "panel" | "plain";
+  /**
+   * Soft reference for character count and warning styling only — input is not hard-capped.
+   * @default 131072 (128 KiB)
+   */
+  softMax?: number;
+  /** @deprecated Use softMax — if set, treated as softMax for backward compatibility. */
   maxLength?: number;
   showCharCount?: boolean;
-  charCountFormatter?: (length: number, max: number) => string;
+  charCountFormatter?: (length: number, softMax: number) => string;
   /** When false, submit is disabled regardless of value */
   canSubmit?: boolean;
   /** When true, an empty message can be submitted (e.g. build mode). */
   allowEmptyMessage?: boolean;
   footerStart?: React.ReactNode;
+  /** Extra controls after footerStart (e.g. expand editor). */
+  footerEnd?: React.ReactNode;
   /** When set, wraps the character counter in a Tooltip */
   charCountTooltip?: string;
+  /** Shown under the composer when length exceeds softMax (e.g. model context hint). */
+  softLimitExceededNote?: string;
   textareaProps?: Omit<
     React.TextareaHTMLAttributes<HTMLTextAreaElement>,
     "value" | "onChange"
@@ -56,15 +71,19 @@ export function ChatComposer({
   className,
   variant = "default",
   shell,
-  maxLength = 4000,
+  softMax: softMaxProp,
+  maxLength: maxLengthLegacy,
   showCharCount = true,
-  charCountFormatter = (len, max) => `${len}/${max}`,
+  charCountFormatter = (len, soft) => `${len}/${soft}`,
   canSubmit = true,
   allowEmptyMessage = false,
   footerStart,
+  footerEnd,
   charCountTooltip,
+  softLimitExceededNote,
   textareaProps,
 }: ChatComposerProps) {
+  const softMax = softMaxProp ?? maxLengthLegacy ?? DEFAULT_COMPOSER_SOFT_MAX;
   const formRef = useRef<HTMLFormElement>(null);
   const [isFocused, setIsFocused] = useState(false);
   const {
@@ -92,8 +111,9 @@ export function ChatComposer({
     }
   };
 
-  const countStr = charCountFormatter(value.length, maxLength);
-  const countWarning = value.length > maxLength * 0.875;
+  const countStr = charCountFormatter(value.length, softMax);
+  const countWarning = isComposerCharCountWarning(value.length, softMax);
+  const overSoftMax = isOverComposerSoftMax(value.length, softMax);
 
   const textareaBlock = (
     <div className="relative flex-1">
@@ -115,7 +135,6 @@ export function ChatComposer({
               : "resize-vertical min-h-[80px]",
           textareaClassName,
         )}
-        maxLength={maxLength}
         onKeyDown={handleKeyDown}
       />
       {showCharCount && (
@@ -135,6 +154,11 @@ export function ChatComposer({
       )}
     </div>
   );
+
+  const softNoteBlock =
+    overSoftMax && softLimitExceededNote ? (
+      <p className="text-text-muted dark:text-dark-secondary-400 text-xs">{softLimitExceededNote}</p>
+    ) : null;
 
   const submitButton = (compactHeight?: boolean, workbenchTall?: boolean) => (
     <Button
@@ -192,12 +216,14 @@ export function ChatComposer({
             {textareaBlock}
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               {footerStart}
+              {footerEnd}
             </div>
             {submitButton(false, variant === "workbench")}
           </div>
+          {softNoteBlock}
         </div>
       </div>
     </form>

@@ -138,6 +138,7 @@ func extractRoute(_ *token.FileSet, file *ast.File, call *ast.CallExpr, swagger 
 	}
 
 	if handlerDocs != "" {
+		handlerDocs = stripAnnotationLines(handlerDocs)
 		parts := strings.SplitN(handlerDocs, "\n", 2)
 		if len(parts) > 0 {
 			op.Summary = parts[0]
@@ -188,7 +189,7 @@ func extractRoute(_ *token.FileSet, file *ast.File, call *ast.CallExpr, swagger 
 	}
 	op.Responses.Set("default", &openapi3.ResponseRef{Value: defaultResponse})
 
-	if isSSEHandler(handler) {
+	if eventType, isSSE := sseHandlerEventType(handler); isSSE {
 		responseRef := op.Responses.Map()["200"]
 		if responseRef == nil {
 			responseRef = &openapi3.ResponseRef{Value: openapi3.NewResponse()}
@@ -200,7 +201,11 @@ func extractRoute(_ *token.FileSet, file *ast.File, call *ast.CallExpr, swagger 
 			responseRef.Value.Content = openapi3.NewContent()
 		}
 		mediaType := openapi3.NewMediaType()
-		mediaType.Schema = openapi3.NewStringSchema().NewRef()
+		if eventType != "" {
+			mediaType.Schema = schema.RefForAnnotation(normalizeAnnotatedType(eventType))
+		} else {
+			mediaType.Schema = openapi3.NewStringSchema().NewRef()
+		}
 		responseRef.Value.Content["text/event-stream"] = mediaType
 	} else if len(statusCodes) == 0 {
 		response := openapi3.NewResponse()
@@ -413,16 +418,43 @@ func httpStatusToDescription(code int) string {
 	}
 }
 
-func isSSEHandler(handler *ast.FuncDecl) bool {
+// sseHandlerEventType returns ("", false) when the handler is not an SSE
+// handler, or (eventType, true) when it is. eventType is the Go type named in
+// an // @sse-response annotation (e.g. "taskengine.TaskEvent"), or "" when no
+// annotation is present (falls back to a plain string schema).
+func sseHandlerEventType(handler *ast.FuncDecl) (string, bool) {
 	if handler.Doc == nil {
-		return false
+		return "", false
 	}
+	found := false
+	eventType := ""
 	for _, c := range handler.Doc.List {
-		if strings.Contains(c.Text, "Server-Sent Events") || strings.Contains(c.Text, "streams status updates") {
-			return true
+		text := c.Text
+		if strings.Contains(text, "Server-Sent Events") || strings.Contains(text, "streams status updates") {
+			found = true
+		}
+		if after, ok := strings.CutPrefix(strings.TrimPrefix(text, "// "), "@sse-response "); ok {
+			eventType = strings.TrimSpace(after)
 		}
 	}
-	return false
+	return eventType, found
+}
+
+// stripAnnotationLines removes lines that start with "@" (openapi-gen
+// directives like @sse-response) so they don't appear in the description.
+func stripAnnotationLines(s string) string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "@") {
+			out = append(out, line)
+		}
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n")
+}
+
+func isSSEHandler(handler *ast.FuncDecl) bool {
+	_, ok := sseHandlerEventType(handler)
+	return ok
 }
 
 func extractPathParams(path string) []string {

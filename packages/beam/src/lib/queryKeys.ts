@@ -106,6 +106,12 @@ export const chainKeys = {
     [...chainKeys.triggers(vfsPath), triggerId] as const,
 };
 
+export const hitlPolicyKeys = {
+  all: ['hitl-policies'] as const,
+  list: () => [...hitlPolicyKeys.all, 'list'] as const,
+  byName: (name: string) => [...hitlPolicyKeys.all, 'name', name] as const,
+};
+
 export const activityKeys = {
   all: ['activity'] as const,
   logs: (limit?: number) => ['activity', 'logs', { limit }] as const,
@@ -214,6 +220,10 @@ export const terminalKeys = {
   all: ['terminal'] as const,
   sessions: () => [...terminalKeys.all, 'sessions'] as const,
   session: (id: string) => [...terminalKeys.all, 'session', id] as const,
+};
+
+export const modelRegistryKeys = {
+  all: ['model-registry'] as const,
 };
 
 export const planKeys = {

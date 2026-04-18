@@ -54,6 +54,8 @@ export type ChatInterfaceProps = {
   chainPanel?: ReactNode;
   /** Show the Plan tab (only when plan mode is active). */
   showPlanTab?: boolean;
+  /** Rendered inline in the thread after the last message (e.g. HITL approval card). */
+  approvalContent?: ReactNode;
 };
 
 export const ChatInterface = ({
@@ -74,6 +76,7 @@ export const ChatInterface = ({
   showWorkbenchTabs = false,
   chainPanel,
   showPlanTab = false,
+  approvalContent,
 }: ChatInterfaceProps) => {
   const { containerRef, endRef, scrollToEnd, isNearBottom } = useChatScroll({
     deps: [threadItems, streamScrollSignature, workbenchTab],
@@ -168,6 +171,11 @@ export const ChatInterface = ({
               </div>
             );
           })
+        )}
+        {approvalContent && (
+          <div className="animate-in fade-in-0 duration-150 pb-2">
+            {approvalContent}
+          </div>
         )}
       </ChatThread>
       <ChatScrollToLatest

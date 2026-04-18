@@ -200,3 +200,13 @@ CREATE INDEX IF NOT EXISTS idx_terminal_sessions_node ON terminal_sessions (node
 
 ALTER TABLE terminal_sessions ADD COLUMN IF NOT EXISTS workspace_id VARCHAR(255);
 
+CREATE TABLE IF NOT EXISTS llm_model_registry (
+    id          VARCHAR(255) PRIMARY KEY,
+    name        VARCHAR(512) NOT NULL UNIQUE,
+    source_url  VARCHAR(1024) NOT NULL,
+    size_bytes  BIGINT NOT NULL DEFAULT 0,
+    created_at  TIMESTAMP NOT NULL,
+    updated_at  TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_model_registry_created_at ON llm_model_registry(created_at);
+

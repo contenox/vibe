@@ -11,6 +11,11 @@ export type { ChatProcessingBarProps } from "./ChatProcessingBar";
 export { ChatProcessingBar } from "./ChatProcessingBar";
 export type { ChatComposerProps } from "./ChatComposer";
 export { ChatComposer } from "./ChatComposer";
+export {
+  DEFAULT_COMPOSER_SOFT_MAX,
+  isComposerCharCountWarning,
+  isOverComposerSoftMax,
+} from "./composerSoftLimit";
 export type { ChatTypingIndicatorProps } from "./ChatTypingIndicator";
 export { ChatTypingIndicator } from "./ChatTypingIndicator";
 export type { ChatDateSeparatorProps } from "./ChatDateSeparator";

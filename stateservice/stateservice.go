@@ -18,7 +18,7 @@ type Service interface {
 	Get(ctx context.Context) ([]statetype.BackendRuntimeState, error)
 	// SetupStatus returns readiness from KV defaults, registered backends, and current runtime state.
 	SetupStatus(ctx context.Context) (setupcheck.Result, error)
-	// SetCLIConfig updates CLI default model, provider, and optional default-chain keys in SQLite KV (same as contenox config set / PUT /cli-config).
+	// SetCLIConfig updates CLI default keys (model, provider, chain, hitl-policy-name) in SQLite KV (same as contenox config set / PUT /cli-config).
 	// Empty fields in the patch are left unchanged. At least one field must be non-empty after trim.
 	SetCLIConfig(ctx context.Context, patch CLIConfigPatch) (CLIConfigSnapshot, error)
 }
@@ -28,6 +28,7 @@ type CLIConfigPatch struct {
 	DefaultModel    string
 	DefaultProvider string
 	DefaultChain    string
+	HITLPolicyName  string
 }
 
 // CLIConfigSnapshot is the resolved KV values after an update.
@@ -35,6 +36,7 @@ type CLIConfigSnapshot struct {
 	DefaultModel    string
 	DefaultProvider string
 	DefaultChain    string
+	HITLPolicyName  string
 }
 
 type service struct {
@@ -67,8 +69,11 @@ func (s *service) SetupStatus(ctx context.Context) (setupcheck.Result, error) {
 
 // SetCLIConfig implements Service.
 func (s *service) SetCLIConfig(ctx context.Context, patch CLIConfigPatch) (CLIConfigSnapshot, error) {
-	if strings.TrimSpace(patch.DefaultModel) == "" && strings.TrimSpace(patch.DefaultProvider) == "" && strings.TrimSpace(patch.DefaultChain) == "" {
-		return CLIConfigSnapshot{}, fmt.Errorf("provide at least one of default-model, default-provider, or default-chain")
+	if strings.TrimSpace(patch.DefaultModel) == "" &&
+		strings.TrimSpace(patch.DefaultProvider) == "" &&
+		strings.TrimSpace(patch.DefaultChain) == "" &&
+		strings.TrimSpace(patch.HITLPolicyName) == "" {
+		return CLIConfigSnapshot{}, fmt.Errorf("provide at least one of default-model, default-provider, default-chain, or hitl-policy-name")
 	}
 	store := runtimetypes.New(s.db.WithoutTransaction())
 	if strings.TrimSpace(patch.DefaultModel) != "" {
@@ -86,10 +91,16 @@ func (s *service) SetCLIConfig(ctx context.Context, patch CLIConfigPatch) (CLICo
 			return CLIConfigSnapshot{}, fmt.Errorf("set default-chain: %w", err)
 		}
 	}
+	if strings.TrimSpace(patch.HITLPolicyName) != "" {
+		if err := clikv.SetHITLPolicy(ctx, store, patch.HITLPolicyName); err != nil {
+			return CLIConfigSnapshot{}, fmt.Errorf("set hitl-policy-name: %w", err)
+		}
+	}
 	return CLIConfigSnapshot{
 		DefaultModel:    clikv.Read(ctx, store, "default-model"),
 		DefaultProvider: clikv.Read(ctx, store, "default-provider"),
 		DefaultChain:    clikv.Read(ctx, store, "default-chain"),
+		HITLPolicyName:  clikv.ReadHITLPolicy(ctx, store),
 	}, nil
 }
 

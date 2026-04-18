@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/contenox/contenox/internal/modelrepo"
 	"github.com/contenox/contenox/libtracker"
@@ -63,12 +65,12 @@ type openAITool struct {
 }
 
 type openAIFunction struct {
-	Name        string      `json:"name"`                  // ^[a-zA-Z0-9_-]+$
-	Description string      `json:"description,omitempty"` // optional
-	Parameters  interface{} `json:"parameters,omitempty"`  // JSON Schema
+	Name        string `json:"name"`                  // ^[a-zA-Z0-9_-]+$
+	Description string `json:"description,omitempty"` // optional
+	Parameters  any    `json:"parameters,omitempty"`  // JSON Schema
 }
 
-func (c *openAIClient) sendRequest(ctx context.Context, endpoint string, request interface{}, response interface{}) error {
+func (c *openAIClient) sendRequest(ctx context.Context, endpoint string, request any, response any) error {
 	url := c.baseURL + endpoint
 
 	tracker := c.tracker
@@ -88,76 +90,113 @@ func (c *openAIClient) sendRequest(ctx context.Context, endpoint string, request
 	)
 	defer end()
 
-	var reqBody io.Reader
+	var body []byte
 	if request != nil {
-		marshaledReqBody, err := json.Marshal(request)
+		var err error
+		body, err = json.Marshal(request)
 		if err != nil {
 			err = fmt.Errorf("failed to marshal request: %w", err)
 			reportErr(err)
 			return err
 		}
-		reqBody = bytes.NewBuffer(marshaledReqBody)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, reqBody)
-	if err != nil {
-		err = fmt.Errorf("failed to create request: %w", err)
-		reportErr(err)
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		err = fmt.Errorf("HTTP request failed for model %s: %w", c.modelName, err)
-		reportErr(err)
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Log response headers (including rate-limit headers) via tracker
-	reportChange("http_response", map[string]any{
-		"status_code": resp.StatusCode,
-		"headers":     resp.Header,
-	})
-
-	if resp.StatusCode != http.StatusOK {
-		var errorResponse struct {
-			Error struct {
-				Message string      `json:"message"`
-				Type    string      `json:"type"`
-				Code    interface{} `json:"code"`
-			} `json:"error"`
+	const maxRateLimitRetries = 1
+	for attempt := 0; attempt <= maxRateLimitRetries; attempt++ {
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewBuffer(body)
 		}
-		bodyBytes, readErr := io.ReadAll(resp.Body)
-		if readErr == nil {
-			if jsonErr := json.Unmarshal(bodyBytes, &errorResponse); jsonErr == nil && errorResponse.Error.Message != "" {
-				err = fmt.Errorf("OpenAI API returned non-200 status: %d, Type: %s, Code: %v, Message: %s for model %s",
-					resp.StatusCode, errorResponse.Error.Type, errorResponse.Error.Code, errorResponse.Error.Message, c.modelName)
+
+		req, err := http.NewRequestWithContext(ctx, "POST", url, reqBody)
+		if err != nil {
+			err = fmt.Errorf("failed to create request: %w", err)
+			reportErr(err)
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			err = fmt.Errorf("HTTP request failed for model %s: %w", c.modelName, err)
+			reportErr(err)
+			return err
+		}
+
+		reportChange("http_response", map[string]any{
+			"status_code": resp.StatusCode,
+			"headers":     resp.Header,
+		})
+
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRateLimitRetries {
+			wait := parseRetryAfterMs(resp.Header)
+			resp.Body.Close()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			var errorResponse struct {
+				Error struct {
+					Message string `json:"message"`
+					Type    string `json:"type"`
+					Code    any    `json:"code"`
+				} `json:"error"`
+			}
+			bodyBytes, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr == nil {
+				if jsonErr := json.Unmarshal(bodyBytes, &errorResponse); jsonErr == nil && errorResponse.Error.Message != "" {
+					err = fmt.Errorf("OpenAI API returned non-200 status: %d, Type: %s, Code: %v, Message: %s for model %s",
+						resp.StatusCode, errorResponse.Error.Type, errorResponse.Error.Code, errorResponse.Error.Message, c.modelName)
+					reportErr(err)
+					return err
+				}
+				err = fmt.Errorf("OpenAI API returned non-200 status: %d, body: %s for model %s",
+					resp.StatusCode, string(bodyBytes), c.modelName)
 				reportErr(err)
 				return err
 			}
-			err = fmt.Errorf("OpenAI API returned non-200 status: %d, body: %s for model %s",
-				resp.StatusCode, string(bodyBytes), c.modelName)
+			err = fmt.Errorf("OpenAI API returned non-200 status: %d for model %s", resp.StatusCode, c.modelName)
 			reportErr(err)
 			return err
 		}
-		err = fmt.Errorf("OpenAI API returned non-200 status: %d for model %s", resp.StatusCode, c.modelName)
-		reportErr(err)
-		return err
-	}
 
-	if response != nil {
-		if err := json.NewDecoder(resp.Body).Decode(response); err != nil {
-			err = fmt.Errorf("failed to decode response for model %s: %w", c.modelName, err)
-			reportErr(err)
-			return err
+		if response != nil {
+			if err := json.NewDecoder(resp.Body).Decode(response); err != nil {
+				resp.Body.Close()
+				err = fmt.Errorf("failed to decode response for model %s: %w", c.modelName, err)
+				reportErr(err)
+				return err
+			}
+		}
+		resp.Body.Close()
+
+		reportChange("request_completed", nil)
+		return nil
+	}
+	return fmt.Errorf("OpenAI API rate limit exceeded for model %s", c.modelName)
+}
+
+// parseRetryAfterMs reads Retry-After-Ms (milliseconds) or Retry-After (seconds)
+// from the response headers. Falls back to 2 seconds if neither is present.
+func parseRetryAfterMs(h http.Header) time.Duration {
+	if ms := h.Get("Retry-After-Ms"); ms != "" {
+		if n, err := strconv.ParseInt(ms, 10, 64); err == nil && n > 0 {
+			return time.Duration(n) * time.Millisecond
 		}
 	}
-
-	reportChange("request_completed", nil)
-	return nil
+	if s := h.Get("Retry-After"); s != "" {
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 2 * time.Second
 }
 
 // buildOpenAIRequest builds a compliant request and sanitizes tool names per

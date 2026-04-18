@@ -4,6 +4,7 @@ package setupcheck
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 
@@ -23,6 +24,7 @@ type Input struct {
 	DefaultModel    string
 	DefaultProvider string
 	DefaultChain    string
+	HITLPolicyName  string
 	States          []statetype.BackendRuntimeState
 	// RegisteredBackendCount, if non-nil, overrides len(RegisteredBackends) / len(States)
 	// for BackendCount. CLI doctor sets this from ListBackends when runtime state sync is unavailable.
@@ -61,6 +63,7 @@ type Result struct {
 	DefaultModel          string         `json:"defaultModel"`
 	DefaultProvider       string         `json:"defaultProvider"`
 	DefaultChain          string         `json:"defaultChain"`
+	HITLPolicyName        string         `json:"hitlPolicyName"`
 	BackendCount          int            `json:"backendCount"`
 	ReachableBackendCount int            `json:"reachableBackendCount"`
 	Issues                []Issue        `json:"issues"`
@@ -84,6 +87,7 @@ func Evaluate(in Input) Result {
 		DefaultModel:    strings.TrimSpace(in.DefaultModel),
 		DefaultProvider: strings.TrimSpace(in.DefaultProvider),
 		DefaultChain:    strings.TrimSpace(in.DefaultChain),
+		HITLPolicyName:  strings.TrimSpace(in.HITLPolicyName),
 		BackendCount:    len(in.RegisteredBackends),
 	}
 
@@ -647,12 +651,7 @@ func repairBackendCommand(check *BackendCheck) string {
 }
 
 func anyHostedOllamaCheck(checks []BackendCheck) bool {
-	for _, check := range checks {
-		if isHostedOllamaCheck(check) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(checks, isHostedOllamaCheck)
 }
 
 func isHostedOllamaCheck(check BackendCheck) bool {

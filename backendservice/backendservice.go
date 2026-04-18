@@ -79,9 +79,9 @@ func validate(backend *runtimetypes.Backend) error {
 		return fmt.Errorf("%w: baseURL is required", ErrInvalidBackend)
 	}
 	switch strings.ToLower(backend.Type) {
-	case "ollama", "vllm", "openai", "gemini":
+	case "ollama", "vllm", "openai", "gemini", "local":
 	default:
-		return fmt.Errorf("%w: Type must be ollama, vllm, openai, or gemini", ErrInvalidBackend)
+		return fmt.Errorf("%w: Type must be ollama, vllm, openai, gemini, or local", ErrInvalidBackend)
 	}
 
 	return nil

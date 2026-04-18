@@ -58,7 +58,7 @@ ci-prepare-embeds:
 	bash $(PROJECT_ROOT)/scripts/ci_prepare_embeds.sh
 
 build-cli: docs-gen
-	go build -o $(PROJECT_ROOT)/bin/contenox $(PROJECT_ROOT)/cmd/contenox
+	CGO_ENABLED=1 go build -o $(PROJECT_ROOT)/bin/contenox $(PROJECT_ROOT)/cmd/contenox
 
 build-web:
 	npm run build --workspace=@contenox/ui

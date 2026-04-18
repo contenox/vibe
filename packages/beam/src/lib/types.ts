@@ -1,3 +1,20 @@
+export type ModelDescriptor = {
+  id?: string;
+  name: string;
+  sourceUrl: string;
+  sizeBytes: number;
+  curated: boolean;
+};
+
+export type ModelRegistryEntry = {
+  id: string;
+  name: string;
+  sourceUrl: string;
+  sizeBytes: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type Backend = {
   id: string;
   name: string;
@@ -64,7 +81,8 @@ export type TaskEventKind =
   | 'step_completed'
   | 'step_failed'
   | 'chain_completed'
-  | 'chain_failed';
+  | 'chain_failed'
+  | 'approval_requested';
 
 export type TaskEvent = {
   kind: TaskEventKind;
@@ -89,6 +107,13 @@ export type TaskEvent = {
    * inline-attachment mapping handles both directions of state flow.
    */
   attachments?: Array<{ kind: string; payload?: unknown }>;
+
+  // Approval fields — only present on approval_requested events.
+  approval_id?: string;
+  hook_name?: string;
+  tool_name?: string;
+  approval_args?: Record<string, unknown>;
+  approval_diff?: string;
 };
 
 export type SetupIssue = {
@@ -120,6 +145,8 @@ export type SetupStatus = {
   defaultProvider: string;
   /** VFS-relative or absolute chain path (same KV as `contenox config set default-chain`). */
   defaultChain: string;
+  /** Active HITL policy filename (same KV as `contenox config set hitl-policy-name`). */
+  hitlPolicyName: string;
   backendCount: number;
   reachableBackendCount: number;
   issues: SetupIssue[];
@@ -130,6 +157,27 @@ export type CLIConfigUpdateResponse = {
   defaultModel: string;
   defaultProvider: string;
   defaultChain: string;
+  hitlPolicyName: string;
+};
+
+export type HITLCondition = {
+  key: string;
+  op: 'eq' | 'glob';
+  value: string;
+};
+
+export type HITLRule = {
+  hook: string;
+  tool: string;
+  when?: HITLCondition[];
+  action: 'allow' | 'approve' | 'deny';
+  timeout_s?: number;
+  on_timeout?: 'deny' | 'approve';
+};
+
+export type HITLPolicy = {
+  default_action?: 'allow' | 'approve' | 'deny';
+  rules: HITLRule[];
 };
 
 /** Mirrors planstore + planapi JSON (snake_case). */

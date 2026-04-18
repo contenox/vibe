@@ -31,6 +31,11 @@ const (
 	TaskEventPlanRunStarted  TaskEventKind = "plan_run_started"
 	TaskEventPlanRunCompiled TaskEventKind = "plan_run_compiled"
 	TaskEventPlanRunFailed   TaskEventKind = "plan_run_failed"
+
+	// TaskEventApprovalRequested is emitted by the HITLWrapper before executing a
+	// gated tool call. The execution goroutine blocks until the human responds via
+	// POST /api/approvals/{approval_id}. The Beam UI renders an approval card.
+	TaskEventApprovalRequested TaskEventKind = "approval_requested"
 )
 
 type TaskEvent struct {
@@ -56,6 +61,14 @@ type TaskEvent struct {
 	// shown adjacent to the assistant message that was streaming when the
 	// hook fired.
 	Attachments []WidgetHint `json:"attachments,omitempty"`
+
+	// Approval fields — populated only for TaskEventApprovalRequested events.
+	// ApprovalID is the unique key used to resume or cancel via POST /api/approvals/{id}.
+	ApprovalID   string         `json:"approval_id,omitempty"`
+	HookName     string         `json:"hook_name,omitempty"`
+	ToolName     string         `json:"tool_name,omitempty"`
+	ApprovalArgs map[string]any `json:"approval_args,omitempty"`
+	ApprovalDiff string         `json:"approval_diff,omitempty"`
 }
 
 type TaskEventScope struct {

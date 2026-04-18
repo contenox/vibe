@@ -1,7 +1,7 @@
 import { Button, Panel, SidebarToggle, Span, UserMenu } from '@contenox/ui';
 import React, { useContext, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import logoUrl from '../assets/logo.png';
+import logoUrl from '../assets/logo.svg?url';
 import { useLogout } from '../hooks/useLogout';
 import { AuthContext } from '../lib/authContext';
 import { cn } from '../lib/utils';

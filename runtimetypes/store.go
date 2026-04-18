@@ -186,6 +186,14 @@ type Store interface {
 	ListRemoteHooks(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*RemoteHook, error)
 	EstimateRemoteHookCount(ctx context.Context) (int64, error)
 
+	CreateModelRegistryEntry(ctx context.Context, e *ModelRegistryEntry) error
+	GetModelRegistryEntry(ctx context.Context, id string) (*ModelRegistryEntry, error)
+	GetModelRegistryEntryByName(ctx context.Context, name string) (*ModelRegistryEntry, error)
+	UpdateModelRegistryEntry(ctx context.Context, e *ModelRegistryEntry) error
+	DeleteModelRegistryEntry(ctx context.Context, id string) error
+	ListModelRegistryEntries(ctx context.Context, cursor *time.Time, limit int) ([]*ModelRegistryEntry, error)
+	EstimateModelRegistryEntryCount(ctx context.Context) (int64, error)
+
 	CreateMCPServer(ctx context.Context, srv *MCPServer) error
 	GetMCPServer(ctx context.Context, id string) (*MCPServer, error)
 	GetMCPServerByName(ctx context.Context, name string) (*MCPServer, error)
@@ -224,7 +232,7 @@ const MaxRowsCount = 100000
 var sqliteCountableTables = map[string]bool{
 	"job_queue_v2": true, "kv": true, "remote_hooks": true,
 	"ollama_models": true, "llm_affinity_group": true, "llm_backends": true,
-	"mcp_servers": true,
+	"mcp_servers": true, "llm_model_registry": true,
 }
 
 func (s *store) estimateCount(ctx context.Context, table string) (int64, error) {

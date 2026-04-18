@@ -20,6 +20,7 @@ import (
 	"github.com/contenox/contenox/execservice"
 	"github.com/contenox/contenox/hookproviderservice"
 	"github.com/contenox/contenox/internal/backendapi"
+	"github.com/contenox/contenox/internal/modelregistryapi"
 	"github.com/contenox/contenox/internal/chatapi"
 	"github.com/contenox/contenox/internal/execapi"
 	"github.com/contenox/contenox/internal/groupapi"
@@ -31,6 +32,9 @@ import (
 	"github.com/contenox/contenox/internal/providerapi"
 	"github.com/contenox/contenox/internal/runtimestate"
 	"github.com/contenox/contenox/internal/setupapi"
+	"github.com/contenox/contenox/hitlservice"
+	"github.com/contenox/contenox/internal/approvalapi"
+	"github.com/contenox/contenox/internal/hitlpolicyapi"
 	"github.com/contenox/contenox/internal/taskchainapi"
 	"github.com/contenox/contenox/internal/taskeventsapi"
 	"github.com/contenox/contenox/internal/terminalapi"
@@ -40,6 +44,8 @@ import (
 	"github.com/contenox/contenox/libroutine"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/mcpserverservice"
+	"github.com/contenox/contenox/modelregistry"
+	"github.com/contenox/contenox/modelregistryservice"
 	"github.com/contenox/contenox/mcpworker"
 	"github.com/contenox/contenox/openaichatservice"
 	"github.com/contenox/contenox/planservice"
@@ -65,6 +71,7 @@ func New(
 	state *runtimestate.State,
 	hookRegistry taskengine.HookProvider,
 	hookRepo taskengine.HookRepo,
+	hitlSvc hitlservice.Service,
 	taskService execservice.TasksEnvService,
 	embedService embedservice.Service,
 	execService execservice.ExecService,
@@ -97,6 +104,10 @@ func New(
 	backendapi.AddStateRoutes(mux, stateService)
 	setupapi.AddSetupRoutes(mux, stateService, auth)
 	taskeventsapi.AddRoutes(mux, pubsub, auth)
+	if hitlSvc != nil {
+		approvalapi.AddRoutes(mux, hitlSvc, auth)
+	}
+	hitlpolicyapi.AddRoutes(mux, vfsSvc, auth)
 	groupapi.AddgroupRoutes(mux, groupservice)
 	// Get circuit breaker group instance
 	group := libroutine.GetGroup()
@@ -121,6 +132,11 @@ func New(
 	providerService := providerservice.New(dbInstance)
 	providerService = providerservice.WithActivityTracker(providerService, serveropsChainedTracker)
 	providerapi.AddProviderRoutes(mux, providerService)
+
+	registrySvc := modelregistryservice.New(dbInstance)
+	registrySvc = modelregistryservice.WithActivityTracker(registrySvc, serveropsChainedTracker)
+	reg := modelregistry.New(registrySvc)
+	modelregistryapi.AddRoutes(mux, registrySvc, reg)
 	hookproviderService := hookproviderservice.New(dbInstance, hookRegistry, serveropsChainedTracker)
 	hookproviderService = hookproviderservice.WithActivityTracker(hookproviderService, serveropsChainedTracker)
 	hooksapi.AddRemoteHookRoutes(mux, hookproviderService)

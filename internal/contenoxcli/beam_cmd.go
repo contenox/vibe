@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/contenox/contenox/embedservice"
 	"github.com/contenox/contenox/execservice"
+	"github.com/contenox/contenox/hitlservice"
 	"github.com/contenox/contenox/internal/hooks"
 	"github.com/contenox/contenox/internal/llmrepo"
 	"github.com/contenox/contenox/internal/ollamatokenizer"
@@ -70,6 +72,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		components.repo,
 		components.envExec,
 		components.hookRepo,
+		components.hitlSvc,
 		components.taskService,
 		components.embedService,
 		components.execService,
@@ -100,6 +103,7 @@ type serverComponents struct {
 	repo             llmrepo.ModelRepo
 	envExec          taskengine.EnvExecutor
 	hookRepo         taskengine.HookRepo
+	hitlSvc          hitlservice.Service
 	taskService      execservice.TasksEnvService
 	embedService     embedservice.Service
 	execService      execservice.ExecService
@@ -244,6 +248,20 @@ func buildServerComponents(ctx context.Context, db libdb.DBManager, tenantID str
 
 	hookRepo := hooks.NewPersistentRepo(localHooks, db, http.DefaultClient, bus)
 
+	// hitlSvc is always created so the approvals HTTP endpoint is available even
+	// when HITL is disabled (it simply finds no pending approvals).
+	chainVFS := vfsservice.NewLocalFS(contenoxPath)
+	if err := ensureHITLPolicies(contenoxPath); err != nil {
+		slog.Warn("hitl: failed to write embedded policy presets", "error", err)
+	}
+	hitlSvc := hitlservice.New(chainVFS, store, tracker)
+	if os.Getenv("CONTENOX_HITL_ENABLED") == "true" {
+		sink := taskengine.NewBusTaskEventSink(bus)
+		hookRepo = localhooks.NewHITLWrapper(hookRepo, func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
+			return hitlSvc.RequestApproval(ctx, req, sink)
+		}, hitlSvc, tracker)
+	}
+
 	// Task engine.
 	taskEngineCtx := taskengine.WithTaskEventSink(ctx, taskengine.NewBusTaskEventSink(bus))
 	exec, err := taskengine.NewExec(taskEngineCtx, repo, hookRepo, tracker)
@@ -266,7 +284,6 @@ func buildServerComponents(ctx context.Context, db libdb.DBManager, tenantID str
 
 	projectRoot := filepath.Dir(contenoxPath)
 	vfsSvc := vfsservice.NewLocalFS(projectRoot)
-	chainVFS := vfsservice.NewLocalFS(contenoxPath)
 	taskChainService := taskchainservice.NewVFS(chainVFS)
 	taskChainService = taskchainservice.WithActivityTracker(taskChainService, tracker)
 
@@ -286,6 +303,7 @@ func buildServerComponents(ctx context.Context, db libdb.DBManager, tenantID str
 		repo:             repo,
 		envExec:          envExec,
 		hookRepo:         hookRepo,
+		hitlSvc:          hitlSvc,
 		taskService:      taskService,
 		embedService:     embedService,
 		execService:      execService,

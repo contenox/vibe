@@ -1,6 +1,15 @@
-import { ChatComposer, Tooltip, Badge } from '@contenox/ui';
+import {
+  ChatComposer,
+  Tooltip,
+  Badge,
+  Button,
+  DEFAULT_COMPOSER_SOFT_MAX,
+} from '@contenox/ui';
 import { t } from 'i18next';
 import { FormEvent, useCallback, useMemo, useRef, useState } from 'react';
+import { Maximize2 } from 'lucide-react';
+
+import { ExpandedMessageEditor } from './ExpandedMessageEditor';
 
 import {
   parseSlashInvocation,
@@ -25,7 +34,12 @@ type MessageInputFormProps = {
   title?: string;
   className?: string;
   variant?: 'default' | 'compact' | 'workbench';
+  /** Soft limit for character-count warning only (default 128 Ki). */
+  softMax?: number;
+  /** @deprecated Use softMax — forwarded to ChatComposer as legacy alias. */
   maxLength?: number;
+  /** Show expand / full editor control (not shown for compact). @default true */
+  showExpandEditor?: boolean;
   canSubmit?: boolean;
   /** When true, submit is allowed with an empty message (e.g. chat mode build). */
   allowEmptyMessage?: boolean;
@@ -48,15 +62,18 @@ export const MessageInputForm = ({
   title = '',
   className,
   variant = 'default',
+  softMax,
   maxLength,
+  showExpandEditor = true,
   canSubmit,
   allowEmptyMessage = false,
 }: MessageInputFormProps) => {
-  const effectiveMax = maxLength ?? (variant === 'workbench' ? 8000 : 4000);
+  const effectiveSoftMax = softMax ?? maxLength ?? DEFAULT_COMPOSER_SOFT_MAX;
   const slashRegistry = useSlashCommandRegistry();
   const artifactRegistry = useArtifactRegistry();
   const sources = useArtifactSources();
   const [notice, setNotice] = useState<SlashNotice>(null);
+  const [expandEditorOpen, setExpandEditorOpen] = useState(false);
   /** Armed one-shot sources keyed by sourceId so slash commands can dedupe. */
   const armedUnregistersRef = useRef(new Map<string, () => void>());
 
@@ -148,6 +165,11 @@ export const MessageInputForm = ({
     [armArtifact, notify, onChange, onSubmit, slashRegistry, value],
   );
 
+  const sendFromExpanded = useCallback(() => {
+    const ev = { preventDefault: () => {} } as unknown as FormEvent;
+    void handleSubmit(ev);
+  }, [handleSubmit]);
+
   /**
    * Mention-armed sources (id starting with `mention:`) are shown as pending
    * pills above the composer so the user can see what will attach to the
@@ -186,9 +208,10 @@ export const MessageInputForm = ({
         pendingLabel={t('chat.sending_button')}
         title={title}
         variant={variant}
-        maxLength={effectiveMax}
+        softMax={effectiveSoftMax}
         canSubmit={canSubmit}
         allowEmptyMessage={allowEmptyMessage}
+        softLimitExceededNote={t('chat.soft_limit_note')}
         charCountTooltip={
           variant === 'default' || variant === 'workbench' ? t('chat.char_count_tooltip') : undefined
         }
@@ -218,7 +241,34 @@ export const MessageInputForm = ({
             </>
           ) : undefined
         }
+        footerEnd={
+          showExpandEditor && variant !== 'compact' ? (
+            <Tooltip content={t('chat.expand_editor')}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => setExpandEditorOpen(true)}
+                aria-label={t('chat.expand_editor')}
+              >
+                <Maximize2 className="h-4 w-4" />
+              </Button>
+            </Tooltip>
+          ) : undefined
+        }
       />
+      {showExpandEditor && variant !== 'compact' ? (
+        <ExpandedMessageEditor
+          open={expandEditorOpen}
+          onClose={() => setExpandEditorOpen(false)}
+          value={value}
+          onChange={handleChange}
+          onSend={sendFromExpanded}
+          isPending={isPending}
+          canSubmit={canSubmit ?? true}
+        />
+      ) : null}
       {notice && (
         <pre
           className={

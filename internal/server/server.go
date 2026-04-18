@@ -21,6 +21,7 @@ import (
 	"github.com/contenox/contenox/libbus"
 	"github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
+	"github.com/contenox/contenox/hitlservice"
 	"github.com/contenox/contenox/serverapi"
 	"github.com/contenox/contenox/taskchainservice"
 	"github.com/contenox/contenox/taskengine"
@@ -42,6 +43,7 @@ func Run(
 	repo llmrepo.ModelRepo,
 	environmentExec taskengine.EnvExecutor,
 	hookRepo taskengine.HookRepo,
+	hitlSvc hitlservice.Service,
 	taskService execservice.TasksEnvService,
 	embedService embedservice.Service,
 	execService execservice.ExecService,
@@ -82,6 +84,7 @@ func Run(
 		state,
 		hookRepo,
 		hookRepo,
+		hitlSvc,
 		taskService,
 		embedService,
 		execService,

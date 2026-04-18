@@ -1,0 +1,10 @@
+{
+  "default_action": "deny",
+  "rules": [
+    {"hook": "local_fs",    "tool": "read_file",   "action": "allow"},
+    {"hook": "local_fs",    "tool": "list_files",  "action": "allow"},
+    {"hook": "local_fs",    "tool": "write_file",  "action": "approve"},
+    {"hook": "local_fs",    "tool": "sed",         "action": "approve"},
+    {"hook": "local_shell", "tool": "local_shell", "action": "approve"}
+  ]
+}

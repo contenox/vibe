@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/contenox/contenox/execservice"
+	"github.com/contenox/contenox/hitlservice"
 	"github.com/contenox/contenox/internal/hooks"
 	"github.com/contenox/contenox/internal/llmrepo"
 	"github.com/contenox/contenox/internal/ollamatokenizer"
@@ -25,6 +27,7 @@ import (
 	"github.com/contenox/contenox/runtimetypes"
 	"github.com/contenox/contenox/stateservice"
 	"github.com/contenox/contenox/taskengine"
+	"github.com/contenox/contenox/vfsservice"
 )
 
 type Engine struct {
@@ -210,6 +213,16 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		engine.LocalHooks = append(engine.LocalHooks, name)
 	}
 	hookRepo := hooks.NewPersistentRepo(localHooks, db, http.DefaultClient, bus)
+
+	// Wrap with HITL interceptor when --hitl is requested.
+	if opts.EffectiveHITL {
+		hitlVFS := vfsservice.NewLocalFS(opts.ContenoxDir)
+		if err := ensureHITLPolicies(opts.ContenoxDir); err != nil {
+			slog.Warn("hitl: failed to write embedded policy presets", "error", err)
+		}
+		hitlSvc := hitlservice.New(hitlVFS, store, tracker)
+		hookRepo = localhooks.NewHITLWrapper(hookRepo, NewCLIAskApproval(os.Stderr), hitlSvc, tracker)
+	}
 
 	// 9. Task engine
 	taskEngineCtx := taskengine.WithTaskEventSink(engineCtx, taskengine.NewBusTaskEventSink(bus))

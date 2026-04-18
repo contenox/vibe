@@ -68,6 +68,7 @@ import { buildChatThreadItems } from './chatThreadItems';
 import BuildModeChainGraph from './components/BuildModeChainGraph';
 import { ChatInterface, type ChatWorkbenchTabId } from './components/ChatInterface';
 import { CompiledPlanThreadEmbed } from './components/CompiledPlanThreadEmbed';
+import { ApprovalCard } from './components/ApprovalCard';
 import { MessageInputForm } from './components/MessageInputForm';
 import { StateVisualizer } from './components/StateVisualizer';
 import { TaskEventFeed } from './components/TaskEventFeed';
@@ -1156,6 +1157,19 @@ function ChatPageImpl() {
                         canStop={isProcessing}
                         onStop={handleStop}
                         streamScrollSignature={streamScrollSignature}
+                        approvalContent={liveTask.pendingApproval ? (
+                          <ApprovalCard
+                            approval={liveTask.pendingApproval}
+                            onRespond={async (approved) => {
+                              if (!liveTask.pendingApproval) return;
+                              try {
+                                await api.respondToApproval(liveTask.pendingApproval.approvalId, approved);
+                              } catch {
+                                // Backend will surface the outcome via the SSE stream.
+                              }
+                            }}
+                          />
+                        ) : undefined}
                       />
                     )}
                   </div>

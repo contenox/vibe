@@ -185,6 +185,8 @@ Giving the model tools (file system and shell access):
 
   --local-exec-allowed-dir <dir>     allow local_fs tools inside <dir>
   --shell                            enable local_shell (command policy is defined in the chain)
+  --hitl                             pause before write_file, sed, and local_shell calls;
+                                     require y/n approval at the terminal (human-in-the-loop)
 
 Examples:
   # Chat with file system access to the current project:
@@ -192,6 +194,9 @@ Examples:
 
   # Shell access (policy comes from the chain's hook_policies; default chains allow common dev tools):
   contenox chat --shell "suggest a commit message from git diff"
+
+  # Shell access with human approval before every write or shell call:
+  contenox chat --shell --local-exec-allowed-dir . --hitl "refactor main.go to use slog"
 
   # Trim context: only send last 10 messages from session history to the model:
   contenox chat --trim 10 "let's continue where we left off"
@@ -298,6 +303,7 @@ func init() {
 	// Chat-specific local flags (not exposed globally).
 	chatCmd.Flags().Int("trim", 0, "Only send the last N messages from session history to the model (0 = send all)")
 	chatCmd.Flags().Int("last", 0, "Print last N user/assistant turns after the reply (0 = only print new reply)")
+	chatCmd.Flags().Bool("hitl", false, "Pause before write_file, sed, and local_shell calls; require y/n approval in the terminal")
 
 	// Server command flags
 	beamCmd.Flags().String("tenant", localTenantID, "Tenant ID to use for the server (defaults to local tenant)")
@@ -449,6 +455,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	effectiveThink, _ := flags.GetBool("think")
+	effectiveHITL, _ := cmd.Flags().GetBool("hitl")
 	historyTrim, _ := cmd.Flags().GetInt("trim")
 	lastN, _ := cmd.Flags().GetInt("last")
 
@@ -463,6 +470,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		EffectiveLocalExecAllowedDir: effectiveLocalExecAllowedDir,
 		EffectiveTracing:             effectiveTracing,
 		EffectiveSteps:               effectiveSteps,
+		EffectiveHITL:                effectiveHITL,
 		EffectiveRaw:                 effectiveRaw,
 		EffectiveThink:               effectiveThink,
 		HistoryTrim:                  historyTrim,

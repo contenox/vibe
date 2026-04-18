@@ -41,15 +41,17 @@ type putCLIConfigRequest struct {
 	DefaultModel    string `json:"default-model"`
 	DefaultProvider string `json:"default-provider"`
 	DefaultChain    string `json:"default-chain"`
+	HITLPolicyName  string `json:"hitl-policy-name"`
 }
 
 type putCLIConfigResponse struct {
 	DefaultModel    string `json:"defaultModel"`
 	DefaultProvider string `json:"defaultProvider"`
 	DefaultChain    string `json:"defaultChain"`
+	HITLPolicyName  string `json:"hitlPolicyName"`
 }
 
-// Updates one or both CLI default model/provider keys (same as contenox config set).
+// Updates CLI default keys (model, provider, chain, hitl-policy-name) in KV (same as contenox config set).
 func (h *setupHandler) putCLIConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := h.auth.GetIdentity(ctx); err != nil {
@@ -61,14 +63,18 @@ func (h *setupHandler) putCLIConfig(w http.ResponseWriter, r *http.Request) {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
 		return
 	}
-	if strings.TrimSpace(body.DefaultModel) == "" && strings.TrimSpace(body.DefaultProvider) == "" && strings.TrimSpace(body.DefaultChain) == "" {
-		_ = apiframework.Error(w, r, apiframework.BadRequest("Provide at least one of default-model, default-provider, or default-chain."), apiframework.UpdateOperation)
+	if strings.TrimSpace(body.DefaultModel) == "" &&
+		strings.TrimSpace(body.DefaultProvider) == "" &&
+		strings.TrimSpace(body.DefaultChain) == "" &&
+		strings.TrimSpace(body.HITLPolicyName) == "" {
+		_ = apiframework.Error(w, r, apiframework.BadRequest("Provide at least one of default-model, default-provider, default-chain, or hitl-policy-name."), apiframework.UpdateOperation)
 		return
 	}
 	snap, err := h.state.SetCLIConfig(ctx, stateservice.CLIConfigPatch{
 		DefaultModel:    body.DefaultModel,
 		DefaultProvider: body.DefaultProvider,
 		DefaultChain:    body.DefaultChain,
+		HITLPolicyName:  body.HITLPolicyName,
 	})
 	if err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.UpdateOperation)
@@ -78,6 +84,7 @@ func (h *setupHandler) putCLIConfig(w http.ResponseWriter, r *http.Request) {
 		DefaultModel:    snap.DefaultModel,
 		DefaultProvider: snap.DefaultProvider,
 		DefaultChain:    snap.DefaultChain,
+		HITLPolicyName:  snap.HITLPolicyName,
 	}
 	_ = apiframework.Encode(w, r, http.StatusOK, resp) // @response setupapi.putCLIConfigResponse
 }

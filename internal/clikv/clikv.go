@@ -22,6 +22,17 @@ func Read(ctx context.Context, store runtimetypes.Store, key string) string {
 	return strings.TrimSpace(val)
 }
 
+// ReadHITLPolicy returns the active HITL policy filename (e.g. "hitl-policy-strict.json"),
+// or "" if no policy has been explicitly selected.
+func ReadHITLPolicy(ctx context.Context, store runtimetypes.Store) string {
+	return Read(ctx, store, "hitl-policy-name")
+}
+
+// SetHITLPolicy persists the active HITL policy filename.
+func SetHITLPolicy(ctx context.Context, store runtimetypes.Store, name string) error {
+	return SetString(ctx, store, "hitl-policy-name", name)
+}
+
 // SetString persists a string value for key, JSON-encoded like contenox config set.
 func SetString(ctx context.Context, store runtimetypes.Store, key, value string) error {
 	v := strings.TrimSpace(value)

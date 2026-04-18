@@ -283,6 +283,8 @@ func (s *State) processBackend(ctx context.Context, backend *runtimetypes.Backen
 		s.processGeminiBackend(ctx, backend, declaredModels)
 	case "openai":
 		s.processOpenAIBackend(ctx, backend, declaredModels)
+	case "local":
+		s.processLocalBackend(ctx, backend, declaredModels)
 	default:
 		brokenService := &statetype.BackendRuntimeState{
 			ID:      backend.ID,
@@ -375,6 +377,36 @@ func (s *State) processOllamaBackend(ctx context.Context, backend *runtimetypes.
 		stateservice.Models = observedModelNames(observedModels)
 	} else {
 		stateservice.Models = models
+	}
+	s.state.Store(backend.ID, stateservice)
+}
+
+// processLocalBackend handles state reconciliation for a local llama.cpp backend.
+// It scans the model directory (stored in backend.BaseURL) for GGUF model subdirectories.
+func (s *State) processLocalBackend(ctx context.Context, backend *runtimetypes.Backend, _ []*runtimetypes.Model) {
+	catalog, err := s.newCatalogProvider(backend, "")
+	if err != nil {
+		storeBackendError(s, backend, "", err, nil)
+		return
+	}
+	observedModels, err := catalog.ListModels(ctx)
+	if err != nil {
+		storeBackendError(s, backend, "", err, nil)
+		return
+	}
+	stateservice := &statetype.BackendRuntimeState{
+		ID:      backend.ID,
+		Name:    backend.Name,
+		Backend: *backend,
+		Models:  make([]string, 0, len(observedModels)),
+	}
+	pulledModels := make([]statetype.ModelPullStatus, 0, len(observedModels))
+	for _, observed := range observedModels {
+		pulledModels = append(pulledModels, pullStatusFromObservedModel(observed))
+	}
+	stateservice.PulledModels = pulledModels
+	if s.autoDiscoverModels {
+		stateservice.Models = observedModelNames(observedModels)
 	}
 	s.state.Store(backend.ID, stateservice)
 }

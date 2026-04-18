@@ -4,6 +4,7 @@ import {
   File,
   Link as LinkIcon,
   ListChecks,
+  Package,
   Settings,
   type LucideIcon,
 } from 'lucide-react';
@@ -14,7 +15,9 @@ import HomeRedirect from '../pages/HomeRedirect.tsx';
 import { LOGIN_ROUTE } from './routeConstants.ts';
 
 const BackendsPage = lazy(() => import('../pages/admin/backends/BackendPage.tsx'));
+const ModelRegistryPage = lazy(() => import('../pages/admin/models/ModelRegistryPage.tsx'));
 const ChainsPage = lazy(() => import('../pages/admin/chains/ChainsPage.tsx'));
+const HITLPoliciesPage = lazy(() => import('../pages/admin/hitl-policies/HITLPoliciesPage.tsx'));
 const PlansListPage = lazy(() => import('../pages/admin/plans/PlansListPage.tsx'));
 const PlanActivePage = lazy(() => import('../pages/admin/plans/PlanActivePage.tsx'));
 const ChatPage = lazy(() => import('../pages/admin/chats/ChatPage.tsx'));
@@ -55,9 +58,11 @@ type AdminRouteDefinition = {
 
 const adminRouteDefinitions: AdminRouteDefinition[] = [
   { path: '/backends', element: BackendsPage, labelKey: 'navbar.backends', Icon: Database },
+  { path: '/model-registry', element: ModelRegistryPage, labelKey: 'navbar.model_registry', Icon: Package },
   { path: '/hooks/remote', element: RemoteHooksPage, labelKey: 'navbar.hooks', Icon: LinkIcon },
   { path: '/files', element: FilesPage, labelKey: 'navbar.files', Icon: File },
   { path: '/chains', element: ChainsPage, labelKey: 'navbar.chains', Icon: LinkIcon },
+  { path: '/hitl-policies', element: HITLPoliciesPage, labelKey: 'navbar.hitl_policies', Icon: Settings },
   { path: '/plans', element: PlansListPage, labelKey: 'navbar.plans', Icon: ListChecks },
   { path: '/exec', element: ExecPromptPage, labelKey: 'navbar.prompt', Icon: ChevronsRight },
   { path: '/settings', element: SettingsPage, labelKey: 'navbar.settings', Icon: Settings },

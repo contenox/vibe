@@ -6,11 +6,10 @@ on:
       - "v*"
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+    outputs:
+      tag: ${{ steps.vars.outputs.TAG }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -45,6 +44,22 @@ jobs:
           fi
           echo "✓ Version verification passed: $VERSION_IN_FILE matches tag"
 
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            cc: gcc
+          - goarch: arm64
+            cc: aarch64-linux-gnu-gcc
+            cross: true
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -55,25 +70,64 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Install CGo dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc g++ nlohmann-json3-dev
+          ${{ matrix.cross && 'sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu' || 'true' }}
+
+      - name: Fetch missing llama.cpp headers
+        run: |
+          OLLAMA_MOD="$(go env GOPATH)/pkg/mod/github.com/ollama/ollama@v0.17.5"
+          go mod download github.com/ollama/ollama@v0.17.5
+          chmod -R u+w "$OLLAMA_MOD/llama"
+          MTMD="$OLLAMA_MOD/llama/llama.cpp/tools/mtmd"
+          mkdir -p "$MTMD/miniaudio" "$MTMD/stb"
+          curl -fsSL https://raw.githubusercontent.com/mackron/miniaudio/master/miniaudio.h \
+               -o "$MTMD/miniaudio/miniaudio.h"
+          curl -fsSL https://raw.githubusercontent.com/nothings/stb/master/stb_image.h \
+               -o "$MTMD/stb/stb_image.h"
+
       - name: Prepare embed inputs (Beam UI + OpenAPI stub)
         run: make ci-prepare-embeds
 
       - name: Generate OpenAPI for embed
         run: make docs-gen
 
-      - name: Build Contenox binaries
+      - name: Build Contenox binary
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "1"
+          CC: ${{ matrix.cc }}
         run: |
-          TAG="${{ steps.vars.outputs.TAG }}"
+          TAG="${{ needs.verify.outputs.tag }}"
           LDFLAGS="-X github.com/contenox/contenox/internal/contenoxcli.Version=${TAG}"
-          for goos in linux darwin; do
-            for goarch in amd64 arm64; do
-              GOOS=$goos GOARCH=$goarch go build -ldflags="${LDFLAGS}" -o "contenox-${TAG}-${goos}-${goarch}" ./cmd/contenox
-            done
-          done
+          go build -ldflags="${LDFLAGS}" -o "contenox-${TAG}-linux-${{ matrix.goarch }}" ./cmd/contenox
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: contenox-linux-${{ matrix.goarch }}
+          path: contenox-*
+
+  release:
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
 
       - name: Create GitHub Release and upload assets
         run: |
-          TAG="${{ steps.vars.outputs.TAG }}"
+          TAG="${{ needs.verify.outputs.tag }}"
           gh release create "$TAG" contenox-* \
             --title "$TAG" \
             --notes "" \

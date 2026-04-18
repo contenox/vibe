@@ -53,6 +53,9 @@ Examples:
   contenox run --chain .contenox/embed.json --input @myfile.go
   contenox run --chain .contenox/parse-chain.json --input-type json '{"key":"value"}'
   git diff | contenox run "suggest a commit message"  # uses default-run-chain.json
+
+  # Run with human approval before any write_file, sed, or local_shell tool call:
+  contenox run --shell --hitl --chain .contenox/my-chain.json "fix the bug"
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -331,6 +334,7 @@ func buildRunOpts(cmd *cobra.Command, db libdbexec.DBManager, contenoxDir string
 
 	effectiveEnableLocalExec, _ := flags.GetBool("shell")
 	effectiveLocalExecAllowedDir, _ := flags.GetString("local-exec-allowed-dir")
+	effectiveHITL, _ := cmd.Flags().GetBool("hitl")
 
 	return chatOpts{
 		EffectiveDB:                  "", // resolved separately in RunE
@@ -341,6 +345,7 @@ func buildRunOpts(cmd *cobra.Command, db libdbexec.DBManager, contenoxDir string
 		EffectiveNoDeleteModels:      true,
 		EffectiveEnableLocalExec:     effectiveEnableLocalExec,
 		EffectiveLocalExecAllowedDir: effectiveLocalExecAllowedDir,
+		EffectiveHITL:                effectiveHITL,
 		EffectiveTracing:             effectiveTracing,
 		ContenoxDir:                  contenoxDir,
 	}
@@ -351,4 +356,5 @@ func init() {
 	f.String("chain", "", "Path to a task chain JSON file (falls back to .contenox/default-run-chain.json if present)")
 	f.String("input", "", "Input value or @path to read from a file (e.g. --input @main.go)")
 	f.String("input-type", "string", "Input data type: string, chat, json, int, float, bool")
+	f.Bool("hitl", false, "Pause before write_file, sed, and local_shell calls; require y/n approval in the terminal")
 }

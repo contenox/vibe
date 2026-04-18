@@ -49,6 +49,48 @@ make build-cli
 ./bin/contenox "list files in my home directory"
 ```
 
+### Building with local LLM inference (CGo)
+
+The `internal/modelrepo/local` package embeds llama.cpp inference directly into the binary via `github.com/ollama/ollama/llama` (CGo). This is **required** to build the full binary — `CGO_ENABLED=0` no longer works.
+
+**System packages (Ubuntu/Debian):**
+
+```bash
+sudo apt-get install -y gcc g++ nlohmann-json3-dev
+```
+
+`nlohmann-json3-dev` provides `nlohmann/json_fwd.hpp`, which llama.cpp's v0.17.5 C++ tools require.
+
+**Missing headers in the Go module cache:**
+
+The ollama module at v0.17.5 includes multimodal C++ code (`mtmd`) that depends on two single-file libraries not bundled with the module. Download them manually:
+
+```bash
+OLLAMA_MOD="$(go env GOPATH)/pkg/mod/github.com/ollama/ollama@v0.17.5"
+MTMD="$OLLAMA_MOD/llama/llama.cpp/tools/mtmd"
+
+# Make module cache writable (read-only by default)
+chmod -R u+w "$OLLAMA_MOD/llama"
+
+# miniaudio — audio I/O library
+mkdir -p "$MTMD/miniaudio"
+curl -fsSL https://raw.githubusercontent.com/mackron/miniaudio/master/miniaudio.h \
+     -o "$MTMD/miniaudio/miniaudio.h"
+
+# stb_image — image loading library
+mkdir -p "$MTMD/stb"
+curl -fsSL https://raw.githubusercontent.com/nothings/stb/master/stb_image.h \
+     -o "$MTMD/stb/stb_image.h"
+```
+
+These steps are one-time per machine. After that, `make build-cli` (which sets `CGO_ENABLED=1`) will compile cleanly. To verify the CGo layer alone:
+
+```bash
+CGO_ENABLED=1 go build ./internal/modelrepo/local/...
+```
+
+**Why these headers aren't in the module:** Go module distributions don't include all C/C++ source trees needed by every possible build tag. v0.17.5 added multimodal support whose C++ files pull in miniaudio and stb_image as relative includes. Until Ollama bundles them, the manual download is the workaround.
+
 ### Running Beam (HTTP server + embedded UI)
 
 The binary serves the **built** React app embedded from `internal/web/beam/dist`. After UI changes, run **`make build-web`** (or `npm run build` in the workspace), then rebuild the Go binary so `//go:embed` picks up assets.

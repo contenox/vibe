@@ -30,6 +30,7 @@ type chatOpts struct {
 	EffectiveLocalExecAllowedDir string
 	EffectiveTracing             bool
 	EffectiveSteps               bool
+	EffectiveHITL                bool
 	EffectiveRaw                 bool
 	EffectiveThink               bool
 	HistoryTrim                  int

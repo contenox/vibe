@@ -25,6 +25,13 @@ type handler struct {
 	auth   middleware.AuthZReader
 }
 
+// stream subscribes the caller to a Server-Sent Events stream of TaskEvent
+// objects scoped to the given requestId. Each event is a JSON-encoded
+// TaskEvent emitted as "data: <json>\n\n". The stream closes when the request
+// context is cancelled or the chain completes.
+// approval_requested events include approval_id, hook_name, tool_name,
+// approval_args, and approval_diff so the UI can render an approval card.
+// @sse-response taskengine.TaskEvent
 func (h *handler) stream(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.auth.GetIdentity(r.Context()); err != nil {
 		_ = apiframework.Error(w, r, err, apiframework.AuthorizeOperation)

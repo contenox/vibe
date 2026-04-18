@@ -1,6 +1,14 @@
 import { artifactsToInlineAttachments } from './inlineAttachments';
 import type { ChatContextArtifact, InlineAttachment, TaskEvent } from './types';
 
+export type PendingApproval = {
+  approvalId: string;
+  hookName: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  diff: string;
+};
+
 export type TaskEventViewState = {
   events: TaskEvent[];
   content: string;
@@ -17,6 +25,8 @@ export type TaskEventViewState = {
    * by user-attached artifacts in Phase 4.
    */
   attachments: InlineAttachment[];
+  /** Non-null when execution is paused waiting for HITL approval. */
+  pendingApproval: PendingApproval | null;
 };
 
 export function createEmptyTaskEventState(): TaskEventViewState {
@@ -29,6 +39,7 @@ export function createEmptyTaskEventState(): TaskEventViewState {
     lastTaskID: null,
     activeChainId: null,
     attachments: [],
+    pendingApproval: null,
   };
 }
 
@@ -77,18 +88,32 @@ export function reduceTaskEventState(
     case 'step_completed':
       next.lastTaskID = event.task_id ?? state.lastTaskID;
       next.status = formatStepStatus(event, 'Completed');
+      next.pendingApproval = null;
       break;
     case 'step_failed':
       next.lastTaskID = event.task_id ?? state.lastTaskID;
       next.status = formatStepStatus(event, 'Failed');
       next.error = event.error ?? 'Task failed';
+      next.pendingApproval = null;
       break;
     case 'chain_completed':
       next.status = 'Completed';
+      next.pendingApproval = null;
       break;
     case 'chain_failed':
       next.status = 'Failed';
       next.error = event.error ?? 'Task failed';
+      next.pendingApproval = null;
+      break;
+    case 'approval_requested':
+      next.status = 'Awaiting approval';
+      next.pendingApproval = {
+        approvalId: event.approval_id ?? '',
+        hookName: event.hook_name ?? '',
+        toolName: event.tool_name ?? '',
+        args: event.approval_args ?? {},
+        diff: event.approval_diff ?? '',
+      };
       break;
   }
 
