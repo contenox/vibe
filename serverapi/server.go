@@ -136,7 +136,7 @@ func New(
 	registrySvc := modelregistryservice.New(dbInstance)
 	registrySvc = modelregistryservice.WithActivityTracker(registrySvc, serveropsChainedTracker)
 	reg := modelregistry.New(registrySvc)
-	modelregistryapi.AddRoutes(mux, registrySvc, reg)
+	modelregistryapi.AddRoutes(mux, registrySvc, reg, backendService, runtimetypes.New(dbInstance.WithoutTransaction()))
 	hookproviderService := hookproviderservice.New(dbInstance, hookRegistry, serveropsChainedTracker)
 	hookproviderService = hookproviderservice.WithActivityTracker(hookproviderService, serveropsChainedTracker)
 	hooksapi.AddRemoteHookRoutes(mux, hookproviderService)

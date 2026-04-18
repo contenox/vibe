@@ -244,3 +244,4 @@ func (b *backendManager) deleteBackend(w http.ResponseWriter, r *http.Request) {
 
 	_ = apiframework.Encode(w, r, http.StatusOK, "backend removed") // @response string
 }
+

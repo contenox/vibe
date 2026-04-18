@@ -1,4 +1,4 @@
-import { Button, Form, FormField, Input, Section, Select, Spinner } from '@contenox/ui';
+import { Button, Form, FormField, Input, Panel, Section, Select, Spinner } from '@contenox/ui';
 import { useTranslation } from 'react-i18next';
 import { Backend } from '../../../../lib/types';
 
@@ -81,7 +81,13 @@ export default function BackendForm({
           <Input
             value={baseURL}
             onChange={e => setBaseURL(e.target.value)}
-            placeholder="http://localhost:11434"
+            placeholder={
+              configType === 'local'
+                ? '~/.contenox/models/'
+                : configType === 'vllm'
+                  ? 'http://gpu-host:8000'
+                  : 'http://localhost:11434'
+            }
             disabled={isPending}
           />
         </FormField>
@@ -91,12 +97,23 @@ export default function BackendForm({
             value={configType}
             onChange={e => setConfigType(e.target.value)}
             options={[
-              { value: 'ollama', label: 'Ollama' },
+              { value: 'ollama', label: 'Ollama (local)' },
               { value: 'vllm', label: 'vLLM' },
+              { value: 'local', label: 'Local (GGUF / llama.cpp)' },
             ]}
             disabled={isPending}
           />
         </FormField>
+
+        {configType === 'ollama' && (
+          <Panel variant="flat">{t('backends.hint_ollama')}</Panel>
+        )}
+        {configType === 'vllm' && (
+          <Panel variant="flat">{t('backends.hint_vllm')}</Panel>
+        )}
+        {configType === 'local' && (
+          <Panel variant="flat">{t('backends.hint_local')}</Panel>
+        )}
       </Form>
     </Section>
   );

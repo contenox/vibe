@@ -1,5 +1,5 @@
 import { Button } from '@contenox/ui';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import type { PendingApproval } from '../../../../lib/taskEvents';
 
 type Props = {
@@ -116,7 +116,7 @@ export function ApprovalCard({ approval, onRespond }: Props) {
         </Button>
         <Button
           size="sm"
-          variant="destructive"
+          variant="danger"
           disabled={inflight}
           onClick={() => handle(false)}
         >

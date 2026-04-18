@@ -30,3 +30,13 @@ export function useDeleteModelRegistryEntry() {
     },
   });
 }
+
+export function useDownloadModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.downloadModel(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: modelRegistryKeys.all });
+    },
+  });
+}

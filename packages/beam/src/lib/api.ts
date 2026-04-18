@@ -419,4 +419,6 @@ export const api = {
     apiFetch<ModelRegistryEntry>('/api/model-registry', options('POST', data)),
   deleteModelRegistryEntry: (id: string) =>
     apiFetch<void>(`/api/model-registry/${encodeURIComponent(id)}`, options('DELETE')),
+  downloadModel: (name: string) =>
+    apiFetch<string>('/api/model-registry/download', { ...options('POST', { name }), timeoutMs: null }),
 };

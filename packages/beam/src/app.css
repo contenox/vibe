@@ -16,7 +16,6 @@
 }
 
 @import 'tailwindcss';
-@tailwind utilities;
 
 /* xterm injects .xterm under the host — not React-rendered; scope with data-xterm-host */
 @layer components {

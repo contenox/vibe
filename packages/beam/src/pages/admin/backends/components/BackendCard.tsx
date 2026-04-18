@@ -66,6 +66,7 @@ export function BackendCard({ backend, onEdit, onDelete }: BackendCardProps) {
           </div>
         </div>
       )}
+
     </ResourceCard>
   );
 }

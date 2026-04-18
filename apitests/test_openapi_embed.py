@@ -32,3 +32,22 @@ def test_beam_spa_root_still_serves(beam_origin):
     assert "text/html" in (r.headers.get("Content-Type") or "")
     # Embedded Vite build serves index with root mount
     assert len(r.text) > 100
+
+
+def test_openapi_model_registry_routes_present(beam_origin):
+    """OpenAPI spec must expose all model-registry routes including /download."""
+    r = requests.get(f"{beam_origin}/openapi.json", timeout=30)
+    assert_status_code(r, 200)
+    paths = r.json().get("paths", {})
+
+    # Core CRUD paths
+    assert "/model-registry" in paths, "Missing /model-registry"
+    assert "/model-registry/{id}" in paths, "Missing /model-registry/{id}"
+
+    # Download route added in this session
+    assert "/model-registry/download" in paths, (
+        "Missing POST /model-registry/download — new route not reflected in spec"
+    )
+
+    download_ops = paths["/model-registry/download"]
+    assert "post" in download_ops, "POST operation missing on /model-registry/download"

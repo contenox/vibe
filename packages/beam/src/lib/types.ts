@@ -207,6 +207,9 @@ export type PlanStep = {
   status: StepStatus;
   execution_result: string;
   executed_at: string;
+  summary?: string;
+  failure_class?: string;
+  last_failure_summary?: string;
 };
 
 export type NewPlanResponse = {

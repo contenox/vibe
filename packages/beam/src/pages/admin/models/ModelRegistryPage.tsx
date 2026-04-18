@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import {
   useCreateModelRegistryEntry,
   useDeleteModelRegistryEntry,
+  useDownloadModel,
   useModelRegistry,
 } from '../../../hooks/useModelRegistry';
 import { ModelDescriptor } from '../../../lib/types';
@@ -21,12 +22,25 @@ import { ModelDescriptor } from '../../../lib/types';
 function RegistryEntryRow({
   entry,
   onDelete,
+  onDownload,
 }: {
   entry: ModelDescriptor;
   onDelete: (id: string) => void;
+  onDownload: (name: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const [isDownloading, setIsDownloading] = useState(false);
   const sizeMB = entry.sizeBytes ? Math.round(entry.sizeBytes / 1024 / 1024) : 0;
+
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    try {
+      await onDownload(entry.name);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="flex items-center justify-between rounded border p-3 text-sm">
       <div className="min-w-0 flex-1 space-y-0.5">
@@ -43,11 +57,16 @@ function RegistryEntryRow({
           <div className="text-xs text-gray-400">{sizeMB} MB</div>
         )}
       </div>
-      {!entry.curated && entry.id && (
-        <Button variant="ghost" size="sm" onClick={() => onDelete(entry.id!)}>
-          {t('common.delete')}
+      <div className="flex items-center gap-2 ml-2 shrink-0">
+        <Button variant="ghost" size="sm" onClick={handleDownload} disabled={isDownloading}>
+          {isDownloading ? t('model_registry.downloading') : t('model_registry.download')}
         </Button>
-      )}
+        {!entry.curated && entry.id && (
+          <Button variant="ghost" size="sm" onClick={() => onDelete(entry.id!)}>
+            {t('common.delete')}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -57,6 +76,7 @@ export default function ModelRegistryPage() {
   const { data: entries, isLoading, error, refetch } = useModelRegistry();
   const createMutation = useCreateModelRegistryEntry();
   const deleteMutation = useDeleteModelRegistryEntry();
+  const downloadMutation = useDownloadModel();
 
   const [name, setName] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
@@ -74,6 +94,8 @@ export default function ModelRegistryPage() {
   const handleDelete = (id: string) => {
     deleteMutation.mutate(id);
   };
+
+  const handleDownload = (modelName: string) => downloadMutation.mutateAsync(modelName);
 
   if (isLoading) {
     return <LoadingState message={t('model_registry.loading')} />;
@@ -104,6 +126,7 @@ export default function ModelRegistryPage() {
                   key={entry.name}
                   entry={entry}
                   onDelete={handleDelete}
+                  onDownload={handleDownload}
                 />
               ))
             )}
