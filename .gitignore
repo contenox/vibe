@@ -172,7 +172,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# JS build outputs — do not use blanket `dist/` (Go embeds packages/beam → internal/web/beam/dist)
+# JS build outputs — do not use blanket `dist/` (Go embeds packages/beam → runtime/internal/web/beam/dist)
 packages/ui/dist/
 dist-ssr/
 frontend/dist/
@@ -304,7 +304,7 @@ docs/openapi.html
 tools/docs/openapi.json
 tools/docs/openapi.yaml
 # Embedded copy of docs/openapi.json (produced by `make docs-gen`; do not commit)
-internal/openapidocs/openapi.json
+runtime/internal/openapidocs/openapi.json
 /contenox
 
 .notes/

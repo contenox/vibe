@@ -7,7 +7,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -ldflags \"-X github.com/contenox/contenox/internal/contenoxcli.Version=dev\" -o ./bin/contenox ./cmd/contenox"
+cmd = "go build -ldflags \"-X github.com/contenox/contenox/runtime/contenoxcli.Version=dev\" -o ./bin/contenox ./cmd/contenox"
 entrypoint = ["./bin/contenox", "beam"]
 include_ext = ["go", "tpl", "tmpl", "html", "js", "css", "svg", "json"]
 exclude_dir = [

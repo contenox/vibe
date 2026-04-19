@@ -75,7 +75,7 @@ test-system: docs-gen
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -run '^TestSystem_' ./...
 
 test-cli-verbose: docs-gen
-	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -v ./internal/contenoxcli/...
+	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -v ./runtime/contenoxcli/...
 
 test-cli-help: build-cli
 	@chmod +x $(PROJECT_ROOT)/scripts/verify_cli_help.sh
@@ -106,17 +106,17 @@ test-openapi-client-codegen: docs-gen
 	@OPENAPI_SPEC=$(PROJECT_ROOT)/docs/openapi.json $(PROJECT_ROOT)/scripts/verify_openapi_client.sh
 
 # —— docs ————————————————————————————————————————————————————————————————
-# Minimal JSON so //go:embed in internal/openapidocs is satisfied before `go list` (openapi-gen).
+# Minimal JSON so //go:embed in runtime/internal/openapidocs is satisfied before `go list` (openapi-gen).
 OPENAPI_EMBED_STUB := {"openapi":"3.1.0","info":{"title":"pre-docs-gen-stub","version":"0"},"paths":{}}
 
 docs-gen:
-	mkdir -p $(PROJECT_ROOT)/docs $(PROJECT_ROOT)/internal/openapidocs
-	@test -f $(PROJECT_ROOT)/internal/openapidocs/openapi.json || \
-		printf '%s' '$(OPENAPI_EMBED_STUB)' >$(PROJECT_ROOT)/internal/openapidocs/openapi.json
+	mkdir -p $(PROJECT_ROOT)/docs $(PROJECT_ROOT)/runtime/internal/openapidocs
+	@test -f $(PROJECT_ROOT)/runtime/internal/openapidocs/openapi.json || \
+		printf '%s' '$(OPENAPI_EMBED_STUB)' >$(PROJECT_ROOT)/runtime/internal/openapidocs/openapi.json
 	go run $(PROJECT_ROOT)/tools/openapi-gen \
 		--project="$(PROJECT_ROOT)" \
 		--output="$(PROJECT_ROOT)/docs"
-	cp $(PROJECT_ROOT)/docs/openapi.json $(PROJECT_ROOT)/internal/openapidocs/openapi.json
+	cp $(PROJECT_ROOT)/docs/openapi.json $(PROJECT_ROOT)/runtime/internal/openapidocs/openapi.json
 
 docs-markdown: docs-gen
 	@if command -v docker >/dev/null 2>&1; then \

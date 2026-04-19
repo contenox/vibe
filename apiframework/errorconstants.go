@@ -6,7 +6,7 @@ import (
 
 	"github.com/contenox/contenox/libauth"
 	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/runtimetypes"
+	"github.com/contenox/contenox/runtime/runtimetypes"
 )
 
 // Standard error constants

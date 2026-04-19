@@ -347,7 +347,7 @@ make build-cli
 contenox init
 ```
 
-The release version string is **`apiframework/version.txt`**, embedded at compile time through `apiframework.GetVersion()` and shown in `contenox --help`, `contenox --version`, and the root command `Short` line. Optional link-time override: `-ldflags "-X github.com/contenox/contenox/internal/contenoxcli.Version=…"`.
+The release version string is **`apiframework/version.txt`**, embedded at compile time through `apiframework.GetVersion()` and shown in `contenox --help`, `contenox --version`, and the root command `Short` line. Optional link-time override: `-ldflags "-X github.com/contenox/contenox/runtime/contenoxcli.Version=…"`.
 
 ### Check that CLI help still works
 

@@ -71,7 +71,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
-      outDir: '../../internal/web/beam/dist',
+      outDir: '../../runtime/internal/web/beam/dist',
       emptyOutDir: true,
     },
     /** Root-relative URLs so deep links (e.g. /chat/:id) still load /assets/* from the server root. */

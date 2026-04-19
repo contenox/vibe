@@ -8,7 +8,7 @@ Please treat all contributors with respect. Engage in constructive discussions a
 
 ## Repository structure
 
-The **`contenox`** binary is the main entrypoint: plans, chat, and other CLI commands, plus **`contenox beam`**, which runs the HTTP server that **serves the Beam web UI** (embedded in the binary from `internal/web/beam/dist`) and backs it with the same engine.
+The **`contenox`** binary is the main entrypoint: plans, chat, and other CLI commands, plus **`contenox beam`**, which runs the HTTP server that **serves the Beam web UI** (embedded in the binary from `runtime/internal/web/beam/dist`) and backs it with the same engine.
 
 ### Makefile overview
 
@@ -93,7 +93,7 @@ CGO_ENABLED=1 go build ./internal/modelrepo/local/...
 
 ### Running Beam (HTTP server + embedded UI)
 
-The binary serves the **built** React app embedded from `internal/web/beam/dist`. After UI changes, run **`make build-web`** (or `npm run build` in the workspace), then rebuild the Go binary so `//go:embed` picks up assets.
+The binary serves the **built** React app embedded from `runtime/internal/web/beam/dist`. After UI changes, run **`make build-web`** (or `npm run build` in the workspace), then rebuild the Go binary so `//go:embed` picks up assets.
 
 ```bash
 make build-cli
@@ -203,7 +203,7 @@ _ = apiframework.Encode(w, r, http.StatusCreated, resp)  // @response terminalap
 
 ## Generating API documentation
 
-The OpenAPI spec (`docs/openapi.json` and `docs/openapi.yaml`) is generated from the Go types. `make docs-gen` also copies the JSON into `internal/openapidocs/openapi.json` so it can be **embedded in the `contenox` binary**.
+The OpenAPI spec (`docs/openapi.json` and `docs/openapi.yaml`) is generated from the Go types. `make docs-gen` also copies the JSON into `runtime/internal/openapidocs/openapi.json` so it can be **embedded in the `contenox` binary**.
 
 With **`contenox beam`** running (default `http://127.0.0.1:8081`), the same spec is served without the JWT stack, similar to FastAPI’s pattern:
 
@@ -218,6 +218,6 @@ make docs-html        # standalone RapiDoc HTML under docs/ (depends on docs-gen
 make docs-markdown    # optional: large api-reference.md (Docker or npx)
 ```
 
-Do **not** commit generated OpenAPI/embed outputs (`docs/openapi.*`, `internal/openapidocs/openapi.json`, `internal/web/beam/dist/`). Those paths are gitignored where applicable. **`make docs-gen`** drops a tiny stub JSON if needed, runs codegen, then copies the real spec into `internal/openapidocs/` for `//go:embed`. **`make build-cli`**, **`make test`**, **`make test-unit`**, and related test targets run **`docs-gen` first** so you do not commit or hand-maintain that file.
+Do **not** commit generated OpenAPI/embed outputs (`docs/openapi.*`, `runtime/internal/openapidocs/openapi.json`, `runtime/internal/web/beam/dist/`). Those paths are gitignored where applicable. **`make docs-gen`** drops a tiny stub JSON if needed, runs codegen, then copies the real spec into `runtime/internal/openapidocs/` for `//go:embed`. **`make build-cli`**, **`make test`**, **`make test-unit`**, and related test targets run **`docs-gen` first** so you do not commit or hand-maintain that file.
 
 GitHub Actions runs **`make ci-prepare-embeds`** (Beam UI + stub) then **`make docs-gen`** before **`make build-cli`**.

@@ -105,7 +105,7 @@ jobs:
           CXX: ${{ matrix.cxx }}
         run: |
           TAG="${{ needs.verify.outputs.tag }}"
-          LDFLAGS="-X github.com/contenox/contenox/internal/contenoxcli.Version=${TAG}"
+          LDFLAGS="-X github.com/contenox/contenox/runtime/contenoxcli.Version=${TAG}"
           go build -ldflags="${LDFLAGS}" -o "contenox-${TAG}-linux-${{ matrix.goarch }}" ./cmd/contenox
 
       - name: Upload artifact
