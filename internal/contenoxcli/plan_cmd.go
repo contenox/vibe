@@ -69,7 +69,7 @@ Chain JSON (under the resolved .contenox directory):
   chain-step-summarizer.json      — per-step summary into planstore
 Plan step seeds also receive {{var:execution_context}} (engine boundary) and {{var:gate_model}} when used.
 HITL (human-in-the-loop): use plan next --hitl to require terminal approval before write_file, sed, and
-local_shell calls. For Beam, set CONTENOX_HITL_ENABLED=true before starting the server.
+local_shell calls. Beam enables HITL by default; set CONTENOX_HITL_ENABLED=false to disable it.
 'contenox init' writes these files; any plan subcommand refreshes them from built-in defaults.
 To customize them permanently, change the embedded chain definitions in the contenox source tree
 and rebuild, or maintain a fork. Set model/provider via --model, --provider, and

@@ -49,6 +49,7 @@ func Run(
 	execService execservice.ExecService,
 	taskChainService taskchainservice.Service,
 	vfsSvc vfsservice.Service,
+	chainVFS vfsservice.Service,
 	vfsRoot string,
 ) (error, func() error) {
 	if tenantID == "" {
@@ -90,6 +91,7 @@ func Run(
 		execService,
 		taskChainService,
 		vfsSvc,
+		chainVFS,
 		authManager,
 		vfsRoot,
 	)

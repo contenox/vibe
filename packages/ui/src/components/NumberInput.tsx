@@ -1,23 +1,15 @@
 import { Input } from "./Input";
 
-interface NumberInputProps {
+interface NumberInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> {
   value: number | string;
   onChange: (value: number) => void;
-  min?: number;
-  max?: number;
-  step?: number;
-  placeholder?: string;
-  className?: string;
 }
 
-export default function NumberInput({
+export function NumberInput({
   value,
   onChange,
-  min,
-  max,
-  step = 1,
-  placeholder,
   className,
+  ...props
 }: NumberInputProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const numValue = parseFloat(e.target.value);
@@ -33,11 +25,8 @@ export default function NumberInput({
       type="number"
       value={value}
       onChange={handleChange}
-      min={min}
-      max={max}
-      step={step}
-      placeholder={placeholder}
       className={className}
+      {...props}
     />
   );
 }

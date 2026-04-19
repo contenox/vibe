@@ -100,13 +100,7 @@ func PrintSetupIssues(w io.Writer, res setupcheck.Result) {
 		if iss.Severity != "error" && iss.Severity != "warning" {
 			continue
 		}
-		io.WriteString(w, "  • [")
-		io.WriteString(w, iss.Severity)
-		io.WriteString(w, "] ")
-		io.WriteString(w, iss.Code)
-		io.WriteString(w, ": ")
-		io.WriteString(w, iss.Message)
-		io.WriteString(w, "\n")
+		fmt.Fprintf(w, "  • [%s]  %s\n", iss.Severity, iss.Message)
 		if iss.CLICommand != "" {
 			io.WriteString(w, "    Try: ")
 			io.WriteString(w, iss.CLICommand)

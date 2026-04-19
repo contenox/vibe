@@ -81,7 +81,7 @@ func printDoctorText(w io.Writer, res setupcheck.Result) {
 	fmt.Fprintf(w, "Reachable backends:    %d\n", res.ReachableBackendCount)
 	PrintBackendChecks(w, res)
 	if len(res.Issues) == 0 {
-		io.WriteString(w, "\nNo issues reported.\n")
+		io.WriteString(w, "\n✓  All checks passed. Run 'contenox beam' to start.\n")
 		return
 	}
 	PrintSetupIssues(w, res)

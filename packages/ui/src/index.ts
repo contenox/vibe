@@ -10,6 +10,8 @@ export * from "./components/TextArea";
 export * from "./components/Accordion";
 export * from "./components/Badge";
 export * from "./components/Button";
+export * from "./components/CodeBlock";
+export * from "./components/Toolbar";
 export * from "./components/Card";
 export * from "./components/Checkbox";
 export * from "./components/Cmdbar";

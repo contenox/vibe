@@ -110,7 +110,7 @@ export function Small({ children, className }: TypographyProps) {
   );
 }
 
-export function Span({ children, className, variant }: TypographyProps) {
+export function Span({ children, className, variant, ...props }: TypographyProps & React.HTMLAttributes<HTMLSpanElement>) {
   return (
     <span
       className={cn(
@@ -122,6 +122,7 @@ export function Span({ children, className, variant }: TypographyProps) {
         },
         className,
       )}
+      {...props}
     >
       {children}
     </span>

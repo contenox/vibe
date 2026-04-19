@@ -1,4 +1,5 @@
-import { Button } from '@contenox/ui';
+import { Button, ButtonGroup, DiffView, Panel } from '@contenox/ui';
+import type { DiffLine } from '@contenox/ui';
 import { useState } from 'react';
 import type { PendingApproval } from '../../../../lib/taskEvents';
 
@@ -7,13 +8,45 @@ type Props = {
   onRespond: (approved: boolean) => void;
 };
 
-/**
- * ApprovalCard renders a HITL (human-in-the-loop) approval request inline
- * in the chat-canvas. It shows the hook/tool name, arguments, and a unified
- * diff (if the tool mutates a file), then lets the user approve or deny.
- *
- * Execution is paused on the backend until the user responds.
- */
+function parsePatch(raw: string): { filePath: string; lines: DiffLine[] } {
+  const rawLines = raw.split('\n');
+  let filePath = 'diff';
+  const lines: DiffLine[] = [];
+  let oldLine = 0;
+  let newLine = 0;
+
+  for (const text of rawLines) {
+    if (text.startsWith('+++ ')) {
+      filePath = text.slice(4).replace(/^b\//, '');
+      continue;
+    }
+    if (text.startsWith('--- ')) continue;
+    if (text.startsWith('@@ ')) {
+      const m = text.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (m) {
+        oldLine = parseInt(m[1], 10);
+        newLine = parseInt(m[2], 10);
+      }
+      lines.push({ type: 'context', content: text });
+      continue;
+    }
+    if (text.startsWith('+')) {
+      lines.push({ type: 'add', content: text.slice(1), newLineNumber: newLine++ });
+    } else if (text.startsWith('-')) {
+      lines.push({ type: 'remove', content: text.slice(1), oldLineNumber: oldLine++ });
+    } else {
+      lines.push({
+        type: 'context',
+        content: text.startsWith(' ') ? text.slice(1) : text,
+        oldLineNumber: oldLine++,
+        newLineNumber: newLine++,
+      });
+    }
+  }
+
+  return { filePath, lines };
+}
+
 export function ApprovalCard({ approval, onRespond }: Props) {
   const [inflight, setInflight] = useState(false);
   const [diffExpanded, setDiffExpanded] = useState(false);
@@ -24,36 +57,26 @@ export function ApprovalCard({ approval, onRespond }: Props) {
     onRespond(approved);
   };
 
-  const argEntries = Object.entries(approval.args).filter(([, v]) => v !== '' && v !== null && v !== undefined);
+  const argEntries = Object.entries(approval.args).filter(
+    ([, v]) => v !== '' && v !== null && v !== undefined,
+  );
 
   return (
-    <div
-      style={{
-        border: '1px solid var(--color-warning, #d97706)',
-        borderRadius: '0.5rem',
-        padding: '0.75rem 1rem',
-        margin: '0.5rem 0',
-        background: 'var(--color-warning-bg, #fffbeb)',
-      }}
-    >
-      <div style={{ fontWeight: 600, marginBottom: '0.4rem' }}>
+    <Panel variant="warning" className="mx-0 my-2">
+      <div className="mb-1.5 flex items-center gap-1 text-sm font-semibold">
         ⚠ Approval required:{' '}
-        <code style={{ fontSize: '0.9em' }}>
+        <code className="text-[0.9em]">
           {approval.hookName}.{approval.toolName}
         </code>
       </div>
 
       {argEntries.length > 0 && (
-        <table style={{ fontSize: '0.8em', marginBottom: '0.5rem', borderCollapse: 'collapse' }}>
+        <table className="mb-2 border-collapse text-xs">
           <tbody>
             {argEntries.map(([k, v]) => (
               <tr key={k}>
-                <td style={{ paddingRight: '0.75rem', color: 'var(--color-muted, #6b7280)', verticalAlign: 'top' }}>
-                  {k}
-                </td>
-                <td style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                  {String(v)}
-                </td>
+                <td className="pr-3 align-top text-text-muted dark:text-dark-text-muted">{k}</td>
+                <td className="break-all font-mono">{String(v)}</td>
               </tr>
             ))}
           </tbody>
@@ -61,68 +84,30 @@ export function ApprovalCard({ approval, onRespond }: Props) {
       )}
 
       {approval.diff && approval.diff !== '(no changes)' && (
-        <div style={{ marginBottom: '0.5rem' }}>
-          <button
+        <div className="mb-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-0 text-text-muted dark:text-dark-text-muted"
             onClick={() => setDiffExpanded(e => !e)}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '0.8em',
-              color: 'var(--color-muted, #6b7280)',
-              padding: 0,
-              marginBottom: '0.25rem',
-            }}
           >
             {diffExpanded ? '▾ Hide diff' : '▸ Show diff'}
-          </button>
-          {diffExpanded && (
-            <pre
-              style={{
-                fontSize: '0.75em',
-                background: 'var(--color-code-bg, #f3f4f6)',
-                padding: '0.5rem',
-                borderRadius: '0.25rem',
-                overflowX: 'auto',
-                whiteSpace: 'pre',
-                maxHeight: '20rem',
-                overflowY: 'auto',
-              }}
-            >
-              {approval.diff.split('\n').map((line, i) => {
-                const color =
-                  line.startsWith('+') ? 'var(--color-success, #16a34a)' :
-                  line.startsWith('-') ? 'var(--color-error, #dc2626)' :
-                  undefined;
-                return (
-                  <span key={i} style={color ? { color, display: 'block' } : { display: 'block' }}>
-                    {line}
-                  </span>
-                );
-              })}
-            </pre>
-          )}
+          </Button>
+          {diffExpanded && (() => {
+            const { filePath, lines } = parsePatch(approval.diff!);
+            return <DiffView filePath={filePath} lines={lines} className="max-h-80 overflow-auto" />;
+          })()}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-        <Button
-          size="sm"
-          disabled={inflight}
-          onClick={() => handle(true)}
-          style={{ background: 'var(--color-success, #16a34a)', color: '#fff' }}
-        >
+      <ButtonGroup className="mt-1">
+        <Button size="sm" variant="success" disabled={inflight} onClick={() => handle(true)}>
           Approve
         </Button>
-        <Button
-          size="sm"
-          variant="danger"
-          disabled={inflight}
-          onClick={() => handle(false)}
-        >
+        <Button size="sm" variant="danger" disabled={inflight} onClick={() => handle(false)}>
           Deny
         </Button>
-      </div>
-    </div>
+      </ButtonGroup>
+    </Panel>
   );
 }

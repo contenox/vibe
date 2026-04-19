@@ -342,6 +342,8 @@ export type ChatMessage = {
   callTools?: ToolCallEntry[];
   /** For role=tool messages: links this result back to the assistant's callTools entry. */
   toolCallId?: string;
+  /** Task events streamed during the generation of this message. */
+  events?: TaskEvent[];
 };
 
 /**

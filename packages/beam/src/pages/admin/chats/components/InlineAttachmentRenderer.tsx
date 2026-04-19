@@ -1,4 +1,4 @@
-import { Collapsible, Span } from '@contenox/ui';
+import { CodeBlock, Collapsible, Span } from '@contenox/ui';
 import { FileText, TerminalSquare, ListChecks, Workflow, Database } from 'lucide-react';
 import { t } from 'i18next';
 
@@ -39,9 +39,9 @@ function FileViewAttachment({
       defaultExpanded={false}
       className="border-border bg-surface-100 dark:bg-dark-surface-200 mt-2 rounded border"
     >
-      <pre className="text-text dark:text-dark-text overflow-auto px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre">
+      <CodeBlock className="px-3 py-2 leading-relaxed">
         {attachment.text}
-      </pre>
+      </CodeBlock>
     </Collapsible>
   );
 }
@@ -67,9 +67,9 @@ function TerminalExcerptAttachment({
       defaultExpanded={false}
       className="border-border bg-surface-100 dark:bg-dark-surface-200 mt-2 rounded border"
     >
-      <pre className="text-text dark:text-dark-text overflow-auto px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre">
+      <CodeBlock className="px-3 py-2 leading-relaxed">
         {attachment.output}
-      </pre>
+      </CodeBlock>
     </Collapsible>
   );
 }
@@ -114,9 +114,9 @@ function PlanSummaryAttachment({
             <Span variant="muted" className="text-[10px]">
               {t('chat.attachment_plan_summary', 'Summary')}
             </Span>
-            <pre className="text-text dark:text-dark-text mt-0.5 font-mono text-[11px] whitespace-pre-wrap">
+            <CodeBlock className="mt-0.5 text-[11px] whitespace-pre-wrap">
               {attachment.summary}
-            </pre>
+            </CodeBlock>
           </div>
         )}
       </div>
@@ -144,9 +144,9 @@ function DAGAttachment({
       defaultExpanded={false}
       className="border-border bg-surface-100 dark:bg-dark-surface-200 mt-2 rounded border"
     >
-      <pre className="text-text dark:text-dark-text overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre">
+      <CodeBlock className="px-3 py-2 text-[11px] leading-relaxed">
         {attachment.chainJSON}
-      </pre>
+      </CodeBlock>
     </Collapsible>
   );
 }
@@ -176,9 +176,9 @@ function StateUnitAttachment({
       defaultExpanded={false}
       className="border-border bg-surface-100 dark:bg-dark-surface-200 mt-2 rounded border"
     >
-      <pre className="text-text dark:text-dark-text overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre">
+      <CodeBlock className="px-3 py-2 text-[11px] leading-relaxed">
         {data ?? '(no data)'}
-      </pre>
+      </CodeBlock>
     </Collapsible>
   );
 }

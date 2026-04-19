@@ -1,4 +1,4 @@
-import { P, Page, Panel, Section, Select, Span, Spinner } from '@contenox/ui';
+import { InlineNotice, P, Page, Panel, Section, Select, Span, Spinner } from '@contenox/ui';
 import { useMemo, useState, useEffect, FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -6,6 +6,7 @@ import { ArtifactRegistryProvider } from '../../../lib/artifacts';
 import { useListFiles } from '../../../hooks/useFiles';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';
 import { useCreateChat } from '../../../hooks/useChats';
+import { useSetupStatus } from '../../../hooks/useSetupStatus';
 import { SlashCommandRegistryProvider } from '../../../lib/slashCommands';
 import { ChatSession } from '../../../lib/types';
 import { MessageInputForm } from './components/MessageInputForm';
@@ -31,6 +32,7 @@ function ChatLandingPageImpl() {
   const [selectedChainId, setSelectedChainId] = useState('');
   const createChat = useCreateChat();
 
+  const { data: setupStatus } = useSetupStatus(true);
   const { data: files = [], isLoading: chainsLoading } = useListFiles();
   const chainPaths = useMemo(
     () => files.filter(f => isChainLikeVfsPath(f.path)).map(f => f.path),
@@ -78,6 +80,15 @@ function ChatLandingPageImpl() {
     <Page bodyScroll="auto">
       <Section title={t('chat.landing_title')} description={t('chat.landing_description')}>
         <div className="mx-auto mt-6 max-w-2xl space-y-4">
+          {setupStatus && !setupStatus.defaultModel ? (
+            <InlineNotice variant="warning">
+              {t('chat.landing_no_model', 'No default model set. Run contenox init to configure.')}
+            </InlineNotice>
+          ) : setupStatus?.defaultModel ? (
+            <Span variant="muted" className="block text-xs">
+              {[setupStatus.defaultModel, setupStatus.defaultProvider].filter(Boolean).join(' · ')}
+            </Span>
+          ) : null}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Span variant="muted" className="shrink-0 text-sm">
               {t('chat.task_chain')}

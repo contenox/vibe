@@ -1,4 +1,4 @@
-import { Button, Span, Spinner } from '@contenox/ui';
+import { Button, InsetPanel, Span, Spinner } from '@contenox/ui';
 import { Paperclip, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { t } from 'i18next';
@@ -11,6 +11,11 @@ import {
   type ArtifactSource,
 } from '../../../../lib/artifacts';
 import { useSlashCommand, type SlashCommand } from '../../../../lib/slashCommands';
+import {
+  getSharedTerminalSession,
+  reuseOrCreateTerminalSession,
+  setSharedTerminalSession,
+} from '../../../../lib/terminalSessionSingleton';
 
 const SESSION_KEY = 'beam_terminal_session_id';
 const DISCONNECT_RECREATE_MS = 350;
@@ -18,10 +23,11 @@ const DISCONNECT_RECREATE_MS = 350;
 const MAX_CONNECT_FAILURES = 3;
 
 export function TerminalPanel({ className }: { className?: string }) {
-  const [wsUrl, setWsUrl] = useState<string | null>(null);
-  const [initializing, setInitializing] = useState(true);
+  const sharedInit = getSharedTerminalSession();
+  const [wsUrl, setWsUrl] = useState<string | null>(() => sharedInit?.wsUrl ?? null);
+  const [initializing, setInitializing] = useState(() => !sharedInit);
   const [error, setError] = useState<string | null>(null);
-  const sessionIdRef = useRef<string | null>(null);
+  const sessionIdRef = useRef<string | null>(sharedInit?.sessionId ?? null);
   const createGenRef = useRef(0);
   const disconnectDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectFailuresRef = useRef(0);
@@ -115,8 +121,16 @@ export function TerminalPanel({ className }: { className?: string }) {
     setArmedOutput(null);
   }, []);
 
-  const persist = useCallback((sessionId: string | null) => {
+  /** Persists session id to localStorage and syncs the in-memory singleton used across remounts. */
+  const persist = useCallback((sessionId: string | null, wsUrlForCache?: string | null) => {
     sessionIdRef.current = sessionId;
+    if (sessionId) {
+      const ws =
+        wsUrlForCache ?? `/api/terminal/sessions/${encodeURIComponent(sessionId)}/ws`;
+      setSharedTerminalSession({ sessionId, wsUrl: ws });
+    } else {
+      setSharedTerminalSession(null);
+    }
     try {
       if (sessionId) localStorage.setItem(SESSION_KEY, sessionId);
       else localStorage.removeItem(SESSION_KEY);
@@ -138,30 +152,33 @@ export function TerminalPanel({ className }: { className?: string }) {
     setError(null);
     setWsUrl(null);
     try {
-      let res: Awaited<ReturnType<typeof api.createTerminalSession>>;
-      try {
-        res = await api.createTerminalSession({ cwd: '' });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Failed to create terminal session';
-        const tooMany =
-          e instanceof ApiError &&
-          e.status === 422 &&
-          (msg.toLowerCase().includes('too many') || msg.toLowerCase().includes('concurrent'));
-        if (tooMany && retryAfterPrune) {
-          try {
-            const list = await api.listTerminalSessions();
-            await Promise.all(list.map(s => api.deleteTerminalSession(s.id).catch(() => undefined)));
-          } catch {
-            /* ignore prune errors */
-          }
+      const session = await reuseOrCreateTerminalSession(async () => {
+        let res: Awaited<ReturnType<typeof api.createTerminalSession>>;
+        try {
           res = await api.createTerminalSession({ cwd: '' });
-        } else {
-          throw e;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Failed to create terminal session';
+          const tooMany =
+            e instanceof ApiError &&
+            e.status === 422 &&
+            (msg.toLowerCase().includes('too many') || msg.toLowerCase().includes('concurrent'));
+          if (tooMany && retryAfterPrune) {
+            try {
+              const list = await api.listTerminalSessions();
+              await Promise.all(list.map(s => api.deleteTerminalSession(s.id).catch(() => undefined)));
+            } catch {
+              /* ignore prune errors */
+            }
+            res = await api.createTerminalSession({ cwd: '' });
+          } else {
+            throw e;
+          }
         }
-      }
+        return { sessionId: res.id, wsUrl: `/api${res.wsPath}` };
+      });
       if (gen !== createGenRef.current) return;
-      persist(res.id);
-      setWsUrl(`/api${res.wsPath}`);
+      persist(session.sessionId, session.wsUrl);
+      setWsUrl(session.wsUrl);
       setError(null);
     } catch (e) {
       if (gen !== createGenRef.current) return;
@@ -174,9 +191,19 @@ export function TerminalPanel({ className }: { className?: string }) {
     }
   }, [persist]);
 
-  // On mount: try saved session, fall back to new session
+  // On mount: reuse in-tab singleton if present (avoids duplicate network on remount); else try saved session, then create
   useEffect(() => {
     let cancelled = false;
+    const reused = getSharedTerminalSession();
+    if (reused) {
+      sessionIdRef.current = reused.sessionId;
+      setWsUrl(reused.wsUrl);
+      setInitializing(false);
+      return () => {
+        createGenRef.current++;
+      };
+    }
+
     (async () => {
       const savedId = (() => {
         try {
@@ -191,8 +218,10 @@ export function TerminalPanel({ className }: { className?: string }) {
           const session = await api.getTerminalSession(savedId);
           if (cancelled) return;
           if (session.status === 'active') {
+            const wsUrl = `/api/terminal/sessions/${savedId}/ws`;
             sessionIdRef.current = savedId;
-            setWsUrl(`/api/terminal/sessions/${savedId}/ws`);
+            persist(savedId, wsUrl);
+            setWsUrl(wsUrl);
             setInitializing(false);
             return;
           }
@@ -340,22 +369,24 @@ export function TerminalPanel({ className }: { className?: string }) {
   return (
     <div className={`flex h-full min-h-0 w-full min-w-0 flex-col ${className ?? ''}`}>
       {/* Title bar */}
-      <div className="border-border bg-surface-100 dark:bg-dark-surface-200 flex shrink-0 items-center justify-between gap-2 border-b px-2 py-1.5">
+      <InsetPanel tone="strip" className="flex-row items-center justify-between gap-2 px-2 py-1.5">
         <div className="flex items-center gap-2">
           <Span variant="muted" className="text-xs font-medium">
             {t('terminal.title', 'Terminal')}
           </Span>
           {armedOutput && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="xs"
               onClick={handleClearAttached}
-              className="bg-success/10 text-success hover:bg-success/20 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
               title={t('terminal.detach_attached', 'Detach (clear attached output)')}
+              className="bg-success/10 text-success hover:bg-success/20 gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
             >
               <Paperclip className="h-3 w-3" />
               {t('terminal.attached_pill', 'Attached')}
               <X className="h-3 w-3" />
-            </button>
+            </Button>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -390,7 +421,7 @@ export function TerminalPanel({ className }: { className?: string }) {
             <X className="h-3.5 w-3.5" />
           </Button>
         </div>
-      </div>
+      </InsetPanel>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <XTerminal
           ref={xtermRef}

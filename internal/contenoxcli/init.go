@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/contenox/contenox/internal/runtimestate"
 	"github.com/contenox/contenox/internal/setupcheck"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtimetypes"
@@ -185,16 +186,38 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 		}
 	}
 
-	// If a cloud provider is selected, check for the API key and instruct if missing.
+	// Resolve API key status (env or KV store) — used both for the status line and to
+	// suppress the "register backend" step when the backend is already configured.
+	var envVal string
+	var kvHasKey bool
 	if pc.envKey != "" {
-		if os.Getenv(pc.envKey) == "" {
+		envVal = os.Getenv(pc.envKey)
+		if envVal == "" {
+			dbPath := filepath.Join(contenoxDir, "local.db")
+			if _, statErr := os.Stat(dbPath); statErr == nil {
+				if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
+					store := runtimetypes.New(db.WithoutTransaction())
+					var cfg runtimestate.ProviderConfig
+					kvKey := runtimestate.ProviderKeyPrefix + strings.ToLower(provider)
+					if err := store.GetKV(libtracker.WithNewRequestID(context.Background()), kvKey, &cfg); err == nil && cfg.APIKey != "" {
+						kvHasKey = true
+					}
+					db.Close()
+				}
+			}
+		}
+		switch {
+		case envVal != "":
+			fmt.Fprintf(out, "✓  %s API key detected (%s).\n\n", pc.name, pc.envKey)
+		case kvHasKey:
+			fmt.Fprintf(out, "✓  %s API key stored in local.db (set %s to use a different key).\n\n", pc.name, pc.envKey)
+		default:
 			fmt.Fprintf(out, "⚠️  %s API key not found in environment.\n", pc.name)
 			fmt.Fprintf(out, "   Set it before running contenox:\n\n")
 			fmt.Fprintf(out, "     export %s=your-key-here\n\n", pc.envKey)
-		} else {
-			fmt.Fprintf(out, "✓  %s API key detected (%s).\n\n", pc.name, pc.envKey)
 		}
 	}
+	backendReady := kvHasKey || envVal != ""
 
 	fmt.Fprintln(out, "Next steps:")
 	fmt.Fprintln(out, "")
@@ -262,18 +285,23 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 		fmt.Fprintln(out, "")
 		chatStep = 4
 	default:
-		fmt.Fprintf(out, "  1. Register the %s backend:\n", pc.name)
-		fmt.Fprintf(out, "       contenox backend add %s --type %s --api-key-env %s\n", provider, provider, pc.envKey)
-		fmt.Fprintf(out, "       contenox model list   # confirm the runtime can see %s models\n", pc.name)
-		fmt.Fprintf(out, "       contenox config set default-model %s\n", pc.defaultModel)
-		fmt.Fprintln(out, "")
-		switch provider {
-		case "gemini":
-			fmt.Fprintln(out, "  Get a free Gemini API key: https://aistudio.google.com/apikey")
+		if !backendReady {
+			fmt.Fprintf(out, "  1. Register the %s backend:\n", pc.name)
+			fmt.Fprintf(out, "       contenox backend add %s --type %s --api-key-env %s\n", provider, provider, pc.envKey)
+			fmt.Fprintf(out, "       contenox model list   # confirm the runtime can see %s models\n", pc.name)
+			fmt.Fprintf(out, "       contenox config set default-model %s\n", pc.defaultModel)
 			fmt.Fprintln(out, "")
-		case "openai":
-			fmt.Fprintln(out, "  Get an OpenAI API key: https://platform.openai.com/api-keys")
-			fmt.Fprintln(out, "")
+			switch provider {
+			case "gemini":
+				fmt.Fprintln(out, "  Get a free Gemini API key: https://aistudio.google.com/apikey")
+				fmt.Fprintln(out, "")
+			case "openai":
+				fmt.Fprintln(out, "  Get an OpenAI API key: https://platform.openai.com/api-keys")
+				fmt.Fprintln(out, "")
+			}
+			chatStep = 3
+		} else {
+			chatStep = 1
 		}
 	}
 	fmt.Fprintf(out, "  %d. Chat with your model:\n", chatStep)

@@ -7,11 +7,11 @@ import {
   chatTranscriptMarkdownComponents,
 } from '@contenox/ui';
 import { t } from 'i18next';
-import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ChatMessage as ChatMessageModel } from '../../../../lib/types';
 import { InlineAttachments } from './InlineAttachmentRenderer';
+import { ExecutionTimeline } from './ExecutionTimeline';
 
 type ChatMessageProps = {
   message: ChatMessageModel;
@@ -73,6 +73,7 @@ export const ChatMessage = ({ message, isLatest = false, streamThinking }: ChatM
       ) : null}
       {message.streaming && message.content && !message.error ? <ChatStreamingCaret /> : null}
       <InlineAttachments attachments={message.attachments} />
+      <ExecutionTimeline events={message.events} state={message.state} />
     </ChatMessageUI>
   );
 };

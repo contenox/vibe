@@ -18,11 +18,12 @@ var validConfigKeys = map[string]string{
 	"default-model":    "Default LLM model name (e.g. qwen2.5:7b)",
 	"default-provider": "Default LLM provider type (e.g. ollama, openai, gemini)",
 	"default-chain":    "Default chain file path (relative to .contenox/ or absolute)",
+	"hitl-policy-name": "Active HITL policy file name (e.g. hitl-policy-strict.json). Empty = use hitl-policy-default.json.",
 }
 
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Manage persistent CLI settings (default model, provider, chain).",
+	Short: "Manage persistent CLI settings (default model, provider, chain, HITL policy).",
 	Long: `Store and retrieve persistent CLI defaults backed by SQLite.
 
 These settings are used when the corresponding flag is not explicitly provided.
@@ -31,7 +32,8 @@ They are project-local when .contenox/local.db exists, otherwise global (~/.cont
 Supported keys:
   default-model      Default LLM model name (e.g. qwen2.5:7b)
   default-provider   Default LLM provider type (e.g. ollama, openai, gemini)
-  default-chain      Default chain file path`,
+  default-chain      Default chain file path
+  hitl-policy-name   Active HITL policy file name (e.g. hitl-policy-strict.json)`,
 }
 
 var configSetCmd = &cobra.Command{
@@ -43,17 +45,19 @@ Valid keys:
   default-model      Default LLM model name
   default-provider   Default LLM provider type
   default-chain      Default chain file path
+  hitl-policy-name   Active HITL policy file name
 
 Examples:
   contenox config set default-model    qwen2.5:7b
   contenox config set default-provider ollama
   contenox config set default-model    gemini-2.5-flash
-  contenox config set default-chain    .contenox/default-chain.json`,
+  contenox config set default-chain    .contenox/default-chain.json
+  contenox config set hitl-policy-name hitl-policy-strict.json`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key, value := args[0], args[1]
 		if _, ok := validConfigKeys[key]; !ok {
-			return fmt.Errorf("unknown key %q — valid keys: default-model, default-provider, default-chain", key)
+			return fmt.Errorf("unknown key %q — valid keys: default-model, default-provider, default-chain, hitl-policy-name", key)
 		}
 		db, store, err := openConfigDB(cmd)
 		if err != nil {
@@ -67,7 +71,7 @@ Examples:
 		if err := store.SetKV(ctx, kvKey, json.RawMessage(data)); err != nil {
 			return fmt.Errorf("failed to set %q: %w", key, err)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Set %s = %s\n", key, value)
+		fmt.Fprintf(cmd.OutOrStdout(), "✓  %s = %s\n", key, value)
 		return nil
 	},
 }
@@ -80,7 +84,8 @@ var configGetCmd = &cobra.Command{
 Examples:
   contenox config get default-model
   contenox config get default-provider
-  contenox config get default-chain`,
+  contenox config get default-chain
+  contenox config get hitl-policy-name`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]

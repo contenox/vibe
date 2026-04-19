@@ -13,6 +13,7 @@ import {
 } from '@contenox/ui';
 import { t } from 'i18next';
 import type { ReactNode } from 'react';
+import { Sparkles } from 'lucide-react';
 import type { ChatThreadItem } from '../chatThreadItems';
 import { ChatMessage } from './ChatMessage';
 
@@ -125,13 +126,16 @@ export const ChatInterface = ({
         className="h-full"
         scrollClassName="flex-1 space-y-4 overflow-auto px-4 py-4 sm:px-5">
         {!threadItems.length ? (
-          <EmptyState
-            title={t('chat.no_messages')}
-            description={t('chat.empty_workbench_hint')}
-            icon="⌁"
-            orientation="vertical"
-            className="h-full"
-          />
+          <div className="flex h-full flex-col items-center justify-center">
+            <EmptyState
+              title="Ready to execute"
+              description="Select a toolchain from the top menu to define the agent's capabilities. Type your instruction below to begin."
+              icon={<Sparkles className="w-8 h-8 opacity-80 shadow-primary/20 drop-shadow-md" />}
+              iconSize="lg"
+              orientation="vertical"
+              className="bg-muted/10 ring-1 ring-border shadow-sm max-w-lg"
+            />
+          </div>
         ) : (
           threadItems.map((item, index) => {
             // Skip compiled plan embeds in the thread — they're in their own tab now

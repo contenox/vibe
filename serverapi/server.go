@@ -77,6 +77,7 @@ func New(
 	execService execservice.ExecService,
 	taskChainService taskchainservice.Service,
 	vfsSvc vfsservice.Service,
+	chainVFS vfsservice.Service,
 	auth middleware.AuthZReader,
 	vfsRoot string,
 	// kvManager libkv.KVManager,
@@ -107,7 +108,7 @@ func New(
 	if hitlSvc != nil {
 		approvalapi.AddRoutes(mux, hitlSvc, auth)
 	}
-	hitlpolicyapi.AddRoutes(mux, vfsSvc, auth)
+	hitlpolicyapi.AddRoutes(mux, chainVFS, auth)
 	groupapi.AddgroupRoutes(mux, groupservice)
 	// Get circuit breaker group instance
 	group := libroutine.GetGroup()

@@ -59,6 +59,16 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	defer components.cleanup() // close bus, etc.
 
+	addr := components.config.Addr
+	if addr == "" {
+		addr = "127.0.0.1"
+	}
+	port := components.config.Port
+	if port == "" {
+		port = "8081"
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Beam ready → http://%s:%s\n", addr, port)
+
 	errRun, cleanupServer := server.Run(
 		ctx,
 		tenant,
@@ -78,6 +88,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		components.execService,
 		components.taskChainService,
 		components.vfsSvc,
+		components.chainVFS,
 		filepath.Dir(contenoxPath),
 	)
 	defer func() {
@@ -109,6 +120,7 @@ type serverComponents struct {
 	execService      execservice.ExecService
 	taskChainService taskchainservice.Service
 	vfsSvc           vfsservice.Service
+	chainVFS         vfsservice.Service
 	cleanup          func()
 }
 
@@ -255,7 +267,7 @@ func buildServerComponents(ctx context.Context, db libdb.DBManager, tenantID str
 		slog.Warn("hitl: failed to write embedded policy presets", "error", err)
 	}
 	hitlSvc := hitlservice.New(chainVFS, store, tracker)
-	if os.Getenv("CONTENOX_HITL_ENABLED") == "true" {
+	if os.Getenv("CONTENOX_HITL_ENABLED") != "false" {
 		sink := taskengine.NewBusTaskEventSink(bus)
 		hookRepo = localhooks.NewHITLWrapper(hookRepo, func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
 			return hitlSvc.RequestApproval(ctx, req, sink)
@@ -309,6 +321,7 @@ func buildServerComponents(ctx context.Context, db libdb.DBManager, tenantID str
 		execService:      execService,
 		taskChainService: taskChainService,
 		vfsSvc:           vfsSvc,
+		chainVFS:         chainVFS,
 		cleanup:          cleanup,
 	}, nil
 }

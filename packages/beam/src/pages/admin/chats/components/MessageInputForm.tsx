@@ -3,11 +3,12 @@ import {
   Tooltip,
   Badge,
   Button,
+  InlineNotice,
   DEFAULT_COMPOSER_SOFT_MAX,
 } from '@contenox/ui';
 import { t } from 'i18next';
 import { FormEvent, useCallback, useMemo, useRef, useState } from 'react';
-import { Maximize2 } from 'lucide-react';
+import { Maximize2, Paperclip } from 'lucide-react';
 
 import { ExpandedMessageEditor } from './ExpandedMessageEditor';
 
@@ -188,13 +189,16 @@ export const MessageInputForm = ({
       {pendingPills.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           {pendingPills.map((s) => (
-            <span
+            <Badge
               key={s.id}
-              className="bg-primary/10 text-primary inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+              variant="primary"
+              size="sm"
+              className="gap-1"
               title={t('chat.pending_attachment', 'Will attach to next message')}
             >
-              📎 {s.label}
-            </span>
+              <Paperclip className="h-3 w-3" />
+              {s.label}
+            </Badge>
           ))}
         </div>
       )}
@@ -270,15 +274,12 @@ export const MessageInputForm = ({
         />
       ) : null}
       {notice && (
-        <pre
-          className={
-            notice.level === 'error'
-              ? 'text-destructive mt-2 whitespace-pre-wrap font-mono text-xs'
-              : 'text-text-muted mt-2 whitespace-pre-wrap font-mono text-xs'
-          }
+        <InlineNotice
+          variant={notice.level === 'error' ? 'error' : 'info'}
+          className="mt-2 whitespace-pre-wrap font-mono text-xs"
         >
           {notice.message}
-        </pre>
+        </InlineNotice>
       )}
     </div>
   );

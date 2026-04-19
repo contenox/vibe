@@ -24,6 +24,7 @@ type cliTaskEventRenderer struct {
 	lastTaskID     string
 	contentActive  bool
 	thinkingActive bool
+	stepCount      int
 	// streamApproxBytes is approximate output size (UTF-8 bytes) seen for the current step stream.
 	streamApproxBytes int
 	lastStreamAt      time.Time
@@ -117,11 +118,15 @@ func (r *cliTaskEventRenderer) Render(event taskengine.TaskEvent) {
 	case taskengine.TaskEventStepStarted:
 		r.finishChunkLine()
 		r.streamMu.Lock()
+		r.stepCount++
+		step := r.stepCount
 		r.streamApproxBytes = 0
 		r.lastStreamAt = time.Now()
 		r.streamMu.Unlock()
 		if r.trace {
-			fmt.Fprintf(r.w, "[step:%s] %s started\n", event.TaskID, event.TaskHandler)
+			fmt.Fprintf(r.w, "[step %d: %s] started\n", step, event.TaskHandler)
+		} else {
+			fmt.Fprintf(r.w, "[step %d] %s\n", step, event.TaskHandler)
 		}
 	case taskengine.TaskEventStepChunk:
 		if event.Thinking != "" && r.showThinking {

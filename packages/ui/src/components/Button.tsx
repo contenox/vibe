@@ -4,7 +4,7 @@ import { Spinner } from "./Spinner";
 import { Span } from "./Typography";
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "ghost" | "accent" | "outline" | "text" | "danger";
+  variant?: "primary" | "secondary" | "ghost" | "accent" | "outline" | "text" | "danger" | "success";
   size?: "xs" | "sm" | "md" | "lg" | "xl" | "2xl" | "icon";
   isLoading?: boolean;
   palette?: "primary" | "secondary" | "accent" | "neutral" | "light";
@@ -68,6 +68,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       "focus:ring-error-300 dark:focus:ring-dark-error-300",
     );
 
+    const successStyles = cn(
+      "bg-transparent",
+      "text-success dark:text-dark-success",
+      "hover:bg-success/10 dark:hover:bg-dark-success/10",
+      "focus:ring-success-300 dark:focus:ring-dark-success-300",
+    );
+
     return (
       <button
         ref={ref}
@@ -101,9 +108,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
             ? ghostStyles
             : variant === "danger"
               ? dangerStyles
-              : variant !== "outline" &&
-                  variant !== "text" &&
-                  paletteStyles[palette],
+              : variant === "success"
+                ? successStyles
+                : variant !== "outline" &&
+                    variant !== "text" &&
+                    paletteStyles[palette],
           className,
         )}
         disabled={isLoading || props.disabled}

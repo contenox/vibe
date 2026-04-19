@@ -1,31 +1,23 @@
 import {
-  Badge,
   Button,
-  EmptyState,
   InlineNotice,
-  InsetPanel,
   P,
   ResizablePanel,
   ResizablePanelGroup,
   ResizablePanelHandle,
   Section,
-  Select,
-  SidePanelBody,
-  SidePanelColumn,
-  SidePanelHeader,
-  SidePanelRailButton,
   Span,
-  Spinner,
-  Tooltip,
   Fill,
   Page,
 } from '@contenox/ui';
-import { FolderOpen, PanelRightClose, PanelRightOpen, Pencil, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { t } from 'i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useChain, useUpdateChain } from '../../../hooks/useChains';
+import { useListPolicies, useSetActivePolicy } from '../../../hooks/usePolicies';
+import { useSetupStatus } from '../../../hooks/useSetupStatus';
 import { useListFiles } from '../../../hooks/useFiles';
 import { useActivePlan, useCompilePlanPreview } from '../../../hooks/usePlans';
 import { isChainLikeVfsPath } from '../../../lib/chainPaths';
@@ -70,9 +62,10 @@ import { ChatInterface, type ChatWorkbenchTabId } from './components/ChatInterfa
 import { CompiledPlanThreadEmbed } from './components/CompiledPlanThreadEmbed';
 import { ApprovalCard } from './components/ApprovalCard';
 import { MessageInputForm } from './components/MessageInputForm';
-import { StateVisualizer } from './components/StateVisualizer';
-import { TaskEventFeed } from './components/TaskEventFeed';
 import WorkspaceSplitPanel, { type WorkspaceSplitHandle } from './components/WorkspaceSplitPanel';
+import { ChatToolbar } from './components/ChatToolbar';
+import { BuildModeStrip } from './components/BuildModeStrip';
+import { ChatRunLog } from './components/ChatRunLog';
 
 const STATE_PANEL_STORAGE_KEY = 'beam_chat_state_panel_open';
 const WORKSPACE_PANEL_STORAGE_KEY = 'beam_chat_workspace_panel_open';
@@ -218,8 +211,8 @@ function ChatPageImpl() {
   );
   const location = useLocation();
   const navigate = useNavigate();
+  const chatId = paramChatId ?? null;
   const [message, setMessage] = useState('');
-  const [chatId, setChatId] = useState<string | null>(paramChatId || null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [selectedChainId, setSelectedChainId] = useState('');
   const [selectedMode, setSelectedMode] = useState<ChatModeId>('chat');
@@ -232,9 +225,6 @@ function ChatPageImpl() {
   const cancelledRef = useRef(false);
   const activeRequestIdRef = useRef<string | null>(null);
   const lastFailedSendRef = useRef<{ text: string; chainId: string; mode: ChatModeId } | null>(null);
-  const [editingTokenLimit, setEditingTokenLimit] = useState(false);
-  const [tokenLimitDraft, setTokenLimitDraft] = useState('');
-  const tokenLimitPopoverRef = useRef<HTMLDivElement>(null);
   const pendingSendRef = useRef<{
     requestId: string;
     message: string;
@@ -331,10 +321,6 @@ function ChatPageImpl() {
     [files],
   );
 
-  useEffect(() => {
-    if (paramChatId) setChatId(paramChatId);
-  }, [paramChatId]);
-
   // Preselect default-chain.json (or the first available chain) when no chain
   // has been chosen yet. Mirrors what the server does via chain_resolve.go.
   useEffect(() => {
@@ -359,6 +345,11 @@ function ChatPageImpl() {
     error: executorChainError,
   } = useChain(chainPathForExecutorPreview);
   const { mutate: updateChain } = useUpdateChain(chainPathForExecutorPreview);
+
+  const { data: policyNames = [] } = useListPolicies();
+  const { data: setupStatus } = useSetupStatus(true);
+  const activePolicyName = setupStatus?.hitlPolicyName ?? '';
+  const setActivePolicy = useSetActivePolicy();
 
   const compiledChainFromPlan = useMemo(
     () => parseCompiledChainJSON(activePlan?.plan.compiled_chain_json),
@@ -565,17 +556,6 @@ function ChatPageImpl() {
     }, 4000);
     return () => window.clearTimeout(id);
   }, [activeRequestId, isProcessing, tryDispatchSend]);
-
-  useEffect(() => {
-    if (!editingTokenLimit) return;
-    const handler = (e: MouseEvent) => {
-      if (tokenLimitPopoverRef.current && !tokenLimitPopoverRef.current.contains(e.target as Node)) {
-        setEditingTokenLimit(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [editingTokenLimit]);
 
   useEffect(() => {
     const errorMessage = sendError?.message;
@@ -788,6 +768,7 @@ function ChatPageImpl() {
       streaming: true,
       error: liveTask.error ?? undefined,
       attachments: liveTask.attachments,
+      events: liveTask.events,
     });
     return merged;
   }, [
@@ -798,6 +779,7 @@ function ChatPageImpl() {
     liveTask.attachments,
     liveTask.content,
     liveTask.error,
+    liveTask.events,
     optimisticOutgoing,
   ]);
 
@@ -933,176 +915,37 @@ function ChatPageImpl() {
     <Fill className="bg-surface-50 dark:bg-dark-surface-100 flex flex-col">
             {chatId ? (
               <>
-                <div className="bg-surface-50 dark:bg-dark-surface-200 text-text dark:text-dark-text flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
-                  <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <Span variant="muted" className="text-xs sm:text-sm">
-                        {t('chat.task_chain')}
-                      </Span>
-                      <Tooltip content={t('chat.chain_tooltip')} position="top">
-                        <Badge variant="outline" size="sm" className="cursor-help px-1.5">
-                          ?
-                        </Badge>
-                      </Tooltip>
-                    </div>
-                    <Select
-                      options={chainOptions}
-                      value={selectedChainId}
-                      onChange={e => setSelectedChainId(e.target.value)}
-                      className="min-w-[10rem] max-w-full flex-1 sm:max-w-md"
-                      disabled={chainsLoading}
-                    />
-                    {chainsLoading && <Spinner size="sm" />}
-                    {executorChainPreview && (
-                      <div className="relative" ref={tokenLimitPopoverRef}>
-                        <Tooltip content={t('chat.token_limit_tooltip')} position="top">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setTokenLimitDraft(String(executorChainPreview.token_limit ?? 0));
-                              setEditingTokenLimit(v => !v);
-                            }}
-                            className="text-text-muted dark:text-dark-text-muted hover:bg-surface-100 dark:hover:bg-dark-surface-200 flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs"
-                          >
-                            <span>{executorChainPreview.token_limit ? `${Math.round(executorChainPreview.token_limit / 1000)}k` : '∞'}</span>
-                            <Pencil className="h-2.5 w-2.5" />
-                          </button>
-                        </Tooltip>
-                        {editingTokenLimit && (
-                          <div className="bg-surface-50 dark:bg-dark-surface-100 border-border absolute top-full left-0 z-50 mt-1 flex flex-col gap-2 rounded border p-3 shadow-md">
-                            <span className="text-text dark:text-dark-text text-xs font-medium">{t('chat.token_limit_label')}</span>
-                            <div className="flex gap-2">
-                              <input
-                                type="number"
-                                min={0}
-                                value={tokenLimitDraft}
-                                onChange={e => setTokenLimitDraft(e.target.value)}
-                                className="border-border bg-surface-50 dark:bg-dark-surface-200 text-text dark:text-dark-text w-28 rounded border px-2 py-1 text-xs"
-                                autoFocus
-                              />
-                              <Button
-                                size="xs"
-                                type="button"
-                                onClick={() => {
-                                  updateChain({ token_limit: Number(tokenLimitDraft) });
-                                  setEditingTokenLimit(false);
-                                }}
-                              >
-                                {t('common.save', 'Save')}
-                              </Button>
-                              <Button
-                                size="xs"
-                                variant="ghost"
-                                type="button"
-                                onClick={() => setEditingTokenLimit(false)}
-                              >
-                                {t('common.cancel', 'Cancel')}
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {/*
-                     * Edit-chain link — closes the dead end where a user can
-                     * see the active chain in the dropdown but had no path to
-                     * fix it when something like a missing hook_policies
-                     * surfaced mid-conversation. Disabled when no chain is
-                     * selected; query param matches what /chains expects.
-                     */}
-                    <Tooltip
-                      content={
-                        selectedChainId
-                          ? t('chat.edit_chain', 'Open this chain in the editor')
-                          : t('chat.edit_chain_disabled', 'Select a chain to edit')
-                      }
-                      position="top"
-                    >
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        disabled={!selectedChainId.trim()}
-                        onClick={() =>
-                          navigate(
-                            `/chains?path=${encodeURIComponent(selectedChainId.trim())}`,
-                          )
-                        }
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                    </Tooltip>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <Span variant="muted" className="text-xs sm:text-sm">
-                        {t('chat.mode')}
-                      </Span>
-                      <Tooltip content={t('chat.mode_tooltip')} position="top">
-                        <Badge variant="outline" size="sm" className="cursor-help px-1.5">
-                          ?
-                        </Badge>
-                      </Tooltip>
-                    </div>
-                    <Select
-                      options={modeOptions}
-                      value={selectedMode}
-                      onChange={e => setSelectedMode(e.target.value as ChatModeId)}
-                      className="min-w-[7rem] max-w-[12rem] shrink-0"
-                      disabled={isProcessing}
-                    />
-                  </div>
-                  <span
-                    className="text-text-muted dark:text-dark-text-muted shrink-0 text-xs"
-                    title={`${t('chat.messages')}: ${chatHistory?.length ?? 0}, ${t('chat.state_updates')}: ${latestState.length}`}>
-                    {t('chat.stats_compact', {
-                      messages: chatHistory?.length ?? 0,
-                      state: latestState.length,
-                    })}
-                  </span>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Tooltip content={t('chat.workspace_toggle_tooltip')}>
-                      <Button
-                        type="button"
-                        variant={workspacePanelOpen ? 'secondary' : 'outline'}
-                        size="sm"
-                        className="shrink-0"
-                        onClick={() => persistWorkspacePanelOpen(!workspacePanelOpen)}
-                        aria-pressed={workspacePanelOpen}
-                        aria-label={t('chat.workspace_toggle_aria')}>
-                        <FolderOpen className="h-4 w-4" />
-                      </Button>
-                    </Tooltip>
-                    {workspacePanelOpen ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="lg:hidden"
-                        onClick={() => setMobileWorkspaceOpen(true)}>
-                        {t('chat.workspace_open_mobile')}
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
+                <ChatToolbar
+                  chainOptions={chainOptions}
+                  selectedChainId={selectedChainId}
+                  onChainChange={setSelectedChainId}
+                  chainsLoading={chainsLoading}
+                  executorChainPreview={executorChainPreview ?? null}
+                  onTokenLimitSave={limit => updateChain({ token_limit: limit })}
+                  modeOptions={modeOptions}
+                  selectedMode={selectedMode}
+                  onModeChange={setSelectedMode}
+                  isProcessing={isProcessing}
+                  policyNames={policyNames}
+                  activePolicyName={activePolicyName}
+                  onPolicyChange={name => setActivePolicy.mutate(name)}
+                  policyChangePending={setActivePolicy.isPending}
+                  policyChangeError={setActivePolicy.isError ? (setActivePolicy.error?.message ?? t('chat.hitl_policy_error', 'Failed to set policy')) : null}
+                  statsLabel={t('chat.stats_compact', { messages: chatHistory?.length ?? 0, state: latestState.length })}
+                  workspacePanelOpen={workspacePanelOpen}
+                  onWorkspaceToggle={() => persistWorkspacePanelOpen(!workspacePanelOpen)}
+                  onOpenMobileWorkspace={() => setMobileWorkspaceOpen(true)}
+                  onEditChain={() => navigate(`/chains?path=${encodeURIComponent(selectedChainId.trim())}`)}
+                  isLg={isLg}
+                />
 
                 {selectedMode === 'build' && (
-                  <InsetPanel
-                    tone="strip"
-                    role="region"
-                    aria-label={t('chat.build_graph_aria_panel')}>
-                    <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
-                      <Span variant="body" className="text-sm font-medium">
-                        {t('chat.build_workflow_title')}
-                      </Span>
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        disabled={isProcessing || !selectedChainId.trim()}
-                        onClick={() => submitOutgoingMessage('', selectedChainId, 'build')}>
-                        {t('chat.build_run_button')}
-                      </Button>
-                    </div>
-                  </InsetPanel>
+                  <BuildModeStrip
+                    selectedChainId={selectedChainId}
+                    executorChainPreview={executorChainPreview ?? null}
+                    isProcessing={isProcessing}
+                    onRun={() => submitOutgoingMessage('', selectedChainId, 'build')}
+                  />
                 )}
 
                 <Fill className="flex flex-col">
@@ -1270,70 +1113,13 @@ function ChatPageImpl() {
           )}
         </div>
 
-        {/* Run log (task state): collapsible to reclaim horizontal space */}
-        {statePanelOpen ? (
-          <SidePanelColumn>
-            <SidePanelHeader>
-              <div className="flex min-w-0 items-center gap-2">
-                <Span variant="body" className="text-text dark:text-dark-text truncate font-medium">
-                  {t('chat.run_log')}
-                </Span>
-                <Badge variant={latestState.length > 0 || liveTask.events.length > 0 ? 'success' : 'secondary'} size="sm">
-                  {isProcessing ? liveTask.events.length : latestState.length}
-                </Badge>
-              </div>
-              <Tooltip content={t('chat.hide_run_log')} position="left">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={toggleStatePanel}
-                  aria-label={t('chat.hide_run_log')}>
-                  <PanelRightClose className="h-4 w-4" />
-                </Button>
-              </Tooltip>
-            </SidePanelHeader>
-            <SidePanelBody>
-              {liveTask.events.length > 0 ? (
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <Span variant="muted" className="mb-1 block text-xs font-medium">
-                    {t('chat.task_events_feed_title')}
-                  </Span>
-                  <TaskEventFeed events={liveTask.events} />
-                </div>
-              ) : null}
-              {latestState.length > 0 ? (
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <Span variant="muted" className="mb-1 block text-xs font-medium">
-                    {t('chat.captured_state_title')}
-                  </Span>
-                  <StateVisualizer state={latestState} />
-                </div>
-              ) : liveTask.events.length === 0 ? (
-                <EmptyState
-                  title={t('chat.no_state_data')}
-                  description={t('chat.state_will_appear_here')}
-                  icon="📊"
-                  orientation="vertical"
-                  iconSize="md"
-                  className="text-text dark:text-dark-text-muted h-full"
-                />
-              ) : null}
-            </SidePanelBody>
-          </SidePanelColumn>
-        ) : (
-          <Tooltip content={t('chat.show_run_log')} position="left">
-            <SidePanelRailButton onClick={toggleStatePanel} aria-label={t('chat.show_run_log')}>
-              <PanelRightOpen className="h-4 w-4" />
-              {(isProcessing ? liveTask.events.length : latestState.length) > 0 ? (
-                <Badge variant="success" size="sm" className="mt-1">
-                  {isProcessing ? liveTask.events.length : latestState.length}
-                </Badge>
-              ) : null}
-            </SidePanelRailButton>
-          </Tooltip>
-        )}
+        <ChatRunLog
+          open={statePanelOpen}
+          onToggle={toggleStatePanel}
+          isProcessing={isProcessing}
+          events={liveTask.events}
+          state={latestState}
+        />
       </Fill>
     </Page>
   );
