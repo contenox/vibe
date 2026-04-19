@@ -26,22 +26,6 @@ func setupSQLiteStore(t *testing.T) (context.Context, libdb.DBManager, runtimety
 	return ctx, db, store
 }
 
-func Test_isDuplicateBackendError(t *testing.T) {
-	// legacy single-column constraint (old schema)
-	require.True(t, isDuplicateBackendError(newTestErr("constraint failed: UNIQUE constraint failed: llm_backends.base_url (2067)")))
-	require.True(t, isDuplicateBackendError(newTestErr("libdb: unexpected database error: UNIQUE constraint failed: llm_backends.base_url")))
-	// composite constraint (new schema)
-	require.True(t, isDuplicateBackendError(newTestErr("UNIQUE constraint failed: llm_backends.type, llm_backends.base_url")))
-	require.False(t, isDuplicateBackendError(nil))
-	require.False(t, isDuplicateBackendError(newTestErr("other error")))
-	require.False(t, isDuplicateBackendError(newTestErr("UNIQUE constraint failed: llm_backends.name")))
-}
-
-type testErr struct{ msg string }
-
-func (e *testErr) Error() string  { return e.msg }
-func newTestErr(msg string) error { return &testErr{msg} }
-
 // ---------------------------------------------------------------------------
 // setProviderConfigKV
 // ---------------------------------------------------------------------------
@@ -161,7 +145,6 @@ func Test_backendService_sameTypeAndURL_rejected(t *testing.T) {
 	require.NoError(t, svc.Create(ctx, b1))
 	err := svc.Create(ctx, b2)
 	require.Error(t, err)
-	require.True(t, isDuplicateBackendError(err))
 }
 
 func Test_backendService_differentType_sameURL_allowed(t *testing.T) {

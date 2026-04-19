@@ -282,10 +282,11 @@ BEGIN TRANSACTION;
 CREATE TABLE llm_backends_temp (
     id VARCHAR(255) PRIMARY KEY,
     name VARCHAR(512) NOT NULL UNIQUE,
-    base_url VARCHAR(512) NOT NULL, -- Constraint removed here
+    base_url VARCHAR(512) NOT NULL,
     type VARCHAR(512) NOT NULL,
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(type, base_url)
 );
 
 -- 2. Move your data

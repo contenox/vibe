@@ -124,7 +124,8 @@ jobs:
           npm version "${TAG#v}" --prefix packages/beam-desktop --no-git-tag-version
 
       - name: Package desktop app
-        run: npx --prefix packages/beam-desktop electron-builder --linux --${{ matrix.electron_arch }}
+        working-directory: packages/beam-desktop
+        run: npx electron-builder --linux --${{ matrix.electron_arch }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

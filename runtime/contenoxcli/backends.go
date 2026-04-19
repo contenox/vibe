@@ -10,8 +10,6 @@ import (
 	"github.com/contenox/contenox/runtime/runtimetypes"
 )
 
-// setProviderConfigKV stores a cloud provider API key in the SQLite KV store.
-// Used by backend_cmd.go when a backend with an API key is registered.
 func setProviderConfigKV(ctx context.Context, store runtimetypes.Store, providerType, apiKey string) error {
 	key := runtimestate.ProviderKeyPrefix + strings.ToLower(providerType)
 	pc := runtimestate.ProviderConfig{APIKey: apiKey, Type: providerType}
