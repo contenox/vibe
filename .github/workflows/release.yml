@@ -51,9 +51,11 @@ jobs:
       matrix:
         include:
           - goarch: amd64
+            electron_arch: x64
             cc: gcc
             cxx: g++
           - goarch: arm64
+            electron_arch: arm64
             cc: aarch64-linux-gnu-gcc
             cxx: aarch64-linux-gnu-g++
             cross: true
@@ -72,6 +74,12 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Cache electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron-builder
+          key: electron-builder-linux-${{ matrix.goarch }}-${{ hashFiles('packages/beam-desktop/package.json') }}
+
       - name: Install CGo dependencies
         run: |
           sudo apt-get update -qq
@@ -80,8 +88,9 @@ jobs:
 
       - name: Fetch missing llama.cpp headers
         run: |
-          OLLAMA_MOD="$(go env GOPATH)/pkg/mod/github.com/ollama/ollama@v0.17.5"
-          go mod download github.com/ollama/ollama@v0.17.5
+          OLLAMA_VERSION="$(go list -m -f '{{.Version}}' github.com/ollama/ollama)"
+          OLLAMA_MOD="$(go env GOPATH)/pkg/mod/github.com/ollama/ollama@${OLLAMA_VERSION}"
+          go mod download "github.com/ollama/ollama@${OLLAMA_VERSION}"
           chmod -R u+w "$OLLAMA_MOD/llama"
           MTMD="$OLLAMA_MOD/llama/llama.cpp/tools/mtmd"
           mkdir -p "$MTMD/miniaudio" "$MTMD/stb"
@@ -96,7 +105,7 @@ jobs:
       - name: Generate OpenAPI for embed
         run: make docs-gen
 
-      - name: Build Contenox binary
+      - name: Build contenox binary
         env:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
@@ -106,13 +115,22 @@ jobs:
         run: |
           TAG="${{ needs.verify.outputs.tag }}"
           LDFLAGS="-X github.com/contenox/contenox/runtime/contenoxcli.Version=${TAG}"
-          go build -ldflags="${LDFLAGS}" -o "contenox-${TAG}-linux-${{ matrix.goarch }}" ./cmd/contenox
+          mkdir -p bin
+          go build -ldflags="${LDFLAGS}" -o bin/contenox ./cmd/contenox
 
-      - name: Upload artifact
+      - name: Sync package.json version
+        run: |
+          TAG="${{ needs.verify.outputs.tag }}"
+          npm version "${TAG#v}" --prefix packages/beam-desktop --no-git-tag-version
+
+      - name: Package desktop app
+        run: npx --prefix packages/beam-desktop electron-builder --linux --${{ matrix.electron_arch }}
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: contenox-linux-${{ matrix.goarch }}
-          path: contenox-*
+          name: desktop-linux-${{ matrix.goarch }}
+          path: packages/beam-desktop/dist/contenox-beam-*
 
   release:
     needs: [verify, build]
@@ -131,7 +149,7 @@ jobs:
       - name: Create GitHub Release and upload assets
         run: |
           TAG="${{ needs.verify.outputs.tag }}"
-          gh release create "$TAG" contenox-* \
+          gh release create "$TAG" contenox-beam-* \
             --title "$TAG" \
             --notes "" \
             --latest \

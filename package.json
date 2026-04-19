@@ -4,7 +4,8 @@
   "version": "0.6.5",
   "workspaces": [
     "packages/beam",
-    "packages/ui"
+    "packages/ui",
+    "packages/beam-desktop"
   ],
   "scripts": {
     "test:openapi-client-codegen": "bash ./scripts/verify_openapi_client.sh"

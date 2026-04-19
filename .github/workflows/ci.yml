@@ -50,7 +50,7 @@ jobs:
         run: make docs-gen
 
       - name: Build contenox (compile smoke)
-        run: make build-cli
+        run: make build-contenox
 
       - name: Cheap Go tests (TestUnit_* + -short only)
         run: make test-unit

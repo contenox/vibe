@@ -49,6 +49,9 @@ var reservedSubcommands = map[string]bool{beamCmd.Use: true, "init": true, "chat
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
+	if len(os.Args) == 1 {
+		os.Args = append(os.Args, "beam")
+	}
 	args := os.Args[1:]
 	// Only inject "run" when no reserved subcommand was given (so "contenox completion" and "contenox help" work).
 	// Scan past leading flags (e.g. --db /path) to find the first non-flag argument.

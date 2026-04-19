@@ -25,44 +25,51 @@ export OLLAMA_HOST
 AIR ?= $(shell command -v air 2>/dev/null || echo "$(shell go env GOPATH)/bin/air")
 APITEST_VENV := $(PROJECT_ROOT)/apitests/.venv
 APITEST_ACTIVATE := $(APITEST_VENV)/bin/activate
-DEV_CLI_BIN := $(HOME)/.local/bin/contenox
+DEV_CONTENOX_BIN := $(HOME)/.local/bin/contenox
 
 .PHONY: help \
-	build-cli build-ui build-web ci-prepare-embeds \
+	build-contenox build-ui build-web build-desktop dev-desktop ci-prepare-embeds \
 	clean \
 	deps-go-watch deps-npm \
-	dev-cli dev-cli-link dev-cli-unlink \
+	dev-install dev-link dev-unlink \
 	dev-go-watch dev-web dev-web-fresh dev-web-proxy \
 	docs-gen docs-html docs-markdown \
 	format-web lint-web \
-	test test-unit test-system test-cli-verbose test-cli-help \
+	test test-unit test-system test-contenox-verbose test-contenox-help \
 	test-http-api test-http-api-venv test-openapi-client-codegen \
 	wait-http-ready
 
 # -----------------------------------------------------------------------------
 help:
-	@echo "build-*    build-cli build-web  |  ci-prepare-embeds (CI: Beam dist + OpenAPI stub)"
-	@echo "test-*     test test-unit test-system test-cli-verbose test-cli-help"
+	@echo "build-*    build-contenox build-ui build-web build-desktop  |  ci-prepare-embeds (CI: Beam dist + OpenAPI stub)"
+	@echo "test-*     test test-unit test-system test-contenox-verbose test-contenox-help"
 	@echo "           test-http-api test-http-api-venv test-openapi-client-codegen"
 	@echo "docs-*     docs-gen docs-html docs-markdown"
-	@echo "dev-*      dev-cli dev-cli-link dev-cli-unlink dev-go-watch dev-web dev-web-proxy dev-web-fresh"
+	@echo "dev-*      dev-install dev-link dev-unlink dev-go-watch dev-web dev-web-proxy dev-web-fresh dev-desktop wait-http-ready"
 	@echo "deps-*     deps-npm deps-go-watch"
-	@echo "lint-web format-web  |  wait-http-ready"
+	@echo "lint-web format-web  |  dev-web-fresh (clean + deps + build-ui + dev-web)"
 	@echo "Version (maintainers): make -f Makefile.version help"
 	@echo "clean"
-	@echo "See CONTRIBUTING.md for the two-terminal web + API workflow."
+	@echo "See CONTRIBUTING.md (browser + optional Electron shell)."
 
 # —— build ————————————————————————————————————————————————————————————————
 # CI: generate gitignored embed inputs (Beam dist + OpenAPI stub) before docs-gen / go build.
 ci-prepare-embeds:
 	bash $(PROJECT_ROOT)/scripts/ci_prepare_embeds.sh
 
-build-cli: docs-gen
+# Contenox binary: CLI, beam server, embedded web assets — one entrypoint (cmd/contenox).
+build-contenox: docs-gen
 	CGO_ENABLED=1 go build -o $(PROJECT_ROOT)/bin/contenox $(PROJECT_ROOT)/cmd/contenox
 
 build-web:
 	npm run build --workspace=@contenox/ui
 	npm run build --workspace=@contenox/beam
+
+build-desktop: build-contenox
+	npm run build --workspace=@contenox/beam-desktop
+
+dev-desktop: build-contenox
+	npm run start --workspace=@contenox/beam-desktop
 
 # —— test ————————————————————————————————————————————————————————————————
 test: docs-gen
@@ -74,10 +81,10 @@ test-unit: docs-gen
 test-system: docs-gen
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -run '^TestSystem_' ./...
 
-test-cli-verbose: docs-gen
+test-contenox-verbose: docs-gen
 	GOMAXPROCS=4 go test -C $(PROJECT_ROOT) -v ./runtime/contenoxcli/...
 
-test-cli-help: build-cli
+test-contenox-help: build-contenox
 	@chmod +x $(PROJECT_ROOT)/scripts/verify_cli_help.sh
 	@CONTENOX_BIN=$(PROJECT_ROOT)/bin/contenox $(PROJECT_ROOT)/scripts/verify_cli_help.sh
 
@@ -85,7 +92,7 @@ test-http-api-venv:
 	test -d $(APITEST_VENV) || python3 -m venv $(APITEST_VENV)
 	. $(APITEST_ACTIVATE) && pip install -r $(PROJECT_ROOT)/apitests/requirements.txt
 
-test-http-api: build-cli test-http-api-venv
+test-http-api: build-contenox test-http-api-venv
 	@pkill -f "[/]bin/contenox beam" 2>/dev/null || true
 	@sleep 1
 	@TMPDIR=$$(mktemp -d) && \
@@ -136,16 +143,16 @@ docs-html: docs-gen
 	cp $(PROJECT_ROOT)/scripts/openapi-rapidoc.html $(PROJECT_ROOT)/docs/openapi.html
 
 # —— dev —————————————————————————————————————————————————————————————————
-dev-cli: build-cli dev-cli-link
+dev-install: build-contenox dev-link
 
-dev-cli-link: build-cli
-	@mkdir -p $(dir $(DEV_CLI_BIN))
-	@ln -sf $(PROJECT_ROOT)/bin/contenox $(DEV_CLI_BIN)
-	@echo "Linked $(DEV_CLI_BIN) -> $(PROJECT_ROOT)/bin/contenox"
-	@echo "Use this binary: ensure $(dir $(DEV_CLI_BIN)) is on PATH before other contenox installs (check: which contenox)"
+dev-link: build-contenox
+	@mkdir -p $(dir $(DEV_CONTENOX_BIN))
+	@ln -sf $(PROJECT_ROOT)/bin/contenox $(DEV_CONTENOX_BIN)
+	@echo "Linked $(DEV_CONTENOX_BIN) -> $(PROJECT_ROOT)/bin/contenox"
+	@echo "Use this binary: ensure $(dir $(DEV_CONTENOX_BIN)) is on PATH before other contenox installs (check: which contenox)"
 
-dev-cli-unlink:
-	@rm -f $(DEV_CLI_BIN)
+dev-unlink:
+	@rm -f $(DEV_CONTENOX_BIN)
 
 dev-go-watch:
 	@test -x "$(AIR)" || { echo "run: make deps-go-watch"; exit 1; }
@@ -181,6 +188,6 @@ deps-go-watch:
 
 # —— clean ———————————————————————————————————————————————————————————————
 clean:
-	rm -rf node_modules packages/beam/node_modules packages/ui/node_modules package-lock.json
+	rm -rf node_modules packages/beam/node_modules packages/ui/node_modules packages/beam-desktop/node_modules package-lock.json
 	rm -rf packages/beam/dist packages/ui/dist
 	rm -rf .vite

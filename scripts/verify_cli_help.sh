@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Smoke-test that the contenox binary starts and every documented top-level command prints help.
-# Keeps CLI docs and Cobra wiring in sync (run after: make build-cli).
+# Keeps CLI docs and Cobra wiring in sync (run after: make build-contenox).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${CONTENOX_BIN:-$ROOT/bin/contenox}"
 if [[ ! -x "$BIN" ]]; then
-  echo "error: missing executable: $BIN (run: make build-cli)" >&2
+  echo "error: missing executable: $BIN (run: make build-contenox)" >&2
   exit 1
 fi
 

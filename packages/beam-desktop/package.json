@@ -1,0 +1,29 @@
+{
+  "name": "@contenox/beam-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Contenox Beam desktop application",
+  "author": {
+    "name": "Contenox",
+    "email": "hello@contenox.com"
+  },
+  "homepage": "https://contenox.com",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron . --dev --no-sandbox",
+    "build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "36.9.5",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.contenox.beam",
+    "productName": "Contenox Beam",
+    "extraResources": [
+      { "from": "../../bin/contenox", "to": "contenox" }
+    ],
+    "artifactName": "contenox-beam-${version}-${arch}.${ext}",
+    "linux": { "target": ["AppImage"] }
+  }
+}

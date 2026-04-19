@@ -1,7 +1,7 @@
 import { Spinner } from '@contenox/ui';
 import '@contenox/ui/styles.css';
 import { Suspense } from 'react';
-import { Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { Route, HashRouter as Router, Routes } from 'react-router-dom';
 import './app.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';

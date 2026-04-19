@@ -28,10 +28,10 @@ import (
 	"github.com/contenox/contenox/runtime/vfsservice"
 )
 
-// Run starts the Contenox server with the given tenant ID and blocks until ctx is cancelled.
-// The server loads its configuration from environment variables (see serverapi.Config).
-// If tenantID is empty, a default local tenant ID is used.
-func Run(
+// Build creates the combined HTTP handler (API routes + Beam SPA) without starting
+// a network listener. The returned cleanup func must be called when done.
+// Used by Run (HTTP server) and the Wails desktop entry point.
+func Build(
 	ctx context.Context,
 	tenantID, nodeInstanceID string,
 	config *serverapi.Config,
@@ -51,27 +51,18 @@ func Run(
 	vfsSvc vfsservice.Service,
 	chainVFS vfsservice.Service,
 	vfsRoot string,
-) (error, func() error) {
+) (http.Handler, func() error, error) {
 	if tenantID == "" {
 		tenantID = "00000000-0000-0000-0000-000000000001"
-	}
-	if config.Addr == "" {
-		config.Addr = "127.0.0.1"
-	}
-	if config.Port == "" {
-		config.Port = "8081"
 	}
 
 	internalMux := http.NewServeMux()
 
-	// Create the authentication manager (hardcoded admin user)
-	tokenTTL := 24 * time.Hour // TODO: make configurable
+	tokenTTL := 24 * time.Hour
 	authManager := auth.NewSimpleTokenManager(tokenTTL)
 
-	// Add authentication routes from usersapi
 	usersapi.AddAuthRoutes(internalMux, authManager, authManager)
 
-	// Add all other API routes (backend, exec, etc.)
 	cleanupAPI, err := serverapi.New(
 		ctx,
 		internalMux,
@@ -96,17 +87,12 @@ func Run(
 		vfsRoot,
 	)
 	if err != nil {
-		return fmt.Errorf("init API handler: %w", err), cleanupAPI
+		return nil, cleanupAPI, fmt.Errorf("init API handler: %w", err)
 	}
 
-	// Build the full handler with middleware chain
 	var apiHandler http.Handler = internalMux
-
-	// Base middleware (request ID, tracing)
 	apiHandler = apiframework.RequestIDMiddleware(apiHandler)
 	apiHandler = apiframework.TracingMiddleware(apiHandler)
-
-	// Optional static token (if configured)
 	if config.Token != "" {
 		apiHandler = apiframework.TokenMiddleware(apiHandler)
 		apiHandler = apiframework.EnforceToken(config.Token, apiHandler)
@@ -118,24 +104,63 @@ func Run(
 	}
 	apiHandler = middleware.EnableCORS(&corsConfig, apiHandler)
 
-	// Authentication middleware stack.
-	// Execution order must be:
-	// Extract -> Refresh -> Auth -> handler
-	// so browser cookies can be refreshed before validation rejects an expiring token.
-	apiHandler = middleware.JWTAuthMiddleware(authManager, apiHandler)       // innermost: validates token after refresh
-	apiHandler = middleware.JWTRefreshMiddleware(authManager, apiHandler)    // refresh browser token before auth validation
-	apiHandler = middleware.ExtractAndSetTokenMiddleware(apiHandler)         // outermost: pulls token from cookie/header first
+	// Execution order: Extract -> Refresh -> Auth -> handler
+	apiHandler = middleware.JWTAuthMiddleware(authManager, apiHandler)
+	apiHandler = middleware.JWTRefreshMiddleware(authManager, apiHandler)
+	apiHandler = middleware.ExtractAndSetTokenMiddleware(apiHandler)
 
-	// Root mux: embedded OpenAPI spec + RapiDoc (/openapi.json, /docs), then API, then Beam SPA.
 	mux := http.NewServeMux()
 	openapidocs.Register(mux)
 	mux.Handle("/api/", http.StripPrefix("/api", apiHandler))
 	mux.Handle("/", beam.Handler())
 
+	return mux, cleanupAPI, nil
+}
+
+// Run starts the Contenox server with the given tenant ID and blocks until ctx is cancelled.
+// The server loads its configuration from environment variables (see serverapi.Config).
+// If tenantID is empty, a default local tenant ID is used.
+func Run(
+	ctx context.Context,
+	tenantID, nodeInstanceID string,
+	config *serverapi.Config,
+	state *runtimestate.State,
+	tracker libtracker.ActivityTracker,
+	ps libbus.Messenger,
+	dbInstance libdbexec.DBManager,
+	tokenizerSvc ollamatokenizer.Tokenizer,
+	repo llmrepo.ModelRepo,
+	environmentExec taskengine.EnvExecutor,
+	hookRepo taskengine.HookRepo,
+	hitlSvc hitlservice.Service,
+	taskService execservice.TasksEnvService,
+	embedService embedservice.Service,
+	execService execservice.ExecService,
+	taskChainService taskchainservice.Service,
+	vfsSvc vfsservice.Service,
+	chainVFS vfsservice.Service,
+	vfsRoot string,
+) (error, func() error) {
+	if config.Addr == "" {
+		config.Addr = "127.0.0.1"
+	}
+	if config.Port == "" {
+		config.Port = "8081"
+	}
+
+	h, cleanupAPI, err := Build(
+		ctx, tenantID, nodeInstanceID, config, state, tracker, ps, dbInstance,
+		tokenizerSvc, repo, environmentExec, hookRepo, hitlSvc, taskService,
+		embedService, execService, taskChainService, vfsSvc, chainVFS, vfsRoot,
+	)
+	if err != nil {
+		return err, cleanupAPI
+	}
+
 	addr := config.Addr + ":" + config.Port
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: h,
 	}
 	serveErrCh := make(chan error, 1)
 

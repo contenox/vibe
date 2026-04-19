@@ -33,6 +33,82 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// BuildHandler initialises all services from the local .contenox directory and
+// returns the combined HTTP handler (API + Beam SPA). Used by the Wails desktop
+// entry point so it can pass the handler directly to Wails' AssetServer.
+func BuildHandler(ctx context.Context) (http.Handler, func(), error) {
+	contenoxPath, err := ResolveContenoxDir(nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve contenox dir: %w", err)
+	}
+	dbPath, err := resolveDBPathFromDir(contenoxPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve db path: %w", err)
+	}
+	db, err := OpenDBAt(ctx, dbPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open database: %w", err)
+	}
+
+	components, err := buildServerComponents(ctx, db, localTenantID, contenoxPath, nil)
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("build server components: %w", err)
+	}
+
+	h, cleanupServer, err := server.Build(
+		ctx,
+		localTenantID,
+		components.nodeID,
+		components.config,
+		components.state,
+		components.tracker,
+		components.bus,
+		components.db,
+		components.tokenizer,
+		components.repo,
+		components.envExec,
+		components.hookRepo,
+		components.hitlSvc,
+		components.taskService,
+		components.embedService,
+		components.execService,
+		components.taskChainService,
+		components.vfsSvc,
+		components.chainVFS,
+		filepath.Dir(contenoxPath),
+	)
+	if err != nil {
+		components.cleanup()
+		db.Close()
+		return nil, nil, fmt.Errorf("build handler: %w", err)
+	}
+
+	cleanup := func() {
+		if cleanupServer != nil {
+			_ = cleanupServer()
+		}
+		components.cleanup()
+		db.Close()
+	}
+	return h, cleanup, nil
+}
+
+// resolveDBPathFromDir returns the SQLite database path given the resolved .contenox dir,
+// applying the same precedence as resolveDBPath but without requiring a cobra.Command.
+func resolveDBPathFromDir(contenoxPath string) (string, error) {
+	if _, err := os.Stat(contenoxPath); err == nil {
+		return filepath.Join(contenoxPath, "local.db"), nil
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		globalDB := filepath.Join(home, ".contenox", "local.db")
+		if _, err := os.Stat(globalDB); err == nil {
+			return globalDB, nil
+		}
+	}
+	return filepath.Abs(filepath.Join(contenoxPath, "local.db"))
+}
+
 func runServer(cmd *cobra.Command, args []string) error {
 	tenant, _ := cmd.Flags().GetString("tenant")
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

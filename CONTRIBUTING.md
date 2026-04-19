@@ -10,16 +10,31 @@ Please treat all contributors with respect. Engage in constructive discussions a
 
 The **`contenox`** binary is the main entrypoint: plans, chat, and other CLI commands, plus **`contenox beam`**, which runs the HTTP server that **serves the Beam web UI** (embedded in the binary from `runtime/internal/web/beam/dist`) and backs it with the same engine.
 
+All AI/LLM orchestration packages live under **`runtime/`**. Infrastructure libraries (`libauth`, `libbus`, `libcipher`, `libdbexec`, `libkvstore`, `libroutine`, `libtracker`) stay at the module root. HTTP framework (`apiframework`) and frontend tooling (`packages/`, `cmd/`) also stay at the root.
+
+```
+runtime/              ← AI/LLM orchestration (taskengine, planservice, runtimetypes, …)
+  internal/           ← HTTP route handlers, model repo drivers, CLI engine
+runtime/contenoxcli   ← CLI command implementations (importable from cmd/)
+cmd/contenox/         ← contenox binary entry point
+packages/beam/        ← React SPA (Vite, TypeScript, TailwindCSS)
+packages/beam-desktop/ ← Electron shell (optional): window around contenox beam on :8081
+packages/ui/          ← shared component library
+lib*/                 ← infrastructure libraries (no LLM dependencies)
+apiframework/         ← HTTP helpers, middleware, error constants
+serverapi/            ← top-level HTTP server composition (stays outside runtime/)
+```
+
 ### Makefile overview
 
 The root **`Makefile`** groups targets by prefix:
 
 | Prefix | Purpose |
 |--------|---------|
-| **`build-*`** | `build-cli`, `build-web` |
+| **`build-*`** | `build-contenox`, `build-ui`, `build-web`, `build-desktop` |
 | **`test-*`** | Go tests, CLI help check, HTTP API tests, OpenAPI client codegen smoke |
 | **`docs-*`** | Regenerate OpenAPI and docs artifacts |
-| **`dev-*`** | Local CLI install symlink, Air reload, Vite, `wait-http-ready` |
+| **`dev-*`** | `dev-install` / `dev-link` / `dev-unlink`, Air reload, Vite (`dev-web` / `dev-web-proxy`), Electron (`dev-desktop`), `wait-http-ready` |
 | **`deps-*`** | `deps-npm`, `deps-go-watch` (Air) |
 | **`lint-web`** / **`format-web`** | Beam UI package |
 | **`clean`** | Remove frontend `node_modules` / build outputs (see target for details) |
@@ -32,18 +47,29 @@ Version bumps and release notes for maintainers live in **`Makefile.version`** (
 
 ### Prerequisites
 
-- [Go](https://go.dev/doc/install) 1.24+
+- [Go](https://go.dev/doc/install) 1.25+
 - Access to an LLM provider (e.g. OpenAI API key, or locally via [Ollama](https://ollama.ai/), [vLLM](https://docs.vllm.ai/), etc.)
 - `make`
 - **Beam UI:** Node.js and npm — run **`make deps-npm`** at the repo root (workspaces under `packages/beam` and `packages/ui`)
 - **HTTP API tests (Python):** Python 3 — **`make test-http-api-venv`** creates `apitests/.venv` and installs `apitests/requirements.txt`
 - **Optional:** [Air](https://github.com/air-verse/air) for Go live reload (`make deps-go-watch`), `curl` (health checks), Docker (optional for `make docs-markdown`; an `npx` fallback exists)
+- **Optional — Electron desktop shell:** no extra installs beyond **`make deps-npm`** (workspace `packages/beam-desktop` pulls Electron). Production installers use `electron-builder` when you run **`make build-desktop`**.
+
+### Go binary path
+
+`go install` puts binaries in `$GOPATH/bin` (typically `~/go/bin`). Add it to your shell:
+
+```bash
+export PATH=$PATH:$(go env GOPATH)/bin
+```
+
+Add this line to `~/.bashrc` or `~/.zshrc` to make it permanent.
 
 ### Building the CLI
 
 ```bash
 # Build the binary into ./bin/contenox
-make build-cli
+make build-contenox
 
 # Run an example
 ./bin/contenox "list files in my home directory"
@@ -51,7 +77,7 @@ make build-cli
 
 ### Building with local LLM inference (CGo)
 
-The `internal/modelrepo/local` package embeds llama.cpp inference directly into the binary via `github.com/ollama/ollama/llama` (CGo). This is **required** to build the full binary — `CGO_ENABLED=0` no longer works.
+The `runtime/internal/modelrepo/local` package embeds llama.cpp inference directly into the binary via `github.com/ollama/ollama/llama` (CGo). This is **required** to build the full binary — `CGO_ENABLED=0` no longer works.
 
 **System packages (Ubuntu/Debian):**
 
@@ -83,10 +109,10 @@ curl -fsSL https://raw.githubusercontent.com/nothings/stb/master/stb_image.h \
      -o "$MTMD/stb/stb_image.h"
 ```
 
-These steps are one-time per machine. After that, `make build-cli` (which sets `CGO_ENABLED=1`) will compile cleanly. To verify the CGo layer alone:
+These steps are one-time per machine. After that, `make build-contenox` (which sets `CGO_ENABLED=1`) will compile cleanly. To verify the CGo layer alone:
 
 ```bash
-CGO_ENABLED=1 go build ./internal/modelrepo/local/...
+CGO_ENABLED=1 go build ./runtime/internal/modelrepo/local/...
 ```
 
 **Why these headers aren't in the module:** Go module distributions don't include all C/C++ source trees needed by every possible build tag. v0.17.5 added multimodal support whose C++ files pull in miniaudio and stb_image as relative includes. Until Ollama bundles them, the manual download is the workaround.
@@ -96,13 +122,13 @@ CGO_ENABLED=1 go build ./internal/modelrepo/local/...
 The binary serves the **built** React app embedded from `runtime/internal/web/beam/dist`. After UI changes, run **`make build-web`** (or `npm run build` in the workspace), then rebuild the Go binary so `//go:embed` picks up assets.
 
 ```bash
-make build-cli
+make build-contenox
 make build-web    # if you changed packages/beam or packages/ui
-make build-cli
+make build-contenox
 ./bin/contenox beam   # default :8081 — regenerate OpenAPI after HTTP/route changes: make docs-gen
 ```
 
-**Beam sign-in** (`http://127.0.0.1:8081/login`): default username **`admin`**, password **`admin`** (matches `internal/auth/simple.go`).
+**Beam sign-in** (`http://127.0.0.1:8081/login`): default username **`admin`**, password **`admin`** (matches `runtime/internal/auth/simple.go`).
 
 ### Beam UI: full-stack development (recommended for frontend)
 
@@ -115,11 +141,31 @@ Open the **Vite dev server URL** in the browser (e.g. `http://localhost:5173`), 
 
 **`make dev-web`** (Vite without proxy) does not register the `/api` → `:8081` proxy. For API access from the Beam UI in that mode, set `VITE_API_BASE_URL=http://127.0.0.1:8081` in `packages/beam/.env.local`, or use **`make dev-web-proxy`** (recommended for full-stack).
 
-Optional: **`make dev-cli`** builds and symlinks `contenox` to `~/.local/bin/contenox` for a system-wide command during development.
+Optional: **`make dev-install`** (or **`make dev-link`** after a build) symlinks `contenox` to `~/.local/bin/contenox` for development.
 
-### Enterprise marketing site (`enterprise/site`)
+### Beam Desktop (Electron)
 
-The Next.js site includes documentation under `/docs`. **Cross-page doc search** loads a static index built from `enterprise/site/content/docs/**/*.md`. The generated file `enterprise/site/public/docs-search-index.json` is **gitignored**; it is produced automatically before `npm run dev` and `npm run build` (`prebuild`). If you change markdown under `content/docs/` and need the index without a full restart, run **`npm run docs:search-index`** in `enterprise/site`.
+`packages/beam-desktop/` is a thin Electron wrapper: it spawns **`contenox beam --data-dir ~/.contenox`** (using `bin/contenox` from the repo in dev) and opens a window on **`http://127.0.0.1:8081`**. The React app and HTTP API are the same as in the browser; Electron does not replace Vite or the Go server.
+
+**Prerequisites:** Node/npm (`make deps-npm`) and **`make build-contenox`** so `bin/contenox` exists.
+
+Run **`contenox init`** once if you do not already have `~/.contenox/`.
+
+**Dev — Electron shell** (opens DevTools in `--dev`; rebuild the CLI when you change Go):
+
+```bash
+make dev-desktop
+```
+
+For **full-stack UI work**, the usual flow is still **two terminals**: **`make dev-go-watch`** (or `contenox beam`) plus **`make dev-web-proxy`**, and use the browser. Use **`make dev-desktop`** when you specifically want the Electron window.
+
+**Production installer** (Linux `.deb` / `AppImage`, macOS `.dmg`, Windows `.exe` via `electron-builder`):
+
+```bash
+make build-desktop
+```
+
+The packaged app bundles `contenox` as an extra resource next to the Electron app.
 
 ## Running tests
 
@@ -141,13 +187,13 @@ make test-system       # only TestSystem_*
 **CLI package (verbose):**
 
 ```bash
-make test-cli-verbose
+make test-contenox-verbose
 ```
 
 **CLI help drift check** (after changing Cobra commands or flags): build first, then:
 
 ```bash
-make test-cli-help
+make test-contenox-help
 ```
 
 **Race detector (optional):**
@@ -205,7 +251,7 @@ _ = apiframework.Encode(w, r, http.StatusCreated, resp)  // @response terminalap
 
 The OpenAPI spec (`docs/openapi.json` and `docs/openapi.yaml`) is generated from the Go types. `make docs-gen` also copies the JSON into `runtime/internal/openapidocs/openapi.json` so it can be **embedded in the `contenox` binary**.
 
-With **`contenox beam`** running (default `http://127.0.0.1:8081`), the same spec is served without the JWT stack, similar to FastAPI’s pattern:
+With **`contenox beam`** running (default `http://127.0.0.1:8081`), the same spec is served without the JWT stack, similar to FastAPI's pattern:
 
 - **`GET /openapi.json`** — raw OpenAPI 3.1 JSON  
 - **`GET /docs`** — RapiDoc UI (loads the embedded spec from `/openapi.json`)
@@ -218,6 +264,6 @@ make docs-html        # standalone RapiDoc HTML under docs/ (depends on docs-gen
 make docs-markdown    # optional: large api-reference.md (Docker or npx)
 ```
 
-Do **not** commit generated OpenAPI/embed outputs (`docs/openapi.*`, `runtime/internal/openapidocs/openapi.json`, `runtime/internal/web/beam/dist/`). Those paths are gitignored where applicable. **`make docs-gen`** drops a tiny stub JSON if needed, runs codegen, then copies the real spec into `runtime/internal/openapidocs/` for `//go:embed`. **`make build-cli`**, **`make test`**, **`make test-unit`**, and related test targets run **`docs-gen` first** so you do not commit or hand-maintain that file.
+Do **not** commit generated OpenAPI/embed outputs (`docs/openapi.*`, `runtime/internal/openapidocs/openapi.json`, `runtime/internal/web/beam/dist/`). Those paths are gitignored where applicable. **`make docs-gen`** drops a tiny stub JSON if needed, runs codegen, then copies the real spec into `runtime/internal/openapidocs/` for `//go:embed`. **`make build-contenox`**, **`make test`**, **`make test-unit`**, and related test targets run **`docs-gen` first** so you do not commit or hand-maintain that file.
 
-GitHub Actions runs **`make ci-prepare-embeds`** (Beam UI + stub) then **`make docs-gen`** before **`make build-cli`**.
+GitHub Actions runs **`make ci-prepare-embeds`** (Beam UI + stub) then **`make docs-gen`** before **`make build-contenox`**.
