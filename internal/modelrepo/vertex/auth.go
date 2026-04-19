@@ -3,11 +3,29 @@ package vertex
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"golang.org/x/oauth2/google"
 )
 
 const cloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
+
+// extractProjectFromVertexURL parses the GCP project ID from a Vertex AI base URL of the form
+// https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}.
+func extractProjectFromVertexURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(u.Path, "/")
+	for i, p := range parts {
+		if p == "projects" && i+1 < len(parts) {
+			return parts[i+1]
+		}
+	}
+	return ""
+}
 
 // BearerToken returns a fresh ADC access token for Vertex AI.
 func BearerToken(ctx context.Context) (string, error) {

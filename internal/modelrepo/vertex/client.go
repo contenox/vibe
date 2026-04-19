@@ -78,6 +78,9 @@ func (c *vertexClient) sendRequest(ctx context.Context, endpoint string, request
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	if project := extractProjectFromVertexURL(c.baseURL); project != "" {
+		req.Header.Set("x-goog-user-project", project)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

@@ -109,9 +109,6 @@ Examples:
 			BaseURL: baseURL,
 		}
 		if err := svc.Create(ctx, backend); err != nil {
-			if isUniqueConstraintBaseURLError(err) {
-				return fmt.Errorf("a backend with URL %q already exists", baseURL)
-			}
 			return fmt.Errorf("failed to add backend: %w", err)
 		}
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/contenox/contenox/internal/modelrepo"
@@ -15,46 +14,32 @@ import (
 func TestUnit_GoogleCatalog_ListModels(t *testing.T) {
 	t.Parallel()
 
-	// Mock the Gemini AI Studio /v1beta/models endpoint.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1beta/models", r.URL.Path)
 		require.Equal(t, http.MethodGet, r.Method)
-		// Gemini AI Studio list is unauthenticated — no auth header expected.
+		require.NotEmpty(t, r.Header.Get("Authorization"), "expected ADC bearer token")
+		require.Equal(t, "test-project", r.Header.Get("x-goog-user-project"))
+		require.Equal(t, "/v1beta1/publishers/google/models", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"models": []map[string]any{
-				{
-					"name":            "models/gemini-2.5-flash",
-					"inputTokenLimit": 1048576,
-					"supportedGenerationMethods": []string{
-						"generateContent",
-						"embedContent",
-					},
-				},
-				{
-					"name":            "models/gemini-2.5-pro",
-					"inputTokenLimit": 2097152,
-					"supportedGenerationMethods": []string{
-						"generateContent",
-					},
-				},
+			"publisherModels": []map[string]any{
+				{"name": "publishers/google/models/gemini-2.5-flash"},
+				{"name": "publishers/google/models/gemini-2.5-pro"},
 			},
 		})
 	}))
 	defer server.Close()
 
-	// Patch the list URL by registering a catalog provider that points at our server.
-	// We need to test the googleCatalogProvider directly since the list URL is hardcoded.
-	// Use a test double that replaces the HTTP client.
 	catalog := &googleCatalogProvider{
 		spec: modelrepo.BackendSpec{
 			Type:    "vertex-google",
 			BaseURL: "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1",
 		},
+		tokenFn: func(_ context.Context) (string, error) { return "fake-token", nil },
 		httpClient: &http.Client{
-			Transport: redirectTransport{
-				original: "https://generativelanguage.googleapis.com",
-				target:   server.URL,
+			Transport: bearerInjectTransport{
+				inner:     server.Client().Transport,
+				serverURL: server.URL,
+				token:     "fake-token",
 			},
 		},
 	}
@@ -65,11 +50,9 @@ func TestUnit_GoogleCatalog_ListModels(t *testing.T) {
 
 	flash := models[0]
 	require.Equal(t, "gemini-2.5-flash", flash.Name)
-	require.Equal(t, 1048576, flash.ContextLength)
 	require.True(t, flash.CanChat)
 	require.True(t, flash.CanPrompt)
 	require.True(t, flash.CanStream)
-	require.True(t, flash.CanEmbed)
 
 	pro := models[1]
 	require.Equal(t, "gemini-2.5-pro", pro.Name)
@@ -87,6 +70,8 @@ func TestUnit_PublisherCatalog_ListModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
 		require.NotEmpty(t, r.Header.Get("Authorization"), "expected ADC bearer token")
+		require.Equal(t, "test-project", r.Header.Get("x-goog-user-project"))
+		require.Equal(t, "/v1beta1/publishers/anthropic/models", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"publisherModels": []map[string]any{
@@ -106,10 +91,9 @@ func TestUnit_PublisherCatalog_ListModels(t *testing.T) {
 		tokenFn: func(_ context.Context) (string, error) { return "fake-token", nil },
 		httpClient: &http.Client{
 			Transport: bearerInjectTransport{
-				inner:       server.Client().Transport,
-				serverURL:   server.URL,
-				originalURL: "https://aiplatform.googleapis.com",
-				token:       "fake-token",
+				inner:     server.Client().Transport,
+				serverURL: server.URL,
+				token:     "fake-token",
 			},
 		},
 	}
@@ -131,25 +115,11 @@ func TestUnit_PublisherCatalog_ListModels(t *testing.T) {
 	require.Equal(t, "claude-sonnet-4-5-20251029", provider.ModelName())
 }
 
-// redirectTransport rewrites requests destined for `original` to `target`.
-type redirectTransport struct {
-	original string
-	target   string
-}
-
-func (t redirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	cloned := req.Clone(req.Context())
-	cloned.URL.Scheme = "http"
-	cloned.URL.Host = strings.TrimPrefix(t.target, "http://")
-	return http.DefaultTransport.RoundTrip(cloned)
-}
-
 // bearerInjectTransport provides a fake bearer token and redirects to the test server.
 type bearerInjectTransport struct {
-	inner       http.RoundTripper
-	serverURL   string
-	originalURL string
-	token       string
+	inner     http.RoundTripper
+	serverURL string
+	token     string
 }
 
 func (t bearerInjectTransport) RoundTrip(req *http.Request) (*http.Response, error) {

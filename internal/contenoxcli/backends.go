@@ -10,16 +10,6 @@ import (
 	"github.com/contenox/contenox/runtimetypes"
 )
 
-// isUniqueConstraintBaseURLError reports whether err is a UNIQUE constraint failure on llm_backends.base_url.
-// Used by backend_cmd.go to give a friendlier error message.
-func isUniqueConstraintBaseURLError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "UNIQUE constraint failed") && strings.Contains(msg, "base_url")
-}
-
 // setProviderConfigKV stores a cloud provider API key in the SQLite KV store.
 // Used by backend_cmd.go when a backend with an API key is registered.
 func setProviderConfigKV(ctx context.Context, store runtimetypes.Store, providerType, apiKey string) error {

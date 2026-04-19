@@ -25,11 +25,12 @@ CREATE TABLE IF NOT EXISTS llm_affinity_group (
 CREATE TABLE IF NOT EXISTS llm_backends (
     id VARCHAR(255) PRIMARY KEY,
     name VARCHAR(512) NOT NULL UNIQUE,
-    base_url VARCHAR(512) NOT NULL UNIQUE,
+    base_url VARCHAR(512) NOT NULL,
     type VARCHAR(512) NOT NULL,
 
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(type, base_url)
 );
 
 CREATE TABLE IF NOT EXISTS llm_affinity_group_backend_assignments (

@@ -27,11 +27,12 @@ CREATE TABLE IF NOT EXISTS llm_affinity_group (
 CREATE TABLE IF NOT EXISTS llm_backends (
     id VARCHAR(255) PRIMARY KEY,
     name VARCHAR(512) NOT NULL UNIQUE,
-    base_url VARCHAR(512) NOT NULL UNIQUE,
+    base_url VARCHAR(512) NOT NULL,
     type VARCHAR(512) NOT NULL,
 
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(type, base_url)
 );
 
 CREATE TABLE IF NOT EXISTS llm_affinity_group_backend_assignments (
@@ -273,3 +274,27 @@ ALTER TABLE plan_steps ADD COLUMN failure_class        VARCHAR(50);
 
 ALTER TABLE terminal_sessions ADD COLUMN workspace_id VARCHAR(255);
 
+
+PRAGMA foreign_keys=off;
+BEGIN TRANSACTION;
+
+-- 1. Create the clean version
+CREATE TABLE llm_backends_temp (
+    id VARCHAR(255) PRIMARY KEY,
+    name VARCHAR(512) NOT NULL UNIQUE,
+    base_url VARCHAR(512) NOT NULL, -- Constraint removed here
+    type VARCHAR(512) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+-- 2. Move your data
+INSERT INTO llm_backends_temp (id, name, base_url, type, created_at, updated_at)
+SELECT id, name, base_url, type, created_at, updated_at FROM llm_backends;
+
+-- 3. Swap them
+DROP TABLE llm_backends;
+ALTER TABLE llm_backends_temp RENAME TO llm_backends;
+
+COMMIT;
+PRAGMA foreign_keys=on;

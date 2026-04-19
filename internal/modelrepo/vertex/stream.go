@@ -72,6 +72,9 @@ func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 			return
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
+		if project := extractProjectFromVertexURL(c.baseURL); project != "" {
+			req.Header.Set("x-goog-user-project", project)
+		}
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {

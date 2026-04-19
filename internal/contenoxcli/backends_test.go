@@ -26,12 +26,15 @@ func setupSQLiteStore(t *testing.T) (context.Context, libdb.DBManager, runtimety
 	return ctx, db, store
 }
 
-func Test_isUniqueConstraintBaseURLError(t *testing.T) {
-	require.True(t, isUniqueConstraintBaseURLError(newTestErr("constraint failed: UNIQUE constraint failed: llm_backends.base_url (2067)")))
-	require.True(t, isUniqueConstraintBaseURLError(newTestErr("libdb: unexpected database error: UNIQUE constraint failed: llm_backends.base_url")))
-	require.False(t, isUniqueConstraintBaseURLError(nil))
-	require.False(t, isUniqueConstraintBaseURLError(newTestErr("other error")))
-	require.False(t, isUniqueConstraintBaseURLError(newTestErr("UNIQUE constraint failed: llm_backends.name")))
+func Test_isDuplicateBackendError(t *testing.T) {
+	// legacy single-column constraint (old schema)
+	require.True(t, isDuplicateBackendError(newTestErr("constraint failed: UNIQUE constraint failed: llm_backends.base_url (2067)")))
+	require.True(t, isDuplicateBackendError(newTestErr("libdb: unexpected database error: UNIQUE constraint failed: llm_backends.base_url")))
+	// composite constraint (new schema)
+	require.True(t, isDuplicateBackendError(newTestErr("UNIQUE constraint failed: llm_backends.type, llm_backends.base_url")))
+	require.False(t, isDuplicateBackendError(nil))
+	require.False(t, isDuplicateBackendError(newTestErr("other error")))
+	require.False(t, isDuplicateBackendError(newTestErr("UNIQUE constraint failed: llm_backends.name")))
 }
 
 type testErr struct{ msg string }
@@ -148,7 +151,7 @@ func Test_backendService_delete(t *testing.T) {
 	require.Empty(t, list)
 }
 
-func Test_backendService_uniqueBaseURL_rejected(t *testing.T) {
+func Test_backendService_sameTypeAndURL_rejected(t *testing.T) {
 	ctx, db, _ := setupSQLiteStore(t)
 	svc := backendservice.New(db)
 
@@ -158,7 +161,19 @@ func Test_backendService_uniqueBaseURL_rejected(t *testing.T) {
 	require.NoError(t, svc.Create(ctx, b1))
 	err := svc.Create(ctx, b2)
 	require.Error(t, err)
-	require.True(t, isUniqueConstraintBaseURLError(err))
+	require.True(t, isDuplicateBackendError(err))
+}
+
+func Test_backendService_differentType_sameURL_allowed(t *testing.T) {
+	ctx, db, _ := setupSQLiteStore(t)
+	svc := backendservice.New(db)
+
+	url := "https://us-central1-aiplatform.googleapis.com/v1/projects/my-project/locations/us-central1"
+	b1 := &runtimetypes.Backend{ID: uuid.NewString(), Name: "vertex-google", Type: "vertex-google", BaseURL: url}
+	b2 := &runtimetypes.Backend{ID: uuid.NewString(), Name: "vertex-anthropic", Type: "vertex-anthropic", BaseURL: url}
+
+	require.NoError(t, svc.Create(ctx, b1))
+	require.NoError(t, svc.Create(ctx, b2))
 }
 
 // ---------------------------------------------------------------------------
