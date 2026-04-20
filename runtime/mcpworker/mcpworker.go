@@ -1,14 +1,4 @@
-// Package mcpworker manages persistent MCP server sessions across a distributed
-// deployment. Each registered MCP server gets a long-lived MCPSessionPool on
-// every node, exposed via NATS request-reply so that PersistentRepo can route
-// tool calls without knowing which node owns the session.
-//
-// NATS subjects:
-//
-//	mcp.{name}.execute     — request: MCPToolRequest JSON → reply: MCPToolReply JSON
-//	mcp.{name}.list-tools  — request: empty → reply: []mcp.Tool JSON
-//	mcp.servers.created    — event: MCPServer JSON (new server registered)
-//	mcp.servers.deleted    — event: MCPDeletedEvent JSON (server removed)
+// Package mcpworker keeps MCP server connections alive across chain steps. Chains reach databases, Git hosts, and internal tools through here without reconnecting on every step.
 package mcpworker
 
 import (

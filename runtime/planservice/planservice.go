@@ -1,8 +1,4 @@
-// Package planservice manages AI-generated execution plans.
-// Each plan is a named, ordered list of steps created from a free-text goal.
-//
-// Chains are passed per-call so the caller decides which planner / executor
-// to use at runtime (selected by the API client).
+// Package planservice stores and advances execution plans. A plan is a named sequence of steps built from a plain-text goal — it persists in SQLite across restarts so work resumes without re-explaining context.
 package planservice
 
 import (

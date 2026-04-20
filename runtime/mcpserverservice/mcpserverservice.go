@@ -1,6 +1,4 @@
-// Package mcpserverservice provides CRUD operations for MCP server configurations.
-// MCP server configs are persisted in the shared database and consumed by
-// PersistentRepo at hook-execution time via transient connections (distributed-safe).
+// Package mcpserverservice stores MCP server configs. Add a database, Git host, or internal tool once — chains can call it from that point on.
 package mcpserverservice
 
 import (

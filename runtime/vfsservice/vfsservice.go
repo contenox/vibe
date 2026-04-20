@@ -1,7 +1,4 @@
-// Package vfsservice provides a virtual filesystem abstraction backed by
-// Postgres (via libdbexec). It is a verbatim port of
-// enterprise/bob/fileservice/fileservice.go with accessctrstore replaced by
-// Callbacks and the store package swapped to vfsstore.
+// Package vfsservice exposes the local filesystem to chains. Steps read files, inspect repos, and write outputs through this.
 package vfsservice
 
 import (

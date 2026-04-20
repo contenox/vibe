@@ -46,13 +46,13 @@ Plans are stored in SQLite. They don't evaporate when the session ends.
 
 ---
 
-## Beam
+## Desktop app
 
 ```bash
 contenox
 ```
 
-Opens Beam — where the thread is the workspace. Terminal output, file reads, live agent steps, and plan state appear inline in the conversation. Same runtime as the CLI. No cloud required.
+Opens the Contenox desktop app. Terminal output, file reads, live agent steps, and plan state appear inline in the same thread you're typing in. No cloud required.
 
 ---
 

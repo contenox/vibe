@@ -2,6 +2,7 @@
   "name": "@contenox/beam",
   "private": true,
   "version": "0.6.5",
+  "description": "Contenox web UI — chain editor, chat thread, file browser, and live terminal in one view.",
   "type": "module",
   "scripts": {
     "dev": "vite",

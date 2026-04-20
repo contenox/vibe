@@ -1,6 +1,4 @@
-// Package sessionservice provides CRUD operations for CLI chat sessions.
-// It encapsulates messagestore + runtimetypes KV orchestration so session_cmd
-// and chat flows can share logic without duplicating raw transaction management.
+// Package sessionservice stores CLI chat sessions so conversations persist across terminal restarts.
 package sessionservice
 
 import (

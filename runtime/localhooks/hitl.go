@@ -1,4 +1,4 @@
-// Package localhooks provides local hook integrations.
+// Package localhooks provides hooks that fire around chain execution: approval gates, plan summaries, and step transitions.
 package localhooks
 
 import (

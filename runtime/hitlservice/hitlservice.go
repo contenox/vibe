@@ -1,7 +1,5 @@
-// Package hitlservice manages HITL (human-in-the-loop) policy evaluation and
-// in-flight approval gate management for tool calls that require human review.
-// The policy is loaded from a VFS JSON file on every Evaluate call so edits
-// take effect immediately without a server restart.
+// Package hitlservice evaluates approval policies before shell commands and tool calls execute.
+// Each action pauses here and waits for an approve or deny decision before the chain continues.
 package hitlservice
 
 import (

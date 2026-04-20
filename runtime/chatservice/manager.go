@@ -1,4 +1,4 @@
-// Package chatservice provides chat session management and message persistence.
+// Package chatservice persists the conversation thread. Terminal output, file reads, and agent steps are stored here so the thread survives restarts.
 package chatservice
 
 import (

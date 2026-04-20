@@ -2,7 +2,7 @@
   "name": "@contenox/beam-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Contenox Beam desktop application",
+  "description": "Contenox desktop app — chains, files, and a live shell in one thread. Runs on your machine, no cloud required.",
   "author": {
     "name": "Contenox",
     "email": "hello@contenox.com"
@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "com.contenox.beam",
-    "productName": "Contenox Beam",
+    "productName": "Contenox",
     "extraResources": [
       { "from": "../../bin/contenox", "to": "contenox" }
     ],

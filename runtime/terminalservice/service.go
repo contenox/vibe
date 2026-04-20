@@ -1,4 +1,4 @@
-// Package terminalservice hosts a single PTY-backed shell session per process.
+// Package terminalservice runs a real shell session on the local machine. Chains call into this to execute commands and read back real output.
 package terminalservice
 
 import (

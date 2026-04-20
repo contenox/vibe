@@ -1,5 +1,4 @@
-// Package chatsessionmodes orchestrates a single chat turn: mode resolution, context injection,
-// chain execution, and persistence. HTTP handlers should delegate here.
+// Package chatsessionmodes routes each chat turn: resolves which chain to run, injects context, executes steps, and persists the result.
 package chatsessionmodes
 
 import (
