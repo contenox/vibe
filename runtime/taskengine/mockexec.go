@@ -65,18 +65,10 @@ func (m *MockTaskExecutor) TaskExec(ctx context.Context, startingTime time.Time,
 		switch v := output.(type) {
 		case string:
 			outputDataType = DataTypeString
-		case bool:
-			outputDataType = DataTypeBool
 		case int:
 			outputDataType = DataTypeInt
-		case float64:
-			outputDataType = DataTypeFloat
 		case ChatHistory:
 			outputDataType = DataTypeChatHistory
-		case OpenAIChatRequest:
-			outputDataType = DataTypeOpenAIChat
-		case OpenAIChatResponse:
-			outputDataType = DataTypeOpenAIChatResponse
 		case map[string]any:
 			outputDataType = DataTypeJSON
 		default:
@@ -103,17 +95,8 @@ func (m *MockTaskExecutor) TaskExec(ctx context.Context, startingTime time.Time,
 	// If no explicit transition response was provided, infer it.
 	// This is crucial for conditional handlers used in tests.
 	if transitionResponse == "" {
-		switch currentTask.Handler {
-		case HandlePromptToCondition:
-			// For condition key handler, use the string output as the transition eval.
-			if s, ok := output.(string); ok {
-				transitionResponse = s
-			}
-		default:
-			// Generic fallback: if the output is a string, use it.
-			if s, ok := output.(string); ok {
-				transitionResponse = s
-			}
+		if s, ok := output.(string); ok {
+			transitionResponse = s
 		}
 	}
 

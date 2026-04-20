@@ -4,8 +4,23 @@ import (
 	"strings"
 )
 
-// StripCodeFences removes leading and trailing Markdown code fences from LLM
-// output. It handles ` ``` `, ` ```json `, ` ```javascript ` etc.
+func stripCodeFences(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if !strings.HasPrefix(trimmed, "```") {
+		return trimmed
+	}
+	trimmed = trimmed[3:]
+	if idx := strings.IndexByte(trimmed, '\n'); idx >= 0 {
+		trimmed = trimmed[idx+1:]
+	} else {
+		return strings.TrimSpace(trimmed)
+	}
+	if idx := strings.LastIndex(trimmed, "```"); idx >= 0 {
+		trimmed = trimmed[:idx]
+	}
+	return strings.TrimSpace(trimmed)
+}
+
 func StripCodeFences(s string) string { return stripCodeFences(s) }
 
 // ExtractJSONArray scans s for the outermost [...] block and returns it.

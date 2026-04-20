@@ -1,4 +1,4 @@
-import { Button, Card, FormField, Label, Panel, Spinner, Textarea } from '@contenox/ui';
+import { Button, Card, Collapsible, FormField, Input, Label, Panel, Select, Spinner, Textarea } from '@contenox/ui';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useUpdateChain } from '../../../../hooks/useChains';
@@ -71,6 +71,37 @@ export default function ChainEditor({
         <Label>{t('chains.form_description')}</Label>
         <div>{chain.description}</div>
       </div>
+
+      <Collapsible title={t('chains.form_chain_settings')} defaultExpanded={false} className="mb-4">
+        <div className="grid grid-cols-2 gap-4 pt-2">
+          <div>
+            <Label className="block text-sm font-medium">{t('chains.token_limit')}</Label>
+            <Input
+              type="number"
+              min={0}
+              value={chain.token_limit ?? 0}
+              onChange={e => {
+                const v = parseInt(e.target.value, 10);
+                updateChain.mutate({ ...chain, tasks: chain.tasks, token_limit: v || undefined });
+              }}
+              placeholder="0"
+            />
+          </div>
+          <div>
+            <Label className="block text-sm font-medium">{t('chains.form_debug')}</Label>
+            <Select
+              value={chain.debug ? 'true' : 'false'}
+              onChange={e => {
+                updateChain.mutate({ ...chain, tasks: chain.tasks, debug: e.target.value === 'true' || undefined });
+              }}
+              options={[
+                { value: 'false', label: t('common.no') },
+                { value: 'true', label: t('common.yes') },
+              ]}
+            />
+          </div>
+        </div>
+      </Collapsible>
 
       <FormField label={t('chains.form_tasks')} error={tasksError}>
         <Textarea

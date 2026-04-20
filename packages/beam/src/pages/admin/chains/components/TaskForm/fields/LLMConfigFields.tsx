@@ -143,6 +143,64 @@ export default function LLMConfigFields({
           </div>
         </div>
 
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label className="block text-sm font-medium">{t('chains.task_form.think')}</Label>
+            <Select
+              value={config.think ?? ''}
+              onChange={e => updateConfig({ think: e.target.value || undefined })}
+              options={[
+                { value: '', label: t('chains.task_form.think_default') },
+                { value: 'low', label: t('chains.task_form.think_low') },
+                { value: 'medium', label: t('chains.task_form.think_medium') },
+                { value: 'high', label: t('chains.task_form.think_high') },
+              ]}
+            />
+            <P className="text-text-muted mt-1 text-xs">{t('chains.task_form.think_help')}</P>
+          </div>
+
+          <div>
+            <Label className="block text-sm font-medium">{t('chains.task_form.shift')}</Label>
+            <Select
+              value={config.shift ? 'true' : 'false'}
+              onChange={e => updateConfig({ shift: e.target.value === 'true' || undefined })}
+              options={[
+                { value: 'false', label: t('common.no') },
+                { value: 'true', label: t('common.yes') },
+              ]}
+            />
+            <P className="text-text-muted mt-1 text-xs">{t('chains.task_form.shift_help')}</P>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label className="block text-sm font-medium">{t('chains.task_form.hooks')}</Label>
+            <Input
+              value={(config.hooks ?? []).join(', ')}
+              onChange={e => {
+                const val = e.target.value.trim();
+                updateConfig({ hooks: val ? val.split(',').map(s => s.trim()).filter(Boolean) : undefined });
+              }}
+              placeholder="*, !hook_name, hook_a"
+            />
+            <P className="text-text-muted mt-1 text-xs">{t('chains.task_form.hooks_help')}</P>
+          </div>
+
+          <div>
+            <Label className="block text-sm font-medium">{t('chains.task_form.hide_tools')}</Label>
+            <Input
+              value={(config.hide_tools ?? []).join(', ')}
+              onChange={e => {
+                const val = e.target.value.trim();
+                updateConfig({ hide_tools: val ? val.split(',').map(s => s.trim()).filter(Boolean) : undefined });
+              }}
+              placeholder="tool1, hook.tool2"
+            />
+            <P className="text-text-muted mt-1 text-xs">{t('chains.task_form.hide_tools_help')}</P>
+          </div>
+        </div>
+
         <Collapsible
           title={t('chains.task_form.retry_policy')}
           defaultExpanded={false}

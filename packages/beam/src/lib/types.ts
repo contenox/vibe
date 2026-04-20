@@ -584,30 +584,6 @@ export interface HookCall {
   args?: Record<string, string>;
 }
 
-export interface TransitionBranch {
-  operator?: OperatorTerm;
-  when: string;
-  goto: string;
-  compose?: BranchCompose;
-}
-
-export interface ChainTask {
-  id: string;
-  description: string;
-  handler: TaskHandler;
-  system_instruction?: string;
-  valid_conditions?: Record<string, boolean>;
-  execute_config?: ExecuteConfig;
-  hook?: HookCall;
-  print?: string;
-  prompt_template: string;
-  output_template?: string;
-  input_var?: string;
-  transition: TaskTransition;
-  timeout?: string;
-  retry_on_failure?: number;
-}
-
 export type ComposeStrategy = 'override' | 'merge_chat_histories' | 'append_string_to_chat_history';
 
 export type OperatorTerm =
@@ -620,7 +596,6 @@ export type OperatorTerm =
   | 'in_range'
   | 'default';
 
-// Keep exactly ONE TransitionBranch definition (delete any duplicates)
 export interface TransitionBranch {
   operator?: OperatorTerm;
   when: string;
@@ -628,31 +603,25 @@ export interface TransitionBranch {
   compose?: BranchCompose;
 }
 
-// ✅ Add this: the missing TaskTransition type
 export interface TaskTransition {
-  /** Task id to go to on failure, or 'end' (omit/undefined for none). */
   on_failure?: string;
-  /** Conditional branches; use goto: 'end' to finish. */
   branches: TransitionBranch[];
 }
 
-// Forms use the same shape; alias for clarity in UI layer
 export type FormTransition = TaskTransition;
 
-// Keep ChainTask referring to TaskTransition
 export interface ChainTask {
   id: string;
   description: string;
   handler: TaskHandler;
   system_instruction?: string;
-  valid_conditions?: Record<string, boolean>;
   execute_config?: ExecuteConfig;
   hook?: HookCall;
   print?: string;
   prompt_template: string;
   output_template?: string;
   input_var?: string;
-  transition: TaskTransition; // <- now resolvable
+  transition: TaskTransition;
   timeout?: string;
   retry_on_failure?: number;
 }
@@ -1027,33 +996,19 @@ export interface DraggableProvided {
 }
 
 export type TaskHandler =
-  | 'prompt_to_condition'
-  | 'prompt_to_int'
-  | 'prompt_to_float'
-  | 'prompt_to_range'
-  | 'prompt_to_string'
-  | 'text_to_embedding'
-  | 'raise_error'
   | 'chat_completion'
   | 'execute_tool_calls'
-  | 'parse_command'
-  | 'parse_key_value'
-  | 'convert_to_openai_chat_response'
-  | 'noop'
-  | 'hook';
+  | 'hook'
+  | 'prompt_to_string'
+  | 'prompt_to_int'
+  | 'raise_error'
+  | 'noop';
 
-export const HandleConditionKey: TaskHandler = 'prompt_to_condition';
-export const HandleParseNumber: TaskHandler = 'prompt_to_int';
-export const HandleParseScore: TaskHandler = 'prompt_to_float';
-export const HandleParseRange: TaskHandler = 'prompt_to_range';
 export const HandlePromptToString: TaskHandler = 'prompt_to_string';
-export const HandleEmbedding: TaskHandler = 'text_to_embedding';
+export const HandleParseNumber: TaskHandler = 'prompt_to_int';
 export const HandleRaiseError: TaskHandler = 'raise_error';
 export const HandleChatCompletion: TaskHandler = 'chat_completion';
 export const HandleExecuteToolCalls: TaskHandler = 'execute_tool_calls';
-export const HandleParseTransition: TaskHandler = 'parse_command';
-export const HandleParseKeyValue: TaskHandler = 'parse_key_value';
-export const HandleConvertToOpenAIChatResponse: TaskHandler = 'convert_to_openai_chat_response';
 export const HandleNoop: TaskHandler = 'noop';
 export const HandleHook: TaskHandler = 'hook';
 

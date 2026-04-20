@@ -218,7 +218,6 @@ const TaskDetailsPanel: React.FC<TaskDetailsPanelProps> = ({
       prompt_template: data.prompt_template || editedTask.prompt_template,
       transition: data.transition || editedTask.transition,
       system_instruction: data.system_instruction,
-      valid_conditions: data.valid_conditions,
       execute_config: data.execute_config,
       hook: data.hook,
       print: data.print,

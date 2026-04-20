@@ -9,13 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"dario.cat/mergo"
 	"github.com/contenox/contenox/runtime/internal/llmrepo"
 	libmodelprovider "github.com/contenox/contenox/runtime/internal/modelrepo"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtime/taskengine/compact"
 	"github.com/contenox/contenox/runtime/taskengine/llmretry"
-	"github.com/google/uuid"
 )
 
 // TaskExecutor executes individual tasks within a workflow.
@@ -284,113 +282,6 @@ func (exe *SimpleExec) promptWithRetry(
 
 // Prompt resolves a model client and sends the prompt
 // to be executed. Returns the trimmed response string or an error.
-func (exe *SimpleExec) Embed(ctx context.Context, llmCall LLMExecutionConfig, prompt string, ctxLength int) ([]float64, error) {
-	reportErr, _, end := exe.tracker.Start(ctx, "SimpleExec", "Embed",
-		"model_name", llmCall.Model,
-		"model_names", llmCall.Models,
-		"provider_types", llmCall.Providers,
-		"provider_type", llmCall.Provider,
-	)
-	defer end()
-
-	if prompt == "" {
-		err := fmt.Errorf("unprocessable empty prompt")
-		reportErr(err)
-		return nil, err
-	}
-
-	// Count tokens and check limits
-	modelName := getPrimaryModel(&llmCall)
-	if err := exe.countTokensAndCheckLimit(ctx, modelName, prompt, ctxLength); err != nil {
-		reportErr(err)
-		return nil, err
-	}
-
-	providerNames := []string{}
-	if llmCall.Provider != "" {
-		providerNames = append(providerNames, llmCall.Provider)
-	}
-	if llmCall.Providers != nil {
-		providerNames = append(providerNames, llmCall.Providers...)
-	}
-	modelNames := []string{}
-	if llmCall.Model != "" {
-		modelNames = append(modelNames, llmCall.Model)
-	}
-	if llmCall.Models != nil {
-		modelNames = append(modelNames, llmCall.Models...)
-	}
-	if len(providerNames) > 1 {
-		return nil, fmt.Errorf("multiple providers specified")
-	}
-	if len(modelNames) > 1 {
-		return nil, fmt.Errorf("multiple models specified")
-	}
-	privider := ""
-	modelNameOut := ""
-	if len(modelNames) > 0 {
-		modelNameOut = modelNames[0]
-	}
-	if len(providerNames) > 0 {
-		privider = providerNames[0]
-	}
-
-	response, _, err := exe.repo.Embed(ctx, llmrepo.EmbedRequest{
-		ProviderType: privider,
-		ModelName:    modelNameOut,
-		// Tracker:      exe.tracker,
-	}, prompt)
-	if err != nil {
-		err = fmt.Errorf("prompt execution failed: %w", err)
-		reportErr(err)
-		return nil, err
-	}
-
-	return response, nil
-}
-
-// rang executes the prompt and attempts to parse the response as a range string (e.g. "6-8").
-// If the response is a single number, it returns a degenerate range like "6-6".
-func (exe *SimpleExec) rang(ctx context.Context, systemInstruction string, llmCall LLMExecutionConfig, prompt string, ctxLength int) (string, error) {
-	response, err := exe.Prompt(ctx, systemInstruction, llmCall, prompt, ctxLength)
-	if err != nil {
-		return "", fmt.Errorf("rang: prompt execution failed: %w", err)
-	}
-
-	return parseRangeString(response, prompt, response)
-}
-
-// parseRangeString parses and validates a string as either a range ("6-8") or a single number.
-// Returns the normalized range string (e.g., "6-8" or "6-6") or an error.
-func parseRangeString(input, prompt, response string) (string, error) {
-	clean := strings.TrimSpace(input)
-	clean = strings.ReplaceAll(clean, " ", "")
-	clean = strings.ReplaceAll(clean, "\"", "")
-	clean = strings.ReplaceAll(clean, "'", "")
-
-	if strings.Contains(clean, "-") {
-		parts := strings.Split(clean, "-")
-		if len(parts) != 2 {
-			return "", fmt.Errorf("invalid range format: %q", input)
-		}
-		_, err1 := parseNumber(parts[0])
-		_, err2 := parseNumber(parts[1])
-		if err1 != nil {
-			return "", fmt.Errorf("invalid number format: prompt %s answer %s invalid part %q %w", prompt, response, parts[0], err1)
-		}
-		if err2 != nil {
-			return "", fmt.Errorf("invalid number format: prompt %s answer %s invalid part %q %w", prompt, response, parts[1], err2)
-		}
-		return parts[0] + "-" + parts[1], nil // return normalized (already clean)
-	}
-
-	// Try as single number
-	if _, err := parseNumber(clean); err != nil {
-		return "", fmt.Errorf("invalid number format: prompt %s answer %s %w", prompt, response, err)
-	}
-
-	return clean + "-" + clean, nil
-}
 
 // number executes the prompt and parses the response as an integer.
 func (exe *SimpleExec) number(ctx context.Context, systemInstruction string, llmCall LLMExecutionConfig, prompt string, ctxLength int) (int, error) {
@@ -412,18 +303,6 @@ func (exe *SimpleExec) number(ctx context.Context, systemInstruction string, llm
 	return int(num), nil
 }
 
-// score executes the prompt and parses the response as a floating-point score.
-func (exe *SimpleExec) score(ctx context.Context, systemInstruction string, llmCall LLMExecutionConfig, prompt string, ctxLength int) (float64, error) {
-	response, err := exe.Prompt(ctx, systemInstruction, llmCall, prompt, ctxLength)
-	if err != nil {
-		return 0, fmt.Errorf("score: prompt execution failed: %w", err)
-	}
-	f, err := parseNumber(response)
-	if err != nil {
-		return 0, fmt.Errorf("invalid number format: prompt %s answer %s %w", prompt, response, err)
-	}
-	return f, nil
-}
 
 // TaskExec dispatches task execution based on the task type.
 func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time, ctxLength int, chainContext *ChainContext, currentTask *TaskDefinition, input any, dataType DataType) (any, DataType, string, error) {
@@ -451,10 +330,6 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			return prompt, nil
 		case DataTypeInt:
 			return fmt.Sprintf("%d", input), nil
-		case DataTypeFloat:
-			return fmt.Sprintf("%f", input), nil
-		case DataTypeBool:
-			return fmt.Sprintf("%t", input), nil
 		case DataTypeChatHistory:
 			history, ok := input.(ChatHistory)
 			if !ok {
@@ -464,16 +339,6 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 				return "", fmt.Errorf("SEVERBUG: chat history is empty")
 			}
 			return history.Messages[len(history.Messages)-1].Content, nil
-		case DataTypeOpenAIChat:
-			request, ok := input.(OpenAIChatRequest)
-			if !ok {
-				return "", fmt.Errorf("internal error: input is not an OpenAIChatRequest")
-			}
-			if len(request.Messages) == 0 {
-				return "", fmt.Errorf("cannot get prompt from empty OpenAI chat request")
-			}
-			return request.Messages[len(request.Messages)-1].Content, nil
-
 		default:
 			return "", fmt.Errorf("getPrompt unsupported input type for task %v: %v", currentTask.Handler.String(), outputType.String())
 		}
@@ -483,15 +348,8 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 	}
 	switch currentTask.Handler {
 	case HandlePromptToString,
-		HandlePromptToCondition,
 		HandlePromptToInt,
-		HandlePromptToFloat,
-		HandlePromptToRange,
-		HandleParseTransition,
-		HandleTextToEmbedding,
-		HandleRaiseError,
-		HandleParseKeyValue,
-		HandlePromptToJS:
+		HandleRaiseError:
 		prompt, err := getPrompt()
 		if err != nil {
 			return nil, DataTypeAny, "", err
@@ -507,44 +365,12 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			output = transitionEval
 			outputType = DataTypeString
 
-		case HandlePromptToCondition:
-			var hit bool
-			hit, taskErr = exe.condition(taskCtx, currentTask.SystemInstruction, *currentTask.ExecuteConfig, currentTask.ValidConditions, prompt, ctxLength)
-			output = hit
-			outputType = DataTypeBool
-			transitionEval = strconv.FormatBool(hit)
-
 		case HandlePromptToInt:
 			var number int
 			number, taskErr = exe.number(taskCtx, currentTask.SystemInstruction, *currentTask.ExecuteConfig, prompt, ctxLength)
 			output = number
 			outputType = DataTypeInt
 			transitionEval = strconv.FormatInt(int64(number), 10)
-
-		case HandlePromptToFloat:
-			var score float64
-			score, taskErr = exe.score(taskCtx, currentTask.SystemInstruction, *currentTask.ExecuteConfig, prompt, ctxLength)
-			output = score
-			outputType = DataTypeFloat
-			transitionEval = strconv.FormatFloat(score, 'f', 2, 64)
-
-		case HandlePromptToRange:
-			transitionEval, taskErr = exe.rang(taskCtx, currentTask.SystemInstruction, *currentTask.ExecuteConfig, prompt, ctxLength)
-			outputType = DataTypeString
-			output = transitionEval
-
-		case HandleParseTransition:
-			transitionEval, taskErr = exe.parseTransition(prompt)
-			// output / outputType pass-through
-
-		case HandleTextToEmbedding:
-			message, err := getPrompt()
-			if err != nil {
-				return nil, DataTypeAny, "", fmt.Errorf("failed to get prompt: %w", err)
-			}
-			output, taskErr = exe.Embed(taskCtx, *currentTask.ExecuteConfig, message, ctxLength)
-			outputType = DataTypeVector
-			transitionEval = "ok"
 
 		case HandleRaiseError:
 			message, err := getPrompt()
@@ -553,70 +379,7 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			}
 			return nil, DataTypeAny, "", errors.New(message)
 
-		case HandleParseKeyValue:
-			var message string
-			switch outputType {
-			case DataTypeJSON:
-				// If already JSON, just pass through
-				output = input
-				outputType = DataTypeJSON
-				transitionEval = "already_json"
-			default:
-				message, err = getPrompt()
-				if err != nil {
-					return nil, DataTypeAny, "", fmt.Errorf("failed to get prompt: %w", err)
-				}
-				// Parse key-value pairs
-				result, err := parseKeyValueString(message)
-				if err != nil {
-					return nil, DataTypeAny, "", fmt.Errorf("failed to parse key-value string: %w", err)
-				}
-
-				output = result
-				outputType = DataTypeJSON
-				transitionEval = "parsed"
-			}
-
-		case HandlePromptToJS:
-			// 1) Ask the model for JS source (or JSON containing JS).
-			rawResponse, err := exe.Prompt(taskCtx, currentTask.SystemInstruction, *currentTask.ExecuteConfig, prompt, ctxLength)
-			if err != nil {
-				taskErr = fmt.Errorf("prompt_to_js: prompt execution failed: %w", err)
-				break
-			}
-
-			// 2) Normalize: strip code fences and, if it's JSON, extract the `code` field.
-			jsCode := normalizeJSResponse(rawResponse)
-
-			output = map[string]any{
-				"code": jsCode,
-			}
-			outputType = DataTypeJSON
-
-			// 3) Simple transition key for branching.
-			if strings.TrimSpace(jsCode) == "" {
-				transitionEval = "empty_js"
-			} else {
-				transitionEval = "ok"
-			}
-
 		}
-
-	case HandleConvertToOpenAIChatResponse:
-		if dataType != DataTypeChatHistory {
-			return nil, DataTypeAny, "", fmt.Errorf("handler '%s' requires input of type 'chat_history', used var %s, but got '%s'", currentTask.InputVar, currentTask.Handler, dataType.String())
-		}
-		chatHistory, ok := input.(ChatHistory)
-		if !ok {
-			return nil, DataTypeAny, "", fmt.Errorf("input data is not of type ChatHistory")
-		}
-
-		id := fmt.Sprintf("chatcmpl-%d-%s", time.Now().UnixNano(), uuid.NewString()[:4])
-		openAIResponse := ConvertChatHistoryToOpenAI(id, chatHistory)
-		output = openAIResponse
-		outputType = DataTypeOpenAIChatResponse
-		transitionEval = "converted"
-		taskErr = nil
 
 	case HandleChatCompletion:
 		if currentTask.ExecuteConfig == nil {
@@ -627,20 +390,6 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 		var finalExecConfig *LLMExecutionConfig = currentTask.ExecuteConfig
 
 		switch dataType {
-		case DataTypeOpenAIChat:
-			openAIRequest, ok := input.(OpenAIChatRequest)
-			if !ok {
-				return nil, DataTypeAny, "", fmt.Errorf("input data for handler %s claimed to be %s but was %T", currentTask.Handler, dataType.String(), input)
-			}
-
-			var requestConfig LLMExecutionConfig
-			chatHistory, _, _, requestConfig = ConvertOpenAIToChatHistory(openAIRequest)
-
-			finalExecConfig = &requestConfig
-			if err := mergo.Merge(finalExecConfig, currentTask.ExecuteConfig, mergo.WithOverride); err != nil {
-				return nil, DataTypeAny, "", fmt.Errorf("failed to merge execution configs: %w", err)
-			}
-
 		case DataTypeChatHistory:
 			var ok bool
 			chatHistory, ok = input.(ChatHistory)
@@ -661,7 +410,7 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			}
 
 		default:
-			return nil, DataTypeAny, "", fmt.Errorf("handler '%s' requires input of type 'openai_chat', 'chat_history', or 'string', used var: %s but got '%s'", currentTask.InputVar, currentTask.Handler, dataType.String())
+			return nil, DataTypeAny, "", fmt.Errorf("handler '%s' requires input of type 'chat_history' or 'string', used var: %s but got '%s'", currentTask.InputVar, currentTask.Handler, dataType.String())
 		}
 
 		// Count tokens and check limits for chat completion
@@ -831,24 +580,6 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 	return output, outputType, transitionEval, taskErr
 }
 
-func (exe *SimpleExec) parseTransition(inputStr string) (string, error) {
-	if inputStr == "" {
-		return "", nil
-	}
-	trimmedInput := strings.TrimSpace(inputStr)
-	if !strings.HasPrefix(trimmedInput, "/") {
-		return "pass", nil
-	}
-
-	// Parse command
-	parts := strings.SplitN(trimmedInput, " ", 2)
-	command := strings.TrimPrefix(parts[0], "/")
-	if command == "" {
-		return "", fmt.Errorf("empty command")
-	}
-
-	return command, nil
-}
 
 func (exe *SimpleExec) executeLLM(
 	ctx context.Context,
@@ -1173,88 +904,6 @@ func (exe *SimpleExec) hookengine(
 	return finalOutput, finalOutputType, finalTransitionEval, nil
 }
 
-// condition executes a prompt and evaluates its result against a provided condition mapping.
-// It returns true/false based on the resolved condition value or fallback heuristics.
-func (exe *SimpleExec) condition(ctx context.Context, systemInstruction string, llmCall LLMExecutionConfig, validConditions map[string]bool, prompt string, ctxLength int) (bool, error) {
-	response, err := exe.Prompt(ctx, systemInstruction, llmCall, prompt, ctxLength)
-	if err != nil {
-		return false, fmt.Errorf("condition: prompt execution failed: %w", err)
-	}
-	// Fix 7: use only EqualFold+TrimSpace. The previous strict-equality early-abort
-	// made all fuzzy matching unreachable — any LLM response with a trailing space
-	// or different capitalisation would always fail.
-	trimmed := strings.TrimSpace(response)
-	for key, val := range validConditions {
-		if strings.EqualFold(trimmed, key) {
-			return val, nil
-		}
-	}
-	return false, fmt.Errorf("condition: unrecognised response %q (valid: %v) prompt: %.200s", response, validConditions, prompt)
-}
-
-func parseKeyValueString(input string) (map[string]any, error) {
-	result := make(map[string]any)
-
-	// Handle empty input
-	if input == "" {
-		return result, nil
-	}
-
-	// Try to detect delimiter - could be comma, semicolon, or newline
-	var pairs []string
-	if strings.Contains(input, ";") {
-		pairs = strings.Split(input, ";")
-	} else if strings.Contains(input, "\n") {
-		pairs = strings.Split(input, "\n")
-	} else {
-		pairs = strings.Split(input, ",")
-	}
-
-	for _, pair := range pairs {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-
-		// Split by equals sign
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) != 2 {
-			// Try colon as alternative delimiter
-			kv = strings.SplitN(pair, ":", 2)
-			if len(kv) != 2 {
-				return nil, fmt.Errorf("invalid key-value pair: %q", pair)
-			}
-		}
-
-		key := strings.TrimSpace(kv[0])
-		value := strings.TrimSpace(kv[1])
-
-		// Fix 3: guard against single-character quoted strings (len==1 would produce
-		// value[1:0] which panics). Both prefix and suffix must match.
-		if len(value) >= 2 &&
-			((strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
-				(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'"))) {
-			value = value[1 : len(value)-1]
-		}
-
-		// Try to parse value as number or boolean
-		if num, err := strconv.ParseFloat(value, 64); err == nil {
-			if num == float64(int(num)) {
-				result[key] = int(num)
-			} else {
-				result[key] = num
-			}
-		} else if value == "true" {
-			result[key] = true
-		} else if value == "false" {
-			result[key] = false
-		} else {
-			result[key] = value
-		}
-	}
-
-	return result, nil
-}
 
 // resolveToolWithResolution tries to find a ToolWithResolution for a given tool name.
 // It first looks up by key, then falls back to scanning by Function.Name / HookName.
@@ -1279,68 +928,6 @@ func resolveToolWithResolution(chainContext *ChainContext, toolName string) (Too
 	return ToolWithResolution{}, false
 }
 
-// stripCodeFences removes leading/trailing Markdown code fences like:
-//
-// ```
-// ```json
-// ```javascript
-//
-// and their trailing ``` at the end of the string.
-func stripCodeFences(s string) string {
-	trimmed := strings.TrimSpace(s)
-	if !strings.HasPrefix(trimmed, "```") {
-		return trimmed
-	}
-
-	// Drop leading ```
-	trimmed = trimmed[3:]
-
-	// Optional language tag up to the first newline
-	if idx := strings.IndexByte(trimmed, '\n'); idx >= 0 {
-		trimmed = trimmed[idx+1:]
-	} else {
-		// No newline, nothing useful left
-		return strings.TrimSpace(trimmed)
-	}
-
-	// Remove trailing ``` (last occurrence)
-	if idx := strings.LastIndex(trimmed, "```"); idx >= 0 {
-		trimmed = trimmed[:idx]
-	}
-
-	return strings.TrimSpace(trimmed)
-}
-
-// normalizeJSResponse tries to turn the raw LLM response into pure JS source:
-//
-// 1. Strip Markdown fences.
-// 2. If the result looks like JSON and has a "code" field, return that.
-// 3. Otherwise, return the stripped text as-is.
-func normalizeJSResponse(raw string) string {
-	if raw == "" {
-		return ""
-	}
-
-	// Step 1: strip ``` fences if present
-	trimmed := stripCodeFences(raw)
-	trimmed = strings.TrimSpace(trimmed)
-	if trimmed == "" {
-		return ""
-	}
-
-	// Step 2: if it's JSON, try to extract { "code": "..." }
-	if strings.HasPrefix(trimmed, "{") {
-		var obj struct {
-			Code string `json:"code"`
-		}
-		if err := json.Unmarshal([]byte(trimmed), &obj); err == nil && obj.Code != "" {
-			return obj.Code
-		}
-	}
-
-	// Step 3: fall back to treating the stripped text as JS
-	return trimmed
-}
 
 // maybeCompact runs [compact.Maybe] on the chat history when llmCall.CompactPolicy
 // is set. The compaction call uses [llmretry.Do] with the same RetryPolicy

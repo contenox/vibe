@@ -515,11 +515,7 @@ func TestUnit_BranchComposeConditionalPaths(t *testing.T) {
 				},
 				{
 					ID:      "check_condition",
-					Handler: taskengine.HandlePromptToCondition,
-					ValidConditions: map[string]bool{
-						"approve": true,
-						"reject":  true,
-					},
+					Handler: taskengine.HandlePromptToString,
 					Transition: taskengine.TaskTransition{
 						Branches: []taskengine.TransitionBranch{
 							{
@@ -589,11 +585,7 @@ func TestUnit_BranchComposeConditionalPaths(t *testing.T) {
 			Tasks: []taskengine.TaskDefinition{
 				{
 					ID:      "router",
-					Handler: taskengine.HandlePromptToCondition,
-					ValidConditions: map[string]bool{
-						"continue": true,
-						"stop":     true,
-					},
+					Handler: taskengine.HandlePromptToString,
 					Transition: taskengine.TaskTransition{
 						Branches: []taskengine.TransitionBranch{
 							{

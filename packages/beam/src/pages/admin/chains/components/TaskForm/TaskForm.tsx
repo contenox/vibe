@@ -65,7 +65,6 @@ export default function TaskForm({
         prompt_template: newFormData.prompt_template!,
         transition: newFormData.transition!,
         system_instruction: newFormData.system_instruction,
-        valid_conditions: newFormData.valid_conditions,
         execute_config: newFormData.execute_config,
         hook,
         print: newFormData.print,

@@ -150,26 +150,8 @@ func (s *Service) SendTurn(ctx context.Context, in TurnInput) (*TurnResult, erro
 		if perr := s.chatManager.PersistDiff(ctx, tx, in.SessionID, toPersist); perr != nil {
 			return nil, perr
 		}
-	case taskengine.DataTypeOpenAIChatResponse:
-		openaiResp, ok := result.(taskengine.OpenAIChatResponse)
-		if !ok || len(openaiResp.Choices) == 0 || openaiResp.Choices[0].Message.Content == nil {
-			return nil, fmt.Errorf("chain returned OpenAI-style response without assistant text")
-		}
-		out.Response = *openaiResp.Choices[0].Message.Content
-		out.InputTokenCount = openaiResp.Usage.PromptTokens
-		out.OutputTokenCount = openaiResp.Usage.CompletionTokens
-		messages = append(messages, taskengine.Message{
-			ID:        uuid.NewString(),
-			Role:      "assistant",
-			Content:   out.Response,
-			Timestamp: time.Now().UTC(),
-		})
-		if perr := s.chatManager.PersistDiff(ctx, tx, in.SessionID, messages); perr != nil {
-			return nil, perr
-		}
 	case taskengine.DataTypeString, taskengine.DataTypeJSON, taskengine.DataTypeAny, taskengine.DataTypeNil,
-		taskengine.DataTypeBool, taskengine.DataTypeInt, taskengine.DataTypeFloat,
-		taskengine.DataTypeVector, taskengine.DataTypeSearchResults:
+		taskengine.DataTypeInt:
 		out.Response = FormatChainResultForChat(result)
 		messages = append(messages, taskengine.Message{
 			ID:        uuid.NewString(),

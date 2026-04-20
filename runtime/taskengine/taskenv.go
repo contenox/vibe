@@ -23,15 +23,9 @@ type DataType int
 const (
 	DataTypeAny DataType = iota
 	DataTypeString
-	DataTypeBool
 	DataTypeInt
-	DataTypeFloat
-	DataTypeVector
-	DataTypeSearchResults
 	DataTypeJSON
 	DataTypeChatHistory
-	DataTypeOpenAIChat
-	DataTypeOpenAIChatResponse
 	DataTypeNil
 )
 
@@ -42,24 +36,12 @@ func (d *DataType) String() string {
 		return "any"
 	case DataTypeString:
 		return "string"
-	case DataTypeBool:
-		return "bool"
 	case DataTypeInt:
 		return "int"
-	case DataTypeFloat:
-		return "float"
-	case DataTypeVector:
-		return "vector"
-	case DataTypeSearchResults:
-		return "search_results"
 	case DataTypeJSON:
 		return "json"
 	case DataTypeChatHistory:
 		return "chat_history"
-	case DataTypeOpenAIChat:
-		return "openai_chat"
-	case DataTypeOpenAIChatResponse:
-		return "openai_chat_response"
 	case DataTypeNil:
 		return "nil"
 	default:
@@ -74,24 +56,12 @@ func DataTypeFromString(s string) (DataType, error) {
 		return DataTypeAny, nil
 	case "string":
 		return DataTypeString, nil
-	case "bool":
-		return DataTypeBool, nil
 	case "int":
 		return DataTypeInt, nil
-	case "float":
-		return DataTypeFloat, nil
-	case "vector":
-		return DataTypeVector, nil
-	case "search_results":
-		return DataTypeSearchResults, nil
 	case "json":
 		return DataTypeJSON, nil
 	case "chat_history":
 		return DataTypeChatHistory, nil
-	case "openai_chat":
-		return DataTypeOpenAIChat, nil
-	case "openai_chat_response":
-		return DataTypeOpenAIChatResponse, nil
 	case "nil":
 		return DataTypeNil, nil
 	default:
@@ -248,18 +218,9 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 	var taskErr error
 	var inputVar string
 
-	clientTools := []Tool{}
-	if dataType == DataTypeOpenAIChat {
-		req, ok := input.(OpenAIChatRequest)
-		if !ok {
-			return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: invalid input type", currentTask.ID)
-		}
-		clientTools = req.Tools
-	}
-
 	chainContext := &ChainContext{
 		Tools:       map[string]ToolWithResolution{},
-		ClientTools: clientTools,
+		ClientTools: []Tool{},
 		Debug:       chain.Debug,
 	}
 	filter := map[string]ToolWithResolution{}
@@ -310,7 +271,6 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 	for _, twr := range filter {
 		chainContext.Tools[twr.Function.Name] = twr
 	}
-	chainContext.ClientTools = clientTools
 
 	for {
 		if ctx.Err() != nil {

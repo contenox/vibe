@@ -14,32 +14,15 @@ func New() *Validator {
 	return &Validator{}
 }
 
-// ValidationProfile defines what a workflow should guarantee
 type ValidationProfile struct {
-	// RequiredReturnType specifies the data type that must be returned
 	RequiredReturnType string
-	// AllowConvertibleTypes specifies if types that can be converted are acceptable
-	AllowConvertibleTypes bool
-	// RequiredInputType specifies the expected input type (optional)
-	RequiredInputType string
+	RequiredInputType  string
 }
 
-// Standard validation profiles
-var (
-	// ChatServiceProfile validates workflows for the chat service
-	ChatServiceProfile = ValidationProfile{
-		RequiredReturnType:    "chat_history",
-		AllowConvertibleTypes: false,
-		RequiredInputType:     "chat_history",
-	}
-
-	// OpenAIChatServiceProfile validates workflows for OpenAI-compatible service
-	OpenAIChatServiceProfile = ValidationProfile{
-		RequiredReturnType:    "openai_chat_response",
-		AllowConvertibleTypes: true, // Allow chat_history since it can be converted
-		RequiredInputType:     "openai_chat",
-	}
-)
+var ChatServiceProfile = ValidationProfile{
+	RequiredReturnType: "chat_history",
+	RequiredInputType:  "chat_history",
+}
 
 // ValidateWorkflow ensures a workflow is compatible with the given profile
 func (v *Validator) ValidateWorkflow(chain *taskengine.TaskChainDefinition, profile ValidationProfile) error {
@@ -136,10 +119,7 @@ func (v *Validator) canTransitionToEnd(task taskengine.TaskDefinition) bool {
 func (v *Validator) taskReturnsCompatibleType(task taskengine.TaskDefinition, profile ValidationProfile) bool {
 	switch task.Handler {
 	case taskengine.HandleChatCompletion, taskengine.HandleExecuteToolCalls:
-		return profile.RequiredReturnType == "chat_history" ||
-			(profile.AllowConvertibleTypes && profile.RequiredReturnType == "openai_chat_response")
-	case taskengine.HandleConvertToOpenAIChatResponse:
-		return profile.RequiredReturnType == "openai_chat_response"
+		return profile.RequiredReturnType == "chat_history"
 	case taskengine.HandlePromptToString:
 		// Check if this task composes with chat_history
 		for _, branch := range task.Transition.Branches {

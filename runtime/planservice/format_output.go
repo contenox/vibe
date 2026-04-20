@@ -2,7 +2,6 @@ package planservice
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/contenox/contenox/runtime/taskengine"
@@ -19,7 +18,6 @@ import (
 //   - string: returned as-is (no interpretation).
 //   - map[string]any, default: JSON pretty-print for debugging/storage only.
 //   - []any: strings joined with newlines; non-strings JSON-marshaled per element.
-//   - taskengine.OpenAIChatResponse: first choice text, or a one-line tool-call placeholder.
 //
 // Not guaranteed: tool result bodies, full multi-turn history, parity with files written to disk,
 // or semantic “completion” of the step goal — only what this function returns.
@@ -46,15 +44,6 @@ func formatTaskOutput(out any) string {
 			}
 		}
 		return strings.Join(parts, "\n")
-
-	case taskengine.OpenAIChatResponse:
-		if len(v.Choices) > 0 && v.Choices[0].Message.Content != nil {
-			return *v.Choices[0].Message.Content
-		}
-		if len(v.Choices) > 0 && len(v.Choices[0].Message.ToolCalls) > 0 {
-			return fmt.Sprintf("[tool call: %s]", v.Choices[0].Message.ToolCalls[0].Function.Name)
-		}
-		return ""
 
 	default:
 		b, _ := json.MarshalIndent(v, "", "  ")

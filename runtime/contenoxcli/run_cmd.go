@@ -41,8 +41,6 @@ Input types (--input-type):
   chat              Wrapped as a single user message (DataTypeChatHistory)
   json              Parsed as a JSON object (DataTypeJSON)
   int               Parsed as integer (DataTypeInt)
-  float             Parsed as float (DataTypeFloat)
-  bool              Parsed as boolean: true/false/1/0 (DataTypeBool)
 
 If --chain is not specified, falls back to .contenox/default-run-chain.json
 if that file exists in the current directory.
@@ -281,23 +279,9 @@ func parseRunInput(raw, typeName string) (any, taskengine.DataType, error) {
 		}
 		return n, taskengine.DataTypeInt, nil
 
-	case "float":
-		f, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-		if err != nil {
-			return nil, taskengine.DataTypeAny, fmt.Errorf("input is not a valid float: %w", err)
-		}
-		return f, taskengine.DataTypeFloat, nil
-
-	case "bool":
-		b, err := strconv.ParseBool(strings.TrimSpace(raw))
-		if err != nil {
-			return nil, taskengine.DataTypeAny, fmt.Errorf("input is not a valid bool (use true/false/1/0): %w", err)
-		}
-		return b, taskengine.DataTypeBool, nil
-
 	default:
 		return nil, taskengine.DataTypeAny, fmt.Errorf(
-			"unknown input type %q — valid values: string, chat, json, int, float, bool", typeName,
+			"unknown input type %q — valid values: string, chat, json, int", typeName,
 		)
 	}
 }
@@ -355,6 +339,6 @@ func init() {
 	f := runCmd.Flags()
 	f.String("chain", "", "Path to a task chain JSON file (falls back to .contenox/default-run-chain.json if present)")
 	f.String("input", "", "Input value or @path to read from a file (e.g. --input @main.go)")
-	f.String("input-type", "string", "Input data type: string, chat, json, int, float, bool")
+	f.String("input-type", "string", "Input data type: string, chat, json, int")
 	f.Bool("hitl", false, "Pause before write_file, sed, and local_shell calls; require y/n approval in the terminal")
 }
