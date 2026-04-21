@@ -17,7 +17,7 @@ Not another chat. A system that executes.
 ## Install
 
 <!-- Release tooling: keep next line in sync with apiframework/version.txt (updated by `make -f Makefile.version bump-*`). -->
-<!-- TAG=v0.9.0 -->
+<!-- TAG=v0.9.1 -->
 
 ```bash
 curl -fsSL https://contenox.com/install.sh | sh
