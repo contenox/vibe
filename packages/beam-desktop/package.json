@@ -1,6 +1,6 @@
 {
   "name": "@contenox/desktop",
-  "version": "0.1.0",
+  "version": "0.9.2",
   "private": true,
   "description": "Contenox desktop app — chains, files, and a live shell in one thread. Runs on your machine, no cloud required.",
   "author": {
