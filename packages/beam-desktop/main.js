@@ -7,8 +7,8 @@ const os = require('os')
 const isDev = process.argv.includes('--dev')
 
 const binaryPath = isDev
-  ? path.join(__dirname, '../../bin/contenox')
-  : path.join(process.resourcesPath, 'contenox')
+  ? path.join(__dirname, '../../bin/contenox-runtime')
+  : path.join(process.resourcesPath, 'contenox-runtime')
 
 const dataDir = path.join(os.homedir(), '.contenox')
 

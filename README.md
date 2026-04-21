@@ -1,12 +1,11 @@
 # Contenox
+**The AI copilot that's actually yours.**
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/v/release/contenox/contenox?label=version&logo=github)](https://github.com/contenox/contenox/releases)
 
-**Built so your workflow stays on your side.**
-
-Most AI tools make your workflow dependent on systems you don't control. When they fail, reset, or change — you start over. Contenox keeps your context, executes real work, and routes to whichever model fits the job — so you're not renting your ability to ship.
+Most AI tools make your workflow dependent on systems you don't control. Contenox doesn't. Context persists. Execution stays local. You own the copilot.
 
 Not another chat. A system that executes.
 
@@ -31,7 +30,7 @@ Contenox is an AI copilot you own. Any model, any provider — the workflow stay
 
 ```bash
 contenox plan new "install a git pre-commit hook that prevents commits when go build fails"
-contenox plan next --auto
+contenox plan next --auto  # runs all steps without pausing — skips human approval
 ```
 
 ```
@@ -47,6 +46,8 @@ Plans are stored in SQLite. They don't evaporate when the session ends.
 ---
 
 ## Desktop app
+
+Contenox is an Electron desktop app. The same binary serves both the CLI and the app.
 
 ```bash
 contenox

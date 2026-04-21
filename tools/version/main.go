@@ -124,19 +124,25 @@ func bumpVersion(bumpType string) error {
 	}
 	tx.readmeUpdated = true
 
-	// 7. Commit changes
+	// 7. Update desktop package.json version
+	if err := updateDesktopPackageVersion(newVersion); err != nil {
+		return fmt.Errorf("failed to update desktop package.json: %w", err)
+	}
+	tx.desktopPackageUpdated = true
+
+	// 8. Commit changes
 	if err := commitVersionFile(newVersion); err != nil {
 		return fmt.Errorf("failed to commit version changes: %w", err)
 	}
 	tx.commitCreated = true
 
-	// 8. Regenerate docs (this amends the commit)
+	// 9. Regenerate docs (this amends the commit)
 	fmt.Println("\n🔄 Regenerating documentation with new version...")
 	if err := updateDocsAndAmendCommit(); err != nil {
 		return fmt.Errorf("failed to update documentation: %w", err)
 	}
 
-	// 9. Create tag (after commit is amended)
+	// 10. Create tag (after commit is amended)
 	if err := createTag(newVersion); err != nil {
 		return fmt.Errorf("failed to create tag: %w", err)
 	}
@@ -281,9 +287,9 @@ func updateVersionFile(newVersion string) error {
 func commitVersionFile(newVersion string) error {
 	fmt.Println("📦 Committing version and README...")
 
-	cmd := exec.Command("git", "add", getVersionFile(), "README.md")
+	cmd := exec.Command("git", "add", getVersionFile(), "README.md", "packages/beam-desktop/package.json")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to stage version and README: %w\nOutput: %s", err, string(output))
+		return fmt.Errorf("failed to stage version files: %w\nOutput: %s", err, string(output))
 	}
 
 	// Commit the change
@@ -304,6 +310,28 @@ func createTag(newVersion string) error {
 		return fmt.Errorf("failed to create tag: %w\nOutput: %s", err, string(output))
 	}
 
+	return nil
+}
+
+func updateDesktopPackageVersion(newVersion string) error {
+	pkgPath := "packages/beam-desktop/package.json"
+	content, err := os.ReadFile(pkgPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", pkgPath, err)
+	}
+	semver := strings.TrimPrefix(newVersion, "v")
+	re := regexp.MustCompile(`("version"\s*:\s*)"[^"]*"`)
+	if !re.Match(content) {
+		return fmt.Errorf("%s has no \"version\" field", pkgPath)
+	}
+	updated := re.ReplaceAll(content, []byte(`${1}"`+semver+`"`))
+	if bytes.Equal(updated, content) {
+		return nil
+	}
+	if err := os.WriteFile(pkgPath, updated, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", pkgPath, err)
+	}
+	fmt.Printf("   📝 Updated %s to %s\n", pkgPath, semver)
 	return nil
 }
 
@@ -330,14 +358,15 @@ func updateReadmeTag(newVersion string) error {
 
 // BumpTransaction represents a version bump operation with state tracking for proper cleanup
 type bumpTransaction struct {
-	currentVersion     string
-	newVersion         string
-	versionFileUpdated bool
-	readmeUpdated      bool
-	commitCreated      bool
-	tagCreated         bool
-	hasError           bool
-	successful         bool
+	currentVersion        string
+	newVersion            string
+	versionFileUpdated    bool
+	readmeUpdated         bool
+	desktopPackageUpdated bool
+	commitCreated         bool
+	tagCreated            bool
+	hasError              bool
+	successful            bool
 }
 
 // newBumpTransaction creates a new transaction context
@@ -381,6 +410,14 @@ func (tx *bumpTransaction) Rollback() {
 		fmt.Println("   Restoring README TAG...")
 		if err := updateReadmeTag(tx.currentVersion); err != nil {
 			fmt.Printf("   Failed to restore README: %v\n", err)
+		}
+	}
+
+	// If we updated the desktop package.json, revert it
+	if tx.desktopPackageUpdated {
+		fmt.Println("   Restoring desktop package.json...")
+		if err := updateDesktopPackageVersion(tx.currentVersion); err != nil {
+			fmt.Printf("   Failed to restore desktop package.json: %v\n", err)
 		}
 	}
 

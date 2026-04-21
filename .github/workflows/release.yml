@@ -131,7 +131,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-linux-${{ matrix.goarch }}
-          path: packages/beam-desktop/dist/contenox-beam-*
+          path: packages/beam-desktop/dist/contenox-*
 
   release:
     needs: [verify, build]
@@ -150,7 +150,7 @@ jobs:
       - name: Create GitHub Release and upload assets
         run: |
           TAG="${{ needs.verify.outputs.tag }}"
-          gh release create "$TAG" contenox-beam-* \
+          gh release create "$TAG" contenox-* \
             --title "$TAG" \
             --notes "" \
             --latest \

@@ -1,5 +1,5 @@
 {
-  "name": "@contenox/beam-desktop",
+  "name": "@contenox/desktop",
   "version": "0.1.0",
   "private": true,
   "description": "Contenox desktop app — chains, files, and a live shell in one thread. Runs on your machine, no cloud required.",
@@ -18,12 +18,12 @@
     "electron-builder": "^26.0.0"
   },
   "build": {
-    "appId": "com.contenox.beam",
+    "appId": "com.contenox.app",
     "productName": "Contenox",
     "extraResources": [
-      { "from": "../../bin/contenox", "to": "contenox" }
+      { "from": "../../bin/contenox-runtime", "to": "contenox-runtime" }
     ],
-    "artifactName": "contenox-beam-${version}-${arch}.${ext}",
+    "artifactName": "contenox-${version}-${arch}.${ext}",
     "linux": { "target": ["AppImage"] }
   }
 }
