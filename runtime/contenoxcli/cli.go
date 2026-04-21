@@ -1,4 +1,4 @@
-// cli.go holds the contenox CLI entrypoint (Main), default constants, flags, and merge logic.
+// cli.go holds the contenox-runtime CLI entrypoint (Main), default constants, flags, and merge logic.
 package contenoxcli
 
 import (
@@ -47,13 +47,10 @@ const (
 // reservedSubcommands are first-arg names that must not be treated as run input (Cobra or our subcommands).
 var reservedSubcommands = map[string]bool{beamCmd.Use: true, "init": true, "chat": true, "help": true, "completion": true, "session": true, "plan": true, "run": true, "hook": true, "mcp": true, "backend": true, "config": true, "model": true, "models": true, "doctor": true, "version": true}
 
-// Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
+// Main runs the contenox-runtime CLI: init subcommand or run (default) with optional positional input.
 func Main() {
-	if len(os.Args) == 1 {
-		os.Args = append(os.Args, "beam")
-	}
 	args := os.Args[1:]
-	// Only inject "run" when no reserved subcommand was given (so "contenox completion" and "contenox help" work).
+	// Only inject "run" when no reserved subcommand was given (so "contenox-runtime completion" and "contenox-runtime help" work).
 	// Scan past leading flags (e.g. --db /path) to find the first non-flag argument.
 	// Also skip injection when args contains only --help/-h so the root command shows its own help.
 	onlyHelp := len(args) == 0
@@ -82,7 +79,7 @@ func Main() {
 // true if the first positional argument is a reserved subcommand name.
 func firstNonFlagIsReserved(args []string) bool {
 	// Boolean flags that do NOT consume the next token as their value.
-	// Without this list, `contenox --trace chat` would mistake "chat" for the
+	// Without this list, `contenox-runtime --trace chat` would mistake "chat" for the
 	// value of --trace and then forward it to the chat command as text input.
 	boolFlags := map[string]bool{
 		"--shell": true, "--trace": true, "--steps": true, "--raw": true,
@@ -120,46 +117,46 @@ func firstNonFlagIsReserved(args []string) bool {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "contenox",
+	Use:   "contenox-runtime",
 	Short: "AI agent CLI: plan and execute tasks using your LLM of choice.",
 	Long: `Contenox is a local AI agent CLI that plans and executes multi-step tasks on your
 machine using filesystem and shell tools — driven by your LLM of choice.
 No daemon, no cloud required. State is stored in SQLite.
 
   Quickstart:
-    contenox init                          # scaffold .contenox/ with default chains
-    contenox "list files in my home dir"   # one-shot natural language → shell
-    contenox beam                          # HTTP server + Beam web UI
-    contenox plan new "some multi-step goal"  # create an autonomous multi-step plan
-    contenox plan next --auto              # execute plan steps until done
+    contenox-runtime init                          # scaffold .contenox/ with default chains
+    contenox-runtime "list files in my home dir"   # one-shot natural language → shell
+    contenox-runtime beam                          # HTTP server + Beam web UI
+    contenox-runtime plan new "some multi-step goal"  # create an autonomous multi-step plan
+    contenox-runtime plan next --auto              # execute plan steps until done
 
   Register an LLM backend:
     # Local (Ollama)
     ollama serve && ollama pull qwen2.5:7b
-    contenox backend add local --type ollama
+    contenox-runtime backend add local --type ollama
     # Then set your default:
-    contenox config set default-model qwen2.5:7b
+    contenox-runtime config set default-model qwen2.5:7b
 
     # Hosted Ollama Cloud
-    contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
-    contenox config set default-provider ollama
+    contenox-runtime backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
+    contenox-runtime config set default-provider ollama
 
     # Google Gemini (no GPU required)
-    contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
-    contenox config set default-model  gemini-2.5-flash
-    contenox config set default-provider gemini
+    contenox-runtime backend add gemini --type gemini --api-key-env GEMINI_API_KEY
+    contenox-runtime config set default-model  gemini-2.5-flash
+    contenox-runtime config set default-provider gemini
 
     # OpenAI
-    contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
-    contenox config set default-model    gpt-4o-mini
-    contenox config set default-provider openai
+    contenox-runtime backend add openai --type openai --api-key-env OPENAI_API_KEY
+    contenox-runtime config set default-model    gpt-4o-mini
+    contenox-runtime config set default-provider openai
 
   Scope note:
     Backends and config are GLOBAL (stored in ~/.contenox/local.db).
     Chain files (.contenox/) are LOCAL to each project directory — like .git/.
-    Run 'contenox init' once per project to create the local chain files.
+    Run 'contenox-runtime init' once per project to create the local chain files.
 
-  Note: contenox plan requires a model that supports tool calling.`,
+  Note: contenox-runtime plan requires a model that supports tool calling.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -170,19 +167,19 @@ var chatCmd = &cobra.Command{
 	Long: `Send a message to the active chat session and get a response.
 Input is passed as positional args, --input, or piped via stdin.
 
-  contenox "what can you do?"
-  echo "summarise README.md" | contenox
-  contenox chat --shell "list files in the current dir"
+  contenox-runtime "what can you do?"
+  echo "summarise README.md" | contenox-runtime
+  contenox-runtime chat --shell "list files in the current dir"
 
 Sessions persist conversation history across invocations (stored in SQLite).
 Each session remembers previous messages so the model has context.
 The first run auto-creates a "default" session. Manage sessions with:
 
-  contenox session list              list all sessions (* = active)
-  contenox session new <name>        create a new named session (becomes active)
-  contenox session switch <name>     switch to a different session
-  contenox session show              print the active session's full history
-  contenox session delete <name>     delete a session and all its messages
+  contenox-runtime session list              list all sessions (* = active)
+  contenox-runtime session new <name>        create a new named session (becomes active)
+  contenox-runtime session switch <name>     switch to a different session
+  contenox-runtime session show              print the active session's full history
+  contenox-runtime session delete <name>     delete a session and all its messages
 
 Giving the model tools (file system and shell access):
 
@@ -193,19 +190,19 @@ Giving the model tools (file system and shell access):
 
 Examples:
   # Chat with file system access to the current project:
-  contenox chat --local-exec-allowed-dir . "summarise the README"
+  contenox-runtime chat --local-exec-allowed-dir . "summarise the README"
 
   # Shell access (policy comes from the chain's hook_policies; default chains allow common dev tools):
-  contenox chat --shell "suggest a commit message from git diff"
+  contenox-runtime chat --shell "suggest a commit message from git diff"
 
   # Shell access with human approval before every write or shell call:
-  contenox chat --shell --local-exec-allowed-dir . --hitl "refactor main.go to use slog"
+  contenox-runtime chat --shell --local-exec-allowed-dir . --hitl "refactor main.go to use slog"
 
   # Trim context: only send last 10 messages from session history to the model:
-  contenox chat --trim 10 "let's continue where we left off"
+  contenox-runtime chat --trim 10 "let's continue where we left off"
 
   # Show last 6 turns of the conversation after the reply:
-  contenox chat --last 6 "hello"`,
+  contenox-runtime chat --last 6 "hello"`,
 	Args: cobra.ArbitraryArgs,
 	RunE: runChat,
 }
@@ -217,26 +214,26 @@ var initCmd = &cobra.Command{
 
 This writes default-chain.json, default-run-chain.json, chain-planner.json, chain-step-executor.json,
 chain-step-executor-gated.json, chain-plan-explorer.json, and chain-step-summarizer.json
-(the same embedded planner and step-executor chains used by 'contenox plan'). Plan subcommands
+(the same embedded planner and step-executor chains used by 'contenox-runtime plan'). Plan subcommands
 still refresh those JSON files from the binary when you run them.
 
 After init, register a backend, make sure the runtime can see a model, then set your defaults:
 
   # Local Ollama:
-  contenox backend add local --type ollama
-  contenox config set default-model qwen2.5:7b
+  contenox-runtime backend add local --type ollama
+  contenox-runtime config set default-model qwen2.5:7b
 
   # Hosted Ollama Cloud:
-  contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
-  contenox config set default-model gpt-oss:20b
+  contenox-runtime backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
+  contenox-runtime config set default-model gpt-oss:20b
 
   # OpenAI:
-  contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
-  contenox config set default-model gpt-5-mini
+  contenox-runtime backend add openai --type openai --api-key-env OPENAI_API_KEY
+  contenox-runtime config set default-model gpt-5-mini
 
   # Google Gemini:
-  contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
-  contenox config set default-model gemini-3.1-pro-preview
+  contenox-runtime backend add gemini --type gemini --api-key-env GEMINI_API_KEY
+  contenox-runtime config set default-model gemini-3.1-pro-preview
 
 Use --force to overwrite existing files.`,
 	Args: cobra.MaximumNArgs(1),
@@ -251,16 +248,16 @@ standalone server binary. The server reads its configuration from environment
 variables (DATABASE_URL, NATS_URL, etc.). Use --tenant to override the tenant ID.
 
 Examples:
-  contenox beam
-  contenox beam --tenant 96ed1c59-ffc1-4545-b3c3-191079c68d79`,
+  contenox-runtime beam
+  contenox-runtime beam --tenant 96ed1c59-ffc1-4545-b3c3-191079c68d79`,
 	RunE: runServer,
 }
 
-// versionCmd prints the same line as `contenox --version` so `contenox version`
+// versionCmd prints the same line as `contenox-runtime --version` so `contenox-runtime version`
 // is not mistaken for chat input (the default run command).
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print the contenox CLI version",
+	Short: "Print the contenox-runtime CLI version",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("%s version %s\n", cmd.Root().Name(), cmd.Root().Version)
 	},
@@ -273,7 +270,7 @@ func init() {
 	// Cobra prints Long for --help when set; include version so it matches apiframework/version.txt.
 	rootCmd.Long = fmt.Sprintf("Version: %s\n\n%s", v, rootCmd.Long)
 
-	// Run flags on root so "contenox --input x" and "contenox hi" both work.
+	// Run flags on root so "contenox-runtime --input x" and "contenox-runtime hi" both work.
 	f := rootCmd.PersistentFlags()
 	f.String("db", "", "SQLite database path (default: .contenox/local.db)")
 	f.String("data-dir", "", "Override the .contenox data directory path")
@@ -300,7 +297,7 @@ func init() {
 	rootCmd.AddCommand(modelCmd)
 	rootCmd.AddCommand(beamCmd)
 
-	rootCmd.InitDefaultHelpCmd() // so "contenox help" is handled by Cobra, not passed as run input
+	rootCmd.InitDefaultHelpCmd() // so "contenox-runtime help" is handled by Cobra, not passed as run input
 	initCmd.Flags().BoolP("force", "f", false, "Overwrite existing files")
 
 	// Chat-specific local flags (not exposed globally).
@@ -428,7 +425,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	if effectiveChain == "" {
 		// No chain found anywhere in the directory tree — guide the user.
 		fmt.Fprintln(os.Stderr, "No .contenox/ project found in this directory or any parent directory.")
-		fmt.Fprintln(os.Stderr, "Run 'contenox init' to get started, or pass --chain explicitly.")
+		fmt.Fprintln(os.Stderr, "Run 'contenox-runtime init' to get started, or pass --chain explicitly.")
 		return errChainRequired
 	}
 

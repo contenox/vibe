@@ -29,15 +29,15 @@ By default, 'model list' queries each registered backend in real-time and
 shows the models it is currently serving.
 
 Examples:
-  contenox model list
+  contenox-runtime model list
 
 Set the default model:
-  contenox config set default-model    gemini-2.5-flash
-  contenox config set default-provider gemini`,
+  contenox-runtime config set default-model    gemini-2.5-flash
+  contenox-runtime config set default-provider gemini`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
-			return fmt.Errorf("unknown subcommand %q\n\nTo set a default model:\n  contenox config set default-model <model>\n  contenox config set default-provider <provider>", args[0])
+			return fmt.Errorf("unknown subcommand %q\n\nTo set a default model:\n  contenox-runtime config set default-model <model>\n  contenox-runtime config set default-provider <provider>", args[0])
 		}
 		return cmd.Help()
 	},
@@ -53,7 +53,7 @@ Shows model name, backend it comes from, and capabilities discovered at runtime
 (chat, embed, prompt, stream, context length).
 
 Examples:
-  contenox model list`,
+  contenox-runtime model list`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
@@ -92,7 +92,7 @@ func printLiveModels(ctx context.Context, db libdb.DBManager, out, errW io.Write
 
 	rt := state.Get(ctx)
 	if len(rt) == 0 {
-		fmt.Fprintln(out, "No backends registered. Run: contenox backend add <name> --type <type>")
+		fmt.Fprintln(out, "No backends registered. Run: contenox-runtime backend add <name> --type <type>")
 		return nil
 	}
 
@@ -171,7 +171,7 @@ func printLiveModels(ctx context.Context, db libdb.DBManager, out, errW io.Write
 		fmt.Fprintln(out, "\nNo models found on any backend.")
 	}
 	if preferredModel != "" {
-		fmt.Fprintln(out, "\n* = default model (contenox config set default-model <name>)")
+		fmt.Fprintln(out, "\n* = default model (contenox-runtime config set default-model <name>)")
 	}
 	return nil
 }
@@ -231,9 +231,9 @@ Accepts a bare integer or a k/m shorthand (case-insensitive):
   m  – millions    (1m   = 1 000 000)
 
 Examples:
-  contenox model set-context gpt-5-mini           --context 128k
-  contenox model set-context gemini-3.1-pro-preview --context 1m
-  contenox model set-context qwen2.5:7b             --context 32k`,
+  contenox-runtime model set-context gpt-5-mini           --context 128k
+  contenox-runtime model set-context gemini-3.1-pro-preview --context 1m
+  contenox-runtime model set-context qwen2.5:7b             --context 32k`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())

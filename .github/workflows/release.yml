@@ -116,7 +116,7 @@ jobs:
           TAG="${{ needs.verify.outputs.tag }}"
           LDFLAGS="-X github.com/contenox/contenox/runtime/contenoxcli.Version=${TAG}"
           mkdir -p bin
-          go build -ldflags="${LDFLAGS}" -o bin/contenox ./cmd/contenox
+          go build -ldflags="${LDFLAGS}" -o bin/contenox-runtime ./cmd/contenox-runtime
 
       - name: Sync package.json version
         run: |

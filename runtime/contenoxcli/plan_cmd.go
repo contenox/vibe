@@ -25,7 +25,7 @@ import (
 )
 
 // planExecDefaultTimeout is used for plan subcommands when the user does not pass
-// contenox --timeout (the global default is short for one-shot runs).
+// contenox-runtime --timeout (the global default is short for one-shot runs).
 const planExecDefaultTimeout = 30 * time.Minute
 
 // planCommandTimeout returns the execution budget for plan CLI operations. If the user
@@ -45,21 +45,21 @@ var planCmd = &cobra.Command{
 	Long: `Create and execute multi-step AI plans that run shell commands on your machine.
 
 Workflow:
-  1. contenox plan new "<goal>"    # LLM generates a step-by-step plan and saves it
-  2. contenox plan show            # inspect the generated steps
-  3. contenox plan next --shell    # execute the next pending step (enable shell tools)
-  4. contenox plan next --auto --shell  # run all steps until done or failed
+  1. contenox-runtime plan new "<goal>"    # LLM generates a step-by-step plan and saves it
+  2. contenox-runtime plan show            # inspect the generated steps
+  3. contenox-runtime plan next --shell    # execute the next pending step (enable shell tools)
+  4. contenox-runtime plan next --auto --shell  # run all steps until done or failed
 
 On failure:
-  contenox plan retry <N>    # reset step N back to pending and retry
-  contenox plan skip  <N>    # mark step N as skipped and continue
-  contenox plan replan       # ask the LLM to regenerate remaining steps
+  contenox-runtime plan retry <N>    # reset step N back to pending and retry
+  contenox-runtime plan skip  <N>    # mark step N as skipped and continue
+  contenox-runtime plan replan       # ask the LLM to regenerate remaining steps
 
 Long runs (monitoring):
-  Before: contenox doctor — confirm backend, API keys, and default model/provider.
-  During: use contenox --trace plan next … for telemetry on stderr; log the session (e.g. tee plan.log).
-  Timeouts: plan subcommands default to 30m per invocation unless you set contenox --timeout (e.g. 2h for huge repos).
-  Shell + FS: use plan next --shell and contenox --local-exec-allowed-dir <project-root> so local_shell
+  Before: contenox-runtime doctor — confirm backend, API keys, and default model/provider.
+  During: use contenox-runtime --trace plan next … for telemetry on stderr; log the session (e.g. tee plan.log).
+  Timeouts: plan subcommands default to 30m per invocation unless you set contenox-runtime --timeout (e.g. 2h for huge repos).
+  Shell + FS: use plan next --shell and contenox-runtime --local-exec-allowed-dir <project-root> so local_shell
   and local_fs policies match your tree.
 
 Chain JSON (under the resolved .contenox directory):
@@ -70,13 +70,13 @@ Chain JSON (under the resolved .contenox directory):
 Plan step seeds also receive {{var:execution_context}} (engine boundary) and {{var:gate_model}} when used.
 HITL (human-in-the-loop): use plan next --hitl to require terminal approval before write_file, sed, and
 local_shell calls. Beam enables HITL by default; set CONTENOX_HITL_ENABLED=false to disable it.
-'contenox init' writes these files; any plan subcommand refreshes them from built-in defaults.
-To customize them permanently, change the embedded chain definitions in the contenox source tree
+'contenox-runtime init' writes these files; any plan subcommand refreshes them from built-in defaults.
+To customize them permanently, change the embedded chain definitions in the contenox-runtime source tree
 and rebuild, or maintain a fork. Set model/provider via --model, --provider, and
-'contenox config set default-model' so {{var:model}} / {{var:provider}} resolve.
+'contenox-runtime config set default-model' so {{var:model}} / {{var:provider}} resolve.
 
 Note: plan execution requires a model that supports tool calling.
-The active plan is tracked automatically; use 'contenox plan list' to see all plans.`,
+The active plan is tracked automatically; use 'contenox-runtime plan list' to see all plans.`,
 	SilenceUsage: true,
 }
 
@@ -90,13 +90,13 @@ The new plan becomes the active plan only after generation succeeds. If the plan
 
 Input can be provided as a positional argument, piped via stdin, or both:
 
-  contenox plan new "set up a Go project with tests and CI"
-  git diff | contenox plan new "write a commit message and update CHANGELOG"
-  cat ERROR.log | contenox plan new "diagnose and fix this error"
+  contenox-runtime plan new "set up a Go project with tests and CI"
+  git diff | contenox-runtime plan new "write a commit message and update CHANGELOG"
+  cat ERROR.log | contenox-runtime plan new "diagnose and fix this error"
 
 The planner chain must output a JSON array of step descriptions. If your model
 produces malformed output, switch to a stronger model via --model or
-'contenox config set default-model'.`,
+'contenox-runtime config set default-model'.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanNew,
 }
@@ -129,10 +129,10 @@ The step is marked completed when execution succeeds; use ===STEP_DONE=== in the
 the model signals completion.
 
 {{var:model}}, {{var:provider}}, {{var:summarizer_model}}, {{var:gate_model}}, and {{var:execution_context}}
-are merged for the compiled seed and chains. See 'contenox plan' help for chain file paths.
+are merged for the compiled seed and chains. See 'contenox-runtime plan' help for chain file paths.
 
-Use contenox --trace plan next … to stream step telemetry to stderr. For a long unattended run,
-log output: contenox plan next --auto --shell … 2>&1 | tee plan-run.log   (30m default; add --timeout 2h if needed)
+Use contenox-runtime --trace plan next … to stream step telemetry to stderr. For a long unattended run,
+log output: contenox-runtime plan next --auto --shell … 2>&1 | tee plan-run.log   (30m default; add --timeout 2h if needed)
 
 Flags:
   --auto     Continue executing steps until the plan is done or a step fails
@@ -141,11 +141,11 @@ Flags:
   --hitl     Pause before write_file, sed, and local_shell calls; require y/n approval in the terminal
 
 Examples:
-  contenox plan next
-  contenox plan next --shell             # single step with shell access
-  contenox plan next --auto --shell      # run everything until done
-  contenox plan next --shell --gate      # post-tool LLM gate after each tool round
-  contenox plan next --shell --hitl      # human approval before each write/shell tool call`,
+  contenox-runtime plan next
+  contenox-runtime plan next --shell             # single step with shell access
+  contenox-runtime plan next --auto --shell      # run everything until done
+  contenox-runtime plan next --shell --gate      # post-tool LLM gate after each tool round
+  contenox-runtime plan next --shell --hitl      # human approval before each write/shell tool call`,
 	Args: cobra.NoArgs,
 	RunE: runPlanNext,
 }
@@ -154,10 +154,10 @@ var planRetryCmd = &cobra.Command{
 	Use:   "retry <ordinal>",
 	Short: "Reset a failed or skipped step back to pending.",
 	Long: `Reset a step by its ordinal number (1-based) back to pending status so it
-can be re-executed by 'contenox plan next'.
+can be re-executed by 'contenox-runtime plan next'.
 
 Example:
-  contenox plan retry 3`,
+  contenox-runtime plan retry 3`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPlanRetry,
 }
@@ -165,11 +165,11 @@ Example:
 var planSkipCmd = &cobra.Command{
 	Use:   "skip <ordinal>",
 	Short: "Mark a pending or failed step as skipped.",
-	Long: `Mark a step as skipped so 'contenox plan next' moves on to the next one.
+	Long: `Mark a step as skipped so 'contenox-runtime plan next' moves on to the next one.
 Useful when a step is not applicable or was completed manually.
 
 Example:
-  contenox plan skip 2`,
+  contenox-runtime plan skip 2`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPlanSkip,
 }
@@ -184,7 +184,7 @@ Pending steps are deleted and replaced with the newly generated ones.
 Completed and skipped steps are preserved.
 
 Example:
-  contenox plan replan`,
+  contenox-runtime plan replan`,
 	Args: cobra.NoArgs,
 	RunE: runPlanReplan,
 }
@@ -213,11 +213,11 @@ The RepoContext is rendered into every step's seed prompt as {{var:repo_context}
 so steps see concrete file paths and conventions instead of cold-exploring on every run.
 
 The explorer is read-only by contract: only local_fs (and other read-only hooks) are
-allowlisted, and contenox plan explore validates this before running the chain.
+allowlisted, and contenox-runtime plan explore validates this before running the chain.
 
 Example:
-  contenox plan explore                # explore for the active plan
-  contenox plan new --explore "..."    # explore as part of plan creation`,
+  contenox-runtime plan explore                # explore for the active plan
+  contenox-runtime plan new --explore "..."    # explore as part of plan creation`,
 	Args: cobra.NoArgs,
 	RunE: runPlanExplore,
 }
@@ -517,7 +517,7 @@ func runPlanList(cmd *cobra.Command, _ []string) error {
 	}
 
 	if len(plans) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No plans yet. Run: contenox plan new <goal>")
+		fmt.Fprintln(cmd.OutOrStdout(), "No plans yet. Run: contenox-runtime plan new <goal>")
 		return nil
 	}
 
@@ -551,7 +551,7 @@ func runPlanShow(cmd *cobra.Command, _ []string) error {
 	exec := db.WithoutTransaction()
 	activeID, err := getActivePlanID(ctx, exec)
 	if err != nil || activeID == "" {
-		return fmt.Errorf("no active plan; run 'contenox plan new <goal>' (or 'contenox plan list' to see existing plans)")
+		return fmt.Errorf("no active plan; run 'contenox-runtime plan new <goal>' (or 'contenox-runtime plan list' to see existing plans)")
 	}
 
 	store := planstore.New(exec)
@@ -684,7 +684,7 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 				fmt.Fprintln(cmd.OutOrStdout(), "All steps complete. Plan is done!")
 				return nil
 			}
-			return fmt.Errorf("no active plan; run 'contenox plan new <goal>'")
+			return fmt.Errorf("no active plan; run 'contenox-runtime plan new <goal>'")
 		}
 
 		var nextStep *planstore.PlanStep
@@ -750,9 +750,9 @@ func runPlanNext(cmd *cobra.Command, _ []string) error {
 				}
 			}
 			fmt.Fprintln(cmd.ErrOrStderr(), "\nStep did not complete successfully.\n"+
-				"  • contenox plan show          → see current status\n"+
-				"  • contenox plan retry <N>     → retry this step\n"+
-				"  • contenox plan replan        → regenerate remaining steps")
+				"  • contenox-runtime plan show          → see current status\n"+
+				"  • contenox-runtime plan retry <N>     → retry this step\n"+
+				"  • contenox-runtime plan replan        → regenerate remaining steps")
 			return nil
 		}
 
@@ -854,7 +854,7 @@ func runPlanReplan(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("replan failed: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Replanned with %d new steps. Use 'contenox plan show' to see them.\n", len(newSteps))
+	fmt.Fprintf(cmd.OutOrStdout(), "Replanned with %d new steps. Use 'contenox-runtime plan show' to see them.\n", len(newSteps))
 	return nil
 }
 

@@ -27,23 +27,23 @@ Once registered, the runtime uses it for model resolution during chain execution
 
 Examples:
   # Register a local Ollama server (default URL inferred):
-  contenox backend add local --type ollama
+  contenox-runtime backend add local --type ollama
 
   # Register Ollama Cloud directly:
-  contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
+  contenox-runtime backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
 
   # Register OpenAI using an environment variable for the key:
-  contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
+  contenox-runtime backend add openai --type openai --api-key-env OPENAI_API_KEY
 
   # Register Google Gemini:
-  contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
+  contenox-runtime backend add gemini --type gemini --api-key-env GEMINI_API_KEY
 
   # Register a custom vLLM server:
-  contenox backend add myvllm --type vllm --url http://gpu-host:8000
+  contenox-runtime backend add myvllm --type vllm --url http://gpu-host:8000
 
-  contenox backend list
-  contenox backend show openai
-  contenox backend remove myvllm`,
+  contenox-runtime backend list
+  contenox-runtime backend show openai
+  contenox-runtime backend remove myvllm`,
 }
 
 var backendAddCmd = &cobra.Command{
@@ -59,11 +59,11 @@ API keys should be passed via --api-key-env (reads from environment) rather than
 --api-key (inline literal) to avoid leaking secrets into shell history.
 
 Examples:
-  contenox backend add local   --type ollama
-  contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
-  contenox backend add openai  --type openai  --api-key-env OPENAI_API_KEY
-  contenox backend add gemini  --type gemini  --api-key-env GEMINI_API_KEY
-  contenox backend add myvllm --type vllm    --url http://gpu-host:8000`,
+  contenox-runtime backend add local   --type ollama
+  contenox-runtime backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
+  contenox-runtime backend add openai  --type openai  --api-key-env OPENAI_API_KEY
+  contenox-runtime backend add gemini  --type gemini  --api-key-env GEMINI_API_KEY
+  contenox-runtime backend add myvllm --type vllm    --url http://gpu-host:8000`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
@@ -140,7 +140,7 @@ var backendListCmd = &cobra.Command{
 			return fmt.Errorf("failed to list backends: %w", err)
 		}
 		if len(backends) == 0 {
-			fmt.Fprintln(cmd.OutOrStdout(), "No backends registered. Run: contenox backend add <name> --type <type>")
+			fmt.Fprintln(cmd.OutOrStdout(), "No backends registered. Run: contenox-runtime backend add <name> --type <type>")
 			return nil
 		}
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
@@ -224,7 +224,7 @@ func resolveDBPath(cmd *cobra.Command) (string, error) {
 		return filepath.Abs(dbFlag)
 	}
 	// Prefer project-local DB if a .contenox directory exists (even if local.db
-	// doesn't yet — e.g. right after `contenox init`).
+	// doesn't yet — e.g. right after `contenox-runtime init`).
 	localDir, err := ResolveContenoxDir(cmd)
 	if err == nil {
 		if _, statErr := os.Stat(localDir); statErr == nil {

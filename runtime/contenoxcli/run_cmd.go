@@ -21,14 +21,14 @@ import (
 )
 
 // runCmd runs any task chain with any input type.
-// Unlike 'contenox chat' (which hardcodes DataTypeChatHistory), 'contenox run'
+// Unlike 'contenox-runtime chat' (which hardcodes DataTypeChatHistory), 'contenox-runtime run'
 // lets the caller specify the input type and is fully stateless (no chat history).
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run any task chain with explicit input type control (stateless).",
 	Long: `Run a task chain with explicit control over input type and content.
 
-Unlike 'contenox chat', run is stateless — no chat history is loaded or saved.
+Unlike 'contenox-runtime chat', run is stateless — no chat history is loaded or saved.
 It accepts any task chain regardless of the first handler's expected input type.
 
 Input sources (in priority order):
@@ -46,14 +46,14 @@ If --chain is not specified, falls back to .contenox/default-run-chain.json
 if that file exists in the current directory.
 
 Examples:
-  contenox run --chain .contenox/score-chain.json "is this code safe?"
-  cat diff.txt | contenox run --chain .contenox/review.json --input-type chat
-  contenox run --chain .contenox/embed.json --input @myfile.go
-  contenox run --chain .contenox/parse-chain.json --input-type json '{"key":"value"}'
-  git diff | contenox run "suggest a commit message"  # uses default-run-chain.json
+  contenox-runtime run --chain .contenox/score-chain.json "is this code safe?"
+  cat diff.txt | contenox-runtime run --chain .contenox/review.json --input-type chat
+  contenox-runtime run --chain .contenox/embed.json --input @myfile.go
+  contenox-runtime run --chain .contenox/parse-chain.json --input-type json '{"key":"value"}'
+  git diff | contenox-runtime run "suggest a commit message"  # uses default-run-chain.json
 
   # Run with human approval before any write_file, sed, or local_shell tool call:
-  contenox run --shell --hitl --chain .contenox/my-chain.json "fix the bug"
+  contenox-runtime run --shell --hitl --chain .contenox/my-chain.json "fix the bug"
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -79,7 +79,7 @@ Examples:
 		}
 		if chainPath == "" {
 			fmt.Fprintln(os.Stderr, "No .contenox/ project found in this directory or any parent directory.")
-			fmt.Fprintln(os.Stderr, "Run 'contenox init' to get started, or pass --chain explicitly.")
+			fmt.Fprintln(os.Stderr, "Run 'contenox-runtime init' to get started, or pass --chain explicitly.")
 			return errChainRequired
 		}
 
@@ -233,7 +233,7 @@ func resolveRunInput(cmd *cobra.Command, args []string) (string, error) {
 	if len(args) > 0 {
 		argsInput := strings.Join(args, " ")
 		// If stdin is also piped, combine: args = instruction, stdin = data.
-		// e.g. git diff | contenox run "suggest a commit message"
+		// e.g. git diff | contenox-runtime run "suggest a commit message"
 		data, ok, err := readStdinIfAvailable(maxCLIStdinBytes)
 		if err != nil {
 			return "", err

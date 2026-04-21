@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// validConfigKeys lists the keys users can set via `contenox config set`.
+// validConfigKeys lists the keys users can set via `contenox-runtime config set`.
 var validConfigKeys = map[string]string{
 	"default-model":    "Default LLM model name (e.g. qwen2.5:7b)",
 	"default-provider": "Default LLM provider type (e.g. ollama, openai, gemini)",
@@ -48,11 +48,11 @@ Valid keys:
   hitl-policy-name   Active HITL policy file name
 
 Examples:
-  contenox config set default-model    qwen2.5:7b
-  contenox config set default-provider ollama
-  contenox config set default-model    gemini-2.5-flash
-  contenox config set default-chain    .contenox/default-chain.json
-  contenox config set hitl-policy-name hitl-policy-strict.json`,
+  contenox-runtime config set default-model    qwen2.5:7b
+  contenox-runtime config set default-provider ollama
+  contenox-runtime config set default-model    gemini-2.5-flash
+  contenox-runtime config set default-chain    .contenox/default-chain.json
+  contenox-runtime config set hitl-policy-name hitl-policy-strict.json`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key, value := args[0], args[1]
@@ -82,10 +82,10 @@ var configGetCmd = &cobra.Command{
 	Long: `Print the current value of a persistent CLI setting.
 
 Examples:
-  contenox config get default-model
-  contenox config get default-provider
-  contenox config get default-chain
-  contenox config get hitl-policy-name`,
+  contenox-runtime config get default-model
+  contenox-runtime config get default-provider
+  contenox-runtime config get default-chain
+  contenox-runtime config get hitl-policy-name`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
@@ -116,7 +116,7 @@ var configListCmd = &cobra.Command{
 Outputs a table of KEY and VALUE. Unset keys show an empty value.
 
 Example:
-  contenox config list`,
+  contenox-runtime config list`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		db, store, err := openConfigDB(cmd)

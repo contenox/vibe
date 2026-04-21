@@ -16,7 +16,7 @@ All AI/LLM orchestration packages live under **`runtime/`**. Infrastructure libr
 runtime/              ← AI/LLM orchestration (taskengine, planservice, runtimetypes, …)
   internal/           ← HTTP route handlers, model repo drivers, CLI engine
 runtime/contenoxcli   ← CLI command implementations (importable from cmd/)
-cmd/contenox/         ← contenox binary entry point
+cmd/contenox-runtime/ ← contenox-runtime binary entry point
 packages/beam/        ← React SPA (Vite, TypeScript, TailwindCSS)
 packages/beam-desktop/ ← Electron shell (optional): window around contenox beam on :8081
 packages/ui/          ← shared component library

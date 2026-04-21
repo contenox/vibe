@@ -39,7 +39,7 @@ import (
 func BuildHandler(ctx context.Context) (http.Handler, func(), error) {
 	contenoxPath, err := ResolveContenoxDir(nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve contenox dir: %w", err)
+		return nil, nil, fmt.Errorf("resolve contenox-runtime dir: %w", err)
 	}
 	dbPath, err := resolveDBPathFromDir(contenoxPath)
 	if err != nil {
@@ -126,7 +126,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	contenoxPath, err := ResolveContenoxDir(cmd)
 	if err != nil {
-		return fmt.Errorf("invalid contenox path: %w", err)
+		return fmt.Errorf("invalid contenox-runtime path: %w", err)
 	}
 
 	components, err := buildServerComponents(ctx, db, tenant, contenoxPath, cmd)

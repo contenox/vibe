@@ -1,4 +1,4 @@
-// chat_cmd.go implements contenox chat (session-backed chain execution).
+// chat_cmd.go implements contenox-runtime chat (session-backed chain execution).
 package contenoxcli
 
 import (
@@ -38,7 +38,7 @@ type chatOpts struct {
 	InputValue                   string
 	InputFlagPassed              bool
 	ContenoxDir                  string
-	// EffectiveSkipBackendCycle skips state.RunBackendCycle (e.g. contenox doctor --skip-cycle).
+	// EffectiveSkipBackendCycle skips state.RunBackendCycle (e.g. contenox-runtime doctor --skip-cycle).
 	EffectiveSkipBackendCycle bool
 }
 
@@ -46,7 +46,7 @@ type chatOpts struct {
 // db is already opened by the caller (runChat in cli.go) so we share it here.
 func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW io.Writer) error {
 	// Component 1: use BuildEngine instead of the 150-line duplicate scaffold.
-	// This fixes MCP being broken for `contenox chat` (the old code used
+	// This fixes MCP being broken for `contenox-runtime chat` (the old code used
 	// libbus.NewInMem() and never initialised mcpworker.Manager).
 	engine, err := BuildEngine(ctx, db, opts)
 	if err != nil {

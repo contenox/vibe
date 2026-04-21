@@ -25,7 +25,7 @@ export OLLAMA_HOST
 AIR ?= $(shell command -v air 2>/dev/null || echo "$(shell go env GOPATH)/bin/air")
 APITEST_VENV := $(PROJECT_ROOT)/apitests/.venv
 APITEST_ACTIVATE := $(APITEST_VENV)/bin/activate
-DEV_CONTENOX_BIN := $(HOME)/.local/bin/contenox
+DEV_CONTENOX_BIN := $(HOME)/.local/bin/contenox-runtime
 
 .PHONY: help \
 	build-contenox build-ui build-web build-desktop dev-desktop ci-prepare-embeds \
@@ -57,9 +57,9 @@ help:
 ci-prepare-embeds:
 	bash $(PROJECT_ROOT)/scripts/ci_prepare_embeds.sh
 
-# Contenox binary: CLI, beam server, embedded web assets — one entrypoint (cmd/contenox).
+# Contenox binary: CLI, beam server, embedded web assets — one entrypoint (cmd/contenox-runtime).
 build-contenox: docs-gen
-	CGO_ENABLED=1 go build -o $(PROJECT_ROOT)/bin/contenox $(PROJECT_ROOT)/cmd/contenox
+	CGO_ENABLED=1 go build -o $(PROJECT_ROOT)/bin/contenox-runtime $(PROJECT_ROOT)/cmd/contenox-runtime
 
 build-web:
 	npm run build --workspace=@contenox/ui
@@ -86,20 +86,20 @@ test-contenox-verbose: docs-gen
 
 test-contenox-help: build-contenox
 	@chmod +x $(PROJECT_ROOT)/scripts/verify_cli_help.sh
-	@CONTENOX_BIN=$(PROJECT_ROOT)/bin/contenox $(PROJECT_ROOT)/scripts/verify_cli_help.sh
+	@CONTENOX_BIN=$(PROJECT_ROOT)/bin/contenox-runtime $(PROJECT_ROOT)/scripts/verify_cli_help.sh
 
 test-http-api-venv:
 	test -d $(APITEST_VENV) || python3 -m venv $(APITEST_VENV)
 	. $(APITEST_ACTIVATE) && pip install -r $(PROJECT_ROOT)/apitests/requirements.txt
 
 test-http-api: build-contenox test-http-api-venv
-	@pkill -f "[/]bin/contenox beam" 2>/dev/null || true
+	@pkill -f "[/]bin/contenox-runtime beam" 2>/dev/null || true
 	@sleep 1
 	@TMPDIR=$$(mktemp -d) && \
 	mkdir -p "$$TMPDIR/.contenox" && \
-	$(PROJECT_ROOT)/bin/contenox --data-dir "$$TMPDIR/.contenox" config set default-model "$(TASK_MODEL)" && \
-	$(PROJECT_ROOT)/bin/contenox --data-dir "$$TMPDIR/.contenox" config set default-provider "$(TASK_PROVIDER)" && \
-	$(PROJECT_ROOT)/bin/contenox beam --data-dir "$$TMPDIR/.contenox" & \
+	$(PROJECT_ROOT)/bin/contenox-runtime --data-dir "$$TMPDIR/.contenox" config set default-model "$(TASK_MODEL)" && \
+	$(PROJECT_ROOT)/bin/contenox-runtime --data-dir "$$TMPDIR/.contenox" config set default-provider "$(TASK_PROVIDER)" && \
+	$(PROJECT_ROOT)/bin/contenox-runtime beam --data-dir "$$TMPDIR/.contenox" & \
 	BEAM_PID=$$! && \
 	until curl -sf -o /dev/null http://localhost:8081/api/health 2>/dev/null; do sleep 1; done && \
 	( . $(APITEST_ACTIVATE) && OLLAMA_HOST=$(OLLAMA_HOST) pytest $(PROJECT_ROOT)/apitests/$(TEST_FILE) ; ) ; \
@@ -147,8 +147,8 @@ dev-install: build-contenox dev-link
 
 dev-link: build-contenox
 	@mkdir -p $(dir $(DEV_CONTENOX_BIN))
-	@ln -sf $(PROJECT_ROOT)/bin/contenox $(DEV_CONTENOX_BIN)
-	@echo "Linked $(DEV_CONTENOX_BIN) -> $(PROJECT_ROOT)/bin/contenox"
+	@ln -sf $(PROJECT_ROOT)/bin/contenox-runtime $(DEV_CONTENOX_BIN)
+	@echo "Linked $(DEV_CONTENOX_BIN) -> $(PROJECT_ROOT)/bin/contenox-runtime"
 	@echo "Use this binary: ensure $(dir $(DEV_CONTENOX_BIN)) is on PATH before other contenox installs (check: which contenox)"
 
 dev-unlink:

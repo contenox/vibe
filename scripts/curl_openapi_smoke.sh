@@ -2,9 +2,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-BIN="$ROOT/bin/contenox"
+BIN="$ROOT/bin/contenox-runtime"
 TMP=$(mktemp -d)
-cleanup() { pkill -f '[/]bin/contenox beam' 2>/dev/null || true; rm -rf "$TMP"; }
+cleanup() { pkill -f '[/]bin/contenox-runtime beam' 2>/dev/null || true; rm -rf "$TMP"; }
 trap cleanup EXIT
 mkdir -p "$TMP/.contenox"
 "$BIN" --data-dir "$TMP/.contenox" config set default-model phi3:3.8b
