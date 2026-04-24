@@ -70,11 +70,13 @@ CREATE TABLE IF NOT EXISTS entity_events (
 );
 
 CREATE TABLE IF NOT EXISTS kv (
-    key VARCHAR(255) PRIMARY KEY,
+    key VARCHAR(255) NOT NULL,
+    workspace_id VARCHAR(255) NOT NULL DEFAULT '',
     value JSONB NOT NULL,
 
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (key, workspace_id)
 );
 
 CREATE TABLE IF NOT EXISTS remote_hooks (
@@ -113,8 +115,13 @@ $$ LANGUAGE plpgsql STABLE;
 
 CREATE TABLE IF NOT EXISTS message_indices (
     id VARCHAR(255) PRIMARY KEY,
-    identity VARCHAR(512) NOT NULL
+    identity VARCHAR(512) NOT NULL,
+    workspace_id VARCHAR(255) NOT NULL DEFAULT '',
+    name VARCHAR(255)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_indices_name
+    ON message_indices (name, workspace_id)
+    WHERE name IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS messages (
     id VARCHAR(255),
@@ -148,7 +155,8 @@ CREATE INDEX IF NOT EXISTS idx_mcp_servers_created_at ON mcp_servers(created_at)
 
 CREATE TABLE IF NOT EXISTS plans (
     id         VARCHAR(255) PRIMARY KEY,
-    name       VARCHAR(255) NOT NULL UNIQUE,
+    name       VARCHAR(255) NOT NULL,
+    workspace_id VARCHAR(255) NOT NULL DEFAULT '',
     goal       TEXT         NOT NULL,
     status     VARCHAR(50)  NOT NULL DEFAULT 'active',
     session_id VARCHAR(255),
@@ -158,6 +166,7 @@ CREATE TABLE IF NOT EXISTS plans (
     created_at TIMESTAMP    NOT NULL,
     updated_at TIMESTAMP    NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_name_workspace ON plans (name, workspace_id);
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS compiled_chain_json TEXT;
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS compiled_chain_id VARCHAR(255);
 ALTER TABLE plans ADD COLUMN IF NOT EXISTS compile_executor_chain_id VARCHAR(255);
@@ -183,23 +192,6 @@ ALTER TABLE plan_steps ADD COLUMN IF NOT EXISTS summary              TEXT;
 ALTER TABLE plan_steps ADD COLUMN IF NOT EXISTS chat_history_json    TEXT;
 ALTER TABLE plan_steps ADD COLUMN IF NOT EXISTS summary_error        TEXT;
 ALTER TABLE plan_steps ADD COLUMN IF NOT EXISTS last_failure_summary TEXT;
-
-CREATE TABLE IF NOT EXISTS terminal_sessions (
-    id VARCHAR(255) PRIMARY KEY,
-    principal VARCHAR(512) NOT NULL,
-    cwd TEXT NOT NULL,
-    shell VARCHAR(512) NOT NULL,
-    cols INT NOT NULL,
-    rows INT NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'active',
-    node_instance_id VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_terminal_sessions_principal_created ON terminal_sessions (principal, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_terminal_sessions_node ON terminal_sessions (node_instance_id);
-
-ALTER TABLE terminal_sessions ADD COLUMN IF NOT EXISTS workspace_id VARCHAR(255);
 
 CREATE TABLE IF NOT EXISTS llm_model_registry (
     id          VARCHAR(255) PRIMARY KEY,

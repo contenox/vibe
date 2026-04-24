@@ -37,11 +37,13 @@ type CLIConfigSnapshot struct {
 	DefaultProvider string
 	DefaultChain    string
 	HITLPolicyName  string
+	ResolvedFrom    map[string]string
 }
 
 type service struct {
-	state *runtimestate.State
-	db    libdbexec.DBManager
+	state       *runtimestate.State
+	db          libdbexec.DBManager
+	workspaceID string
 }
 
 // Get implements Service.
@@ -60,7 +62,7 @@ func (s *service) SetupStatus(ctx context.Context) (setupcheck.Result, error) {
 	if err != nil {
 		return setupcheck.Result{}, err
 	}
-	in, err := setupcheck.GatherInput(ctx, s.db, states)
+	in, err := setupcheck.GatherInput(ctx, s.db, states, s.workspaceID)
 	if err != nil {
 		return setupcheck.Result{}, err
 	}
@@ -87,27 +89,35 @@ func (s *service) SetCLIConfig(ctx context.Context, patch CLIConfigPatch) (CLICo
 		}
 	}
 	if strings.TrimSpace(patch.DefaultChain) != "" {
-		if err := clikv.SetString(ctx, store, "default-chain", patch.DefaultChain); err != nil {
+		if err := clikv.WriteConfig(ctx, store, s.workspaceID, "default-chain", patch.DefaultChain); err != nil {
 			return CLIConfigSnapshot{}, fmt.Errorf("set default-chain: %w", err)
 		}
 	}
 	if strings.TrimSpace(patch.HITLPolicyName) != "" {
-		if err := clikv.SetHITLPolicy(ctx, store, patch.HITLPolicyName); err != nil {
+		if err := clikv.WriteConfig(ctx, store, s.workspaceID, "hitl-policy-name", patch.HITLPolicyName); err != nil {
 			return CLIConfigSnapshot{}, fmt.Errorf("set hitl-policy-name: %w", err)
 		}
 	}
+	defaultChain, chainFrom := clikv.ReadConfig(ctx, store, s.workspaceID, "default-chain")
+	hitlPolicy, policyFrom := clikv.ReadConfig(ctx, store, s.workspaceID, "hitl-policy-name")
 	return CLIConfigSnapshot{
 		DefaultModel:    clikv.Read(ctx, store, "default-model"),
 		DefaultProvider: clikv.Read(ctx, store, "default-provider"),
-		DefaultChain:    clikv.Read(ctx, store, "default-chain"),
-		HITLPolicyName:  clikv.ReadHITLPolicy(ctx, store),
+		DefaultChain:    defaultChain,
+		HITLPolicyName:  hitlPolicy,
+		ResolvedFrom: map[string]string{
+			"defaultChain":   chainFrom,
+			"hitlPolicyName": policyFrom,
+		},
 	}, nil
 }
 
 // New returns a state service backed by runtime state and the same DB used for backends + CLI KV.
-func New(state *runtimestate.State, db libdbexec.DBManager) Service {
+// workspaceID scopes workspace-specific config (default-chain, hitl-policy-name) with global fallback.
+func New(state *runtimestate.State, db libdbexec.DBManager, workspaceID string) Service {
 	return &service{
-		state: state,
-		db:    db,
+		state:       state,
+		db:          db,
+		workspaceID: workspaceID,
 	}
 }

@@ -1,7 +1,7 @@
 # Contenox
 **The AI copilot that's actually yours.**
 
-[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/v/release/contenox/contenox?label=version&logo=github)](https://github.com/contenox/contenox/releases)
 
@@ -15,7 +15,7 @@ Not another chat. A system that executes.
 
 ## Install
 
-<!-- Release tooling: keep next line in sync with apiframework/version.txt (updated by `make -f Makefile.version bump-*`). -->
+<!-- Release tooling: keep next line in sync with runtime/version/version.txt (updated by `make -f Makefile.version bump-*`). -->
 <!-- TAG=v0.9.2 -->
 
 ```bash
@@ -42,18 +42,6 @@ Executing Step 5: chmod +x .git/hooks/pre-commit...       ✓
 ```
 
 Plans are stored in SQLite. They don't evaporate when the session ends.
-
----
-
-## Desktop app
-
-Contenox is an Electron desktop app. The same binary serves both the CLI and the app.
-
-```bash
-contenox
-```
-
-Opens the Contenox desktop app. Terminal output, file reads, live agent steps, and plan state appear inline in the same thread you're typing in. No cloud required.
 
 ---
 

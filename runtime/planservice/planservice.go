@@ -94,20 +94,20 @@ type Args struct {
 }
 
 type service struct {
-	db     libdb.DBManager
-	engine execservice.TasksEnvService
-	vfs    vfsservice.Service
+	db          libdb.DBManager
+	engine      execservice.TasksEnvService
+	vfs         vfsservice.Service
+	workspaceID string
 }
 
-// New creates a Service. vfs may be nil (plan markdown writing is skipped).
-func New(db libdb.DBManager, engine execservice.TasksEnvService, vfs vfsservice.Service) Service {
-	return &service{db: db, engine: engine, vfs: vfs}
+func New(db libdb.DBManager, engine execservice.TasksEnvService, vfs vfsservice.Service, workspaceID string) Service {
+	return &service{db: db, engine: engine, vfs: vfs, workspaceID: workspaceID}
 }
 
 var _ Service = (*service)(nil)
 
 func (s *service) activePlan(ctx context.Context) (*planstore.Plan, []*planstore.PlanStep, error) {
-	st := planstore.New(s.db.WithoutTransaction())
+	st := planstore.New(s.db.WithoutTransaction(), s.workspaceID)
 	plan, err := st.GetActivePlan(ctx)
 	if errors.Is(err, planstore.ErrNotFound) {
 		return nil, nil, nil
@@ -132,7 +132,7 @@ func (s *service) Explore(ctx context.Context, planID string, explorerChain *tas
 	if explorerChain == nil {
 		return nil, fmt.Errorf("explorer chain is nil")
 	}
-	st := planstore.New(s.db.WithoutTransaction())
+	st := planstore.New(s.db.WithoutTransaction(), s.workspaceID)
 
 	var plan *planstore.Plan
 	var err error
@@ -325,7 +325,7 @@ func (s *service) getOrCompileChain(ctx context.Context, plan *planstore.Plan, s
 	if err != nil {
 		return nil, err
 	}
-	st := planstore.New(s.db.WithoutTransaction())
+	st := planstore.New(s.db.WithoutTransaction(), s.workspaceID)
 	if err := st.UpdatePlanCompiledChain(ctx, plan.ID, string(b), compiledID, cacheKey); err != nil {
 		return nil, err
 	}
@@ -434,7 +434,7 @@ func (s *service) abortNextWithFailure(ctx context.Context, plan *planstore.Plan
 		return "", "", txErr
 	}
 	defer rTx()
-	txSt := planstore.New(tx)
+	txSt := planstore.New(tx, s.workspaceID)
 	msg := cause.Error()
 	if err := txSt.UpdatePlanStepStatus(cleanupCtx, pending.ID, planstore.StepStatusFailed, msg); err != nil {
 		return "", "", fmt.Errorf("update step after failure: %w", err)
@@ -549,7 +549,7 @@ func (s *service) New(ctx context.Context, goal string, plannerChain *taskengine
 		return nil, nil, "", err
 	}
 	defer rTx()
-	st := planstore.New(tx)
+	st := planstore.New(tx, s.workspaceID)
 	if err := st.CreatePlan(ctx, plan); err != nil {
 		return nil, nil, "", fmt.Errorf("create plan: %w", err)
 	}
@@ -706,7 +706,7 @@ func (s *service) ReplanScoped(ctx context.Context, scope ReplanScope, plannerCh
 		return nil, "", err
 	}
 	defer rTx()
-	st := planstore.New(tx)
+	st := planstore.New(tx, s.workspaceID)
 	if err := st.UpdatePlanCompiledChain(ctx, plan.ID, "", "", ""); err != nil {
 		return nil, "", fmt.Errorf("clear compiled chain: %w", err)
 	}
@@ -733,7 +733,7 @@ func (s *service) ReplanScoped(ctx context.Context, scope ReplanScope, plannerCh
 		return nil, "", err
 	}
 
-	allSteps, err := planstore.New(s.db.WithoutTransaction()).ListPlanSteps(ctx, plan.ID)
+	allSteps, err := planstore.New(s.db.WithoutTransaction(), s.workspaceID).ListPlanSteps(ctx, plan.ID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -758,7 +758,7 @@ func (s *service) Next(ctx context.Context, args Args, executorChain, summarizer
 		return "", "", err
 	}
 
-	st := planstore.New(s.db.WithoutTransaction())
+	st := planstore.New(s.db.WithoutTransaction(), s.workspaceID)
 	plan, err := st.GetActivePlan(ctx)
 	if errors.Is(err, planstore.ErrNotFound) {
 		return "", "", fmt.Errorf("no active plan")
@@ -846,7 +846,7 @@ func (s *service) Next(ctx context.Context, args Args, executorChain, summarizer
 		return "", "", txErr
 	}
 	defer rTx()
-	txSt := planstore.New(tx)
+	txSt := planstore.New(tx, s.workspaceID)
 	if err := txSt.UpdatePlanStepStatus(cleanupCtx, pending.ID, finalStatus, finalResult); err != nil {
 		return "", "", fmt.Errorf("update step: %w", err)
 	}
@@ -894,7 +894,7 @@ func (s *service) Retry(ctx context.Context, ordinal int) (string, error) {
 		return "", err
 	}
 	defer rTx()
-	txSt := planstore.New(tx)
+	txSt := planstore.New(tx, s.workspaceID)
 	// Preserve the failed attempt's summary (or ExecutionResult fallback) as
 	// LastFailureSummary so the re-run's summarizer can see why the prior try
 	// failed. Matches the repair_js pattern in the enterprise state machine:
@@ -908,7 +908,7 @@ func (s *service) Retry(ctx context.Context, ordinal int) (string, error) {
 	if err := commit(ctx); err != nil {
 		return "", err
 	}
-	allSteps, err := planstore.New(s.db.WithoutTransaction()).ListPlanSteps(ctx, plan.ID)
+	allSteps, err := planstore.New(s.db.WithoutTransaction(), s.workspaceID).ListPlanSteps(ctx, plan.ID)
 	if err != nil {
 		return "", err
 	}
@@ -940,7 +940,7 @@ func (s *service) Skip(ctx context.Context, ordinal int) (string, error) {
 		return "", err
 	}
 	defer rTx()
-	txSt := planstore.New(tx)
+	txSt := planstore.New(tx, s.workspaceID)
 	if err := txSt.UpdatePlanStepStatus(ctx, target.ID, planstore.StepStatusSkipped, "skipped"); err != nil {
 		return "", err
 	}
@@ -980,7 +980,7 @@ func (s *service) List(ctx context.Context) ([]*planstore.Plan, error) {
 		return nil, err
 	}
 	defer rTx()
-	plans, err := planstore.New(tx).ListPlans(ctx)
+	plans, err := planstore.New(tx, s.workspaceID).ListPlans(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -996,7 +996,7 @@ func (s *service) SetActive(ctx context.Context, planName string) error {
 		return err
 	}
 	defer rTx()
-	st := planstore.New(tx)
+	st := planstore.New(tx, s.workspaceID)
 	if err := st.ArchiveActivePlans(ctx); err != nil {
 		return err
 	}
@@ -1016,7 +1016,7 @@ func (s *service) Delete(ctx context.Context, planName string) error {
 		return err
 	}
 	defer rTx()
-	st := planstore.New(tx)
+	st := planstore.New(tx, s.workspaceID)
 	plan, err := st.GetPlanByName(ctx, planName)
 	if err != nil {
 		return fmt.Errorf("plan %q not found: %w", planName, err)
@@ -1028,7 +1028,7 @@ func (s *service) Delete(ctx context.Context, planName string) error {
 }
 
 func (s *service) Clean(ctx context.Context) (int, error) {
-	n, err := planstore.New(s.db.WithoutTransaction()).DeleteFinishedPlans(ctx)
+	n, err := planstore.New(s.db.WithoutTransaction(), s.workspaceID).DeleteFinishedPlans(ctx)
 	if err != nil {
 		return 0, err
 	}

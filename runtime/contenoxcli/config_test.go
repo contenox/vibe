@@ -87,22 +87,15 @@ func Test_getConfigKV_overwrite(t *testing.T) {
 // resolveDBPath
 // ---------------------------------------------------------------------------
 
-func Test_resolveDBPath_defaultsToContenoxDir(t *testing.T) {
-	dir := t.TempDir()
-	// resolveDBPath prefers a project-local .contenox/ when it exists on disk; otherwise
-	// it may fall through to ~/.contenox/local.db if present, which breaks hermetic tests.
-	contenoxDir := filepath.Join(dir, ".contenox")
-	require.NoError(t, os.MkdirAll(contenoxDir, 0o755))
+func Test_resolveDBPath_defaultsToGlobalDB(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	expected := filepath.Join(home, ".contenox", "local.db")
 
-	orig, _ := os.Getwd()
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { _ = os.Chdir(orig) })
-
-	// Build a minimal cobra command that doesn't have --db set.
 	cmd := testCobraCmd()
 	dbPath, err := resolveDBPath(cmd)
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(contenoxDir, "local.db"), dbPath)
+	assert.Equal(t, expected, dbPath)
 }
 
 func Test_resolveDBPath_flagOverridesDefault(t *testing.T) {

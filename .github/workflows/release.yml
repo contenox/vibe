@@ -23,23 +23,15 @@ jobs:
       - name: Verify version matches tag
         run: |
           TAG="${{ steps.vars.outputs.TAG }}"
-          VERSION_IN_FILE=$(cat apiframework/version.txt | tr -d '\n' | tr -d '\r')
+          VERSION_IN_FILE=$(cat runtime/version/version.txt | tr -d '\n' | tr -d '\r')
           if [ "$VERSION_IN_FILE" != "$TAG" ]; then
             echo "ERROR: Version in file ($VERSION_IN_FILE) does NOT match tag ($TAG)"
             echo "This means the tag was created without updating the version file first."
             echo "Proper release process:"
-            echo "  1. Update version file with new version"
+            echo "  1. Update runtime/version/version.txt with new version"
             echo "  2. Commit the change"
             echo "  3. Create tag pointing to THAT commit"
             echo "  4. Push tag"
-            echo ""
-            echo "To fix this:"
-            echo "  git checkout $TAG"
-            echo "  echo -n '$TAG' > apiframework/version.txt"
-            echo "  git commit -m 'Update version to $TAG' apiframework/version.txt"
-            echo "  git tag -d $TAG"
-            echo "  git tag $TAG"
-            echo "  git push -f origin $TAG"
             exit 1
           fi
           echo "✓ Version verification passed: $VERSION_IN_FILE matches tag"
@@ -51,11 +43,9 @@ jobs:
       matrix:
         include:
           - goarch: amd64
-            electron_arch: x64
             cc: gcc
             cxx: g++
           - goarch: arm64
-            electron_arch: arm64
             cc: aarch64-linux-gnu-gcc
             cxx: aarch64-linux-gnu-g++
             cross: true
@@ -67,18 +57,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Cache electron-builder downloads
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/electron-builder
-          key: electron-builder-linux-${{ matrix.goarch }}-${{ hashFiles('packages/beam-desktop/package.json') }}
+          go-version: "1.25"
 
       - name: Install CGo dependencies
         run: |
@@ -99,12 +78,6 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/nothings/stb/master/stb_image.h \
                -o "$MTMD/stb/stb_image.h"
 
-      - name: Prepare embed inputs (Beam UI + OpenAPI stub)
-        run: make ci-prepare-embeds
-
-      - name: Generate OpenAPI for embed
-        run: make docs-gen
-
       - name: Build contenox binary
         env:
           GOOS: linux
@@ -116,22 +89,13 @@ jobs:
           TAG="${{ needs.verify.outputs.tag }}"
           LDFLAGS="-X github.com/contenox/contenox/runtime/contenoxcli.Version=${TAG}"
           mkdir -p bin
-          go build -ldflags="${LDFLAGS}" -o bin/contenox-runtime ./cmd/contenox-runtime
-
-      - name: Sync package.json version
-        run: |
-          TAG="${{ needs.verify.outputs.tag }}"
-          npm version "${TAG#v}" --prefix packages/beam-desktop --no-git-tag-version
-
-      - name: Package desktop app
-        working-directory: packages/beam-desktop
-        run: npx electron-builder --linux --${{ matrix.electron_arch }}
+          go build -ldflags="${LDFLAGS}" -o bin/contenox-linux-${{ matrix.goarch }} ./cmd/contenox
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-linux-${{ matrix.goarch }}
-          path: packages/beam-desktop/dist/contenox-*
+          name: contenox-linux-${{ matrix.goarch }}
+          path: bin/contenox-linux-${{ matrix.goarch }}
 
   release:
     needs: [verify, build]

@@ -18,7 +18,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// Service executes one chat turn with mode resolution and injection.
 type Service struct {
 	db           libdbexec.DBManager
 	taskService  execservice.TasksEnvService
@@ -27,19 +26,18 @@ type Service struct {
 	chatManager  *chatservice.Manager
 	resolver     ChainResolver
 	registry     *ModeRegistry
+	workspaceID  string
 }
 
-// Deps configures Service.
 type Deps struct {
 	DB           libdbexec.DBManager
 	TaskService  execservice.TasksEnvService
 	ChainService taskchainservice.Service
 	PlanService  planservice.Service
-	// Optional: override mode→chain map (defaults to DefaultChainByMode).
+	WorkspaceID  string
 	ModeToDefaultChain map[string]string
 }
 
-// New builds a Service with default resolver and mode registry.
 func New(deps Deps) *Service {
 	modeMap := deps.ModeToDefaultChain
 	if len(modeMap) == 0 {
@@ -52,9 +50,10 @@ func New(deps Deps) *Service {
 		taskService:  deps.TaskService,
 		chainService: deps.ChainService,
 		planService:  deps.PlanService,
-		chatManager:  chatservice.NewManager(nil),
+		chatManager:  chatservice.NewManager(deps.WorkspaceID),
 		resolver:     resolver,
 		registry:     reg,
+		workspaceID:  deps.WorkspaceID,
 	}
 }
 

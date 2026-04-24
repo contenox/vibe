@@ -12,7 +12,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/contenox/contenox/apiframework"
+	"github.com/contenox/contenox/runtime/errdefs"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/getkin/kin-openapi/openapi3"
 )
@@ -782,15 +782,15 @@ func findTaskByID(tasks []TaskDefinition, id string) (*TaskDefinition, error) {
 
 func validateChain(tasks []TaskDefinition) error {
 	if len(tasks) == 0 {
-		return fmt.Errorf("chain has no tasks %w", apiframework.ErrBadRequest)
+		return fmt.Errorf("chain has no tasks %w", errdefs.ErrBadRequest)
 	}
 	for _, ct := range tasks {
 		if ct.ID == "" || ct.ID == TermEnd {
 			if ct.ID == "" {
-				return fmt.Errorf("task ID cannot be empty %w", apiframework.ErrBadRequest)
+				return fmt.Errorf("task ID cannot be empty %w", errdefs.ErrBadRequest)
 			}
 			if ct.ID == TermEnd {
-				return fmt.Errorf("task ID cannot be '%s' %w", TermEnd, apiframework.ErrBadRequest)
+				return fmt.Errorf("task ID cannot be '%s' %w", TermEnd, errdefs.ErrBadRequest)
 			}
 		}
 	}

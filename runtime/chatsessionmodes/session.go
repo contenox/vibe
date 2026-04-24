@@ -31,7 +31,7 @@ type ListedChatSession struct {
 func (s *Service) CreateChatSession(ctx context.Context, identity string) (chatID string, startedAt time.Time, err error) {
 	chatID = uuid.NewString()
 	startedAt = time.Now().UTC()
-	st := messagestore.New(s.db.WithoutTransaction())
+	st := messagestore.New(s.db.WithoutTransaction(), s.workspaceID)
 	if err := st.CreateMessageIndex(ctx, chatID, identity); err != nil {
 		return "", time.Time{}, err
 	}
@@ -45,7 +45,7 @@ func (s *Service) ListChatMessages(ctx context.Context, sessionID string) ([]tas
 
 // ListChatSessions returns sessions for an identity with optional last-message preview.
 func (s *Service) ListChatSessions(ctx context.Context, identity string) ([]ListedChatSession, error) {
-	st := messagestore.New(s.db.WithoutTransaction())
+	st := messagestore.New(s.db.WithoutTransaction(), s.workspaceID)
 	sessions, err := st.ListAllSessions(ctx, identity)
 	if err != nil {
 		return nil, err

@@ -38,11 +38,9 @@ type PlanManagerHook struct {
 	summarizerChain *taskengine.TaskChainDefinition
 	svc             planservice.Service
 	contenoxDir     string
+	workspaceID     string
 }
 
-// NewPlanManagerHook creates a PlanManagerHook. The summarizer chain is the
-// same one planservice.Next uses at the CLI/HTTP layer — the hook must be
-// constructed with it so run_next_step produces typed-JSON handovers.
 func NewPlanManagerHook(
 	db libdb.DBManager,
 	plannerChain *taskengine.TaskChainDefinition,
@@ -50,6 +48,7 @@ func NewPlanManagerHook(
 	summarizerChain *taskengine.TaskChainDefinition,
 	engine execservice.TasksEnvService,
 	contenoxDir string,
+	workspaceID string,
 ) taskengine.HookRepo {
 	vfs := vfsservice.NewLocalFS(filepath.Join(contenoxDir, "plans"))
 	return &PlanManagerHook{
@@ -58,7 +57,8 @@ func NewPlanManagerHook(
 		executorChain:   executorChain,
 		summarizerChain: summarizerChain,
 		contenoxDir:     contenoxDir,
-		svc:             planservice.New(db, engine, vfs),
+		workspaceID:     workspaceID,
+		svc:             planservice.New(db, engine, vfs, workspaceID),
 	}
 }
 
@@ -105,7 +105,7 @@ func (h *PlanManagerHook) createPlan(ctx context.Context, input any, hook *taske
 	// Write the active-plan KV pointer so the TUI sidebar refreshes.
 	kvStore := runtimetypes.New(h.db.WithoutTransaction())
 	raw, _ := json.Marshal(plan.ID)
-	err = kvStore.SetKV(ctx, "contenox.plan.active", json.RawMessage(raw))
+	err = kvStore.SetWorkspaceKV(ctx, h.workspaceID, "contenox.plan.active", json.RawMessage(raw))
 	if err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("plan_manager create_plan: %w", err)
 	}
@@ -125,7 +125,7 @@ func (h *PlanManagerHook) createPlan(ctx context.Context, input any, hook *taske
 // runNextStep executes the next pending step via the executor chain.
 func (h *PlanManagerHook) runNextStep(ctx context.Context) (any, taskengine.DataType, error) {
 	// Peek at the next pending step for step metadata in the response.
-	st := planstore.New(h.db.WithoutTransaction())
+	st := planstore.New(h.db.WithoutTransaction(), h.workspaceID)
 	activePlan, err := st.GetActivePlan(ctx)
 	if err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("plan_manager run_next_step: %w", err)
@@ -164,7 +164,7 @@ func (h *PlanManagerHook) runNextStep(ctx context.Context) (any, taskengine.Data
 
 // getPlanStatus returns all steps of the active plan with their current state.
 func (h *PlanManagerHook) getPlanStatus(ctx context.Context) (any, taskengine.DataType, error) {
-	st := planstore.New(h.db.WithoutTransaction())
+	st := planstore.New(h.db.WithoutTransaction(), h.workspaceID)
 	activePlan, err := st.GetActivePlan(ctx)
 	if err != nil {
 		return `{"status":"no_active_plan"}`, taskengine.DataTypeString, nil

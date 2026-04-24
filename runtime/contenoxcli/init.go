@@ -14,6 +14,7 @@ import (
 	"github.com/contenox/contenox/runtime/internal/setupcheck"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtime/runtimetypes"
+	"github.com/google/uuid"
 )
 
 //go:embed chain-contenox.json
@@ -80,8 +81,7 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 	if provider == "" {
 		// Default to the provider already configured in the database so that
 		// re-running init doesn't show irrelevant setup steps.
-		dbPath := filepath.Join(contenoxDir, "local.db")
-		if _, statErr := os.Stat(dbPath); statErr == nil {
+		if dbPath, gpErr := globalDBPath(); gpErr == nil {
 			if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
 				store := runtimetypes.New(db.WithoutTransaction())
 				if cur, err := getConfigKV(libtracker.WithNewRequestID(context.Background()), store, "default-provider"); err == nil && cur != "" {
@@ -103,6 +103,10 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 	}
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
 		return fmt.Errorf("failed to create .contenox directory: %w", err)
+	}
+	wsPath := filepath.Join(contenoxDir, "workspace.id")
+	if _, err := os.Stat(wsPath); os.IsNotExist(err) {
+		_ = os.WriteFile(wsPath, []byte(uuid.NewString()), 0o644)
 	}
 	chainPath := filepath.Join(contenoxDir, "default-chain.json")
 	runChainPath := filepath.Join(contenoxDir, "default-run-chain.json")
@@ -158,8 +162,7 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 
 	// Surface the currently configured model so users immediately know
 	// if they have a stale entry from a previous install.
-	dbPath := filepath.Join(contenoxDir, "local.db")
-	if _, statErr := os.Stat(dbPath); statErr == nil {
+	if dbPath, gpErr := globalDBPath(); gpErr == nil {
 		if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
 			store := runtimetypes.New(db.WithoutTransaction())
 			ctx := libtracker.WithNewRequestID(context.Background())
@@ -173,7 +176,7 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 			}
 			db.Close()
 			if curModel != "" || curProvider != "" {
-				fmt.Fprintln(out, "Current config (from local.db):")
+				fmt.Fprintln(out, "Current config (from ~/.contenox/local.db):")
 				if curProvider != "" {
 					fmt.Fprintf(out, "  default-provider = %s\n", curProvider)
 				}
@@ -193,8 +196,7 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 	if pc.envKey != "" {
 		envVal = os.Getenv(pc.envKey)
 		if envVal == "" {
-			dbPath := filepath.Join(contenoxDir, "local.db")
-			if _, statErr := os.Stat(dbPath); statErr == nil {
+			if dbPath, gpErr := globalDBPath(); gpErr == nil {
 				if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
 					store := runtimetypes.New(db.WithoutTransaction())
 					var cfg runtimestate.ProviderConfig

@@ -14,21 +14,19 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type store struct {
-	Exec libdbexec.Exec
+	Exec        libdbexec.Exec
+	workspaceID string
 }
 
-// New creates a new message store instance.
-func New(exec libdbexec.Exec) Store {
-	return &store{Exec: exec}
+func New(exec libdbexec.Exec, workspaceID string) Store {
+	return &store{Exec: exec, workspaceID: workspaceID}
 }
 
-// CreateMessageIndex creates a new message index (unnamed).
 func (s *store) CreateMessageIndex(ctx context.Context, id string, identity string) error {
 	_, err := s.Exec.ExecContext(ctx, `
-		INSERT INTO message_indices(id, identity)
-		VALUES ($1, $2)`,
-		id,
-		identity,
+		INSERT INTO message_indices(id, identity, workspace_id)
+		VALUES ($1, $2, $3)`,
+		id, identity, s.workspaceID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create message index: %w", err)
@@ -36,14 +34,11 @@ func (s *store) CreateMessageIndex(ctx context.Context, id string, identity stri
 	return nil
 }
 
-// CreateNamedMessageIndex creates a new message index with a human-readable name.
 func (s *store) CreateNamedMessageIndex(ctx context.Context, id string, identity string, name string) error {
 	_, err := s.Exec.ExecContext(ctx, `
-		INSERT INTO message_indices(id, identity, name)
-		VALUES ($1, $2, $3)`,
-		id,
-		identity,
-		name,
+		INSERT INTO message_indices(id, identity, workspace_id, name)
+		VALUES ($1, $2, $3, $4)`,
+		id, identity, s.workspaceID, name,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create named message index: %w", err)
@@ -51,13 +46,11 @@ func (s *store) CreateNamedMessageIndex(ctx context.Context, id string, identity
 	return nil
 }
 
-// DeleteMessageIndex deletes a message index.
 func (s *store) DeleteMessageIndex(ctx context.Context, id string, identity string) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		DELETE FROM message_indices
-		WHERE id = $1 AND identity = $2`,
-		id,
-		identity,
+		WHERE id = $1 AND identity = $2 AND workspace_id = $3`,
+		id, identity, s.workspaceID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to delete message index: %w", err)
@@ -79,8 +72,8 @@ func (s *store) listMessageIndicesByIdentity(ctx context.Context, identity strin
 	rows, err := s.Exec.QueryContext(ctx, `
 		SELECT id
 		FROM message_indices
-		WHERE identity = $1`,
-		identity,
+		WHERE identity = $1 AND workspace_id = $2`,
+		identity, s.workspaceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query message indices: %w", err)
@@ -106,9 +99,9 @@ func (s *store) ListAllSessions(ctx context.Context, identity string) ([]Session
 	rows, err := s.Exec.QueryContext(ctx, `
 		SELECT id, identity, COALESCE(name, '')
 		FROM message_indices
-		WHERE identity = $1
+		WHERE identity = $1 AND workspace_id = $2
 		ORDER BY id ASC`,
-		identity,
+		identity, s.workspaceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sessions: %w", err)
@@ -135,9 +128,8 @@ func (s *store) GetSessionByName(ctx context.Context, identity string, name stri
 	err := s.Exec.QueryRowContext(ctx, `
 		SELECT id, identity, COALESCE(name, '')
 		FROM message_indices
-		WHERE identity = $1 AND name = $2`,
-		identity,
-		name,
+		WHERE identity = $1 AND name = $2 AND workspace_id = $3`,
+		identity, name, s.workspaceID,
 	).Scan(&si.ID, &si.Identity, &si.Name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

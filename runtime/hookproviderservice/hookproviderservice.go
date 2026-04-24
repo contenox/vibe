@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/contenox/apiframework"
+	"github.com/contenox/contenox/runtime/errdefs"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtime/runtimetypes"
@@ -213,20 +213,20 @@ func (s *service) List(ctx context.Context, createdAtCursor *time.Time, limit in
 func validate(hook *runtimetypes.RemoteHook) error {
 	switch {
 	case hook.Name == "":
-		return fmt.Errorf("%w %w: name is required", ErrInvalidHook, apiframework.ErrUnprocessableEntity)
+		return fmt.Errorf("%w %w: name is required", ErrInvalidHook, errdefs.ErrUnprocessableEntity)
 	case hook.EndpointURL == "":
-		return fmt.Errorf("%w %w: endpoint URL is required", ErrInvalidHook, apiframework.ErrUnprocessableEntity)
+		return fmt.Errorf("%w %w: endpoint URL is required", ErrInvalidHook, errdefs.ErrUnprocessableEntity)
 	case hook.TimeoutMs <= 0:
-		return fmt.Errorf("%w %w: timeout must be positive", ErrInvalidHook, apiframework.ErrUnprocessableEntity)
+		return fmt.Errorf("%w %w: timeout must be positive", ErrInvalidHook, errdefs.ErrUnprocessableEntity)
 	}
 
 	// Validate headers if provided
 	for key, value := range hook.Headers {
 		if key == "" {
-			return fmt.Errorf("%w %w: header name cannot be empty", ErrInvalidHook, apiframework.ErrUnprocessableEntity)
+			return fmt.Errorf("%w %w: header name cannot be empty", ErrInvalidHook, errdefs.ErrUnprocessableEntity)
 		}
 		if value == "" {
-			return fmt.Errorf("%w %w: header value for %s cannot be empty", ErrInvalidHook, apiframework.ErrUnprocessableEntity, key)
+			return fmt.Errorf("%w %w: header value for %s cannot be empty", ErrInvalidHook, errdefs.ErrUnprocessableEntity, key)
 		}
 	}
 

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/contenox/contenox/apiframework"
+	"github.com/contenox/contenox/runtime/errdefs"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/runtime/runtimetypes"
 )
@@ -56,7 +56,7 @@ func (s *service) Update(ctx context.Context, data *runtimetypes.Model) error {
 		return err
 	}
 	if data.ID == "" {
-		return fmt.Errorf("%w %w: id is required", apiframework.ErrBadRequest, ErrInvalidModel)
+		return fmt.Errorf("%w %w: id is required", errdefs.ErrBadRequest, ErrInvalidModel)
 	}
 	tx := s.dbInstance.WithoutTransaction()
 	storeInstance := runtimetypes.New(tx)
@@ -72,14 +72,14 @@ func (s *service) List(ctx context.Context, createdAtCursor *time.Time, limit in
 func (s *service) Delete(ctx context.Context, modelName string) error {
 	tx := s.dbInstance.WithoutTransaction()
 	if modelName == s.immutableEmbedModelName {
-		return apiframework.ErrImmutableModel
+		return errdefs.ErrImmutableModel
 	}
 	return runtimetypes.New(tx).DeleteModel(ctx, modelName)
 }
 
 func validate(model *runtimetypes.Model) error {
 	if model.Model == "" {
-		return fmt.Errorf("%w %w: model name is required", apiframework.ErrBadRequest, ErrInvalidModel)
+		return fmt.Errorf("%w %w: model name is required", errdefs.ErrBadRequest, ErrInvalidModel)
 	}
 	return nil
 }

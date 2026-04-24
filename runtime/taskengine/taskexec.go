@@ -563,8 +563,14 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			if currentTask.Hook.Args == nil {
 				currentTask.Hook.Args = make(map[string]string)
 			}
+			hookCtx := taskCtx
+			if currentTask.ExecuteConfig != nil {
+				if policy, ok := currentTask.ExecuteConfig.HookPolicies[currentTask.Hook.Name]; ok && len(policy) > 0 {
+					hookCtx = WithHookArgs(hookCtx, currentTask.Hook.Name, policy)
+				}
+			}
 			output, outputType, transitionEval, taskErr = exe.hookengine(
-				taskCtx,
+				hookCtx,
 				startingTime,
 				output,
 				currentTask.Hook,

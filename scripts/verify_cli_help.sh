@@ -3,7 +3,7 @@
 # Keeps CLI docs and Cobra wiring in sync (run after: make build-contenox).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="${CONTENOX_BIN:-$ROOT/bin/contenox-runtime}"
+BIN="${CONTENOX_BIN:-$ROOT/bin/contenox}"
 if [[ ! -x "$BIN" ]]; then
   echo "error: missing executable: $BIN (run: make build-contenox)" >&2
   exit 1
@@ -22,7 +22,6 @@ run_help plan
 run_help plan next
 run_help session
 run_help init
-run_help beam
 run_help hook
 run_help mcp
 run_help backend

@@ -22,8 +22,8 @@ var modelAddCmd = &cobra.Command{
 This does not download the model; use 'model pull' to download.
 
 Examples:
-  contenox-runtime model add my-llm --url https://huggingface.co/org/model.gguf
-  contenox-runtime model add my-llm --url https://huggingface.co/org/model.gguf --size 1073741824`,
+  contenox model add my-llm --url https://huggingface.co/org/model.gguf
+  contenox model add my-llm --url https://huggingface.co/org/model.gguf --size 1073741824`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
@@ -57,8 +57,8 @@ var modelShowCmd = &cobra.Command{
 	Long: `Resolve a model by name from the registry (curated + user-added) and print its details.
 
 Examples:
-  contenox-runtime model show qwen2.5-1.5b
-  contenox-runtime model show my-custom-llm`,
+  contenox model show qwen2.5-1.5b
+  contenox model show my-custom-llm`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
@@ -86,8 +86,8 @@ var modelRemoveCmd = &cobra.Command{
 Curated (built-in) models cannot be removed.
 
 Examples:
-  contenox-runtime model remove my-custom-llm
-  contenox-runtime model rm my-custom-llm`,
+  contenox model remove my-custom-llm
+  contenox model rm my-custom-llm`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
@@ -115,7 +115,7 @@ var modelRegistryListCmd = &cobra.Command{
 	Long: `Show all models known to the registry: built-in curated entries and any user-added entries.
 
 Examples:
-  contenox-runtime model registry-list`,
+  contenox model registry-list`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())

@@ -71,11 +71,13 @@ CREATE TABLE IF NOT EXISTS entity_events (
 );
 
 CREATE TABLE IF NOT EXISTS kv (
-    key VARCHAR(255) PRIMARY KEY,
+    key VARCHAR(255) NOT NULL,
+    workspace_id VARCHAR(255) NOT NULL DEFAULT '',
     value TEXT NOT NULL,
 
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (key, workspace_id)
 );
 
 CREATE TABLE IF NOT EXISTS remote_hooks (
@@ -119,12 +121,12 @@ CREATE TABLE IF NOT EXISTS event_triggers (
 CREATE TABLE IF NOT EXISTS message_indices (
     id VARCHAR(255) PRIMARY KEY,
     identity VARCHAR(512) NOT NULL,
-    name VARCHAR(255)  -- human-readable session name; NULL = unnamed
+    workspace_id VARCHAR(255) NOT NULL DEFAULT '',
+    name VARCHAR(255)
 );
 
--- Partial unique index: only enforce uniqueness when name IS NOT NULL
 CREATE UNIQUE INDEX IF NOT EXISTS idx_message_indices_name
-    ON message_indices (name)
+    ON message_indices (name, workspace_id)
     WHERE name IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -146,17 +148,17 @@ CREATE INDEX IF NOT EXISTS idx_event_triggers_function_name ON event_triggers(fu
 
 CREATE TABLE IF NOT EXISTS plans (
     id VARCHAR(255) PRIMARY KEY,
-    name VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    workspace_id VARCHAR(255) NOT NULL DEFAULT '',
     goal TEXT NOT NULL,
-    status VARCHAR(50) DEFAULT 'active', -- active | completed | archived
-    session_id VARCHAR(255),             -- optional FK to message_indices
+    status VARCHAR(50) DEFAULT 'active',
+    session_id VARCHAR(255),
     compiled_chain_json          TEXT,
     compiled_chain_id            VARCHAR(255),
     compile_executor_chain_id    VARCHAR(255),
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
-
 CREATE TABLE IF NOT EXISTS plan_steps (
     id VARCHAR(255) PRIMARY KEY,
     plan_id VARCHAR(255) REFERENCES plans(id) ON DELETE CASCADE,
@@ -202,21 +204,6 @@ CREATE TABLE IF NOT EXISTS llm_model_registry (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_model_registry_created_at ON llm_model_registry(created_at);
 
-CREATE TABLE IF NOT EXISTS terminal_sessions (
-    id VARCHAR(255) PRIMARY KEY,
-    principal VARCHAR(512) NOT NULL,
-    cwd TEXT NOT NULL,
-    shell VARCHAR(512) NOT NULL,
-    cols INT NOT NULL,
-    rows INT NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'active',
-    node_instance_id VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_terminal_sessions_principal_created ON terminal_sessions (principal, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_terminal_sessions_node ON terminal_sessions (node_instance_id);
-
 -- libbus.SQLiteBus tables -----------------------------------------------
 
 CREATE TABLE IF NOT EXISTS bus_events (
@@ -254,6 +241,10 @@ ALTER TABLE remote_hooks ADD COLUMN inject_params_json TEXT NOT NULL DEFAULT '{}
 ALTER TABLE mcp_servers ADD COLUMN headers_json        TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE mcp_servers ADD COLUMN inject_params_json  TEXT NOT NULL DEFAULT '{}';
 
+-- plans: workspace_id added after initial release
+ALTER TABLE plans ADD COLUMN workspace_id VARCHAR(255) NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_name_workspace ON plans (name, workspace_id);
+
 -- plans: cached plancompile output (must match planstore + planstore/store queries)
 ALTER TABLE plans ADD COLUMN compiled_chain_json TEXT;
 ALTER TABLE plans ADD COLUMN compiled_chain_id VARCHAR(255);
@@ -272,7 +263,6 @@ ALTER TABLE plan_steps ADD COLUMN last_failure_summary TEXT;
 -- whether to auto-replan a failed step. See planstore.FailureClass.
 ALTER TABLE plan_steps ADD COLUMN failure_class        VARCHAR(50);
 
-ALTER TABLE terminal_sessions ADD COLUMN workspace_id VARCHAR(255);
 
 
 PRAGMA foreign_keys=off;

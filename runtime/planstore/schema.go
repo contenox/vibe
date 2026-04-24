@@ -18,18 +18,21 @@ import (
 func InitSchema(ctx context.Context, exec libdbexec.Exec) error {
 	_, err := exec.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS plans (
-			id         VARCHAR(255) PRIMARY KEY,
-			name       VARCHAR(255) NOT NULL UNIQUE,
-			goal       TEXT         NOT NULL,
-			status     VARCHAR(50)  NOT NULL DEFAULT 'active',
-			session_id VARCHAR(255),
+			id           VARCHAR(255) PRIMARY KEY,
+			name         VARCHAR(255) NOT NULL,
+			workspace_id VARCHAR(255) NOT NULL DEFAULT '',
+			goal         TEXT         NOT NULL,
+			status       VARCHAR(50)  NOT NULL DEFAULT 'active',
+			session_id   VARCHAR(255),
 			compiled_chain_json          TEXT,
 			compiled_chain_id            VARCHAR(255),
 			compile_executor_chain_id    VARCHAR(255),
 			repo_context_json            TEXT,
-			created_at TIMESTAMP    NOT NULL,
-			updated_at TIMESTAMP    NOT NULL
+			created_at   TIMESTAMP    NOT NULL,
+			updated_at   TIMESTAMP    NOT NULL
 		);
+
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_name_workspace ON plans (name, workspace_id);
 
 		CREATE TABLE IF NOT EXISTS plan_steps (
 			id                    VARCHAR(255) PRIMARY KEY,
@@ -61,6 +64,7 @@ func InitSchema(ctx context.Context, exec libdbexec.Exec) error {
 // migratePlansCompiledColumns adds compile columns to existing databases created before they existed.
 func migratePlansCompiledColumns(ctx context.Context, exec libdbexec.Exec) error {
 	stmts := []string{
+		`ALTER TABLE plans ADD COLUMN workspace_id VARCHAR(255) NOT NULL DEFAULT ''`,
 		`ALTER TABLE plans ADD COLUMN compiled_chain_json TEXT`,
 		`ALTER TABLE plans ADD COLUMN compiled_chain_id VARCHAR(255)`,
 		`ALTER TABLE plans ADD COLUMN compile_executor_chain_id VARCHAR(255)`,

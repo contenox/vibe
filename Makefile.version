@@ -1,4 +1,4 @@
-# Maintainer: apiframework/version.txt bumps and release checklist.
+# Maintainer: runtime/version/version.txt bumps and release checklist.
 # Run from repo root: make -f Makefile.version help
 
 PROJECT_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -7,7 +7,7 @@ PROJECT_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 .PHONY: help set-version bump-patch bump-minor bump-major release
 
 help:
-	@echo "Version file: apiframework/version.txt (see tools/version/)"
+	@echo "Version file: runtime/version/version.txt (see tools/version/)"
 	@echo "  make -f Makefile.version set-version"
 	@echo "  make -f Makefile.version bump-patch | bump-minor | bump-major"
 	@echo "After bumping, commit changes, then tag (see: make -f Makefile.version release)"
@@ -29,4 +29,4 @@ release:
 	@echo "  1. Bump: make -f Makefile.version bump-patch|bump-minor|bump-major"
 	@echo "  2. Commit version files (and any synced manifests the tool updated)"
 	@echo "  3. git tag vX.Y.Z && git push origin vX.Y.Z"
-	@echo "CI verifies apiframework/version.txt matches the tag, then builds and publishes assets."
+	@echo "CI verifies runtime/version/version.txt matches the tag, then builds and publishes assets."

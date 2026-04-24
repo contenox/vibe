@@ -1,4 +1,4 @@
-// Package setupcheck evaluates local runtime readiness (defaults, backends) for Beam and CLI.
+// Package setupcheck evaluates local runtime readiness (defaults, backends) for the CLI.
 package setupcheck
 
 import (
@@ -30,6 +30,9 @@ type Input struct {
 	// for BackendCount. CLI doctor sets this from ListBackends when runtime state sync is unavailable.
 	RegisteredBackendCount *int
 	RegisteredBackends     []runtimetypes.Backend
+	// ResolvedFrom records where workspace-scoped keys came from: "workspace" or "global".
+	// Keys are camelCase JSON names: "defaultChain", "hitlPolicyName".
+	ResolvedFrom map[string]string
 }
 
 // Issue describes one setup problem and how to fix it.
@@ -60,14 +63,15 @@ type BackendCheck struct {
 
 // Result is returned by GET /setup-status and contenox doctor.
 type Result struct {
-	DefaultModel          string         `json:"defaultModel"`
-	DefaultProvider       string         `json:"defaultProvider"`
-	DefaultChain          string         `json:"defaultChain"`
-	HITLPolicyName        string         `json:"hitlPolicyName"`
-	BackendCount          int            `json:"backendCount"`
-	ReachableBackendCount int            `json:"reachableBackendCount"`
-	Issues                []Issue        `json:"issues"`
-	BackendChecks         []BackendCheck `json:"backendChecks,omitempty"`
+	DefaultModel          string            `json:"defaultModel"`
+	DefaultProvider       string            `json:"defaultProvider"`
+	DefaultChain          string            `json:"defaultChain"`
+	HITLPolicyName        string            `json:"hitlPolicyName"`
+	BackendCount          int               `json:"backendCount"`
+	ReachableBackendCount int               `json:"reachableBackendCount"`
+	Issues                []Issue           `json:"issues"`
+	BackendChecks         []BackendCheck    `json:"backendChecks,omitempty"`
+	ResolvedFrom          map[string]string `json:"resolvedFrom,omitempty"`
 }
 
 type backendErrorKind string
@@ -89,6 +93,7 @@ func Evaluate(in Input) Result {
 		DefaultChain:    strings.TrimSpace(in.DefaultChain),
 		HITLPolicyName:  strings.TrimSpace(in.HITLPolicyName),
 		BackendCount:    len(in.RegisteredBackends),
+		ResolvedFrom:    in.ResolvedFrom,
 	}
 
 	if r.BackendCount == 0 {

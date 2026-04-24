@@ -1,32 +1,30 @@
 #:schema https://json.schemastore.org/any.json
-# Air — live reload for Go: https://github.com/air-verse/air
+# Air — rebuild-on-save for the contenox CLI binary.
 # Run: make dev-go-watch  (after: make deps-go-watch)
-# Pair with Vite: make dev-web-proxy
+#
+# This does NOT execute the binary on each save — contenox is a one-shot CLI,
+# not a server. Air rebuilds ./bin/contenox and refreshes the ~/.local/bin
+# symlink so `contenox` on your PATH always points at the latest build.
+# Invoke the binary yourself in another terminal.
 
 root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -ldflags \"-X github.com/contenox/contenox/runtime/contenoxcli.Version=dev\" -o ./bin/contenox-runtime ./cmd/contenox-runtime"
-entrypoint = ["./bin/contenox-runtime", "beam"]
-include_ext = ["go", "tpl", "tmpl", "html", "js", "css", "svg", "json"]
+cmd = "go build -ldflags \"-X github.com/contenox/contenox/runtime/contenoxcli.Version=dev\" -o ./bin/contenox ./cmd/contenox && mkdir -p $HOME/.local/bin && ln -sf $(pwd)/bin/contenox $HOME/.local/bin/contenox"
+entrypoint = ["true"]
+include_ext = ["go", "json"]
 exclude_dir = [
-  "node_modules",
-  "packages/beam/node_modules",
-  "packages/ui/node_modules",
   ".git",
   "tmp",
   "enterprise",
-  "apitests",
   "docs",
-  "website",
-  "testproject",
 ]
 exclude_regex = ["_test\\.go"]
 delay = 500
 stop_on_error = true
-send_interrupt = true
-kill_delay = "500ms"
+send_interrupt = false
+kill_delay = "100ms"
 
 [log]
 time = true

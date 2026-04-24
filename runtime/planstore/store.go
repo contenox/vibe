@@ -14,12 +14,12 @@ import (
 var ErrNotFound = errors.New("plan not found")
 
 type store struct {
-	Exec libdbexec.Exec
+	Exec        libdbexec.Exec
+	workspaceID string
 }
 
-// New creates a new plan store instance.
-func New(exec libdbexec.Exec) Store {
-	return &store{Exec: exec}
+func New(exec libdbexec.Exec, workspaceID string) Store {
+	return &store{Exec: exec, workspaceID: workspaceID}
 }
 
 // CreatePlan creates a new plan.
@@ -42,10 +42,11 @@ func (s *store) CreatePlan(ctx context.Context, plan *Plan) error {
 	rcJSON := sql.NullString{String: plan.RepoContextJSON, Valid: plan.RepoContextJSON != ""}
 
 	_, err := s.Exec.ExecContext(ctx, `
-		INSERT INTO plans (id, name, goal, status, session_id, compiled_chain_json, compiled_chain_id, compile_executor_chain_id, repo_context_json, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		INSERT INTO plans (id, name, workspace_id, goal, status, session_id, compiled_chain_json, compiled_chain_id, compile_executor_chain_id, repo_context_json, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		plan.ID,
 		plan.Name,
+		s.workspaceID,
 		plan.Goal,
 		string(plan.Status),
 		sessionID,
@@ -79,9 +80,9 @@ func (s *store) getPlanByCondition(ctx context.Context, condition string, arg an
 	query := fmt.Sprintf(`
 		SELECT id, name, goal, status, session_id, compiled_chain_json, compiled_chain_id, compile_executor_chain_id, repo_context_json, created_at, updated_at
 		FROM plans
-		WHERE %s`, condition)
+		WHERE workspace_id = $2 AND %s`, condition)
 
-	err := s.Exec.QueryRowContext(ctx, query, arg).Scan(
+	err := s.Exec.QueryRowContext(ctx, query, arg, s.workspaceID).Scan(
 		&p.ID,
 		&p.Name,
 		&p.Goal,
@@ -128,9 +129,10 @@ func (s *store) GetActivePlan(ctx context.Context) (*Plan, error) {
 	err := s.Exec.QueryRowContext(ctx, `
 		SELECT id, name, goal, status, session_id, compiled_chain_json, compiled_chain_id, compile_executor_chain_id, repo_context_json, created_at, updated_at
 		FROM plans
-		WHERE status = 'active'
+		WHERE workspace_id = $1 AND status = 'active'
 		ORDER BY updated_at DESC
 		LIMIT 1`,
+		s.workspaceID,
 	).Scan(&p.ID, &p.Name, &p.Goal, &status, &sessionID, &ccJSON, &ccID, &exID, &rcJSON, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -201,7 +203,9 @@ func (s *store) ListPlans(ctx context.Context) ([]*Plan, error) {
 	rows, err := s.Exec.QueryContext(ctx, `
 		SELECT id, name, goal, status, session_id, compiled_chain_json, compiled_chain_id, compile_executor_chain_id, repo_context_json, created_at, updated_at
 		FROM plans
+		WHERE workspace_id = $1
 		ORDER BY created_at ASC`,
+		s.workspaceID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query plans: %w", err)
@@ -244,8 +248,8 @@ func (s *store) ListPlans(ctx context.Context) ([]*Plan, error) {
 func (s *store) DeletePlan(ctx context.Context, id string) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		DELETE FROM plans
-		WHERE id = $1`,
-		id,
+		WHERE id = $1 AND workspace_id = $2`,
+		id, s.workspaceID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to delete plan: %w", err)
@@ -510,7 +514,9 @@ func (s *store) DeletePendingPlanSteps(ctx context.Context, planID string) error
 // statement. Returns the number of plans deleted.
 func (s *store) DeleteFinishedPlans(ctx context.Context) (int, error) {
 	rows, err := s.Exec.QueryContext(ctx,
-		`DELETE FROM plans WHERE status IN ('completed','archived') RETURNING id`)
+		`DELETE FROM plans WHERE workspace_id = $1 AND status IN ('completed','archived') RETURNING id`,
+		s.workspaceID,
+	)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete finished plans: %w", err)
 	}
@@ -527,8 +533,8 @@ func (s *store) DeleteFinishedPlans(ctx context.Context) (int, error) {
 // ArchiveActivePlans sets every active plan's status to 'archived' in one query.
 func (s *store) ArchiveActivePlans(ctx context.Context) error {
 	_, err := s.Exec.ExecContext(ctx,
-		`UPDATE plans SET status = 'archived', updated_at = $1 WHERE status = 'active'`,
-		time.Now().UTC(),
+		`UPDATE plans SET status = 'archived', updated_at = $1 WHERE workspace_id = $2 AND status = 'active'`,
+		time.Now().UTC(), s.workspaceID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to archive active plans: %w", err)

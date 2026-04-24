@@ -13,12 +13,12 @@ import (
 	"github.com/contenox/contenox/runtime/taskengine"
 )
 
-// Manager coordinates chat message management.
-type Manager struct{}
+type Manager struct {
+	workspaceID string
+}
 
-// NewManager creates a new Manager.
-func NewManager(store messagestore.Store) *Manager {
-	return &Manager{}
+func NewManager(workspaceID string) *Manager {
+	return &Manager{workspaceID: workspaceID}
 }
 
 // AddInstruction inserts a system message into an existing chat index.
@@ -36,7 +36,7 @@ func (m *Manager) AddInstruction(ctx context.Context, tx libdb.Exec, id string, 
 	if messageID == "" {
 		messageID = generateMessageID(id, &msg)
 	}
-	return messagestore.New(tx).AppendMessages(ctx, &messagestore.Message{
+	return messagestore.New(tx, m.workspaceID).AppendMessages(ctx, &messagestore.Message{
 		ID:      messageID,
 		IDX:     id,
 		Payload: payload,
@@ -57,7 +57,7 @@ func (m *Manager) AppendMessage(_ context.Context, messages []taskengine.Message
 
 // ListMessages retrieves all stored messages for a given subject ID.
 func (m *Manager) ListMessages(ctx context.Context, tx libdb.Exec, subjectID string) ([]taskengine.Message, error) {
-	conversation, err := messagestore.New(tx).ListMessages(ctx, subjectID)
+	conversation, err := messagestore.New(tx, m.workspaceID).ListMessages(ctx, subjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (m *Manager) PersistDiff(ctx context.Context, tx libdb.Exec, subjectID stri
 		return nil
 	}
 
-	conversation, err := messagestore.New(tx).ListMessages(ctx, subjectID)
+	conversation, err := messagestore.New(tx, m.workspaceID).ListMessages(ctx, subjectID)
 	if err != nil {
 		return err
 	}
@@ -113,14 +113,14 @@ func (m *Manager) PersistDiff(ctx context.Context, tx libdb.Exec, subjectID stri
 	}
 
 	if len(newMessages) > 0 {
-		return messagestore.New(tx).AppendMessages(ctx, newMessages...)
+		return messagestore.New(tx, m.workspaceID).AppendMessages(ctx, newMessages...)
 	}
 	return nil
 }
 
 // DeleteSession removes all messages and the index for a session.
 func (m *Manager) DeleteSession(ctx context.Context, tx libdb.Exec, sessionID string, identity string) error {
-	store := messagestore.New(tx)
+	store := messagestore.New(tx, m.workspaceID)
 	// DeleteMessageIndex cascades to messages via ON DELETE CASCADE.
 	if err := store.DeleteMessageIndex(ctx, sessionID, identity); err != nil {
 		return fmt.Errorf("failed to delete session index: %w", err)
@@ -130,7 +130,7 @@ func (m *Manager) DeleteSession(ctx context.Context, tx libdb.Exec, sessionID st
 
 // RenameSession updates the human-readable name of a session.
 func (m *Manager) RenameSession(ctx context.Context, tx libdb.Exec, sessionID string, name string) error {
-	return messagestore.New(tx).RenameSession(ctx, sessionID, name)
+	return messagestore.New(tx, m.workspaceID).RenameSession(ctx, sessionID, name)
 }
 
 // generateMessageID creates a deterministic ID from the message content.

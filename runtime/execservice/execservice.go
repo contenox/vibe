@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/contenox/apiframework"
+	"github.com/contenox/contenox/runtime/errdefs"
 	"github.com/contenox/contenox/runtime/internal/llmrepo"
 	"github.com/google/uuid"
 )
@@ -36,10 +36,10 @@ type SimpleExecutionResponse struct {
 
 func (s *execService) Execute(ctx context.Context, request *TaskRequest) (*SimpleExecutionResponse, error) {
 	if request == nil {
-		return nil, apiframework.ErrEmptyRequest
+		return nil, errdefs.ErrEmptyRequest
 	}
 	if request.Prompt == "" {
-		return nil, fmt.Errorf("prompt is empty %w", apiframework.ErrEmptyRequestBody)
+		return nil, fmt.Errorf("prompt is empty %w", errdefs.ErrEmptyRequestBody)
 	}
 	modelNames := []string{}
 	providerNames := []string{}

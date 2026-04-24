@@ -105,7 +105,7 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	ctx = taskengine.WithTemplateVars(ctx, templateVars)
 
 	// Persistent Session Management
-	sessionID, err := ensureDefaultSession(ctx, db)
+	sessionID, err := ensureDefaultSession(ctx, db, ResolveWorkspaceID(opts.ContenoxDir))
 	if err != nil {
 		slog.Warn("Failed to resolve active session — history will not be persisted", "error", err)
 		sessionID = ""
@@ -113,7 +113,7 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 		// INJECT: Tunnel the session ID down the call stack so MCP workers can multiplex connections
 		ctx = context.WithValue(ctx, runtimetypes.SessionIDContextKey, sessionID)
 	}
-	chatMgr := chatservice.NewManager(nil)
+	chatMgr := chatservice.NewManager(ResolveWorkspaceID(opts.ContenoxDir))
 
 	stopTaskEvents := startCLITaskEventStream(ctx, engine, errW, cliTaskEventRenderOptions{
 		Trace:        opts.EffectiveTracing,

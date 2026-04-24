@@ -177,6 +177,9 @@ type Store interface {
 	ListKV(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*KV, error)
 	ListKVPrefix(ctx context.Context, prefix string, createdAtCursor *time.Time, limit int) ([]*KV, error)
 	EstimateKVCount(ctx context.Context) (int64, error)
+	SetWorkspaceKV(ctx context.Context, workspaceID string, key string, value json.RawMessage) error
+	GetWorkspaceKV(ctx context.Context, workspaceID string, key string, out interface{}) error
+	DeleteWorkspaceKV(ctx context.Context, workspaceID string, key string) error
 
 	CreateRemoteHook(ctx context.Context, hook *RemoteHook) error
 	GetRemoteHook(ctx context.Context, id string) (*RemoteHook, error)

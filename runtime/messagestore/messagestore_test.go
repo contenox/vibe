@@ -30,7 +30,7 @@ func setupDB(t *testing.T) (context.Context, libdb.DBManager) {
 
 func TestMessageStore_CreateAndListIndices(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction())
+	store := messagestore.New(db.WithoutTransaction(), "")
 
 	err := store.CreateMessageIndex(ctx, "idx-alice", "alice")
 	require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestMessageStore_CreateAndListIndices(t *testing.T) {
 
 func TestMessageStore_AppendAndList(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction())
+	store := messagestore.New(db.WithoutTransaction(), "")
 
 	require.NoError(t, store.CreateMessageIndex(ctx, "idx-msgs", "alice"))
 
@@ -69,7 +69,7 @@ func TestMessageStore_AppendAndList(t *testing.T) {
 
 func TestMessageStore_LastMessage(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction())
+	store := messagestore.New(db.WithoutTransaction(), "")
 
 	require.NoError(t, store.CreateMessageIndex(ctx, "idx-last", "alice"))
 
@@ -86,7 +86,7 @@ func TestMessageStore_LastMessage(t *testing.T) {
 
 func TestMessageStore_DeleteMessages(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction())
+	store := messagestore.New(db.WithoutTransaction(), "")
 
 	require.NoError(t, store.CreateMessageIndex(ctx, "idx-del", "alice"))
 	require.NoError(t, store.AppendMessages(ctx,
@@ -102,8 +102,8 @@ func TestMessageStore_DeleteMessages(t *testing.T) {
 
 func TestChatService_PersistDiff(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction())
-	mgr := chatservice.NewManager(store)
+	store := messagestore.New(db.WithoutTransaction(), "")
+	mgr := chatservice.NewManager("")
 
 	require.NoError(t, store.CreateMessageIndex(ctx, "idx-diff", "dave"))
 
@@ -146,7 +146,7 @@ func TestChatService_PersistDiff(t *testing.T) {
 
 func TestMessageStore_WithTransaction(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction())
+	store := messagestore.New(db.WithoutTransaction(), "")
 
 	require.NoError(t, store.CreateMessageIndex(ctx, "idx-tx", "eve"))
 
@@ -154,7 +154,7 @@ func TestMessageStore_WithTransaction(t *testing.T) {
 		exec, _, release, err := db.WithTransaction(ctx)
 		require.NoError(t, err)
 
-		txStore := messagestore.New(exec)
+		txStore := messagestore.New(exec, "")
 		require.NoError(t, txStore.AppendMessages(ctx, &messagestore.Message{
 			ID: "rollback-msg", IDX: "idx-tx", Payload: []byte(`"test"`), AddedAt: time.Now().UTC(),
 		}))
@@ -171,7 +171,7 @@ func TestMessageStore_WithTransaction(t *testing.T) {
 		require.NoError(t, err)
 		defer release()
 
-		txStore := messagestore.New(exec)
+		txStore := messagestore.New(exec, "")
 		require.NoError(t, txStore.AppendMessages(ctx, &messagestore.Message{
 			ID: "committed-msg", IDX: "idx-tx", Payload: []byte(`"committed"`), AddedAt: time.Now().UTC(),
 		}))

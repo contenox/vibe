@@ -55,12 +55,12 @@ type Service interface {
 }
 
 type service struct {
-	db libdb.DBManager
+	db          libdb.DBManager
+	workspaceID string
 }
 
-// New returns a Service backed by the given database manager.
-func New(db libdb.DBManager) Service {
-	return &service{db: db}
+func New(db libdb.DBManager, workspaceID string) Service {
+	return &service{db: db, workspaceID: workspaceID}
 }
 
 
@@ -69,7 +69,7 @@ func (s *service) New(ctx context.Context, identity, name string) (string, error
 		name = "session-" + uuid.New().String()[:8]
 	}
 	exec := s.db.WithoutTransaction()
-	if _, err := messagestore.New(exec).GetSessionByName(ctx, identity, name); err == nil {
+	if _, err := messagestore.New(exec, s.workspaceID).GetSessionByName(ctx, identity, name); err == nil {
 		return "", fmt.Errorf("session %q already exists", name)
 	}
 
@@ -80,7 +80,7 @@ func (s *service) New(ctx context.Context, identity, name string) (string, error
 	}
 	defer release()
 
-	if err := messagestore.New(txExec).CreateNamedMessageIndex(ctx, newID, identity, name); err != nil {
+	if err := messagestore.New(txExec, s.workspaceID).CreateNamedMessageIndex(ctx, newID, identity, name); err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 	if err := s.setKV(ctx, txExec, newID); err != nil {
@@ -94,12 +94,12 @@ func (s *service) New(ctx context.Context, identity, name string) (string, error
 
 func (s *service) List(ctx context.Context, identity string) ([]*SessionInfo, error) {
 	exec := s.db.WithoutTransaction()
-	sessions, err := messagestore.New(exec).ListAllSessions(ctx, identity)
+	sessions, err := messagestore.New(exec, s.workspaceID).ListAllSessions(ctx, identity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
 	}
 	activeID, _ := s.GetActiveID(ctx)
-	store := messagestore.New(exec)
+	store := messagestore.New(exec, s.workspaceID)
 	out := make([]*SessionInfo, 0, len(sessions))
 	for _, sess := range sessions {
 		count, _ := store.CountMessages(ctx, sess.ID)
@@ -115,7 +115,7 @@ func (s *service) List(ctx context.Context, identity string) ([]*SessionInfo, er
 
 func (s *service) Switch(ctx context.Context, identity, name string) error {
 	exec := s.db.WithoutTransaction()
-	si, err := messagestore.New(exec).GetSessionByName(ctx, identity, name)
+	si, err := messagestore.New(exec, s.workspaceID).GetSessionByName(ctx, identity, name)
 	if err != nil {
 		if errors.Is(err, messagestore.ErrNotFound) {
 			return fmt.Errorf("session %q not found", name)
@@ -127,7 +127,7 @@ func (s *service) Switch(ctx context.Context, identity, name string) error {
 
 func (s *service) Delete(ctx context.Context, identity, name string) (bool, error) {
 	exec := s.db.WithoutTransaction()
-	si, err := messagestore.New(exec).GetSessionByName(ctx, identity, name)
+	si, err := messagestore.New(exec, s.workspaceID).GetSessionByName(ctx, identity, name)
 	if err != nil {
 		if errors.Is(err, messagestore.ErrNotFound) {
 			return false, fmt.Errorf("session %q not found", name)
@@ -144,7 +144,7 @@ func (s *service) Delete(ctx context.Context, identity, name string) (bool, erro
 	}
 	defer release()
 
-	if err := messagestore.New(txExec).DeleteMessageIndex(ctx, si.ID, identity); err != nil {
+	if err := messagestore.New(txExec, s.workspaceID).DeleteMessageIndex(ctx, si.ID, identity); err != nil {
 		return false, fmt.Errorf("failed to delete session: %w", err)
 	}
 	if wasActive {
@@ -158,7 +158,7 @@ func (s *service) Delete(ctx context.Context, identity, name string) (bool, erro
 
 func (s *service) GetActiveID(ctx context.Context) (string, error) {
 	var id string
-	if err := runtimetypes.New(s.db.WithoutTransaction()).GetKV(ctx, kvActiveSession, &id); err != nil {
+	if err := runtimetypes.New(s.db.WithoutTransaction()).GetWorkspaceKV(ctx, s.workspaceID, kvActiveSession, &id); err != nil {
 		if errors.Is(err, libdb.ErrNotFound) {
 			return "", nil
 		}
@@ -180,7 +180,7 @@ func (s *service) EnsureDefault(ctx context.Context, identity string) (string, e
 		return "", err
 	}
 	if activeID != "" {
-		sessions, err := messagestore.New(exec).ListAllSessions(ctx, identity)
+		sessions, err := messagestore.New(exec, s.workspaceID).ListAllSessions(ctx, identity)
 		if err == nil {
 			for _, sess := range sessions {
 				if sess.ID == activeID {
@@ -192,7 +192,7 @@ func (s *service) EnsureDefault(ctx context.Context, identity string) (string, e
 	}
 
 	// Re-use an existing "default" session if present.
-	if existing, err := messagestore.New(exec).GetSessionByName(ctx, identity, defaultName); err == nil {
+	if existing, err := messagestore.New(exec, s.workspaceID).GetSessionByName(ctx, identity, defaultName); err == nil {
 		if setErr := s.setKV(ctx, exec, existing.ID); setErr != nil {
 			slog.Warn("Failed to set active session", "error", setErr)
 		}
@@ -207,7 +207,7 @@ func (s *service) EnsureDefault(ctx context.Context, identity string) (string, e
 	}
 	defer release()
 
-	if err := messagestore.New(txExec).CreateNamedMessageIndex(ctx, newID, identity, defaultName); err != nil {
+	if err := messagestore.New(txExec, s.workspaceID).CreateNamedMessageIndex(ctx, newID, identity, defaultName); err != nil {
 		return "", fmt.Errorf("failed to create default session: %w", err)
 	}
 	if err := s.setKV(ctx, txExec, newID); err != nil {
@@ -225,5 +225,5 @@ func (s *service) setKV(ctx context.Context, exec libdb.Exec, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal session id: %w", err)
 	}
-	return runtimetypes.New(exec).SetKV(ctx, kvActiveSession, raw)
+	return runtimetypes.New(exec).SetWorkspaceKV(ctx, s.workspaceID, kvActiveSession, raw)
 }

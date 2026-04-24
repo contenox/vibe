@@ -20,10 +20,10 @@ const kvActivePlan = "contenox.plan.active"
 
 // getActivePlanID reads the active plan ID from the kv table.
 // Returns ("", nil) if no active plan has been set yet.
-func getActivePlanID(ctx context.Context, exec libdb.Exec) (string, error) {
+func getActivePlanID(ctx context.Context, exec libdb.Exec, workspaceID string) (string, error) {
 	store := runtimetypes.New(exec)
 	var id string
-	if err := store.GetKV(ctx, kvActivePlan, &id); err != nil {
+	if err := store.GetWorkspaceKV(ctx, workspaceID, kvActivePlan, &id); err != nil {
 		if errors.Is(err, libdb.ErrNotFound) {
 			return "", nil
 		}
@@ -32,20 +32,19 @@ func getActivePlanID(ctx context.Context, exec libdb.Exec) (string, error) {
 	return id, nil
 }
 
-// setActivePlanID persists the active plan ID to the kv table.
-func setActivePlanID(ctx context.Context, exec libdb.Exec, id string) error {
+func setActivePlanID(ctx context.Context, exec libdb.Exec, id string, workspaceID string) error {
 	store := runtimetypes.New(exec)
 	raw, err := json.Marshal(id)
 	if err != nil {
 		return fmt.Errorf("failed to marshal plan id: %w", err)
 	}
-	return store.SetKV(ctx, kvActivePlan, raw)
+	return store.SetWorkspaceKV(ctx, workspaceID, kvActivePlan, raw)
 }
 
 // syncPlanMarkdown queries the DB for the given plan and writes a
 // GitHub-style markdown file to .contenox/plans/<name>.md
-func syncPlanMarkdown(ctx context.Context, exec libdb.Exec, planID string, contenoxDir string) error {
-	store := planstore.New(exec)
+func syncPlanMarkdown(ctx context.Context, exec libdb.Exec, planID string, contenoxDir string, workspaceID string) error {
+	store := planstore.New(exec, workspaceID)
 	plan, err := store.GetPlanByID(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("failed to load plan: %w", err)

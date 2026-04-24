@@ -144,7 +144,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		slog.Warn("No reachable backends – subsequent model operations may fail")
 	}
 
-	ss := stateservice.New(state, db)
+	ss := stateservice.New(state, db, ResolveWorkspaceID(opts.ContenoxDir))
 	res, err := ss.SetupStatus(ctx)
 	if err != nil {
 		slog.Debug("setup status failed", "error", err)
@@ -175,7 +175,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		"print":        localhooks.NewPrint(tracker),
 		"webhook":      localhooks.NewWebCaller(),
 		"local_fs":     localhooks.NewLocalFSHook(opts.EffectiveLocalExecAllowedDir),
-		"plan_summary": localhooks.NewPlanSummaryHook(planstore.New(db.WithoutTransaction())),
+		"plan_summary": localhooks.NewPlanSummaryHook(planstore.New(db.WithoutTransaction(), ResolveWorkspaceID(opts.ContenoxDir))),
 	}
 	jsHooks := map[string]taskengine.HookRepo{
 		"echo":    localhooks.NewEchoHook(),

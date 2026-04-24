@@ -14,18 +14,23 @@ var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check LLM setup: defaults, registered backends, and connectivity.",
 	Long: `Shows whether your default model and provider are set, lists every registered backend
-(OpenAI, Gemini, Ollama, vLLM, etc.), and reports reachability and setup issues for each.
-Use it after contenox-runtime init, after contenox-runtime backend add, or when chat/plan cannot resolve a model.
+(local embedded llama.cpp, Ollama, OpenAI, Gemini, vLLM, Vertex AI), and reports reachability
+and setup issues for each. Use it after contenox init, after contenox backend add, or when
+chat/plan cannot resolve a model.
 
 Additionally, if you use local Ollama: when no Ollama backend is ready yet, doctor may probe
 your Ollama URL (OLLAMA_HOST, or http://127.0.0.1:11434) and suggest commands to pull a model
 (at least ollama pull qwen2.5:7b), register the backend, and set defaults—including --url for a
 non-default host or port.
 
+Note on the 'local' backend type: contenox ships with embedded llama.cpp inference in the
+binary itself. A 'local'-type backend runs the model in-process (no external server, no API
+key, no network) — see 'contenox backend add --help' for details.
+
 Examples:
-  contenox-runtime doctor
-  contenox-runtime doctor --json
-  contenox-runtime doctor --skip-cycle`,
+  contenox doctor
+  contenox doctor --json
+  contenox doctor --skip-cycle`,
 	RunE: runDoctor,
 }
 
@@ -81,7 +86,7 @@ func printDoctorText(w io.Writer, res setupcheck.Result) {
 	fmt.Fprintf(w, "Reachable backends:    %d\n", res.ReachableBackendCount)
 	PrintBackendChecks(w, res)
 	if len(res.Issues) == 0 {
-		io.WriteString(w, "\n✓  All checks passed. Run 'contenox-runtime beam' to start.\n")
+		io.WriteString(w, "\n✓  All checks passed.\n")
 		return
 	}
 	PrintSetupIssues(w, res)

@@ -1,4 +1,4 @@
-// session_cmd.go — contenox-runtime session subcommand tree (new, list, switch, delete, show).
+// session_cmd.go — contenox session subcommand tree (new, list, switch, delete, show).
 // Each subcommand opens only the DB via sessionservice; no LLM stack is needed.
 package contenoxcli
 
@@ -16,18 +16,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// sessionCmd is the parent "contenox-runtime session" command.
+// sessionCmd is the parent "contenox session" command.
 var sessionCmd = &cobra.Command{
 	Use:   "session",
 	Short: "Manage chat sessions (new, list, switch, delete, show).",
 	Long: `Create and switch named chat sessions.
 Each session maintains its own persistent conversation history.
 
-  contenox-runtime session new [name]     create a session and make it active
-  contenox-runtime session list           list all sessions (* = active)
-  contenox-runtime session switch <name>  switch the active session
-  contenox-runtime session delete <name>  delete a session and its messages
-  contenox-runtime session show           print the active session's conversation`,
+  contenox session new [name]     create a session and make it active
+  contenox session list           list all sessions (* = active)
+  contenox session switch <name>  switch the active session
+  contenox session delete <name>  delete a session and its messages
+  contenox session show           print the active session's conversation`,
 	SilenceUsage: true,
 }
 
@@ -71,9 +71,9 @@ Flags:
   --head N    Show only the first N messages
 
 Examples:
-  contenox-runtime session show
-  contenox-runtime session show my-session
-  contenox-runtime session show --tail 10`,
+  contenox session show
+  contenox session show my-session
+  contenox session show --tail 10`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runSessionShow,
 }
@@ -95,8 +95,10 @@ func openSessionService(cmd *cobra.Command) (context.Context, libdb.DBManager, s
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}
+	contenoxDir, _ := ResolveContenoxDir(cmd)
+	workspaceID := ResolveWorkspaceID(contenoxDir)
 	cleanup := func() { _ = db.Close() }
-	return ctx, db, sessionservice.New(db), cleanup, nil
+	return ctx, db, sessionservice.New(db, workspaceID), cleanup, nil
 }
 
 func runSessionNew(cmd *cobra.Command, args []string) error {
@@ -133,7 +135,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if len(sessions) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No sessions yet. Run: contenox-runtime session new")
+		fmt.Fprintln(cmd.OutOrStdout(), "No sessions yet. Run: contenox session new")
 		return nil
 	}
 	for _, s := range sessions {
@@ -159,7 +161,7 @@ func runSessionSwitch(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 	if err := svc.Switch(ctx, localIdentity, name); err != nil {
-		return fmt.Errorf("%w; run 'contenox-runtime session list' to see available sessions", err)
+		return fmt.Errorf("%w; run 'contenox session list' to see available sessions", err)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Switched to session %q.\n", name)
 	return nil
@@ -178,7 +180,7 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if wasActive {
-		fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %q (was active; run 'contenox-runtime session new' or 'contenox-runtime session switch' to set a new active session).\n", name)
+		fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %q (was active; run 'contenox session new' or 'contenox session switch' to set a new active session).\n", name)
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %q.\n", name)
 	}
@@ -211,12 +213,12 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 			}
 		}
 		if sessionID == "" {
-			return fmt.Errorf("session %q not found; run 'contenox-runtime session list'", args[0])
+			return fmt.Errorf("session %q not found; run 'contenox session list'", args[0])
 		}
 	} else {
 		activeID, err := svc.GetActiveID(ctx)
 		if err != nil || activeID == "" {
-			return fmt.Errorf("no active session; run 'contenox-runtime session new' to create one")
+			return fmt.Errorf("no active session; run 'contenox session new' to create one")
 		}
 		sessionID = activeID
 		sessionName = sessionID[:8] + "…"
@@ -229,8 +231,8 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Raw message read for rendering — remains direct (presentation, not CRUD).
-	store := messagestore.New(db.WithoutTransaction())
+	contenoxDir, _ := ResolveContenoxDir(cmd)
+	store := messagestore.New(db.WithoutTransaction(), ResolveWorkspaceID(contenoxDir))
 	rawMsgs, err := store.ListMessages(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to read messages: %w", err)

@@ -92,8 +92,6 @@ func lookupKindSpec(kind string) (KindSpec, bool) {
 // Typed payload shapes.
 // ------------------------------------------------------------------
 
-// FileExcerptPayload matches what packages/beam/src/lib/workspaceFileContext.ts
-// emits today.
 type FileExcerptPayload struct {
 	Path      string `json:"path"`
 	Text      string `json:"text"`

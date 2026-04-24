@@ -2,7 +2,6 @@ package contenoxcli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"text/tabwriter"
 
@@ -13,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// validConfigKeys lists the keys users can set via `contenox-runtime config set`.
+// validConfigKeys lists the keys users can set via `contenox config set`.
 var validConfigKeys = map[string]string{
 	"default-model":    "Default LLM model name (e.g. qwen2.5:7b)",
 	"default-provider": "Default LLM provider type (e.g. ollama, openai, gemini)",
@@ -26,8 +25,8 @@ var configCmd = &cobra.Command{
 	Short: "Manage persistent CLI settings (default model, provider, chain, HITL policy).",
 	Long: `Store and retrieve persistent CLI defaults backed by SQLite.
 
-These settings are used when the corresponding flag is not explicitly provided.
-They are project-local when .contenox/local.db exists, otherwise global (~/.contenox/local.db).
+Global keys (shared across all projects): default-model, default-provider
+Workspace keys (scoped to current project): default-chain, hitl-policy-name
 
 Supported keys:
   default-model      Default LLM model name (e.g. qwen2.5:7b)
@@ -39,39 +38,35 @@ Supported keys:
 var configSetCmd = &cobra.Command{
 	Use:   "set <key> <value>",
 	Short: "Set a persistent config value.",
-	Long: `Set a persistent CLI default stored in the local SQLite database.
+	Long: `Set a persistent CLI default stored in the SQLite database.
 
-Valid keys:
-  default-model      Default LLM model name
-  default-provider   Default LLM provider type
-  default-chain      Default chain file path
-  hitl-policy-name   Active HITL policy file name
+Global keys (default-model, default-provider) are shared across all projects.
+Workspace keys (default-chain, hitl-policy-name) are scoped to the current project
+workspace and fall back to the global value when not set locally.
 
 Examples:
-  contenox-runtime config set default-model    qwen2.5:7b
-  contenox-runtime config set default-provider ollama
-  contenox-runtime config set default-model    gemini-2.5-flash
-  contenox-runtime config set default-chain    .contenox/default-chain.json
-  contenox-runtime config set hitl-policy-name hitl-policy-strict.json`,
+  contenox config set default-model    qwen2.5:7b
+  contenox config set default-provider ollama
+  contenox config set default-chain    .contenox/default-chain.json
+  contenox config set hitl-policy-name hitl-policy-strict.json`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key, value := args[0], args[1]
 		if _, ok := validConfigKeys[key]; !ok {
 			return fmt.Errorf("unknown key %q — valid keys: default-model, default-provider, default-chain, hitl-policy-name", key)
 		}
-		db, store, err := openConfigDB(cmd)
+		db, store, workspaceID, err := openConfigDBWithWorkspace(cmd)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
 
 		ctx := libtracker.WithNewRequestID(context.Background())
-		kvKey := clikv.Prefix + key
-		data, _ := json.Marshal(value)
-		if err := store.SetKV(ctx, kvKey, json.RawMessage(data)); err != nil {
+		if err := clikv.WriteConfig(ctx, store, workspaceID, key, value); err != nil {
 			return fmt.Errorf("failed to set %q: %w", key, err)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "✓  %s = %s\n", key, value)
+		_, scope := clikv.ReadConfig(ctx, store, workspaceID, key)
+		fmt.Fprintf(cmd.OutOrStdout(), "✓  %s = %s  (%s)\n", key, value, scope)
 		return nil
 	},
 }
@@ -82,28 +77,25 @@ var configGetCmd = &cobra.Command{
 	Long: `Print the current value of a persistent CLI setting.
 
 Examples:
-  contenox-runtime config get default-model
-  contenox-runtime config get default-provider
-  contenox-runtime config get default-chain
-  contenox-runtime config get hitl-policy-name`,
+  contenox config get default-model
+  contenox config get default-provider
+  contenox config get default-chain
+  contenox config get hitl-policy-name`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
 		if _, ok := validConfigKeys[key]; !ok {
 			return fmt.Errorf("unknown key %q", key)
 		}
-		db, store, err := openConfigDB(cmd)
+		db, store, workspaceID, err := openConfigDBWithWorkspace(cmd)
 		if err != nil {
 			return err
 		}
 		defer db.Close()
 
 		ctx := libtracker.WithNewRequestID(context.Background())
-		val, err := getConfigKV(ctx, store, key)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), val)
+		val, scope := clikv.ReadConfig(ctx, store, workspaceID, key)
+		fmt.Fprintf(cmd.OutOrStdout(), "%s  (%s)\n", val, scope)
 		return nil
 	},
 }
@@ -111,15 +103,13 @@ Examples:
 var configListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all persistent config values.",
-	Long: `Print all known CLI config keys and their current values.
-
-Outputs a table of KEY and VALUE. Unset keys show an empty value.
+	Long: `Print all known CLI config keys, their current values, and their scope.
 
 Example:
-  contenox-runtime config list`,
+  contenox config list`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, store, err := openConfigDB(cmd)
+		db, store, workspaceID, err := openConfigDBWithWorkspace(cmd)
 		if err != nil {
 			return err
 		}
@@ -127,10 +117,10 @@ Example:
 
 		ctx := libtracker.WithNewRequestID(context.Background())
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "KEY\tVALUE")
+		fmt.Fprintln(w, "KEY\tVALUE\tSCOPE")
 		for key := range validConfigKeys {
-			val, _ := getConfigKV(ctx, store, key)
-			fmt.Fprintf(w, "%s\t%s\n", key, val)
+			val, scope := clikv.ReadConfig(ctx, store, workspaceID, key)
+			fmt.Fprintf(w, "%s\t%s\t%s\n", key, val, scope)
 		}
 		return w.Flush()
 	},
@@ -152,6 +142,16 @@ func openConfigDB(cmd *cobra.Command) (libdb.DBManager, runtimetypes.Store, erro
 		return nil, nil, err
 	}
 	return db, runtimetypes.New(db.WithoutTransaction()), nil
+}
+
+func openConfigDBWithWorkspace(cmd *cobra.Command) (libdb.DBManager, runtimetypes.Store, string, error) {
+	db, store, err := openConfigDB(cmd)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	contenoxDir, _ := ResolveContenoxDir(cmd)
+	workspaceID := ResolveWorkspaceID(contenoxDir)
+	return db, store, workspaceID, nil
 }
 
 func init() {

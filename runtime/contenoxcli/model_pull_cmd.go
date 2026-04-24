@@ -21,7 +21,7 @@ var modelPullCmd = &cobra.Command{
 	Short: "Download a GGUF model for local inference.",
 	Long: `Download a GGUF model from HuggingFace and store it under ~/.contenox/models/<name>/.
 
-Curated models — run 'contenox-runtime model registry-list' to see full list with sizes.
+Curated models — run 'contenox model registry-list' to see full list with sizes.
   By GPU size (approximate Q4_K_M VRAM needed):
   ~1 GB   tiny            FastThink 0.5B (testing only)
   ~1 GB   llama3.2-1b     Llama 3.2 1B
@@ -39,12 +39,12 @@ Curated models — run 'contenox-runtime model registry-list' to see full list w
   ~68 GB  llama4-scout    Llama 4 Scout 17Bx16E (multi-GPU)
 
 Or provide an explicit URL:
-  contenox-runtime model pull my-model --url https://huggingface.co/.../model.gguf
+  contenox model pull my-model --url https://huggingface.co/.../model.gguf
 
 After downloading, register a local backend and start using the model:
-  contenox-runtime backend add local --type local --url ~/.contenox/models/
-  contenox-runtime model list
-  contenox-runtime "hello, what can you do?"`,
+  contenox backend add local --type local --url ~/.contenox/models/
+  contenox model list
+  contenox "hello, what can you do?"`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
@@ -59,7 +59,7 @@ After downloading, register a local backend and start using the model:
 			name = args[0]
 			downloadURL = rawURL
 		case rawURL != "" && len(args) == 0:
-			return fmt.Errorf("provide a model name when using --url: contenox-runtime model pull <name> --url <url>")
+			return fmt.Errorf("provide a model name when using --url: contenox model pull <name> --url <url>")
 		case len(args) == 1:
 			name = args[0]
 			d, err := reg.Resolve(ctx, name)
@@ -70,7 +70,7 @@ After downloading, register a local backend and start using the model:
 					names = append(names, e.Name)
 				}
 				sort.Strings(names)
-				return fmt.Errorf("unknown model %q\n\nRun 'contenox-runtime model registry-list' to see all curated models.\nOr specify --url to download any GGUF file.", name)
+				return fmt.Errorf("unknown model %q\n\nRun 'contenox model registry-list' to see all curated models.\nOr specify --url to download any GGUF file.", name)
 			}
 			downloadURL = d.SourceURL
 		default:
@@ -89,7 +89,7 @@ After downloading, register a local backend and start using the model:
 		destPath := filepath.Join(modelDir, "model.gguf")
 		if _, err := os.Stat(destPath); err == nil {
 			fmt.Fprintf(cmd.OutOrStdout(), "Model %q already downloaded at %s\n", name, destPath)
-			fmt.Fprintf(cmd.OutOrStdout(), "Register with: contenox-runtime backend add local --type local --url %s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "Register with: contenox backend add local --type local --url %s\n",
 				filepath.Join(homeDir, ".contenox", "models"))
 			return nil
 		}
@@ -100,7 +100,7 @@ After downloading, register a local backend and start using the model:
 			return fmt.Errorf("download failed: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "\nDone. Register with:\n  contenox-runtime backend add local --type local --url %s\n",
+		fmt.Fprintf(cmd.OutOrStdout(), "\nDone. Register with:\n  contenox backend add local --type local --url %s\n",
 			filepath.Join(homeDir, ".contenox", "models"))
 
 		// Persist to local model registry (non-fatal).

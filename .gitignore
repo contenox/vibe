@@ -25,167 +25,6 @@ go.work.sum
 vendor/
 
 # ==============================
-# Python
-# ==============================
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-env.bak/
-venv.bak/
-.python-version
-
-# Byte-compiled / optimized
-__pycache__/
-*.py[codz]
-*$py.class
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-#lib/ ui uses lib...
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Translations
-*.mo
-*.pot
-
-# Django / Flask
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-instance/
-.webassets-cache
-
-# Scrapy
-.scrapy
-
-# Sphinx
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter / IPython
-.ipynb_checkpoints
-profile_default/
-ipython_config.py
-
-# pyenv / pipenv / poetry / pdm / pixi
-.pipenv/
-Pipfile
-# Pipfile.lock  ← DO NOT IGNORE
-# poetry.lock   ← DO NOT IGNORE
-.pdm-python
-.pdm-build/
-.pixi/
-__pypackages__/
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath
-*.sage.py
-
-# mypy / pyre / pytype
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pyre/
-.pytype/
-
-# Cython
-cython_debug/
-
-# Ruff
-.ruff_cache/
-
-# PyPI config
-.pypirc
-
-# Abstra
-.abstra/
-
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
-
-# ==============================
-# Node.js / Frontend
-# ==============================
-
-node_modules/
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-.pnp.*
-.pnp.js
-
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# JS build outputs — do not use blanket `dist/` (Go embeds packages/beam → runtime/internal/web/beam/dist)
-packages/ui/dist/
-dist-ssr/
-frontend/dist/
-.cache/
-.next/
-.out/
-.build/
-.vercel
-
-*.tsbuildinfo
-next-env.d.ts
-
-# ==============================
 # General / OS / IDE
 # ==============================
 
@@ -194,7 +33,6 @@ next-env.d.ts
 .envrc
 .env.*
 !.env.example
-!.env.proxy
 
 # Logs
 *.log
@@ -205,19 +43,12 @@ logs/
 *.key
 *.crt
 
-# Local overrides
-compose.local.yaml
-docker-compose.override.yml
-
 # Editor / IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *.suo
-*.ntvs*
-*.njsproj
-*.sln
 
 # OS
 .DS_Store
@@ -236,7 +67,6 @@ temp/
 bin/
 .contenox/
 
-
 # Local AI context control (Cursor)
 .cursorignore
 .cursorindexingignore
@@ -244,67 +74,9 @@ bin/
 # Ollama local data
 .ollama/
 
-vald/
-
-# Docs
-# (manual markdown files should be tracked; openapi specs are ignored below)
-
-# ==============================
 # Enterprise (optional local checkout — not tracked)
-# ==============================
 enterprise/
 
 .apikey.txt
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files
-.env*
-!.env.proxy
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-docs/openapi.json
-docs/openapi.yaml
-docs/api-reference.md
-docs/openapi.html
-tools/docs/openapi.json
-tools/docs/openapi.yaml
-# Embedded copy of docs/openapi.json (produced by `make docs-gen`; do not commit)
-runtime/internal/openapidocs/openapi.json
-/contenox
 
 .notes/

@@ -70,7 +70,6 @@ func startCLITaskEventStream(
 		}
 	}()
 
-	// Idle + size hints live in the CLI only (no taskengine changes).
 	go func() {
 		t := time.NewTicker(8 * time.Second)
 		defer t.Stop()

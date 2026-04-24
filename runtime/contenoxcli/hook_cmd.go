@@ -1,4 +1,4 @@
-// hook_cmd.go — contenox-runtime hook subcommand tree (add, list, show, remove, update).
+// hook_cmd.go — contenox hook subcommand tree (add, list, show, remove, update).
 // Each subcommand opens only the DB; no LLM stack is needed.
 package contenoxcli
 
@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// hookCmd is the parent "contenox-runtime hook" command.
+// hookCmd is the parent "contenox hook" command.
 var hookCmd = &cobra.Command{
 	Use:   "hook",
 	Short: "Manage remote hooks (add, list, show, remove, update).",
@@ -28,12 +28,12 @@ fetches its schema, discovers every operation, and makes them callable by the mo
 The service MUST expose an OpenAPI v3 spec at its base URL.
 
 Examples:
-  contenox-runtime hook add myapi --url http://localhost:8080
-  contenox-runtime hook add myapi --url http://localhost:8080 --header "Authorization: Bearer $TOKEN"
-  contenox-runtime hook list
-  contenox-runtime hook show myapi
-  contenox-runtime hook update myapi --url http://new-host:8080
-  contenox-runtime hook remove myapi`,
+  contenox hook add myapi --url http://localhost:8080
+  contenox hook add myapi --url http://localhost:8080 --header "Authorization: Bearer $TOKEN"
+  contenox hook list
+  contenox hook show myapi
+  contenox hook update myapi --url http://new-host:8080
+  contenox hook remove myapi`,
 	SilenceUsage: true,
 }
 
@@ -49,8 +49,8 @@ Headers are injected into every call to the service (e.g. for authentication).
 Specify each header as a separate --header flag in "Key: Value" format.
 
 Examples:
-  contenox-runtime hook add myapi --url http://localhost:8080
-  contenox-runtime hook add myapi --url https://api.example.com \
+  contenox hook add myapi --url http://localhost:8080
+  contenox hook add myapi --url https://api.example.com \
     --header "Authorization: Bearer $TOKEN" \
     --header "X-Tenant: acme" \
     --timeout 5000`,
@@ -88,9 +88,9 @@ Only flags that are explicitly provided are updated; others are left unchanged.
 Passing --header replaces ALL existing headers for that hook.
 
 Examples:
-  contenox-runtime hook update myapi --url http://new-host:9090
-  contenox-runtime hook update myapi --timeout 15000
-  contenox-runtime hook update myapi --header "Authorization: Bearer $NEW_TOKEN"`,
+  contenox hook update myapi --url http://new-host:9090
+  contenox hook update myapi --timeout 15000
+  contenox hook update myapi --header "Authorization: Bearer $NEW_TOKEN"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runHookUpdate,
 }
@@ -193,7 +193,7 @@ func runHookAdd(cmd *cobra.Command, args []string) error {
 
 	// Check name not already taken.
 	if _, err := svc.GetByName(ctx, name); err == nil {
-		return fmt.Errorf("hook %q already exists; use 'contenox-runtime hook update' to modify it", name)
+		return fmt.Errorf("hook %q already exists; use 'contenox hook update' to modify it", name)
 	}
 
 	// Probe tools (non-fatal — purely presentation logic, not a service concern).
@@ -243,7 +243,7 @@ func runHookList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(all) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No remote hooks registered. Run: contenox-runtime hook add <name> --url <endpoint>")
+		fmt.Fprintln(cmd.OutOrStdout(), "No remote hooks registered. Run: contenox hook add <name> --url <endpoint>")
 		return nil
 	}
 

@@ -86,19 +86,6 @@ Plan names are derived from the goal text (`fix-auth-token-expiry-a3f9e12b`), so
 
 ---
 
-### `contenox beam` — web UI and HTTP API
-
-Starts the Contenox runtime as an HTTP server and serves the **Beam** React app in the browser. Configuration uses the same environment variables as the standalone server (see server docs). Use `--tenant` to set the tenant ID.
-
-```bash
-contenox beam
-contenox beam --tenant 96ed1c59-ffc1-4545-b3c3-191079c68d79
-```
-
-For terminal-only workflows, use `contenox chat`, `contenox plan`, and `contenox run` as documented below.
-
----
-
 ### `contenox run` — run any chain, any input type
 
 For scripting and pipeline use cases where you want full control. **`--chain` is optional** if `<resolved .contenox>/default-run-chain.json` exists (same discovery as a bare `contenox` invocation).
@@ -347,7 +334,7 @@ make build-contenox
 contenox init
 ```
 
-The release version string is **`apiframework/version.txt`**, embedded at compile time through `apiframework.GetVersion()` and shown in `contenox --help`, `contenox --version`, and the root command `Short` line. Optional link-time override: `-ldflags "-X github.com/contenox/contenox/runtime/contenoxcli.Version=…"`.
+The release version string is **`runtime/version/version.txt`**, embedded at compile time through `version.Get()` and shown in `contenox --help`, `contenox --version`, and the root command `Short` line. Optional link-time override: `-ldflags "-X github.com/contenox/contenox/runtime/contenoxcli.Version=…"`.
 
 ### Check that CLI help still works
 

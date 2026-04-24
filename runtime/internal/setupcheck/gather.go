@@ -10,8 +10,8 @@ import (
 )
 
 // GatherInput builds Input from SQLite KV defaults, registered backend count, and a runtime state snapshot.
-// Callers obtain states from stateservice.Get or runtimestate.State.Get (values from the map, in stable order if needed).
-func GatherInput(ctx context.Context, db libdbexec.DBManager, states []statetype.BackendRuntimeState) (Input, error) {
+// workspaceID scopes workspace-scoped keys (default-chain, hitl-policy-name) with global fallback.
+func GatherInput(ctx context.Context, db libdbexec.DBManager, states []statetype.BackendRuntimeState, workspaceID string) (Input, error) {
 	store := runtimetypes.New(db.WithoutTransaction())
 	backends, err := store.ListBackends(ctx, nil, runtimetypes.MAXLIMIT)
 	if err != nil {
@@ -25,14 +25,20 @@ func GatherInput(ctx context.Context, db libdbexec.DBManager, states []statetype
 		}
 		registered = append(registered, *backend)
 	}
+	defaultChain, chainFrom := clikv.ReadConfig(ctx, store, workspaceID, "default-chain")
+	hitlPolicy, policyFrom := clikv.ReadConfig(ctx, store, workspaceID, "hitl-policy-name")
 	return Input{
 		DefaultModel:           clikv.Read(ctx, store, "default-model"),
 		DefaultProvider:        clikv.Read(ctx, store, "default-provider"),
-		DefaultChain:           clikv.Read(ctx, store, "default-chain"),
-		HITLPolicyName:         clikv.ReadHITLPolicy(ctx, store),
+		DefaultChain:           defaultChain,
+		HITLPolicyName:         hitlPolicy,
 		States:                 states,
 		RegisteredBackendCount: &n,
 		RegisteredBackends:     registered,
+		ResolvedFrom: map[string]string{
+			"defaultChain":   chainFrom,
+			"hitlPolicyName": policyFrom,
+		},
 	}, nil
 }
 

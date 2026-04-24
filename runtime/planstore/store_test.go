@@ -13,7 +13,7 @@ import (
 
 func TestUnit_CreateAndGetPlanByID(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{
 		ID:   uuid.NewString(),
@@ -36,7 +36,7 @@ func TestUnit_CreateAndGetPlanByID(t *testing.T) {
 
 func TestUnit_GetPlanByName(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "named-plan", Goal: "whatever"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -48,7 +48,7 @@ func TestUnit_GetPlanByName(t *testing.T) {
 
 func TestUnit_GetPlanByID_NotFound(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	_, err := st.GetPlanByID(ctx, uuid.NewString())
 	require.ErrorIs(t, err, planstore.ErrNotFound)
@@ -56,7 +56,7 @@ func TestUnit_GetPlanByID_NotFound(t *testing.T) {
 
 func TestUnit_GetPlanByName_NotFound(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	_, err := st.GetPlanByName(ctx, "no-such-plan")
 	require.ErrorIs(t, err, planstore.ErrNotFound)
@@ -64,7 +64,7 @@ func TestUnit_GetPlanByName_NotFound(t *testing.T) {
 
 func TestUnit_ListPlans_Empty(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plans, err := st.ListPlans(ctx)
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestUnit_ListPlans_Empty(t *testing.T) {
 
 func TestUnit_ListPlans(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	for i := 0; i < 3; i++ {
 		require.NoError(t, st.CreatePlan(ctx, &planstore.Plan{
@@ -90,7 +90,7 @@ func TestUnit_ListPlans(t *testing.T) {
 
 func TestUnit_UpdatePlanStatus(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -104,7 +104,7 @@ func TestUnit_UpdatePlanStatus(t *testing.T) {
 
 func TestUnit_DeletePlan(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -116,7 +116,7 @@ func TestUnit_DeletePlan(t *testing.T) {
 
 func TestUnit_DeletePlan_NotFound(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	err := st.DeletePlan(ctx, uuid.NewString())
 	require.ErrorIs(t, err, planstore.ErrNotFound)
@@ -126,7 +126,7 @@ func TestUnit_DeletePlan_NotFound(t *testing.T) {
 
 func TestUnit_GetActivePlan(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -139,7 +139,7 @@ func TestUnit_GetActivePlan(t *testing.T) {
 
 func TestUnit_GetActivePlan_ReturnsLastUpdated(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	p1 := &planstore.Plan{ID: uuid.NewString(), Name: "p1-" + uuid.NewString()[:8], Goal: "g"}
 	p2 := &planstore.Plan{ID: uuid.NewString(), Name: "p2-" + uuid.NewString()[:8], Goal: "g"}
@@ -154,7 +154,7 @@ func TestUnit_GetActivePlan_ReturnsLastUpdated(t *testing.T) {
 
 func TestUnit_GetActivePlan_NotFound(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	_, err := st.GetActivePlan(ctx)
 	require.ErrorIs(t, err, planstore.ErrNotFound)
@@ -162,7 +162,7 @@ func TestUnit_GetActivePlan_NotFound(t *testing.T) {
 
 func TestUnit_GetActivePlan_IgnoresCompleted(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -183,7 +183,7 @@ func newPlan(t *testing.T, st planstore.Store, ctx interface{ Deadline() (time.T
 
 func TestUnit_CreateAndListPlanSteps(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -203,7 +203,7 @@ func TestUnit_CreateAndListPlanSteps(t *testing.T) {
 
 func TestUnit_UpdatePlanStepStatus_Completed(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -222,7 +222,7 @@ func TestUnit_UpdatePlanStepStatus_Completed(t *testing.T) {
 
 func TestUnit_UpdatePlanStepStatus_RetryResetsPending(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -242,7 +242,7 @@ func TestUnit_UpdatePlanStepStatus_RetryResetsPending(t *testing.T) {
 
 func TestUnit_DeletePendingPlanSteps(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -266,7 +266,7 @@ func TestUnit_DeletePendingPlanSteps(t *testing.T) {
 
 func TestUnit_ClaimNextPendingStep(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -291,7 +291,7 @@ func TestUnit_ClaimNextPendingStep(t *testing.T) {
 
 func TestUnit_ClaimNextPendingStep_ClaimsLowestOrdinal(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -311,7 +311,7 @@ func TestUnit_ClaimNextPendingStep_ClaimsLowestOrdinal(t *testing.T) {
 
 func TestUnit_ClaimNextPendingStep_SkipsRunning(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -334,7 +334,7 @@ func TestUnit_ClaimNextPendingStep_SkipsRunning(t *testing.T) {
 
 func TestUnit_ClaimNextPendingStep_NoSteps(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -345,7 +345,7 @@ func TestUnit_ClaimNextPendingStep_NoSteps(t *testing.T) {
 
 func TestUnit_ClaimNextPendingStep_AllCompleted(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -362,7 +362,7 @@ func TestUnit_ClaimNextPendingStep_AllCompleted(t *testing.T) {
 
 func TestUnit_DeletePlan_CascadesSteps(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{ID: uuid.NewString(), Name: "p-" + uuid.NewString()[:8], Goal: "g"}
 	require.NoError(t, st.CreatePlan(ctx, plan))
@@ -385,7 +385,7 @@ func TestUnit_DeletePlan_CascadesSteps(t *testing.T) {
 
 func TestUnit_Plan_SessionID_RoundTrips(t *testing.T) {
 	ctx, db := SetupStore(t)
-	st := planstore.New(db.WithoutTransaction())
+	st := planstore.New(db.WithoutTransaction(), "")
 
 	plan := &planstore.Plan{
 		ID:        uuid.NewString(),

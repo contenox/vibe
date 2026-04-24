@@ -78,8 +78,6 @@ type Manager struct {
 	rootCtx   context.Context
 }
 
-// New creates a Manager, loads all MCP server configs from the DB, and starts
-// a persisted session worker for each. It is safe to call in serverapi.New().
 func New(ctx context.Context, db runtimetypes.Store, messenger libbus.Messenger, tracker libtracker.ActivityTracker) (*Manager, error) {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
