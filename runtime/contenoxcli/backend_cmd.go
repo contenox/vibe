@@ -49,6 +49,11 @@ Examples:
   # Register Google Gemini:
   contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
 
+  # Register a Google Vertex AI backend (run gcloud auth application-default login first):
+  export GOOGLE_CLOUD_PROJECT=my-project-id
+  contenox backend add vertex --type vertex-google \
+    --url "https://us-central1-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/us-central1"
+
   # Register a custom vLLM server:
   contenox backend add myvllm --type vllm --url http://gpu-host:8000
 
@@ -113,6 +118,25 @@ Examples:
 		apiKey := apiKeyLit
 		if apiKey == "" && apiKeyEnv != "" {
 			apiKey = os.Getenv(apiKeyEnv)
+		}
+
+		// Sanity-check the URL: a double-slash in the path (after stripping the scheme)
+		// is almost always caused by an un-expanded environment variable such as
+		// $GOOGLE_CLOUD_PROJECT being empty.  Catch it early rather than silently
+		// registering a broken backend.
+		if baseURL != "" {
+			pathPart := baseURL
+			if idx := strings.Index(baseURL, "://"); idx >= 0 {
+				pathPart = baseURL[idx+3:] // skip "https://"
+			}
+			if strings.Contains(pathPart, "//") {
+				return fmt.Errorf(
+					"--url %q looks malformed (consecutive slashes in path).\n"+
+						"  This usually means an environment variable like $GOOGLE_CLOUD_PROJECT was not set.\n"+
+						"  Export it and retry:\n"+
+						"    export GOOGLE_CLOUD_PROJECT=my-project-id",
+					baseURL)
+			}
 		}
 
 		db, svc, err := openBackendDB(cmd)
@@ -196,7 +220,7 @@ var backendShowCmd = &cobra.Command{
 
 var backendRemoveCmd = &cobra.Command{
 	Use:     "remove <name>",
-	Aliases: []string{"rm"},
+	Aliases: []string{"rm", "delete"},
 	Short:   "Remove a registered backend.",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

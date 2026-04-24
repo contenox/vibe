@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtime/internal/runtimestate"
 	"github.com/contenox/contenox/runtime/internal/setupcheck"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtime/runtimetypes"
 	"github.com/google/uuid"
 )
@@ -227,8 +227,8 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 	switch provider {
 	case "vertex-google", "vertex-anthropic", "vertex-meta", "vertex-mistralai":
 		fmt.Fprintln(out, "  1. Authenticate with Google Cloud:")
-		fmt.Fprintln(out, "       gcloud auth application-default login")
 		fmt.Fprintln(out, "       export GOOGLE_CLOUD_PROJECT=my-project-id")
+		fmt.Fprintln(out, "       gcloud auth application-default login --project $GOOGLE_CLOUD_PROJECT")
 		fmt.Fprintln(out, "")
 		fmt.Fprintf(out, "  2. Register the %s backend:\n", pc.name)
 		fmt.Fprintf(out, "       contenox backend add %s --type %s \\\n", provider, provider)
@@ -274,7 +274,7 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 		fmt.Fprintln(out, "       ollama pull qwen2.5:7b")
 		fmt.Fprintln(out, "")
 		fmt.Fprintln(out, "  3. Register the local API and set defaults (URLs match contenox backend add defaults):")
-		fmt.Fprintln(out, "       contenox backend add local --type ollama")
+		fmt.Fprintln(out, "       contenox backend add ollama --type ollama")
 		fmt.Fprintln(out, "       contenox config set default-provider ollama")
 		fmt.Fprintln(out, "       contenox config set default-model qwen2.5:7b")
 		fmt.Fprintln(out, "       contenox doctor")
@@ -282,8 +282,10 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 		fmt.Fprintln(out, "  Optional: use hosted Ollama Cloud instead of a local server:")
 		fmt.Fprintln(out, "       export OLLAMA_API_KEY=your-key-here")
 		fmt.Fprintln(out, "       contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY")
-		fmt.Fprintln(out, "")
 		fmt.Fprintln(out, "  Get an Ollama API key for direct cloud access: https://ollama.com/settings/keys")
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "  Optional: run fully local models via the local provider:")
+		fmt.Fprintln(out, "       contenox init local")
 		fmt.Fprintln(out, "")
 		chatStep = 4
 	default:

@@ -263,6 +263,14 @@ ALTER TABLE plan_steps ADD COLUMN last_failure_summary TEXT;
 -- whether to auto-replan a failed step. See planstore.FailureClass.
 ALTER TABLE plan_steps ADD COLUMN failure_class        VARCHAR(50);
 
+-- kv: workspace_id added after initial release (required for workspace-scoped config
+-- and the ON CONFLICT (key, workspace_id) upsert used by SetKV / SetWorkspaceKV).
+-- The ALTER is silently skipped on fresh installs (column already in CREATE TABLE above).
+ALTER TABLE kv ADD COLUMN workspace_id VARCHAR(255) NOT NULL DEFAULT '';
+-- The unique index makes ON CONFLICT (key, workspace_id) a valid upsert target on
+-- upgraded DBs whose PRIMARY KEY is still just (key). Idempotent: IF NOT EXISTS.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kv_key_workspace ON kv(key, workspace_id);
+
 
 
 PRAGMA foreign_keys=off;

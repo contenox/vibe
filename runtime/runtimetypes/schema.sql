@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS kv (
     updated_at TIMESTAMP NOT NULL,
     PRIMARY KEY (key, workspace_id)
 );
+ALTER TABLE kv ADD COLUMN IF NOT EXISTS workspace_id VARCHAR(255) NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kv_key_workspace ON kv(key, workspace_id);
 
 CREATE TABLE IF NOT EXISTS remote_hooks (
     id VARCHAR(255) PRIMARY KEY,
