@@ -131,10 +131,10 @@ func bumpVersion(bumpType string) error {
 	tx.commitCreated = true
 
 	// 9. Regenerate docs (this amends the commit)
-	fmt.Println("\n🔄 Regenerating documentation with new version...")
-	if err := updateDocsAndAmendCommit(); err != nil {
-		return fmt.Errorf("failed to update documentation: %w", err)
-	}
+	//	fmt.Println("\n🔄 Regenerating documentation with new version...")
+	// if err := updateDocsAndAmendCommit(); err != nil {
+	// 	return fmt.Errorf("failed to update documentation: %w", err)
+	// }
 
 	// 10. Create tag (after commit is amended)
 	if err := createTag(newVersion); err != nil {
@@ -150,31 +150,31 @@ func bumpVersion(bumpType string) error {
 	return nil
 }
 
-func updateDocsAndAmendCommit() error {
-	// Regenerate OpenAPI spec and Markdown
-	cmd := exec.Command("make", "docs-markdown")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to run 'make docs-markdown': %w\nOutput: %s", err, string(output))
-	}
+// func updateDocsAndAmendCommit() error {
+// 	// Regenerate OpenAPI spec and Markdown
+// 	cmd := exec.Command("make", "docs-markdown")
+// 	if output, err := cmd.CombinedOutput(); err != nil {
+// 		return fmt.Errorf("failed to run 'make docs-markdown': %w\nOutput: %s", err, string(output))
+// 	}
 
-	// Add updated docs to index
-	cmd = exec.Command("git", "add", "docs/")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to git add docs/: %w\nOutput: %s", err, string(output))
-	}
+// 	// Add updated docs to index
+// 	cmd = exec.Command("git", "add", "docs/")
+// 	if output, err := cmd.CombinedOutput(); err != nil {
+// 		return fmt.Errorf("failed to git add docs/: %w\nOutput: %s", err, string(output))
+// 	}
 
-	cmd = exec.Command("git", "commit", "-S", "--amend", "--no-edit")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		if strings.Contains(string(output), "nothing to commit") {
-			fmt.Println("   Documentation was already up-to-date.")
-			return nil
-		}
-		return fmt.Errorf("failed to amend commit: %w\nOutput: %s", err, string(output))
-	}
+// 	cmd = exec.Command("git", "commit", "-S", "--amend", "--no-edit")
+// 	if output, err := cmd.CombinedOutput(); err != nil {
+// 		if strings.Contains(string(output), "nothing to commit") {
+// 			fmt.Println("   Documentation was already up-to-date.")
+// 			return nil
+// 		}
+// 		return fmt.Errorf("failed to amend commit: %w\nOutput: %s", err, string(output))
+// 	}
 
-	fmt.Println("   Documentation updated and included in the release commit.")
-	return nil
-}
+// 	fmt.Println("   Documentation updated and included in the release commit.")
+// 	return nil
+// }
 
 func isGitRepository() bool {
 	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
@@ -330,14 +330,14 @@ func updateReadmeTag(newVersion string) error {
 
 // BumpTransaction represents a version bump operation with state tracking for proper cleanup
 type bumpTransaction struct {
-	currentVersion        string
-	newVersion            string
+	currentVersion     string
+	newVersion         string
 	versionFileUpdated bool
 	readmeUpdated      bool
 	commitCreated      bool
 	tagCreated         bool
-	hasError              bool
-	successful            bool
+	hasError           bool
+	successful         bool
 }
 
 // newBumpTransaction creates a new transaction context
