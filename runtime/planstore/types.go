@@ -75,7 +75,7 @@ type PlanStep struct {
 	ExecutedAt      time.Time  `json:"executed_at"` // Zero time if not executed
 
 	// Summary is a JSON document (schema: outcome/summary/artifacts/handover_for_next/caveats)
-	// produced by the summarizer chain and persisted by the plan_summary persist hook.
+	// produced by the summarizer chain and persisted by the plan_summary persist tools.
 	// Empty string means NULL (legacy row or summarizer fell through to fallback).
 	Summary string `json:"summary,omitempty"`
 	// ChatHistoryJSON is the raw taskengine.ChatHistory from the executor subgraph,
@@ -123,11 +123,11 @@ type Store interface {
 	ClaimNextPendingStep(ctx context.Context, planID string) (*PlanStep, error)
 
 	// UpdatePlanStepSummary persists a validated summary JSON + raw chat history for the step.
-	// Called by the plan_summary persist hook on successful validation.
+	// Called by the plan_summary persist tools on successful validation.
 	UpdatePlanStepSummary(ctx context.Context, stepID string, summaryJSON, chatHistoryJSON string) error
 	// UpdatePlanStepSummaryFailure persists the raw summarizer output + parse/validation error
 	// and updates ExecutionResult to a fallback string so the next step still has context.
-	// Called by the plan_summary fallback hook when validation failed twice.
+	// Called by the plan_summary fallback tools when validation failed twice.
 	UpdatePlanStepSummaryFailure(ctx context.Context, stepID string, rawOutput, errMsg, fallbackExecResult string) error
 	// MoveSummaryToLastFailure atomically copies the current Summary (or ExecutionResult
 	// fallback) into LastFailureSummary and clears Summary/ChatHistoryJSON/SummaryError.

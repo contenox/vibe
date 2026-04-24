@@ -437,7 +437,7 @@ func (s *store) UpdatePlanStepStatus(ctx context.Context, stepID string, status 
 }
 
 // UpdatePlanStepSummary persists the typed summary JSON + raw executor chat history.
-// Called by the plan_summary persist hook when summarizer output validated successfully.
+// Called by the plan_summary persist tools when summarizer output validated successfully.
 func (s *store) UpdatePlanStepSummary(ctx context.Context, stepID string, summaryJSON, chatHistoryJSON string) error {
 	summary := sql.NullString{String: summaryJSON, Valid: summaryJSON != ""}
 	chatHist := sql.NullString{String: chatHistoryJSON, Valid: chatHistoryJSON != ""}

@@ -7,9 +7,9 @@ import (
 )
 
 // minimalSummarizer returns a valid summarizer chain fixture shaped like the
-// shipped chain-step-summarizer.json: one chat LLM, one persist hook (with
-// ok/invalid branches), one repair LLM, a second persist hook, and a fallback
-// hook. Uses the symbolic references (SummarizerRefExecTerminal,
+// shipped chain-step-summarizer.json: one chat LLM, one persist tools (with
+// ok/invalid branches), one repair LLM, a second persist tools, and a fallback
+// tools. Uses the symbolic references (SummarizerRefExecTerminal,
 // SummarizerRefNextStep) that plancompile.Compile rewrites per step.
 func minimalSummarizer() *taskengine.TaskChainDefinition {
 	return &taskengine.TaskChainDefinition{
@@ -28,8 +28,8 @@ func minimalSummarizer() *taskengine.TaskChainDefinition {
 			},
 			{
 				ID:      "persist",
-				Handler: taskengine.HandleHook,
-				Hook:    &taskengine.HookCall{Name: "plan_summary", ToolName: "persist"},
+				Handler: taskengine.HandleTools,
+				Tools:    &taskengine.ToolsCall{Name: "plan_summary", ToolName: "persist"},
 				Transition: taskengine.TaskTransition{
 					OnFailure: "fallback",
 					Branches: []taskengine.TransitionBranch{
@@ -52,8 +52,8 @@ func minimalSummarizer() *taskengine.TaskChainDefinition {
 			},
 			{
 				ID:      "persist_repair",
-				Handler: taskengine.HandleHook,
-				Hook:    &taskengine.HookCall{Name: "plan_summary", ToolName: "persist"},
+				Handler: taskengine.HandleTools,
+				Tools:    &taskengine.ToolsCall{Name: "plan_summary", ToolName: "persist"},
 				Transition: taskengine.TaskTransition{
 					OnFailure: "fallback",
 					Branches: []taskengine.TransitionBranch{
@@ -64,9 +64,9 @@ func minimalSummarizer() *taskengine.TaskChainDefinition {
 			},
 			{
 				ID:       "fallback",
-				Handler:  taskengine.HandleHook,
+				Handler:  taskengine.HandleTools,
 				InputVar: SummarizerRefExecTerminal,
-				Hook:     &taskengine.HookCall{Name: "plan_summary", ToolName: "fallback"},
+				Tools:     &taskengine.ToolsCall{Name: "plan_summary", ToolName: "fallback"},
 				Transition: taskengine.TaskTransition{
 					OnFailure: SummarizerRefNextStep,
 					Branches: []taskengine.TransitionBranch{

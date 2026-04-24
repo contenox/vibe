@@ -76,10 +76,10 @@ type Service interface {
 // Args controls Next execution behaviour.
 //
 // WithShell is a hard gate enforced inside the task engine: when false, Next
-// attaches a runtime hook allowlist ["*", "!local_shell"] to the execution
-// context, so resolveHookNames will remove local_shell from whatever the
+// attaches a runtime tools allowlist ["*", "!local_shell"] to the execution
+// context, so resolveToolsNames will remove local_shell from whatever the
 // executor chain declared. A chain JSON that tries to invoke local_shell when
-// the caller disallowed it fails at hook-dispatch time, regardless of what the
+// the caller disallowed it fails at tools-dispatch time, regardless of what the
 // chain author wrote. The flag can only further restrict; when true, the
 // chain's own allowlist governs.
 //
@@ -126,7 +126,7 @@ func (s *service) activePlan(ctx context.Context) (*planstore.Plan, []*planstore
 // on the target plan (active when planID is empty). Implements [Service.Explore].
 //
 // The chain itself is responsible for restricting tools to read-only via its
-// own execute_config.hooks (see chain-plan-explorer.json + validatePlanExplorerChain).
+// own execute_config.tools (see chain-plan-explorer.json + validatePlanExplorerChain).
 // On success the RepoContext is also returned for the caller to display.
 func (s *service) Explore(ctx context.Context, planID string, explorerChain *taskengine.TaskChainDefinition) (*planstore.RepoContext, error) {
 	if explorerChain == nil {
@@ -272,7 +272,7 @@ func parsePlannerJSONRaw(raw string) ([]string, error) {
 }
 
 // compileCacheKey combines the executor + summarizer chain ids with a hash of
-// each chain's full JSON so edits to token_limit, tasks, hook_policies, or
+// each chain's full JSON so edits to token_limit, tasks, tools_policies, or
 // summarizer topology invalidate cached compiled plans. The key is persisted
 // in plan.compile_executor_chain_id (column kept for backwards compatibility;
 // it now holds the combined cache key, not just the executor id).
@@ -815,16 +815,16 @@ func (s *service) Next(ctx context.Context, args Args, executorChain, summarizer
 	retrySink := &taskengine.RetryOutcomeSink{}
 	execCtx = taskengine.WithRetryOutcomeSink(execCtx, retrySink)
 	// Widget-hint sink — collects per-step inline-rendering hints emitted by
-	// hooks (local_fs.read_file → file_view, etc.). Drained per task by the
+	// tools (local_fs.read_file → file_view, etc.). Drained per task by the
 	// task-event publisher into TaskEvent.Attachments. Phase 5 of the Beam
 	// canvas-vision plan.
 	execCtx = taskengine.WithWidgetHintSink(execCtx, &taskengine.WidgetHintSink{})
-	// Plan-step identity flows via ctx to the plan_summary hook so it knows
+	// Plan-step identity flows via ctx to the plan_summary tools so it knows
 	// which DB row to write (identity chosen at ClaimNextPendingStep time,
 	// not at plancompile time; cannot live in compiled chain JSON).
 	execCtx = taskengine.WithPlanStepContext(execCtx, plan.ID, pending.ID)
 	if !args.WithShell {
-		execCtx = taskengine.WithRuntimeHookAllowlist(execCtx, []string{"*", "!local_shell"})
+		execCtx = taskengine.WithRuntimeToolsAllowlist(execCtx, []string{"*", "!local_shell"})
 	}
 
 	out, _, _, execErr := s.engine.Execute(execCtx, stepChain, plan.Goal, taskengine.DataTypeString)

@@ -121,7 +121,7 @@ func Compile(
 
 		// exec_done_{N}: identity noop that captures the executor's terminal
 		// output under a predictable ID. Both the summarizer's entry task and
-		// the fallback hook task bind their InputVar to this node (via
+		// the fallback tools task bind their InputVar to this node (via
 		// SummarizerRefExecTerminal), so each sees the raw executor ChatHistory.
 		execDone := taskengine.TaskDefinition{
 			ID:          execDoneID,

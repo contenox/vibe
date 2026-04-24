@@ -54,18 +54,18 @@ type TaskEvent struct {
 	Content      string        `json:"content,omitempty"`
 	Thinking     string        `json:"thinking,omitempty"`
 	Error        string        `json:"error,omitempty"`
-	// Attachments are widget hints produced by hooks during the step that just
+	// Attachments are widget hints produced by tools during the step that just
 	// completed (Phase 5 of the canvas-vision plan). Drained from the
 	// context-bound [WidgetHintSink] at publish time. The Beam UI maps each
 	// hint to an inline attachment renderer (file_view, terminal_excerpt, …)
 	// shown adjacent to the assistant message that was streaming when the
-	// hook fired.
+	// tools fired.
 	Attachments []WidgetHint `json:"attachments,omitempty"`
 
 	// Approval fields — populated only for TaskEventApprovalRequested events.
 	// ApprovalID is the unique key used to resume or cancel via POST /api/approvals/{id}.
 	ApprovalID   string         `json:"approval_id,omitempty"`
-	HookName     string         `json:"hook_name,omitempty"`
+	ToolsName     string         `json:"tools_name,omitempty"`
 	ToolName     string         `json:"tool_name,omitempty"`
 	ApprovalArgs map[string]any `json:"approval_args,omitempty"`
 	ApprovalDiff string         `json:"approval_diff,omitempty"`

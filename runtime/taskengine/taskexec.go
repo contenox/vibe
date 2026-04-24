@@ -39,10 +39,10 @@ type TaskExecutor interface {
 
 // SimpleExec is a basic implementation of TaskExecutor.
 // It supports prompt-to-string, number, score, range, boolean condition evaluation,
-// and delegation to registered hooks.
+// and delegation to registered tools.
 type SimpleExec struct {
 	repo         llmrepo.ModelRepo
-	hookProvider HookRepo
+	toolsProvider ToolsRepo
 	tracker      libtracker.ActivityTracker
 	eventSink    TaskEventSink
 }
@@ -51,17 +51,17 @@ type SimpleExec struct {
 func NewExec(
 	ctx context.Context,
 	repo llmrepo.ModelRepo,
-	hookProvider HookRepo,
+	toolsProvider ToolsRepo,
 	tracker libtracker.ActivityTracker,
 ) (TaskExecutor, error) {
-	if hookProvider == nil {
-		return nil, fmt.Errorf("hook provider is nil")
+	if toolsProvider == nil {
+		return nil, fmt.Errorf("tools provider is nil")
 	}
 	if repo == nil {
 		return nil, fmt.Errorf("repo executor is nil")
 	}
 	return &SimpleExec{
-		hookProvider: hookProvider,
+		toolsProvider: toolsProvider,
 		repo:         repo,
 		tracker:      tracker,
 		eventSink:    taskEventSinkFromContext(ctx),
@@ -316,8 +316,8 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 	if currentTask.Handler == HandleNoop {
 		return output, outputType, "noop", nil
 	}
-	if currentTask.Hook == nil {
-		currentTask.Hook = &HookCall{}
+	if currentTask.Tools == nil {
+		currentTask.Tools = &ToolsCall{}
 	}
 	// Unified prompt extraction function
 	getPrompt := func() (string, error) {
@@ -475,7 +475,7 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 		executedAny := false
 
 		for _, toolCall := range lastMessage.CallTools {
-			// robust resolution: try direct key, then scan by Function.Name / HookName
+			// robust resolution: try direct key, then scan by Function.Name / ToolsName
 			resolutionInfo, found := resolveToolWithResolution(chainContext, toolCall.Function.Name)
 			if !found {
 				// No matching tool wiring for this call; skip it
@@ -495,21 +495,21 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 				break
 			}
 
-			hookArgs := make(map[string]string)
-			if currentTask.Hook != nil && currentTask.Hook.Args != nil {
-				hookArgs = currentTask.Hook.Args
+			toolsArgs := make(map[string]string)
+			if currentTask.Tools != nil && currentTask.Tools.Args != nil {
+				toolsArgs = currentTask.Tools.Args
 			}
-			hookCall := &HookCall{
-				Name: resolutionInfo.HookName,
-				// Strip the "hookName." prefix: tools are advertised to the model as
-				// "hookName.toolName" for namespacing, but Exec() only needs the leaf name.
-				ToolName: strings.TrimPrefix(toolCall.Function.Name, resolutionInfo.HookName+"."),
-				// NOTE: dynamic args are passed as `input` to Exec; Hook.Args is static/template-level (may be empty for execute_tool_calls)
-				Args: hookArgs,
+			toolsCall := &ToolsCall{
+				Name: resolutionInfo.ToolsName,
+				// Strip the "toolsName." prefix: tools are advertised to the model as
+				// "toolsName.toolName" for namespacing, but Exec() only needs the leaf name.
+				ToolName: strings.TrimPrefix(toolCall.Function.Name, resolutionInfo.ToolsName+"."),
+				// NOTE: dynamic args are passed as `input` to Exec; Tools.Args is static/template-level (may be empty for execute_tool_calls)
+				Args: toolsArgs,
 			}
 
 			// `args` are the per-call dynamic tool arguments
-			result, resultType, err := exe.hookProvider.Exec(taskCtx, startingTime, args, chainContext.Debug, hookCall)
+			result, resultType, err := exe.toolsProvider.Exec(taskCtx, startingTime, args, chainContext.Debug, toolsCall)
 			if err != nil {
 				result = fmt.Sprintf("tool %s execution failed: %s", toolCall.Function.Name, err)
 				err = nil
@@ -552,28 +552,28 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 		case executedAny:
 			transitionEval = "tools_executed"
 		default:
-			// We *had* tool calls, but none resolved to hooks
+			// We *had* tool calls, but none resolved to tools
 			transitionEval = "no_calls_found"
 		}
 
-	case HandleHook:
-		if currentTask.Hook == nil {
-			taskErr = fmt.Errorf("hook task missing hook definition")
+	case HandleTools:
+		if currentTask.Tools == nil {
+			taskErr = fmt.Errorf("tools task missing tools definition")
 		} else {
-			if currentTask.Hook.Args == nil {
-				currentTask.Hook.Args = make(map[string]string)
+			if currentTask.Tools.Args == nil {
+				currentTask.Tools.Args = make(map[string]string)
 			}
-			hookCtx := taskCtx
+			toolsCtx := taskCtx
 			if currentTask.ExecuteConfig != nil {
-				if policy, ok := currentTask.ExecuteConfig.HookPolicies[currentTask.Hook.Name]; ok && len(policy) > 0 {
-					hookCtx = WithHookArgs(hookCtx, currentTask.Hook.Name, policy)
+				if policy, ok := currentTask.ExecuteConfig.ToolsPolicies[currentTask.Tools.Name]; ok && len(policy) > 0 {
+					toolsCtx = WithToolsArgs(toolsCtx, currentTask.Tools.Name, policy)
 				}
 			}
-			output, outputType, transitionEval, taskErr = exe.hookengine(
-				hookCtx,
+			output, outputType, transitionEval, taskErr = exe.toolsengine(
+				toolsCtx,
 				startingTime,
 				output,
-				currentTask.Hook,
+				currentTask.Tools,
 				chainContext.Debug,
 				currentTask.OutputTemplate,
 			)
@@ -593,7 +593,7 @@ func (exe *SimpleExec) executeLLM(
 	ctxLength int,
 	llmCall *LLMExecutionConfig,
 	clientTools []Tool,
-	hookResolution map[string]ToolWithResolution,
+	toolsResolution map[string]ToolWithResolution,
 ) (any, DataType, string, error) {
 	reportErr, reportChange, end := exe.tracker.Start(ctx, "SimpleExec", "prompt_model",
 		"model_name", llmCall.Model,
@@ -626,18 +626,18 @@ func (exe *SimpleExec) executeLLM(
 		}
 	}
 
-	// 2. Hook tools (if any hooks are allowed)
-	if len(llmCall.Hooks) > 0 {
-		resolvedNames, err := resolveHookNames(ctx, llmCall.Hooks, exe.hookProvider)
+	// 2. Tools tools (if any tools are allowed)
+	if len(llmCall.Tools) > 0 {
+		resolvedNames, err := resolveToolsNames(ctx, llmCall.Tools, exe.toolsProvider)
 		if err != nil {
-			return nil, DataTypeAny, "", fmt.Errorf("failed to resolve hooks for LLM call: %w", err)
+			return nil, DataTypeAny, "", fmt.Errorf("failed to resolve tools for LLM call: %w", err)
 		}
 		included := make(map[string]struct{}, len(resolvedNames))
 		for _, name := range resolvedNames {
 			included[name] = struct{}{}
 		}
-		for _, twr := range hookResolution {
-			if _, ok := included[twr.HookName]; ok {
+		for _, twr := range toolsResolution {
+			if _, ok := included[twr.ToolsName]; ok {
 				tools = append(tools, libmodelprovider.Tool{
 					Type: twr.Type,
 					Function: &libmodelprovider.FunctionTool{
@@ -865,32 +865,32 @@ func (exe *SimpleExec) executeLLM(
 	return input, DataTypeChatHistory, "executed", nil
 }
 
-// hookengine handles the execution of a hook, including output templating.
-func (exe *SimpleExec) hookengine(
+// toolsengine handles the execution of a tools, including output templating.
+func (exe *SimpleExec) toolsengine(
 	ctx context.Context,
 	startingTime time.Time,
 	input any,
-	hook *HookCall,
+	tools *ToolsCall,
 	debug bool,
 	outputTemplate string,
 ) (any, DataType, string, error) {
-	if hook.Args == nil {
-		hook.Args = make(map[string]string)
+	if tools.Args == nil {
+		tools.Args = make(map[string]string)
 	}
 
 	// Call the provider with the new, simple signature.
-	hookOutput, dataType, err := exe.hookProvider.Exec(ctx, startingTime, input, debug, hook)
+	toolsOutput, dataType, err := exe.toolsProvider.Exec(ctx, startingTime, input, debug, tools)
 	if err != nil {
 		return nil, dataType, "failed", err
 	}
 
-	hookOutput, dataType, normErr := NormalizeDataType(hookOutput, dataType)
+	toolsOutput, dataType, normErr := NormalizeDataType(toolsOutput, dataType)
 	if normErr != nil {
 		return nil, DataTypeAny, "failed", normErr
 	}
 
 	// On success, process the output.
-	finalOutput := hookOutput
+	finalOutput := toolsOutput
 	finalOutputType := dataType
 	finalTransitionEval := "ok"
 
@@ -899,7 +899,7 @@ func (exe *SimpleExec) hookengine(
 		rendered, tplErr := renderTemplate(outputTemplate, finalOutput)
 		if tplErr != nil {
 			// Return a descriptive error if templating fails.
-			return nil, DataTypeAny, "failed", fmt.Errorf("failed to render hook output template: %w", tplErr)
+			return nil, DataTypeAny, "failed", fmt.Errorf("failed to render tools output template: %w", tplErr)
 		}
 		finalOutput = rendered
 		finalOutputType = DataTypeString
@@ -912,7 +912,7 @@ func (exe *SimpleExec) hookengine(
 
 
 // resolveToolWithResolution tries to find a ToolWithResolution for a given tool name.
-// It first looks up by key, then falls back to scanning by Function.Name / HookName.
+// It first looks up by key, then falls back to scanning by Function.Name / ToolsName.
 // This makes us robust to how chainContext.Tools was keyed.
 func resolveToolWithResolution(chainContext *ChainContext, toolName string) (ToolWithResolution, bool) {
 	if chainContext == nil {
@@ -924,9 +924,9 @@ func resolveToolWithResolution(chainContext *ChainContext, toolName string) (Too
 		return twr, true
 	}
 
-	// 2) Fallback: scan for matching Function.Name or HookName
+	// 2) Fallback: scan for matching Function.Name or ToolsName
 	for _, twr := range chainContext.Tools {
-		if twr.Function.Name == toolName || twr.HookName == toolName {
+		if twr.Function.Name == toolName || twr.ToolsName == toolName {
 			return twr, true
 		}
 	}

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/runtime/localhooks"
-	"github.com/contenox/contenox/runtime/localhooks/mcpoauth"
+	"github.com/contenox/contenox/runtime/localtools"
+	"github.com/contenox/contenox/runtime/localtools/mcpoauth"
 	"github.com/contenox/contenox/runtime/runtimetypes"
 	"golang.org/x/oauth2"
 )
@@ -46,7 +46,7 @@ type pendingOAuth struct {
 	CreatedAt    time.Time
 }
 
-func (s *service) AuthenticateOAuth(ctx context.Context, name string, oauthCfg *localhooks.MCPOAuthConfig) error {
+func (s *service) AuthenticateOAuth(ctx context.Context, name string, oauthCfg *localtools.MCPOAuthConfig) error {
 	srv, err := s.GetByName(ctx, name)
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func (s *service) AuthenticateOAuth(ctx context.Context, name string, oauthCfg *
 
 	tokenStore := s.oauthTokenStore()
 	if oauthCfg == nil {
-		oauthCfg = &localhooks.MCPOAuthConfig{}
+		oauthCfg = &localtools.MCPOAuthConfig{}
 	}
 	if oauthCfg.TokenStore == nil {
 		oauthCfg.TokenStore = tokenStore
@@ -76,7 +76,7 @@ func (s *service) AuthenticateOAuth(ctx context.Context, name string, oauthCfg *
 		return err
 	}
 
-	tok, err := localhooks.RunOAuthFlow(ctx, o2cfg, oauthCfg, meta)
+	tok, err := localtools.RunOAuthFlow(ctx, o2cfg, oauthCfg, meta)
 	if err != nil {
 		return fmt.Errorf("oauth flow: %w", err)
 	}
@@ -237,7 +237,7 @@ func (s *service) resolveOAuthConfig(
 }
 
 func validateOAuthServer(srv *runtimetypes.MCPServer) error {
-	if srv.AuthType != string(localhooks.MCPAuthOAuth) {
+	if srv.AuthType != string(localtools.MCPAuthOAuth) {
 		return fmt.Errorf("mcp server %q must use authType oauth (got %q)", srv.Name, srv.AuthType)
 	}
 	if srv.Transport != "sse" && srv.Transport != "http" {

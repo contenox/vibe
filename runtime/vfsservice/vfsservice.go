@@ -29,7 +29,7 @@ var (
 	ErrNotSupported   = errors.New("operation not supported")
 )
 
-// Callbacks holds optional lifecycle hooks called around VFS operations.
+// Callbacks holds optional lifecycle tools called around VFS operations.
 // Any nil field is silently skipped.
 type Callbacks struct {
 	BeforeRead  func(ctx context.Context, resourceID string) error

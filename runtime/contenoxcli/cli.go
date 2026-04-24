@@ -46,7 +46,7 @@ const (
 )
 
 // reservedSubcommands are first-arg names that must not be treated as run input (Cobra or our subcommands).
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "plan": true, "run": true, "hook": true, "mcp": true, "backend": true, "config": true, "model": true, "models": true, "doctor": true, "version": true}
+var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "plan": true, "run": true, "tools": true, "mcp": true, "backend": true, "config": true, "model": true, "models": true, "doctor": true, "version": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
@@ -198,7 +198,7 @@ Examples:
   # Chat with file system access to the current project:
   contenox chat --local-exec-allowed-dir . "summarise the README"
 
-  # Shell access (policy comes from the chain's hook_policies; default chains allow common dev tools):
+  # Shell access (policy comes from the chain's tools_policies; default chains allow common dev tools):
   contenox chat --shell "suggest a commit message from git diff"
 
   # Shell access with human approval before every write or shell call:
@@ -272,9 +272,9 @@ func init() {
 	f.String("provider", "", "Provider type override (ollama, openai, vllm, gemini). Overrides config default_provider.")
 	f.Int("context", defaultContext, "Context length")
 	f.Bool("no-delete-models", true, "Legacy compatibility flag; OSS runtime model deletion is disabled.")
-	f.String("chain", "", "Path to a task chain JSON file. Chains define the LLM workflow: which model, which hooks, how to branch. Falls back to default_chain in config, then .contenox/default-chain.json")
+	f.String("chain", "", "Path to a task chain JSON file. Chains define the LLM workflow: which model, which tools, how to branch. Falls back to default_chain in config, then .contenox/default-chain.json")
 	f.String("input", "", "Input for the chain (default: positional args or stdin if piped)")
-	f.Bool("shell", false, "Enable the local_shell hook (use only in trusted environments)")
+	f.Bool("shell", false, "Enable the local_shell tools (use only in trusted environments)")
 	f.String("local-exec-allowed-dir", "", "If set, local_shell may only run scripts/binaries under this directory")
 	f.Duration("timeout", defaultTimeout, "Maximum execution time (e.g., 5m, 1h)")
 	f.Bool("trace", false, "Enable operation telemetry on stderr")
@@ -283,7 +283,7 @@ func init() {
 	f.Bool("raw", false, "Print full output (e.g. entire chat JSON)")
 	f.Bool("think", false, "Print model reasoning trace to stderr (for thinking models)")
 
-	rootCmd.AddCommand(initCmd, chatCmd, sessionCmd, planCmd, runCmd, hookCmd, doctorCmd, versionCmd)
+	rootCmd.AddCommand(initCmd, chatCmd, sessionCmd, planCmd, runCmd, toolsCmd, doctorCmd, versionCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(backendCmd)
 	rootCmd.AddCommand(configCmd)

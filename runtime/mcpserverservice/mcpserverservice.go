@@ -7,7 +7,7 @@ import (
 	"time"
 
 	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/runtime/localhooks"
+	"github.com/contenox/contenox/runtime/localtools"
 	"github.com/contenox/contenox/runtime/runtimetypes"
 	"github.com/google/uuid"
 )
@@ -20,7 +20,7 @@ type Service interface {
 	Update(ctx context.Context, srv *runtimetypes.MCPServer) error
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*runtimetypes.MCPServer, error)
-	AuthenticateOAuth(ctx context.Context, name string, oauthCfg *localhooks.MCPOAuthConfig) error
+	AuthenticateOAuth(ctx context.Context, name string, oauthCfg *localtools.MCPOAuthConfig) error
 	StartOAuth(ctx context.Context, id, redirectBase string) (*OAuthStartResult, error)
 	CompleteOAuth(ctx context.Context, req OAuthCallbackRequest) (*OAuthCallbackResult, error)
 }

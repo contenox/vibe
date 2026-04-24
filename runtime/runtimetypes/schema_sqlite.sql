@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS kv (
     PRIMARY KEY (key, workspace_id)
 );
 
-CREATE TABLE IF NOT EXISTS remote_hooks (
+CREATE TABLE IF NOT EXISTS remote_tools (
     id VARCHAR(255) PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
     endpoint_url VARCHAR(512) NOT NULL,
@@ -167,7 +167,7 @@ CREATE TABLE IF NOT EXISTS plan_steps (
     status VARCHAR(50) DEFAULT 'pending', -- pending | completed | failed | skipped
     execution_result TEXT,                -- legacy single-string fallback; superseded by summary JSON
     executed_at TIMESTAMP,
-    summary TEXT,                         -- planstore.SummaryDoc JSON; written by plan_summary persist hook
+    summary TEXT,                         -- planstore.SummaryDoc JSON; written by plan_summary persist tools
     chat_history_json TEXT,               -- raw executor ChatHistory (debug + Retry context)
     summary_error TEXT,                   -- populated by plan_summary fallback when both validation attempts failed
     last_failure_summary TEXT,            -- prior attempt's Summary/ExecutionResult, moved here by Retry
@@ -232,10 +232,10 @@ CREATE TABLE IF NOT EXISTS bus_replies (
 -- "duplicate column name" errors on already-upgraded databases are silently
 -- skipped and the remaining statements still run.
 
--- remote_hooks columns added after initial release
-ALTER TABLE remote_hooks ADD COLUMN headers             TEXT;
-ALTER TABLE remote_hooks ADD COLUMN properties         BLOB;
-ALTER TABLE remote_hooks ADD COLUMN inject_params_json TEXT NOT NULL DEFAULT '{}';
+-- remote_tools columns added after initial release
+ALTER TABLE remote_tools ADD COLUMN headers             TEXT;
+ALTER TABLE remote_tools ADD COLUMN properties         BLOB;
+ALTER TABLE remote_tools ADD COLUMN inject_params_json TEXT NOT NULL DEFAULT '{}';
 
 -- mcp_servers columns added after initial release
 ALTER TABLE mcp_servers ADD COLUMN headers_json        TEXT NOT NULL DEFAULT '{}';
@@ -254,7 +254,7 @@ ALTER TABLE plans ADD COLUMN compile_executor_chain_id VARCHAR(255);
 ALTER TABLE plans ADD COLUMN repo_context_json TEXT;
 
 -- plan_steps: typed-handover columns (planstore.SummaryDoc JSON + debug + Retry context).
--- See planstore/summary.go for the schema and localhooks.PlanSummaryHook for the writers.
+-- See planstore/summary.go for the schema and localtools.PlanSummaryTools for the writers.
 ALTER TABLE plan_steps ADD COLUMN summary              TEXT;
 ALTER TABLE plan_steps ADD COLUMN chat_history_json    TEXT;
 ALTER TABLE plan_steps ADD COLUMN summary_error        TEXT;

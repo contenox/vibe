@@ -36,7 +36,7 @@ func TestEvaluate_FirstMatchWins(t *testing.T) {
 	cases := []struct {
 		name       string
 		policy     *Policy
-		hook       string
+		tools       string
 		tool       string
 		args       map[string]any
 		wantAction Action
@@ -44,66 +44,66 @@ func TestEvaluate_FirstMatchWins(t *testing.T) {
 	}{
 		{
 			name:   "exact match approve",
-			policy: &Policy{Rules: []Rule{{Hook: "local_fs", Tool: "write_file", Action: ActionApprove}}},
-			hook:   "local_fs", tool: "write_file",
+			policy: &Policy{Rules: []Rule{{Tools: "local_fs", Tool: "write_file", Action: ActionApprove}}},
+			tools:   "local_fs", tool: "write_file",
 			wantAction: ActionApprove, wantReason: ReasonMatchedRule,
 		},
 		{
 			name:   "exact match deny",
-			policy: &Policy{Rules: []Rule{{Hook: "local_fs", Tool: "write_file", Action: ActionDeny}}},
-			hook:   "local_fs", tool: "write_file",
+			policy: &Policy{Rules: []Rule{{Tools: "local_fs", Tool: "write_file", Action: ActionDeny}}},
+			tools:   "local_fs", tool: "write_file",
 			wantAction: ActionDeny, wantReason: ReasonMatchedRule,
 		},
 		{
-			name:   "wildcard hook",
-			policy: &Policy{Rules: []Rule{{Hook: "*", Tool: "write_file", Action: ActionApprove}}},
-			hook:   "anything", tool: "write_file",
+			name:   "wildcard tools",
+			policy: &Policy{Rules: []Rule{{Tools: "*", Tool: "write_file", Action: ActionApprove}}},
+			tools:   "anything", tool: "write_file",
 			wantAction: ActionApprove, wantReason: ReasonMatchedRule,
 		},
 		{
 			name:   "wildcard tool",
-			policy: &Policy{Rules: []Rule{{Hook: "local_fs", Tool: "*", Action: ActionApprove}}},
-			hook:   "local_fs", tool: "anything",
+			policy: &Policy{Rules: []Rule{{Tools: "local_fs", Tool: "*", Action: ActionApprove}}},
+			tools:   "local_fs", tool: "anything",
 			wantAction: ActionApprove, wantReason: ReasonMatchedRule,
 		},
 		{
-			name:   "empty hook matches all",
-			policy: &Policy{Rules: []Rule{{Hook: "", Tool: "write_file", Action: ActionApprove}}},
-			hook:   "local_fs", tool: "write_file",
+			name:   "empty tools matches all",
+			policy: &Policy{Rules: []Rule{{Tools: "", Tool: "write_file", Action: ActionApprove}}},
+			tools:   "local_fs", tool: "write_file",
 			wantAction: ActionApprove, wantReason: ReasonMatchedRule,
 		},
 		{
 			name:   "no match defaults to allow when default_action absent",
-			policy: &Policy{Rules: []Rule{{Hook: "local_fs", Tool: "write_file", Action: ActionApprove}}},
-			hook:   "webhook", tool: "call",
+			policy: &Policy{Rules: []Rule{{Tools: "local_fs", Tool: "write_file", Action: ActionApprove}}},
+			tools:   "webtools", tool: "call",
 			wantAction: ActionAllow, wantReason: ReasonDefaultAction,
 		},
 		{
 			name: "first rule wins",
 			policy: &Policy{Rules: []Rule{
-				{Hook: "local_fs", Tool: "write_file", Action: ActionDeny},
-				{Hook: "local_fs", Tool: "write_file", Action: ActionApprove},
+				{Tools: "local_fs", Tool: "write_file", Action: ActionDeny},
+				{Tools: "local_fs", Tool: "write_file", Action: ActionApprove},
 			}},
-			hook: "local_fs", tool: "write_file",
+			tools: "local_fs", tool: "write_file",
 			wantAction: ActionDeny, wantReason: ReasonMatchedRule,
 		},
 		{
 			name:   "empty rules — default allow",
 			policy: &Policy{Rules: []Rule{}},
-			hook:   "local_fs", tool: "write_file",
+			tools:   "local_fs", tool: "write_file",
 			wantAction: ActionAllow, wantReason: ReasonDefaultAction,
 		},
 		{
 			name:   "wildcard both matches anything",
-			policy: &Policy{Rules: []Rule{{Hook: "*", Tool: "*", Action: ActionApprove}}},
-			hook:   "echo", tool: "echo",
+			policy: &Policy{Rules: []Rule{{Tools: "*", Tool: "*", Action: ActionApprove}}},
+			tools:   "echo", tool: "echo",
 			wantAction: ActionApprove, wantReason: ReasonMatchedRule,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := evaluate(tc.policy, tc.hook, tc.tool, tc.args)
+			got := evaluate(tc.policy, tc.tools, tc.tool, tc.args)
 			assert.Equal(t, tc.wantAction, got.Action)
 			assert.Equal(t, tc.wantReason, got.Reason)
 		})
@@ -137,8 +137,8 @@ func TestEvaluate_DefaultAction(t *testing.T) {
 func TestEvaluate_MatchedRuleIndex(t *testing.T) {
 	t.Parallel()
 	p := &Policy{Rules: []Rule{
-		{Hook: "echo", Tool: "echo", Action: ActionAllow},
-		{Hook: "local_fs", Tool: "write_file", Action: ActionApprove},
+		{Tools: "echo", Tool: "echo", Action: ActionAllow},
+		{Tools: "local_fs", Tool: "write_file", Action: ActionApprove},
 	}}
 	got := evaluate(p, "local_fs", "write_file", nil)
 	require.NotNil(t, got.MatchedRule)
@@ -153,7 +153,7 @@ func TestEvaluate_WhenCondition_GlobMatch(t *testing.T) {
 		DefaultAction: ActionDeny,
 		Rules: []Rule{
 			{
-				Hook:   "local_fs",
+				Tools:   "local_fs",
 				Tool:   "write_file",
 				When:   []Condition{{Key: "path", Op: OpGlob, Value: "./src/**"}},
 				Action: ActionAllow,
@@ -174,12 +174,12 @@ func TestEvaluate_WhenCondition_EqMatch(t *testing.T) {
 	p := &Policy{
 		Rules: []Rule{
 			{
-				Hook:   "local_fs",
+				Tools:   "local_fs",
 				Tool:   "read_file",
 				When:   []Condition{{Key: "path", Op: OpEq, Value: "secrets.txt"}},
 				Action: ActionDeny,
 			},
-			{Hook: "local_fs", Tool: "read_file", Action: ActionAllow},
+			{Tools: "local_fs", Tool: "read_file", Action: ActionAllow},
 		},
 	}
 	got := evaluate(p, "local_fs", "read_file", map[string]any{"path": "secrets.txt"})
@@ -195,7 +195,7 @@ func TestEvaluate_WhenCondition_MissingKey_RuleSkipped(t *testing.T) {
 		DefaultAction: ActionDeny,
 		Rules: []Rule{
 			{
-				Hook:   "local_fs",
+				Tools:   "local_fs",
 				Tool:   "write_file",
 				When:   []Condition{{Key: "path", Op: OpGlob, Value: "./src/**"}},
 				Action: ActionAllow,
@@ -213,7 +213,7 @@ func TestEvaluate_WhenCondition_AllMustMatch(t *testing.T) {
 		DefaultAction: ActionApprove,
 		Rules: []Rule{
 			{
-				Hook: "local_fs",
+				Tools: "local_fs",
 				Tool: "write_file",
 				When: []Condition{
 					{Key: "path", Op: OpGlob, Value: "./src/**"},
@@ -303,7 +303,7 @@ func TestValidatePolicy(t *testing.T) {
 		},
 		{
 			name:    "valid — default deny",
-			policy:  Policy{DefaultAction: ActionDeny, Rules: []Rule{{Hook: "local_fs", Tool: "read_file", Action: ActionAllow}}},
+			policy:  Policy{DefaultAction: ActionDeny, Rules: []Rule{{Tools: "local_fs", Tool: "read_file", Action: ActionAllow}}},
 			wantErr: false,
 		},
 		{
@@ -313,22 +313,22 @@ func TestValidatePolicy(t *testing.T) {
 		},
 		{
 			name:    "invalid — on_timeout allow",
-			policy:  Policy{Rules: []Rule{{Hook: "*", Tool: "*", Action: ActionApprove, OnTimeout: ActionAllow}}},
+			policy:  Policy{Rules: []Rule{{Tools: "*", Tool: "*", Action: ActionApprove, OnTimeout: ActionAllow}}},
 			wantErr: true,
 		},
 		{
 			name:    "valid — on_timeout deny",
-			policy:  Policy{Rules: []Rule{{Hook: "*", Tool: "*", Action: ActionApprove, TimeoutS: 60, OnTimeout: ActionDeny}}},
+			policy:  Policy{Rules: []Rule{{Tools: "*", Tool: "*", Action: ActionApprove, TimeoutS: 60, OnTimeout: ActionDeny}}},
 			wantErr: false,
 		},
 		{
 			name:    "invalid — unknown op",
-			policy:  Policy{Rules: []Rule{{Hook: "local_fs", Tool: "write_file", Action: ActionAllow, When: []Condition{{Key: "path", Op: "regex", Value: ".*"}}}}},
+			policy:  Policy{Rules: []Rule{{Tools: "local_fs", Tool: "write_file", Action: ActionAllow, When: []Condition{{Key: "path", Op: "regex", Value: ".*"}}}}},
 			wantErr: true,
 		},
 		{
 			name:    "invalid — unknown action",
-			policy:  Policy{Rules: []Rule{{Hook: "local_fs", Tool: "write_file", Action: "jump"}}},
+			policy:  Policy{Rules: []Rule{{Tools: "local_fs", Tool: "write_file", Action: "jump"}}},
 			wantErr: true,
 		},
 	}
@@ -354,7 +354,7 @@ func TestLoadPolicy_ParsesValidJSON(t *testing.T) {
 	ctx := context.Background()
 	data := []byte(`{
 		"default_action": "deny",
-		"rules": [{"hook":"local_fs","tool":"write_file","action":"approve","timeout_s":60,"on_timeout":"deny"}]
+		"rules": [{"tools":"local_fs","tool":"write_file","action":"approve","timeout_s":60,"on_timeout":"deny"}]
 	}`)
 	_, err := vfs.CreateFile(ctx, &vfsservice.File{Name: "hitl-policy.json", Data: data})
 	require.NoError(t, err)
@@ -373,7 +373,7 @@ func TestLoadPolicy_WithWhenCondition(t *testing.T) {
 	dir := t.TempDir()
 	vfs := vfsservice.NewLocalFS(dir)
 	ctx := context.Background()
-	data := []byte(`{"rules":[{"hook":"local_fs","tool":"write_file","when":[{"key":"path","op":"glob","value":"./src/**"}],"action":"allow"}]}`)
+	data := []byte(`{"rules":[{"tools":"local_fs","tool":"write_file","when":[{"key":"path","op":"glob","value":"./src/**"}],"action":"allow"}]}`)
 	_, err := vfs.CreateFile(ctx, &vfsservice.File{Name: "hitl-policy.json", Data: data})
 	require.NoError(t, err)
 
@@ -389,7 +389,7 @@ func TestLoadPolicy_RejectsInvalidPolicy(t *testing.T) {
 	dir := t.TempDir()
 	vfs := vfsservice.NewLocalFS(dir)
 	ctx := context.Background()
-	data := []byte(`{"rules":[{"hook":"*","tool":"*","action":"approve","on_timeout":"allow"}]}`)
+	data := []byte(`{"rules":[{"tools":"*","tool":"*","action":"approve","on_timeout":"allow"}]}`)
 	_, err := vfs.CreateFile(ctx, &vfsservice.File{Name: "hitl-policy.json", Data: data})
 	require.NoError(t, err)
 
@@ -439,7 +439,7 @@ func TestDefaultPolicy_MatchesLegacyBehaviour(t *testing.T) {
 	assert.Equal(t, ActionApprove, evaluate(p, "local_fs", "sed", nil).Action)
 	assert.Equal(t, ActionApprove, evaluate(p, "local_shell", "local_shell", nil).Action)
 	// Tools not in the default policy pass through.
-	assert.Equal(t, ActionAllow, evaluate(p, "webhook", "call", nil).Action)
+	assert.Equal(t, ActionAllow, evaluate(p, "webtools", "call", nil).Action)
 	assert.Equal(t, ActionAllow, evaluate(p, "echo", "echo", nil).Action)
 }
 
@@ -460,12 +460,12 @@ func TestService_Evaluate_LoadsFromVFS(t *testing.T) {
 	dir := t.TempDir()
 	vfs := vfsservice.NewLocalFS(dir)
 	ctx := context.Background()
-	data := []byte(`{"default_action":"deny","rules":[{"hook":"webhook","tool":"call","action":"allow"}]}`)
+	data := []byte(`{"default_action":"deny","rules":[{"tools":"webtools","tool":"call","action":"allow"}]}`)
 	_, err := vfs.CreateFile(ctx, &vfsservice.File{Name: "hitl-policy.json", Data: data})
 	require.NoError(t, err)
 
 	svc := New(vfs, fixedKVReader{"hitl-policy.json"}, libtracker.NoopTracker{})
-	result, err := svc.Evaluate(ctx, "webhook", "call", nil)
+	result, err := svc.Evaluate(ctx, "webtools", "call", nil)
 	require.NoError(t, err)
 	assert.Equal(t, ActionAllow, result.Action)
 
@@ -483,8 +483,8 @@ func TestService_Evaluate_WhenConditionFromVFS(t *testing.T) {
 	data := []byte(`{
 		"default_action": "approve",
 		"rules": [
-			{"hook":"local_fs","tool":"write_file","when":[{"key":"path","op":"glob","value":"./src/**"}],"action":"allow"},
-			{"hook":"local_fs","tool":"write_file","action":"approve","timeout_s":30,"on_timeout":"deny"}
+			{"tools":"local_fs","tool":"write_file","when":[{"key":"path","op":"glob","value":"./src/**"}],"action":"allow"},
+			{"tools":"local_fs","tool":"write_file","action":"approve","timeout_s":30,"on_timeout":"deny"}
 		]
 	}`)
 	_, err := vfs.CreateFile(ctx, &vfsservice.File{Name: "hitl-policy.json", Data: data})

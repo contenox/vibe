@@ -12,7 +12,7 @@ import (
 
 	"github.com/contenox/contenox/runtime/execservice"
 	"github.com/contenox/contenox/runtime/hitlservice"
-	"github.com/contenox/contenox/runtime/internal/hooks"
+	"github.com/contenox/contenox/runtime/internal/tools"
 	"github.com/contenox/contenox/runtime/internal/llmrepo"
 	"github.com/contenox/contenox/runtime/internal/ollamatokenizer"
 	"github.com/contenox/contenox/runtime/internal/runtimestate"
@@ -21,7 +21,7 @@ import (
 	"github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libkvstore"
 	"github.com/contenox/contenox/libtracker"
-	"github.com/contenox/contenox/runtime/localhooks"
+	"github.com/contenox/contenox/runtime/localtools"
 	"github.com/contenox/contenox/runtime/mcpworker"
 	"github.com/contenox/contenox/runtime/planstore"
 	"github.com/contenox/contenox/runtime/runtimetypes"
@@ -36,8 +36,8 @@ type Engine struct {
 	Stop        func()
 	Bus         libbus.Messenger
 	MCPManager  *mcpworker.Manager
-	// LocalHooks lists the names of all registered local hook handlers.
-	LocalHooks []string
+	// LocalTools lists the names of all registered local tools handlers.
+	LocalTools []string
 	// SetupCheck is the last SetupStatus evaluation after RunBackendCycle (for resolver-failure hints).
 	SetupCheck setupcheck.Result
 }
@@ -169,32 +169,32 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		return nil, fmt.Errorf("failed to create model manager: %w", err)
 	}
 
-	// 8. Local hooks
-	localHooks := map[string]taskengine.HookRepo{
-		"echo":         localhooks.NewEchoHook(),
-		"print":        localhooks.NewPrint(tracker),
-		"webhook":      localhooks.NewWebCaller(),
-		"local_fs":     localhooks.NewLocalFSHook(opts.EffectiveLocalExecAllowedDir),
-		"plan_summary": localhooks.NewPlanSummaryHook(planstore.New(db.WithoutTransaction(), ResolveWorkspaceID(opts.ContenoxDir))),
+	// 8. Local tools
+	localTools := map[string]taskengine.ToolsRepo{
+		"echo":         localtools.NewEchoTools(),
+		"print":        localtools.NewPrint(tracker),
+		"webtools":      localtools.NewWebCaller(),
+		"local_fs":     localtools.NewLocalFSTools(opts.EffectiveLocalExecAllowedDir),
+		"plan_summary": localtools.NewPlanSummaryTools(planstore.New(db.WithoutTransaction(), ResolveWorkspaceID(opts.ContenoxDir))),
 	}
-	jsHooks := map[string]taskengine.HookRepo{
-		"echo":    localhooks.NewEchoHook(),
-		"print":   localhooks.NewPrint(tracker),
-		"webhook": localhooks.NewWebCaller(),
+	jsTools := map[string]taskengine.ToolsRepo{
+		"echo":    localtools.NewEchoTools(),
+		"print":   localtools.NewPrint(tracker),
+		"webtools": localtools.NewWebCaller(),
 	}
-	if sshHook, err := localhooks.NewSSHHook(); err != nil {
-		slog.Debug("SSH hook not registered", "error", err)
+	if sshTools, err := localtools.NewSSHTools(); err != nil {
+		slog.Debug("SSH tools not registered", "error", err)
 	} else {
-		jsHooks["ssh"] = sshHook
+		jsTools["ssh"] = sshTools
 	}
 	if opts.EffectiveEnableLocalExec {
-		hookOpts := []localhooks.LocalExecOption{}
+		toolsOpts := []localtools.LocalExecOption{}
 		if opts.EffectiveLocalExecAllowedDir != "" {
-			hookOpts = append(hookOpts, localhooks.WithLocalExecAllowedDir(opts.EffectiveLocalExecAllowedDir))
+			toolsOpts = append(toolsOpts, localtools.WithLocalExecAllowedDir(opts.EffectiveLocalExecAllowedDir))
 		}
-		localExecHook := localhooks.NewLocalExecHook(hookOpts...)
-		jsHooks["local_shell"] = localExecHook
-		localHooks["local_shell"] = localExecHook
+		localExecTools := localtools.NewLocalExecTools(toolsOpts...)
+		jsTools["local_shell"] = localExecTools
+		localTools["local_shell"] = localExecTools
 	}
 	// Start mcpworker.Manager — loads MCP servers from SQLite and serves them
 	// via the SQLite bus. This is the same code path as the runtime-API (which uses NATS).
@@ -209,10 +209,10 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		return nil, fmt.Errorf("failed to start mcp event watcher: %w", err)
 	}
 	engine.MCPManager = mgr
-	for name := range localHooks {
-		engine.LocalHooks = append(engine.LocalHooks, name)
+	for name := range localTools {
+		engine.LocalTools = append(engine.LocalTools, name)
 	}
-	hookRepo := hooks.NewPersistentRepo(localHooks, db, http.DefaultClient, bus)
+	toolsRepo := tools.NewPersistentRepo(localTools, db, http.DefaultClient, bus)
 
 	// Wrap with HITL interceptor when --hitl is requested.
 	if opts.EffectiveHITL {
@@ -221,24 +221,24 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 			slog.Warn("hitl: failed to write embedded policy presets", "error", err)
 		}
 		hitlSvc := hitlservice.New(hitlVFS, store, tracker)
-		hookRepo = localhooks.NewHITLWrapper(hookRepo, NewCLIAskApproval(os.Stderr), hitlSvc, tracker)
+		toolsRepo = localtools.NewHITLWrapper(toolsRepo, NewCLIAskApproval(os.Stderr), hitlSvc, tracker)
 	}
 
 	// 9. Task engine
 	taskEngineCtx := taskengine.WithTaskEventSink(engineCtx, taskengine.NewBusTaskEventSink(bus))
-	exec, err := taskengine.NewExec(taskEngineCtx, repo, hookRepo, tracker)
+	exec, err := taskengine.NewExec(taskEngineCtx, repo, toolsRepo, tracker)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create task executor: %w", err)
 	}
-	envExec, err := taskengine.NewEnv(taskEngineCtx, tracker, exec, taskengine.NewSimpleInspector(), hookRepo)
+	envExec, err := taskengine.NewEnv(taskEngineCtx, tracker, exec, taskengine.NewSimpleInspector(), toolsRepo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create environment executor: %w", err)
 	}
-	envExec, err = taskengine.NewMacroEnv(envExec, hookRepo)
+	envExec, err = taskengine.NewMacroEnv(envExec, toolsRepo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create macro environment: %w", err)
 	}
-	taskService := execservice.NewTasksEnv(engineCtx, envExec, hookRepo)
+	taskService := execservice.NewTasksEnv(engineCtx, envExec, toolsRepo)
 
 	engine.TaskService = taskService
 	engine.Tracker = tracker

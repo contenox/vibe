@@ -8,7 +8,7 @@ import (
 
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
-	"github.com/contenox/contenox/runtime/localhooks"
+	"github.com/contenox/contenox/runtime/localtools"
 	"github.com/contenox/contenox/runtime/mcpserverservice"
 	"github.com/contenox/contenox/runtime/runtimetypes"
 	"github.com/spf13/cobra"
@@ -363,7 +363,7 @@ Example:
 		}
 		defer db.Close()
 
-		if err := svc.AuthenticateOAuth(ctx, name, &localhooks.MCPOAuthConfig{}); err != nil {
+		if err := svc.AuthenticateOAuth(ctx, name, &localtools.MCPOAuthConfig{}); err != nil {
 			return fmt.Errorf("mcp oauth auth: %w", err)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "%s: authenticated successfully.\n", name)

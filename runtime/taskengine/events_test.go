@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/contenox/runtime/internal/hooks"
+	"github.com/contenox/contenox/runtime/internal/tools"
 	"github.com/contenox/contenox/runtime/internal/llmrepo"
 	libmodelprovider "github.com/contenox/contenox/runtime/internal/modelrepo"
 	"github.com/contenox/contenox/libbus"
@@ -65,7 +65,7 @@ func TestTaskEvents_ExecEnvLifecycle(t *testing.T) {
 	env, err := taskengine.NewEnv(constructorCtx, libtracker.NoopTracker{}, &taskengine.MockTaskExecutor{
 		MockOutput:          "done",
 		MockTransitionValue: "done",
-	}, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	}, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -107,7 +107,7 @@ func TestTaskEvents_ExecEnvFailureLifecycle(t *testing.T) {
 
 	env, err := taskengine.NewEnv(constructorCtx, libtracker.NoopTracker{}, &taskengine.MockTaskExecutor{
 		MockError: errors.New("boom"),
-	}, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	}, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -151,9 +151,9 @@ func TestTaskEvents_PromptStreamingPublishesChunks(t *testing.T) {
 		},
 	}
 
-	exec, err := taskengine.NewExec(constructorCtx, repo, hooks.NewMockHookRegistry(), libtracker.NoopTracker{})
+	exec, err := taskengine.NewExec(constructorCtx, repo, tools.NewMockToolsRegistry(), libtracker.NoopTracker{})
 	require.NoError(t, err)
-	env, err := taskengine.NewEnv(constructorCtx, libtracker.NoopTracker{}, exec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(constructorCtx, libtracker.NoopTracker{}, exec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{

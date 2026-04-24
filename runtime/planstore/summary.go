@@ -6,14 +6,14 @@ package planstore
 //
 // This contract is shared between:
 //
-//   - localhooks.PlanSummaryHook (validates + writes it on success, rejects
+//   - localtools.PlanSummaryTools (validates + writes it on success, rejects
 //     invalid output so the DAG's repair branch can try again).
 //   - planservice.NewPlanStepMacroVars (reads the prior step's Summary to
 //     populate {{var:previous_output}} / {{var:previous_handover}} /
 //     {{var:previous_artifacts}} / {{var:previous_caveats}} for the next
 //     step's seed prompt).
 //
-// Kept in planstore — not in planservice or localhooks — to avoid either side
+// Kept in planstore — not in planservice or localtools — to avoid either side
 // owning the contract the other depends on. Adding a required field here is a
 // breaking change (requires migration of persisted rows); adding an optional
 // field is safe.

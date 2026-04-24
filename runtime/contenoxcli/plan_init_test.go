@@ -39,7 +39,7 @@ func TestValidatePlanExplorerChain_embedded(t *testing.T) {
 }
 
 func TestValidatePlanExplorerChain_rejectsLocalShell(t *testing.T) {
-	bad := strings.Replace(chainPlanExplorer, `"hooks": ["local_fs"]`, `"hooks": ["local_fs", "local_shell"]`, 1)
+	bad := strings.Replace(chainPlanExplorer, `"tools": ["local_fs"]`, `"tools": ["local_fs", "local_shell"]`, 1)
 	var chain taskengine.TaskChainDefinition
 	if err := json.Unmarshal([]byte(bad), &chain); err != nil {
 		t.Fatal(err)
@@ -53,14 +53,14 @@ func TestValidatePlanExplorerChain_rejectsLocalShell(t *testing.T) {
 	}
 }
 
-func TestValidatePlanExplorerChain_rejectsWildcardHooks(t *testing.T) {
-	bad := strings.Replace(chainPlanExplorer, `"hooks": ["local_fs"]`, `"hooks": ["*"]`, 1)
+func TestValidatePlanExplorerChain_rejectsWildcardTools(t *testing.T) {
+	bad := strings.Replace(chainPlanExplorer, `"tools": ["local_fs"]`, `"tools": ["*"]`, 1)
 	var chain taskengine.TaskChainDefinition
 	if err := json.Unmarshal([]byte(bad), &chain); err != nil {
 		t.Fatal(err)
 	}
 	if err := validatePlanExplorerChain(&chain, "tampered.json"); err == nil {
-		t.Fatal("expected error on wildcard hooks")
+		t.Fatal("expected error on wildcard tools")
 	}
 }
 

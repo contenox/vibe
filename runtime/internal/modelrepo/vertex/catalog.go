@@ -26,7 +26,7 @@ type googleCatalogProvider struct {
 	spec       modelrepo.BackendSpec
 	httpClient *http.Client
 	tracker    libtracker.ActivityTracker
-	tokenFn    func(context.Context) (string, error) // test hook; nil → BearerTokenWithCreds
+	tokenFn    func(context.Context) (string, error) // test tools; nil → BearerTokenWithCreds
 }
 
 func newGoogleCatalog(spec modelrepo.BackendSpec, opts modelrepo.CatalogOptions) (modelrepo.CatalogProvider, error) {
@@ -193,7 +193,7 @@ type publisherCatalogProvider struct {
 	spec       modelrepo.BackendSpec
 	httpClient *http.Client
 	tracker    libtracker.ActivityTracker
-	tokenFn    func(context.Context) (string, error) // test hook
+	tokenFn    func(context.Context) (string, error) // test tools
 }
 
 func newPublisherCatalog(publisher string) func(modelrepo.BackendSpec, modelrepo.CatalogOptions) (modelrepo.CatalogProvider, error) {

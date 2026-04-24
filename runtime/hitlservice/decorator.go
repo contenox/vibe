@@ -19,10 +19,10 @@ func WithActivityTracker(svc Service, tracker libtracker.ActivityTracker) Servic
 
 var _ Service = (*activityTrackerDecorator)(nil)
 
-func (d *activityTrackerDecorator) Evaluate(ctx context.Context, hookName, toolName string, args map[string]any) (EvaluationResult, error) {
-	reportErr, _, end := d.tracker.Start(ctx, "evaluate", "hitl_policy", "hook", hookName, "tool", toolName)
+func (d *activityTrackerDecorator) Evaluate(ctx context.Context, toolsName, toolName string, args map[string]any) (EvaluationResult, error) {
+	reportErr, _, end := d.tracker.Start(ctx, "evaluate", "hitl_policy", "tools", toolsName, "tool", toolName)
 	defer end()
-	result, err := d.svc.Evaluate(ctx, hookName, toolName, args)
+	result, err := d.svc.Evaluate(ctx, toolsName, toolName, args)
 	if err != nil {
 		reportErr(err)
 		return EvaluationResult{}, err
@@ -31,7 +31,7 @@ func (d *activityTrackerDecorator) Evaluate(ctx context.Context, hookName, toolN
 }
 
 func (d *activityTrackerDecorator) RequestApproval(ctx context.Context, req ApprovalRequest, sink taskengine.TaskEventSink) (bool, error) {
-	reportErr, _, end := d.tracker.Start(ctx, "request", "hitl_approval", "hook", req.HookName, "tool", req.ToolName)
+	reportErr, _, end := d.tracker.Start(ctx, "request", "hitl_approval", "tools", req.ToolsName, "tool", req.ToolName)
 	defer end()
 	ok, err := d.svc.RequestApproval(ctx, req, sink)
 	if err != nil {

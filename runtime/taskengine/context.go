@@ -47,30 +47,30 @@ func MergeTemplateVars(ctx context.Context, overlay map[string]string) context.C
 	return WithTemplateVars(ctx, base)
 }
 
-type runtimeHookAllowlistKey struct{}
+type runtimeToolsAllowlistKey struct{}
 
-type runtimeHookAllowlist struct {
+type runtimeToolsAllowlist struct {
 	list []string
 }
 
-// WithRuntimeHookAllowlist attaches a caller-supplied hook allowlist to ctx that
-// is intersected with each task's own allowlist inside resolveHookNames. A caller
+// WithRuntimeToolsAllowlist attaches a caller-supplied tools allowlist to ctx that
+// is intersected with each task's own allowlist inside resolveToolsNames. A caller
 // can only further restrict — never expand — what a chain JSON permits. Grammar
-// matches TaskDefinition.Hooks: nil/[]/["*"]/exact names/["*","!name"].
+// matches TaskDefinition.Tools: nil/[]/["*"]/exact names/["*","!name"].
 //
 // Use this when a host (e.g. planservice) must enforce per-call policy (such as
 // disabling local_shell for a step) regardless of what the chain JSON declares.
 // Absent key means "no runtime restriction" — behavior matches pre-feature code.
-func WithRuntimeHookAllowlist(ctx context.Context, allowlist []string) context.Context {
-	return context.WithValue(ctx, runtimeHookAllowlistKey{}, runtimeHookAllowlist{list: allowlist})
+func WithRuntimeToolsAllowlist(ctx context.Context, allowlist []string) context.Context {
+	return context.WithValue(ctx, runtimeToolsAllowlistKey{}, runtimeToolsAllowlist{list: allowlist})
 }
 
-// RuntimeHookAllowlistFromContext returns (allowlist, true) when an allowlist was
-// attached via WithRuntimeHookAllowlist. The returned slice follows the same
-// grammar as TaskDefinition.Hooks. Returns (nil, false) when no runtime
+// RuntimeToolsAllowlistFromContext returns (allowlist, true) when an allowlist was
+// attached via WithRuntimeToolsAllowlist. The returned slice follows the same
+// grammar as TaskDefinition.Tools. Returns (nil, false) when no runtime
 // allowlist is attached — callers should treat this as "no restriction".
-func RuntimeHookAllowlistFromContext(ctx context.Context) ([]string, bool) {
-	v, ok := ctx.Value(runtimeHookAllowlistKey{}).(runtimeHookAllowlist)
+func RuntimeToolsAllowlistFromContext(ctx context.Context) ([]string, bool) {
+	v, ok := ctx.Value(runtimeToolsAllowlistKey{}).(runtimeToolsAllowlist)
 	if !ok {
 		return nil, false
 	}
@@ -84,11 +84,11 @@ type planStepContext struct {
 	stepID string
 }
 
-// WithPlanStepContext attaches plan + step identity to ctx. Hooks compiled into
+// WithPlanStepContext attaches plan + step identity to ctx. Tools compiled into
 // a plan's per-step DAG (e.g. plan_summary persist/fallback) read this to know
 // which DB row to write, since the identity is chosen at ClaimNextPendingStep
 // time — not at plancompile time — and cannot live in the compiled chain JSON.
-// Mirrors the WithTemplateVars / WithRuntimeHookAllowlist pattern: unexported
+// Mirrors the WithTemplateVars / WithRuntimeToolsAllowlist pattern: unexported
 // key struct, wrapper value, ok-convention getter.
 func WithPlanStepContext(ctx context.Context, planID, stepID string) context.Context {
 	return context.WithValue(ctx, planStepContextKey{}, planStepContext{planID: planID, stepID: stepID})

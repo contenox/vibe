@@ -1,19 +1,19 @@
 {
     "id": "chain-run",
-    "description": "Stateless one-shot chain for `contenox run`. Designed for scripted / pipeline use (`git diff | contenox run \"suggest a commit\"`). Includes classified retry so transient provider errors don't kill a CI step. Compaction is intentionally omitted — one-shot calls don't grow long enough to benefit. Plan-management hooks excluded by default.",
+    "description": "Stateless one-shot chain for `contenox run`. Designed for scripted / pipeline use (`git diff | contenox run \"suggest a commit\"`). Includes classified retry so transient provider errors don't kill a CI step. Compaction is intentionally omitted — one-shot calls don't grow long enough to benefit. Plan-management tools excluded by default.",
     "tasks": [
         {
             "id": "contenox_run",
-            "description": "Stateless agentic chat. Model may call hooks (transition tool-call) or respond directly (transition default → end).",
+            "description": "Stateless agentic chat. Model may call tools (transition tool-call) or respond directly (transition default → end).",
             "handler": "chat_completion",
-            "system_instruction": "You are Contenox, a task-execution assistant invoked from a CLI / pipeline. Be concise — your output is likely consumed by another script or piped to a file.\n\nSCOPE: Only registered hooks exist; there is no separate UI. If the user / caller asks for something that cannot be done with available hooks, say so briefly.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess — say briefly what is missing and stop. A non-interactive caller cannot answer a clarifying question, so just refuse cleanly.\n\nNo ===STEP_DONE=== marker — that is plan-execution semantics, not one-shot run.",
+            "system_instruction": "You are Contenox, a task-execution assistant invoked from a CLI / pipeline. Be concise — your output is likely consumed by another script or piped to a file.\n\nSCOPE: Only registered tools exist; there is no separate UI. If the user / caller asks for something that cannot be done with available tools, say so briefly.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess — say briefly what is missing and stop. A non-interactive caller cannot answer a clarifying question, so just refuse cleanly.\n\nNo ===STEP_DONE=== marker — that is plan-execution semantics, not one-shot run.",
             "execute_config": {
                 "model": "{{var:model}}",
                 "provider": "{{var:provider}}",
                 "shift": true,
                 "pass_clients_tools": false,
-                "hooks": ["*", "!plan_manager"],
-                "hook_policies": {
+                "tools": ["*", "!plan_manager"],
+                "tools_policies": {
                     "local_shell": {
                         "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq",
                         "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"

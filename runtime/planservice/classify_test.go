@@ -62,7 +62,7 @@ func TestClassifyStepFailure_FallbackToErrText(t *testing.T) {
 	if got != planstore.FailureClassCapacity {
 		t.Fatalf("got %q want capacity", got)
 	}
-	got = classifyStepFailure(fmt.Errorf("hook tool foo failed: not found"), sink)
+	got = classifyStepFailure(fmt.Errorf("tools tool foo failed: not found"), sink)
 	if got != planstore.FailureClassLogic {
 		t.Fatalf("got %q want logic", got)
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/contenox/runtime/internal/hooks"
+	"github.com/contenox/contenox/runtime/internal/tools"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtime/taskengine"
 	"github.com/stretchr/testify/require"
@@ -37,7 +37,7 @@ func TestUnit_SimpleEnv_ExecEnv_SingleTask(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(t.Context(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(t.Context(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -66,7 +66,7 @@ func TestUnit_SimpleEnv_ExecEnv_SingleTask(t *testing.T) {
 
 func TestUnit_SimpleEnv_ExecEnv_UsesParentCancellation(t *testing.T) {
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, cancelAwareExecutor{}, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, cancelAwareExecutor{}, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -98,7 +98,7 @@ func TestUnit_SimpleEnv_ExecEnv_FailsAfterRetries(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -126,7 +126,7 @@ func TestUnit_SimpleEnv_ExecEnv_TransitionsToNextTask(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -165,7 +165,7 @@ func TestUnit_SimpleEnv_ExecEnv_ErrorTransition(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -203,7 +203,7 @@ func TestUnit_SimpleEnv_ExecEnv_PrintTemplate(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -235,7 +235,7 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_OriginalInput(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -266,7 +266,7 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_PreviousTaskOutput(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -307,7 +307,7 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_WithModeration(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -325,9 +325,9 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_WithModeration(t *testing.T) {
 			},
 			{
 				ID:       "store",
-				Handler:  taskengine.HandleHook,
+				Handler:  taskengine.HandleTools,
 				InputVar: "input", // Use original input despite moderation
-				Hook: &taskengine.HookCall{
+				Tools: &taskengine.ToolsCall{
 					Name: "store_message",
 				},
 				Transition: taskengine.TaskTransition{
@@ -358,7 +358,7 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_InvalidVariable(t *testing.T) {
 	mockExec := &taskengine.MockTaskExecutor{} // Shouldn't be called
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{
@@ -389,7 +389,7 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_DefaultBehavior(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{

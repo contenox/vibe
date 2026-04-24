@@ -13,9 +13,9 @@ import (
 // MacroEnv is a transparent decorator around EnvExecutor that expands
 // special macros in task templates before execution. Supported macros:
 //
-//   - {{hookservice:list}}              -> JSON map of hook name -> tool names
-//   - {{hookservice:hooks}}             -> JSON array of hook names
-//   - {{hookservice:tools <hook_name>}} -> JSON array of tool names for that hook
+//   - {{toolservice:list}}              -> JSON map of tools name -> tool names
+//   - {{toolservice:tools}}             -> JSON array of tools names
+//   - {{toolservice:tools <tools_name>}} -> JSON array of tool names for that tools
 //   - {{var:<name>}}                    -> value from context template vars (set by caller via WithTemplateVars; engine never reads env); errors if key is missing
 //   - {{now}} or {{now:<layout>}}       -> current time (default RFC3339; layout e.g. 2006-01-02)
 //   - {{chain:id}}                      -> chain ID of the chain being executed
@@ -23,17 +23,17 @@ import (
 // The engine does not expand any env:VAR-style macro; var:* is populated only by the caller.
 type MacroEnv struct {
 	inner        EnvExecutor
-	hookProvider HookRepo
+	toolsProvider ToolsRepo
 }
 
 // NewMacroEnv wraps an existing EnvExecutor with macro expansion.
-func NewMacroEnv(inner EnvExecutor, hookProvider HookRepo) (EnvExecutor, error) {
+func NewMacroEnv(inner EnvExecutor, toolsProvider ToolsRepo) (EnvExecutor, error) {
 	if inner == nil {
 		return nil, fmt.Errorf("NewMacroEnv: inner EnvExecutor is nil")
 	}
 	return &MacroEnv{
 		inner:        inner,
-		hookProvider: hookProvider,
+		toolsProvider: toolsProvider,
 	}, nil
 }
 
@@ -59,9 +59,9 @@ func (m *MacroEnv) ExecEnv(
 			ec := *clone.Tasks[i].ExecuteConfig
 			clone.Tasks[i].ExecuteConfig = &ec
 		}
-		if clone.Tasks[i].Hook != nil {
-			h := *clone.Tasks[i].Hook
-			clone.Tasks[i].Hook = &h
+		if clone.Tasks[i].Tools != nil {
+			h := *clone.Tasks[i].Tools
+			clone.Tasks[i].Tools = &h
 		}
 	}
 
@@ -72,7 +72,7 @@ func (m *MacroEnv) ExecEnv(
 		// Determine the allowlist for this specific task.
 		var allowlist []string
 		if t.ExecuteConfig != nil {
-			allowlist = t.ExecuteConfig.Hooks
+			allowlist = t.ExecuteConfig.Tools
 		}
 
 		var err error
@@ -102,11 +102,11 @@ func (m *MacroEnv) ExecEnv(
 
 			// Auto-append tools summary if tools are available and not already mentioned
 			if len(allowlist) > 0 && !strings.Contains(t.SystemInstruction, "Available tools") && !strings.Contains(t.SystemInstruction, "tool") {
-				allowed, _ := resolveHookNames(ctx, allowlist, m.hookProvider)
+				allowed, _ := resolveToolsNames(ctx, allowlist, m.toolsProvider)
 				if len(allowed) > 0 {
-					summary, _ := m.renderHooksAndToolsJSON(ctx, allowed)
+					summary, _ := m.renderToolsAndToolsJSON(ctx, allowed)
 					if summary != "" {
-						t.SystemInstruction += "\n\nAvailable tools (hook -> function names):\n" + summary
+						t.SystemInstruction += "\n\nAvailable tools (tools -> function names):\n" + summary
 					}
 				}
 			}
@@ -173,11 +173,11 @@ func (m *MacroEnv) expandSpecialTemplates(ctx context.Context, chain *TaskChainD
 
 func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, allowlist []string, namespace, payload, original string) (string, error) {
 	switch namespace {
-	case "hookservice":
-		if m.hookProvider == nil {
+	case "toolservice":
+		if m.toolsProvider == nil {
 			return original, nil
 		}
-		allowed, err := resolveHookNames(ctx, allowlist, m.hookProvider)
+		allowed, err := resolveToolsNames(ctx, allowlist, m.toolsProvider)
 		if err != nil {
 			return original, nil
 		}
@@ -189,14 +189,14 @@ func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, al
 		}
 		switch cmd {
 		case "list":
-			return m.renderHooksAndToolsJSON(ctx, allowed)
-		case "hooks":
-			return m.renderHookNamesJSON(allowed)
+			return m.renderToolsAndToolsJSON(ctx, allowed)
 		case "tools":
+			return m.renderToolsNamesJSON(allowed)
+		case "tool":
 			if arg == "" {
-				return "", fmt.Errorf("hookservice:tools requires a hook name argument")
+				return "", fmt.Errorf("toolsservice:tool requires a tools name argument")
 			}
-			return m.renderToolsForHookJSON(ctx, allowed, arg)
+			return m.renderToolsForToolsJSON(ctx, allowed, arg)
 		default:
 			return original, nil
 		}
@@ -230,20 +230,20 @@ func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, al
 	}
 }
 
-func (m *MacroEnv) renderHookNamesJSON(names []string) (string, error) {
+func (m *MacroEnv) renderToolsNamesJSON(names []string) (string, error) {
 	b, err := json.Marshal(names)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal hook names: %w", err)
+		return "", fmt.Errorf("failed to marshal tools names: %w", err)
 	}
 	return string(b), nil
 }
 
-func (m *MacroEnv) renderHooksAndToolsJSON(ctx context.Context, names []string) (string, error) {
+func (m *MacroEnv) renderToolsAndToolsJSON(ctx context.Context, names []string) (string, error) {
 	result := make(map[string][]string, len(names))
 	for _, name := range names {
-		tools, err := m.hookProvider.GetToolsForHookByName(ctx, name)
+		tools, err := m.toolsProvider.GetToolsForToolsByName(ctx, name)
 		if err != nil {
-			// Skip broken hooks; you can also choose to fail hard here.
+			// Skip broken tools; you can also choose to fail hard here.
 			continue
 		}
 		fnNames := make([]string, 0, len(tools))
@@ -255,16 +255,16 @@ func (m *MacroEnv) renderHooksAndToolsJSON(ctx context.Context, names []string) 
 
 	b, err := json.Marshal(result)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal hooks+tools: %w", err)
+		return "", fmt.Errorf("failed to marshal tools+tools: %w", err)
 	}
 	return string(b), nil
 }
 
-func (m *MacroEnv) renderToolsForHookJSON(ctx context.Context, allowed []string, hookName string) (string, error) {
-	// Respect the allowlist: only expose tools if the hook is allowed.
+func (m *MacroEnv) renderToolsForToolsJSON(ctx context.Context, allowed []string, toolsName string) (string, error) {
+	// Respect the allowlist: only expose tools if the tools is allowed.
 	permitted := false
 	for _, a := range allowed {
-		if a == hookName {
+		if a == toolsName {
 			permitted = true
 			break
 		}
@@ -273,9 +273,9 @@ func (m *MacroEnv) renderToolsForHookJSON(ctx context.Context, allowed []string,
 		b, _ := json.Marshal([]string{})
 		return string(b), nil
 	}
-	tools, err := m.hookProvider.GetToolsForHookByName(ctx, hookName)
+	tools, err := m.toolsProvider.GetToolsForToolsByName(ctx, toolsName)
 	if err != nil {
-		return "", fmt.Errorf("failed to get tools for hook %s: %w", hookName, err)
+		return "", fmt.Errorf("failed to get tools for tools %s: %w", toolsName, err)
 	}
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {
@@ -283,7 +283,7 @@ func (m *MacroEnv) renderToolsForHookJSON(ctx context.Context, allowed []string,
 	}
 	b, err := json.Marshal(names)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal tools for hook %s: %w", hookName, err)
+		return "", fmt.Errorf("failed to marshal tools for tools %s: %w", toolsName, err)
 	}
 	return string(b), nil
 }

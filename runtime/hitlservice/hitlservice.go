@@ -23,9 +23,9 @@ type KVReader interface {
 
 // PolicyEvaluator determines the action for a tool call based on the loaded policy.
 // args are the parsed tool call arguments and are used to evaluate When conditions.
-// It is the minimal interface consumed by localhooks.HITLWrapper.
+// It is the minimal interface consumed by localtools.HITLWrapper.
 type PolicyEvaluator interface {
-	Evaluate(ctx context.Context, hookName, toolName string, args map[string]any) (EvaluationResult, error)
+	Evaluate(ctx context.Context, toolsName, toolName string, args map[string]any) (EvaluationResult, error)
 }
 
 // Service extends PolicyEvaluator with approval gate management for the server path.
@@ -77,8 +77,8 @@ func (s *service) readActivePolicyName(ctx context.Context) string {
 
 const kvPrefixHITLPolicy = "cli.hitl-policy-name"
 
-func (s *service) Evaluate(ctx context.Context, hookName, toolName string, args map[string]any) (EvaluationResult, error) {
-	reportErr, reportChange, end := s.tracker.Start(ctx, "hitl", "evaluate", "hookName", hookName, "toolName", toolName)
+func (s *service) Evaluate(ctx context.Context, toolsName, toolName string, args map[string]any) (EvaluationResult, error) {
+	reportErr, reportChange, end := s.tracker.Start(ctx, "hitl", "evaluate", "toolsName", toolsName, "toolName", toolName)
 	defer end()
 	policyPath := s.readActivePolicyName(ctx)
 	if policyPath == "" {
@@ -92,7 +92,7 @@ func (s *service) Evaluate(ctx context.Context, hookName, toolName string, args 
 		p = defaultPolicy()
 	}
 	reportChange("policy", policyPath)
-	return evaluate(p, hookName, toolName, args), nil
+	return evaluate(p, toolsName, toolName, args), nil
 }
 
 func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink taskengine.TaskEventSink) (bool, error) {
@@ -112,7 +112,7 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 
 	ev := taskengine.NewTaskEvent(ctx, taskengine.TaskEventApprovalRequested)
 	ev.ApprovalID = approvalID
-	ev.HookName = req.HookName
+	ev.ToolsName = req.ToolsName
 	ev.ToolName = req.ToolName
 	ev.ApprovalArgs = req.Args
 	ev.ApprovalDiff = req.Diff

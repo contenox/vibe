@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/contenox/runtime/internal/hooks"
+	"github.com/contenox/contenox/runtime/internal/tools"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/runtime/taskengine"
 	"github.com/stretchr/testify/require"
@@ -60,7 +60,7 @@ func TestUnit_SimpleEnv_ExecEnv_JSONTemplateAccess(t *testing.T) {
 	}
 
 	tracker := libtracker.NoopTracker{}
-	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), hooks.NewMockHookRegistry())
+	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
 	require.NoError(t, err)
 
 	chain := &taskengine.TaskChainDefinition{

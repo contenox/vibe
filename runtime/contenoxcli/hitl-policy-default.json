@@ -1,7 +1,7 @@
 {
   "rules": [
-    {"hook": "local_fs",    "tool": "write_file",  "action": "approve"},
-    {"hook": "local_fs",    "tool": "sed",         "action": "approve"},
-    {"hook": "local_shell", "tool": "local_shell", "action": "approve"}
+    {"tools": "local_fs",    "tool": "write_file",  "action": "approve"},
+    {"tools": "local_fs",    "tool": "sed",         "action": "approve"},
+    {"tools": "local_shell", "tool": "local_shell", "action": "approve"}
   ]
 }

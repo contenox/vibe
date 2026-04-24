@@ -8,18 +8,18 @@ import (
 
 type TasksEnvService interface {
 	Execute(ctx context.Context, chain *taskengine.TaskChainDefinition, input any, inputType taskengine.DataType) (any, taskengine.DataType, []taskengine.CapturedStateUnit, error)
-	taskengine.HookRegistry
+	taskengine.ToolsRegistry
 }
 
 type tasksEnvService struct {
 	environmentExec taskengine.EnvExecutor
-	hookRegistry    taskengine.HookRegistry
+	toolsRegistry    taskengine.ToolsRegistry
 }
 
-func NewTasksEnv(ctx context.Context, environmentExec taskengine.EnvExecutor, hookRegistry taskengine.HookRegistry) TasksEnvService {
+func NewTasksEnv(ctx context.Context, environmentExec taskengine.EnvExecutor, toolsRegistry taskengine.ToolsRegistry) TasksEnvService {
 	return &tasksEnvService{
 		environmentExec: environmentExec,
-		hookRegistry:    hookRegistry,
+		toolsRegistry:    toolsRegistry,
 	}
 }
 
@@ -28,5 +28,5 @@ func (s *tasksEnvService) Execute(ctx context.Context, chain *taskengine.TaskCha
 }
 
 func (s *tasksEnvService) Supports(ctx context.Context) ([]string, error) {
-	return s.hookRegistry.Supports(ctx)
+	return s.toolsRegistry.Supports(ctx)
 }

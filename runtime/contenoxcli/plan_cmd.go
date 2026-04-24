@@ -136,7 +136,7 @@ log output: contenox plan next --auto --shell … 2>&1 | tee plan-run.log   (30m
 
 Flags:
   --auto     Continue executing steps until the plan is done or a step fails
-  --shell    Enable the local_shell hook so the model can run commands
+  --shell    Enable the local_shell tools so the model can run commands
   --gate     Use gated executor (post-tool LLM gate; extra cost/latency)
   --hitl     Pause before write_file, sed, and local_shell calls; require y/n approval in the terminal
 
@@ -212,7 +212,7 @@ on the active plan.
 The RepoContext is rendered into every step's seed prompt as {{var:repo_context}},
 so steps see concrete file paths and conventions instead of cold-exploring on every run.
 
-The explorer is read-only by contract: only local_fs (and other read-only hooks) are
+The explorer is read-only by contract: only local_fs (and other read-only tools) are
 allowlisted, and contenox plan explore validates this before running the chain.
 
 Example:
@@ -225,7 +225,7 @@ Example:
 func init() {
 	planCmd.AddCommand(planNewCmd, planListCmd, planShowCmd, planNextCmd, planRetryCmd, planSkipCmd, planReplanCmd, planDeleteCmd, planCleanCmd, planExploreCmd)
 	planNextCmd.Flags().Bool("auto", false, "Continue executing steps automatically until the plan is done or a step fails")
-	planNextCmd.Flags().Bool("shell", false, "Enable the local_shell hook for this plan step (required for shell-based tasks)")
+	planNextCmd.Flags().Bool("shell", false, "Enable the local_shell tools for this plan step (required for shell-based tasks)")
 	planNextCmd.Flags().Bool("gate", false, "Use chain-step-executor-gated.json: after each tool round, a small model scores whether to continue (extra latency/cost; aborts bad/corrupt tool output)")
 	planNextCmd.Flags().Bool("hitl", false, "Pause before each write/shell tool call and require y/n approval in the terminal (human-in-the-loop)")
 	planNewCmd.Flags().Bool("explore", false, "Also run 'plan explore' on the new plan to seed it with a RepoContext")

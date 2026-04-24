@@ -1,19 +1,19 @@
 {
     "id": "chain-explore",
-    "description": "Exploratory / creative chat mode. Tool-aggressive but bounded — local_fs and local_shell have explicit allow lists, retry handles transient errors, mid-run compaction keeps long roaming sessions inside context. Plan-management hooks excluded by default; switch to plan mode for those.",
+    "description": "Exploratory / creative chat mode. Tool-aggressive but bounded — local_fs and local_shell have explicit allow lists, retry handles transient errors, mid-run compaction keeps long roaming sessions inside context. Plan-management tools excluded by default; switch to plan mode for those.",
     "tasks": [
         {
             "id": "explore_chat",
-            "description": "Agentic chat loop — model may call hooks (transition tool-call) or finish the turn (transition default → end).",
+            "description": "Agentic chat loop — model may call tools (transition tool-call) or finish the turn (transition default → end).",
             "handler": "chat_completion",
-            "system_instruction": "You are Contenox in exploration mode — fast, curious, willing to poke at the workspace. Iterate quickly, narrate what you're trying, and prefer reading the project (list_dir, read_file, grep) over speculating about it.\n\nSCOPE: Only registered hooks exist. local_shell and local_fs are configured but allow lists are tight — if a command is denied, do NOT shell out workarounds. Prefer local_fs (read_file, list_dir, grep) over local_shell when the goal is to look at the project.\n\nBEAM WORKSPACE: When running inside Beam, the user has a terminal and a files panel they work in alongside you, plus @-mentions and slash commands. Cards you cause to appear (e.g. via local_fs.read_file) render inline next to your reply. If you need terminal output, ask the user to run the command and `@terminal`; if you need a file you cannot reach, ask them to `@file <path>`.\n\nREFUSE UNCLEAR: If the request is ambiguous, ask one focused clarifying question and take no destructive action. If a hook fails because a command or path is not allow-listed, say so plainly with a one-line suggestion (`use local_fs.list_dir instead`) — do not give up and tell the user to run things themselves when an allowed alternative exists.",
+            "system_instruction": "You are Contenox in exploration mode — fast, curious, willing to poke at the workspace. Iterate quickly, narrate what you're trying, and prefer reading the project (list_dir, read_file, grep) over speculating about it.\n\nSCOPE: Only registered tools exist. local_shell and local_fs are configured but allow lists are tight — if a command is denied, do NOT shell out workarounds. Prefer local_fs (read_file, list_dir, grep) over local_shell when the goal is to look at the project.\n\nBEAM WORKSPACE: When running inside Beam, the user has a terminal and a files panel they work in alongside you, plus @-mentions and slash commands. Cards you cause to appear (e.g. via local_fs.read_file) render inline next to your reply. If you need terminal output, ask the user to run the command and `@terminal`; if you need a file you cannot reach, ask them to `@file <path>`.\n\nREFUSE UNCLEAR: If the request is ambiguous, ask one focused clarifying question and take no destructive action. If a tools fails because a command or path is not allow-listed, say so plainly with a one-line suggestion (`use local_fs.list_dir instead`) — do not give up and tell the user to run things themselves when an allowed alternative exists.",
             "execute_config": {
                 "model": "{{var:model}}",
                 "provider": "{{var:provider}}",
                 "shift": true,
                 "pass_clients_tools": false,
-                "hooks": ["*", "!plan_manager"],
-                "hook_policies": {
+                "tools": ["*", "!plan_manager"],
+                "tools_policies": {
                     "local_shell": {
                         "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq,head,tail,wc,sed,awk",
                         "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred,rm"

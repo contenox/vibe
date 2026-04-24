@@ -11,12 +11,12 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// stubHookRepo is a minimal HookRepo for macro expansion tests.
-type stubHookRepo struct {
+// stubToolsRepo is a minimal ToolsRepo for macro expansion tests.
+type stubToolsRepo struct {
 	names map[string][]taskengine.Tool
 }
 
-func (s *stubHookRepo) Supports(_ context.Context) ([]string, error) {
+func (s *stubToolsRepo) Supports(_ context.Context) ([]string, error) {
 	out := make([]string, 0, len(s.names))
 	for n := range s.names {
 		out = append(out, n)
@@ -24,19 +24,19 @@ func (s *stubHookRepo) Supports(_ context.Context) ([]string, error) {
 	return out, nil
 }
 
-func (s *stubHookRepo) GetSchemasForSupportedHooks(_ context.Context) (map[string]*openapi3.T, error) {
+func (s *stubToolsRepo) GetSchemasForSupportedTools(_ context.Context) (map[string]*openapi3.T, error) {
 	return nil, nil
 }
 
-func (s *stubHookRepo) GetToolsForHookByName(_ context.Context, name string) ([]taskengine.Tool, error) {
+func (s *stubToolsRepo) GetToolsForToolsByName(_ context.Context, name string) ([]taskengine.Tool, error) {
 	tools, ok := s.names[name]
 	if !ok {
-		return nil, taskengine.ErrHookNotFound
+		return nil, taskengine.ErrToolsNotFound
 	}
 	return tools, nil
 }
 
-func (s *stubHookRepo) Exec(_ context.Context, _ time.Time, _ any, _ bool, _ *taskengine.HookCall) (any, taskengine.DataType, error) {
+func (s *stubToolsRepo) Exec(_ context.Context, _ time.Time, _ any, _ bool, _ *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	return nil, taskengine.DataTypeAny, nil
 }
 
@@ -44,10 +44,10 @@ func tool(name string) taskengine.Tool {
 	return taskengine.Tool{Type: "function", Function: taskengine.FunctionTool{Name: name}}
 }
 
-func newMacroChain(template string, hooks []string) *taskengine.TaskChainDefinition {
+func newMacroChain(template string, tools []string) *taskengine.TaskChainDefinition {
 	cfg := &taskengine.LLMExecutionConfig{
 		Model:  "test",
-		Hooks:  hooks,
+		Tools:  tools,
 	}
 	return &taskengine.TaskChainDefinition{
 		ID: "test-chain",
@@ -63,7 +63,7 @@ func newMacroChain(template string, hooks []string) *taskengine.TaskChainDefinit
 	}
 }
 
-func runMacroExpand(t *testing.T, repo taskengine.HookRepo, sysInstruction string, hooks []string) string {
+func runMacroExpand(t *testing.T, repo taskengine.ToolsRepo, sysInstruction string, tools []string) string {
 	t.Helper()
 	// We only test macro expansion; wrap a noop inner executor.
 	inner := &noopEnv{}
@@ -71,7 +71,7 @@ func runMacroExpand(t *testing.T, repo taskengine.HookRepo, sysInstruction strin
 	if err != nil {
 		t.Fatalf("NewMacroEnv: %v", err)
 	}
-	chain := newMacroChain(sysInstruction, hooks)
+	chain := newMacroChain(sysInstruction, tools)
 	// ExecEnv expands macros then delegates to noopEnv which returns the expanded system_instruction.
 	raw, _, _, err := env.ExecEnv(context.Background(), chain, "", taskengine.DataTypeString)
 	if err != nil {
@@ -94,65 +94,65 @@ func (n *noopEnv) ExecEnv(_ context.Context, chain *taskengine.TaskChainDefiniti
 	return input, taskengine.DataTypeString, nil, nil
 }
 
-func stubRepo() *stubHookRepo {
-	return &stubHookRepo{names: map[string][]taskengine.Tool{
-		"hook_a": {tool("tool_a1"), tool("tool_a2")},
-		"hook_b": {tool("tool_b1")},
-		"hook_c": {tool("tool_c1")},
+func stubRepo() *stubToolsRepo {
+	return &stubToolsRepo{names: map[string][]taskengine.Tool{
+		"tools_a": {tool("tool_a1"), tool("tool_a2")},
+		"tools_b": {tool("tool_b1")},
+		"tools_c": {tool("tool_c1")},
 	}}
 }
 
-// ── hookservice:hooks ──────────────────────────────────────────────────────────
+// ── toolservice:tools ──────────────────────────────────────────────────────────
 
-func TestMacroEnv_Hooks_NoAllowlist(t *testing.T) {
-	// nil allowlist = field absent = all hooks (backward compat)
-	out := runMacroExpand(t, stubRepo(), "{{hookservice:hooks}}", nil)
+func TestMacroEnv_Tools_NoAllowlist(t *testing.T) {
+	// nil allowlist = field absent = all tools (backward compat)
+	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools}}", nil)
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
 		t.Fatalf("not JSON: %v — got: %s", err, out)
 	}
 	if len(names) != 3 {
-		t.Errorf("expected 3 hooks, got %d: %v", len(names), names)
+		t.Errorf("expected 3 tools, got %d: %v", len(names), names)
 	}
 }
 
-func TestMacroEnv_Hooks_StarAllowlist(t *testing.T) {
+func TestMacroEnv_Tools_StarAllowlist(t *testing.T) {
 	// ["*"] = explicit all
-	out := runMacroExpand(t, stubRepo(), "{{hookservice:hooks}}", []string{"*"})
+	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools}}", []string{"*"})
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
 		t.Fatalf("not JSON: %v — got: %s", err, out)
 	}
 	if len(names) != 3 {
-		t.Errorf("expected 3 hooks with [*], got %d: %v", len(names), names)
+		t.Errorf("expected 3 tools with [*], got %d: %v", len(names), names)
 	}
 }
 
-func TestMacroEnv_Hooks_EmptyAllowlist(t *testing.T) {
-	// [] = explicitly no hooks
-	out := runMacroExpand(t, stubRepo(), "{{hookservice:hooks}}", []string{})
+func TestMacroEnv_Tools_EmptyAllowlist(t *testing.T) {
+	// [] = explicitly no tools
+	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools}}", []string{})
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
 		t.Fatalf("not JSON: %v — got: %s", err, out)
 	}
 	if len(names) != 0 {
-		t.Errorf("empty allowlist: expected 0 hooks, got %d: %v", len(names), names)
+		t.Errorf("empty allowlist: expected 0 tools, got %d: %v", len(names), names)
 	}
 }
 
-func TestMacroEnv_Hooks_WithAllowlist(t *testing.T) {
-	out := runMacroExpand(t, stubRepo(), "{{hookservice:hooks}}", []string{"hook_a"})
+func TestMacroEnv_Tools_WithAllowlist(t *testing.T) {
+	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools}}", []string{"tools_a"})
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
 		t.Fatalf("not JSON: %v — got: %s", err, out)
 	}
-	if len(names) != 1 || names[0] != "hook_a" {
-		t.Errorf("expected [hook_a], got %v", names)
+	if len(names) != 1 || names[0] != "tools_a" {
+		t.Errorf("expected [tools_a], got %v", names)
 	}
 }
 
-func TestMacroEnv_Hooks_AllowlistMiss(t *testing.T) {
-	out := runMacroExpand(t, stubRepo(), "{{hookservice:hooks}}", []string{"hook_x"})
+func TestMacroEnv_Tools_AllowlistMiss(t *testing.T) {
+	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools}}", []string{"tools_x"})
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
 		t.Fatalf("not JSON: %v — got: %s", err, out)
@@ -162,26 +162,26 @@ func TestMacroEnv_Hooks_AllowlistMiss(t *testing.T) {
 	}
 }
 
-// ── hookservice:list ───────────────────────────────────────────────────────────
+// ── toolservice:list ───────────────────────────────────────────────────────────
 
 func TestMacroEnv_List_WithAllowlist(t *testing.T) {
-	out := runMacroExpand(t, stubRepo(), "{{hookservice:list}}", []string{"hook_a"})
+	out := runMacroExpand(t, stubRepo(), "{{toolservice:list}}", []string{"tools_a"})
 	var m map[string][]string
 	if err := json.Unmarshal([]byte(out), &m); err != nil {
 		t.Fatalf("not JSON: %v — got: %s", err, out)
 	}
-	if _, ok := m["hook_a"]; !ok {
-		t.Errorf("hook_a should be in map, got keys: %v", keys(m))
+	if _, ok := m["tools_a"]; !ok {
+		t.Errorf("tools_a should be in map, got keys: %v", keys(m))
 	}
-	if _, ok := m["hook_b"]; ok {
-		t.Errorf("hook_b should NOT be in map")
+	if _, ok := m["tools_b"]; ok {
+		t.Errorf("tools_b should NOT be in map")
 	}
 }
 
-// ── hookservice:tools ──────────────────────────────────────────────────────────
+// ── toolservice:tools ──────────────────────────────────────────────────────────
 
 func TestMacroEnv_Tools_Allowed(t *testing.T) {
-	out := runMacroExpand(t, stubRepo(), "{{hookservice:tools hook_a}}", []string{"hook_a"})
+	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools tools_a}}", []string{"tools_a"})
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
 		t.Fatalf("not JSON: %v — got: %s", err, out)
@@ -192,20 +192,20 @@ func TestMacroEnv_Tools_Allowed(t *testing.T) {
 }
 
 func TestMacroEnv_Tools_NotAllowed(t *testing.T) {
-	out := runMacroExpand(t, stubRepo(), "{{hookservice:tools hook_b}}", []string{"hook_a"})
-	// hook_b is not in allowlist → should return empty array
+	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools tools_b}}", []string{"tools_a"})
+	// tools_b is not in allowlist → should return empty array
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
 		t.Fatalf("not JSON: %v — got: %s", err, out)
 	}
 	if len(names) != 0 {
-		t.Errorf("expected empty for disallowed hook, got %v", names)
+		t.Errorf("expected empty for disallowed tools, got %v", names)
 	}
 }
 
 func TestMacroEnv_Tools_NoAllowlist_Allowed(t *testing.T) {
-	// nil = no allowlist = all hooks accessible
-	out := runMacroExpand(t, stubRepo(), "{{hookservice:tools hook_b}}", nil)
+	// nil = no allowlist = all tools accessible
+	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools tools_b}}", nil)
 	if strings.Contains(out, "tool_b1") {
 		return // good
 	}

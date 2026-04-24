@@ -14,8 +14,8 @@
                 "temperature": 0.2,
                 "shift": true,
                 "pass_clients_tools": false,
-                "hooks": ["local_fs"],
-                "hook_policies": {
+                "tools": ["local_fs"],
+                "tools_policies": {
                     "local_fs": {
                         "_allowed_dir": ".",
                         "_max_read_bytes": "524288",
@@ -59,7 +59,7 @@
         },
         {
             "id": "plan_explorer_tools",
-            "description": "Agentic loop — tool turn: run read-only hook tools, then return to plan_explorer_chat (engine pattern from chain-step-executor run_tools).",
+            "description": "Agentic loop — tool turn: run read-only tools tools, then return to plan_explorer_chat (engine pattern from chain-step-executor run_tools).",
             "handler": "execute_tool_calls",
             "input_var": "plan_explorer_chat",
             "transition": {

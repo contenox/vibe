@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/libtracker"
-	"github.com/contenox/contenox/runtime/localhooks"
+	"github.com/contenox/contenox/runtime/localtools"
 	"github.com/contenox/contenox/runtime/runtimetypes"
 )
 
@@ -78,7 +78,7 @@ func (d *activityTrackerDecorator) List(ctx context.Context, createdAtCursor *ti
 	return d.service.List(ctx, createdAtCursor, limit)
 }
 
-func (d *activityTrackerDecorator) AuthenticateOAuth(ctx context.Context, name string, oauthCfg *localhooks.MCPOAuthConfig) error {
+func (d *activityTrackerDecorator) AuthenticateOAuth(ctx context.Context, name string, oauthCfg *localtools.MCPOAuthConfig) error {
 	reportErrFn, _, endFn := d.tracker.Start(ctx, "oauth_cli_auth", "mcp_server", "name", name)
 	defer endFn()
 	if err := d.service.AuthenticateOAuth(ctx, name, oauthCfg); err != nil {

@@ -21,7 +21,7 @@ type vertexClient struct {
 	credJSON      string // service account JSON; empty → ADC
 	httpClient    *http.Client
 	tracker       libtracker.ActivityTracker
-	tokenFn       func(context.Context) (string, error) // test hook; overrides credJSON when set
+	tokenFn       func(context.Context) (string, error) // test tools; overrides credJSON when set
 }
 
 // endpoint builds the full Vertex AI API URL for a given method (e.g. "generateContent").

@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS kv (
 ALTER TABLE kv ADD COLUMN IF NOT EXISTS workspace_id VARCHAR(255) NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kv_key_workspace ON kv(key, workspace_id);
 
-CREATE TABLE IF NOT EXISTS remote_hooks (
+CREATE TABLE IF NOT EXISTS remote_tools (
     id VARCHAR(255) PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
     endpoint_url VARCHAR(512) NOT NULL,
@@ -93,9 +93,9 @@ CREATE TABLE IF NOT EXISTS remote_hooks (
     updated_at TIMESTAMP NOT NULL
 );
 
-ALTER TABLE remote_hooks ADD COLUMN IF NOT EXISTS body_properties BYTEA;
-ALTER TABLE remote_hooks ADD COLUMN IF NOT EXISTS headers JSONB;
-ALTER TABLE remote_hooks ADD COLUMN IF NOT EXISTS inject_params_json JSONB DEFAULT '{}';
+ALTER TABLE remote_tools ADD COLUMN IF NOT EXISTS body_properties BYTEA;
+ALTER TABLE remote_tools ADD COLUMN IF NOT EXISTS headers JSONB;
+ALTER TABLE remote_tools ADD COLUMN IF NOT EXISTS inject_params_json JSONB DEFAULT '{}';
 
 
 CREATE INDEX IF NOT EXISTS idx_job_queue_v2_task_type ON job_queue_v2 USING hash(task_type);

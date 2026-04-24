@@ -1,6 +1,6 @@
 {
     "id": "chain-step-summarizer",
-    "description": "After each plan step executor completes, this chain emits a typed-JSON summary (plan_summary persist/fallback hooks route it into planstore). Shape mirrors the enterprise generate→eval→repair→answer pattern: one chat_completion emits JSON, one hook validates+persists or returns 'invalid', an optional repair chat_completion retries once, a fallback hook records summary_error if repair still fails.",
+    "description": "After each plan step executor completes, this chain emits a typed-JSON summary (plan_summary persist/fallback tools route it into planstore). Shape mirrors the enterprise generate→eval→repair→answer pattern: one chat_completion emits JSON, one tools validates+persists or returns 'invalid', an optional repair chat_completion retries once, a fallback tools records summary_error if repair still fails.",
     "tasks": [
         {
             "id": "summarize",
@@ -14,7 +14,7 @@
                 "provider": "{{var:provider}}",
                 "temperature": 0.1,
                 "pass_clients_tools": false,
-                "hooks": [],
+                "tools": [],
                 "retry_policy": {
                     "max_attempts": 3,
                     "initial_backoff": "1s",
@@ -37,8 +37,8 @@
         {
             "id": "persist",
             "description": "Validate the summarizer's JSON and write it to planstore; branch on ok|invalid",
-            "handler": "hook",
-            "hook": {
+            "handler": "tools",
+            "tools": {
                 "name": "plan_summary",
                 "tool_name": "persist",
                 "args": {}
@@ -76,7 +76,7 @@
                 "provider": "{{var:provider}}",
                 "temperature": 0.1,
                 "pass_clients_tools": false,
-                "hooks": [],
+                "tools": [],
                 "retry_policy": {
                     "max_attempts": 3,
                     "initial_backoff": "1s",
@@ -99,8 +99,8 @@
         {
             "id": "persist_repair",
             "description": "Second validation + write attempt; on invalid fall through to fallback",
-            "handler": "hook",
-            "hook": {
+            "handler": "tools",
+            "tools": {
                 "name": "plan_summary",
                 "tool_name": "persist",
                 "args": {}
@@ -124,9 +124,9 @@
         {
             "id": "fallback",
             "description": "Unconditional fallback: record summary_error + execution_result from the executor history",
-            "handler": "hook",
+            "handler": "tools",
             "input_var": "__exec_terminal__",
-            "hook": {
+            "tools": {
                 "name": "plan_summary",
                 "tool_name": "fallback",
                 "args": {}

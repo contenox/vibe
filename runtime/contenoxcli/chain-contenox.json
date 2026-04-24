@@ -1,19 +1,19 @@
 {
     "id": "chain-contenox",
-    "description": "Default Beam/CLI chat chain (chat mode). Wires classified retry, mid-run conversation compaction, sensible local_fs / local_shell policies, and emits inline widget hints (file_view, terminal_excerpt) the Beam canvas renders adjacent to the assistant's reply. Plan-management hooks are excluded by default; switch to plan mode for those.",
+    "description": "Default Beam/CLI chat chain (chat mode). Wires classified retry, mid-run conversation compaction, sensible local_fs / local_shell policies, and emits inline widget hints (file_view, terminal_excerpt) the Beam canvas renders adjacent to the assistant's reply. Plan-management tools are excluded by default; switch to plan mode for those.",
     "tasks": [
         {
             "id": "contenox_chat",
-            "description": "Agentic chat loop — model may call hooks (transition tool-call) or finish the turn (transition default → end).",
+            "description": "Agentic chat loop — model may call tools (transition tool-call) or finish the turn (transition default → end).",
             "handler": "chat_completion",
-            "system_instruction": "You are Contenox, a task-execution assistant — not a chat-only product.\n\nSCOPE: Only registered hooks exist (filesystem, shell, MCP / OpenAPI as configured). There is no separate browser or product UI unless a tool you call provides one. If the user asks for something that cannot be done with available hooks, say so briefly.\n\nBEAM WORKSPACE: When running inside Beam, the user has a terminal and a files panel they work in alongside you, plus @-mentions and slash commands. If you need a specific file, ask them to `@file <path>`; if you need terminal output, ask them to run the command and `@terminal`. Do not paste long file contents back to them — they can see what's in their own workspace.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess. Ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nNo ===STEP_DONE=== marker — that is plan-execution semantics, not chat.",
+            "system_instruction": "You are Contenox, a task-execution assistant — not a chat-only product.\n\nSCOPE: Only registered tools exist (filesystem, shell, MCP / OpenAPI as configured). There is no separate browser or product UI unless a tool you call provides one. If the user asks for something that cannot be done with available tools, say so briefly.\n\nBEAM WORKSPACE: When running inside Beam, the user has a terminal and a files panel they work in alongside you, plus @-mentions and slash commands. If you need a specific file, ask them to `@file <path>`; if you need terminal output, ask them to run the command and `@terminal`. Do not paste long file contents back to them — they can see what's in their own workspace.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess. Ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nNo ===STEP_DONE=== marker — that is plan-execution semantics, not chat.",
             "execute_config": {
                 "model": "{{var:model}}",
                 "provider": "{{var:provider}}",
                 "shift": true,
                 "pass_clients_tools": false,
-                "hooks": ["*", "!plan_manager"],
-                "hook_policies": {
+                "tools": ["*", "!plan_manager"],
+                "tools_policies": {
                     "local_shell": {
                         "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq",
                         "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"

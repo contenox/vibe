@@ -22,7 +22,7 @@ const (
 	HandleChatCompletion TaskHandler = "chat_completion"
 	HandleExecuteToolCalls TaskHandler = "execute_tool_calls"
 	HandleNoop TaskHandler = "noop"
-	HandleHook TaskHandler = "hook"
+	HandleTools TaskHandler = "tools"
 )
 
 func (t TaskHandler) String() string {
@@ -183,29 +183,29 @@ type LLMExecutionConfig struct {
 	Provider         string   `yaml:"provider,omitempty" json:"provider,omitempty" example:"ollama"`
 	Providers        []string `yaml:"providers,omitempty" json:"providers,omitempty" example:"[\"ollama\", \"openai\"]"`
 	Temperature      float32  `yaml:"temperature,omitempty" json:"temperature,omitempty" example:"0.7"`
-	// Hooks is the allowlist of hook names this task may invoke.
+	// Tools is the allowlist of tools names this task may invoke.
 	//
 	// Patterns supported:
-	//   - absent/null   — all registered hooks (backward-compatible default)
-	//   - []            — no hooks exposed to the model
-	//   - ["*"]         — all registered hooks (explicit)
-	//   - ["a","b"]     — only the named hooks (unknown names silently ignored)
-	//   - ["*","!name"] — all hooks except the excluded name(s)
+	//   - absent/null   — all registered tools (backward-compatible default)
+	//   - []            — no tools exposed to the model
+	//   - ["*"]         — all registered tools (explicit)
+	//   - ["a","b"]     — only the named tools (unknown names silently ignored)
+	//   - ["*","!name"] — all tools except the excluded name(s)
 	//
 	// Exclusions ("!name") are only meaningful when combined with "*".
-	Hooks     []string `yaml:"hooks,omitempty" json:"hooks,omitempty" example:"[\"local_shell\", \"nws\"]"`
-	HideTools []string `yaml:"hide_tools,omitempty" json:"hide_tools,omitempty" example:"[\"tool1\", \"hook_name1.tool1\"]"`
-	// HookPolicies carries per-hook policy overrides for this task.
-	// Keys are hook names; values are maps of policy key → value pairs.
-	// These are injected into the context before GetToolsForHookByName is called,
-	// so hooks can produce dynamic tool descriptions and enforce the policy at Exec time.
+	Tools     []string `yaml:"tools,omitempty" json:"tools,omitempty" example:"[\"local_shell\", \"nws\"]"`
+	HideTools []string `yaml:"hide_tools,omitempty" json:"hide_tools,omitempty" example:"[\"tool1\", \"tools_name1.tool1\"]"`
+	// ToolsPolicies carries per-tools policy overrides for this task.
+	// Keys are tools names; values are maps of policy key → value pairs.
+	// These are injected into the context before GetToolsForToolsByName is called,
+	// so tools can produce dynamic tool descriptions and enforce the policy at Exec time.
 	//
 	// Example (local_shell):
-	//   hook_policies:
+	//   tools_policies:
 	//     local_shell:
 	//       _allowed_commands: "git,go,ls,cat,grep"
 	//       _denied_commands:  "sudo,su,dd,mkfs"
-	HookPolicies     map[string]map[string]string `yaml:"hook_policies,omitempty" json:"hook_policies,omitempty"`
+	ToolsPolicies     map[string]map[string]string `yaml:"tools_policies,omitempty" json:"tools_policies,omitempty"`
 	PassClientsTools bool                         `yaml:"pass_clients_tools" json:"pass_clients_tools"`
 	// Think enables reasoning mode for supported models.
 	// Accepts "true"/"false" or "high"/"medium"/"low". Empty = provider default (off).
@@ -224,15 +224,15 @@ type LLMExecutionConfig struct {
 	CompactPolicy *compact.Policy `yaml:"compact_policy,omitempty" json:"compact_policy,omitempty"`
 }
 
-// HookCall represents an external integration or side-effect triggered during a task.
-// Hooks allow tasks to interact with external systems (e.g., "send_email", "update_db").
-type HookCall struct {
-	// Name is the registered hook-service (e.g., "send_email").
+// ToolsCall represents an external integration or side-effect triggered during a task.
+// Tools allow tasks to interact with external systems (e.g., "send_email", "update_db").
+type ToolsCall struct {
+	// Name is the registered tools-service (e.g., "send_email").
 	Name string `yaml:"name" json:"name" example:"slack"`
 
 	// ToolName is the name of the tool to invoke (e.g., "send_slack_notification").
 	ToolName string `yaml:"tool_name" json:"tool_name" example:"send_slack_notification"`
-	// Args are key-value pairs to parameterize the hook call.
+	// Args are key-value pairs to parameterize the tools call.
 	// Example: {"to": "user@example.com", "subject": "Notification"}
 	Args map[string]string `yaml:"args" json:"args" example:"{\"channel\": \"#alerts\", \"message\": \"Task completed successfully\"}"`
 }
@@ -244,7 +244,7 @@ type TaskDefinition struct {
 	// Description is a human-readable summary of what the task does.
 	Description string `yaml:"description" json:"description" example:"Validates user input meets quality requirements"`
 
-	// Handler determines how the LLM output (or hook) will be interpreted.
+	// Handler determines how the LLM output (or tools) will be interpreted.
 	Handler TaskHandler `yaml:"handler" json:"handler" example:"condition_key" openapi_include_type:"string"`
 
 	// SystemInstruction provides additional instructions to the LLM, if applicable system level will be used.
@@ -253,14 +253,14 @@ type TaskDefinition struct {
 	// ExecuteConfig defines the configuration for executing prompt or chat model tasks.
 	ExecuteConfig *LLMExecutionConfig `yaml:"execute_config,omitempty" json:"execute_config,omitempty" openapi_include_type:"taskengine.LLMExecutionConfig"`
 
-	// Hook defines an external action to run.
-	// Required for Hook tasks, must be nil/omitted for all other types.
+	// Tools defines an external action to run.
+	// Required for Tools tasks, must be nil/omitted for all other types.
 	// Example: {type: "send_email", args: {"to": "user@example.com"}}
-	Hook *HookCall `yaml:"hook,omitempty" json:"hook,omitempty" openapi_include_type:"taskengine.HookCall"`
+	Tools *ToolsCall `yaml:"tools,omitempty" json:"tools,omitempty" openapi_include_type:"taskengine.ToolsCall"`
 
 	// Print optionally formats the output for display/logging.
 	// Supports template variables from previous task outputs.
-	// Optional for all task types except Hook where it's rarely used.
+	// Optional for all task types except Tools where it's rarely used.
 	// Example: "The score is: {{.previous_output}}"
 	Print string `yaml:"print,omitempty" json:"print,omitempty" example:"Validation result: {{.validate_input}}"`
 
@@ -270,11 +270,11 @@ type TaskDefinition struct {
 	// Example: "Rate the quality from 1-10: {{.input}}"
 	PromptTemplate string `yaml:"prompt_template" json:"prompt_template" example:"Is this input valid? {{.input}}"`
 
-	// OutputTemplate is an optional go template to format the output of a hook.
-	// If specified, the hook's JSON output will be used as data for the template.
+	// OutputTemplate is an optional go template to format the output of a tools.
+	// If specified, the tools's JSON output will be used as data for the template.
 	// The final output of the task will be the rendered string.
 	// Example: "The weather is {{.weather}} with a temperature of {{.temperature}}."
-	OutputTemplate string `yaml:"output_template,omitempty" json:"output_template,omitempty" example:"Hook result: {{.status}}"`
+	OutputTemplate string `yaml:"output_template,omitempty" json:"output_template,omitempty" example:"Tools result: {{.status}}"`
 
 	// InputVar is the name of the variable to use as input for the task.
 	// Example: "input" for the original input.
@@ -290,7 +290,7 @@ type TaskDefinition struct {
 	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty" example:"30s"`
 
 	// RetryOnFailure sets how many times to retry this task on failure.
-	// Applies to all task types including Hooks.
+	// Applies to all task types including Tools.
 	// Default: 0 (no retries)
 	RetryOnFailure int `yaml:"retry_on_failure,omitempty" json:"retry_on_failure,omitempty" example:"2"`
 }
@@ -324,7 +324,7 @@ const (
 // along with branching logic, retry policies, and model preferences.
 //
 // TaskChainDefinition support dynamic routing based on LLM outputs or conditions,
-// and can include hooks to perform external actions (e.g., sending emails).
+// and can include tools to perform external actions (e.g., sending emails).
 type TaskChainDefinition struct {
 	// ID uniquely identifies the chain.
 	ID string `yaml:"id" json:"id"`

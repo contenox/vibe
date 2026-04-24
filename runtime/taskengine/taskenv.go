@@ -77,60 +77,60 @@ type EnvExecutor interface {
 // ErrUnsupportedTaskType indicates unrecognized task type
 var ErrUnsupportedTaskType = errors.New("executor does not support the task type")
 
-// ErrHookNotFound is returned when a named hook is not registered in any repo.
-var ErrHookNotFound = errors.New("hook not found")
+// ErrToolsNotFound is returned when a named tools is not registered in any repo.
+var ErrToolsNotFound = errors.New("tools not found")
 
-// ErrHookToolsUnavailable is returned when a hook is registered but its tool
+// ErrToolsToolsUnavailable is returned when a tools is registered but its tool
 // list cannot be loaded (e.g. MCP server unreachable or list-tools failed).
-// ExecEnv treats this like a missing hook for tool preload: skip tools, continue the chain.
-var ErrHookToolsUnavailable = errors.New("hook tools unavailable")
+// ExecEnv treats this like a missing tools for tool preload: skip tools, continue the chain.
+var ErrToolsToolsUnavailable = errors.New("tools tools unavailable")
 
-type hookToolsUnavailableError struct {
-	hookName string
+type toolsToolsUnavailableError struct {
+	toolsName string
 	cause    error
 }
 
-func (e *hookToolsUnavailableError) Error() string {
-	return fmt.Sprintf("%s: hook %q: %v", ErrHookToolsUnavailable, e.hookName, e.cause)
+func (e *toolsToolsUnavailableError) Error() string {
+	return fmt.Sprintf("%s: tools %q: %v", ErrToolsToolsUnavailable, e.toolsName, e.cause)
 }
 
-func (e *hookToolsUnavailableError) Unwrap() []error {
+func (e *toolsToolsUnavailableError) Unwrap() []error {
 	if e == nil {
 		return nil
 	}
-	return []error{ErrHookToolsUnavailable, e.cause}
+	return []error{ErrToolsToolsUnavailable, e.cause}
 }
 
-// HookToolsUnavailable wraps cause as ErrHookToolsUnavailable for hookName (for errors.Is).
-func HookToolsUnavailable(hookName string, cause error) error {
+// ToolsToolsUnavailable wraps cause as ErrToolsToolsUnavailable for toolsName (for errors.Is).
+func ToolsToolsUnavailable(toolsName string, cause error) error {
 	if cause == nil {
 		return nil
 	}
-	return &hookToolsUnavailableError{
-		hookName: hookName,
+	return &toolsToolsUnavailableError{
+		toolsName: toolsName,
 		cause:    cause,
 	}
 }
 
-// HookRepo defines interface for external system integrations and side effects.
-type HookRepo interface {
-	Exec(ctx context.Context, startingTime time.Time, input any, debug bool, args *HookCall) (any, DataType, error)
-	HookRegistry
-	HooksWithSchema
+// ToolsRepo defines interface for external system integrations and side effects.
+type ToolsRepo interface {
+	Exec(ctx context.Context, startingTime time.Time, input any, debug bool, args *ToolsCall) (any, DataType, error)
+	ToolsRegistry
+	ToolsWithSchema
 }
 
-type HookProvider interface {
-	HookRegistry
-	HooksWithSchema
+type ToolsProvider interface {
+	ToolsRegistry
+	ToolsWithSchema
 }
 
-type HookRegistry interface {
+type ToolsRegistry interface {
 	Supports(ctx context.Context) ([]string, error)
 }
 
-type HooksWithSchema interface {
-	GetSchemasForSupportedHooks(ctx context.Context) (map[string]*openapi3.T, error)
-	GetToolsForHookByName(ctx context.Context, name string) ([]Tool, error)
+type ToolsWithSchema interface {
+	GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error)
+	GetToolsForToolsByName(ctx context.Context, name string) ([]Tool, error)
 }
 
 // SimpleEnv is the default implementation of EnvExecutor.
@@ -138,7 +138,7 @@ type SimpleEnv struct {
 	exec         TaskExecutor
 	tracker      libtracker.ActivityTracker
 	inspector    Inspector
-	hookProvider HookRepo
+	toolsProvider ToolsRepo
 	eventSink    TaskEventSink
 }
 
@@ -148,7 +148,7 @@ func NewEnv(
 	tracker libtracker.ActivityTracker,
 	exec TaskExecutor,
 	inspector Inspector,
-	hookProvider HookRepo,
+	toolsProvider ToolsRepo,
 ) (EnvExecutor, error) {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
@@ -157,7 +157,7 @@ func NewEnv(
 		exec:         exec,
 		tracker:      tracker,
 		inspector:    inspector,
-		hookProvider: hookProvider,
+		toolsProvider: toolsProvider,
 		eventSink:    taskEventSinkFromContext(ctx),
 	}, nil
 }
@@ -170,7 +170,7 @@ type ChainContext struct {
 
 type ToolWithResolution struct {
 	Tool
-	HookName string
+	ToolsName string
 }
 
 // ExecEnv executes the given chain with the provided input.
@@ -228,42 +228,42 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 		if task.ExecuteConfig == nil {
 			continue
 		}
-		hookNames, err := resolveHookNames(ctx, task.ExecuteConfig.Hooks, env.hookProvider)
+		toolsNames, err := resolveToolsNames(ctx, task.ExecuteConfig.Tools, env.toolsProvider)
 		if err != nil {
-			return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: failed to resolve hooks: %w", currentTask.ID, err)
+			return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: failed to resolve tools: %w", currentTask.ID, err)
 		}
-		for _, hookName := range hookNames {
+		for _, toolsName := range toolsNames {
 			// Build a task-scoped context carrying any chain-level policy args for
-			// this hook. WithHookArgs copies the map, so the stored value is
+			// this tools. WithToolsArgs copies the map, so the stored value is
 			// immutable and safe to read concurrently without locks.
 			toolCtx := ctx
-			// 1. execute_config.hook_policies is the primary mechanism — chain authors
-			//    set per-hook policy here without touching the Hook field.
+			// 1. execute_config.tools_policies is the primary mechanism — chain authors
+			//    set per-tools policy here without touching the Tools field.
 			if task.ExecuteConfig != nil {
-				if policy, ok := task.ExecuteConfig.HookPolicies[hookName]; ok && len(policy) > 0 {
-					toolCtx = WithHookArgs(toolCtx, hookName, policy)
+				if policy, ok := task.ExecuteConfig.ToolsPolicies[toolsName]; ok && len(policy) > 0 {
+					toolCtx = WithToolsArgs(toolCtx, toolsName, policy)
 				}
 			}
-			// 2. task.Hook.Args is the secondary mechanism for HandleHook tasks.
-			if task.Hook != nil && task.Hook.Name == hookName && len(task.Hook.Args) > 0 {
-				toolCtx = WithHookArgs(toolCtx, hookName, task.Hook.Args)
+			// 2. task.Tools.Args is the secondary mechanism for HandleTools tasks.
+			if task.Tools != nil && task.Tools.Name == toolsName && len(task.Tools.Args) > 0 {
+				toolCtx = WithToolsArgs(toolCtx, toolsName, task.Tools.Args)
 			}
-			hookTools, err := env.hookProvider.GetToolsForHookByName(toolCtx, hookName)
+			toolsTools, err := env.toolsProvider.GetToolsForToolsByName(toolCtx, toolsName)
 			if err != nil {
-				if errors.Is(err, ErrHookNotFound) {
-					// Hook not registered (e.g. local_shell disabled via --enable-local-exec=false).
+				if errors.Is(err, ErrToolsNotFound) {
+					// Tools not registered (e.g. local_shell disabled via --enable-local-exec=false).
 					// The model simply won't see this tool.
 					continue
 				}
-				if errors.Is(err, ErrHookToolsUnavailable) {
+				if errors.Is(err, ErrToolsToolsUnavailable) {
 					reportErrChain(err)
 					continue
 				}
-				return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: failed to get tools for hook %s: %w", currentTask.ID, hookName, err)
+				return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: failed to get tools for tools %s: %w", currentTask.ID, toolsName, err)
 			}
-			for _, tool := range hookTools {
-				tool.Function.Name = hookName + "." + tool.Function.Name
-				filter[tool.Function.Name] = ToolWithResolution{Tool: tool, HookName: hookName}
+			for _, tool := range toolsTools {
+				tool.Function.Name = toolsName + "." + tool.Function.Name
+				filter[tool.Function.Name] = ToolWithResolution{Tool: tool, ToolsName: toolsName}
 			}
 		}
 	}
@@ -381,10 +381,10 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 			stepEvent := NewTaskEvent(taskCtx, TaskEventStepCompleted)
 			stepEvent.OutputType = outputType.String()
 			stepEvent.Transition = transitionEval
-			// Drain any UI hints emitted by hooks during this step (Phase 5
+			// Drain any UI hints emitted by tools during this step (Phase 5
 			// of the canvas-vision plan). Hints go out exactly once per
 			// publish — Drain() also clears them so the next step starts
-			// clean. Failed steps still publish hints because a hook may
+			// clean. Failed steps still publish hints because a tools may
 			// have produced a useful widget before the step's terminal
 			// error (e.g. a partial file_view before a downstream parse fail).
 			if hints := drainWidgetHints(taskCtx); len(hints) > 0 {

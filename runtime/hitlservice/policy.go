@@ -26,7 +26,7 @@ const (
 // Diff is populated for file-mutation tools (write_file, sed) to show the
 // unified diff of what would change.
 type ApprovalRequest struct {
-	HookName string
+	ToolsName string
 	ToolName string
 	Args     map[string]any
 	Diff     string
@@ -52,11 +52,11 @@ type Condition struct {
 	Value string      `json:"value"`
 }
 
-// Rule matches a hook+tool pair (with optional conditions) and assigns an action.
+// Rule matches a tools+tool pair (with optional conditions) and assigns an action.
 // When contains zero conditions the name match alone is sufficient.
 // All conditions in When must hold for the rule to match (AND semantics).
 type Rule struct {
-	Hook      string      `json:"hook"`
+	Tools      string      `json:"tools"`
 	Tool      string      `json:"tool"`
 	When      []Condition `json:"when,omitempty"`
 	Action    Action      `json:"action"`
@@ -92,10 +92,10 @@ type EvaluationResult struct {
 	OnTimeout   Action
 }
 
-// evaluate returns the EvaluationResult for the given hook, tool name, and call args.
-func evaluate(p *Policy, hookName, toolName string, args map[string]any) EvaluationResult {
+// evaluate returns the EvaluationResult for the given tools, tool name, and call args.
+func evaluate(p *Policy, toolsName, toolName string, args map[string]any) EvaluationResult {
 	for i, r := range p.Rules {
-		if ruleMatches(r, hookName, toolName, args) {
+		if ruleMatches(r, toolsName, toolName, args) {
 			idx := i
 			return EvaluationResult{
 				Action:      r.Action,
@@ -116,10 +116,10 @@ func evaluate(p *Policy, hookName, toolName string, args map[string]any) Evaluat
 	}
 }
 
-func ruleMatches(r Rule, hookName, toolName string, args map[string]any) bool {
-	hookOK := r.Hook == "" || r.Hook == "*" || r.Hook == hookName
+func ruleMatches(r Rule, toolsName, toolName string, args map[string]any) bool {
+	toolsOK := r.Tools == "" || r.Tools == "*" || r.Tools == toolsName
 	toolOK := r.Tool == "" || r.Tool == "*" || r.Tool == toolName
-	if !hookOK || !toolOK {
+	if !toolsOK || !toolOK {
 		return false
 	}
 	for _, c := range r.When {
@@ -251,9 +251,9 @@ func validatePolicy(p *Policy) error {
 func defaultPolicy() *Policy {
 	return &Policy{
 		Rules: []Rule{
-			{Hook: "local_fs", Tool: "write_file", Action: ActionApprove},
-			{Hook: "local_fs", Tool: "sed", Action: ActionApprove},
-			{Hook: "local_shell", Tool: "local_shell", Action: ActionApprove},
+			{Tools: "local_fs", Tool: "write_file", Action: ActionApprove},
+			{Tools: "local_fs", Tool: "sed", Action: ActionApprove},
+			{Tools: "local_shell", Tool: "local_shell", Action: ActionApprove},
 		},
 	}
 }

@@ -185,7 +185,7 @@ func validateExecutorChain(chain *taskengine.TaskChainDefinition, path string) e
 // validateSummarizerChain checks that a chain meets the contract required by plancompile.Compile
 // for the summarizer slot. The summarizer chain must:
 //   - Have at least one task.
-//   - Reference the plan_summary hook (persist or fallback) somewhere in its tasks, so
+//   - Reference the plan_summary tools (persist or fallback) somewhere in its tasks, so
 //     the typed JSON actually gets persisted.
 // Full structural validation happens inside plancompile.Compile (edges, cross-references).
 func validateSummarizerChain(chain *taskengine.TaskChainDefinition, path string) error {
@@ -193,20 +193,20 @@ func validateSummarizerChain(chain *taskengine.TaskChainDefinition, path string)
 		return fmt.Errorf(
 			"summarizer chain %q has no tasks\n"+
 				"  The summarizer chain must have at least one chat_completion task and at least one\n"+
-				"  hook task invoking plan_summary (tool_name: persist or fallback).",
+				"  tools task invoking plan_summary (tool_name: persist or fallback).",
 			path,
 		)
 	}
 	hasPersist := false
 	hasFallback := false
 	for _, task := range chain.Tasks {
-		if task.Handler != taskengine.HandleHook || task.Hook == nil {
+		if task.Handler != taskengine.HandleTools || task.Tools == nil {
 			continue
 		}
-		if strings.TrimSpace(task.Hook.Name) != "plan_summary" {
+		if strings.TrimSpace(task.Tools.Name) != "plan_summary" {
 			continue
 		}
-		switch strings.TrimSpace(task.Hook.ToolName) {
+		switch strings.TrimSpace(task.Tools.ToolName) {
 		case "persist":
 			hasPersist = true
 		case "fallback":
@@ -215,14 +215,14 @@ func validateSummarizerChain(chain *taskengine.TaskChainDefinition, path string)
 	}
 	if !hasPersist {
 		return fmt.Errorf(
-			"summarizer chain %q: no task invokes hook plan_summary tool_name=persist\n"+
+			"summarizer chain %q: no task invokes tools plan_summary tool_name=persist\n"+
 				"  Without this, validated JSON summaries are never persisted to planstore.",
 			path,
 		)
 	}
 	if !hasFallback {
 		return fmt.Errorf(
-			"summarizer chain %q: no task invokes hook plan_summary tool_name=fallback\n"+
+			"summarizer chain %q: no task invokes tools plan_summary tool_name=fallback\n"+
 				"  Without this, a step whose summarizer output fails validation twice will leave the\n"+
 				"  plan_step row with no summary at all — next step's handover would fall through to empty.",
 			path,
@@ -236,7 +236,7 @@ func validateSummarizerChain(chain *taskengine.TaskChainDefinition, path string)
 //   - have at least one chat_completion task,
 //   - have an execute_tool_calls task and a "tool-call" branch on the chat,
 //   - close the agentic loop (same as executor),
-//   - declare ONLY read-only hooks (typically local_fs); local_shell is rejected
+//   - declare ONLY read-only tools (typically local_fs); local_shell is rejected
 //     because exploration is meant to be side-effect free.
 func validatePlanExplorerChain(chain *taskengine.TaskChainDefinition, path string) error {
 	if err := validateExecutorChain(chain, path); err != nil {
@@ -246,18 +246,18 @@ func validatePlanExplorerChain(chain *taskengine.TaskChainDefinition, path strin
 		if task.Handler != taskengine.HandleChatCompletion || task.ExecuteConfig == nil {
 			continue
 		}
-		for _, h := range task.ExecuteConfig.Hooks {
+		for _, h := range task.ExecuteConfig.Tools {
 			if strings.TrimSpace(h) == "local_shell" {
 				return fmt.Errorf(
 					"explorer chain %q: task %q allowlists local_shell\n"+
-						"  Exploration must be read-only — restrict hooks to local_fs (and other read-only tools).",
+						"  Exploration must be read-only — restrict tools to local_fs (and other read-only tools).",
 					path, task.ID,
 				)
 			}
 			if strings.TrimSpace(h) == "*" {
 				return fmt.Errorf(
-					"explorer chain %q: task %q uses wildcard hook %q\n"+
-						"  Exploration must be read-only — list only read-only hook names (e.g. \"local_fs\").",
+					"explorer chain %q: task %q uses wildcard tools %q\n"+
+						"  Exploration must be read-only — list only read-only tools names (e.g. \"local_fs\").",
 					path, task.ID, h,
 				)
 			}

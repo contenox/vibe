@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// WidgetHint is one inline-rendering hint emitted by a hook (or any code on
+// WidgetHint is one inline-rendering hint emitted by a tools (or any code on
 // the execution path) that the UI should render adjacent to an assistant
 // message in the chat thread.
 //
@@ -19,7 +19,7 @@ import (
 //
 // First-party kinds that the Beam UI knows how to render today: file_view,
 // terminal_excerpt, plan_summary, dag, state_unit. The kind string is
-// deliberately untyped here so a hook can emit experimental kinds without a
+// deliberately untyped here so a tools can emit experimental kinds without a
 // coordinated taskengine release; the UI falls back to a JSON dump for
 // unknown kinds.
 type WidgetHint struct {
@@ -76,7 +76,7 @@ func (s *WidgetHintSink) Snapshot() []WidgetHint {
 
 type widgetHintSinkKey struct{}
 
-// WithWidgetHintSink attaches sink to ctx so hooks reachable from this
+// WithWidgetHintSink attaches sink to ctx so tools reachable from this
 // context can call [AppendWidgetHint].
 func WithWidgetHintSink(ctx context.Context, sink *WidgetHintSink) context.Context {
 	if sink == nil {
@@ -95,7 +95,7 @@ func widgetHintSinkFromContext(ctx context.Context) *WidgetHintSink {
 // No-op when no sink is set so direct taskengine callers (and tests) work
 // without ceremony.
 //
-// Hooks call this AFTER successfully producing their primary tool-result
+// Tools call this AFTER successfully producing their primary tool-result
 // content. Failure paths should NOT emit hints — the agent does not need a
 // widget for an error that already lives in the tool message.
 func AppendWidgetHint(ctx context.Context, hint WidgetHint) {

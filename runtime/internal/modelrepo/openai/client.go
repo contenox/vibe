@@ -204,7 +204,7 @@ func parseRetryAfterMs(h http.Header) time.Duration {
 // sanitized->original so callers can translate tool-call names back.
 //
 // Critically, it also sanitizes tool_calls[].function.name in the message
-// history: the taskengine qualifies tool names as "hookName.toolName"
+// history: the taskengine qualifies tool names as "toolsName.toolName"
 // (e.g. "filesystem.list_directory"). The dot violates OpenAI's pattern,
 // so any prior-turn assistant messages must have their tool call names
 // sanitized before being forwarded to the API.

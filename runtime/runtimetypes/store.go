@@ -108,11 +108,11 @@ type InjectionArg struct {
 	In    string `json:"in" example:"body"`
 }
 
-// RemoteHook represents a remote hook configuration
-type RemoteHook struct {
+// RemoteTools represents a remote tools configuration
+type RemoteTools struct {
 	ID           string            `json:"id" example:"h1a2b3c4-d5e6-f7g8-h9i0-j1k2l3m4n5o6"`
 	Name         string            `json:"name" example:"mailing-tools"`
-	EndpointURL  string            `json:"endpointUrl" example:"http://hooks-endpoint:port"`
+	EndpointURL  string            `json:"endpointUrl" example:"http://tools-endpoint:port"`
 	TimeoutMs    int               `json:"timeoutMs" example:"5000"`
 	Headers      map[string]string `json:"headers,omitempty" example:"Authorization:Bearer token,Content-Type:application/json"`
 	Properties   InjectionArg      `json:"properties"`
@@ -181,13 +181,13 @@ type Store interface {
 	GetWorkspaceKV(ctx context.Context, workspaceID string, key string, out interface{}) error
 	DeleteWorkspaceKV(ctx context.Context, workspaceID string, key string) error
 
-	CreateRemoteHook(ctx context.Context, hook *RemoteHook) error
-	GetRemoteHook(ctx context.Context, id string) (*RemoteHook, error)
-	GetRemoteHookByName(ctx context.Context, name string) (*RemoteHook, error)
-	UpdateRemoteHook(ctx context.Context, hook *RemoteHook) error
-	DeleteRemoteHook(ctx context.Context, id string) error
-	ListRemoteHooks(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*RemoteHook, error)
-	EstimateRemoteHookCount(ctx context.Context) (int64, error)
+	CreateRemoteTools(ctx context.Context, tools *RemoteTools) error
+	GetRemoteTools(ctx context.Context, id string) (*RemoteTools, error)
+	GetRemoteToolsByName(ctx context.Context, name string) (*RemoteTools, error)
+	UpdateRemoteTools(ctx context.Context, tools *RemoteTools) error
+	DeleteRemoteTools(ctx context.Context, id string) error
+	ListRemoteTools(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*RemoteTools, error)
+	EstimateRemoteToolsCount(ctx context.Context) (int64, error)
 
 	CreateModelRegistryEntry(ctx context.Context, e *ModelRegistryEntry) error
 	GetModelRegistryEntry(ctx context.Context, id string) (*ModelRegistryEntry, error)
@@ -233,7 +233,7 @@ const MaxRowsCount = 100000
 
 // sqliteCountableTables is the whitelist for SELECT COUNT(*) fallback when estimate_row_count is not available (e.g. SQLite).
 var sqliteCountableTables = map[string]bool{
-	"job_queue_v2": true, "kv": true, "remote_hooks": true,
+	"job_queue_v2": true, "kv": true, "remote_tools": true,
 	"ollama_models": true, "llm_affinity_group": true, "llm_backends": true,
 	"mcp_servers": true, "llm_model_registry": true,
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/contenox/contenox/runtime/hitlservice"
-	"github.com/contenox/contenox/runtime/localhooks"
+	"github.com/contenox/contenox/runtime/localtools"
 )
 
 // NewCLIAskApproval returns an AskApproval callback suitable for interactive
@@ -21,7 +21,7 @@ import (
 // prompts "Approve? [y/N]:", and blocks until the user responds or ctx is
 // cancelled. Only "y" or "yes" (case-insensitive) approves; everything else
 // (including blank input and EOF) denies.
-func NewCLIAskApproval(w io.Writer) localhooks.AskApproval {
+func NewCLIAskApproval(w io.Writer) localtools.AskApproval {
 	return func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
 		// Try to open the controlling terminal directly so we can prompt even
 		// when stdin is a pipe.
@@ -34,7 +34,7 @@ func NewCLIAskApproval(w io.Writer) localhooks.AskApproval {
 
 		fmt.Fprintln(w, "\n────────────────────────────────────────────────────")
 		fmt.Fprintf(w, "  HITL approval required\n")
-		fmt.Fprintf(w, "  Hook : %s\n", req.HookName)
+		fmt.Fprintf(w, "  Tools : %s\n", req.ToolsName)
 		fmt.Fprintf(w, "  Tool : %s\n", req.ToolName)
 		if len(req.Args) > 0 {
 			fmt.Fprintln(w, "  Args :")

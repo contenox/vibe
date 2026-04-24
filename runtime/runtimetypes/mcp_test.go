@@ -410,59 +410,59 @@ func TestUnit_MCPServers_EmptyMapsRoundTrip(t *testing.T) {
 	require.Empty(t, got.Headers)
 }
 
-// ─── RemoteHook inject_params_json round-trips ────────────────────────────────
+// ─── RemoteTools inject_params_json round-trips ────────────────────────────────
 
-func newHook(name string) *runtimetypes.RemoteHook {
-	return &runtimetypes.RemoteHook{
+func newTools(name string) *runtimetypes.RemoteTools {
+	return &runtimetypes.RemoteTools{
 		ID:          uuid.New().String(),
 		Name:        name,
-		EndpointURL: "https://api.example.com/hook",
+		EndpointURL: "https://api.example.com/tools",
 		TimeoutMs:   5000,
 	}
 }
 
-func TestUnit_RemoteHook_InjectParamsRoundTrip(t *testing.T) {
+func TestUnit_RemoteTools_InjectParamsRoundTrip(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	hook := newHook("hook-inject-" + uuid.New().String()[:8])
-	hook.InjectParams = map[string]string{"tenant_id": "acme", "env": "prod"}
-	require.NoError(t, s.CreateRemoteHook(ctx, hook))
+	tools := newTools("tools-inject-" + uuid.New().String()[:8])
+	tools.InjectParams = map[string]string{"tenant_id": "acme", "env": "prod"}
+	require.NoError(t, s.CreateRemoteTools(ctx, tools))
 
-	got, err := s.GetRemoteHook(ctx, hook.ID)
+	got, err := s.GetRemoteTools(ctx, tools.ID)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"tenant_id": "acme", "env": "prod"}, got.InjectParams)
 }
 
-func TestUnit_RemoteHook_UpdateInjectParamsReplaceAll(t *testing.T) {
+func TestUnit_RemoteTools_UpdateInjectParamsReplaceAll(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	hook := newHook("hook-upd-" + uuid.New().String()[:8])
-	hook.InjectParams = map[string]string{"old": "value", "extra": "gone"}
-	require.NoError(t, s.CreateRemoteHook(ctx, hook))
+	tools := newTools("tools-upd-" + uuid.New().String()[:8])
+	tools.InjectParams = map[string]string{"old": "value", "extra": "gone"}
+	require.NoError(t, s.CreateRemoteTools(ctx, tools))
 
-	hook.InjectParams = map[string]string{"tenant_id": "new"}
-	require.NoError(t, s.UpdateRemoteHook(ctx, hook))
+	tools.InjectParams = map[string]string{"tenant_id": "new"}
+	require.NoError(t, s.UpdateRemoteTools(ctx, tools))
 
-	got, err := s.GetRemoteHook(ctx, hook.ID)
+	got, err := s.GetRemoteTools(ctx, tools.ID)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"tenant_id": "new"}, got.InjectParams)
 	_, hasExtra := got.InjectParams["extra"]
 	require.False(t, hasExtra, "update must replace entire map")
 }
 
-func TestUnit_RemoteHook_ListIncludesInjectParams(t *testing.T) {
+func TestUnit_RemoteTools_ListIncludesInjectParams(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	hook := newHook("hook-list-" + uuid.New().String()[:8])
-	hook.InjectParams = map[string]string{"correlation_id": "trace-abc"}
-	require.NoError(t, s.CreateRemoteHook(ctx, hook))
+	tools := newTools("tools-list-" + uuid.New().String()[:8])
+	tools.InjectParams = map[string]string{"correlation_id": "trace-abc"}
+	require.NoError(t, s.CreateRemoteTools(ctx, tools))
 
-	list, err := s.ListRemoteHooks(ctx, nil, 100)
+	list, err := s.ListRemoteTools(ctx, nil, 100)
 	require.NoError(t, err)
 
-	var found *runtimetypes.RemoteHook
+	var found *runtimetypes.RemoteTools
 	for _, h := range list {
-		if h.ID == hook.ID {
+		if h.ID == tools.ID {
 			found = h
 			break
 		}

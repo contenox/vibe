@@ -67,7 +67,7 @@ func WithCatalogTracker(tracker libtracker.ActivityTracker) CatalogOption {
 	}
 }
 
-// CatalogProviderConstructor is the registry hook implemented by vendor packages.
+// CatalogProviderConstructor is the registry tools implemented by vendor packages.
 type CatalogProviderConstructor func(spec BackendSpec, opts CatalogOptions) (CatalogProvider, error)
 
 type registryCatalogFactory struct{}

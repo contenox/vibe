@@ -11,8 +11,8 @@ import (
 
 	"github.com/contenox/contenox/libbus"
 	"github.com/contenox/contenox/libtracker"
-	"github.com/contenox/contenox/runtime/localhooks"
-	"github.com/contenox/contenox/runtime/localhooks/mcpoauth"
+	"github.com/contenox/contenox/runtime/localtools"
+	"github.com/contenox/contenox/runtime/localtools/mcpoauth"
 	"github.com/contenox/contenox/runtime/runtimetypes"
 )
 
@@ -53,14 +53,14 @@ type MCPDeletedEvent struct {
 
 // poolEntry wraps a session pool with its last-access timestamp for idle eviction.
 type poolEntry struct {
-	pool       *localhooks.MCPSessionPool
+	pool       *localtools.MCPSessionPool
 	lastAccess time.Time
 }
 
 // worker holds the multiplexed pools and NATS subscriptions for one MCP server.
 type worker struct {
 	serverName string
-	cfg        localhooks.MCPServerConfig
+	cfg        localtools.MCPServerConfig
 	pools      map[string]*poolEntry // Keyed by Contenox SessionID
 	mu         sync.Mutex
 	cancelFn   context.CancelFunc // cancels the worker's context → NATS auto-unsubscribes
@@ -109,7 +109,7 @@ func New(ctx context.Context, db runtimetypes.Store, messenger libbus.Messenger,
 
 // getOrCreatePool lazily initializes a session pool for a specific Contenox chat session.
 // Uses double-checked locking to prevent TOCTOU ghost-connection races.
-func (m *Manager) getOrCreatePool(ctx context.Context, w *worker, chatSessionID string) *localhooks.MCPSessionPool {
+func (m *Manager) getOrCreatePool(ctx context.Context, w *worker, chatSessionID string) *localtools.MCPSessionPool {
 	if chatSessionID == "" {
 		chatSessionID = "default"
 	}
@@ -150,7 +150,7 @@ func (m *Manager) getOrCreatePool(ctx context.Context, w *worker, chatSessionID 
 	}
 
 	// Create the pool (connection is lazy — happens inside CallTool/ListTools).
-	pool := localhooks.NewMCPSessionPool(poolCfg)
+	pool := localtools.NewMCPSessionPool(poolCfg)
 
 	// Double-check: another goroutine may have inserted for this session while we
 	// were doing the DB lookup. Return the existing one to avoid ghost connections.
@@ -371,24 +371,24 @@ func (m *Manager) WatchEvents(ctx context.Context) error {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-func mcpServerToConfig(srv *runtimetypes.MCPServer, store runtimetypes.Store) localhooks.MCPServerConfig {
-	cfg := localhooks.MCPServerConfig{
+func mcpServerToConfig(srv *runtimetypes.MCPServer, store runtimetypes.Store) localtools.MCPServerConfig {
+	cfg := localtools.MCPServerConfig{
 		Name:           srv.Name,
-		Transport:      localhooks.MCPTransport(srv.Transport),
+		Transport:      localtools.MCPTransport(srv.Transport),
 		Command:        srv.Command,
 		Args:           srv.Args,
 		URL:            srv.URL,
 		ConnectTimeout: time.Duration(srv.ConnectTimeoutSeconds) * time.Second,
 	}
 	if srv.AuthType != "" {
-		cfg.Auth = &localhooks.MCPAuthConfig{
-			Type:          localhooks.MCPAuthType(srv.AuthType),
+		cfg.Auth = &localtools.MCPAuthConfig{
+			Type:          localtools.MCPAuthType(srv.AuthType),
 			Token:         srv.AuthToken,
 			APIKeyFromEnv: srv.AuthEnvKey,
 		}
 	}
-	if localhooks.MCPAuthType(srv.AuthType) == localhooks.MCPAuthOAuth && store != nil {
-		cfg.OAuth = &localhooks.MCPOAuthConfig{
+	if localtools.MCPAuthType(srv.AuthType) == localtools.MCPAuthOAuth && store != nil {
+		cfg.OAuth = &localtools.MCPOAuthConfig{
 			TokenStore: mcpoauth.NewKVTokenStore(store),
 		}
 	}
@@ -408,7 +408,7 @@ func errorListReply(err error) ([]byte, error) {
 }
 
 // DecodeToolReply decodes a NATS reply from mcp.{name}.execute.
-// Used by PersistentRepo — exported so the hooks package can use it.
+// Used by PersistentRepo — exported so the tools package can use it.
 func DecodeToolReply(data []byte) (any, error) {
 	var reply MCPToolReply
 	if err := json.Unmarshal(data, &reply); err != nil {
