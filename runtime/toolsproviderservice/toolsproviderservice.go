@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/contenox/runtime/errdefs"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
+	"github.com/contenox/contenox/runtime/errdefs"
 	"github.com/contenox/contenox/runtime/runtimetypes"
 	"github.com/contenox/contenox/runtime/taskengine"
 	"github.com/getkin/kin-openapi/openapi3"
@@ -49,9 +49,9 @@ type LocalTools struct {
 }
 
 type service struct {
-	dbInstance   libdb.DBManager
+	dbInstance    libdb.DBManager
 	toolsRegistry taskengine.ToolsProvider
-	tracker      libtracker.ActivityTracker
+	tracker       libtracker.ActivityTracker
 }
 
 // New creates a new service instance. tracker may be nil (no-op tracking).
@@ -60,9 +60,9 @@ func New(dbInstance libdb.DBManager, toolsRegistry taskengine.ToolsProvider, tra
 		tracker = libtracker.NoopTracker{}
 	}
 	return &service{
-		dbInstance:   dbInstance,
+		dbInstance:    dbInstance,
 		toolsRegistry: toolsRegistry,
-		tracker:      tracker,
+		tracker:       tracker,
 	}
 }
 

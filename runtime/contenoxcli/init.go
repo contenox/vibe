@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/contenox/contenox/libtracker"
+	"github.com/contenox/contenox/runtime/backendservice"
 	"github.com/contenox/contenox/runtime/internal/runtimestate"
 	"github.com/contenox/contenox/runtime/internal/setupcheck"
 	"github.com/contenox/contenox/runtime/runtimetypes"
@@ -73,8 +74,33 @@ var providerConfigs = map[string]providerConfig{
 	},
 }
 
+// hasBackendOfType returns true when the local DB already contains at least one
+// backend whose Type matches the given provider string.
+func hasBackendOfType(providerType string) bool {
+	dbPath, err := globalDBPath()
+	if err != nil {
+		return false
+	}
+	db, err := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	svc := backendservice.New(db)
+	backends, err := svc.List(libtracker.WithNewRequestID(context.Background()), nil, 100)
+	if err != nil {
+		return false
+	}
+	for _, b := range backends {
+		if strings.EqualFold(b.Type, providerType) {
+			return true
+		}
+	}
+	return false
+}
+
 // RunInit scaffolds .contenox/ with default chain files.
-// provider is "" (defaults to the already-configured provider or "ollama"), "ollama", "gemini", "openai", or "local".
+// provider is "" (defaults to the already-configured provider or "local"), "ollama", "gemini", "openai", or "local".
 // contenoxDir is the target data directory (e.g. from --data-dir or the default .contenox/).
 func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir string) error {
 	provider = strings.ToLower(strings.TrimSpace(provider))
@@ -93,7 +119,7 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 			}
 		}
 		if provider == "" {
-			provider = "ollama"
+			provider = "local"
 		}
 	}
 
@@ -289,23 +315,30 @@ func RunInit(out, errOut io.Writer, force bool, provider string, contenoxDir str
 		fmt.Fprintln(out, "")
 		chatStep = 4
 	default:
+		backendRegistered := hasBackendOfType(provider)
+		registerStep := 1
 		if !backendReady {
-			fmt.Fprintf(out, "  1. Register the %s backend:\n", pc.name)
-			fmt.Fprintf(out, "       contenox backend add %s --type %s --api-key-env %s\n", provider, provider, pc.envKey)
-			fmt.Fprintf(out, "       contenox model list   # confirm the runtime can see %s models\n", pc.name)
-			fmt.Fprintf(out, "       contenox config set default-model %s\n", pc.defaultModel)
-			fmt.Fprintln(out, "")
+			fmt.Fprintf(out, "  1. Set your %s API key:\n", pc.name)
+			fmt.Fprintf(out, "       export %s=your-key-here\n", pc.envKey)
 			switch provider {
 			case "gemini":
 				fmt.Fprintln(out, "  Get a free Gemini API key: https://aistudio.google.com/apikey")
-				fmt.Fprintln(out, "")
 			case "openai":
 				fmt.Fprintln(out, "  Get an OpenAI API key: https://platform.openai.com/api-keys")
-				fmt.Fprintln(out, "")
 			}
-			chatStep = 3
+			fmt.Fprintln(out, "")
+			registerStep = 2
+		}
+		if !backendRegistered {
+			fmt.Fprintf(out, "  %d. Register the %s backend and set defaults:\n", registerStep, pc.name)
+			fmt.Fprintf(out, "       contenox backend add %s --type %s --api-key-env %s\n", provider, provider, pc.envKey)
+			fmt.Fprintf(out, "       contenox config set default-provider %s\n", provider)
+			fmt.Fprintf(out, "       contenox config set default-model %s\n", pc.defaultModel)
+			fmt.Fprintln(out, "       contenox doctor")
+			fmt.Fprintln(out, "")
+			chatStep = registerStep + 1
 		} else {
-			chatStep = 1
+			chatStep = registerStep
 		}
 	}
 	fmt.Fprintf(out, "  %d. Chat with your model:\n", chatStep)
