@@ -218,6 +218,8 @@ func validate(tools *runtimetypes.RemoteTools) error {
 		return fmt.Errorf("%w %w: endpoint URL is required", ErrInvalidTools, errdefs.ErrUnprocessableEntity)
 	case tools.TimeoutMs <= 0:
 		return fmt.Errorf("%w %w: timeout must be positive", ErrInvalidTools, errdefs.ErrUnprocessableEntity)
+	case tools.SpecURL != "" && !isValidSpecSource(tools.SpecURL):
+		return fmt.Errorf("%w %w: spec_url must be an http/https URL or file:///abs/path", ErrInvalidTools, errdefs.ErrUnprocessableEntity)
 	}
 
 	// Validate headers if provided
@@ -232,3 +234,12 @@ func validate(tools *runtimetypes.RemoteTools) error {
 
 	return nil
 }
+
+// isValidSpecSource reports whether s is an acceptable spec source:
+// an http/https URL or a file:// URI (absolute path stored by the CLI).
+func isValidSpecSource(s string) bool {
+	return strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "https://") ||
+		strings.HasPrefix(s, "file://")
+}
+

@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS remote_tools (
 ALTER TABLE remote_tools ADD COLUMN IF NOT EXISTS body_properties BYTEA;
 ALTER TABLE remote_tools ADD COLUMN IF NOT EXISTS headers JSONB;
 ALTER TABLE remote_tools ADD COLUMN IF NOT EXISTS inject_params_json JSONB DEFAULT '{}';
+ALTER TABLE remote_tools ADD COLUMN IF NOT EXISTS spec_url TEXT;
+
 
 
 CREATE INDEX IF NOT EXISTS idx_job_queue_v2_task_type ON job_queue_v2 USING hash(task_type);

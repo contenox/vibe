@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,11 +27,15 @@ var toolsCmd = &cobra.Command{
 
 A remote tools points at an OpenAPI v3 service. When used in a chain the runtime
 fetches its schema, discovers every operation, and makes them callable by the model.
-The service MUST expose an OpenAPI v3 spec at its base URL.
+
+By default the spec is fetched from <url>/openapi.json. Use --spec to point at a
+different location: a full URL (https://...) or a local file (~/my-spec.yaml,
+./spec.json, /abs/path/spec.yaml). Local paths are stored as file:// URIs.
 
 Examples:
   contenox tools add myapi --url http://localhost:8080
   contenox tools add myapi --url http://localhost:8080 --header "Authorization: Bearer $TOKEN"
+  contenox tools add erpnext --url https://erp.example.com --spec ~/.contenox/erp-subset.yaml
   contenox tools list
   contenox tools show myapi
   contenox tools update myapi --url http://new-host:8080
@@ -45,6 +51,11 @@ var toolsAddCmd = &cobra.Command{
 The runtime probes the endpoint at registration time to count available tools.
 If the service is unreachable at registration, it will be retried at chain execution time.
 
+By default the spec is fetched from <url>/openapi.json. Use --spec when the spec
+lives at a different URL, or provide a local file path (~/path, ./path, /abs/path).
+Local paths are resolved to absolute paths and stored as file:// URIs — the file
+must exist at registration time.
+
 Headers are injected into every call to the service (e.g. for authentication).
 Specify each header as a separate --header flag in "Key: Value" format.
 
@@ -53,7 +64,12 @@ Examples:
   contenox tools add myapi --url https://api.example.com \
     --header "Authorization: Bearer $TOKEN" \
     --header "X-Tenant: acme" \
-    --timeout 5000`,
+    --timeout 5000
+  contenox tools add erpnext --url https://erp.example.com \
+    --spec ~/.contenox/erp-subset.yaml \
+    --header "Authorization: token $ERP_TOKEN"
+  contenox tools add legacy --url https://api.example.com \
+    --spec https://raw.githubusercontent.com/example/repo/main/openapi.yaml`,
 	Args: cobra.ExactArgs(1),
 	RunE: runToolsAdd,
 }
@@ -81,16 +97,20 @@ var toolsRemoveCmd = &cobra.Command{
 
 var toolsUpdateCmd = &cobra.Command{
 	Use:   "update <name>",
-	Short: "Update an existing remote tools's URL, headers, or timeout.",
+	Short: "Update an existing remote tools's URL, headers, timeout, or spec.",
 	Long: `Update one or more properties of a registered tools.
 
 Only flags that are explicitly provided are updated; others are left unchanged.
 Passing --header replaces ALL existing headers for that tools.
+Passing --spec replaces the spec source; pass an empty string to clear it
+(reverting to <url>/openapi.json discovery).
 
 Examples:
   contenox tools update myapi --url http://new-host:9090
   contenox tools update myapi --timeout 15000
-  contenox tools update myapi --header "Authorization: Bearer $NEW_TOKEN"`,
+  contenox tools update myapi --header "Authorization: Bearer $NEW_TOKEN"
+  contenox tools update myapi --spec ~/.contenox/new-spec.yaml
+  contenox tools update myapi --spec ""`,
 	Args: cobra.ExactArgs(1),
 	RunE: runToolsUpdate,
 }
@@ -101,11 +121,13 @@ func init() {
 	toolsAddCmd.Flags().StringArray("header", nil, `Header to inject into every call, e.g. "Authorization: Bearer $TOKEN" (repeatable)`)
 	toolsAddCmd.Flags().StringArray("inject", nil, `Param to inject as a tool call argument and hide from the model, e.g. "tenant_id=acme" (repeatable)`)
 	toolsAddCmd.Flags().Int("timeout", 10000, "Request timeout in milliseconds")
+	toolsAddCmd.Flags().String("spec", "", "Full URL or local file path to the OpenAPI v3 spec (e.g. https://host/openapi.yaml, ~/spec.yaml, ./spec.json)")
 
 	toolsUpdateCmd.Flags().String("url", "", "New base URL")
 	toolsUpdateCmd.Flags().StringArray("header", nil, `Header to inject, e.g. "Authorization: Bearer $TOKEN" (repeatable; replaces all existing headers)`)
 	toolsUpdateCmd.Flags().StringArray("inject", nil, `Params to inject as tool call args (repeatable; replaces all existing injected params)`)
 	toolsUpdateCmd.Flags().Int("timeout", 0, "New timeout in milliseconds (0 = keep existing)")
+	toolsUpdateCmd.Flags().String("spec", "", "New spec URL or file path (replaces existing; pass empty string to clear)")
 
 	toolsCmd.AddCommand(toolsAddCmd, toolsListCmd, toolsShowCmd, toolsRemoveCmd, toolsUpdateCmd)
 }
@@ -155,17 +177,50 @@ func parseInjects(raw []string) (map[string]string, error) {
 	return out, nil
 }
 
-// probeTools fetches the OpenAPI schema and returns the number of tools discovered.
-// Returns -1 on failure (non-fatal — we warn but still register the tools).
-func probeTools(endpoint string) int {
-	proto := &tools.OpenAPIToolProtocol{}
+// probeTools fetches tools from the spec source and returns the count.
+// specURL is used as the spec source when non-empty; otherwise endpointURL is used.
+// Returns -1 on failure — non-fatal, just affects the registration message.
+func probeTools(endpointURL, specURL string) int {
+	proto := &tools.OpenAPIToolProtocol{SpecSource: specURL}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	tools, err := proto.FetchTools(ctx, endpoint, nil, http.DefaultClient)
+	discovered, err := proto.FetchTools(ctx, endpointURL, nil, http.DefaultClient)
 	if err != nil {
 		return -1
 	}
-	return len(tools)
+	return len(discovered)
+}
+
+// resolveSpecPath converts a user-supplied spec source to the canonical stored form.
+//   - http:// and https:// URLs are returned as-is.
+//   - file:// URIs are returned as-is (user already knows what they're doing).
+//   - ~/path is expanded to the user's home directory and converted to file:///abs/path.
+//   - Relative and absolute file paths are resolved to an absolute path,
+//     verified to exist, and returned as file:///abs/path.
+func resolveSpecPath(raw string) (string, error) {
+	// Pass through URLs and already-formed file:// URIs.
+	if strings.HasPrefix(raw, "http://") ||
+		strings.HasPrefix(raw, "https://") ||
+		strings.HasPrefix(raw, "file://") {
+		return raw, nil
+	}
+	// Expand ~/
+	if strings.HasPrefix(raw, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot expand ~: %w", err)
+		}
+		raw = filepath.Join(home, raw[2:])
+	}
+	// Resolve to absolute path and verify it exists.
+	abs, err := filepath.Abs(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid spec path %q: %w", raw, err)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return "", fmt.Errorf("spec file not found: %s", abs)
+	}
+	return "file://" + abs, nil
 }
 
 func runToolsAdd(cmd *cobra.Command, args []string) error {
@@ -184,6 +239,16 @@ func runToolsAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Resolve optional spec source.
+	var resolvedSpec string
+	if specRaw, _ := cmd.Flags().GetString("spec"); specRaw != "" {
+		resolved, err := resolveSpecPath(specRaw)
+		if err != nil {
+			return err
+		}
+		resolvedSpec = resolved
+	}
+
 	ctx := libtracker.WithNewRequestID(context.Background())
 	db, svc, err := openToolsService(cmd)
 	if err != nil {
@@ -197,16 +262,17 @@ func runToolsAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Probe tools (non-fatal — purely presentation logic, not a service concern).
-	toolCount := probeTools(url)
+	toolCount := probeTools(url, resolvedSpec)
 
-	tools := &runtimetypes.RemoteTools{
+	remoteTools := &runtimetypes.RemoteTools{
 		Name:         name,
 		EndpointURL:  url,
+		SpecURL:      resolvedSpec,
 		TimeoutMs:    timeoutMs,
 		Headers:      headers,
 		InjectParams: injectParams,
 	}
-	if err := svc.Create(ctx, tools); err != nil {
+	if err := svc.Create(ctx, remoteTools); err != nil {
 		return fmt.Errorf("failed to register tools: %w", err)
 	}
 
@@ -277,6 +343,9 @@ func runToolsShow(cmd *cobra.Command, args []string) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Name:      %s\n", remoteTools.Name)
 	fmt.Fprintf(out, "URL:       %s\n", remoteTools.EndpointURL)
+	if remoteTools.SpecURL != "" {
+		fmt.Fprintf(out, "Spec URL:  %s\n", remoteTools.SpecURL)
+	}
 	fmt.Fprintf(out, "Timeout:   %dms\n", remoteTools.TimeoutMs)
 	fmt.Fprintf(out, "Registered:%s\n", remoteTools.CreatedAt.Local().Format("2006-01-02 15:04:05"))
 
@@ -296,8 +365,8 @@ func runToolsShow(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "Inject:    %s (values hidden)\n", strings.Join(keys, ", "))
 	}
 
-	// Probe live tools.
-	proto := &tools.OpenAPIToolProtocol{}
+	// Probe live tools — use SpecURL as spec source when set.
+	proto := &tools.OpenAPIToolProtocol{SpecSource: remoteTools.SpecURL}
 	toolCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -375,6 +444,19 @@ func runToolsUpdate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		remoteTools.InjectParams = injectParams
+	}
+	if cmd.Flags().Changed("spec") {
+		specRaw, _ := cmd.Flags().GetString("spec")
+		if specRaw == "" {
+			// Explicit empty string clears the spec URL.
+			remoteTools.SpecURL = ""
+		} else {
+			resolved, err := resolveSpecPath(specRaw)
+			if err != nil {
+				return err
+			}
+			remoteTools.SpecURL = resolved
+		}
 	}
 
 	if err := svc.Update(ctx, remoteTools); err != nil {

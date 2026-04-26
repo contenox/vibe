@@ -113,6 +113,7 @@ type RemoteTools struct {
 	ID           string            `json:"id" example:"h1a2b3c4-d5e6-f7g8-h9i0-j1k2l3m4n5o6"`
 	Name         string            `json:"name" example:"mailing-tools"`
 	EndpointURL  string            `json:"endpointUrl" example:"http://tools-endpoint:port"`
+	SpecURL      string            `json:"specUrl,omitempty"` // optional; file:///abs/path or https://... — when set, spec is loaded from here instead of EndpointURL+/openapi.json
 	TimeoutMs    int               `json:"timeoutMs" example:"5000"`
 	Headers      map[string]string `json:"headers,omitempty" example:"Authorization:Bearer token,Content-Type:application/json"`
 	Properties   InjectionArg      `json:"properties"`

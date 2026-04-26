@@ -45,6 +45,15 @@ func NewPersistentRepo(
 	}
 }
 
+// protocolFor returns a ToolProtocol configured to load the OpenAPI spec from specURL
+// when non-empty. Falls back to the stored toolProtocol (backward compatible).
+func (p *PersistentRepo) protocolFor(specURL string) ToolProtocol {
+	if specURL == "" {
+		return p.toolProtocol
+	}
+	return &OpenAPIToolProtocol{SpecSource: specURL}
+}
+
 // Exec executes a tools by name.
 func (p *PersistentRepo) Exec(
 	ctx context.Context,
@@ -204,8 +213,8 @@ func (p *PersistentRepo) execRemoteTools(
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(tools.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
-	// Execute via OpenAPI protocol
-	result, dataType, err := p.toolProtocol.ExecuteTool(
+	// Execute via OpenAPI protocol; spec loaded from SpecURL when set.
+	result, dataType, err := p.protocolFor(tools.SpecURL).ExecuteTool(
 		timeoutCtx,
 		tools.EndpointURL,
 		p.httpClient,
@@ -275,7 +284,7 @@ func (p *PersistentRepo) GetToolsForToolsByName(ctx context.Context, name string
 			In:    ArgLocationHeader,
 		}
 	}
-	tools, err := p.toolProtocol.FetchTools(ctx, remoteTools.EndpointURL, injectParams, p.httpClient)
+	tools, err := p.protocolFor(remoteTools.SpecURL).FetchTools(ctx, remoteTools.EndpointURL, injectParams, p.httpClient)
 	if err != nil {
 		return nil, taskengine.ToolsToolsUnavailable(name, fmt.Errorf("remote tools fetch tools: %w", err))
 	}
@@ -309,7 +318,7 @@ func (p *PersistentRepo) GetSchemasForSupportedTools(ctx context.Context) (map[s
 
 		// Process this page immediately
 		for _, tools := range page {
-			schema, err := p.toolProtocol.FetchSchema(ctx, tools.EndpointURL, p.httpClient)
+			schema, err := p.protocolFor(tools.SpecURL).FetchSchema(ctx, tools.EndpointURL, p.httpClient)
 			if err != nil {
 				// Optionally log here (e.g., via p.logger.Warn(...)) in real implementation
 				continue // Graceful: one failing tools doesn't break all

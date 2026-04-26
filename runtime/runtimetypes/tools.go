@@ -72,11 +72,12 @@ func (s *store) CreateRemoteTools(ctx context.Context, tools *RemoteTools) error
 
 	_, err = s.Exec.ExecContext(ctx, `
         INSERT INTO remote_tools
-        (id, name, endpoint_url, timeout_ms, headers, properties, inject_params_json, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        (id, name, endpoint_url, spec_url, timeout_ms, headers, properties, inject_params_json, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		tools.ID,
 		tools.Name,
 		tools.EndpointURL,
+		tools.SpecURL,
 		tools.TimeoutMs,
 		headersJSON,
 		bodyPropsBytes,
@@ -93,12 +94,13 @@ func (s *store) GetRemoteTools(ctx context.Context, id string) (*RemoteTools, er
 	var injectJSON string
 
 	err := s.Exec.QueryRowContext(ctx, `
-        SELECT id, name, endpoint_url, timeout_ms, headers, properties, inject_params_json, created_at, updated_at
+        SELECT id, name, endpoint_url, spec_url, timeout_ms, headers, properties, inject_params_json, created_at, updated_at
         FROM remote_tools
         WHERE id = $1`, id).Scan(
 		&tools.ID,
 		&tools.Name,
 		&tools.EndpointURL,
+		&tools.SpecURL,
 		&tools.TimeoutMs,
 		&headersJSON,
 		&bodyPropsBytes,
@@ -140,12 +142,13 @@ func (s *store) GetRemoteToolsByName(ctx context.Context, name string) (*RemoteT
 	var injectJSON string
 
 	err := s.Exec.QueryRowContext(ctx, `
-        SELECT id, name, endpoint_url,  timeout_ms, headers, properties, inject_params_json, created_at, updated_at
+        SELECT id, name, endpoint_url, spec_url, timeout_ms, headers, properties, inject_params_json, created_at, updated_at
         FROM remote_tools
         WHERE name = $1`, name).Scan(
 		&tools.ID,
 		&tools.Name,
 		&tools.EndpointURL,
+		&tools.SpecURL,
 		&tools.TimeoutMs,
 		&headersJSON,
 		&bodyPropsBytes,
@@ -202,11 +205,12 @@ func (s *store) UpdateRemoteTools(ctx context.Context, tools *RemoteTools) error
 
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE remote_tools
-		SET name = $2, endpoint_url = $3, timeout_ms = $4, headers = $5, properties = $6, inject_params_json = $7, updated_at = $8
+		SET name = $2, endpoint_url = $3, spec_url = $4, timeout_ms = $5, headers = $6, properties = $7, inject_params_json = $8, updated_at = $9
 		WHERE id = $1`,
 		tools.ID,
 		tools.Name,
 		tools.EndpointURL,
+		tools.SpecURL,
 		tools.TimeoutMs,
 		headersJSON,
 		bodyPropsBytes,
@@ -230,7 +234,7 @@ func (s *store) ListRemoteTools(ctx context.Context, createdAtCursor *time.Time,
 	}
 
 	rows, err := s.Exec.QueryContext(ctx, `
-        SELECT id, name, endpoint_url, timeout_ms, headers, properties, inject_params_json, created_at, updated_at
+        SELECT id, name, endpoint_url, spec_url, timeout_ms, headers, properties, inject_params_json, created_at, updated_at
         FROM remote_tools
         WHERE created_at < $1
         ORDER BY created_at DESC, id DESC
@@ -250,6 +254,7 @@ func (s *store) ListRemoteTools(ctx context.Context, createdAtCursor *time.Time,
 			&tools.ID,
 			&tools.Name,
 			&tools.EndpointURL,
+			&tools.SpecURL,
 			&tools.TimeoutMs,
 			&headersJSON,
 			&bodyPropsBytes,

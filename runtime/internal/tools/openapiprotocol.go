@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 
@@ -15,38 +16,52 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-type OpenAPIToolProtocol struct{}
+// OpenAPIToolProtocol implements ToolProtocol using OpenAPI v3 specs.
+// SpecSource, when non-empty, is used as the spec location instead of
+// endpointURL+"/openapi.json". Supported formats:
+//   - https://... or http://...  — fetched over HTTP
+//   - file:///abs/path           — read from local filesystem
+type OpenAPIToolProtocol struct {
+	SpecSource string // optional; set by remoteprovider when RemoteTools.SpecURL is non-empty
+}
 
 func (p *OpenAPIToolProtocol) FetchSchema(ctx context.Context, endpointURL string, httpClient *http.Client) (*openapi3.T, error) {
+	// Use SpecSource override when set; otherwise derive from endpointURL.
 	specURL := endpointURL + "/openapi.json"
+	if p.SpecSource != "" {
+		specURL = p.SpecSource
+	}
 
 	u, err := url.Parse(specURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid endpoint URL: %w", err)
+		return nil, fmt.Errorf("invalid spec URL: %w", err)
 	}
 
 	loader := openapi3.NewLoader()
 	loader.Context = ctx
 	loader.IsExternalRefsAllowed = true
 
-	if httpClient != nil {
-		loader.ReadFromURIFunc = func(loader *openapi3.Loader, url *url.URL) ([]byte, error) {
-			req, err := http.NewRequestWithContext(ctx, "GET", url.String(), nil)
-			if err != nil {
-				return nil, err
-			}
-			resp, err := httpClient.Do(req)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("failed to fetch OpenAPI spec: %s (status %d)", url.String(), resp.StatusCode)
-			}
-
-			return io.ReadAll(resp.Body)
+	// ReadFromURIFunc handles both HTTP and file:// URIs.
+	loader.ReadFromURIFunc = func(loader *openapi3.Loader, url *url.URL) ([]byte, error) {
+		if url.Scheme == "file" {
+			return os.ReadFile(url.Path)
 		}
+		if httpClient == nil {
+			return nil, fmt.Errorf("no http client configured for URL %s", url.String())
+		}
+		req, err := http.NewRequestWithContext(ctx, "GET", url.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("failed to fetch OpenAPI spec: %s (status %d)", url.String(), resp.StatusCode)
+		}
+		return io.ReadAll(resp.Body)
 	}
 
 	schema, err := loader.LoadFromURI(u)

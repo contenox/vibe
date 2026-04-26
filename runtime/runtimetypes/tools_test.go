@@ -596,3 +596,97 @@ func TestUnit_RemoteTools_WithProperties(t *testing.T) {
 		require.Equal(t, updatedProps, retrieved.Properties)
 	})
 }
+
+func TestUnit_RemoteTools_SpecURL_RoundTrip(t *testing.T) {
+	ctx, s := runtimetypes.SetupStore(t)
+
+	tools := &runtimetypes.RemoteTools{
+		ID:          uuid.New().String(),
+		Name:        "spec-url-tools",
+		EndpointURL: "https://erp.example.com",
+		SpecURL:     "file:///home/user/.contenox/erp-subset.yaml",
+		TimeoutMs:   5000,
+	}
+
+	require.NoError(t, s.CreateRemoteTools(ctx, tools))
+
+	// GetRemoteTools by ID
+	got, err := s.GetRemoteTools(ctx, tools.ID)
+	require.NoError(t, err)
+	require.Equal(t, tools.SpecURL, got.SpecURL)
+
+	// GetRemoteToolsByName
+	gotByName, err := s.GetRemoteToolsByName(ctx, tools.Name)
+	require.NoError(t, err)
+	require.Equal(t, tools.SpecURL, gotByName.SpecURL)
+}
+
+func TestUnit_RemoteTools_SpecURL_EmptyByDefault(t *testing.T) {
+	ctx, s := runtimetypes.SetupStore(t)
+
+	tools := &runtimetypes.RemoteTools{
+		ID:          uuid.New().String(),
+		Name:        "no-spec-url-tools",
+		EndpointURL: "https://api.example.com",
+		TimeoutMs:   5000,
+	}
+	require.NoError(t, s.CreateRemoteTools(ctx, tools))
+
+	got, err := s.GetRemoteTools(ctx, tools.ID)
+	require.NoError(t, err)
+	require.Empty(t, got.SpecURL, "SpecURL should be empty when not set")
+}
+
+func TestUnit_RemoteTools_SpecURL_Update(t *testing.T) {
+	ctx, s := runtimetypes.SetupStore(t)
+
+	tools := &runtimetypes.RemoteTools{
+		ID:          uuid.New().String(),
+		Name:        "spec-url-update-tools",
+		EndpointURL: "https://api.example.com",
+		TimeoutMs:   5000,
+	}
+	require.NoError(t, s.CreateRemoteTools(ctx, tools))
+
+	// Set spec URL
+	tools.SpecURL = "https://raw.githubusercontent.com/example/repo/main/openapi.yaml"
+	require.NoError(t, s.UpdateRemoteTools(ctx, tools))
+
+	got, err := s.GetRemoteTools(ctx, tools.ID)
+	require.NoError(t, err)
+	require.Equal(t, tools.SpecURL, got.SpecURL)
+
+	// Clear spec URL
+	tools.SpecURL = ""
+	require.NoError(t, s.UpdateRemoteTools(ctx, tools))
+
+	got, err = s.GetRemoteTools(ctx, tools.ID)
+	require.NoError(t, err)
+	require.Empty(t, got.SpecURL, "SpecURL should be empty after clearing")
+}
+
+func TestUnit_RemoteTools_SpecURL_ListIncludes(t *testing.T) {
+	ctx, s := runtimetypes.SetupStore(t)
+
+	tools := &runtimetypes.RemoteTools{
+		ID:          uuid.New().String(),
+		Name:        "spec-url-list-tools",
+		EndpointURL: "https://api.example.com",
+		SpecURL:     "file:///tmp/spec.json",
+		TimeoutMs:   5000,
+	}
+	require.NoError(t, s.CreateRemoteTools(ctx, tools))
+
+	list, err := s.ListRemoteTools(ctx, nil, 100)
+	require.NoError(t, err)
+
+	var found *runtimetypes.RemoteTools
+	for _, item := range list {
+		if item.ID == tools.ID {
+			found = item
+			break
+		}
+	}
+	require.NotNil(t, found, "created tools should appear in list")
+	require.Equal(t, tools.SpecURL, found.SpecURL)
+}

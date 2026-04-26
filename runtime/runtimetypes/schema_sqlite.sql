@@ -236,6 +236,7 @@ CREATE TABLE IF NOT EXISTS bus_replies (
 ALTER TABLE remote_tools ADD COLUMN headers             TEXT;
 ALTER TABLE remote_tools ADD COLUMN properties         BLOB;
 ALTER TABLE remote_tools ADD COLUMN inject_params_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE remote_tools ADD COLUMN spec_url           TEXT;
 
 -- mcp_servers columns added after initial release
 ALTER TABLE mcp_servers ADD COLUMN headers_json        TEXT NOT NULL DEFAULT '{}';
