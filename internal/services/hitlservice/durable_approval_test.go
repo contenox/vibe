@@ -66,7 +66,7 @@ type signalSink struct {
 	ids chan<- string
 }
 
-func (s signalSink) Enabled() bool { return true }
+func (s signalSink) Wants(taskengine.TaskEventKind) bool { return true }
 
 func (s signalSink) PublishTaskEvent(_ context.Context, ev taskengine.TaskEvent) error {
 	s.ids <- ev.ApprovalID

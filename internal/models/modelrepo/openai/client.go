@@ -36,7 +36,10 @@ type openAIChatRequest struct {
 	TopP                *float64         `json:"top_p,omitempty"`
 	Seed                *int             `json:"seed,omitempty"`
 	Stream              bool             `json:"stream,omitempty"`
-	Tools               []openAITool     `json:"tools,omitempty"`
+	// StreamOptions requests the trailing usage chunk on streamed responses
+	// (stream_options.include_usage); only set when Stream is true.
+	StreamOptions *openAIStreamOptions `json:"stream_options,omitempty"`
+	Tools         []openAITool         `json:"tools,omitempty"`
 	// ReasoningEffort maps the existing modelrepo.WithThink values onto OpenAI's
 	// chat-completions `reasoning_effort` parameter without widening the public
 	// package API. Supported values are model-dependent.
@@ -75,6 +78,10 @@ type apiToolCallReq struct {
 type openAIFunction2 struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+type openAIStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type openAITool struct {

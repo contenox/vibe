@@ -58,7 +58,7 @@ const (
 // approvals, code, vscode-agent, modeld) stay reserved on purpose: an operator
 // typing one gets Cobra's unknown-command error naming the mistake, instead of
 // the word being silently injected as a chat prompt.
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true}
+var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
@@ -228,11 +228,6 @@ box; for local inference run Ollama or vLLM.
     contenox config set default-model    gpt-4o-mini
     contenox config set default-provider openai
 
-    # OpenRouter
-    contenox backend add openrouter --type openrouter --api-key-env OPENROUTER_API_KEY
-    contenox config set default-model    deepseek/deepseek-chat-v3-5
-    contenox config set default-provider openrouter
-
   VS Code autocomplete can use a separate model from chat:
     # Example: chat on OpenAI, ghost text on local Ollama.
     contenox config set default-provider openai
@@ -334,11 +329,6 @@ After init, register a backend, make sure the runtime can see a model, then set 
   contenox config set default-provider gemini
   contenox config set default-model gemini-3.1-pro-preview
 
-  # OpenRouter:
-  contenox backend add openrouter --type openrouter --api-key-env OPENROUTER_API_KEY
-  contenox config set default-provider openrouter
-  contenox config set default-model deepseek/deepseek-chat-v3-5
-
   # Optional VS Code autocomplete model, independent from chat:
   contenox config set default-autocomplete-provider ollama
   contenox config set default-autocomplete-model qwen2.5-coder:7b
@@ -408,6 +398,7 @@ func init() {
 	rootCmd.AddCommand(workspaceCmd)
 	rootCmd.AddCommand(sandboxCmd)
 	rootCmd.AddCommand(shellEnvCmd)
+	rootCmd.AddCommand(vetCmd)
 
 	rootCmd.InitDefaultHelpCmd() // so "contenox help" is handled by Cobra, not passed as run input
 	initCmd.Flags().BoolP("force", "f", false, "Overwrite existing files")

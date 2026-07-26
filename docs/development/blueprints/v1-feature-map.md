@@ -148,7 +148,6 @@ these fail on the target platform being released.
 - Hosted Ollama Cloud.
 - OpenAI.
 - Gemini.
-- OpenRouter.
 - Other providers through manual backend registration.
 
 ### Manual test implications
@@ -178,9 +177,7 @@ these fail on the target platform being released.
 
 - `ollama`: local Ollama daemon or hosted Ollama Cloud.
 - `openai`: OpenAI API.
-- `openrouter`: OpenRouter API.
 - `anthropic`: Anthropic API.
-- `mistral`: Mistral API.
 - `bedrock`: AWS Bedrock Converse API.
 - `gemini`: Google Gemini API.
 - `vllm`: self-hosted OpenAI-compatible endpoint.

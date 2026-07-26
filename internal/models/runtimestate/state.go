@@ -340,7 +340,7 @@ func (s *State) processBackend(ctx context.Context, backend *runtimetypes.Backen
 		s.processVLLMBackend(ctx, backend, declaredModels)
 	case "gemini":
 		s.processGeminiBackend(ctx, backend, declaredModels)
-	case "openai", "openrouter", "anthropic", "mistral":
+	case "openai", "anthropic":
 		// Direct cloud, API-key + OpenAI-style model listing. processOpenAIBackend
 		// is generic over backend.Type (keys, catalog), so it serves all of them.
 		s.processOpenAIBackend(ctx, backend, declaredModels)

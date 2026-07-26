@@ -8,7 +8,7 @@ description: Configure Contenox to use Gemini on Vertex AI — billed through yo
 The `vertex-google` backend runs **Gemini** on your own GCP project. Use it when you want Google-managed inference billed against your GCP account, regional control, or models that aren't on AI Studio.
 
 > [!NOTE]
-> For **Claude**, **Llama**, or **Mistral**, use a direct provider instead — [Anthropic](/docs/integrations/providers/anthropic/), [Mistral](/docs/integrations/providers/mistral/), or [AWS Bedrock](/docs/integrations/providers/bedrock/). Contenox does not support the Vertex Anthropic/Meta/Mistral partner backends.
+> For **Claude** or **Llama**, use a direct provider instead — [Anthropic](/docs/integrations/providers/anthropic/) or [AWS Bedrock](/docs/integrations/providers/bedrock/). Contenox does not support the Vertex Anthropic/Meta/Mistral partner backends.
 
 ## Prerequisites
 

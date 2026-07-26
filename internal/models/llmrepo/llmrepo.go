@@ -377,14 +377,20 @@ func (e *modelManager) Stream(
 		return nil, Meta{}, fmt.Errorf("stream initialization failed: %w", err)
 	}
 
-	// Wrap the stream to close the client when done
+	// Wrap the stream to close the client when done. Every relay send selects
+	// on ctx.Done() so an abandoned consumer can never strand this goroutine
+	// (and the client it holds) on a blocked channel send.
 	wrappedStream := make(chan *libmodelprovider.StreamParcel)
 	go func() {
 		defer close(wrappedStream)
 		defer safeClose(client)
 
 		for parcel := range stream {
-			wrappedStream <- parcel
+			select {
+			case wrappedStream <- parcel:
+			case <-ctx.Done():
+				return
+			}
 			if parcel.Error != nil {
 				break
 			}

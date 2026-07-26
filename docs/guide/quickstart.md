@@ -81,10 +81,8 @@ Contenox needs at least one model to work. Pick the option that fits:
 |--------|--------------|
 | [Ollama](/docs/integrations/providers/ollama/) | Ollama installed locally, or an Ollama Cloud key |
 | [Google Gemini](/docs/integrations/providers/gemini/) | A free Gemini API key (no GPU) |
-| [OpenRouter](/docs/integrations/providers/openrouter/) | One OpenRouter API key for many hosted models |
 | [OpenAI](/docs/integrations/providers/openai/) | An OpenAI API key |
 | [Anthropic](/docs/integrations/providers/anthropic/) | An Anthropic API key (Claude) |
-| [Mistral](/docs/integrations/providers/mistral/) | A Mistral API key |
 | [AWS Bedrock](/docs/integrations/providers/bedrock/) | An AWS account with Bedrock model access |
 
 If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) for a fully local setup, or [Gemini](/docs/integrations/providers/gemini/) for a free hosted key.

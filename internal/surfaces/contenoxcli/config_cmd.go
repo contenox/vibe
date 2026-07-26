@@ -19,7 +19,7 @@ import (
 // validConfigKeys lists the keys users can set via `contenox config set`.
 var validConfigKeys = map[string]string{
 	"default-model":                 "Default LLM model name (e.g. qwen2.5:7b)",
-	"default-provider":              "Default LLM provider type (e.g. ollama, openrouter, openai, gemini)",
+	"default-provider":              "Default LLM provider type (e.g. ollama, openai, gemini)",
 	"default-alt-model":             "Optional alt LLM model name. Used by chains referencing {{var:alt_model}}.",
 	"default-alt-provider":          "Optional alt LLM provider type. Used by chains referencing {{var:alt_provider}}.",
 	"default-autocomplete-model":    "Optional VS Code autocomplete model name, independent from default-model.",
@@ -44,7 +44,7 @@ Workspace keys (scoped to current project): default-chain, hitl-policy-name
 
 Supported keys:
   default-model                  Default LLM model name (e.g. qwen2.5:7b)
-  default-provider               Default LLM provider type (e.g. ollama, openrouter, openai, gemini)
+  default-provider               Default LLM provider type (e.g. ollama, openai, gemini)
   default-alt-model              Optional alt LLM model name (chains using {{var:alt_model}})
   default-alt-provider           Optional alt LLM provider (chains using {{var:alt_provider}})
   default-autocomplete-model     Optional VS Code autocomplete model, separate from chat
@@ -76,8 +76,6 @@ Examples:
   contenox config set default-autocomplete-provider ollama
   contenox config set default-autocomplete-model    qwen2.5-coder:7b
 
-  contenox config set default-autocomplete-provider mistral
-  contenox config set default-autocomplete-model    mistral-code-fim-latest
   contenox config set default-max-tokens 8192
   contenox config set default-think    high
   contenox config set default-chain    .contenox/default-chain.json

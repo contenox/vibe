@@ -3,7 +3,7 @@ package modelregistry
 import "strings"
 
 // The Gemini and Vertex model-listing APIs do NOT report input modalities — unlike
-// OpenRouter, Ollama, Bedrock, Mistral, and Anthropic, whose vision capability we
+// Ollama, Bedrock, and Anthropic, whose vision capability we
 // detect at runtime from their API responses. Image-input support for Google
 // models is therefore MAINTAINED BY HAND below.
 //

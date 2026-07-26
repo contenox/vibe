@@ -14,6 +14,7 @@ import (
 	"github.com/contenox/beam/internal/kernel/tools"
 	libdb "github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/beam/internal/services/localtools"
 	"github.com/contenox/beam/internal/services/toolsproviderservice"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
@@ -167,6 +168,92 @@ Examples:
 	RunE: runToolsUpdate,
 }
 
+// toolsFilterCmd groups tool-output filter operations (S8 context prevention:
+// the local_shell stdout filter engine in internal/services/localtools).
+var toolsFilterCmd = &cobra.Command{
+	Use:   "filter",
+	Short: "Work with tool-output filters (local_shell stdout compression).",
+	Long: `Tool-output filters compress noisy local_shell stdout (test runners, package
+installs) before it reaches the model, while the raw stream is always preserved
+in the spool. Config precedence: project-local .contenox/filters.json →
+user-global ~/.contenox/filters.json → embedded defaults.`,
+	SilenceUsage: true,
+}
+
+// toolsFilterTestCmd runs filter-config inline test cases and
+// match-assertions through the real transform pipeline. Non-zero exit on any
+// failure, for CI.
+var toolsFilterTestCmd = &cobra.Command{
+	Use:   "test [config-file ...]",
+	Short: "Validate filter configs: inline test cases and match-assertions, with got/want diffs.",
+	Long: `Run every inline test case ("input" → "want") and match-assertion ("command X
+must/must-not hit filter Y") in the filter config chain through the REAL
+transform pipeline.
+
+With no arguments the effective chain is validated: the discovered project
+config (.contenox/filters.json, walking up from the current directory), the
+user-global config (~/.contenox/filters.json), and the embedded defaults.
+With file arguments, exactly those files (in the given precedence order) plus
+the embedded defaults are validated.
+
+Exits non-zero when anything fails — including filters skipped at load time
+(e.g. a filter declaring both "drop" and "allow", or a broken regex) — so the
+command can gate CI.
+
+Examples:
+  contenox tools filter test
+  contenox tools filter test .contenox/filters.json`,
+	RunE:         runToolsFilterTest,
+	SilenceUsage: true,
+}
+
+func runToolsFilterTest(cmd *cobra.Command, args []string) error {
+	var opts []localtools.FilterEngineOption
+	if len(args) > 0 {
+		opts = append(opts, localtools.WithFilterSources(args...))
+	}
+	engine := localtools.NewOutputFilterEngine(libtracker.NoopTracker{}, opts...)
+	cwd, _ := os.Getwd()
+	report := engine.Validate(cwd)
+
+	out := cmd.OutOrStdout()
+	if report.Disabled {
+		fmt.Fprintln(out, "note: the filter kill switch is currently ON (disabled=true); validation ran anyway.")
+	}
+	for _, f := range report.Files {
+		fmt.Fprintf(out, "%s:\n", f.Origin)
+		if f.LoadError != "" {
+			fmt.Fprintf(out, "  LOAD ERROR: %s\n", f.LoadError)
+		}
+		for _, is := range f.Issues {
+			fmt.Fprintf(out, "  SKIPPED %s: %s\n", is.Name, is.Err)
+		}
+		for _, c := range f.Cases {
+			if c.Pass {
+				fmt.Fprintf(out, "  ok   %s / %s\n", c.Filter, c.Case)
+			} else {
+				fmt.Fprintf(out, "  FAIL %s / %s\n    got:  %q\n    want: %q\n", c.Filter, c.Case, c.Got, c.Want)
+			}
+		}
+		for _, a := range f.Assertions {
+			if a.Pass {
+				fmt.Fprintf(out, "  ok   %q %s\n", a.Command, a.Expect)
+			} else {
+				got := a.Got
+				if got == "" {
+					got = "(no filter)"
+				}
+				fmt.Fprintf(out, "  FAIL %q %s — actually hit %s\n", a.Command, a.Expect, got)
+			}
+		}
+	}
+	if n := report.Failures(); n > 0 {
+		return fmt.Errorf("filter validation: %d failure(s)", n)
+	}
+	fmt.Fprintln(out, "filter validation: all checks passed")
+	return nil
+}
+
 func init() {
 	toolsAddCmd.Flags().String("url", "", "Base URL of the remote tools service (required)")
 	_ = toolsAddCmd.MarkFlagRequired("url")
@@ -191,7 +278,8 @@ func init() {
 	toolsUpdateCmd.Flags().Int("timeout", 0, "New timeout in milliseconds (0 = keep existing)")
 	toolsUpdateCmd.Flags().String("spec", "", "New spec URL or file path (replaces existing; pass empty string to clear)")
 
-	toolsCmd.AddCommand(toolsAddCmd, toolsListCmd, toolsShowCmd, toolsRemoveCmd, toolsUpdateCmd)
+	toolsFilterCmd.AddCommand(toolsFilterTestCmd)
+	toolsCmd.AddCommand(toolsAddCmd, toolsListCmd, toolsShowCmd, toolsRemoveCmd, toolsUpdateCmd, toolsFilterCmd)
 }
 
 // openToolsService resolves the DB path, opens SQLite and returns a toolsproviderservice.

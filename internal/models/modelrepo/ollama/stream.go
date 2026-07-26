@@ -80,38 +80,86 @@ func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		req.Truncate = config.Truncate
 	}
 
+	// Raw-delta contract (modelrepo.StreamParcel): content / thinking / tool
+	// calls are forwarded as raw deltas — Ollama delivers each tool call whole,
+	// so each gets the next sequential index — and the done=true response
+	// becomes the typed terminal parcel (done_reason + eval counts). Assembly
+	// belongs to the engine-side modelrepo.StreamAssembler.
 	ch := make(chan *modelrepo.StreamParcel)
 	go func() {
 		defer close(ch)
 		defer end()
 
+		send := func(p *modelrepo.StreamParcel) bool {
+			select {
+			case ch <- p:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
 		var (
-			chunkCount int
-			totalLen   int
+			chunkCount    int
+			totalLen      int
+			toolCallIndex int
+			terminal      *modelrepo.StreamTerminal
 		)
 		err := c.ollamaClient.Chat(ctx, req, func(resp api.ChatResponse) error {
-			if resp.Message.Content != "" || resp.Message.Thinking != "" {
-				if resp.Message.Content != "" {
-					chunkCount++
-					totalLen += len(resp.Message.Content)
-				}
-				select {
-				case ch <- &modelrepo.StreamParcel{
-					Data:     resp.Message.Content,
-					Thinking: resp.Message.Thinking,
-				}:
-				case <-ctx.Done():
+			if resp.Message.Content != "" {
+				chunkCount++
+				totalLen += len(resp.Message.Content)
+				if !send(&modelrepo.StreamParcel{Data: resp.Message.Content}) {
 					return ctx.Err()
+				}
+			}
+			if resp.Message.Thinking != "" {
+				if !send(&modelrepo.StreamParcel{Thinking: resp.Message.Thinking}) {
+					return ctx.Err()
+				}
+			}
+			for _, tc := range resp.Message.ToolCalls {
+				argsJSON, err := json.Marshal(tc.Function.Arguments)
+				if err != nil {
+					continue
+				}
+				delta := &modelrepo.ToolCallDelta{
+					Index:        toolCallIndex,
+					Type:         "function",
+					Name:         tc.Function.Name,
+					ArgsFragment: string(argsJSON),
+				}
+				toolCallIndex++
+				if !send(&modelrepo.StreamParcel{ToolCall: delta}) {
+					return ctx.Err()
+				}
+			}
+			if resp.Done {
+				terminal = &modelrepo.StreamTerminal{
+					FinishReason: resp.DoneReason,
+					Usage: &modelrepo.TokenUsage{
+						PromptTokens:     resp.Metrics.PromptEvalCount,
+						CompletionTokens: resp.Metrics.EvalCount,
+						TotalTokens:      resp.Metrics.PromptEvalCount + resp.Metrics.EvalCount,
+					},
 				}
 			}
 			return nil
 		})
 		if err != nil {
 			reportErr(err)
-			select {
-			case ch <- &modelrepo.StreamParcel{Error: fmt.Errorf("ollama stream request failed for model %s: %w", c.modelName, err)}:
-			case <-ctx.Done():
-			}
+			send(&modelrepo.StreamParcel{Error: fmt.Errorf("ollama stream request failed for model %s: %w", c.modelName, err)})
+			return
+		}
+		if terminal == nil {
+			// The connection ended without a done=true response; surface it
+			// instead of letting a truncated stream read as success.
+			err := fmt.Errorf("ollama stream for model %s ended without a done response", c.modelName)
+			reportErr(err)
+			send(&modelrepo.StreamParcel{Error: err})
+			return
+		}
+		if !send(&modelrepo.StreamParcel{Terminal: terminal}) {
 			return
 		}
 

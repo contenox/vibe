@@ -96,8 +96,9 @@ func requireNoOrphanedToolLinks(t *testing.T, msgs []libmodelprovider.Message) {
 }
 
 func okStream() (<-chan *libmodelprovider.StreamParcel, llmrepo.Meta, error) {
-	ch := make(chan *libmodelprovider.StreamParcel, 1)
+	ch := make(chan *libmodelprovider.StreamParcel, 2)
 	ch <- &libmodelprovider.StreamParcel{Data: "ok"}
+	ch <- &libmodelprovider.StreamParcel{Terminal: &libmodelprovider.StreamTerminal{FinishReason: "stop"}}
 	close(ch)
 	return ch, llmrepo.Meta{ModelName: "test-model"}, nil
 }

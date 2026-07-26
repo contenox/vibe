@@ -19,7 +19,12 @@ type vertexStreamClient struct {
 }
 
 // Stream implements modelrepo.LLMStreamClient against the Gemini
-// streamGenerateContent wire format (vertex-google).
+// streamGenerateContent wire format (vertex-google). It emits raw deltas per
+// the modelrepo.StreamParcel contract: text / thinking deltas as they arrive,
+// each streamed functionCall part as one whole-call ToolCallDelta (the wire
+// delivers calls complete, so each gets the next sequential index), then one
+// typed terminal parcel with the candidate's finishReason and usageMetadata.
+// Assembly belongs to the engine-side modelrepo.StreamAssembler.
 func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	parcels := make(chan *modelrepo.StreamParcel)
 
@@ -34,9 +39,18 @@ func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 	go func() {
 		defer close(parcels)
 
+		send := func(p *modelrepo.StreamParcel) bool {
+			select {
+			case parcels <- p:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
 		body, err := json.Marshal(request)
 		if err != nil {
-			parcels <- &modelrepo.StreamParcel{Error: fmt.Errorf("failed to marshal stream request: %w", err)}
+			send(&modelrepo.StreamParcel{Error: fmt.Errorf("failed to marshal stream request: %w", err)})
 			return
 		}
 
@@ -56,7 +70,7 @@ func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		if err != nil {
 			err = fmt.Errorf("failed to create stream request: %w", err)
 			reportErr(err)
-			parcels <- &modelrepo.StreamParcel{Error: err}
+			send(&modelrepo.StreamParcel{Error: err})
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -73,7 +87,7 @@ func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		token, err := tokenFn(ctx)
 		if err != nil {
 			reportErr(err)
-			parcels <- &modelrepo.StreamParcel{Error: err}
+			send(&modelrepo.StreamParcel{Error: err})
 			return
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -85,7 +99,7 @@ func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		if err != nil {
 			err = fmt.Errorf("HTTP stream request failed for model %s: %w", c.modelName, err)
 			reportErr(err)
-			parcels <- &modelrepo.StreamParcel{Error: err}
+			send(&modelrepo.StreamParcel{Error: err})
 			return
 		}
 		defer resp.Body.Close()
@@ -99,18 +113,23 @@ func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 			b, _ := io.ReadAll(resp.Body)
 			err = fmt.Errorf("vertex API returned non-200 status for stream: %d, body: %s", resp.StatusCode, string(b))
 			reportErr(err)
-			parcels <- &modelrepo.StreamParcel{Error: err}
+			send(&modelrepo.StreamParcel{Error: err})
 			return
 		}
 
 		var (
 			chunkCount    int
 			totalContent  strings.Builder
-			toolCalls     []modelrepo.ToolCall
+			toolCallIndex int
 			lastSignature string
+			finishReason  string
+			usage         *modelrepo.TokenUsage
 		)
 
 		sc := bufio.NewScanner(resp.Body)
+		// SSE frames carry a whole chunk per line; the bufio.Scanner default
+		// 64KB cap truncates large chunks, so raise it.
+		sc.Buffer(make([]byte, 64*1024), 1024*1024)
 		for sc.Scan() {
 			line := sc.Text()
 			if !strings.HasPrefix(line, "data: ") {
@@ -129,54 +148,61 @@ func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 			if chunk.PromptFeedback.BlockReason != "" {
 				err = fmt.Errorf("stream blocked by Vertex AI for reason: %s", chunk.PromptFeedback.BlockReason)
 				reportErr(err)
-				parcels <- &modelrepo.StreamParcel{Error: err}
+				send(&modelrepo.StreamParcel{Error: err})
 				return
 			}
-
-			if len(chunk.Candidates) > 0 && len(chunk.Candidates[0].Content.Parts) > 0 {
-				var outText, thinkingText string
-				for _, part := range chunk.Candidates[0].Content.Parts {
-					switch {
-					case part.Thought && part.Text != "":
-						thinkingText += part.Text
-					case part.Text != "":
-						outText += part.Text
-					case part.FunctionCall != nil:
-						argsJSON, err := json.Marshal(part.FunctionCall.Args)
-						if err != nil {
-							continue
-						}
-						tc := modelrepo.ToolCall{
-							ID:   uuid.NewString(),
-							Type: "function",
-							Function: struct {
-								Name      string `json:"name"`
-								Arguments string `json:"arguments"`
-							}{
-								Name:      part.FunctionCall.Name,
-								Arguments: string(argsJSON),
-							},
-						}
-						sig := part.ThoughtSignature
-						if sig == "" {
-							sig = part.FunctionCall.ThoughtSignature
-						}
-						if sig == "" {
-							sig = lastSignature
-						}
-						if sig != "" {
-							lastSignature = sig
-							tc.ProviderMeta = map[string]string{"thought_signature": sig}
-						}
-						toolCalls = append(toolCalls, tc)
-					}
+			if chunk.UsageMetadata != nil {
+				usage = &modelrepo.TokenUsage{
+					PromptTokens:     chunk.UsageMetadata.PromptTokenCount,
+					CompletionTokens: chunk.UsageMetadata.CandidatesTokenCount,
+					TotalTokens:      chunk.UsageMetadata.TotalTokenCount,
 				}
-				if outText != "" || thinkingText != "" {
+			}
+			if len(chunk.Candidates) == 0 {
+				continue
+			}
+			cand := chunk.Candidates[0]
+			if cand.FinishReason != "" {
+				finishReason = cand.FinishReason
+			}
+			for _, part := range cand.Content.Parts {
+				switch {
+				case part.Thought && part.Text != "":
 					chunkCount++
-					totalContent.WriteString(outText)
-					select {
-					case parcels <- &modelrepo.StreamParcel{Data: outText, Thinking: thinkingText}:
-					case <-ctx.Done():
+					if !send(&modelrepo.StreamParcel{Thinking: part.Text}) {
+						return
+					}
+				case part.Text != "":
+					chunkCount++
+					totalContent.WriteString(part.Text)
+					if !send(&modelrepo.StreamParcel{Data: part.Text}) {
+						return
+					}
+				case part.FunctionCall != nil:
+					argsJSON, err := json.Marshal(part.FunctionCall.Args)
+					if err != nil {
+						continue
+					}
+					delta := &modelrepo.ToolCallDelta{
+						Index:        toolCallIndex,
+						ID:           uuid.NewString(),
+						Type:         "function",
+						Name:         part.FunctionCall.Name,
+						ArgsFragment: string(argsJSON),
+					}
+					toolCallIndex++
+					sig := part.ThoughtSignature
+					if sig == "" {
+						sig = part.FunctionCall.ThoughtSignature
+					}
+					if sig == "" {
+						sig = lastSignature
+					}
+					if sig != "" {
+						lastSignature = sig
+						delta.ProviderMeta = map[string]string{"thought_signature": sig}
+					}
+					if !send(&modelrepo.StreamParcel{ToolCall: delta}) {
 						return
 					}
 				}
@@ -186,28 +212,21 @@ func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		if err := sc.Err(); err != nil && err != io.EOF {
 			err = fmt.Errorf("error reading from stream: %w", err)
 			reportErr(err)
-			select {
-			case parcels <- &modelrepo.StreamParcel{Error: err}:
-			case <-ctx.Done():
-			}
+			send(&modelrepo.StreamParcel{Error: err})
 			return
 		}
 
-		// Tool calls are assembled from the streamed functionCall parts and
-		// delivered on a terminal parcel (empty Data/Thinking) so the executor's
-		// stream path can finalize them exactly like the non-streaming chat path.
-		if len(toolCalls) > 0 {
-			select {
-			case parcels <- &modelrepo.StreamParcel{ToolCalls: toolCalls}:
-			case <-ctx.Done():
-				return
-			}
+		if !send(&modelrepo.StreamParcel{Terminal: &modelrepo.StreamTerminal{
+			FinishReason: finishReason,
+			Usage:        usage,
+		}}) {
+			return
 		}
 
 		reportChange("stream_completed", map[string]any{
 			"chunk_count":     chunkCount,
 			"total_length":    totalContent.Len(),
-			"tool_call_count": len(toolCalls),
+			"tool_call_count": toolCallIndex,
 			"content_preview": truncateString(totalContent.String(), 100),
 		})
 	}()

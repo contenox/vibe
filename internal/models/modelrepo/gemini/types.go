@@ -55,6 +55,15 @@ type geminiGenerateContentResponse struct {
 	PromptFeedback struct {
 		BlockReason string `json:"blockReason,omitempty"`
 	} `json:"promptFeedback"`
+	UsageMetadata *geminiUsageMetadata `json:"usageMetadata,omitempty"`
+}
+
+// geminiUsageMetadata is the API's token accounting, attached to (the last
+// chunk of) a generateContent / streamGenerateContent response.
+type geminiUsageMetadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
 }
 
 // geminiFunctionDeclaration matches Gemini API's FunctionDeclaration exactly

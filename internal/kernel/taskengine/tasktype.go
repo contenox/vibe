@@ -246,7 +246,7 @@ type LLMExecutionConfig struct {
 	// Models are set, Model plus Models form the candidate set (Model first);
 	// the resolver then picks a reachable one — so set exactly Model for a single
 	// pinned model, or use Models for an explicit candidate pool.
-	Model string `yaml:"model" json:"model" example:"mistral:instruct"`
+	Model string `yaml:"model" json:"model" example:"llama2:7b"`
 	// Models is an additional candidate pool, considered alongside Model.
 	Models []string `yaml:"models,omitempty" json:"models,omitempty" example:"[\"gpt-4\", \"gpt-3.5-turbo\"]"`
 	// Provider is the primary provider, placed first in the candidate list;
@@ -571,7 +571,7 @@ type ChatHistory struct {
 	// Messages is the list of messages in the conversation.
 	Messages []Message `json:"messages"`
 	// Model is the name of the model to use for the conversation.
-	Model string `json:"model" example:"mistral:instruct"`
+	Model string `json:"model" example:"llama2:7b"`
 	// InputTokens will be filled by the engine and will hold the number of tokens used for the input.
 	InputTokens int `json:"inputTokens" example:"15"`
 	// OutputTokens will be filled by the engine and will hold the number of tokens used for the output.

@@ -280,9 +280,7 @@ Register and manage LLM backend endpoints.
 contenox backend add ollama       --type ollama
 contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
 contenox backend add openai       --type openai  --api-key-env OPENAI_API_KEY
-contenox backend add openrouter   --type openrouter --api-key-env OPENROUTER_API_KEY
 contenox backend add anthropic    --type anthropic --api-key-env ANTHROPIC_API_KEY
-contenox backend add mistral      --type mistral --api-key-env MISTRAL_API_KEY
 contenox backend add bedrock      --type bedrock --url https://bedrock-runtime.us-east-1.amazonaws.com
 contenox backend add gemini       --type gemini  --api-key-env GEMINI_API_KEY
 contenox backend add myvllm       --type vllm    --url http://gpu-host:8000
@@ -296,8 +294,8 @@ contenox backend remove myvllm
 
 | Flag            | Description                                                                               |
 | --------------- | ----------------------------------------------------------------------------------------- |
-| `--type`        | Backend type: `ollama`, `openai`, `openrouter`, `anthropic`, `mistral`, `gemini`, `bedrock`, `vllm`, `vertex-google`. |
-| `--url`         | Base URL (auto-inferred for openai/openrouter/anthropic/mistral/gemini; required for vllm, bedrock, and vertex-google) |
+| `--type`        | Backend type: `ollama`, `openai`, `anthropic`, `gemini`, `bedrock`, `vllm`, `vertex-google`. |
+| `--url`         | Base URL (auto-inferred for openai/anthropic/gemini; required for vllm, bedrock, and vertex-google) |
 | `--api-key-env` | Environment variable holding the API key (preferred)                                      |
 | `--api-key`     | API key literal (avoid — use `--api-key-env`)                                             |
 

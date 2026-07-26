@@ -3,6 +3,7 @@ package missiontools_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -151,11 +152,17 @@ func TestUnit_MissionTools_ReportReadsModelArgs(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
 
+	// The absolute ref must genuinely exist: this test is about ARG PARSING, and
+	// a result claiming a nonexistent absolute path would (correctly) trip the
+	// conclusion verification gate and land downgraded — verify_test.go's job.
+	outLog := filepath.Join(t.TempDir(), "out.log")
+	require.NoError(t, os.WriteFile(outLog, []byte("all green"), 0o644))
+
 	input := map[string]any{
 		"kind":    "result",
 		"summary": "done",
 		"detail":  "all green",
-		"refs":    []any{"README.md", "/tmp/out.log"},
+		"refs":    []any{"README.md", outLog},
 	}
 	call := &taskengine.ToolsCall{Name: missiontools.ToolsProviderName, ToolName: missiontools.ToolNameReport}
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), input, false, call)
@@ -166,7 +173,7 @@ func TestUnit_MissionTools_ReportReadsModelArgs(t *testing.T) {
 	require.Len(t, reports, 1)
 	require.Equal(t, missionservice.ReportKindResult, reports[0].Kind)
 	require.Equal(t, "all green", reports[0].Detail)
-	require.Equal(t, []string{"README.md", "/tmp/out.log"}, reports[0].Refs)
+	require.Equal(t, []string{"README.md", outLog}, reports[0].Refs)
 }
 
 // TestUnit_MissionTools_ReportReadsModelHandover proves the model-driven shape

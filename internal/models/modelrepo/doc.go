@@ -5,7 +5,7 @@
 // ChatResult, StreamParcel, Tool, ChatArgument).
 //
 // Concrete providers live in subpackages (openai, gemini, vertex, vllm,
-// ollama, anthropic, mistral, openrouter, bedrock). Higher-level code such as llmrepo and runtimestate depends
+// ollama, anthropic, bedrock). Higher-level code such as llmrepo and runtimestate depends
 // only on the interfaces declared here; provider subpackages are imported
 // for their side effects to register catalogs with runtimestate.
 package modelrepo

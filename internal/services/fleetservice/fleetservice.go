@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/contenox/beam/internal/errdefs"
 	"github.com/contenox/beam/internal/kernel/agentinstance"
@@ -106,10 +107,12 @@ type Service interface {
 	Get(ctx context.Context, instanceID string) (agentinstance.InstanceStatus, error)
 
 	// Dispatch allocates a unit: it resolves and validates the declared
-	// agent (refusing a disabled one), brings up an instance, opens a
-	// session, records a mission bound to both ids and carrying the
-	// request's envelope, and runs the intent as the unit's first turn on a
-	// detached context, returning as soon as the session is open
+	// agent (refusing a disabled one), admits it past the fleet-width cap
+	// (refusing with a teaching message when maxParallel units are already
+	// open — see admission.go), brings up an instance, opens a session,
+	// records a mission bound to both ids and carrying the request's
+	// envelope, and runs the intent as the unit's first turn on a detached
+	// context, returning as soon as the session is open
 	// (async-after-OpenSession; the turn's outcome is observable on the
 	// board).
 	//
@@ -166,6 +169,16 @@ type service struct {
 	// editor both wire it, so a mission cannot be created against an envelope that
 	// will never load and silently fall back to the default gate.
 	policyValidator hitlservice.PolicyValidator
+	// maxParallel is the fleet-width admission cap (see admission.go): how many
+	// units may be open at once before Dispatch refuses. Defaults to
+	// DefaultMaxParallel — enforced from birth, per the pando lesson — and 0 is
+	// the explicit "unlimited" opt-out (WithMaxParallel / fleet-max-parallel=0).
+	maxParallel int
+	// admission serializes the count-then-allocate window of the cap check:
+	// Dispatch holds it from admitUnit through StartResolved, so two concurrent
+	// dispatches cannot both observe cap-1 open units and both allocate. It
+	// guards nothing else — the rest of Dispatch runs unserialized as before.
+	admission sync.Mutex
 }
 
 // Option configures a fleet Service at construction. It exists so the optional
@@ -224,6 +237,11 @@ func New(
 		workspaceRoots: workspaceRoots,
 		projectRoot:    projectRoot,
 		tracker:        tracker,
+		// The width cap is enforced BEFORE any option runs: a fleetservice
+		// nobody configured still refuses past DefaultMaxParallel, so the knob
+		// cannot exist un-enforced (see admission.go). WithMaxParallel only
+		// ever changes the value — including to 0 (unlimited).
+		maxParallel: DefaultMaxParallel,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -303,11 +321,24 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 	missionID := uuid.NewString()
 
 	// 1. Bring up an instance from the record the Enabled check was just made
-	// against. StartResolved, not Start(agentName): Start would re-read the same
+	// against — but only past the fleet-width admission gate (admission.go):
+	// count the units already open and refuse past the cap with a refusal that
+	// teaches. Every dispatch passes this gate uniformly — fleetservice has no
+	// separate operator relaunch/retry verb to carve a bypass for — and the
+	// lock spans the check AND the allocation, so concurrent dispatches cannot
+	// slip past the cap between counting and spawning.
+	//
+	// StartResolved, not Start(agentName): Start would re-read the same
 	// row, which is both a second query per dispatch and a TOCTOU window — an
 	// agent disabled between the two reads would still spawn, defeating the check
 	// immediately above it.
+	s.admission.Lock()
+	if err := s.admitUnit(ctx); err != nil {
+		s.admission.Unlock()
+		return DispatchResult{}, err
+	}
 	instanceID, err := s.instances.StartResolved(ctx, agent, cwd)
+	s.admission.Unlock()
 	if err != nil {
 		return DispatchResult{}, err
 	}
@@ -361,6 +392,11 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 	// return. Payload discipline holds — ids and stop reason to the tracker, never
 	// prompt content — and the intent is stored CLEAN on the mission (the
 	// unattended preamble is prepended on the wire only, never persisted).
+	// The unit is allocated end to end: count it. Telemetry only (see
+	// counters.go) — the admission gate above counts LIVE instances off the
+	// kernel's board, never this ledger.
+	recordDispatch()
+
 	detached := context.WithoutCancel(ctx)
 	go s.driveUnattendedMission(detached, missionRun{
 		instanceID: instanceID,

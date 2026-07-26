@@ -2,6 +2,7 @@ package fleetservice
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,13 @@ type fakeManager struct {
 	cancelCalls []cancelCall
 
 	statuses map[string]agentinstance.InstanceStatus
+
+	// listStates configures List: each entry becomes one live instance in that
+	// state on a single declared agent's row — the shape the admission gate
+	// counts over. listErr, when set, makes List fail instead (the gate's
+	// fail-closed branch).
+	listStates []string
+	listErr    error
 }
 
 func (m *fakeManager) Start(_ context.Context, agentName, _ string) (string, error) {
@@ -171,7 +179,27 @@ func (m *fakeManager) Attach(context.Context, string, libacp.SessionID, agentins
 }
 func (m *fakeManager) Detach(string, libacp.SessionID, string) error { return nil }
 func (m *fakeManager) List(context.Context) ([]agentinstance.FleetEntry, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	if len(m.listStates) == 0 {
+		return nil, nil
+	}
+	instances := make([]agentinstance.InstanceStatus, len(m.listStates))
+	for i, state := range m.listStates {
+		instances[i] = agentinstance.InstanceStatus{ID: fmt.Sprintf("listed-%d", i), State: state}
+	}
+	return []agentinstance.FleetEntry{{AgentName: "runner", Instances: instances}}, nil
+}
+
+// setListStates swaps the states List reports live instances in — the hook the
+// admission tests use to make a "unit" conclude between two dispatches.
+func (m *fakeManager) setListStates(states ...string) {
+	m.mu.Lock()
+	m.listStates = states
+	m.mu.Unlock()
 }
 func (m *fakeManager) CloseSession(string, libacp.SessionID) error { return nil }
 func (m *fakeManager) SetConfigOption(context.Context, string, libacp.SessionID, string, libacp.SessionConfigOptionValue) error {

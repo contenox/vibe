@@ -87,6 +87,15 @@ type vertexResponse struct {
 	PromptFeedback struct {
 		BlockReason string `json:"blockReason,omitempty"`
 	} `json:"promptFeedback"`
+	UsageMetadata *vertexUsageMetadata `json:"usageMetadata,omitempty"`
+}
+
+// vertexUsageMetadata is the API's token accounting, attached to (the last
+// chunk of) a generateContent / streamGenerateContent response.
+type vertexUsageMetadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
 }
 
 // vertexErrorResponse is used to parse structured API errors.

@@ -323,6 +323,25 @@ func (w *spoolWriter) inlineOutput() string {
 	return w.pre.String()
 }
 
+// fullText returns the complete raw stream when it is retrievable: from the
+// in-memory buffer when the stream fit the inline budget, else read back from
+// the spool file. It reports false when the stream is incomplete (spool cap
+// hit) or unpersisted (spool error) — callers such as the S8 output filter
+// must then leave the stream alone. Call after close().
+func (w *spoolWriter) fullText() (string, bool) {
+	if !w.spilled {
+		return w.pre.String(), true
+	}
+	if w.spoolErr != nil || w.overCap || w.path == "" {
+		return "", false
+	}
+	b, err := os.ReadFile(w.path)
+	if err != nil {
+		return "", false
+	}
+	return string(b), true
+}
+
 // close flushes and closes the spool file, returning its path (or "" if nothing
 // was spilled).
 func (w *spoolWriter) close() string {

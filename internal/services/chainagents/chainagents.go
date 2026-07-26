@@ -41,6 +41,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/contenox/beam/internal/kernel/taskengine"
 	libdb "github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/services/agentregistryservice"
 	"github.com/contenox/beam/internal/services/localfileservice"
@@ -213,6 +214,18 @@ func scan(ctx context.Context, roots []string) ([]candidate, error) {
 		for _, rel := range paths {
 			chain, err := chains.Get(ctx, rel)
 			if err != nil {
+				// taskchainservice.Get vets every chain it returns, so a chain
+				// the linter refuses never seeds the registry. Say WHY, loudly:
+				// the operator's next question is exactly this reason, and an
+				// existing discovered row for the chain is disabled below by the
+				// same vanished-file pass (a chain that cannot run and a chain
+				// that is gone earn the same refusal at spawn).
+				if errors.Is(err, taskengine.ErrChainLint) {
+					slog.Warn("chain agent discovery: chain file fails validation and was skipped",
+						"chain_path", filepath.Join(abs, filepath.FromSlash(rel)),
+						"reason", err.Error(),
+						"remedy", "fix the file (see 'contenox vet'), then run 'contenox agent enable <name>' if the agent was disabled")
+				}
 				continue
 			}
 			if !eligible(filepath.Base(rel), chain.ID) {
@@ -325,9 +338,9 @@ func disableVanished(ctx context.Context, agents agentregistryservice.Service, f
 		if err := agents.Update(ctx, agent); err != nil {
 			return nil, fmt.Errorf("chainagents: disable vanished chain agent %q: %w", agent.Name, err)
 		}
-		slog.Warn("chain agent disabled: its chain file is gone",
+		slog.Warn("chain agent disabled: its chain file is gone or fails validation (a validation reason was logged by the scan above)",
 			"agent", agent.Name, "chain_path", path,
-			"remedy", "restore the file and run 'contenox agent enable "+agent.Name+"', or remove the agent")
+			"remedy", "restore or fix the file and run 'contenox agent enable "+agent.Name+"', or remove the agent")
 		disabled = append(disabled, agent.Name)
 	}
 	return disabled, nil

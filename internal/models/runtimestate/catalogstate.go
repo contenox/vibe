@@ -68,12 +68,8 @@ func providerConfigKey(backendType string) (string, bool) {
 		return OllamaKey, true
 	case "openai":
 		return OpenaiKey, true
-	case "openrouter":
-		return OpenRouterKey, true
 	case "anthropic":
 		return AnthropicKey, true
-	case "mistral":
-		return MistralKey, true
 	case "bedrock":
 		return BedrockKey, true
 	case "gemini":

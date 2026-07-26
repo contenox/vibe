@@ -55,6 +55,13 @@ type openAIResponse struct {
 		Effort  string `json:"effort"`
 		Summary string `json:"summary"`
 	} `json:"reasoning"`
+	// Usage is reported on the completed response object (and therefore on
+	// the response.completed stream event).
+	Usage *struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
 	// Error is set on response.failed / response.incomplete stream events.
 	Error *struct {
 		Code    string `json:"code"`

@@ -173,6 +173,10 @@ type provider struct {
 	// all — rather than offering tools that cannot work.
 	supervisor SupervisorStore
 	resolver   AttentionResolver
+	// recordDowngrade is the verification gate's telemetry hook (see
+	// WithDowngradeRecorder). Never nil: New installs a no-op, so the gate
+	// bumps it unconditionally.
+	recordDowngrade func()
 }
 
 // Option configures the provider at construction (the house's functional-option
@@ -205,7 +209,7 @@ func New(missions MissionStore, asker AttentionAsker, opts ...Option) taskengine
 	if missions == nil {
 		panic("missiontools: mission store is required")
 	}
-	p := &provider{missions: missions, asker: asker}
+	p := &provider{missions: missions, asker: asker, recordDowngrade: func() {}}
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -316,11 +320,40 @@ func (p *provider) execReport(ctx context.Context, missionID string, input any, 
 		Refs:     argStrings(input, call, "refs"),
 		Handover: handover,
 	}
+	// The conclusion verification gate (see verify.go): a RESULT whose claimed
+	// artifacts include a positively missing local path is downgraded to
+	// progress and annotated — before the write, so the durable row already
+	// tells the truth. The report always lands, through the same AddReport
+	// below, so routing and inbox behavior are untouched; and the tool's own
+	// reply names the downgrade so the unit learns it too.
+	downgradeNote := ""
+	if report.Kind == missionservice.ReportKindResult {
+		claims := reportClaims{refs: report.Refs}
+		if report.Handover != nil {
+			claims.artifacts = report.Handover.Artifacts
+		}
+		if missing := missingArtifacts(WorkdirFromContext(ctx), claimedRefs(claims)); len(missing) > 0 {
+			report.Kind = missionservice.ReportKindProgress
+			report.Detail = appendWarning(report.Detail, verificationWarning(missing))
+			downgradeNote = fmt.Sprintf(" (downgraded from result: %s: %s)", verificationWarningLead, quoteList(missing))
+			p.recordDowngrade()
+		}
+	}
 	if err := p.missions.AddReport(ctx, missionID, report); err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: file report: %w", err)
 	}
 	p.heartbeat(ctx, missionID)
-	return fmt.Sprintf("recorded %s report %q", report.Kind, report.ID), taskengine.DataTypeString, nil
+	return fmt.Sprintf("recorded %s report %q%s", report.Kind, report.ID, downgradeNote), taskengine.DataTypeString, nil
+}
+
+// appendWarning attaches the verification warning to a report's detail, on its
+// own paragraph — the same shape withUnansweredNote uses, so an annotated
+// detail always reads as the unit's words first, the runtime's note after.
+func appendWarning(detail, warning string) string {
+	if strings.TrimSpace(detail) == "" {
+		return warning
+	}
+	return detail + "\n\n" + warning
 }
 
 func (p *provider) execAskAttention(ctx context.Context, missionID string, input any, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {

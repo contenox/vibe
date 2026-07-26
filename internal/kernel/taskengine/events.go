@@ -80,15 +80,20 @@ type TaskEventScope struct {
 	Retry       int
 }
 
+// TaskEventSink receives engine observation events. Wants is per-kind so a
+// sink can decline event kinds it does not consume — and ONLY gates whether
+// events are built and published. It must never select an execution path:
+// execution semantics are identical whether every Wants returns true or false
+// (streaming is observation, not a mode).
 type TaskEventSink interface {
 	PublishTaskEvent(ctx context.Context, event TaskEvent) error
-	Enabled() bool
+	Wants(kind TaskEventKind) bool
 }
 
 type NoopTaskEventSink struct{}
 
 func (NoopTaskEventSink) PublishTaskEvent(context.Context, TaskEvent) error { return nil }
-func (NoopTaskEventSink) Enabled() bool                                     { return false }
+func (NoopTaskEventSink) Wants(TaskEventKind) bool                          { return false }
 
 type BusTaskEventSink struct {
 	bus            libbus.Messenger
@@ -110,12 +115,14 @@ func TaskEventRequestSubject(requestID string) string {
 	return TaskEventSubjectAll + ".request." + requestID
 }
 
-func (s *BusTaskEventSink) Enabled() bool {
+// Wants accepts every kind while a bus is attached (the pre-Wants Enabled()
+// behavior: bus sinks consumed all kinds).
+func (s *BusTaskEventSink) Wants(TaskEventKind) bool {
 	return s != nil && s.bus != nil
 }
 
 func (s *BusTaskEventSink) PublishTaskEvent(ctx context.Context, event TaskEvent) error {
-	if !s.Enabled() {
+	if !s.Wants(event.Kind) {
 		return nil
 	}
 
@@ -192,7 +199,7 @@ func NewTaskEvent(ctx context.Context, kind TaskEventKind) TaskEvent {
 }
 
 func publishTaskEventBestEffort(ctx context.Context, tracker libtracker.ActivityTracker, sink TaskEventSink, event TaskEvent) {
-	if sink == nil || !sink.Enabled() {
+	if sink == nil || !sink.Wants(event.Kind) {
 		return
 	}
 	if err := sink.PublishTaskEvent(ctx, event); err != nil {

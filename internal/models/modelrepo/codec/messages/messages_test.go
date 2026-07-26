@@ -3,6 +3,7 @@ package messages
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/contenox/beam/internal/models/modelrepo"
@@ -98,10 +99,15 @@ func TestUnit_DecodeResponse_TextThinkingToolUse(t *testing.T) {
 	}
 }
 
+// TestUnit_StreamDecoder_NamedEventsAndInputJSONDelta drives the decoder's
+// raw-delta parcels (plus the Finish terminal) through the engine-side
+// assembler: the decoder translates the wire only, assembly happens exactly
+// once in modelrepo.StreamAssembler.
 func TestUnit_StreamDecoder_NamedEventsAndInputJSONDelta(t *testing.T) {
 	d := NewStreamDecoder(nil)
+	asm := modelrepo.NewStreamAssembler("anthropic", "test-model")
 	lines := []string{
-		`{"type":"message_start","message":{"role":"assistant"}}`,
+		`{"type":"message_start","message":{"role":"assistant","usage":{"input_tokens":21}}}`,
 		`{"type":"content_block_start","index":0,"content_block":{"type":"text"}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}`,
@@ -110,31 +116,58 @@ func TestUnit_StreamDecoder_NamedEventsAndInputJSONDelta(t *testing.T) {
 		`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"pa"}}`,
 		`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"th\":\"/x\"}"}}`,
 		`{"type":"content_block_stop","index":1}`,
-		`{"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}}`,
 		`{"type":"message_stop"}`,
 	}
-	var text string
 	for _, l := range lines {
-		p, err := d.DecodeLine([]byte(l))
+		parcels, err := d.DecodeLine([]byte(l))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p != nil {
-			text += p.Data
+		for _, p := range parcels {
+			if err := asm.Consume(p); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	if text != "Hello" {
-		t.Fatalf("assembled text: %q", text)
+	if err := asm.Consume(d.Finish()); err != nil {
+		t.Fatal(err)
 	}
-	tcs := d.ToolCalls()
-	if len(tcs) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(tcs))
+	res, err := asm.Result()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if tcs[0].ID != "toolu_1" || tcs[0].Function.Name != "fs.list" {
-		t.Fatalf("tool call id/name: %+v", tcs[0])
+	if res.Content != "Hello" {
+		t.Fatalf("assembled text: %q", res.Content)
 	}
-	if tcs[0].Function.Arguments != `{"path":"/x"}` {
-		t.Fatalf("assembled args: %q", tcs[0].Function.Arguments)
+	if len(res.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(res.ToolCalls))
+	}
+	if res.ToolCalls[0].ID != "toolu_1" || res.ToolCalls[0].Function.Name != "fs.list" {
+		t.Fatalf("tool call id/name: %+v", res.ToolCalls[0])
+	}
+	if res.ToolCalls[0].Function.Arguments != `{"path":"/x"}` {
+		t.Fatalf("assembled args: %q", res.ToolCalls[0].Function.Arguments)
+	}
+	if res.FinishReason != "tool_use" {
+		t.Fatalf("finish reason: %q", res.FinishReason)
+	}
+	if res.Usage == nil || res.Usage.PromptTokens != 21 || res.Usage.CompletionTokens != 9 {
+		t.Fatalf("usage: %+v", res.Usage)
+	}
+}
+
+// TestUnit_StreamDecoder_ErrorEventSurfaces asserts an in-stream `error` SSE
+// event is a hard decode error — the transport turns it into an Error parcel
+// instead of swallowing it.
+func TestUnit_StreamDecoder_ErrorEventSurfaces(t *testing.T) {
+	d := NewStreamDecoder(nil)
+	_, err := d.DecodeLine([]byte(`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`))
+	if err == nil {
+		t.Fatal("expected an error for the in-stream error event")
+	}
+	if !strings.Contains(err.Error(), "overloaded_error") || !strings.Contains(err.Error(), "Overloaded") {
+		t.Fatalf("error should carry the API's type and message: %v", err)
 	}
 }
 

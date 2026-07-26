@@ -134,12 +134,31 @@ func (c *geminiClient) sendRequest(ctx context.Context, endpoint string, request
 }
 
 // buildGeminiRequest builds a proper Gemini generateContent request using modelrepo args & tools
-func buildGeminiRequest(modelName string, messages []modelrepo.Message, systemInstruction *geminiSystemInstruction, args []modelrepo.ChatArgument, canThink ...bool) (geminiGenerateContentRequest, error) {
+// buildGeminiRequest owns system-prompt extraction (like vertex's
+// buildVertexRequest): system messages are hoisted into systemInstruction here
+// so every caller — chat AND stream — sends them; a caller cannot forget and
+// silently drop the system prompt.
+func buildGeminiRequest(modelName string, messages []modelrepo.Message, args []modelrepo.ChatArgument, canThink ...bool) (geminiGenerateContentRequest, error) {
 	// Collect chat args
 	cfg := &modelrepo.ChatConfig{}
 	for _, a := range args {
 		a.Apply(cfg)
 	}
+
+	var systemInstruction *geminiSystemInstruction
+	filtered := make([]modelrepo.Message, 0, len(messages))
+	for _, m := range messages {
+		if m.Role == "system" {
+			if m.Content != "" {
+				systemInstruction = &geminiSystemInstruction{
+					Parts: []geminiPart{{Text: m.Content}},
+				}
+			}
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	messages = filtered
 
 	// Convert tools -> Gemini tool declarations
 	var tools []geminiToolRequest

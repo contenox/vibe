@@ -113,24 +113,24 @@ func TestUnit_BuildGeminiRequest_MapsThinkingConfig(t *testing.T) {
 	t.Parallel()
 	msgs := []modelrepo.Message{{Role: "user", Content: "hi"}}
 
-	req, err := buildGeminiRequest("gemini-2.5-pro", msgs, nil, []modelrepo.ChatArgument{modelrepo.WithThink("medium")})
+	req, err := buildGeminiRequest("gemini-2.5-pro", msgs, []modelrepo.ChatArgument{modelrepo.WithThink("medium")})
 	require.NoError(t, err)
 	require.NotNil(t, req.GenerationConfig.ThinkingConfig)
 	require.NotNil(t, req.GenerationConfig.ThinkingConfig.ThinkingBudget)
 	assert.Equal(t, 8192, *req.GenerationConfig.ThinkingConfig.ThinkingBudget)
 	assert.Equal(t, "", req.GenerationConfig.ThinkingConfig.ThinkingLevel)
 
-	req, err = buildGeminiRequest("gemini-3-flash", msgs, nil, []modelrepo.ChatArgument{modelrepo.WithThink("off")})
+	req, err = buildGeminiRequest("gemini-3-flash", msgs, []modelrepo.ChatArgument{modelrepo.WithThink("off")})
 	require.NoError(t, err)
 	require.NotNil(t, req.GenerationConfig.ThinkingConfig)
 	require.Nil(t, req.GenerationConfig.ThinkingConfig.ThinkingBudget)
 	assert.Equal(t, "minimal", req.GenerationConfig.ThinkingConfig.ThinkingLevel)
 
-	req, err = buildGeminiRequest("gemini-3-pro", msgs, nil, []modelrepo.ChatArgument{modelrepo.WithThink("auto")})
+	req, err = buildGeminiRequest("gemini-3-pro", msgs, []modelrepo.ChatArgument{modelrepo.WithThink("auto")})
 	require.NoError(t, err)
 	require.Nil(t, req.GenerationConfig.ThinkingConfig)
 
-	req, err = buildGeminiRequest("gemini-2.5-pro", msgs, nil, []modelrepo.ChatArgument{modelrepo.WithThink("medium")}, false)
+	req, err = buildGeminiRequest("gemini-2.5-pro", msgs, []modelrepo.ChatArgument{modelrepo.WithThink("medium")}, false)
 	require.NoError(t, err)
 	require.Nil(t, req.GenerationConfig.ThinkingConfig, "provider with CanThink=false must omit Gemini thinking config")
 }
@@ -140,7 +140,6 @@ func TestUnit_BuildGeminiRequest_RejectsEmptyContents(t *testing.T) {
 
 	_, err := buildGeminiRequest("gemini-3.1-pro-preview",
 		[]modelrepo.Message{{Role: "system", Content: "system only"}},
-		&geminiSystemInstruction{Parts: []geminiPart{{Text: "system only"}}},
 		nil,
 	)
 	require.Error(t, err)
@@ -149,7 +148,6 @@ func TestUnit_BuildGeminiRequest_RejectsEmptyContents(t *testing.T) {
 
 	_, err = buildGeminiRequest("gemini-3.1-pro-preview",
 		[]modelrepo.Message{{Role: "user", Content: ""}},
-		nil,
 		nil,
 	)
 	require.Error(t, err)
@@ -175,7 +173,7 @@ func TestUnit_BuildGeminiRequest_WrapsSchemaLikeToolResultAsText(t *testing.T) {
 		{Role: "tool", ToolCallID: "call-1", Content: schemaResult},
 	}
 
-	req, err := buildGeminiRequest("gemini-3.1-pro-preview", msgs, nil, nil)
+	req, err := buildGeminiRequest("gemini-3.1-pro-preview", msgs, nil)
 	require.NoError(t, err)
 	require.Len(t, req.Contents, 2)
 	resp := req.Contents[1].Parts[0].FunctionResponse.Response
@@ -197,7 +195,7 @@ func TestUnit_BuildGeminiRequest_ImageInputAddsInlineDataPart(t *testing.T) {
 		},
 	}
 
-	req, err := buildGeminiRequest("gemini-2.5-pro", msgs, nil, nil)
+	req, err := buildGeminiRequest("gemini-2.5-pro", msgs, nil)
 	require.NoError(t, err)
 
 	// White-box: the user content carries a text part then an inlineData part.
@@ -219,7 +217,7 @@ func TestUnit_BuildGeminiRequest_ImageInputAddsInlineDataPart(t *testing.T) {
 	assert.Contains(t, js, `"data":"`+wantB64+`"`)
 
 	// A text-only message keeps its prior single text-part shape (no inlineData).
-	textReq, err := buildGeminiRequest("gemini-2.5-pro", []modelrepo.Message{{Role: "user", Content: "hi"}}, nil, nil)
+	textReq, err := buildGeminiRequest("gemini-2.5-pro", []modelrepo.Message{{Role: "user", Content: "hi"}}, nil)
 	require.NoError(t, err)
 	require.Len(t, textReq.Contents, 1)
 	require.Len(t, textReq.Contents[0].Parts, 1)
@@ -248,7 +246,7 @@ func TestUnit_BuildGeminiRequest_KeepsNormalObjectToolResultStructured(t *testin
 		{Role: "tool", ToolCallID: "call-1", Content: `{"status":"ok"}`},
 	}
 
-	req, err := buildGeminiRequest("gemini-3.1-pro-preview", msgs, nil, nil)
+	req, err := buildGeminiRequest("gemini-3.1-pro-preview", msgs, nil)
 	require.NoError(t, err)
 	require.Equal(t, "ok", req.Contents[1].Parts[0].FunctionResponse.Response["status"])
 }

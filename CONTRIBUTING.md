@@ -59,7 +59,7 @@ declarative. New Go primitives should be rare.
 **LLM Resolution** — `llmrepo.ModelRepo` handles request-side selection by
 capability, provider, model, and context length. `modelrepo.Provider`
 implementations handle provider-side calls for Ollama/Ollama Cloud, vLLM,
-OpenAI, OpenRouter, Anthropic, Mistral, Gemini, AWS Bedrock, and Vertex.
+OpenAI, Anthropic, Gemini, AWS Bedrock, and Vertex.
 Runtime state catalogs configured backend capabilities for selectors and
 diagnostics.
 

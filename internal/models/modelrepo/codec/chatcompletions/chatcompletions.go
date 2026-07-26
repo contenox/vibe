@@ -5,9 +5,9 @@
 // round-tripping.
 //
 // It does NO I/O: callers build a Request, marshal and POST it through their
-// own transport (API-key header for direct OpenAI/Mistral), then hand the raw
-// response bytes back here to decode. This is what lets the direct Mistral /
-// OpenAI provider stay a thin transport wrapper around the shared codec.
+// own transport (API-key header for direct OpenAI, bearer token for vLLM), then
+// hand the raw response bytes back here to decode. This is what lets each
+// OpenAI-compatible provider stay a thin transport wrapper around the shared codec.
 package chatcompletions
 
 import (
@@ -21,7 +21,7 @@ import (
 
 // Request is the OpenAI-compatible chat/completions request body.
 //
-// Note: this codec emits `max_tokens` (the field Mistral's OpenAI-compatible
+// Note: this codec emits `max_tokens` (the field every OpenAI-compatible
 // endpoint accepts), not the newer `max_completion_tokens`.
 type Request struct {
 	Model       string        `json:"model"`
@@ -85,7 +85,7 @@ type wireToolDecl struct {
 // the StreamDecoder can translate tool-call names back to what the caller used.
 //
 // model is placed verbatim in the body; the transport decides the exact string
-// (e.g. "mistral-large-latest", or whatever id the provider expects).
+// (e.g. "gpt-5-mini", or whatever id the provider expects).
 func Build(model string, messages []modelrepo.Message, cfg *modelrepo.ChatConfig) (Request, map[string]string) {
 	req := Request{Model: model}
 	if cfg != nil {
@@ -250,6 +250,8 @@ func newToolCall(id, typ, name, args string) modelrepo.ToolCall {
 }
 
 // streamChunk is one SSE chunk of a streamed chat/completions response.
+// The Reasoning field is a vLLM variant spelling of reasoning_content; both
+// map to a Thinking delta.
 type streamChunk struct {
 	Choices []struct {
 		Index int `json:"index"`
@@ -257,6 +259,7 @@ type streamChunk struct {
 			Role             string `json:"role"`
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
 			ToolCalls        []struct {
 				Index    int    `json:"index"`
 				ID       string `json:"id"`
@@ -269,96 +272,93 @@ type streamChunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
-// StreamDecoder assembles a streamed chat/completions response. Text and
-// reasoning deltas are returned as parcels; tool-call fragments are accumulated
-// per index and exposed via ToolCalls() once the stream ends.
+// StreamDecoder translates streamed chat/completions chunks into raw-delta
+// parcels (per the modelrepo.StreamParcel contract). It does NOT assemble:
+// tool-call fragments are emitted as ToolCallDelta parcels (names translated
+// through nameMap as they appear) and assembly is left to the engine-side
+// modelrepo.StreamAssembler. The finish reason and usage report are held back
+// and surfaced by Finish as the typed terminal parcel, because the wire can
+// deliver a trailing usage-only chunk after the finish_reason chunk.
 type StreamDecoder struct {
-	nameMap  map[string]string
-	toolAcc  map[int]*accTool
-	maxIndex int
-}
-
-type accTool struct {
-	id   string
-	typ  string
-	name string
-	args strings.Builder
+	nameMap      map[string]string
+	finishReason string
+	usage        *modelrepo.TokenUsage
 }
 
 // NewStreamDecoder returns a decoder. nameMap is the sanitized->original map
 // from Build (may be nil if no tools).
 func NewStreamDecoder(nameMap map[string]string) *StreamDecoder {
-	return &StreamDecoder{nameMap: nameMap, toolAcc: map[int]*accTool{}, maxIndex: -1}
+	return &StreamDecoder{nameMap: nameMap}
 }
 
 // DecodeLine parses one SSE data payload (the bytes AFTER the "data: " prefix,
-// excluding the "[DONE]" sentinel which the caller should skip). It returns a
-// parcel to emit if the chunk carried visible text/reasoning, or nil.
-func (d *StreamDecoder) DecodeLine(payload []byte) (*modelrepo.StreamParcel, error) {
+// excluding the "[DONE]" sentinel which the caller should skip) and returns
+// the raw-delta parcels it carries, in wire order.
+func (d *StreamDecoder) DecodeLine(payload []byte) ([]*modelrepo.StreamParcel, error) {
 	var chunk streamChunk
 	if err := json.Unmarshal(payload, &chunk); err != nil {
 		return nil, fmt.Errorf("chatcompletions: decode stream chunk: %w", err)
 	}
+	if chunk.Usage != nil {
+		d.usage = &modelrepo.TokenUsage{
+			PromptTokens:     chunk.Usage.PromptTokens,
+			CompletionTokens: chunk.Usage.CompletionTokens,
+			TotalTokens:      chunk.Usage.TotalTokens,
+		}
+	}
 	if len(chunk.Choices) == 0 {
 		return nil, nil
 	}
-	delta := chunk.Choices[0].Delta
-
-	for _, tc := range delta.ToolCalls {
-		idx := tc.Index
-		acc := d.toolAcc[idx]
-		if acc == nil {
-			acc = &accTool{}
-			d.toolAcc[idx] = acc
-			if idx > d.maxIndex {
-				d.maxIndex = idx
-			}
-		}
-		if tc.ID != "" {
-			acc.id = tc.ID
-		}
-		if tc.Type != "" {
-			acc.typ = tc.Type
-		}
-		if tc.Function.Name != "" {
-			acc.name = tc.Function.Name
-		}
-		if tc.Function.Arguments != "" {
-			acc.args.WriteString(tc.Function.Arguments)
-		}
+	choice := chunk.Choices[0]
+	if choice.FinishReason != "" {
+		d.finishReason = choice.FinishReason
 	}
 
-	if delta.Content != "" || delta.ReasoningContent != "" {
-		return &modelrepo.StreamParcel{Data: delta.Content, Thinking: delta.ReasoningContent}, nil
+	var parcels []*modelrepo.StreamParcel
+	if choice.Delta.Content != "" {
+		parcels = append(parcels, &modelrepo.StreamParcel{Data: choice.Delta.Content})
 	}
-	return nil, nil
-}
-
-// ToolCalls returns the tool calls assembled across the stream, in index order,
-// with names translated back via nameMap.
-func (d *StreamDecoder) ToolCalls() []modelrepo.ToolCall {
-	if d.maxIndex < 0 {
-		return nil
+	if thinking := firstNonEmpty(choice.Delta.Reasoning, choice.Delta.ReasoningContent); thinking != "" {
+		parcels = append(parcels, &modelrepo.StreamParcel{Thinking: thinking})
 	}
-	var out []modelrepo.ToolCall
-	for i := 0; i <= d.maxIndex; i++ {
-		acc := d.toolAcc[i]
-		if acc == nil {
-			continue
-		}
-		name := acc.name
+	for _, tc := range choice.Delta.ToolCalls {
+		name := tc.Function.Name
 		if orig, ok := d.nameMap[name]; ok && orig != "" {
 			name = orig
 		}
-		typ := acc.typ
-		if typ == "" {
-			typ = "function"
-		}
-		out = append(out, newToolCall(acc.id, typ, name, acc.args.String()))
+		parcels = append(parcels, &modelrepo.StreamParcel{ToolCall: &modelrepo.ToolCallDelta{
+			Index:        tc.Index,
+			ID:           tc.ID,
+			Type:         tc.Type,
+			Name:         name,
+			ArgsFragment: tc.Function.Arguments,
+		}})
 	}
-	return out
+	return parcels, nil
+}
+
+// Finish returns the typed terminal parcel: the finish reason last seen on the
+// wire plus the usage report when the provider sent one. Callers emit it after
+// the SSE stream ends cleanly ([DONE] or EOF without error).
+func (d *StreamDecoder) Finish() *modelrepo.StreamParcel {
+	return &modelrepo.StreamParcel{Terminal: &modelrepo.StreamTerminal{
+		FinishReason: d.finishReason,
+		Usage:        d.usage,
+	}}
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // sanitizeToolName replaces characters outside OpenAI's allowed set

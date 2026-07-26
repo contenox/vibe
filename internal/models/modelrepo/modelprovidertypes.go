@@ -69,17 +69,73 @@ type ChatArgument interface {
 	Apply(config *ChatConfig)
 }
 
+// ToolCallDelta is one raw streamed tool-call fragment. Providers translate
+// their wire format into these fragments and never assemble them; assembly is
+// engine policy and happens exactly once, in StreamAssembler.
+//
+// Index groups the fragments of one call: every fragment of the same call
+// carries the same Index, and distinct calls in one response carry distinct
+// Indexes. Providers whose wire format has no index (they deliver each call
+// whole) assign sequential indexes in arrival order.
+//
+// ID, Type, and Name are atomic fields: each is set on at most one fragment
+// per index (conventionally the first). ArgsFragment carries a piece of the
+// argument JSON; fragments are concatenated in arrival order.
+type ToolCallDelta struct {
+	Index        int
+	ID           string
+	Type         string
+	Name         string
+	ArgsFragment string
+	// ProviderMeta carries opaque provider-specific data that must round-trip
+	// on the next turn (e.g. Gemini thought_signature).
+	ProviderMeta map[string]string
+}
+
+// TokenUsage is provider-reported token accounting. Zero fields mean
+// "not reported"; the assembler merges later reports over earlier ones
+// field-wise.
+type TokenUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+// StreamTerminal is the typed terminal event of a stream: the provider's
+// finish reason (verbatim wire value, e.g. "stop", "tool_calls", "length",
+// "content_filter", "MAX_TOKENS") plus final usage when the provider reports
+// it there.
+type StreamTerminal struct {
+	FinishReason string
+	Usage        *TokenUsage
+}
+
+// StreamParcel is ONE raw delta from a provider stream. The contract is exact:
+//
+//   - Exactly one of Data, Thinking, ToolCall, Usage, Terminal, or Error is
+//     populated per parcel.
+//   - Providers emit raw deltas only. They never accumulate content, never
+//     assemble tool calls, and never reorder events; assembly is engine
+//     policy (StreamAssembler).
+//   - A successful stream ends with exactly one Terminal parcel, after which
+//     the channel closes. Nothing follows a Terminal parcel.
+//   - A failed stream ends with an Error parcel (in-stream provider error
+//     events surface here too) and no Terminal.
 type StreamParcel struct {
+	// Data is a visible output-text delta.
 	Data string
 	// Thinking carries a streamed reasoning/thinking delta separate from the
 	// visible output text. Like Message.Thinking, it is provider-facing output
 	// and must never be sent back as conversation history.
 	Thinking string
-	// ToolCalls carries final structured tool-call output for providers that can
-	// assemble tool calls from a stream. It is normally emitted on a terminal
-	// parcel, not token-by-token.
-	ToolCalls []ToolCall
-	Error     error
+	// ToolCall is one raw tool-call fragment (see ToolCallDelta).
+	ToolCall *ToolCallDelta
+	// Usage is a provider usage report emitted mid-stream (some providers
+	// report prompt tokens at stream start and completion tokens at the end).
+	Usage *TokenUsage
+	// Terminal is the typed end-of-stream event: finish reason + final usage.
+	Terminal *StreamTerminal
+	Error    error
 }
 
 type Tool struct {

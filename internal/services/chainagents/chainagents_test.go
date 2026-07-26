@@ -281,3 +281,44 @@ func TestUnit_Discover_RequiresARegistry(t *testing.T) {
 	_, err := chainagents.Discover(context.Background(), nil, t.TempDir())
 	require.Error(t, err)
 }
+
+// TestUnit_Discover_LintFailingChainIsSkippedAndDisabled: discovery vets every
+// chain before seeding (via taskchainservice.Get's linter), so a chain the
+// linter refuses (1) never seeds the registry and (2) gets its existing
+// discovered row DISABLED through the same path a vanished file takes — sticky:
+// even after the file is fixed, re-enabling is the operator's explicit verb.
+func TestUnit_Discover_LintFailingChainIsSkippedAndDisabled(t *testing.T) {
+	ctx, agents := setupRegistry(t)
+	dir := t.TempDir()
+	writeChain(t, dir, "agent-worker.json", "worker")
+
+	res, err := chainagents.Discover(ctx, agents, dir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"worker"}, res.Created)
+	require.True(t, mustGet(t, ctx, agents, "worker").Enabled)
+
+	// Break the chain in place: still parseable, still has an id and tasks
+	// (so the walker lists it), but the linter refuses it (unknown handler).
+	broken := taskengine.TaskChainDefinition{
+		ID:    "worker",
+		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
+	}
+	data, err := json.Marshal(broken)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-worker.json"), data, 0o600))
+
+	res, err = chainagents.Discover(ctx, agents, dir)
+	require.NoError(t, err)
+	require.Empty(t, res.Created)
+	require.Empty(t, res.Updated)
+	require.Equal(t, []string{"worker"}, res.Disabled,
+		"a chain the linter refuses must be disabled like a vanished file")
+	require.False(t, mustGet(t, ctx, agents, "worker").Enabled)
+
+	// Fixing the file does NOT auto re-enable: Discover never moves Enabled
+	// upward, so the operator's `contenox agent enable` stays the one verb.
+	writeChain(t, dir, "agent-worker.json", "worker")
+	_, err = chainagents.Discover(ctx, agents, dir)
+	require.NoError(t, err)
+	require.False(t, mustGet(t, ctx, agents, "worker").Enabled)
+}

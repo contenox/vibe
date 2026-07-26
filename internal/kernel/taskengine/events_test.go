@@ -3,6 +3,9 @@ package taskengine_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/models/llmrepo"
 	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/beam/internal/models/modelrepo/openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +29,7 @@ func (s *captureTaskEventSink) PublishTaskEvent(ctx context.Context, event taske
 	return nil
 }
 
-func (s *captureTaskEventSink) Enabled() bool { return true }
+func (s *captureTaskEventSink) Wants(taskengine.TaskEventKind) bool { return true }
 
 type mockModelRepo struct {
 	streamFunc func(ctx context.Context, req llmrepo.Request, messages []libmodelprovider.Message, opts ...libmodelprovider.ChatArgument) (<-chan *libmodelprovider.StreamParcel, llmrepo.Meta, error)
@@ -178,10 +182,13 @@ func TestTaskEvents_ChatStreamingPublishesChunks(t *testing.T) {
 
 	repo := &mockModelRepo{
 		streamFunc: func(ctx context.Context, req llmrepo.Request, messages []libmodelprovider.Message, opts ...libmodelprovider.ChatArgument) (<-chan *libmodelprovider.StreamParcel, llmrepo.Meta, error) {
-			ch := make(chan *libmodelprovider.StreamParcel, 3)
+			ch := make(chan *libmodelprovider.StreamParcel, 4)
 			ch <- &libmodelprovider.StreamParcel{Thinking: "think-1"}
 			ch <- &libmodelprovider.StreamParcel{Data: "hello "}
 			ch <- &libmodelprovider.StreamParcel{Data: "world"}
+			// Raw-delta contract: a successful stream ends with a typed
+			// terminal parcel.
+			ch <- &libmodelprovider.StreamParcel{Terminal: &libmodelprovider.StreamTerminal{FinishReason: "stop"}}
 			close(ch)
 			return ch, llmrepo.Meta{
 				ModelName:    "test-model",
@@ -247,27 +254,44 @@ func TestTaskEvents_ChatStreamingPublishesChunks(t *testing.T) {
 }
 
 // TestTaskEvents_ChatStreamingWithToolsParsesToolCalls locks in the streaming
-// path for tool-bearing chat_completion tasks: visible content still streams
-// token-by-token, tool calls delivered on the terminal parcel are parsed onto
-// the assistant message (not leaked into the transcript as prose), and the full
-// reply is never re-published as a duplicate chunk after streaming.
+// path for tool-bearing chat_completion tasks, fixture-driven end to end: a
+// recorded chat-completions SSE transcript (tool-call fragments split across
+// chunks) is served over HTTP, decoded by the REAL openai stream adapter, and
+// assembled by the engine — visible content still streams token-by-token,
+// tool calls are assembled engine-side onto the assistant message (never
+// leaked into the transcript as prose), and the full reply is never
+// re-published as a duplicate chunk after streaming.
 func TestTaskEvents_ChatStreamingWithToolsParsesToolCalls(t *testing.T) {
 	sink := &captureTaskEventSink{}
 	constructorCtx := taskengine.WithTaskEventSink(context.Background(), sink)
 
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"let me \"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"check\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\"}}]}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"Berlin\\\"}\"}}]}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	provider := openai.NewOpenAIProvider("test-key", "test-model", []string{srv.URL}, libmodelprovider.CapabilityConfig{
+		CanChat:   true,
+		CanStream: true,
+	}, srv.Client(), libtracker.NoopTracker{})
+
 	repo := &mockModelRepo{
 		streamFunc: func(ctx context.Context, req llmrepo.Request, messages []libmodelprovider.Message, opts ...libmodelprovider.ChatArgument) (<-chan *libmodelprovider.StreamParcel, llmrepo.Meta, error) {
-			ch := make(chan *libmodelprovider.StreamParcel, 4)
-			ch <- &libmodelprovider.StreamParcel{Data: "let me "}
-			ch <- &libmodelprovider.StreamParcel{Data: "check"}
-			// Terminal parcel: assembled tool calls, no visible tokens. This is
-			// how providers surface tool calls from a stream.
-			tc := libmodelprovider.ToolCall{ID: "call-1", Type: "function"}
-			tc.Function.Name = "get_weather"
-			tc.Function.Arguments = `{"city":"Berlin"}`
-			ch <- &libmodelprovider.StreamParcel{ToolCalls: []libmodelprovider.ToolCall{tc}}
-			close(ch)
-			return ch, llmrepo.Meta{ModelName: "test-model", ProviderType: "llama", BackendID: "b1"}, nil
+			client, err := provider.GetStreamConnection(ctx, srv.URL)
+			if err != nil {
+				return nil, llmrepo.Meta{}, err
+			}
+			ch, err := client.Stream(ctx, messages, opts...)
+			if err != nil {
+				return nil, llmrepo.Meta{}, err
+			}
+			return ch, llmrepo.Meta{ModelName: "test-model", ProviderType: "openai", BackendID: "b1"}, nil
 		},
 	}
 

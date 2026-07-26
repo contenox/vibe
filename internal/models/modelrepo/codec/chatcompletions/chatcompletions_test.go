@@ -11,7 +11,7 @@ import (
 // TestUnit_Build_SerializesImageAsContentParts asserts an image attachment
 // becomes the OpenAI content-parts array (text part + image_url part with the
 // inline base64 data URI), while a text-only message keeps a plain-string
-// content — the shape Mistral and OpenRouter both consume.
+// content — the shape OpenAI-compatible endpoints consume.
 func TestUnit_Build_SerializesImageAsContentParts(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
 	msgs := []modelrepo.Message{
@@ -21,7 +21,7 @@ func TestUnit_Build_SerializesImageAsContentParts(t *testing.T) {
 		}},
 	}
 
-	req, _ := Build("mistral-small-latest", msgs, nil)
+	req, _ := Build("gpt-5-mini", msgs, nil)
 	raw, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -147,37 +147,57 @@ func TestUnit_DecodeResponse_TextAndToolCalls(t *testing.T) {
 	}
 }
 
-func TestUnit_StreamDecoder_AssemblesTextAndToolArgs(t *testing.T) {
+// TestUnit_StreamDecoder_EmitsRawDeltasForAssembler drives the decoder's
+// delta parcels (plus the Finish terminal) through the engine-side assembler:
+// the decoder translates the wire only, assembly happens exactly once in
+// modelrepo.StreamAssembler.
+func TestUnit_StreamDecoder_EmitsRawDeltasForAssembler(t *testing.T) {
 	nameMap := map[string]string{"fs_list": "fs.list"}
 	d := NewStreamDecoder(nameMap)
+	asm := modelrepo.NewStreamAssembler("openai", "test-model")
 
 	lines := []string{
 		`{"choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"}}]}`,
 		`{"choices":[{"index":0,"delta":{"content":"lo"}}]}`,
 		`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"fs_list","arguments":"{\"pa"}}]}}]}`,
 		`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"/x\"}"}}]}}]}`,
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`,
 	}
-	var text string
 	for _, l := range lines {
-		p, err := d.DecodeLine([]byte(l))
+		parcels, err := d.DecodeLine([]byte(l))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p != nil {
-			text += p.Data
+		for _, p := range parcels {
+			if err := asm.Consume(p); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	if text != "Hello" {
-		t.Fatalf("assembled text: %q", text)
+	if err := asm.Consume(d.Finish()); err != nil {
+		t.Fatal(err)
 	}
-	tcs := d.ToolCalls()
-	if len(tcs) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(tcs))
+	res, err := asm.Result()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if tcs[0].Function.Name != "fs.list" {
-		t.Fatalf("stream tool name not un-sanitized: %q", tcs[0].Function.Name)
+	if res.Content != "Hello" {
+		t.Fatalf("assembled text: %q", res.Content)
 	}
-	if tcs[0].Function.Arguments != `{"path":"/x"}` {
-		t.Fatalf("assembled args: %q", tcs[0].Function.Arguments)
+	if len(res.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(res.ToolCalls))
+	}
+	if res.ToolCalls[0].Function.Name != "fs.list" {
+		t.Fatalf("stream tool name not un-sanitized: %q", res.ToolCalls[0].Function.Name)
+	}
+	if res.ToolCalls[0].Function.Arguments != `{"path":"/x"}` {
+		t.Fatalf("assembled args: %q", res.ToolCalls[0].Function.Arguments)
+	}
+	if res.FinishReason != "tool_calls" {
+		t.Fatalf("finish reason: %q", res.FinishReason)
+	}
+	if res.Usage == nil || res.Usage.PromptTokens != 11 || res.Usage.CompletionTokens != 7 || res.Usage.TotalTokens != 18 {
+		t.Fatalf("usage: %+v", res.Usage)
 	}
 }

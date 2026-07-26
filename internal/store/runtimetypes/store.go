@@ -25,7 +25,7 @@ type Status struct {
 	Digest    string `json:"digest,omitempty" example:"sha256:9e3a6c0d3b5e7f8a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a"`
 	Total     int64  `json:"total,omitempty" example:"1000000"`
 	Completed int64  `json:"completed,omitempty" example:"250000"`
-	Model     string `json:"model" example:"mistral:instruct"`
+	Model     string `json:"model" example:"llama2:7b"`
 	BaseURL   string `json:"baseUrl" example:"http://ollama-prod.internal:11434"`
 }
 
@@ -46,7 +46,7 @@ type Backend struct {
 
 type Model struct {
 	ID            string    `json:"id" example:"m7d8e9f0a-1b2c-3d4e-5f6a-7b8c9d0e1f2a"`
-	Model         string    `json:"model" example:"mistral:instruct"`
+	Model         string    `json:"model" example:"llama2:7b"`
 	ContextLength int       `json:"contextLength" example:"8192"`
 	CanChat       bool      `json:"canChat" example:"true"`
 	CanEmbed      bool      `json:"canEmbed" example:"false"`
@@ -81,7 +81,7 @@ type AffinityGroup struct {
 type Job struct {
 	ID           string          `json:"id" example:"j1a2b3c4-d5e6-f7g8-h9i0-j1k2l3m4n5o6"`
 	TaskType     string          `json:"taskType" example:"model-download"`
-	Payload      json.RawMessage `json:"payload" example:"{\"model\":\"mistral:instruct\",\"backend\":\"b7d9e1a3-8f0c-4a7d-9b1e-2f3a4b5c6d7e\"}"`
+	Payload      json.RawMessage `json:"payload" example:"{\"model\":\"llama2:7b\",\"backend\":\"b7d9e1a3-8f0c-4a7d-9b1e-2f3a4b5c6d7e\"}"`
 	ScheduledFor int64           `json:"scheduledFor" example:"1717020800"`
 	ValidUntil   int64           `json:"validUntil" example:"1717024400"`
 	RetryCount   int             `json:"retryCount" example:"0"`
@@ -91,7 +91,7 @@ type Job struct {
 // KV represents a key-value pair in the database
 type KV struct {
 	Key       string          `json:"key" example:"config:default-model"`
-	Value     json.RawMessage `json:"value" example:"\"mistral:instruct\""`
+	Value     json.RawMessage `json:"value" example:"\"llama2:7b\""`
 	CreatedAt time.Time       `json:"createdAt" example:"2023-11-15T14:30:45Z"`
 	UpdatedAt time.Time       `json:"updatedAt" example:"2023-11-15T14:30:45Z"`
 }

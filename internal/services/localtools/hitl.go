@@ -182,7 +182,7 @@ func (h *HITLWrapper) Exec(
 }
 
 func (h *HITLWrapper) publishDecision(ctx context.Context, toolsName, toolName string, args map[string]any, result hitlservice.EvaluationResult, approvalRequested bool) {
-	if h.eventSink == nil || !h.eventSink.Enabled() {
+	if h.eventSink == nil || !h.eventSink.Wants(taskengine.TaskEventHITLDecision) {
 		return
 	}
 	ev := taskengine.NewTaskEvent(ctx, taskengine.TaskEventHITLDecision)

@@ -25,7 +25,7 @@ Sends the current input to the LLM and waits for a reply. If the model calls a t
 |-------|----------|-------------|
 | `system_instruction` | No | System prompt (supports macros) |
 | `execute_config.model` | Yes | Model name, e.g. `qwen2.5:7b` |
-| `execute_config.provider` | Yes | `ollama`, `openai`, `openrouter`, `anthropic`, `mistral`, `vllm`, `gemini`, `bedrock`, `vertex-google` |
+| `execute_config.provider` | Yes | `ollama`, `openai`, `anthropic`, `vllm`, `gemini`, `bedrock`, `vertex-google` |
 | `execute_config.tools` | No | Tools allowlist: `[]`=none, `["*"]`=all, `["a","b"]`=named, `["*","!x"]`=all-except. Absent/`null`=none — the task has no tools until this field explicitly grants some. |
 | `execute_config.hide_tools` | No | Tools to suppress (by namespaced name) from **both** the registry tools selected via `tools` and any client-passed tools |
 | `execute_config.tools_policies` | No | Per-tools-provider policy overrides, `{ "<tools_name>": { "<key>": "<value>" } }`. Injected before the tool runs, so the provider can enforce them (e.g. `local_shell: { "_allowed_commands": "git,go,ls", "_denied_commands": "sudo,rm" }`). |

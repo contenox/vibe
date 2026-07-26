@@ -621,7 +621,7 @@ func backendHint(backend runtimetypes.Backend, kind backendErrorKind) string {
 	switch kind {
 	case backendErrorAPIKeyMissing:
 		switch modelrepo.CanonicalBackendType(backend.Type) {
-		case "openai", "anthropic", "mistral", "gemini":
+		case "openai", "anthropic", "gemini":
 			return fmt.Sprintf("Save credentials on Cloud providers, or re-add backend %q after exporting the provider API key.", backend.Name)
 		case "vertex-google":
 			return fmt.Sprintf("Backend %q uses ADC (Application Default Credentials). Run: gcloud auth application-default login", backend.Name)
@@ -637,7 +637,7 @@ func backendHint(backend runtimetypes.Backend, kind backendErrorKind) string {
 		}
 	case backendErrorAuth:
 		switch modelrepo.CanonicalBackendType(backend.Type) {
-		case "openai", "anthropic", "mistral", "gemini":
+		case "openai", "anthropic", "gemini":
 			return fmt.Sprintf("The stored API key for backend %q was rejected. Update the key on Cloud providers.", backend.Name)
 		case "vertex-google":
 			return fmt.Sprintf("ADC credentials for backend %q were rejected. Refresh with: gcloud auth application-default login", backend.Name)
@@ -751,7 +751,7 @@ func modelNamePresent(available []string, wanted string) bool {
 
 func providerFixPath(provider string) string {
 	switch modelrepo.CanonicalBackendType(provider) {
-	case "openai", "openrouter", "anthropic", "mistral", "bedrock", "gemini", "vertex-google":
+	case "openai", "anthropic", "bedrock", "gemini", "vertex-google":
 		return "/backends?tab=cloud-providers"
 	default:
 		return "/backends?tab=backends"
@@ -760,7 +760,7 @@ func providerFixPath(provider string) string {
 
 func providerFixPathForChecks(provider string, checks []BackendCheck) string {
 	switch modelrepo.CanonicalBackendType(provider) {
-	case "openai", "anthropic", "mistral", "bedrock", "gemini", "vertex-google":
+	case "openai", "anthropic", "bedrock", "gemini", "vertex-google":
 		return "/backends?tab=cloud-providers"
 	case "ollama":
 		if anyHostedOllamaCheck(checks) {
@@ -776,8 +776,6 @@ func providerAddCommand(provider string) string {
 		return "contenox backend add openai --type openai --api-key-env OPENAI_API_KEY"
 	case "anthropic":
 		return "contenox backend add anthropic --type anthropic --api-key-env ANTHROPIC_API_KEY"
-	case "mistral":
-		return "contenox backend add mistral --type mistral --api-key-env MISTRAL_API_KEY"
 	case "gemini":
 		return "contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY"
 	case "vertex-google":
@@ -791,7 +789,7 @@ func providerAddCommand(provider string) string {
 
 func noChatModelsCommand(provider string) string {
 	switch modelrepo.CanonicalBackendType(provider) {
-	case "openai", "anthropic", "mistral", "gemini":
+	case "openai", "anthropic", "gemini":
 		return "contenox model list   # confirm which chat models the provider exposes"
 	case "vertex-google":
 		return "contenox model list   # Gemini models from AI Studio metadata; set default-model to a gemini-* name"
@@ -804,7 +802,7 @@ func noChatModelsCommand(provider string) string {
 
 func primaryDiagnosticCommand(provider string) string {
 	switch modelrepo.CanonicalBackendType(provider) {
-	case "openai", "anthropic", "mistral", "gemini":
+	case "openai", "anthropic", "gemini":
 		return "contenox doctor --json   # inspect backendChecks.error for the provider backend"
 	case "vertex-google":
 		return "gcloud auth application-default print-access-token   # verify ADC is working; also check GOOGLE_CLOUD_PROJECT is set"
@@ -831,8 +829,6 @@ func repairBackendCommand(check *BackendCheck) string {
 		return fmt.Sprintf("export OPENAI_API_KEY=... && contenox backend remove %q && contenox backend add %q --type openai --url %q --api-key-env OPENAI_API_KEY", check.Name, check.Name, chooseBaseURL(check.BaseURL, "https://api.openai.com/v1"))
 	case "anthropic":
 		return fmt.Sprintf("export ANTHROPIC_API_KEY=... && contenox backend remove %q && contenox backend add %q --type anthropic --url %q --api-key-env ANTHROPIC_API_KEY", check.Name, check.Name, chooseBaseURL(check.BaseURL, "https://api.anthropic.com"))
-	case "mistral":
-		return fmt.Sprintf("export MISTRAL_API_KEY=... && contenox backend remove %q && contenox backend add %q --type mistral --url %q --api-key-env MISTRAL_API_KEY", check.Name, check.Name, chooseBaseURL(check.BaseURL, "https://api.mistral.ai/v1"))
 	case "gemini":
 		return fmt.Sprintf("export GEMINI_API_KEY=... && contenox backend remove %q && contenox backend add %q --type gemini --url %q --api-key-env GEMINI_API_KEY", check.Name, check.Name, chooseBaseURL(check.BaseURL, "https://generativelanguage.googleapis.com"))
 	case "vertex-google":
@@ -879,8 +875,6 @@ func providerDisplayName(provider string) string {
 		return "OpenAI"
 	case "anthropic":
 		return "Anthropic"
-	case "mistral":
-		return "Mistral"
 	case "bedrock":
 		return "AWS Bedrock"
 	case "gemini":

@@ -92,7 +92,7 @@
         }
       },
       "transition": {
-        "on_failure": "end",
+        "on_failure": "",
         "branches": [
           {
             "operator": "edge_traversed_at_least",

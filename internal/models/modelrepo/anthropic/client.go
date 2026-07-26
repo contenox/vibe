@@ -269,6 +269,16 @@ func (c *anthropicStreamClient) Stream(ctx context.Context, messages []modelrepo
 		defer close(parcels)
 		defer resp.Body.Close()
 		defer end()
+
+		send := func(p *modelrepo.StreamParcel) bool {
+			select {
+			case parcels <- p:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
 		sc := bufio.NewScanner(resp.Body)
 		sc.Buffer(make([]byte, 64*1024), 1024*1024)
 		var chunkCount int
@@ -281,25 +291,28 @@ func (c *anthropicStreamClient) Stream(ctx context.Context, messages []modelrepo
 			if payload == "" || payload == "[DONE]" {
 				continue
 			}
-			p, derr := dec.DecodeLine([]byte(payload))
+			ps, derr := dec.DecodeLine([]byte(payload))
 			if derr != nil {
-				continue
+				// In-stream `error` events (overloaded_error etc.) surface here;
+				// swallowing them would let the stream end looking successful.
+				derr = fmt.Errorf("anthropic stream failed for model %s: %w", c.modelName, derr)
+				reportErr(derr)
+				send(&modelrepo.StreamParcel{Error: derr})
+				return
 			}
-			if p != nil {
+			for _, p := range ps {
 				chunkCount++
-				select {
-				case parcels <- p:
-				case <-ctx.Done():
+				if !send(p) {
 					return
 				}
 			}
 		}
 		if err := sc.Err(); err != nil && err != io.EOF {
 			reportErr(err)
-			select {
-			case parcels <- &modelrepo.StreamParcel{Error: fmt.Errorf("anthropic: stream read: %w", err)}:
-			case <-ctx.Done():
-			}
+			send(&modelrepo.StreamParcel{Error: fmt.Errorf("anthropic: stream read: %w", err)})
+			return
+		}
+		if !send(dec.Finish()) {
 			return
 		}
 		reportChange("stream_completed", map[string]any{"chunk_count": chunkCount})

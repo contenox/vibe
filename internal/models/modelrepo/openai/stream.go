@@ -11,36 +11,17 @@ import (
 	"strings"
 
 	"github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/beam/internal/models/modelrepo/codec/chatcompletions"
 )
 
 type OpenAIStreamClient struct {
 	openAIClient
 }
 
-type openAIChatStreamResponseChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int    `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index int `json:"index"`
-		Delta struct {
-			Role             string `json:"role,omitempty"`
-			Content          string `json:"content,omitempty"`
-			ReasoningContent string `json:"reasoning_content,omitempty"`
-			ToolCalls        []struct {
-				ID       string `json:"id,omitempty"`
-				Type     string `json:"type,omitempty"`
-				Function struct {
-					Name      string `json:"name,omitempty"`
-					Arguments string `json:"arguments,omitempty"`
-				} `json:"function,omitempty"`
-			} `json:"tool_calls,omitempty"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-}
-
+// Stream emits raw deltas per the modelrepo.StreamParcel contract: content /
+// thinking / tool-call fragments as they arrive on the wire, then one typed
+// terminal parcel (finish reason + usage). Assembly belongs to the engine-side
+// modelrepo.StreamAssembler, never to this client.
 func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "openai", "model", c.modelName)
@@ -50,20 +31,21 @@ func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 	usesResponses := openAIUsesResponsesEndpoint(c.modelName)
 	endpoint := "/chat/completions"
 	var requestBody []byte
-	var responseNameMap map[string]string
+	var nameMap map[string]string
 	var err error
 
 	if usesResponses {
 		var req openAIResponsesRequest
-		req, responseNameMap = buildOpenAIResponsesRequestWithCapabilities(c.modelName, messages, args, c.supportsThink)
+		req, nameMap = buildOpenAIResponsesRequestWithCapabilities(c.modelName, messages, args, c.supportsThink)
 		c.clampResponsesMaxOutputTokens(&req)
 		req.Stream = true
 		requestBody, err = json.Marshal(req)
 		endpoint = "/responses"
 	} else {
 		var req openAIChatRequest
-		req, _ = buildOpenAIRequestWithCapabilities(c.modelName, messages, args, c.supportsThink)
+		req, nameMap = buildOpenAIRequestWithCapabilities(c.modelName, messages, args, c.supportsThink)
 		req.Stream = true
+		req.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
 		c.clampChatMaxOutputTokens(&req)
 		requestBody, err = json.Marshal(req)
 	}
@@ -105,61 +87,44 @@ func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		defer end() // End tracking when the stream completes
 
 		if usesResponses {
-			streamResponsesSSE(ctx, resp.Body, responseNameMap, streamCh, reportErr, reportChange)
+			streamResponsesSSE(ctx, resp.Body, nameMap, streamCh, reportErr, reportChange)
 			return
 		}
 
-		// Create a scanner to read the response line by line
+		send := func(p *modelrepo.StreamParcel) bool {
+			select {
+			case streamCh <- p:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
+		dec := chatcompletions.NewStreamDecoder(nameMap)
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 		var chunkCount int
-		var totalContent strings.Builder
 
 		for scanner.Scan() {
 			line := scanner.Text()
-
-			// Skip empty lines
-			if line == "" {
+			if !strings.HasPrefix(line, "data: ") {
 				continue
 			}
-
-			// SSE format starts with "data: "
-			if strings.HasPrefix(line, "data: ") {
-				jsonData := strings.TrimPrefix(line, "data: ")
-
-				// Skip [DONE] messages
-				if jsonData == "[DONE]" {
-					continue
-				}
-
-				var chunk openAIChatStreamResponseChunk
-				if err := json.Unmarshal([]byte(jsonData), &chunk); err != nil {
-					select {
-					case streamCh <- &modelrepo.StreamParcel{
-						Error: fmt.Errorf("failed to decode SSE data: %w, raw: %s", err, jsonData),
-					}:
-					case <-ctx.Done():
-						return
-					}
-					continue
-				}
-
-				// Process the chunk
-				if len(chunk.Choices) > 0 {
-					delta := chunk.Choices[0].Delta
-					if delta.Content != "" || delta.ReasoningContent != "" {
-						if delta.Content != "" {
-							chunkCount++
-							totalContent.WriteString(delta.Content)
-						}
-						select {
-						case streamCh <- &modelrepo.StreamParcel{
-							Data:     delta.Content,
-							Thinking: delta.ReasoningContent,
-						}:
-						case <-ctx.Done():
-							return
-						}
-					}
+			jsonData := strings.TrimPrefix(line, "data: ")
+			if jsonData == "[DONE]" {
+				continue
+			}
+			parcels, derr := dec.DecodeLine([]byte(jsonData))
+			if derr != nil {
+				derr = fmt.Errorf("failed to decode SSE data: %w, raw: %s", derr, jsonData)
+				reportErr(derr)
+				send(&modelrepo.StreamParcel{Error: derr})
+				return
+			}
+			for _, p := range parcels {
+				chunkCount++
+				if !send(p) {
+					return
 				}
 			}
 		}
@@ -167,20 +132,14 @@ func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		if err := scanner.Err(); err != nil && err != io.EOF {
 			err = fmt.Errorf("stream scanning error: %w", err)
 			reportErr(err)
-			select {
-			case streamCh <- &modelrepo.StreamParcel{
-				Error: err,
-			}:
-			case <-ctx.Done():
-				return
-			}
+			send(&modelrepo.StreamParcel{Error: err})
+			return
 		}
 
-		reportChange("stream_completed", map[string]any{
-			"chunk_count":     chunkCount,
-			"total_length":    totalContent.Len(),
-			"content_preview": truncateString(totalContent.String(), 100),
-		})
+		if !send(dec.Finish()) {
+			return
+		}
+		reportChange("stream_completed", map[string]any{"chunk_count": chunkCount})
 	}()
 
 	return streamCh, nil
@@ -196,13 +155,13 @@ func truncateString(s string, maxLen int) string {
 // responsesSSEEvent covers the subset of Responses API SSE event types we handle.
 type responsesSSEEvent struct {
 	Type string `json:"type"`
-	// response.output_text.delta
+	// response.output_text.delta / response.reasoning_summary_text.delta
 	Delta string `json:"delta"`
-	// response.function_call_arguments.delta
-	CallID string `json:"call_id"`
-	// response.output_item.done — the finished item
+	// output slot of the item the event belongs to; groups tool-call fragments.
+	OutputIndex int `json:"output_index"`
+	// response.output_item.added / .done — the (partial) item
 	Item *openAIResponseOutputItem `json:"item"`
-	// response.completed — the full response (reasoning summary lives here)
+	// response.completed — the full response (usage + reasoning summary)
 	Response *openAIResponse `json:"response"`
 	// error — code/message are top-level per the Responses API spec, but some
 	// gateways nest them under an "error" object instead.
@@ -240,10 +199,12 @@ func (ev responsesSSEEvent) errorText(rawPayload string) string {
 	return code + ": " + msg
 }
 
-// streamResponsesSSE reads a Responses API SSE stream and forwards text parcels
-// to out. Tool call arguments are accumulated but not streamed (consistent with
-// the Chat Completions stream path). Reasoning summaries are emitted as thinking
-// parcels from the response.completed event.
+// streamResponsesSSE reads a Responses API SSE stream and forwards raw-delta
+// parcels to out: output text and reasoning-summary deltas as they arrive,
+// tool-call fragments as ToolCallDelta parcels keyed by output_index (id/name
+// from response.output_item.added, argument fragments from
+// response.function_call_arguments.delta), and a typed terminal parcel from
+// response.completed. Assembly belongs to the engine-side assembler.
 func streamResponsesSSE(
 	ctx context.Context,
 	body io.ReadCloser,
@@ -255,6 +216,16 @@ func streamResponsesSSE(
 	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	var chunkCount int
+	var emittedReasoning bool
+
+	send := func(p *modelrepo.StreamParcel) bool {
+		select {
+		case out <- p:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
 
 	for sc.Scan() {
 		line := sc.Text()
@@ -277,33 +248,82 @@ func streamResponsesSSE(
 				continue
 			}
 			chunkCount++
-			select {
-			case out <- &modelrepo.StreamParcel{Data: ev.Delta}:
-			case <-ctx.Done():
+			if !send(&modelrepo.StreamParcel{Data: ev.Delta}) {
+				return
+			}
+
+		case "response.reasoning_summary_text.delta":
+			if ev.Delta == "" {
+				continue
+			}
+			emittedReasoning = true
+			if !send(&modelrepo.StreamParcel{Thinking: ev.Delta}) {
+				return
+			}
+
+		case "response.output_item.added":
+			// A function_call item opens a tool-call slot: id + name arrive
+			// here, the argument fragments follow as separate delta events.
+			if ev.Item == nil || strings.ToLower(ev.Item.Type) != "function_call" {
+				continue
+			}
+			id := ev.Item.CallID
+			if id == "" {
+				id = ev.Item.ID
+			}
+			name := ev.Item.Name
+			if orig, ok := nameMap[name]; ok && orig != "" {
+				name = orig
+			}
+			if !send(&modelrepo.StreamParcel{ToolCall: &modelrepo.ToolCallDelta{
+				Index: ev.OutputIndex,
+				ID:    id,
+				Type:  "function",
+				Name:  name,
+			}}) {
 				return
 			}
 
 		case "response.function_call_arguments.delta":
-			// Tool call args are accumulated server-side; the final arguments
-			// appear in response.output_item.done. Nothing to emit here.
+			if ev.Delta == "" {
+				continue
+			}
+			if !send(&modelrepo.StreamParcel{ToolCall: &modelrepo.ToolCallDelta{
+				Index:        ev.OutputIndex,
+				ArgsFragment: ev.Delta,
+			}}) {
+				return
+			}
 
 		case "response.completed":
-			// Emit reasoning summary (if any) as a thinking parcel.
-			if ev.Response != nil && ev.Response.Reasoning.Summary != "" {
-				select {
-				case out <- &modelrepo.StreamParcel{Thinking: ev.Response.Reasoning.Summary}:
-				case <-ctx.Done():
+			// Reasoning summary fallback for gateways that never emitted
+			// summary deltas; skipped when deltas already streamed it.
+			if !emittedReasoning && ev.Response != nil && ev.Response.Reasoning.Summary != "" {
+				if !send(&modelrepo.StreamParcel{Thinking: ev.Response.Reasoning.Summary}) {
 					return
 				}
 			}
+			term := &modelrepo.StreamTerminal{FinishReason: "stop"}
+			if ev.Response != nil && ev.Response.Usage != nil {
+				term.Usage = &modelrepo.TokenUsage{
+					PromptTokens:     ev.Response.Usage.InputTokens,
+					CompletionTokens: ev.Response.Usage.OutputTokens,
+					TotalTokens:      ev.Response.Usage.TotalTokens,
+				}
+			}
+			if !send(&modelrepo.StreamParcel{Terminal: term}) {
+				return
+			}
+			reportChange("stream_completed", map[string]any{
+				"path":        "responses",
+				"chunk_count": chunkCount,
+			})
+			return
 
 		case "error":
 			err := fmt.Errorf("responses stream error %s", ev.errorText(payload))
 			reportErr(err)
-			select {
-			case out <- &modelrepo.StreamParcel{Error: err}:
-			case <-ctx.Done():
-			}
+			send(&modelrepo.StreamParcel{Error: err})
 			return
 
 		case "response.failed", "response.incomplete":
@@ -311,10 +331,7 @@ func streamResponsesSSE(
 			// silently and the caller would see an empty completion.
 			err := fmt.Errorf("responses stream %s %s", ev.Type, ev.errorText(payload))
 			reportErr(err)
-			select {
-			case out <- &modelrepo.StreamParcel{Error: err}:
-			case <-ctx.Done():
-			}
+			send(&modelrepo.StreamParcel{Error: err})
 			return
 		}
 	}
@@ -322,17 +339,15 @@ func streamResponsesSSE(
 	if err := sc.Err(); err != nil && err != io.EOF {
 		err = fmt.Errorf("responses: stream read: %w", err)
 		reportErr(err)
-		select {
-		case out <- &modelrepo.StreamParcel{Error: err}:
-		case <-ctx.Done():
-		}
+		send(&modelrepo.StreamParcel{Error: err})
 		return
 	}
 
-	reportChange("stream_completed", map[string]any{
-		"path":        "responses",
-		"chunk_count": chunkCount,
-	})
+	// The stream ended without response.completed/failed — surface it instead
+	// of letting a truncated connection read as success.
+	err := fmt.Errorf("responses: stream ended without response.completed")
+	reportErr(err)
+	send(&modelrepo.StreamParcel{Error: err})
 }
 
 var _ modelrepo.LLMStreamClient = (*OpenAIStreamClient)(nil)

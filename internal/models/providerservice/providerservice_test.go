@@ -88,7 +88,6 @@ func TestUnit_ProviderService_ListsSupportedProviderCapabilities(t *testing.T) {
 	}
 	require.Contains(t, byProvider, "openai")
 	require.Contains(t, byProvider, "anthropic")
-	require.Contains(t, byProvider, "mistral")
 	require.Contains(t, byProvider, "gemini")
 	require.Contains(t, byProvider, "vertex-google")
 	require.NotContains(t, byProvider, "vertex-anthropic")

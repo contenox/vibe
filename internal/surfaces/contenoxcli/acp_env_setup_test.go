@@ -108,7 +108,6 @@ func TestUnit_ACPEnvSetupVars_ContractShape(t *testing.T) {
 		keyVars = append(keyVars, v.Name)
 	}
 	assert.Contains(t, keyVars, "OPENAI_API_KEY")
-	assert.Contains(t, keyVars, "OPENROUTER_API_KEY")
 	assert.Contains(t, keyVars, "GEMINI_API_KEY")
 }
 

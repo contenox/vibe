@@ -52,7 +52,12 @@ func validateChain(chain *taskengine.TaskChainDefinition) error {
 	if len(chain.Tasks) == 0 {
 		return fmt.Errorf("task chain must contain at least one task")
 	}
-	return nil
+	// The full load-time linter (handler signatures, dataflow, references)
+	// gates BOTH writes and reads: a chain that cannot execute is refused
+	// where the author can still fix it, and a broken file that slipped onto
+	// disk stays refused — sticky — until it is repaired, instead of failing
+	// mid-run as a SEVERBUG.
+	return taskengine.LintChain(chain)
 }
 
 func (s *localStore) Get(ctx context.Context, ref string) (*taskengine.TaskChainDefinition, error) {
@@ -61,6 +66,9 @@ func (s *localStore) Get(ctx context.Context, ref string) (*taskengine.TaskChain
 	}
 	if path, err := NormalizePath(ref); err == nil {
 		if chain, err := s.loadPath(ctx, path); err == nil {
+			if lintErr := taskengine.LintChain(chain); lintErr != nil {
+				return nil, disabledChainError(path, lintErr)
+			}
 			return chain, nil
 		}
 	}
@@ -74,10 +82,24 @@ func (s *localStore) Get(ctx context.Context, ref string) (*taskengine.TaskChain
 			continue
 		}
 		if chain.ID == ref {
+			// The id resolves to this file, so a lint failure must surface as
+			// "found but refused" with the reason — not roll on to NotFound,
+			// which would teach the operator the wrong lesson entirely.
+			if lintErr := taskengine.LintChain(chain); lintErr != nil {
+				return nil, disabledChainError(path, lintErr)
+			}
 			return chain, nil
 		}
 	}
 	return nil, fmt.Errorf("task chain %q: %w", ref, libdb.ErrNotFound)
+}
+
+// disabledChainError is the sticky read-side refusal: the file exists and
+// parses, but the linter proves it cannot execute. The error names the file,
+// carries the linter's teaching, and wraps taskengine.ErrChainLint so callers
+// (chainagents, the vet verb) can tell "invalid" from "missing".
+func disabledChainError(path string, lintErr error) error {
+	return fmt.Errorf("task chain file %q is disabled until it is fixed: %w", path, lintErr)
 }
 
 func (s *localStore) List(ctx context.Context) ([]string, error) {

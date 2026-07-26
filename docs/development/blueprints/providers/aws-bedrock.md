@@ -30,7 +30,7 @@ streaming are genuinely easier with the SDK.
 | **Auth** | Full credential chain: env, profile, IAM role, instance metadata, AssumeRole; auto-refresh. SigV4 handled. | Bedrock API key (long-lived bearer) → `Authorization: Bearer`. No IAM roles/instance creds. |
 | **Streaming** | `ConverseStream` returns a **typed event union** — switch on event type, SDK decodes the binary `vnd.amazon.eventstream` framing for you. | Must hand-roll the binary eventstream decoder (prelude + headers + payload + CRC32), ~200–300 LOC. |
 | **Dependency** | New, large transitive tree in `go.mod`. | None. |
-| **Fits existing transport** | No — uses the SDK client, not our `net/http` pattern. | Yes — same shape as anthropic/mistral providers. |
+| **Fits existing transport** | No — uses the SDK client, not our `net/http` pattern. | Yes — same shape as the anthropic provider. |
 
 So: **SDK = less of our own code, standard AWS auth, streaming free, but a big
 dependency and a different transport shape.** **Zero-dep = consistent with the

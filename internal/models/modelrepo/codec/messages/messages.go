@@ -300,90 +300,128 @@ type streamEvent struct {
 		Text        string `json:"text"`
 		Thinking    string `json:"thinking"`
 		PartialJSON string `json:"partial_json"`
+		// message_delta carries the final stop_reason here.
+		StopReason string `json:"stop_reason"`
 	} `json:"delta"`
+	Message struct {
+		Usage streamUsage `json:"usage"`
+	} `json:"message"`
+	Usage streamUsage `json:"usage"`
+	// error events carry the failure detail.
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
-// StreamDecoder assembles a streamed Messages response. Text and thinking
-// deltas are emitted as parcels; tool_use blocks are accumulated per index
-// (id/name from content_block_start, arguments from input_json_delta) and
-// exposed via ToolCalls() once the stream ends.
+type streamUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+// StreamDecoder translates streamed Messages SSE events into raw-delta parcels
+// (per the modelrepo.StreamParcel contract). It does NOT assemble: tool_use
+// blocks surface as ToolCallDelta parcels — id/name from content_block_start,
+// argument fragments from input_json_delta — and assembly is left to the
+// engine-side modelrepo.StreamAssembler. Anthropic in-stream `error` events
+// are decoding errors here so the transport surfaces them as Error parcels
+// instead of swallowing them. The stop reason and usage accumulate across
+// message_start/message_delta and are surfaced by Finish as the typed
+// terminal parcel.
 type StreamDecoder struct {
-	nameMap  map[string]string
-	toolAcc  map[int]*accTool
-	maxIndex int
-}
-
-type accTool struct {
-	id   string
-	name string
-	args strings.Builder
+	nameMap    map[string]string
+	stopReason string
+	usage      modelrepo.TokenUsage
+	sawUsage   bool
 }
 
 func NewStreamDecoder(nameMap map[string]string) *StreamDecoder {
-	return &StreamDecoder{nameMap: nameMap, toolAcc: map[int]*accTool{}, maxIndex: -1}
+	return &StreamDecoder{nameMap: nameMap}
 }
 
-// DecodeLine parses one SSE `data:` payload (bytes after "data: "). It returns
-// a parcel if the event carried visible text/thinking, or nil otherwise.
-func (d *StreamDecoder) DecodeLine(payload []byte) (*modelrepo.StreamParcel, error) {
+// DecodeLine parses one SSE `data:` payload (bytes after "data: ") and returns
+// the raw-delta parcels it carries, in wire order. An Anthropic `error` event
+// returns an error carrying the API's type and message.
+func (d *StreamDecoder) DecodeLine(payload []byte) ([]*modelrepo.StreamParcel, error) {
 	var ev streamEvent
 	if err := json.Unmarshal(payload, &ev); err != nil {
 		return nil, fmt.Errorf("messages: decode stream event: %w", err)
 	}
 	switch ev.Type {
+	case "error":
+		return nil, fmt.Errorf("messages: in-stream error event: %s: %s", ev.Error.Type, ev.Error.Message)
+	case "message_start":
+		d.recordUsage(ev.Message.Usage)
+		return nil, nil
+	case "message_delta":
+		if ev.Delta.StopReason != "" {
+			d.stopReason = ev.Delta.StopReason
+		}
+		d.recordUsage(ev.Usage)
+		return nil, nil
 	case "content_block_start":
 		if ev.ContentBlock.Type == "tool_use" {
-			acc := &accTool{id: ev.ContentBlock.ID, name: ev.ContentBlock.Name}
-			d.toolAcc[ev.Index] = acc
-			if ev.Index > d.maxIndex {
-				d.maxIndex = ev.Index
+			name := ev.ContentBlock.Name
+			if orig, ok := d.nameMap[name]; ok && orig != "" {
+				name = orig
 			}
+			return []*modelrepo.StreamParcel{{ToolCall: &modelrepo.ToolCallDelta{
+				Index: ev.Index,
+				ID:    ev.ContentBlock.ID,
+				Type:  "function",
+				Name:  name,
+			}}}, nil
 		}
 		return nil, nil
 	case "content_block_delta":
 		switch ev.Delta.Type {
 		case "text_delta":
 			if ev.Delta.Text != "" {
-				return &modelrepo.StreamParcel{Data: ev.Delta.Text}, nil
+				return []*modelrepo.StreamParcel{{Data: ev.Delta.Text}}, nil
 			}
 		case "thinking_delta":
 			if ev.Delta.Thinking != "" {
-				return &modelrepo.StreamParcel{Thinking: ev.Delta.Thinking}, nil
+				return []*modelrepo.StreamParcel{{Thinking: ev.Delta.Thinking}}, nil
 			}
 		case "input_json_delta":
-			if acc := d.toolAcc[ev.Index]; acc != nil {
-				acc.args.WriteString(ev.Delta.PartialJSON)
+			if ev.Delta.PartialJSON != "" {
+				return []*modelrepo.StreamParcel{{ToolCall: &modelrepo.ToolCallDelta{
+					Index:        ev.Index,
+					ArgsFragment: ev.Delta.PartialJSON,
+				}}}, nil
 			}
 		}
 		return nil, nil
 	default:
-		// message_start, content_block_stop, message_delta, message_stop, ping
+		// content_block_stop, message_stop, ping
 		return nil, nil
 	}
 }
 
-// ToolCalls returns the tool calls assembled across the stream, in index order.
-func (d *StreamDecoder) ToolCalls() []modelrepo.ToolCall {
-	if d.maxIndex < 0 {
-		return nil
+func (d *StreamDecoder) recordUsage(u streamUsage) {
+	if u.InputTokens == 0 && u.OutputTokens == 0 {
+		return
 	}
-	var out []modelrepo.ToolCall
-	for i := 0; i <= d.maxIndex; i++ {
-		acc := d.toolAcc[i]
-		if acc == nil {
-			continue
-		}
-		args := acc.args.String()
-		if strings.TrimSpace(args) == "" {
-			args = "{}"
-		}
-		name := acc.name
-		if orig, ok := d.nameMap[name]; ok && orig != "" {
-			name = orig
-		}
-		out = append(out, newToolCall(acc.id, name, args))
+	d.sawUsage = true
+	if u.InputTokens != 0 {
+		d.usage.PromptTokens = u.InputTokens
 	}
-	return out
+	if u.OutputTokens != 0 {
+		d.usage.CompletionTokens = u.OutputTokens
+	}
+}
+
+// Finish returns the typed terminal parcel: the stop reason from message_delta
+// plus the usage accumulated across message_start/message_delta. Callers emit
+// it after the SSE stream ends cleanly.
+func (d *StreamDecoder) Finish() *modelrepo.StreamParcel {
+	term := &modelrepo.StreamTerminal{FinishReason: d.stopReason}
+	if d.sawUsage {
+		u := d.usage
+		u.TotalTokens = u.PromptTokens + u.CompletionTokens
+		term.Usage = &u
+	}
+	return &modelrepo.StreamParcel{Terminal: term}
 }
 
 func sanitizeToolName(in string) string {

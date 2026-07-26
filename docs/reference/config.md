@@ -41,12 +41,8 @@ contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --a
 # OpenAI (base URL inferred)
 contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
 
-# OpenRouter (base URL inferred)
-contenox backend add openrouter --type openrouter --api-key-env OPENROUTER_API_KEY
-
-# Anthropic and Mistral (base URLs inferred)
+# Anthropic (base URL inferred)
 contenox backend add anthropic --type anthropic --api-key-env ANTHROPIC_API_KEY
-contenox backend add mistral --type mistral --api-key-env MISTRAL_API_KEY
 
 # Google Gemini
 contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
@@ -125,9 +121,7 @@ contenox backend remove myvllm
 | -------- | --------------------------------------------------------------------------------------------------------- |
 | `ollama` | Local: run `ollama serve` first. Hosted: use `--url https://ollama.com/api --api-key-env OLLAMA_API_KEY`. |
 | `openai` | Use `--api-key-env OPENAI_API_KEY`. Base URL inferred.                                                    |
-| `openrouter` | Use `--api-key-env OPENROUTER_API_KEY`. Base URL inferred as `https://openrouter.ai/api/v1`. |
 | `anthropic` | Anthropic Claude (direct API). Use `--api-key-env ANTHROPIC_API_KEY`. Base URL inferred.               |
-| `mistral` | Mistral (La Plateforme). Use `--api-key-env MISTRAL_API_KEY`. Base URL inferred.                        |
 | `gemini` | Use `--api-key-env GEMINI_API_KEY`. Base URL inferred.                                                    |
 | `bedrock` | Amazon Bedrock (Converse API). Requires `--url` (carries the region). Auth: ambient AWS credential chain (env / profile / IAM role), or static keys JSON via `--api-key-env`. |
 | `vllm`   | Self-hosted OpenAI-compatible endpoint. Requires `--url`.                                                 |

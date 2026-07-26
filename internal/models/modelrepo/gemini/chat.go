@@ -19,22 +19,8 @@ func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "gemini", "model", c.modelName)
 	defer end()
 
-	// Pull out an optional system instruction
-	var systemInstruction *geminiSystemInstruction
-	filtered := make([]modelrepo.Message, 0, len(messages))
-	for _, m := range messages {
-		if m.Role == "system" {
-			if m.Content != "" {
-				systemInstruction = &geminiSystemInstruction{
-					Parts: []geminiPart{{Text: m.Content}},
-				}
-			}
-			continue
-		}
-		filtered = append(filtered, m)
-	}
-
-	req, err := buildGeminiRequest(c.modelName, filtered, systemInstruction, args, c.canThink)
+	// buildGeminiRequest hoists system messages into systemInstruction.
+	req, err := buildGeminiRequest(c.modelName, messages, args, c.canThink)
 	if err != nil {
 		reportErr(err)
 		return modelrepo.ChatResult{}, err

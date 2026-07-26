@@ -11,7 +11,7 @@ func TestUnit_BuildTemplateVars_PreservesConfiguredDefaultForRecovery(t *testing
 		EffectiveDefaultModel:       "does-not-exist",
 		EffectiveDefaultProvider:    "vllm",
 		EffectiveConfiguredModel:    "qwen3-4b",
-		EffectiveConfiguredProvider: "mistral",
+		EffectiveConfiguredProvider: "anthropic",
 		EffectiveAltDefaultModel:    "small-model",
 		EffectiveAltDefaultProvider: "ollama",
 		EffectiveMaxTokens:          "4096",
@@ -21,7 +21,7 @@ func TestUnit_BuildTemplateVars_PreservesConfiguredDefaultForRecovery(t *testing
 	require.Equal(t, "does-not-exist", vars["model"])
 	require.Equal(t, "vllm", vars["provider"])
 	require.Equal(t, "qwen3-4b", vars["default_model"])
-	require.Equal(t, "mistral", vars["default_provider"])
+	require.Equal(t, "anthropic", vars["default_provider"])
 	require.Equal(t, "small-model", vars["alt_model"])
 	require.Equal(t, "ollama", vars["alt_provider"])
 	require.Equal(t, "4096", vars["max_tokens"])

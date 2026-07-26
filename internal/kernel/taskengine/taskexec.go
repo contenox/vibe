@@ -82,6 +82,9 @@ func (exe *SimpleExec) publishStepChunk(ctx context.Context, meta llmrepo.Meta, 
 	if content == "" && thinking == "" {
 		return
 	}
+	if exe.eventSink == nil || !exe.eventSink.Wants(TaskEventStepChunk) {
+		return
+	}
 	_, _, end := exe.tracker.Start(ctx, "publish_step_chunk", "task_event",
 		"content_len", len(content),
 		"thinking_len", len(thinking),
@@ -357,27 +360,34 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 		streamArgs = append(streamArgs, libmodelprovider.WithShift{})
 	}
 
-	if exe.eventSink.Enabled() {
-		messages := []libmodelprovider.Message{}
-		if systemInstruction != "" {
-			messages = append(messages, libmodelprovider.Message{Role: "system", Content: systemInstruction})
-		}
-		messages = append(messages, libmodelprovider.Message{Role: "user", Content: prompt})
+	// ONE execution path (mirroring executeLLM): prompts stream and are
+	// assembled engine-side; the sink only observes. PromptExecute survives as
+	// the fallback when stream setup fails, taken identically with or without
+	// a sink.
+	messages := []libmodelprovider.Message{}
+	if systemInstruction != "" {
+		messages = append(messages, libmodelprovider.Message{Role: "system", Content: systemInstruction})
+	}
+	messages = append(messages, libmodelprovider.Message{Role: "user", Content: prompt})
 
-		stream, meta, err := exe.repo.Stream(ctx, req, messages, streamArgs...)
-		if err == nil {
-			var fullResponse strings.Builder
-			for parcel := range stream {
-				if parcel.Error != nil {
-					err := fmt.Errorf("prompt stream failed: %w", parcel.Error)
-					reportErr(err)
-					return "", err
-				}
-				fullResponse.WriteString(parcel.Data)
-				exe.publishStepChunk(ctx, meta, parcel.Data, parcel.Thinking)
+	stream, meta, err := exe.repo.Stream(ctx, req, messages, streamArgs...)
+	if err == nil {
+		asm := libmodelprovider.NewStreamAssembler(meta.ProviderType, meta.ModelName)
+		for parcel := range stream {
+			if err := asm.Consume(parcel); err != nil {
+				err = fmt.Errorf("prompt stream failed: %w", err)
+				reportErr(err)
+				return "", err
 			}
-			return strings.TrimSpace(fullResponse.String()), nil
+			exe.publishStepChunk(ctx, meta, parcel.Data, parcel.Thinking)
 		}
+		res, err := asm.Result()
+		if err != nil {
+			err = fmt.Errorf("prompt stream failed: %w", err)
+			reportErr(err)
+			return "", err
+		}
+		return strings.TrimSpace(res.Content), nil
 	}
 
 	response, _, err := exe.promptWithRetry(ctx, reportChange, &llmCall, req, systemInstruction, prompt)
@@ -823,7 +833,7 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 
 			// Emit a "pending" event so ACP clients can show the tool card
 			// before execution starts (spec: pending → in_progress → completed).
-			if exe.eventSink.Enabled() {
+			if exe.eventSink.Wants(TaskEventToolCallPending) {
 				pendingEvent := NewTaskEvent(callCtx, TaskEventToolCallPending)
 				pendingEvent.ToolName = toolCall.Function.Name
 				pendingEvent.ApprovalID = toolCall.ID
@@ -870,7 +880,7 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			chatHistory.Messages = append(chatHistory.Messages, toolResultMessage)
 			answeredBatch[toolCall.ID] = true
 
-			if exe.eventSink.Enabled() {
+			if exe.eventSink.Wants(TaskEventToolCall) {
 				toolEvent := NewTaskEvent(callCtx, TaskEventToolCall)
 				toolEvent.ToolName = toolCall.Function.Name
 				toolEvent.ApprovalID = toolCall.ID
@@ -949,7 +959,7 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			}
 			toolEnd()
 
-			if exe.eventSink.Enabled() {
+			if exe.eventSink.Wants(TaskEventToolCall) {
 				toolEvent := NewTaskEvent(toolsCtx, TaskEventToolCall)
 
 				toolName := currentTask.Tools.Name
@@ -1131,7 +1141,7 @@ func (exe *SimpleExec) executeLLM(
 		"limit":           ctxLength,
 	})
 	// Also publish as TaskEvent for ACP etc. to pick up (used ~ total input, size = ctx)
-	if exe.eventSink.Enabled() {
+	if exe.eventSink.Wants(TaskEventTokenUsage) {
 		ev := NewTaskEvent(ctx, TaskEventTokenUsage)
 		ev.ModelName = modelName
 		ev.TokenUsed = totalTokens
@@ -1176,7 +1186,7 @@ func (exe *SimpleExec) executeLLM(
 			"limit":           ctxLength,
 			"kept_messages":   len(slid),
 		})
-		if exe.eventSink.Enabled() {
+		if exe.eventSink.Wants(TaskEventTokenUsage) {
 			ev := NewTaskEvent(ctx, TaskEventTokenUsage)
 			ev.ModelName = modelName
 			ev.TokenUsed = totalTokens
@@ -1231,94 +1241,39 @@ func (exe *SimpleExec) executeLLM(
 		Tracker:       exe.tracker,
 	}
 
-	// Stream whenever an event sink is listening — including tool-bearing chats.
-	// The model streams visible content/thinking tokens as they are produced;
-	// tool calls (if any) arrive assembled on a terminal parcel and are finalized
-	// exactly like the non-streaming path once generation completes. This keeps
-	// slow local inference from reading as silence while preserving tool dispatch.
-	if exe.eventSink.Enabled() {
-		stream, meta, err := exe.repo.Stream(ctx, req, messagesC, chatArgs...)
-		if err == nil {
-			var streamedContent strings.Builder
-			var streamedThinking strings.Builder
-			var streamedToolCalls []libmodelprovider.ToolCall
-			for parcel := range stream {
-				if parcel.Error != nil {
-					return nil, DataTypeAny, "", fmt.Errorf("chat stream failed: %w", parcel.Error)
-				}
-				streamedContent.WriteString(parcel.Data)
-				streamedThinking.WriteString(parcel.Thinking)
-				// Tool calls are assembled provider-side and delivered on a terminal
-				// parcel; accumulate them but only stream visible content/thinking.
-				streamedToolCalls = append(streamedToolCalls, parcel.ToolCalls...)
-				// The terminal tool-call parcel carries empty Data/Thinking, so this
-				// no-ops for it — no tool-call payload leaks into the transcript.
-				exe.publishStepChunk(ctx, meta, parcel.Data, parcel.Thinking)
-			}
-
-			callTools := make([]ToolCall, len(streamedToolCalls))
-			for i, tc := range streamedToolCalls {
-				callTools[i] = ToolCall{
-					ID: ensureUniqueToolCallID(tc.ID),
-					Function: FunctionCall{
-						Name:      tc.Function.Name,
-						Arguments: tc.Function.Arguments,
-					},
-					Type:         tc.Type,
-					ProviderMeta: tc.ProviderMeta,
-				}
-			}
-
-			content := streamedContent.String()
-			input.Messages = append(input.Messages, Message{
-				ID:        uuid.NewString(),
-				Role:      "assistant",
-				Content:   content,
-				Thinking:  streamedThinking.String(),
-				CallTools: callTools,
-				Timestamp: time.Now().UTC(),
-			})
-			// Content already streamed incrementally above; do NOT re-publish the
-			// full message here or ACP clients would render the reply twice.
-
-			// Count output tokens (content only, not tool calls) to match the
-			// non-streaming path so usage indicators and follow-up budgeting stay
-			// consistent across the two code paths.
-			if len(content) != 0 {
-				outputTokensCount, err := exe.repo.CountTokens(ctx, meta.ModelName, content)
-				if err != nil {
-					err = fmt.Errorf("tokenizer failed: %w", err)
-					reportErr(err)
-					return nil, DataTypeAny, "", err
-				}
-				input.OutputTokens = outputTokensCount
-			}
-
-			if len(callTools) > 0 {
-				return input, DataTypeChatHistory, TransitionToolCall, nil
-			}
-			return input, DataTypeChatHistory, TransitionExecuted, nil
-		}
-	}
-
-	resp, meta, err := exe.chatWithRetry(ctx, reportChange, llmCall, req, messagesC, chatArgs)
-	if err != nil {
-		if len(tools) > 0 && isRecoverableToolSurfaceError(err) {
-			reportChange("tools_disabled_after_tool_surface_error", map[string]any{
-				"tool_count": len(tools),
-				"error":      err.Error(),
-			})
-			noToolReq := req
-			noToolReq.ContextLength = requestedContextRequirement(ctx, totalTokens-toolTokens)
-			noToolMessages := stripToolProtocolMessages(messagesC)
-			noToolArgs := chatArgsForLLMCall(llmCall, nil)
-			resp, meta, err = exe.chatWithRetry(ctx, reportChange, llmCall, noToolReq, noToolMessages, noToolArgs)
-			if err == nil {
-				reportChange("tools_disabled_chat_succeeded", map[string]any{
-					"model":         meta.ModelName,
-					"provider_type": meta.ProviderType,
+	// ONE execution path: every chat streams and is assembled engine-side by
+	// modelrepo.StreamAssembler; the event sink only observes (publishStepChunk
+	// gates itself per-kind via Wants). Whether a sink listens can never select
+	// a different code path — that fork is what let streamed tool calls diverge
+	// from the non-streaming path. The non-streaming Chat call survives only as
+	// the fallback when stream setup fails (e.g. the resolved model cannot
+	// stream), and that fallback is taken identically with or without a sink.
+	streamed, resp, meta, err := exe.streamChatOnce(ctx, reportChange, req, messagesC, chatArgs)
+	if !streamed && err != nil {
+		resp, meta, err = exe.chatWithRetry(ctx, reportChange, llmCall, req, messagesC, chatArgs)
+		if err != nil {
+			if len(tools) > 0 && isRecoverableToolSurfaceError(err) {
+				reportChange("tools_disabled_after_tool_surface_error", map[string]any{
+					"tool_count": len(tools),
+					"error":      err.Error(),
 				})
+				noToolReq := req
+				noToolReq.ContextLength = requestedContextRequirement(ctx, totalTokens-toolTokens)
+				noToolMessages := stripToolProtocolMessages(messagesC)
+				noToolArgs := chatArgsForLLMCall(llmCall, nil)
+				resp, meta, err = exe.chatWithRetry(ctx, reportChange, llmCall, noToolReq, noToolMessages, noToolArgs)
+				if err == nil {
+					reportChange("tools_disabled_chat_succeeded", map[string]any{
+						"model":         meta.ModelName,
+						"provider_type": meta.ProviderType,
+					})
+				}
 			}
+		}
+		if err == nil {
+			// The fallback response was never streamed, so publish it as one
+			// chunk (streamed replies were already published incrementally).
+			exe.publishStepChunk(ctx, meta, resp.Message.Content, resp.Message.Thinking)
 		}
 	}
 	if err != nil {
@@ -1348,7 +1303,6 @@ func (exe *SimpleExec) executeLLM(
 		CallTools: callTools,
 		Timestamp: time.Now().UTC(),
 	})
-	exe.publishStepChunk(ctx, meta, respMessage.Content, respMessage.Thinking)
 
 	// Count output tokens (only for the response content, not tool calls)
 	var outputTokensCount int
@@ -1366,6 +1320,66 @@ func (exe *SimpleExec) executeLLM(
 		return input, DataTypeChatHistory, TransitionToolCall, nil
 	}
 	return input, DataTypeChatHistory, TransitionExecuted, nil
+}
+
+// streamChatOnce runs one chat over the streaming path and assembles the
+// result with modelrepo.StreamAssembler — the single place streamed deltas
+// become tool calls. streamed=false with an error means stream SETUP failed
+// (resolution/connect) and the caller may fall back to non-streaming Chat;
+// streamed=true means parcels were (possibly) already observed, so mid-stream
+// failures are final — re-running the model after publishing chunks would
+// show the user two divergent replies.
+func (exe *SimpleExec) streamChatOnce(
+	ctx context.Context,
+	reportChange func(id string, data any),
+	req llmrepo.Request,
+	messages []libmodelprovider.Message,
+	chatArgs []libmodelprovider.ChatArgument,
+) (streamed bool, _ libmodelprovider.ChatResult, _ llmrepo.Meta, _ error) {
+	stream, meta, err := exe.repo.Stream(ctx, req, messages, chatArgs...)
+	if err != nil {
+		return false, libmodelprovider.ChatResult{}, llmrepo.Meta{}, err
+	}
+
+	asm := libmodelprovider.NewStreamAssembler(meta.ProviderType, meta.ModelName)
+	for parcel := range stream {
+		if err := asm.Consume(parcel); err != nil {
+			return true, libmodelprovider.ChatResult{}, meta, fmt.Errorf("chat stream failed: %w", err)
+		}
+		// Observation only: visible content/thinking deltas fan out to the
+		// sink; tool-call fragments, usage, and terminal parcels never leak
+		// into the transcript.
+		exe.publishStepChunk(ctx, meta, parcel.Data, parcel.Thinking)
+	}
+	res, err := asm.Result()
+	if err != nil {
+		return true, libmodelprovider.ChatResult{}, meta, fmt.Errorf("chat stream failed: %w", err)
+	}
+
+	// The terminal parcel's finish reason and usage are part of the response
+	// truth: length/content_filter endings and provider token accounting are
+	// recorded instead of ignored.
+	finish := map[string]any{
+		"finish_reason": res.FinishReason,
+		"model":         meta.ModelName,
+		"provider_type": meta.ProviderType,
+	}
+	if res.Usage != nil {
+		finish["prompt_tokens"] = res.Usage.PromptTokens
+		finish["completion_tokens"] = res.Usage.CompletionTokens
+		finish["total_tokens"] = res.Usage.TotalTokens
+	}
+	reportChange("stream_finished", finish)
+
+	out := libmodelprovider.ChatResult{
+		Message: libmodelprovider.Message{
+			Role:     "assistant",
+			Content:  res.Content,
+			Thinking: res.Thinking,
+		},
+		ToolCalls: res.ToolCalls,
+	}
+	return true, out, meta, nil
 }
 
 func chatArgsForLLMCall(llmCall *LLMExecutionConfig, tools []libmodelprovider.Tool) []libmodelprovider.ChatArgument {
@@ -1812,7 +1826,7 @@ func (exe *SimpleExec) appendToolErrorResult(ctx context.Context, chatHistory *C
 	}
 	chatHistory.Messages = append(chatHistory.Messages, toolResultMessage)
 
-	if exe.eventSink.Enabled() {
+	if exe.eventSink.Wants(TaskEventToolCall) {
 		toolEvent := NewTaskEvent(ctx, TaskEventToolCall)
 		toolEvent.ToolName = toolCall.Function.Name
 		toolEvent.ApprovalID = toolCall.ID

@@ -60,7 +60,7 @@ func (s *captureTaskEventSink) PublishTaskEvent(_ context.Context, event taskeng
 	return nil
 }
 
-func (s *captureTaskEventSink) Enabled() bool { return true }
+func (s *captureTaskEventSink) Wants(taskengine.TaskEventKind) bool { return true }
 
 func allowPolicy() *mockPolicyEval {
 	return &mockPolicyEval{result: hitlservice.EvaluationResult{Action: hitlservice.ActionAllow}}

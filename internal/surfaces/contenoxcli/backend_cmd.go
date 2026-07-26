@@ -38,8 +38,6 @@ var backendCmd = &cobra.Command{
 A backend points at an LLM provider. Supported types:
   ollama                        Local Ollama daemon (requires: ollama serve) or hosted Ollama Cloud.
   openai                        api.openai.com (requires --api-key-env).
-  openrouter                    openrouter.ai — routes 300+ models from many providers through one
-                                OpenAI-compatible endpoint (requires --api-key-env OPENROUTER_API_KEY).
   gemini                        Google Gemini (requires --api-key-env).
   vllm                          Self-hosted OpenAI-compatible endpoint (requires --url).
   vertex-google                 Google Cloud Vertex AI / Gemini (requires gcloud auth application-default
@@ -54,9 +52,6 @@ Examples:
 
   # Register OpenAI using an environment variable for the key:
   contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
-
-  # Register OpenRouter (access 300+ models via one API key):
-  contenox backend add openrouter --type openrouter --api-key-env OPENROUTER_API_KEY
 
   # Register Google Gemini:
   contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
@@ -85,12 +80,8 @@ func defaultBaseURLForType(typ string) (string, error) {
 		return "http://localhost:11434", nil
 	case "openai":
 		return "https://api.openai.com/v1", nil
-	case "openrouter":
-		return "https://openrouter.ai/api/v1", nil
 	case "anthropic":
 		return "https://api.anthropic.com", nil
-	case "mistral":
-		return "https://api.mistral.ai/v1", nil
 	case "gemini":
 		return "https://generativelanguage.googleapis.com", nil
 	case "vertex-google":
@@ -108,9 +99,8 @@ var backendAddCmd = &cobra.Command{
 	Long: `Register a named LLM backend endpoint in the local SQLite database.
 
 The --type flag determines which provider protocol is used.
-  openai, anthropic, mistral,
+  openai, anthropic,
   gemini                        Cloud providers. Base URL inferred if --url is omitted. Requires --api-key-env.
-  openrouter                    openrouter.ai — single API key for 300+ models. Base URL inferred. Requires --api-key-env.
   ollama                        Local daemon (requires 'ollama serve') or hosted Ollama Cloud (use
                                 --url https://ollama.com/api and --api-key-env OLLAMA_API_KEY).
   vllm                          Self-hosted OpenAI-compatible endpoint (requires --url).
@@ -123,7 +113,6 @@ Examples:
   contenox backend add ollama     --type ollama
   contenox backend add ollama-cloud --type ollama    --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
   contenox backend add openai     --type openai      --api-key-env OPENAI_API_KEY
-  contenox backend add openrouter --type openrouter  --api-key-env OPENROUTER_API_KEY
   contenox backend add gemini     --type gemini      --api-key-env GEMINI_API_KEY
   contenox backend add myvllm    --type vllm         --url http://gpu-host:8000`,
 	Args: cobra.ExactArgs(1),
@@ -337,8 +326,8 @@ func globalContenoxDir() (string, error) {
 }
 
 func init() {
-	backendAddCmd.Flags().String("type", "ollama", "Backend type: ollama, openai, openrouter, anthropic, mistral, bedrock, gemini, vllm, vertex-google")
-	backendAddCmd.Flags().String("url", "", "Base URL of the backend (auto-inferred for openai/openrouter/anthropic/mistral/gemini if omitted; set https://ollama.com/api for hosted Ollama)")
+	backendAddCmd.Flags().String("type", "ollama", "Backend type: ollama, openai, anthropic, bedrock, gemini, vllm, vertex-google")
+	backendAddCmd.Flags().String("url", "", "Base URL of the backend (auto-inferred for openai/anthropic/gemini if omitted; set https://ollama.com/api for hosted Ollama)")
 	backendAddCmd.Flags().String("api-key-env", "", "Name of the environment variable holding the API key (preferred over --api-key)")
 	backendAddCmd.Flags().String("api-key", "", "API key literal — prefer --api-key-env to avoid leaking into shell history")
 

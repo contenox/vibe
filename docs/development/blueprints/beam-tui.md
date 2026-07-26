@@ -6,6 +6,15 @@ This is the component plan for contenox beam, the terminal UI that is the produc
 
 Do not relitigate these; every component spec below assumes them.
 
+- **Full ACP command parity (CORE DESIGN, maintainer 2026-07-27).** beam
+  surfaces every ACP slash command — `/mission` included — with zero
+  beam-side command reimplementation. This is guaranteed by the in-process
+  loopback below (beam drives the real Transport, so command advertisement
+  and dispatch are identical to an editor's) and is an acceptance criterion
+  for the command-palette component: the palette renders the same
+  `available_commands` set an ACP editor receives. Missions are kept and
+  first-class; the mission-panel component stands.
+
 - **In-process ACP loopback.** beam consumes `internal/surfaces/acpsvc.Transport` in-process via an in-memory duplex pipe carrying real libacp wire types: one `libacp.AgentSideConnection` wraps the Transport, one `libacp.ClientSideConnection` (beam's own `libacp.Client` impl) sits on the other end. This is the exact two-Run-loops-over-`io.Pipe` pattern already proven end-to-end in `internal/surfaces/acpsvc/client_loopback_test.go`. No subprocess, no socket, no stdio. A side benefit is load-bearing: routing through a real connection pair inherits libacp's `safeCallMethod` panic containment (`libacp/conn.go`) instead of beam owning all recovery itself.
 - **Stack.** bubbletea + lipgloss (+ bubbles, teatest). None of these are in go.mod today; their arrival is deliberate and happens with the first beam packages (theme-styles/test-harness), closing the TODO §8 gate.
 - **Missions are the signature.** Fire-and-detach a bounded unit of work at a declared agent under an HITL envelope; reports stream back into the firing session. `/mission` (already implemented server-side) is the sole successor of the old `/plan`; the interactive plan-stepping verbs are not resurrected.

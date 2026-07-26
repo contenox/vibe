@@ -38,9 +38,11 @@ func NewKVJournalTaskEventSink(inner TaskEventSink, kv libkv.KVManager, tracker 
 	return &KVJournalTaskEventSink{inner: inner, kv: kv, tracker: tracker}
 }
 
-func (s *KVJournalTaskEventSink) Enabled() bool {
+// Wants defers to the wrapped sink (matching the pre-Wants Enabled()
+// delegation); with no inner sink the journal itself consumes every kind.
+func (s *KVJournalTaskEventSink) Wants(kind TaskEventKind) bool {
 	if s.inner != nil {
-		return s.inner.Enabled()
+		return s.inner.Wants(kind)
 	}
 	return true
 }

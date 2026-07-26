@@ -45,10 +45,17 @@ type chatRequest struct {
 	MaxTokens          *int             `json:"max_tokens,omitempty"`
 	TopP               *float64         `json:"top_p,omitempty"`
 	Seed               *int             `json:"seed,omitempty"`
-	Stream             bool             `json:"stream,omitempty"`
+	Stream bool `json:"stream,omitempty"`
+	// StreamOptions requests the trailing usage chunk on streamed responses
+	// (stream_options.include_usage); only set when Stream is true.
+	StreamOptions      *streamOptions   `json:"stream_options,omitempty"`
 	Tools              []modelrepo.Tool `json:"tools,omitempty"`
 	ReasoningEffort    string           `json:"reasoning_effort,omitempty"`
 	ChatTemplateKwargs map[string]any   `json:"chat_template_kwargs,omitempty"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type chatResponse struct {

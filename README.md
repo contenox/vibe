@@ -143,7 +143,7 @@ contenox config set default-provider ollama
 contenox config set default-model    qwen2.5:7b
 ```
 
-Also supported: OpenRouter, Mistral, Gemini, Vertex AI, and Amazon Bedrock.
+Also supported: Gemini, Vertex AI, and Amazon Bedrock.
 
 ---
 

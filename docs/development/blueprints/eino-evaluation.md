@@ -82,10 +82,10 @@ weekend, not a rescue.
 | T3 | Chain linter at load: handler signature registry (closed table: e.g. chat_completion {string,chat_history}→chat_history), DataType dataflow walk over goto/on_failure edges with eino's tri-state (must/mustNot error at load, may keeps runtime check), input_var/macro reference checks, teaching errors naming both endpoints, sticky disable on the chain row; wired into taskchainservice (write+read), chainagents.Discover, a `chain vet` verb, ExecEnv backstop | M | the whole runtime SEVERBUG class; unvalidated chains seeding the agent registry |
 | T4 | Interrupt/checkpoint: HITLWrapper third outcome `ErrApprovalPending`; JSON checkpoint of {vars+types, edgeCounts, history, pendingToolCalls} keyed by approvalID with **hierarchical addresses** (chain/task/toolCall) and a versioned envelope + migration hook from day one (their v0.3.26 lesson); resume re-enters via the existing tool-pairing repair path; hybrid policy: park ≤30s fast path, checkpoint-and-release slow path; nativeturn gains `suspended` | L | runs lost on restart; hour-long goroutines per approval; missions unable to detach on ask-attention |
 | T5 | Event-contract hardening: terminal `step_stream_end` event (chunk count + usage), per-kind field matrix documented as THE engine-bridge contract, event scope → hierarchical address | S | beam engine-bridge contract gaps; replay missing stream brackets. Prerequisite for T4 |
-| T6 | `call_chain` handler: chains declare input_types/output_type in their envelope; child signature = node signature checked by T3's linter; include-cycle detection at load; ACP self-spawn stays as the deliberate isolation tier | S–M | composition costing an OS process and losing types at the boundary |
+| ~~T6~~ | WITHDRAWN (maintainer, 2026-07-27): chain composition is ruled out — if ever needed, multiple chains get transpiled/flattened into one chain at build time; the executor never learns nesting | — | — |
 | T7 | Stream hygiene: ctx.Done() in every relay send, explicit copy/close obligations | S | llmrepo relay goroutine leak |
 
-Dependencies: T5 before T4; T3 before T6. T1+T2 merge INTO the provider fix
+Dependencies: T5 before T4. T1+T2 merge INTO the provider fix
 slice — do the structural fix, not the 20-line patch.
 
 ## Never-do list (from eino's own scars)

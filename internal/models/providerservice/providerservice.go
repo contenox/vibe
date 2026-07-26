@@ -23,7 +23,6 @@ const (
 	ProviderTypeOllama       = "ollama"
 	ProviderTypeOpenAI       = "openai"
 	ProviderTypeAnthropic    = "anthropic"
-	ProviderTypeMistral      = "mistral"
 	ProviderTypeBedrock      = "bedrock"
 	ProviderTypeGemini       = "gemini"
 	ProviderTypeVLLM         = "vllm"
@@ -91,7 +90,6 @@ var providerDefaultsByType = map[string]providerDefaults{
 	ProviderTypeOllama:       {Type: ProviderTypeOllama, DefaultBaseURL: "http://127.0.0.1:11434", RecommendedAPIKeyEnv: "OLLAMA_API_KEY"},
 	ProviderTypeOpenAI:       {Type: ProviderTypeOpenAI, DefaultBaseURL: "https://api.openai.com/v1", RequiresSecretConfig: true, RecommendedAPIKeyEnv: "OPENAI_API_KEY"},
 	ProviderTypeAnthropic:    {Type: ProviderTypeAnthropic, DefaultBaseURL: "https://api.anthropic.com", RequiresSecretConfig: true, RecommendedAPIKeyEnv: "ANTHROPIC_API_KEY"},
-	ProviderTypeMistral:      {Type: ProviderTypeMistral, DefaultBaseURL: "https://api.mistral.ai/v1", RequiresSecretConfig: true, RecommendedAPIKeyEnv: "MISTRAL_API_KEY"},
 	ProviderTypeBedrock:      {Type: ProviderTypeBedrock, RequiresBaseURL: true},
 	ProviderTypeGemini:       {Type: ProviderTypeGemini, DefaultBaseURL: "https://generativelanguage.googleapis.com", RequiresSecretConfig: true, RecommendedAPIKeyEnv: "GEMINI_API_KEY"},
 	ProviderTypeVLLM:         {Type: ProviderTypeVLLM, RequiresBaseURL: true},

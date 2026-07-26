@@ -18,7 +18,7 @@ type erroringSink struct{}
 func (erroringSink) PublishTaskEvent(context.Context, taskengine.TaskEvent) error {
 	return errors.New("sink down")
 }
-func (erroringSink) Enabled() bool { return true }
+func (erroringSink) Wants(taskengine.TaskEventKind) bool { return true }
 
 func seedAndService(t *testing.T, json string) hitlservice.Service {
 	t.Helper()
