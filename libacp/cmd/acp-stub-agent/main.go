@@ -100,7 +100,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/contenox/runtime/libacp"
+	"github.com/contenox/beam/libacp"
 )
 
 // stdio adapts the process's stdin/stdout to the io.ReadWriteCloser

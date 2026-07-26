@@ -42,7 +42,7 @@ func showHelp() {
 }
 
 func getVersionFile() string {
-	return "runtime/version/version.txt"
+	return "internal/version/version.txt"
 }
 
 func getCurrentDescribeVersion() (string, error) {
@@ -288,7 +288,7 @@ func updateReadmeTag(newVersion string) error {
 	}
 	re := regexp.MustCompile(`TAG=v\d+\.\d+\.\d+`)
 	if !re.Match(content) {
-		return fmt.Errorf("README.md has no TAG=vX.Y.Z substring for release tooling (add e.g. `<!-- TAG=v0.6.5 -->` near Quick Start; keep in sync with runtime/version/version.txt)")
+		return fmt.Errorf("README.md has no TAG=vX.Y.Z substring for release tooling (add e.g. `<!-- TAG=v0.6.5 -->` near Quick Start; keep in sync with internal/version/version.txt)")
 	}
 	updated := re.ReplaceAll(content, []byte("TAG="+newVersion))
 	if bytes.Equal(updated, content) {

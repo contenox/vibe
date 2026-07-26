@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/contenox/runtime/libacp"
+	"github.com/contenox/beam/libacp"
 )
 
 // A code that already states the failure must not be overridden by sniffing

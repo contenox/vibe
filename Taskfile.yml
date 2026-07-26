@@ -19,6 +19,12 @@ vars:
     sh: ls {{.ROOT_DIR}}/tools/rust-sdk/target/debug/mcp-echo-server 2>/dev/null || true
 
 tasks:
+  default:
+    desc: List available tasks
+    silent: true
+    cmds:
+      - task --list
+
   build:
     desc: Build the contenox CLI (pure Go, static)
     cmds:
@@ -47,7 +53,7 @@ tasks:
   test-cli-verbose:
     desc: Verbose CLI package tests
     cmds:
-      - GOMAXPROCS=4 go test -v ./runtime/contenoxcli/...
+      - GOMAXPROCS=4 go test -v ./internal/surfaces/contenoxcli/...
 
   test-cli-help:
     desc: Verify CLI help output against the golden script
@@ -59,7 +65,7 @@ tasks:
   tool-eval:
     desc: 'Gated per-model tool-eval matrix (opt-in: exports CONTENOX_RUN_TOOL_EVALS=1)'
     cmds:
-      - CONTENOX_RUN_TOOL_EVALS=1 CONTENOX_TOOL_EVAL_OUT={{.BIN_DIR}} GOMAXPROCS=1 go test -v -timeout 30m -run '^TestSystem_ToolEval' ./runtime/tooleval
+      - CONTENOX_RUN_TOOL_EVALS=1 CONTENOX_TOOL_EVAL_OUT={{.BIN_DIR}} GOMAXPROCS=1 go test -v -timeout 30m -run '^TestSystem_ToolEval' ./internal/tooleval
 
   acp-conformance:
     desc: Validate libacp agent-side wire dispatch against the Rust reference ACP clients
@@ -80,7 +86,7 @@ tasks:
   acp-host-e2e:
     desc: 'Registry→resolve→spawn→session host path, end to end (contenox self-loopback always; testy when built)'
     cmds:
-      - ACP_TESTY_BIN={{.ACP_TESTY_BIN}} ACP_MCP_ECHO_BIN={{.ACP_MCP_ECHO_BIN}} ACP_CLAUDE_ACP_BIN=$ACP_CLAUDE_ACP_BIN go test -run '^TestHostE2E_' -v ./runtime/agenthost/...
+      - ACP_TESTY_BIN={{.ACP_TESTY_BIN}} ACP_MCP_ECHO_BIN={{.ACP_MCP_ECHO_BIN}} ACP_CLAUDE_ACP_BIN=$ACP_CLAUDE_ACP_BIN go test -run '^TestHostE2E_' -v ./internal/services/agenthost/...
 
   test-all:
     desc: 'The one-command release gate: build, then every suite, fast gates first'
@@ -166,7 +172,7 @@ tasks:
       - 'echo "  1. Bump: task version:bump-patch|version:bump-minor|version:bump-major"'
       - 'echo "  2. Review the generated release commit and tag"'
       - 'echo "  3. Push: git push && git push origin vX.Y.Z"'
-      - 'echo "CI verifies runtime/version/version.txt matches the tag, then builds and publishes assets."'
+      - 'echo "CI verifies internal/version/version.txt matches the tag, then builds and publishes assets."'
 
   clean:
     desc: Remove build outputs

@@ -16,7 +16,7 @@ strings, features, and code branches — see §8.**
 - [x] UI library — `packages/ui` (website now vendors its own tokens.css)
 - [x] API layer — `runtime/serverapi` + 24 `runtime/internal/*api` pkgs
 - [x] API framework — `apiframework/` deleted; error taxonomy folded into
-      `runtime/errdefs` (fleet/mission/missionchanges/terminal services)
+      `internal/errdefs` (fleet/mission/missionchanges/terminal services)
 - [x] API spec generator — `internal/openapigen`, `tools/openapi-gen`
 - [x] modeld — COMPLETELY: daemon AND client half (modeldinstall/probe/conn,
       `runtime/transport`, modelrepo llama+openvino, local backend types,
@@ -48,7 +48,11 @@ strings, features, and code branches — see §8.**
 - [x] README rewritten (terminal-first, zero killed-product mentions)
 - [x] CONTRIBUTING rewritten (Task workflow, current commands, voice note)
 - [x] WHY.md created (motive record; steer via this file)
-- [ ] USER REVIEW: R&D page tone, landing TUI copy (EN+DE), README
+- [ ] USER REVIEW: R&D page tone, landing copy (EN+DE), README
+- [ ] Landing: replace the old-way/contenox table with a three-frame terminal
+      strip (mission fired → detach → envelope interrupt; commands as the only
+      captions) once beam exists to record — the CEO-copy pass's real
+      recommendation; the terse table is the interim
 
 ## 3. `contenox beam` — the new TUI (NEXT MILESTONE)
 
@@ -124,39 +128,38 @@ Work items:
 
 ## 6. Open decisions (USER)
 
-- [ ] **Repo/product rename** — "runtime" hurts product-market fit; options in
-      session report (candidates: beam, contenox, others)
-- [ ] **Repo restructure** (user wants: guts into a kernel package, less flat,
-      clear what-is-what; internal-first; no types-split-from-logic). Agreed
-      direction 2026-07-26 — layered, hoisted out of the runtime/ wrapper
-      (kills the …/runtime/runtime/… double path), ALMOST EVERYTHING under Go
-      `internal/` so the compiler enforces the public surface (k8s's pkg/ +
-      staging model is the wrong template — we're a product repo, not a
-      library federation):
-      · `libacp/` — the one deliberately public library (reusable Go ACP impl)
-      · `internal/kernel/` — taskengine, agentinstance, nativeturn, contextasm,
-        enginesvc, llmresolver, reasoning
-      · `internal/models/` — modelrepo+providers, llmrepo, runtimestate
-        (fold statetype INTO runtimestate), backendservice, providerservice,
-        modelregistry, modelcapability
-      · `internal/services/` — chat/session/mission/fleet/hitl/mcp/tools/
-        shell/vfs/workspace/…
-      · `internal/store/` — runtimetypes (persistence layer: entities + SQLite
-        Store; types stay with their logic — NO standalone types/ package)
-      · `internal/surfaces/` — contenoxcli, acpsvc, beamtui
-      · `internal/{bus,dbexec,kvstore,sandbox,tracker}/` — former lib*s
-      · `internal/errdefs/` — the one tiny shared leaf (tailscale-types/key
-        style exception)
-      Execute as ONE atomic import rewrite TOGETHER with the module/repo
-      rename, sequenced AFTER the pending commit and the history purge,
-      BEFORE beam TUI code.
+- [x] **Repo/product rename** — DECIDED: `beam`. Module is now
+      `github.com/contenox/beam` (rewrite done 2026-07-26).
+      - [x] GitHub repo renamed to contenox/beam (2026-07-26); local origin
+            updated; install.sh REPO var, landing badges, and the ACP
+            registry manifest repointed
+      - [ ] after next release: verify install.sh end-to-end against
+            contenox/beam release assets (old URLs redirect meanwhile)
+      - [ ] scripts/demos/*.tape still reference the old local checkout path
+            (~/src/github.com/contenox/runtime) — refresh when demos are
+            re-recorded (or chop with §6 orphans)
+- [x] **Repo restructure** — DONE 2026-07-26 (one atomic rewrite with the
+      rename; 730 files moved). Layout: `libacp/` public; `internal/kernel/`
+      (taskengine, agentinstance, nativeturn, contextasm, enginesvc,
+      reasoning, llmresolver, tools) · `internal/models/` (modelrepo+
+      providers, llmrepo, runtimestate, statetype, backend/provider services,
+      modelregistry*, modelcapability, hostcapacity, ollamatokenizer) ·
+      `internal/services/` (~38 domain pkgs) · `internal/store/runtimetypes` ·
+      `internal/surfaces/` (contenoxcli, acpsvc; beamtui to come) ·
+      `internal/{libbus,libdbexec,libkvstore,libsandbox,libtracker}` (dirs
+      keep package names — mechanical move) · `internal/errdefs` ·
+      `internal/version` · `internal/tooleval`. Gates green post-move: build,
+      vet, gofmt, unit suite, CLI help smoke, website build.
+      - [ ] Fold statetype INTO runtimestate (deferred: package merge is
+            surgery, not a move)
+      - [ ] statetype/tooleval/version placement review after beam TUI lands
 - [x] **taskengine** — RESOLVED (2026-07-26): keep the engine (it executes
       every chat/ACP/mission turn and owns the Message/ImagePart vocabulary);
       demote the public chain-authoring story. Follow-ups:
       - [ ] reframe docs/specification/ + landing "Chain is the contract" cap:
             users author AGENTS (agent-*.json) and ENVELOPES (HITL policies) —
             chains are the substrate, documented for power users
-      - [ ] move `runtime/taskengine` → `runtime/internal/taskengine` during
+      - [ ] move `internal/kernel/taskengine` → `runtime/internal/taskengine` during
             the modularization milestone (mechanical import rewrite; not in
             this commit)
       - [x] core/kernel layering stays: thin surfaces → services → engine is
@@ -167,7 +170,7 @@ Work items:
       product-surface-truth, tool-hardening, local-coding-node-goals, README.
       Say the word and they go too.
 - [ ] **Orphaned engineering** (outside CLI closure — chop or keep?):
-      `runtime/tooleval` (+fixtures; Taskfile tool-eval uses it), `libcipher`,
+      `internal/tooleval` (+fixtures; Taskfile tool-eval uses it), `libcipher`,
       `libprocess`, `libroutine`, `scripts/demos/`,
       `scripts/contenox-agentic-bench.ps1` + bench chain json.
       KEEP (harness/tooling): tools/acp-validator, libacp/cmd/acp-stub-agent,
@@ -194,14 +197,21 @@ Run these; every hit must be justified or killed:
 - `grep -rn 'make ' docs/ CONTRIBUTING.md README.md .github/` (should be task)
 - `contenox model registry-*` commands: registry lists GGUF/OpenVINO curated
   models but `model pull` is gone — dead feature branch? decide
-- `runtime/internal/hostcapacity` — former modeld capacity helper; check
+- `internal/models/hostcapacity` — former modeld capacity helper; check
   remaining importers, likely dead
-- `runtime/agentsmd`, `runtime/agentview`, `runtime/accessview`,
-  `runtime/presence`, `runtime/operatorinbox` — verify still reachable from
+- `internal/services/agentsmd`, `internal/services/agentview`, `internal/services/accessview`,
+  `internal/services/presence`, `internal/services/operatorinbox` — verify still reachable from
   CLI closure after serve removal
 - examples/ chains re-verify against surviving providers
 - `.contenox/` in-repo chain configs — check for killed-cmd references
 - go.mod: charmbracelet deps should arrive only with the new TUI; grpc is
   indirect-only now
-- `runtime/version` + install.sh + release.yml artifact-name consistency
+- `internal/version` + install.sh + release.yml artifact-name consistency
 - SUPPORT.md issue templates (.github/ISSUE_TEMPLATE?) for killed surfaces
+- Known load-flaky tests (pass isolated, flake under full-suite parallel
+  load — harden or serialize): runtimetypes `TestUnit_Backend_
+  DeletesSuccessfully` (Postgres testcontainer startup timeout — also ask:
+  why does the SQLite-era store still test against a Postgres container?),
+  acpsvc `TestE2E_Wire_ExternalAgent_CommandMenuAfterNewSessionResult` and
+  `TestLoopback_ExternalAgent_LazyRespawnPushesConfigOptions` (subprocess
+  EOF under load)

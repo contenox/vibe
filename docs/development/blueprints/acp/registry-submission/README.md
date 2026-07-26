@@ -9,7 +9,7 @@ contenox/
   icon.svg
 ```
 
-The manifest version must match `runtime/version/version.txt`.
+The manifest version must match `internal/version/version.txt`.
 
 Before opening the registry PR, verify the release asset URLs return `200` and
 run the registry validator from the registry checkout:

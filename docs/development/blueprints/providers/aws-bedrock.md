@@ -1,6 +1,6 @@
 # Blueprint: AWS Bedrock provider
 
-Status: implemented — the provider ships in `runtime/modelrepo/bedrock`. Kept as the assessment and design record.
+Status: implemented — the provider ships in `internal/models/modelrepo/bedrock`. Kept as the assessment and design record.
 
 Bedrock is doable and fits the provider/codec pattern. The central choice is
 **whether to take the `aws-sdk-go-v2` dependency** — it flips which parts are
@@ -44,7 +44,7 @@ land non-streaming first.
 
 ## 3. Codec story (cleaner than Vertex either way)
 
-Target **Converse**: one new `runtime/modelrepo/codec/converse` package —
+Target **Converse**: one new `internal/models/modelrepo/codec/converse` package —
 build the Converse request (messages→content blocks, `system`, `toolConfig`
 from neutral `Tool`, `inferenceConfig` from `ChatConfig`), decode the response
 (`output.message.content[]` → text + `toolUse`), and a ConverseStream decoder
@@ -74,8 +74,8 @@ Claude. Pick the Converse subset and skip the rest (draft §6).
 ## 5. Implementation checklist (when greenlit)
 
 New code:
-- `runtime/modelrepo/codec/converse/` — codec + golden/stream tests.
-- `runtime/modelrepo/bedrock/` — `client.go` (transport per §2), `provider.go`,
+- `internal/models/modelrepo/codec/converse/` — codec + golden/stream tests.
+- `internal/models/modelrepo/bedrock/` — `client.go` (transport per §2), `provider.go`,
   `catalog.go` (register `"bedrock"`; ListModels via `ListFoundationModels` or
   static; default chat caps; map `AccessDeniedException` → enablement hint),
   `types.go`, httptest round-trip tests (zero-dep path) or SDK-mock tests.

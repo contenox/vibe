@@ -108,6 +108,7 @@ bin/
 /contenox-cli
 /contenox-runtime
 /vibe
+/version
 /acp-stub-agent
 
 .notes/

@@ -1,8 +1,8 @@
 # Provider Blueprints
 
-Cloud/hosted model providers plug into `runtime/modelrepo` behind the
+Cloud/hosted model providers plug into `internal/models/modelrepo` behind the
 `modelrepo.Provider` interface; request-side selection happens in
-`runtime/llmrepo`. These docs cover provider-specific integration designs.
+`internal/models/llmrepo`. These docs cover provider-specific integration designs.
 
 | Doc | Status | What it covers |
 | --- | --- | --- |

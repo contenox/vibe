@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/contenox/runtime/libacp"
+	"github.com/contenox/beam/libacp"
 )
 
 // Supervisor keeps an agent subprocess alive across transient crashes by

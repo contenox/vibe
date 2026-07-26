@@ -3,7 +3,7 @@
 Date: 2026-07-21
 Status: blueprint (research landed; implementation staged). Companion incident:
 the first real fleet dispatch derailed because `list_dir` did not distinguish a
-50MB executable from a directory (fixed same day in `runtime/localtools/fs.go`
+50MB executable from a directory (fixed same day in `internal/services/localtools/fs.go`
 — suffixes, binary sniff, teaching errors). The general problem stands: the
 local tools work well with Gemini and degrade on other models, and everything
 in the product builds on this layer.

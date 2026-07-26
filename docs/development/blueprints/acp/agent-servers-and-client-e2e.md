@@ -1,9 +1,9 @@
 # Blueprint: Agent servers and client-host e2e
 
 **Status:** largely landed — the composed-path harness exists (`make acp-host-e2e`,
-`runtime/agenthost/e2e_{loopback,testy,claude,mcp}_test.go`) and `contenox agent
+`internal/services/agenthost/e2e_{loopback,testy,claude,mcp}_test.go`) and `contenox agent
 check` is its user-facing twin. Scopes how a declared agent is *served* as an ACP agent and
-how the runtime's new **client-host** role (`runtime/agenthost`) is verified
+how the runtime's new **client-host** role (`internal/services/agenthost`) is verified
 end-to-end. Sits on top of the landed external-agent plumbing (`agents` table,
 `agentregistryservice`, `agenthost`) and the registration UX
 ([the `contenox agent` CLI](../../../reference/contenox-cli.md)). UI surfaces
@@ -23,7 +23,7 @@ and *trust* hosting a foreign agent, two things are missing:
 ## The insight: contenox is already an ACP server
 
 `contenox acp` runs the ACP **agent** role over stdio ("Run the Contenox ACP
-server over stdio", `runtime/contenoxcli/acp_cmd.go`). It is the same `libacp`
+server over stdio", `internal/surfaces/contenoxcli/acp_cmd.go`). It is the same `libacp`
 JSON-RPC-over-`io.ReadWriteCloser` machinery the host uses, pointed the other way.
 So contenox can be **registered as an external agent pointing at its own binary**
 — a self-hosting loopback:
@@ -82,6 +82,6 @@ reference tools cover, so we don't confuse them:
 Gate each server's e2e on its binary env var (`ACP_TESTY_BIN`; the loopback needs
 the freshly built `contenox` binary; the stub builds itself), matching the
 existing conformance/client-e2e convention. Home is most naturally a new
-`runtime/agenthost` e2e (it is the integration point that composes
+`internal/services/agenthost` e2e (it is the integration point that composes
 registry + host), with a `make` target beside `acp-client-e2e`.
 

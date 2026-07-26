@@ -5,7 +5,7 @@
 #   curl -fsSL https://contenox.com/install.sh | CONTENOX_WITH_MODELD=1 sh   # also preinstall the local inference daemon
 set -e
 
-REPO="contenox/runtime"
+REPO="contenox/beam"
 BIN="contenox"
 
 # ── Detect OS ─────────────────────────────────────────────────────────────────

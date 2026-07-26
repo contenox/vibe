@@ -1,4 +1,4 @@
-module github.com/contenox/runtime
+module github.com/contenox/beam
 
 go 1.25.5
 

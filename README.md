@@ -1,27 +1,19 @@
-# Contenox
+# contenox
 
-**An open coding harness for your terminal and editor — bring any model.**
+**Fire coding work at an agent, under rules you can read.**
 
-Contenox is a coding harness: the part of agentic work that stays yours —
-sessions, tools, approvals, missions — while models come and go. Chat and
-shell in your terminal, use the same harness inside Zed, JetBrains, or any
-ACP editor, and fire off **missions** — work an agent does unattended inside
-an approval envelope, so it only interrupts you when it matters. Bring
-whatever models you like, hosted or local: Ollama, OpenAI, Anthropic, Gemini,
-OpenRouter, Mistral, Bedrock, Vertex, vLLM.
+An open coding harness. Terminal CLI, the same sessions inside Zed,
+JetBrains, or any ACP editor, and beam on the way. Missions run detached
+under approval envelopes — plain files, like the system prompts, chains, and
+tool allowlists. Any model, any MCP server, any OpenAPI spec as tools, in
+combination. SQLite. No account.
 
-No account, no hosted service: your sessions, chains, and config live in
-local SQLite on your machine.
-
-**The bet:** coding agents are evolving from something you babysit into
-something you delegate to. Contenox is built for that next step —
-
-| Coding agents today | The bet Contenox makes |
+| The old way | contenox |
 | --- | --- |
-| You watch the agent work and approve it token by token. | Fire a mission and stay in flow — the envelope decides when you get interrupted. |
-| The agent is a subscription to one vendor's model. | Models are config: local Ollama or vLLM today, a frontier API tomorrow. |
-| Every editor ships its own copilot with its own memory. | One agent and one session memory across the terminal and every ACP editor. |
-| Your best prompts and guardrails die in chat scrollback. | Repeatable work lives in versioned chains — reviewable, shareable, runnable anywhere. |
+| A hidden prompt | A file you edit |
+| Guessing the blast radius | An envelope you wrote |
+| Watching it work | Detached missions |
+| One vendor | Any model, any MCP, together |
 
 Docs: **[contenox.com](https://contenox.com)**
 
@@ -41,7 +33,7 @@ less install.sh
 sh install.sh
 ```
 
-*Pre-built release downloads and source builds are also available on the [releases page](https://github.com/contenox/runtime/releases).*
+*Pre-built release downloads and source builds are also available on the [releases page](https://github.com/contenox/beam/releases).*
 
 ---
 
@@ -104,7 +96,7 @@ contenox --shell "check Proxmox and flag anything red"
 ## Editor integration
 
 Contenox speaks the [Agent Client Protocol (ACP)](https://github.com/zed-industries/agent-client-protocol)
-over standard I/O — one runtime behind every editor session.
+over standard I/O — one harness behind every editor session.
 
 ### Zed
 
@@ -128,8 +120,7 @@ project.
 
 *Step-by-step guides:* [Zed](https://contenox.com/docs/integrations/editors/zed/) | [JetBrains](https://contenox.com/docs/integrations/editors/jetbrains/) | [AionUi](https://contenox.com/docs/integrations/editors/aionui/).
 
-**Coming next:** `contenox beam` — a terminal UI for the whole runtime, built
-on the same session machinery — is in active development.
+Terminal. Editor. **beam** — soon.
 
 ---
 
@@ -162,7 +153,7 @@ Defaults are safe so you don't have to think about them: gated actions ask a
 human first (in the terminal or your editor's permission UI), agent shells run
 confined with scrubbed environments, and every session leaves reviewable local
 state. Approval policies are yours to author — loosen or tighten per chain,
-and the runtime stays out of your way everywhere else.
+and the harness stays out of your way everywhere else.
 
 ---
 
@@ -171,8 +162,8 @@ and the runtime stays out of your way everywhere else.
 The CLI is pure Go — no C toolchain, no native dependencies.
 
 ```bash
-git clone https://github.com/contenox/runtime
-cd runtime
+git clone https://github.com/contenox/beam
+cd beam
 task build        # https://taskfile.dev — or: CGO_ENABLED=0 go build ./cmd/contenox
 ```
 

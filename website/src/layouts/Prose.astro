@@ -16,7 +16,7 @@ const segments = current.replace(/^\//, '').replace(/\/$/, '').split('/');
 if (segments[0] !== 'docs') segments.unshift('docs');
 if (segments[segments.length - 1] === 'readme') segments[segments.length - 1] = 'README';
 const docPath = segments.join('/') + '.md';
-const editUrl = `https://github.com/contenox/runtime/blob/main/${docPath}`;
+const editUrl = `https://github.com/contenox/beam/blob/main/${docPath}`;
 
 // Blueprints are design records: browsable, but kept out of search engines.
 const noindex = current.startsWith('/docs/development/blueprints/');

@@ -28,7 +28,7 @@ if ! echo "$HELP_OUTPUT" | grep -q "Version:"; then
 fi
 
 # 3. Every top-level subcommand must appear in the help output. Keep this list
-# in lockstep with the registrations in runtime/contenoxcli/cli.go — a command
+# in lockstep with the registrations in internal/surfaces/contenoxcli/cli.go — a command
 # added there but not here is invisible to this gate, and vice versa.
 EXPECTED_CMDS=(
   "acp"

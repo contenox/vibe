@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/runtime/libacp"
+	"github.com/contenox/beam/libacp"
 )
 
 func TestIsNotFound(t *testing.T) {

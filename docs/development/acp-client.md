@@ -4,7 +4,7 @@
 the conversation:
 
 - **Agent side** — `libacp.AgentSideConnection` serving a `libacp.Agent`.
-  This is the upward direction: `runtime/acpsvc` implements the production
+  This is the upward direction: `internal/surfaces/acpsvc` implements the production
   agent that ACP clients (Zed, JetBrains, the Beam TUI) drive via
   `contenox acp`.
 - **Client side** — `libacp.ClientSideConnection` driving a `libacp.Client`.
@@ -24,7 +24,7 @@ transport both roles use to reach a peer binary.
 ## E2E harnesses against the Rust reference SDK
 
 The in-repo tests exercise both halves against each other (in-process fakes,
-plus a production loopback in `runtime/acpsvc/client_loopback_test.go` that
+plus a production loopback in `internal/surfaces/acpsvc/client_loopback_test.go` that
 runs the real `acpsvc` agent against the real `ClientSideConnection`). Two
 additional, opt-in harnesses validate each role against **independently
 implemented** peers from the reference Rust SDK
@@ -54,7 +54,7 @@ Both targets skip-or-fail cleanly when their binary env var is unset:
 One layer above the wire-dispatch harnesses, `make acp-host-e2e` validates the
 runtime's **client-host composition** end to end: an `agents` row created and
 resolved through the real registry service, spawned and driven by
-`runtime/agenthost.DriveTurn` (initialize → session/new → session/prompt →
+`internal/services/agenthost.DriveTurn` (initialize → session/new → session/prompt →
 teardown), with the streamed reply asserted on the caller's harness. This is
 the harness scoped by
 [blueprints/acp/agent-servers-and-client-e2e.md](blueprints/acp/agent-servers-and-client-e2e.md).
@@ -75,7 +75,7 @@ reply — the way to verify an agent right after `contenox agent add`.
 
 An agent row's `mcp_servers` config field is an explicit, per-agent allowlist
 of registered MCP server names (`contenox mcp list`) forwarded to that agent
-in ACP `session/new` — the mirror of what `runtime/acpsvc` consumes when
+in ACP `session/new` — the mirror of what `internal/surfaces/acpsvc` consumes when
 contenox is on the *agent* side of the same exchange. The host
 (`agenthost.ResolveForwardedMcpServers` + DriveTurn) resolves names loudly
 (a missing name fails the turn rather than silently shrinking the agent's

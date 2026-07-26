@@ -19,9 +19,9 @@ CLI / ACP stdio sessions / beam TUI
     ->
 Service Layer (runtime/*service/)
     ->
-Task Engine (runtime/taskengine/)
+Task Engine (internal/kernel/taskengine/)
     ->
-Data + Integrations (lib*/ + runtime/runtimetypes/ + runtime/localtools/)
+Data + Integrations (lib*/ + internal/store/runtimetypes/ + internal/services/localtools/)
 ```
 
 The Go runtime owns chains, execution state, model routing, tools, MCP worker
@@ -49,7 +49,7 @@ package (`execservice`, `backendservice`, `mcpserverservice`, `stateservice`,
 Services communicate through the shared `runtimetypes.Store` interface and bus
 events rather than depending on each other directly.
 
-**Task Engine** (`runtime/taskengine/`) — the core execution model. Chains are
+**Task Engine** (`internal/kernel/taskengine/`) — the core execution model. Chains are
 JSON/YAML DAGs with typed I/O (`DataType`: String, Int, JSON, ChatHistory,
 Any). Task handlers (`chat_completion`, `execute_tool_calls`, `tools`,
 `route`, `raise_error`, `noop`) and branch operators (`equals`, `contains`,
@@ -76,12 +76,12 @@ subscribe without direct package coupling.
 
 | File | What it shows |
 |------|---------------|
-| `runtime/taskengine/tasktype.go` | Chain schema, task handlers, branch operators |
-| `runtime/taskengine/taskenv.go` | Runtime tool resolution and chain execution context |
-| `runtime/contenoxcli/cli.go` | CLI dispatch |
-| `runtime/contenoxcli/engine.go` | CLI-local engine bootstrap |
-| `runtime/acpsvc/` | ACP session transport (editors and the beam TUI build on this) |
-| `runtime/agentinstance/` | the embeddable fleet kernel (missions run in-process) |
+| `internal/kernel/taskengine/tasktype.go` | Chain schema, task handlers, branch operators |
+| `internal/kernel/taskengine/taskenv.go` | Runtime tool resolution and chain execution context |
+| `internal/surfaces/contenoxcli/cli.go` | CLI dispatch |
+| `internal/surfaces/contenoxcli/engine.go` | CLI-local engine bootstrap |
+| `internal/surfaces/acpsvc/` | ACP session transport (editors and the beam TUI build on this) |
+| `internal/kernel/agentinstance/` | the embeddable fleet kernel (missions run in-process) |
 
 ## Repository structure
 
@@ -92,23 +92,32 @@ The `contenox` binary is the only entrypoint. Current commands include
 protocols for editors; `workspace` grants or revokes the workspace roots a
 session may run in; the rest work against the local database directly.)
 
-All AI workflow packages live under `runtime/`. Infrastructure libraries
-(`libacp`, `libbus`, `libdbexec`, `libkvstore`, `libsandbox`, `libtracker`)
-stay at the module root.
+The layout is layered, and almost everything lives under Go `internal/` so
+the compiler defines the public surface. `libacp/` is the one deliberately
+public library (a reusable Go ACP implementation).
 
 ```text
-cmd/contenox/         contenox binary entry point
-runtime/contenoxcli/  CLI command implementations
-runtime/taskengine/   chain schema and execution engine
-runtime/llmrepo/      provider/model selection
-runtime/modelrepo/    provider drivers (ollama, vllm, openai, …)
-runtime/localtools/   local shell, local filesystem, web, echo, print tools
-runtime/*service/     runtime services
-runtime/acpsvc/       ACP session transport
+cmd/contenox/            contenox binary entry point
+libacp/                  the public ACP library (agent+client wire impl)
+internal/kernel/         the guts: taskengine, agentinstance, nativeturn,
+                         contextasm, enginesvc, reasoning, llmresolver, tools
+internal/models/         model plumbing: modelrepo + provider drivers,
+                         llmrepo, runtimestate, backend/provider services,
+                         modelregistry, hostcapacity
+internal/services/       domain services: chat, session, mission, fleet,
+                         hitl, mcp, tools, shell, vfs, workspace, …
+internal/store/          runtimetypes — entities + the SQLite Store
+internal/surfaces/       thin adapters: contenoxcli (CLI), acpsvc (ACP
+                         sessions), beamtui (the TUI, in development)
+internal/libbus, libdbexec, libkvstore, libsandbox, libtracker
+                         infrastructure libraries with no LLM dependency
+internal/errdefs/        shared error vocabulary (tiny leaf)
 docs/development/blueprints/  design records and R&D directions
-lib*/                 infrastructure libraries with no LLM dependency
-website/              contenox.com (Astro; renders docs/ as content)
+website/                 contenox.com (Astro; renders docs/ as content)
 ```
+
+The layering is a rule, not a convention: surfaces stay thin and call
+services; business logic never lives in `internal/surfaces/`.
 
 ## Local development setup
 
@@ -188,7 +197,7 @@ run `task test-cli-help` and update the relevant docs.
 - Prefer self-documenting code. Add short comments only for non-obvious
   invariants, protocol behavior, security boundaries, or tricky edge cases.
 - Service constructors accept interfaces. Wire concrete implementations in
-  `runtime/contenoxcli/engine.go`.
+  `internal/surfaces/contenoxcli/engine.go`.
 - Keep chain behavior declarative. Business logic belongs in chain definitions
   unless a new primitive is genuinely needed in `taskengine`.
 - Tool exposure must be explicit. `execute_config.tools` omitted, `null`, or

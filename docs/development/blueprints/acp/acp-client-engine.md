@@ -46,7 +46,7 @@ them into one opaque result.
 
 This is protocol-honest by construction: taskengine's step-sequencing already
 threads one step's output into the next (`ExecEnv`'s loop in
-`runtime/taskengine/taskenv.go` assigns the prior step's output as
+`internal/kernel/taskengine/taskenv.go` assigns the prior step's output as
 `taskInput` before invoking the next task), and `Transition.Branches` already
 picks the next task
 by evaluating that output. An ACP step's final turn is just another step
@@ -56,7 +56,7 @@ Fan-out (running the same ACP step against several agents, or several
 sessions) follows the same pattern any other task type uses; nothing about
 agents requires new fan-out machinery.
 
-Concretely, this is a new `TaskHandler` (see `runtime/taskengine/tasktype.go`
+Concretely, this is a new `TaskHandler` (see `internal/kernel/taskengine/tasktype.go`
 for the existing closed enum — `raise_error`, `route`, `chat_completion`,
 `execute_tool_calls`, `noop`, `tools`) and a new case in the `taskexec.go`
 switch, not a plugin/registry layer. That matches the taskengine's existing
@@ -81,7 +81,7 @@ type LLMPromptExecClient interface {
 }
 ```
 
-(`runtime/modelrepo/modelprovidertypes.go`). Implementing `Chat` over an ACP
+(`internal/models/modelrepo/modelprovidertypes.go`). Implementing `Chat` over an ACP
 agent means, inside one call: open or resume a session, send the prompt,
 absorb every `tool_call`, every `plan` update, and every
 `session/request_permission` round-trip the agent produces, wait for
@@ -113,7 +113,7 @@ decision of the client core, and it is load-bearing:
 
 **A sub-agent's `session/request_permission` must be answered by contenox's
 own HITL policy machinery** — the same policy evaluator that gates contenox's
-own tools when contenox is the agent (`runtime/hitlservice/policy.go`:
+own tools when contenox is the agent (`internal/services/hitlservice/policy.go`:
 `Policy{DefaultAction, Rules}`, first-match `Rule{Tools, Tool, When
 []Condition, Action}` with condition operators including `glob`,
 `command_blacklist`, `command_ask_always`). The policy answers on the human's
@@ -134,7 +134,7 @@ Both shapes live on this core. `libacp` — the runtime's own ACP
 implementation — speaks both sides: `AgentSideConnection` (`libacp/conn.go`)
 and the `Agent` / `AgentFactory` contract it drives (`libacp/agent.go`),
 which is exactly what `acpsvc` wraps (`acpsvc.New(deps) libacp.AgentFactory`,
-`runtime/acpsvc/transport.go`), and `ClientSideConnection`
+`internal/surfaces/acpsvc/transport.go`), and `ClientSideConnection`
 (`libacp/clientconn.go`) with the `Client` / `ClientFactory` contract
 (`libacp/client.go`) — session lifecycle (new/load/resume/prompt/cancel), the
 pending-request map, and the permission callback, shared machinery the two
@@ -152,7 +152,7 @@ Symmetry worth noting: `acpsvc`'s own `local_shell` handling already expects
 capable peers to run commands on the peer's own machine — it routes through
 the *client's* `terminal/create` when the connected client advertises the
 Terminal capability, falling back to server-side exec only when the peer
-cannot (`runtime/acpsvc/commandrunner.go:35`, `if
+cannot (`internal/surfaces/acpsvc/commandrunner.go:35`, `if
 !t.getClientCaps().Terminal { ... fallback ... }`). The client core built here
 is the mirror image of that same capability negotiation, generalized to
 contenox acting as the capable peer for a sub-agent it drives.
@@ -161,7 +161,7 @@ contenox acting as the capable peer for a sub-agent it drives.
 
 External ACP agents are registered the same way external MCP servers already
 are — a persisted, name-keyed spawn spec, not a bespoke config surface. The
-existing pattern is `runtimetypes.MCPServer` (`runtime/runtimetypes/mcp.go`):
+existing pattern is `runtimetypes.MCPServer` (`internal/store/runtimetypes/mcp.go`):
 `ID`, `Name`, `Transport`, `Command`, `Args`, plus connection/auth fields
 (`URL`, `AuthType`, `AuthToken`, `AuthEnvKey`, `OAuthClientID`,
 `OAuthClientSecretEnv`, `ConnectTimeoutSeconds`, `Headers`,

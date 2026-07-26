@@ -19,7 +19,7 @@
 //
 // A connection reads from any io.ReadWriteCloser. For the common case of an
 // agent subprocess spoken to over stdio, the subpackage
-// github.com/contenox/runtime/libacp/acpexec spawns the process and hands
+// github.com/contenox/beam/libacp/acpexec spawns the process and hands
 // back the transport.
 //
 // # Driving an agent (client role)

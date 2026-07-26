@@ -169,7 +169,7 @@ contract is a separate direction, below).
    plan tools + mission verbs, withholds execution tools) with the adapted
    Codex discipline text; the batch journey (plan → fire → skim → assess)
    documented as the acceptance. — **PROMPT HALF LANDED**: the profile ships as
-   `runtime/contenoxcli/agent-planner.json` (discovered by the agent-* convention,
+   `internal/surfaces/contenoxcli/agent-planner.json` (discovered by the agent-* convention,
    granted only the `mission` tools, withholding execution tools) with the
    Codex-derived discipline prompt. See the appendix for the prompt text and the
    envelope guidance. Sub-mission firing from the profile is a FUTURE slice.
@@ -191,7 +191,7 @@ tooling, and modes surfaced to editors via `session/set_mode`.
 
 The planner is not a new agent KIND — it is a capability PROFILE (the OpenHands
 lesson: constrained toolset + boundary prompt + plan artifact suffices). It ships
-as a declared chain agent, `runtime/contenoxcli/agent-planner.json`, scaffolded
+as a declared chain agent, `internal/surfaces/contenoxcli/agent-planner.json`, scaffolded
 into `~/.contenox/` by `contenox init` and declared as a fleet-dispatchable agent
 by the `agent-*` filename convention (chain-agent discovery). Fire it like any
 mission: `contenox mission fire --agent agent-planner --intent "…" --policy …`.

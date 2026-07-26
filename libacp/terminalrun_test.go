@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	libacp "github.com/contenox/runtime/libacp"
+	libacp "github.com/contenox/beam/libacp"
 )
 
 type fakeTerminalPeer struct {

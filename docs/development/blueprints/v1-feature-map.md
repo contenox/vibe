@@ -79,7 +79,7 @@ these fail on the target platform being released.
 - Test install on a clean machine or clean container with no prior
   `~/.contenox`.
 - Test the standalone CLI on Linux, macOS, and Windows before V1.
-- Verify `contenox --version` matches `runtime/version/version.txt`.
+- Verify `contenox --version` matches `internal/version/version.txt`.
 - Verify `contenox update` behavior both when current and when update metadata
   says a newer release exists.
 - Verify CLI release artifacts are named predictably enough for users to
@@ -572,7 +572,7 @@ Auth:
 
 - `echo`: simple echo for test chains.
 - `print`: deterministic message output/system message helper.
-- SSH remote command execution exists in `runtime/localtools`. V1 should decide
+- SSH remote command execution exists in `internal/services/localtools`. V1 should decide
   whether this is public, experimental, or hidden before documenting it as a
   supported user feature.
 

@@ -13,7 +13,7 @@ description: Install Contenox and connect a model.
 curl -fsSL https://contenox.com/install.sh | sh
 ```
 
-Or download the binary directly from [GitHub Releases](https://github.com/contenox/runtime/releases/latest).
+Or download the binary directly from [GitHub Releases](https://github.com/contenox/beam/releases/latest).
 
 The whole path — install, setup, first prompt — in one take:
 

@@ -24,11 +24,11 @@ jobs:
       - name: Verify version matches tag
         run: |
           TAG="${{ steps.vars.outputs.TAG }}"
-          VERSION_IN_FILE=$(cat runtime/version/version.txt | tr -d '\n' | tr -d '\r')
+          VERSION_IN_FILE=$(cat internal/version/version.txt | tr -d '\n' | tr -d '\r')
           if [ "$VERSION_IN_FILE" != "$TAG" ]; then
             echo "ERROR: Version in file ($VERSION_IN_FILE) does NOT match tag ($TAG)"
             echo "Proper release process:"
-            echo "  1. Update runtime/version/version.txt with new version"
+            echo "  1. Update internal/version/version.txt with new version"
             echo "  2. Commit the change"
             echo "  3. Create tag pointing to THAT commit"
             echo "  4. Push tag"
@@ -74,7 +74,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           TAG="${{ needs.verify.outputs.tag }}"
-          LDFLAGS="-X github.com/contenox/runtime/runtime/contenoxcli.Version=${TAG}"
+          LDFLAGS="-X github.com/contenox/beam/internal/surfaces/contenoxcli.Version=${TAG}"
           mkdir -p bin
           EXT=""
           if [ "${{ matrix.goos }}" = "windows" ]; then
