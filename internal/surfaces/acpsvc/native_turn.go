@@ -191,13 +191,13 @@ func (tr *nativeEventTranslator) publish(ctx context.Context, sid libacp.Session
 // this connection's context, which is exactly why the wait below keys the drop case
 // on connCtx (a bare socket close) rather than the request context (which a
 // session/cancel also cancels).
-func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, droppedContentKinds []string) (libacp.PromptResponse, error) {
+func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, images []taskengine.ImagePart, droppedContentKinds []string) (libacp.PromptResponse, error) {
 	t := d.t
 	_ = ctx // the turn owns its own serve-rooted context; ctx governed the prompt preamble only.
 
 	viewer := newNativeTurnViewer(t, req.SessionID)
 	turnFn := func(turnCtx context.Context, emit func(context.Context, libacp.SessionNotification)) nativeturn.Result {
-		return d.runNativeTurn(turnCtx, req, sess, input, droppedContentKinds, emit)
+		return d.runNativeTurn(turnCtx, req, sess, input, images, droppedContentKinds, emit)
 	}
 
 	turn, _, err := t.deps.NativeTurns.Start(req.SessionID, turnFn, viewer)
@@ -240,7 +240,7 @@ func nativeResultToResponse(res nativeturn.Result) (libacp.PromptResponse, error
 // reaches here); the post-turn SessionInfo is journaled rather than sent
 // AfterResponse; and it owns its own turn-scoped tracker span, because the turn
 // outlives the connection whose Prompt started it.
-func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, droppedContentKinds []string, emit func(context.Context, libacp.SessionNotification)) nativeturn.Result {
+func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, images []taskengine.ImagePart, droppedContentKinds []string, emit func(context.Context, libacp.SessionNotification)) nativeturn.Result {
 	t := d.t
 
 	turnCtx = libtracker.WithNewRequestID(turnCtx)
@@ -349,6 +349,7 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 	resp, err := d.agent.Prompt(turnCtx, agentservice.PromptRequest{
 		SessionID:      sess.InternalSessionID,
 		Input:          input,
+		Images:         images,
 		Chain:          t.deps.ChainRegistry.Default(),
 		TemplateVars:   templateVars,
 		ToolsAllowlist: toolsAllowlist,

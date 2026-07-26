@@ -43,6 +43,16 @@ HITL gates) stays on by default — it just stops being the headline.
 accidentally committed are being purged from git history, and website media
 moves to S3; a public V1 repo should clone fast and contain source.
 
+## The heart
+
+The surfaces are reach; the heart is the kernel. Eighteen months of matured
+execution machinery — typed-IO chains, policy envelopes, an embeddable fleet
+kernel, tracing through every step — in the way Dagger's heart is its engine
+rather than its CLI. Users meet contenox in a terminal or an editor; what
+they're actually holding is a programmable substrate for agentic work that
+runs the same unit in a chat turn, a detached mission, or a headless pipeline
+loop. The V1 cut removed surfaces, never the heart.
+
 ## What this is NOT
 
 - Not an abandonment of multi-surface ambitions forever — it's sequencing.

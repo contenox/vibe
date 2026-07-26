@@ -9,8 +9,12 @@ import (
 )
 
 type PromptRequest struct {
-	SessionID      string
-	Input          string
+	SessionID string
+	Input     string
+	// Images are attachments riding this turn's user message (vision). They
+	// travel on taskengine.Message.Images, persist with the session history,
+	// and route the request to CanVision providers via llmresolver.
+	Images         []taskengine.ImagePart
 	InputType      taskengine.DataType
 	InputValue     any
 	Chain          *taskengine.TaskChainDefinition

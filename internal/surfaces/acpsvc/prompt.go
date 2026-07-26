@@ -85,14 +85,24 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		return libacp.PromptResponse{}, err
 	}
 
-	input, droppedContentKinds := libacp.FlattenContent(req.Prompt)
-	if input == "" {
+	// Image blocks are pulled out FIRST: FlattenContent is a lossy text
+	// projection that drops them, and vision rides the user Message's Images —
+	// see extractImageParts. An image-only prompt (empty text, ≥1 image) is a
+	// valid turn: "what is this?" asked by attachment alone.
+	images, textBlocks := extractImageParts(req.Prompt)
+	input, droppedContentKinds := libacp.FlattenContent(textBlocks)
+	if input == "" && len(images) == 0 {
 		err := libacp.NewError(libacp.ErrInvalidParams, "empty prompt")
 		reportErr(err)
 		return libacp.PromptResponse{}, err
 	}
 
 	if name, args, ok := parseCommand(input); ok {
+		// Slash commands are text verbs; an image attached to one has no
+		// meaning. Record it as dropped rather than silently discarding.
+		if len(images) > 0 {
+			droppedContentKinds = append(droppedContentKinds, string(libacp.ContentKindImage))
+		}
 		cmdCtx := libtracker.WithNewRequestID(ctx)
 		return t.dispatchCommand(cmdCtx, req.SessionID, sess, name, args)
 	}
@@ -103,7 +113,7 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	// native_turn.go. The stdio `contenox acp` path leaves NativeTurns nil and keeps
 	// the connection-bound turn below, byte-for-byte the historical behavior.
 	if t.deps.NativeTurns != nil {
-		return d.promptViaRegistry(ctx, req, sess, input, droppedContentKinds)
+		return d.promptViaRegistry(ctx, req, sess, input, images, droppedContentKinds)
 	}
 
 	promptCtx := libtracker.WithNewRequestID(ctx)
@@ -226,6 +236,7 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	resp, err := d.agent.Prompt(promptCtx, agentservice.PromptRequest{
 		SessionID:      sess.InternalSessionID,
 		Input:          input,
+		Images:         images,
 		Chain:          t.deps.ChainRegistry.Default(),
 		TemplateVars:   templateVars,
 		ToolsAllowlist: toolsAllowlist,

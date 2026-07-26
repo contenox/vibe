@@ -323,7 +323,7 @@ func (a *agent) buildChatInput(ctx context.Context, req PromptRequest) (any, tas
 
 	inputContent := ComposeUserInput(req.Input, req.Context)
 
-	userMsg := taskengine.Message{ID: uuid.NewString(), Role: "user", Content: inputContent, Timestamp: time.Now().UTC()}
+	userMsg := taskengine.Message{ID: uuid.NewString(), Role: "user", Content: inputContent, Images: req.Images, Timestamp: time.Now().UTC()}
 	chatInput := taskengine.ChatHistory{
 		Messages: append(history, userMsg),
 	}

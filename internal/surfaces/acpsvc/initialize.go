@@ -74,7 +74,9 @@ func (t *Transport) Initialize(ctx context.Context, req libacp.InitializeRequest
 		AgentCapabilities: libacp.AgentCapabilities{
 			LoadSession: true,
 			PromptCapabilities: libacp.PromptCapabilities{
-				Image:           false,
+				// Image blocks are extracted into the user message's ImageParts
+				// (see extractImageParts) and ride to CanVision providers.
+				Image:           true,
 				Audio:           false,
 				EmbeddedContext: true,
 			},

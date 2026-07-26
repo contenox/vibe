@@ -58,7 +58,7 @@ const (
 // approvals, code, vscode-agent, modeld) stay reserved on purpose: an operator
 // typing one gets Cobra's unknown-command error naming the mistake, instead of
 // the word being silently injected as a chat prompt.
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "code": true, "vscode-agent": true, "modeld": true}
+var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
@@ -417,6 +417,7 @@ func init() {
 
 	// Chat-specific local flags (not exposed globally).
 	chatCmd.Flags().Int("trim", 0, "Only send the last N messages from session history to the model (0 = send all)")
+	chatCmd.Flags().StringArray("attach", nil, "Attach an image to this message (repeatable). Routes to a vision-capable model.")
 	chatCmd.Flags().Int("last", 0, "Print last N user/assistant turns after the reply (0 = only print new reply)")
 	chatCmd.Flags().Bool("auto", false, "Non-interactive mode: disable HITL approval prompts. Default is HITL on; tools route through the active hitl-policy. Use --auto only in trusted/scripted contexts.")
 
@@ -736,6 +737,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	effectiveHITL := !autoMode
 	historyTrim, _ := cmd.Flags().GetInt("trim")
 	lastN, _ := cmd.Flags().GetInt("last")
+	attachPaths, _ := cmd.Flags().GetStringArray("attach")
 
 	opts := chatOpts{
 		EffectiveDB:                  dbPath,
@@ -760,6 +762,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		LastN:                        lastN,
 		InputValue:                   inputValue,
 		InputFlagPassed:              inputPassed,
+		AttachPaths:                  attachPaths,
 		ContenoxDir:                  contenoxDir,
 	}
 	return execChat(ctx, db, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())

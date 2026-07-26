@@ -39,7 +39,10 @@ type chatOpts struct {
 	LastN                        int
 	InputValue                   string
 	InputFlagPassed              bool
-	ContenoxDir                  string
+	// AttachPaths are --attach image files; they ride the turn's user message
+	// as ImageParts and route the request to a CanVision provider.
+	AttachPaths []string
+	ContenoxDir string
 	// EffectiveSkipBackendCycle skips state.RunBackendCycle (e.g. contenox-runtime doctor --skip-cycle).
 	EffectiveSkipBackendCycle bool
 	// EffectiveAskApproval lets editor integrations reuse BuildEngine while
@@ -91,7 +94,13 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 			}
 		}
 	}
-	if in == "" {
+	images, err := loadImageAttachments(opts.AttachPaths)
+	if err != nil {
+		return err
+	}
+	// An image-only turn is valid ("what is this?" asked by attachment alone);
+	// no input AND no attachment is not.
+	if in == "" && len(images) == 0 {
 		return fmt.Errorf("no input for chain: pass input as args, --input, or pipe via stdin")
 	}
 
@@ -135,6 +144,7 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	resp, err := ag.Prompt(ctx, agentservice.PromptRequest{
 		SessionID:      sessionID,
 		Input:          in,
+		Images:         images,
 		Chain:          chain,
 		TemplateVars:   templateVars,
 		ContextLength:  opts.EffectiveContext,
