@@ -1,12 +1,22 @@
 # Confining agents: the sandbox wall
 
-When contenox runs an agent (one of its task chains), it spawns it as a
-subprocess and confines it behind "the wall": the agent can act on the world only
-through the tools it is given and the workspace it is handed. The wall governs the
-surface no tool gate can see — the code the agent runs *inside its own process*:
+The wall confines **foreign agents**: an external ACP agent — code contenox did
+not write — spawned as a subprocess and allowed to act on the world only through
+the tools it is given and the workspace it is handed. The wall governs the
+surface no tool gate can see: the code the agent runs *inside its own process* —
 its own Bash, its own file access, whatever its toolchain drags in (an `npm
 install` postinstall script). A well-behaved agent uses its tools and never
 touches the wall; anything that does is confined.
+
+> [!IMPORTANT]
+> **Two things this page is not.** It is not what governs contenox's own chains —
+> `chat`, `run`, `beam`, an editor `acp` session, and the mission units the fleet
+> dispatches all run outside the wall, by design; see
+> [what the wall does not confine](#what-the-wall-does-not-confine-contenox-itself).
+> And registering a foreign agent is not exposed yet — `external_acp` agents are
+> internal-only today, so on a stock install nothing reaches the wall. The
+> mechanism below is built, tested and fail-closed; it is waiting on the
+> registration path, not the other way around.
 
 There are two layers. One is always on and needs nothing. One is opt-in.
 
@@ -47,6 +57,16 @@ through the runtime's own tool grants and the
 [human-in-the-loop gate](/docs/guide/hitl/), which is the layer built to govern
 it. A foreign agent gets the wall instead, because no such layer covers the code
 inside its process.
+
+Know what that costs you. The same applies to every chain contenox runs in its
+own process — `chat`, `run`, `beam`, an editor `acp` session — so **the shells
+those chains run (`local_shell`, the `shell_session` PTY) are not confined**: they
+are ordinary child processes of the runtime, rooted at the session's workspace but
+free of the filesystem, exec and environment fence a foreign agent gets. What
+stands between a chain and an arbitrary command is the approval gate and the
+chain's tool policy — a gate at the tool layer, not a wall at the kernel. Gate
+accordingly, and give an untrusted driver the hardened `acpx` profile
+(`local_shell` denied outright) rather than assuming a sandbox that is not there.
 
 ## Confining the network too (the opt-in wall)
 

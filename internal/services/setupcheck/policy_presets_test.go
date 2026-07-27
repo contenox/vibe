@@ -1,0 +1,124 @@
+package setupcheck
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/contenox/beam/internal/models/runtimestate"
+	"github.com/contenox/beam/internal/store/runtimetypes"
+)
+
+func readyInput() Input {
+	return Input{
+		DefaultModel:      "qwen2.5:7b",
+		DefaultProvider:   "ollama",
+		DefaultEmbedModel: "nomic-embed-text",
+		RegisteredBackends: []runtimetypes.Backend{{
+			ID: "b1", Name: "local", Type: "ollama", BaseURL: "http://127.0.0.1:11434",
+		}},
+		States: []runtimestate.BackendRuntimeState{{
+			Backend: runtimetypes.Backend{ID: "b1", Name: "local", Type: "ollama", BaseURL: "http://127.0.0.1:11434"},
+			PulledModels: []runtimestate.ModelPullStatus{
+				{Model: "qwen2.5:7b", CanChat: true},
+				{Model: "nomic-embed-text", CanEmbed: true},
+			},
+		}},
+	}
+}
+
+// TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks is the whole
+// contract of this issue: it tells the operator which toolsets are about to nag
+// and how to stop it, and it NEVER makes the runtime "not ready". An envelope
+// that asks too often is annoying; refusing to run over it would be worse than
+// the bug it reports.
+func TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks(t *testing.T) {
+	base := Evaluate(readyInput())
+	if !base.Ready() {
+		t.Fatalf("fixture is not ready before the issue is added: %#v", base.BlockingIssues())
+	}
+
+	res := AddStalePolicyPresetIssue(base, []StalePolicyPreset{{
+		Name:     "hitl-policy-default.json",
+		Path:     "/home/u/.contenox/hitl-policy-default.json",
+		Toolsets: []string{"gointel", "goja", "jq", "workspace"},
+		Effect:   "every call stops for approval",
+	}}, "contenox init --refresh-policies")
+
+	var found Issue
+	for _, iss := range res.Issues {
+		if iss.Code == StalePolicyPresetsCode {
+			found = iss
+		}
+	}
+	if found.Code == "" {
+		t.Fatalf("no %s issue was added: %#v", StalePolicyPresetsCode, res.Issues)
+	}
+	if found.Severity != "warning" {
+		t.Fatalf("severity = %q, want warning (a stale envelope never blocks)", found.Severity)
+	}
+	if found.Category != CategoryPolicy {
+		t.Fatalf("category = %q, want %q", found.Category, CategoryPolicy)
+	}
+	for _, want := range []string{"hitl-policy-default.json", "gointel", "goja", "jq", "workspace", "stops for approval"} {
+		if !strings.Contains(found.Message, want) {
+			t.Fatalf("message does not name %q: %s", want, found.Message)
+		}
+	}
+	if found.CLICommand != "contenox init --refresh-policies" {
+		t.Fatalf("cliCommand = %q, want the refresh verb", found.CLICommand)
+	}
+
+	for _, iss := range res.BlockingIssues() {
+		if iss.Code == StalePolicyPresetsCode {
+			t.Fatalf("the stale-policy warning reached BlockingIssues: %#v", iss)
+		}
+	}
+	if !res.Ready() {
+		t.Fatalf("a stale policy preset made the runtime not ready: %#v", res.BlockingIssues())
+	}
+}
+
+// TestUnit_AddStalePolicyPresetIssue_SaysNothingWhenNothingIsStale keeps the
+// notice from becoming noise: no stale presets (or no named toolsets) means no
+// issue at all, and the caller's Result is untouched.
+func TestUnit_AddStalePolicyPresetIssue_SaysNothingWhenNothingIsStale(t *testing.T) {
+	base := Evaluate(readyInput())
+	before := len(base.Issues)
+
+	for _, stale := range [][]StalePolicyPreset{
+		nil,
+		{},
+		{{Name: "hitl-policy-default.json"}}, // no toolsets: nothing to say
+	} {
+		res := AddStalePolicyPresetIssue(base, stale, "contenox init --refresh-policies")
+		for _, iss := range res.Issues {
+			if iss.Code == StalePolicyPresetsCode {
+				t.Fatalf("issue raised for %#v", stale)
+			}
+		}
+		if len(res.Issues) != before {
+			t.Fatalf("issue count changed: %d -> %d", before, len(res.Issues))
+		}
+	}
+}
+
+// TestUnit_AddStalePolicyPresetIssue_DoesNotMutateTheCallersIssues pins the
+// copy-on-append: doctor holds its Result by value and a shared backing array
+// would let one enrichment overwrite another's issue.
+func TestUnit_AddStalePolicyPresetIssue_DoesNotMutateTheCallersIssues(t *testing.T) {
+	base := Evaluate(readyInput())
+	baseIssues := append([]Issue(nil), base.Issues...)
+
+	_ = AddStalePolicyPresetIssue(base, []StalePolicyPreset{{
+		Name: "hitl-policy-default.json", Toolsets: []string{"workspace"},
+	}}, "contenox init --refresh-policies")
+
+	if len(base.Issues) != len(baseIssues) {
+		t.Fatalf("caller's issue slice grew: %d -> %d", len(baseIssues), len(base.Issues))
+	}
+	for i := range baseIssues {
+		if base.Issues[i].Code != baseIssues[i].Code {
+			t.Fatalf("caller's issue %d changed: %q -> %q", i, baseIssues[i].Code, base.Issues[i].Code)
+		}
+	}
+}

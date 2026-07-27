@@ -3,8 +3,8 @@ package enginesvc
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
@@ -16,6 +16,7 @@ import (
 	"github.com/contenox/beam/internal/models/llmrepo"
 	"github.com/contenox/beam/internal/models/ollamatokenizer"
 	"github.com/contenox/beam/internal/models/runtimestate"
+	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/services/execservice"
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/localtools"
@@ -116,7 +117,12 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 	tracker := cfg.Tracker
 	if tracker == nil {
 		if cfg.Tracing {
-			tracker = libtracker.NewLogActivityTracker(slog.Default())
+			// nil, not slog.Default(): the constructor defaults it to the same
+			// logger, and passing nil keeps the kernel out of the slog import
+			// graph entirely — one fewer place the guard has to make an
+			// exception for, and one fewer place a slog.Warn could be added
+			// beside a legitimate use and look at home.
+			tracker = libtracker.NewLogActivityTracker(nil)
 		} else {
 			tracker = libtracker.NoopTracker{}
 		}
@@ -165,14 +171,18 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 
 	tokenizer := ollamatokenizer.NewEstimateTokenizer()
 
+	embedding := resolveEmbeddingModel(ctx, runtimetypes.New(db.WithoutTransaction()), cfg, tracker)
+
 	repo, err := llmrepo.NewModelManager(state, tokenizer, llmrepo.ModelManagerConfig{
 		DefaultPromptModel:    llmrepo.ModelConfig{Name: cfg.DefaultModel, Provider: cfg.DefaultProvider},
-		DefaultEmbeddingModel: llmrepo.ModelConfig{Name: cfg.DefaultModel, Provider: cfg.DefaultProvider},
+		DefaultEmbeddingModel: embedding,
 		DefaultChatModel:      llmrepo.ModelConfig{Name: cfg.DefaultModel, Provider: cfg.DefaultProvider},
 	}, tracker)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model manager: %w", err)
 	}
+	engine.Models = repo
+	engine.EmbeddingModel = embedding
 
 	eventSink := cfg.TaskEventSink
 	if eventSink == nil {
@@ -222,6 +232,59 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 	return engine, nil
 }
 
+// resolveEmbeddingModel decides which model produces EMBEDDINGS.
+//
+// This used to be the chat model, unconditionally (DefaultEmbeddingModel was set
+// to cfg.DefaultModel) — correct only where a provider's chat model also embeds,
+// and silently wrong everywhere else: Ollama's chat models mostly refuse /embed,
+// and OpenAI's chat models are not embedding models at all. Retrieval built on
+// that assumption fails at the provider with an error that names the wrong
+// thing.
+//
+// Resolution order, per docs/development/blueprints/workspace-index.md:
+//
+//  1. the caller's explicit Config fields (a flag, an embedder wiring its own),
+//  2. the `contenox config` KV keys default-embed-model / default-embed-provider,
+//  3. the chat model, WITH a warning — retrieval is optional, so an unset embed
+//     model must never fail Build; it degrades, loudly.
+//
+// "Loudly" means through the tracker, which is the only instrumentation seam
+// here: it is the seam that redacts, and the one an embedding host can point at
+// something other than a log file. The fallback is reported as a CHANGE rather
+// than an error because nothing failed — the resolution succeeded, on a degraded
+// input — which is the same judgement the reachability report in Build makes.
+//
+// The provider falling back alone is silent by design: one provider serving both
+// the chat and the embedding model is the normal single-backend setup, and
+// warning about it would train operators to ignore the warning that matters.
+func resolveEmbeddingModel(ctx context.Context, store runtimetypes.Store, cfg Config, tracker libtracker.ActivityTracker) llmrepo.ModelConfig {
+	if tracker == nil {
+		tracker = libtracker.NoopTracker{}
+	}
+	model := strings.TrimSpace(cfg.DefaultEmbedModel)
+	if model == "" {
+		model = clikv.Read(ctx, store, "default-embed-model")
+	}
+	provider := strings.TrimSpace(cfg.DefaultEmbedProvider)
+	if provider == "" {
+		provider = clikv.Read(ctx, store, "default-embed-provider")
+	}
+
+	if model == "" {
+		_, reportFallback, endFallback := tracker.Start(ctx, "resolve", "embedding_model",
+			"fallback_model", cfg.DefaultModel,
+			"fallback_provider", cfg.DefaultProvider,
+			"hint", "contenox config set default-embed-model <name>  # a chat model embeds only on some providers")
+		reportFallback(cfg.DefaultModel, "no embedding model configured; falling back to the chat model")
+		endFallback()
+		model = cfg.DefaultModel
+	}
+	if provider == "" {
+		provider = cfg.DefaultProvider
+	}
+	return llmrepo.ModelConfig{Name: model, Provider: provider}
+}
+
 func buildTools(engineCtx context.Context, cfg Config, db libdbexec.DBManager, tracker libtracker.ActivityTracker, bus libbus.Messenger) (*mcpworker.Manager, []string, taskengine.ToolsRepo, error) {
 	store := runtimetypes.New(db.WithoutTransaction())
 	mgr, err := mcpworker.New(engineCtx, store, bus, tracker)
@@ -268,6 +331,16 @@ func buildTools(engineCtx context.Context, cfg Config, db libdbexec.DBManager, t
 			raw,
 			missiontools.ToolsProviderName,
 		)
+	}
+
+	// Late-bind whoever needed the aggregate repo they are themselves registered
+	// in (Config.OnToolsRepoReady documents the cycle and why this exact repo).
+	// The call sits HERE — after the HITL wrap, before the guidance wrap — and
+	// that position is the contract, not an implementation detail: a nested tool
+	// caller must meet the same gate the model meets, and must not be counted as
+	// model-level navigation.
+	if cfg.OnToolsRepoReady != nil {
+		cfg.OnToolsRepoReady(toolsRepo)
 	}
 
 	// Attention layer, Stage 0 — the inward face. This is THE single seam: one

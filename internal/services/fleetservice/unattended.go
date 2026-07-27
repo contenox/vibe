@@ -230,7 +230,7 @@ func (a *unattendedAnswerer) toolCallBudgetRefusal(ctx context.Context, policyNa
 	if !toolCallBudgetExceeded(count, bounds) {
 		return "", false
 	}
-	return toolCallsExhaustedReason(bounds.MaxToolCalls), true
+	return toolCallsExhaustedReason(bounds), true
 }
 
 // judge evaluates the envelope against the mapped request and reports whether

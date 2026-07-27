@@ -49,7 +49,25 @@ const (
 	// summariseArg. Anything longer reads as a head plus its true size.
 	maxArgValueDisplay = 240
 
-	// diffTabStop is what a tab in a diff body is worth. Eight is what git,
+	// maxArgBlockLines bounds a multi-line argument rendered as a block. Forty
+	// is enough for the whole of a script a human would actually read before
+	// approving it, and small enough that a 4 KB body cannot push the rest of
+	// the card off screen. When it bites it says so, in the same words the
+	// diff cap uses: what approving would mean, not merely that lines were
+	// hidden.
+	maxArgBlockLines = 40
+
+	// maxMayCallNames bounds the declared-reach line. A script that names more
+	// tools than this has stopped being reviewable as a list; the count of
+	// what is not shown is what the operator needs then.
+	maxMayCallNames = 8
+
+	// argBlockIndent puts a block's body under its key without letting it be
+	// mistaken for card chrome.
+	argBlockIndent = "    "
+
+	// diffTabStop is what a tab in a diff body — or in a multi-line argument
+	// block, which is source text by the same argument — is worth. Eight is what git,
 	// every pager and the editor the change came from already assume, so an
 	// expanded tab puts the code under review in the columns the author saw
 	// it in. Folding it to one space (the rule for a name) would silently
@@ -200,10 +218,11 @@ func (c *Card) ToolCallID() string { return c.ev.ToolCallID }
 // glyph (empty for none), used only while pending — a resolved card never
 // animates.
 //
-// Every line fits width EXCEPT diff body lines, which are emitted
+// Every line fits width EXCEPT the two that carry source text — diff body
+// lines and the body of a multi-line argument block — which are emitted
 // unwrapped and verbatim, exactly like transcript code lines: a wrapped or
-// elided diff line copies out of the terminal as something that is not the
-// change under review (blueprint D1's copy-cleanliness rule, item 8).
+// elided line of either copies out of the terminal as something that is not
+// what is under review (blueprint D1's copy-cleanliness rule, item 8).
 func (c *Card) Render(width int, ascii bool, spinner string) []frame.Line {
 	if width <= 0 {
 		return nil
@@ -218,14 +237,17 @@ func (c *Card) Render(width int, ascii bool, spinner string) []frame.Line {
 		frame.S(frame.StyleNone, c.toolIdentity()),
 	))
 
+	// The reach sits with the identity, not with the arguments: it says what
+	// this tool IS able to touch, which is the question the arguments of a
+	// script tool cannot answer.
+	if r := mayCallText(c.ev.Meta, ascii); r != "" {
+		add(frame.Styled(frame.StyleMuted, r))
+	}
+
 	switch {
 	case c.args != nil:
 		for _, k := range c.argKeys {
-			prefix := "  " + k + " = "
-			add(frame.L(
-				frame.S(frame.StyleMuted, prefix),
-				frame.S(frame.StyleNone, c.argText(k, width-textwidth.Width(prefix), ascii)),
-			))
+			out = append(out, c.argLines(k, width, ascii)...)
 		}
 	case c.rawArgs != "":
 		add(frame.L(
@@ -345,6 +367,143 @@ func (c *Card) toolIdentity() string {
 		return sanitize.Line(c.ev.Title)
 	}
 	return "unknown tool"
+}
+
+// argLines renders one argument row — or, for a value that is itself source
+// text, the block that value deserves.
+//
+// The scalar row is the default and stays the default: it is what keeps a 4 KB
+// replacement from pushing the diff off screen. But a value with newlines in it
+// is code — a script body, a heredoc, a patch — and squeezing code onto one row
+// means writing its newlines out as literal "\n" and then cutting the result to
+// fit. That renders the ONE argument most in need of reading as the least
+// readable thing on the card, which is the exact failure the card exists to
+// prevent (found by dogfooding a goja_eval call).
+//
+// The block is suppressed when the card carries a rendered diff, because then
+// the scalar summary's "see diff" is TRUE and the diff below is the better,
+// unduplicated rendering of the same bytes. With no diff, nothing else on the
+// card shows the content, so the block is the only honest place to read it.
+func (c *Card) argLines(k string, width int, ascii bool) []frame.Line {
+	if body, ok := c.argBlockBody(k); ok {
+		return c.blockLines(k, body, width, ascii)
+	}
+	prefix := "  " + k + " = "
+	return []frame.Line{clamp(frame.L(
+		frame.S(frame.StyleMuted, prefix),
+		frame.S(frame.StyleNone, c.argText(k, width-textwidth.Width(prefix), ascii)),
+	), width, ascii)}
+}
+
+// argBlockBody reports the source text of an argument that should render as a
+// block, and whether it should. See argLines for the rule.
+func (c *Card) argBlockBody(k string) (string, bool) {
+	if c.ev.Meta.Diff != "" {
+		return "", false
+	}
+	s, ok := c.args[k].(string)
+	if !ok || !strings.Contains(s, "\n") {
+		return "", false
+	}
+	return s, true
+}
+
+// blockLines lays a multi-line argument out under its key: one source line per
+// frame line, at the block indent.
+//
+// Body lines take the diff's treatment exactly — unwrapped, sanitized, tabs
+// expanded — for the diff's reasons. Unwrapped, because a line this card split
+// would copy out of the terminal as something that is not what will run.
+// Sanitized, because the body is peer-supplied text presented to a human as the
+// thing they are about to authorise, so a CSI that erases the lines above it or
+// a bidi override that displays a line as the reverse of what it does is a
+// defect with the whole HITL gate as its blast radius. Tabs EXPAND rather than
+// fold, because indentation is part of what is being read.
+func (c *Card) blockLines(k, body string, width int, ascii bool) []frame.Line {
+	lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
+	shown := lines
+	if len(shown) > maxArgBlockLines {
+		shown = shown[:maxArgBlockLines]
+	}
+
+	out := make([]frame.Line, 0, len(shown)+3)
+	out = append(out, clamp(frame.Styled(frame.StyleMuted, "  "+sanitize.Line(k)+" ="), width, ascii))
+	for _, l := range shown {
+		s := sanitize.ExpandTabs(sanitize.Lines(l), diffTabStop)
+		out = append(out, frame.Styled(frame.StyleCode, argBlockIndent+s))
+	}
+	if hidden := len(lines) - len(shown); hidden > 0 {
+		// Wrapped, never truncated, and unindented — the same treatment the
+		// diff's own cap notice gets, because it is the same sentence: the part
+		// that says what approving would mean is load-bearing at any width.
+		for _, w := range textwidth.Wrap(blockTruncationWarning(hidden, ascii), width) {
+			out = append(out, frame.Styled(frame.StyleWarn, w))
+		}
+	}
+	return out
+}
+
+// blockTruncationWarning states the consequence, not just the arithmetic —
+// truncationWarning's sentence, for content rather than for a diff.
+func blockTruncationWarning(hidden int, ascii bool) string {
+	return fmt.Sprintf("%s +%d more lines %s approving accepts content you have not seen",
+		warnGlyph(ascii), hidden, dashGlyph(ascii))
+}
+
+// mayCallText is the declared-reach line: the tools this call may itself reach
+// while it runs (approvalflow.Meta.MayCall).
+//
+// A script tool is the one gated call whose arguments do not say what it will
+// do. The tools it calls raise their own cards when they are gated — but an
+// ALLOW-tier call raises none, so without this line an operator approving a
+// script cannot know it will read files or run git.
+//
+// It is rendered muted and as a DECLARATION, never as a guarantee: the wording
+// is "may call", the names are the author's, and nothing here enforces them.
+// The list is capped by count with the remainder stated, so a script that names
+// forty tools cannot push the decision off screen — and cannot hide how many it
+// named either.
+//
+// All three states of Meta.MayCallDeclared read differently, because they mean
+// different things (see that field): an undeclared reach is unbounded and says
+// so, a declared-empty reach is a promise and says that, and no information at
+// all — every ordinary tool card — says nothing rather than implying either.
+func mayCallText(m approvalflow.Meta, ascii bool) string {
+	names := make([]string, 0, len(m.MayCall))
+	seen := make(map[string]struct{}, len(m.MayCall))
+	for _, raw := range m.MayCall {
+		n := strings.TrimSpace(sanitize.Line(raw))
+		if n == "" {
+			continue
+		}
+		if _, dup := seen[n]; dup {
+			continue
+		}
+		seen[n] = struct{}{}
+		names = append(names, n)
+	}
+
+	if len(names) == 0 {
+		switch {
+		case m.MayCallDeclared == nil:
+			return ""
+		case *m.MayCallDeclared:
+			return "may call  nothing"
+		default:
+			return "may call  any tool the policy allows" + sep(ascii) + "nothing declared"
+		}
+	}
+
+	hidden := 0
+	if len(names) > maxMayCallNames {
+		hidden = len(names) - maxMayCallNames
+		names = names[:maxMayCallNames]
+	}
+	out := "may call  " + strings.Join(names, sep(ascii))
+	if hidden > 0 {
+		out += fmt.Sprintf("%s+%d more", sep(ascii), hidden)
+	}
+	return out
 }
 
 // argText renders one argument value.

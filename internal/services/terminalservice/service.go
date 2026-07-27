@@ -10,6 +10,7 @@ import (
 
 	"github.com/contenox/beam/internal/errdefs"
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/terminalstore"
 )
 
@@ -47,10 +48,30 @@ type service struct {
 	db             libdb.DBManager
 	nodeInstanceID string
 	workspaceID    string
+	tracker        libtracker.ActivityTracker
 	sessions       sync.Map // id -> *session
 }
 
-func New(cfg Config, db libdb.DBManager, nodeInstanceID string, workspaceID string) (Service, error) {
+// Option configures the terminal service at construction, so its optional
+// dependencies can be wired without changing New's signature.
+type Option func(*service)
+
+// WithTracker wires the ActivityTracker the pty plumbing reports to: the
+// stream pumps behind an attachment and the local resize, none of which can
+// return an error to a caller (they run on goroutines the caller never sees, or
+// after the durable geometry write already succeeded). It is distinct from
+// WithActivityTracker, which instruments the Service API from outside; this one
+// reaches the events that never cross that boundary. Nil degrades to
+// libtracker.NoopTracker.
+func WithTracker(tracker libtracker.ActivityTracker) Option {
+	return func(s *service) {
+		if tracker != nil {
+			s.tracker = tracker
+		}
+	}
+}
+
+func New(cfg Config, db libdb.DBManager, nodeInstanceID string, workspaceID string, opts ...Option) (Service, error) {
 	if !cfg.Enabled {
 		return NewDisabled(), nil
 	}
@@ -62,6 +83,15 @@ func New(cfg Config, db libdb.DBManager, nodeInstanceID string, workspaceID stri
 		db:             db,
 		nodeInstanceID: nodeInstanceID,
 		workspaceID:    workspaceID,
+		tracker:        libtracker.NoopTracker{},
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	if s.tracker == nil {
+		s.tracker = libtracker.NoopTracker{}
 	}
 	if err := terminalstore.InitSchema(context.Background(), s.db.WithoutTransaction()); err != nil {
 		return nil, err
@@ -186,7 +216,7 @@ func (s *service) UpdateGeometry(ctx context.Context, principal, id string, cols
 		}
 		return err
 	}
-	s.resizeLocalPTY(id, cols, rows)
+	s.resizeLocalPTY(ctx, id, cols, rows)
 	return nil
 }
 

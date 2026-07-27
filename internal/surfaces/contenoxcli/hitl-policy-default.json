@@ -1,5 +1,11 @@
 {
-  "//compute": "OPTIONAL and OMITTED here by design, so this preset stays unbounded (unchanged behavior). The envelope is a unit's TOTAL boundary: to bound a mission's COMPUTE as well as its actions, add a top-level \"compute\" block, e.g. \"compute\": {\"maxTurns\": 40, \"maxToolCalls\": 300, \"maxTokens\": 2000000, \"onExhausted\": \"finish_stuck\"}. Bounds only RESTRICT (an absent field is unbounded); a mission that crosses one is finished at status \"stuck\" with a reason naming the bound. maxTurns and maxToolCalls are enforced host-side; maxTokens is best-effort (enforced only from reported usage); modelAllowlist/backendAllowlist are declared but not yet enforced. See docs/development/blueprints/acp/envelope-compute-bounds.md.",
+  "//compute": "PRESENT AND REAL, and that is a deliberate reversal: this preset used to ship unbounded. A mission is fire-and-detach — nobody is watching it — so \"unbounded\" does not mean \"flexible\", it means a runaway spends real money until something else stops it. These are generous CEILINGS meant to catch that case, not to shape normal work; raise them for a mission that genuinely needs more. Bounds only ever RESTRICT, they are per-MISSION (an attached chat under this policy is bounded by the rules below, not by these), and a mission that crosses one is finished at status \"stuck\" with a reason naming the bound — visible on the board, in the inbox, and to `mission fire --wait`.",
+  "//compute-fields": "maxToolCalls counts envelope-gated tool dispatches and is exact. maxTokens is BEST-EFFORT: it bounds a mission from the usage its unit reports, and is inert for a unit whose provider reports none — so treat it as a backstop, not a billing limit. maxTurns is deliberately OMITTED rather than forgotten: the dispatcher issues at most two prompt turns per mission (the intent, then one nudge), so any ceiling above 1 could never fire and shipping one would claim a bound that does not exist. modelAllowlist/backendAllowlist ARE enforced when set (a resolution outside them is refused before anything is sent), but no shipped preset can guess your model names — set them on a per-mission envelope. onExhausted is written out rather than left to default: \"finish_stuck\" is the only implemented behavior, and \"pause_ask\" parses but behaves identically (`contenox vet` warns about it). See docs/development/blueprints/acp/envelope-compute-bounds.md.",
+  "compute": {
+    "maxToolCalls": 300,
+    "maxTokens": 2000000,
+    "onExhausted": "finish_stuck"
+  },
   "default_action": "approve",
   "rules": [
     {
@@ -189,6 +195,22 @@
     {
       "//": "gointel: every tool is a read of the workspace's type-checked Go view (describe, definition, references, implementations, symbols, diagnostics). Allowed whole; revisit this rule before any mutating op (rename) ever lands in the toolset.",
       "tools": "gointel",
+      "action": "allow"
+    },
+    {
+      "//": "workspace: the single workspace_search tool reads this workspace's semantic INDEX and returns file:line-range citations. It is a read of files the agent may already read — nothing is written, nothing is spent (the embedding calls were paid by `contenox index`), and it reaches no further than the index the operator built. Allowed whole, the same call gointel gets; revisit before any write ever lands in this toolset.",
+      "tools": "workspace",
+      "action": "allow"
+    },
+    {
+      "//": "goja_eval: ALLOW, and the reasoning is structural rather than optimistic. The sandbox has NO ambient I/O BY CONSTRUCTION — no filesystem, no network, no require/import, no process, no event loop — so there is nothing for an approval to protect: the only reach out of it is host.tool, and every call that makes is evaluated by THIS policy under the rule for the tool it addresses, exactly as if the model had called it directly. What is left to gate is pure compute, and compute is bounded three ways that need no human: the deadline interrupt (2s default, 30s ceiling), the call-stack cap, and the output cap. The one soft limit is memory — goja has no cap, so an allocation bomb is bounded by RATE (~200 MB/s measured) until the deadline fires, i.e. a TRANSIENT ceiling in the low hundreds of MB, then GC; that is documented, not hidden, and it is a cost an approval card cannot reduce. Dogfooding argued this down from approve: 8 live approvals in one session, each costing an operator more than the call did, none of which could have prevented anything. WHAT REVOKES THIS: any ambient capability ever reaching the sandbox — a filesystem shim, a network fetch, a module loader, a VM that outlives the call — puts this rule back to approve, because the argument above is entirely about there being nothing here to reach. Script tools in $CONTENOX_DIR/tools still carry NO rule: operator-authored code nobody reviewed falls to default_action, and an operator who trusts a script adds an allow rule for it by name, exactly like any other envelope edit.",
+      "tools": "goja",
+      "tool": "goja_eval",
+      "action": "allow"
+    },
+    {
+      "//": "jq: the single jq_query tool runs a jq program over ONE JSON or YAML document and returns the values it emits. ALLOW, and structurally rather than optimistically. IT READS A FILE THE AGENT MAY ALREADY READ: `path` goes through the same vfs containment local_fs does, so the bytes reachable here are a SUBSET of what local_fs.read_file — already allow above — reaches. IT COMPUTES DETERMINISTICALLY AND CANNOT WRITE: gojq has no write path and this package adds none; a filter like `.a = 1` returns a modified COPY as its result and the file on disk is untouched. IT CANNOT REACH THE NETWORK OR THIS PROCESS: jq has no I/O builtins, and the three doors it does have are shut at compile time — `input`/`inputs` are refused because no input iterator is supplied, `import`/`include` because no module loader is, and `env`/`$ENV` evaluate to an EMPTY object because the environ loader is explicitly disabled (so no filter can read this process's API keys). AND IT IS FULLY DEADLINE-BOUNDED INCLUDING RECURSION, which is the property that makes the tier structural: gojq checks the context between VM instructions, so `def f: f; f` (non-terminating recursion) and `[range(1e8)]` (a compute bomb) both stop AT the 2s deadline — measured at 2.009s and 2.004s respectively — and regexes go through Go's RE2, which cannot backtrack catastrophically. That is strictly stronger than the goja rule above, whose memory is bounded only by rate; jq's worst native allocation (string repetition) has gojq's own 2 GiB hard ceiling above it. Output is capped in both COUNT and BYTES with an explicit truncation marker, so one filter cannot flood a context window. WHAT REVOKES THIS: an in-place write mode, a module loader, an input iterator, or an environ loader ever being wired into this package — each of those is exactly one of the four clauses above.",
+      "tools": "jq",
       "action": "allow"
     },
     {

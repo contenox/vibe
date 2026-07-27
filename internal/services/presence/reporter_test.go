@@ -3,12 +3,19 @@ package presence_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/presence"
 )
+
+// errStoreBoom is the failure a primed recordingStore returns, kept a sentinel
+// so a test can assert the tracker report carries the store's own error rather
+// than a rephrasing of it.
+var errStoreBoom = errors.New("boom")
 
 // recordingStore is a ReporterStore test double that counts writes and can be
 // made to fail, so the best-effort guard is provable without a real db.
@@ -24,7 +31,7 @@ func (s *recordingStore) Register(_ context.Context, rec presence.Record) error 
 	defer s.mu.Unlock()
 	s.registers = append(s.registers, rec)
 	if s.fail {
-		return errors.New("boom")
+		return errStoreBoom
 	}
 	return nil
 }
@@ -34,7 +41,7 @@ func (s *recordingStore) Deregister(_ context.Context, _ presence.Kind, _ string
 	defer s.mu.Unlock()
 	s.deregistered = true
 	if s.fail {
-		return errors.New("boom")
+		return errStoreBoom
 	}
 	return nil
 }
@@ -119,6 +126,107 @@ func TestUnit_Reporter_BestEffort_StoreFailureNeverBreaksStartup(t *testing.T) {
 
 	// It kept trying despite every write erroring — errors are shrugged, not fatal.
 	waitFor(t, func() bool { return store.writeCount() >= 2 })
+}
+
+// recordingTracker records the (operation, subject, error) of every report. It
+// must be concurrency-safe: the heartbeat reports from the reporter's own
+// goroutine while the test reads.
+type recordingTracker struct {
+	mu     sync.Mutex
+	events []trackedEvent
+}
+
+type trackedEvent struct {
+	op, subject string
+	err         error
+}
+
+func (r *recordingTracker) Start(_ context.Context, op, subject string, _ ...any) (func(error), func(string, any), func()) {
+	return func(err error) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.events = append(r.events, trackedEvent{op: op, subject: subject, err: err})
+		},
+		func(string, any) {},
+		func() {}
+}
+
+func (r *recordingTracker) countFor(op, subject string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, ev := range r.events {
+		if ev.op == op && ev.subject == subject && ev.err != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func (r *recordingTracker) firstFor(op, subject string) (trackedEvent, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ev := range r.events {
+		if ev.op == op && ev.subject == subject && ev.err != nil {
+			return ev, true
+		}
+	}
+	return trackedEvent{}, false
+}
+
+var _ libtracker.ActivityTracker = (*recordingTracker)(nil)
+
+// TestUnit_Reporter_StoreFailureIsReportedToTracker proves the shrug is not
+// silence: a heartbeat that cannot be written, and a deregister that cannot be
+// removed, are both reported through the tracker. Nothing reaches the caller —
+// presence stays best-effort — but an operator wiring a tracker can see that
+// this process is absent from the board because its writes are failing.
+func TestUnit_Reporter_StoreFailureIsReportedToTracker(t *testing.T) {
+	store := &recordingStore{fail: true}
+	tracker := &recordingTracker{}
+	r := presence.StartReporter(context.Background(), store,
+		presence.Record{Kind: presence.KindServe},
+		presence.WithInterval(5*time.Millisecond),
+		presence.WithTracker(tracker),
+	)
+	waitFor(t, func() bool { return tracker.countFor("register", "presence_record") >= 1 })
+
+	ev, ok := tracker.firstFor("register", "presence_record")
+	if !ok {
+		t.Fatal("a failed heartbeat write must be reported")
+	}
+	if ev.err == nil || !strings.Contains(ev.err.Error(), "heartbeat write failed") {
+		t.Errorf("the report must name what failed, got %v", ev.err)
+	}
+	if !errors.Is(ev.err, errStoreBoom) {
+		t.Errorf("the report must carry the store error, got %v", ev.err)
+	}
+
+	r.Stop()
+	if tracker.countFor("deregister", "presence_record") == 0 {
+		t.Error("a failed deregister must be reported too")
+	}
+}
+
+// TestUnit_Reporter_HealthyStoreReportsNoFailure pins the volume: the tracker
+// hears from the reporter only when a write fails.
+func TestUnit_Reporter_HealthyStoreReportsNoFailure(t *testing.T) {
+	store := &recordingStore{}
+	tracker := &recordingTracker{}
+	r := presence.StartReporter(context.Background(), store,
+		presence.Record{Kind: presence.KindACP},
+		presence.WithInterval(5*time.Millisecond),
+		presence.WithTracker(tracker),
+	)
+	waitFor(t, func() bool { return store.writeCount() >= 2 })
+	r.Stop()
+
+	if n := tracker.countFor("register", "presence_record"); n != 0 {
+		t.Errorf("a healthy store must report no failures, got %d", n)
+	}
+	if n := tracker.countFor("deregister", "presence_record"); n != 0 {
+		t.Errorf("a healthy deregister must report no failures, got %d", n)
+	}
 }
 
 func TestUnit_Reporter_UpdateTriggersImmediateHeartbeat(t *testing.T) {

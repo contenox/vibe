@@ -298,7 +298,7 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		Tracker:      tracker,
 		PolicySource: hitlPolicySource(contenoxDir),
 		DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-			discoverChainAgents(dctx, agents, contenoxDir)
+			discoverChainAgents(dctx, agents, contenoxDir, tracker)
 		},
 		// No SessionDeliverer or AgentSupervisor: this process hosts no chat
 		// sessions, so kernel-only delivery is right and every report of this

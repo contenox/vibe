@@ -15,6 +15,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// fsRefusalText renders a soft REFUSAL the way the engine renders it for the
+// model: a DataTypeString result goes through fmt.Sprintf("%v", …)
+// (taskengine/taskexec.go, serializeToolResultContent), so a typed refusal whose
+// String() is the denial sentence reaches the model as exactly the bytes it
+// always did.
+//
+// The type exists so a PROGRAM cannot read the apology as a receipt: a
+// FsRefusalResult declares itself unusable, and the goja bridge throws instead of
+// handing a script a sentence about a write that never happened. This helper
+// asserts both halves — the text is unchanged, and the value is the typed
+// refusal rather than a bare string.
+func fsRefusalText(t *testing.T, res any) string {
+	t.Helper()
+	refusal, ok := res.(localtools.FsRefusalResult)
+	require.Truef(t, ok, "expected a typed FsRefusalResult a program cannot mistake for a result, got %T: %#v", res, res)
+	require.True(t, refusal.Refused)
+	require.Equal(t, refusal.Reason, refusal.String(), "the model-facing rendering must be the denial sentence itself")
+	require.NotEmpty(t, refusal.ProgramUnusable(), "a refusal must declare itself unusable to a program")
+	return refusal.String()
+}
+
 func setupFSReadGuard(t *testing.T) (context.Context, taskengine.ToolsRepo, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -68,8 +89,7 @@ func TestUnit_ReadBeforeWrite_DeniedWithoutRead(t *testing.T) {
 
 	res, err := execTool(t, ctx, tools, "write_file", map[string]any{"path": "a.txt", "content": "updated"})
 	require.NoError(t, err, "denial must be a soft string result, not a chain error")
-	msg, ok := res.(string)
-	require.True(t, ok, "denial result must be string, got %T", res)
+	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "read_file")
 	require.Contains(t, msg, "without reading it first")
 
@@ -104,8 +124,7 @@ func TestUnit_ReadBeforeWrite_SedDeniedWithoutRead(t *testing.T) {
 		"replacement": "ALPHA",
 	})
 	require.NoError(t, err)
-	msg, ok := res.(string)
-	require.True(t, ok)
+	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "read_file")
 
 	got, err := os.ReadFile(filepath.Join(dir, "a.txt"))
@@ -206,7 +225,7 @@ func TestUnit_ReadBeforeWrite_SessionScoping(t *testing.T) {
 	ctxB := context.WithValue(ctx, runtimetypes.SessionIDContextKey, "session-B")
 	res, err := execTool(t, ctxB, tools, "write_file", map[string]any{"path": "a.txt", "content": "updated"})
 	require.NoError(t, err)
-	msg, _ := res.(string)
+	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "without reading it first", "a read in session A must not satisfy a write in session B")
 }
 
@@ -234,8 +253,7 @@ func TestUnit_ReadBeforeWrite_DeniedWhenFileChangedAfterRead(t *testing.T) {
 	})
 	require.NoError(t, err, "stale-read denial should be a soft tool result, not a chain error")
 
-	msg, ok := res.(string)
-	require.True(t, ok, "expected stale-read denial as string, got %T: %#v", res, res)
+	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "changed", "denial should explain that the file changed since it was read")
 	require.Contains(t, msg, "read", "denial should tell the agent to re-read before writing")
 
@@ -272,8 +290,7 @@ func TestUnit_ReadBeforeWrite_RangeReadDoesNotAuthorizeFullFileWrite(t *testing.
 	})
 	require.NoError(t, err, "range-read denial should be a soft tool result, not a chain error")
 
-	msg, ok := res.(string)
-	require.True(t, ok, "expected range-read denial as string, got %T: %#v", res, res)
+	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "read_file", "denial should tell the agent to read the full file before full overwrite")
 	require.Contains(t, msg, "range", "denial should explain that a range read is insufficient for full-file write")
 
@@ -305,8 +322,7 @@ func TestUnit_ReadBeforeWrite_InvalidationAfterMutation(t *testing.T) {
 		"content": "changed again\n",
 	})
 	require.NoError(t, err, "denial should be a soft tool result")
-	msg, ok := res.(string)
-	require.True(t, ok, "expected denial message string, got %T", res)
+	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "without reading it first")
 
 	// File should still contain the first mutation, not the second
@@ -341,12 +357,59 @@ func TestUnit_ReadBeforeWrite_SedInvalidation(t *testing.T) {
 		"replacement": "BRAVO",
 	})
 	require.NoError(t, err)
-	msg, ok := res.(string)
-	require.True(t, ok)
+	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "without reading it first")
 
 	// Content unchanged from first sed
 	got, err := os.ReadFile(filepath.Join(dir, "a.txt"))
 	require.NoError(t, err)
 	require.Equal(t, "ALPHA bravo\n", string(got))
+}
+
+// TestUnit_ReadFile_UnchangedStubIsAStandInForAReaderOnly is the regression test
+// for the second live failure (2026-07-27): a goja script called read_file, got
+// the session-dedup stub, and treated "File unchanged since last read — the
+// content from your earlier read_file call in this conversation is still
+// current." as the file's content.
+//
+// The sentence is TRUE of a model, whose earlier read is still in its context.
+// It is false of every caller that never made that read. So the stub is now a
+// typed value: it renders to the model as the identical sentence (the dedup is
+// untouched, and those tokens still never leave), and it hands a PROGRAM the
+// content it was standing in for.
+func TestUnit_ReadFile_UnchangedStubIsAStandInForAReaderOnly(t *testing.T) {
+	ctx, tools, dir := setupFSReadGuard(t)
+	writeFile(t, dir, "a.txt", "line one\nline two\n")
+
+	first, err := execTool(t, ctx, tools, "read_file", map[string]any{"path": "a.txt"})
+	require.NoError(t, err)
+	require.Equal(t, "line one\nline two\n", first, "the first read is the file itself")
+
+	second, err := execTool(t, ctx, tools, "read_file", map[string]any{"path": "a.txt"})
+	require.NoError(t, err)
+
+	stub, ok := second.(localtools.FsUnchangedResult)
+	require.Truef(t, ok, "a repeat read answered %T; a bare sentence is indistinguishable from content to a program", second)
+
+	// The MODEL still sees exactly the sentence it always did — the dedup is the
+	// point, and the engine renders a DataTypeString result with %v.
+	require.Equal(t,
+		"File unchanged since last read — the content from your earlier read_file call in this conversation is still current. Pass force=true if you need the content re-sent.",
+		stub.String(), "the model-facing dedup message changed")
+
+	// A PROGRAM gets the file.
+	text, available := stub.ProgramText()
+	require.True(t, available, "the stub must be redeemable for the content it stands in for")
+	require.Equal(t, "line one\nline two\n", text,
+		"a program asked for a file and was handed a sentence about a conversation it is not in")
+
+	require.True(t, stub.Unchanged)
+	require.Equal(t, len("line one\nline two\n"), stub.Bytes)
+	require.NotEmpty(t, stub.SHA256)
+
+	// force still works, unchanged, for the caller that wants the bytes resent
+	// into the model's context.
+	forced, err := execTool(t, ctx, tools, "read_file", map[string]any{"path": "a.txt", "force": true})
+	require.NoError(t, err)
+	require.Equal(t, "line one\nline two\n", forced)
 }

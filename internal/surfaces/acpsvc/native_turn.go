@@ -9,6 +9,7 @@ import (
 	"github.com/contenox/beam/internal/kernel/nativeturn"
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/beam/internal/models/llmrepo"
 	"github.com/contenox/beam/internal/services/agentservice"
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/missiontools"
@@ -270,6 +271,10 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 		// Mirrors prompt.go: workdir in ctx lets the verification gate stat
 		// relative artifact refs claimed by result reports.
 		turnCtx = missiontools.WithWorkdir(turnCtx, sess.Cwd)
+		// Mirrors prompt.go: the envelope's model/backend allowlist must bound the
+		// serve-rooted turn exactly as it bounds the connection-rooted one, or a
+		// unit would escape its compute envelope simply by running under serve.
+		turnCtx = llmrepo.WithResolutionBounds(turnCtx, sess.resolutionBounds())
 	}
 	// The other end of the same relationship: a session that FIRED missions carries
 	// its own id in, unlocking the supervisor tools (see missiontools.WithParentSessionID)

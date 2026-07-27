@@ -59,6 +59,9 @@
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
           },
+          "jq": {
+            "_allowed_dir": "."
+          },
           "local_fs": {
             "_allowed_dir": ".",
             "_max_read_bytes": "262144",
@@ -120,6 +123,9 @@
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
           },
+          "jq": {
+            "_allowed_dir": "."
+          },
           "local_fs": {
             "_allowed_dir": ".",
             "_max_read_bytes": "262144",
@@ -167,6 +173,9 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",
@@ -229,6 +238,9 @@
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
           },
+          "jq": {
+            "_allowed_dir": "."
+          },
           "local_fs": {
             "_allowed_dir": ".",
             "_max_read_bytes": "262144",
@@ -275,6 +287,9 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",
@@ -337,6 +352,9 @@
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
           },
+          "jq": {
+            "_allowed_dir": "."
+          },
           "local_fs": {
             "_allowed_dir": ".",
             "_max_read_bytes": "262144",
@@ -384,6 +402,9 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",
@@ -445,6 +466,9 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",

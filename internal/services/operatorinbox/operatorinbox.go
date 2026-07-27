@@ -60,10 +60,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/missionservice"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/google/uuid"
@@ -110,9 +110,9 @@ type EventPublisher interface {
 	Publish(ctx context.Context, subject string, data []byte) error
 }
 
-// Option configures an operator inbox at construction, so the one optional
-// dependency this service has can be wired without changing New's signature for
-// the callers that pass only a db.
+// Option configures an operator inbox at construction, so the optional
+// dependencies this service has can be wired without changing New's signature
+// for the callers that pass only a db.
 type Option func(*service)
 
 // WithEventPublisher wires the bus Add announces stored items on (AddedSubject).
@@ -120,6 +120,17 @@ type Option func(*service)
 // exactly how an inbox built before this seam existed behaves.
 func WithEventPublisher(pub EventPublisher) Option {
 	return func(s *service) { s.pub = pub }
+}
+
+// WithTracker wires the ActivityTracker the best-effort publish path reports to
+// (see publishAdded). Unset — or set to nil — the inbox tracks nothing: an item
+// is stored whether or not anyone is watching.
+func WithTracker(tracker libtracker.ActivityTracker) Option {
+	return func(s *service) {
+		if tracker != nil {
+			s.tracker = tracker
+		}
+	}
 }
 
 // Reason records WHY a report landed in the operator inbox rather than reaching
@@ -210,16 +221,20 @@ type Service interface {
 }
 
 type service struct {
-	db  libdb.DBManager
-	pub EventPublisher
+	db      libdb.DBManager
+	pub     EventPublisher
+	tracker libtracker.ActivityTracker
 }
 
 // New creates an operator inbox backed by the given database manager, storing
 // items in the shared KV table (the same backing missionservice uses).
 func New(db libdb.DBManager, opts ...Option) Service {
-	s := &service{db: db}
+	s := &service{db: db, tracker: libtracker.NoopTracker{}}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.tracker == nil {
+		s.tracker = libtracker.NoopTracker{}
 	}
 	return s
 }
@@ -268,8 +283,9 @@ func (s *service) publishAdded(ctx context.Context, item *Item, raw json.RawMess
 		return
 	}
 	if err := s.pub.Publish(ctx, AddedSubject, raw); err != nil {
-		slog.Warn("operatorinbox: publish item-added event failed; item stored, live nudge skipped",
-			"itemId", item.ID, "missionId", item.MissionID, "error", err)
+		reportErr, _, end := s.tracker.Start(ctx, "publish", "inbox_item_added_event", "itemId", item.ID, "missionId", item.MissionID)
+		reportErr(fmt.Errorf("operatorinbox: publish item-added event failed; item stored, live nudge skipped: %w", err))
+		end()
 	}
 }
 

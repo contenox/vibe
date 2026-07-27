@@ -151,6 +151,24 @@ func echoArg(s string) string {
 	return strconv.Quote(s)
 }
 
+// echoErr renders a WRAPPED lower-level error inside a teaching message.
+//
+// It is clamped for the same reason echoArg is, and the reason is easy to miss:
+// the wrapped text routinely embeds the very argument that failed. A 10 KB dir
+// comes back from the filesystem as "…: file name too long" with all 10 KB of
+// the name in it, so clamping the argument and then interpolating %v puts the
+// argument straight back into the result through the side door.
+func echoErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	r := []rune(err.Error())
+	if len(r) > maxEchoRunes {
+		return string(r[:maxEchoRunes]) + "…"
+	}
+	return string(r)
+}
+
 // echoName renders a model-supplied IDENTIFIER — an argument NAME — for an
 // error message. Same clamp as echoArg, and non-printable runes (a NUL, a bidi
 // override) are replaced rather than embedded, but no quotes: the
@@ -375,11 +393,25 @@ func (ix *index) allowedDir(ctx context.Context) (string, error) {
 		base = ix.cfg.CwdResolver(ctx)
 	}
 	if strings.TrimSpace(base) == "" {
-		return "", errors.New("gointel: no allowed directory configured")
+		// FATAL, and it says so, because no argument the model can change will fix
+		// it: the workspace root is a WIRING decision made above this package.
+		//
+		// This is the failure mode that looks like a broken tool and is not one.
+		// gointel is registered unconditionally, so it appears in the tool list of
+		// every session; a session whose composition root left both AllowedDir and
+		// CwdResolver empty therefore advertises six tools that refuse every call.
+		// A bare "no allowed directory configured" sends the model hunting for a
+		// better symbol spelling forever. Naming the two ways to supply the root —
+		// the flag an operator passes and the resolver a composition root wires —
+		// is what turns that into something the first reader can act on.
+		return "", errors.New("gointel: no workspace root is configured for this session, so there is nothing to index; " +
+			"the root comes from the runtime's allowed directory (--local-exec-allowed-dir on the CLI) or from the " +
+			"session cwd resolver the composition root supplies — no symbol or dir argument can substitute for it " +
+			"(fatal: no workspace root)")
 	}
 	resolved, err := vfs.ResolveRoot(base)
 	if err != nil {
-		return "", fmt.Errorf("gointel: invalid allowed dir: %w", err)
+		return "", recoverablef("gointel: workspace root %s cannot be resolved: %s", echoArg(base), echoErr(err))
 	}
 	return resolved, nil
 }
@@ -424,7 +456,7 @@ func (ix *index) moduleRoot(ctx context.Context, dir string) (root, base string,
 		// Anything else vfs refused (a NUL byte in the path, an unreadable
 		// component) is still a caller-correctable argument, so it carries the
 		// recoverable marker like every other refusal on this surface.
-		return "", "", recoverablef("gointel: cannot resolve dir %s: %v", echoArg(dir), err)
+		return "", "", recoverablef("gointel: cannot resolve dir %s: %s", echoArg(dir), echoErr(err))
 	}
 	if info, statErr := os.Stat(start); statErr == nil && !info.IsDir() {
 		start = filepath.Dir(start)

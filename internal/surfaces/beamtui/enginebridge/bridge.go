@@ -1088,7 +1088,7 @@ func (c *bridgeClient) RequestPermission(ctx context.Context, req libacp.Request
 	}
 
 	meta, _ := approvalflow.ParseMeta(req.ToolCall.Meta)
-	if meta == (approvalflow.Meta{}) {
+	if meta.IsZero() {
 		meta, _ = approvalflow.ParseMeta(req.Meta)
 	}
 

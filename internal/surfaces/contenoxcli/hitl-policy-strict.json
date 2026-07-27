@@ -1,5 +1,11 @@
 {
-  "//compute": "OPTIONAL and OMITTED here by design, so this preset stays unbounded (unchanged behavior). The envelope is a unit's TOTAL boundary: to bound a mission's COMPUTE as well as its actions, add a top-level \"compute\" block, e.g. \"compute\": {\"maxTurns\": 20, \"maxToolCalls\": 150, \"maxTokens\": 1000000, \"onExhausted\": \"finish_stuck\"}. Bounds only RESTRICT (an absent field is unbounded); a mission that crosses one is finished at status \"stuck\" with a reason naming the bound. maxTurns and maxToolCalls are enforced host-side; maxTokens is best-effort (enforced only from reported usage); modelAllowlist/backendAllowlist are declared but not yet enforced. See docs/development/blueprints/acp/envelope-compute-bounds.md.",
+  "//compute": "PRESENT AND REAL, and tighter than the default preset's — a policy whose default_action is \"deny\" is chosen by an operator who wants the narrow envelope, and its compute half should match its action half. A mission is fire-and-detach, so unbounded would mean a runaway spends real money with nobody watching. Bounds only ever RESTRICT, they are per-MISSION (an attached chat under this policy is bounded by the rules below, not by these), and a mission that crosses one is finished at status \"stuck\" with a reason naming the bound.",
+  "//compute-fields": "maxToolCalls counts envelope-gated tool dispatches and is exact. maxTokens is BEST-EFFORT: it bounds a mission from the usage its unit reports, and is inert for a unit whose provider reports none. maxTurns is deliberately OMITTED, not forgotten: the dispatcher issues at most two prompt turns per mission, so any ceiling above 1 could never fire and shipping one would claim a bound that does not exist. modelAllowlist/backendAllowlist ARE enforced when set, but no shipped preset can guess your model names — set them on a per-mission envelope. \"finish_stuck\" is the only implemented onExhausted behavior. See docs/development/blueprints/acp/envelope-compute-bounds.md.",
+  "compute": {
+    "maxToolCalls": 150,
+    "maxTokens": 1000000,
+    "onExhausted": "finish_stuck"
+  },
   "default_action": "deny",
   "rules": [
     {

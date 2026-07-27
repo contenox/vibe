@@ -7,6 +7,7 @@ import (
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/beam/internal/models/llmrepo"
 	"github.com/contenox/beam/internal/services/agentservice"
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/missiontools"
@@ -180,6 +181,12 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		// relative artifact refs a result report claims (absolute refs verify
 		// without it).
 		promptCtx = missiontools.WithWorkdir(promptCtx, sess.Cwd)
+		// Bind the envelope's COMPUTE allowlist onto the same context, so this
+		// turn's model/backend resolution is refused if it steps outside what the
+		// mission was dispatched under. It rides the identical prompt ->
+		// agentservice -> taskengine path WithPolicyName rides, ending at
+		// llmrepo's resolver seam. An unbounded mission binds nothing.
+		promptCtx = llmrepo.WithResolutionBounds(promptCtx, sess.resolutionBounds())
 	}
 	// The other end of the same relationship: a session that FIRED missions carries
 	// its own id in, unlocking the supervisor tools (see missiontools.WithParentSessionID)

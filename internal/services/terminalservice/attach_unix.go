@@ -5,8 +5,8 @@ package terminalservice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"log/slog"
 	"time"
 
 	"github.com/contenox/beam/internal/services/terminalstore"
@@ -52,12 +52,16 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 			n, err := tty.Read(buf)
 			if n > 0 {
 				if _, werr := conn.Write(buf[:n]); werr != nil {
-					slog.Debug("attach: pty->ws write error", "error", werr)
+					reportErr, _, end := s.tracker.Start(ctx, "stream_output", "terminal_pty", "sessionID", id, "backend", "pty")
+					reportErr(fmt.Errorf("attach: pty->ws write error: %w", werr))
+					end()
 					return
 				}
 			}
 			if err != nil {
-				slog.Debug("attach: pty read done", "error", err)
+				reportErr, _, end := s.tracker.Start(ctx, "stream_output", "terminal_pty", "sessionID", id, "backend", "pty")
+				reportErr(fmt.Errorf("attach: pty read done: %w", err))
+				end()
 				return
 			}
 		}
@@ -66,7 +70,11 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 	go func() {
 		defer cancel()
 		n, err := io.Copy(tty, conn)
-		slog.Debug("attach: ws->pty copy done", "bytes", n, "error", err)
+		reportErr, _, end := s.tracker.Start(ctx, "stream_input", "terminal_pty", "sessionID", id, "backend", "pty", "bytes", n)
+		if err != nil {
+			reportErr(fmt.Errorf("attach: ws->pty copy done: %w", err))
+		}
+		end()
 	}()
 
 	if resizeCh != nil {
@@ -81,7 +89,9 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 					}
 					if msg.Cols > 0 && msg.Rows > 0 {
 						if err := pty.Setsize(tty, &pty.Winsize{Rows: uint16(msg.Rows), Cols: uint16(msg.Cols)}); err != nil {
-							slog.Debug("terminal pty resize", "error", err)
+							reportErr, _, end := s.tracker.Start(ctx, "resize", "terminal_pty", "session", id, "backend", "pty", "cols", msg.Cols, "rows", msg.Rows)
+							reportErr(fmt.Errorf("terminal pty resize: %w", err))
+							end()
 						}
 					}
 				}

@@ -252,7 +252,10 @@ var _ taskengine.ToolsRepo = (*decorator)(nil)
 //     would corrupt its shape, so guidance is COUNTED but not surfaced here — a
 //     later string result in the same session carries the up-to-date totals.
 //     This keeps the decorator transparent for structured tools (write_file,
-//     mission_plan) while keeping their calls visible to scope.
+//     mission_plan) while keeping their calls visible to scope. The one
+//     exception is a typed result that RENDERS as text and says so by
+//     implementing AppendGuidance(string) any: it carries the lines in its own
+//     rendering, so a tool does not lose its guidance merely by being typed.
 func (d *decorator) Exec(ctx context.Context, startingTime time.Time, input any, debug bool, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	res, dt, err := d.inner.Exec(ctx, startingTime, input, debug, call)
 	if err != nil {
@@ -266,11 +269,24 @@ func (d *decorator) Exec(ctx context.Context, startingTime time.Time, input any,
 	// navigation), then decide whether this particular result can carry the lines.
 	lines := d.observe(ctx, input, call)
 
-	s, ok := res.(string)
-	if !ok || dt != taskengine.DataTypeString || len(lines) == 0 {
+	if len(lines) == 0 || dt != taskengine.DataTypeString {
 		return res, dt, err
 	}
-	return s + "\n" + strings.Join(lines, "\n"), dt, nil
+	suffix := "\n" + strings.Join(lines, "\n")
+	if s, ok := res.(string); ok {
+		return s + suffix, dt, nil
+	}
+	// A TYPED result that renders as text can still carry the lines without
+	// losing its shape. Some tools return a struct whose String() is the prose
+	// the model reads (localtools' git results, so a PROGRAM reading them gets
+	// fields rather than prose to guess at); without this branch, typing a tool
+	// would silently drop its guidance from the model's view — a model-facing
+	// change made by a decision that was supposed to be invisible to the model.
+	// Asserted structurally, so this package depends on no toolset.
+	if carrier, ok := res.(interface{ AppendGuidance(string) any }); ok {
+		return carrier.AppendGuidance(suffix), dt, nil
+	}
+	return res, dt, err
 }
 
 // Supports delegates to the inner repo — the decorator changes results, never

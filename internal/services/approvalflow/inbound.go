@@ -86,6 +86,14 @@ type Mapped struct {
 	// change. Empty otherwise.
 	Diff string
 
+	// MayCall and MayCallDeclared are the DECLARED reach the downstream sent
+	// (Meta.MayCall / Meta.MayCallDeclared): the tools the gated call may itself
+	// invoke, and how to read that list. They are display provenance for the
+	// human answering, exactly like PolicyName — nothing is evaluated from
+	// them, and a declaration is not a proof. See Meta.MayCall.
+	MayCall         []string
+	MayCallDeclared *bool
+
 	// Title is the request's human-facing label (toolCall.title), falling back
 	// to the tool-call id. It is always populated with SOMETHING, because an
 	// inbox row with no description at all is unanswerable — it is display
@@ -122,6 +130,8 @@ func MapRequest(req libacp.RequestPermissionRequest) Mapped {
 	m.Named = m.ToolsName != "" && m.ToolName != ""
 	m.PolicyName = strings.TrimSpace(meta.PolicyName)
 	m.Diff = meta.Diff
+	m.MayCall = meta.MayCall
+	m.MayCallDeclared = meta.MayCallDeclared
 
 	if args, ok := ParseArgs(req.ToolCall.RawInput); ok {
 		m.Args = args
@@ -142,7 +152,7 @@ func ParseMeta(raw json.RawMessage) (Meta, bool) {
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return Meta{}, false
 	}
-	if meta == (Meta{}) {
+	if meta.IsZero() {
 		return Meta{}, false
 	}
 	return meta, true

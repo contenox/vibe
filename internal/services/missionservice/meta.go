@@ -31,8 +31,30 @@ import (
 const MissionMetaKey = "contenox.mission"
 
 // MissionMeta is the value stored under MissionMetaKey.
+//
+// ModelAllowlist / BackendAllowlist are the second thing that must cross the
+// process boundary, and for a different reason than the mission id. The id is a
+// GRANT (it hands the unit its mission tools); these are a BOUND (they take model
+// choice away). They ride here because the supervising process cannot enforce
+// them from outside: a dispatched unit resolves its own models in its own
+// process, and the ACP session/update contract carries no model identity for the
+// host to watch. So the bound travels IN at session setup and is enforced by the
+// unit against its own resolver (llmrepo.WithResolutionBounds), where the choice
+// is actually made.
+//
+// That the unit enforces its own bound is safe for the same structural reason the
+// mission-id grant is: a unit is this runtime re-invoked as an ACP peer over
+// stdio (agentinstance's chain branch — the only user-declarable agent kind), not
+// a foreign process being asked to police itself. And the direction is
+// narrowing-only: `_meta` a unit does not receive leaves it exactly as unbounded
+// as it is today, so a dropped or ignored bound can never GRANT anything.
 type MissionMeta struct {
 	MissionID string `json:"missionId"`
+	// ModelAllowlist / BackendAllowlist mirror hitlservice.ComputeBounds. Omitted
+	// (nil) means unbounded for that dimension, which is what every envelope
+	// without a compute block sends.
+	ModelAllowlist   []string `json:"modelAllowlist,omitempty"`
+	BackendAllowlist []string `json:"backendAllowlist,omitempty"`
 }
 
 // MarshalMissionMeta builds the `{"contenox.mission": {"missionId": "<id>"}}`
@@ -40,14 +62,45 @@ type MissionMeta struct {
 // id. Returns nil for an empty id so a non-mission session sends no `_meta` at
 // all rather than an empty envelope.
 func MarshalMissionMeta(missionID string) json.RawMessage {
+	return MarshalMissionMetaBounded(missionID, nil, nil)
+}
+
+// MarshalMissionMetaBounded is MarshalMissionMeta plus the envelope's
+// model/backend allowlists, for a dispatcher that read the mission's compute
+// bounds. Empty lists marshal away entirely (the `omitempty` tags), so a mission
+// with no allowlist produces byte-for-byte the same `_meta` as before this
+// existed.
+func MarshalMissionMetaBounded(missionID string, modelAllowlist, backendAllowlist []string) json.RawMessage {
 	if strings.TrimSpace(missionID) == "" {
 		return nil
 	}
-	raw, err := json.Marshal(map[string]MissionMeta{MissionMetaKey: {MissionID: missionID}})
+	meta := MissionMeta{
+		MissionID:        missionID,
+		ModelAllowlist:   trimmedNonEmpty(modelAllowlist),
+		BackendAllowlist: trimmedNonEmpty(backendAllowlist),
+	}
+	raw, err := json.Marshal(map[string]MissionMeta{MissionMetaKey: meta})
 	if err != nil {
 		return nil
 	}
 	return raw
+}
+
+// trimmedNonEmpty drops blank entries and trims the rest, so a hand-edited
+// envelope's stray whitespace cannot produce an allowlist entry that matches
+// nothing. Returns nil (not an empty slice) when nothing survives, which is what
+// keeps the field off the wire.
+func trimmedNonEmpty(entries []string) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if t := strings.TrimSpace(e); t != "" {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // ParseMissionMeta extracts the mission id from a session/new `_meta`. A missing
@@ -55,24 +108,40 @@ func MarshalMissionMeta(missionID string) json.RawMessage {
 // ships unrelated `_meta` (or none) is simply not on a mission — mirroring
 // acpsvc.parseAgentMeta's fail-soft contract.
 func ParseMissionMeta(meta json.RawMessage) (string, bool) {
+	mm, ok := ParseMissionMetaFull(meta)
+	return mm.MissionID, ok
+}
+
+// ParseMissionMetaFull is ParseMissionMeta plus the envelope bounds the
+// dispatcher attached. Same fail-soft contract: anything unparseable reads as
+// "not on a mission" rather than an error, and a `_meta` carrying only an id
+// yields nil allowlists — unbounded, today's behavior.
+//
+// The returned MissionID is trimmed; the allowlists are trimmed and blank-free,
+// so the reader can compare them without re-cleaning.
+func ParseMissionMetaFull(meta json.RawMessage) (MissionMeta, bool) {
 	if len(meta) == 0 {
-		return "", false
+		return MissionMeta{}, false
 	}
 	var m map[string]json.RawMessage
 	if json.Unmarshal(meta, &m) != nil {
-		return "", false
+		return MissionMeta{}, false
 	}
 	raw, ok := m[MissionMetaKey]
 	if !ok {
-		return "", false
+		return MissionMeta{}, false
 	}
 	var mm MissionMeta
 	if json.Unmarshal(raw, &mm) != nil {
-		return "", false
+		return MissionMeta{}, false
 	}
 	id := strings.TrimSpace(mm.MissionID)
 	if id == "" {
-		return "", false
+		return MissionMeta{}, false
 	}
-	return id, true
+	return MissionMeta{
+		MissionID:        id,
+		ModelAllowlist:   trimmedNonEmpty(mm.ModelAllowlist),
+		BackendAllowlist: trimmedNonEmpty(mm.BackendAllowlist),
+	}, true
 }

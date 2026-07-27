@@ -5,8 +5,8 @@ package terminalservice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"time"
 	"unsafe"
@@ -61,7 +61,9 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 			}
 			ready, err := windowsPipeHasData(output)
 			if err != nil {
-				slog.Debug("attach: conpty output readiness done", "error", err)
+				reportErr, _, end := s.tracker.Start(ctx, "stream_output", "terminal_pty", "sessionID", id, "backend", "conpty", "phase", "readiness")
+				reportErr(fmt.Errorf("attach: conpty output readiness done: %w", err))
+				end()
 				return
 			}
 			if !ready {
@@ -71,12 +73,16 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 			n, err := output.Read(buf)
 			if n > 0 {
 				if _, werr := conn.Write(buf[:n]); werr != nil {
-					slog.Debug("attach: conpty->ws write error", "error", werr)
+					reportErr, _, end := s.tracker.Start(ctx, "stream_output", "terminal_pty", "sessionID", id, "backend", "conpty")
+					reportErr(fmt.Errorf("attach: conpty->ws write error: %w", werr))
+					end()
 					return
 				}
 			}
 			if err != nil {
-				slog.Debug("attach: conpty read done", "error", err)
+				reportErr, _, end := s.tracker.Start(ctx, "stream_output", "terminal_pty", "sessionID", id, "backend", "conpty")
+				reportErr(fmt.Errorf("attach: conpty read done: %w", err))
+				end()
 				return
 			}
 		}
@@ -85,7 +91,11 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 	go func() {
 		defer cancel()
 		n, err := io.Copy(input, conn)
-		slog.Debug("attach: ws->conpty copy done", "bytes", n, "error", err)
+		reportErr, _, end := s.tracker.Start(ctx, "stream_input", "terminal_pty", "sessionID", id, "backend", "conpty", "bytes", n)
+		if err != nil {
+			reportErr(fmt.Errorf("attach: ws->conpty copy done: %w", err))
+		}
+		end()
 	}()
 
 	if resizeCh != nil {
@@ -99,7 +109,7 @@ func (s *service) Attach(ctx context.Context, principal, id string, conn io.Read
 						return
 					}
 					if msg.Cols > 0 && msg.Rows > 0 {
-						s.resizeLocalPTY(id, msg.Cols, msg.Rows)
+						s.resizeLocalPTY(ctx, id, msg.Cols, msg.Rows)
 					}
 				}
 			}

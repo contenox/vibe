@@ -46,6 +46,73 @@ const readBeforeWriteFullReadDenial = "local_fs: cannot overwrite existing file 
 
 const readBeforeWriteStaleReadDenial = "local_fs: cannot modify existing file %s because it changed since you read it. Call local_fs.read_file(%q) to refresh the current contents, then retry. " + severityRecoverable
 
+// ---------------------------------------------------------------------------
+// Results a PROGRAM can trust
+//
+// Two of this toolset's answers are sentences that mean something to a READER
+// and something else — or nothing — to a program:
+//
+//   - fileUnchangedStub is not the file. It means "you already have this", which
+//     is true of a model whose earlier read is still in its context and FALSE of
+//     any caller that never made that read. A goja script that got it treated the
+//     sentence as the file's content (found by live use, 2026-07-27).
+//   - a read-before-write denial is not a receipt. It means "I did nothing", and
+//     a script that reads it as a write result reports a success that never
+//     happened.
+//
+// Both now return a TYPED value whose String() is byte-for-byte the sentence
+// they returned before, so the model-facing result is unchanged (the engine
+// renders a DataTypeString result with fmt.Sprintf("%v", …)). What changes is
+// what a program gets: the unchanged-stub hands over the actual content it was
+// standing in for, and the denial declares itself unusable so the caller throws
+// instead of parsing an apology.
+//
+// The two method names are the whole contract, asserted structurally by whoever
+// consumes them (gojatool/hostresult.go) so neither package imports the other.
+// ---------------------------------------------------------------------------
+
+// FsUnchangedResult is read_file's session-dedup answer. See fileUnchangedStub.
+type FsUnchangedResult struct {
+	Path      string `json:"path"`
+	SHA256    string `json:"sha256"`
+	Bytes     int    `json:"bytes"`
+	Unchanged bool   `json:"unchanged"`
+
+	// content is what the stub stands in for. It is unexported because it must
+	// not travel back into the model's context by any route — the entire point
+	// of the stub is that those tokens are already there — and ProgramText is
+	// the one door it leaves by.
+	content string
+}
+
+func (r FsUnchangedResult) String() string { return fileUnchangedStub }
+
+// ProgramText hands a program the content the stub stood in for.
+//
+// This is the fix for the caveat, not a convenience: "the content from your
+// earlier read_file call in this conversation is still current" is a true
+// sentence about a CONVERSATION, and a program is not in one. Answering a script
+// with the file it asked for keeps the dedup (the model's context is untouched)
+// while removing the only way the optimisation could produce a wrong answer.
+func (r FsUnchangedResult) ProgramText() (string, bool) { return r.content, true }
+
+// FsRefusalResult is a soft refusal: a mutation that did NOT happen, reported to
+// the model as an ordinary tool result so it can correct itself and retry.
+type FsRefusalResult struct {
+	Refused bool   `json:"refused"`
+	Reason  string `json:"reason"`
+}
+
+func (r FsRefusalResult) String() string { return r.Reason }
+
+// ProgramUnusable declares that there is no result here for a program to read —
+// only an explanation of why nothing happened.
+func (r FsRefusalResult) ProgramUnusable() string { return r.Reason }
+
+func fsRefusal(reason string) FsRefusalResult {
+	return FsRefusalResult{Refused: true, Reason: reason}
+}
+
 type readRequirement int
 
 const (
@@ -468,7 +535,13 @@ func (h *LocalFSTools) readFile(ctx context.Context, args map[string]any) (any, 
 	force, _ := argBool(args, "force")
 	hash := contentHash(content)
 	if !force && !h.readTrackingDisabled(ctx) && h.hasCurrentFullRead(ctx, absPath, hash) {
-		return fileUnchangedStub, taskengine.DataTypeString, nil
+		return FsUnchangedResult{
+			Path:      display,
+			SHA256:    hash,
+			Bytes:     len(content),
+			Unchanged: true,
+			content:   string(content),
+		}, taskengine.DataTypeString, nil
 	}
 
 	out := string(content)
@@ -649,7 +722,7 @@ func (h *LocalFSTools) writeFile(ctx context.Context, args map[string]any) (any,
 
 	gate := h.requireReadBeforeMutation(ctx, absPath, display, requireFullFileRead)
 	if gate.denied {
-		return gate.denial, taskengine.DataTypeString, nil
+		return fsRefusal(gate.denial), taskengine.DataTypeString, nil
 	}
 	// gate already read the file to validate its hash; reuse those bytes
 	// instead of reading a second time.
@@ -670,7 +743,7 @@ func (h *LocalFSTools) writeFile(ctx context.Context, args map[string]any) (any,
 	if gate.exists && gate.verified && !h.readTrackingDisabled(ctx) {
 		if unchanged, _ := h.confirmUnchanged(ctx, absPath, gate.hash); !unchanged {
 			h.invalidateReads(ctx, absPath)
-			return fmt.Sprintf(readBeforeWriteStaleReadDenial, display, display), taskengine.DataTypeString, nil
+			return fsRefusal(fmt.Sprintf(readBeforeWriteStaleReadDenial, display, display)), taskengine.DataTypeString, nil
 		}
 	}
 
@@ -746,7 +819,7 @@ func (h *LocalFSTools) sed(ctx context.Context, args map[string]any) (any, taske
 
 	gate := h.requireReadBeforeMutation(ctx, absPath, display, requireAnyFileRead)
 	if gate.denied {
-		return gate.denial, taskengine.DataTypeString, nil
+		return fsRefusal(gate.denial), taskengine.DataTypeString, nil
 	}
 	if !gate.verified {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: sed: could not read %s", display)
@@ -825,7 +898,7 @@ func (h *LocalFSTools) sed(ctx context.Context, args map[string]any) (any, taske
 	if !h.readTrackingDisabled(ctx) {
 		if unchanged, _ := h.confirmUnchanged(ctx, absPath, gate.hash); !unchanged {
 			h.invalidateReads(ctx, absPath)
-			return fmt.Sprintf(readBeforeWriteStaleReadDenial, display, display), taskengine.DataTypeString, nil
+			return fsRefusal(fmt.Sprintf(readBeforeWriteStaleReadDenial, display, display)), taskengine.DataTypeString, nil
 		}
 	}
 

@@ -307,6 +307,72 @@ CREATE TABLE IF NOT EXISTS bus_replies (
     created_at INTEGER NOT NULL DEFAULT (unixepoch('now'))
 );
 
+-- workspace_index_configs / workspace_chunks: the local workspace semantic index
+-- (internal/services/workspaceindex, see
+-- docs/development/blueprints/workspace-index.md). Not a vector database and not
+-- multi-tenant — one index per workspace, in the same SQLite file as everything
+-- else.
+--
+-- A config row is one IMMUTABLE GENERATION of an index: which embedding model
+-- produced its vectors, how wide they are, how files were chunked, which
+-- resolved root was walked. There is no UPDATE path and the live config cannot
+-- be deleted (runtimetypes/workspaceindex.go). Changing the embedding model
+-- creates a NEW config and cuts over — the newest config for a workspace is the
+-- active one — because vectors from two models sharing one table is the silent
+-- corruption this design exists to prevent.
+--
+-- dimension is recorded here rather than per chunk so a vector of the wrong
+-- width is a load error at the store boundary, never a silently mis-scored hit.
+-- Migration-safe by construction: CREATE TABLE IF NOT EXISTS on brand-new tables.
+CREATE TABLE IF NOT EXISTS workspace_index_configs (
+    id                  VARCHAR(255) PRIMARY KEY,
+    workspace_id        VARCHAR(255) NOT NULL,
+    root                TEXT NOT NULL DEFAULT '',
+    embed_model         VARCHAR(512) NOT NULL,
+    embed_provider      VARCHAR(255) NOT NULL DEFAULT '',
+    dimension           INT NOT NULL,
+    chunk_tokens        INT NOT NULL DEFAULT 0,
+    chunk_overlap_lines INT NOT NULL DEFAULT 0,
+    created_at          TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_index_configs_workspace
+    ON workspace_index_configs(workspace_id, created_at);
+
+-- content_sha is the digest of the WHOLE FILE the chunk came from, not of the
+-- chunk text: one column answers both "did this file change since I indexed it"
+-- (incremental re-index) and "is this hit still true" (staleness at query time).
+-- vector is a little-endian float32 blob whose length must equal the config's
+-- dimension.
+CREATE TABLE IF NOT EXISTS workspace_chunks (
+    id           VARCHAR(255) PRIMARY KEY,
+    config_id    VARCHAR(255) NOT NULL REFERENCES workspace_index_configs(id) ON DELETE CASCADE,
+    workspace_id VARCHAR(255) NOT NULL,
+    path         TEXT NOT NULL,
+    start_line   INT NOT NULL,
+    end_line     INT NOT NULL,
+    content_sha  VARCHAR(64) NOT NULL,
+    text         TEXT NOT NULL,
+    vector       BLOB NOT NULL,
+    created_at   TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_chunks_config_path
+    ON workspace_chunks(config_id, path);
+
+-- The lexical half of hybrid retrieval: FTS5 narrows to a bounded candidate set
+-- (bm25 order) and vectors rank within it, so scoring never scans the whole
+-- index. This is a standalone contentful FTS5 table rather than an
+-- external-content one because our chunk key is a VARCHAR id, not the INTEGER
+-- rowid external-content tables require; both tables are written only by
+-- AppendWorkspaceChunks / DeleteWorkspaceChunks*, in the same call, so they
+-- cannot drift. FTS5 availability in modernc.org/sqlite is proven by
+-- TestUnit_WorkspaceIndex_FTS5IsAvailable rather than assumed.
+CREATE VIRTUAL TABLE IF NOT EXISTS workspace_chunks_fts USING fts5(
+    text,
+    chunk_id UNINDEXED,
+    config_id UNINDEXED,
+    tokenize = 'unicode61'
+);
+
 -- Incremental migrations — executed one-by-one by NewSQLiteDBManager so that
 -- "duplicate column name" errors on already-upgraded databases are silently
 -- skipped and the remaining statements still run.

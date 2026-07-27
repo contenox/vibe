@@ -154,10 +154,19 @@ Also supported: Gemini, Vertex AI, and Amazon Bedrock.
 ## Guardrails, without the nagging
 
 Defaults are safe so you don't have to think about them: gated actions ask a
-human first (in the terminal or your editor's permission UI), agent shells run
-confined with scrubbed environments, and every session leaves reviewable local
-state. Approval policies are yours to author — loosen or tighten per chain,
-and the harness stays out of your way everywhere else.
+human first (in the terminal or your editor's permission UI), and every session
+leaves reviewable local state. Approval policies are yours to author — loosen or
+tighten per chain, and the harness stays out of your way everywhere else.
+
+Know exactly what that gate is. Everything you run today — `chat`, `run`,
+`beam`, an editor `acp` session, and the mission units the fleet dispatches — is
+contenox's own chains in contenox's own process, bounded by the approval gate and
+the chain's tool policy. That is a gate at the tool layer, not a kernel sandbox:
+their shells are ordinary child processes and inherit the runtime's environment.
+The [sandbox](https://contenox.com/docs/guide/agent-sandbox/) — Landlock-enforced
+filesystem and exec confinement, scrubbed environment, Linux-only and fail-closed
+— is what confines a *foreign* agent, code contenox did not write; registering
+one is not exposed yet, so nothing on a stock install takes that path.
 
 ---
 

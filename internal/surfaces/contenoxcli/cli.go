@@ -58,7 +58,7 @@ const (
 // code, vscode-agent, modeld) stay reserved on purpose: an operator typing one
 // gets Cobra's unknown-command error naming the mistake, instead of the word
 // being silently injected as a chat prompt.
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true}
+var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true, "index": true, "search": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
@@ -138,8 +138,7 @@ func recordStartupFailure(execErr error) {
 		return
 	}
 	defer f.Close()
-	logger := slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	tr := libtracker.NewLogActivityTracker(logger)
+	tr := libtracker.NewTextActivityTracker(f)
 	reportErr, _, end := tr.Start(context.Background(), "exec", "cli",
 		"argv", strings.Join(os.Args[1:], " "),
 		"version", CLIVersion(),
@@ -332,7 +331,11 @@ After init, register a backend, make sure the runtime can see a model, then set 
   contenox config set default-autocomplete-provider ollama
   contenox config set default-autocomplete-model qwen2.5-coder:7b
 
-Use --force to overwrite existing files, or --update to refresh unchanged default files to the latest version.`,
+Use --force to overwrite existing files, or --update to refresh unchanged default files to the latest version.
+
+Use --refresh-policies to rewrite ONLY the HITL policy presets (hitl-policy-*.json) in
+~/.contenox from this build. That is what 'contenox doctor' points at when an envelope
+predates a shipped toolset: it leaves chains, config and sessions alone, unlike --force.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInitCmd,
 }
@@ -404,6 +407,7 @@ func init() {
 	rootCmd.InitDefaultHelpCmd() // so "contenox help" is handled by Cobra, not passed as run input
 	initCmd.Flags().BoolP("force", "f", false, "Overwrite existing files")
 	initCmd.Flags().Bool("update", false, "Update unchanged default files to the latest version")
+	initCmd.Flags().Bool("refresh-policies", false, "Rewrite ONLY the HITL policy presets in ~/.contenox from this build (chains, config and sessions are untouched; your edits to those policy files are replaced)")
 	initCmd.Flags().Bool("project", false, "Create a project marker in the CURRENT directory (a fresh workspace id), instead of reusing an ancestor's .contenox")
 	initCmd.Flags().String("name", "", "Friendly project name for the marker (default: the directory name)")
 
@@ -418,6 +422,12 @@ func init() {
 // setupTelemetryLogging checks if the user has enabled file logging.
 // If enabled, it sets up slog to write to both os.Stderr and ~/.contenox/telemetry.log.
 // Returns a cleanup function to close the file.
+//
+// This is SINK WIRING, which is why log/slog is imported here and nowhere else
+// in this package's command logic: it points the process default handler — the
+// output the tracker built by libtracker.NewLogActivityTracker writes through —
+// at the operator's telemetry file. Nothing in this package may call slog as an
+// API; see the allowlist in libtracker's TestUnit_NoDirectSlogOutsideSinks.
 func setupTelemetryLogging(ctx context.Context, store runtimetypes.Store, contenoxDir string) (func(), error) {
 	enabledStr := clikv.Read(ctx, store, "telemetry-enabled")
 	if enabledStr != "true" {
@@ -433,6 +443,21 @@ func setupTelemetryLogging(ctx context.Context, store runtimetypes.Store, conten
 	mw := io.MultiWriter(os.Stderr, f)
 	slog.SetDefault(slog.New(slog.NewTextHandler(mw, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	return func() { f.Close() }, nil
+}
+
+// warnTelemetryLoggingUnavailable reports a failed setupTelemetryLogging to the
+// operator, on the command's own stderr.
+//
+// PRINTED, NOT TRACKED, and the reason is the same at all three call sites
+// (chat, run, beam): telemetry-enabled is set, so the operator explicitly asked
+// for this log and is silently not getting it. That is a message to a human who
+// can fix it — a bad path, a read-only directory, a full disk — not an event
+// about the program worth correlating later. Reporting it through the tracker
+// would also be circular: the tracker's sink is the logging that just failed to
+// come up.
+func warnTelemetryLoggingUnavailable(w io.Writer, err error) {
+	fmt.Fprintf(w, "warning: telemetry-enabled is set but its log file could not be opened, continuing without it: %v\n"+
+		"         turn it off with: contenox config set telemetry-enabled false\n", err)
 }
 
 // ResolveContenoxDir finds the closest .contenox directory by walking up from the
@@ -509,6 +534,12 @@ func ResolveWorkspaceID(contenoxDir string) string {
 }
 
 func runInitCmd(cmd *cobra.Command, args []string) error {
+	// The narrow verb the stale-policy notice points at: presets only, no
+	// chains, no marker, no config. It short-circuits everything else because
+	// its whole value is being SMALLER than --force.
+	if refresh, _ := cmd.Flags().GetBool("refresh-policies"); refresh {
+		return runRefreshPolicies(cmd.OutOrStdout())
+	}
 	force, _ := cmd.Flags().GetBool("force")
 	update, _ := cmd.Flags().GetBool("update")
 	projectMode, _ := cmd.Flags().GetBool("project")
@@ -597,7 +628,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 
 	closeLogs, err := setupTelemetryLogging(dbCtx, runtimetypes.New(db.WithoutTransaction()), contenoxDir)
 	if err != nil {
-		slog.Warn("Failed to setup telemetry logging", "error", err)
+		warnTelemetryLoggingUnavailable(cmd.ErrOrStderr(), err)
 	}
 	defer closeLogs()
 
@@ -756,6 +787,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		InputFlagPassed:              inputPassed,
 		AttachPaths:                  attachPaths,
 		ContenoxDir:                  contenoxDir,
+		WarnW:                        cmd.ErrOrStderr(),
 	}
 	return execChat(ctx, db, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 }

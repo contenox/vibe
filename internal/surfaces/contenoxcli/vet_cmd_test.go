@@ -40,9 +40,13 @@ func TestUnit_Vet_AllInRepoChainsAndPoliciesPass(t *testing.T) {
 	for _, path := range files {
 		path := path
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			vetted, err := vetOneFile(path)
+			vetted, err, diags := vetOneFile(path)
 			require.True(t, vetted, "shipped file %s must classify as chain or envelope", path)
 			require.NoError(t, err)
+			// No SHIPPED file may lean on a field the runtime does not enforce.
+			// A warning here means a preset is making a claim contenox cannot
+			// keep — which is the exact defect the diagnostics exist to catch.
+			require.Empty(t, diags, "shipped file %s must not declare unenforced fields", path)
 		})
 	}
 }
@@ -95,6 +99,51 @@ func TestUnit_Vet_ReportsPerFileAndCountsFailures(t *testing.T) {
 	require.Contains(t, report, `unknown action "permit"`)
 	require.Contains(t, report, `tools "local_*" can never match`)
 	require.Contains(t, report, "skip "+skipped)
+}
+
+// A valid envelope that declares a field the runtime does not enforce must be
+// reported to the operator writing it — that operator will never read the Go doc
+// comment recording the deferral, and a security field that parses silently reads
+// as a security field that works.
+//
+// The verdict stays "ok" and the run stays green: the file IS valid, and a
+// warning that failed the run would pressure an operator into deleting the field
+// rather than understanding it.
+func TestUnit_Vet_WarnsOnDeclaredButUnenforcedEnvelopeFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hitl-policy-pause.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+		"default_action": "approve",
+		"rules": [],
+		"compute": {"maxToolCalls": 25, "onExhausted": "pause_ask"}
+	}`), 0o600))
+
+	var out strings.Builder
+	failed := runVetOnFiles(&out, []string{path})
+	require.Equal(t, 0, failed, "a warning is not a defect and must not fail the run")
+
+	report := out.String()
+	require.Contains(t, report, "ok   "+path)
+	require.Contains(t, report, "WARN "+path)
+	require.Contains(t, report, "compute.onExhausted")
+	require.Contains(t, report, "NOT IMPLEMENTED")
+	// It must say what to rely on instead, not merely that the field is broken.
+	require.Contains(t, report, "finish_stuck")
+}
+
+// An envelope that uses no unenforced field is silent — no WARN line at all.
+func TestUnit_Vet_IsSilentForEnvelopesThatClaimOnlyWhatIsEnforced(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hitl-policy-bounded.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+		"default_action": "approve",
+		"rules": [],
+		"compute": {"maxToolCalls": 300, "maxTokens": 2000000, "modelAllowlist": ["gemini-2.5-flash"], "onExhausted": "finish_stuck"}
+	}`), 0o600))
+
+	var out strings.Builder
+	require.Equal(t, 0, runVetOnFiles(&out, []string{path}))
+	require.NotContains(t, out.String(), "WARN")
 }
 
 // TestUnit_Vet_CollectExpandsDirectoriesRecursively pins the path argument

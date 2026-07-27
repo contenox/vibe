@@ -2,6 +2,7 @@ package localtools_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,20 +53,39 @@ func writeRepoFile(t *testing.T, dir, name, content string) {
 	require.NoError(t, os.WriteFile(full, []byte(content), 0o644))
 }
 
-// gitExec calls one tool of the git toolset the way the engine does.
+// gitExec calls one tool of the git toolset and renders the result THE WAY THE
+// ENGINE DOES.
+//
+// The rendering is not a convenience: it is the assertion. Some git tools return
+// a typed value now (GitStatusResult and friends), so that a PROGRAM reading the
+// result gets fields instead of prose to guess at — and the whole safety of that
+// change rests on the model still seeing the identical bytes. The engine renders
+// a DataTypeString result with fmt.Sprintf("%v", …)
+// (taskengine/taskexec.go, serializeToolResultContent), so this helper does the
+// same, and every existing expectation in this file goes on asserting the exact
+// model-facing text.
 func gitExec(t *testing.T, tools taskengine.ToolsRepo, tool string, args map[string]any) (string, error) {
 	t.Helper()
 	if args == nil {
 		args = map[string]any{}
 	}
-	res, _, err := tools.Exec(context.Background(), time.Now(), args, false,
+	res, dt, err := tools.Exec(context.Background(), time.Now(), args, false,
 		&taskengine.ToolsCall{Name: "git", ToolName: tool})
 	if err != nil {
 		return "", err
 	}
-	s, ok := res.(string)
-	require.True(t, ok, "git tool %s must return a string result, got %T", tool, res)
-	return s, nil
+	require.Equal(t, taskengine.DataTypeString, dt,
+		"git tool %s changed its data type; the engine renders DataTypeString with %%v and anything else with json.Marshal", tool)
+	switch v := res.(type) {
+	case string:
+		return v, nil
+	case fmt.Stringer:
+		return v.String(), nil
+	default:
+		require.Failf(t, "unrenderable git result",
+			"git tool %s returned %T, which is neither a string nor a fmt.Stringer — the engine would render it as a Go struct dump into the model's context", tool, res)
+		return "", nil
+	}
 }
 
 func mustGitExec(t *testing.T, tools taskengine.ToolsRepo, tool string, args map[string]any) string {
@@ -380,4 +400,107 @@ func TestUnit_GitTools_SchemaSurface(t *testing.T) {
 
 	_, err = tools.GetToolsForToolsByName(ctx, "git_push")
 	require.Error(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// The program-facing half: readable AND parseable
+// ---------------------------------------------------------------------------
+
+// TestUnit_GitTools_ModelFacingTextIsUnchangedByStructuredResults is the safety
+// rail under the typed results. git_status, git_log and git_branch_list return a
+// Go value now so that a PROGRAM (a goja script, an approval surface) gets
+// fields instead of prose to guess at — and the entire safety of that change is
+// that the MODEL sees the identical bytes it always did.
+//
+// The engine renders a DataTypeString result with fmt.Sprintf("%v", …), which
+// calls String(). This test asserts the rendered text against a full golden
+// string, not a substring: a partial assertion would pass while a field it
+// didn't mention quietly disappeared from the model's view.
+func TestUnit_GitTools_ModelFacingTextIsUnchangedByStructuredResults(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{"tracked.txt": "one\n"})
+	writeRepoFile(t, dir, "tracked.txt", "one\ntwo\n")
+	writeRepoFile(t, dir, "brand_new.txt", "new\n")
+
+	tools := localtools.NewGitTools(dir)
+	status := mustGitExec(t, tools, "git_status", nil)
+
+	// The header lines carry a hash and a branch name, so they are asserted by
+	// shape; everything below them is the part a script used to try to parse,
+	// and it is pinned exactly.
+	lines := strings.Split(strings.TrimRight(status, "\n"), "\n")
+	require.GreaterOrEqual(t, len(lines), 2)
+	assert.True(t, strings.HasPrefix(lines[0], "branch "), "first line: %q", lines[0])
+	assert.True(t, strings.HasPrefix(lines[1], "HEAD "), "second line: %q", lines[1])
+	assert.Equal(t, []string{
+		"changed but not staged:",
+		"  M tracked.txt",
+		"untracked:",
+		"  brand_new.txt",
+	}, lines[2:], "the model-facing status body changed")
+
+	branches := mustGitExec(t, tools, "git_branch_list", nil)
+	assert.Regexp(t, `^\* \S+ [0-9a-f]{8}\n$`, branches, "the model-facing branch listing changed")
+
+	logOut := mustGitExec(t, tools, "git_log", nil)
+	assert.Regexp(t, `^[0-9a-f]{8} Test Author <test@example\.com> \S+\n    initial commit\n$`, logOut,
+		"the model-facing log rendering changed")
+}
+
+// TestUnit_GitTools_StructuredResultsCarryTheSameFacts is the other side: what a
+// program gets must be the same repository state the prose describes, in fields
+// it cannot mis-read. This is the regression test for the live failure that
+// started all of this — a script that read "4 staged, 2 other, no untracked" off
+// a tree with one modified and one untracked file.
+func TestUnit_GitTools_StructuredResultsCarryTheSameFacts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	wt := newTestRepo(t, dir, map[string]string{"tracked.txt": "one\n", "staged.txt": "s\n"})
+	writeRepoFile(t, dir, "tracked.txt", "one\ntwo\n")
+	writeRepoFile(t, dir, "staged.txt", "s2\n")
+	_, err := wt.Add("staged.txt")
+	require.NoError(t, err)
+	writeRepoFile(t, dir, "brand_new.txt", "new\n")
+
+	tools := localtools.NewGitTools(dir)
+	res, _, err := tools.Exec(context.Background(), time.Now(), map[string]any{}, false,
+		&taskengine.ToolsCall{Name: "git", ToolName: "git_status"})
+	require.NoError(t, err)
+
+	st, ok := res.(localtools.GitStatusResult)
+	require.Truef(t, ok, "git_status returned %T; a program cannot read prose", res)
+	assert.False(t, st.Clean)
+	assert.NotEmpty(t, st.Branch)
+	require.NotNil(t, st.Head)
+	assert.Equal(t, "initial commit", st.Head.Subject)
+	assert.Len(t, st.Head.Hash, 8)
+
+	assert.Equal(t, []localtools.GitStatusEntry{{Path: "staged.txt", Code: "M"}}, st.Staged)
+	assert.Equal(t, []localtools.GitStatusEntry{{Path: "tracked.txt", Code: "M"}}, st.Unstaged)
+	assert.Equal(t, []string{"brand_new.txt"}, st.Untracked)
+
+	// And the rendering of that same value is still the prose the model reads.
+	assert.Contains(t, st.String(), "staged for commit:")
+	assert.Contains(t, st.String(), "  M staged.txt")
+
+	// git_log and git_branch_list carry their facts the same way.
+	res, _, err = tools.Exec(context.Background(), time.Now(), map[string]any{"n": 5}, false,
+		&taskengine.ToolsCall{Name: "git", ToolName: "git_log"})
+	require.NoError(t, err)
+	logRes, ok := res.(localtools.GitLogResult)
+	require.Truef(t, ok, "git_log returned %T", res)
+	require.Len(t, logRes.Commits, 1)
+	assert.Equal(t, "initial commit", logRes.Commits[0].Subject)
+	assert.Equal(t, "Test Author", logRes.Commits[0].Author)
+	assert.Equal(t, "test@example.com", logRes.Commits[0].Email)
+
+	res, _, err = tools.Exec(context.Background(), time.Now(), map[string]any{}, false,
+		&taskengine.ToolsCall{Name: "git", ToolName: "git_branch_list"})
+	require.NoError(t, err)
+	branches, ok := res.(localtools.GitBranchListResult)
+	require.Truef(t, ok, "git_branch_list returned %T", res)
+	require.Len(t, branches.Branches, 1)
+	assert.True(t, branches.Branches[0].Current)
+	assert.Equal(t, branches.Current, branches.Branches[0].Name)
 }

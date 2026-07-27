@@ -36,13 +36,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/agentregistryservice"
 	"github.com/contenox/beam/internal/services/localfileservice"
 	"github.com/contenox/beam/internal/services/taskchainservice"
@@ -118,7 +118,7 @@ type Result struct {
 //
 // # What happens to an agent whose chain file vanished
 //
-// It is DISABLED, not deleted, and logged. Deleting would destroy the row that
+// It is DISABLED, not deleted, and reported. Deleting would destroy the row that
 // mission records and lifecycle telemetry already point at, and would make the
 // unit disappear from the board with no trace of why. Disabling routes the
 // refusal through the one shared judgement every spawn path already makes —
@@ -134,13 +134,33 @@ type Result struct {
 //
 // Discover is idempotent: a second pass over an unchanged tree writes nothing
 // at all.
+//
+// It runs UNINSTRUMENTED: the two diagnostics this pass produces (a chain file
+// the linter refuses, an agent whose file vanished) go nowhere. A caller that
+// wants an operator to see them — every startup path should — calls
+// DiscoverWithTracker instead, which is the same pass with its reports wired to
+// the caller's tracker.
 func Discover(ctx context.Context, agents agentregistryservice.Service, roots ...string) (Result, error) {
+	return DiscoverWithTracker(ctx, agents, nil, roots...)
+}
+
+// DiscoverWithTracker is Discover with its diagnostics reported to tracker. It
+// takes the tracker as a plain argument rather than an option because roots is
+// variadic and, more to the point, because the diagnostics are the whole reason
+// this pass says anything at all: a chain that fails validation and an agent
+// disabled because its file is gone are the two facts an operator has to be able
+// to see. A nil tracker degrades to libtracker.NoopTracker, so the pass itself
+// behaves identically either way.
+func DiscoverWithTracker(ctx context.Context, agents agentregistryservice.Service, tracker libtracker.ActivityTracker, roots ...string) (Result, error) {
 	var result Result
 	if agents == nil {
 		return result, fmt.Errorf("chainagents: agent registry is required")
 	}
+	if tracker == nil {
+		tracker = libtracker.NoopTracker{}
+	}
 
-	found, err := scan(ctx, roots)
+	found, err := scan(ctx, tracker, roots)
 	if err != nil {
 		return result, err
 	}
@@ -164,7 +184,7 @@ func Discover(ctx context.Context, agents agentregistryservice.Service, roots ..
 		}
 	}
 
-	disabled, err := disableVanished(ctx, agents, names)
+	disabled, err := disableVanished(ctx, agents, tracker, names)
 	if err != nil {
 		return result, err
 	}
@@ -186,7 +206,7 @@ type candidate struct {
 // every .json in the directory and drops the ones without an id or without
 // tasks, so an unparseable or half-written file is skipped here for free and
 // for the same reason it is skipped everywhere else.
-func scan(ctx context.Context, roots []string) ([]candidate, error) {
+func scan(ctx context.Context, tracker libtracker.ActivityTracker, roots []string) ([]candidate, error) {
 	var out []candidate
 	claimed := map[string]bool{}
 	// Roots are a PRECEDENCE list, so a root that appears twice adds nothing: the
@@ -236,10 +256,11 @@ func scan(ctx context.Context, roots []string) ([]candidate, error) {
 				// same vanished-file pass (a chain that cannot run and a chain
 				// that is gone earn the same refusal at spawn).
 				if errors.Is(err, taskengine.ErrChainLint) {
-					slog.Warn("chain agent discovery: chain file fails validation and was skipped",
+					reportErr, _, end := tracker.Start(ctx, "discover", "chain_agent",
 						"chain_path", filepath.Join(abs, filepath.FromSlash(rel)),
-						"reason", err.Error(),
 						"remedy", "fix the file (see 'contenox vet'), then run 'contenox agent enable <name>' if the agent was disabled")
+					reportErr(fmt.Errorf("chain agent discovery: chain file fails validation and was skipped: %w", err))
+					end()
 				}
 				continue
 			}
@@ -332,7 +353,7 @@ func upsert(ctx context.Context, agents agentregistryservice.Service, c candidat
 
 // disableVanished disables every discovered agent that this pass did not find a
 // chain file for. See Discover for why disable rather than delete.
-func disableVanished(ctx context.Context, agents agentregistryservice.Service, found map[string]bool) ([]string, error) {
+func disableVanished(ctx context.Context, agents agentregistryservice.Service, tracker libtracker.ActivityTracker, found map[string]bool) ([]string, error) {
 	all, err := agents.List(ctx, nil, runtimetypes.MAXLIMIT)
 	if err != nil {
 		return nil, fmt.Errorf("chainagents: list declared agents: %w", err)
@@ -353,9 +374,11 @@ func disableVanished(ctx context.Context, agents agentregistryservice.Service, f
 		if err := agents.Update(ctx, agent); err != nil {
 			return nil, fmt.Errorf("chainagents: disable vanished chain agent %q: %w", agent.Name, err)
 		}
-		slog.Warn("chain agent disabled: its chain file is gone or fails validation (a validation reason was logged by the scan above)",
+		reportErr, _, end := tracker.Start(ctx, "disable", "chain_agent",
 			"agent", agent.Name, "chain_path", path,
 			"remedy", "restore or fix the file and run 'contenox agent enable "+agent.Name+"', or remove the agent")
+		reportErr(fmt.Errorf("chain agent disabled: its chain file is gone or fails validation (a validation reason was reported by the scan above)"))
+		end()
 		disabled = append(disabled, agent.Name)
 	}
 	return disabled, nil

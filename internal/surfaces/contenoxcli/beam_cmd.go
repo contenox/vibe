@@ -131,6 +131,14 @@ func runBeam(cmd *cobra.Command, args []string) error {
 	if err := seedACPChainIfMissing(contenoxDir); err != nil {
 		return fmt.Errorf("seed ACP chain preset: %w", err)
 	}
+	// The seeder above never rewrites a policy file it cannot prove is
+	// untouched, so an envelope written before gointel/goja/jq/workspace existed
+	// stays exactly as it is — and every call to those toolsets falls through to
+	// default_action: approve, i.e. an approval card per READ. That is invisible
+	// from inside the TUI, so it is named once here, on the way in, beside the
+	// "logs:" line (printed later, in step (7), once terminal caps are final).
+	// It stops the moment the file gains the rules.
+	policyNotice := stalePolicyNotice(beamHITLPolicy, policyDirs(contenoxDir))
 
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -145,7 +153,10 @@ func runBeam(cmd *cobra.Command, args []string) error {
 
 	closeLogs, err := setupTelemetryLogging(dbCtx, runtimetypes.New(db.WithoutTransaction()), contenoxDir)
 	if err != nil {
-		slog.Warn("Failed to setup telemetry logging", "error", err)
+		// Printed on the way in, like the redirect failure twenty lines below
+		// and for the same reason — beam has not taken the terminal yet, so
+		// this is still the operator's stderr.
+		warnTelemetryLoggingUnavailable(errW, err)
 	} else {
 		defer closeLogs()
 	}
@@ -245,7 +256,17 @@ func runBeam(cmd *cobra.Command, args []string) error {
 			// row couldn't be written) must not crash beam or change the
 			// user-facing story — it just falls through to the same gate
 			// text a virgin install always got before this path existed.
-			slog.Warn("beam: zero-config local ollama registration failed", "error", zcErr)
+			//
+			// TELEMETRY, precisely because the user-facing story is unchanged:
+			// the operator already gets the setup gate telling them what to do,
+			// so a second line here would be noise on top of an answer they
+			// have. What is worth keeping is the record that the automatic path
+			// was tried and why it did not fire, which is the tracker's job.
+			// One-shot Start/report/end, as reportrouter does for a failure it
+			// can only note (reportrouter.go's handleAsk).
+			reportErr, _, end := engine.Tracker.Start(ctx, "register", "zero_config_ollama")
+			reportErr(zcErr)
+			end()
 		}
 		if decision.Fire {
 			// The already-built engine resolved its defaults against the
@@ -341,7 +362,10 @@ func runBeam(cmd *cobra.Command, args []string) error {
 			HITL:         beamHITL,
 			PolicySource: hitlPolicySource(contenoxDir),
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-				discoverChainAgents(dctx, agents, contenoxDir)
+				// engine.Tracker, not the Noop this fleet is built with: a
+				// discovery pass is exactly the thing `--trace` is turned on to
+				// see, and beam's slog sink is beam.log, never the screen.
+				discoverChainAgents(dctx, agents, contenoxDir, engine.Tracker)
 			},
 		})
 		if buildErr != nil {
@@ -443,10 +467,15 @@ func runBeam(cmd *cobra.Command, args []string) error {
 	// StyleMuted is resolved the same way every other span in beam is
 	// (style.Styles.SGR) rather than an ad hoc escape code, so it matches the dim
 	// chrome role used everywhere else once beam is actually running.
-	if zeroConfigNotice != "" || beamLogPath != "" {
+	if zeroConfigNotice != "" || policyNotice != "" || beamLogPath != "" {
 		prefix, suffix := style.New(caps).SGR(frame.StyleMuted)
 		if zeroConfigNotice != "" {
 			fmt.Fprintf(os.Stdout, "%s%s%s\n", prefix, zeroConfigNotice, suffix)
+		}
+		if policyNotice != "" {
+			// One line, not a wall: the toolsets, what happens to them, and the
+			// verb that fixes it.
+			fmt.Fprintf(os.Stdout, "%s%s%s\n", prefix, policyNotice, suffix)
 		}
 		if beamLogPath != "" {
 			// Discoverability is the whole reason this line exists: warnings that
@@ -504,6 +533,13 @@ const beamLogFileName = "beam.log"
 // Returning the path rather than printing it here keeps this a plumbing
 // function: the print has to happen later, after terminal capability detection,
 // so it can be styled like every other pre-TUI line (see its call site).
+//
+// This function is why beam_cmd.go imports log/slog, and it is the only reason:
+// it CONFIGURES the sink the tracker writes through, it does not log. Beam's
+// stderr is the screen, so getting the default handler off it is a correctness
+// requirement, not instrumentation. Command logic in this file reports through
+// engine.Tracker; see the allowlist in libtracker's
+// TestUnit_NoDirectSlogOutsideSinks.
 func redirectBeamLogsToFile(dbPath string) (string, func(), error) {
 	logPath := filepath.Join(filepath.Dir(dbPath), beamLogFileName)
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)

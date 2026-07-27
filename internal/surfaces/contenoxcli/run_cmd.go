@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -124,7 +123,7 @@ Examples:
 
 		closeLogs, err := setupTelemetryLogging(dbCtx, runtimetypes.New(db.WithoutTransaction()), contenoxDir)
 		if err != nil {
-			slog.Warn("Failed to setup telemetry logging", "error", err)
+			warnTelemetryLoggingUnavailable(cmd.ErrOrStderr(), err)
 		}
 		defer closeLogs()
 
@@ -168,9 +167,14 @@ Examples:
 		execCtx, stop := signal.NotifyContext(timeoutCtx, syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		if o.EffectiveTracing {
-			slog.Info("Executing chain", "chain", chainPathAbs, "input_type", inputTypeName)
-		} else {
+		// Same swap as execChat's: the chain run becomes a tracked operation
+		// instead of a bare slog.Info gated on --trace. engine.Tracker already
+		// encodes that gate (log-backed under --trace, Noop otherwise), so the
+		// visible behavior is unchanged and the completion record is new.
+		_, _, chainEnd := engine.Tracker.Start(execCtx, "execute", "chain",
+			"chain", chainPathAbs, "input_type", inputTypeName)
+		defer chainEnd()
+		if !o.EffectiveTracing {
 			fmt.Fprintln(cmd.ErrOrStderr(), "Thinking...")
 		}
 
@@ -386,6 +390,9 @@ func buildRunOpts(cmd *cobra.Command, db libdbexec.DBManager, contenoxDir string
 		EffectiveTracing:             effectiveTracing,
 		EffectiveThink:               effectiveThink,
 		ContenoxDir:                  contenoxDir,
+		// Shared by `run` and `beam`: both are invoked by a person, so engine
+		// construction has somewhere to address an operator warning.
+		WarnW: cmd.ErrOrStderr(),
 	}, nil
 }
 

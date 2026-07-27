@@ -1,22 +1,60 @@
 package chainagents_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync"
 	"testing"
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/agentregistryservice"
 	"github.com/contenox/beam/internal/services/chainagents"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
+
+// recordingTracker records the (operation, subject, error) of every report so a
+// test can assert WHAT discovery said, not merely that it logged something.
+type recordingTracker struct {
+	mu     sync.Mutex
+	events []trackedEvent
+}
+
+type trackedEvent struct {
+	op, subject string
+	err         error
+	kv          []any
+}
+
+func (r *recordingTracker) Start(_ context.Context, op, subject string, kv ...any) (func(error), func(string, any), func()) {
+	kvCopy := append([]any(nil), kv...)
+	return func(err error) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.events = append(r.events, trackedEvent{op: op, subject: subject, err: err, kv: kvCopy})
+		},
+		func(string, any) {},
+		func() {}
+}
+
+// errorsFor returns the reported errors for one operation/subject pair.
+func (r *recordingTracker) errorsFor(op, subject string) []error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []error
+	for _, ev := range r.events {
+		if ev.op == op && ev.subject == subject && ev.err != nil {
+			out = append(out, ev.err)
+		}
+	}
+	return out
+}
+
+var _ libtracker.ActivityTracker = (*recordingTracker)(nil)
 
 func setupRegistry(t *testing.T) (context.Context, agentregistryservice.Service) {
 	t.Helper()
@@ -346,14 +384,72 @@ func TestUnit_Discover_RepeatedRootIsWalkedOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-broken.json"), broken, 0o600))
 
-	var logged bytes.Buffer
-	restore := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	defer slog.SetDefault(restore)
-
-	res, err := chainagents.Discover(ctx, agents, dir, dir)
+	tracker := &recordingTracker{}
+	res, err := chainagents.DiscoverWithTracker(ctx, agents, tracker, dir, dir)
 	require.NoError(t, err)
 	require.Equal(t, []string{"good"}, res.Created, "a repeated root must not change what is discovered")
-	require.Equal(t, 1, strings.Count(logged.String(), "chain agent discovery: chain file fails validation"),
-		"one broken chain file must produce exactly one warning, however many times its directory was listed")
+	reported := tracker.errorsFor("discover", "chain_agent")
+	require.Len(t, reported, 1,
+		"one broken chain file must produce exactly one report, however many times its directory was listed")
+	require.ErrorIs(t, reported[0], taskengine.ErrChainLint,
+		"the report must carry WHY the file was refused, not just that it was")
+	require.Contains(t, reported[0].Error(), "chain file fails validation")
+}
+
+// TestUnit_Discover_ReportsRefusedChainAndDisabledAgent proves both diagnostics
+// this pass produces reach the tracker — the ONLY instrumentation seam here, so
+// an operator's view of "why is my agent missing" lives or dies by these two
+// reports. A chain the linter refuses is reported as it is skipped, and the
+// agent it had already seeded is reported again as it is disabled.
+func TestUnit_Discover_ReportsRefusedChainAndDisabledAgent(t *testing.T) {
+	ctx, agents := setupRegistry(t)
+	dir := t.TempDir()
+	writeChain(t, dir, "agent-worker.json", "worker")
+
+	tracker := &recordingTracker{}
+	_, err := chainagents.DiscoverWithTracker(ctx, agents, tracker, dir)
+	require.NoError(t, err)
+	require.Empty(t, tracker.errorsFor("discover", "chain_agent"), "a clean pass reports nothing")
+	require.Empty(t, tracker.errorsFor("disable", "chain_agent"))
+
+	// Break the file the agent points at: parseable and listable, refused by the
+	// linter — the shape that reports twice, once per diagnostic.
+	broken, err := json.Marshal(taskengine.TaskChainDefinition{
+		ID:    "worker",
+		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-worker.json"), broken, 0o600))
+
+	tracker = &recordingTracker{}
+	res, err := chainagents.DiscoverWithTracker(ctx, agents, tracker, dir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"worker"}, res.Disabled)
+
+	refused := tracker.errorsFor("discover", "chain_agent")
+	require.Len(t, refused, 1, "the refused chain file is reported as it is skipped")
+	require.ErrorIs(t, refused[0], taskengine.ErrChainLint)
+
+	disabled := tracker.errorsFor("disable", "chain_agent")
+	require.Len(t, disabled, 1, "disabling an agent whose file is gone or broken is reported")
+	require.Contains(t, disabled[0].Error(), "chain agent disabled")
+}
+
+// TestUnit_Discover_WithoutTrackerStillRuns pins the nil-degrades-to-noop
+// contract: instrumentation is an observer here, never a dependency the pass
+// needs to reconcile the registry.
+func TestUnit_Discover_WithoutTrackerStillRuns(t *testing.T) {
+	ctx, agents := setupRegistry(t)
+	dir := t.TempDir()
+	broken, err := json.Marshal(taskengine.TaskChainDefinition{
+		ID:    "brokenagent",
+		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-broken.json"), broken, 0o600))
+	writeChain(t, dir, "agent-good.json", "good")
+
+	res, err := chainagents.DiscoverWithTracker(ctx, agents, nil, dir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"good"}, res.Created)
 }

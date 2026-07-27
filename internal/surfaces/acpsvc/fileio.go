@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/localtools"
 	"github.com/contenox/beam/internal/services/vfs"
 	"github.com/contenox/beam/internal/store/runtimetypes"
@@ -131,7 +131,19 @@ func NewACPCwdResolver(transport func() *Transport) func(context.Context) string
 // that could act on one. There is no live request to refuse — only a stale or
 // foreign session record — and the safe reading of it is the operator's own
 // default root.
-func NewServeCwdResolver(db libdb.DBManager, roots *vfs.Factory) func(context.Context) string {
+//
+// The tracker is that missing channel, and the reason it is a parameter rather
+// than something read off a Transport: this resolver is shared by every
+// per-connection transport on the serve path, so there is no single one to ask.
+// A degraded resolution is silent to the agent by design, which is exactly why
+// it must not also be silent to the operator — a session quietly rooted
+// somewhere other than where its record says is the kind of thing you find out
+// about from instrumentation or not at all. Nil degrades to NoopTracker so the
+// resolver stays constructible without one.
+func NewServeCwdResolver(db libdb.DBManager, roots *vfs.Factory, tracker libtracker.ActivityTracker) func(context.Context) string {
+	if tracker == nil {
+		tracker = libtracker.NoopTracker{}
+	}
 	defaultRoot := func() string {
 		if roots == nil {
 			return ""
@@ -147,8 +159,10 @@ func NewServeCwdResolver(db libdb.DBManager, roots *vfs.Factory) func(context.Co
 		}
 		resolved, err := vfs.ResolveSessionCwd(roots, stored, defaultRoot())
 		if err != nil {
-			slog.Warn("acpsvc: session workspace is outside the configured workspace roots; using the default root",
-				"stored_cwd", stored, "default_root", defaultRoot(), "error", err)
+			reportErr, _, end := tracker.Start(ctx, "resolve", "session_workspace",
+				"stored_cwd", stored, "default_root", defaultRoot())
+			reportErr(fmt.Errorf("acpsvc: session workspace is outside the configured workspace roots; using the default root: %w", err))
+			end()
 			return defaultRoot()
 		}
 		return resolved

@@ -145,6 +145,5 @@ own hole.
 ## Next steps
 
 - [Confining agents: the sandbox wall](/docs/guide/agent-sandbox/) — the how-to: the default fence and the opt-in network wall.
-- [Least-privilege shell environment](/docs/guide/environment-scrubbing/) — the environment slice of the wall you can use today.
-- [Host external ACP agents](/docs/integrations/agents/external-acp-agents/) — registering, spawning, and driving a foreign agent.
-- [Human-in-the-loop](/docs/guide/hitl/) — the tool-layer gate that governs a declared chain's effects.
+- [Least-privilege shell environment](/docs/guide/environment-scrubbing/) — the same idea for the shells contenox runs in its own process; configured, not yet enforced.
+- [Human-in-the-loop](/docs/guide/hitl/) — the tool-layer gate that governs a declared chain's effects, and the only thing governing contenox's own chains, which run outside the wall.

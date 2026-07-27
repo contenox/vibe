@@ -13,6 +13,7 @@ import (
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/hitlservice"
+	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/uuid"
 )
@@ -451,7 +452,7 @@ func (h *HITLWrapper) buildDiff(ctx context.Context, tools *taskengine.ToolsCall
 		if path == "" {
 			return "", "", nil
 		}
-		oldContent, err := h.readViaTools(ctx, tools, path)
+		oldContent, err := h.readCurrentContent(ctx, tools, path)
 		if err != nil {
 			return "", "", err
 		}
@@ -464,7 +465,7 @@ func (h *HITLWrapper) buildDiff(ctx context.Context, tools *taskengine.ToolsCall
 		if path == "" || pattern == "" {
 			return "", "", nil
 		}
-		oldContent, err := h.readViaTools(ctx, tools, path)
+		oldContent, err := h.readCurrentContent(ctx, tools, path)
 		if err != nil {
 			return "", "", err
 		}
@@ -474,20 +475,82 @@ func (h *HITLWrapper) buildDiff(ctx context.Context, tools *taskengine.ToolsCall
 	return "", "", nil
 }
 
-// readViaTools calls the inner tools's read_file tool so path resolution,
-// symlink checks, and sandbox enforcement are handled by the tools itself.
-// Returns ("", nil) when the file does not yet exist.
-func (h *HITLWrapper) readViaTools(ctx context.Context, tools *taskengine.ToolsCall, path string) (string, error) {
+// errDiffBaseUnavailable is returned when the current contents of the file
+// cannot be established at approval time. The caller shows the ask WITHOUT a
+// diff, which is the only safe direction: a diff computed against anything
+// other than the file is a diff of a change that is not the one being approved.
+var errDiffBaseUnavailable = errors.New("hitl: current file contents unavailable for the diff")
+
+// readCurrentContent returns the file's CURRENT contents — the before-side of
+// the diff the operator is about to approve.
+//
+// It goes through the toolset's own read_file so that path resolution, symlink
+// containment and the sandbox root are the same ones the write itself will be
+// subject to; a read this function resolved differently would describe a
+// different file than the one about to change. What it will NOT accept is a
+// rendered or remembered answer in place of those bytes:
+//
+//   - force: true defeats read_file's session dedup. Warm-cache reads answer
+//     with fileUnchangedStub — a sentence for the model, meaning "you already
+//     have this" — and that sentence reached the diff builder as the prior
+//     content, so an operator was shown a status message as the before-side of
+//     a write and approved it (found by dogfooding). The approval gate is a
+//     security boundary, not a performance path: it re-reads, every time.
+//   - the read runs with the session identity stripped, so read_file neither
+//     consults nor records this session's read markers. Recording one would be
+//     worse than wasteful: the gate's own read would satisfy the read-before-
+//     write rule (and clear a stale-read denial) for the very write it is
+//     gating, i.e. the approval would grant the model a precondition it never
+//     met.
+//   - any answer still carrying a severity marker is a NOTICE, not a file: the
+//     over-the-output-cap path returns a head plus "read_file truncated …",
+//     whose head would render the file's tail as deleted. Refused rather than
+//     diffed.
+//
+// Returns ("", nil) when the file does not yet exist — a new file legitimately
+// has an empty before-side.
+func (h *HITLWrapper) readCurrentContent(ctx context.Context, tools *taskengine.ToolsCall, path string) (string, error) {
 	readCall := &taskengine.ToolsCall{Name: tools.Name, ToolName: "read_file"}
-	result, _, err := h.inner.Exec(ctx, time.Now(), map[string]any{"path": path}, false, readCall)
+	readCtx := context.WithValue(ctx, runtimetypes.SessionIDContextKey, "")
+	result, _, err := h.inner.Exec(readCtx, time.Now(), map[string]any{"path": path, "force": true}, false, readCall)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
 		}
 		return "", err
 	}
-	s, _ := result.(string)
+
+	if _, cached := result.(FsUnchangedResult); cached {
+		// Defence in depth: force already prevents this, and a stripped session
+		// prevents it again. If it ever arrives anyway, it is a status message,
+		// and a status message must never be shown to a human as the file they
+		// are about to overwrite. (The stub carries the real content for program
+		// callers now — see FsUnchangedResult — but the gate deliberately does
+		// not take that door: it re-reads, every time, so what the operator
+		// approves is what is on disk at approval time.)
+		return "", fmt.Errorf("%w: read_file answered from its session cache", errDiffBaseUnavailable)
+	}
+	s, ok := result.(string)
+	if !ok {
+		return "", fmt.Errorf("%w: read_file answered %T, not file contents", errDiffBaseUnavailable, result)
+	}
+	if hasSeverityMarker(strings.TrimSpace(tailOf(s, severityTailWindow))) {
+		return "", fmt.Errorf("%w: read_file answered with a notice, not the file", errDiffBaseUnavailable)
+	}
 	return s, nil
+}
+
+// severityTailWindow is how much of a tool answer is examined for the severity
+// marker that identifies it as a notice. Only the tail is examined because a
+// notice is APPENDED: scanning the whole answer would refuse to diff any file
+// that merely quotes the marker — such as the file that defines it.
+const severityTailWindow = 512
+
+func tailOf(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }
 
 // ─── LCS unified diff ─────────────────────────────────────────────────────────

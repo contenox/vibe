@@ -32,9 +32,9 @@
 // # Best-effort, always
 //
 // Registration and every heartbeat are best-effort: a presence write that fails
-// is a logged shrug, never something that blocks or fails the process it
-// observes. An editor that cannot write its presence still serves its user; it is
-// merely invisible on the board until its next successful heartbeat.
+// is a shrug reported to the tracker, never something that blocks or fails the
+// process it observes. An editor that cannot write its presence still serves its
+// user; it is merely invisible on the board until its next successful heartbeat.
 //
 // # Storage: keyed rows in the shared SQLite KV store
 //

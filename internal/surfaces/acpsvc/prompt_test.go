@@ -14,11 +14,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// recOp records one tracked span. subject/kv/lastErr exist so a test can assert
+// WHAT was reported and not merely that something was — the point of moving a
+// signal off slog is that it stays legible at the seam it moved to.
 type recOp struct {
 	op      string
+	subject string
+	kv      []any
 	errs    int
+	lastErr error
 	changes int
 	ended   int
+}
+
+// kvStr returns the string value recorded under key, or "" if absent.
+func (o *recOp) kvStr(key string) string {
+	for i := 0; i+1 < len(o.kv); i += 2 {
+		if k, ok := o.kv[i].(string); ok && k == key {
+			s, _ := o.kv[i+1].(string)
+			return s
+		}
+	}
+	return ""
 }
 
 type recTracker struct {
@@ -26,12 +43,12 @@ type recTracker struct {
 	ops []*recOp
 }
 
-func (rt *recTracker) Start(_ context.Context, op, _ string, _ ...any) (func(error), func(string, any), func()) {
+func (rt *recTracker) Start(_ context.Context, op, subject string, kv ...any) (func(error), func(string, any), func()) {
 	rt.mu.Lock()
-	o := &recOp{op: op}
+	o := &recOp{op: op, subject: subject, kv: append([]any(nil), kv...)}
 	rt.ops = append(rt.ops, o)
 	rt.mu.Unlock()
-	return func(error) { rt.mu.Lock(); o.errs++; rt.mu.Unlock() },
+	return func(err error) { rt.mu.Lock(); o.errs++; o.lastErr = err; rt.mu.Unlock() },
 		func(string, any) { rt.mu.Lock(); o.changes++; rt.mu.Unlock() },
 		func() { rt.mu.Lock(); o.ended++; rt.mu.Unlock() }
 }
@@ -41,6 +58,19 @@ func (rt *recTracker) find(op string) *recOp {
 	defer rt.mu.Unlock()
 	for _, o := range rt.ops {
 		if o.op == op {
+			return o
+		}
+	}
+	return nil
+}
+
+// findSubject locates a span by the operation/subject pair, which is what
+// identifies a report when one operation verb is reused across subjects.
+func (rt *recTracker) findSubject(op, subject string) *recOp {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	for _, o := range rt.ops {
+		if o.op == op && o.subject == subject {
 			return o
 		}
 	}

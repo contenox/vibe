@@ -398,3 +398,76 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
+
+// carrierResult is a typed tool result that RENDERS as text — the shape
+// localtools' git results have, so a program reading them gets fields while the
+// model reads prose.
+type carrierResult struct {
+	Field string `json:"field"`
+	text  string
+}
+
+func (c carrierResult) String() string { return c.text }
+
+func (c carrierResult) AppendGuidance(text string) any {
+	c.text += text
+	return c
+}
+
+// TestUnit_ToolGuidance_TypedResultThatRendersAsTextKeepsItsGuidance is the
+// regression test for a silent loss: typing a tool's result so a PROGRAM can
+// read it must not remove the guidance the MODEL was getting. A struct that says
+// it can carry the lines carries them; its structure is untouched.
+func TestUnit_ToolGuidance_TypedResultThatRendersAsTextKeepsItsGuidance(t *testing.T) {
+	repo := &stubRepo{result: carrierResult{Field: "v", text: "branch main\n"}, dt: taskengine.DataTypeString}
+	r := toolguidance.WrapWith(repo, toolguidance.Options{RepeatThreshold: 2, ScopeEvery: 1000, RevisitThreshold: 1000})
+	ctx := toolguidance.WithSession(context.Background(), "s")
+	call := &taskengine.ToolsCall{Name: "git", ToolName: "git_status"}
+
+	// First call: below the repeat threshold, so nothing is appended and the
+	// value is returned untouched.
+	res, _, err := r.Exec(ctx, time.Now(), map[string]any{}, false, call)
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if got, ok := res.(carrierResult); !ok || got.text != "branch main\n" {
+		t.Fatalf("an unmarked result was altered: %#v", res)
+	}
+
+	// Second call trips the repeat marker: the lines ride the result's own
+	// rendering, and the struct is still a struct.
+	res, _, err = r.Exec(ctx, time.Now(), map[string]any{}, false, call)
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	got, ok := res.(carrierResult)
+	if !ok {
+		t.Fatalf("the decorator replaced a typed result with %T — appending must never change a result's shape", res)
+	}
+	if countHarness(got.String()) == 0 {
+		t.Fatalf("a typed result lost its guidance: %q", got.String())
+	}
+	if !strings.HasPrefix(got.String(), "branch main\n") {
+		t.Fatalf("the tool's own output was not preserved: %q", got.String())
+	}
+	if got.Field != "v" {
+		t.Fatalf("the structured fields were lost: %#v", got)
+	}
+}
+
+// A typed result that CANNOT carry text is still returned byte-for-byte, which
+// is the older half of the same law: advice never changes a result's shape.
+func TestUnit_ToolGuidance_TypedResultWithoutACarrierIsUntouched(t *testing.T) {
+	type plain struct{ A int }
+	repo := &stubRepo{result: plain{A: 1}, dt: taskengine.DataTypeJSON}
+	r := toolguidance.WrapWith(repo, toolguidance.Options{RepeatThreshold: 1, ScopeEvery: 1, RevisitThreshold: 1})
+	ctx := toolguidance.WithSession(context.Background(), "s")
+
+	res, _, err := r.Exec(ctx, time.Now(), map[string]any{}, false, fsCall("write_file"))
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if got, ok := res.(plain); !ok || got.A != 1 {
+		t.Fatalf("a structured result was altered: %#v", res)
+	}
+}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -51,6 +50,16 @@ type chatOpts struct {
 	// EffectiveTaskEventSink lets editor integrations receive task events
 	// directly without subscribing to the engine bus.
 	EffectiveTaskEventSink taskengine.TaskEventSink
+	// WarnW is where engine construction prints the messages an OPERATOR has
+	// to read and act on (today: the ungated-local_shell posture in
+	// localToolset). It is not an instrumentation seam — telemetry goes to the
+	// tracker — it is the command's own stderr, carried this far down because
+	// BuildEngine has nine call sites and only the command layer knows which
+	// writer is the operator's.
+	//
+	// A nil writer means "nobody is listening": tests and editor-embedded
+	// callers get silence rather than a line on some unrelated stream.
+	WarnW io.Writer
 }
 
 // execChat runs the full chat pipeline and returns any error encountered.
@@ -128,9 +137,14 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 		WorkspaceID: workspaceID,
 	})
 
-	if opts.EffectiveTracing {
-		slog.Info("Executing chain", "chain", chainPathAbs)
-	} else {
+	// The chain run is a tracked OPERATION, not a log line: engine.Tracker is a
+	// log-backed tracker exactly when --trace is on and a Noop otherwise, so
+	// this replaces the old `if tracing { slog.Info(...) }` with the same
+	// condition expressed through the one instrumentation seam — and gains the
+	// completion record and duration that the bare Info line never had.
+	_, _, chainEnd := engine.Tracker.Start(ctx, "execute", "chain", "chain", chainPathAbs)
+	defer chainEnd()
+	if !opts.EffectiveTracing {
 		fmt.Fprintln(errW, "Thinking...")
 	}
 

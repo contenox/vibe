@@ -709,7 +709,8 @@ func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 		string(bResp.SessionID),
 	).Scan(&internalID))
 
-	resolver := NewServeCwdResolver(db, factory)
+	resolverTracker := &recTracker{}
+	resolver := NewServeCwdResolver(db, factory, resolverTracker)
 	toolCtx := context.WithValue(ctx, runtimetypes.SessionIDContextKey, internalID)
 	assert.Equal(t, resolvedB, resolver(toolCtx), "resolver must return the session's persisted cwd")
 
@@ -723,6 +724,12 @@ func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 	// A session without a workspace in scope falls back to the default root.
 	assert.Equal(t, factory.Default(), resolver(context.Background()))
 
+	// Neither resolution above was a refusal, so nothing may have been reported:
+	// the degradation report has to stay rare enough that its presence means
+	// something.
+	assert.Nil(t, resolverTracker.findSubject("resolve", "session_workspace"),
+		"an in-allowlist resolution must not report a workspace degradation")
+
 	// 4b. A persisted cwd is re-checked against the CURRENT allowlist, not
 	// trusted because it was allowlisted when it was written. The record outlives
 	// the process that wrote it: the same database is read by a serve started
@@ -731,9 +738,24 @@ func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 	// and must NOT be handed to the agent's filesystem tools or its PTY.
 	narrowed, err := vfs.NewFactory(rootA)
 	require.NoError(t, err)
-	narrowedResolver := NewServeCwdResolver(db, narrowed)
+	narrowedTracker := &recTracker{}
+	narrowedResolver := NewServeCwdResolver(db, narrowed, narrowedTracker)
 	assert.Equal(t, resolvedA, narrowedResolver(toolCtx),
 		"a stored cwd outside the current allowlist must fall back to the default root, not be adopted verbatim")
+
+	// The fallback is silent to the AGENT by construction — the resolver has no
+	// error channel to one — so the operator's only sight of it is this report.
+	// Assert the whole span, not just that it fired: an out-of-allowlist session
+	// is unreadable without knowing which cwd was rejected and which root
+	// replaced it.
+	degraded := narrowedTracker.findSubject("resolve", "session_workspace")
+	require.NotNil(t, degraded, "a rejected stored cwd must be reported through the tracker")
+	require.Equal(t, 1, degraded.errs, "the refusal must be reported exactly once")
+	require.Equal(t, 1, degraded.ended, "the span must be closed")
+	require.ErrorContains(t, degraded.lastErr, "outside the configured workspace roots",
+		"the report must carry the reason the stored cwd was refused")
+	assert.Equal(t, resolvedB, degraded.kvStr("stored_cwd"), "the report must name the refused cwd")
+	assert.Equal(t, narrowed.Default(), degraded.kvStr("default_root"), "the report must name the root used instead")
 
 	// 5. Reloading the rootB session with the "/" sentinel (what beam sends)
 	// must PRESERVE its workspace, not clobber it back to the default root.

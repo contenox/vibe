@@ -94,6 +94,45 @@ func TestUnit_Compute_TokenBudgetExceeded(t *testing.T) {
 	require.True(t, tokenBudgetExceeded(101, hitlservice.ComputeBounds{MaxTokens: 100}))
 }
 
+// An envelope that asked for pause_ask gets finish_stuck, and the durable record
+// must SAY so. `contenox vet` warns at authoring time, but an operator who never
+// ran it must not learn about the substitution by waiting for an ask that never
+// arrives — the stuck reason is the one place they are guaranteed to look.
+func TestUnit_Compute_ReasonsNameThePauseAskSubstitution(t *testing.T) {
+	t.Parallel()
+	pauseAsk := hitlservice.ComputeBounds{
+		MaxTurns:     1,
+		MaxToolCalls: 2,
+		MaxTokens:    3,
+		OnExhausted:  hitlservice.OnExhaustedPauseAsk,
+	}
+	for name, reason := range map[string]string{
+		"turns":  turnsExhaustedReason(pauseAsk),
+		"tools":  toolCallsExhaustedReason(pauseAsk),
+		"tokens": tokensExhaustedReason(pauseAsk, 99),
+	} {
+		require.Contains(t, reason, computeBoundLead, name)
+		require.Contains(t, reason, "compute.onExhausted", name)
+		require.Contains(t, reason, "NOT IMPLEMENTED", name)
+	}
+}
+
+// An envelope honored exactly as written gets nothing appended — the note is
+// about a substitution, so it must not appear when none happened.
+func TestUnit_Compute_ReasonsStaySilentWhenOnExhaustedIsHonored(t *testing.T) {
+	t.Parallel()
+	for _, b := range []hitlservice.ComputeBounds{
+		{MaxTurns: 1},
+		{MaxTurns: 1, OnExhausted: hitlservice.OnExhaustedFinishStuck},
+	} {
+		require.NotContains(t, turnsExhaustedReason(b), "NOT IMPLEMENTED")
+		require.NotContains(t, toolCallsExhaustedReason(b), "NOT IMPLEMENTED")
+		require.NotContains(t, tokensExhaustedReason(b, 1), "NOT IMPLEMENTED")
+		// The bound itself is still named, exactly as before.
+		require.Contains(t, turnsExhaustedReason(b), "maxTurns=1")
+	}
+}
+
 func TestUnit_Compute_JournalTokenUsage(t *testing.T) {
 	t.Parallel()
 

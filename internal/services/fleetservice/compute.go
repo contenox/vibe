@@ -38,16 +38,41 @@ import (
 // names WHICH bound and its value so the terminal record teaches, not just refuses.
 const computeBoundLead = "compute bound exhausted"
 
-func turnsExhaustedReason(limit int) string {
-	return fmt.Sprintf("%s: maxTurns=%d — the mission spent its turn budget without reaching its operator.", computeBoundLead, limit)
+func turnsExhaustedReason(b hitlservice.ComputeBounds) string {
+	return withOnExhaustedTruth(fmt.Sprintf("%s: maxTurns=%d — the mission spent its turn budget without reaching its operator.", computeBoundLead, b.MaxTurns), b)
 }
 
-func toolCallsExhaustedReason(limit int) string {
-	return fmt.Sprintf("%s: maxToolCalls=%d — the mission reached its envelope-gated action budget; this call and any after it are refused.", computeBoundLead, limit)
+func toolCallsExhaustedReason(b hitlservice.ComputeBounds) string {
+	return withOnExhaustedTruth(fmt.Sprintf("%s: maxToolCalls=%d — the mission reached its envelope-gated action budget; this call and any after it are refused.", computeBoundLead, b.MaxToolCalls), b)
 }
 
-func tokensExhaustedReason(limit, used int) string {
-	return fmt.Sprintf("%s: maxTokens=%d (reported usage %d) — the mission spent its token budget.", computeBoundLead, limit, used)
+func tokensExhaustedReason(b hitlservice.ComputeBounds, used int) string {
+	return withOnExhaustedTruth(fmt.Sprintf("%s: maxTokens=%d (reported usage %d) — the mission spent its token budget.", computeBoundLead, b.MaxTokens, used), b)
+}
+
+// withOnExhaustedTruth appends the onExhausted deferral to a reason when — and
+// only when — the envelope asked for behavior the runtime does not implement.
+//
+// This is the moment the substitution actually costs the operator something: they
+// wrote `onExhausted: "pause_ask"` expecting to be asked whether to extend, and
+// the mission is instead coming to rest. `contenox vet` says so at authoring time
+// (hitlservice.PolicyDiagnostics), but an operator who never ran vet must not
+// learn it by noticing an ask that never arrives. The durable stuck reason is the
+// one place they are guaranteed to look — it is what the board, the inbox and
+// `mission fire --wait` all show — so the truth is stated there, in the same
+// words vet uses.
+//
+// An envelope that took the default (or wrote finish_stuck explicitly) gets
+// nothing appended: it is being honored exactly as written.
+func withOnExhaustedTruth(reason string, b hitlservice.ComputeBounds) string {
+	if b.OnExhausted != hitlservice.OnExhaustedPauseAsk {
+		return reason
+	}
+	notes := hitlservice.ComputeDiagnostics(&b)
+	for _, n := range notes {
+		reason += "\n" + n.String()
+	}
+	return reason
 }
 
 // turnBudgetExceeded reports whether STARTING the nextTurn'th prompt turn (1-based)

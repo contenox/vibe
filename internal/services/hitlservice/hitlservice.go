@@ -418,8 +418,13 @@ func (s *service) Evaluate(ctx context.Context, toolsName, toolName string, args
 		p = defaultPolicy()
 	}
 	reportChange("policy", policyPath)
-	result := evaluate(p, toolsName, toolName, args)
+	result := evaluate(ctx, p, toolsName, toolName, args)
 	result.PolicyName = policyPath
+	if result.Detail != "" {
+		// Which command of a compound line was caught — the only part of a
+		// verdict that is not readable off the call's own arguments.
+		reportChange("detail", result.Detail)
+	}
 	return result, nil
 }
 

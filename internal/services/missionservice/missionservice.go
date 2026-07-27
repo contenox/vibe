@@ -48,12 +48,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/contenox/beam/internal/errdefs"
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/google/uuid"
 )
@@ -538,13 +538,15 @@ type Service interface {
 }
 
 type service struct {
-	db  libdb.DBManager
-	pub EventPublisher
+	db      libdb.DBManager
+	pub     EventPublisher
+	tracker libtracker.ActivityTracker
 }
 
-// Option configures a mission service at construction. It exists so the one
-// optional dependency this service has (the event publisher) can be wired
-// without changing New's signature for the many callers that pass only a db.
+// Option configures a mission service at construction. It exists so the
+// optional dependencies this service has (the event publisher, the tracker) can
+// be wired without changing New's signature for the many callers that pass only
+// a db.
 type Option func(*service)
 
 // WithEventPublisher wires the bus AddReport publishes ReportAddedEvent on. When
@@ -556,11 +558,26 @@ func WithEventPublisher(pub EventPublisher) Option {
 	return func(s *service) { s.pub = pub }
 }
 
+// WithTracker wires the ActivityTracker the best-effort publish paths report to
+// (see publishReportAdded). Unset — or set to nil — the service tracks nothing:
+// instrumentation is an observer here, never a dependency a mission needs to be
+// stored.
+func WithTracker(tracker libtracker.ActivityTracker) Option {
+	return func(s *service) {
+		if tracker != nil {
+			s.tracker = tracker
+		}
+	}
+}
+
 // New creates a mission service backed by the given database manager.
 func New(db libdb.DBManager, opts ...Option) Service {
-	s := &service{db: db}
+	s := &service{db: db, tracker: libtracker.NoopTracker{}}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.tracker == nil {
+		s.tracker = libtracker.NoopTracker{}
 	}
 	return s
 }
@@ -886,13 +903,15 @@ func (s *service) publishReportAdded(ctx context.Context, m *Mission, report *Re
 	}
 	data, err := json.Marshal(ev)
 	if err != nil {
-		slog.Warn("missionservice: marshal report-added event failed; report stored, routing nudge skipped",
-			"missionId", m.ID, "reportId", report.ID, "error", err)
+		reportErr, _, end := s.tracker.Start(ctx, "publish", "report_added_event", "missionId", m.ID, "reportId", report.ID)
+		reportErr(fmt.Errorf("missionservice: marshal report-added event failed; report stored, routing nudge skipped: %w", err))
+		end()
 		return
 	}
 	if err := s.pub.Publish(ctx, ReportAddedSubject, data); err != nil {
-		slog.Warn("missionservice: publish report-added event failed; report stored, routing nudge skipped",
-			"missionId", m.ID, "reportId", report.ID, "error", err)
+		reportErr, _, end := s.tracker.Start(ctx, "publish", "report_added_event", "missionId", m.ID, "reportId", report.ID)
+		reportErr(fmt.Errorf("missionservice: publish report-added event failed; report stored, routing nudge skipped: %w", err))
+		end()
 	}
 }
 
@@ -1082,13 +1101,15 @@ func (s *service) publishStatusChanged(ctx context.Context, m *Mission, old Stat
 	}
 	data, err := json.Marshal(ev)
 	if err != nil {
-		slog.Warn("missionservice: marshal status-changed event failed; status stored, routing nudge skipped",
-			"missionId", m.ID, "status", m.Status, "error", err)
+		reportErr, _, end := s.tracker.Start(ctx, "publish", "status_changed_event", "missionId", m.ID, "status", m.Status)
+		reportErr(fmt.Errorf("missionservice: marshal status-changed event failed; status stored, routing nudge skipped: %w", err))
+		end()
 		return
 	}
 	if err := s.pub.Publish(ctx, StatusChangedSubject, data); err != nil {
-		slog.Warn("missionservice: publish status-changed event failed; status stored, routing nudge skipped",
-			"missionId", m.ID, "status", m.Status, "error", err)
+		reportErr, _, end := s.tracker.Start(ctx, "publish", "status_changed_event", "missionId", m.ID, "status", m.Status)
+		reportErr(fmt.Errorf("missionservice: publish status-changed event failed; status stored, routing nudge skipped: %w", err))
+		end()
 	}
 }
 
@@ -1118,13 +1139,15 @@ func (s *service) publishPlanRevised(ctx context.Context, m *Mission, summary Pl
 	}
 	data, err := json.Marshal(ev)
 	if err != nil {
-		slog.Warn("missionservice: marshal plan-revised event failed; plan stored, routing nudge skipped",
-			"missionId", m.ID, "revision", m.Plan.Revision, "error", err)
+		reportErr, _, end := s.tracker.Start(ctx, "publish", "plan_revised_event", "missionId", m.ID, "revision", m.Plan.Revision)
+		reportErr(fmt.Errorf("missionservice: marshal plan-revised event failed; plan stored, routing nudge skipped: %w", err))
+		end()
 		return
 	}
 	if err := s.pub.Publish(ctx, PlanRevisedSubject, data); err != nil {
-		slog.Warn("missionservice: publish plan-revised event failed; plan stored, routing nudge skipped",
-			"missionId", m.ID, "revision", m.Plan.Revision, "error", err)
+		reportErr, _, end := s.tracker.Start(ctx, "publish", "plan_revised_event", "missionId", m.ID, "revision", m.Plan.Revision)
+		reportErr(fmt.Errorf("missionservice: publish plan-revised event failed; plan stored, routing nudge skipped: %w", err))
+		end()
 	}
 }
 

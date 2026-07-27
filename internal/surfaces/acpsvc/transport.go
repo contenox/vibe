@@ -12,6 +12,7 @@ import (
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	libdb "github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/beam/internal/models/llmrepo"
 	"github.com/contenox/beam/internal/services/chatservice"
 	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/services/shellsession"
@@ -160,6 +161,19 @@ type sessionEntry struct {
 	// against THIS mission and no other. Empty for an ordinary chat-mode session,
 	// whose mission tools resolve to nothing (the envelope enforced at construction).
 	MissionID string
+
+	// ModelAllowlist / BackendAllowlist are the COMPUTE half of the same envelope,
+	// arriving on the same session/new `_meta` as MissionID: the models and
+	// backends this unit's mission may resolve. They are bound onto every turn
+	// context (llmrepo.WithResolutionBounds, in prompt.go and native_turn.go) so
+	// the refusal happens at the one place a model is actually chosen — the host
+	// that dispatched this unit cannot see that choice, so it hands down the bound
+	// instead (see missionservice.MissionMeta).
+	//
+	// Nil for an ordinary chat session and for a mission whose envelope declares no
+	// allowlist, and nil injects nothing: those turns resolve exactly as before.
+	ModelAllowlist   []string
+	BackendAllowlist []string
 
 	// FiredMissions marks the OTHER side of the relationship: this session has
 	// dispatched missions of its own, which is what unlocks the supervisor tools
@@ -533,6 +547,25 @@ func (s *sessionEntry) modelOrDefault(defaultModel string) string {
 		return defaultModel
 	}
 	return s.Model
+}
+
+// resolutionBounds is this session's envelope allowlist in the shape the
+// resolution seam consumes (llmrepo.ResolutionBounds). One accessor rather than
+// two literal constructions, because BOTH turn paths must bind the identical
+// bound: a unit that escaped its compute envelope simply by running under serve
+// instead of over the connection would be a hole, not a difference.
+//
+// Zero for an ordinary chat session and for a mission whose envelope declares no
+// allowlist, and WithResolutionBounds stores nothing for a zero value — those
+// turns resolve exactly as they did before bounds existed.
+func (s *sessionEntry) resolutionBounds() llmrepo.ResolutionBounds {
+	if s == nil {
+		return llmrepo.ResolutionBounds{}
+	}
+	return llmrepo.ResolutionBounds{
+		Models:   s.ModelAllowlist,
+		Backends: s.BackendAllowlist,
+	}
 }
 
 func (s *sessionEntry) effectiveTokenLimit() int {

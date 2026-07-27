@@ -352,11 +352,48 @@ func (s *Snapshot) typeErrors(p *packages.Package) []Diagnostic {
 			Location: loc,
 			Severity: "type-error",
 			Category: "type",
-			Message:  strings.TrimSpace(err.Msg),
+			Message:  s.enrichTypeError(strings.TrimSpace(err.Msg)),
 			Line:     line,
 		})
 	}
 	return out
+}
+
+// importErrorPrefix is how go/types opens the one type error whose real cause is
+// never in the file it points at.
+const importErrorPrefix = "could not import "
+
+// enrichTypeError adds the single hint go/types cannot.
+//
+// A module with a dependency in go.mod that was never downloaded — the shape a
+// repository is in the moment an agent edits go.mod, or any offline run — fails
+// with `could not import example.com/x (invalid package name: "")`, anchored at
+// the IMPORT LINE. That anchor is a trap: the import line is correct, and an
+// agent that trusts the position will rewrite working source. When the
+// unimportable path is not one of this module's own packages, the cause is
+// module resolution, and the file to look at is go.mod.
+//
+// Deliberately additive and advisory: the toolchain's own text is preserved
+// verbatim in front, because `go build` is still the arbiter.
+func (s *Snapshot) enrichTypeError(msg string) string {
+	if !strings.HasPrefix(msg, importErrorPrefix) {
+		return msg
+	}
+	rest := strings.TrimPrefix(msg, importErrorPrefix)
+	path := rest
+	if i := strings.IndexAny(rest, " \t("); i > 0 {
+		path = rest[:i]
+	}
+	path = strings.Trim(path, `"`)
+	if path == "" {
+		return msg
+	}
+	if _, own := s.byPath[path]; own {
+		// A package of THIS module that failed to build: the position is honest
+		// and the sibling package's own diagnostics say why.
+		return msg
+	}
+	return msg + " — " + path + " is a dependency, not a package of this module, so this is a module-resolution failure rather than a problem with the import line; check that go.mod requires it and that it has been downloaded (`go mod download`)"
 }
 
 // positionFromString renders a packages.Error position ("/abs/file.go:12:5")

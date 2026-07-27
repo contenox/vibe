@@ -349,9 +349,22 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 	// and constructs the session with its mission tools bound to exactly this
 	// mission. On failure tear the fresh instance down so a failed dispatch never
 	// leaks a running subprocess (the acpsvc contract).
+	// The envelope's model/backend allowlist rides the SAME `_meta` as the mission
+	// id, for the reason compute.go's header gives: the ceilings are enforced here
+	// because the host can count them, and the allowlists cannot be, because model
+	// choice happens inside the unit's own process and no ACP update carries it.
+	// So the BOUND travels in at construction (missionservice.MissionMeta) and the
+	// unit holds its own resolver to it (llmrepo.WithResolutionBounds). Read from
+	// the named envelope, not from the mission row, because the row does not exist
+	// yet — the bounds must be on the unit's very first session, not bolted on
+	// after it is already able to resolve a model.
+	//
+	// Fail-to-unbounded on a read failure, the same stance computeBoundsFor takes:
+	// a policy hiccup must not block a dispatch that Dispatch already validated.
+	dispatchBounds := s.dispatchResolutionBounds(ctx, req.HITLPolicyName)
 	sessionID, err := s.instances.OpenSession(ctx, instanceID, agentinstance.SessionSpec{
 		Cwd:  cwd,
-		Meta: missionservice.MarshalMissionMeta(missionID),
+		Meta: missionservice.MarshalMissionMetaBounded(missionID, dispatchBounds.ModelAllowlist, dispatchBounds.BackendAllowlist),
 	})
 	if err != nil {
 		_ = s.instances.Stop(instanceID)
@@ -470,7 +483,7 @@ func (s *service) driveUnattendedMission(ctx context.Context, run missionRun) {
 	// budget is ever issued) and lands it stuck, rather than nudging: a mission out
 	// of turns is not a mute unit to teach, it is a mission that spent its compute.
 	if turnBudgetExceeded(2, bounds) {
-		s.finishComputeStuck(ctx, run.missionID, turnsExhaustedReason(bounds.MaxTurns), reportChange)
+		s.finishComputeStuck(ctx, run.missionID, turnsExhaustedReason(bounds), reportChange)
 		return
 	}
 	stop, err = s.promptTurn(ctx, run, []libacp.ContentBlock{libacp.NewTextContent(missionNudge)})
@@ -513,6 +526,27 @@ func (s *service) computeBoundsFor(ctx context.Context, missionID string) hitlse
 	return bounds
 }
 
+// dispatchResolutionBounds reads the envelope named by policyName for the
+// allowlists a unit must be constructed under. It is the Dispatch-time twin of
+// computeBoundsFor: that one reads bounds for a mission that already exists, this
+// one reads them for a mission that does not exist yet, straight from the policy
+// name the caller supplied (Dispatch has already validated that it loads).
+//
+// Unbounded on any failure — no reader wired, policy unreadable — because the
+// alternative is refusing a dispatch over a bound the operator may not even have
+// declared. A genuinely declared-but-undelivered allowlist is caught earlier and
+// louder: `contenox vet` and the mission-creation validator both speak to it.
+func (s *service) dispatchResolutionBounds(ctx context.Context, policyName string) hitlservice.ComputeBounds {
+	if s.computeBounds == nil {
+		return hitlservice.ComputeBounds{}
+	}
+	bounds, err := s.computeBounds.ComputeBoundsFor(ctx, policyName)
+	if err != nil {
+		return hitlservice.ComputeBounds{}
+	}
+	return bounds
+}
+
 // enforceTokenBudget stops a mission that has spent its token budget. It reads the
 // unit's REPORTED usage from the session journal (best-effort — a unit whose
 // provider emits no usage_update leaves maxTokens inert, documented on the
@@ -531,7 +565,7 @@ func (s *service) enforceTokenBudget(ctx context.Context, run missionRun, b hitl
 	if !present || !tokenBudgetExceeded(used, b) {
 		return false
 	}
-	s.finishComputeStuck(ctx, run.missionID, tokensExhaustedReason(b.MaxTokens, used), reportChange)
+	s.finishComputeStuck(ctx, run.missionID, tokensExhaustedReason(b, used), reportChange)
 	return true
 }
 

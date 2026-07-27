@@ -5,10 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/hitlservice"
+	"github.com/contenox/beam/internal/services/jqtool"
 	"github.com/contenox/beam/internal/services/localtools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -285,4 +287,152 @@ func TestUnit_InteractivePoliciesRequireApprovalForPlainShellFallback(t *testing
 			assert.Equal(t, hitlservice.ActionApprove, r.Action, "%s must not auto-allow plain shell fallback", name)
 		})
 	}
+}
+
+// TestUnit_PolicyPresetUpgrade covers the deployment gap that made a shipped
+// read tool ask for approval on an existing install: presets were written
+// once and never refreshed, so an envelope predating a toolset had no rule
+// for it and every call fell through to default_action.
+func TestUnit_PolicyPresetUpgrade(t *testing.T) {
+	name := HITLPolicyPresets[0].Name
+
+	t.Run("untouched preset is upgraded", func(t *testing.T) {
+		dir := t.TempDir()
+		// A previous build's file, recorded as ours.
+		old := `{"default_action":"approve","rules":[]}`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(old), 0644))
+		writePresetState(dir, map[string]string{name: presetSHA(old)})
+
+		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
+		require.NoError(t, err)
+		require.Empty(t, stale)
+
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		require.NoError(t, err)
+		require.Equal(t, HITLPolicyPresets[0].Content, string(got), "an unedited preset must be refreshed")
+	})
+
+	t.Run("hand-edited preset is kept and reported", func(t *testing.T) {
+		dir := t.TempDir()
+		edited := `{"default_action":"deny","rules":[]}`
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(edited), 0644))
+		writePresetState(dir, map[string]string{name: presetSHA("something else entirely")})
+
+		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
+		require.NoError(t, err)
+		require.Contains(t, stale, name)
+
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		require.NoError(t, err)
+		require.Equal(t, edited, string(got), "the operator's edit must survive")
+	})
+
+	t.Run("unrecorded preset is kept and reported", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(`{"default_action":"approve"}`), 0644))
+
+		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
+		require.NoError(t, err)
+		require.Contains(t, stale, name, "a preset with no provenance record is treated as the operator's")
+	})
+
+	t.Run("a byte-identical preset with no record is adopted", func(t *testing.T) {
+		// The transition case: an install that predates .preset-state.json but
+		// whose preset happens to match this build. Nothing is written, nothing
+		// is reported — the hash is simply recorded, so the NEXT build upgrades
+		// this install automatically instead of holding it back forever.
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(HITLPolicyPresets[0].Content), 0644))
+		require.NoFileExists(t, filepath.Join(dir, presetStateFile))
+
+		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
+		require.NoError(t, err)
+		require.NotContains(t, stale, name, "a preset identical to this build's is provably ours")
+		require.Equal(t, presetSHA(HITLPolicyPresets[0].Content), readPresetState(dir)[name],
+			"the adoption must be recorded, or the next upgrade repeats this stand-off")
+	})
+
+	t.Run("fresh install writes and records every preset", func(t *testing.T) {
+		dir := t.TempDir()
+		stale, err := upgradeEmbeddedHITLPolicies(dir, false)
+		require.NoError(t, err)
+		require.Empty(t, stale)
+
+		state := readPresetState(dir)
+		for _, p := range HITLPolicyPresets {
+			require.Equal(t, presetSHA(p.Content), state[p.Name], "every written preset is recorded")
+		}
+		// A second run is a no-op that still reports nothing stale.
+		stale, err = upgradeEmbeddedHITLPolicies(dir, false)
+		require.NoError(t, err)
+		require.Empty(t, stale)
+	})
+}
+
+// TestUnit_InteractivePolicies_JQIsAllowed pins the seeded jq envelope on a
+// FRESH policy directory — the seeded file is written to a temp dir and loaded
+// through the real service, so this asserts what an operator actually gets, not
+// what the JSON literal says.
+//
+// The tier is allow BY CONSTRUCTION and the reasons are structural (jq_query
+// reads a file read_file already reaches, writes nothing, reaches no network,
+// and is deadline-bounded including recursion). If any of those stops being
+// true, this test is the tripwire: it fails loudly rather than letting a tool
+// that gained a capability keep the tier it earned without one.
+func TestUnit_InteractivePolicies_JQIsAllowed(t *testing.T) {
+	t.Parallel()
+	for name, content := range map[string]string{
+		"hitl-policy-default.json": hitlPolicyDefault,
+		"hitl-policy-acp.json":     hitlPolicyACP,
+	} {
+		name, content := name, content
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc := seededPolicyService(t, name, content)
+			ctx := context.Background()
+
+			// Every tool the toolset DECLARES must be allowed — the same
+			// drift guard the git test applies, so a second jq tool added
+			// later cannot inherit this rule silently... it would, since the
+			// rule is toolset-wide, which is exactly why the assertion is
+			// written over the declared list rather than over one name.
+			declared, err := jqtool.NewTools(t.TempDir()).GetToolsForToolsByName(ctx, jqtool.ToolsProviderName)
+			require.NoError(t, err)
+			require.NotEmpty(t, declared)
+			for _, tool := range declared {
+				r, err := svc.Evaluate(ctx, jqtool.ToolsProviderName, tool.Function.Name,
+					map[string]any{"path": "chain.json", "filter": "."})
+				require.NoError(t, err)
+				assert.Equalf(t, hitlservice.ActionAllow, r.Action,
+					"%s: jq.%s must never nag — it reads a file read_file already reaches and writes nothing",
+					name, tool.Function.Name)
+			}
+
+			// The justification comment is load-bearing documentation, not
+			// decoration: it is what the next reader weighs the tier against.
+			// Asserted with a bare boolean rather than assert.Contains so a
+			// failure reports the missing phrase instead of dumping the whole
+			// 40 KB preset into the test log.
+			for _, phrase := range []string{"DEADLINE-BOUNDED", "CANNOT WRITE", "EMPTY object"} {
+				assert.Truef(t, strings.Contains(content, phrase),
+					"%s: the jq rule must state %q — the allow tier is only defensible while that clause is true", name, phrase)
+			}
+		})
+	}
+}
+
+// TestUnit_DefaultPolicy_JQMatchesTheSeededPresets closes the drift seam between
+// the built-in fallback policy (hitlservice.defaultPolicy, used when no preset
+// file is present) and the shipped JSON. A tool allowed by the file and unruled
+// in the fallback would nag on exactly the installs that have no policy dir yet.
+func TestUnit_DefaultPolicy_JQMatchesTheSeededPresets(t *testing.T) {
+	t.Parallel()
+	// An empty policy dir forces the built-in fallback.
+	svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()),
+		testTenant, nopKV{}, libtracker.NoopTracker{}, "hitl-policy-default.json")
+	r, err := svc.Evaluate(context.Background(), jqtool.ToolsProviderName, jqtool.ToolQuery,
+		map[string]any{"path": "chain.json", "filter": "."})
+	require.NoError(t, err)
+	assert.Equal(t, hitlservice.ActionAllow, r.Action,
+		"hitlservice.defaultPolicy() must allow jq exactly as the seeded presets do")
 }

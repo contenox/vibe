@@ -11,6 +11,7 @@ import (
 
 	libbus "github.com/contenox/beam/internal/libbus"
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/missionservice"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
@@ -181,6 +182,75 @@ func TestUnit_Inbox_PublishFailureNeverFailsAdd(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, "still durable", items[0].Report.Summary)
+}
+
+// recordingTracker records the (operation, subject, error) of every report so a
+// test can assert what the best-effort publish path said when it shrugged.
+type recordingTracker struct {
+	mu     sync.Mutex
+	events []trackedEvent
+}
+
+type trackedEvent struct {
+	op, subject string
+	err         error
+}
+
+func (r *recordingTracker) Start(_ context.Context, op, subject string, _ ...any) (func(error), func(string, any), func()) {
+	return func(err error) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.events = append(r.events, trackedEvent{op: op, subject: subject, err: err})
+		},
+		func(string, any) {},
+		func() {}
+}
+
+func (r *recordingTracker) errorsFor(op, subject string) []error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []error
+	for _, ev := range r.events {
+		if ev.op == op && ev.subject == subject && ev.err != nil {
+			out = append(out, ev.err)
+		}
+	}
+	return out
+}
+
+var _ libtracker.ActivityTracker = (*recordingTracker)(nil)
+
+// TestUnit_Inbox_PublishFailureIsReportedToTracker proves the shrug is audible:
+// swallowing the bus error entirely would leave an operator with a live nudge
+// that silently never arrives, so the failure is reported through the tracker
+// even though it never reaches Add's caller.
+func TestUnit_Inbox_PublishFailureIsReportedToTracker(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	tracker := &recordingTracker{}
+	svc := New(db, WithEventPublisher(&failingPublisher{}), WithTracker(tracker))
+
+	require.NoError(t, svc.Add(ctx, landedItem("m1", "still durable")))
+
+	reported := tracker.errorsFor("publish", "inbox_item_added_event")
+	require.Len(t, reported, 1, "a failed publish is reported exactly once")
+	require.Contains(t, reported[0].Error(), "bus down", "the report carries the bus error")
+	require.Contains(t, reported[0].Error(), "live nudge skipped",
+		"the report keeps the consequence: stored, not announced")
+}
+
+// TestUnit_Inbox_PublishSuccessReportsNothing pins the volume: the tracker hears
+// from this path only when the publish fails.
+func TestUnit_Inbox_PublishSuccessReportsNothing(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	tracker := &recordingTracker{}
+	bus := libbus.NewSQLiteWithOptions(db.WithoutTransaction(), libbus.SQLiteBusOptions{
+		EventPoll: time.Millisecond,
+	})
+	t.Cleanup(func() { _ = bus.Close() })
+	svc := New(db, WithEventPublisher(bus), WithTracker(tracker))
+
+	require.NoError(t, svc.Add(ctx, landedItem("m1", "quiet success")))
+	require.Empty(t, tracker.errorsFor("publish", "inbox_item_added_event"))
 }
 
 // TestUnit_Inbox_NoPublisherStillAdds proves the seam is optional: an inbox built

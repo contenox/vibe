@@ -443,7 +443,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			HITL:         acpHITL,
 			PolicySource: hitlPolicySource(contenoxDir),
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-				discoverChainAgents(dctx, agents, contenoxDir)
+				discoverChainAgents(dctx, agents, contenoxDir, tracker)
 			},
 		})
 		if buildErr != nil {

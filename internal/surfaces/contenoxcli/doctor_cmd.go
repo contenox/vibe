@@ -75,6 +75,11 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build engine: %w", err)
 	}
 	res := setupcheck.EnrichResultWithOllamaProbe(ctx, engine.SetupCheck)
+	// A policy envelope written before a toolset existed sends every call to
+	// that toolset through default_action — an approval card per read on an
+	// install that has simply been upgraded. It is not a failure (nothing here
+	// blocks), but it is invisible from the inside, so doctor says it.
+	res = setupcheck.AddStalePolicyPresetIssue(res, stalePolicyPresetIssues(policyDirs(contenoxDir)), RefreshPoliciesCommand)
 	vision := visionSummaryFromState(engine.State.Get(ctx), res.DefaultModel)
 	engine.Stop()
 

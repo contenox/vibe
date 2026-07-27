@@ -32,6 +32,8 @@ func GatherInput(ctx context.Context, db libdbexec.DBManager, states []runtimest
 		DefaultProvider:        clikv.Read(ctx, store, "default-provider"),
 		DefaultAltModel:        clikv.Read(ctx, store, "default-alt-model"),
 		DefaultAltProvider:     clikv.Read(ctx, store, "default-alt-provider"),
+		DefaultEmbedModel:      clikv.Read(ctx, store, "default-embed-model"),
+		DefaultEmbedProvider:   clikv.Read(ctx, store, "default-embed-provider"),
 		DefaultChain:           defaultChain,
 		HITLPolicyName:         hitlPolicy,
 		States:                 states,

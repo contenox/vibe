@@ -2,11 +2,12 @@ package presence
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/google/uuid"
 )
 
@@ -23,12 +24,12 @@ type ReporterStore interface {
 // change (a session opened/closed), and best-effort deregisters on shutdown.
 //
 // It is best-effort to its core: StartReporter never blocks or fails the process
-// it observes, and every store error is a logged shrug. An editor whose presence
-// store is wedged still serves its user — it is merely absent from the board
-// until its next successful heartbeat.
+// it observes, and every store error is a shrug reported to the tracker. An
+// editor whose presence store is wedged still serves its user — it is merely
+// absent from the board until its next successful heartbeat.
 type Reporter struct {
 	store    ReporterStore
-	log      *slog.Logger
+	tracker  libtracker.ActivityTracker
 	interval time.Duration
 	// initialDelay defers the first registration write past the boot-critical
 	// embed/init window on the shared SQLite file (see run). Overridable for
@@ -56,13 +57,16 @@ func WithInterval(d time.Duration) ReporterOption {
 	}
 }
 
-// WithLogger sets the logger heartbeat failures are shrugged to. Defaults to
-// slog.Default at Debug — a presence hiccup is not the process's problem to
-// shout about.
-func WithLogger(l *slog.Logger) ReporterOption {
+// WithTracker sets the ActivityTracker heartbeat failures are shrugged to.
+// Defaults to libtracker.NoopTracker — a presence hiccup is not the process's
+// problem to shout about, so a caller that wires nothing sees nothing, and a
+// caller that wires a tracker decides at ITS sink how loud a failed heartbeat is.
+// The report itself never reaches the caller of StartReporter: presence stays
+// best-effort whether or not anyone is watching.
+func WithTracker(tracker libtracker.ActivityTracker) ReporterOption {
 	return func(r *Reporter) {
-		if l != nil {
-			r.log = l
+		if tracker != nil {
+			r.tracker = tracker
 		}
 	}
 }
@@ -80,7 +84,7 @@ func StartReporter(ctx context.Context, store ReporterStore, rec Record, opts ..
 	rctx, cancel := context.WithCancel(ctx)
 	r := &Reporter{
 		store:        store,
-		log:          slog.Default(),
+		tracker:      libtracker.NoopTracker{},
 		interval:     DefaultHeartbeatInterval,
 		initialDelay: DefaultInitialDelay,
 		rec:          rec,
@@ -92,6 +96,9 @@ func StartReporter(ctx context.Context, store ReporterStore, rec Record, opts ..
 		if o != nil {
 			o(r)
 		}
+	}
+	if r.tracker == nil {
+		r.tracker = libtracker.NoopTracker{}
 	}
 	if r.rec.InstanceID == "" {
 		r.rec.InstanceID = uuid.NewString()
@@ -181,7 +188,9 @@ func (r *Reporter) write(ctx context.Context) {
 	r.mu.Unlock()
 	rec.LastSeen = time.Now().UTC()
 	if err := r.store.Register(ctx, rec); err != nil {
-		r.log.Debug("presence: heartbeat write failed (ignored)", "kind", rec.Kind, "instance", rec.InstanceID, "err", err)
+		reportErr, _, end := r.tracker.Start(ctx, "register", "presence_record", "kind", rec.Kind, "instance", rec.InstanceID)
+		reportErr(fmt.Errorf("presence: heartbeat write failed (ignored): %w", err))
+		end()
 	}
 }
 
@@ -195,7 +204,9 @@ func (r *Reporter) deregister() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := r.store.Deregister(ctx, kind, id); err != nil {
-		r.log.Debug("presence: deregister failed (ignored)", "kind", kind, "instance", id, "err", err)
+		reportErr, _, end := r.tracker.Start(ctx, "deregister", "presence_record", "kind", kind, "instance", id)
+		reportErr(fmt.Errorf("presence: deregister failed (ignored): %w", err))
+		end()
 	}
 }
 

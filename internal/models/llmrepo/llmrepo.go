@@ -232,6 +232,12 @@ func (e *modelManager) PromptExecute(
 	}
 	defer safeClose(client)
 
+	// The envelope's model/backend allowlist, checked between resolution and the
+	// call so a refusal spends nothing (see bounds.go). Unbounded requests skip it.
+	if err := e.enforceResolutionBounds(ctx, "prompt", provider, backend); err != nil {
+		return "", Meta{}, err
+	}
+
 	result, usage, err := client.Prompt(ctx, systemInstruction, temperature, prompt)
 	if err != nil {
 		return "", Meta{}, fmt.Errorf("prompt execution failed: %w", err)
@@ -295,6 +301,11 @@ func (e *modelManager) Chat(
 	}
 	defer safeClose(client)
 
+	// Envelope allowlist, checked before anything is sent (see bounds.go).
+	if err := e.enforceResolutionBounds(ctx, "chat", provider, backend); err != nil {
+		return libmodelprovider.ChatResult{}, Meta{}, err
+	}
+
 	response, err := client.Chat(ctx, messages, withCanonicalRequestShape(opts, providerCacheHints(req.CacheHints, sessionKey))...)
 	if err != nil {
 		return libmodelprovider.ChatResult{}, Meta{}, fmt.Errorf("chat execution failed: %w", err)
@@ -354,6 +365,13 @@ func (e *modelManager) Embed(
 	}
 	defer safeClose(client)
 
+	// Envelope allowlist. It bounds embeddings too — the allowlist is TOTAL, not
+	// per-kind, because an embedding call spends the mission's compute like any
+	// other (see ResolutionBounds).
+	if err := e.enforceResolutionBounds(ctx, "embed", provider, backend); err != nil {
+		return nil, Meta{}, err
+	}
+
 	embeddings, err := client.Embed(ctx, prompt)
 	if err != nil {
 		return nil, Meta{}, fmt.Errorf("embedding generation failed: %w", err)
@@ -409,6 +427,12 @@ func (e *modelManager) Stream(
 	}
 	if err != nil {
 		return nil, Meta{}, fmt.Errorf("stream: client resolution failed: %w", err)
+	}
+
+	// Envelope allowlist, checked before the stream is opened (see bounds.go).
+	if err := e.enforceResolutionBounds(ctx, "stream", provider, backend); err != nil {
+		safeClose(client)
+		return nil, Meta{}, err
 	}
 
 	stream, err := client.Stream(ctx, messages, withCanonicalRequestShape(opts, providerCacheHints(req.CacheHints, sessionKey))...)

@@ -255,6 +255,25 @@ type Store interface {
 	DeleteChainCheckpoint(ctx context.Context, id string) error
 	ListChainCheckpoints(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*ChainCheckpoint, error)
 
+	// Workspace semantic index: an immutable index-config generation plus its
+	// chunks and their FTS5 lexical mirror (see runtimetypes/workspaceindex.go
+	// and docs/development/blueprints/workspace-index.md). Note the absent
+	// UpdateWorkspaceIndexConfig — a config is create-once, and changing the
+	// embedding model means a new config and a cutover, never a mutation.
+	CreateWorkspaceIndexConfig(ctx context.Context, cfg *WorkspaceIndexConfig) error
+	GetWorkspaceIndexConfig(ctx context.Context, id string) (*WorkspaceIndexConfig, error)
+	GetActiveWorkspaceIndexConfig(ctx context.Context, workspaceID string) (*WorkspaceIndexConfig, error)
+	ListWorkspaceIndexConfigs(ctx context.Context, workspaceID string, createdAtCursor *time.Time, limit int) ([]*WorkspaceIndexConfig, error)
+	DeleteWorkspaceIndexConfig(ctx context.Context, id string) error
+
+	AppendWorkspaceChunks(ctx context.Context, chunks ...*WorkspaceChunk) error
+	ListWorkspaceIndexedFiles(ctx context.Context, configID string) ([]WorkspaceIndexedFile, error)
+	DeleteWorkspaceChunksForPaths(ctx context.Context, configID string, paths ...string) error
+	DeleteWorkspaceChunksForConfig(ctx context.Context, configID string) error
+	SearchWorkspaceChunks(ctx context.Context, configID string, match string, limit int) ([]*WorkspaceChunk, error)
+	ScanWorkspaceChunks(ctx context.Context, configID string, limit int) ([]*WorkspaceChunk, error)
+	CountWorkspaceChunks(ctx context.Context, configID string) (int64, error)
+
 	EnforceMaxRowCount(ctx context.Context, count int64) error
 }
 

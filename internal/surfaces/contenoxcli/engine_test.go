@@ -2,10 +2,16 @@ package contenoxcli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/contenox/beam/internal/kernel/taskengine"
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/gointel"
+	"github.com/contenox/beam/internal/services/gojatool"
+	"github.com/contenox/beam/internal/services/jqtool"
 	"github.com/stretchr/testify/require"
 )
 
@@ -123,13 +129,20 @@ func TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated(t *testing.T) {
 	goIndex := gointel.NewIndex(gointel.Config{})
 	t.Cleanup(goIndex.Shutdown)
 
-	off := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, tracker, goIndex)
+	// No ScriptDir: the provider is still registered, carrying goja_eval alone.
+	// That is the always-on shape an operator who never wrote a script gets.
+	gt, err := gojatool.New(gojatool.Config{})
+	require.NoError(t, err)
+	t.Cleanup(gt.Shutdown)
+
+	off := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, tracker, goIndex, gt)
 	require.Contains(t, off, "git", "git must be registered even with the shell off")
 	require.Contains(t, off, "local_fs")
 	require.Contains(t, off, gointel.ToolsProviderName, "gointel is a read surface, always on")
+	require.Contains(t, off, gojatool.ToolsProviderName, "goja is a compute surface, always on")
 	require.NotContains(t, off, "local_shell", "the shell stays opt-in")
 
-	on := localToolset(chatOpts{EffectiveEnableLocalExec: true, EffectiveHITL: true}, nil, tracker, goIndex)
+	on := localToolset(chatOpts{EffectiveEnableLocalExec: true, EffectiveHITL: true}, nil, tracker, goIndex, gt)
 	require.Contains(t, on, "git")
 	require.Contains(t, on, "local_shell")
 
@@ -139,4 +152,64 @@ func TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, supported, "git_status")
 	require.Contains(t, supported, "git_commit")
+
+	gojaSupported, err := off[gojatool.ToolsProviderName].Supports(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, gojaSupported, gojatool.ToolEval)
+}
+
+// TestUnit_LocalToolset_JQIsAlwaysOn pins the jq registration and, more
+// importantly, the CONTAINMENT CLAIM the seeded allow rule rests on: jq_query is
+// constructed with exactly the directory local_fs is, so the set of files it can
+// read is a subset of the set read_file can read. If those two ever diverge —
+// one gaining a cwd fallback the other lacks, say — the "reads a file the agent
+// may already read" clause in the envelope stops being true and this test is
+// where it should be noticed.
+func TestUnit_LocalToolset_JQIsAlwaysOn(t *testing.T) {
+	tracker := libtracker.NoopTracker{}
+
+	goIndex := gointel.NewIndex(gointel.Config{})
+	t.Cleanup(goIndex.Shutdown)
+	gt, err := gojatool.New(gojatool.Config{})
+	require.NoError(t, err)
+	t.Cleanup(gt.Shutdown)
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain.json"),
+		[]byte(`{"tasks":[{"id":"plan","handler":"model"},{"id":"read","handler":"tools"}]}`), 0o644))
+
+	for _, shellOn := range []bool{false, true} {
+		tools := localToolset(chatOpts{
+			EffectiveEnableLocalExec:     shellOn,
+			EffectiveHITL:                true,
+			EffectiveLocalExecAllowedDir: dir,
+		}, nil, tracker, goIndex, gt)
+
+		require.Containsf(t, tools, jqtool.ToolsProviderName,
+			"jq is a read surface and must be registered with the shell %v", shellOn)
+
+		supported, err := tools[jqtool.ToolsProviderName].Supports(context.Background())
+		require.NoError(t, err)
+		require.Contains(t, supported, jqtool.ToolQuery)
+
+		// The registered provider is the real toolset, scoped to the same
+		// workspace local_fs got, answering a real query.
+		res, dt, err := tools[jqtool.ToolsProviderName].Exec(context.Background(), time.Now(),
+			map[string]any{"path": "chain.json", "filter": `[.tasks[] | select(.handler=="tools") | .id]`}, false,
+			&taskengine.ToolsCall{Name: jqtool.ToolsProviderName, ToolName: jqtool.ToolQuery})
+		require.NoError(t, err)
+		require.Equal(t, taskengine.DataTypeJSON, dt)
+		out, ok := res.(*jqtool.Result)
+		require.True(t, ok)
+		require.Equal(t, 1, out.Count)
+		require.JSONEq(t, `["read"]`, string(out.Values[0]))
+
+		// And the boundary is the SAME boundary: a path outside the workspace is
+		// refused, not read.
+		_, _, err = tools[jqtool.ToolsProviderName].Exec(context.Background(), time.Now(),
+			map[string]any{"path": "../outside.json", "filter": "."}, false,
+			&taskengine.ToolsCall{Name: jqtool.ToolsProviderName, ToolName: jqtool.ToolQuery})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "escapes allowed directory")
+	}
 }

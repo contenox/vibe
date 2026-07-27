@@ -42,7 +42,12 @@ What gets vetted:
 
 Files are classified by content: a "tasks" array is a chain, a "rules" array
 (or a hitl-policy-*.json name) is an envelope; anything else is skipped.
-Exits non-zero when any vetted file fails.`,
+Exits non-zero when any vetted file fails.
+
+A file can also be reported as WARN. A warning is not a defect — the file is
+valid and the runtime accepts it — it means an envelope field parses but is
+not enforced as strongly as it reads, and it names what to rely on instead.
+Warnings never fail the run.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runVetCmd,
 }
@@ -171,31 +176,44 @@ func jsonIsArray(raw json.RawMessage) bool {
 
 // vetOneFile returns nil for a passing file, the teaching error otherwise.
 // The bool reports whether the file was actually vetted (false = skipped).
-func vetOneFile(path string) (bool, error) {
+//
+// The third return is the file's DIAGNOSTICS: fields that parsed, validate, and
+// still do less than they read like (hitlservice.PolicyDiagnostics). They are not
+// defects — a warned file loads and governs normally — so they never influence
+// the verdict or the exit code. They exist because an envelope is a security
+// document read by an operator who will never open the Go source that records the
+// caveat, and "it parses" must not be mistaken for "it is enforced".
+func vetOneFile(path string) (bool, error, []hitlservice.PolicyDiagnostic) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return true, fmt.Errorf("cannot read %q: %w", path, err)
+		return true, fmt.Errorf("cannot read %q: %w", path, err), nil
 	}
 	switch classifyVetFile(path, data) {
 	case vetKindChain:
 		var chain taskengine.TaskChainDefinition
 		if err := json.Unmarshal(data, &chain); err != nil {
-			return true, fmt.Errorf("chain does not parse: %w", err)
+			return true, fmt.Errorf("chain does not parse: %w", err), nil
 		}
-		return true, taskengine.LintChain(&chain)
+		return true, taskengine.LintChain(&chain), nil
 	case vetKindEnvelope:
-		return true, hitlservice.VetPolicy(data)
+		return true, hitlservice.VetPolicy(data), hitlservice.PolicyDiagnostics(data)
 	default:
-		return false, nil
+		return false, nil, nil
 	}
 }
 
 // runVetOnFiles vets each file, reporting per-file verdicts to out, and
 // returns how many failed.
+//
+// A file can be both "ok" and warned: the verdict answers "would the runtime
+// accept this?", the warnings answer "does it do what you think?". Both are
+// printed, and only the verdict counts toward the failure tally — a WARN that
+// failed the run would pressure an operator into deleting the field rather than
+// understanding it.
 func runVetOnFiles(out io.Writer, files []string) int {
 	failed := 0
 	for _, path := range files {
-		vetted, err := vetOneFile(path)
+		vetted, err, diags := vetOneFile(path)
 		switch {
 		case !vetted:
 			fmt.Fprintf(out, "skip %s (not a chain or hitl-policy file)\n", path)
@@ -205,12 +223,24 @@ func runVetOnFiles(out io.Writer, files []string) int {
 		default:
 			fmt.Fprintf(out, "ok   %s\n", path)
 		}
+		// Warnings print for a passing file AND a failing one: a defect elsewhere
+		// in the document is no reason to withhold the fact that another field is
+		// not enforced.
+		for _, d := range diags {
+			fmt.Fprintf(out, "WARN %s\n%s\n", path, indentVetLines(d.String()))
+		}
 	}
 	return failed
 }
 
 func indentVetError(err error) string {
-	lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+	return indentVetLines(err.Error())
+}
+
+// indentVetLines is the shared indent for everything printed under a file's
+// verdict line, so a warning and a defect line up the same way.
+func indentVetLines(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
 	for i, line := range lines {
 		lines[i] = "     " + line
 	}

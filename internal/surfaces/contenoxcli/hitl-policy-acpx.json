@@ -1,4 +1,11 @@
 {
+  "//compute": "PRESENT AND REAL, and tighter than hitl-policy-acp's — a default_action of \"deny\" says the operator wants the narrow envelope, and its compute half should match its action half. Compute bounds are per-MISSION, so they do nothing for the attached editor session this preset usually serves; they exist for the case where this policy is named as a mission envelope, because a mission is fire-and-detach and an unbounded runaway spends real money with nobody watching. A mission that crosses a bound is finished at status \"stuck\" with a reason naming it.",
+  "//compute-fields": "maxToolCalls counts envelope-gated tool dispatches and is exact. maxTokens is BEST-EFFORT: it bounds a mission from the usage its unit reports, and is inert for a unit whose provider reports none. maxTurns is deliberately OMITTED, not forgotten: the dispatcher issues at most two prompt turns per mission, so any ceiling above 1 could never fire. modelAllowlist/backendAllowlist ARE enforced when set, but no shipped preset can guess your model names. \"finish_stuck\" is the only implemented onExhausted behavior. See docs/development/blueprints/acp/envelope-compute-bounds.md.",
+  "compute": {
+    "maxToolCalls": 150,
+    "maxTokens": 1000000,
+    "onExhausted": "finish_stuck"
+  },
   "default_action": "deny",
   "rules": [
     {

@@ -1,22 +1,33 @@
 ---
 title: Least-privilege shell environment
-description: Give an agent exactly the environment its task needs — not your whole .env — by stripping the runtime's secrets and injecting only what you choose.
+description: The scrub-and-inject design for the shells contenox runs in its own process — give an agent exactly the environment its task needs, not your whole .env. The policy surface exists; no spawn site applies it today.
 ---
 
 # Least-privilege shell environment
 
+> [!WARNING]
+> **Not in effect today.** Neither the scrub nor the injection below is applied to
+> any shell contenox spawns. The wiring lived in `contenox serve`, which was cut;
+> the surviving surfaces (`beam`, `acp`, `chat`, `run`) never took it up. The
+> policy, the `SANDBOX_*` variables, `contenox shell-env` and the `contenox
+> sandbox env` preview all still exist — they just govern nothing, so a shell an
+> agent drives inherits the runtime's environment whole. The one environment that
+> IS scrubbed is a foreign agent's, by the
+> [agent sandbox](/docs/guide/agent-sandbox/). Treat this page as the design of
+> the surface, not a control you can rely on.
+
 An agent that can run a shell can read its environment — and by default that environment is the contenox process's own, with every variable it was started with. The usual way an agent gets a value it needs, say a `DATABASE_URL`, is to read your `.env`; but reading `.env` for one variable hands it the `STRIPE_SECRET_KEY` two lines below, too.
 
-Contenox inverts that. It gives each spawned shell — the `local_shell` tool, the `shell_session` / `!` PTY, the interactive terminal — exactly the environment a task needs, in two moves:
+This surface is built to invert that: each spawned shell — the `local_shell` tool, the `shell_session` / `!` PTY, the interactive terminal — gets exactly the environment a task needs, in two moves:
 
-- **scrub** — strip serve's own credentials out of the shell, so there is nothing to leak;
+- **scrub** — strip the runtime's own credentials out of the shell, so there is nothing to leak;
 - **inject** — add back only the variables you choose, with the values you set.
 
-The agent gets its `DATABASE_URL`, does the work, and your other secrets were never in the room. This is the environment slice of least privilege: deny by default, grant what the job needs.
+The agent gets its `DATABASE_URL`, does the work, and your other secrets are never in the room. That is the environment slice of least privilege: deny by default, grant what the job needs. It is configuration today with no enforcement behind it — see the warning above.
 
 ## How it works
 
-Scrubbing is **on by default** for agent-reachable shells. When contenox spawns one, it builds the environment in two layers:
+Scrubbing is **configured on by default** for agent-reachable shells — `deny-secrets` is the policy `contenox sandbox env` reports, and no spawn site applies it today (see the warning above). The design is two layers:
 
 1. The **scrub** filters the contenox process's environment down to a policy you choose. The default, `deny-secrets`, keeps the toolchain's variables but drops the control plane and the common credential shapes.
 2. The **injection** overlays your own variables on top, so an injected value always wins — and applies even when the scrub is `off`.
@@ -99,8 +110,8 @@ contenox sandbox env --terminal # the interactive-terminal policy
 contenox shell-env list
 ```
 
-`sandbox env` is a dry run against the live environment (names only, values withheld), so you can confirm the scrub strips what you expect before relying on it.
+`sandbox env` is a dry run of the **policy** against the live environment (names only, values withheld). It shows what the scrub would strip — not what a spawned shell actually receives, which today is the unfiltered environment.
 
 ## How it relates to the agent sandbox
 
-This is the **environment** slice of a larger least-privilege architecture: an agent should reach only what its task needs, and nothing else. The [agent-sandbox blueprint](/docs/development/blueprints/acp/agent-sandbox/) describes the rest of "the wall" — making the filesystem, network, and process tree of a spawned agent absent by construction too, so it cannot read your `.env` off disk any more than from the environment. Environment scrubbing and injection are the part of that wall you can use today; the filesystem and network slices land with the sandbox.
+This is the **environment** slice of a larger least-privilege architecture: an agent should reach only what its task needs, and nothing else. The [agent sandbox](/docs/guide/agent-sandbox/) is the rest of "the wall" — the filesystem and exec surface of a spawned foreign agent made absent by construction, so it cannot read your `.env` off disk any more than from the environment. That wall is built and fail-closed, and it scrubs the environment of the agents it confines — though nothing reaches it on a stock install yet (see its status note). This page's scrub is the same idea applied to the shells contenox runs *in its own process*, where the wall does not reach — and it is the piece that is not wired.

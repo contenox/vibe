@@ -130,8 +130,7 @@ func TestUnit_Severity_DenialIsRecoverable(t *testing.T) {
 
 	res, err := execTool(t, ctx, tools, "write_file", map[string]any{"path": "a.txt", "content": "new"})
 	require.NoError(t, err)
-	msg, ok := res.(string)
-	require.True(t, ok)
+	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "without reading it first")
 	require.Contains(t, msg, "(recoverable:")
 }

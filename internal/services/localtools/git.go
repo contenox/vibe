@@ -384,6 +384,128 @@ func currentBranch(repo *git.Repository) string {
 }
 
 // ---------------------------------------------------------------------------
+// Results that are readable AND parseable
+//
+// WHY THESE TYPES EXIST:
+// A tool result is written for a READER. `git_status` answers with prose — a
+// branch line, then indented sections — because that is what a model reads best,
+// and the whole toolset is built around that (see fs_schema.go on terseness).
+// But live use (2026-07-27) found what happens when a PROGRAM consumes the same
+// answer: a goja script assumed git_status returned porcelain, and reported "4
+// staged, 2 other, no untracked" for a tree with one modified and one untracked
+// file. It returned successfully. Nothing in the stack could have caught it.
+//
+// So the read tools whose answers have an obvious record shape return a TYPED
+// value instead of a bare string, and that type's String() is the exact prose
+// they returned before. The engine renders a DataTypeString result with
+// fmt.Sprintf("%v", …) (taskengine/taskexec.go, serializeToolResultContent), so
+// the model-facing bytes are UNCHANGED — asserted by the golden test in
+// git_test.go — while a program (the goja bridge, which JSON-marshals anything
+// that is not a string) gets fields it cannot mis-read.
+//
+// STABILITY: these shapes are not a public API. They are program-facing, they
+// live beside the tool that produces them, and they change when the tool does.
+// A script that depends on one should pin the field it reads, not the whole
+// object.
+// ---------------------------------------------------------------------------
+
+// AppendGuidance lets a typed result carry text appended by a decorator without
+// losing its structure.
+//
+// It exists because of one concrete consequence of typing these results: the
+// tool-guidance decorator (services/toolguidance) appends navigation lines to
+// STRING results and returns anything else byte-for-byte, so typing git_status
+// would silently have dropped those lines from the model's view. That is a
+// model-facing change, and typing these results was supposed to be invisible to
+// the model. So the results carry the text instead — the structure is untouched
+// and the rendering is identical to what a plain string would have produced.
+//
+// The method name is the whole contract; the decorator asserts it structurally,
+// so neither package imports the other.
+func (r GitStatusResult) AppendGuidance(text string) any {
+	r.text += text
+	return r
+}
+
+func (r GitLogResult) AppendGuidance(text string) any {
+	r.text += text
+	return r
+}
+
+func (r GitBranchListResult) AppendGuidance(text string) any {
+	r.text += text
+	return r
+}
+
+// GitCommitRef is a commit reduced to what a status line shows.
+type GitCommitRef struct {
+	Hash    string `json:"hash"`
+	Subject string `json:"subject"`
+}
+
+// GitStatusEntry is one path with the single-letter git status code that applies
+// to it — 'M', 'A', 'D', 'R', '?', the codes `git status --short` prints.
+type GitStatusEntry struct {
+	Path string `json:"path"`
+	Code string `json:"code"`
+}
+
+// GitStatusResult is git_status. Staged, Unstaged and Untracked are the three
+// answers the prose sections spell out; Clean is the whole answer when there is
+// nothing in any of them.
+//
+// The lists are always COMPLETE even when the rendered text was truncated at
+// gitMaxOutputBytes: truncation is a bound on the model's context window, not on
+// the repository, and a program that asked for the status wants the status.
+type GitStatusResult struct {
+	Branch    string           `json:"branch"`
+	Head      *GitCommitRef    `json:"head,omitempty"`
+	Clean     bool             `json:"clean"`
+	Staged    []GitStatusEntry `json:"staged"`
+	Unstaged  []GitStatusEntry `json:"unstaged"`
+	Untracked []string         `json:"untracked"`
+
+	text string
+}
+
+func (r GitStatusResult) String() string { return r.text }
+
+// GitLogEntry is one commit as git_log renders it.
+type GitLogEntry struct {
+	Hash    string `json:"hash"`
+	Author  string `json:"author"`
+	Email   string `json:"email"`
+	Date    string `json:"date"`
+	Subject string `json:"subject"`
+}
+
+// GitLogResult is git_log.
+type GitLogResult struct {
+	Commits []GitLogEntry `json:"commits"`
+
+	text string
+}
+
+func (r GitLogResult) String() string { return r.text }
+
+// GitBranch is one local branch.
+type GitBranch struct {
+	Name    string `json:"name"`
+	Hash    string `json:"hash"`
+	Current bool   `json:"current"`
+}
+
+// GitBranchListResult is git_branch_list.
+type GitBranchListResult struct {
+	Current  string      `json:"current"`
+	Branches []GitBranch `json:"branches"`
+
+	text string
+}
+
+func (r GitBranchListResult) String() string { return r.text }
+
+// ---------------------------------------------------------------------------
 // Read operations
 // ---------------------------------------------------------------------------
 
@@ -402,29 +524,41 @@ func (h *GitTools) status(ctx context.Context) (any, taskengine.DataType, error)
 		return nil, taskengine.DataTypeAny, recoverablef("%s: %v", tool, err)
 	}
 
+	out := GitStatusResult{
+		Branch:    currentBranch(repo),
+		Staged:    []GitStatusEntry{},
+		Unstaged:  []GitStatusEntry{},
+		Untracked: []string{},
+	}
 	var staged, unstaged, untracked []string
 	for _, path := range sortedStatusPaths(st) {
 		fs := st[path]
 		if fs.Staging == git.Untracked && fs.Worktree == git.Untracked {
 			untracked = append(untracked, "  "+path)
+			out.Untracked = append(out.Untracked, path)
 			continue
 		}
 		if fs.Staging != git.Unmodified && fs.Staging != git.Untracked {
 			staged = append(staged, fmt.Sprintf("  %c %s", fs.Staging, path))
+			out.Staged = append(out.Staged, GitStatusEntry{Path: path, Code: string(fs.Staging)})
 		}
 		if fs.Worktree != git.Unmodified && fs.Worktree != git.Untracked {
 			unstaged = append(unstaged, fmt.Sprintf("  %c %s", fs.Worktree, path))
+			out.Unstaged = append(out.Unstaged, GitStatusEntry{Path: path, Code: string(fs.Worktree)})
 		}
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "branch %s\n", currentBranch(repo))
+	fmt.Fprintf(&sb, "branch %s\n", out.Branch)
 	if commit, ok, cErr := headCommit(repo); cErr == nil && ok {
-		fmt.Fprintf(&sb, "HEAD %s %s\n", shortHash(commit.Hash), subjectOf(commit.Message))
+		out.Head = &GitCommitRef{Hash: shortHash(commit.Hash), Subject: subjectOf(commit.Message)}
+		fmt.Fprintf(&sb, "HEAD %s %s\n", out.Head.Hash, out.Head.Subject)
 	}
 	if len(staged)+len(unstaged)+len(untracked) == 0 {
 		sb.WriteString("working tree clean\n")
-		return sb.String(), taskengine.DataTypeString, nil
+		out.Clean = true
+		out.text = sb.String()
+		return out, taskengine.DataTypeString, nil
 	}
 	section := func(title string, lines []string) {
 		if len(lines) == 0 {
@@ -435,7 +569,8 @@ func (h *GitTools) status(ctx context.Context) (any, taskengine.DataType, error)
 	section("staged for commit", staged)
 	section("changed but not staged", unstaged)
 	section("untracked", untracked)
-	return truncateGitOutput(tool, sb.String(), "narrow the workspace or commit some of it"), taskengine.DataTypeString, nil
+	out.text = truncateGitOutput(tool, sb.String(), "narrow the workspace or commit some of it")
+	return out, taskengine.DataTypeString, nil
 }
 
 func sortedStatusPaths(st git.Status) []string {
@@ -573,12 +708,13 @@ func (h *GitTools) log(ctx context.Context, args map[string]any) (any, taskengin
 	iter, err := repo.Log(opts)
 	if err != nil {
 		if errors.Is(err, plumbing.ErrReferenceNotFound) {
-			return "no commits yet\n", taskengine.DataTypeString, nil
+			return GitLogResult{Commits: []GitLogEntry{}, text: "no commits yet\n"}, taskengine.DataTypeString, nil
 		}
 		return nil, taskengine.DataTypeAny, recoverablef("%s: %v", tool, err)
 	}
 	defer iter.Close()
 
+	out := GitLogResult{Commits: []GitLogEntry{}}
 	var sb strings.Builder
 	count := 0
 	err = iter.ForEach(func(c *object.Commit) error {
@@ -586,18 +722,26 @@ func (h *GitTools) log(ctx context.Context, args map[string]any) (any, taskengin
 			return storerStop
 		}
 		count++
+		entry := GitLogEntry{
+			Hash:    shortHash(c.Hash),
+			Author:  c.Author.Name,
+			Email:   c.Author.Email,
+			Date:    c.Author.When.Format(time.RFC3339),
+			Subject: subjectOf(c.Message),
+		}
+		out.Commits = append(out.Commits, entry)
 		fmt.Fprintf(&sb, "%s %s <%s> %s\n    %s\n",
-			shortHash(c.Hash), c.Author.Name, c.Author.Email,
-			c.Author.When.Format(time.RFC3339), subjectOf(c.Message))
+			entry.Hash, entry.Author, entry.Email, entry.Date, entry.Subject)
 		return nil
 	})
 	if err != nil && !errors.Is(err, storerStop) {
 		return nil, taskengine.DataTypeAny, recoverablef("%s: %v", tool, err)
 	}
 	if count == 0 {
-		return "no commits match\n", taskengine.DataTypeString, nil
+		return GitLogResult{Commits: []GitLogEntry{}, text: "no commits match\n"}, taskengine.DataTypeString, nil
 	}
-	return truncateGitOutput(tool, sb.String(), "ask for fewer commits with n"), taskengine.DataTypeString, nil
+	out.text = truncateGitOutput(tool, sb.String(), "ask for fewer commits with n")
+	return out, taskengine.DataTypeString, nil
 }
 
 // storerStop ends a commit iteration early. go-git's ForEach treats any non-nil
@@ -666,6 +810,7 @@ func (h *GitTools) branchList(ctx context.Context) (any, taskengine.DataType, er
 	}
 	defer iter.Close()
 
+	out := GitBranchListResult{Current: current, Branches: []GitBranch{}}
 	var names []string
 	err = iter.ForEach(func(ref *plumbing.Reference) error {
 		name := ref.Name().Short()
@@ -673,6 +818,7 @@ func (h *GitTools) branchList(ctx context.Context) (any, taskengine.DataType, er
 		if name == current {
 			marker = "* "
 		}
+		out.Branches = append(out.Branches, GitBranch{Name: name, Hash: shortHash(ref.Hash()), Current: name == current})
 		names = append(names, fmt.Sprintf("%s%s %s", marker, name, shortHash(ref.Hash())))
 		return nil
 	})
@@ -680,10 +826,12 @@ func (h *GitTools) branchList(ctx context.Context) (any, taskengine.DataType, er
 		return nil, taskengine.DataTypeAny, recoverablef("%s: %v", tool, err)
 	}
 	if len(names) == 0 {
-		return "no branches yet (the repository has no commits)\n", taskengine.DataTypeString, nil
+		return GitBranchListResult{Current: current, Branches: []GitBranch{}, text: "no branches yet (the repository has no commits)\n"}, taskengine.DataTypeString, nil
 	}
 	sort.Strings(names)
-	return truncateGitOutput(tool, strings.Join(names, "\n")+"\n", "the repository has many branches"), taskengine.DataTypeString, nil
+	sort.Slice(out.Branches, func(i, j int) bool { return out.Branches[i].Name < out.Branches[j].Name })
+	out.text = truncateGitOutput(tool, strings.Join(names, "\n")+"\n", "the repository has many branches")
+	return out, taskengine.DataTypeString, nil
 }
 
 func (h *GitTools) blame(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {

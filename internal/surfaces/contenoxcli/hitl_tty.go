@@ -14,6 +14,7 @@ import (
 
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/localtools"
+	"github.com/contenox/beam/internal/surfaces/beamtui/sanitize"
 )
 
 // ErrApprovalAborted is returned when the operator aborts the whole run from an
@@ -35,6 +36,18 @@ const (
 	// notice appears immediately above the prompt where it cannot be scrolled
 	// past unnoticed.
 	maxDiffLinesDisplay = 120
+
+	// maxArgBlockLines bounds a multi-line argument printed as a block, and
+	// matches comp/approval's cap so the two surfaces show a human the same
+	// amount of the same thing. Forty is enough for the whole of a script
+	// somebody would actually read before approving it.
+	maxArgBlockLines = 40
+
+	// argBlockTabStop is what a tab inside such a block is worth. Eight, like
+	// every diff tool and pager, so the code lines up in the columns its author
+	// wrote it in — folding a tab to one space would silently re-indent the
+	// very lines being approved.
+	argBlockTabStop = 8
 
 	// inputFlushWindow is how long to spend draining stray keystrokes typed
 	// before the prompt was drawn.
@@ -172,7 +185,7 @@ func renderApprovalRequest(w io.Writer, req hitlservice.ApprovalRequest) {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			fmt.Fprintf(w, "    %s = %s\n", k, summariseArg(req.Args[k]))
+			writeArg(w, k, req.Args[k], req.Diff != "")
 		}
 	}
 
@@ -184,7 +197,11 @@ func renderApprovalRequest(w io.Writer, req hitlservice.ApprovalRequest) {
 			shown = lines[:maxDiffLinesDisplay]
 		}
 		for _, line := range shown {
-			fmt.Fprintf(w, "    %s\n", line)
+			// Sanitized for the same reason the argument block is: this is
+			// content out of a repository, printed straight to a terminal,
+			// directly above the prompt it would erase. Unwrapped and
+			// un-elided, though — the change under review copies out whole.
+			fmt.Fprintf(w, "    %s\n", sanitize.ExpandTabs(sanitize.Lines(line), argBlockTabStop))
 		}
 		if len(lines) > maxDiffLinesDisplay {
 			fmt.Fprintf(w, "\n  ⚠ diff truncated: showing %d of %d lines — %d lines NOT shown below this point.\n",
@@ -194,22 +211,72 @@ func renderApprovalRequest(w io.Writer, req hitlservice.ApprovalRequest) {
 	}
 }
 
+// writeArg prints one argument for review.
+//
+// A value with newlines in it — a script body, a heredoc, a patch — is printed
+// as an indented BLOCK, one source line per line, because summariseArg's
+// one-liner writes those newlines out as literal "\n" and then cuts the result
+// at 240 bytes. That renders the one argument most in need of reading as the
+// least readable thing above the prompt, which is the exact failure this gate
+// exists to prevent (found dogfooding a goja_eval call).
+//
+// hasDiff suppresses the block: when a diff was rendered, the summary's "see
+// diff" is TRUE and the diff below is the better, unduplicated rendering of the
+// same bytes. With no diff — a script tool, a shell heredoc, or a write whose
+// current contents could not be read — nothing else here shows the content, and
+// the block is the only honest place to read it.
+//
+// Body lines are sanitized (the same treatment comp/approval gives a diff line:
+// no escape sequence reaches the terminal, tabs expand rather than fold) but
+// never wrapped or elided: a line this function split would copy out of the
+// terminal as something that is not what will run.
+func writeArg(w io.Writer, key string, v any, hasDiff bool) {
+	s, isString := v.(string)
+	if !isString || hasDiff || !strings.Contains(s, "\n") {
+		fmt.Fprintf(w, "    %s = %s\n", key, summariseArg(v))
+		return
+	}
+
+	lines := strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+	shown := lines
+	if len(shown) > maxArgBlockLines {
+		shown = shown[:maxArgBlockLines]
+	}
+
+	fmt.Fprintf(w, "    %s =\n", sanitize.Line(key))
+	for _, l := range shown {
+		fmt.Fprintf(w, "      %s\n", sanitize.ExpandTabs(sanitize.Lines(l), argBlockTabStop))
+	}
+	if hidden := len(lines) - len(shown); hidden > 0 {
+		// The consequence, not just the arithmetic — the same sentence the diff
+		// cap uses a few lines below.
+		fmt.Fprintf(w, "      ⚠ +%d more lines — approving accepts content you have not seen\n", hidden)
+	}
+}
+
 // summariseArg renders an argument value for review: whitespace made visible,
 // long values elided with their true size, so a 4 KB replacement reads as one
 // line rather than scrolling the diff away.
+//
+// The result is sanitized, because an argument is somebody else's text on its
+// way to a terminal: an escape sequence in one erases the prompt printed
+// beneath it, which is a defect with the whole gate as its blast radius. Values
+// that are source text take writeArg's block instead, and keep their lines.
 func summariseArg(v any) string {
 	s := fmt.Sprintf("%v", v)
 	total := len(s)
 	lines := strings.Count(s, "\n") + 1
 
 	if total <= maxArgValueDisplay && lines == 1 {
-		return s
+		return sanitize.Line(s)
 	}
 	head := s
-	if len(head) > maxArgValueDisplay {
-		head = head[:maxArgValueDisplay]
+	if r := []rune(head); len(r) > maxArgValueDisplay {
+		// Cut on a rune boundary: a byte cut can split a rune and put a
+		// replacement character in the middle of what is being reviewed.
+		head = string(r[:maxArgValueDisplay])
 	}
-	head = strings.ReplaceAll(head, "\n", "\\n")
+	head = sanitize.Line(strings.ReplaceAll(head, "\n", "\\n"))
 	return fmt.Sprintf("%s… [%d bytes, %d lines — see diff]", head, total, lines)
 }
 

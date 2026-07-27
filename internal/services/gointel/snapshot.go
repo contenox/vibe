@@ -146,9 +146,12 @@ func buildSnapshot(ctx context.Context, root, base string) (*Snapshot, error) {
 	}
 	pkgs, err := packages.Load(cfg, "./...")
 	if err != nil {
+		// The driver error is clamped: go/packages forwards `go list` stderr
+		// verbatim, which on a broken module is a page of text the model can do
+		// nothing with beyond the first line.
 		return nil, wrapRecoverable(ErrLoad,
-			"could not load %s: %v; run `go build ./...` there to see what the toolchain is complaining about",
-			displayPath(base, root), err)
+			"could not load %s: %s; run `go build ./...` there to see what the toolchain is complaining about",
+			displayPath(base, root), echoErr(err))
 	}
 	if len(pkgs) == 0 {
 		return nil, wrapRecoverable(ErrNoModule,

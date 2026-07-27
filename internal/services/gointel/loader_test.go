@@ -267,13 +267,33 @@ func TestUnit_ModuleRoot_ResolvesFromAFilePath(t *testing.T) {
 	}
 }
 
+// TestUnit_Config_RequiresAnAllowedDir pins the refusal AND its voice.
+//
+// The voice matters more than usual here. A composition root that registers
+// gointel without supplying a workspace root produces six advertised tools that
+// refuse every call — the shipped feature is inert, and every symptom points at
+// the tool rather than at the wiring. So the refusal must be marked FATAL (no
+// argument the model changes can fix it) and must name both ways the root is
+// supplied, so whoever reads it first can act on it.
 func TestUnit_Config_RequiresAnAllowedDir(t *testing.T) {
 	ix := NewIndex(Config{})
 	t.Cleanup(ix.Shutdown)
 
 	_, err := ix.Definition(context.Background(), Request{Symbol: "X"})
-	if err == nil || !strings.Contains(err.Error(), "no allowed directory") {
-		t.Fatalf("error = %v, want a no-allowed-directory refusal", err)
+	if err == nil {
+		t.Fatal("an index with no workspace root answered a query")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no workspace root") {
+		t.Fatalf("error = %v, want a no-workspace-root refusal", err)
+	}
+	if !strings.Contains(msg, severityFatalToken) {
+		t.Errorf("error %q is not marked fatal, but no retry can fix a wiring gap", msg)
+	}
+	for _, want := range []string{"--local-exec-allowed-dir", "cwd resolver"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not name %q as a way to supply the root", msg, want)
+		}
 	}
 }
 

@@ -51,15 +51,18 @@ func runSandboxEnv(cmd *cobra.Command, _ []string) error {
 	// nil injector: this preview reports the SCRUB only (what serve's own
 	// environment keeps/strips). The operator-injected variables layered on top are
 	// listed separately by `contenox shell-env list`.
-	shellScrub, terminalScrub := resolveSandboxScrubs(config, nil)
+	shellScrub, terminalScrub := resolveSandboxScrubs(config, nil, cmd.ErrOrStderr())
 
+	// nil warnW on the two re-resolutions below: they ask the same question of
+	// the same values resolveSandboxScrubs just answered, purely to label the
+	// output. The typo warning is the call above's to make, once per bad value.
 	terminal, _ := cmd.Flags().GetBool("terminal")
 	surface := "agent shells (local_shell, shell_session)"
-	mode := resolveScrubMode(config.SandboxShellScrub, libsandbox.ScrubDenySecrets)
+	mode := resolveScrubMode(config.SandboxShellScrub, libsandbox.ScrubDenySecrets, nil)
 	scrub := shellScrub
 	if terminal {
 		surface = "interactive terminal"
-		mode = resolveScrubMode(config.SandboxTerminalScrub, libsandbox.ScrubOff)
+		mode = resolveScrubMode(config.SandboxTerminalScrub, libsandbox.ScrubOff, nil)
 		scrub = terminalScrub
 	}
 

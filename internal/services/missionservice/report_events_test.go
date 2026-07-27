@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -121,4 +122,88 @@ func TestUnit_AddReport_NoPublisherStillStores(t *testing.T) {
 	reports, err := svc.ListReports(ctx, m.ID, 100)
 	require.NoError(t, err)
 	require.Len(t, reports, 1)
+}
+
+// recordingTracker records the (operation, subject, error) of every report so a
+// test can assert WHAT a best-effort path said when it shrugged, rather than
+// asserting that it merely stayed silent.
+type recordingTracker struct {
+	mu     sync.Mutex
+	events []trackedEvent
+}
+
+type trackedEvent struct {
+	op, subject string
+	err         error
+}
+
+func (r *recordingTracker) Start(_ context.Context, op, subject string, _ ...any) (func(error), func(string, any), func()) {
+	return func(err error) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.events = append(r.events, trackedEvent{op: op, subject: subject, err: err})
+		},
+		func(string, any) {},
+		func() {}
+}
+
+func (r *recordingTracker) errorsFor(op, subject string) []error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []error
+	for _, ev := range r.events {
+		if ev.op == op && ev.subject == subject && ev.err != nil {
+			out = append(out, ev.err)
+		}
+	}
+	return out
+}
+
+var _ libtracker.ActivityTracker = (*recordingTracker)(nil)
+
+// TestUnit_PublishFailuresAreReportedToTracker proves the three best-effort
+// publish paths (report, plan revision, terminal status) do not swallow a bus
+// failure: each reports it through the tracker — the one instrumentation seam —
+// while the durable write it announced still stands.
+func TestUnit_PublishFailuresAreReportedToTracker(t *testing.T) {
+	ctx, db := setupMissionDB(t)
+	busErr := fmt.Errorf("bus is down")
+	pub := &fakePublisher{err: busErr}
+	tracker := &recordingTracker{}
+	svc := New(db, WithEventPublisher(pub), WithTracker(tracker))
+
+	m := newMission("shrug audibly")
+	m.ParentSessionID = "parent-session-7"
+	require.NoError(t, svc.Create(ctx, m))
+
+	require.NoError(t, svc.AddReport(ctx, m.ID, &Report{Kind: ReportKindResult, Summary: "done"}))
+	_, err := svc.SetPlan(ctx, m.ID, []PlanEntry{
+		entry("", "scope the work", PlanEntryPending, PlanEntryPriorityMedium),
+	}, "initial plan")
+	require.NoError(t, err)
+	_, err = svc.Finish(ctx, m.ID, StatusLanded, "shipped")
+	require.NoError(t, err)
+
+	for _, subject := range []string{"report_added_event", "plan_revised_event", "status_changed_event"} {
+		reported := tracker.errorsFor("publish", subject)
+		require.Len(t, reported, 1, "a failed publish of %s is reported exactly once", subject)
+		require.ErrorIs(t, reported[0], busErr, "the report carries the bus error, not a summary of it")
+		require.Contains(t, reported[0].Error(), "routing nudge skipped",
+			"the report keeps the consequence the operator needs: stored, not routed")
+	}
+}
+
+// TestUnit_PublishSuccessReportsNothing pins the volume: the tracker hears from
+// these paths only when a publish fails, exactly as the log line it replaced
+// fired only on failure.
+func TestUnit_PublishSuccessReportsNothing(t *testing.T) {
+	ctx, db := setupMissionDB(t)
+	tracker := &recordingTracker{}
+	svc := New(db, WithEventPublisher(&fakePublisher{}), WithTracker(tracker))
+
+	m := newMission("quiet success")
+	require.NoError(t, svc.Create(ctx, m))
+	require.NoError(t, svc.AddReport(ctx, m.ID, &Report{Kind: ReportKindResult, Summary: "done"}))
+
+	require.Empty(t, tracker.errorsFor("publish", "report_added_event"))
 }

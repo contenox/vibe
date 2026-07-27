@@ -58,6 +58,56 @@ func sampleEvent(resolve func(bool)) enginebridge.PermissionRequested {
 	}
 }
 
+// sampleScriptCode is the argument that motivated the block renderer: real
+// source, with a tab indent and a literal "\n" INSIDE a string, so a golden
+// that ever re-escapes the value gives itself away twice.
+const sampleScriptCode = `const notes = host.tool("local_fs.read_file", { path: "CHANGELOG.md" });
+if (!notes) {
+	throw new Error("CHANGELOG.md is empty");
+}
+return { lines: notes.split("\n").length };`
+
+// scriptEvent is the card dogfooding reported: a goja call whose decisive
+// argument is code, with no diff anywhere to fall back on, and a declared reach
+// that is the only thing on the card saying what the code will touch.
+//
+// The reach is FIXTURE data — it pins how a declaration renders, and says
+// nothing about which policy tier any particular tool sits in. mayCall/declared
+// are parameters so one fixture drives all three states of the declaration.
+func scriptEvent(mayCall []string, declared *bool) enginebridge.PermissionRequested {
+	args := map[string]any{
+		"code":       sampleScriptCode,
+		"timeout_ms": float64(2000),
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		panic(err)
+	}
+	return enginebridge.PermissionRequested{
+		SessionID:  libacp.SessionID("sess-7f3a"),
+		ToolCallID: "goja.goja_eval",
+		Title:      "goja.goja_eval",
+		Kind:       libacp.ToolKindOther,
+		Status:     libacp.ToolCallStatusPending,
+		Meta: approvalflow.Meta{
+			ToolsName:       "goja",
+			ToolName:        "goja_eval",
+			PolicyName:      "guarded",
+			PolicyPath:      "rules[2].goja",
+			MayCall:         mayCall,
+			MayCallDeclared: declared,
+		},
+		RawInput: raw,
+		Options: []libacp.PermissionOption{
+			{OptionID: approvalflow.OptionAllow, Name: "Allow", Kind: libacp.PermissionAllowOnce},
+			{OptionID: approvalflow.OptionDeny, Name: "Deny", Kind: libacp.PermissionRejectOnce},
+		},
+		Resolve: func(bool) {},
+	}
+}
+
+func boolp(v bool) *bool { return &v }
+
 func texts(lines []frame.Line) []string {
 	out := make([]string, 0, len(lines))
 	for _, l := range lines {
@@ -580,6 +630,331 @@ func TestUnit_RenderNeverExceedsWidth(t *testing.T) {
 	if got := New(ev).Render(0, false, ""); got != nil {
 		t.Fatal("zero width rendered lines")
 	}
+}
+
+// TestUnit_ArgBlockGoldens pins the multi-line argument block at the resize
+// matrix in both glyph sets. This is the card the dogfooding hunt found
+// rendering its `code` argument as a "\n"-escaped one-liner cut at 240 bytes:
+// the one argument that had to be read was the least readable thing on it.
+func TestUnit_ArgBlockGoldens(t *testing.T) {
+	for _, ascii := range []bool{false, true} {
+		for _, w := range goldenWidths {
+			label := "unicode"
+			if ascii {
+				label = "ascii"
+			}
+			name := fmt.Sprintf("argblock_%s_w%d", label, w)
+			t.Run(name, func(t *testing.T) {
+				c := New(scriptEvent([]string{"local_fs.read_file", "local_shell.exec"}, boolp(true)))
+				testkit.Golden(t, name, testkit.EncodeLines(c.Render(w, ascii, "⠋")))
+			})
+		}
+	}
+}
+
+// TestUnit_MultiLineArgIsABlockNotAnEscapedOneLiner is defect 1 itself: every
+// source line gets its own frame line, at the block indent, with no "\n"
+// anywhere and nothing cut mid-content.
+func TestUnit_MultiLineArgIsABlockNotAnEscapedOneLiner(t *testing.T) {
+	lines := texts(New(scriptEvent(nil, nil)).Render(120, false, ""))
+	joined := strings.Join(lines, "\n")
+
+	// The scalar shape's own marker is what the escaped one-liner leaves behind.
+	if strings.Contains(joined, "bytes,") {
+		t.Fatalf("the code argument is still summarised onto one line:\n%s", joined)
+	}
+	// There is no diff on this card, so nothing on it may point at one.
+	if strings.Contains(joined, "see diff") {
+		t.Fatalf("the code argument points at a diff that does not exist:\n%s", joined)
+	}
+
+	// The key line opens the block; the body follows it in source order.
+	start := -1
+	for i, l := range lines {
+		if l == "  code =" {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatalf("no block header for the code argument: %q", lines)
+	}
+	want := strings.Split(sampleScriptCode, "\n")
+	for i, src := range want {
+		// The tab line is the one that must arrive expanded, not folded.
+		expect := "    " + strings.ReplaceAll(src, "\t", "        ")
+		if got := lines[start+1+i]; got != expect {
+			t.Fatalf("block line %d = %q, want %q", i, got, expect)
+		}
+	}
+	// Sorted-key order still holds around the block.
+	if got := lines[start+1+len(want)]; got != "  timeout_ms = 2000" {
+		t.Fatalf("line after the block = %q, want the next argument", got)
+	}
+	// Copy fidelity in the other direction: a backslash-n that is part of the
+	// SOURCE stays a backslash-n. The block neither escapes newlines nor
+	// un-escapes what the author wrote.
+	if got := lines[start+len(want)]; got != `    return { lines: notes.split("\n").length };` {
+		t.Fatalf("the source's own escape was rewritten: %q", got)
+	}
+
+	// And the body is styled as code, one span per line, so it copies clean.
+	rendered := New(scriptEvent(nil, nil)).Render(120, false, "")
+	for i := range want {
+		l := rendered[start+1+i]
+		if len(l) != 1 || l[0].Style != frame.StyleCode {
+			t.Fatalf("block line %d has %d spans styled %q, want one code span", i, len(l), l[0].Style)
+		}
+	}
+}
+
+// TestUnit_ArgBlockLinesAreUnwrapped is the copy-cleanliness rule the diff body
+// already has: a code line the card split would paste back as something that is
+// not what would run, so it is emitted whole at any width.
+func TestUnit_ArgBlockLinesAreUnwrapped(t *testing.T) {
+	long := "const payload = \"" + strings.Repeat("x", 300) + "\";"
+	ev := scriptEvent(nil, nil)
+	ev.RawInput = mustArgs(t, map[string]any{"code": "// head\n" + long})
+
+	for _, w := range []int{20, 40, 80} {
+		found := false
+		for _, l := range New(ev).Render(w, false, "") {
+			if l.Text() == "    "+long {
+				found = true
+				if len(l) != 1 {
+					t.Fatalf("width %d: block line split into %d spans", w, len(l))
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("width %d: the 300-cell block line was not emitted verbatim", w)
+		}
+	}
+}
+
+// TestUnit_ArgBlockIsSanitized: the body is peer-supplied text shown to a human
+// as the thing they are authorising, so its exemption is from WRAPPING, never
+// from sanitizing.
+func TestUnit_ArgBlockIsSanitized(t *testing.T) {
+	ev := scriptEvent(nil, nil)
+	ev.RawInput = mustArgs(t, map[string]any{
+		"code": "run()\x1b[2Jcleared\n‮drawkcab\n\x1b]0;pwned\x07gone\n\tindented",
+	})
+
+	var body []string
+	for _, l := range New(ev).Render(120, false, "") {
+		for _, sp := range l {
+			for _, r := range sp.Text {
+				if r < 0x20 || r == 0x7f {
+					t.Fatalf("span %q carries %U", sp.Text, r)
+				}
+				if (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) {
+					t.Fatalf("span %q carries bidi control %U", sp.Text, r)
+				}
+			}
+		}
+		if strings.HasPrefix(l.Text(), "    ") {
+			body = append(body, l.Text())
+		}
+	}
+	want := []string{"    run()cleared", "    drawkcab", "    gone", "            indented"}
+	if !equal(body, want) {
+		t.Fatalf("block body = %q, want %q", body, want)
+	}
+}
+
+// TestUnit_ArgBlockCapAnnouncesWhatIsHidden: the cap is visible, states the
+// consequence, and — like the diff's own notice — is wrapped rather than
+// truncated at every width, because that sentence is what makes the elision
+// honest.
+func TestUnit_ArgBlockCapAnnouncesWhatIsHidden(t *testing.T) {
+	body := make([]string, 140)
+	for i := range body {
+		body[i] = fmt.Sprintf("line %d", i)
+	}
+	ev := scriptEvent(nil, nil)
+	ev.RawInput = mustArgs(t, map[string]any{"code": strings.Join(body, "\n")})
+
+	lines := texts(New(ev).Render(120, false, ""))
+	shown := 0
+	for _, l := range lines {
+		if strings.HasPrefix(l, "    line ") {
+			shown++
+		}
+	}
+	if shown != maxArgBlockLines {
+		t.Fatalf("rendered %d block lines, want %d", shown, maxArgBlockLines)
+	}
+	if got := lines[maxArgBlockLines+2]; got != "    line 39" {
+		t.Fatalf("last shown block line = %q, want the 40th", got)
+	}
+	warning := lines[maxArgBlockLines+3]
+	for _, want := range []string{"⚠", "+100 more lines", "approving accepts content you have not seen"} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("cap notice = %q, missing %q", warning, want)
+		}
+	}
+
+	for _, ascii := range []bool{false, true} {
+		for _, w := range []int{40, 60, 80, 120} {
+			var warn strings.Builder
+			for _, l := range New(ev).Render(w, ascii, "") {
+				if l[0].Style == frame.StyleWarn {
+					warn.WriteString(l.Text())
+				}
+			}
+			if got := warn.String(); got != blockTruncationWarning(100, ascii) {
+				t.Fatalf("ascii=%v width %d: notice reassembles to %q, want %q",
+					ascii, w, got, blockTruncationWarning(100, ascii))
+			}
+		}
+	}
+
+	// A body exactly at the cap does not announce a cap.
+	ev.RawInput = mustArgs(t, map[string]any{"code": strings.Join(body[:maxArgBlockLines], "\n")})
+	for _, l := range texts(New(ev).Render(120, false, "")) {
+		if strings.Contains(l, "more lines") {
+			t.Fatalf("a body exactly at the cap announced one: %q", l)
+		}
+	}
+}
+
+// TestUnit_ArgBlockYieldsToTheDiff: when a diff IS rendered, the scalar
+// summary's "see diff" is true and the diff is the better rendering of the same
+// bytes — so the card does not print the body twice and does not push the diff
+// away with it.
+func TestUnit_ArgBlockYieldsToTheDiff(t *testing.T) {
+	lines := texts(New(sampleEvent(nil)).Render(120, false, ""))
+	if !strings.HasPrefix(lines[2], "  content = ") || !strings.Contains(lines[2], "see diff") {
+		t.Fatalf("a write_file card lost its scalar summary: %q", lines[2])
+	}
+	if lines[2] == "  content =" {
+		t.Fatal("the write body was blocked out above its own diff")
+	}
+}
+
+// TestUnit_MayCallLine is defect 2's rendering half: what the operator learns
+// about a call whose arguments cannot say what it will touch. All three states
+// of the declaration read differently, because they mean different things.
+func TestUnit_MayCallLine(t *testing.T) {
+	line := func(ev enginebridge.PermissionRequested, w int, ascii bool) string {
+		for _, l := range texts(New(ev).Render(w, ascii, "")) {
+			if strings.HasPrefix(l, "may call") {
+				return l
+			}
+		}
+		return ""
+	}
+
+	t.Run("present", func(t *testing.T) {
+		ev := scriptEvent([]string{"local_fs.read_file", "local_shell.exec"}, boolp(true))
+		if got, want := line(ev, 120, false), "may call  local_fs.read_file · local_shell.exec"; got != want {
+			t.Fatalf("reach line = %q, want %q", got, want)
+		}
+		if got, want := line(ev, 120, true), "may call  local_fs.read_file - local_shell.exec"; got != want {
+			t.Fatalf("ascii reach line = %q, want %q", got, want)
+		}
+		// It sits with the identity it qualifies, directly under the tool line.
+		lines := texts(New(ev).Render(120, false, ""))
+		if !strings.HasPrefix(lines[1], "tool  ") || !strings.HasPrefix(lines[2], "may call") {
+			t.Fatalf("reach line is not under the tool line: %q", lines[:4])
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		// An ordinary tool card carried no declaration and must claim nothing.
+		if got := line(sampleEvent(nil), 120, false); got != "" {
+			t.Fatalf("a card with no declaration printed %q", got)
+		}
+		if got := line(scriptEvent(nil, nil), 120, false); got != "" {
+			t.Fatalf("an undeclared-and-unknown reach printed %q", got)
+		}
+	})
+
+	t.Run("declared empty is not the same as undeclared", func(t *testing.T) {
+		if got, want := line(scriptEvent(nil, boolp(true)), 120, false), "may call  nothing"; got != want {
+			t.Fatalf("declared-empty reach = %q, want %q", got, want)
+		}
+		if got, want := line(scriptEvent(nil, boolp(false)), 120, false),
+			"may call  any tool the policy allows · nothing declared"; got != want {
+			t.Fatalf("undeclared reach = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("capped", func(t *testing.T) {
+		names := make([]string, 0, 20)
+		for i := range 20 {
+			names = append(names, fmt.Sprintf("tools_%02d.call", i))
+		}
+		got := line(scriptEvent(names, boolp(true)), 400, false)
+		if strings.Count(got, "tools_") != maxMayCallNames {
+			t.Fatalf("reach line listed %d names, want %d: %q", strings.Count(got, "tools_"), maxMayCallNames, got)
+		}
+		if !strings.HasSuffix(got, "+12 more") {
+			t.Fatalf("capped reach line = %q, want it to end in the count it hid", got)
+		}
+	})
+
+	t.Run("blanks and repeats do not pad the list", func(t *testing.T) {
+		ev := scriptEvent([]string{"local_fs.read_file", "  ", "local_fs.read_file", ""}, boolp(true))
+		if got, want := line(ev, 120, false), "may call  local_fs.read_file"; got != want {
+			t.Fatalf("reach line = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("sanitized and clamped", func(t *testing.T) {
+		ev := scriptEvent([]string{"a\x1b[2Jb\x1b]0;t\x07c\td\x7f‮e"}, boolp(true))
+		for _, l := range New(ev).Render(60, false, "") {
+			for _, sp := range l {
+				for _, r := range sp.Text {
+					if r < 0x20 || r == 0x7f {
+						t.Fatalf("reach span %q carries %U", sp.Text, r)
+					}
+					if (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) {
+						t.Fatalf("reach span %q carries bidi control %U", sp.Text, r)
+					}
+				}
+			}
+			if got := textwidth.Width(l.Text()); strings.HasPrefix(l.Text(), "may call") && got > 60 {
+				t.Fatalf("reach line is %d cells at width 60: %q", got, l.Text())
+			}
+		}
+	})
+}
+
+// TestUnit_ArgBlockChromeNeverExceedsWidth: the block's exemption covers its
+// BODY only. The key line and the cap notice are chrome and still fit.
+func TestUnit_ArgBlockChromeNeverExceedsWidth(t *testing.T) {
+	body := make([]string, 60)
+	for i := range body {
+		body[i] = strings.Repeat("東京 wide ", 8)
+	}
+	ev := scriptEvent([]string{"local_fs.read_file", "local_shell.exec"}, boolp(true))
+	ev.RawInput = mustArgs(t, map[string]any{
+		strings.Repeat("long_key_", 6): strings.Join(body, "\n"),
+	})
+
+	for _, ascii := range []bool{false, true} {
+		for w := 4; w <= 140; w++ {
+			for i, l := range New(ev).Render(w, ascii, "⠋") {
+				if strings.HasPrefix(l.Text(), "    ") {
+					continue // block body: unwrapped by design
+				}
+				if got := textwidth.Width(l.Text()); got > w {
+					t.Fatalf("ascii=%v width %d line %d: %d cells (%q)", ascii, w, i, got, l.Text())
+				}
+			}
+		}
+	}
+}
+
+func mustArgs(t *testing.T, args map[string]any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 // isDiffBody reports whether a rendered line came out of the diff, by the

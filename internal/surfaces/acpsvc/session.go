@@ -717,7 +717,13 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 	// own contenox chain, which is where its mission tools live. Binding the id
 	// onto the entry here (construction) is what scopes those tools to this one
 	// mission; an ordinary chat session has no such `_meta` and reads as "".
-	missionID, _ := missionservice.ParseMissionMeta(req.Meta)
+	// The same `_meta` carries the envelope's COMPUTE allowlists when the mission
+	// declared any: the dispatcher cannot watch this process pick a model, so it
+	// hands the bound down and this session holds its own resolver to it (see
+	// missionservice.MissionMeta and llmrepo.WithResolutionBounds). Absent for an
+	// ordinary chat session and for an unbounded mission, which bind nothing.
+	missionMeta, _ := missionservice.ParseMissionMetaFull(req.Meta)
+	missionID := missionMeta.MissionID
 
 	entry := &sessionEntry{
 		WorkspaceID:       workspaceID,
@@ -725,6 +731,8 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 		InternalSessionID: contenoxSessionID,
 		McpServerNames:    registered,
 		MissionID:         missionID,
+		ModelAllowlist:    missionMeta.ModelAllowlist,
+		BackendAllowlist:  missionMeta.BackendAllowlist,
 		driver:            &nativeDriver{t: t, agent: ag},
 		Provider:          t.provider(),
 		Model:             t.model(),

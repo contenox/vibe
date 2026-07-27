@@ -5,11 +5,14 @@ package terminalservice
 import (
 	"context"
 	"net"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
@@ -120,6 +123,148 @@ func TestAttach_SecondConnectionPreemptsFirst(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first attach did not exit after preempt")
 	}
+}
+
+// recordingTracker records every Start (and every error reported through it) so
+// a test can assert what the pty plumbing said. It must be concurrency-safe: the
+// attach pumps report from their own goroutines.
+type recordingTracker struct {
+	mu     sync.Mutex
+	events []trackedEvent
+}
+
+type trackedEvent struct {
+	op, subject string
+	kv          []any
+	err         error
+}
+
+func (r *recordingTracker) Start(_ context.Context, op, subject string, kv ...any) (func(error), func(string, any), func()) {
+	kvCopy := append([]any(nil), kv...)
+	r.mu.Lock()
+	r.events = append(r.events, trackedEvent{op: op, subject: subject, kv: kvCopy})
+	r.mu.Unlock()
+	return func(err error) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.events = append(r.events, trackedEvent{op: op, subject: subject, kv: kvCopy, err: err})
+		},
+		func(string, any) {},
+		func() {}
+}
+
+func (r *recordingTracker) matching(op, subject string, withErr bool) []trackedEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []trackedEvent
+	for _, ev := range r.events {
+		if ev.op == op && ev.subject == subject && (ev.err != nil) == withErr {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func kvOf(ev trackedEvent, key string) any {
+	for i := 0; i+1 < len(ev.kv); i += 2 {
+		if k, ok := ev.kv[i].(string); ok && k == key {
+			return ev.kv[i+1]
+		}
+	}
+	return nil
+}
+
+func setupTrackedTerminalService(t *testing.T, tracker libtracker.ActivityTracker) (context.Context, Service) {
+	t.Helper()
+	ctx := context.Background()
+	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "terminal.db"), runtimetypes.SchemaSQLite)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	cfg := Config{
+		Enabled:      true,
+		AllowedRoot:  t.TempDir(),
+		DefaultShell: "/bin/sh",
+	}
+	svc, err := New(cfg, db, "node-test", "ws-test", WithTracker(tracker))
+	require.NoError(t, err)
+	return ctx, svc
+}
+
+// TestResizeFailureIsReportedToTracker proves the geometry write is not the only
+// thing that can fail: the durable row updates, the pty resize behind it can
+// still refuse, and that refusal reaches nobody through the return value (the
+// caller already got its nil). The tracker is the only place it can surface, so
+// it must surface there.
+func TestResizeFailureIsReportedToTracker(t *testing.T) {
+	tracker := &recordingTracker{}
+	ctx, svc := setupTrackedTerminalService(t, tracker)
+	principal := "local-user"
+
+	out, err := svc.Create(ctx, principal, CreateRequest{CWD: ""})
+	require.NoError(t, err)
+
+	// Swap the session's pty for a closed descriptor: the store update still
+	// succeeds, the ioctl behind it cannot. (The real pty is left open and closed
+	// on cleanup, so the session stays in the live map — closing it would end the
+	// shell and remove the session, which is a different code path.)
+	sess := svc.(*service).localByID(out.ID)
+	require.NotNil(t, sess)
+	realTTY := sess.tty
+	t.Cleanup(func() { _ = realTTY.Close() })
+	closedFD, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	require.NoError(t, closedFD.Close())
+	sess.tty = closedFD
+
+	require.NoError(t, svc.UpdateGeometry(ctx, principal, out.ID, 100, 40),
+		"a failed pty resize must not fail the geometry update — the row is the durable fact")
+
+	reported := tracker.matching("resize", "terminal_pty", true)
+	require.Len(t, reported, 1, "the failed pty resize is reported exactly once")
+	require.Contains(t, reported[0].err.Error(), "resize")
+	require.Equal(t, out.ID, kvOf(reported[0], "session"))
+	require.Equal(t, "pty", kvOf(reported[0], "backend"))
+}
+
+// TestAttachStreamsAreReportedToTracker pins the attach pumps' instrumentation:
+// they run on goroutines whose outcome no caller ever sees, so the byte count
+// and the reason a pump stopped exist only if they are reported.
+func TestAttachStreamsAreReportedToTracker(t *testing.T) {
+	tracker := &recordingTracker{}
+	ctx, svc := setupTrackedTerminalService(t, tracker)
+	principal := "local-user"
+
+	out, err := svc.Create(ctx, principal, CreateRequest{CWD: ""})
+	require.NoError(t, err)
+
+	conn, peer := net.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- svc.Attach(context.Background(), principal, out.ID, conn, nil) }()
+
+	time.Sleep(50 * time.Millisecond)
+	require.NoError(t, peer.Close()) // the client goes away: the ws->pty pump ends
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("attach did not return after the client went away")
+	}
+
+	// The pumps report from their own goroutines, which Attach does not join (it
+	// joins only the pty reader), so poll rather than assume the report has landed
+	// by the time Attach returns.
+	var starts []trackedEvent
+	require.Eventually(t, func() bool {
+		starts = tracker.matching("stream_input", "terminal_pty", false)
+		return len(starts) > 0
+	}, 2*time.Second, 5*time.Millisecond, "the ws->pty pump must report how it ended")
+	require.Equal(t, out.ID, kvOf(starts[0], "sessionID"))
+	require.Equal(t, "pty", kvOf(starts[0], "backend"))
+	require.NotNil(t, kvOf(starts[0], "bytes"), "the byte count the log line carried must survive")
+
+	_ = svc.Close(ctx, principal, out.ID)
 }
 
 func TestReapIdle_OnlyDetached(t *testing.T) {
