@@ -8,18 +8,19 @@ how-to docs live one level up in `docs/`.
 
 | Area | What it covers |
 | --- | --- |
-| [acp/](acp/README.md) | Agent Client Protocol surface: contenox as agent (registry submission artifacts, e2e conformance) and as client (the client-side engine, fleet and mission machinery) |
+| [acp/](acp/README.md) | Agent Client Protocol surface: contenox as agent (registry submission artifacts, sandbox architecture) and as client (the client-side engine, fleet and mission machinery) |
 | [providers/](providers/README.md) | Cloud/hosted provider integrations |
-| [windows/](windows/README.md) | Windows product surface: terminal-first CLI distribution |
 
-## Product
+## Beam TUI and engine designs
 
 | Doc | Status | What it covers |
 | --- | --- | --- |
-| [v1-feature-map.md](v1-feature-map.md) | reference | The V1 surface mapped for release testing: boundaries, journeys, per-area risks |
-| [local-coding-node-goals.md](local-coding-node-goals.md) | goals | The substrate-neutral "why": what the local coding node must achieve |
-| [product-surface-truth-blueprint.md](product-surface-truth-blueprint.md) | rule | Everything surfaced must actually work; the certification stance |
-| [tool-hardening.md](tool-hardening.md) | research + staged design | Local tools vs. model diversity: per-model tool surfaces, the ten hardening recommendations, the eval harness |
+| [beam-tui.md](beam-tui.md) | active blueprint | The beam TUI component blueprint: constitutional decisions, build order, testability doctrine |
+| [beam-tui-crush-mining.md](beam-tui-crush-mining.md) | mining report | Clean-room study of charmbracelet/crush (FSL — implementers use this report, never the repo) |
+| [pando-mining.md](pando-mining.md) | mining report | Clean-room study of digiogithub/pando; mission re-entry design input (§F1-G2/G3) |
+| [eino-evaluation.md](eino-evaluation.md) | decision record | The replace-vs-learn evaluation of cloudwego/eino, with the revisit trigger |
+| [provider-kv-cache.md](provider-kv-cache.md) | active design | Provider KV-cache utilization: prefix determinism, breakpoints, usage extraction |
+| [tool-hardening.md](tool-hardening.md) | decision record | The ten tool-hardening recommendations (Rec 4/5/7 landed in `localtools`); the retired eval-harness design |
 
 ## Past R&D
 

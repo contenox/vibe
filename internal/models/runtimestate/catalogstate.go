@@ -10,7 +10,6 @@ import (
 	"github.com/contenox/beam/internal/libkvstore"
 	"github.com/contenox/beam/internal/models/modelcapability"
 	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/models/statetype"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
@@ -153,7 +152,7 @@ func observedModelNames(models []modelrepo.ObservedModel) []string {
 	return names
 }
 
-func (s *State) applyCapabilityOverrides(ctx context.Context, provider string, model statetype.ModelPullStatus) statetype.ModelPullStatus {
+func (s *State) applyCapabilityOverrides(ctx context.Context, provider string, model ModelPullStatus) ModelPullStatus {
 	provider = modelrepo.CanonicalBackendType(provider)
 	name := strings.TrimSpace(model.Model)
 	if name == "" {
@@ -176,11 +175,11 @@ func (s *State) applyCapabilityOverrides(ctx context.Context, provider string, m
 }
 
 func storeBackendError(state *State, backend *runtimetypes.Backend, apiKey string, err error, models []string) {
-	runtimeState := &statetype.BackendRuntimeState{
+	runtimeState := &BackendRuntimeState{
 		ID:           backend.ID,
 		Name:         backend.Name,
 		Models:       models,
-		PulledModels: []statetype.ModelPullStatus{},
+		PulledModels: []ModelPullStatus{},
 		Backend:      *backend,
 	}
 	if err != nil {

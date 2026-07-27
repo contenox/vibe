@@ -17,6 +17,12 @@ type ChatResult struct {
 	// call (streaming reports usage on the terminal StreamParcel instead).
 	// nil means the provider did not report usage.
 	Usage *TokenUsage
+	// FinishReason is the provider's VERBATIM finish reason (openai "length",
+	// anthropic "max_tokens", gemini "MAX_TOKENS", ollama "length", bedrock
+	// "max_tokens", …). Empty when the provider reported none. Normalization
+	// happens at the consumer (agentservice.InferStopReason) — a truncated
+	// SUCCESS must reach clients as a max-tokens stop, not end_turn.
+	FinishReason string
 }
 
 type ToolCall struct {
@@ -254,5 +260,7 @@ type LLMStreamClient interface {
 }
 
 type LLMPromptExecClient interface {
-	Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, error)
+	// Prompt returns the completion text plus the provider-reported token
+	// accounting; nil usage means the provider did not report any.
+	Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, *TokenUsage, error)
 }

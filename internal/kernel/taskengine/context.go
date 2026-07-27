@@ -45,7 +45,7 @@ func MergeTemplateVars(ctx context.Context, overlay map[string]string) context.C
 }
 
 // WithRequestedContextLength attaches a per-request context window. Task
-// execution uses it as the resolver/modeld minimum without replacing the
+// execution uses it as the resolver's minimum without replacing the
 // chain's token_limit guardrail.
 func WithRequestedContextLength(ctx context.Context, contextLength int) context.Context {
 	return libmodelprovider.WithRequestedContextLength(ctx, contextLength)

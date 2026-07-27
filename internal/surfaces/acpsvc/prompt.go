@@ -250,8 +250,8 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		// Distinguish a genuine user cancellation from an execution failure that
 		// merely SURFACED as a timeout. Only context.Canceled is a cancellation
 		// (the client sent session/cancel, or the connection/parent context was
-		// torn down). context.DeadlineExceeded — e.g. modeld refusing to load a
-		// model, or waiting on a busy single GPU slot until an inner LLM call
+		// torn down). context.DeadlineExceeded — e.g. a local backend refusing to
+		// load a model, or waiting on a busy single GPU slot until an inner LLM call
 		// deadlines — is a FAILURE the client must SEE, not a silent clean stop.
 		// agentservice.InferStopReason maps BOTH to StopCancelled, so trusting
 		// resp.StopReason (or a bare promptCtx.Err()) here would let a hard

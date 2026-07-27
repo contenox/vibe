@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/statetype"
+	"github.com/contenox/beam/internal/models/runtimestate"
 	"github.com/contenox/beam/internal/services/setupcheck"
 )
 
@@ -13,7 +13,7 @@ type activityTrackerDecorator struct {
 	tracker libtracker.ActivityTracker
 }
 
-func (d *activityTrackerDecorator) Get(ctx context.Context) ([]statetype.BackendRuntimeState, error) {
+func (d *activityTrackerDecorator) Get(ctx context.Context) ([]runtimestate.BackendRuntimeState, error) {
 	reportErrFn, _, endFn := d.tracker.Start(
 		ctx,
 		"read",

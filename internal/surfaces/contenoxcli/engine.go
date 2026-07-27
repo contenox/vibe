@@ -10,9 +10,13 @@ import (
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	"github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/beam/internal/services/agentservice"
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/localtools"
+	"github.com/contenox/beam/internal/services/missionservice"
+	"github.com/contenox/beam/internal/services/missiontools"
 	"github.com/contenox/beam/internal/services/setupcheck"
+	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
 // ComputeReadiness builds the engine — which runs a read-only backend sync, NOT
@@ -46,6 +50,12 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		"print":    localtools.NewPrint(tracker),
 		"webtools": localtools.NewWebCaller(tracker),
 		"local_fs": localtools.NewLocalFSTools(opts.EffectiveLocalExecAllowedDir, db),
+		// Durable-only mission tools (no asker, no publisher): this engine is
+		// what `approvals respond` resumes suspended MISSION chains on, and a
+		// resumed chain's later mission_report/mission_finish calls must land
+		// in the store rather than fail as unknown tools. A nested attention
+		// ask degrades to the durable blocker fallback here.
+		missiontools.ToolsProviderName: missiontools.New(missionservice.New(db), nil),
 	}
 	if opts.EffectiveEnableLocalExec {
 		execOpts := []localtools.LocalExecOption{}
@@ -66,6 +76,15 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 
 	readinessModel, readinessProvider := readinessDefaults(opts)
 
+	// Build the HITL service HERE and inject it, rather than letting enginesvc
+	// mint one internally: the composition root must hold the instance so it can
+	// register the resume-on-verdict hook after the engine exists (the engine is
+	// a hook dependency, so registration cannot happen anywhere lower).
+	var hitlSvc hitlservice.Service
+	if opts.EffectiveHITL {
+		hitlSvc = hitlservice.NewWithDefaultPolicy(hitlPolicySource(opts.ContenoxDir), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, "")
+	}
+
 	reportChange("phase", "tools_prepared")
 	engine, err := enginesvc.Build(ctx, db, enginesvc.Config{
 		DefaultModel:             opts.EffectiveDefaultModel,
@@ -79,6 +98,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		LocalTools:               tools,
 		EnableHITL:               opts.EffectiveHITL,
 		AskApproval:              askApproval,
+		HITLService:              hitlSvc,
 		Tracker:                  tracker,
 		Tracing:                  opts.EffectiveTracing,
 		SkipBackendCycle:         opts.EffectiveSkipBackendCycle,
@@ -89,6 +109,13 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	if err != nil {
 		reportErr(err)
 		return nil, err
+	}
+	if hitlSvc != nil {
+		hitlservice.SetResumeHook(hitlSvc, agentservice.ResumeHook(agentservice.Deps{
+			Engine:      engine,
+			DB:          db,
+			WorkspaceID: ResolveWorkspaceID(opts.ContenoxDir),
+		}))
 	}
 	reportChange("phase", "enginesvc_built")
 	return engine, nil

@@ -36,7 +36,7 @@ func NewVLLMPromptClient(ctx context.Context, baseURL, modelName string, context
 }
 
 // Prompt implements LLMPromptExecClient interface
-func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, error) {
+func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, *modelrepo.TokenUsage, error) {
 	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "prompt", "vllm", "model", c.modelName)
 	defer end()
@@ -56,14 +56,14 @@ func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, tempe
 	var response chatResponse
 	if err := c.sendRequest(ctx, "/v1/chat/completions", request, &response); err != nil {
 		reportErr(err)
-		return "", err
+		return "", nil, err
 	}
 
 	// Handle response
 	if len(response.Choices) == 0 {
 		err := fmt.Errorf("no completion choices returned from vLLM for model %s", c.modelName)
 		reportErr(err)
-		return "", err
+		return "", nil, err
 	}
 
 	choice := response.Choices[0]
@@ -72,7 +72,7 @@ func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, tempe
 		if choice.Message.Content == "" {
 			err := fmt.Errorf("empty content from model %s despite normal completion", c.modelName)
 			reportErr(err)
-			return "", err
+			return "", nil, err
 		}
 		reportChange("prompt_completed", map[string]any{
 			"finish_reason":     "stop",
@@ -81,18 +81,25 @@ func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, tempe
 			"prompt_tokens":     response.Usage.PromptTokens,
 			"completion_tokens": response.Usage.CompletionTokens,
 		})
-		return choice.Message.Content, nil
+		// Same accounting as the chat path: vLLM reports no usable cache
+		// dimension per request, so the cache fields stay zero.
+		usage := &modelrepo.TokenUsage{
+			PromptTokens:     response.Usage.PromptTokens,
+			CompletionTokens: response.Usage.CompletionTokens,
+			TotalTokens:      response.Usage.TotalTokens,
+		}
+		return choice.Message.Content, usage, nil
 	case "length":
 		err := fmt.Errorf("token limit reached for model %s (partial response: %q)", c.modelName, choice.Message.Content)
 		reportErr(err)
-		return "", err
+		return "", nil, err
 	case "content_filter":
 		err := fmt.Errorf("content filtered for model %s (partial response: %q)", c.modelName, choice.Message.Content)
 		reportErr(err)
-		return "", err
+		return "", nil, err
 	default:
 		err := fmt.Errorf("unexpected completion reason %q for model %s", choice.FinishReason, c.modelName)
 		reportErr(err)
-		return "", err
+		return "", nil, err
 	}
 }

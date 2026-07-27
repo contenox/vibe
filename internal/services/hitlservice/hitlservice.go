@@ -170,6 +170,14 @@ type Service interface {
 	// summary, diff, policy name, and matched rule), since ListPending
 	// hands back the durable row unprojected rather than a narrower DTO.
 	ListPending(ctx context.Context, limit int) ([]*runtimetypes.HITLApproval, error)
+
+	// AbandonMissionAsks closes every pending ask filed under missionID,
+	// deliberately WITHOUT running the resume hook: it exists for `mission
+	// stop`, where nothing of the stopped mission may continue. Each row
+	// resolves to denied (an attention ask thereby reads as unanswered) and
+	// the closed IDs are returned so the caller can delete any checkpoints
+	// suspended under them.
+	AbandonMissionAsks(ctx context.Context, missionID string) ([]string, error)
 }
 
 // Sentinel errors Respond returns instead of a silent false — see Respond's
@@ -419,7 +427,22 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 	if s.approvals == nil {
 		return false, fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
 	}
-	approvalID := uuid.NewString()
+	// A caller-supplied ToolCallID IS the ask's durable identity: the child
+	// wrapper files its pending row under the engine tool-call ID before the
+	// ask ever crosses the ACP wire, so a parent-side RequestApproval carrying
+	// that same ID must ADOPT the existing row, not mint a twin. (The twin was
+	// the dual-inbox wart: answering the child's row worked, the parent's
+	// duplicate sat pending until the sweeper expired it.)
+	approvalID := req.ToolCallID
+	adopted := false
+	if approvalID == "" {
+		approvalID = uuid.NewString()
+	} else if row, err := s.approvals.GetHITLApproval(ctx, approvalID); err == nil {
+		if row.State != runtimetypes.HITLApprovalPending {
+			return row.State == runtimetypes.HITLApprovalApproved, nil
+		}
+		adopted = true
+	}
 
 	// A matched rule's own TimeoutS always wins. Absent one, the row (and the
 	// wait below) is bounded by the serve-level ceiling instead of blocking
@@ -430,12 +453,27 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 		timeoutDur = time.Duration(req.TimeoutS) * time.Second
 	}
 
-	row := buildApprovalRow(approvalID, req, time.Now().UTC(), timeoutDur)
-	// Durable pending row FIRST — a restart between here and the answer must
-	// still show this ask as pending, not lose it (fleet-consolidation.md
-	// slice C1, defect D3).
-	if err := s.approvals.CreateHITLApproval(ctx, row); err != nil {
-		return false, fmt.Errorf("hitlservice: persist pending approval: %w", err)
+	if !adopted {
+		row := buildApprovalRow(approvalID, req, time.Now().UTC(), timeoutDur)
+		// Durable pending row FIRST — a restart between here and the answer must
+		// still show this ask as pending, not lose it (fleet-consolidation.md
+		// slice C1, defect D3).
+		if err := s.approvals.CreateHITLApproval(ctx, row); err != nil {
+			// A create-vs-create race on a shared ToolCallID: exactly one
+			// wins; the loser re-reads and adopts (or returns the verdict a
+			// blink-fast resolver already recorded).
+			if req.ToolCallID != "" {
+				if row, getErr := s.approvals.GetHITLApproval(ctx, approvalID); getErr == nil {
+					if row.State != runtimetypes.HITLApprovalPending {
+						return row.State == runtimetypes.HITLApprovalApproved, nil
+					}
+				} else {
+					return false, fmt.Errorf("hitlservice: persist pending approval: %w", err)
+				}
+			} else {
+				return false, fmt.Errorf("hitlservice: persist pending approval: %w", err)
+			}
+		}
 	}
 
 	// Buffered (capacity 1): a Respond landing before this goroutine reaches
@@ -474,27 +512,41 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 		defer cancel()
 	}
 
-	select {
-	case ans := <-ch:
-		return ans.approved, nil
-	case <-waitCtx.Done():
-		if ctx.Err() != nil {
-			// The caller's own context ended: process shutdown, client
-			// disconnect, or — when the matched rule set TimeoutS>0 — the
-			// exact deadline localtools.HITLWrapper.Exec applied to askCtx,
-			// which it detects via this same ctx.Err() to apply the rule's
-			// OnTimeout itself (unchanged from before this change). The row
-			// is left pending here either way: SweepExpired closes it out
-			// once expires_at passes, and a restart before that still finds
-			// it pending rather than losing it.
-			return false, ctx.Err()
+	// The channel wakes a same-process Respond immediately; the poll watches
+	// the DURABLE row for a resolver in another process (the child unit's own
+	// inline resolve on an adopted row, or `contenox approvals respond` in a
+	// second terminal) — the same two-lane wait RequestAttention runs.
+	poll := time.NewTicker(attentionPollInterval)
+	defer poll.Stop()
+	for {
+		select {
+		case ans := <-ch:
+			return ans.approved, nil
+		case <-poll.C:
+			row, err := s.approvals.GetHITLApproval(ctx, approvalID)
+			if err != nil || row.State == runtimetypes.HITLApprovalPending {
+				continue // unreadable right now, or still waiting on a human
+			}
+			return row.State == runtimetypes.HITLApprovalApproved, nil
+		case <-waitCtx.Done():
+			if ctx.Err() != nil {
+				// The caller's own context ended: process shutdown, client
+				// disconnect, or — when the matched rule set TimeoutS>0 — the
+				// exact deadline localtools.HITLWrapper.Exec applied to askCtx,
+				// which it detects via this same ctx.Err() to apply the rule's
+				// OnTimeout itself (unchanged from before this change). The row
+				// is left pending here either way: SweepExpired closes it out
+				// once expires_at passes, and a restart before that still finds
+				// it pending rather than losing it.
+				return false, ctx.Err()
+			}
+			// Only the serve-level ceiling could have fired here (a rule timeout
+			// would have made waitCtx == ctx, handled above): nothing upstream
+			// bounds this ask, so treat it exactly like an explicit human denial
+			// — a late denial beats an eternal block — instead of hanging
+			// forever. SweepExpired resolves the row itself on its next tick.
+			return false, nil
 		}
-		// Only the serve-level ceiling could have fired here (a rule timeout
-		// would have made waitCtx == ctx, handled above): nothing upstream
-		// bounds this ask, so treat it exactly like an explicit human denial
-		// — a late denial beats an eternal block — instead of hanging
-		// forever. SweepExpired resolves the row itself on its next tick.
-		return false, nil
 	}
 }
 
@@ -798,6 +850,47 @@ func marshalAttentionResolution(text, by string) json.RawMessage {
 		return json.RawMessage(`{}`)
 	}
 	return raw
+}
+
+// AbandonMissionAsks implements Service — see the interface doc. The CAS in
+// ResolveHITLApproval keeps it race-safe against a concurrent Respond/Answer:
+// whichever transition lands first wins, and a row that just resolved is
+// simply skipped here.
+func (s *service) AbandonMissionAsks(ctx context.Context, missionID string) ([]string, error) {
+	if s.approvals == nil {
+		return nil, fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
+	}
+	rows, err := s.approvals.ListHITLApprovalsForMission(ctx, missionID, runtimetypes.MAXLIMIT)
+	if err != nil {
+		return nil, fmt.Errorf("hitlservice: list asks for mission %s: %w", missionID, err)
+	}
+	now := time.Now().UTC()
+	var closed []string
+	for _, row := range rows {
+		if row.State != runtimetypes.HITLApprovalPending {
+			continue
+		}
+		err := s.approvals.ResolveHITLApproval(ctx, row.ID, runtimetypes.HITLApprovalDenied, marshalApprovalResolution(false), now)
+		if err != nil {
+			if errors.Is(err, libdb.ErrNotFound) {
+				continue // resolved concurrently — not ours to close anymore
+			}
+			return closed, fmt.Errorf("hitlservice: abandon ask %s: %w", row.ID, err)
+		}
+		// Wake a waiter parked on THIS instance so it sees the deny now rather
+		// than at its own timeout. Same best-effort shape as resolve().
+		s.mu.Lock()
+		ch, ok := s.pending[row.ID]
+		s.mu.Unlock()
+		if ok {
+			select {
+			case ch <- answer{approved: false}:
+			default:
+			}
+		}
+		closed = append(closed, row.ID)
+	}
+	return closed, nil
 }
 
 func marshalApprovalResolution(approved bool) json.RawMessage {

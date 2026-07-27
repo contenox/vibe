@@ -1,6 +1,0 @@
-{
-  "tool_family": "local_fs",
-  "required": true,
-  "max_iterations": 12,
-  "tags": ["incident", "navigation", "binary-detection", "list_dir"]
-}

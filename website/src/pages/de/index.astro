@@ -12,7 +12,7 @@ const t: LandingStrings = {
   ctaPackage: 'Workflow verpacken',
   ctaGithub: 'Auf GitHub ansehen',
   installNote: 'Installiert <code class="font-mono">contenox</code>. Mit <code class="font-mono">contenox init</code> richtest du einen Workspace ein.',
-  positioning: 'contenox ist ein offenes Coding-Harness: dieselben Sessions im Terminal und im Editor, jede Regel eine lesbare Datei, jedes Modell und jeder MCP in Kombination.',
+  positioning: 'contenox ist ein offenes Coding-Harness, gebaut um den Envelope: die Datei, die begrenzt, was ein Agent unbeaufsichtigt tun darf. Missionen sind das, was Envelopes sicher machen — abfeuern, aushängen, zurückkommen, wenn es fertig ist. Dieselben Sessions im Terminal und im Editor, jedes Modell und jeder MCP in Kombination.',
   tableWorld: 'Der alte Weg',
   tableWhy: 'contenox',
   rows: [
@@ -40,8 +40,8 @@ const t: LandingStrings = {
   ],
   capsEyebrow: 'Kernfähigkeiten',
   caps: [
-    ['Die Chain ist der Vertrag', 'Prompts, Modell-Routing, Tool-Allowlists, Kommando-Policies, Budgets und Freigabe-Gates sind sichtbare Schlüssel in einer versionierten Datei — prüfbar, diffbar, wiederholbar.'],
-    ['Läuft, wo gearbeitet wird', 'Ein Harness hinter dem CLI, der beam-TUI und jedem ACP-Editor. Dieselben Chains, Sessions und Policies überall.'],
+    ['Der Envelope ist die Grenze', 'Was ein Agent unbeaufsichtigt tun darf, ist eine Datei, die du geschrieben hast: Tool-Allowlists, Kommando-Policies, Budgets, Freigabe-Gates. Envelopes überleben Neustarts — eine unbeantwortete Freigabe checkpointet den Run und gibt den Platz frei; beantworte sie aus jedem Terminal, auch Tage später, und der Run läuft genau einmal weiter.'],
+    ['Die Chain ist der Vertrag', 'Prompts, Modell-Routing und jede Regel sind sichtbare Schlüssel in einer versionierten Datei — prüfbar, diffbar, wiederholbar. Ein Harness hinter dem CLI, der beam-TUI und jedem ACP-Editor.'],
     ['Provider sind Konfiguration', 'Inferenz läuft über lokales Ollama oder vLLM — oder über OpenAI, Anthropic, Gemini, Bedrock oder Vertex — ohne den Workflow anzufassen.'],
     ['Lokal als Standard', 'Sessions, Konfiguration, Run-Logs und Zustand liegen in SQLite auf deinem Rechner. Kein gehosteter Dienst, kein Konto — Telemetrie ist opt-in und standardmäßig aus.'],
   ],

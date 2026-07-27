@@ -37,9 +37,8 @@ semantics elsewhere.
 - `contenox beam` — the terminal UI (in development, built on the same ACP
   session services)
 
-When you change this surface, update
-`docs/development/blueprints/v1-feature-map.md` and the relevant user docs in
-the same change.
+When you change this surface, update the relevant user docs in the same
+change.
 
 ### Abstraction layers
 

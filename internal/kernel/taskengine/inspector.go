@@ -38,6 +38,10 @@ type CapturedStateUnit struct {
 	ModelName    string      `json:"modelName,omitempty"`
 	ToolNames    []string    `json:"toolNames,omitempty"`
 	TokenUsage   *TokenUsage `json:"tokenUsage,omitempty"`
+	// FinishReason is the provider's verbatim finish reason for the model call
+	// this step captured, when its output was a chat history ("length"-class
+	// values mean truncation). Consumers normalize; the engine records.
+	FinishReason string `json:"finishReason,omitempty"`
 }
 
 type TokenUsage struct {

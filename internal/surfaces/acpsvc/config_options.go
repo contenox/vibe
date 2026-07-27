@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/contenox/beam/internal/kernel/reasoning"
-	"github.com/contenox/beam/internal/models/statetype"
+	"github.com/contenox/beam/internal/models/runtimestate"
 	"github.com/contenox/beam/internal/services/project"
 	libacp "github.com/contenox/beam/libacp"
 )
@@ -425,19 +425,19 @@ func (t *Transport) resolveSessionHITLPolicy(sess *sessionEntry) string {
 	return name
 }
 
-func (t *Transport) runtimeStates(ctx context.Context) []statetype.BackendRuntimeState {
+func (t *Transport) runtimeStates(ctx context.Context) []runtimestate.BackendRuntimeState {
 	if t.deps.Engine == nil || t.deps.Engine.State == nil {
 		return nil
 	}
 	// The runtime reconciles backends at startup and on explicit refresh only;
 	// without this, a backend that comes up after startup (most commonly a
-	// (re)started modeld) stays invisible to the ACP model dropdown until some
+	// (re)started ollama) stays invisible to the ACP model dropdown until some
 	// other read path (e.g. GET /state) happens to trigger a reconcile first.
 	// Debounced (see ReconcileIfStale), so this is cheap even on a hot config
 	// options read. Best-effort: serve the existing snapshot even if it fails.
 	_ = t.deps.Engine.State.ReconcileIfStale(ctx)
 	states := t.deps.Engine.State.Get(ctx)
-	out := make([]statetype.BackendRuntimeState, 0, len(states))
+	out := make([]runtimestate.BackendRuntimeState, 0, len(states))
 	for _, state := range states {
 		out = append(out, state)
 	}
@@ -600,7 +600,7 @@ func hitlPolicyDisplayName(name string) string {
 	return name
 }
 
-func describePulledModel(model statetype.ModelPullStatus) string {
+func describePulledModel(model runtimestate.ModelPullStatus) string {
 	var parts []string
 	if model.ContextLength > 0 {
 		parts = append(parts, "context "+strconv.Itoa(model.ContextLength))

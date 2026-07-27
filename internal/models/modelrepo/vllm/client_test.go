@@ -220,7 +220,7 @@ func TestUnit_VLLMPrompt_TracksReasoningAlias(t *testing.T) {
 		tracker:    tracker,
 	}
 
-	resp, err := client.Prompt(context.Background(), "sys", 0.3, "hello")
+	resp, _, err := client.Prompt(context.Background(), "sys", 0.3, "hello")
 	require.NoError(t, err)
 	assert.Equal(t, "final answer", resp)
 	require.NotNil(t, gotRequest.Temperature)

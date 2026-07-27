@@ -387,6 +387,7 @@ func init() {
 	rootCmd.AddCommand(backendCmd)
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(missionCmd)
+	rootCmd.AddCommand(approvalsCmd)
 	rootCmd.AddCommand(cacheCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(modelCmd)

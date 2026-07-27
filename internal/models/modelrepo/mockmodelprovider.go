@@ -125,9 +125,9 @@ func (m *MockChatClient) Close() error {
 // MockPromptClient is a mock implementation of LLMPromptExecClient for testing.
 type MockPromptClient struct{}
 
-// Prompt returns a mock response.
-func (m *MockPromptClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, error) {
-	return "mock response", nil
+// Prompt returns a mock response with no usage report.
+func (m *MockPromptClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, *TokenUsage, error) {
+	return "mock response", nil, nil
 }
 
 // Close is a no-op for the mock client.

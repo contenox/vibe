@@ -2,11 +2,15 @@
 
 **Fire coding work at an agent, under rules you can read.**
 
-An open coding harness. Terminal CLI, the same sessions inside Zed,
-JetBrains, or any ACP editor, and beam on the way. Missions run detached
-under approval envelopes — plain files, like the system prompts, chains, and
-tool allowlists. Any model, any MCP server, any OpenAPI spec as tools, in
-combination. SQLite. No account.
+An open coding harness, built around the envelope: a plain file that bounds
+what an agent may do unattended — tool allowlists, command policy, budgets,
+approval gates. Missions are what envelopes make safe: fire one, detach,
+come back to done. Envelopes survive restarts — an unanswered approval
+checkpoints the run; answer it later with `contenox approvals respond`, from
+any terminal, and the run resumes exactly once. Terminal CLI, the same
+sessions inside Zed, JetBrains, or any ACP editor, and beam on the way. Any
+model, any MCP server, any OpenAPI spec as tools, in combination. SQLite.
+No account.
 
 | The old way | contenox |
 | --- | --- |

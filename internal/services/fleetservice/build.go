@@ -169,7 +169,18 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 	}
 	fleet := New(kernel, agents, deps.Missions, nil, deps.ProjectRoot, deps.Tracker, opts...)
 
+	// `mission stop` from ANY process reaches this host: the terminal-status
+	// event travels the shared SQLite bus, and the kernel hosting the unit
+	// reaps it (see stop.go).
+	stopTeardown, err := runStatusTeardown(ctx, deps.Bus, deps.Missions, kernel)
+	if err != nil {
+		stopRouter()
+		_ = kernel.Close()
+		return nil, nil, nil, err
+	}
+
 	stop := func() {
+		stopTeardown()
 		stopRouter()
 		_ = kernel.Close()
 	}

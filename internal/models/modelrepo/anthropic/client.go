@@ -354,7 +354,7 @@ func (c *anthropicStreamClient) Stream(ctx context.Context, messages []modelrepo
 
 type anthropicPromptClient struct{ anthropicClient }
 
-func (c *anthropicPromptClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, error) {
+func (c *anthropicPromptClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, *modelrepo.TokenUsage, error) {
 	msgs := []modelrepo.Message{{Role: "user", Content: prompt}}
 	if s := strings.TrimSpace(systemInstruction); s != "" {
 		msgs = append([]modelrepo.Message{{Role: "system", Content: s}}, msgs...)
@@ -366,9 +366,9 @@ func (c *anthropicPromptClient) Prompt(ctx context.Context, systemInstruction st
 	}
 	res, err := chat.Chat(ctx, msgs, chatArgs...)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return res.Message.Content, nil
+	return res.Message.Content, res.Usage, nil
 }
 
 var (

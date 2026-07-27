@@ -479,12 +479,15 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 					step.ToolNames = names
 				}
 			}
-			if hist, ok := output.(ChatHistory); ok && (hist.InputTokens > 0 || hist.OutputTokens > 0) {
-				step.TokenUsage = &TokenUsage{
-					Prompt:     hist.InputTokens,
-					Completion: hist.OutputTokens,
-					Total:      hist.InputTokens + hist.OutputTokens,
+			if hist, ok := output.(ChatHistory); ok {
+				if hist.InputTokens > 0 || hist.OutputTokens > 0 {
+					step.TokenUsage = &TokenUsage{
+						Prompt:     hist.InputTokens,
+						Completion: hist.OutputTokens,
+						Total:      hist.InputTokens + hist.OutputTokens,
+					}
 				}
+				step.FinishReason = hist.FinishReason
 			}
 			stack.RecordStep(step)
 

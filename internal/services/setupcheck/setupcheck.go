@@ -10,7 +10,7 @@ import (
 
 	"github.com/contenox/beam/internal/kernel/llmresolver"
 	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/models/statetype"
+	"github.com/contenox/beam/internal/models/runtimestate"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
@@ -28,7 +28,7 @@ type Input struct {
 	DefaultAltProvider string
 	DefaultChain       string
 	HITLPolicyName     string
-	States             []statetype.BackendRuntimeState
+	States             []runtimestate.BackendRuntimeState
 	// RegisteredBackendCount, if non-nil, overrides len(RegisteredBackends) / len(States)
 	// for BackendCount. CLI doctor sets this from ListBackends when runtime state sync is unavailable.
 	RegisteredBackendCount *int
@@ -222,7 +222,7 @@ func OverlayEffectiveDefaults(res Result, model, provider string) Result {
 
 // ResolveMaxOutputTokens returns the known output-token ceiling for the active
 // provider/model from already-synced runtime state. It returns 0 when unknown.
-func ResolveMaxOutputTokens(states []statetype.BackendRuntimeState, provider, model string) int {
+func ResolveMaxOutputTokens(states []runtimestate.BackendRuntimeState, provider, model string) int {
 	provider = modelrepo.CanonicalBackendType(provider)
 	model = strings.TrimSpace(model)
 	if provider == "" || model == "" {
@@ -426,7 +426,7 @@ func addIssue(r *Result, issue Issue) {
 	r.Issues = append(r.Issues, issue)
 }
 
-func buildBackendChecks(registered []runtimetypes.Backend, states []statetype.BackendRuntimeState, defaultProvider string) []BackendCheck {
+func buildBackendChecks(registered []runtimetypes.Backend, states []runtimestate.BackendRuntimeState, defaultProvider string) []BackendCheck {
 	if len(registered) == 0 && len(states) > 0 {
 		registered = make([]runtimetypes.Backend, 0, len(states))
 		for _, state := range states {
@@ -447,7 +447,7 @@ func buildBackendChecks(registered []runtimetypes.Backend, states []statetype.Ba
 		return registered[i].ID < registered[j].ID
 	})
 
-	stateByID := make(map[string]statetype.BackendRuntimeState, len(states))
+	stateByID := make(map[string]runtimestate.BackendRuntimeState, len(states))
 	for _, state := range states {
 		stateByID[state.Backend.ID] = state
 	}
@@ -501,7 +501,7 @@ func countReachableChecks(checks []BackendCheck) int {
 	return n
 }
 
-func countChatModelsOnState(state statetype.BackendRuntimeState) int {
+func countChatModelsOnState(state runtimestate.BackendRuntimeState) int {
 	n := 0
 	for _, model := range state.PulledModels {
 		if model.CanChat {
@@ -511,7 +511,7 @@ func countChatModelsOnState(state statetype.BackendRuntimeState) int {
 	return n
 }
 
-func chatModelNamesOnState(state statetype.BackendRuntimeState) []string {
+func chatModelNamesOnState(state runtimestate.BackendRuntimeState) []string {
 	seen := map[string]struct{}{}
 	var names []string
 	for _, model := range state.PulledModels {

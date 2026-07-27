@@ -11,7 +11,6 @@ import (
 	libbus "github.com/contenox/beam/internal/libbus"
 	libdb "github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/models/modelcapability"
-	"github.com/contenox/beam/internal/models/statetype"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +30,7 @@ func TestUnit_ApplyCapabilityOverrides_ManualTrueWins(t *testing.T) {
 	_, err := modelcapability.New(store).SetThink(ctx, "OpenAI", "gpt-5", true)
 	require.NoError(t, err)
 
-	got := state.applyCapabilityOverrides(ctx, "openai", statetype.ModelPullStatus{Model: "gpt-5"})
+	got := state.applyCapabilityOverrides(ctx, "openai", ModelPullStatus{Model: "gpt-5"})
 	require.True(t, got.CanThink)
 }
 
@@ -40,7 +39,7 @@ func TestUnit_ApplyCapabilityOverrides_ManualFalseSuppressesProviderTrue(t *test
 	_, err := modelcapability.New(store).SetThink(ctx, "vllm", "Qwen/Qwen3-32B", false)
 	require.NoError(t, err)
 
-	got := state.applyCapabilityOverrides(ctx, "vllm", statetype.ModelPullStatus{
+	got := state.applyCapabilityOverrides(ctx, "vllm", ModelPullStatus{
 		Model:    "Qwen/Qwen3-32B",
 		CanThink: true,
 	})

@@ -336,9 +336,15 @@ func (b *SQLiteBus) Request(ctx context.Context, subject string, data []byte) ([
 	if closed {
 		return nil, ErrConnectionClosed
 	}
-	// Report cancellation as cancellation rather than letting it surface as an
-	// opaque driver error from the INSERT below.
+	// A deadline that has already passed is a request timeout, the same verdict
+	// the wait loop below reaches — the classification must not depend on WHERE
+	// inside Request the deadline happens to fire (under load it can expire
+	// before or during the INSERT). Cancellation stays cancellation: a caller
+	// that aborted on purpose must not be told the peer was too slow.
 	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: %v", ErrRequestTimeout, err)
+		}
 		return nil, err
 	}
 
@@ -351,6 +357,9 @@ func (b *SQLiteBus) Request(ctx context.Context, subject string, data []byte) ([
 		id, subject, data,
 	)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: %v", ErrRequestTimeout, err)
+		}
 		return nil, fmt.Errorf("sqlite request insert: %w", err)
 	}
 

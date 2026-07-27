@@ -4,14 +4,14 @@ import (
 	"context"
 
 	"github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/models/statetype"
+	"github.com/contenox/beam/internal/models/runtimestate"
 	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
 // GatherInput builds Input from SQLite KV defaults, registered backend count, and a runtime state snapshot.
 // workspaceID scopes workspace-scoped keys (default-chain, hitl-policy-name) with global fallback.
-func GatherInput(ctx context.Context, db libdbexec.DBManager, states []statetype.BackendRuntimeState, workspaceID string) (Input, error) {
+func GatherInput(ctx context.Context, db libdbexec.DBManager, states []runtimestate.BackendRuntimeState, workspaceID string) (Input, error) {
 	store := runtimetypes.New(db.WithoutTransaction())
 	backends, err := store.ListBackends(ctx, nil, runtimetypes.MAXLIMIT)
 	if err != nil {
@@ -45,11 +45,11 @@ func GatherInput(ctx context.Context, db libdbexec.DBManager, states []statetype
 }
 
 // StatesFromMap flattens runtime state snapshots for Evaluate / GatherInput.
-func StatesFromMap(m map[string]statetype.BackendRuntimeState) []statetype.BackendRuntimeState {
+func StatesFromMap(m map[string]runtimestate.BackendRuntimeState) []runtimestate.BackendRuntimeState {
 	if len(m) == 0 {
 		return nil
 	}
-	out := make([]statetype.BackendRuntimeState, 0, len(m))
+	out := make([]runtimestate.BackendRuntimeState, 0, len(m))
 	for _, v := range m {
 		out = append(out, v)
 	}

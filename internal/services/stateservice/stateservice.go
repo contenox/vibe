@@ -9,7 +9,6 @@ import (
 	"github.com/contenox/beam/internal/kernel/reasoning"
 	"github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/models/runtimestate"
-	"github.com/contenox/beam/internal/models/statetype"
 	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/services/setupcheck"
 	"github.com/contenox/beam/internal/store/runtimetypes"
@@ -17,7 +16,7 @@ import (
 
 // Service exposes runtime backend state plus onboarding/setup evaluation (same inputs as GET /setup-status).
 type Service interface {
-	Get(ctx context.Context) ([]statetype.BackendRuntimeState, error)
+	Get(ctx context.Context) ([]runtimestate.BackendRuntimeState, error)
 	// SetupStatus returns readiness from KV defaults, registered backends, and current runtime state.
 	SetupStatus(ctx context.Context) (setupcheck.Result, error)
 	// Refresh reconciles registered backends/models, then returns the updated setup status.
@@ -79,7 +78,7 @@ type service struct {
 }
 
 // Get implements Service.
-func (s *service) Get(ctx context.Context) ([]statetype.BackendRuntimeState, error) {
+func (s *service) Get(ctx context.Context) ([]runtimestate.BackendRuntimeState, error) {
 	// The runtime reconciles backends at startup and on explicit refresh only;
 	// without this a backend that comes up after startup (most commonly a
 	// (re)started modeld) stays invisible to /state and /setup-status until the
@@ -87,7 +86,7 @@ func (s *service) Get(ctx context.Context) ([]statetype.BackendRuntimeState, err
 	// Best-effort: serve the existing snapshot even if the reconcile fails.
 	_ = s.state.ReconcileIfStale(ctx)
 	m := s.state.Get(ctx)
-	l := make([]statetype.BackendRuntimeState, 0, len(m))
+	l := make([]runtimestate.BackendRuntimeState, 0, len(m))
 	for _, e := range m {
 		l = append(l, e)
 	}

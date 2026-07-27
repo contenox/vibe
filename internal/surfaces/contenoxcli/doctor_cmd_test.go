@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/statetype"
+	"github.com/contenox/beam/internal/models/runtimestate"
 	"github.com/stretchr/testify/require"
 )
 
@@ -13,17 +13,17 @@ import (
 // text-only, and stays silent when no backend is reachable (connectivity
 // errors already dominate that output).
 func TestUnit_VisionSummary(t *testing.T) {
-	state := map[string]statetype.BackendRuntimeState{
+	state := map[string]runtimestate.BackendRuntimeState{
 		"b1": {
 			ID: "b1", Name: "openai",
-			PulledModels: []statetype.ModelPullStatus{
+			PulledModels: []runtimestate.ModelPullStatus{
 				{Model: "gpt-4o", CanChat: true, CanVision: true},
 				{Model: "qwen3-4b", CanChat: true},
 			},
 		},
 		"b2": {
 			ID: "b2", Name: "broken", Error: "connection refused",
-			PulledModels: []statetype.ModelPullStatus{
+			PulledModels: []runtimestate.ModelPullStatus{
 				{Model: "ghost-vlm", CanChat: true, CanVision: true},
 			},
 		},
@@ -51,8 +51,8 @@ func TestUnit_VisionSummary(t *testing.T) {
 	})
 
 	t.Run("no vision models teaches the refusal", func(t *testing.T) {
-		v := visionSummaryFromState(map[string]statetype.BackendRuntimeState{
-			"b1": {ID: "b1", PulledModels: []statetype.ModelPullStatus{{Model: "qwen3-4b", CanChat: true}}},
+		v := visionSummaryFromState(map[string]runtimestate.BackendRuntimeState{
+			"b1": {ID: "b1", PulledModels: []runtimestate.ModelPullStatus{{Model: "qwen3-4b", CanChat: true}}},
 		}, "")
 		var out strings.Builder
 		printVisionSummary(&out, v)
@@ -60,7 +60,7 @@ func TestUnit_VisionSummary(t *testing.T) {
 	})
 
 	t.Run("no reachable backend prints nothing", func(t *testing.T) {
-		v := visionSummaryFromState(map[string]statetype.BackendRuntimeState{
+		v := visionSummaryFromState(map[string]runtimestate.BackendRuntimeState{
 			"b2": {ID: "b2", Error: "down"},
 		}, "")
 		var out strings.Builder

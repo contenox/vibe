@@ -189,3 +189,54 @@ func TestUnit_RequestAttention_AnswerFromAnotherProcessWakesTheUnit(t *testing.T
 		t.Fatal("a unit waiting in another process was never woken by the answer")
 	}
 }
+
+// The park window: elapsing unanswered returns the typed pending error with
+// the row STILL pending and answerable — the checkpoint-and-release seam.
+func TestUnit_RequestAttention_ParkWindowReturnsTypedPending(t *testing.T) {
+	ctx, store, _ := setupHITLDB(t)
+	svc := newDurableService(t, store)
+
+	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
+		Summary:    "anyone there?",
+		AskID:      "call-park1",
+		ParkWindow: 20 * time.Millisecond,
+	}, taskengine.NoopTaskEventSink{})
+
+	var pending *hitlservice.AttentionPendingError
+	require.ErrorAs(t, err, &pending)
+	require.Equal(t, "call-park1", pending.AskID, "the pending error names the row to resume on")
+
+	row, err := store.GetHITLApproval(ctx, "call-park1")
+	require.NoError(t, err)
+	require.Equal(t, runtimetypes.HITLApprovalPending, row.State, "parking must leave the question answerable")
+}
+
+// A caller-chosen AskID becomes the durable row's identity — the "ask ID ==
+// tool-call ID == checkpoint key" invariant for questions.
+func TestUnit_RequestAttention_CallerChosenAskIDIsTheRowID(t *testing.T) {
+	ctx, store, _ := setupHITLDB(t)
+	svc := newDurableService(t, store)
+
+	done := make(chan string, 1)
+	go func() {
+		text, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
+			Summary: "which branch?",
+			AskID:   "call-identity",
+		}, taskengine.NoopTaskEventSink{})
+		require.NoError(t, err)
+		done <- text
+	}()
+
+	require.Eventually(t, func() bool {
+		row, err := store.GetHITLApproval(ctx, "call-identity")
+		return err == nil && row.State == runtimetypes.HITLApprovalPending
+	}, 5*time.Second, 10*time.Millisecond, "the row must appear under the caller's ID")
+
+	require.NoError(t, svc.Answer(ctx, "call-identity", "main"))
+	select {
+	case text := <-done:
+		require.Equal(t, "main", text)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the parked asker never received the answer")
+	}
+}

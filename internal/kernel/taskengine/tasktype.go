@@ -576,6 +576,11 @@ type ChatHistory struct {
 	InputTokens int `json:"inputTokens" example:"15"`
 	// OutputTokens will be filled by the engine and will hold the number of tokens used for the output.
 	OutputTokens int `json:"outputTokens" example:"10"`
+	// FinishReason is the provider's verbatim finish reason for the LAST model
+	// call that produced this history ("length"-class values mean the response
+	// was truncated). Filled by the engine; empty when no model call ran or
+	// the provider reported none.
+	FinishReason string `json:"finishReason,omitempty" example:"stop"`
 }
 
 // Message represents a single message in a chat conversation.

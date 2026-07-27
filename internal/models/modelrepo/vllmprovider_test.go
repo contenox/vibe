@@ -142,7 +142,7 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 
 				t.Log("Testing prompt execution...")
 				start := time.Now()
-				resp, err := promptClient.Prompt(ctx, system, 0.7, promptText)
+				resp, _, err := promptClient.Prompt(ctx, system, 0.7, promptText)
 				elapsed := time.Since(start)
 
 				require.NoError(t, err, "failed to execute prompt")

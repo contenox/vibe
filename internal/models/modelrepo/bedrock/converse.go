@@ -329,9 +329,10 @@ func decodeConverse(out *bedrockruntime.ConverseOutput, toOriginal map[string]st
 		return modelrepo.ChatResult{}, fmt.Errorf("bedrock: no text or tool calls in response")
 	}
 	return modelrepo.ChatResult{
-		Message:   modelrepo.Message{Role: "assistant", Content: text.String(), Thinking: thinking.String()},
-		ToolCalls: toolCalls,
-		Usage:     usageFromConverse(out.Usage),
+		Message:      modelrepo.Message{Role: "assistant", Content: text.String(), Thinking: thinking.String()},
+		ToolCalls:    toolCalls,
+		Usage:        usageFromConverse(out.Usage),
+		FinishReason: string(out.StopReason),
 	}, nil
 }
 

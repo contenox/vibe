@@ -14,6 +14,9 @@ import (
 )
 
 func TestSystem_Ollama_Tools(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping ollama system test: starts a container and pulls multi-GB models")
+	}
 	// Set up shared test environment
 	ctx := t.Context()
 	uri, _, cleanup, err := modelrepo.SetupOllamaLocalInstance(ctx, "latest")

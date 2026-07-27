@@ -140,8 +140,10 @@ func (c *loopbackClient) WriteTextFile(_ context.Context, req libacp.WriteTextFi
 // the test if they don't arrive within the deadline.
 func (c *loopbackClient) drain(t *testing.T, n int) []libacp.SessionNotification {
 	t.Helper()
+	// Generous deadline: some callers wait on a spawned subprocess, and under
+	// full-suite load spawn + roundtrip can far exceed an isolated run.
 	got := make([]libacp.SessionNotification, 0, n)
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for len(got) < n {
 		select {
 		case note := <-c.updates:

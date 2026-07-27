@@ -372,6 +372,13 @@ func checkpointSaverFromContext(ctx context.Context) CheckpointSaver {
 	return saver
 }
 
+// HasCheckpointSaver reports whether a durable checkpoint sink is installed on
+// this run — the precondition for any park-and-release ask: without a saver a
+// suspend cannot land durably, so askers must fall back to blocking.
+func HasCheckpointSaver(ctx context.Context) bool {
+	return checkpointSaverFromContext(ctx) != nil
+}
+
 type approvalVerdictsContextKey struct{}
 
 // WithApprovalVerdicts pre-loads human verdicts keyed by approval ID (== the
@@ -402,6 +409,65 @@ func ApprovalVerdictFromContext(ctx context.Context, approvalID string) (approve
 	}
 	approved, ok = verdicts[approvalID]
 	return approved, ok
+}
+
+type attentionAnswersContextKey struct{}
+
+// AttentionAnswer is the TEXT twin of an approval verdict: the operator's
+// words for a resumed attention ask, or the recorded fact that nobody
+// answered (Answered=false → the asking tool runs its blocker fallback).
+type AttentionAnswer struct {
+	Answered bool
+	Text     string
+}
+
+// WithAttentionAnswers pre-loads operator answers keyed by ask ID (== the
+// engine-minted tool-call ID) for a resumed run, exactly as
+// WithApprovalVerdicts pre-loads verdicts: the asking tool consults this map
+// before asking again. The map is copied; callers cannot mutate answers
+// mid-run.
+func WithAttentionAnswers(ctx context.Context, answers map[string]AttentionAnswer) context.Context {
+	if len(answers) == 0 {
+		return ctx
+	}
+	copied := make(map[string]AttentionAnswer, len(answers))
+	for k, v := range answers {
+		copied[k] = v
+	}
+	return context.WithValue(ctx, attentionAnswersContextKey{}, copied)
+}
+
+// AttentionAnswerFromContext reports the pre-loaded answer for askID,
+// ok=false when none was injected.
+func AttentionAnswerFromContext(ctx context.Context, askID string) (ans AttentionAnswer, ok bool) {
+	if askID == "" {
+		return AttentionAnswer{}, false
+	}
+	answers, _ := ctx.Value(attentionAnswersContextKey{}).(map[string]AttentionAnswer)
+	if answers == nil {
+		return AttentionAnswer{}, false
+	}
+	ans, ok = answers[askID]
+	return ans, ok
+}
+
+type suspendableToolCallContextKey struct{}
+
+// WithSuspendableToolCall marks the current tool call as one the engine can
+// SUSPEND on (checkpoint-and-release): it is set only at the model-batch
+// execution site, whose task output is the ChatHistory suspendRun requires. A
+// tools-handler task call never carries it — suspending there would trip
+// suspendRun's transcript requirement — so askers gate their park-and-release
+// behavior on this marker and fall back to blocking otherwise.
+func WithSuspendableToolCall(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suspendableToolCallContextKey{}, true)
+}
+
+// ToolCallSuspendable reports whether the current tool call may suspend the
+// run — see WithSuspendableToolCall.
+func ToolCallSuspendable(ctx context.Context) bool {
+	ok, _ := ctx.Value(suspendableToolCallContextKey{}).(bool)
+	return ok
 }
 
 type resumeCheckpointContextKey struct{}

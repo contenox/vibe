@@ -2,6 +2,7 @@ package acpsvc
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	libdb "github.com/contenox/beam/internal/libdbexec"
@@ -13,13 +14,10 @@ import (
 func setupResolverDB(t *testing.T) (context.Context, libdb.DBManager) {
 	t.Helper()
 	ctx := context.TODO()
-	connStr, _, cleanup, err := libdb.SetupLocalInstance(ctx, "test", "test", "test")
-	require.NoError(t, err)
-	db, err := libdb.NewPostgresDBManager(ctx, connStr, runtimetypes.Schema)
+	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "test.db"), runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, db.Close())
-		cleanup()
 	})
 	return ctx, db
 }

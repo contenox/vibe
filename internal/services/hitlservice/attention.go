@@ -59,6 +59,30 @@ type AttentionRequest struct {
 	// are the caller's to swallow, since a question that was recorded but not
 	// announced is still answerable from the ask queue.
 	OnRaised func(askID string)
+
+	// AskID, when set, is the durable row's ID — the caller's identity for the
+	// ask (the engine tool-call ID, mirroring the approval invariant "row ID ==
+	// tool-call ID == checkpoint key"). Empty keeps today's behavior: a fresh
+	// uuid per ask.
+	AskID string
+
+	// ParkWindow, when > 0, bounds how long RequestAttention BLOCKS before
+	// returning a typed *AttentionPendingError with the row left pending — the
+	// checkpoint-and-release seam. Zero keeps today's behavior: block until the
+	// ceiling.
+	ParkWindow time.Duration
+}
+
+// AttentionPendingError reports that an attention ask's park window elapsed
+// with nobody answering: the row is still pending and answerable; the caller's
+// job is now to checkpoint and release its process. The typed-error twin of
+// the approval path's parked-timeout return.
+type AttentionPendingError struct {
+	AskID string
+}
+
+func (e *AttentionPendingError) Error() string {
+	return fmt.Sprintf("hitlservice: attention ask %s is pending past its park window; suspend and resume on answer", e.AskID)
 }
 
 // IsAttentionAsk reports whether a durable ask row is an attention ask — a
@@ -106,7 +130,10 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		return "", fmt.Errorf("hitlservice: attention ask requires a summary")
 	}
 
-	askID := uuid.NewString()
+	askID := req.AskID
+	if askID == "" {
+		askID = uuid.NewString()
+	}
 	now := time.Now().UTC()
 	// No matched rule sets a deadline for an attention ask (no rule produced it),
 	// so it is bounded by the serve-level ceiling like any unbounded permission
@@ -187,8 +214,26 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	poll := time.NewTicker(attentionPollInterval)
 	defer poll.Stop()
 
+	// The park window: after it elapses unanswered, the caller gets the typed
+	// pending error and checkpoints instead of holding a goroutine for the
+	// whole ceiling. A nil channel arm never fires (ParkWindow unset).
+	var park <-chan time.Time
+	if req.ParkWindow > 0 {
+		park = time.After(req.ParkWindow)
+	}
+
 	for {
 		select {
+		case <-park:
+			// One last read: an answer that landed durably during the window
+			// must win over parking.
+			if row, err := s.approvals.GetHITLApproval(ctx, askID); err == nil && row.State != runtimetypes.HITLApprovalPending {
+				if text := AnswerOf(row); strings.TrimSpace(text) != "" {
+					return text, nil
+				}
+				return "", ErrAttentionUnanswered
+			}
+			return "", &AttentionPendingError{AskID: askID}
 		case ans := <-ch:
 			if !ans.approved || strings.TrimSpace(ans.text) == "" {
 				// Answered with a refusal, or with nothing to say: the unit gets no
@@ -273,11 +318,24 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string) e
 
 	s.mu.Lock()
 	ch, ok := s.pending[askID]
+	hook := s.resumeHook
 	s.mu.Unlock()
 	if ok {
 		select {
 		case ch <- answer{approved: true, text: text}:
 		default:
+		}
+		return nil
+	}
+
+	// Waiter GONE — the asking run parked past its window, checkpointed, and
+	// released its process. Run the resume hook with exactly resolve()'s
+	// contract: the answer IS durably recorded either way; ErrNoCheckpoint is
+	// the clean "nothing was suspended" (the asker is still parked in its OWN
+	// process and will see the row on its next poll).
+	if hook != nil {
+		if err := hook(ctx, askID); err != nil && !errors.Is(err, ErrNoCheckpoint) {
+			return fmt.Errorf("hitlservice: answer for ask %s recorded, but resuming its suspended run failed: %w", askID, err)
 		}
 	}
 	return nil

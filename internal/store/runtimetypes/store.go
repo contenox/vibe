@@ -5,8 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"log"
-	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -259,9 +258,6 @@ type Store interface {
 	EnforceMaxRowCount(ctx context.Context, count int64) error
 }
 
-//go:embed schema.sql
-var Schema string
-
 //go:embed schema_sqlite.sql
 var SchemaSQLite string
 
@@ -312,40 +308,17 @@ func (s *store) EnforceMaxRowCount(ctx context.Context, count int64) error {
 	return nil
 }
 
-func quiet() func() {
-	null, _ := os.Open(os.DevNull)
-	sout := os.Stdout
-	serr := os.Stderr
-	os.Stdout = null
-	os.Stderr = null
-	log.SetOutput(null)
-	return func() {
-		defer null.Close()
-		os.Stdout = sout
-		os.Stderr = serr
-		log.SetOutput(os.Stderr)
-	}
-}
-
-// setupStore initializes a test Postgres instance and returns the store.
+// SetupStore initializes a test SQLite store — the same engine the product
+// runs on (see contenoxcli's OpenDBAt).
 func SetupStore(t *testing.T) (context.Context, Store) {
 	t.Helper()
 
-	// Silence logs
-	unquiet := quiet()
-	t.Cleanup(unquiet)
-
 	ctx := context.TODO()
-	connStr, _, cleanup, err := libdb.SetupLocalInstance(ctx, "test", "test", "test")
+	dbManager, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "test.db"), SchemaSQLite)
 	require.NoError(t, err)
 
-	dbManager, err := libdb.NewPostgresDBManager(ctx, connStr, Schema)
-	require.NoError(t, err)
-
-	// Cleanup DB and container
 	t.Cleanup(func() {
 		require.NoError(t, dbManager.Close())
-		cleanup()
 	})
 
 	s := New(dbManager.WithoutTransaction())

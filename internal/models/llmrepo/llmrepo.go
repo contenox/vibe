@@ -44,6 +44,11 @@ type Meta struct {
 	ModelName    string `json:"model_name"`
 	ProviderType string `json:"provider_type"`
 	BackendID    string `json:"backend_id"`
+	// Usage is the provider-reported token accounting for the call, when the
+	// operation carries no other channel for it (PromptExecute); nil means the
+	// provider did not report usage. Chat/Stream report usage on the
+	// ChatResult / terminal StreamParcel instead.
+	Usage *libmodelprovider.TokenUsage `json:"usage,omitempty"`
 }
 
 type ModelRepo interface {
@@ -99,7 +104,7 @@ const minResolveReconcileInterval = 5 * time.Second
 // reconcileForResolution self-heals a runtime that resolved its model state
 // before a backend was reachable. The runtime reconciles backends at startup and
 // on explicit refresh only (no periodic loop), so a backend that comes up
-// afterwards — most commonly modeld being (re)started after the runtime — stays
+// afterwards — most commonly a local backend (ollama, vllm) being (re)started after the runtime — stays
 // invisible and every request for its models fails with "no models found in
 // runtime state". When resolution fails for that reason this runs one debounced
 // backend cycle and reports whether the caller should retry resolution. It fires
@@ -227,7 +232,7 @@ func (e *modelManager) PromptExecute(
 	}
 	defer safeClose(client)
 
-	result, err := client.Prompt(ctx, systemInstruction, temperature, prompt)
+	result, usage, err := client.Prompt(ctx, systemInstruction, temperature, prompt)
 	if err != nil {
 		return "", Meta{}, fmt.Errorf("prompt execution failed: %w", err)
 	}
@@ -236,6 +241,12 @@ func (e *modelManager) PromptExecute(
 		ModelName:    provider.ModelName(),
 		ProviderType: provider.GetType(),
 		BackendID:    backend,
+		Usage:        usage,
+	}
+	// Same tracker seam as the chat path so token accounting is observable on
+	// every non-streaming call.
+	if usage != nil {
+		e.reportTokenUsage(ctx, req, meta, *usage)
 	}
 	return result, meta, nil
 }

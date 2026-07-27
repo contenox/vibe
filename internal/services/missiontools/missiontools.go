@@ -62,6 +62,7 @@ package missiontools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -83,6 +84,13 @@ const (
 	ToolNameReport = "mission_report"
 	// ToolNameAskAttention flags that the caller's mission needs an operator.
 	ToolNameAskAttention = "mission_ask_attention"
+
+	// AttentionParkWindow is how long a suspendable mission_ask_attention
+	// blocks before checkpoint-and-release — the question's twin of
+	// localtools.ApprovalParkWindow, and the same duration on purpose: the
+	// operator-is-watching fast path answers within it, everyone else answers
+	// a durable row later.
+	AttentionParkWindow = 30 * time.Second
 	// ToolNamePlan replaces the caller's mission plan with a full snapshot (the
 	// resident-planner channel: the plan is a living record it rewrites in whole,
 	// never a schedule the runtime executes — see the plan blueprint's design
@@ -152,17 +160,36 @@ type MissionStore interface {
 // mechanism" invariant made concrete. When it is nil, mission_ask_attention
 // degrades to filing a durable blocker report (see New).
 type AttentionAsker interface {
-	// RaiseAttention puts missionID's unit's question to a human and BLOCKS
-	// until it is answered, returning the operator's own words. An error means
-	// no answer is coming (nobody replied inside the deadline, the reply was a
-	// refusal, or the ask could not be recorded) — the caller's fallback, not a
-	// failure to surface.
+	// RaiseAttention puts the unit's question to a human and BLOCKS until it
+	// is answered, returning the operator's own words. An error means no
+	// answer is coming (nobody replied inside the deadline, the reply was a
+	// refusal, or the ask could not be recorded) — the caller's fallback, not
+	// a failure to surface. The one exception: when ask.ParkWindow elapsed
+	// unanswered, the error is a *taskengine.ApprovalPendingError and the
+	// caller's job is to let the run SUSPEND (checkpoint-and-release) rather
+	// than file a blocker — the question is still pending and answerable.
 	//
 	// It returns the answer rather than just an error because that is the whole
 	// point of asking: a unit that learns "someone was notified" still cannot
 	// proceed, while a unit handed "the contenox runtime repo, /home/x/src/…"
 	// finishes its mission on the next turn.
-	RaiseAttention(ctx context.Context, missionID, summary, detail string) (string, error)
+	RaiseAttention(ctx context.Context, ask AttentionAsk) (string, error)
+}
+
+// AttentionAsk is one unit's question, plus the identity/parking knobs the
+// checkpoint-and-release path needs. Zero values of AskID/ParkWindow mean the
+// pre-detach behavior: fresh row ID, block to the ceiling.
+type AttentionAsk struct {
+	MissionID string
+	Summary   string
+	Detail    string
+	// AskID is the durable row identity — the engine tool-call ID on the
+	// suspendable path, so "ask ID == tool-call ID == checkpoint key" holds
+	// for questions exactly as it does for permission asks.
+	AskID string
+	// ParkWindow, when > 0, bounds the block; past it the asker returns the
+	// typed pending error described on RaiseAttention.
+	ParkWindow time.Duration
 }
 
 type provider struct {
@@ -173,6 +200,9 @@ type provider struct {
 	// all — rather than offering tools that cannot work.
 	supervisor SupervisorStore
 	resolver   AttentionResolver
+	// parkWindow bounds a suspendable ask's block before checkpoint-and-release
+	// (AttentionParkWindow unless overridden via WithAttentionParkWindow).
+	parkWindow time.Duration
 	// recordDowngrade is the verification gate's telemetry hook (see
 	// WithDowngradeRecorder). Never nil: New installs a no-op, so the gate
 	// bumps it unconditionally.
@@ -188,6 +218,16 @@ type Option func(*provider)
 // missions, answer a unit's question. Both deps are required together — listing
 // without answering is a dead end, answering without listing gives the model no
 // way to learn an ask id.
+// WithAttentionParkWindow overrides the park duration (AttentionParkWindow by
+// default) — tests shrink it so a suspension happens in milliseconds.
+func WithAttentionParkWindow(d time.Duration) Option {
+	return func(p *provider) {
+		if d > 0 {
+			p.parkWindow = d
+		}
+	}
+}
+
 func WithSupervision(store SupervisorStore, resolver AttentionResolver) Option {
 	return func(p *provider) {
 		p.supervisor = store
@@ -209,7 +249,7 @@ func New(missions MissionStore, asker AttentionAsker, opts ...Option) taskengine
 	if missions == nil {
 		panic("missiontools: mission store is required")
 	}
-	p := &provider{missions: missions, asker: asker, recordDowngrade: func() {}}
+	p := &provider{missions: missions, asker: asker, recordDowngrade: func() {}, parkWindow: AttentionParkWindow}
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -362,18 +402,48 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 	if strings.TrimSpace(summary) == "" {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: mission_ask_attention requires a summary")
 	}
-	if p.asker != nil {
+	callID, _ := ctx.Value(taskengine.ContextKeyToolCallID).(string)
+
+	// RESUME path first: a run resumed after checkpoint-and-release carries the
+	// operator's answer (or the recorded fact that nobody gave one) injected
+	// under this call's ID — consume it instead of asking the same question
+	// twice.
+	if ans, ok := taskengine.AttentionAnswerFromContext(ctx, callID); ok {
+		p.heartbeat(ctx, missionID)
+		if ans.Answered && strings.TrimSpace(ans.Text) != "" {
+			return ans.Text, taskengine.DataTypeString, nil
+		}
+		// Denied/expired on resume: the same blocker fallback an unanswered
+		// blocking ask takes, so the question is durably preserved.
+		detail = withUnansweredNote(detail, fmt.Errorf("the ask was resolved without an answer while the run was suspended"))
+	} else if p.asker != nil {
 		// The unit parks here while a human reads the question. Its heartbeat is
 		// stamped BEFORE the wait, not after: asking is proof of life, and a unit
 		// blocked on an operator for ten minutes must not look dead for ten
 		// minutes.
 		p.heartbeat(ctx, missionID)
-		answer, err := p.asker.RaiseAttention(ctx, missionID, summary, detail)
+		ask := AttentionAsk{MissionID: missionID, Summary: summary, Detail: detail}
+		// Park-and-release only where a suspend can actually land: the
+		// model-batch execution site (whose output is the ChatHistory a
+		// checkpoint needs) with a durable saver installed. Everywhere else
+		// the ask blocks to the ceiling, exactly as before.
+		if callID != "" && taskengine.ToolCallSuspendable(ctx) && taskengine.HasCheckpointSaver(ctx) {
+			ask.AskID = callID
+			ask.ParkWindow = p.parkWindow
+		}
+		answer, err := p.asker.RaiseAttention(ctx, ask)
 		if err == nil {
 			p.heartbeat(ctx, missionID)
 			// The answer IS the tool result: the model reads it as the reply to
 			// the question it just asked and continues in the same turn.
 			return answer, taskengine.DataTypeString, nil
+		}
+		var pending *taskengine.ApprovalPendingError
+		if errors.As(err, &pending) {
+			// The park window elapsed with the question still open. Hand the
+			// typed error up UNwrapped: the engine suspends the run under this
+			// ask's ID, and the answer arrives via resume injection above.
+			return nil, taskengine.DataTypeAny, pending
 		}
 		// No answer is coming. Fall through to the blocker below rather than
 		// failing the call: the question is worth more durably recorded than

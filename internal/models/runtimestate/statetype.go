@@ -1,4 +1,4 @@
-package statetype
+package runtimestate
 
 import (
 	"strings"
@@ -14,7 +14,7 @@ type BackendRuntimeState struct {
 	ID           string               `json:"id" example:"b7d9e1a3-8f0c-4a7d-9b1e-2f3a4b5c6d7e"`
 	Name         string               `json:"name" example:"ollama-production"`
 	Models       []string             `json:"models" example:"[\"llama2:7b\", \"qwen2.5:7b\", \"nomic-embed-text:latest\"]"`
-	PulledModels []ModelPullStatus    `json:"pulledModels" openapi_include_type:"statetype.ModelPullStatus"`
+	PulledModels []ModelPullStatus    `json:"pulledModels" openapi_include_type:"ModelPullStatus"`
 	Backend      runtimetypes.Backend `json:"backend"`
 	// Error stores a description of the last encountered error when
 	// interacting with or reconciling this backend's state, if any.
@@ -29,7 +29,7 @@ type ModelPullStatus struct {
 	ModifiedAt      time.Time    `json:"modifiedAt" example:"2023-11-15T14:30:45Z"`
 	Size            int64        `json:"size" example:"4709611008"`
 	Digest          string       `json:"digest" example:"sha256:9e3a6c0d3b5e7f8a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a"`
-	Details         ModelDetails `json:"details" openapi_include_type:"statetype.ModelDetails"`
+	Details         ModelDetails `json:"details" openapi_include_type:"ModelDetails"`
 	ContextLength   int          `json:"contextLength" example:"4096"`
 	MaxOutputTokens int          `json:"maxOutputTokens,omitempty" example:"8192"`
 	CanChat         bool         `json:"canChat" example:"true"`

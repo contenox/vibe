@@ -5,11 +5,10 @@ import (
 
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/models/statetype"
 )
 
 // LocalProviderAdapter creates providers for self-hosted backends (Ollama, vLLM)
-func LocalProviderAdapter(ctx context.Context, tracker libtracker.ActivityTracker, runtime map[string]statetype.BackendRuntimeState) ProviderFromRuntimeState {
+func LocalProviderAdapter(ctx context.Context, tracker libtracker.ActivityTracker, runtime map[string]BackendRuntimeState) ProviderFromRuntimeState {
 	// Create a flat list of providers (one per model per backend)
 	providersByType := make(map[string][]modelrepo.Provider)
 

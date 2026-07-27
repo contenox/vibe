@@ -66,12 +66,13 @@ func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		return nil, err
 	}
 	req := &api.ChatRequest{
-		Model:    c.modelName,
-		Messages: apiMessages,
-		Stream:   &stream,
-		Think:    think,
-		Options:  buildOllamaOptions(config, c.maxOutputTokens),
-		Tools:    apiTools,
+		Model:     c.modelName,
+		Messages:  apiMessages,
+		Stream:    &stream,
+		Think:     think,
+		Options:   buildOllamaOptions(config, c.maxOutputTokens),
+		Tools:     apiTools,
+		KeepAlive: keepAlive(),
 	}
 	if config.Shift != nil {
 		req.Shift = config.Shift

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/contenox/beam/internal/models/runtimestate"
-	"github.com/contenox/beam/internal/models/statetype"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
@@ -20,12 +19,12 @@ func TestUnit_ModelProviderAdapter_SetsCorrectModelCapabilities(t *testing.T) {
 	backendID := "backend-test"
 	backendURL := "http://host:1234"
 
-	runtime := map[string]statetype.BackendRuntimeState{
+	runtime := map[string]runtimestate.BackendRuntimeState{
 		backendID: {
 			ID:      backendID,
 			Name:    "Test Backend",
 			Backend: runtimetypes.Backend{ID: backendID, Name: "Ollama", Type: "ollama", BaseURL: backendURL},
-			PulledModels: []statetype.ModelPullStatus{
+			PulledModels: []runtimestate.ModelPullStatus{
 				{
 					Name:          chatModelName,
 					Model:         chatModelName,
@@ -92,12 +91,12 @@ func TestUnit_ModelProviderAdapter_PropagatesCapabilitiesCorrectly(t *testing.T)
 	backendURL := "http://host:1234"
 
 	// Define models with specific capabilities
-	runtime := map[string]statetype.BackendRuntimeState{
+	runtime := map[string]runtimestate.BackendRuntimeState{
 		backendID: {
 			ID:      backendID,
 			Name:    "Test Backend",
 			Backend: runtimetypes.Backend{ID: backendID, Name: "Ollama", Type: "ollama", BaseURL: backendURL},
-			PulledModels: []statetype.ModelPullStatus{
+			PulledModels: []runtimestate.ModelPullStatus{
 				{
 					Name:          "chat-model",
 					Model:         "chat-model",
@@ -172,12 +171,12 @@ func TestUnit_ModelProviderAdapter_HandlesMissingCapabilities(t *testing.T) {
 	backendURL := "http://host:1234"
 
 	// Define model with partial capabilities
-	runtime := map[string]statetype.BackendRuntimeState{
+	runtime := map[string]runtimestate.BackendRuntimeState{
 		backendID: {
 			ID:      backendID,
 			Name:    "Test Backend",
 			Backend: runtimetypes.Backend{ID: backendID, Name: "Ollama", Type: "ollama", BaseURL: backendURL},
-			PulledModels: []statetype.ModelPullStatus{
+			PulledModels: []runtimestate.ModelPullStatus{
 				{
 					Name:       "partial-model",
 					Model:      "partial-model",
@@ -208,7 +207,7 @@ func TestUnit_ModelProviderAdapter_CreatesOpenAIProviderViaCatalog(t *testing.T)
 	backendID := "openai-backend"
 	backendURL := "http://openai.local"
 
-	state := statetype.BackendRuntimeState{
+	state := runtimestate.BackendRuntimeState{
 		ID:   backendID,
 		Name: "OpenAI Backend",
 		Backend: runtimetypes.Backend{
@@ -217,7 +216,7 @@ func TestUnit_ModelProviderAdapter_CreatesOpenAIProviderViaCatalog(t *testing.T)
 			Type:    "openai",
 			BaseURL: backendURL,
 		},
-		PulledModels: []statetype.ModelPullStatus{
+		PulledModels: []runtimestate.ModelPullStatus{
 			{
 				Name:          "gpt-5",
 				Model:         "gpt-5",
@@ -230,7 +229,7 @@ func TestUnit_ModelProviderAdapter_CreatesOpenAIProviderViaCatalog(t *testing.T)
 	}
 	state.SetAPIKey("test-key")
 
-	runtime := map[string]statetype.BackendRuntimeState{
+	runtime := map[string]runtimestate.BackendRuntimeState{
 		backendID: state,
 	}
 

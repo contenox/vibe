@@ -19,6 +19,9 @@ var chatModel = "smollm2:135m" // "tinyllama:1.1b" // "qwen3:4b" //  "tinyllama:
 
 // TestSystem_Ollama comprehensively tests the Ollama provider with a shared container setup
 func TestSystem_Ollama(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping ollama system test: starts a container and pulls multi-GB models")
+	}
 	// Set up shared test environment
 	ctx := t.Context()
 	uri, _, cleanup, err := modelrepo.SetupOllamaLocalInstance(ctx, "latest")
@@ -167,7 +170,7 @@ func TestSystem_Ollama(t *testing.T) {
 		// Test basic prompt
 		system := "You are a Task Engine answering other Machines directly without explanation"
 		prompt := "What is the capital of France?"
-		resp, err := promptClient.Prompt(ctx, system, 0.7, prompt)
+		resp, _, err := promptClient.Prompt(ctx, system, 0.7, prompt)
 		require.NoError(t, err)
 		assert.Contains(t, resp, "Paris")
 		assert.NotContains(t, resp, "think")
@@ -184,7 +187,7 @@ func TestSystem_Ollama(t *testing.T) {
 		require.NoError(t, err)
 
 		// Test with low temperature for deterministic output
-		resp, err := promptClient.Prompt(ctx, "You are a calculator", 0.1, "How much is 2 + 2?")
+		resp, _, err := promptClient.Prompt(ctx, "You are a calculator", 0.1, "How much is 2 + 2?")
 		require.NoError(t, err)
 		assert.Contains(t, resp, "4")
 	})

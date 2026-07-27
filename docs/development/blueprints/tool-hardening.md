@@ -101,6 +101,11 @@ file_editor or use a heredoc" error is the reference).
 
 ## The eval harness (aider-benchmark-shaped, incident-driven)
 
+> **Retired 2026-07-27:** the `internal/tooleval` implementation of this
+> harness was removed with the V1 chop (zero production importers). The design
+> below stays as the record; the hardening recommendations themselves live on
+> in `internal/services/localtools` (Rec 4/5/7 references in code).
+
 ```
 scenarios/<tool-family>/<slug>/
   instruction.md   # literal task given to the model

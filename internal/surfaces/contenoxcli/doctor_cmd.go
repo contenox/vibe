@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/contenox/beam/internal/models/statetype"
+	"github.com/contenox/beam/internal/models/runtimestate"
 	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/services/fleetservice"
 	"github.com/contenox/beam/internal/services/setupcheck"
@@ -119,7 +119,7 @@ type visionSummary struct {
 
 // visionSummaryFromState collects vision-capable chat models and whether the
 // configured default model is one of them.
-func visionSummaryFromState(state map[string]statetype.BackendRuntimeState, defaultModel string) visionSummary {
+func visionSummaryFromState(state map[string]runtimestate.BackendRuntimeState, defaultModel string) visionSummary {
 	s := visionSummary{}
 	seen := map[string]bool{}
 	for _, bs := range state {

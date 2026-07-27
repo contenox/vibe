@@ -22,8 +22,9 @@ func (c *OllamaEmbedClient) Embed(ctx context.Context, text string) ([]float64, 
 	defer end()
 
 	resp, err := c.ollamaClient.Embed(ctx, &api.EmbedRequest{
-		Model: c.modelName,
-		Input: text,
+		Model:     c.modelName,
+		Input:     text,
+		KeepAlive: keepAlive(),
 	})
 	if err != nil {
 		reportErr(err)

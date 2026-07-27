@@ -465,8 +465,9 @@ func DecodeResponse(raw []byte, nameMap map[string]string) (modelrepo.ChatResult
 			Content:  text.String(),
 			Thinking: thinking.String(),
 		},
-		ToolCalls: toolCalls,
-		Usage:     usage,
+		ToolCalls:    toolCalls,
+		Usage:        usage,
+		FinishReason: resp.StopReason,
 	}, nil
 }
 

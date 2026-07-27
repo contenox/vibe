@@ -23,7 +23,6 @@ import (
 	libdb "github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/libkvstore"
 	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/models/statetype"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
@@ -148,9 +147,9 @@ func (s *State) RunBackendCycle(ctx context.Context) error {
 // ReconcileIfStale runs one RunBackendCycle when the last reconcile is older than
 // ReconcileDebounceInterval, otherwise it is a no-op. The runtime reconciles at
 // startup and on explicit refresh only (no periodic loop), so a backend that
-// comes up afterwards — most commonly modeld being (re)started after the runtime
-// — would otherwise stay invisible to read-only views (GET /state,
-// GET /setup-status) until a restart. Calling this from those read paths lets
+// comes up afterwards — most commonly a local backend (e.g. ollama) being
+// (re)started after the runtime — would otherwise stay invisible to read-only
+// views (`contenox state`, `contenox doctor`) until a restart. Calling this from those read paths lets
 // them self-heal, debounced so a burst of UI polls coalesces into one re-scan.
 func (s *State) ReconcileIfStale(ctx context.Context) error {
 	if !s.claimReconcile(time.Now()) {
@@ -183,15 +182,15 @@ func (s *State) markReconciled(now time.Time) {
 // Get returns a copy of the current observed state for all backends.
 // This provides a safe snapshot for reading state without risking modification
 // of the internal structures.
-func (s *State) Get(ctx context.Context) map[string]statetype.BackendRuntimeState {
-	state := map[string]statetype.BackendRuntimeState{}
+func (s *State) Get(ctx context.Context) map[string]BackendRuntimeState {
+	state := map[string]BackendRuntimeState{}
 	s.state.Range(func(key, value any) bool {
-		backend, ok := value.(*statetype.BackendRuntimeState)
+		backend, ok := value.(*BackendRuntimeState)
 		if !ok {
 			// log.Fatalf("invalid type in state: %T", value)
 			return true
 		}
-		var backendCopy statetype.BackendRuntimeState
+		var backendCopy BackendRuntimeState
 		raw, err := json.Marshal(backend)
 		if err != nil {
 			// log.Fatalf("failed to marshal backend: %v", err)
@@ -349,7 +348,7 @@ func (s *State) processBackend(ctx context.Context, backend *runtimetypes.Backen
 	case "bedrock":
 		s.processBedrockBackend(ctx, backend, declaredModels)
 	default:
-		brokenService := &statetype.BackendRuntimeState{
+		brokenService := &BackendRuntimeState{
 			ID:      backend.ID,
 			Name:    backend.Name,
 			Models:  []string{},
@@ -388,7 +387,7 @@ func (s *State) processOllamaBackend(ctx context.Context, backend *runtimetypes.
 		return
 	}
 
-	stateservice := &statetype.BackendRuntimeState{
+	stateservice := &BackendRuntimeState{
 		ID:      backend.ID,
 		Name:    backend.Name,
 		Backend: *backend,
@@ -397,7 +396,7 @@ func (s *State) processOllamaBackend(ctx context.Context, backend *runtimetypes.
 	stateservice.SetAPIKey(apiKey)
 
 	// Create proper model entries with capabilities.
-	pulledModels := make([]statetype.ModelPullStatus, 0, len(observedModels))
+	pulledModels := make([]ModelPullStatus, 0, len(observedModels))
 	for _, observed := range observedModels {
 		lmr := pullStatusFromObservedModel(observed)
 
@@ -479,7 +478,7 @@ func (s *State) processVLLMBackend(ctx context.Context, backend *runtimetypes.Ba
 		return
 	}
 
-	res := &statetype.BackendRuntimeState{
+	res := &BackendRuntimeState{
 		ID:      backend.ID,
 		Name:    backend.Name,
 		Models:  observedModelNames(observedModels),
@@ -487,7 +486,7 @@ func (s *State) processVLLMBackend(ctx context.Context, backend *runtimetypes.Ba
 	}
 	res.SetAPIKey(apiKey)
 
-	pulledModels := make([]statetype.ModelPullStatus, 0, len(observedModels))
+	pulledModels := make([]ModelPullStatus, 0, len(observedModels))
 	for _, observed := range observedModels {
 		if declaredModel, exists := declaredModelMap[observed.Name]; exists {
 			effectiveContextLen := declaredModel.ContextLength
@@ -524,11 +523,11 @@ func (s *State) processVLLMBackend(ctx context.Context, backend *runtimetypes.Ba
 }
 
 func (s *State) processGeminiBackend(ctx context.Context, backend *runtimetypes.Backend, _ []*runtimetypes.Model) {
-	stateInstance := &statetype.BackendRuntimeState{
+	stateInstance := &BackendRuntimeState{
 		ID:           backend.ID,
 		Name:         backend.Name,
 		Backend:      *backend,
-		PulledModels: []statetype.ModelPullStatus{},
+		PulledModels: []ModelPullStatus{},
 	}
 	stateInstance.SetAPIKey("")
 	apiKey, err := s.loadProviderAPIKey(ctx, backend.Type)
@@ -545,7 +544,7 @@ func (s *State) processGeminiBackend(ctx context.Context, backend *runtimetypes.
 
 	if cachedModels, ok := s.loadObservedModelCache(ctx, backend.ID, apiKey); ok {
 		stateInstance.Models = observedModelNames(cachedModels)
-		stateInstance.PulledModels = make([]statetype.ModelPullStatus, 0, len(cachedModels))
+		stateInstance.PulledModels = make([]ModelPullStatus, 0, len(cachedModels))
 		for _, model := range cachedModels {
 			lmr := s.applyCapabilityOverrides(ctx, backend.Type, pullStatusFromObservedModel(model))
 			stateInstance.PulledModels = append(stateInstance.PulledModels, lmr)
@@ -569,7 +568,7 @@ func (s *State) processGeminiBackend(ctx context.Context, backend *runtimetypes.
 
 	// Update state
 	stateInstance.Models = observedModelNames(observedModels)
-	stateInstance.PulledModels = make([]statetype.ModelPullStatus, 0, len(observedModels))
+	stateInstance.PulledModels = make([]ModelPullStatus, 0, len(observedModels))
 	for _, model := range observedModels {
 		lmr := s.applyCapabilityOverrides(ctx, backend.Type, pullStatusFromObservedModel(model))
 		stateInstance.PulledModels = append(stateInstance.PulledModels, lmr)
@@ -596,11 +595,11 @@ func (s *State) processBedrockBackend(ctx context.Context, backend *runtimetypes
 // back to the ambient credential chain (GCP ADC / AWS default chain). This
 // differs from processOpenAIBackend, which errors when no API key is stored.
 func (s *State) processOptionalCredCloudBackend(ctx context.Context, backend *runtimetypes.Backend, _ []*runtimetypes.Model) {
-	stateInstance := &statetype.BackendRuntimeState{
+	stateInstance := &BackendRuntimeState{
 		ID:           backend.ID,
 		Name:         backend.Name,
 		Backend:      *backend,
-		PulledModels: []statetype.ModelPullStatus{},
+		PulledModels: []ModelPullStatus{},
 	}
 
 	// credJSON may be empty (ADC fallback) — that's fine, not an error.
@@ -609,7 +608,7 @@ func (s *State) processOptionalCredCloudBackend(ctx context.Context, backend *ru
 
 	if cachedModels, ok := s.loadObservedModelCache(ctx, backend.ID, credJSON); ok {
 		stateInstance.Models = observedModelNames(cachedModels)
-		stateInstance.PulledModels = make([]statetype.ModelPullStatus, 0, len(cachedModels))
+		stateInstance.PulledModels = make([]ModelPullStatus, 0, len(cachedModels))
 		for _, model := range cachedModels {
 			lmr := s.applyCapabilityOverrides(ctx, backend.Type, pullStatusFromObservedModel(model))
 			stateInstance.PulledModels = append(stateInstance.PulledModels, lmr)
@@ -632,7 +631,7 @@ func (s *State) processOptionalCredCloudBackend(ctx context.Context, backend *ru
 	}
 
 	stateInstance.Models = observedModelNames(observedModels)
-	stateInstance.PulledModels = make([]statetype.ModelPullStatus, 0, len(observedModels))
+	stateInstance.PulledModels = make([]ModelPullStatus, 0, len(observedModels))
 	for _, model := range observedModels {
 		lmr := s.applyCapabilityOverrides(ctx, backend.Type, pullStatusFromObservedModel(model))
 		stateInstance.PulledModels = append(stateInstance.PulledModels, lmr)
@@ -642,10 +641,10 @@ func (s *State) processOptionalCredCloudBackend(ctx context.Context, backend *ru
 }
 
 func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.Backend, models []*runtimetypes.Model) {
-	stateInstance := &statetype.BackendRuntimeState{
+	stateInstance := &BackendRuntimeState{
 		ID:           backend.ID,
 		Name:         backend.Name,
-		PulledModels: []statetype.ModelPullStatus{},
+		PulledModels: []ModelPullStatus{},
 		Backend:      *backend,
 	}
 
@@ -687,7 +686,7 @@ func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.
 
 	// Update state
 	stateInstance.Models = observedModelNames(observedModels)
-	pulledModels := make([]statetype.ModelPullStatus, 0, len(observedModels))
+	pulledModels := make([]ModelPullStatus, 0, len(observedModels))
 	for _, observed := range observedModels {
 		if declaredModel, exists := declaredModels[observed.Name]; exists {
 			// Observed capabilities are the base and declared trues merge in

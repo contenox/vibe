@@ -80,8 +80,10 @@ func (c *wireClient) call(method string, params any) (libacp.Response, []libacp.
 // (AfterResponse ordering) until `want` have been seen or the deadline hits.
 func (c *wireClient) drainNotifications(want int) []libacp.Notification {
 	c.t.Helper()
+	// Generous deadline: the notifications come from a spawned subprocess, and
+	// under full-suite load spawn + roundtrip can far exceed an isolated run.
 	var notes []libacp.Notification
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(30 * time.Second)
 	done := make(chan libacp.Incoming, want)
 	go func() {
 		for i := 0; i < want; i++ {

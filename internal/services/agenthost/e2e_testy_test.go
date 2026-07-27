@@ -13,13 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file is the Phase 2 leg of the ACP agent-servers-and-client e2e (see
-// docs/development/blueprints/acp/agent-servers-and-client-e2e.md): it drives
+// This file is the second leg of the ACP client-host e2e: it drives
 // testy — the Rust reference SDK's deterministic conformance agent — through
 // the composed registry → DriveTurn path, pinning that contenox's client-host
 // role is spec-correct against an agent implementation contenox does not own.
 // The tests are opt-in: testy is not vendored, so they skip unless
-// ACP_TESTY_BIN points at a local build (see `make acp-client-e2e`).
+// ACP_TESTY_BIN points at a local build (see `task acp-client-e2e`).
 //
 // testy interop notes this file depends on (established in
 // libacp/acpexec/e2e_testy_test.go, which drives testy at the lower libacp

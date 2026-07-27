@@ -32,8 +32,8 @@ implemented** peers from the reference Rust SDK
 
 | Target | Validates | Peer binary |
 | --- | --- | --- |
-| `make acp-conformance` | our **agent** side (`libacp/cmd/acp-stub-agent` via `AgentSideConnection`) | `acp-validator`, a conformance-checking ACP client |
-| `make acp-client-e2e` | our **client** side (`ClientSideConnection` over `acpexec`) | `testy`, the SDK's deterministic test agent |
+| `task acp-conformance` | our **agent** side (`libacp/cmd/acp-stub-agent` via `AgentSideConnection`) | `acp-validator`, a conformance-checking ACP client |
+| `task acp-client-e2e` | our **client** side (`ClientSideConnection` over `acpexec`) | `testy`, the SDK's deterministic test agent |
 
 Both targets skip-or-fail cleanly when their binary env var is unset:
 
@@ -51,13 +51,11 @@ Both targets skip-or-fail cleanly when their binary env var is unset:
 
 ## The composed host e2e (registry → agenthost → live turn)
 
-One layer above the wire-dispatch harnesses, `make acp-host-e2e` validates the
+One layer above the wire-dispatch harnesses, `task acp-host-e2e` validates the
 runtime's **client-host composition** end to end: an `agents` row created and
 resolved through the real registry service, spawned and driven by
 `internal/services/agenthost.DriveTurn` (initialize → session/new → session/prompt →
-teardown), with the streamed reply asserted on the caller's harness. This is
-the harness scoped by
-[blueprints/acp/agent-servers-and-client-e2e.md](blueprints/acp/agent-servers-and-client-e2e.md).
+teardown), with the streamed reply asserted on the caller's harness.
 Servers, each isolating something different:
 
 | Server | Gate | Asserts |

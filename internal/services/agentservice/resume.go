@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
@@ -17,6 +18,7 @@ import (
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/models/llmrepo"
 	"github.com/contenox/beam/internal/services/hitlservice"
+	"github.com/contenox/beam/internal/services/missiontools"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
@@ -147,9 +149,20 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		}
 		return nil, fmt.Errorf("agentservice: load approval %s: %w", approvalID, err)
 	}
-	approved, err := verdictFromApproval(row)
-	if err != nil {
-		return nil, err
+	// An attention ask resumes with TEXT, not a boolean: the operator's words
+	// (or the recorded fact that nobody gave any) are injected for the asking
+	// tool to consume. A permission ask keeps the boolean verdict path.
+	isAttention := hitlservice.IsAttentionAsk(row)
+	var approved bool
+	if isAttention {
+		if row.State == runtimetypes.HITLApprovalPending {
+			return nil, fmt.Errorf("%w (ask %s)", ErrApprovalUnanswered, row.ID)
+		}
+	} else {
+		approved, err = verdictFromApproval(row)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	now := time.Now().UTC()
@@ -193,10 +206,26 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		ctx = context.WithValue(ctx, runtimetypes.SessionIDContextKey, cp.SessionID)
 		ctx = llmrepo.WithSessionKey(ctx, llmrepo.DeriveSessionKey(cp.SessionID))
 	}
-	// The verdict rides the context; the HITL wrapper consumes it for exactly
+	// The mission binding is part of the environment the suspended run held:
+	// without it the mission tools are invisible to the resumed chain (their
+	// exposure gates on it), so a unit's resumed ask could neither consume its
+	// answer nor file its blocker. The ask row's attribution is the durable
+	// source of truth for which mission that was.
+	if row.MissionID != nil && *row.MissionID != "" {
+		ctx = missiontools.WithMissionID(ctx, *row.MissionID)
+	}
+	// The verdict rides the context; the consuming tool reads it for exactly
 	// this call ID instead of asking again. Later gated calls of the resumed
 	// run gate normally (and may suspend afresh).
-	ctx = taskengine.WithApprovalVerdicts(ctx, map[string]bool{approvalID: approved})
+	if isAttention {
+		ans := taskengine.AttentionAnswer{}
+		if text := strings.TrimSpace(hitlservice.AnswerOf(row)); text != "" {
+			ans = taskengine.AttentionAnswer{Answered: true, Text: text}
+		}
+		ctx = taskengine.WithAttentionAnswers(ctx, map[string]taskengine.AttentionAnswer{approvalID: ans})
+	} else {
+		ctx = taskengine.WithApprovalVerdicts(ctx, map[string]bool{approvalID: approved})
+	}
 	ctx = taskengine.WithResumeCheckpoint(ctx, cp)
 	ctx = taskengine.WithCheckpointSaver(ctx, &checkpointSaver{
 		store:     store,

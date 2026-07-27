@@ -98,5 +98,22 @@ func InferStopReason(err error, steps []taskengine.CapturedStateUnit) StopReason
 		return StopMaxTurnRequests
 	}
 
+	// A SUCCESSFUL turn whose last model step was truncated by the output cap
+	// is a max-tokens stop, not end_turn — the provider's verbatim finish
+	// reason surfaces on the captured step (openai/vllm/ollama "length",
+	// anthropic/bedrock "max_tokens", gemini/vertex "MAX_TOKENS", openai
+	// Responses "max_output_tokens").
+	for i := len(steps) - 1; i >= 0; i-- {
+		fr := steps[i].FinishReason
+		if fr == "" {
+			continue
+		}
+		switch strings.ToLower(fr) {
+		case "length", "max_tokens", "max_output_tokens", "model_length":
+			return StopMaxTokens
+		}
+		break // the last model step decides; earlier steps' reasons are history
+	}
+
 	return StopEndTurn
 }

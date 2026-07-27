@@ -23,6 +23,7 @@ import (
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/models/modelrepo"
 	"github.com/contenox/beam/internal/services/agentregistryservice"
+	"github.com/contenox/beam/internal/services/agentservice"
 	"github.com/contenox/beam/internal/services/fleetservice"
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/localtools"
@@ -365,6 +366,11 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			cfg.AskApproval = askApproval
 			cfg.HITLPolicySource = acpPolicySource()
 			cfg.HITLDefaultPolicyName = profile.hitlPolicy
+			// Inject the process's one durable-ask service instead of letting
+			// enginesvc mint a second instance over the same store — two
+			// instances cannot wake each other's parked waiters, and the resume
+			// hook below must live on the instance the gate actually asks through.
+			cfg.HITLService = acpHITL
 		}
 
 		engine, err = enginesvc.Build(ctx, db, cfg)
@@ -372,6 +378,14 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			return fmt.Errorf("build engine: %w", err)
 		}
 		defer engine.Stop()
+		// Resume-on-verdict: a verdict that lands with no waiter parked (the
+		// asking process died, or the ask outlived its 30s park and was
+		// checkpointed) resumes the suspended run in THIS process.
+		hitlservice.SetResumeHook(acpHITL, agentservice.ResumeHook(agentservice.Deps{
+			Engine:      engine,
+			DB:          db,
+			WorkspaceID: workspaceID,
+		}))
 	}
 
 	updateBanner := acpUpdateBanner(dbCtx, db, contenoxDir)
@@ -633,7 +647,8 @@ type missionAttentionAsker struct {
 
 var _ missiontools.AttentionAsker = missionAttentionAsker{}
 
-func (a missionAttentionAsker) RaiseAttention(ctx context.Context, missionID, summary, detail string) (string, error) {
+func (a missionAttentionAsker) RaiseAttention(ctx context.Context, ask missiontools.AttentionAsk) (string, error) {
+	missionID, summary, detail := ask.MissionID, ask.Summary, ask.Detail
 	// The mission is read for ATTRIBUTION, not permission: who is asking, on whose
 	// behalf, and — the field that matters — which session fired it, so the
 	// question can be announced where the operator is actually looking. A mission
@@ -645,11 +660,13 @@ func (a missionAttentionAsker) RaiseAttention(ctx context.Context, missionID, su
 			parentSessionID, agentName, intent = m.ParentSessionID, m.AgentName, m.Intent
 		}
 	}
-	return a.hitl.RequestAttention(ctx, hitlservice.AttentionRequest{
-		Summary:   summary,
-		Detail:    detail,
-		MissionID: missionID,
-		AgentName: agentName,
+	answer, err := a.hitl.RequestAttention(ctx, hitlservice.AttentionRequest{
+		Summary:    summary,
+		Detail:     detail,
+		MissionID:  missionID,
+		AgentName:  agentName,
+		AskID:      ask.AskID,
+		ParkWindow: ask.ParkWindow,
 		OnRaised: func(askID string) {
 			// Announce the question the same way a report is announced — on the bus,
 			// self-contained, for whoever is listening. serve's router turns this into
@@ -667,6 +684,15 @@ func (a missionAttentionAsker) RaiseAttention(ctx context.Context, missionID, su
 			})
 		},
 	}, taskengine.NoopTaskEventSink{})
+	// The park window elapsed unanswered: translate to the engine's typed
+	// pending error so the run suspends under this ask's ID — missiontools
+	// hands it up unwrapped and the engine checkpoints (the S6 pattern, now
+	// for questions).
+	var pending *hitlservice.AttentionPendingError
+	if errors.As(err, &pending) {
+		return "", &taskengine.ApprovalPendingError{ApprovalID: pending.AskID, ToolName: missiontools.ToolNameAskAttention}
+	}
+	return answer, err
 }
 
 // publishAsked emits the attention-asked event, best-effort: a question that was

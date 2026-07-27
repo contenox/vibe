@@ -116,9 +116,10 @@ func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	}
 
 	result := modelrepo.ChatResult{
-		Message:   modelrepo.Message{Role: "assistant", Content: outText, Thinking: thinkingText},
-		ToolCalls: toolCalls,
-		Usage:     resp.UsageMetadata.neutralUsage(),
+		Message:      modelrepo.Message{Role: "assistant", Content: outText, Thinking: thinkingText},
+		ToolCalls:    toolCalls,
+		Usage:        resp.UsageMetadata.neutralUsage(),
+		FinishReason: cand.FinishReason,
 	}
 
 	reportChange("chat_completed", result)

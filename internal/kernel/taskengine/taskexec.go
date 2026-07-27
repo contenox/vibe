@@ -439,11 +439,22 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 		return strings.TrimSpace(res.Content), nil
 	}
 
-	response, _, err := exe.promptWithRetry(ctx, reportChange, &llmCall, req, systemInstruction, prompt)
+	response, promptMeta, err := exe.promptWithRetry(ctx, reportChange, &llmCall, req, systemInstruction, prompt)
 	if err != nil {
 		err = fmt.Errorf("prompt execution failed: %w", err)
 		reportErr(err)
 		return "", err
+	}
+
+	// The streaming branch reports usage via step_stream_end; the fallback has
+	// no stream bracket, so publish the provider-reported usage as a token
+	// usage event (used ~ total, size = ctx), mirroring the post-shift emission.
+	if promptMeta.Usage != nil && exe.eventSink.Wants(TaskEventTokenUsage) {
+		ev := NewTaskEvent(ctx, TaskEventTokenUsage)
+		ev.ModelName = promptMeta.ModelName
+		ev.TokenUsed = promptMeta.Usage.TotalTokens
+		ev.TokenSize = ctxLength
+		publishTaskEventBestEffort(ctx, nil, exe.eventSink, ev)
 	}
 
 	return strings.TrimSpace(response), nil
@@ -901,6 +912,11 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			budgetBytes := max(int64(remainingTokens-500)*3, 0)
 			callCtx = context.WithValue(callCtx, ContextKeyOutputByteLimit, budgetBytes)
 			callCtx = context.WithValue(callCtx, ContextKeyToolCallID, toolCall.ID)
+			// This is the ONE execution site whose task output is the
+			// ChatHistory suspendRun needs — mark the call suspendable so
+			// park-and-release askers (mission_ask_attention) may checkpoint
+			// here and only here.
+			callCtx = WithSuspendableToolCall(callCtx)
 
 			toolReportErr, toolReportChange, toolEnd := exe.tracker.Start(
 				callCtx, "tool_call", toolCall.Function.Name,
@@ -1258,6 +1274,7 @@ func (exe *SimpleExec) executeLLM(
 	//       show the state that hit the hard limit.
 	//     - If Shift == true (common on chat_completion tasks in default chains):
 	//       We slide (drop oldest non-system units) and continue. A post_shift event is emitted.
+	trimFired := false
 	if ctxLength > 0 && totalTokens > ctxLength {
 		if !llmCall.Shift {
 			err := fmt.Errorf("%w: total token count %d (messages: %d, tools: %d) > %d", ErrContextLengthExceeded,
@@ -1265,6 +1282,7 @@ func (exe *SimpleExec) executeLLM(
 			reportErr(err)
 			return nil, DataTypeAny, "", err
 		}
+		trimFired = true
 		reserve := reserveOutputTokens(llmCall, ctxLength)
 		budget := ctxLength - toolTokens - preludeTokens - reserve
 		slid, slidTokens, err := exe.shiftMessagesToFit(ctx, modelName, input.Messages, budget)
@@ -1332,11 +1350,26 @@ func (exe *SimpleExec) executeLLM(
 	if llmCall.Models != nil {
 		modelNames = append(modelNames, llmCall.Models...)
 	}
+	// The rich history hint the provider breakpoints wait on: everything but
+	// the volatile last message is asserted stable — the incremental
+	// per-turn-reuse shape (anthropic BP3 lands on the previous turn's final
+	// message). A trim this call changed the prefix, so the request is
+	// expected-cold and asserts nothing. Over-assertion can only cost a cache
+	// write, never correctness: hints never change what the model sees.
+	stableHistoryLen := 0
+	if !trimFired && len(messagesC) > 1 {
+		stableHistoryLen = len(messagesC) - 1
+	}
 	req := llmrepo.Request{
 		ProviderTypes: providerNames,
 		ModelNames:    modelNames,
 		ContextLength: requestedContextRequirement(ctx, totalTokens),
 		Tracker:       exe.tracker,
+		CacheHints: &llmrepo.CacheHints{
+			StableSystem:     true,
+			StableTools:      true,
+			StableHistoryLen: stableHistoryLen,
+		},
 	}
 
 	// ONE execution path: every chat streams and is assembled engine-side by
@@ -1421,6 +1454,9 @@ func (exe *SimpleExec) executeLLM(
 		}
 	}
 	input.OutputTokens = outputTokensCount
+	// The provider's verbatim finish reason rides the history to the capture
+	// site — a "length"-class value is how a truncated success stays visible.
+	input.FinishReason = resp.FinishReason
 
 	if len(callTools) > 0 {
 		return input, DataTypeChatHistory, TransitionToolCall, nil
@@ -1491,7 +1527,8 @@ func (exe *SimpleExec) streamChatOnce(
 			Content:  res.Content,
 			Thinking: res.Thinking,
 		},
-		ToolCalls: res.ToolCalls,
+		ToolCalls:    res.ToolCalls,
+		FinishReason: res.FinishReason,
 	}
 	return true, out, meta, nil
 }

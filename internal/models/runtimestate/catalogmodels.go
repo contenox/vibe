@@ -4,13 +4,12 @@ import (
 	"strings"
 
 	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/models/statetype"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
 const observedDisplayNameMetaKey = "display_name"
 
-func observedModelFromPullStatus(model statetype.ModelPullStatus) modelrepo.ObservedModel {
+func observedModelFromPullStatus(model ModelPullStatus) modelrepo.ObservedModel {
 	name := strings.TrimSpace(model.Model)
 	if name == "" {
 		name = strings.TrimSpace(model.Name)
@@ -51,7 +50,7 @@ func observedModelFromPullStatus(model statetype.ModelPullStatus) modelrepo.Obse
 // declared row cannot express (CanVision, CanThink) always survive from
 // observation; a declared false never suppresses an observed true — manual
 // suppression goes through capability overrides instead.
-func mergeDeclaredOverObserved(declared *runtimetypes.Model, observed modelrepo.ObservedModel) statetype.ModelPullStatus {
+func mergeDeclaredOverObserved(declared *runtimetypes.Model, observed modelrepo.ObservedModel) ModelPullStatus {
 	lmr := pullStatusFromObservedModel(observed)
 	lmr.Name = declared.ID
 	lmr.Model = declared.Model
@@ -74,7 +73,7 @@ func mergeDeclaredOverObserved(declared *runtimetypes.Model, observed modelrepo.
 	return lmr
 }
 
-func pullStatusFromObservedModel(model modelrepo.ObservedModel) statetype.ModelPullStatus {
+func pullStatusFromObservedModel(model modelrepo.ObservedModel) ModelPullStatus {
 	displayName := model.Name
 	if model.Meta != nil {
 		if display := strings.TrimSpace(model.Meta[observedDisplayNameMetaKey]); display != "" {
@@ -82,7 +81,7 @@ func pullStatusFromObservedModel(model modelrepo.ObservedModel) statetype.ModelP
 		}
 	}
 
-	return statetype.ModelPullStatus{
+	return ModelPullStatus{
 		Name:            displayName,
 		Model:           model.Name,
 		ModifiedAt:      model.ModifiedAt,

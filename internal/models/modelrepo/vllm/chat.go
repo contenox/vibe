@@ -77,8 +77,13 @@ func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message,
 		},
 	}
 
+	result.FinishReason = choice.FinishReason
 	switch choice.FinishReason {
-	case "stop", "tool_calls":
+	case "stop", "tool_calls", "length":
+		// "length" is a truncated SUCCESS, same contract as the streaming
+		// assembler: the partial content is real, and the verbatim finish
+		// reason lets the engine surface the truncation instead of the old
+		// behavior of discarding the content behind an opaque error.
 		reportChange("chat_completed", map[string]any{
 			"finish_reason":    choice.FinishReason,
 			"content_length":   len(message.Content),
@@ -86,10 +91,6 @@ func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message,
 			"tool_calls_count": len(toolCalls),
 		})
 		return result, nil
-	case "length":
-		err := fmt.Errorf("token limit reached")
-		reportErr(err)
-		return modelrepo.ChatResult{}, err
 	case "content_filter":
 		err := fmt.Errorf("content filtered")
 		reportErr(err)

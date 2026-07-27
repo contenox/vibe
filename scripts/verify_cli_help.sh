@@ -34,6 +34,7 @@ EXPECTED_CMDS=(
   "acp"
   "acpx"
   "agent"
+  "approvals"
   "backend"
   "cache"
   "chat"

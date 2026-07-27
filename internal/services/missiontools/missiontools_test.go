@@ -283,17 +283,19 @@ type fakeAsker struct {
 	missionID string
 	summary   string
 	detail    string
+	lastAsk   missiontools.AttentionAsk
 	calls     int
 	// answer is what the operator replies; err makes the ask go unanswered.
 	answer string
 	err    error
 }
 
-func (f *fakeAsker) RaiseAttention(_ context.Context, missionID, summary, detail string) (string, error) {
+func (f *fakeAsker) RaiseAttention(_ context.Context, ask missiontools.AttentionAsk) (string, error) {
 	f.calls++
-	f.missionID = missionID
-	f.summary = summary
-	f.detail = detail
+	f.missionID = ask.MissionID
+	f.summary = ask.Summary
+	f.detail = ask.Detail
+	f.lastAsk = ask
 	return f.answer, f.err
 }
 

@@ -140,9 +140,10 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	}
 
 	result := modelrepo.ChatResult{
-		Message:   message,
-		ToolCalls: toolCalls,
-		Usage:     response.Usage.neutralUsage(),
+		Message:      message,
+		ToolCalls:    toolCalls,
+		Usage:        response.Usage.neutralUsage(),
+		FinishReason: choice.FinishReason,
 	}
 	reportChange("chat_completed", result)
 	return result, nil

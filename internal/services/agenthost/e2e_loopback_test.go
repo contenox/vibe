@@ -19,9 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file is the self-hosting loopback e2e from
-// docs/development/blueprints/acp/agent-servers-and-client-e2e.md: contenox's
-// own binary, freshly built, is registered as an external ACP agent pointing
+// This file is the self-hosting loopback e2e for the client-host role:
+// contenox's own binary, freshly built, is registered as an external ACP agent pointing
 // at `contenox acp` and driven by this repo's client-host. One DriveTurn walks
 // registry row → resolve → spawn → initialize → session/new → session/prompt →
 // task-chain execution inside the spawned contenox → streamed reply →

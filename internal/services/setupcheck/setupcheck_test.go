@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/statetype"
+	"github.com/contenox/beam/internal/models/runtimestate"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
 func TestSystem_Evaluate_missingDefaults(t *testing.T) {
-	r := Evaluate(Input{States: []statetype.BackendRuntimeState{{}}})
+	r := Evaluate(Input{States: []runtimestate.BackendRuntimeState{{}}})
 	if len(r.Issues) < 2 {
 		t.Fatalf("expected at least 2 issues, got %v", r.Issues)
 	}
@@ -33,9 +33,9 @@ func TestSystem_Evaluate_noBackends(t *testing.T) {
 }
 
 func TestUnit_Evaluate_ResolvesDefaultMaxOutputTokens(t *testing.T) {
-	states := []statetype.BackendRuntimeState{{
+	states := []runtimestate.BackendRuntimeState{{
 		Backend: runtimetypes.Backend{Type: "openai"},
-		PulledModels: []statetype.ModelPullStatus{{
+		PulledModels: []runtimestate.ModelPullStatus{{
 			Model:           "gpt-5",
 			CanChat:         true,
 			MaxOutputTokens: 128000,
@@ -60,7 +60,7 @@ func TestSystem_Evaluate_allUnreachable(t *testing.T) {
 	r := Evaluate(Input{
 		DefaultModel:    "m",
 		DefaultProvider: "ollama",
-		States: []statetype.BackendRuntimeState{
+		States: []runtimestate.BackendRuntimeState{
 			{Error: "down"},
 			{Error: "timeout"},
 		},
@@ -149,10 +149,10 @@ func TestSystem_Evaluate_noChatModels_ollama(t *testing.T) {
 	r := Evaluate(Input{
 		DefaultModel:    "llama3",
 		DefaultProvider: "ollama",
-		States: []statetype.BackendRuntimeState{
+		States: []runtimestate.BackendRuntimeState{
 			{
 				Backend: runtimetypes.Backend{Type: "ollama"},
-				PulledModels: []statetype.ModelPullStatus{
+				PulledModels: []runtimestate.ModelPullStatus{
 					{Name: "embed", CanChat: false, CanEmbed: true},
 				},
 			},
@@ -176,7 +176,7 @@ func TestSystem_Evaluate_noChatModels_openaiHint(t *testing.T) {
 	r := Evaluate(Input{
 		DefaultModel:    "gpt-4o",
 		DefaultProvider: "openai",
-		States: []statetype.BackendRuntimeState{
+		States: []runtimestate.BackendRuntimeState{
 			{Backend: runtimetypes.Backend{Type: "openai"}, PulledModels: nil},
 		},
 	})
@@ -196,10 +196,10 @@ func TestSystem_Evaluate_noChatModels_skippedWhenChatModelExists(t *testing.T) {
 	r := Evaluate(Input{
 		DefaultModel:    "m",
 		DefaultProvider: "ollama",
-		States: []statetype.BackendRuntimeState{
+		States: []runtimestate.BackendRuntimeState{
 			{
 				Backend: runtimetypes.Backend{Type: "ollama"},
-				PulledModels: []statetype.ModelPullStatus{
+				PulledModels: []runtimestate.ModelPullStatus{
 					{Name: "llama3", CanChat: true},
 				},
 			},
@@ -216,7 +216,7 @@ func TestSystem_Evaluate_noChatModels_skippedWhenAllUnreachable(t *testing.T) {
 	r := Evaluate(Input{
 		DefaultModel:    "m",
 		DefaultProvider: "ollama",
-		States: []statetype.BackendRuntimeState{
+		States: []runtimestate.BackendRuntimeState{
 			{Backend: runtimetypes.Backend{Type: "ollama"}, Error: "down"},
 		},
 	})
@@ -281,7 +281,7 @@ func TestSystem_Evaluate_defaultProviderAPIKeyMissing(t *testing.T) {
 		DefaultModel:       "gpt-5",
 		DefaultProvider:    "openai",
 		RegisteredBackends: []runtimetypes.Backend{backend},
-		States: []statetype.BackendRuntimeState{
+		States: []runtimestate.BackendRuntimeState{
 			{Backend: backend, Error: "API key not configured"},
 		},
 	})
@@ -312,7 +312,7 @@ func TestSystem_Evaluate_defaultProviderAPIKeyMissing_hostedOllama(t *testing.T)
 		DefaultModel:       "qwen3",
 		DefaultProvider:    "ollama",
 		RegisteredBackends: []runtimetypes.Backend{backend},
-		States: []statetype.BackendRuntimeState{
+		States: []runtimestate.BackendRuntimeState{
 			{Backend: backend, Error: "API key not configured"},
 		},
 	})
@@ -344,10 +344,10 @@ func TestSystem_Evaluate_defaultModelNotAvailable(t *testing.T) {
 		DefaultModel:       "gpt-5",
 		DefaultProvider:    "openai",
 		RegisteredBackends: []runtimetypes.Backend{backend},
-		States: []statetype.BackendRuntimeState{
+		States: []runtimestate.BackendRuntimeState{
 			{
 				Backend: backend,
-				PulledModels: []statetype.ModelPullStatus{
+				PulledModels: []runtimestate.ModelPullStatus{
 					{Model: "gpt-4o", CanChat: true},
 				},
 			},

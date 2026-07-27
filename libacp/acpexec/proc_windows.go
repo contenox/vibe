@@ -9,7 +9,7 @@ import (
 
 // setProcessGroup is a no-op on Windows: there is no Setpgid equivalent here;
 // descendant cleanup would need Job Objects, which the Windows product
-// surface can add when it lands (see docs/development/blueprints/windows/).
+// surface can add when it lands (see docs/development/windows-development.md).
 func setProcessGroup(cmd *exec.Cmd) {}
 
 // killProcessTree kills the direct child only — see setProcessGroup for why

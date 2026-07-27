@@ -76,6 +76,13 @@ type openAIResponse struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
+	// Status is "completed" on a full response and "incomplete" on a
+	// truncated one; IncompleteDetails.Reason then names why
+	// ("max_output_tokens", "content_filter").
+	Status            string `json:"status"`
+	IncompleteDetails *struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details"`
 }
 
 // openAIResponsesUsage is the Responses API usage report. input_tokens is the
@@ -429,13 +436,22 @@ func parseOpenAIResponsesResponseFromObject(nameMap map[string]string, response 
 		return modelrepo.ChatResult{}, fmt.Errorf("responses: empty output")
 	}
 
+	// A truncated response reports status "incomplete" with the reason in
+	// incomplete_details — surfaced verbatim as the finish reason so the
+	// engine can tell a truncated success from a complete one.
+	finishReason := ""
+	if resp.Status == "incomplete" && resp.IncompleteDetails != nil {
+		finishReason = resp.IncompleteDetails.Reason
+	}
+
 	return modelrepo.ChatResult{
 		Message: modelrepo.Message{
 			Role:     role,
 			Content:  textBuilder.String(),
 			Thinking: strings.TrimSpace(thinkingBuilder.String()),
 		},
-		ToolCalls: toolCalls,
-		Usage:     resp.Usage.neutralUsage(),
+		ToolCalls:    toolCalls,
+		Usage:        resp.Usage.neutralUsage(),
+		FinishReason: finishReason,
 	}, nil
 }

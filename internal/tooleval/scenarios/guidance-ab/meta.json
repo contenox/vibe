@@ -1,6 +1,0 @@
-{
-  "tool_family": "local_fs",
-  "required": false,
-  "max_iterations": 20,
-  "tags": ["ab", "navigation", "toolguidance", "measurement"]
-}

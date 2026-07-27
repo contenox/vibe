@@ -62,11 +62,6 @@ tasks:
       - chmod +x {{.ROOT_DIR}}/scripts/verify_cli_help.sh
       - CONTENOX_BIN={{.BIN_DIR}}/contenox {{.ROOT_DIR}}/scripts/verify_cli_help.sh
 
-  tool-eval:
-    desc: 'Gated per-model tool-eval matrix (opt-in: exports CONTENOX_RUN_TOOL_EVALS=1)'
-    cmds:
-      - CONTENOX_RUN_TOOL_EVALS=1 CONTENOX_TOOL_EVAL_OUT={{.BIN_DIR}} GOMAXPROCS=1 go test -v -timeout 30m -run '^TestSystem_ToolEval' ./internal/tooleval
-
   acp-conformance:
     desc: Validate libacp agent-side wire dispatch against the Rust reference ACP clients
     preconditions:

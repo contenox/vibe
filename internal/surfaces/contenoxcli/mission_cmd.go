@@ -24,6 +24,7 @@ import (
 	"github.com/contenox/beam/internal/services/agentregistryservice"
 	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/services/fleetservice"
+	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/missionservice"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
@@ -509,6 +510,49 @@ func formatMissionAge(now, t time.Time) string {
 	}
 }
 
+var missionStopCmd = &cobra.Command{
+	Use:   "stop <mission-id>",
+	Short: "Stop a running mission: abandon it, close its pending asks, and reap its unit wherever it runs",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runMissionStop,
+}
+
+func runMissionStop(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	contenoxDir, err := ResolveContenoxDir(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
+	}
+	dbPath, err := resolveDBPath(cmd)
+	if err != nil {
+		return err
+	}
+	db, err := OpenDBAt(libtracker.WithNewRequestID(ctx), dbPath)
+	if err != nil {
+		return fmt.Errorf("open database %q: %w", dbPath, err)
+	}
+	defer db.Close()
+
+	// Publisher-wired on purpose: the terminal-status event is what reaches the
+	// LIVE host of the unit (an editor process, a --wait fire in another
+	// terminal) over the shared SQLite bus and makes it reap the subprocess.
+	bus := libbus.NewSQLite(db.WithoutTransaction())
+	defer bus.Close()
+	missions := missionservice.New(db, missionservice.WithEventPublisher(bus))
+	store := runtimetypes.New(db.WithoutTransaction())
+	hitl := hitlservice.NewWithDefaultPolicy(hitlPolicySource(contenoxDir), runtimetypes.LocalTenantID, store, libtracker.NoopTracker{}, "")
+
+	reason, _ := cmd.Flags().GetString("reason")
+	if err := fleetservice.StopMission(ctx, missions, hitl, store, args[0], reason); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Mission %s abandoned. Pending asks are closed; any live unit is being reaped by its host process.\n", args[0])
+	return nil
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 // openMissionService opens the shared database the way every other read verb
@@ -533,8 +577,11 @@ func init() {
 	missionFireCmd.Flags().Bool("wait", false, "Block until the mission reaches a terminal status (REQUIRED: the unit is a child of this process and dies with it)")
 	missionFireCmd.Flags().Duration("timeout", 30*time.Minute, "Maximum time to wait for a terminal status before tearing the unit down")
 
+	missionStopCmd.Flags().String("reason", "", "One line on why the mission is being stopped (persisted as the status reason)")
+
 	missionCmd.AddCommand(missionListCmd)
 	missionCmd.AddCommand(missionShowCmd)
 	missionCmd.AddCommand(missionReportsCmd)
 	missionCmd.AddCommand(missionFireCmd)
+	missionCmd.AddCommand(missionStopCmd)
 }

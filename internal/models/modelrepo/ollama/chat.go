@@ -89,12 +89,13 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	}
 
 	req := &api.ChatRequest{
-		Model:    c.modelName,
-		Messages: apiMessages,
-		Stream:   &stream,
-		Think:    think,
-		Options:  llamaOptions,
-		Tools:    apiTools,
+		Model:     c.modelName,
+		Messages:  apiMessages,
+		Stream:    &stream,
+		Think:     think,
+		Options:   llamaOptions,
+		Tools:     apiTools,
+		KeepAlive: keepAlive(),
 	}
 	if config.Shift != nil {
 		req.Shift = config.Shift
@@ -136,9 +137,10 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		reportErr(err)
 		return modelrepo.ChatResult{}, err
 	case "length":
-		err := fmt.Errorf("token limit reached for model %s (partial response: %q)", c.modelName, finalResponse.Message.Content)
-		reportErr(err)
-		return modelrepo.ChatResult{}, err
+		// A truncated SUCCESS, same contract as the streaming assembler: the
+		// partial content is real; the verbatim finish reason below lets the
+		// engine surface the truncation instead of the old behavior of
+		// discarding the content behind an opaque error.
 	case "stop":
 		// Allow empty content if there are tool calls — the model is signalling it wants to call tools.
 		// Also allow empty content with no tool calls — some models (e.g. qwen2.5) emit this as a
@@ -198,6 +200,7 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 			CompletionTokens: finalResponse.Metrics.EvalCount,
 			TotalTokens:      finalResponse.Metrics.PromptEvalCount + finalResponse.Metrics.EvalCount,
 		},
+		FinishReason: finalResponse.DoneReason,
 	}
 
 	reportChange("chat_completed", map[string]any{
