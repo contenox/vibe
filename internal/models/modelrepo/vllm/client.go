@@ -40,12 +40,12 @@ type chatRequest struct {
 	// Messages is []any so text/tool turns serialize as the neutral
 	// modelrepo.Message (unchanged wire shape) while image-bearing turns
 	// serialize as the OpenAI content-parts form (see toVLLMRequestMessages).
-	Messages           []any            `json:"messages"`
-	Temperature        *float64         `json:"temperature,omitempty"`
-	MaxTokens          *int             `json:"max_tokens,omitempty"`
-	TopP               *float64         `json:"top_p,omitempty"`
-	Seed               *int             `json:"seed,omitempty"`
-	Stream bool `json:"stream,omitempty"`
+	Messages    []any    `json:"messages"`
+	Temperature *float64 `json:"temperature,omitempty"`
+	MaxTokens   *int     `json:"max_tokens,omitempty"`
+	TopP        *float64 `json:"top_p,omitempty"`
+	Seed        *int     `json:"seed,omitempty"`
+	Stream      bool     `json:"stream,omitempty"`
 	// StreamOptions requests the trailing usage chunk on streamed responses
 	// (stream_options.include_usage); only set when Stream is true.
 	StreamOptions      *streamOptions   `json:"stream_options,omitempty"`

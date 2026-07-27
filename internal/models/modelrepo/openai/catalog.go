@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/modelregistry"
+
 	"github.com/contenox/beam/internal/models/modelrepo"
 )
 
@@ -152,7 +152,7 @@ func inferObservedModel(id string) modelrepo.ObservedModel {
 
 	// OpenAI's model API reports no modality, so vision is a maintained list;
 	// gated on CanChat so audio/embedding/image-gen models never claim it.
-	observed.CanVision = observed.CanChat && modelregistry.OpenAIModelSupportsVision(id)
+	observed.CanVision = observed.CanChat && modelrepo.OpenAIModelSupportsVision(id)
 
 	return observed
 }

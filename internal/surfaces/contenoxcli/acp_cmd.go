@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/models/modelrepo"
 	"github.com/contenox/beam/internal/services/agentregistryservice"
+	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/services/fleetservice"
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/localtools"
@@ -578,10 +580,20 @@ func buildInProcessFleet(ctx context.Context, deps inProcessFleetDeps) (fleetser
 	// A dispatched mission's cwd defaults to this editor's working directory (the
 	// project Zed launched us in) when the request names none.
 	projectRoot, _ := os.Getwd()
-	fleet := fleetservice.New(kernel, agents, deps.missions, nil, projectRoot, deps.tracker,
+	fleetOpts := []fleetservice.Option{
 		// Same envelope-existence guard the serve path enforces, over this editor's
 		// .contenox policy files, so `/mission --policy typo.json` is refused here too.
-		fleetservice.WithPolicyValidator(hitlservice.NewPolicyValidator(hitlPolicySource(deps.contenoxDir), runtimetypes.LocalTenantID, "")))
+		fleetservice.WithPolicyValidator(hitlservice.NewPolicyValidator(hitlPolicySource(deps.contenoxDir), runtimetypes.LocalTenantID, "")),
+	}
+	// The operator's fleet-width cap. Absent or unparsable keeps the enforced
+	// default (fleetservice.DefaultMaxParallel); the knob and the gate share one
+	// key constant so they cannot drift.
+	if raw := clikv.Read(ctx, runtimetypes.New(deps.db.WithoutTransaction()), fleetservice.MaxParallelConfigKey); raw != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+			fleetOpts = append(fleetOpts, fleetservice.WithMaxParallel(n))
+		}
+	}
+	fleet := fleetservice.New(kernel, agents, deps.missions, nil, projectRoot, deps.tracker, fleetOpts...)
 
 	stop := func() {
 		stopRouter()

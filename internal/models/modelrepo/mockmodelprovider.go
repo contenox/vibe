@@ -151,7 +151,8 @@ func (m *MockEmbedClient) Close() error {
 // MockStreamClient is a mock implementation of LLMStreamClient for testing.
 type MockStreamClient struct{}
 
-// Stream returns a channel with mock stream parcels.
+// Stream returns a channel with mock stream parcels, honoring the raw-delta
+// contract's terminal parcel.
 func (m *MockStreamClient) Stream(ctx context.Context, messages []Message, args ...ChatArgument) (<-chan *StreamParcel, error) {
 	ch := make(chan *StreamParcel)
 	go func() {
@@ -159,6 +160,7 @@ func (m *MockStreamClient) Stream(ctx context.Context, messages []Message, args 
 		ch <- &StreamParcel{Data: "mock data part 1"}
 		ch <- &StreamParcel{Data: "mock data part 2"}
 		ch <- &StreamParcel{Data: "mock data part 3"}
+		ch <- &StreamParcel{Terminal: &StreamTerminal{FinishReason: "stop"}}
 	}()
 	return ch, nil
 }

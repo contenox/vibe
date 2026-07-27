@@ -259,6 +259,9 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 	}
 	if sess.MissionID != "" {
 		turnCtx = missiontools.WithMissionID(turnCtx, sess.MissionID)
+		// Mirrors prompt.go: workdir in ctx lets the verification gate stat
+		// relative artifact refs claimed by result reports.
+		turnCtx = missiontools.WithWorkdir(turnCtx, sess.Cwd)
 	}
 	// The other end of the same relationship: a session that FIRED missions carries
 	// its own id in, unlocking the supervisor tools (see missiontools.WithParentSessionID)

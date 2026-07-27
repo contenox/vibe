@@ -154,6 +154,10 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	// tools therefore resolve to nothing.
 	if sess.MissionID != "" {
 		promptCtx = missiontools.WithMissionID(promptCtx, sess.MissionID)
+		// Bind the unit's workdir so the conclusion verification gate can stat
+		// relative artifact refs a result report claims (absolute refs verify
+		// without it).
+		promptCtx = missiontools.WithWorkdir(promptCtx, sess.Cwd)
 	}
 	// The other end of the same relationship: a session that FIRED missions carries
 	// its own id in, unlocking the supervisor tools (see missiontools.WithParentSessionID)

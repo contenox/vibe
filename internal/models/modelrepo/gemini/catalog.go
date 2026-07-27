@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/modelregistry"
+
 	"github.com/contenox/beam/internal/models/modelrepo"
 )
 
@@ -152,7 +152,7 @@ func (p *catalogProvider) describeModel(ctx context.Context, modelName string) (
 	}
 	// Gemini's model API reports no input modalities, so vision comes from the
 	// hand-maintained Google allowlist rather than runtime detection.
-	observed.CanVision = observed.CanChat && modelregistry.GeminiModelSupportsVision(observed.Name)
+	observed.CanVision = observed.CanChat && modelrepo.GeminiModelSupportsVision(observed.Name)
 
 	return observed, nil
 }

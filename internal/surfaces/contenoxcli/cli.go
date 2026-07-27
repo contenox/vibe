@@ -205,7 +205,6 @@ box; for local inference run Ollama or vLLM.
 
   Inspect models:
     contenox model list                    # models exposed by registered live backends
-    contenox model registry-list           # curated models in the local registry
 
   Or register an LLM backend manually:
     # Local Ollama daemon

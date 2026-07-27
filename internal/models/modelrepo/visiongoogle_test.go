@@ -1,9 +1,7 @@
-package modelregistry_test
+package modelrepo
 
 import (
 	"testing"
-
-	"github.com/contenox/beam/internal/models/modelregistry"
 )
 
 func TestUnit_GeminiModelSupportsVision(t *testing.T) {
@@ -33,7 +31,7 @@ func TestUnit_GeminiModelSupportsVision(t *testing.T) {
 		{"", false},
 	}
 	for _, tc := range cases {
-		if got := modelregistry.GeminiModelSupportsVision(tc.name); got != tc.want {
+		if got := GeminiModelSupportsVision(tc.name); got != tc.want {
 			t.Errorf("GeminiModelSupportsVision(%q) = %v, want %v", tc.name, got, tc.want)
 		}
 	}

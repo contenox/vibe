@@ -1,4 +1,4 @@
-package modelregistry
+package modelrepo
 
 import "strings"
 

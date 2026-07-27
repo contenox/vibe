@@ -32,7 +32,7 @@ gemini, bedrock, vertex.
 
 ## 1. IMPLEMENTATION SLICES (ordered; each committable with a named gate)
 
-### S1 — Streaming truth — M — [AGENT IN FLIGHT]
+### S1 — Streaming truth — DONE 2026-07-27
 Problem (from the 2026-07-26 provider audit): when output is streamed, 7 of
 9 providers silently lose the model's tool calls — each provider implemented
 its own delta-assembly, most incompletely, and the engine even runs a
@@ -98,6 +98,10 @@ Also: verify the Anthropic model catalog actually returns the capability
 fields we trust it for, and show vision capability in `contenox model list`
 and `contenox doctor` so a failed vision request teaches instead of
 confusing.
+- new finding (vision sanity-check, 2026-07-27): pinning a NON-vision model
+  with `--model` while attaching an image silently overrides the pin to a
+  vision model — should teach-refuse or announce the substitution, never
+  swap silently.
 *Gate:* a declared gpt-4o/claude routes vision correctly; embedding on
 vertex either works or is refused at the catalog, never at the connection.
 
@@ -125,7 +129,9 @@ Remaining audit items, in priority order:
       support is silently ignored — support it or refuse loudly.
 *Gate:* the audit's parity matrix re-checked with no silent lies left.
 
-### S4 — Chain & envelope vet — M — [AGENT IN FLIGHT]
+### S4 — Chain & envelope vet — DONE 2026-07-27 (incl. live catch: a stale
+### home-dir agent-planner.json failed vet correctly; classifier hardened to
+### require array-typed keys after tokenizer vocab.json false positives)
 Today a broken chain fails mid-run with internal-sounding type errors, and
 nothing validates envelope (approval-policy) files at all. Build load-time
 validation with teaching errors:
@@ -179,7 +185,9 @@ approvals on suspend/resume:
 *Gate:* kill -9 during a pending approval → restart → answer the approval →
 the chain completes.
 
-### S7 — Envelope enforcement at fleet width — S — [AGENT IN FLIGHT]
+### S7 — Envelope enforcement at fleet width — DONE 2026-07-27 (incl. all
+### four wiring items: config key, fleet construction, doctor line, workdir
+### context for relative artifact verification)
 Two guards adapted from the pando mining report (`pando-mining.md`), plus
 counters:
 - an admission cap in fleetservice: nothing today stops a loop from
@@ -198,7 +206,8 @@ counters:
 *Gate:* a mission loop cannot exceed the cap; a hallucinated success
 arrives downgraded.
 
-### S8 — Context prevention: tool-output filters — M — [AGENT IN FLIGHT]
+### S8 — Context prevention: tool-output filters — DONE 2026-07-27
+### (measured: 95KB go-test transcript → 430 bytes inline, failures intact)
 The missing preventive leg of the context-budget story (we plan display and
 recovery; nothing today reduces what a verbose command costs before it
 enters history — one `go test` blast can wedge a session). Build the filter
@@ -254,7 +263,12 @@ ruling on the blueprint's 61 open design decisions (§3 below).
 Interleaving: S7/S8 are independent of S1–S3. S6 needs S5.
 
 ## 2. Remaining vision (image-input) items
-- [ ] **Vision sanity-check (maintainer-requested):** actually run an image
+- [x] **Vision sanity-check PASSED (2026-07-27):** a real image went
+      end-to-end — `--attach red-circle.png` → capability routing picked the
+      vision model (moondream via ollama) over the text default → "I see a
+      red circle." One finding filed under S2 (silent model-pin override).
+      Still open below: the ACP-editor-side image run.
+- [ ] **Vision sanity-check, ACP half (original item):** actually run an image
       through the whole feature against a live vision-capable model — e.g.
       `contenox --attach shot.png "what is this?"` against local Ollama with
       a vision model (llava/qwen-vl class) AND one image sent from an ACP
@@ -280,12 +294,11 @@ Interleaving: S7/S8 are independent of S1–S3. S6 needs S5.
 ## 3. Open decisions (maintainer)
 - [ ] **The beam blueprint's 61 open design decisions (D1–D61)** — gates TUI
       implementation start
-- [x] **modelregistry: RULED WIPED** (maintainer 2026-07-27 — "we don't
-      need a modelregistry"). Execution queued until the in-flight S1 agent
-      lands (it owns internal/models/ right now): delete
-      internal/models/{modelregistry,modelregistryservice}, the
-      `model registry-*` CLI commands, and whatever model_fit/hostcapacity
-      turn out to be registry-only dependents.
+- [x] **modelregistry: WIPED** (ruled + executed 2026-07-27): packages,
+      `model registry-*` commands, model_fit and hostcapacity all deleted;
+      the hand-maintained Gemini/OpenAI vision allowlists were rehomed into
+      modelrepo (visiongoogle.go / visionopenai.go) — they are capability
+      truth, not registry.
 - [ ] **Mission re-entry** (blueprint decision D28): should a finished
       mission be able to wake its supervising agent to continue work? The
       pando report (§F1-G2/G3) contains a disciplined design: budgeted

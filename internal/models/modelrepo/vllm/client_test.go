@@ -278,24 +278,12 @@ func TestUnit_VLLMStreamClient_UsesChatRequestParityAndStreamsThinking(t *testin
 	require.NotNil(t, gotRequest.ChatTemplateKwargs)
 	assert.Equal(t, true, gotRequest.ChatTemplateKwargs["enable_thinking"])
 
-	var parcels []struct {
-		Data     string
-		Thinking string
-	}
+	asm := modelrepo.NewStreamAssembler("vllm", "test-model")
 	for parcel := range stream {
-		require.NoError(t, parcel.Error)
-		parcels = append(parcels, struct {
-			Data     string
-			Thinking string
-		}{
-			Data:     parcel.Data,
-			Thinking: parcel.Thinking,
-		})
+		require.NoError(t, asm.Consume(parcel))
 	}
-
-	require.Len(t, parcels, 2)
-	assert.Equal(t, "", parcels[0].Data)
-	assert.Equal(t, "trace", parcels[0].Thinking)
-	assert.Equal(t, "hello", parcels[1].Data)
-	assert.Equal(t, "", parcels[1].Thinking)
+	res, err := asm.Result()
+	require.NoError(t, err)
+	assert.Equal(t, "trace", res.Thinking)
+	assert.Equal(t, "hello", res.Content)
 }

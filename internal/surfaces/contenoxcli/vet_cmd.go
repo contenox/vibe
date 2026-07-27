@@ -1,6 +1,7 @@
 package contenoxcli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -144,10 +145,13 @@ func classifyVetFile(path string, data []byte) vetFileKind {
 		}
 		return vetKindSkip
 	}
-	if _, ok := probe["tasks"]; ok {
+	// Keys must hold ARRAYS, not merely exist: a tokenizer vocab.json maps
+	// every token string to a number, and "tasks"/"rules" are common enough
+	// to be tokens — presence alone misclassified those files as chains.
+	if raw, ok := probe["tasks"]; ok && jsonIsArray(raw) {
 		return vetKindChain
 	}
-	if _, ok := probe["rules"]; ok {
+	if raw, ok := probe["rules"]; ok && jsonIsArray(raw) {
 		return vetKindEnvelope
 	}
 	if _, ok := probe["default_action"]; ok {
@@ -157,6 +161,12 @@ func classifyVetFile(path string, data []byte) vetFileKind {
 		return vetKindEnvelope
 	}
 	return vetKindSkip
+}
+
+// jsonIsArray reports whether a raw JSON value is an array.
+func jsonIsArray(raw json.RawMessage) bool {
+	trimmed := bytes.TrimLeft(raw, " \t\r\n")
+	return len(trimmed) > 0 && trimmed[0] == '['
 }
 
 // vetOneFile returns nil for a passing file, the teaching error otherwise.

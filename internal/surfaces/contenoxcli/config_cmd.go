@@ -32,6 +32,7 @@ var validConfigKeys = map[string]string{
 	"update-check":                  "Enable automatic update availability checks (true/false). Set false for zero-trust/air-gapped environments.",
 	"default-mission-agent":         "Default declared agent fired by '/mission <intent>' and 'contenox mission fire' with no --agent.",
 	"default-mission-policy":        "Default mission envelope (HITL policy) used when '/mission' or 'contenox mission fire' names none.",
+	"fleet-max-parallel":            "Fleet-width admission cap: max concurrently open mission units (integer; 0 = unlimited; default 8).",
 }
 
 var configCmd = &cobra.Command{

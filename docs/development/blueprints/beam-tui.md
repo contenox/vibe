@@ -6,6 +6,66 @@ This is the component plan for contenox beam, the terminal UI that is the produc
 
 Do not relitigate these; every component spec below assumes them.
 
+- **The testability lesson (maintainer 2026-07-27, from why the old TUI
+  lost to a web UI):** a TUI fails when correctness is only observable by a
+  human at one terminal size — e2e was human-only, resize made components
+  combinatorially fragile, and "what even is a component" had no answer.
+  beam's counter-doctrine, binding on every component: (1) a component IS a
+  pure function of (state, width) → styled lines — nothing reads the
+  terminal, geometry is passed-in data (children are plain structs with
+  render functions, never nested sub-apps); (2) resize correctness = golden
+  frames at 60/80/120 columns including mid-stream states — a test matrix,
+  not manual window-wiggling; (3) animation is deterministic (seeded, a
+  pure function of settings+tick) so motion is golden-testable, and the
+  liveness metric runs as an automated frame-diff harness, not an
+  impression; (4) e2e = scripted teatest sessions against fixture engines —
+  the human's job is taste, never correctness. Note the inline-rendering
+  dividend: printed transcript lives in real scrollback and is immune to
+  resize by construction; only the composer/status region reflows, so the
+  resize-bug surface is two rows and a text box. This doctrine is WHY
+  test-harness and theme-styles are first in the build order.
+- **Chat's superpowers are the floor (maintainer 2026-07-27: "contenox chat
+  -e is almost a superpower").** beam must lose NOTHING chat already does
+  well. `$EDITOR` composition specifically is promoted to composer MVP: one
+  keystroke (Ctrl+E, mirroring `chat -e`) suspends beam, opens $EDITOR
+  seeded with the current draft (tempfile with a .md suffix so editors
+  highlight it; cursor position passed through where supported), and the
+  saved content returns as the composed prompt. Inline rendering makes
+  suspend/resume clean. Regression tests for the two known prior-art bugs:
+  the draft must be carried INTO the editor, and the tempfile must not leak
+  on error paths.
+- **The scope bar (maintainer 2026-07-27).** beam is `contenox chat` plus
+  exactly the four things chat lacks: (1) movement & feedback (liveness,
+  context gauge, done-notification), (2) autocomplete (slash commands,
+  @file), (3) ACP-like controls (the parity command/config surface + inline
+  approval cards), (4) keyboard-navigable pickers (file tree for attaching,
+  session picker). The enough-vs-too-much test for ANY feature: "would
+  contenox chat need this to stop feeling dead, incomplete, or
+  unnavigable?" If no, it waits until dogfooding makes us personally miss
+  it. Consequences: no mission panel (inline mission cards + a status-bar
+  counter), no transcript search/fold (terminal scrollback owns history),
+  no diff viewer component (print diffs plainly; a key on the approval card
+  prints one), no shell pane ($ output prints inline), no
+  connection-lifecycle state machine (in-process — engine errors print like
+  chat errors), selection-clipboard reduced to OSC 52 yank helpers. The
+  full component specs remain below as prior art, each deferred item gated
+  behind a dogfooding-observed need — never built speculatively.
+- **Copy/paste is constitutional (maintainer 2026-07-27).** The maintainer's
+  stated reason the old vibe TUI was rejected — and why `contenox chat` is a
+  plain CLI today — is that copying text out of and pasting into the TUI was
+  broken. beam's failure condition is defined accordingly: if copy/paste is
+  ever worse than plain terminal scrollback, beam has failed. This RULES
+  D1 = inline rendering (transcript flows into the terminal's real
+  scrollback; only the composer/status region is managed — no alt-screen)
+  and D2 = zero mouse capture (native terminal selection, always).
+  Acceptance tests, non-negotiable: (1) select a code block out of the
+  transcript with the terminal's own mouse selection and paste it elsewhere
+  — you get exactly the code, no border chrome, no phantom line breaks from
+  wrapping; (2) scroll back in the terminal's own scrollback and copy text
+  from ten screens ago; (3) paste 50 lines into the composer — they land as
+  one block, never executed line-by-line; (4) OSC 52 yank helpers (copy last
+  answer / code block) are additive conveniences, never a replacement for
+  native selection.
 - **Full ACP command parity (CORE DESIGN, maintainer 2026-07-27).** beam
   surfaces every ACP slash command — `/mission` included — with zero
   beam-side command reimplementation. This is guaranteed by the in-process

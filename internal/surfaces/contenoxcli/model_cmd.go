@@ -30,7 +30,6 @@ be used now.
 
 Examples:
   contenox model list
-  contenox model registry-list
 
 Set the default model:
   contenox config set default-model    gemini-flash-latest

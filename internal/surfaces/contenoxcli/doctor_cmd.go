@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/contenox/beam/internal/services/clikv"
+	"github.com/contenox/beam/internal/services/fleetservice"
 	"github.com/contenox/beam/internal/services/setupcheck"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
@@ -101,6 +102,13 @@ func printDoctorText(w io.Writer, res setupcheck.Result) {
 	fmt.Fprintf(w, "Default provider: %s\n", res.DefaultProvider)
 	fmt.Fprintf(w, "Backends (registered): %d\n", res.BackendCount)
 	fmt.Fprintf(w, "Reachable backends:    %d\n", res.ReachableBackendCount)
+	// Fleet activity is process-lifetime, so this line only means something in
+	// a long-lived process (an editor session); a fresh doctor run shows it only
+	// if this very invocation dispatched — render nothing rather than "0/0/0".
+	if c := fleetservice.Counters(); c.Dispatches > 0 || c.CapRefusals > 0 || c.VerificationDowngrades > 0 {
+		fmt.Fprintf(w, "Fleet: %d dispatched, %d refused at cap, %d results downgraded\n",
+			c.Dispatches, c.CapRefusals, c.VerificationDowngrades)
+	}
 	PrintBackendChecks(w, res)
 	if len(res.Issues) == 0 {
 		io.WriteString(w, "\n✓  All checks passed.\n")
