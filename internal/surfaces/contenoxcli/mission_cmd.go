@@ -47,11 +47,24 @@ subprocess of THIS command, so --wait is required — when this process exits,
 its units are torn down with it. Fire-and-detach needs a long-lived host: an
 editor session ('contenox acp', the /mission command) today, beam later.
 
+'mission asks' reads a mission's pending QUESTIONS — a unit's attention asks,
+waiting on a human's own words rather than a yes/no. Answering them is NOT a
+mission verb: 'contenox approvals respond <id> --answer "..."' is the one
+surface that answers every pending ask, permission or question, mission-bound
+or not — 'mission asks' only narrows the view to one mission (or every open
+one).
+
 Examples:
   contenox mission list
   contenox mission show <mission-id>
   contenox mission reports <mission-id>
+  contenox mission plan <mission-id>
+  contenox mission asks [mission-id]
   contenox mission fire agent-reviewer "review the open PR for regressions" --wait
+
+Related:
+  contenox approvals            the live ask queue — answer a pending question or permission gate
+  contenox inbox                reports a mission left behind with no live session to read them
 
 Related config (contenox config set …):
   default-mission-policy   the envelope used when --policy names none
@@ -92,7 +105,7 @@ Use 'contenox mission reports <id>' for full report detail.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
-		db, missions, err := openMissionService(cmd)
+		db, missions, hitl, err := openMissionAndHitlServices(cmd)
 		if err != nil {
 			return err
 		}
@@ -106,7 +119,11 @@ Use 'contenox mission reports <id>' for full report detail.`,
 		if err != nil {
 			return fmt.Errorf("failed to read reports for mission %q: %w", m.ID, err)
 		}
-		renderMissionShow(cmd.OutOrStdout(), m, reports, time.Now().UTC())
+		// Best-effort: the pending-asks line is a discoverability nudge toward
+		// 'mission asks'/'approvals respond', not core content — a read failure
+		// here must not fail the whole show.
+		asks, _ := hitl.PendingAttentionAsks(ctx, m.ID)
+		renderMissionShow(cmd.OutOrStdout(), m, reports, asks, time.Now().UTC())
 		return nil
 	},
 }
@@ -137,6 +154,35 @@ reads chronologically.`,
 		renderMissionReports(cmd.OutOrStdout(), m, reports)
 		return nil
 	},
+}
+
+var missionPlanCmd = &cobra.Command{
+	Use:   "plan <mission-id>",
+	Short: "Print a mission's living plan in full: every entry, its status and priority, and the revision history.",
+	Long: `'mission show' prints only a one-line plan SUMMARY (revision number and
+per-status counts) — this prints the plan itself: every entry, ordered, with
+its status (pending|in_progress|completed) and priority, plus the durable
+"+added/-removed — why" history of past revisions. A mission with no plan
+(revision 0 — no resident planner has run for its agent) says so plainly.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runMissionPlan,
+}
+
+var missionAsksCmd = &cobra.Command{
+	Use:   "asks [mission-id]",
+	Short: "List a mission's pending attention asks — questions its unit is waiting on a human to answer.",
+	Long: `Print the pending QUESTIONS raised under one mission (or, with no id, under
+every OPEN mission) — the durable attention asks a unit raised via its
+mission_ask_attention tool and is still parked on. This is a READ-ONLY,
+mission-scoped view: answering an ask is 'contenox approvals respond <id>
+--answer "..."', the same verb that answers every pending ask in the system,
+question or permission gate, mission-bound or not.
+
+Examples:
+  contenox mission asks                  every open mission's pending questions
+  contenox mission asks <mission-id>     one mission's pending questions`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runMissionAsks,
 }
 
 var missionFireCmd = &cobra.Command{
@@ -362,7 +408,7 @@ func renderMissionTable(w io.Writer, missions []*missionservice.Mission, now tim
 	return tw.Flush()
 }
 
-func renderMissionShow(w io.Writer, m *missionservice.Mission, reports []*missionservice.Report, now time.Time) {
+func renderMissionShow(w io.Writer, m *missionservice.Mission, reports []*missionservice.Report, asks []*runtimetypes.HITLApproval, now time.Time) {
 	fmt.Fprintf(w, "Mission:   %s\n", m.ID)
 	fmt.Fprintf(w, "Intent:    %s\n", m.Intent)
 	fmt.Fprintf(w, "Agent:     %s\n", m.AgentName)
@@ -403,6 +449,13 @@ func renderMissionShow(w io.Writer, m *missionservice.Mission, reports []*missio
 	}
 	fmt.Fprintf(w, "Created:   %s (%s ago)\n", m.CreatedAt.Format(time.RFC3339), formatMissionAge(now, m.CreatedAt))
 	fmt.Fprintf(w, "Updated:   %s (%s ago)\n", m.UpdatedAt.Format(time.RFC3339), formatMissionAge(now, m.UpdatedAt))
+
+	if len(asks) > 0 {
+		fmt.Fprintf(w, "Asks:      %d pending — answer with 'contenox approvals respond <id> --answer \"...\"' (contenox mission asks %s):\n", len(asks), m.ID)
+		for _, a := range asks {
+			fmt.Fprintf(w, "             [%s] %s\n", a.ID, a.ArgsSummary)
+		}
+	}
 
 	fmt.Fprintln(w)
 	if len(reports) == 0 {
@@ -459,6 +512,75 @@ func renderMissionReports(w io.Writer, m *missionservice.Mission, reports []*mis
 			}
 		}
 	}
+}
+
+// renderMissionPlan prints a mission's living plan in full — every entry,
+// ordered as stored, with its status and priority — plus the durable revision
+// history ('mission show' prints only the one-line summary of this).
+func renderMissionPlan(w io.Writer, m *missionservice.Mission) {
+	if m.Plan.Revision == 0 {
+		fmt.Fprintf(w, "Mission %s has no plan yet (revision 0) — no resident planner has run for this mission.\n", m.ID)
+		return
+	}
+	fmt.Fprintf(w, "Mission %s — plan revision %d\n", m.ID, m.Plan.Revision)
+	if explanation := strings.TrimSpace(m.Plan.Explanation); explanation != "" {
+		fmt.Fprintf(w, "Rationale: %s\n", explanation)
+	}
+	fmt.Fprintln(w)
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "STATUS\tPRIORITY\tENTRY")
+	for _, e := range m.Plan.Entries {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", e.Status, e.Priority, e.Content)
+	}
+	tw.Flush()
+
+	if len(m.PlanRevisions) > 0 {
+		fmt.Fprintln(w, "\nRevision history (oldest first):")
+		for _, r := range m.PlanRevisions {
+			line := fmt.Sprintf("  rev %d: +%d/-%d (%d pending, %d in progress, %d completed)",
+				r.Revision, r.Added, r.Removed, r.Pending, r.InProgress, r.Completed)
+			if explanation := strings.TrimSpace(r.Explanation); explanation != "" {
+				line += " — " + explanation
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
+}
+
+// renderMissionAsksTable prints one row per pending attention ask. missions is
+// keyed by mission id — populated by the caller so the AGENT column can be
+// filled without a second read when an ask's own AgentName is unset — and may
+// be empty when the caller only had ids to hand.
+func renderMissionAsksTable(w io.Writer, missions map[string]*missionservice.Mission, asks []*runtimetypes.HITLApproval, now time.Time) error {
+	if len(asks) == 0 {
+		fmt.Fprintln(w, "No pending attention asks. A mission's unit raises one when it needs a human's own words, not a yes/no — answer with 'contenox approvals respond <id> --answer \"...\"'.")
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tMISSION\tAGENT\tSUMMARY\tAGE\tEXPIRES-IN")
+	for _, a := range asks {
+		missionID, agent := "", a.AgentName
+		if a.MissionID != nil {
+			missionID = *a.MissionID
+			if agent == "" {
+				if m, ok := missions[missionID]; ok {
+					agent = m.AgentName
+				}
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			a.ID, missionID, agent, a.ArgsSummary, formatMissionAge(now, a.CreatedAt), formatMissionAge(a.ExpiresAt, now))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	for _, a := range asks {
+		if a.Diff != nil && strings.TrimSpace(*a.Diff) != "" {
+			fmt.Fprintf(w, "\nDetail for %s:\n%s\n", a.ID, *a.Diff)
+		}
+	}
+	fmt.Fprintln(w, "\nAnswer with 'contenox approvals respond <id> --answer \"...\"'.")
+	return nil
 }
 
 // chronological returns reports oldest-first for reading. ListReports hands
@@ -553,6 +675,74 @@ func runMissionStop(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runMissionPlan(cmd *cobra.Command, args []string) error {
+	ctx := libtracker.WithNewRequestID(context.Background())
+	db, missions, err := openMissionService(cmd)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	m, err := missions.Get(ctx, args[0])
+	if err != nil {
+		return fmt.Errorf("mission %q not found: %w — see 'contenox mission list' for recorded missions", args[0], err)
+	}
+	renderMissionPlan(cmd.OutOrStdout(), m)
+	return nil
+}
+
+func runMissionAsks(cmd *cobra.Command, args []string) error {
+	ctx := libtracker.WithNewRequestID(context.Background())
+	db, missions, hitl, err := openMissionAndHitlServices(cmd)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	now := time.Now().UTC()
+	if len(args) == 1 {
+		missionID := args[0]
+		m, err := missions.Get(ctx, missionID)
+		if err != nil {
+			return fmt.Errorf("mission %q not found: %w — see 'contenox mission list' for recorded missions", missionID, err)
+		}
+		asks, err := hitl.PendingAttentionAsks(ctx, missionID)
+		if err != nil {
+			return fmt.Errorf("failed to list asks for mission %q: %w", missionID, err)
+		}
+		return renderMissionAsksTable(cmd.OutOrStdout(), map[string]*missionservice.Mission{m.ID: m}, asks, now)
+	}
+
+	// No mission id: every OPEN mission's pending asks. hitlservice has no
+	// cross-mission "every pending attention ask" read — PendingAttentionAsks
+	// is scoped to one mission — so this iterates the open missions and asks
+	// each in turn, exactly as a supervisor without a single mission in mind
+	// would have to.
+	limit, _ := cmd.Flags().GetInt("limit")
+	ms, err := missions.List(ctx, nil, limit)
+	if err != nil {
+		return fmt.Errorf("failed to list missions: %w", err)
+	}
+
+	byID := make(map[string]*missionservice.Mission, len(ms))
+	var asks []*runtimetypes.HITLApproval
+	for _, m := range ms {
+		if m.Status != missionservice.StatusOpen {
+			continue // a finished mission's asks are already closed (mission stop) or answered
+		}
+		got, err := hitl.PendingAttentionAsks(ctx, m.ID)
+		if err != nil {
+			return fmt.Errorf("failed to list asks for mission %q: %w", m.ID, err)
+		}
+		if len(got) == 0 {
+			continue
+		}
+		byID[m.ID] = m
+		asks = append(asks, got...)
+	}
+	return renderMissionAsksTable(cmd.OutOrStdout(), byID, asks, now)
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 // openMissionService opens the shared database the way every other read verb
@@ -571,8 +761,35 @@ func openMissionService(cmd *cobra.Command) (io.Closer, missionservice.Service, 
 	return db, missionservice.New(db), nil
 }
 
+// openMissionAndHitlServices opens the shared database and builds both a
+// missionservice and a hitlservice.Service over it — the same hitlservice
+// construction openApprovalsService uses (NewWithDefaultPolicy over the same
+// policy source and store), so a mission-side read of what is pending agrees
+// byte-for-byte with what 'contenox approvals' considers pending. Used by
+// verbs that READ asks in mission scope ('mission show', 'mission asks')
+// without owning answering them — that stays 'contenox approvals respond'.
+func openMissionAndHitlServices(cmd *cobra.Command) (io.Closer, missionservice.Service, hitlservice.Service, error) {
+	contenoxDir, err := ResolveContenoxDir(cmd)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to resolve .contenox dir: %w", err)
+	}
+	dbPath, err := resolveDBPath(cmd)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("invalid database path: %w", err)
+	}
+	dbCtx := libtracker.WithNewRequestID(context.Background())
+	db, err := OpenDBAt(dbCtx, dbPath)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	store := runtimetypes.New(db.WithoutTransaction())
+	hitl := hitlservice.NewWithDefaultPolicy(hitlPolicySource(contenoxDir), runtimetypes.LocalTenantID, store, libtracker.NoopTracker{}, "")
+	return db, missionservice.New(db), hitl, nil
+}
+
 func init() {
 	missionListCmd.Flags().Int("limit", 50, "Maximum number of missions to list")
+	missionAsksCmd.Flags().Int("limit", 200, "Maximum number of open missions to scan for pending asks (only used with no mission-id)")
 	missionFireCmd.Flags().String("policy", "", "Mission envelope: the HITL policy bounding the unattended unit (default: the default-mission-policy config)")
 	missionFireCmd.Flags().Bool("wait", false, "Block until the mission reaches a terminal status (REQUIRED: the unit is a child of this process and dies with it)")
 	missionFireCmd.Flags().Duration("timeout", 30*time.Minute, "Maximum time to wait for a terminal status before tearing the unit down")
@@ -582,6 +799,8 @@ func init() {
 	missionCmd.AddCommand(missionListCmd)
 	missionCmd.AddCommand(missionShowCmd)
 	missionCmd.AddCommand(missionReportsCmd)
+	missionCmd.AddCommand(missionPlanCmd)
+	missionCmd.AddCommand(missionAsksCmd)
 	missionCmd.AddCommand(missionFireCmd)
 	missionCmd.AddCommand(missionStopCmd)
 }

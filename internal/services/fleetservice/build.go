@@ -126,7 +126,7 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 	}
 	kernel := agentinstance.New(agents, agentinstance.WithStderr(stderr))
 
-	operatorInbox := operatorinbox.New(deps.DB)
+	operatorInbox := operatorinbox.New(deps.DB, operatorinbox.WithEventPublisher(deps.Bus))
 
 	// The report router delivers a fired unit's report onto whoever fired it —
 	// the host's live session surface first when one is wired, the kernel's own

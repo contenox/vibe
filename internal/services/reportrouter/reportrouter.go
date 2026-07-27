@@ -15,6 +15,19 @@
 //     back to the inbox rather than being lost. A supervisor ending must never
 //     drop a report.
 //
+// The same edge carries three more things a unit says: its QUESTIONS
+// (AttentionAskedSubject), its PLAN REVISIONS (PlanRevisedSubject) and its
+// TERMINAL TRANSITION (StatusChangedSubject). They are routed to the same place
+// by the same rule and differ only in what an undeliverable one MEANS, which is
+// decided by what keeps them:
+//
+//   - A report is content nothing else keeps → undeliverable means INBOX.
+//   - An ask is already durable and answerable in its own queue → undeliverable
+//     means a missed notification, answered from the queue instead.
+//   - A status change or a plan revision is already on the mission record →
+//     undeliverable means DROP. Filing every mission's ending in the operator's
+//     worklist would drown the reports the worklist exists for.
+//
 // # Why a bus consumer and not a call from AddReport
 //
 // missionservice publishes that a report exists and stays ignorant of sessions
@@ -126,60 +139,65 @@ func New(deps Deps) (*Router, error) {
 // SQLite) applies beyond it.
 const streamBuffer = 64
 
-// Start subscribes to ReportAddedSubject and processes events until the returned
-// stop function is called or ctx is cancelled. It returns after the subscription
-// is established, so an event published after Start returns is seen (the bus
-// registers the subscription before Stream returns). The stop function cancels
-// the loop, unsubscribes, and waits for the loop goroutine to exit, so no
-// delivery is in flight once it returns.
+// Start subscribes to every mission subject the router routes and processes
+// events until the returned stop function is called or ctx is cancelled. It
+// returns after the subscriptions are established, so an event published after
+// Start returns is seen (the bus registers the subscription before Stream
+// returns). The stop function cancels the loops, unsubscribes, and waits for the
+// loop goroutines to exit, so no delivery is in flight once it returns.
+//
+// The four subjects are one edge, not four features: everything a unit says
+// while it runs — what it did (report), what it needs (ask), what it now plans
+// (plan revision), how it ended (status) — belongs to whoever fired it. They are
+// subscribed here together so "the supervisor hears from its unit" stays ONE
+// mechanism, and they differ only in what a failed delivery means (see each
+// route* method).
 func (r *Router) Start(ctx context.Context) (func(), error) {
-	ch := make(chan []byte, streamBuffer)
-	sub, err := r.deps.Bus.Stream(ctx, missionservice.ReportAddedSubject, ch)
-	if err != nil {
-		return nil, fmt.Errorf("reportrouter: subscribe %q: %w", missionservice.ReportAddedSubject, err)
-	}
-	// The second half of the edge: a unit's QUESTION. Reports say what a unit did;
-	// asks say what it needs before it can go on, and both belong to whoever fired
-	// the mission. Routing them from one place is what keeps "the supervisor hears
-	// from its unit" one mechanism rather than two — the ask's own durability is
-	// hitlservice's business, so nothing here can lose it.
-	askCh := make(chan []byte, streamBuffer)
-	askSub, err := r.deps.Bus.Stream(ctx, missionservice.AttentionAskedSubject, askCh)
-	if err != nil {
-		_ = sub.Unsubscribe()
-		return nil, fmt.Errorf("reportrouter: subscribe %q: %w", missionservice.AttentionAskedSubject, err)
-	}
 	runCtx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		r.loop(runCtx, ch)
-	}()
-	go func() {
-		defer wg.Done()
-		r.askLoop(runCtx, askCh)
-	}()
-	return func() {
+	var subs []libbus.Subscription
+	stop := func() {
 		cancel()
-		_ = sub.Unsubscribe()
-		_ = askSub.Unsubscribe()
+		for _, sub := range subs {
+			_ = sub.Unsubscribe()
+		}
 		wg.Wait()
-	}, nil
-}
-
-func (r *Router) askLoop(ctx context.Context, ch <-chan []byte) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case data, ok := <-ch:
-			if !ok {
-				return
-			}
-			r.handleAsk(ctx, data)
+	}
+	subscribe := func(subject string, handle func(context.Context, []byte)) error {
+		ch := make(chan []byte, streamBuffer)
+		sub, err := r.deps.Bus.Stream(ctx, subject, ch)
+		if err != nil {
+			return fmt.Errorf("reportrouter: subscribe %q: %w", subject, err)
+		}
+		subs = append(subs, sub)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.loop(runCtx, ch, handle)
+		}()
+		return nil
+	}
+	for _, lane := range []struct {
+		subject string
+		handle  func(context.Context, []byte)
+	}{
+		{missionservice.ReportAddedSubject, r.handle},
+		// A unit's QUESTION. Reports say what a unit did; asks say what it needs
+		// before it can go on. The ask's own durability is hitlservice's business,
+		// so nothing here can lose it.
+		{missionservice.AttentionAskedSubject, r.handleAsk},
+		// A unit's terminal transition and its plan revisions: STATUS, not content.
+		// Both are already durable on the mission record, so both are droppable
+		// (see routeStatus).
+		{missionservice.StatusChangedSubject, r.handleStatus},
+		{missionservice.PlanRevisedSubject, r.handlePlan},
+	} {
+		if err := subscribe(lane.subject, lane.handle); err != nil {
+			stop()
+			return nil, err
 		}
 	}
+	return stop, nil
 }
 
 func (r *Router) handleAsk(ctx context.Context, data []byte) {
@@ -296,7 +314,10 @@ func askText(ev missionservice.AttentionAskedEvent) string {
 	return b.String()
 }
 
-func (r *Router) loop(ctx context.Context, ch <-chan []byte) {
+// loop drains one subscription's channel into its handler until the run context
+// is cancelled or the bus closes the channel. One body for every lane: the lanes
+// differ in what they DECODE and where they route, never in how they are pumped.
+func (r *Router) loop(ctx context.Context, ch <-chan []byte, handle func(context.Context, []byte)) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -305,7 +326,7 @@ func (r *Router) loop(ctx context.Context, ch <-chan []byte) {
 			if !ok {
 				return
 			}
-			r.handle(ctx, data)
+			handle(ctx, data)
 		}
 	}
 }
@@ -429,5 +450,233 @@ func reportText(ev missionservice.ReportAddedEvent) string {
 		b.WriteString("\nrefs: ")
 		b.WriteString(strings.Join(ev.Report.Refs, ", "))
 	}
+	return b.String()
+}
+
+// --- status and plan: the DROPPABLE half of the edge ------------------------
+//
+// A report is content a unit produced and nothing else keeps, which is why a
+// report that reaches no live supervisor is written to the inbox. A status
+// change and a plan revision are neither: both are already ON the durable
+// mission record before the event is published (Mission.Status/StatusReason,
+// Mission.Plan and its bounded PlanRevisions ring), and both are re-readable at
+// any time with a single Get. Routing them is therefore a NOTIFICATION — "your
+// unit just landed", "your unit re-planned" — and a notification nobody is
+// listening for is dropped, not filed.
+//
+// Filing them instead would be actively wrong: the inbox is the operator's
+// worklist of things needing their EYES, and every mission that ever finishes
+// produces a status change. An inbox that collected them would drown the reports
+// and asks it exists for. So: no parent session, or a parent that cannot be
+// reached, means DROP (recorded on the tracker, so the drop is observable and
+// not silent).
+
+func (r *Router) handleStatus(ctx context.Context, data []byte) {
+	var ev missionservice.StatusChangedEvent
+	if err := json.Unmarshal(data, &ev); err != nil {
+		reportErr, _, end := r.deps.Tracker.Start(ctx, "fleet", "route_status_change")
+		reportErr(fmt.Errorf("reportrouter: decode status-changed event: %w", err))
+		end()
+		return
+	}
+	r.routeStatus(ctx, ev)
+}
+
+// routeStatus notifies the firing session that its unit reached a terminal
+// state. Dropped when there is no live parent — see the block comment above.
+func (r *Router) routeStatus(ctx context.Context, ev missionservice.StatusChangedEvent) {
+	reportErr, reportChange, end := r.deps.Tracker.Start(ctx, "fleet", "route_status_change",
+		"mission_id", ev.MissionID, "old_status", string(ev.OldStatus), "new_status", string(ev.NewStatus))
+	defer end()
+
+	if ev.ParentSessionID == "" {
+		// An operator fired this mission directly: they read its status from the
+		// mission itself (`contenox mission list/get`), which already holds it.
+		reportChange("routed", "dropped_operator_fired")
+		return
+	}
+	reportChange("parent_session_id", ev.ParentSessionID)
+	if err := r.deps.Sessions.DeliverToSession(ctx, libacp.SessionID(ev.ParentSessionID), buildStatusNotification(ev)); err != nil {
+		reportChange("routed", "dropped_parent_not_live")
+		reportErr(err)
+		return
+	}
+	reportChange("routed", "session")
+}
+
+func (r *Router) handlePlan(ctx context.Context, data []byte) {
+	var ev missionservice.PlanRevisedEvent
+	if err := json.Unmarshal(data, &ev); err != nil {
+		reportErr, _, end := r.deps.Tracker.Start(ctx, "fleet", "route_plan_revision")
+		reportErr(fmt.Errorf("reportrouter: decode plan-revised event: %w", err))
+		end()
+		return
+	}
+	r.routePlan(ctx, ev)
+}
+
+// routePlan notifies the firing session that its unit re-planned. Same drop rule
+// as routeStatus: the snapshot and its revision history are already durable on
+// the mission.
+func (r *Router) routePlan(ctx context.Context, ev missionservice.PlanRevisedEvent) {
+	reportErr, reportChange, end := r.deps.Tracker.Start(ctx, "fleet", "route_plan_revision",
+		"mission_id", ev.MissionID, "revision", ev.Revision)
+	defer end()
+
+	if ev.ParentSessionID == "" {
+		reportChange("routed", "dropped_operator_fired")
+		return
+	}
+	reportChange("parent_session_id", ev.ParentSessionID)
+	if err := r.deps.Sessions.DeliverToSession(ctx, libacp.SessionID(ev.ParentSessionID), buildPlanNotification(ev)); err != nil {
+		reportChange("routed", "dropped_parent_not_live")
+		reportErr(err)
+		return
+	}
+	reportChange("routed", "session")
+}
+
+// statusUpdateMeta namespaces the terminal-transition attribution the delivered
+// update carries, so a client can render "unit landed" as a lifecycle event
+// rather than as chat text. Dotted namespace, same as the report and ask keys.
+type statusUpdateMeta struct {
+	Status *statusAttribution `json:"contenox.missionStatus,omitempty"`
+}
+
+type statusAttribution struct {
+	MissionID string `json:"missionId"`
+	AgentName string `json:"agentName,omitempty"`
+	Intent    string `json:"intent,omitempty"`
+	OldStatus string `json:"oldStatus"`
+	NewStatus string `json:"newStatus"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// planUpdateMeta namespaces the plan-revision attribution, carrying the counts a
+// client draws a progress line from without reading the mission back.
+type planUpdateMeta struct {
+	Plan *planAttribution `json:"contenox.missionPlan,omitempty"`
+}
+
+type planAttribution struct {
+	MissionID   string `json:"missionId"`
+	AgentName   string `json:"agentName,omitempty"`
+	Revision    int    `json:"revision"`
+	Explanation string `json:"explanation,omitempty"`
+	EntryCount  int    `json:"entryCount"`
+	Pending     int    `json:"pending"`
+	InProgress  int    `json:"inProgress"`
+	Completed   int    `json:"completed"`
+}
+
+// buildStatusNotification renders a terminal transition as the session update
+// delivered into the firing session — same shape as a report (an
+// agent_message_chunk plus a dotted _meta envelope), because the supervisor
+// reads both in the same transcript.
+func buildStatusNotification(ev missionservice.StatusChangedEvent) libacp.SessionNotification {
+	update := libacp.NewAgentMessageChunk(statusText(ev))
+	update.MessageID = statusMessageID(ev)
+	meta := statusUpdateMeta{Status: &statusAttribution{
+		MissionID: ev.MissionID,
+		AgentName: ev.AgentName,
+		Intent:    ev.Intent,
+		OldStatus: string(ev.OldStatus),
+		NewStatus: string(ev.NewStatus),
+		Reason:    ev.Reason,
+	}}
+	if raw, err := json.Marshal(meta); err == nil {
+		update.Meta = raw
+	}
+	return libacp.SessionNotification{
+		SessionID: libacp.SessionID(ev.ParentSessionID),
+		Update:    update,
+	}
+}
+
+// statusMessageID gives a status notification its own message id, for the reason
+// buildAskNotification and buildReportNotification give: a delivered update with
+// no id of its own is folded into whatever message the session is currently
+// streaming, so a landing merges into the last thing the agent said.
+//
+// The discriminator is the TRANSITION (old→new), not a counter, and that is a
+// decision worth naming. StatusChangedEvent carries no revision and no
+// timestamp, so the alternatives were a router-local counter or the pair. The
+// pair is DERIVED FROM THE EVENT, which buys two things a counter cannot:
+//
+//   - It is collision-free by the same guard that makes the transition possible
+//     at all. Finish is the only publisher, it accepts only non-terminal →
+//     terminal, and a terminal mission is immutable — so a given (mission, old,
+//     new) triple can be published at most once, ever.
+//   - It is STABLE under redelivery. The bus this runs on is SQLite-backed and
+//     at-least-once; a counter would render one landing twice as two separate
+//     messages, while the pair collapses a redelivery into the same message id
+//     the client already has.
+func statusMessageID(ev missionservice.StatusChangedEvent) string {
+	return fmt.Sprintf("mission-status-%s-%s-%s", ev.MissionID, ev.OldStatus, ev.NewStatus)
+}
+
+// statusText composes the human-readable body of a terminal transition, in
+// reportText's voice: the unit first, then what happened to it, then why when a
+// reason was given. The status word IS the verb ("landed", "derailed", "stuck"),
+// so the line reads as English for every member of the terminal set without a
+// per-status phrase table that a new status would silently fall out of.
+func statusText(ev missionservice.StatusChangedEvent) string {
+	unit := strings.TrimSpace(ev.AgentName)
+	if unit == "" {
+		unit = "a mission unit"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "unit %s %s", unit, ev.NewStatus)
+	if reason := strings.TrimSpace(ev.Reason); reason != "" {
+		b.WriteString(": ")
+		b.WriteString(reason)
+	}
+	return b.String()
+}
+
+// buildPlanNotification renders a plan revision as the session update delivered
+// into the firing session.
+func buildPlanNotification(ev missionservice.PlanRevisedEvent) libacp.SessionNotification {
+	update := libacp.NewAgentMessageChunk(planText(ev))
+	// The revision number is the mission's OWN monotonic counter for exactly this
+	// event, so it is both collision-free per mission and stable under redelivery
+	// — the property statusMessageID has to construct by hand.
+	update.MessageID = fmt.Sprintf("mission-plan-%s-%d", ev.MissionID, ev.Revision)
+	meta := planUpdateMeta{Plan: &planAttribution{
+		MissionID:   ev.MissionID,
+		AgentName:   ev.AgentName,
+		Revision:    ev.Revision,
+		Explanation: ev.Explanation,
+		EntryCount:  ev.EntryCount,
+		Pending:     ev.Pending,
+		InProgress:  ev.InProgress,
+		Completed:   ev.Completed,
+	}}
+	if raw, err := json.Marshal(meta); err == nil {
+		update.Meta = raw
+	}
+	return libacp.SessionNotification{
+		SessionID: libacp.SessionID(ev.ParentSessionID),
+		Update:    update,
+	}
+}
+
+// planText composes the human-readable body of a plan revision: what changed and
+// why on the first line, where the plan now STANDS on the second. The counts
+// line is what makes this legible to a supervising agent — it can decide whether
+// to intervene from the transcript alone, without reading the mission back.
+func planText(ev missionservice.PlanRevisedEvent) string {
+	unit := strings.TrimSpace(ev.AgentName)
+	if unit == "" {
+		unit = "a mission unit"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "unit %s revised its plan (rev %d)", unit, ev.Revision)
+	if explanation := strings.TrimSpace(ev.Explanation); explanation != "" {
+		b.WriteString(": ")
+		b.WriteString(explanation)
+	}
+	fmt.Fprintf(&b, "\n%d entries: %d pending, %d in progress, %d completed",
+		ev.EntryCount, ev.Pending, ev.InProgress, ev.Completed)
 	return b.String()
 }

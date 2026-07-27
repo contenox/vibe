@@ -1,0 +1,11 @@
+── scrollback ──
+── live (cursor hidden) ──
+[pending]·[/] [tool]write_file: internal/config/limits.go[/]
+[hitl]◆ approval required[/]
+[muted]tool  [/]local_fs.write_file
+[muted]  path = [/]internal/config/limits.go
+[muted]policy default · rule .contenox/policies/default.yaml[/]
+[muted]new content (1 lines)[/]
+[pending]⠋[/] [strong]y[/][muted] allow · [/][strong]n[/][muted] deny · Esc cancels turn[/]
+[muted]▌ [/][muted]type / for commands · ! for shell · @ to attach[/]
+[brand]▌[/] [muted]contenox[/]  [brand]⠋[/] write_file: internal/config/limits.go  [muted]qwen3:8b · ollama[/]          

@@ -189,6 +189,17 @@ type candidate struct {
 func scan(ctx context.Context, roots []string) ([]candidate, error) {
 	var out []candidate
 	claimed := map[string]bool{}
+	// Roots are a PRECEDENCE list, so a root that appears twice adds nothing: the
+	// first pass over it already claimed every agent it can provide, and by the
+	// precedence rule the second pass would lose every one of those claims to
+	// itself. Walking it again is therefore pure duplication — including of the
+	// per-file diagnostics below, which is how it announced itself: an operator
+	// launching a surface whose workspace directory IS ~/.contenox (beam, and
+	// `contenox acp` outside a project) saw every "chain file fails validation"
+	// warning printed exactly twice on every startup. Deduplicated HERE, on the
+	// resolved absolute path, so it holds for every caller rather than for
+	// whichever one remembered.
+	seenRoot := map[string]bool{}
 	for _, root := range roots {
 		if strings.TrimSpace(root) == "" {
 			continue
@@ -197,6 +208,10 @@ func scan(ctx context.Context, roots []string) ([]candidate, error) {
 		if err != nil {
 			return nil, fmt.Errorf("chainagents: resolve chain root %q: %w", root, err)
 		}
+		if seenRoot[abs] {
+			continue
+		}
+		seenRoot[abs] = true
 		// Skipped rather than created: discovery reads the operator's
 		// directories, it does not conjure them.
 		if info, err := os.Stat(abs); err != nil || !info.IsDir() {

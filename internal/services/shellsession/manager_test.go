@@ -16,16 +16,28 @@ import (
 
 func newTestManager(t *testing.T, idle time.Duration) *manager {
 	t.Helper()
-	root := t.TempDir()
-	roots, err := vfs.NewFactory(root)
-	if err != nil {
-		t.Fatalf("vfs.NewFactory(%q): %v", root, err)
+	return newTestManagerWith(t, Config{IdleTimeout: idle})
+}
+
+// newTestManagerWith builds a manager from a partial Config, filling in the
+// workspace envelope (a real one-root allowlist rooted at a temp dir, which is
+// what production hands it) unless the caller supplied one.
+func newTestManagerWith(t *testing.T, cfg Config) *manager {
+	t.Helper()
+	if cfg.CwdResolver == nil || cfg.Workspace == nil {
+		root := t.TempDir()
+		roots, err := vfs.NewFactory(root)
+		if err != nil {
+			t.Fatalf("vfs.NewFactory(%q): %v", root, err)
+		}
+		if cfg.CwdResolver == nil {
+			cfg.CwdResolver = func(context.Context) string { return root }
+		}
+		if cfg.Workspace == nil {
+			cfg.Workspace = roots
+		}
 	}
-	m := NewManager(Config{
-		CwdResolver: func(context.Context) string { return root },
-		Workspace:   roots,
-		IdleTimeout: idle,
-	}).(*manager)
+	m := NewManager(cfg).(*manager)
 	t.Cleanup(m.Shutdown)
 	return m
 }

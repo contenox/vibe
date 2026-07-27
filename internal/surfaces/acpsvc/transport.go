@@ -12,6 +12,7 @@ import (
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	libdb "github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/beam/internal/services/chatservice"
 	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/services/shellsession"
 	"github.com/contenox/beam/internal/services/vfs"
@@ -842,25 +843,93 @@ func sessionIDFromCtx(ctx context.Context) string {
 
 // sendInitialUsageUpdate sends a usage_update with the session's effective token budget as size
 // (the chain token_limit or per-session override, clamped to model cap).
-// Used falls back to 0 until token events arrive. This makes indicators based on the
+// Used is 0 — this is the BRAND-NEW session path, where zero is the truth.
+// A session with a history uses sendUsageUpdate instead. This makes indicators based on the
 // user-visible/controllable session budget, not raw model cap or default-max-tokens.
 func (t *Transport) sendInitialUsageUpdate(ctx context.Context, sid libacp.SessionID) {
-	// Prefer session's effective token limit (the "chain token-limit" the user switches)
+	if size := t.sessionTokenSize(ctx, sid); size > 0 {
+		t.sendUpdate(ctx, libacp.SessionNotification{
+			SessionID: sid,
+			Update: libacp.SessionUpdate{
+				SessionUpdate: libacp.SessionUpdateUsageUpdate,
+				Size:          size,
+			},
+		})
+	}
+}
+
+// sendUsageUpdate emits the gauge for a session that ALREADY has a history —
+// the load/resume counterpart of sendInitialUsageUpdate, same size resolution
+// with the used half filled in. It is emitted whenever either half is known, so
+// a deployment that cannot resolve a context size still reports what the
+// session has consumed (mirroring the live token_usage translation in
+// events.go, which publishes on `size > 0 || used > 0` for the same reason).
+func (t *Transport) sendUsageUpdate(ctx context.Context, sid libacp.SessionID, used int) {
+	size := t.sessionTokenSize(ctx, sid)
+	if size <= 0 && used <= 0 {
+		return
+	}
+	t.sendUpdate(ctx, libacp.SessionNotification{
+		SessionID: sid,
+		Update: libacp.SessionUpdate{
+			SessionUpdate: libacp.SessionUpdateUsageUpdate,
+			Used:          used,
+			Size:          size,
+		},
+	})
+}
+
+// sendResumedUsageUpdate is sendUsageUpdate for session/resume, which — unlike
+// session/load — never reads the transcript, so the history it needs to size
+// the used half is fetched here. A read failure degrades to a size-only update
+// rather than failing the resume: a gauge is not worth refusing a session over.
+func (t *Transport) sendResumedUsageUpdate(ctx context.Context, sid libacp.SessionID, entry *sessionEntry) {
+	used := 0
+	if t.deps.DB != nil && entry != nil && entry.InternalSessionID != "" {
+		mgr := chatservice.NewManager(entry.WorkspaceID)
+		if msgs, err := mgr.ListMessages(ctx, t.deps.DB.WithoutTransaction(), entry.InternalSessionID); err == nil {
+			used = estimateHistoryTokens(msgs)
+		}
+	}
+	t.sendUsageUpdate(ctx, sid, used)
+}
+
+// sessionTokenSize resolves the "size" half of a usage_update: the context
+// budget the gauge is drawn against, BEFORE any turn has reported one.
+//
+// It is deliberately the same arithmetic taskengine runs to pick a turn's
+// ctxLength (see taskenv's tokenLimit resolution): the chain's token_limit is
+// the base, and the session's own override wins only when it is SMALLER (or
+// when the chain declares none). Deriving it any other way would put a
+// different denominator under the gauge than the first token_usage event of the
+// next turn, and the indicator would visibly jump for no reason the operator
+// can see.
+//
+// The chain's token_limit was missing from this resolution entirely, which is
+// why a reloaded session could produce a usage_update with no size at all
+// wherever the backend reports no per-model context length — most hosted
+// providers, including every vertex model. The model-context-length scan below
+// stays as the last resort for chains that declare no budget.
+//
+// 0 means no budget could be resolved at all.
+func (t *Transport) sessionTokenSize(ctx context.Context, sid libacp.SessionID) int {
 	t.sessionMu.Lock()
 	sess, hasSess := t.sessions[sid]
 	t.sessionMu.Unlock()
 
-	if hasSess && sess != nil {
-		if eff := sess.effectiveTokenLimit(); eff > 0 {
-			t.sendUpdate(ctx, libacp.SessionNotification{
-				SessionID: sid,
-				Update: libacp.SessionUpdate{
-					SessionUpdate: libacp.SessionUpdateUsageUpdate,
-					Size:          eff,
-				},
-			})
-			return
+	limit := 0
+	if t.deps.ChainRegistry != nil {
+		if chain := t.deps.ChainRegistry.Default(); chain != nil {
+			limit = int(chain.TokenLimit)
 		}
+	}
+	if hasSess && sess != nil {
+		if eff := sess.effectiveTokenLimit(); eff > 0 && (limit <= 0 || eff < limit) {
+			limit = eff
+		}
+	}
+	if limit > 0 {
+		return limit
 	}
 
 	// Fallback to model cap (for cases where no explicit budget set yet)
@@ -874,29 +943,16 @@ func (t *Transport) sendInitialUsageUpdate(ctx context.Context, sid libacp.Sessi
 	for _, state := range t.runtimeStates(ctx) {
 		for _, pulled := range state.PulledModels {
 			if preferredModel != "" && pulled.Model == preferredModel && pulled.ContextLength > 0 {
-				t.sendUpdate(ctx, libacp.SessionNotification{
-					SessionID: sid,
-					Update: libacp.SessionUpdate{
-						SessionUpdate: libacp.SessionUpdateUsageUpdate,
-						Size:          pulled.ContextLength,
-					},
-				})
-				return
+				return pulled.ContextLength
 			}
 		}
 	}
 	for _, state := range t.runtimeStates(ctx) {
 		for _, pulled := range state.PulledModels {
 			if pulled.ContextLength > 0 && (pulled.CanChat || pulled.CanPrompt) {
-				t.sendUpdate(ctx, libacp.SessionNotification{
-					SessionID: sid,
-					Update: libacp.SessionUpdate{
-						SessionUpdate: libacp.SessionUpdateUsageUpdate,
-						Size:          pulled.ContextLength,
-					},
-				})
-				return
+				return pulled.ContextLength
 			}
 		}
 	}
+	return 0
 }

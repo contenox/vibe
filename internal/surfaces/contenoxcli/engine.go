@@ -11,6 +11,7 @@ import (
 	"github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/agentservice"
+	"github.com/contenox/beam/internal/services/gointel"
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/localtools"
 	"github.com/contenox/beam/internal/services/missionservice"
@@ -45,29 +46,18 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	reportErr, reportChange, end := tracker.Start(ctx, "build", "engine")
 	defer end()
 
-	tools := map[string]taskengine.ToolsRepo{
-		"echo":     localtools.NewEchoTools(),
-		"print":    localtools.NewPrint(tracker),
-		"webtools": localtools.NewWebCaller(tracker),
-		"local_fs": localtools.NewLocalFSTools(opts.EffectiveLocalExecAllowedDir, db),
-		// Durable-only mission tools (no asker, no publisher): this engine is
-		// what `approvals respond` resumes suspended MISSION chains on, and a
-		// resumed chain's later mission_report/mission_finish calls must land
-		// in the store rather than fail as unknown tools. A nested attention
-		// ask degrades to the durable blocker fallback here.
-		missiontools.ToolsProviderName: missiontools.New(missionservice.New(db), nil),
-	}
-	if opts.EffectiveEnableLocalExec {
-		execOpts := []localtools.LocalExecOption{}
-		if opts.EffectiveLocalExecAllowedDir != "" {
-			execOpts = append(execOpts, localtools.WithLocalExecAllowedDir(opts.EffectiveLocalExecAllowedDir))
+	// The Go-intelligence index owns a reaper goroutine, so it needs a
+	// lifecycle: it rides engine.Stop below, and the guard here covers every
+	// error return between construction and that wrap.
+	goIndex := gointel.NewIndex(gointel.Config{AllowedDir: opts.EffectiveLocalExecAllowedDir})
+	engineBuilt := false
+	defer func() {
+		if !engineBuilt {
+			goIndex.Shutdown()
 		}
-		tools["local_shell"] = localtools.NewLocalExecTools(execOpts...)
+	}()
 
-		if !opts.EffectiveHITL && opts.EffectiveLocalExecAllowedDir == "" {
-			slog.Warn("local_shell is enabled with no HITL and no allowed-dir; chain-level tools_policies is the only safety gate")
-		}
-	}
+	tools := localToolset(opts, db, tracker, goIndex)
 
 	askApproval := opts.EffectiveAskApproval
 	if askApproval == nil {
@@ -118,7 +108,61 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		}))
 	}
 	reportChange("phase", "enginesvc_built")
+	// Ride the engine's chainable stop so the index's reaper is joined
+	// whenever the engine goes down — the same pattern enginesvc uses for
+	// the MCP manager.
+	engineBuilt = true
+	oldStop := engine.Stop
+	engine.Stop = func() {
+		goIndex.Shutdown()
+		oldStop()
+	}
 	return engine, nil
+}
+
+// localToolset is the set of local tool providers every CLI-side engine gets.
+// It is a function rather than an inline literal so what is registered — and,
+// just as importantly, what is registered only when asked for — is assertable
+// without standing up a whole engine (engine_test.go).
+func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, goIndex gointel.Index) map[string]taskengine.ToolsRepo {
+	tools := map[string]taskengine.ToolsRepo{
+		"echo":     localtools.NewEchoTools(),
+		"print":    localtools.NewPrint(tracker),
+		"webtools": localtools.NewWebCaller(tracker),
+		"local_fs": localtools.NewLocalFSTools(opts.EffectiveLocalExecAllowedDir, db),
+		// git is ALWAYS registered — unlike local_shell, it is not gated on
+		// --shell. Reading the repository is the point: an agent that cannot see
+		// what changed says "I can't do that" to the most ordinary question a
+		// coding session has. What it may DO is the envelope's call, not this
+		// file's: the seeded policies allow the six read operations and hold the
+		// four that change the repository at an approval. Same directory scoping
+		// as local_fs above, so both tools see one workspace.
+		localtools.GitToolsName: localtools.NewGitTools(opts.EffectiveLocalExecAllowedDir),
+		// Go intelligence is ALWAYS registered for the same reason git is:
+		// asking "what type is this / who calls this" is reading, and every
+		// gointel tool is a read (the seeded policies allow the whole
+		// toolset — revisit that rule before any mutating op ever lands
+		// here). Same directory scoping as local_fs and git.
+		gointel.ToolsProviderName: gointel.NewTools(goIndex),
+		// Durable-only mission tools (no asker, no publisher): this engine is
+		// what `approvals respond` resumes suspended MISSION chains on, and a
+		// resumed chain's later mission_report/mission_finish calls must land
+		// in the store rather than fail as unknown tools. A nested attention
+		// ask degrades to the durable blocker fallback here.
+		missiontools.ToolsProviderName: missiontools.New(missionservice.New(db), nil),
+	}
+	if opts.EffectiveEnableLocalExec {
+		execOpts := []localtools.LocalExecOption{}
+		if opts.EffectiveLocalExecAllowedDir != "" {
+			execOpts = append(execOpts, localtools.WithLocalExecAllowedDir(opts.EffectiveLocalExecAllowedDir))
+		}
+		tools["local_shell"] = localtools.NewLocalExecTools(execOpts...)
+
+		if !opts.EffectiveHITL && opts.EffectiveLocalExecAllowedDir == "" {
+			slog.Warn("local_shell is enabled with no HITL and no allowed-dir; chain-level tools_policies is the only safety gate")
+		}
+	}
+	return tools
 }
 
 // readinessDefaults derives the effective default model/provider to credit during

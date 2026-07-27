@@ -1,10 +1,13 @@
 package chainagents_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
@@ -321,4 +324,36 @@ func TestUnit_Discover_LintFailingChainIsSkippedAndDisabled(t *testing.T) {
 	_, err = chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
 	require.False(t, mustGet(t, ctx, agents, "worker").Enabled)
+}
+
+// TestUnit_Discover_RepeatedRootIsWalkedOnce pins the dedupe. roots is a
+// PRECEDENCE list, so the same directory listed twice can add nothing — the
+// first pass claims every agent it provides and the second would lose all of
+// them to itself. What the duplication DID produce was duplicated diagnostics:
+// every surface whose workspace directory is also ~/.contenox (beam, and
+// `contenox acp` outside a project) passed the same path as both roots, and an
+// operator with one lint-failing chain saw its warning twice on every single
+// startup — which reads as two broken files, not one.
+func TestUnit_Discover_RepeatedRootIsWalkedOnce(t *testing.T) {
+	ctx, agents := setupRegistry(t)
+	dir := t.TempDir()
+	writeChain(t, dir, "agent-good.json", "good")
+	// Parseable and listable, but the linter refuses it — the shape that warns.
+	broken, err := json.Marshal(taskengine.TaskChainDefinition{
+		ID:    "brokenagent",
+		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-broken.json"), broken, 0o600))
+
+	var logged bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(restore)
+
+	res, err := chainagents.Discover(ctx, agents, dir, dir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"good"}, res.Created, "a repeated root must not change what is discovered")
+	require.Equal(t, 1, strings.Count(logged.String(), "chain agent discovery: chain file fails validation"),
+		"one broken chain file must produce exactly one warning, however many times its directory was listed")
 }

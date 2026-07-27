@@ -93,6 +93,28 @@ const (
 	// OpNoCommandSubstitution blocks commands containing shell substitution
 	// patterns ($(), backticks, <(), >()) that could indicate command injection.
 	OpNoCommandSubstitution ConditionOp = "no_command_substitution"
+	// OpCommandPrefixAllowlist matches the tool call's command line against a
+	// comma-separated list of SAFE COMMAND PREFIXES — "git status", "go build",
+	// "ls" — and is the positive half of the shell vocabulary: with
+	// action:"allow" it is how an envelope says "these verbs never interrupt
+	// anyone", so a coding agent can look at the repository without filing an
+	// approval for every `git status`.
+	//
+	// It matches on the command line as TOKENS, not on the program basename,
+	// because a basename allowlist cannot express the distinction that matters:
+	// `git status` is a read and `git reset --hard` destroys work, and both are
+	// "git". The command's basename is the first token (so /usr/bin/git matches
+	// a "git ..." prefix) and the remaining tokens come from args; a listed
+	// prefix matches when it is a token-wise prefix of that line, so "git log"
+	// covers `git log --oneline -20` and never covers `git clean -fd`.
+	//
+	// It deliberately REFUSES TO MATCH anything that is not a plain argv call:
+	// a call asking for shell mode, or carrying a shell control or substitution
+	// character (; | & > < newline, backtick, $( ) in any token, never matches a
+	// prefix and therefore falls through to the tiers below. That refusal is
+	// what makes this an allowlist rather than a hole — `git status && rm -rf ~`
+	// cannot enter through the entry that allows `git status`.
+	OpCommandPrefixAllowlist ConditionOp = "command_prefix_allowlist"
 )
 
 // Condition is a single key/op/value predicate applied to the args of a tool call.
@@ -289,6 +311,10 @@ func conditionMatches(c Condition, args map[string]any) bool {
 			}
 		case OpNoCommandSubstitution:
 			if detectCommandSubstitution(args) {
+				return true
+			}
+		case OpCommandPrefixAllowlist:
+			if isCommandPrefixAllowed(args, c.Value) {
 				return true
 			}
 		}
@@ -547,63 +573,158 @@ func getCommandFromArgs(args map[string]any) string {
 	return ""
 }
 
-// isCommandBlacklisted checks if the command matches any in the blacklist.
-// The blacklist is a comma-separated string of command names (basenames).
-func isCommandBlacklisted(args map[string]any, blacklist string) bool {
-	if blacklist == "" {
-		return false
-	}
+// commandBasename extracts the bare program name a rule's command list is
+// compared against: the basename of the command, minus any arguments that came
+// along in the same string ("/sbin/mkfs" -> "mkfs", "rm -rf" -> "rm").
+func commandBasename(args map[string]any) string {
 	cmd := getCommandFromArgs(args)
 	if cmd == "" {
+		return ""
+	}
+	fields := strings.Fields(path.Base(cmd))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// commandBasenameInList reports whether the call's command basename appears in a
+// comma-separated list of bare command names. It is the one matcher behind both
+// the blacklist and the ask-always operators, which differ only in the ACTION
+// their rule carries, never in how they match.
+func commandBasenameInList(args map[string]any, commandList string) bool {
+	if commandList == "" {
 		return false
 	}
-	// Get basename of command (strip path and any suffixes)
-	base := path.Base(cmd)
-	// Remove any arguments that might be appended
-	// e.g., "grep -n" -> "grep"
-	base = strings.Fields(base)[0]
+	base := commandBasename(args)
 	if base == "" {
 		return false
 	}
-	// Check against blacklist
-	for _, denied := range strings.Split(blacklist, ",") {
-		denied = strings.TrimSpace(denied)
-		if denied == "" {
-			continue
-		}
-		if base == denied {
+	for _, name := range strings.Split(commandList, ",") {
+		if name = strings.TrimSpace(name); name != "" && base == name {
 			return true
 		}
 	}
 	return false
 }
 
+// isCommandBlacklisted checks if the command matches any in the blacklist.
+// The blacklist is a comma-separated string of command names (basenames).
+func isCommandBlacklisted(args map[string]any, blacklist string) bool {
+	return commandBasenameInList(args, blacklist)
+}
+
 // isCommandInAskAlwaysList checks if the command matches any in the ask-always list.
 // The list is a comma-separated string of command names (basenames) that should
 // always require human approval before execution.
 func isCommandInAskAlwaysList(args map[string]any, commandList string) bool {
-	if commandList == "" {
+	return commandBasenameInList(args, commandList)
+}
+
+// shellControlChars are the characters that make a command line something other
+// than a plain argv call — chaining, piping, redirection, substitution. A token
+// carrying any of them disqualifies the whole call from prefix-allowlist
+// matching (see OpCommandPrefixAllowlist), so an allowlisted verb can never be
+// the doorway for what follows it. A lone "$" is NOT here: without a shell,
+// "$HOME" is a literal argument, and OpNoCommandSubstitution already draws the
+// same line for the "$(" form.
+const shellControlChars = ";|&><`\n\r"
+
+// commandTokens flattens a local_shell call into the token sequence a prefix is
+// compared against — the command basename followed by its arguments. ok is false
+// when the call is not a plain argv call (shell mode requested, or a shell
+// control character anywhere in it), which is exactly when no prefix may match.
+func commandTokens(args map[string]any) (tokens []string, ok bool) {
+	if shellModeRequested(args) {
+		return nil, false
+	}
+	var raw []string
+	if cmd, isStr := args["command"].(string); isStr && strings.TrimSpace(cmd) != "" {
+		raw = append(raw, strings.Fields(cmd)...)
+		raw = append(raw, argTokens(args["args"])...)
+	} else {
+		raw = argTokens(args["args"])
+	}
+	if len(raw) == 0 {
+		return nil, false
+	}
+	for _, t := range raw {
+		if strings.ContainsAny(t, shellControlChars) {
+			return nil, false
+		}
+		for _, pattern := range commandSubstitutionPatterns {
+			if strings.Contains(t, pattern) {
+				return nil, false
+			}
+		}
+	}
+	raw[0] = path.Base(raw[0])
+	return raw, true
+}
+
+// shellModeRequested reports whether the call asked for the platform shell.
+// local_shell already refuses shell mode whenever a tools policy is active, but
+// the envelope must not depend on that: an allowlist that matched a shell string
+// would be allowlisting everything after the first metacharacter.
+func shellModeRequested(args map[string]any) bool {
+	switch v := args["shell"].(type) {
+	case bool:
+		return v
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "1", "yes", "y", "on":
+			return true
+		}
+	}
+	return false
+}
+
+// argTokens flattens an "args" value into tokens. A single string is split on
+// whitespace (it is a command line); an array is taken element-wise (each entry
+// is already one argv slot and may legitimately contain spaces).
+func argTokens(v any) []string {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case string:
+		return strings.Fields(t)
+	case []string:
+		return append([]string(nil), t...)
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			out = append(out, fmt.Sprintf("%v", e))
+		}
+		return out
+	default:
+		return []string{fmt.Sprintf("%v", v)}
+	}
+}
+
+// isCommandPrefixAllowed reports whether the call's command line begins with one
+// of the comma-separated safe prefixes. See OpCommandPrefixAllowlist for the
+// semantics and for why a non-argv call never matches.
+func isCommandPrefixAllowed(args map[string]any, prefixList string) bool {
+	if strings.TrimSpace(prefixList) == "" {
 		return false
 	}
-	cmd := getCommandFromArgs(args)
-	if cmd == "" {
+	tokens, ok := commandTokens(args)
+	if !ok {
 		return false
 	}
-	// Get basename of command (strip path and any suffixes)
-	base := path.Base(cmd)
-	// Remove any arguments that might be appended
-	// e.g., "rm -rf" -> "rm"
-	base = strings.Fields(base)[0]
-	if base == "" {
-		return false
-	}
-	// Check against the ask-always list
-	for _, cmdName := range strings.Split(commandList, ",") {
-		cmdName = strings.TrimSpace(cmdName)
-		if cmdName == "" {
+	for _, entry := range strings.Split(prefixList, ",") {
+		want := strings.Fields(entry)
+		if len(want) == 0 || len(want) > len(tokens) {
 			continue
 		}
-		if base == cmdName {
+		matched := true
+		for i, w := range want {
+			if tokens[i] != w {
+				matched = false
+				break
+			}
+		}
+		if matched {
 			return true
 		}
 	}
@@ -675,7 +796,7 @@ func validatePolicy(p *Policy) error {
 		}
 		for j, c := range r.When {
 			switch c.Op {
-			case OpEq, OpHost, OpCommandBlacklist, OpCommandAskAlways, OpNoCommandSubstitution:
+			case OpEq, OpHost, OpCommandBlacklist, OpCommandAskAlways, OpNoCommandSubstitution, OpCommandPrefixAllowlist:
 			case OpGlob:
 				if err := validateGlobValue(c.Value); err != nil {
 					return fmt.Errorf("rule %d, condition %d: %w", i, j, err)
@@ -811,6 +932,24 @@ func secretDenyRules() []Rule {
 	return rules
 }
 
+// safeShellPrefixes is the built-in fallback's safe-verb allow tier, byte-for-byte
+// the value the shipped hitl-policy-default.json and hitl-policy-acp.json carry
+// (their "//" note justifies every entry). The bar for membership is narrow: a
+// prefix earns a place only if it cannot delete or modify a file, cannot run an
+// arbitrary program, and cannot reach the network — plus the project's own build
+// and test verbs, which run the code the agent is already editing.
+//
+// Notable absences and why: `find` (its -delete and -exec would walk straight
+// around the rm/sudo ask-always tier), bare `gofmt` (gofmt -w rewrites sources —
+// the read-only -l and -d forms are listed instead), `go run`/`go generate`
+// (arbitrary execution), `go get`/`go mod` (network, and they rewrite go.mod),
+// and every mutating git verb (`git commit`, `git reset`, `git clean`, `git
+// checkout`, `git push` — those go through the git toolset's approve rules or
+// through an explicit approval).
+const safeShellPrefixes = "git status,git diff,git log,git show,git blame,git branch,git ls-files,git rev-parse," +
+	"go build,go test,go vet,go list,go doc,go env,go version,gofmt -l,gofmt -d," +
+	"ls,cat,head,tail,wc,pwd,echo,grep,rg"
+
 func defaultPolicy() *Policy {
 	return &Policy{
 		DefaultAction: ActionApprove,
@@ -823,14 +962,36 @@ func defaultPolicy() *Policy {
 			{Tools: "local_fs", Tool: "count_stats", Action: ActionAllow},
 			{Tools: "local_fs", Tool: "write_file", Action: ActionApprove},
 			{Tools: "local_fs", Tool: "sed", Action: ActionApprove},
+			// git: reading the repository is what the tools are FOR — a coding
+			// agent that must file an approval to run `git status` is a coding
+			// agent nobody leaves running. The four operations that change the
+			// repository ask, and git_restore asks because it destroys work.
+			{Tools: "git", Tool: "git_status", Action: ActionAllow},
+			{Tools: "git", Tool: "git_diff", Action: ActionAllow},
+			{Tools: "git", Tool: "git_log", Action: ActionAllow},
+			{Tools: "git", Tool: "git_show", Action: ActionAllow},
+			{Tools: "git", Tool: "git_branch_list", Action: ActionAllow},
+			{Tools: "git", Tool: "git_blame", Action: ActionAllow},
+			{Tools: "git", Tool: "git_add", Action: ActionApprove},
+			{Tools: "git", Tool: "git_commit", Action: ActionApprove},
+			{Tools: "git", Tool: "git_checkout_branch", Action: ActionApprove},
+			{Tools: "git", Tool: "git_restore", Action: ActionApprove},
 			// local_shell: block commands that are never allowed under any circumstance.
 			// Values must be bare basenames — the matcher extracts path.Base(command) and compares
 			// exactly, so multi-word entries like "rm -rf" would silently never fire.
 			{Tools: "local_shell", Tool: "local_shell", Action: ActionDeny, When: []Condition{{Key: "command", Op: OpCommandBlacklist, Value: "mkfs,mke2fs,fdisk,shred,wipefs"}}},
+			// local_shell: require approval for command injection patterns. This
+			// sits ABOVE the allow tier on purpose: a command line carrying a
+			// substitution is never a "safe verb", whatever verb it starts with.
+			{Tools: "local_shell", Tool: "local_shell", Action: ActionApprove, When: []Condition{{Key: "args", Op: OpNoCommandSubstitution, Value: ""}}},
+			// local_shell: the safe-verb allow tier — read-only inspection and the
+			// project's own build/test verbs run without interrupting anyone. Kept
+			// in sync with hitl-policy-default.json, where each entry is justified
+			// individually; see OpCommandPrefixAllowlist for why these are PREFIXES
+			// (so `git log` is allowed and `git clean -fd` is not).
+			{Tools: "local_shell", Tool: "local_shell", Action: ActionAllow, When: []Condition{{Key: "command", Op: OpCommandPrefixAllowlist, Value: safeShellPrefixes}}},
 			// local_shell: require approval for dangerous commands (ask-always list)
 			{Tools: "local_shell", Tool: "local_shell", Action: ActionApprove, When: []Condition{{Key: "command", Op: OpCommandAskAlways, Value: "rm,sudo,dd,chmod,chown,mv,cp,>:,>>"}}},
-			// local_shell: require approval for command injection patterns
-			{Tools: "local_shell", Tool: "local_shell", Action: ActionApprove, When: []Condition{{Key: "args", Op: OpNoCommandSubstitution, Value: ""}}},
 			// local_shell: default to requiring approval (fail-closed safety)
 			{Tools: "local_shell", Tool: "local_shell", Action: ActionApprove},
 			// shell_session: reading scrollback is reference-only and never gated;
@@ -843,6 +1004,7 @@ func defaultPolicy() *Policy {
 			{Tools: "webtools", Tool: "web_put", Action: ActionApprove},
 			{Tools: "webtools", Tool: "web_patch", Action: ActionApprove},
 			{Tools: "webtools", Tool: "web_delete", Action: ActionApprove},
+			{Tools: "gointel", Action: ActionAllow},
 			{Tools: "echo", Action: ActionAllow},
 			{Tools: "print", Action: ActionAllow},
 		}...),

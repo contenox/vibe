@@ -58,7 +58,7 @@ const (
 // code, vscode-agent, modeld) stay reserved on purpose: an operator typing one
 // gets Cobra's unknown-command error naming the mistake, instead of the word
 // being silently injected as a chat prompt.
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true}
+var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {

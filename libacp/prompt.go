@@ -51,6 +51,33 @@ const (
 	SessionUpdateSessionInfo       SessionUpdateKind = "session_info_update"
 )
 
+// AllSessionUpdateKinds returns every SessionUpdateKind the spec defines, in
+// declaration order. It exists so that a consumer's translation table can be
+// tested for COMPLETENESS against the library rather than against a second,
+// hand-maintained copy of this list: a client that maps update kinds to its own
+// vocabulary (see internal/surfaces/beamtui/enginebridge) iterates this and
+// fails when a kind has no arm, instead of silently degrading the new kind to
+// its unknown-update fallback for as long as nobody notices.
+//
+// That makes it part of the contract: ADDING A CONST ABOVE MEANS ADDING IT
+// HERE. The slice is freshly built on every call, so a caller cannot corrupt
+// the answer for the next one.
+func AllSessionUpdateKinds() []SessionUpdateKind {
+	return []SessionUpdateKind{
+		SessionUpdateUserMessageChunk,
+		SessionUpdateAgentMessageChunk,
+		SessionUpdateAgentThoughtChunk,
+		SessionUpdateToolCall,
+		SessionUpdateToolCallUpdate,
+		SessionUpdatePlan,
+		SessionUpdateAvailableCommands,
+		SessionUpdateCurrentMode,
+		SessionUpdateConfigOption,
+		SessionUpdateUsageUpdate,
+		SessionUpdateSessionInfo,
+	}
+}
+
 type SessionUpdate struct {
 	SessionUpdate SessionUpdateKind `json:"sessionUpdate"`
 

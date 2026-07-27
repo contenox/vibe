@@ -1,0 +1,383 @@
+package localtools_test
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/beam/internal/services/localtools"
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// testSignature is an explicit author on every fixture commit: the tests must
+// not depend on whatever user.name the machine running them happens to have
+// configured (a CI box usually has none at all).
+func testSignature() *object.Signature {
+	return &object.Signature{
+		Name:  "Test Author",
+		Email: "test@example.com",
+		When:  time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC),
+	}
+}
+
+// newTestRepo builds a repository in dir with one commit of the given files and
+// returns its worktree.
+func newTestRepo(t *testing.T, dir string, files map[string]string) *git.Worktree {
+	t.Helper()
+	repo, err := git.PlainInit(dir, false)
+	require.NoError(t, err)
+	wt, err := repo.Worktree()
+	require.NoError(t, err)
+	for name, content := range files {
+		writeRepoFile(t, dir, name, content)
+		_, err := wt.Add(name)
+		require.NoError(t, err)
+	}
+	_, err = wt.Commit("initial commit", &git.CommitOptions{Author: testSignature()})
+	require.NoError(t, err)
+	return wt
+}
+
+func writeRepoFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	full := filepath.Join(dir, filepath.FromSlash(name))
+	require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o755))
+	require.NoError(t, os.WriteFile(full, []byte(content), 0o644))
+}
+
+// gitExec calls one tool of the git toolset the way the engine does.
+func gitExec(t *testing.T, tools taskengine.ToolsRepo, tool string, args map[string]any) (string, error) {
+	t.Helper()
+	if args == nil {
+		args = map[string]any{}
+	}
+	res, _, err := tools.Exec(context.Background(), time.Now(), args, false,
+		&taskengine.ToolsCall{Name: "git", ToolName: tool})
+	if err != nil {
+		return "", err
+	}
+	s, ok := res.(string)
+	require.True(t, ok, "git tool %s must return a string result, got %T", tool, res)
+	return s, nil
+}
+
+func mustGitExec(t *testing.T, tools taskengine.ToolsRepo, tool string, args map[string]any) string {
+	t.Helper()
+	out, err := gitExec(t, tools, tool, args)
+	require.NoError(t, err, "git tool %s must succeed", tool)
+	return out
+}
+
+func TestUnit_GitTools_ReadOpsRoundTrip(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{
+		"main.go":     "package main\n\nfunc main() {}\n",
+		"docs/x.md":   "# docs\n",
+		"untouched.t": "same\n",
+	})
+	// One tracked modification and one brand-new file, so status/diff have both
+	// kinds of change to report.
+	writeRepoFile(t, dir, "main.go", "package main\n\nfunc main() { println(\"hi\") }\n")
+	writeRepoFile(t, dir, "notes.txt", "scratch\n")
+
+	tools := localtools.NewGitTools(dir)
+
+	status := mustGitExec(t, tools, "git_status", nil)
+	assert.Contains(t, status, "branch ")
+	assert.Contains(t, status, "HEAD ")
+	assert.Contains(t, status, "initial commit")
+	assert.Contains(t, status, "main.go", "a modified tracked file must appear in status")
+	assert.Contains(t, status, "untracked")
+	assert.Contains(t, status, "notes.txt")
+	assert.NotContains(t, status, "untouched.t", "an unchanged file must not be reported")
+
+	diff := mustGitExec(t, tools, "git_diff", nil)
+	assert.Contains(t, diff, "diff --git a/main.go b/main.go")
+	assert.Contains(t, diff, "--- a/main.go")
+	assert.Contains(t, diff, "+++ b/main.go")
+	assert.Contains(t, diff, "+func main() { println(\"hi\") }")
+	assert.Contains(t, diff, "-func main() {}")
+	assert.Contains(t, diff, "notes.txt", "untracked files are named, not diffed")
+
+	scoped := mustGitExec(t, tools, "git_diff", map[string]any{"path": "docs"})
+	assert.Contains(t, scoped, "no changes against HEAD under docs")
+	assert.NotContains(t, scoped, "diff --git a/main.go")
+
+	logOut := mustGitExec(t, tools, "git_log", nil)
+	assert.Contains(t, logOut, "initial commit")
+	assert.Contains(t, logOut, "Test Author")
+
+	scopedLog := mustGitExec(t, tools, "git_log", map[string]any{"path": "docs/x.md", "n": 5})
+	assert.Contains(t, scopedLog, "initial commit")
+
+	show := mustGitExec(t, tools, "git_show", map[string]any{"ref": "HEAD"})
+	assert.Contains(t, show, "commit ")
+	assert.Contains(t, show, "test@example.com")
+	assert.Contains(t, show, "initial commit")
+	assert.Contains(t, show, "(root commit) files:")
+	assert.Contains(t, show, "main.go")
+
+	branches := mustGitExec(t, tools, "git_branch_list", nil)
+	assert.Contains(t, branches, "*", "the current branch must be marked")
+
+	blame := mustGitExec(t, tools, "git_blame", map[string]any{"path": "docs/x.md"})
+	assert.Contains(t, blame, "Test Author")
+	assert.Contains(t, blame, "# docs")
+}
+
+func TestUnit_GitTools_StatusOnCleanTree(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{"a.txt": "a\n"})
+
+	out := mustGitExec(t, localtools.NewGitTools(dir), "git_status", nil)
+	assert.Contains(t, out, "working tree clean")
+}
+
+func TestUnit_GitTools_NoRepositoryIsAnHonestError(t *testing.T) {
+	t.Parallel()
+	// A temp dir with no repository anywhere above it inside the boundary.
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "workspace")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+
+	_, err := gitExec(t, localtools.NewGitTools(sub), "git_status", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no git repository")
+	assert.Contains(t, err.Error(), "not under version control")
+}
+
+// TestUnit_GitTools_RepoOutsideAllowedDirIsRefused is the containment
+// invariant: local_fs refuses paths outside the allowed dir, and the git tools
+// refuse a REPOSITORY outside it — otherwise a workspace scoped to one
+// subdirectory would quietly operate on the whole enclosing checkout.
+func TestUnit_GitTools_RepoOutsideAllowedDirIsRefused(t *testing.T) {
+	t.Parallel()
+	outer := t.TempDir()
+	newTestRepo(t, outer, map[string]string{"a.txt": "a\n"})
+	inner := filepath.Join(outer, "sub")
+	require.NoError(t, os.MkdirAll(inner, 0o755))
+
+	tools := localtools.NewGitTools(inner)
+	for _, tool := range []string{"git_status", "git_log", "git_branch_list"} {
+		_, err := gitExec(t, tools, tool, nil)
+		require.Error(t, err, "%s must refuse a repository outside the allowed dir", tool)
+		assert.Contains(t, err.Error(), "outside the allowed directory")
+	}
+}
+
+// TestUnit_GitTools_UnboundedFallsBackToEnclosingRepo documents the other half
+// of the boundary rule: with no declared allowed dir there is nothing to
+// enforce, so the enclosing repository is found by walking up, like git does.
+func TestUnit_GitTools_UnboundedFallsBackToEnclosingRepo(t *testing.T) {
+	t.Parallel()
+	outer := t.TempDir()
+	newTestRepo(t, outer, map[string]string{"a.txt": "a\n"})
+	inner := filepath.Join(outer, "sub")
+	require.NoError(t, os.MkdirAll(inner, 0o755))
+
+	tools := localtools.NewGitToolsWith("", "git", func(context.Context) string { return inner })
+	out := mustGitExec(t, tools, "git_status", nil)
+	assert.Contains(t, out, "working tree clean")
+}
+
+func TestUnit_GitTools_PathOutsideRepoIsRefused(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{"a.txt": "a\n"})
+	tools := localtools.NewGitTools(dir)
+
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"git_diff", map[string]any{"path": "../escape"}},
+		{"git_blame", map[string]any{"path": "../../etc/passwd"}},
+		{"git_add", map[string]any{"paths": "../escape"}},
+		{"git_restore", map[string]any{"paths": []any{"../escape"}}},
+	} {
+		_, err := gitExec(t, tools, tc.tool, tc.args)
+		require.Error(t, err, "%s must refuse a path outside the repository", tc.tool)
+		assert.Contains(t, err.Error(), "outside the repository")
+	}
+}
+
+func TestUnit_GitTools_CommitRefusesEmptyStaging(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{"a.txt": "a\n"})
+	// An unstaged modification is still nothing to commit.
+	writeRepoFile(t, dir, "a.txt", "a modified\n")
+
+	tools := localtools.NewGitTools(dir)
+	_, err := gitExec(t, tools, "git_commit", map[string]any{"message": "nothing staged"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing is staged")
+	assert.Contains(t, err.Error(), "git_add")
+}
+
+func TestUnit_GitTools_AddThenCommit(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{"a.txt": "a\n"})
+	writeRepoFile(t, dir, "a.txt", "a modified\n")
+	writeRepoFile(t, dir, "b.txt", "b\n")
+
+	// go-git reads the commit identity from the repository's own config, so the
+	// fixture repo gets one exactly as `git config user.name` would.
+	repo, err := git.PlainOpen(dir)
+	require.NoError(t, err)
+	cfg, err := repo.Config()
+	require.NoError(t, err)
+	cfg.User.Name = "Test Author"
+	cfg.User.Email = "test@example.com"
+	require.NoError(t, repo.SetConfig(cfg))
+
+	tools := localtools.NewGitTools(dir)
+
+	added := mustGitExec(t, tools, "git_add", map[string]any{"paths": []any{"a.txt", "b.txt"}})
+	assert.Contains(t, added, "staged")
+	assert.Contains(t, added, "a.txt")
+
+	staged := mustGitExec(t, tools, "git_status", nil)
+	assert.Contains(t, staged, "staged for commit")
+
+	out := mustGitExec(t, tools, "git_commit", map[string]any{"message": "second commit\n\nbody"})
+	assert.Contains(t, out, "committed ")
+	assert.Contains(t, out, "second commit")
+
+	logOut := mustGitExec(t, tools, "git_log", map[string]any{"n": 5})
+	assert.Contains(t, logOut, "second commit")
+	assert.Contains(t, logOut, "initial commit")
+
+	clean := mustGitExec(t, tools, "git_status", nil)
+	assert.Contains(t, clean, "working tree clean")
+
+	// A commit with a parent shows a real patch, not the root-commit listing.
+	show := mustGitExec(t, tools, "git_show", map[string]any{"ref": "HEAD"})
+	assert.Contains(t, show, "second commit")
+	assert.Contains(t, show, "a modified")
+	assert.NotContains(t, show, "(root commit)")
+}
+
+func TestUnit_GitTools_CheckoutBranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{"a.txt": "a\n"})
+	tools := localtools.NewGitTools(dir)
+
+	out := mustGitExec(t, tools, "git_checkout_branch", map[string]any{"branch": "feature/x", "create": true})
+	assert.Contains(t, out, "created and switched to branch feature/x")
+
+	status := mustGitExec(t, tools, "git_status", nil)
+	assert.Contains(t, status, "branch feature/x")
+
+	branches := mustGitExec(t, tools, "git_branch_list", nil)
+	assert.Contains(t, branches, "* feature/x")
+
+	// Creating it twice is a mistake the error must name a fix for.
+	_, err := gitExec(t, tools, "git_checkout_branch", map[string]any{"branch": "feature/x", "create": true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+
+	_, err = gitExec(t, tools, "git_checkout_branch", map[string]any{"branch": "nope"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create=true")
+}
+
+func TestUnit_GitTools_RestoreDiscardsAndUnstages(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{"a.txt": "original\n"})
+	tools := localtools.NewGitTools(dir)
+
+	// Staged-only restore leaves the file contents alone.
+	writeRepoFile(t, dir, "a.txt", "changed\n")
+	mustGitExec(t, tools, "git_add", map[string]any{"paths": "a.txt"})
+	out := mustGitExec(t, tools, "git_restore", map[string]any{"paths": "a.txt", "staged": true})
+	assert.Contains(t, out, "unstaged")
+	content, err := os.ReadFile(filepath.Join(dir, "a.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "changed\n", string(content), "staged=true must not touch file contents")
+
+	// The destructive form throws the change away.
+	out = mustGitExec(t, tools, "git_restore", map[string]any{"paths": []any{"a.txt"}})
+	assert.Contains(t, out, "discarded")
+	content, err = os.ReadFile(filepath.Join(dir, "a.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "original\n", string(content))
+
+	// Restoring the whole repository at once is refused, not silently expanded.
+	_, err = gitExec(t, tools, "git_restore", map[string]any{"paths": "."})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "restoring the whole repository")
+}
+
+func TestUnit_GitTools_ArgumentContract(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{"a.txt": "a\n"})
+	tools := localtools.NewGitTools(dir)
+
+	_, err := gitExec(t, tools, "git_status", map[string]any{"branch": "main"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown argument")
+
+	_, err = gitExec(t, tools, "git_commit", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "message is required")
+
+	_, err = gitExec(t, tools, "git_show", map[string]any{"ref": "no-such-ref"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot resolve")
+
+	_, err = gitExec(t, tools, "git_add", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "paths is required")
+
+	_, err = gitExec(t, tools, "git_push", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown tool git_push", "network ops are deliberately absent in V1")
+}
+
+// TestUnit_GitTools_SchemaSurface pins the tool set the envelope's rules are
+// written against: a tool renamed here without the seeded policies following it
+// would silently fall through to the default action.
+func TestUnit_GitTools_SchemaSurface(t *testing.T) {
+	t.Parallel()
+	tools := localtools.NewGitTools(t.TempDir())
+	ctx := context.Background()
+
+	supported, err := tools.Supports(ctx)
+	require.NoError(t, err)
+	for _, want := range []string{
+		"git", "git_status", "git_diff", "git_log", "git_show", "git_branch_list",
+		"git_blame", "git_add", "git_commit", "git_checkout_branch", "git_restore",
+	} {
+		assert.Contains(t, supported, want)
+	}
+
+	declared, err := tools.GetToolsForToolsByName(ctx, "git")
+	require.NoError(t, err)
+	assert.Len(t, declared, 10, "the toolset declares exactly the ten git operations")
+	for _, tool := range declared {
+		assert.NotEmpty(t, tool.Function.Description, "%s needs a description", tool.Function.Name)
+		assert.True(t, strings.HasPrefix(tool.Function.Name, "git_"), "unexpected tool %s", tool.Function.Name)
+	}
+
+	one, err := tools.GetToolsForToolsByName(ctx, "git_status")
+	require.NoError(t, err)
+	require.Len(t, one, 1)
+	assert.Equal(t, "git_status", one[0].Function.Name)
+
+	_, err = tools.GetToolsForToolsByName(ctx, "git_push")
+	require.Error(t, err)
+}

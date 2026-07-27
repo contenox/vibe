@@ -86,6 +86,57 @@ func TestE2E_Wire_TerminalPassthrough(t *testing.T) {
 
 	got := collectTerminalOutput(t, client, sid, notes, "hallo-welt", 5*time.Second)
 	assert.Contains(t, got, "hallo-welt", "streamed terminal output must contain the command result")
+
+	// A SECOND `!` line must not repaint the panel. Every subscription opens with
+	// a Reset carrying the whole scrollback, so re-subscribing per command made
+	// the client replay all prior output on every line — O(N^2) on the wire and a
+	// transcript that looked like it was stuttering. The run entrypoint reuses the
+	// live subscription instead; Reset stays reserved for real (re)connects.
+	//
+	// The window is deterministic: the subscribe happens synchronously inside the
+	// run handler, so a Reset it emitted would be written before the response and
+	// therefore land in this call's notifications.
+	runResp2, notes2 := client.call(extMethodTerminalRun, terminalRunParams{
+		SessionID: string(sid),
+		Command:   "echo zweite-zeile",
+	})
+	require.Nil(t, runResp2.Error, "second terminal run must succeed")
+	assert.Zero(t, countTerminalResets(t, sid, notes2),
+		"a second `!` line must reuse the live subscription, not re-deliver the whole scrollback")
+
+	got2 := collectTerminalOutput(t, client, sid, notes2, "zweite-zeile", 5*time.Second)
+	assert.Contains(t, got2, "zweite-zeile")
+}
+
+// countTerminalResets counts the contenox.terminalOutput notifications for sid
+// that carry the full-scrollback Reset flag.
+func countTerminalResets(t *testing.T, sid libacp.SessionID, notes []libacp.Notification) int {
+	t.Helper()
+	n := 0
+	for _, note := range notes {
+		if note.Method != libacp.MethodSessionUpdate {
+			continue
+		}
+		var sn libacp.SessionNotification
+		if json.Unmarshal(note.Params, &sn) != nil {
+			continue
+		}
+		if sn.SessionID != sid || sn.Update.SessionUpdate != TerminalOutputUpdateKind {
+			continue
+		}
+		var meta map[string]json.RawMessage
+		if json.Unmarshal(sn.Update.Meta, &meta) != nil {
+			continue
+		}
+		var payload terminalOutputPayload
+		if json.Unmarshal(meta[TerminalOutputMetaKey], &payload) != nil {
+			continue
+		}
+		if payload.Reset {
+			n++
+		}
+	}
+	return n
 }
 
 // TestE2E_Wire_ExternalAgent_TerminalPassthrough proves the `!` passthrough is

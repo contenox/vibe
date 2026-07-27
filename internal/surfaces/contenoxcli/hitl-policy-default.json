@@ -43,6 +43,58 @@
       "action": "approve"
     },
     {
+      "//": "git — reading the repository is the whole point of having the toolset: an agent that must file an approval to run git_status is an agent nobody leaves running. The six read operations are allow; the four that CHANGE the repository ask. git_restore asks because it is the destructive one (it throws uncommitted work away). There are deliberately no network operations to rule on: push/pull/fetch are not in the toolset (see internal/services/localtools/git.go) and go through local_shell under the tiers below.",
+      "tools": "git",
+      "tool": "git_status",
+      "action": "allow"
+    },
+    {
+      "tools": "git",
+      "tool": "git_diff",
+      "action": "allow"
+    },
+    {
+      "tools": "git",
+      "tool": "git_log",
+      "action": "allow"
+    },
+    {
+      "tools": "git",
+      "tool": "git_show",
+      "action": "allow"
+    },
+    {
+      "tools": "git",
+      "tool": "git_branch_list",
+      "action": "allow"
+    },
+    {
+      "tools": "git",
+      "tool": "git_blame",
+      "action": "allow"
+    },
+    {
+      "tools": "git",
+      "tool": "git_add",
+      "action": "approve"
+    },
+    {
+      "tools": "git",
+      "tool": "git_commit",
+      "action": "approve"
+    },
+    {
+      "tools": "git",
+      "tool": "git_checkout_branch",
+      "action": "approve"
+    },
+    {
+      "tools": "git",
+      "tool": "git_restore",
+      "action": "approve"
+    },
+    {
+      "//": "local_shell tier 1 — never, under any circumstance. Bare basenames only: the matcher compares path.Base(command) exactly, so a multi-word entry would silently never fire.",
       "tools": "local_shell",
       "tool": "local_shell",
       "action": "deny",
@@ -55,18 +107,7 @@
       ]
     },
     {
-      "tools": "local_shell",
-      "tool": "local_shell",
-      "action": "approve",
-      "when": [
-        {
-          "key": "command",
-          "op": "command_ask_always",
-          "value": "rm,sudo,dd,chmod,chown,mv,cp"
-        }
-      ]
-    },
-    {
+      "//": "local_shell tier 2 — command substitution always asks, and it sits ABOVE the allow tier on purpose: a line carrying $(), backticks or process substitution is not a safe verb, whatever verb it starts with.",
       "tools": "local_shell",
       "tool": "local_shell",
       "action": "approve",
@@ -79,6 +120,33 @@
       ]
     },
     {
+      "//": "local_shell tier 3 — the safe-verb allow tier: no approval nagging for operations that cannot change anything. Entries are PREFIXES matched token-wise against the command line, which is what lets `git log` through while `git clean -fd` still asks. A call is only ever matched when it is a plain argv call: shell mode, or any of ; | & > < ` $( in a token, disqualifies it and it falls through to the tiers below. WHY EACH ONE: git status/diff/log/show/blame/ls-files/rev-parse and `git branch` inspect the repository without writing to it (a `git branch -D` is reachable here and is deliberate: deleting a local branch loses no committed work and is reflog-recoverable). go build/test/vet/list/doc/env/version are the project's own build and test verbs — `go test` runs the repository's code, which is the same code the agent is already editing, and that is the accepted daily-driver bargain. gofmt -l and gofmt -d report formatting; bare gofmt is NOT listed because gofmt -w rewrites sources. ls/cat/head/tail/wc/pwd/echo/grep/rg read and print. DELIBERATELY ABSENT: find (its -delete and -exec walk straight around the rm/sudo tier below), go run and go generate (arbitrary execution), go get and go mod (network, and they rewrite go.mod), and every mutating git verb. Anything not listed here is not denied — it just asks.",
+      "tools": "local_shell",
+      "tool": "local_shell",
+      "action": "allow",
+      "when": [
+        {
+          "key": "command",
+          "op": "command_prefix_allowlist",
+          "value": "git status,git diff,git log,git show,git blame,git branch,git ls-files,git rev-parse,go build,go test,go vet,go list,go doc,go env,go version,gofmt -l,gofmt -d,ls,cat,head,tail,wc,pwd,echo,grep,rg"
+        }
+      ]
+    },
+    {
+      "//": "local_shell tier 4 — the ask-always list: commands that delete, escalate or overwrite always show an approval card.",
+      "tools": "local_shell",
+      "tool": "local_shell",
+      "action": "approve",
+      "when": [
+        {
+          "key": "command",
+          "op": "command_ask_always",
+          "value": "rm,sudo,dd,chmod,chown,mv,cp"
+        }
+      ]
+    },
+    {
+      "//": "local_shell tier 5 — the floor: an unknown command asks. Secure where it matters.",
       "tools": "local_shell",
       "tool": "local_shell",
       "action": "approve"
@@ -117,6 +185,11 @@
       "tools": "webtools",
       "tool": "web_delete",
       "action": "approve"
+    },
+    {
+      "//": "gointel: every tool is a read of the workspace's type-checked Go view (describe, definition, references, implementations, symbols, diagnostics). Allowed whole; revisit this rule before any mutating op (rename) ever lands in the toolset.",
+      "tools": "gointel",
+      "action": "allow"
     },
     {
       "tools": "echo",

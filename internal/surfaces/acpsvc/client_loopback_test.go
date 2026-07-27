@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -830,4 +831,194 @@ func TestLoopback_SetSessionConfigOption_RoundTripThroughRealClient(t *testing.T
 	sess := h.tr.sessions[newResp.SessionID]
 	h.tr.sessionMu.Unlock()
 	require.Equal(t, "xhigh", sess.think(), "the change must durably apply to the session's live state")
+}
+
+// TestLoopback_UnknownSlashCommand_AnsweredLocally is M6 over the real wire: a
+// mistyped slash command must be answered by the SERVER — one teaching chunk,
+// end_turn — and must never reach the model. Before this, "/totallyfakecommand"
+// fell through as ordinary prompt text and bought a real turn whose only output
+// was an improvised, differently-worded error every time.
+func TestLoopback_UnknownSlashCommand_AnsweredLocally(t *testing.T) {
+	h := newLoopbackHarness(t)
+	ctx := context.Background()
+
+	_, err := h.client.Initialize(ctx, libacp.InitializeRequest{ProtocolVersion: libacp.ProtocolVersion})
+	require.NoError(t, err)
+	newResp, err := h.client.NewSession(ctx, libacp.NewSessionRequest{Cwd: t.TempDir(), McpServers: []libacp.McpServer{}})
+	require.NoError(t, err)
+	h.lc.drain(t, 1) // deferred available_commands_update
+
+	var promptCalls int32
+	h.swapAgent(newResp.SessionID, &loopbackAgent{
+		promptFunc: func(context.Context, agentservice.PromptRequest) (*agentservice.PromptResponse, error) {
+			atomic.AddInt32(&promptCalls, 1)
+			return &agentservice.PromptResponse{StopReason: agentservice.StopEndTurn}, nil
+		},
+	})
+
+	promptResp, err := h.client.Prompt(ctx, libacp.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt:    []libacp.ContentBlock{libacp.NewTextContent("/totallyfakecommand")},
+	})
+	require.NoError(t, err)
+	require.Equal(t, libacp.StopReasonEndTurn, promptResp.StopReason)
+	require.Zero(t, atomic.LoadInt32(&promptCalls), "an unknown command must not cost a model turn")
+
+	updates := h.lc.drain(t, 1)
+	require.Equal(t, libacp.SessionUpdateAgentMessageChunk, updates[0].Update.SessionUpdate)
+	require.NotNil(t, updates[0].Update.Content)
+	require.Contains(t, updates[0].Update.Content.Text, "/totallyfakecommand")
+	require.Contains(t, updates[0].Update.Content.Text, "/help")
+
+	// Exactly one update: no usage_update (nothing was spent, so the gauge must
+	// not move) and no session_info_update (nothing happened to the session).
+	select {
+	case extra := <-h.lc.updates:
+		t.Fatalf("unknown command produced a second update: %+v", extra)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// And nothing was written to the durable transcript: a typo must not become
+	// the session's first user message, and therefore its title, forever.
+	h.tr.sessionMu.Lock()
+	internalID := h.tr.sessions[newResp.SessionID].InternalSessionID
+	h.tr.sessionMu.Unlock()
+	msgs, err := chatservice.NewManager("loopback-ws").ListMessages(ctx, h.tr.deps.DB.WithoutTransaction(), internalID)
+	require.NoError(t, err)
+	require.Empty(t, msgs, "an unknown command is not an act worth recording")
+}
+
+// TestLoopback_PastedPathStillReachesTheModel is the other side of the same
+// decision, and the one a regression would be silent about: an absolute path
+// pasted as a prompt still buys a real turn. If this ever fails, the shape test
+// in unknownCommandName has grown teeth it must not have.
+func TestLoopback_PastedPathStillReachesTheModel(t *testing.T) {
+	h := newLoopbackHarness(t)
+	ctx := context.Background()
+
+	_, err := h.client.Initialize(ctx, libacp.InitializeRequest{ProtocolVersion: libacp.ProtocolVersion})
+	require.NoError(t, err)
+	newResp, err := h.client.NewSession(ctx, libacp.NewSessionRequest{Cwd: t.TempDir(), McpServers: []libacp.McpServer{}})
+	require.NoError(t, err)
+	h.lc.drain(t, 1)
+
+	seen := make(chan string, 4)
+	h.swapAgent(newResp.SessionID, &loopbackAgent{
+		promptFunc: func(_ context.Context, req agentservice.PromptRequest) (*agentservice.PromptResponse, error) {
+			seen <- req.Input
+			return &agentservice.PromptResponse{StopReason: agentservice.StopEndTurn}, nil
+		},
+	})
+
+	for _, input := range []string{"/etc/passwd", "/home/x y", "what does /etc do"} {
+		_, err := h.client.Prompt(ctx, libacp.PromptRequest{
+			SessionID: newResp.SessionID,
+			Prompt:    []libacp.ContentBlock{libacp.NewTextContent(input)},
+		})
+		require.NoError(t, err)
+		select {
+		case got := <-seen:
+			require.Equal(t, input, got, "%q must reach the model verbatim", input)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%q never reached the model — the command-shape test is too greedy", input)
+		}
+	}
+}
+
+// TestLoopback_LoadSession_ReplaysFailedToolsAndRealUsage is M12 and M11 in one
+// reload: a session whose history contains a failed tool call must come back
+// showing that failure, and its gauge must come back carrying what the history
+// actually costs instead of a flat zero.
+func TestLoopback_LoadSession_ReplaysFailedToolsAndRealUsage(t *testing.T) {
+	h := newLoopbackHarness(t)
+	ctx := context.Background()
+
+	_, err := h.client.Initialize(ctx, libacp.InitializeRequest{ProtocolVersion: libacp.ProtocolVersion})
+	require.NoError(t, err)
+	cwd := t.TempDir()
+	newResp, err := h.client.NewSession(ctx, libacp.NewSessionRequest{Cwd: cwd, McpServers: []libacp.McpServer{}})
+	require.NoError(t, err)
+	h.lc.drain(t, 1)
+
+	h.tr.sessionMu.Lock()
+	internalID := h.tr.sessions[newResp.SessionID].InternalSessionID
+	h.tr.sessionMu.Unlock()
+
+	// A transcript exactly as the engine persists one: the assistant opens two
+	// calls, and the results — written LATER — are the only record of how each
+	// ended. The failure text is verbatim taskexec's substitution.
+	now := time.Now().UTC()
+	history := []taskengine.Message{
+		{ID: "m1", Role: "user", Content: "read both files", Timestamp: now},
+		{ID: "m2", Role: "assistant", Content: "on it", Timestamp: now.Add(time.Millisecond), CallTools: []taskengine.ToolCall{
+			{ID: "ok-1", Type: "function", Function: taskengine.FunctionCall{Name: "local_fs.read_file", Arguments: `{"path":"/tmp/there.txt"}`}},
+			{ID: "bad-1", Type: "function", Function: taskengine.FunctionCall{Name: "local_fs.read_file", Arguments: `{"path":"/tmp/gone.txt"}`}},
+		}},
+		{ID: "m3", Role: "tool", ToolCallID: "ok-1", Content: `"file contents"`, Timestamp: now.Add(2 * time.Millisecond)},
+		{ID: "m4", Role: "tool", ToolCallID: "bad-1", Content: `"tool local_fs.read_file execution failed: open /tmp/gone.txt: no such file or directory"`, Timestamp: now.Add(3 * time.Millisecond)},
+	}
+	require.NoError(t, chatservice.NewManager("loopback-ws").
+		PersistDiff(ctx, h.tr.deps.DB.WithoutTransaction(), internalID, history))
+
+	_, err = h.client.LoadSession(ctx, libacp.LoadSessionRequest{SessionID: newResp.SessionID, Cwd: cwd})
+	require.NoError(t, err)
+
+	// user + assistant text + 2 tool_call + 2 tool_call_update + usage_update,
+	// then the deferred available_commands_update.
+	updates := h.lc.drain(t, 8)
+
+	byToolCall := map[string][]libacp.SessionUpdate{}
+	var usage *libacp.SessionUpdate
+	for i := range updates {
+		u := updates[i].Update
+		if u.ToolCallID != "" {
+			byToolCall[u.ToolCallID] = append(byToolCall[u.ToolCallID], u)
+		}
+		if u.SessionUpdate == libacp.SessionUpdateUsageUpdate {
+			usage = &updates[i].Update
+		}
+	}
+
+	require.Len(t, byToolCall["ok-1"], 2, "a replayed call is an opening card plus its closing update")
+	for _, u := range byToolCall["ok-1"] {
+		require.Equal(t, libacp.ToolCallStatusCompleted, u.Status)
+	}
+	require.Len(t, byToolCall["bad-1"], 2)
+	for _, u := range byToolCall["bad-1"] {
+		require.Equal(t, libacp.ToolCallStatusFailed, u.Status,
+			"a call the transcript records as failed must not replay as a green check (%s)", u.SessionUpdate)
+	}
+
+	require.NotNil(t, usage, "a loaded session must be told what it has already used")
+	require.Equal(t, estimateHistoryTokens(history), usage.Used)
+	require.Positive(t, usage.Used, "the gauge must not come back claiming a full history cost nothing")
+}
+
+// TestUnit_SessionTokenSize_MirrorsTheEnginesOwnBudgetArithmetic pins the
+// denominator under the gauge to the number the very next turn will report.
+// taskenv resolves a turn's ctxLength as the chain's token_limit, with a
+// requested (per-session) budget winning only when it is SMALLER; a
+// pre-turn gauge that disagreed would visibly jump the first time the model
+// spoke, for no reason an operator can see.
+func TestUnit_SessionTokenSize_MirrorsTheEnginesOwnBudgetArithmetic(t *testing.T) {
+	const sid = libacp.SessionID("s")
+	newTransport := func(chainLimit int64, sessionLimit int) *Transport {
+		tr := &Transport{
+			sessions:        map[libacp.SessionID]*sessionEntry{sid: {EffectiveTokenLimit: sessionLimit}},
+			contenoxToACPID: make(map[string]libacp.SessionID),
+		}
+		tr.deps.ChainRegistry = &ChainRegistry{defaultChain: &taskengine.TaskChainDefinition{TokenLimit: chainLimit}}
+		return tr
+	}
+
+	require.Equal(t, 131072, newTransport(131072, 0).sessionTokenSize(context.Background(), sid),
+		"with no session override the chain's token_limit IS the budget")
+	require.Equal(t, 8192, newTransport(131072, 8192).sessionTokenSize(context.Background(), sid),
+		"a smaller session override wins, exactly as taskenv narrows ctxLength")
+	require.Equal(t, 131072, newTransport(131072, 999999).sessionTokenSize(context.Background(), sid),
+		"a larger session override does NOT widen the chain's budget")
+	require.Equal(t, 4096, newTransport(0, 4096).sessionTokenSize(context.Background(), sid),
+		"a chain with no declared budget leaves the session override standing alone")
+	require.Zero(t, newTransport(0, 0).sessionTokenSize(context.Background(), sid),
+		"with no budget anywhere and no model context length, there is no honest denominator")
 }

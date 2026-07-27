@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -198,7 +200,16 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 	_, reportChange, end := t.tracker().Start(ctx, "replay", "acp_session", "session_id", string(sessionID), "message_count", len(messages))
 	defer end()
 
-	var users, assistantText, toolCalls, toolResults int
+	// The persisted transcript records a tool call's OUTCOME nowhere but in the
+	// text of its result message, and the assistant message that OPENED the call
+	// is stored BEFORE that result. So the terminal status has to be resolved in
+	// a pre-pass over the whole transcript, not discovered as the loop walks it —
+	// otherwise every replayed tool_call is emitted as "completed" and a call
+	// that actually failed comes back after a relaunch wearing a green check.
+	// See replayToolStatuses for how honest that mapping can be.
+	statuses := replayToolStatuses(messages, external)
+
+	var users, assistantText, toolCalls, toolResults, failedTools int
 	// One messageId per historical message: the spec groups replayed chunks by
 	// id, so thinking + text of one assistant turn render as one message and a
 	// change of id marks the next.
@@ -235,11 +246,15 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 				assistantText++
 			}
 			for _, tc := range m.CallTools {
+				status := replayStatusFor(statuses, tc.ID)
 				t.sendUpdate(ctx, libacp.SessionNotification{
 					SessionID: sessionID,
-					Update:    toolCallUpdateFromCall(tc),
+					Update:    toolCallUpdateFromCall(tc, status),
 				})
 				toolCalls++
+				if status == libacp.ToolCallStatusFailed {
+					failedTools++
+				}
 			}
 		case "tool":
 			// An external session's tool message carries a self-contained ACP tool
@@ -264,12 +279,167 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 		"assistant":    assistantText,
 		"tool_calls":   toolCalls,
 		"tool_results": toolResults,
+		"failed_tools": failedTools,
 	})
 
-	t.sendInitialUsageUpdate(ctx, sessionID)
+	// A loaded session used to get the SIZE-only usage_update a brand-new session
+	// gets, which reads on the wire as "0 of N used" — a gauge that lies about a
+	// full history until the next turn happens to correct it. Carry the used half
+	// too. See estimateHistoryTokens for exactly how well-founded that number is.
+	t.sendUsageUpdate(ctx, sessionID, estimateHistoryTokens(messages))
 }
 
-func toolCallUpdateFromCall(tc taskengine.ToolCall) libacp.SessionUpdate {
+// replayToolStatuses maps each replayed tool call id to the TERMINAL status its
+// persisted result records, so the assistant message that opened the call can be
+// replayed with the outcome that call actually had.
+//
+// An EXTERNAL session is exact: persistExternalTurn stored the downstream
+// agent's own ACP tool record, status field and all, so this reads it back
+// verbatim (the same record externalToolReplayUpdate decodes).
+//
+// A NATIVE session is a derivation, and the fragility is worth naming: the
+// store holds no status column for a tool call at all — a tool message is a
+// role, a tool_call_id and the result TEXT (see taskengine's tool result
+// message), and the live tool_call event that carried Error is long gone by
+// the time a session is reloaded. So the outcome is recovered from the two
+// shapes the engine itself writes for a failure, and nothing else:
+//
+//   - the string "tool <name> execution failed: <err>", which taskexec
+//     substitutes for the result when a tool returns an error; and
+//   - the object {"error": "<err>"}, which toolErrorContent writes for a call
+//     that was interrupted before it produced one.
+//
+// That coupling is to the engine's own error-formatting, so it breaks silently
+// if that formatting changes — a replayed card would go back to claiming
+// success. The alternative (persisting the status) is a store change; until
+// then this is the honest ceiling, and it is deliberately narrow: see
+// replayToolStatus for why a result that merely CONTAINS an error field is not
+// treated as a failure.
+func replayToolStatuses(messages []taskengine.Message, external bool) map[string]libacp.ToolCallStatus {
+	out := make(map[string]libacp.ToolCallStatus)
+	for _, m := range messages {
+		if m.Role != "tool" {
+			continue
+		}
+		id := m.ToolCallID
+		status := replayToolStatus(m.Content)
+		if external {
+			if u, ok := externalToolReplayUpdate(m); ok {
+				id, status = u.ToolCallID, u.Status
+			}
+		}
+		if id == "" {
+			continue
+		}
+		out[id] = status
+	}
+	return out
+}
+
+// replayStatusFor resolves the status to replay a tool call with. A call with
+// no result message in the transcript — the unanswered tail of a suspended
+// batch, or a transcript truncated mid-turn — keeps the historical "completed",
+// because "we never recorded an outcome" is not evidence of failure and a red
+// cross would be a louder lie than the green check.
+func replayStatusFor(statuses map[string]libacp.ToolCallStatus, toolCallID string) libacp.ToolCallStatus {
+	if status, ok := statuses[toolCallID]; ok && status != "" {
+		return status
+	}
+	return libacp.ToolCallStatusCompleted
+}
+
+// toolExecFailedRE matches the exact sentence taskengine substitutes for a tool
+// result when the tool returned an error ("tool <name> execution failed: ...").
+// Anchored and shaped to a single unspaced tool name so ordinary tool OUTPUT
+// that happens to discuss a failure is not mistaken for one.
+var toolExecFailedRE = regexp.MustCompile(`^tool [^\s]+ execution failed: `)
+
+// replayToolStatus derives one native tool call's terminal status from its
+// persisted result content. See replayToolStatuses for the whole picture.
+//
+// The {"error": ...} test requires the object to hold that ONE key, which is
+// what toolErrorContent writes and nothing else does. A result that merely
+// CARRIES an error field alongside other fields is a SUCCESSFUL call reporting
+// what it found — local_shell's response object has an `error` beside
+// `exit_code`/`stdout` for a command that exited non-zero, and the live path
+// shows that as a completed call (the tool ran; the command failed). Replay
+// must agree with the live path, not invent a second verdict.
+func replayToolStatus(content string) libacp.ToolCallStatus {
+	s := strings.TrimSpace(content)
+	if s == "" {
+		return libacp.ToolCallStatusCompleted
+	}
+	// A tool result is serialized through json.Marshal for the DataTypeAny the
+	// engine reports on every error path, so the failure sentence arrives as a
+	// JSON string literal. Unwrap it before matching.
+	if strings.HasPrefix(s, `"`) {
+		var unquoted string
+		if err := json.Unmarshal([]byte(s), &unquoted); err == nil {
+			s = strings.TrimSpace(unquoted)
+		}
+	}
+	if strings.HasPrefix(s, "{") {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(s), &obj); err == nil && len(obj) == 1 {
+			if raw, ok := obj["error"]; ok {
+				var msg string
+				if json.Unmarshal(raw, &msg) == nil && strings.TrimSpace(msg) != "" {
+					return libacp.ToolCallStatusFailed
+				}
+			}
+		}
+	}
+	if toolExecFailedRE.MatchString(s) {
+		return libacp.ToolCallStatusFailed
+	}
+	return libacp.ToolCallStatusCompleted
+}
+
+// estimateHistoryTokens is the "used" half of the usage_update a reloaded
+// session is given, derived from the transcript that was just replayed.
+//
+// It is an ESTIMATE, and the reason is worth stating plainly rather than
+// hiding behind a number: nothing durable records what a past turn actually
+// consumed. The engine's token_usage event is a live bus event and is not
+// journaled on this deployment; the captured execution state persists a
+// TokenUsage whose prompt half is never populated; and the message store has no
+// usage column. What IS knowable is the input the next turn will re-send — the
+// history itself — so this recomputes it the same way the engine will:
+// ollamatokenizer.EstimateTokenizer (the tokenizer enginesvc wires
+// unconditionally) counts runes/4 with a floor of 1 per non-empty string, over
+// each message's Content, which is exactly the loop taskexec runs to produce
+// the number the gauge shows during a turn.
+//
+// It therefore UNDER-counts by the two components only the turn itself knows:
+// the chain's system prelude and the JSON of the resolved tool schemas. The
+// gauge comes back close instead of at zero, and snaps to exact on the first
+// token_usage event of the next turn. Deliberately not corrected by a guessed
+// constant — a wrong number stated confidently is worse than a low one.
+func estimateHistoryTokens(messages []taskengine.Message) int {
+	total := 0
+	for _, m := range messages {
+		total += estimateContentTokens(m.Content)
+	}
+	return total
+}
+
+// estimateContentTokens mirrors ollamatokenizer.EstimateTokenizer.CountTokens.
+func estimateContentTokens(s string) int {
+	r := utf8.RuneCountInString(s)
+	if r == 0 {
+		return 0
+	}
+	if n := r / 4; n >= 1 {
+		return n
+	}
+	return 1
+}
+
+// toolCallUpdateFromCall renders one replayed tool call from the assistant
+// message that opened it. status is the outcome resolved from the transcript's
+// LATER tool-result message (see replayToolStatuses) — the call site owns it,
+// because this message alone cannot know how the call ended.
+func toolCallUpdateFromCall(tc taskengine.ToolCall, status libacp.ToolCallStatus) libacp.SessionUpdate {
 	title := tc.Function.Name
 	var argsMap map[string]any
 	if tc.Function.Arguments != "" && json.Valid([]byte(tc.Function.Arguments)) {
@@ -283,7 +453,7 @@ func toolCallUpdateFromCall(tc taskengine.ToolCall) libacp.SessionUpdate {
 		ToolCallID:    tc.ID,
 		Title:         title,
 		Kind:          toolKindFor(tc.Function.Name),
-		Status:        libacp.ToolCallStatusCompleted,
+		Status:        status,
 	}
 	if tc.Function.Arguments != "" && json.Valid([]byte(tc.Function.Arguments)) {
 		update.RawInput = json.RawMessage(tc.Function.Arguments)
@@ -332,11 +502,15 @@ func externalToolReplayUpdate(m taskengine.Message) (libacp.SessionUpdate, bool)
 	}, true
 }
 
+// toolCallUpdateFromResult renders the closing update of one replayed native
+// tool call. Its status is derived from the result content itself — the same
+// derivation replayToolStatuses applies to the opening card, so the two halves
+// of one replayed call always agree.
 func toolCallUpdateFromResult(m taskengine.Message) libacp.SessionUpdate {
 	update := libacp.SessionUpdate{
 		SessionUpdate: libacp.SessionUpdateToolCallUpdate,
 		ToolCallID:    m.ToolCallID,
-		Status:        libacp.ToolCallStatusCompleted,
+		Status:        replayToolStatus(m.Content),
 	}
 	if m.Content != "" {
 		update.RawOutput = json.RawMessage(jsonString(m.Content))
@@ -678,6 +852,17 @@ func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionR
 			t.sendAvailableCommands(ctx, req.SessionID)
 		})
 	}
+
+	// A resume keeps the client's TRANSCRIPT, not its gauge: the usage_update is a
+	// wire fact the reconnecting client no longer holds, and without one the
+	// indicator sat at zero over a full history until the next turn happened to
+	// move it. Resume replays nothing, so the history is read rather than handed
+	// over — and it is pushed AFTER the result, next to the menu, because resume's
+	// contract is that nothing precedes its response (that is what distinguishes
+	// it from load).
+	libacp.AfterResponse(ctx, func() {
+		t.sendResumedUsageUpdate(ctx, req.SessionID, entry)
+	})
 
 	reportChange(string(req.SessionID), map[string]any{
 		"contenox_session_id": contenoxSessionID,
@@ -1245,14 +1430,20 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 	return resp, nil
 }
 
-// sessionListTitle derives a session/list Title from the session's first
-// user message — the same "subject" heuristic internalchatapi's chat listing
-// used before it was retired in favor of ACP: it describes what the chat is
-// about, unlike the last message which can be an assistant error or raw tool
-// JSON. Falls back to the session name (fallback) when there is no stored
-// user message yet, or on read failure — session/list must never error out
-// over a title.
+// sessionListTitle resolves a session/list Title in the fixed precedence
+// every surface sees: an operator's own /rename first, then the derived
+// "subject" heuristic, then the session name.
+//
+// The derived half is the same heuristic internalchatapi's chat listing used
+// before it was retired in favor of ACP: the FIRST user message describes
+// what the chat is about, unlike the last message which can be an assistant
+// error or raw tool JSON. Falls back to the session name (fallback) when
+// there is no stored user message yet, or on read failure — session/list must
+// never error out over a title.
 func (t *Transport) sessionListTitle(ctx context.Context, mgr *chatservice.Manager, exec libdb.Exec, internalSessionID, fallback string) string {
+	if title := sessionTitleOverride(ctx, runtimetypes.New(exec), internalSessionID); title != "" {
+		return title
+	}
 	if title := firstUserMessageTitle(ctx, mgr, exec, internalSessionID); title != "" {
 		return title
 	}
@@ -1260,36 +1451,132 @@ func (t *Transport) sessionListTitle(ctx context.Context, mgr *chatservice.Manag
 }
 
 // firstUserMessageTitle derives a humane session title from the session's
-// first non-empty user message, whitespace-collapsed and clipped to
-// sessionListTitleMaxLen. Returns "" when the session has no stored user
-// message yet or on read failure — the shared heuristic behind both the
+// first non-empty, non-command-shaped user message, whitespace-collapsed and
+// clipped to sessionListTitleMaxLen. Returns "" when the session has no such
+// stored user message yet (including a session whose only user turns so far
+// are commands) or on read failure — the shared heuristic behind both the
 // session/list Title and the live post-turn session_info_update Title, so a
 // client's tab/sidebar label matches whether it learned the title from a
 // re-list or a live push.
+//
+// A command turn is skipped rather than titling the session: persistCommandTurn
+// deliberately records a slash command's typed line ("/doctor") as an ordinary
+// user message (see there), but that line is an instruction to the server, not
+// a subject the operator would recognize their session by — a session whose
+// first message happens to be "/doctor" must not be titled "/doctor" forever.
+// The moment a real prose message arrives, this (and the live push driven by
+// sessionInfoTitle) picks it up instead. See isCommandShapedText for the
+// recognition reused to tell the two apart.
 func firstUserMessageTitle(ctx context.Context, mgr *chatservice.Manager, exec libdb.Exec, internalSessionID string) string {
 	msgs, err := mgr.ListMessages(ctx, exec, internalSessionID)
 	if err != nil {
 		return ""
 	}
 	for _, m := range msgs {
-		if m.Role == "user" && strings.TrimSpace(m.Content) != "" {
-			return truncateSessionListTitle(strings.TrimSpace(m.Content))
+		if m.Role != "user" {
+			continue
 		}
+		text := strings.TrimSpace(m.Content)
+		if text == "" || isCommandShapedText(text) {
+			continue
+		}
+		return truncateSessionListTitle(text)
 	}
 	return ""
 }
 
-// sessionInfoTitle derives the live Title pushed on a prompt turn's
-// session_info_update from the session's first user message, reusing the
-// session/list heuristic. Empty when the session has no user message yet (or
-// when there is no DB to read) — callers omit the Title in that case so the
-// notification stays a pure freshness (updatedAt) ping.
+// isCommandShapedText reports whether text is shaped like one of this
+// server's slash commands — either a KNOWN one parseCommand recognizes
+// ("/doctor", the case persistCommandTurn actually writes) or an
+// unrecognized one that still has the shape (see unknownCommandName /
+// commandShapeRE in commands.go: lowercase letters, digits and dashes as the
+// leading token). It deliberately reuses both halves of the same recognition
+// Prompt's own dispatch decision makes (see prompt.go) instead of re-deriving
+// it, so a message firstUserMessageTitle treats as "a command, not a title"
+// can never drift from what dispatch itself treats as a command.
+//
+// The shape test is what keeps a pasted path or prose that merely mentions a
+// slash titling the session normally: "/etc/passwd contains x" has "etc/passwd"
+// as its leading token, which fails commandShapeRE (a second slash), so it
+// falls through to unknownCommandName's false and reads as an ordinary,
+// legitimate title.
+func isCommandShapedText(s string) bool {
+	if _, _, ok := parseCommand(s); ok {
+		return true
+	}
+	_, ok := unknownCommandName(s)
+	return ok
+}
+
+// sessionInfoTitle resolves the live Title pushed on a prompt turn's
+// session_info_update, in the SAME precedence as sessionListTitle (override,
+// then the first-user-message heuristic) so a client's tab/sidebar label
+// agrees whether it learned the title from a live push or a re-list. Empty
+// when the session has neither (or when there is no DB to read) — callers omit
+// the Title in that case so the notification stays a pure freshness
+// (updatedAt) ping.
 func (t *Transport) sessionInfoTitle(ctx context.Context, internalSessionID string) string {
 	if t.deps.DB == nil || internalSessionID == "" {
 		return ""
 	}
+	exec := t.deps.DB.WithoutTransaction()
+	if title := sessionTitleOverride(ctx, runtimetypes.New(exec), internalSessionID); title != "" {
+		return title
+	}
 	mgr := chatservice.NewManager(t.workspaceID())
-	return firstUserMessageTitle(ctx, mgr, t.deps.DB.WithoutTransaction(), internalSessionID)
+	return firstUserMessageTitle(ctx, mgr, exec, internalSessionID)
+}
+
+// acpSessionTitleKVPrefix namespaces the operator's own session titles. It is
+// keyed by the INTERNAL session id, not the ACP session id, for the same
+// reason mi.id is the durable identity everywhere else: the ACP id is the
+// message-index NAME, and a title must not become unreachable if that name is
+// ever re-minted.
+//
+// A title is stored SEPARATELY from the name rather than by renaming the
+// message index, because in ACP the name IS the session id (see newSessionID):
+// renaming it would silently break every stored reference to the session —
+// which is exactly why messagestore.RenameSession has no ACP caller.
+const acpSessionTitleKVPrefix = "acp:session_title:"
+
+type sessionTitleRecord struct {
+	Title string `json:"title"`
+}
+
+// setSessionTitleOverride stores (or, on an empty title, clears) the
+// operator's own title for a session. Clearing is not a deletion of the
+// concept — it hands the label back to the derived heuristic, which is the
+// only sane "reset" a title can have.
+func setSessionTitleOverride(ctx context.Context, store runtimetypes.Store, internalSessionID, title string) error {
+	if internalSessionID == "" {
+		return fmt.Errorf("acpsvc: session title: no session")
+	}
+	key := acpSessionTitleKVPrefix + internalSessionID
+	if title == "" {
+		if err := store.DeleteKV(ctx, key); err != nil && !errors.Is(err, libdb.ErrNotFound) {
+			return err
+		}
+		return nil
+	}
+	raw, err := json.Marshal(sessionTitleRecord{Title: title})
+	if err != nil {
+		return err
+	}
+	return store.SetKV(ctx, key, raw)
+}
+
+// sessionTitleOverride reads the operator's own title for a session, or ""
+// when they never set one. A read failure is "" too: a title is a label, and
+// no label is worth failing a session listing over.
+func sessionTitleOverride(ctx context.Context, store runtimetypes.Store, internalSessionID string) string {
+	if internalSessionID == "" {
+		return ""
+	}
+	var rec sessionTitleRecord
+	if err := store.GetKV(ctx, acpSessionTitleKVPrefix+internalSessionID, &rec); err != nil {
+		return ""
+	}
+	return truncateSessionListTitle(rec.Title)
 }
 
 const acpSessionCwdKVPrefix = "acp:session_cwd:"

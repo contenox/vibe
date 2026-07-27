@@ -2,9 +2,14 @@ package operatorinbox
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
+	libbus "github.com/contenox/beam/internal/libbus"
 	libdb "github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/services/missionservice"
 	"github.com/contenox/beam/internal/store/runtimetypes"
@@ -88,4 +93,236 @@ func TestUnit_Inbox_AddValidates(t *testing.T) {
 	require.Error(t, svc.Add(ctx, &Item{Reason: ReasonOperatorFired}), "missionId is required")
 	require.Error(t, svc.Add(ctx, &Item{MissionID: "m1", Reason: "bogus"}), "reason must be a known value")
 	require.Error(t, svc.Add(ctx, nil))
+}
+
+func landedItem(missionID, summary string) *Item {
+	return &Item{
+		MissionID: missionID,
+		AgentName: "runner",
+		Reason:    ReasonOperatorFired,
+		Report: missionservice.Report{
+			ID: "r-" + missionID, MissionID: missionID,
+			Kind: missionservice.ReportKindResult, Summary: summary,
+		},
+	}
+}
+
+// TestUnit_Inbox_AddPublishesTheStoredItem is the live-surface signal: a
+// successful Add announces the item on AddedSubject so a watcher learns of it
+// without polling. Driven over the SQLite bus — the backend the fleet actually
+// runs on, and the one that carries a cross-process event — rather than the
+// in-memory one, so the payload is proven to survive a real round trip.
+func TestUnit_Inbox_AddPublishesTheStoredItem(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	bus := libbus.NewSQLiteWithOptions(db.WithoutTransaction(), libbus.SQLiteBusOptions{
+		EventPoll: time.Millisecond,
+	})
+	t.Cleanup(func() { _ = bus.Close() })
+
+	ch := make(chan []byte, 4)
+	sub, err := bus.Stream(ctx, AddedSubject, ch)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	svc := New(db, WithEventPublisher(bus))
+	item := landedItem("m1", "shipped the board")
+	require.NoError(t, svc.Add(ctx, item))
+
+	var raw []byte
+	select {
+	case raw = <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Add must announce the stored item on AddedSubject")
+	}
+
+	var got Item
+	require.NoError(t, json.Unmarshal(raw, &got), "the payload is the JSON of the stored Item")
+	require.Equal(t, item.ID, got.ID)
+	require.Equal(t, "m1", got.MissionID)
+	require.Equal(t, "runner", got.AgentName)
+	require.Equal(t, ReasonOperatorFired, got.Reason)
+	require.Equal(t, "shipped the board", got.Report.Summary)
+	require.False(t, got.Acked, "a freshly landed item is unacked")
+
+	// The announced payload and the stored row are the same bytes: a subscriber
+	// that renders from the event sees exactly what a reader lists.
+	stored, err := svc.Get(ctx, item.ID)
+	require.NoError(t, err)
+	require.Equal(t, stored.ID, got.ID)
+	require.Equal(t, stored.CreatedAt.UTC(), got.CreatedAt.UTC())
+}
+
+type failingPublisher struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *failingPublisher) Publish(context.Context, string, []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return fmt.Errorf("bus down")
+}
+
+// TestUnit_Inbox_PublishFailureNeverFailsAdd holds the best-effort invariant one
+// layer down from the router: the item is the durable fact, the announcement is
+// a nudge on top of it. A report that reached no live supervisor must not be
+// lost a second time because the bus was down.
+func TestUnit_Inbox_PublishFailureNeverFailsAdd(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	pub := &failingPublisher{}
+	svc := New(db, WithEventPublisher(pub))
+
+	item := landedItem("m1", "still durable")
+	require.NoError(t, svc.Add(ctx, item), "a failed publish must never fail the Add")
+	require.Equal(t, 1, pub.calls)
+
+	items, err := svc.List(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "still durable", items[0].Report.Summary)
+}
+
+// TestUnit_Inbox_NoPublisherStillAdds proves the seam is optional: an inbox built
+// the way every caller before this existed built it stores and lists unchanged.
+func TestUnit_Inbox_NoPublisherStillAdds(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	svc := New(db)
+	require.NoError(t, svc.Add(ctx, landedItem("m1", "no bus wired")))
+	items, err := svc.List(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+}
+
+// TestUnit_Inbox_GetRoundtrip reads one item back by id — the CLI's `inbox show`
+// path — and pins the typed miss for an unknown id.
+func TestUnit_Inbox_GetRoundtrip(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	svc := New(db)
+
+	item := landedItem("m1", "found me")
+	require.NoError(t, svc.Add(ctx, item))
+
+	got, err := svc.Get(ctx, item.ID)
+	require.NoError(t, err)
+	require.Equal(t, item.ID, got.ID)
+	require.Equal(t, "found me", got.Report.Summary)
+	require.Equal(t, ReasonOperatorFired, got.Reason)
+
+	_, err = svc.Get(ctx, "nope")
+	require.ErrorIs(t, err, ErrNotFound, "an unknown id is a typed miss")
+	require.ErrorIs(t, err, libdb.ErrNotFound, "and satisfies the codebase-wide store miss too")
+
+	_, err = svc.Get(ctx, "")
+	require.Error(t, err, "an empty id is a caller bug, not a miss")
+}
+
+// TestUnit_Inbox_AckMarksSeenAndKeepsTheRecord: Ack is a read mark, not a
+// delete. The item stays listed by List (the full record of what reached no live
+// supervisor) and drops out of ListUnacked (the worklist).
+func TestUnit_Inbox_AckMarksSeenAndKeepsTheRecord(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	svc := New(db)
+
+	item := landedItem("m1", "read me")
+	require.NoError(t, svc.Add(ctx, item))
+
+	before := time.Now().UTC().Add(-time.Second)
+	require.NoError(t, svc.Ack(ctx, item.ID))
+
+	got, err := svc.Get(ctx, item.ID)
+	require.NoError(t, err, "acking must not erase the record that a report reached no supervisor")
+	require.True(t, got.Acked)
+	require.NotNil(t, got.AckedAt)
+	require.True(t, got.AckedAt.After(before))
+
+	all, err := svc.List(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, all, 1, "List is the full record and still shows an acked item")
+
+	unacked, err := svc.ListUnacked(ctx, 100)
+	require.NoError(t, err)
+	require.NotNil(t, unacked)
+	require.Empty(t, unacked, "the worklist is empty once everything is read")
+}
+
+// TestUnit_Inbox_AckIsIdempotentAndTyped: a retried CLI ack is a success, and an
+// unknown id is the same typed miss Get gives.
+func TestUnit_Inbox_AckIsIdempotentAndTyped(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	svc := New(db)
+
+	item := landedItem("m1", "twice")
+	require.NoError(t, svc.Add(ctx, item))
+	require.NoError(t, svc.Ack(ctx, item.ID))
+
+	first, err := svc.Get(ctx, item.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.Ack(ctx, item.ID), "acking twice is a no-op success")
+	second, err := svc.Get(ctx, item.ID)
+	require.NoError(t, err)
+	require.Equal(t, first.AckedAt.UTC(), second.AckedAt.UTC(), "the first read time stands")
+
+	require.ErrorIs(t, svc.Ack(ctx, "nope"), ErrNotFound)
+	require.Error(t, svc.Ack(ctx, ""), "an empty id is a caller bug, not a miss")
+}
+
+// TestUnit_Inbox_ListUnackedKeepsOrderAndFilters is the worklist view an
+// operator works down: newest-first, acked items gone, unacked ones kept.
+func TestUnit_Inbox_ListUnackedKeepsOrderAndFilters(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	svc := New(db)
+
+	first := landedItem("m1", "first")
+	require.NoError(t, svc.Add(ctx, first))
+	second := landedItem("m2", "second")
+	require.NoError(t, svc.Add(ctx, second))
+	third := landedItem("m3", "third")
+	require.NoError(t, svc.Add(ctx, third))
+
+	require.NoError(t, svc.Ack(ctx, second.ID))
+
+	unacked, err := svc.ListUnacked(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, unacked, 2)
+	require.Equal(t, "third", unacked[0].Report.Summary, "newest first, same as List")
+	require.Equal(t, "first", unacked[1].Report.Summary)
+
+	all, err := svc.List(ctx, 100)
+	require.NoError(t, err)
+	require.Len(t, all, 3)
+}
+
+// TestUnit_Inbox_ListUnackedFillsItsLimit is the reason ListUnacked pages rather
+// than filtering one page: with a worked-through backlog in front of them, a
+// caller asking for N unacked items must still get N, not "whatever survived the
+// first N rows."
+func TestUnit_Inbox_ListUnackedFillsItsLimit(t *testing.T) {
+	ctx, db := setupInboxDB(t)
+	svc := New(db)
+
+	var unackedIDs []string
+	for i := range 12 {
+		it := landedItem(fmt.Sprintf("m%02d", i), fmt.Sprintf("item %02d", i))
+		require.NoError(t, svc.Add(ctx, it))
+		// Ack everything but the three oldest, so a naive "read `limit` rows then
+		// filter" returns nothing for limit<=9.
+		if i >= 3 {
+			require.NoError(t, svc.Ack(ctx, it.ID))
+		} else {
+			unackedIDs = append(unackedIDs, it.ID)
+		}
+	}
+
+	unacked, err := svc.ListUnacked(ctx, 3)
+	require.NoError(t, err)
+	require.Len(t, unacked, 3, "the acked backlog in front must not starve the worklist")
+	got := map[string]bool{}
+	for _, it := range unacked {
+		got[it.ID] = true
+	}
+	for _, id := range unackedIDs {
+		require.True(t, got[id], "every unacked item is reachable")
+	}
 }

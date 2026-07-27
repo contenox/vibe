@@ -1,0 +1,12 @@
+[hitl]* approval required[/]
+[muted]tool  [/]local_fs.write_file
+[muted]  content = [/]a line of replacement content\n... [1200 bytes, 41 lines - see diff]
+[muted]  create = [/]true
+[muted]  path = [/]/repo/internal/app.go
+[muted]policy guarded - rule rules[3].local_fs.write_file[/]
+[error]--- a/internal/app.go[/]
+[done]+++ b/internal/app.go[/]
+[muted]@@ -12,3 +12,3 @@[/]
+[error]-    return errors.New("todo")[/]
+[done]+    return run(ctx, cfg)[/]
+[error]x denied[/]

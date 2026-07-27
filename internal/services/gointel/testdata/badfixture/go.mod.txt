@@ -1,0 +1,3 @@
+module example.com/badfixture
+
+go 1.21

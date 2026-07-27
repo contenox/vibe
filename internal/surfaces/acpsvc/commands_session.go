@@ -11,6 +11,7 @@ import (
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	"github.com/contenox/beam/internal/services/chatservice"
+	"github.com/contenox/beam/internal/store/runtimetypes"
 	libacp "github.com/contenox/beam/libacp"
 )
 
@@ -34,6 +35,45 @@ func (t *Transport) handleClear(ctx context.Context, _ libacp.SessionID, sess *s
 		return "", fmt.Errorf("commit: %w", err)
 	}
 	return "Conversation history cleared.", nil
+}
+
+// handleRename sets the session's display title — the label a picker, a
+// sidebar or a status bar shows instead of the minted `beam-<uuid>` id.
+//
+// It is deliberately SERVER-side even though only a TUI asked for it: the
+// title is read back by session/list and pushed by session_info_update, so
+// storing it here is what makes one operator's rename visible to every
+// surface (beam, an ACP editor, the CLI) rather than to the one client that
+// typed it. With no argument it reports the current title; with "-" it
+// clears the override and hands the label back to the derived heuristic.
+func (t *Transport) handleRename(ctx context.Context, sess *sessionEntry, args string) (string, error) {
+	if t.deps.DB == nil {
+		return "", fmt.Errorf("renaming is unavailable without a database")
+	}
+	internalID := sess.InternalSessionID
+	if internalID == "" {
+		return "", fmt.Errorf("this session has no durable record to rename")
+	}
+	store := runtimetypes.New(t.deps.DB.WithoutTransaction())
+
+	title := truncateSessionListTitle(strings.TrimSpace(args))
+	if title == "" {
+		current := t.sessionInfoTitle(ctx, internalID)
+		if current == "" {
+			return "This session has no title yet — set one with /rename <title>.", nil
+		}
+		return fmt.Sprintf("Title: %s\nChange it with /rename <title>, or /rename - to reset it.", current), nil
+	}
+	if title == "-" {
+		if err := setSessionTitleOverride(ctx, store, internalID, ""); err != nil {
+			return "", fmt.Errorf("reset title: %w", err)
+		}
+		return "Title reset — it follows the first message again.", nil
+	}
+	if err := setSessionTitleOverride(ctx, store, internalID, title); err != nil {
+		return "", fmt.Errorf("set title: %w", err)
+	}
+	return fmt.Sprintf("Session renamed to %s.", title), nil
 }
 
 // handleCompact summarizes older history into a single message, reclaiming

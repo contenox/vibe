@@ -40,6 +40,12 @@ const (
 	runCaptureWindow = 250 * time.Millisecond
 	readChunkBytes   = 32 * 1024
 	subscriberBuffer = 1024
+	// defaultRows/defaultCols size a PTY whose client never reported a geometry.
+	// Width matters: `ls`, `git log --graph`, `go test` output and every
+	// column-aware tool formats against COLUMNS, so a shell that assumes a size
+	// nobody has produces wrapped or truncated output in the panel.
+	defaultRows = 24
+	defaultCols = 120
 )
 
 // Chunk is one batch of terminal output delivered to a subscriber. Offset is the
@@ -80,6 +86,14 @@ type Manager interface {
 	// Read returns scrollback for sessionID: bytes since `since` when since >= 0,
 	// otherwise the last `tailBytes`. Never creates a shell.
 	Read(sessionID string, since int64, tailBytes int) ReadResult
+	// Resize records the terminal geometry for sessionID and applies it to the
+	// live shell when there is one. It is deliberately total: an unknown session,
+	// a shell that has already been reaped, or a non-positive dimension are all
+	// no-ops rather than errors, because the caller is a UI reporting its own
+	// window and has no useful recovery. The size is remembered even when no
+	// shell exists yet, so the NEXT shell for that session is born at the right
+	// geometry instead of flashing a default one first.
+	Resize(sessionID string, rows, cols int)
 	// Subscribe registers fn for live output of sessionID. fn is invoked from a
 	// dedicated goroutine (so a slow consumer cannot stall the PTY). The current
 	// scrollback is delivered immediately as a Reset chunk. The returned cancel
@@ -122,6 +136,10 @@ type manager struct {
 	mu     sync.Mutex
 	shells map[string]*shell
 	subs   map[string][]*subscriber
+	// sizes is the last geometry each session reported, kept independently of the
+	// shell so it survives idle reaping (the panel is still open; the next run
+	// respawns at the size the window actually has).
+	sizes map[string]ptySize
 
 	stop     chan struct{}
 	stopOnce sync.Once
@@ -136,6 +154,7 @@ func NewManager(cfg Config) Manager {
 		capacity: cfg.ScrollbackBytes,
 		shells:   map[string]*shell{},
 		subs:     map[string][]*subscriber{},
+		sizes:    map[string]ptySize{},
 		stop:     make(chan struct{}),
 	}
 	if m.idle == 0 {
@@ -241,6 +260,27 @@ func (m *manager) Subscribe(sessionID string, fn func(Chunk)) func() {
 	}
 }
 
+func (m *manager) Resize(sessionID string, rows, cols int) {
+	if sessionID == "" || rows <= 0 || cols <= 0 {
+		return
+	}
+	m.mu.Lock()
+	prev, had := m.sizes[sessionID]
+	size := ptySize{rows: rows, cols: cols}
+	m.sizes[sessionID] = size
+	sh := m.shells[sessionID]
+	m.mu.Unlock()
+	if had && prev == size {
+		// Nothing changed: skip the ioctl so a client that reports its geometry on
+		// every run does not spray SIGWINCH at whatever is running in there.
+		return
+	}
+	if sh == nil || sh.closed.Load() {
+		return
+	}
+	_ = sh.pty.resize(rows, cols)
+}
+
 func (m *manager) Kill(sessionID string) {
 	m.killShell(sessionID, true)
 }
@@ -272,7 +312,15 @@ func (m *manager) ensureShell(ctx context.Context, sessionID string) (*shell, bo
 	if err != nil {
 		return nil, false, err
 	}
-	pty, err := startPTY(cwd, m.cfg.Shell, m.cfg.ScrubEnv)
+	// Born at the session's last known geometry: a shell respawned after an idle
+	// reap must not silently fall back to the default width the client never had.
+	m.mu.Lock()
+	size, ok := m.sizes[sessionID]
+	m.mu.Unlock()
+	if !ok {
+		size = ptySize{rows: defaultRows, cols: defaultCols}
+	}
+	pty, err := startPTY(cwd, m.cfg.Shell, m.cfg.ScrubEnv, size.rows, size.cols)
 	if err != nil {
 		return nil, false, err
 	}
@@ -318,6 +366,10 @@ func (m *manager) killShell(sessionID string, dropSubs bool) {
 	if dropSubs {
 		subs = m.subs[sessionID]
 		delete(m.subs, sessionID)
+		// The session itself is going away (close/delete/shutdown), so its
+		// remembered geometry goes with it. An idle reap passes false and keeps it:
+		// the panel is still open at that size.
+		delete(m.sizes, sessionID)
 	}
 	m.mu.Unlock()
 	if sh != nil {
@@ -360,6 +412,13 @@ func (m *manager) reap() {
 			}
 		}
 	}
+}
+
+// ptySize is a terminal geometry. Comparable on purpose: Resize uses equality to
+// skip a no-change ioctl.
+type ptySize struct {
+	rows int
+	cols int
 }
 
 // shell is one running PTY plus its scrollback and output pump.

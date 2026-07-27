@@ -270,6 +270,242 @@ func TestUnit_DeliveredAsksCarryTheirOwnMessageID(t *testing.T) {
 		"two questions must not land in one message — the second would be unanswerable behind the first")
 }
 
+func statusEvent(parentSessionID string, newStatus missionservice.Status, reason string) missionservice.StatusChangedEvent {
+	return missionservice.StatusChangedEvent{
+		MissionID:       "m1",
+		ParentSessionID: parentSessionID,
+		AgentName:       "runner",
+		Intent:          "do the thing",
+		OldStatus:       missionservice.StatusOpen,
+		NewStatus:       newStatus,
+		Reason:          reason,
+	}
+}
+
+func planEvent(parentSessionID string) missionservice.PlanRevisedEvent {
+	return missionservice.PlanRevisedEvent{
+		MissionID:       "m1",
+		ParentSessionID: parentSessionID,
+		AgentName:       "runner",
+		Intent:          "do the thing",
+		Revision:        3,
+		Explanation:     "split the migration in two",
+		EntryCount:      4,
+		Added:           2,
+		Removed:         1,
+		Pending:         2,
+		InProgress:      1,
+		Completed:       1,
+	}
+}
+
+// TestUnit_RouteStatus_DeliversToFiringSession: a unit's ending reaches the
+// session that fired it, carrying the pinned _meta envelope a client renders a
+// lifecycle line from. The literals here are CONTRACT — other surfaces decode
+// exactly these keys — so they are asserted by name, not by shape.
+func TestUnit_RouteStatus_DeliversToFiringSession(t *testing.T) {
+	del := &fakeDeliverer{}
+	inbox := &fakeInbox{}
+	r := newTestRouter(t, del, inbox)
+
+	r.routeStatus(context.Background(), statusEvent("parent-42", missionservice.StatusLanded, ""))
+
+	require.Equal(t, 1, del.count(), "the firing session must be told its unit finished")
+	require.Empty(t, inbox.list(), "a status change is never filed: the mission record already holds it")
+
+	n := del.notes[0]
+	require.Equal(t, libacp.SessionID("parent-42"), n.SessionID)
+	require.Equal(t, libacp.SessionUpdateAgentMessageChunk, n.Update.SessionUpdate)
+	require.Equal(t, "unit runner landed", n.Update.Content.Text)
+	require.Equal(t, "mission-status-m1-open-landed", n.Update.MessageID)
+
+	var meta statusUpdateMeta
+	require.NoError(t, json.Unmarshal(n.Update.Meta, &meta))
+	require.NotNil(t, meta.Status)
+	require.Equal(t, "m1", meta.Status.MissionID)
+	require.Equal(t, "runner", meta.Status.AgentName)
+	require.Equal(t, "do the thing", meta.Status.Intent)
+	require.Equal(t, "open", meta.Status.OldStatus)
+	require.Equal(t, "landed", meta.Status.NewStatus)
+	require.Contains(t, string(n.Update.Meta), "contenox.missionStatus")
+}
+
+// TestUnit_RouteStatus_DerailedCarriesItsReason: the "why" is the whole value of
+// a failure notice, so it rides in both the body and the envelope.
+func TestUnit_RouteStatus_DerailedCarriesItsReason(t *testing.T) {
+	del := &fakeDeliverer{}
+	r := newTestRouter(t, del, &fakeInbox{})
+
+	r.routeStatus(context.Background(), statusEvent("parent-42", missionservice.StatusDerailed, "build never went green"))
+
+	n := del.notes[0]
+	require.Equal(t, "unit runner derailed: build never went green", n.Update.Content.Text)
+	var meta statusUpdateMeta
+	require.NoError(t, json.Unmarshal(n.Update.Meta, &meta))
+	require.Equal(t, "derailed", meta.Status.NewStatus)
+	require.Equal(t, "build never went green", meta.Status.Reason)
+}
+
+// TestUnit_RouteStatus_NoParentIsDroppedNotFiled pins the drop rule's first half:
+// an operator who fired the mission directly reads its status from the mission,
+// so nothing is delivered and — critically — nothing is written to the inbox.
+func TestUnit_RouteStatus_NoParentIsDroppedNotFiled(t *testing.T) {
+	del := &fakeDeliverer{}
+	inbox := &fakeInbox{}
+	r := newTestRouter(t, del, inbox)
+
+	r.routeStatus(context.Background(), statusEvent("", missionservice.StatusLanded, ""))
+
+	require.Zero(t, del.count(), "no supervisor session → no delivery attempt")
+	require.Empty(t, inbox.list(),
+		"every mission that ever finishes would otherwise drown the worklist the inbox exists for")
+}
+
+// TestUnit_RouteStatus_ParentGoneIsDroppedNotFiled pins the second half: a
+// supervisor that ended misses the notification, and that is all it misses — the
+// terminal status is durable on the mission record.
+func TestUnit_RouteStatus_ParentGoneIsDroppedNotFiled(t *testing.T) {
+	del := &fakeDeliverer{err: libdb.ErrNotFound}
+	inbox := &fakeInbox{}
+	r := newTestRouter(t, del, inbox)
+
+	r.routeStatus(context.Background(), statusEvent("parent-42", missionservice.StatusStuck, "waiting on a human"))
+
+	require.Equal(t, 1, del.count(), "delivery was attempted")
+	require.Empty(t, inbox.list(), "an undeliverable status change is dropped, never filed")
+}
+
+// TestUnit_RoutePlan_DeliversToFiringSession: a re-plan reaches the firing
+// session with the counts a supervisor decides from, without reading the mission
+// back. Same contract-literal assertions as the status lane.
+func TestUnit_RoutePlan_DeliversToFiringSession(t *testing.T) {
+	del := &fakeDeliverer{}
+	inbox := &fakeInbox{}
+	r := newTestRouter(t, del, inbox)
+
+	r.routePlan(context.Background(), planEvent("parent-42"))
+
+	require.Equal(t, 1, del.count())
+	require.Empty(t, inbox.list(), "a plan revision is never filed: the mission record already holds it")
+
+	n := del.notes[0]
+	require.Equal(t, libacp.SessionID("parent-42"), n.SessionID)
+	require.Equal(t, libacp.SessionUpdateAgentMessageChunk, n.Update.SessionUpdate)
+	require.Equal(t, "unit runner revised its plan (rev 3): split the migration in two\n"+
+		"4 entries: 2 pending, 1 in progress, 1 completed", n.Update.Content.Text)
+	require.Equal(t, "mission-plan-m1-3", n.Update.MessageID)
+
+	var meta planUpdateMeta
+	require.NoError(t, json.Unmarshal(n.Update.Meta, &meta))
+	require.NotNil(t, meta.Plan)
+	require.Equal(t, "m1", meta.Plan.MissionID)
+	require.Equal(t, "runner", meta.Plan.AgentName)
+	require.Equal(t, 3, meta.Plan.Revision)
+	require.Equal(t, "split the migration in two", meta.Plan.Explanation)
+	require.Equal(t, 4, meta.Plan.EntryCount)
+	require.Equal(t, 2, meta.Plan.Pending)
+	require.Equal(t, 1, meta.Plan.InProgress)
+	require.Equal(t, 1, meta.Plan.Completed)
+	require.Contains(t, string(n.Update.Meta), "contenox.missionPlan")
+}
+
+// TestUnit_RoutePlan_DroppedWithoutInboxWrites covers both drop cases for the
+// plan lane in one table, mirroring the status lane's rule exactly.
+func TestUnit_RoutePlan_DroppedWithoutInboxWrites(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		parentSessionID string
+		deliverErr      error
+		wantAttempts    int
+	}{
+		{"operator fired", "", nil, 0},
+		{"parent gone", "parent-42", libdb.ErrNotFound, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			del := &fakeDeliverer{err: tc.deliverErr}
+			inbox := &fakeInbox{}
+			r := newTestRouter(t, del, inbox)
+
+			r.routePlan(context.Background(), planEvent(tc.parentSessionID))
+
+			require.Equal(t, tc.wantAttempts, del.count())
+			require.Empty(t, inbox.list())
+		})
+	}
+}
+
+// TestUnit_DeliveredStatusAndPlanCarryStableMessageIDs is the twin of the
+// ask/report message-id regressions, plus the property those two get for free
+// and this lane had to construct: the id is DERIVED from the event, so a
+// redelivery off the at-least-once SQLite bus collapses into the message the
+// client already has instead of rendering the same landing twice.
+func TestUnit_DeliveredStatusAndPlanCarryStableMessageIDs(t *testing.T) {
+	landed := buildStatusNotification(statusEvent("cnx", missionservice.StatusLanded, ""))
+	derailed := buildStatusNotification(statusEvent("cnx", missionservice.StatusDerailed, "nope"))
+	require.NotEmpty(t, landed.Update.MessageID)
+	require.NotEqual(t, landed.Update.MessageID, derailed.Update.MessageID,
+		"two different transitions are two different messages")
+	require.Equal(t, landed.Update.MessageID,
+		buildStatusNotification(statusEvent("cnx", missionservice.StatusLanded, "")).Update.MessageID,
+		"the same transition redelivered must reuse its message id, not duplicate the bubble")
+
+	rev3 := buildPlanNotification(planEvent("cnx"))
+	rev4 := planEvent("cnx")
+	rev4.Revision = 4
+	require.NotEqual(t, rev3.Update.MessageID, buildPlanNotification(rev4).Update.MessageID,
+		"two revisions are two messages")
+	require.Equal(t, rev3.Update.MessageID, buildPlanNotification(planEvent("cnx")).Update.MessageID,
+		"one revision redelivered is one message")
+}
+
+// TestUnit_StatusAndPlanTextNameAnUnnamedUnit keeps the anonymous case legible,
+// the way reportText/askText already do.
+func TestUnit_StatusAndPlanTextNameAnUnnamedUnit(t *testing.T) {
+	ev := statusEvent("cnx", missionservice.StatusLanded, "")
+	ev.AgentName = ""
+	require.Equal(t, "unit a mission unit landed", statusText(ev))
+
+	pev := planEvent("cnx")
+	pev.AgentName = ""
+	pev.Explanation = ""
+	require.Contains(t, planText(pev), "unit a mission unit revised its plan (rev 3)\n")
+}
+
+// TestUnit_StartConsumesStatusAndPlanEvents drives the full loop for the two new
+// lanes: both subjects are subscribed by Start and both reach the firing session.
+func TestUnit_StartConsumesStatusAndPlanEvents(t *testing.T) {
+	del := &fakeDeliverer{}
+	bus := libbus.NewInMem()
+	r, err := New(Deps{Bus: bus, Sessions: del, Inbox: &fakeInbox{}})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop, err := r.Start(ctx)
+	require.NoError(t, err)
+	defer stop()
+
+	statusData, err := json.Marshal(statusEvent("parent-42", missionservice.StatusLanded, ""))
+	require.NoError(t, err)
+	require.NoError(t, bus.Publish(ctx, missionservice.StatusChangedSubject, statusData))
+
+	planData, err := json.Marshal(planEvent("parent-42"))
+	require.NoError(t, err)
+	require.NoError(t, bus.Publish(ctx, missionservice.PlanRevisedSubject, planData))
+
+	require.Eventually(t, func() bool { return del.count() == 2 }, 2*time.Second, 10*time.Millisecond,
+		"Start subscribes the status and plan lanes too")
+
+	ids := map[string]bool{}
+	del.mu.Lock()
+	for _, n := range del.notes {
+		ids[n.Update.MessageID] = true
+	}
+	del.mu.Unlock()
+	require.True(t, ids["mission-status-m1-open-landed"])
+	require.True(t, ids["mission-plan-m1-3"])
+}
+
 // TestUnit_DeliveredReportsCarryTheirOwnMessageID holds the same line for
 // reports: two reports are two things a unit said, not one run-on message.
 func TestUnit_DeliveredReportsCarryTheirOwnMessageID(t *testing.T) {

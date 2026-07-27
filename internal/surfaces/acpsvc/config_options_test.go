@@ -2,10 +2,17 @@ package acpsvc
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
+	"github.com/contenox/beam/internal/kernel/enginesvc"
+	"github.com/contenox/beam/internal/kernel/reasoning"
+	libbus "github.com/contenox/beam/internal/libbus"
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/models/runtimestate"
 	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	libacp "github.com/contenox/beam/libacp"
@@ -278,6 +285,144 @@ func TestUnit_WorkspaceConfigOptionsMirrorFreshSession(t *testing.T) {
 	// carries — the single source of truth for the option shapes.
 	sess := &sessionEntry{Provider: tr.provider(), Model: tr.model(), Think: tr.thinkDefault(), driver: &nativeDriver{t: tr}}
 	require.Equal(t, tr.sessionConfigOptions(ctx, sess), options)
+}
+
+// TestUnit_CommandValueDomainsProjectTheAdvertisedOptions pins the wire shape a
+// value-completing surface reads: the four slash commands that take a value get
+// their domain from the SAME options an ACP editor renders as dropdowns, never
+// from a list beam holds. It runs the projection over the real advertised
+// options rather than a handcrafted fixture, so a change to what the selects
+// carry shows up here.
+func TestUnit_CommandValueDomainsProjectTheAdvertisedOptions(t *testing.T) {
+	ctx, db := setupConfigOptionsDB(t)
+
+	tr := &Transport{
+		deps: Deps{
+			DB:                    db,
+			KnownPolicies:         []string{"strict", "dev"},
+			HITLDefaultPolicyName: "strict",
+		},
+		defaultProvider:    "openai",
+		defaultModel:       "gpt-5-mini",
+		defaultAltProvider: "anthropic",
+		defaultAltModel:    "claude-sonnet-4",
+	}
+	sess := &sessionEntry{Think: "medium", HITLPolicy: "dev", driver: &nativeDriver{t: tr}}
+
+	options := tr.sessionConfigOptions(ctx, sess)
+	domains := CommandValueDomains(options)
+
+	// /model completes BARE model names — what handleModel persists — not the
+	// "provider/model" pairs the select carries.
+	require.Equal(t, []string{"gpt-5-mini", "claude-sonnet-4"}, domains[CommandModel])
+
+	// /provider completes the providers that actually have a model to run: the
+	// model select's groups, current provider first.
+	require.Equal(t, []string{"openai", "anthropic"}, domains[CommandProvider])
+
+	// /think completes the reasoning levels verbatim, and every one of them is a
+	// level the command itself accepts.
+	require.Equal(t, []string{"auto", "off", "minimal", "low", "medium", "high", "xhigh"}, domains[CommandThink])
+	for _, level := range domains[CommandThink] {
+		normalized, err := reasoning.Normalize(level)
+		require.NoError(t, err, "advertised think level %q must be one /think accepts", level)
+		require.Equal(t, level, normalized)
+	}
+
+	// /policy completes the preset names, WITHOUT the "use the configured
+	// default" sentinel — that is a dropdown affordance, not a name
+	// clikv.SetHITLPolicy should ever be handed.
+	require.Equal(t, []string{"strict", "dev"}, domains[CommandPolicy])
+	require.NotContains(t, domains[CommandPolicy], hitlPolicyDefaultValue)
+
+	// Every completed model recombines into a value set_config_option accepts,
+	// which is the round-trip that keeps the two surfaces on one truth.
+	model := optionByID(t, options, configIDModel)
+	require.True(t, configOptionHasValue(model, modelConfigValue("openai", domains[CommandModel][0])))
+	require.True(t, configOptionHasValue(model, modelConfigValue("anthropic", domains[CommandModel][1])))
+
+	// The commands that take no value get no domain, so a surface completing
+	// arguments leaves them alone.
+	require.NotContains(t, domains, "compact")
+	require.NotContains(t, domains, "mission")
+}
+
+// TestUnit_CommandValueDomainsKeepSlashedModelNamesWhole guards the one place
+// the projection could mangle a name: Gemini reports models as
+// "models/gemini-…", so the select value is "gemini/models/gemini-…" and only
+// stripping the GROUP prefix (not splitting on the first "/") recovers the name
+// the provider actually answers to.
+func TestUnit_CommandValueDomainsKeepSlashedModelNamesWhole(t *testing.T) {
+	ctx, db := setupConfigOptionsDB(t)
+
+	tr := &Transport{
+		deps:            Deps{DB: db},
+		defaultProvider: "gemini",
+		defaultModel:    "models/gemini-3.1-pro-preview",
+	}
+	sess := &sessionEntry{driver: &nativeDriver{t: tr}}
+
+	domains := CommandValueDomains(tr.sessionConfigOptions(ctx, sess))
+	require.Equal(t, []string{"models/gemini-3.1-pro-preview"}, domains[CommandModel])
+	require.Equal(t, []string{"gemini"}, domains[CommandProvider])
+}
+
+// TestUnit_CommandValueDomainsCarryRegisteredModels is the maintainer's case in
+// one test: the models a surface offers for /model are the models the RUNTIME
+// has, discovered through the same reconcile the ACP model dropdown reads — a
+// backend that came up after startup included.
+func TestUnit_CommandValueDomainsCarryRegisteredModels(t *testing.T) {
+	ctx := context.Background()
+	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "acp-value-domains.db"), runtimetypes.SchemaSQLite)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	bus := libbus.NewSQLite(db.WithoutTransaction())
+	t.Cleanup(func() { _ = bus.Close() })
+	state, err := runtimestate.New(ctx, db, bus, runtimestate.WithAutoDiscoverModels())
+	require.NoError(t, err)
+
+	original := runtimestate.ReconcileDebounceInterval
+	runtimestate.ReconcileDebounceInterval = 0
+	t.Cleanup(func() { runtimestate.ReconcileDebounceInterval = original })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"id": "gpt-5"}, {"id": "gpt-5-mini"}},
+		})
+	}))
+	defer server.Close()
+
+	store := runtimetypes.New(db.WithoutTransaction())
+	require.NoError(t, store.CreateBackend(ctx, &runtimetypes.Backend{
+		ID: "openai-backend", Name: "openai-backend", Type: "openai", BaseURL: server.URL,
+	}))
+	keyData, err := json.Marshal(runtimestate.ProviderConfig{APIKey: "test-key", Type: "openai"})
+	require.NoError(t, err)
+	require.NoError(t, store.SetKV(ctx, runtimestate.OpenaiKey, keyData))
+
+	tr := &Transport{
+		deps:            Deps{DB: db, Engine: &enginesvc.Engine{State: state}},
+		defaultProvider: "openai",
+		defaultModel:    "gpt-5",
+	}
+	sess := &sessionEntry{driver: &nativeDriver{t: tr}}
+
+	domains := CommandValueDomains(tr.sessionConfigOptions(ctx, sess))
+	require.Subset(t, domains[CommandModel], []string{"gpt-5", "gpt-5-mini"},
+		"/model's domain must be the models the runtime reports, not a hardcoded list")
+	require.Equal(t, []string{"openai"}, domains[CommandProvider])
+}
+
+// TestUnit_CommandValueDomainsAreEmptyWithoutOptions pins the "never a gate"
+// half: no options (an externally delegated session forwards a downstream
+// agent's set, which carries none of beam's chain selects) means no domains,
+// and a surface must then let anything the operator types through.
+func TestUnit_CommandValueDomainsAreEmptyWithoutOptions(t *testing.T) {
+	require.Empty(t, CommandValueDomains(nil))
+	require.Empty(t, CommandValueDomains([]libacp.SessionConfigOption{
+		{ID: "stub-verbosity", Type: configTypeSelect, Options: libacp.NewSessionConfigValues([]libacp.SessionConfigValue{{Value: "high"}})},
+	}))
 }
 
 func optionByID(t *testing.T, options []libacp.SessionConfigOption, id string) libacp.SessionConfigOption {

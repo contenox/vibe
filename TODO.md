@@ -185,6 +185,41 @@ tests), gemini, bedrock, vertex):
   reshaped the same way incl. `contenox approvals respond`. German mirrors
   EN; banned-phrase grep clean; website builds.
 
+**2026-07-27 — beam ships (the V1 TUI slice)** [staged]:
+- **No-framework architecture**: the blueprint's earlier bubbletea/lipgloss
+  line is superseded — a schema/engine split instead (`frame` is pure-data
+  Lines a component renders as a function of state+width; `term` is the one
+  package touching the real terminal, a single-writer live-region renderer
+  with guaranteed-restore raw mode; `style` is the sole StyleID→SGR table).
+  Package list in one breath, all under `internal/surfaces/beamtui/`:
+  `frame`, `textwidth`, `input`, `term`, `style`, `sanitize`, `keymap`,
+  `liveness`, `enginebridge`, `testkit`,
+  `comp/{brand,transcript,composer,statusbar,palette,approval,picker,
+  fileaddr}`, `app` — plus the extracted `internal/surfaces/fleetboot`
+  (the shared in-process fleet constructor `acp_cmd.go` and `beam_cmd.go`
+  both call). Wired from `contenoxcli/beam_cmd.go`, beam's composition root.
+  Full accounting of what shipped vs. what the blueprint still lists as
+  deferred: `beam-tui.md` section 9 ("As built").
+- **Constitutional verifications passed live**: the copy/paste acceptance
+  tests (blueprint section 1) run by hand against a real PTY this session —
+  copy-out of a long unwrapped code line came back unbroken, pasting 50
+  lines landed as one composer block (never executed line-by-line), a clean
+  exit restored cooked mode/cursor with no alt-screen residue, and a real
+  turn showed streaming text, the activity spinner plus context gauge, and
+  a resize without corruption.
+- **Sanitize/security hardening**: `sanitize` closes ANSI/C0 escape
+  injection and the Unicode bidi trojan-source class (U+202A–U+202E,
+  U+2066–U+2069) at the one ingest boundary, before any untrusted text —
+  tool titles, file names, session names, diff lines, agent output — ever
+  becomes a drawn span.
+- **Brand device**: the welcome header rasterizes the website logo-mark
+  from its own SVG path geometry as half-block art, printed once into
+  scrollback so it survives in screenshots and history; the status bar's
+  identity segment is the persistent gold beam-bar `▌` + `contenox`, muted,
+  never animated.
+- **Review fan-out**: three adversarial reviews ran across the slice; every
+  majority-severity finding fixed before this ledger entry.
+
 ## 1. Next implementation bites (no decisions needed)
 
 - [ ] **Envelope-core follow-ups** (small, from the shipped slice): the
@@ -240,8 +275,10 @@ beam hits fixed or justified, flaky trio + ollama gating fixed, SUPPORT.md
 and issue templates verified clean (see ledger). Still standing:
 - Re-run the greps before release as a regression check (`modeld|openvino|
   llamacpp`, `mistral|openrouter`, `contenox/runtime`, `beam`, `make `)
-- go.mod: charmbracelet libs arrive only with beam code; grpc stays
-  indirect-only
+- go.mod: beam shipped WITHOUT charmbracelet libs (no-framework architecture,
+  `beam-tui.md` §1/§9) — the gate is now no TUI-framework deps at all,
+  enforced by testkit's import-boundary gate (`TestUnit_ImportBoundaries`);
+  grpc stays indirect-only
 - examples/ and .contenox/ chains re-verified against surviving providers;
   maintainer's home dir: `contenox init --update` refreshes the stale
   agent-planner.json that vet caught

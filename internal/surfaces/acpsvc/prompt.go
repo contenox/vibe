@@ -107,6 +107,28 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		return t.dispatchCommand(cmdCtx, req.SessionID, sess, name, args)
 	}
 
+	// The other half of the same decision: an input SHAPED like a command whose
+	// name this server does not know is answered here, locally, instead of being
+	// forwarded as prompt text. A mistyped command is a question with an exact
+	// answer; letting the model improvise one spent a real turn to produce a
+	// different wrong-ish error every time. Only the native driver does this —
+	// an external session's slash commands belong to its downstream agent, which
+	// owns its own menu and its own refusals. See unknownCommandName for the
+	// shape test that keeps pasted paths and prose reaching the model.
+	if name, ok := unknownCommandName(input); ok {
+		// Same reasoning as the recognized-command path above: a slash command is
+		// a text verb, so an attached image is recorded as dropped.
+		if len(images) > 0 {
+			droppedContentKinds = append(droppedContentKinds, string(libacp.ContentKindImage))
+		}
+		reportChange(string(req.SessionID), map[string]any{
+			"stop_reason":           string(libacp.StopReasonEndTurn),
+			"unknown_command":       name,
+			"dropped_content_kinds": droppedContentKinds,
+		})
+		return t.answerUnknownCommand(ctx, req.SessionID, name), nil
+	}
+
 	// Survival path: when serve wires a native-turn Registry, the turn runs OFF this
 	// connection (on the Registry's serve-rooted context) so a client drop no longer
 	// cancels it — this Transport is a thin viewer. See runtime/nativeturn and

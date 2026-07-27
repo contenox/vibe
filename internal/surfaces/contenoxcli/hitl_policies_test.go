@@ -9,6 +9,7 @@ import (
 
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/hitlservice"
+	"github.com/contenox/beam/internal/services/localtools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -131,6 +132,140 @@ func TestUnit_SeededACPXPolicy_SecretInvariantAndHeavyDeltas(t *testing.T) {
 	r, err = svc.Evaluate(ctx, "some_unaccounted_mcp", "arbitrary_tool", nil)
 	require.NoError(t, err)
 	assert.Equal(t, hitlservice.ActionDeny, r.Action, "acpx default_action must be deny (untrusted driver, least privilege)")
+}
+
+// TestUnit_SeededPolicies_PassTheEnvelopeVet runs the authoring-time validator
+// `contenox vet` runs over every shipped preset. It is stricter than the load
+// path (unknown fields, dead timeouts, patterns that can never match), so a
+// preset edited by hand fails here rather than silently disarming a rule.
+func TestUnit_SeededPolicies_PassTheEnvelopeVet(t *testing.T) {
+	t.Parallel()
+	for _, p := range HITLPolicyPresets {
+		p := p
+		t.Run(p.Name, func(t *testing.T) {
+			t.Parallel()
+			require.NoError(t, hitlservice.VetPolicy([]byte(p.Content)), "%s must pass the envelope vet", p.Name)
+		})
+	}
+}
+
+// TestUnit_InteractivePolicies_GitToolTiers pins the git envelope on the two
+// presets a person is sitting in front of: looking at the repository never
+// interrupts, changing it always asks.
+func TestUnit_InteractivePolicies_GitToolTiers(t *testing.T) {
+	t.Parallel()
+	for name, content := range map[string]string{
+		"hitl-policy-default.json": hitlPolicyDefault,
+		"hitl-policy-acp.json":     hitlPolicyACP,
+	} {
+		name, content := name, content
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc := seededPolicyService(t, name, content)
+			ctx := context.Background()
+
+			for _, tool := range []string{"git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_blame"} {
+				r, err := svc.Evaluate(ctx, "git", tool, map[string]any{})
+				require.NoError(t, err)
+				assert.Equal(t, hitlservice.ActionAllow, r.Action, "%s: git.%s must never nag", name, tool)
+			}
+			for _, tool := range []string{"git_add", "git_commit", "git_checkout_branch", "git_restore"} {
+				r, err := svc.Evaluate(ctx, "git", tool, map[string]any{})
+				require.NoError(t, err)
+				assert.Equal(t, hitlservice.ActionApprove, r.Action, "%s: git.%s changes the repository and must ask", name, tool)
+			}
+		})
+	}
+}
+
+// TestUnit_InteractivePolicies_RuleForEveryGitTool closes the drift seam between
+// the toolset and the envelopes that gate it: a git tool added or renamed in
+// localtools without a rule here would fall through to default_action, which on
+// these presets means it silently starts asking (or, on a permissive one,
+// silently stops). The toolset is the source of truth; the presets must name
+// every operation it declares.
+func TestUnit_InteractivePolicies_RuleForEveryGitTool(t *testing.T) {
+	t.Parallel()
+	declared, err := localtools.NewGitTools(t.TempDir()).GetToolsForToolsByName(context.Background(), localtools.GitToolsName)
+	require.NoError(t, err)
+	require.NotEmpty(t, declared)
+
+	for name, content := range map[string]string{
+		"hitl-policy-default.json": hitlPolicyDefault,
+		"hitl-policy-acp.json":     hitlPolicyACP,
+	} {
+		name, content := name, content
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for _, tool := range declared {
+				assert.Containsf(t, content, `"tool": "`+tool.Function.Name+`"`,
+					"%s has no rule for git.%s — it would fall through to default_action", name, tool.Function.Name)
+			}
+		})
+	}
+}
+
+// TestUnit_InteractivePolicies_ShellSafeVerbTiers pins the shell tiers: the
+// read-only and build verbs run unattended, and every tier above and below them
+// keeps its old verdict.
+func TestUnit_InteractivePolicies_ShellSafeVerbTiers(t *testing.T) {
+	t.Parallel()
+	for name, content := range map[string]string{
+		"hitl-policy-default.json": hitlPolicyDefault,
+		"hitl-policy-acp.json":     hitlPolicyACP,
+	} {
+		name, content := name, content
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc := seededPolicyService(t, name, content)
+			ctx := context.Background()
+
+			allow := []map[string]any{
+				{"command": "git", "args": []any{"status"}},
+				{"command": "git", "args": []any{"diff", "--stat"}},
+				{"command": "git", "args": []any{"log", "--oneline", "-10"}},
+				{"command": "go", "args": []any{"build", "./..."}},
+				{"command": "go", "args": []any{"test", "-short", "./internal/..."}},
+				{"command": "ls", "args": []any{"-la"}},
+				{"command": "cat", "args": []any{"go.mod"}},
+				{"command": "rg", "args": []any{"TODO", "internal"}},
+			}
+			for _, args := range allow {
+				r, err := svc.Evaluate(ctx, "local_shell", "local_shell", args)
+				require.NoError(t, err)
+				assert.Equal(t, hitlservice.ActionAllow, r.Action, "%s: %v is a safe verb and must not nag", name, args)
+			}
+
+			ask := []map[string]any{
+				{"command": "git", "args": []any{"clean", "-fd"}},
+				{"command": "git", "args": []any{"reset", "--hard"}},
+				{"command": "git", "args": []any{"push"}},
+				{"command": "go", "args": []any{"run", "./cmd/x"}},
+				{"command": "gofmt", "args": []any{"-w", "."}},
+				{"command": "find", "args": []any{".", "-delete"}},
+				{"command": "rm", "args": []any{"-rf", "build"}},
+				{"command": "sudo", "args": []any{"ls"}},
+				{"command": "mv", "args": []any{"a", "b"}},
+				{"command": "python3"},
+				{"command": "curl", "args": []any{"https://example.com"}},
+				// An allowlisted verb carrying the rest of a shell line with it.
+				{"command": "git", "args": "status; rm -rf /"},
+				{"command": "ls", "args": []any{"-la"}, "shell": true},
+				{"command": "echo", "args": "$(id)"},
+			}
+			for _, args := range ask {
+				r, err := svc.Evaluate(ctx, "local_shell", "local_shell", args)
+				require.NoError(t, err)
+				assert.Equal(t, hitlservice.ActionApprove, r.Action, "%s: %v must still ask", name, args)
+			}
+
+			for _, cmd := range []string{"mkfs", "shred", "wipefs"} {
+				r, err := svc.Evaluate(ctx, "local_shell", "local_shell", map[string]any{"command": cmd})
+				require.NoError(t, err)
+				assert.Equal(t, hitlservice.ActionDeny, r.Action, "%s: %s stays denied", name, cmd)
+			}
+		})
+	}
 }
 
 func TestUnit_InteractivePoliciesRequireApprovalForPlainShellFallback(t *testing.T) {

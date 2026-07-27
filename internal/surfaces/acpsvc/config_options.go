@@ -29,6 +29,13 @@ const (
 
 	hitlPolicyDefaultValue = "__contenox_default__"
 
+	// modelConfigDefaultGroup is the group id modelConfigValues files a model
+	// under when its provider is unknown (the seeded default/alt model of a
+	// transport configured without one). It is a placeholder for "no provider",
+	// NOT a provider name, so CommandValueDomains must never offer it to
+	// /provider.
+	modelConfigDefaultGroup = "default"
+
 	// WorkspaceConfigOptionsMetaKey is the initialize-response `_meta` key under
 	// which contenox advertises the workspace-level (session-less) config
 	// options. Sessions are minted lazily (on first prompt — see AcpChatPage's
@@ -328,7 +335,7 @@ func (t *Transport) modelConfigValues(ctx context.Context, currentProvider, curr
 	for _, value := range seen {
 		groupID := value.provider
 		if groupID == "" {
-			groupID = "default"
+			groupID = modelConfigDefaultGroup
 		}
 		groupsByProvider[groupID] = append(groupsByProvider[groupID], value)
 		groupNames[groupID] = groupID
@@ -551,6 +558,136 @@ func (t *Transport) sendConfigOptionUpdate(ctx context.Context, sid libacp.Sessi
 			ConfigOptions: t.sessionConfigOptions(ctx, sess),
 		},
 	})
+}
+
+// Command names whose single argument has a value domain — the keys
+// CommandValueDomains returns. They are the wire names from allACPCommands, so
+// a caller can match them against an AvailableCommand.Name without knowing
+// this package's internal config ids.
+const (
+	CommandModel    = "model"
+	CommandProvider = "provider"
+	CommandThink    = "think"
+	CommandPolicy   = "policy"
+)
+
+// CommandValueDomains projects the session config options a client was already
+// handed — from session/new, session/load, session/resume, set_config_option's
+// result, or a config_option_update notification — onto the ARGUMENT domains of
+// the four slash commands that take a value: /model, /provider, /think,
+// /policy. Absent keys mean "no domain known"; a caller must treat that as
+// "anything the operator types is fine", never as a gate.
+//
+// This is a projection, not a second source of truth. Every value here is one
+// an ACP editor already sees in its dropdowns, which is the parity criterion:
+// a surface offering completions offers exactly what the server advertises and
+// validates, and a hardcoded list can never drift into it. The mapping is the
+// only part that is not literal, because a command argument and a select value
+// are not always spelled the same:
+//
+//   - /model takes a BARE model name (handleModel persists it as
+//     default-model), while the model select's values are "provider/model"
+//     pairs grouped by provider. The group id is the provider, so stripping the
+//     group prefix recovers exactly the name the command accepts — including
+//     names that themselves contain a slash ("models/gemini-…"), which a naive
+//     split on the first "/" would mangle.
+//   - /provider takes a provider name. The model select's GROUPS are the
+//     providers, which is the advertise-what-works set: a provider is offered
+//     only when it currently has at least one chat- or prompt-capable model, so
+//     completing one can never select a provider with nothing to run. The
+//     "no provider" placeholder group is not a provider and is skipped.
+//   - /think takes a reasoning level, which is the think select verbatim
+//     (setSessionConfigOption validates against the same list after
+//     reasoning.Normalize).
+//   - /policy takes a policy name — the HITL select minus its
+//     "use the configured default" sentinel, which is a UI affordance rather
+//     than a name clikv.SetHITLPolicy should ever be handed.
+//
+// Order is preserved from the wire, so the server's ranking (current model
+// first, then alphabetical within a provider) survives into a completion list.
+// Duplicates — the same model offered by two providers — collapse to their
+// first appearance.
+func CommandValueDomains(options []libacp.SessionConfigOption) map[string][]string {
+	out := map[string][]string{}
+	for _, option := range options {
+		switch option.ID {
+		case configIDModel:
+			models, providers := modelCommandDomains(option)
+			addCommandValues(out, CommandModel, models...)
+			addCommandValues(out, CommandProvider, providers...)
+		case configIDThink:
+			for _, value := range option.Options.AllValues() {
+				addCommandValues(out, CommandThink, value.Value)
+			}
+		case configIDHITLPolicy:
+			for _, value := range option.Options.AllValues() {
+				if value.Value == hitlPolicyDefaultValue {
+					continue
+				}
+				addCommandValues(out, CommandPolicy, value.Value)
+			}
+		}
+	}
+	return out
+}
+
+// modelCommandDomains splits the model select into the two domains it carries:
+// the bare model names /model accepts, and the providers /provider accepts.
+func modelCommandDomains(option libacp.SessionConfigOption) (models, providers []string) {
+	for _, group := range option.Options.Groups {
+		provider := strings.TrimSpace(group.Group)
+		if provider != "" && provider != modelConfigDefaultGroup {
+			providers = append(providers, provider)
+		}
+		for _, value := range group.Options {
+			models = append(models, modelFromConfigValue(value.Value, provider))
+		}
+	}
+	// A flat (ungrouped) model select is not what modelConfigValues builds, but
+	// an externally delegated session forwards its downstream agent's options
+	// verbatim and may well send one. Fall back to the wire's own encoding.
+	for _, value := range option.Options.Values {
+		provider, model := splitModelConfigValue(value.Value)
+		if provider != "" {
+			providers = append(providers, provider)
+		}
+		models = append(models, model)
+	}
+	return models, providers
+}
+
+// modelFromConfigValue recovers the bare model name from a grouped select
+// value. The group is the provider modelConfigValue prefixed, so the prefix is
+// stripped exactly once and only when it is really there.
+func modelFromConfigValue(value, provider string) string {
+	value = strings.TrimSpace(value)
+	if provider == "" || provider == modelConfigDefaultGroup {
+		return value
+	}
+	return strings.TrimPrefix(value, provider+"/")
+}
+
+// addCommandValues appends non-empty, not-yet-seen values to a command's
+// domain, preserving wire order.
+func addCommandValues(domains map[string][]string, command string, values ...string) {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		existing := domains[command]
+		duplicate := false
+		for _, seen := range existing {
+			if seen == value {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		domains[command] = append(existing, value)
+	}
 }
 
 func configOptionHasValue(option libacp.SessionConfigOption, value string) bool {

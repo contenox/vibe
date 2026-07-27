@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/agentinstance"
 	"github.com/contenox/beam/internal/kernel/enginesvc"
 	"github.com/contenox/beam/internal/kernel/reasoning"
 	"github.com/contenox/beam/internal/kernel/taskengine"
@@ -24,16 +23,15 @@ import (
 	"github.com/contenox/beam/internal/models/modelrepo"
 	"github.com/contenox/beam/internal/services/agentregistryservice"
 	"github.com/contenox/beam/internal/services/agentservice"
-	"github.com/contenox/beam/internal/services/fleetservice"
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/localtools"
 	"github.com/contenox/beam/internal/services/missionservice"
 	"github.com/contenox/beam/internal/services/missiontools"
 	"github.com/contenox/beam/internal/services/presence"
-	"github.com/contenox/beam/internal/services/reportrouter"
 	"github.com/contenox/beam/internal/services/updatecheck"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/contenox/beam/internal/surfaces/acpsvc"
+	"github.com/contenox/beam/internal/surfaces/fleetboot"
 	"github.com/contenox/beam/libacp"
 	"github.com/spf13/cobra"
 )
@@ -428,14 +426,25 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	case engine != nil:
 		// IN-PROCESS fleet (the default editor journey — needs a configured model,
 		// since the dispatched unit resolves the same $HOME state this editor runs on).
-		fleet, agents, stop, buildErr := buildInProcessFleet(ctx, inProcessFleetDeps{
-			db:          db,
-			bus:         bus,
-			missions:    missions,
-			contenoxDir: contenoxDir,
-			tracker:     tracker,
-			transport:   func() *acpsvc.Transport { return transport },
-			hitl:        acpHITL,
+		// The composition itself is fleetboot.BuildInProcessFleet (shared with the
+		// beam TUI, per beam-tui.md section 3 item 5); this call site supplies only
+		// what THIS editor surface knows — its policy source and chain-discovery
+		// roots, both resolved over contenoxDir since fleetboot must not import
+		// contenoxcli to compute them itself.
+		fleet, agents, stop, buildErr := fleetboot.BuildInProcessFleet(ctx, fleetboot.Deps{
+			DB:       db,
+			Bus:      bus,
+			Missions: missions,
+			Tracker:  tracker,
+			// Transport late-binds this connection's live acpsvc.Transport (nil until
+			// the conn factory runs below), so the report deliverer can reach the
+			// firing editor session a mission was fired from.
+			Transport:    func() *acpsvc.Transport { return transport },
+			HITL:         acpHITL,
+			PolicySource: hitlPolicySource(contenoxDir),
+			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
+				discoverChainAgents(dctx, agents, contenoxDir)
+			},
 		})
 		if buildErr != nil {
 			return buildErr
@@ -504,130 +513,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		return fmt.Errorf("acp run: %w", runErr)
 	}
 	return nil
-}
-
-// inProcessFleetDeps are the collaborators buildInProcessFleet wires the
-// editor's embedded fleet from — all over the SAME shared db handle and bus the
-// acp process already opened.
-type inProcessFleetDeps struct {
-	db          libdb.DBManager
-	bus         libbus.Messenger
-	missions    missionservice.Service
-	contenoxDir string
-	tracker     libtracker.ActivityTracker
-	// transport late-binds this connection's live acpsvc.Transport (nil until the
-	// conn factory runs), so the report deliverer can reach the firing editor
-	// session a mission was fired from.
-	transport func() *acpsvc.Transport
-	// hitl is the durable ask store this process raises and answers questions
-	// through — the same instance the mission tools use, so the supervisor's
-	// answer and the unit's question meet in one place.
-	hitl hitlservice.Service
-}
-
-// buildInProcessFleet embeds the fleet the standalone editor dispatches
-// `/mission` through — the ontology's in-process subagent kernel (a mission is
-// a subagent of THIS process). The composition itself lives in the service
-// layer (fleetservice.BuildInProcess — the build-on-services rule); this
-// adapter contributes only what the EDITOR surface knows:
-//
-//   - live-parent delivery through this connection's late-bound transport
-//     (missionReportDeliverer: the live editor session first, the kernel second);
-//   - the autonomous answer edge serve has too — a unit's question may be
-//     offered to the agent driving the session that fired it, when that
-//     mission's envelope allows. Without this an editor-fired mission could
-//     ask, and be answered by a human, but never by the very agent holding the
-//     conversation the mission came from — the case this is most useful in,
-//     since Zed and other ACP clients render no answer box of their own;
-//   - chain-agent discovery over this editor's .contenox dirs, and the same
-//     envelope-existence guard the serve path enforces over its policy files,
-//     so `/mission --policy typo.json` is refused here too.
-func buildInProcessFleet(ctx context.Context, deps inProcessFleetDeps) (fleetservice.Service, agentregistryservice.Service, func(), error) {
-	// A dispatched mission's cwd defaults to this editor's working directory (the
-	// project Zed launched us in) when the request names none.
-	projectRoot, _ := os.Getwd()
-	return fleetservice.BuildInProcess(ctx, fleetservice.InProcessDeps{
-		DB:           deps.db,
-		Bus:          deps.bus,
-		Missions:     deps.missions,
-		ProjectRoot:  projectRoot,
-		Tracker:      deps.tracker,
-		PolicySource: hitlPolicySource(deps.contenoxDir),
-		DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-			discoverChainAgents(dctx, agents, deps.contenoxDir)
-		},
-		SessionDeliverer: func(kernel agentinstance.Manager) reportrouter.SessionDeliverer {
-			return missionReportDeliverer{
-				chat:   func() contenoxSessionDeliverer { return chatDeliverer(deps.transport()) },
-				kernel: kernel,
-			}
-		},
-		AgentSupervisor: agentAnswerOffer{
-			hitl:     deps.hitl,
-			missions: deps.missions,
-			prompter: transportPrompter{transport: deps.transport},
-			tracker:  deps.tracker,
-		},
-		Stderr: os.Stderr,
-	})
-}
-
-// missionReportDeliverer is the report router's SessionDeliverer for the
-// IN-PROCESS editor topology. Per the governing ontology, a mission is a
-// subagent of the editor process that fired it, and its
-// report must reach THAT parent — which, for a `/mission` fired from the editor,
-// is one of THIS process's own native stdio sessions, NOT a kernel-owned unit. So
-// the live editor transport is tried FIRST (Transport.DeliverToContenoxSession
-// maps the firing session's contenox id onto the ACP connection and pushes the
-// update); the kernel is tried second, for the rarer case of a mission fired by
-// an in-process kernel unit's own session. When neither owns the firing session —
-// it has ended, or was never here — both miss and the report router inboxes the
-// report (the true no-live-parent fallback). This is exactly the live delivery
-// the serve-forwarded topology could not make: there the firing session lived in
-// a different process, so the report fell to the inbox as parent-gone.
-type missionReportDeliverer struct {
-	// chat resolves the ACP surface that may own the firing session, late-bound
-	// because the editor's lone transport does not exist yet when the router is
-	// built. It returns nil when there is none to ask. Both shapes of that surface
-	// implement the same one method: the editor's single *acpsvc.Transport, and
-	// serve's *acpsvc.SessionRouter, which finds the right one of its many
-	// connections by the same contenox session id.
-	chat   func() contenoxSessionDeliverer
-	kernel agentinstance.Manager
-}
-
-// contenoxSessionDeliverer injects an out-of-band update into a chat session
-// addressed by its CONTENOX (internal) session id — the id a mission carries as
-// its ParentSessionID. Declared here, where both implementations are consumed.
-type contenoxSessionDeliverer interface {
-	DeliverToContenoxSession(ctx context.Context, contenoxSessionID string, n libacp.SessionNotification) error
-}
-
-// chatDeliverer adapts a possibly-nil *acpsvc.Transport to the interface. The
-// explicit nil check is load-bearing: returning a nil *Transport as an interface
-// value yields a NON-nil interface holding a nil pointer, which would sail past
-// the caller's nil guard and panic on the first delivery.
-func chatDeliverer(t *acpsvc.Transport) contenoxSessionDeliverer {
-	if t == nil {
-		return nil
-	}
-	return t
-}
-
-var _ reportrouter.SessionDeliverer = missionReportDeliverer{}
-
-func (d missionReportDeliverer) DeliverToSession(ctx context.Context, sessionID libacp.SessionID, n libacp.SessionNotification) error {
-	if d.chat != nil {
-		if chat := d.chat(); chat != nil {
-			if err := chat.DeliverToContenoxSession(ctx, string(sessionID), n); err == nil {
-				return nil
-			}
-		}
-	}
-	if d.kernel != nil {
-		return d.kernel.DeliverToSession(ctx, sessionID, n)
-	}
-	return acpsvc.ErrSessionNotLive
 }
 
 // missionAttentionAsker adapts the durable-ask machinery to
@@ -708,22 +593,6 @@ func (a missionAttentionAsker) publishAsked(ctx context.Context, ev missionservi
 		return
 	}
 	_ = a.bus.Publish(ctx, missionservice.AttentionAskedSubject, raw)
-}
-
-// transportPrompter adapts this process's late-bound transport to the
-// session-prompting capability the agent-answer offer needs. Late-bound for the
-// same reason the deliverer is: the connection does not exist when the fleet is
-// composed.
-type transportPrompter struct {
-	transport func() *acpsvc.Transport
-}
-
-func (p transportPrompter) PromptContenoxSession(ctx context.Context, contenoxSessionID, text string) error {
-	t := p.transport()
-	if t == nil {
-		return acpsvc.ErrSessionNotLive
-	}
-	return t.PromptContenoxSession(ctx, contenoxSessionID, text)
 }
 
 func acpPolicySource() hitlservice.PolicySource {

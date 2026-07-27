@@ -13,6 +13,7 @@ import (
 	libdb "github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/services/agentregistryservice"
 	"github.com/contenox/beam/internal/services/clikv"
+	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/missionservice"
 	"github.com/contenox/beam/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
@@ -147,12 +148,35 @@ func TestUnit_RenderMissionShow_SurfacesVerificationWarning(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	renderMissionShow(&buf, m, reports, now)
+	renderMissionShow(&buf, m, reports, nil, now)
 	out := buf.String()
 	require.Contains(t, out, "ship it")
 	require.Contains(t, out, "refs: /tmp/nope.txt")
 	require.Contains(t, out, verificationWarningLead, "the verification-gate warning is visible on show")
 	require.NotContains(t, out, "did the work", "show prints summaries, not full detail")
+}
+
+// TestUnit_RenderMissionShow_SurfacesPendingAsks pins the discoverability
+// cross-reference show grew instead of a second answer surface: a pending ask
+// prints inline and points at how to answer it, rather than silently sitting
+// invisible unless an operator thinks to run 'mission asks' or 'approvals list'.
+func TestUnit_RenderMissionShow_SurfacesPendingAsks(t *testing.T) {
+	now := time.Now().UTC()
+	m := &missionservice.Mission{
+		ID: "m-5", Intent: "needs a human", AgentName: "agent-a",
+		HITLPolicyName: "hitl-policy-default.json",
+		Status:         missionservice.StatusOpen,
+		CreatedAt:      now.Add(-time.Hour), UpdatedAt: now,
+	}
+	asks := []*runtimetypes.HITLApproval{
+		{ID: "ask-9", ArgsSummary: "which project did you mean?"},
+	}
+	var buf bytes.Buffer
+	renderMissionShow(&buf, m, nil, asks, now)
+	out := buf.String()
+	for _, want := range []string{"1 pending", "ask-9", "which project did you mean?", "approvals respond", "mission asks m-5"} {
+		require.Contains(t, out, want)
+	}
 }
 
 func TestUnit_RenderMissionReports_FullDetailAndHandover(t *testing.T) {
@@ -170,6 +194,173 @@ func TestUnit_RenderMissionReports_FullDetailAndHandover(t *testing.T) {
 	for _, want := range []string{"the deep detail", "Outcome:", "done", "a.txt", "pick up here", "unverified"} {
 		require.Contains(t, out, want)
 	}
+}
+
+// ─── plan ────────────────────────────────────────────────────────────────
+
+func TestUnit_RenderMissionPlan_NoPlanSaysSo(t *testing.T) {
+	var buf bytes.Buffer
+	renderMissionPlan(&buf, &missionservice.Mission{ID: "m-plan-0"})
+	require.Contains(t, buf.String(), "no plan yet")
+}
+
+func TestUnit_RenderMissionPlan_EntriesAndHistory(t *testing.T) {
+	m := &missionservice.Mission{
+		ID: "m-plan-1",
+		Plan: missionservice.Plan{
+			Revision:    2,
+			Explanation: "narrowed scope",
+			Entries: []missionservice.PlanEntry{
+				{ID: "e1", Content: "write the thing", Status: missionservice.PlanEntryCompleted, Priority: missionservice.PlanEntryPriorityHigh},
+				{ID: "e2", Content: "test the thing", Status: missionservice.PlanEntryInProgress, Priority: missionservice.PlanEntryPriorityMedium},
+			},
+		},
+		PlanRevisions: []missionservice.PlanRevisionSummary{
+			{Revision: 1, Added: 2, Pending: 2, Explanation: "initial plan"},
+			{Revision: 2, InProgress: 1, Completed: 1, Explanation: "narrowed scope"},
+		},
+	}
+	var buf bytes.Buffer
+	renderMissionPlan(&buf, m)
+	out := buf.String()
+	for _, want := range []string{
+		"revision 2", "narrowed scope",
+		"write the thing", "completed", "high",
+		"test the thing", "in_progress", "medium",
+		"rev 1", "rev 2", "initial plan",
+	} {
+		require.Contains(t, out, want)
+	}
+}
+
+func TestUnit_MissionPlanCmd_PrintsFullPlanUnlikeShowsSummary(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "mission-plan-cli.db")
+	cmd := testCobraCmd()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	require.NoError(t, cmd.Root().PersistentFlags().Set("db", dbPath))
+
+	ctx := context.Background()
+	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
+	require.NoError(t, err)
+	missions := missionservice.New(db)
+	m := &missionservice.Mission{Intent: "plan me", AgentName: "agent-a", HITLPolicyName: "hitl-policy-default.json"}
+	require.NoError(t, missions.Create(ctx, m))
+	_, err = missions.SetPlan(ctx, m.ID, []missionservice.PlanEntry{
+		{Content: "step one", Status: missionservice.PlanEntryPending, Priority: missionservice.PlanEntryPriorityLow},
+	}, "first plan")
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	require.NoError(t, runMissionPlan(cmd, []string{m.ID}))
+	got := out.String()
+	require.Contains(t, got, "step one")
+	require.Contains(t, got, "revision 1")
+}
+
+// ─── asks ────────────────────────────────────────────────────────────────
+
+func TestUnit_RenderMissionAsksTable_Empty(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, renderMissionAsksTable(&buf, nil, nil, time.Now().UTC()))
+	out := buf.String()
+	require.Contains(t, out, "No pending attention asks")
+	require.Contains(t, out, "approvals respond")
+}
+
+func TestUnit_RenderMissionAsksTable_FillsAgentFromMissionWhenAskCarriesNone(t *testing.T) {
+	now := time.Now().UTC()
+	missionID := "m-42"
+	missions := map[string]*missionservice.Mission{
+		missionID: {ID: missionID, AgentName: "agent-a"},
+	}
+	asks := []*runtimetypes.HITLApproval{
+		{ID: "ask-1", ArgsSummary: "which env?", MissionID: &missionID, CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(59 * time.Minute)},
+	}
+	var buf bytes.Buffer
+	require.NoError(t, renderMissionAsksTable(&buf, missions, asks, now))
+	out := buf.String()
+	for _, want := range []string{"ask-1", "m-42", "agent-a", "which env?", "1m", "59m"} {
+		require.Contains(t, out, want)
+	}
+}
+
+func TestUnit_MissionAsksCmd_ScopedToOneMission(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "mission-asks-cli.db")
+	cmd := testCobraCmd()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	require.NoError(t, cmd.Root().PersistentFlags().Set("db", dbPath))
+	require.NoError(t, cmd.Root().PersistentFlags().Set("data-dir", filepath.Join(t.TempDir(), ".contenox")))
+
+	ctx := context.Background()
+	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
+	require.NoError(t, err)
+	missions := missionservice.New(db)
+	m := &missionservice.Mission{Intent: "ask something", AgentName: "agent-a", HITLPolicyName: "hitl-policy-default.json"}
+	require.NoError(t, missions.Create(ctx, m))
+
+	store := runtimetypes.New(db.WithoutTransaction())
+	missionID := m.ID
+	now := time.Now().UTC()
+	require.NoError(t, store.CreateHITLApproval(ctx, &runtimetypes.HITLApproval{
+		ID: "ask-1", ToolsName: hitlservice.AttentionToolsName, ToolName: hitlservice.AttentionToolName,
+		ArgsSummary: "which env?", MissionID: &missionID, AgentName: "agent-a",
+		State: runtimetypes.HITLApprovalPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}))
+	require.NoError(t, db.Close())
+
+	require.NoError(t, runMissionAsks(cmd, []string{m.ID}))
+	got := out.String()
+	require.Contains(t, got, "ask-1")
+	require.Contains(t, got, "which env?")
+	require.Contains(t, got, "agent-a")
+	require.Contains(t, got, "approvals respond")
+}
+
+// TestUnit_MissionAsksCmd_NoIDScansOnlyOpenMissions proves the no-argument
+// form iterates open missions only: a terminal mission's ask (left over from
+// before it finished) must not clutter the "what needs a human right now"
+// view.
+func TestUnit_MissionAsksCmd_NoIDScansOnlyOpenMissions(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "mission-asks-all-cli.db")
+	cmd := testCobraCmd()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	require.NoError(t, cmd.Root().PersistentFlags().Set("db", dbPath))
+	require.NoError(t, cmd.Root().PersistentFlags().Set("data-dir", filepath.Join(t.TempDir(), ".contenox")))
+
+	ctx := context.Background()
+	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
+	require.NoError(t, err)
+	missions := missionservice.New(db)
+
+	open := &missionservice.Mission{Intent: "still going", AgentName: "agent-open", HITLPolicyName: "hitl-policy-default.json"}
+	require.NoError(t, missions.Create(ctx, open))
+	landed := &missionservice.Mission{Intent: "already done", AgentName: "agent-landed", HITLPolicyName: "hitl-policy-default.json"}
+	require.NoError(t, missions.Create(ctx, landed))
+	_, err = missions.Finish(ctx, landed.ID, missionservice.StatusLanded, "done")
+	require.NoError(t, err)
+
+	store := runtimetypes.New(db.WithoutTransaction())
+	now := time.Now().UTC()
+	openID, landedID := open.ID, landed.ID
+	require.NoError(t, store.CreateHITLApproval(ctx, &runtimetypes.HITLApproval{
+		ID: "ask-open", ToolsName: hitlservice.AttentionToolsName, ToolName: hitlservice.AttentionToolName,
+		ArgsSummary: "open-mission question", MissionID: &openID,
+		State: runtimetypes.HITLApprovalPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}))
+	require.NoError(t, store.CreateHITLApproval(ctx, &runtimetypes.HITLApproval{
+		ID: "ask-landed", ToolsName: hitlservice.AttentionToolsName, ToolName: hitlservice.AttentionToolName,
+		ArgsSummary: "landed-mission question", MissionID: &landedID,
+		State: runtimetypes.HITLApprovalPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}))
+	require.NoError(t, db.Close())
+
+	require.NoError(t, runMissionAsks(cmd, nil))
+	got := out.String()
+	require.Contains(t, got, "ask-open")
+	require.NotContains(t, got, "ask-landed", "a terminal mission's leftover ask must not appear in the open-missions view")
 }
 
 func TestUnit_VerificationWarningLine(t *testing.T) {

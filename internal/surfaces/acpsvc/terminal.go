@@ -47,6 +47,23 @@ type terminalOutputPayload struct {
 type terminalRunParams struct {
 	SessionID string `json:"sessionId"`
 	Command   string `json:"command"`
+	// Rows/Cols are the client's CURRENT terminal geometry, optional and
+	// additive: a client that omits them (or sends 0) gets the previous behavior
+	// unchanged. When present they are applied to the session's shell before the
+	// line is submitted, so width-aware commands format against the window the
+	// user is actually looking at instead of a hardcoded default.
+	//
+	// This rides on the run request rather than getting its own
+	// `_contenox/terminal/resize` method deliberately. Piggy-backing is the
+	// smaller change — no new method to route, register, or version — and it
+	// covers the case that actually matters: the geometry a command formats
+	// against is the geometry at the moment it runs. The cost is that a window
+	// resized WHILE something is running gets no SIGWINCH until the next line.
+	// Should the panel need that, shellsession.Manager.Resize is already the
+	// seam — a `_contenox/terminal/resize` method would be a handler that calls
+	// it and nothing else, additive to this.
+	Rows int `json:"rows,omitempty"`
+	Cols int `json:"cols,omitempty"`
 }
 
 type terminalRunResult struct {
@@ -88,8 +105,20 @@ func (t *Transport) handleTerminalRun(ctx context.Context, params json.RawMessag
 	if !ok {
 		return nil, libacp.NewErrorf(libacp.ErrInvalidParams, "unknown session %q", sid)
 	}
-	// Make sure live output flows even if the panel opens after this run.
-	t.subscribeTerminal(sid, entry.InternalSessionID)
+	// Make sure live output flows even if the panel opens after this run — but
+	// only subscribe when nothing is listening yet. subscribeTerminal is
+	// cancel-and-replace, and every fresh subscription opens with a Reset chunk
+	// carrying the ENTIRE scrollback; doing that per `!` line made the panel
+	// repaint all prior output on every command, so N commands cost O(N^2) bytes
+	// on the wire and the transcript read as if each line replayed the session.
+	// Reuse keeps the Reset where it belongs: genuine (re)connects, which go
+	// through subscribeTerminal directly from session/new and session/load.
+	t.ensureTerminalSubscribed(sid, entry.InternalSessionID)
+
+	// Adopt the client's current geometry before the line is typed, so the
+	// command formats against the window the user is looking at. A no-op when the
+	// client sends nothing, and cheap when the size has not changed.
+	t.deps.ShellSessions.Resize(entry.InternalSessionID, p.Rows, p.Cols)
 
 	// Root the shell at the session's workspace via the same cwd resolver the
 	// agent tools use: the resolver reads the internal session id from ctx.
@@ -107,8 +136,12 @@ func (t *Transport) handleTerminalRun(ctx context.Context, params json.RawMessag
 
 // subscribeTerminal begins forwarding a session's shell output to the client as
 // TerminalOutputMetaKey session/update notifications. Idempotent per ACP session
-// id: an existing subscription is cancelled and replaced (the reconnect/reload
-// path), so exactly one stream is live per session on this connection.
+// id: an existing subscription is cancelled and replaced, so exactly one stream
+// is live per session on this connection.
+//
+// Replacing re-delivers the whole scrollback as a Reset, which is the point on
+// the reconnect/reload path (session/new, session/load, session reconnect) and
+// is wrong everywhere else — see ensureTerminalSubscribed.
 func (t *Transport) subscribeTerminal(sid libacp.SessionID, internalID string) {
 	if t.deps.ShellSessions == nil || internalID == "" {
 		return
@@ -126,12 +159,16 @@ func (t *Transport) subscribeTerminal(sid libacp.SessionID, internalID string) {
 
 // ensureTerminalSubscribed subscribes a session's shell output to the client
 // only when no subscription is live yet, unlike subscribeTerminal which always
-// cancels-and-replaces. The external-agent terminal bridge calls it on every
-// terminal/create (an external session never subscribes at session/new — see
-// NewSession's external branch — so the FIRST create must start the panel
-// stream), but a second create in the same session must NOT tear down and
-// repaint the panel. A replace is only wanted on reconnect/reload, where the
-// native path calls subscribeTerminal directly.
+// cancels-and-replaces. Every subscription begins with a full-scrollback Reset,
+// so "replace" is only ever the right move for a client that has lost its buffer
+// — a reconnect or a session reload, where the native path calls
+// subscribeTerminal directly.
+//
+// Two callers need the cheap form. The external-agent terminal bridge calls it
+// on every terminal/create (an external session never subscribes at session/new
+// — see NewSession's external branch — so the FIRST create must start the panel
+// stream), and the `!` passthrough calls it on every run for the same reason;
+// neither may tear down and repaint a panel that is already streaming.
 func (t *Transport) ensureTerminalSubscribed(sid libacp.SessionID, internalID string) {
 	if t.deps.ShellSessions == nil || internalID == "" {
 		return

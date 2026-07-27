@@ -1,0 +1,7 @@
+[user]❯ [/]Add exponential backoff to the retry loop in the ingest worker.
+
+[done]✓[/] [tool]write_file: internal/ingest/retry.go[/]
+
+[assistant]I'll add exponential backoff to the retry loop now.[/]
+
+[assistant]Backoff is now capped at 30s with jitter.[/]

@@ -14,12 +14,13 @@ type ptySession struct{}
 // ErrUnsupported is returned by startPTY on platforms without a PTY backend.
 var ErrUnsupported = errors.New("shellsession: shell sessions are not supported on this platform")
 
-func startPTY(cwd, shell string, scrub func([]string) []string) (*ptySession, error) {
+func startPTY(cwd, shell string, scrub func([]string) []string, rows, cols int) (*ptySession, error) {
 	return nil, ErrUnsupported
 }
 
 func (p *ptySession) Read(b []byte) (int, error)  { return 0, ErrUnsupported }
 func (p *ptySession) Write(b []byte) (int, error) { return 0, ErrUnsupported }
+func (p *ptySession) resize(rows, cols int) error { return ErrUnsupported }
 func (p *ptySession) close()                      {}
 func (p *ptySession) wait()                       {}
 

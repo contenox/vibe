@@ -1,4 +1,4 @@
-package contenoxcli
+package fleetboot
 
 import (
 	"context"

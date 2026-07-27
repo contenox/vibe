@@ -1,6 +1,13 @@
 package contenoxcli
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/beam/internal/services/gointel"
+	"github.com/stretchr/testify/require"
+)
 
 func TestReadinessDefaults(t *testing.T) {
 	cases := []struct {
@@ -97,4 +104,39 @@ func TestReadinessDefaults(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated pins the two registration
+// decisions this file makes.
+//
+// git is unconditional: the whole point of the toolset is that an agent can SEE
+// the repository, and gating that behind --shell is what produced "I can't run
+// git" on a surface that had git sitting right there. What the agent may DO with
+// it is the envelope's call, not this one — the seeded policies allow the reads
+// and hold the four mutations at an approval.
+//
+// local_shell stays gated: enabling raw command execution is still an explicit
+// choice (beam makes it, `contenox chat` does not).
+func TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated(t *testing.T) {
+	tracker := libtracker.NoopTracker{}
+
+	goIndex := gointel.NewIndex(gointel.Config{})
+	t.Cleanup(goIndex.Shutdown)
+
+	off := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, tracker, goIndex)
+	require.Contains(t, off, "git", "git must be registered even with the shell off")
+	require.Contains(t, off, "local_fs")
+	require.Contains(t, off, gointel.ToolsProviderName, "gointel is a read surface, always on")
+	require.NotContains(t, off, "local_shell", "the shell stays opt-in")
+
+	on := localToolset(chatOpts{EffectiveEnableLocalExec: true, EffectiveHITL: true}, nil, tracker, goIndex)
+	require.Contains(t, on, "git")
+	require.Contains(t, on, "local_shell")
+
+	// The registered provider is the real toolset, addressed by the same name
+	// the seeded envelopes' rules use.
+	supported, err := off["git"].Supports(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, supported, "git_status")
+	require.Contains(t, supported, "git_commit")
 }

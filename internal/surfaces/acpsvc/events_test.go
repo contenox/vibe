@@ -270,7 +270,7 @@ func TestUnit_ReplayToolCall_FromAssistantMessage(t *testing.T) {
 			Arguments: `{"path":"/tmp/foo.txt"}`,
 		},
 	}
-	upd := toolCallUpdateFromCall(tc)
+	upd := toolCallUpdateFromCall(tc, libacp.ToolCallStatusCompleted)
 
 	require.Equal(t, libacp.SessionUpdateToolCall, upd.SessionUpdate)
 	require.Equal(t, "call-xyz", upd.ToolCallID)
@@ -288,9 +288,127 @@ func TestUnit_ReplayToolCall_InvalidArgumentsOmitsRawInput(t *testing.T) {
 			Arguments: "not-json",
 		},
 	}
-	upd := toolCallUpdateFromCall(tc)
+	upd := toolCallUpdateFromCall(tc, libacp.ToolCallStatusCompleted)
 	require.Empty(t, upd.RawInput, "malformed Arguments must not be forwarded as RawInput")
 	require.Equal(t, libacp.ToolKindExecute, upd.Kind)
+}
+
+// TestUnit_ReplayToolStatus covers the derivation that makes a replayed tool
+// card tell the truth. The two failure shapes are the ones taskengine itself
+// writes; everything else must stay "completed", including the near-miss cases
+// below, which are what keep a successful call from being libeled as a failure.
+func TestUnit_ReplayToolStatus(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    libacp.ToolCallStatus
+	}{
+		// The engine's two persisted failure shapes.
+		{
+			name:    "exec failure as a JSON string (DataTypeAny marshal)",
+			content: `"tool local_fs.read_file execution failed: open /nope: no such file or directory"`,
+			want:    libacp.ToolCallStatusFailed,
+		},
+		{
+			name:    "exec failure as raw text",
+			content: `tool local_shell.exec execution failed: exec: "nope": executable file not found in $PATH`,
+			want:    libacp.ToolCallStatusFailed,
+		},
+		{
+			name:    "interrupted call (toolErrorContent)",
+			content: `{"error":"tool call was interrupted before a result was recorded"}`,
+			want:    libacp.ToolCallStatusFailed,
+		},
+
+		// Successes, including the ones a looser rule would get wrong.
+		{name: "plain text result", content: "hello world", want: libacp.ToolCallStatusCompleted},
+		{name: "empty result", content: "", want: libacp.ToolCallStatusCompleted},
+		{name: "null result", content: "null", want: libacp.ToolCallStatusCompleted},
+		{
+			name:    "local_shell reporting a non-zero exit is a SUCCESSFUL call",
+			content: `{"exit_code":1,"stdout":"","stderr":"boom","success":false,"error":"exit status 1"}`,
+			want:    libacp.ToolCallStatusCompleted,
+		},
+		{
+			name:    "an empty error field is not a failure",
+			content: `{"error":""}`,
+			want:    libacp.ToolCallStatusCompleted,
+		},
+		{
+			name:    "output that merely discusses a failure",
+			content: `"the log says: tool execution failed somewhere upstream"`,
+			want:    libacp.ToolCallStatusCompleted,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			require.Equal(t, c.want, replayToolStatus(c.content))
+		})
+	}
+}
+
+// TestUnit_ReplayToolStatuses_CarryOutcomeBackToTheOpeningCall is M12 in one
+// assertion: the assistant message that OPENED a call is stored before the
+// result that records how it ended, so the opening card can only be honest if
+// the whole transcript is consulted first.
+func TestUnit_ReplayToolStatuses_CarryOutcomeBackToTheOpeningCall(t *testing.T) {
+	messages := []taskengine.Message{
+		{Role: "user", Content: "read both files"},
+		{Role: "assistant", CallTools: []taskengine.ToolCall{
+			{ID: "ok-1", Function: taskengine.FunctionCall{Name: "local_fs.read_file"}},
+			{ID: "bad-1", Function: taskengine.FunctionCall{Name: "local_fs.read_file"}},
+		}},
+		{Role: "tool", ToolCallID: "ok-1", Content: `"file contents"`},
+		{Role: "tool", ToolCallID: "bad-1", Content: `"tool local_fs.read_file execution failed: no such file"`},
+	}
+
+	statuses := replayToolStatuses(messages, false)
+	require.Equal(t, libacp.ToolCallStatusCompleted, replayStatusFor(statuses, "ok-1"))
+	require.Equal(t, libacp.ToolCallStatusFailed, replayStatusFor(statuses, "bad-1"),
+		"a call whose result says it failed must not replay as a green check")
+
+	// A call with no recorded result keeps the historical "completed": absence of
+	// an outcome is not evidence of failure.
+	require.Equal(t, libacp.ToolCallStatusCompleted, replayStatusFor(statuses, "never-answered"))
+
+	// And the opening card carries it.
+	failed := toolCallUpdateFromCall(messages[1].CallTools[1], replayStatusFor(statuses, "bad-1"))
+	require.Equal(t, libacp.SessionUpdateToolCall, failed.SessionUpdate)
+	require.Equal(t, libacp.ToolCallStatusFailed, failed.Status)
+}
+
+// TestUnit_ReplayToolStatuses_ExternalUsesThePersistedStatus proves the
+// external path stays EXACT rather than derived: a downstream agent's own
+// status field is read back verbatim, including one this package's native
+// heuristic would never produce from the same content.
+func TestUnit_ReplayToolStatuses_ExternalUsesThePersistedStatus(t *testing.T) {
+	rec, err := json.Marshal(externalToolRecord{
+		ToolCallID: "ext-1",
+		Title:      "grep",
+		Status:     libacp.ToolCallStatusFailed,
+	})
+	require.NoError(t, err)
+
+	statuses := replayToolStatuses([]taskengine.Message{
+		{Role: "tool", ToolCallID: "ext-1", Content: string(rec)},
+	}, true)
+	require.Equal(t, libacp.ToolCallStatusFailed, replayStatusFor(statuses, "ext-1"))
+}
+
+// TestUnit_EstimateHistoryTokens mirrors ollamatokenizer.EstimateTokenizer,
+// which is the tokenizer enginesvc wires unconditionally — so this number is
+// the same arithmetic the engine will run on the next turn over the same
+// history, not an independent guess.
+func TestUnit_EstimateHistoryTokens(t *testing.T) {
+	require.Equal(t, 0, estimateHistoryTokens(nil), "an empty session has used nothing")
+	require.Equal(t, 0, estimateHistoryTokens([]taskengine.Message{{Role: "assistant"}}),
+		"an empty message costs nothing")
+	require.Equal(t, 1, estimateHistoryTokens([]taskengine.Message{{Role: "user", Content: "hi"}}),
+		"a non-empty message floors at one token, as the tokenizer does")
+	require.Equal(t, 3, estimateHistoryTokens([]taskengine.Message{
+		{Role: "user", Content: strings.Repeat("x", 8)},      // 2
+		{Role: "assistant", Content: strings.Repeat("y", 4)}, // 1
+	}))
 }
 
 func TestUnit_ReplayToolResult_FromToolMessage(t *testing.T) {

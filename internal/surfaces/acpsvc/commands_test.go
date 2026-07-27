@@ -55,6 +55,84 @@ func TestParseCommand(t *testing.T) {
 	}
 }
 
+// TestUnknownCommandName pins the OTHER half of the dispatch decision: which
+// unrecognized leading slashes are answered locally as a mistyped command, and
+// — the part that must never regress — which ones keep reaching the model as
+// ordinary prompt text. Every pass-through case here is a real thing an
+// operator types at a coding agent.
+func TestUnknownCommandName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantName string
+		wantOk   bool
+	}{
+		// Answered locally: command-shaped, name unknown.
+		{name: "the dogfood case", input: "/totallyfakecommand", wantName: "totallyfakecommand", wantOk: true},
+		{name: "unknown with args", input: "/nonsense do a thing", wantName: "nonsense", wantOk: true},
+		{name: "leading whitespace", input: "  /nope", wantName: "nope", wantOk: true},
+		{name: "dashed name", input: "/max-token", wantName: "max-token", wantOk: true},
+		{name: "digits allowed", input: "/gpt4", wantName: "gpt4", wantOk: true},
+
+		// Passed through: a KNOWN command is parseCommand's business, not this.
+		{name: "known command", input: "/help", wantOk: false},
+		{name: "known command with args", input: "/model qwen2.5:7b", wantOk: false},
+
+		// Passed through: not command-SHAPED. These are the regressions this
+		// test exists to prevent.
+		{name: "absolute path", input: "/etc/passwd", wantOk: false},
+		{name: "absolute path with args", input: "/home/x y", wantOk: false},
+		{name: "path with extension", input: "/tmp/notes.md", wantOk: false},
+		{name: "capitalized path", input: "/Users/alex", wantOk: false},
+		{name: "underscore is not a command char", input: "/some_thing", wantOk: false},
+		{name: "colon is not a command char", input: "/qwen2.5:7b", wantOk: false},
+
+		// Passed through: no leading slash at all.
+		{name: "prose mentioning a path", input: "what does /etc do", wantOk: false},
+		{name: "plain text", input: "hello there", wantOk: false},
+		{name: "slash mid-sentence", input: "please run /help", wantOk: false},
+		{name: "empty", input: "", wantOk: false},
+		{name: "bare slash", input: "/", wantOk: false},
+		{name: "slash then space", input: "/ help", wantOk: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			name, ok := unknownCommandName(tc.input)
+			if ok != tc.wantOk {
+				t.Fatalf("unknownCommandName(%q) ok = %v, want %v", tc.input, ok, tc.wantOk)
+			}
+			if tc.wantOk && name != tc.wantName {
+				t.Errorf("unknownCommandName(%q) name = %q, want %q", tc.input, name, tc.wantName)
+			}
+		})
+	}
+}
+
+// TestUnknownCommandNameNeverClaimsAKnownCommand is the invariant that keeps the
+// two halves of the dispatch decision from ever both firing: anything
+// parseCommand recognizes must be invisible to unknownCommandName, or a command
+// that got added to the menu would start being refused as unknown.
+func TestUnknownCommandNameNeverClaimsAKnownCommand(t *testing.T) {
+	for _, c := range allACPCommands() {
+		if name, ok := unknownCommandName("/" + c.Name); ok {
+			t.Errorf("known command %q was claimed as unknown (%q)", c.Name, name)
+		}
+		if name, ok := unknownCommandName("/" + c.Name + " some args"); ok {
+			t.Errorf("known command %q with args was claimed as unknown (%q)", c.Name, name)
+		}
+	}
+}
+
+func TestUnknownCommandMessage(t *testing.T) {
+	got := unknownCommandMessage("totallyfakecommand")
+	if !strings.Contains(got, "/totallyfakecommand") {
+		t.Errorf("message must name what was typed, got %q", got)
+	}
+	if !strings.Contains(got, "/help") {
+		t.Errorf("message must name the one next action, got %q", got)
+	}
+}
+
 func TestAcpCommandsCoverDispatch(t *testing.T) {
 	// Every known command (the capability-unfiltered superset) must be
 	// recognized by parseCommand, so no advertised subset of it can ever be

@@ -13,8 +13,26 @@ Do not relitigate these; every component spec below assumes them.
   256-color fallback `214`, 16-color tier: **bold, no color** (brand
   degrades to emphasis, never to a wrong-looking approximation). TUI usage
   is a closed list: the liveness spinner during active work, the focused-
-  composer sigil, the running-mission indicator, the active picker row, and
-  one-time brand moments (first-run header). Never body text, never
+  composer sigil, the running-mission indicator, the active picker row,
+  one-time brand moments (the fresh-session welcome header), and — added by
+  maintainer amendment 2026-07-27 — the persistent status-bar identity
+  segment. **Brand identity device (amendment 2026-07-27):** the vertical
+  gold beam-bar `▌` is THE recurring brand device (composer sigil, welcome
+  gutter, status identity). The fresh-session welcome header renders the
+  website logo-mark — three arc blades, each sweeping a quarter turn
+  around its own offset center, pinwheeling around a square core and
+  opening right — as 5-row half-block art RASTERIZED from the SVG's
+  actual path geometry (maintainer 2026-07-27: a hand-approximated
+  angular C "does not even remotely resemble" the mark; regenerate from
+  the SVG, never redraw by eye) in the favicon's luminance ramp — dark
+  `#FCD34D/#FBBF24/#F59E0B`, light `#B45309/#D97706/#F59E0B`, 256-color
+  `221/214/208`, 16-color bold-only, mono pure glyphs — beside the
+  wordmark and one muted hint line, printed once into scrollback (so it
+  appears in screenshots and history, and never repaints). The status bar's
+  leftmost segment is the gold beam-bar plus `contenox` in muted — subtle,
+  never animated, dropped only below minimum width. The ramp introduces
+  StyleIDs `brand-ramp1/2/3` governed by this same closed list. Never body
+  text, never
   semantic states (user's ANSI red/green/yellow stay theirs), never
   backgrounds. Rules of the tier doctrine apply: monochrome usable →
   16-color readable → truecolor beautiful; NO_COLOR and TERM=dumb drop all
@@ -34,7 +52,7 @@ Do not relitigate these; every component spec below assumes them.
   not manual window-wiggling; (3) animation is deterministic (seeded, a
   pure function of settings+tick) so motion is golden-testable, and the
   liveness metric runs as an automated frame-diff harness, not an
-  impression; (4) e2e = scripted teatest sessions against fixture engines —
+  impression; (4) e2e = scripted PTY sessions against fixture engines —
   the human's job is taste, never correctness. Note the inline-rendering
   dividend: printed transcript lives in real scrollback and is immune to
   resize by construction; only the composer/status region reflows, so the
@@ -92,7 +110,46 @@ Do not relitigate these; every component spec below assumes them.
   first-class; the mission-panel component stands.
 
 - **In-process ACP loopback.** beam consumes `internal/surfaces/acpsvc.Transport` in-process via an in-memory duplex pipe carrying real libacp wire types: one `libacp.AgentSideConnection` wraps the Transport, one `libacp.ClientSideConnection` (beam's own `libacp.Client` impl) sits on the other end. This is the exact two-Run-loops-over-`io.Pipe` pattern already proven end-to-end in `internal/surfaces/acpsvc/client_loopback_test.go`. No subprocess, no socket, no stdio. A side benefit is load-bearing: routing through a real connection pair inherits libacp's `safeCallMethod` panic containment (`libacp/conn.go`) instead of beam owning all recovery itself.
-- **Stack.** bubbletea + lipgloss (+ bubbles, teatest). None of these are in go.mod today; their arrival is deliberate and happens with the first beam packages (theme-styles/test-harness), closing the TODO §8 gate.
+- **Rendering architecture (ratified 2026-07-27; supersedes the earlier
+  bubbletea stack line).** beam adopts **no TUI framework**. The maintainer's
+  ruling: the decoupling is game-engine-shaped — components emit data, one
+  engine owns the terminal. Three layers:
+  - **Frame schema** (`internal/surfaces/beamtui/frame`, pure data, zero
+    project deps): a component IS a pure function `(state, width) → []frame.Line`;
+    a `Line` is spans of text tagged with semantic `StyleID`s — never escape
+    codes. A `Frame` is `{Scrollback []Line, Live []Line, Cursor}`:
+    Scrollback is append-only, printed once into the terminal's real history
+    (the copy/paste ruling on D1 made structural — resize-immune by
+    construction); only the bounded Live region (composer/status/overlays)
+    repaints.
+  - **Terminal engine** (`internal/surfaces/beamtui/term` + subpackages, the
+    only code allowed to touch the terminal): raw mode with guaranteed
+    restore (`x/term`, already in go.mod), input decoding as a pure
+    `bytes → events` parser (keys, bracketed paste as one block, focus
+    in/out, SIGWINCH resize; partial sequences carried across chunk
+    boundaries), a single-writer live-region renderer wrapped in
+    synchronized output, `Suspend(fn)` for `$EDITOR`/wizard, OSC 52 + BEL
+    emission. Event flow is an idiomatic Go `select` loop — no message-queue
+    runtime. Backend is swappable behind one interface; frame corruption
+    from concurrent writes is impossible by construction (single Commit
+    path).
+  - **Style resolution** (`internal/surfaces/beamtui/style`): the only
+    StyleID→attributes table; owns the tier ladder (truecolor → 256 → 16 →
+    mono; NO_COLOR/TERM=dumb strip everything), the capability snapshot,
+    and the beam-gold closed list. Rune-safe width/truncation lives in
+    `internal/surfaces/beamtui/textwidth` (go-runewidth), usable by
+    components.
+  - **Reading older references:** where component specs below say
+    `tea.ExecProcess`/ReleaseTerminal read `term.Engine.Suspend`;
+    `WindowSizeMsg` → the Resize event; `tea.WithReportFocus`/`FocusMsg` →
+    focus events (mode 1004); `tea.Tick` → the app loop's deterministic
+    ticker; `tea.Quit` → loop shutdown; `tea.Model`/`Update()` → the
+    component's plain state struct + the app-shell select loop; teatest →
+    scripted PTY sessions (`creack/pty`, already in go.mod); lipgloss roles
+    → the style package. The testability doctrine is unchanged — it was
+    written framework-agnostic and this decision is its direct consequence.
+    Goldens compare Frame data via a reference encoder with readable style
+    tags, which resolves D54 (reviewable AND style-regression-catching).
 - **Missions are the signature.** Fire-and-detach a bounded unit of work at a declared agent under an HITL envelope; reports stream back into the firing session. `/mission` (already implemented server-side) is the sole successor of the old `/plan`; the interactive plan-stepping verbs are not resurrected.
 - **HITL: one policy, no renagging.** Policy is a named envelope selected up front; every gated call renders one inline card answered with one keystroke. No client-side "always allow" cache the policy engine doesn't know about — the codebase's own invariant (`internal/surfaces/contenoxcli/hitl_tty.go` doc comment) stands unless the maintainer explicitly overturns it (see D19).
 - **Inspiration.** The xAI Grok TUI look-and-feel class of coding TUI (also Claude Code): transcript-first, quiet chrome, streaming text, native copy/paste as a headline requirement.
@@ -104,8 +161,8 @@ Deduplicated union of every component's open questions. Each item names its clai
 
 ### Rendering & input model
 
-- **D1 (blocks app-shell + transcript-view — the single biggest fork).** Alt-screen virtualized viewport vs inline/native-scrollback rendering with a bounded live region (the Claude Code pattern). Determines whether long-session virtualization is beam's problem or the terminal's, whether collapse/expand can ever apply to already-scrolled-past cards, and the whole copy/paste story. A persistent side/mission panel argues alt-screen; the copy/paste headline argues inline. Both components declared this "the central open question" without cross-referencing each other.
-- **D2.** Ratify zero terminal mouse-capture as a hard MVP commitment (selection-clipboard asserts it as a MUST; app-shell and diff-view still treat it as open). If ratified, all pane/scroll interaction is keyboard-only in V1 and any later mouse affordance is opt-in.
+- **D1 (blocks app-shell + transcript-view — the single biggest fork).** Alt-screen virtualized viewport vs inline/native-scrollback rendering with a bounded live region (the Claude Code pattern). Determines whether long-session virtualization is beam's problem or the terminal's, whether collapse/expand can ever apply to already-scrolled-past cards, and the whole copy/paste story. A persistent side/mission panel argues alt-screen; the copy/paste headline argues inline. Both components declared this "the central open question" without cross-referencing each other. **Decided in section 1 (copy/paste is constitutional) and shipped structurally, not just conventionally**: inline won; `comp/transcript` appends settled lines to real scrollback exactly once via `TakeAppends` and never repaints them (see section 9).
+- **D2.** Ratify zero terminal mouse-capture as a hard MVP commitment (selection-clipboard asserts it as a MUST; app-shell and diff-view still treat it as open). If ratified, all pane/scroll interaction is keyboard-only in V1 and any later mouse affordance is opt-in. **Decided in section 1 and shipped structurally**: ratified; `term` never enables a mouse-capture mode, so native selection is never contended for.
 - **D3 (blocks keymap-registry policy).** Ctrl+C semantics: quit-immediately (old vibe) vs interrupt-in-flight-turn-then-quit-on-second-press (Claude Code convention, requires the engine-bridge cancel primitive). Also arbitrates the three competing claims on the chord: app-shell global quit, composer clear-non-empty-buffer-first, shell-pane SIGINT-into-PTY — these must be expressed as keymap-registry scopes under one policy.
 - **D4.** Submit-vs-newline chord in the composer. Shift+Enter is not reliably distinguishable from Enter without Kitty-protocol/modifyOtherKeys negotiation; pick the primary chord and a documented fallback (Alt+Enter, Ctrl+J, or a line-continuation convention).
 - **D5.** Reserved exit chord for shell-pane passthrough focus (candidates like Ctrl+\ collide with SIGQUIT); needs real-terminal testing before lock-in (keymap-registry, shell-pane).
@@ -125,7 +182,7 @@ Deduplicated union of every component's open questions. Each item names its clai
 - **D13 (blocks app-shell layout).** Session model: single visible session per beam process with in-place `/session switch` (old vibe), or visible multi-session tabs? Transport already hosts many concurrent sessions; this is a UI mental-model call that also decides what the mission badge and notification "active surface" compare against (engine-bridge, app-shell, session-manager, completion-notification).
 - **D14.** The active-session KV pointer (`contenox.session.active`) is global per workspace and reassigned by every ACP editor tab's `session/new`. Recommendation on the table: beam reads it once at startup, then tracks its own session in memory and writes back only on explicit switch/new — confirm this divergence is acceptable (session-manager).
 - **D15.** ACP-editor-spawned sessions (`zed-<uuid>` etc.) in beam's session list: show, filter, or demote/group with the first-user-message Title convention? (session-manager)
-- **D16.** `contenox beam --session <name>` with an unknown name: error-and-suggest (CLI behavior) or auto-create with confirmation (friendlier for a TUI)? (session-manager)
+- **D16.** `contenox beam --session <name>` with an unknown name: error-and-suggest (CLI behavior) or auto-create with confirmation (friendlier for a TUI)? (session-manager) **Shipped: error-and-suggest** — `beam_cmd.go`'s `resolveBeamSession` returns an error with `knownSessionHint` listing the known sessions; it never auto-creates.
 - **D17.** Auto-derive session names from the first user message (à la ACP Title) instead of `session-XXXXXXXX`-until-renamed? New behavior for all surfaces (session-manager).
 - **D18.** Is "session deleted by another process → next turn errors, user recovers via /session new" an acceptable failure mode, or must beam re-check existence per turn? (session-manager)
 
@@ -169,7 +226,7 @@ Deduplicated union of every component's open questions. Each item names its clai
 - **D42.** Keep vibe's emerald palette or pick a new visual identity for the relaunch WHY.md frames as a repositioning? Changes the component's first PR (theme-styles).
 - **D43.** Does "easy copy/paste" eliminate ALL background/reverse-video chrome, or is background fill fine for never-copied chrome (header/status bars)? Needs a named terminal test matrix (theme-styles).
 - **D44.** Tool-call cards collapsed-by-default: fixed, per-tool-kind (reads collapsed, diffs expanded), or a user preference? (transcript-view)
-- **D45.** `/help` fully client-side (no round trip, no transcript persistence — avoids a growing help block in every session) vs wire-identical to a plain ACP client (command-palette); relatedly whether `/doctor`'s persistence side effect needs softening.
+- **D45.** `/help` fully client-side (no round trip, no transcript persistence — avoids a growing help block in every session) vs wire-identical to a plain ACP client (command-palette); relatedly whether `/doctor`'s persistence side effect needs softening. **Shipped: client-side** — `comp/palette` + `app`'s `helpOpen` overlay render `/help` locally with zero round trip; `/doctor`'s persistence question is still open.
 
 ### Preferences, platform & unassigned seams (from the round-1 critic, unresolved by round 2)
 
@@ -178,23 +235,41 @@ Deduplicated union of every component's open questions. Each item names its clai
 - **D48.** Who owns the shared transient notice/toast primitive at least five components currently invent independently (copy confirmations, attach rejections, "already resolved elsewhere", dispatch errors, no-active-session banner) — a small shared component, or app-shell? (critic)
 - **D49.** Non-TTY invocation (piped stdout, CI): fail fast with a clear message — which bootstrap layer owns the check? first-run explicitly assumes someone upstream did it (critic, first-run).
 - **D50.** Where do unclassified internal errors surface (loopback marshal error, background-goroutine panic report) for bug-report purposes — a debug log pane, a file, stderr-on-exit? (critic)
-- **D51.** Name the composition root: the single place that sequences open DB → resolve session → build engine+transport+fleet → start the tea.Program → hydrate transcript → accept input, and handles partial failure at each step (critic; likely engine-bridge bootstrap + app-shell, but it needs a name and an owner).
+- **D51.** Name the composition root: the single place that sequences open DB → resolve session → build engine+transport+fleet → start the app loop → hydrate transcript → accept input, and handles partial failure at each step (critic; likely engine-bridge bootstrap + app-shell, but it needs a name and an owner). **Shipped: `internal/surfaces/contenoxcli/beam_cmd.go`** — its own package doc names it beam's composition root and numbers the sequence; `app.Run` is the loop it starts.
 
 ### Liveness, notification & testing tuning
 
 - **D52.** Stall threshold: uniform 8s or per-kind (a shell command silent 30s is normal; an LLM step silent 8s is not)? Plus: sub-second timer precision in the first seconds, and whether the frozen-frame telemetry overlay ships as a maintainer regression guard (liveness).
 - **D53.** Notification constants sign-off (1.5s burst coalescing, 2s rate floor) and the definition of "active surface" broad enough that every event has a suppression comparison target, including non-session surfaces (completion-notification, session-manager).
-- **D54.** Golden files: raw ANSI (exact, unreviewable diffs) vs ANSI-stripped plain text (reviewable, misses style regressions). Must be decided before goldens proliferate (test-harness).
+- **D54.** Golden files: raw ANSI (exact, unreviewable diffs) vs ANSI-stripped plain text (reviewable, misses style regressions). Must be decided before goldens proliferate (test-harness). **Resolved** — see "Implementation defaults" below; shipped as `testkit.EncodeLines`'s `[style]text[/]` reference encoding.
 - **D55.** Does test-harness write the first golden/liveness test for each component, or only ship helpers+fixtures+CI wiring with component owners writing their own? Assumed the latter; confirm so no component ships untested (test-harness).
 - **D56.** Is the liveness metric exactly "View() bytes differ across ticks while active, stabilize while idle", or stronger (spinner glyphs cycle in order, timer digits monotonic)? (test-harness)
 
 ### Engine & turn lifecycle
 
-- **D57.** Thinking/reasoning trace: transcript-view's MVP requires rendering `agent_thought_chunk` distinctly while engine-bridge lists the event slot as an open question — reconcile: in or out of MVP (engine-bridge, transcript-view).
+- **D57.** Thinking/reasoning trace: transcript-view's MVP requires rendering `agent_thought_chunk` distinctly while engine-bridge lists the event slot as an open question — reconcile: in or out of MVP (engine-bridge, transcript-view). **Resolved** — see "Implementation defaults" below; shipped as `frame.StyleThought` rendered dimmed (`attrDim`) in `comp/transcript`.
 - **D58.** Should an ordinary (non-mission) turn ever survive beam process death (detached engine daemon), or is "closing beam kills your in-flight turn, like closing a terminal" the V1 answer? Missions already survive independently (connection-lifecycle).
 - **D59.** Confirm beam never points at a remote engine in V1 (CONTENOX_SERVER_URL forwarding was removed); a yes later reshapes connection-lifecycle significantly (connection-lifecycle).
 - **D60.** Is first-run's Ready gate boot-only, with mid-session backend regression (Ollama drops on laptop sleep, key expires) explicitly unowned-for-now — or does connection-lifecycle's Degraded absorb it? Point at one owner (first-run, connection-lifecycle).
 - **D61.** May users browse existing transcripts read-only while `Ready()==false`? Recommended yes; session-manager owns enforcing the boundary (first-run).
+
+### Implementation defaults taken 2026-07-27 (V1 build; maintainer may overturn any)
+
+Recorded so the build isn't blocked; each is the lowest-risk reading of the
+blueprint, not new design. **D3**: Ctrl+C = clear non-empty composer buffer
+first; empty buffer = interrupt in-flight turn; second press within 2s (or
+idle) = quit. **D4**: Enter submits; Ctrl+J and Alt+Enter insert newline
+(kitty-protocol Shift+Enter negotiation deferred). **D8**: `!` prefix
+(matches the implemented backend, its tests and docs). **D9**: warm
+`shellsession` PTY, output prints inline (scope bar cut the pane). **D13**:
+single visible session, in-place `/session switch`. **D40**: dark default
+when detection is inconclusive; `--light` flag override. **D44**: tool cards
+collapsed by default, uniform. **D46**: flags/env only in V1, no prefs file.
+**D54**: resolved structurally — goldens are Frame data through the
+reference encoder (readable style tags). **D57**: thought chunks render in
+MVP, dimmed, since the event already flows. **D6**: y/N mirroring the CLI;
+no whole-run abort key on the in-session card (Esc cancels the turn
+instead).
 
 ## 3. Service extensions required first
 
@@ -202,26 +277,26 @@ Per the build-on-services rule, these land in kernel/services/surface-service pa
 
 ### libacp + internal/surfaces/acpsvc
 
-1. **Vision front door — FlattenContent image drop** (needed by composer, engine-bridge, selection-clipboard, file-addressing later). `libacp/flatten.go`'s `FlattenContent` is a documented lossy text projection that silently drops image/audio/resource blocks; `internal/surfaces/acpsvc/prompt.go`'s nativeDriver flattens every prompt through it, so a correctly-formed image ContentBlock never reaches `taskengine.Message.Images` (`internal/kernel/taskengine/tasktype.go`'s `ImagePart{Data,MimeType}` exists with no producer). The native driver (or agentservice) must preserve image blocks into `Message.Images`. Until this lands, all attach UI is inert; `PromptCapabilities.Image` (hardcoded false in `internal/surfaces/acpsvc/initialize.go`) must also become per-session/model truth for the composer's gate.
-2. **Context-overflow stop reason survives the wire** (context-budget — the single highest-leverage fix in this list). In `libacp/conn.go` (~MethodSessionPrompt handling), a turn failing with `taskengine.ErrContextLengthExceeded` must resolve as `PromptResponse{StopReason: StopReasonMaxTokens}` with a nil RPC error, mirroring the existing cancel special case. Today the computed stop reason is discarded and every client sees a generic internal error, forcing forbidden string-matching in the surface layer.
+1. **Vision front door — FlattenContent image drop** (needed by composer, engine-bridge, selection-clipboard, file-addressing later). `libacp/flatten.go`'s `FlattenContent` is a documented lossy text projection that silently drops image/audio/resource blocks; `internal/surfaces/acpsvc/prompt.go`'s nativeDriver flattens every prompt through it, so a correctly-formed image ContentBlock never reaches `taskengine.Message.Images` (`internal/kernel/taskengine/tasktype.go`'s `ImagePart{Data,MimeType}` exists with no producer). The native driver (or agentservice) must preserve image blocks into `Message.Images`. Until this lands, all attach UI is inert; `PromptCapabilities.Image` (hardcoded false in `internal/surfaces/acpsvc/initialize.go`) must also become per-session/model truth for the composer's gate. **Service prerequisite DONE, predating this build**: `prompt.go`'s nativeDriver now calls `extractImageParts` before `FlattenContent` (images populate `Message.Images`) and `PromptCapabilities.Image` is `true`. **Still open**: beam's own composer attach UI — `comp/composer` has no image-staging path (its `@` affordance is file-addressing's text mentions only); D37/D38 remain unanswered on the beam side.
+2. **Context-overflow stop reason survives the wire** (context-budget — the single highest-leverage fix in this list). In `libacp/conn.go` (~MethodSessionPrompt handling), a turn failing with `taskengine.ErrContextLengthExceeded` must resolve as `PromptResponse{StopReason: StopReasonMaxTokens}` with a nil RPC error, mirroring the existing cancel special case. Today the computed stop reason is discarded and every client sees a generic internal error, forcing forbidden string-matching in the surface layer. **Still open** — `libacp/conn.go` has no `ErrContextLengthExceeded`/`StopReasonMaxTokens` handling; context-budget is not built.
 3. **Re-emit `available_commands_update` on capability change** (command-palette, later-tier). The menu is sent only at session bind; `/model` unlocking `/mission` mid-session leaves the palette stale.
 4. **Injectable clock/id source** (test-harness, flagged not assumed): only if real wall-clock timestamps/random ids in emitted events make byte-exact goldens impossible.
 
 ### internal/surfaces/contenoxcli → shared packages
 
-5. **Extract `buildInProcessFleet`** (engine-bridge prerequisite, req 9 — real, not nice-to-have). The ~100-line fleet composition (agentregistry + agentinstance kernel + operatorinbox + reportrouter + fleetservice) is unexported inside `internal/surfaces/contenoxcli/acp_cmd.go`; beam and `contenox acp` must share one exported constructor.
+5. **Extract `buildInProcessFleet`** (engine-bridge prerequisite, req 9 — real, not nice-to-have). The ~100-line fleet composition (agentregistry + agentinstance kernel + operatorinbox + reportrouter + fleetservice) is unexported inside `internal/surfaces/contenoxcli/acp_cmd.go`; beam and `contenox acp` must share one exported constructor. **DONE** — `internal/surfaces/fleetboot` (package doc: "extracted here per beam-tui.md section 3 item 5"), exporting `BuildInProcessFleet`; both `acp_cmd.go` and `beam_cmd.go` call it.
 6. **Extract an onboarding/apply package** (first-run). `registerSetupBackend`, the `setupProviders` menu table (its own DRIFT-HAZARD comment says it should derive from `providerservice.ListSupportedProviders`), and runSetup's KV-persist tail must become importable by both CLI and beam. `internal/setupcheck`'s package doc promises "no I/O", so this needs a new home (e.g. `internal/onboarding`) or an explicit contract change — location is a maintainer call.
 7. **Ollama auto-registration** (first-run zero-config path): a mutating sibling to `setupcheck.EnrichResultWithOllamaProbe` that actually registers the probed local backend; plus confirm the engine build path runs unconditionally on a virgin install (BuildEngine already tolerates empty defaults).
-8. **Extract the diff engine** (diff-view). The only diff implementation in the repo is the private LCS in `internal/services/localtools/hitl.go` (`unifiedDiff`/`lcsEditScript`); extract to a shared package or take a small dependency — do not create a third implementation.
+8. **Extract the diff engine** (diff-view). The only diff implementation in the repo is the private LCS in `internal/services/localtools/hitl.go` (`unifiedDiff`/`lcsEditScript`); extract to a shared package or take a small dependency — do not create a third implementation. **Still open, sidestepped rather than solved**: `comp/approval` shipped without it by only rendering shape (b) from 4.15 — the pre-rendered unified-diff string already in `Meta.Diff` — sanitized and line-capped, never recomputing a diff client-side. No diff-view package exists; raw before/after (shape a) is not diffed anywhere in beam.
 9. **Extract the gitignore/skip-dirs matcher** (file-addressing). `internal/services/localtools/fs_gitignore.go` + `fs_policy.go`'s `defaultSkipDirNames` must be reusable so @-mention completion and the agent's own `find_files` filter identically; where it lands (shared package vs folded into vfs/localfileservice) is open.
 
 ### internal/services/chatservice
 
-10. **Mechanical `TrimHistory`** (context-budget — the guaranteed recovery path). `/compact` runs an LLM chain over the very history that is over budget, so it cannot rescue a wedged session; add a non-LLM trim (drop oldest/oversized without a model call) and wire it as an acpsvc command (`/trim` or `/compact --force`, D31) alongside `handleClear`/`handleCompact` in `internal/surfaces/acpsvc/commands_session.go`.
+10. **Mechanical `TrimHistory`** (context-budget — the guaranteed recovery path). `/compact` runs an LLM chain over the very history that is over budget, so it cannot rescue a wedged session; add a non-LLM trim (drop oldest/oversized without a model call) and wire it as an acpsvc command (`/trim` or `/compact --force`, D31) alongside `handleClear`/`handleCompact` in `internal/surfaces/acpsvc/commands_session.go`. **Still open** — no `TrimHistory` in `internal/services/chatservice`.
 
 ### internal/services/agentservice
 
-11. **Poison-pill guard for per-step results** (context-budget — the actual reproduction of the 19,734/19,727 wedge). The current guard only skips persisting when overflow hits before any real step (`len(stateUnits)<=1`); an oversized mid-turn tool result is persisted anyway and poisons the session. Policy for the fix is D33.
+11. **Poison-pill guard for per-step results** (context-budget — the actual reproduction of the 19,734/19,727 wedge). The current guard only skips persisting when overflow hits before any real step (`len(stateUnits)<=1`); an oversized mid-turn tool result is persisted anyway and poisons the session. Policy for the fix is D33. **Still open** — `internal/services/agentservice/agent.go`'s guard is unchanged (`len(stateUnits) <= 1`).
 12. **Persistence outcome signal** (connection-lifecycle). `persistHistory` swallows commit failures (reported only to the tracker); `Prompt` returns success even when the exchange was not durably saved. The caller needs a `persisted: false` signal so Degraded's persistence counter and a user warning are possible.
 
 ### internal/kernel/taskengine
@@ -253,14 +328,14 @@ MVP requirements:
 2. Production wiring mirrors `internal/surfaces/acpsvc/client_loopback_test.go`'s io.Pipe loopback (decision made, section 1).
 3. Its `libacp.Client` declares FS read/write capabilities false and no terminal capability, so `internal/surfaces/acpsvc/fileio.go`'s ACPFileIO falls back to direct OS file IO — beam implements none of those callbacks for MVP.
 4. Session lifecycle calls map 1:1 onto Transport methods (New/Load/Resume/List/Close/DeleteSession); no re-implementation of session bookkeeping, cwd resolution, or MCP registration (`internal/surfaces/acpsvc/session.go` owns those, warm per session).
-5. Async `SubmitPrompt(sessionID, text)` returns immediately; results arrive on the per-session channel. `Cancel(sessionID)` maps to Transport.Cancel; a genuine cancel resolves `StopReasonCancelled`, never an error.
-6. Every `SessionNotification` kind becomes exactly one typed UI event, delivered in wire order on a single per-session channel — no reordering, cross-kind coalescing, or silent drops.
+5. Async `SubmitPrompt(sessionID, text)` returns immediately; results arrive on the Bridge's event channel. `Cancel(sessionID)` maps to Transport.Cancel; a genuine cancel resolves `StopReasonCancelled`, never an error.
+6. Every `SessionNotification` kind becomes exactly one typed UI event, delivered in wire order on the Bridge's single SessionID-tagged channel — no reordering, cross-kind coalescing, or silent drops. **Shipped as specified** — `enginebridge/events.go`'s package doc documents the honest contract precisely: one `Events()` channel per Bridge, every Event SessionID-tagged, filtered to the active session by `SetActiveSession`'s `FilterSessionUpdates` wrapper (a drop by design, not a gap); "per-session channel" (as section 5 originally put it) overstates it — it is one channel, not one per session, and `SessionOf` is for attribution, never fan-out.
 7. `RequestPermission` blocks only the affected tool-call card; resolves to allow/deny from the user's keystroke; pending requests resolve `PermissionOutcomeCancelled` on teardown — no hung goroutines.
 8. Slash commands go through SubmitPrompt as plain text (acpsvc's `parseCommand` intercepts); engine-bridge only surfaces AvailableCommands for autocomplete.
 9. Bootstraps the in-process mission fleet (via the extracted constructor, section 3 item 5) into `Deps.Fleet`/`Deps.Agents`; mission reports deliver via `Transport.DeliverToContenoxSession` byte-identically to the editor path.
 10. Closing a session cancels its in-flight prompt, unsubscribes feeds, calls CloseSession; leaks nothing (PTY, bus subscription, dispatched subprocess) past exit.
 11. HITL policy is a startup default (embedded presets from `internal/surfaces/contenoxcli/hitl_policies.go` or override) fed into Deps; never re-asked per call; no client-side allow memory.
-12. Package has zero bubbletea/lipgloss imports, lint-enforced.
+12. Package imports nothing under `beamtui/{frame,term,input,style}` — verified by `testkit`'s import-boundary gate (`TestUnit_ImportBoundaries` rule b), not a lint convention.
 
 Contracts — consumes: `acpsvc.Transport`/Deps, `enginesvc.Engine`, hitl/fleet/mission/shellsession via Deps, libacp types. Emits: session lifecycle results; the ordered per-session typed event stream (text deltas, tool-card open/update/close, plan, usage, config, commands menu); permission-request events; mission confirmations/reports; cancel acknowledgements (cancelled vs failed, distinguishable).
 
@@ -277,7 +352,7 @@ Acceptance criteria (keep):
 - A chain step failing mid-turn resolves that one turn (rendered inline) and leaves global state untouched; connection-lifecycle owns only the escalation counting.
 - Any panic recovered from an engine-bridge call transitions immediately to EngineDown — engine state after a panic is untrusted. (The loopback decision means libacp's `safeCallMethod` catches handler panics; beam's own recover() wrappers stay as cheap insurance.)
 - Degraded enters on: MCP server in failure cooldown; ≥3 consecutive same-provider turn failures in 5 minutes; ≥2 persistence failures. Degraded never blocks prompts; it adds a badge plus one specific recovery action.
-- SetupRequired iff Engine nil or `setupcheck.Result.Ready()==false`; recovery is the one existing wizard via terminal suspend (`tea.ExecProcess`/ReleaseTerminal) — never reimplemented as bubbletea views in MVP; on success a fresh Transport is constructed, no hot-patching.
+- SetupRequired iff Engine nil or `setupcheck.Result.Ready()==false`; recovery is the one existing wizard via terminal suspend (`term.Engine.Suspend`) — never reimplemented as a nested sub-app in MVP; on success a fresh Transport is constructed, no hot-patching.
 - Relaunch after non-clean exit shows history exactly as of the last fully-returned turn — no ghost messages; the lost-exchange gap is documented, not papered over.
 - Resuming runs fixed order: engine build/SetupCheck → DB probe → session load → still-running-missions query (handed to mission-panel); stops at first failure in the matching state.
 - Every state exposes ≥1 labeled single-keypress recovery action; EngineDown's is "quit beam" (no in-place rebuild in MVP) and it is the only state allowed a modal/blocking treatment.
@@ -306,7 +381,7 @@ Open questions beyond D60–D61 and the silent-auto-connect call (D — covered 
 
 ### 4.4 app-shell
 
-The bubbletea program root: computes and hands out rectangles (transcript top-flexible, composer bottom-fixed 1–6 lines, one-line status bar, optional right mission panel that never reserves empty space), tracks the focus enum, intercepts a short global key set, handles resize/suspend/quit, renders the status bar from state others publish. Deliberately thin — it renders no chat message, diff, plan, or menu.
+The program root (the app loop, `app.Run`): computes and hands out rectangles (transcript top-flexible, composer bottom-fixed 1–6 lines, one-line status bar, optional right mission panel that never reserves empty space), tracks the focus enum, intercepts a short global key set, handles resize/suspend/quit, renders the status bar from state others publish. Deliberately thin — it renders no chat message, diff, plan, or menu.
 
 MVP requirements (compressed):
 1. The four regions above; panel claims width only when it has content or is explicitly opened.
@@ -318,10 +393,10 @@ MVP requirements (compressed):
 7. When width can't fit segments, drop whole segments in a documented priority order (proposal: session name first; keep model/provider and health longest) — never wrap or mid-truncate.
 8. Every quit path runs a bounded (~2s) shutdown hook then quits regardless — quitting can never hang the terminal.
 9. Ctrl+Z suspends where supported (no-op elsewhere); resume forces full clear-and-redraw; suspend never pauses detached mission work.
-10. tea.Program construction treats native copy/paste as first-class: no mouse-motion tracking that hijacks click-drag selection (interacts with D1/D2); enables `tea.WithReportFocus` for completion-notification.
+10. Terminal-engine construction treats native copy/paste as first-class: no mouse-motion tracking that hijacks click-drag selection (interacts with D1/D2); enables terminal focus reporting (mode 1004) for completion-notification.
 11. Global keys, region boundaries, and segment priorities expressed as data, not scattered literals.
 
-Contracts — consumes: bubbletea runtime, mounted children, published status fields, token-usage stream, mission count, modal/focus signals. Emits: per-region geometry, focus-change notifications, forwarded keys, shutdown-hook invocation, tea.Quit, modal arbitration. Also owns (per critic): panic recovery restoring the terminal (cooked mode, cursor, alt-screen exit) on unhandled panic.
+Contracts — consumes: the app loop's select runtime, mounted children, published status fields, token-usage stream, mission count, modal/focus signals. Emits: per-region geometry, focus-change notifications, forwarded keys, shutdown-hook invocation, loop shutdown, modal arbitration. Also owns (per critic): panic recovery restoring the terminal (cooked mode, cursor, alt-screen exit) on unhandled panic.
 
 Later: rebindable keymap surface, draggable divider, multi-session tabs (D13), configurable segments, plain-output accessibility mode, persisted layout.
 
@@ -343,9 +418,9 @@ Open questions beyond D3, D5, D46: dynamic vs compile-time Escape-priority regis
 
 ### 4.6 theme-styles
 
-The only package allowed to construct lipgloss colors, styles, borders, spacing. Semantic roles (user/assistant/shell/tool/error/muted/border/active/inactive/pending/done/failed/skipped/hitl), chrome constructors (header, status bar idle/working, bordered panel, inline prefix), one status→style mapping function, and a process-lifetime terminal-capability snapshot. Its job is negative as much as positive: no other package can invent an ad hoc color.
+The only package allowed to construct terminal colors, styles, borders, spacing. Semantic roles (user/assistant/shell/tool/error/muted/border/active/inactive/pending/done/failed/skipped/hitl), chrome constructors (header, status bar idle/working, bordered panel, inline prefix), one status→style mapping function, and a process-lifetime terminal-capability snapshot. Its job is negative as much as positive: no other package can invent an ad hoc color.
 
-MVP (compressed): role lookup is the only path to color (no literal `lipgloss.Color` elsewhere — later a lint guard, à la the deleted web designTokenGuard); named chrome constructors cover every MVP panel kind; exactly one status→style switch for mission/step/approval states; capability detection once at startup (color profile, NO_COLOR, non-tty) with any OSC 11 background query strictly timeboxed — startup must never hang in tmux/CI; adaptive light/dark values, documented fallback default (D40); plain mode preserves meaning via prefix glyphs/labels — color is never the only carrier of meaning; ASCII-safe fallback for every glyph (Windows first-class, D41); copy cleanliness rule: selectable text gets foreground-only styling, background fills reserved for never-copied chrome (D43); named finite spacing/border constants; the go.mod introduction of lipgloss is a deliberate visible change.
+MVP (compressed): role lookup is the only path to color (no literal ANSI/SGR color code elsewhere — later a lint guard, à la the deleted web designTokenGuard); named chrome constructors cover every MVP panel kind; exactly one status→style switch for mission/step/approval states; capability detection once at startup (color profile, NO_COLOR, non-tty) with any OSC 11 background query strictly timeboxed — startup must never hang in tmux/CI; adaptive light/dark values, documented fallback default (D40); plain mode preserves meaning via prefix glyphs/labels — color is never the only carrier of meaning; ASCII-safe fallback for every glyph (Windows first-class, D41); copy cleanliness rule: selectable text gets foreground-only styling, background fills reserved for never-copied chrome (D43); named finite spacing/border constants; per section 1's no-framework ruling, this package (not a third-party styling library) is the one visible go.mod change theme-styles brings.
 
 Contracts — consumes: env/terminal signals only. Emits: the role/constructor API and the capability snapshot (other components use it for non-color layout decisions, e.g. spinner vs "…").
 
@@ -360,7 +435,7 @@ Owns "does the user believe something is happening right now": the shared activi
 Acceptance criteria (maintainer's metrics, keep verbatim):
 - **Micro-motion band above 50% during an active turn**: sampling rendered frames at the tick rate while any activity is open, more than half must differ from the immediately preceding frame.
 - **No freeze exceeding 1s while a step runs**: the interval between two consecutive distinct frames while activity is open never exceeds 1000ms, regardless of engine silence.
-- Ticking is client-side (`tea.Tick`), independent of event arrival: a 10s-silent engine still yields >10 distinct frames.
+- Ticking is client-side (the app loop's deterministic ticker), independent of event arrival: a 10s-silent engine still yields >10 distinct frames.
 - Ticker runs only while ≥1 activity is open; at idle, zero ticks scheduled — flat CPU at rest; never fake progress when nothing is happening.
 - Stall surfaced honestly: no event for the threshold (default 8s, D52) flips text to "still working — no update for Ns"; elapsed is real wall-clock, never a fabricated percentage.
 - Turn end (any StopReason) and mission terminal states freeze the final frame immediately (total elapsed, spinner removed).
@@ -423,7 +498,7 @@ Open questions beyond D1, D29, D44, D57: numeric perf bar for "long session" (or
 
 A pure client-side index + cursor/fold-state layer over the item stream transcript-view renders: jump next/prev tool call and user message, incremental search with highlighting, fold/unfold. Renders nothing itself; never touches the clipboard. No service work needed: session/load already replays full history (the nativeturn journal cap bounds only live-turn replay).
 
-Acceptance criteria (compressed): tool-call jumps collapse a call's status updates to one navigable stop; user-message jumps skip everything between MessageID boundaries; ends are non-wrapping no-ops with a status note; search is literal case-insensitive substring over underlying text (content, titles, rawInput/rawOutput, diff old/new) — never the styled buffer, so lipgloss can't hide a match; a match inside a folded item auto-unfolds exactly that item; sub-16ms query updates up to at least 2,000 items without full rescans per keystroke; fold state is a per-item boolean this component owns and transcript-view only reads; live appends never shift the focused item or selected match; read-only seam for selection-clipboard; zero code added under acpsvc/nativeturn/libacp.
+Acceptance criteria (compressed): tool-call jumps collapse a call's status updates to one navigable stop; user-message jumps skip everything between MessageID boundaries; ends are non-wrapping no-ops with a status note; search is literal case-insensitive substring over underlying text (content, titles, rawInput/rawOutput, diff old/new) — never the styled buffer, so styling can't hide a match; a match inside a folded item auto-unfolds exactly that item; sub-16ms query updates up to at least 2,000 items without full rescans per keystroke; fold state is a per-item boolean this component owns and transcript-view only reads; live appends never shift the focused item or selected match; read-only seam for selection-clipboard; zero code added under acpsvc/nativeturn/libacp.
 
 MVP: incremental item index {itemID, kind, MessageID/ToolCallID, status}; the two jump pairs; a minimal search input owned here (never the composer — a query must not be mistakable for a prompt); fold toggle + fold-all/unfold-all via command-palette; `CurrentPosition()`/`SearchStatus()` for the status bar ("tool call 7/23", "match 2/9"); the documented seam with transcript-view (Items/LineRange/ScrollToItem); explicit non-goal: searching embedded terminal buffers (transcript carries only a TerminalID pointer — shell-pane's concern).
 
@@ -632,9 +707,9 @@ Open questions: covered by D30–D33.
 
 Releases the user's attention back when something finishes or needs them, instead of holding it via constant motion: terminal bell / OSC 9 when a turn ends, a mission reaches terminal status or files a consequential report, or an ask is raised — but only when the user isn't already looking at it. A pure downstream consumer; no new bus subject, no service behavior.
 
-Acceptance criteria (compressed): turn end rings once for StopReason in {end_turn, max_tokens, max_turn_requests, refusal}; cancelled never rings (the user drove it); mission terminal statuses {landed, derailed, stuck, abandoned} ring, StatusOpen never; report kinds blocker/result ring, progress/finding never; approval/attention asks ring regardless of origin (bypass question D23); suppression = window focused (bubbletea FocusMsg) AND the event's owning surface is active; burst coalescing (default 1.5s) → 1 ring; rate floor (default 2s); idempotent by event identity across reconnect/replay; refocus resets throttling but never replays; global off switch means zero escape bytes ever; OSC 9 bodies carry only a generic label ≤80 chars — never tool args/diffs/report detail (banners can surface on a locked screen outside the terminal's trust boundary); all emission routes through app-shell's owned output path (never a bare background-goroutine stdout write that corrupts a frame); BEL is the only always-safe signal — OSC 9 only on an env-heuristic allow-list (iTerm2/WezTerm/ghostty/Konsole), skipped entirely under $TMUX (BEL only, relying on tmux's own bell flagging).
+Acceptance criteria (compressed): turn end rings once for StopReason in {end_turn, max_tokens, max_turn_requests, refusal}; cancelled never rings (the user drove it); mission terminal statuses {landed, derailed, stuck, abandoned} ring, StatusOpen never; report kinds blocker/result ring, progress/finding never; approval/attention asks ring regardless of origin (bypass question D23); suppression = window focused (the terminal focus event, mode 1004) AND the event's owning surface is active; burst coalescing (default 1.5s) → 1 ring; rate floor (default 2s); idempotent by event identity across reconnect/replay; refocus resets throttling but never replays; global off switch means zero escape bytes ever; OSC 9 bodies carry only a generic label ≤80 chars — never tool args/diffs/report detail (banners can surface on a locked screen outside the terminal's trust boundary); all emission routes through app-shell's owned output path (never a bare background-goroutine stdout write that corrupts a frame); BEL is the only always-safe signal — OSC 9 only on an env-heuristic allow-list (iTerm2/WezTerm/ghostty/Konsole), skipped entirely under $TMUX (BEL only, relying on tmux's own bell flagging).
 
-MVP: the four trigger rules; focus tracking via `tea.WithReportFocus` (app-shell must enable and forward); active-surface comparison via session-manager's mapping (the primary fire-and-detach scenario: same window, different tab); throttles; idempotency; toggle (storage: D46); best-effort OSC 9 with redaction; tmux special case. Default ON with an easy off-switch — the premise is calling the user back.
+MVP: the four trigger rules; focus tracking via terminal focus reporting, mode 1004 (app-shell must enable and forward); active-surface comparison via session-manager's mapping (the primary fire-and-detach scenario: same window, different tab); throttles; idempotency; toggle (storage: D46); best-effort OSC 9 with redaction; tmux special case. Default ON with an easy off-switch — the premise is calling the user back.
 
 Contracts — consumes: StopReason per session from engine-bridge, mission status/report events as routed by mission-panel, ask-raised occurrences from approval-cards, focus state from app-shell, surface mapping from session-manager. Emits: raw escape sequences only — a terminal leaf, not a producer. Service extensions: none.
 
@@ -644,13 +719,13 @@ Open questions: covered by D23, D46, D53.
 
 ### 4.21 test-harness
 
-The shared testing infrastructure that keeps beam agent-verifiable: a teatest golden/snapshot harness, a canonical fixture corpus of engine events every component's tests replay, and the frame-diff instrumentation that regression-tests the liveness metric. Without it, beam is the one surface agents cannot self-check via `task test-unit`.
+The shared testing infrastructure that keeps beam agent-verifiable: a golden/snapshot harness, a canonical fixture corpus of engine events every component's tests replay, and the frame-diff instrumentation that regression-tests the liveness metric. Without it, beam is the one surface agents cannot self-check via `task test-unit`.
 
-Acceptance criteria (compressed): all beam golden + liveness tests run headless in the existing `TestUnit_*`/`-short` CI gate — no PTY, no LLM/network, zero flakes over 20 reruns, low-seconds runtime; a versioned fixture corpus derived from the real shapes in `internal/surfaces/acpsvc/events.go` and `internal/kernel/taskengine/events.go` (streaming chunks, thoughts, tool lifecycle, token_usage, plan, approval, chain terminal states) reused by every suite; ≥1 golden per component via teatest, byte-exact, regenerated by one documented `-update` flow; the LIVENESS regression pair — active fixture (streaming chunk, or a mission heartbeat with no output) must produce non-byte-identical consecutive frames across ≥3 simulated ticks, and idle fixtures must stabilize (catches both the frozen frame and the spinner that never stops); pinned terminal sizes (80x24, 120x40) via WindowSizeMsg, never the runner's real env; one shared package (fixture loader, golden helper, frame-diff helper, FakeEngineBridge); failure output reads as an actionable diff so an agent can self-correct from `go test` output alone.
+Acceptance criteria (compressed): all beam golden + liveness tests run headless in the existing `TestUnit_*`/`-short` CI gate — no PTY, no LLM/network, zero flakes over 20 reruns, low-seconds runtime; a versioned fixture corpus derived from the real shapes in `internal/surfaces/acpsvc/events.go` and `internal/kernel/taskengine/events.go` (streaming chunks, thoughts, tool lifecycle, token_usage, plan, approval, chain terminal states) reused by every suite; ≥1 golden per component via the Frame-data reference encoder, byte-exact, regenerated by one documented `-update` flow; the LIVENESS regression pair — active fixture (streaming chunk, or a mission heartbeat with no output) must produce non-byte-identical consecutive frames across ≥3 simulated ticks, and idle fixtures must stabilize (catches both the frozen frame and the spinner that never stops); pinned terminal sizes (80x24, 120x40) via WindowSizeMsg, never the runner's real env; one shared package (fixture loader, golden helper, frame-diff helper, FakeEngineBridge); failure output reads as an actionable diff so an agent can self-correct from `go test` output alone.
 
 MVP: introduce the charmbracelet deps (with theme-styles, this is the TODO §8 arrival); fixture corpus as source of truth; FakeEngineBridge implementing engine-bridge's event contract (blocking dependency: that contract must be fixed first), deterministic, injected clock; documented golden convention (path layout; ANSI-vs-plain is D54); published "frame"/"tick" vocabulary; the two maintainer-named liveness cases (mission fire-and-detach heartbeat; transcript streaming); Taskfile/ci.yml wiring preserving the no-Docker/no-LLM guarantee; the contract doc: every render-touching PR adds/updates a golden or liveness test.
 
-Contracts — consumes: engine-bridge's event contract, real wire types, each component's tea.Model. Emits: the double, the corpus, the helpers, the size constants, the CI task. Service extensions: none (possible injectable clock/ids, section 3 item 4).
+Contracts — consumes: engine-bridge's event contract, real wire types, each component's plain state struct. Emits: the double, the corpus, the helpers, the size constants, the CI task. Service extensions: none (possible injectable clock/ids, section 3 item 4).
 
 Later: shell-pane/diff-view/theme goldens (paired light/dark), fuzz of truncation/wrapping, vhs-style recordings (human review, out of scope), CI job split if slow.
 
@@ -660,7 +735,7 @@ Open questions: covered by D54–D56; plus an audit that no rendering path reads
 
 The seams multiple components share; each has exactly one owner.
 
-- **The engine-bridge event stream is the single source.** Every fact rendered anywhere — text deltas, tool status, usage, plan, mission reports, approvals, commands menu — arrives as one typed event on engine-bridge's per-session channel, in wire order. liveness derives ActivityState from it; transcript-view renders from it; context-budget reads usage from it; completion-notification classifies from it; FakeEngineBridge replays it in tests. No component subscribes to a service bus or imports acpsvc/libacp wire types directly.
+- **The engine-bridge event stream is the single source.** Every fact rendered anywhere — text deltas, tool status, usage, plan, mission reports, approvals, commands menu — arrives as one typed event on the Bridge's one SessionID-tagged channel, filtered to the active session, in wire order (the honest contract per 4.1 item 6 — not literally "a channel per session"). liveness derives ActivityState from it; transcript-view renders from it; context-budget reads usage from it; completion-notification classifies from it; FakeEngineBridge replays it in tests. No component subscribes to a service bus or imports acpsvc/libacp wire types directly.
 - **liveness ActivityState feeds transcript, mission-panel, shell-pane, approval countdown ticks, and app-shell's status line.** Consumers pull spinner-frame and elapsed strings at render time; nobody tracks its own clock or invents a waiting flag. The 50%-micro-motion and 1s-freeze criteria are properties of this one primitive, verified once by test-harness.
 - **keymap-registry is the sole key arbiter.** Raw KeyMsg enters only there; components receive semantic Actions in their declared scope; modals trap via focus push/pop; Escape walks one priority stack; the help overlay and status-bar hints are generated from registrations. app-shell composits; the registry decides. The collision test in CI is the enforcement mechanism.
 - **Selection vs navigation seam.** transcript-navigation owns the focus cursor, search, and fold booleans, exposed read-only (`CurrentFocusItemID`, positions); transcript-view owns rendering and exposes `Items()`/`LineRange()`/`ScrollToItem()`; selection-clipboard consumes focus state to seed copy targets and is the only OSC 52 writer (diff-view and others hand it payloads). Navigation never calls the clipboard; clipboard never moves the viewport.
@@ -714,3 +789,103 @@ The round-1 critic's ranked order, merged with the gap components. Foundational 
 ## 8. Prior art
 
 The old vibe TUI (recoverable from git history; a working copy was staged during this pass) is the direct ancestor and the calibration for both what to keep and what to never repeat. It got the substrate right: a warm in-process engine with persistent MCP connections across turns, and the `$`-shell passthrough as a genuinely fast mechanic. Its plumbing lessons carry over too — rune-safe truncation after a multibyte panic, the y/n approval key-interception pattern, minimum-size layout math. But its measured failure defines beam's headline acceptance bar: a static `waiting` bool that swapped one glyph at turn start and end — no spinner, no tick, no elapsed clock — produced **82–87% frozen frames during active turns, including one 48.6s byte-identical still frame**; its `tea.WithAltScreen()+tea.WithMouseCellMotion()` construction broke native text selection, directly contradicting the copy/paste requirement; and it auto-injected shell stdout into model context as a synthetic user message, a behavior the shellsession design has since deliberately reversed. The maintainer rejected its control-panel-shaped sidebar-of-declared-state design, not its mechanics: beam keeps the warm engine and the shell reflex, and replaces everything about how the frame earns the user's trust.
+
+## 9. As built (2026-07-27)
+
+`contenox beam` shipped today. This is the reconciliation pass: what exists
+on disk under `internal/surfaces/beamtui/` and `internal/surfaces/fleetboot/`
+against the plan above — not a repeat of the design, and not a substitute
+for the D-item and section-3 annotations already inline above.
+
+### Package map
+
+Wired from `internal/surfaces/contenoxcli/beam_cmd.go` (D51's composition
+root). Under `internal/surfaces/beamtui/`: `frame` (the rendering schema),
+`textwidth` (rune-safe width/wrap/truncate), `input` (the bytes→events
+parser), `term` (the terminal engine: raw mode, the live-region writer,
+`Suspend`, OSC 52/BEL — the only tree the import-boundary gate lets touch
+`x/term`/`creack/pty`/`os/signal`), `style` (the StyleID→SGR table and
+capability snapshot), `sanitize` (the one gate between untrusted text and a
+frame.Span), `keymap` (Registry + FocusManager), `liveness` (the
+activity-pulse primitive), `enginebridge` (the ACP loopback + typed event
+translation, UI-free per its own import-boundary rule), `testkit`
+(golden/liveness/import-boundary/fixture infrastructure), `app` (the
+select-loop program root, `app.Run`), and eight pure renderers under
+`comp/`: `brand`, `transcript`, `composer`, `statusbar`, `palette`,
+`approval`, `picker`, `fileaddr`. Sibling, not under `beamtui/`:
+`internal/surfaces/fleetboot` (section 3 item 5's extraction, below).
+
+### Build-order slots: shipped vs deferred
+
+Against section 7's 21 slots, mapped to what actually landed:
+
+- **Shipped as named components**: test-harness → `testkit`; theme-styles →
+  `style`; engine-bridge → `enginebridge`; keymap-registry → `keymap`;
+  liveness → `liveness`; app-shell → `app`; transcript-view →
+  `comp/transcript`; composer → `comp/composer`; command-palette →
+  `comp/palette`; file-addressing → `comp/fileaddr`; approval-cards →
+  `comp/approval`.
+- **Shipped, folded into the composition root instead of a component**:
+  session-manager (session resolution lives in `beam_cmd.go` +
+  `enginebridge`'s session calls; it never grew its own package);
+  connection-lifecycle (`beam_cmd.go`'s linear bootstrap plus `app`'s panic
+  recovery cover the same ground; no 5-state machine type exists).
+- **Shipped ahead of their "Later" label**: `comp/picker`, the generic
+  keyboard-list overlay session-manager's spec (4.8) deferred as "real
+  picker overlay" — it landed at MVP because file-addressing needed it
+  anyway, and now serves both the @-file list and the session picker.
+  `comp/brand`, the section-1 brand identity device, shipped as its own
+  package rather than folded into app-shell.
+- **Deferred per the scope bar (section 1), not built**:
+  - no mission panel — missions render as a `statusbar` badge
+    (`State.Missions`, shown only when ≥1) plus inline `MissionReport`
+    cards in `comp/transcript`, the scope bar's own "inline mission cards +
+    a status-bar counter" call.
+  - no shell pane — `!`-prefixed output prints inline in `comp/transcript`
+    (see its `shell_*_w*.golden` fixtures); no toggleable pane exists.
+  - no diff-view package — `comp/approval.Card.diffLines` renders
+    `Meta.Diff`, the pre-rendered unified-diff string, plainly: sanitized,
+    line-capped at 120 (`maxDiffLines`, matching `hitl_tty.go`'s cut), never
+    recomputed client-side. Section 3 item 8's extraction did not happen;
+    approval sidestepped needing it by only supporting the pre-rendered
+    shape.
+  - no transcript-navigation — no jump/fold/search index over
+    `comp/transcript` exists.
+  - no selection-clipboard component — OSC 52 (with tmux/screen DCS
+    wrapping and the payload cap) lives directly in
+    `term.ANSI.CopyToClipboard`; no mouse-independent yank keybindings are
+    registered in `keymap` yet (D34/D35 still open).
+  - no connection-lifecycle state machine — see above; no Initializing/
+    SetupRequired/Ready/Degraded/EngineDown type exists, and no Degraded
+    badge or escalation counting is wired.
+  - context-budget did not ship as a component either: the gauge is a
+    `statusbar` segment (`segGauge`) reading `usage_update` directly, with
+    no overflow banner — still blocked on section 3 items 2, 10 and 11,
+    all confirmed still open above.
+  - completion-notification did not ship: no bell/OSC 9 on turn-end or
+    mission events yet.
+
+### Test doctrine as practiced
+
+- **Frame-data goldens via testkit**: every component test renders through
+  `testkit.EncodeLines` — readable `[style]text[/]` tags, never raw ANSI
+  (D54's resolution) — at 60/80/120 columns, ASCII and Unicode variants,
+  regenerable with a documented `-update` flow.
+- **Import-boundary gates**: `testkit.TestUnit_ImportBoundaries` enforces
+  the four seams structurally rather than by convention — only `term` (or a
+  subpackage) imports `x/term`/`creack/pty`/`os/signal`; `enginebridge`
+  imports nothing under `beamtui/`; `comp/*` imports none of
+  `term`/`input`/`style`; `frame` imports only the standard library.
+- **Liveness harness**: `testkit.AssertMicroMotion`/`AssertStabilizes` turn
+  the maintainer's two frame-diff metrics (more than half of consecutive
+  frames must differ while active; zero must differ while idle) into
+  deterministic `go test` assertions over a pure `render(tick)` function —
+  no wall clock, rerun-stable.
+- **PTY e2e done by hand this session**: no automated `teatest`-equivalent
+  harness exists yet. The constitutional copy/paste acceptance tests
+  (section 1) were run manually against a live PTY instead: copy-out of a
+  long unwrapped code line came back unbroken, pasting 50 lines landed as
+  one composer block (never executed line-by-line), a clean exit restored
+  cooked mode/cursor with no alt-screen residue, and a real turn showed
+  streaming text, the activity spinner plus context gauge, and a resize
+  without corruption.

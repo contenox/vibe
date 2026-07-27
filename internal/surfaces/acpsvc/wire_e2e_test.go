@@ -258,7 +258,10 @@ func TestE2E_Wire_SessionNewListLoadRoundTrip(t *testing.T) {
 	})
 	require.Nil(t, resp.Error)
 	assert.Empty(t, notes, "session/resume must not replay history")
-	client.drainNotifications(1) // deferred available_commands_update after resume
+	// Deferred after the resume result: the available_commands_update, then the
+	// usage_update that re-seeds the reconnecting client's context gauge (which
+	// resume does NOT hand back with the transcript the client kept).
+	client.drainNotifications(2)
 
 	// close: releases connection-local state; idempotent.
 	require.NotNil(t, initResp.AgentCapabilities.SessionCapabilities.Close, "close capability must be advertised")
