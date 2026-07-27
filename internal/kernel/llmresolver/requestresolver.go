@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math/rand"
 	"strings"
 
@@ -173,6 +174,46 @@ func NormalizeModelName(modelName string) string {
 	return normalized
 }
 
+// refusePinnedNonVision guards explicitly-pinned models on image-bearing
+// requests: when the request names models and the highest-priority name that
+// actually resolves to a capable provider lacks CanVision, the request is
+// refused with a teaching error instead of silently falling through to a
+// different (vision-capable) model later in the list — an explicit pin must
+// never be swapped without saying so. Requests without model names keep
+// capability-based auto-selection; pinned names that match no provider fall
+// through to the ordinary no-match handling.
+func refusePinnedNonVision(
+	ctx context.Context,
+	req Request,
+	getModels func(ctx context.Context, backendTypes ...string) ([]libmodelprovider.Provider, error),
+	base func(libmodelprovider.Provider) bool,
+) error {
+	if !req.RequiresVision || len(req.ModelNames) == 0 {
+		return nil
+	}
+	providers, err := getModels(ctx, req.ProviderTypes...)
+	if err != nil {
+		return nil // let filterCandidates surface the lookup failure
+	}
+	for _, name := range req.ModelNames {
+		matched := false
+		for _, p := range providers {
+			if !providerMatchesAnyName(p, []string{name}) || !base(p) {
+				continue
+			}
+			matched = true
+			if p.CanVision() {
+				return nil
+			}
+		}
+		if matched {
+			return fmt.Errorf("%w: requested model %q accepts text only and the request carries images; name a vision-capable model, set a vision-capable default, or drop the model pin to let routing pick one",
+				ErrPinnedModelLacksVision, name)
+		}
+	}
+	return nil
+}
+
 // visionCapCheck wraps a base capability check with the vision requirement
 // when the request carries image attachments, so image-bearing requests only
 // resolve to providers that report CanVision.
@@ -234,6 +275,10 @@ func Chat(
 	)
 	defer endFn()
 
+	if err := refusePinnedNonVision(ctx, req, getModels, libmodelprovider.Provider.CanChat); err != nil {
+		reportErr(err)
+		return nil, nil, "", err
+	}
 	candidates, err := filterCandidates(ctx, req, getModels, visionCapCheck(req, libmodelprovider.Provider.CanChat))
 	if err != nil {
 		err = classifyVisionFailure(ctx, req, getModels, libmodelprovider.Provider.CanChat, err)
@@ -337,6 +382,10 @@ func Stream(
 	)
 	defer endFn()
 
+	if err := refusePinnedNonVision(ctx, req, getModels, libmodelprovider.Provider.CanStream); err != nil {
+		reportErr(err)
+		return nil, nil, "", err
+	}
 	candidates, err := filterCandidates(ctx, req, getModels, visionCapCheck(req, libmodelprovider.Provider.CanStream))
 	if err != nil {
 		err = classifyVisionFailure(ctx, req, getModels, libmodelprovider.Provider.CanStream, err)
@@ -411,6 +460,62 @@ func PromptExecute(
 	return client, provider, backend, nil
 }
 
+// Policy selects one provider and one of its backends from the candidate set.
+// Randomly is the canonical Policy value; StickyOrRandom builds session-affine
+// ones.
+type Policy = func(candidates []libmodelprovider.Provider) (libmodelprovider.Provider, string, error)
+
+// StickyOrRandom returns a Policy that pins a session to one provider+backend
+// via rendezvous (highest-random-weight) hashing over the candidate set: the
+// same sessionKey picks the same provider+backend for as long as that pair
+// stays in the candidate set, and when it leaves only the sessions pinned to
+// it move. Distinct keys spread across the set. An empty key behaves exactly
+// like Randomly.
+func StickyOrRandom(sessionKey string) Policy {
+	if sessionKey == "" {
+		return Randomly
+	}
+	return func(candidates []libmodelprovider.Provider) (libmodelprovider.Provider, string, error) {
+		if len(candidates) == 0 {
+			return nil, "", ErrNoSatisfactoryModel
+		}
+		var (
+			best        libmodelprovider.Provider
+			bestBackend string
+			bestScore   uint64
+			found       bool
+		)
+		for _, p := range candidates {
+			if p == nil {
+				continue
+			}
+			for _, backend := range p.GetBackendIDs() {
+				score := rendezvousScore(sessionKey, p.GetID(), backend)
+				if !found || score > bestScore {
+					best, bestBackend, bestScore, found = p, backend, score, true
+				}
+			}
+		}
+		if !found {
+			return nil, "", ErrNoSatisfactoryModel
+		}
+		return best, bestBackend, nil
+	}
+}
+
+// rendezvousScore is the weight of one (session, provider, backend) triple.
+// FNV-1a over the joined identity; the delimiter keeps distinct triples from
+// colliding by concatenation.
+func rendezvousScore(sessionKey, providerID, backendID string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(sessionKey))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(providerID))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(backendID))
+	return h.Sum64()
+}
+
 // Randomly is a policy that selects a random provider and random backend.
 //
 // This provides basic load balancing across available resources.
@@ -438,6 +543,12 @@ var ErrNoSatisfactoryModel = errors.New("no model matched the requirements")
 // but no candidate model supports vision. It wraps ErrNoSatisfactoryModel so
 // existing no-match handling (e.g. the resolution self-heal cycle) still fires.
 var ErrNoVisionCapableModel = fmt.Errorf("%w: no available model supports image input (vision)", ErrNoSatisfactoryModel)
+
+// ErrPinnedModelLacksVision is returned when an image-bearing request
+// explicitly names a model that exists but cannot accept images. It does NOT
+// wrap ErrNoSatisfactoryModel: the refusal is deterministic, so retry /
+// self-heal cycles must not fire for it.
+var ErrPinnedModelLacksVision = errors.New("explicitly requested model lacks vision capability")
 
 func selectRandomBackend(provider libmodelprovider.Provider) (string, error) {
 	if provider == nil {

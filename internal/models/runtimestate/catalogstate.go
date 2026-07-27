@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 
@@ -108,7 +107,7 @@ func (s *State) newCatalogProvider(backend *runtimetypes.Backend, apiKey string)
 			BaseURL: backend.BaseURL,
 			APIKey:  apiKey,
 		},
-		modelrepo.WithCatalogHTTPClient(http.DefaultClient),
+		modelrepo.WithCatalogHTTPClient(modelrepo.SharedHTTPClient),
 	)
 }
 

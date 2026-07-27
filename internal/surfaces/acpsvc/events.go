@@ -42,6 +42,17 @@ func (t *Transport) publishEvent(ctx context.Context, sid libacp.SessionID, payl
 				Update:    libacp.NewAgentThoughtChunk(ev.Thinking),
 			})
 		}
+	case taskengine.TaskEventStepStreamEnd:
+		// Consumed deliberately without a wire notification: ACP has no
+		// end-of-stream frame (stream end is implicit in the prompt response),
+		// and usage indicators are fed by token_usage. The explicit case exists
+		// so the engine-events contract test can assert this translator
+		// addresses every kind it consumes; scope fields are ignored here.
+	case taskengine.TaskEventChainSuspended:
+		// Consumed without a wire notification (kept case-for-case identical
+		// with nativeEventTranslator.publish): the approval card the permission
+		// flow already rendered stands in for the suspension — answering it
+		// resumes the checkpointed run (S6).
 	case taskengine.TaskEventStepStarted:
 		if taskengine.IsToolBearingHandler(ev.TaskHandler) {
 			return

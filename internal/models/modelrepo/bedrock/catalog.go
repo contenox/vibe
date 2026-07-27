@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 	"github.com/contenox/beam/internal/libtracker"
@@ -29,7 +29,14 @@ func init() {
 func (p *catalogProvider) Type() string { return "bedrock" }
 
 func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedModel, error) {
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(regionFromURL(p.spec.BaseURL)))
+	// Catalog listing is a non-streaming call: bound it end-to-end.
+	ctx, cancel := modelrepo.NonStreamingContext(ctx)
+	defer cancel()
+
+	// Same credential rules as inference: stored static-creds JSON when
+	// present, ambient AWS chain otherwise (previously the catalog ignored the
+	// stored blob entirely).
+	cfg, err := loadAWSConfig(ctx, regionFromURL(p.spec.BaseURL), p.spec.APIKey, p.httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -41,23 +48,95 @@ func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedM
 		return nil, fmt.Errorf("failed to list foundation models: %w", err)
 	}
 
+	// Newer models (Claude 3.5v2+) are invocable only through a cross-region
+	// inference profile; the base model id returns a 400. Profile listing is
+	// best-effort: without bedrock:ListInferenceProfiles permission the
+	// profile-only models are omitted rather than listed uninvocable.
+	profileIDs, _ := listInferenceProfileIDs(ctx, client)
+
 	var models []modelrepo.ObservedModel
 	for _, summary := range output.ModelSummaries {
-		models = append(models, observedFromSummary(summary))
+		invokeID, ok := resolveInvocableModelID(aws.ToString(summary.ModelId), summary.InferenceTypesSupported, profileIDs)
+		if !ok {
+			continue
+		}
+		models = append(models, observedFromSummary(summary, invokeID))
 	}
 
 	return models, nil
 }
 
+// listInferenceProfileIDs returns every system-defined inference-profile id in
+// the region (e.g. us.anthropic.claude-sonnet-4-5-20250929-v1:0), following
+// nextToken pagination.
+func listInferenceProfileIDs(ctx context.Context, client *bedrock.Client) ([]string, error) {
+	var ids []string
+	var nextToken *string
+	for {
+		out, err := client.ListInferenceProfiles(ctx, &bedrock.ListInferenceProfilesInput{
+			NextToken:  nextToken,
+			TypeEquals: types.InferenceProfileTypeSystemDefined,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range out.InferenceProfileSummaries {
+			if id := aws.ToString(s.InferenceProfileId); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		if out.NextToken == nil || *out.NextToken == "" {
+			return ids, nil
+		}
+		nextToken = out.NextToken
+	}
+}
+
+// resolveInvocableModelID returns the id to invoke a model with. A model whose
+// inferenceTypesSupported includes ON_DEMAND is invocable by its base id; a
+// profile-only model resolves to the system-defined profile whose id is the
+// documented geo prefix + base id (us./eu./apac./jp./global.), preferring the
+// geographic profile over global. ok=false means the model cannot be invoked
+// from this account/region and must not be listed. Pure function for tests.
+func resolveInvocableModelID(modelID string, inferenceTypes []types.InferenceType, profileIDs []string) (string, bool) {
+	for _, t := range inferenceTypes {
+		if t == types.InferenceTypeOnDemand {
+			return modelID, true
+		}
+	}
+	suffix := "." + modelID
+	var matches []string
+	for _, pid := range profileIDs {
+		if strings.HasSuffix(pid, suffix) {
+			matches = append(matches, pid)
+		}
+	}
+	if len(matches) == 0 {
+		return "", false
+	}
+	// Geographic profiles sort before "global." lexically only by accident;
+	// order explicitly: non-global first, then stable order.
+	sort.SliceStable(matches, func(i, j int) bool {
+		gi := strings.HasPrefix(matches[i], "global.")
+		gj := strings.HasPrefix(matches[j], "global.")
+		return !gi && gj
+	})
+	return matches[0], true
+}
+
 // observedFromSummary maps a Bedrock ListFoundationModels result entry into an
-// ObservedModel. It is a pure function (no AWS calls) so the capability mapping
-// can be unit-tested without live credentials.
+// ObservedModel named by its invocable id. It is a pure function (no AWS
+// calls) so the capability mapping can be unit-tested without credentials.
 //
 // CanVision is detected from the API rather than a hardcoded model list: the
 // FoundationModelSummary.InputModalities field reports which input modalities
 // the model accepts, and a model that lists ModelModalityImage ("IMAGE") among
 // them accepts image input.
-func observedFromSummary(summary types.FoundationModelSummary) modelrepo.ObservedModel {
+//
+// CanEmbed is deliberately NEVER advertised: this provider speaks the Converse
+// API only and GetEmbedConnection refuses, so advertising embeddings would lie
+// to the request router. Embedding models are listed with no capabilities.
+func observedFromSummary(summary types.FoundationModelSummary, invokeID string) modelrepo.ObservedModel {
 	modelID := aws.ToString(summary.ModelId)
 	isEmbed := strings.Contains(strings.ToLower(modelID), "embed")
 
@@ -70,15 +149,35 @@ func observedFromSummary(summary types.FoundationModelSummary) modelrepo.Observe
 	}
 
 	return modelrepo.ObservedModel{
-		Name: modelID,
+		Name: invokeID,
 		CapabilityConfig: modelrepo.CapabilityConfig{
 			CanChat:   !isEmbed,
 			CanStream: !isEmbed,
 			CanPrompt: !isEmbed,
-			CanEmbed:  isEmbed,
 			CanVision: canVision,
+			CanThink:  bedrockModelSupportsReasoning(modelID),
 		},
 	}
+}
+
+// bedrockModelSupportsReasoning reports whether a Bedrock model supports the
+// Claude extended-thinking reasoning config (Claude 3.7 and the Claude 4+ /
+// Fable / Mythos generations). The list API reports no reasoning capability, so
+// this is name-based like the vision allowlists in modelrepo.
+func bedrockModelSupportsReasoning(modelID string) bool {
+	base := strings.ToLower(bedrockBaseModelID(modelID))
+	if !strings.Contains(base, "anthropic.") {
+		return false
+	}
+	for _, marker := range []string{
+		"claude-3-7", "claude-sonnet-4", "claude-opus-4", "claude-haiku-4",
+		"claude-fable", "claude-sonnet-5", "mythos",
+	} {
+		if strings.Contains(base, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *catalogProvider) ProviderFor(model modelrepo.ObservedModel) modelrepo.Provider {

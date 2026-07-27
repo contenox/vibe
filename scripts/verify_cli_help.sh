@@ -41,6 +41,7 @@ EXPECTED_CMDS=(
   "doctor"
   "init"
   "mcp"
+  "mission"
   "model"
   "run"
   "sandbox"

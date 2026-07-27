@@ -183,7 +183,36 @@ var (
 	// ErrApprovalExpired reports that approvalID's deadline passed and the
 	// sweeper already resolved it via OnTimeout before this Respond landed.
 	ErrApprovalExpired = errors.New("hitlservice: approval expired before it was answered")
+	// ErrNoCheckpoint is the resume hook's clean "nothing was suspended under
+	// this approval" answer: the fast path answered it in-session, or the gate
+	// never checkpointed. Respond treats it as a no-op, NOT a failure — the
+	// verdict is durably recorded either way.
+	ErrNoCheckpoint = errors.New("hitlservice: no suspended run is checkpointed under this approval")
 )
+
+// ResumeHook resumes the suspended run checkpointed under approvalID after
+// its verdict landed with nobody parked on it — the S6 released case. The
+// composition root registers one via SetResumeHook (agentservice.ResumeHook
+// is the canonical implementation); hitlservice deliberately does NOT import
+// agentservice, so the dependency points from the root downward.
+//
+// Contract: return ErrNoCheckpoint when no run is suspended under the ID (a
+// clean no-op); any other error is surfaced by Respond WITH the note that the
+// verdict itself was recorded — a failed resume never un-answers an approval,
+// and the checkpoint is retained with a failure annotation for a retry.
+type ResumeHook func(ctx context.Context, approvalID string) error
+
+// ApprovalRecorder is the durable half the HITL wrapper's suspend path needs
+// (S6): create the pending row BEFORE parking (row first — a restart between
+// park and verdict must still show the ask), and resolve it inline when the
+// fast path gets its verdict — WITHOUT triggering the resume hook, because
+// the resolver IS the waiter in that case. It is satisfied by this package's
+// service; the wrapper type-asserts its PolicyEvaluator against it, so
+// evaluator-only fakes simply keep the pre-S6 blocking behavior.
+type ApprovalRecorder interface {
+	RecordPendingApproval(ctx context.Context, approvalID string, req ApprovalRequest) error
+	ResolveApprovalInline(ctx context.Context, approvalID string, approved bool) error
+}
 
 const defaultPolicyName = "hitl-policy-default.json"
 
@@ -207,6 +236,7 @@ type service struct {
 	mu              sync.Mutex
 	pending         map[string]chan answer
 	approvalCeiling time.Duration
+	resumeHook      ResumeHook
 }
 
 // New constructs a hitlservice bound to a tenant. The tenantID is forwarded to
@@ -250,6 +280,24 @@ func SetApprovalCeiling(svc Service, ceiling time.Duration) {
 		s.approvalCeiling = ceiling
 		s.mu.Unlock()
 	}
+}
+
+// SetResumeHook registers the resume-on-verdict hook (see ResumeHook) on svc,
+// when svc was constructed by New/NewWithDefaultPolicy in this package. Same
+// shape as SetApprovalCeiling: a no-op for other implementations, so callers
+// need no type switch. Instance-scoped on purpose — no global registry.
+func SetResumeHook(svc Service, hook ResumeHook) {
+	if s, ok := svc.(*service); ok {
+		s.mu.Lock()
+		s.resumeHook = hook
+		s.mu.Unlock()
+	}
+}
+
+func (s *service) hook() ResumeHook {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resumeHook
 }
 
 func (s *service) ceiling() time.Duration {
@@ -372,12 +420,7 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 		return false, fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
 	}
 	approvalID := uuid.NewString()
-	now := time.Now().UTC()
 
-	onTimeout := req.OnTimeout
-	if onTimeout == "" {
-		onTimeout = ActionDeny
-	}
 	// A matched rule's own TimeoutS always wins. Absent one, the row (and the
 	// wait below) is bounded by the serve-level ceiling instead of blocking
 	// indefinitely — see DefaultApprovalCeiling.
@@ -387,32 +430,7 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 		timeoutDur = time.Duration(req.TimeoutS) * time.Second
 	}
 
-	row := &runtimetypes.HITLApproval{
-		ID:          approvalID,
-		ToolsName:   req.ToolsName,
-		ToolName:    req.ToolName,
-		ArgsSummary: summarizeApprovalArgs(req.Args),
-		PolicyName:  req.PolicyName,
-		MatchedRule: req.MatchedRule,
-		OnTimeout:   string(onTimeout),
-		State:       runtimetypes.HITLApprovalPending,
-		InstanceID:  req.InstanceID,
-		SessionID:   req.SessionID,
-		AgentName:   req.AgentName,
-		CreatedAt:   now,
-		ExpiresAt:   now.Add(timeoutDur),
-	}
-	if req.MissionID != "" {
-		// Nullable by design: an ask with no mission stores NULL rather than an
-		// empty string, so "not on a mission" and "mission unknown" cannot be
-		// confused (see runtimetypes.HITLApproval).
-		missionID := req.MissionID
-		row.MissionID = &missionID
-	}
-	if req.Diff != "" {
-		diff := req.Diff
-		row.Diff = &diff
-	}
+	row := buildApprovalRow(approvalID, req, time.Now().UTC(), timeoutDur)
 	// Durable pending row FIRST — a restart between here and the answer must
 	// still show this ask as pending, not lose it (fleet-consolidation.md
 	// slice C1, defect D3).
@@ -480,8 +498,85 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 	}
 }
 
-// Respond implements Service.Respond: see its doc on the interface.
+// buildApprovalRow assembles the durable pending row for one ask. Spelled
+// once so RequestApproval (the blocking fleet path) and RecordPendingApproval
+// (the HITL wrapper's park-and-maybe-suspend path) can never drift in what an
+// inbox row carries.
+func buildApprovalRow(approvalID string, req ApprovalRequest, now time.Time, timeoutDur time.Duration) *runtimetypes.HITLApproval {
+	onTimeout := req.OnTimeout
+	if onTimeout == "" {
+		onTimeout = ActionDeny
+	}
+	row := &runtimetypes.HITLApproval{
+		ID:          approvalID,
+		ToolsName:   req.ToolsName,
+		ToolName:    req.ToolName,
+		ArgsSummary: summarizeApprovalArgs(req.Args),
+		PolicyName:  req.PolicyName,
+		MatchedRule: req.MatchedRule,
+		OnTimeout:   string(onTimeout),
+		State:       runtimetypes.HITLApprovalPending,
+		InstanceID:  req.InstanceID,
+		SessionID:   req.SessionID,
+		AgentName:   req.AgentName,
+		CreatedAt:   now,
+		ExpiresAt:   now.Add(timeoutDur),
+	}
+	if req.MissionID != "" {
+		// Nullable by design: an ask with no mission stores NULL rather than an
+		// empty string, so "not on a mission" and "mission unknown" cannot be
+		// confused (see runtimetypes.HITLApproval).
+		missionID := req.MissionID
+		row.MissionID = &missionID
+	}
+	if req.Diff != "" {
+		diff := req.Diff
+		row.Diff = &diff
+	}
+	return row
+}
+
+// RecordPendingApproval implements ApprovalRecorder: it durably records the
+// ask under the CALLER-chosen approvalID (the engine-minted tool-call ID, so
+// approval == scope.tool_call == checkpoint key) without parking a waiter —
+// the wrapper owns the park. Expiry follows the same rule RequestApproval
+// applies: the matched rule's TimeoutS when set, the serve-level ceiling
+// otherwise, so an ask nobody ever answers is closed out by SweepExpired.
+func (s *service) RecordPendingApproval(ctx context.Context, approvalID string, req ApprovalRequest) error {
+	if s.approvals == nil {
+		return fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
+	}
+	if strings.TrimSpace(approvalID) == "" {
+		return fmt.Errorf("hitlservice: RecordPendingApproval requires a non-empty approval ID")
+	}
+	timeoutDur := s.ceiling()
+	if req.TimeoutS > 0 {
+		timeoutDur = time.Duration(req.TimeoutS) * time.Second
+	}
+	row := buildApprovalRow(approvalID, req, time.Now().UTC(), timeoutDur)
+	if err := s.approvals.CreateHITLApproval(ctx, row); err != nil {
+		return fmt.Errorf("hitlservice: persist pending approval %s: %w", approvalID, err)
+	}
+	return nil
+}
+
+// ResolveApprovalInline implements ApprovalRecorder: the fast-path resolve
+// used by the waiter ITSELF (the HITL wrapper closing its own row after an
+// in-session verdict or a rule timeout). It never invokes the resume hook —
+// there is nothing suspended to resume when the waiter is still present.
+func (s *service) ResolveApprovalInline(ctx context.Context, approvalID string, approved bool) error {
+	return s.resolve(ctx, approvalID, approved, false)
+}
+
+// Respond implements Service.Respond: see its doc on the interface. When the
+// verdict lands for an approval whose waiter is GONE (the S6 released case —
+// the run suspended to a checkpoint), the registered resume hook runs the
+// suspended chain IN THIS PROCESS; see ResumeHook for the error contract.
 func (s *service) Respond(ctx context.Context, approvalID string, approved bool) error {
+	return s.resolve(ctx, approvalID, approved, true)
+}
+
+func (s *service) resolve(ctx context.Context, approvalID string, approved bool, runHook bool) error {
 	if s.approvals == nil {
 		return fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
 	}
@@ -521,6 +616,7 @@ func (s *service) Respond(ctx context.Context, approvalID string, approved bool)
 	// fixes (defect D2).
 	s.mu.Lock()
 	ch, ok := s.pending[approvalID]
+	hook := s.resumeHook
 	s.mu.Unlock()
 	if ok {
 		select {
@@ -529,6 +625,23 @@ func (s *service) Respond(ctx context.Context, approvalID string, approved bool)
 			// Should not happen (the CAS above guarantees at most one winning
 			// Respond per row, and the channel is fresh per RequestApproval
 			// call), but never block Respond on a full channel.
+		}
+		return nil
+	}
+
+	// Waiter GONE (S6 released case): the run that raised this ask suspended
+	// to a checkpoint and its goroutine ended. The responding process runs the
+	// resume itself, synchronously — `approvals respond` completing means the
+	// chain ran, exactly like answering in-session means the chain continued.
+	// ErrNoCheckpoint is the clean "nothing was suspended" answer (fast-path
+	// rows resolve via ResolveApprovalInline and never reach here, but a
+	// RequestApproval waiter that timed out leaves the same shape).
+	if runHook && hook != nil {
+		if err := hook(ctx, approvalID); err != nil && !errors.Is(err, ErrNoCheckpoint) {
+			// The verdict IS durably recorded — never un-answered — but the run
+			// did not resume; its checkpoint is retained with a failure
+			// annotation so it is not silently lost.
+			return fmt.Errorf("hitlservice: verdict for approval %s recorded, but resuming its suspended run failed: %w", approvalID, err)
 		}
 	}
 	return nil
@@ -565,15 +678,39 @@ func (s *service) SweepExpired(ctx context.Context) (int, error) {
 		// own deadline has passed, but costs nothing to cover).
 		s.mu.Lock()
 		ch, ok := s.pending[row.ID]
+		hook := s.resumeHook
 		s.mu.Unlock()
 		if ok {
 			select {
 			case ch <- answer{approved: approved}:
 			default:
 			}
+			continue
+		}
+		// S6: an expired approval may back a SUSPENDED run. Resume it with the
+		// timeout outcome (deny unless the rule said allow, which a validated
+		// policy cannot) so the chain finishes with the existing deny
+		// semantics instead of its checkpoint lingering forever. Best-effort:
+		// a resume failure is reported, keeps the checkpoint annotated (the
+		// hook's contract), and never fails the sweep.
+		if hook != nil {
+			if err := s.resumeExpired(ctx, hook, row.ID); err != nil {
+				reportErr, _, end := s.tracker.Start(ctx, "hitl", "sweep_resume", "approval_id", row.ID)
+				reportErr(err)
+				end()
+			}
 		}
 	}
 	return expired, nil
+}
+
+// resumeExpired runs the resume hook for a swept row, treating "nothing was
+// suspended" as the clean no-op it is.
+func (s *service) resumeExpired(ctx context.Context, hook ResumeHook, approvalID string) error {
+	if err := hook(ctx, approvalID); err != nil && !errors.Is(err, ErrNoCheckpoint) {
+		return err
+	}
+	return nil
 }
 
 // ListPending implements Service.ListPending: see its doc on the interface.

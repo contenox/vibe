@@ -100,6 +100,50 @@ func (exe *SimpleExec) publishStepChunk(ctx context.Context, meta llmrepo.Meta, 
 	publishTaskEventBestEffort(ctx, exe.tracker, exe.eventSink, event)
 }
 
+// publishStepStreamEnd closes a step's stream bracket. Invariants (the
+// engine-events contract, docs/development/engine-events.md):
+//   - emitted exactly once per successfully completed model call of a step
+//     attempt, after the last step_chunk of that call and before the attempt's
+//     step_completed;
+//   - emitted for the non-streaming fallback too (the coalesced single-chunk
+//     path), so "step_chunk sequences on a successful attempt are closed by
+//     step_stream_end" holds unconditionally; the fallback carries no finish
+//     reason or usage;
+//   - NOT emitted when the call fails mid-stream — step_failed closes the
+//     attempt instead;
+//   - chunkCount counts content/thinking-bearing parcels independently of
+//     Wants(step_chunk), so replay can tell streaming happened even when no
+//     sink consumed chunks.
+//
+// Unlike step_chunk, this event is journaled: a replayed run carries its
+// stream brackets.
+func (exe *SimpleExec) publishStepStreamEnd(ctx context.Context, meta llmrepo.Meta, chunkCount int, finishReason string, usage *libmodelprovider.TokenUsage) {
+	if exe.eventSink == nil || !exe.eventSink.Wants(TaskEventStepStreamEnd) {
+		return
+	}
+	event := NewTaskEvent(ctx, TaskEventStepStreamEnd)
+	event.ModelName = meta.ModelName
+	event.ProviderType = meta.ProviderType
+	event.BackendID = meta.BackendID
+	event.ChunkCount = chunkCount
+	event.FinishReason = finishReason
+	if usage != nil {
+		event.Usage = &TokenUsage{
+			Prompt:     usage.PromptTokens,
+			Completion: usage.CompletionTokens,
+			Total:      usage.TotalTokens,
+		}
+	}
+	publishTaskEventBestEffort(ctx, exe.tracker, exe.eventSink, event)
+}
+
+// countsAsStreamChunk mirrors publishStepChunk's emission predicate so
+// ChunkCount on step_stream_end equals the number of step_chunk events a
+// fully subscribed sink observed for the same call.
+func countsAsStreamChunk(parcel *libmodelprovider.StreamParcel) bool {
+	return parcel != nil && (parcel.Data != "" || parcel.Thinking != "")
+}
+
 // countTokensAndCheckLimit counts tokens for text and checks against context limit.
 // If ctxLength <= 0 (chain token_limit not set and no per-request/session override),
 // no limit is enforced at this layer. The prompt proceeds; the underlying model/provider
@@ -373,11 +417,15 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 	stream, meta, err := exe.repo.Stream(ctx, req, messages, streamArgs...)
 	if err == nil {
 		asm := libmodelprovider.NewStreamAssembler(meta.ProviderType, meta.ModelName)
+		chunkCount := 0
 		for parcel := range stream {
 			if err := asm.Consume(parcel); err != nil {
 				err = fmt.Errorf("prompt stream failed: %w", err)
 				reportErr(err)
 				return "", err
+			}
+			if countsAsStreamChunk(parcel) {
+				chunkCount++
 			}
 			exe.publishStepChunk(ctx, meta, parcel.Data, parcel.Thinking)
 		}
@@ -387,6 +435,7 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 			reportErr(err)
 			return "", err
 		}
+		exe.publishStepStreamEnd(ctx, meta, chunkCount, res.FinishReason, res.Usage)
 		return strings.TrimSpace(res.Content), nil
 	}
 
@@ -643,6 +692,17 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 					flushOut, _, _, flushErr := exe.TaskExec(taskCtx, startingTime, ctxLength, chainContext, currentTask, chatHistory, dataType)
 					currentTask.Handler = savedHandler
 					if flushErr != nil {
+						var pendErr *ApprovalPendingError
+						if errors.As(flushErr, &pendErr) {
+							// The flushed batch parked on a human approval: propagate
+							// the suspension upward WITH the partial history, so the
+							// checkpoint captures the results the flush already
+							// produced instead of losing them.
+							if h, ok := flushOut.(ChatHistory); ok {
+								return h, DataTypeChatHistory, "", flushErr
+							}
+							return nil, DataTypeAny, "", flushErr
+						}
 						return nil, DataTypeAny, "", fmt.Errorf("guard: failed to flush pending tool calls: %w", flushErr)
 					}
 					if h, ok := flushOut.(ChatHistory); ok {
@@ -721,11 +781,16 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			break
 		}
 
-		lastMessage := chatHistory.Messages[len(chatHistory.Messages)-1]
-		if len(lastMessage.CallTools) == 0 {
+		// Locate the open batch, tolerating trailing tool results over it: a
+		// resumed checkpoint's transcript legitimately ends "assistant calls +
+		// partial results", and only the unanswered calls execute. An untouched
+		// transcript resolves to the last message exactly as before.
+		assistantIdx, preAnswered := resumableToolCallBatch(chatHistory.Messages)
+		if assistantIdx < 0 {
 			transitionEval = TransitionNoCallsFound
 			break
 		}
+		lastMessage := chatHistory.Messages[assistantIdx]
 
 		allowedTools, explicitToolsScope, err := exe.executionToolsScope(taskCtx, currentTask)
 		if err != nil {
@@ -734,15 +799,28 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 		}
 		hiddenTools := executionHiddenTools(currentTask)
 		executedAny := false
-		priorToolMessages := append([]Message(nil), chatHistory.Messages[:len(chatHistory.Messages)-1]...)
+		priorToolMessages := append([]Message(nil), chatHistory.Messages[:assistantIdx]...)
 		batchRepeatCounts := make(map[string]int)
 		// Tracks which calls in this batch received a result message. Any call
 		// left unanswered (early break on error/cancellation) gets a stub result
 		// after the loop — strict providers reject a transcript in which an
-		// assistant tool call has no result.
-		answeredBatch := make(map[string]bool)
+		// assistant tool call has no result. Seeded with the calls a resumed
+		// transcript's trailing results already answered.
+		answeredBatch := make(map[string]bool, len(preAnswered))
+		for id := range preAnswered {
+			answeredBatch[id] = true
+		}
+		// suspendedBatch is set when a call parks on a human approval past the
+		// fast window (ErrApprovalPending): the batch stops, the unanswered
+		// calls are deliberately NOT stubbed — the checkpointed transcript must
+		// end with them so the resume path re-enters and executes them.
+		suspendedBatch := false
 
 		for _, toolCall := range lastMessage.CallTools {
+			if toolCall.ID != "" && answeredBatch[toolCall.ID] {
+				// Already answered by a trailing result (resumed partial batch).
+				continue
+			}
 			argsStr := normalizedToolArguments(toolCall.Function.Arguments)
 			repeatIndex := nextToolCallRepeatIndex(priorToolMessages, batchRepeatCounts, toolCall.Function.Name, argsStr)
 
@@ -844,6 +922,20 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			// `args` are the per-call dynamic tool arguments
 			result, resultType, err := exe.toolsProvider.Exec(callCtx, startingTime, args, chainContext.Debug, toolsCall)
 
+			var pendErr *ApprovalPendingError
+			if errors.As(err, &pendErr) {
+				// Third HITL outcome: the call is awaiting a human past the fast
+				// window. No result message is appended for this call and the
+				// batch stops here — its unanswered tail is exactly what the
+				// checkpoint records and what resume re-executes. The call's
+				// tool_call_pending event stays unbracketed until the resumed
+				// segment re-emits the pair (see engine-events.md §4).
+				toolEnd()
+				taskErr = err
+				suspendedBatch = true
+				break
+			}
+
 			toolExecErr := err
 			switch {
 			case err != nil && (errors.Is(err, context.Canceled) || callCtx.Err() != nil):
@@ -902,18 +994,24 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			}
 		}
 
-		for _, tc := range lastMessage.CallTools {
-			if tc.ID == "" || answeredBatch[tc.ID] {
-				continue
+		if !suspendedBatch {
+			for _, tc := range lastMessage.CallTools {
+				if tc.ID == "" || answeredBatch[tc.ID] {
+					continue
+				}
+				answeredBatch[tc.ID] = true
+				exe.appendToolErrorResult(taskCtx, &chatHistory, tc, interruptedToolCallResult, nil)
 			}
-			answeredBatch[tc.ID] = true
-			exe.appendToolErrorResult(taskCtx, &chatHistory, tc, interruptedToolCallResult, nil)
 		}
 
 		output = chatHistory
 		outputType = DataTypeChatHistory
 
 		switch {
+		case suspendedBatch:
+			// taskErr carries the ApprovalPendingError; the executor turns it
+			// into a checkpoint + ChainSuspendedError, so no transition fires.
+			transitionEval = ""
 		case taskErr != nil:
 			transitionEval = TransitionFailed
 		case executedAny:
@@ -1272,8 +1370,16 @@ func (exe *SimpleExec) executeLLM(
 		}
 		if err == nil {
 			// The fallback response was never streamed, so publish it as one
-			// chunk (streamed replies were already published incrementally).
+			// chunk (streamed replies were already published incrementally),
+			// then close the bracket so the contract "a successful attempt's
+			// chunks end with step_stream_end" holds on this path too. The
+			// non-streaming Chat call reports no finish reason or usage.
+			fallbackChunks := 0
+			if resp.Message.Content != "" || resp.Message.Thinking != "" {
+				fallbackChunks = 1
+			}
 			exe.publishStepChunk(ctx, meta, resp.Message.Content, resp.Message.Thinking)
+			exe.publishStepStreamEnd(ctx, meta, fallbackChunks, "", nil)
 		}
 	}
 	if err != nil {
@@ -1342,6 +1448,7 @@ func (exe *SimpleExec) streamChatOnce(
 	}
 
 	asm := libmodelprovider.NewStreamAssembler(meta.ProviderType, meta.ModelName)
+	chunkCount := 0
 	for parcel := range stream {
 		if err := asm.Consume(parcel); err != nil {
 			return true, libmodelprovider.ChatResult{}, meta, fmt.Errorf("chat stream failed: %w", err)
@@ -1349,12 +1456,19 @@ func (exe *SimpleExec) streamChatOnce(
 		// Observation only: visible content/thinking deltas fan out to the
 		// sink; tool-call fragments, usage, and terminal parcels never leak
 		// into the transcript.
+		if countsAsStreamChunk(parcel) {
+			chunkCount++
+		}
 		exe.publishStepChunk(ctx, meta, parcel.Data, parcel.Thinking)
 	}
 	res, err := asm.Result()
 	if err != nil {
 		return true, libmodelprovider.ChatResult{}, meta, fmt.Errorf("chat stream failed: %w", err)
 	}
+	// Bracket the completed stream: after the last chunk, before the caller's
+	// step_completed. On mid-stream failure (returns above) no bracket closes —
+	// step_failed does.
+	exe.publishStepStreamEnd(ctx, meta, chunkCount, res.FinishReason, res.Usage)
 
 	// The terminal parcel's finish reason and usage are part of the response
 	// truth: length/content_filter endings and provider token accounting are
@@ -1830,6 +1944,9 @@ func (exe *SimpleExec) appendToolErrorResult(ctx context.Context, chatHistory *C
 		toolEvent := NewTaskEvent(ctx, TaskEventToolCall)
 		toolEvent.ToolName = toolCall.Function.Name
 		toolEvent.ApprovalID = toolCall.ID
+		// ctx here is the task context, not a per-call context, so the
+		// tool-call address must be set explicitly.
+		toolEvent.Scope.ToolCall = toolCall.ID
 		toolEvent.ApprovalArgs = args
 		toolEvent.Error = errStr
 		publishTaskEventBestEffort(ctx, exe.tracker, exe.eventSink, toolEvent)

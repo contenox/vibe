@@ -67,7 +67,7 @@ func (c *geminiClient) sendRequest(ctx context.Context, endpoint string, request
 	)
 	defer end()
 
-	var reqBody io.Reader
+	var body []byte
 	if request != nil {
 		b, err := json.Marshal(request)
 		if err != nil {
@@ -75,19 +75,26 @@ func (c *geminiClient) sendRequest(ctx context.Context, endpoint string, request
 			reportErr(err)
 			return err
 		}
-		reqBody = bytes.NewBuffer(b)
+		body = b
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, reqBody)
-	if err != nil {
-		err = fmt.Errorf("failed to create request: %w", err)
-		reportErr(err)
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Goog-Api-Key", c.apiKey)
-
-	resp, err := c.httpClient.Do(req)
+	// Non-streaming call: bounded end-to-end, retried on 429/5xx with
+	// Retry-After honored.
+	ctx, cancel := modelrepo.NonStreamingContext(ctx)
+	defer cancel()
+	resp, err := modelrepo.DoWithRetry(ctx, c.httpClient, func() (*http.Request, error) {
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Goog-Api-Key", c.apiKey)
+		return req, nil
+	})
 	if err != nil {
 		err = fmt.Errorf("HTTP request failed for model %s: %w", c.modelName, err)
 		reportErr(err)
@@ -109,14 +116,19 @@ func (c *geminiClient) sendRequest(ctx context.Context, endpoint string, request
 				Status  string `json:"status"`
 			} `json:"error"`
 		}
-		body, _ := io.ReadAll(resp.Body)
-		if jsonErr := json.Unmarshal(body, &eresp); jsonErr == nil && eresp.Error.Message != "" {
+		respBody, _ := io.ReadAll(resp.Body)
+		if jsonErr := json.Unmarshal(respBody, &eresp); jsonErr == nil && eresp.Error.Message != "" {
+			// Typed sentinel mapping per Gemini's documented shapes:
+			// RESOURCE_EXHAUSTED → rate limit, INVALID_ARGUMENT with token
+			// phrasing → context overflow.
 			err = fmt.Errorf("gemini API error: %d %s - %s (model=%s url=%s)",
 				resp.StatusCode, eresp.Error.Status, eresp.Error.Message, c.modelName, fullURL)
+			err = modelrepo.ClassifyProviderError(err, resp.StatusCode, eresp.Error.Status, eresp.Error.Message)
 			reportErr(err)
 			return err
 		}
-		err = fmt.Errorf("gemini API error: %d - %s (model=%s url=%s)", resp.StatusCode, string(body), c.modelName, fullURL)
+		err = fmt.Errorf("gemini API error: %d - %s (model=%s url=%s)", resp.StatusCode, string(respBody), c.modelName, fullURL)
+		err = modelrepo.ClassifyProviderError(err, resp.StatusCode, "", string(respBody))
 		reportErr(err)
 		return err
 	}

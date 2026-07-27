@@ -26,7 +26,7 @@ type ollamaHTTPClient struct {
 
 func newOllamaHTTPClient(baseURL, apiKey string, httpClient *http.Client) (*ollamaHTTPClient, error) {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = modelrepo.SharedHTTPClient
 	}
 	u, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {

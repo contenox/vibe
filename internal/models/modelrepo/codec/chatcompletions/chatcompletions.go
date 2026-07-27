@@ -194,6 +194,37 @@ type Response struct {
 		Message      responseMsg `json:"message"`
 		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *wireUsage `json:"usage"`
+}
+
+// wireUsage is the chat-completions usage report. prompt_tokens already
+// INCLUDES cached tokens on OpenAI (no normalization needed); the cached
+// count is broken out under prompt_tokens_details.cached_tokens. vLLM's V1
+// engine reports the details object as null (vllm#44961), which decodes to
+// zero — its warm signal is server-side metrics, not per-request usage.
+type wireUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+}
+
+func (u *wireUsage) neutralUsage() *modelrepo.TokenUsage {
+	if u == nil {
+		return nil
+	}
+	total := u.TotalTokens
+	if total == 0 {
+		total = u.PromptTokens + u.CompletionTokens
+	}
+	return &modelrepo.TokenUsage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      total,
+		CacheReadTokens:  u.PromptTokensDetails.CachedTokens,
+	}
 }
 
 type responseMsg struct {
@@ -223,6 +254,7 @@ func DecodeResponse(raw []byte, nameMap map[string]string) (modelrepo.ChatResult
 			Content:  choice.Message.Content,
 			Thinking: choice.Message.ReasoningContent,
 		},
+		Usage: resp.Usage.neutralUsage(),
 	}
 	result.ToolCalls = decodeToolCalls(choice.Message.ToolCalls, nameMap)
 	return result, nil
@@ -272,11 +304,7 @@ type streamChunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage *wireUsage `json:"usage"`
 }
 
 // StreamDecoder translates streamed chat/completions chunks into raw-delta
@@ -307,11 +335,7 @@ func (d *StreamDecoder) DecodeLine(payload []byte) ([]*modelrepo.StreamParcel, e
 		return nil, fmt.Errorf("chatcompletions: decode stream chunk: %w", err)
 	}
 	if chunk.Usage != nil {
-		d.usage = &modelrepo.TokenUsage{
-			PromptTokens:     chunk.Usage.PromptTokens,
-			CompletionTokens: chunk.Usage.CompletionTokens,
-			TotalTokens:      chunk.Usage.TotalTokens,
-		}
+		d.usage = chunk.Usage.neutralUsage()
 	}
 	if len(chunk.Choices) == 0 {
 		return nil, nil

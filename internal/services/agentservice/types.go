@@ -40,6 +40,11 @@ type PromptResponse struct {
 	OutputType taskengine.DataType
 	Steps      []taskengine.CapturedStateUnit
 	StopReason StopReason
+	// SuspendedApprovalID is set when StopReason is StopSuspended: the
+	// approval whose verdict resumes the run (== the checkpoint key —
+	// hitlservice.Respond on it triggers ResumeFromCheckpoint via the
+	// registered hook).
+	SuspendedApprovalID string
 }
 
 type StopReason string
@@ -49,6 +54,10 @@ const (
 	StopMaxTokens       StopReason = "max_tokens"
 	StopMaxTurnRequests StopReason = "max_turn_requests"
 	StopCancelled       StopReason = "cancelled"
+	// StopSuspended: the run parked on a human approval past the fast window
+	// and was checkpointed (S6). Not a failure — the run continues once the
+	// approval is answered, in whichever process answers it.
+	StopSuspended StopReason = "suspended"
 )
 
 type SessionInfo struct {

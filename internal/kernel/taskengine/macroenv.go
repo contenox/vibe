@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -82,25 +83,29 @@ func (m *MacroEnv) ExecEnv(
 
 		var err error
 		if t.PromptTemplate != "" {
-			t.PromptTemplate, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.PromptTemplate)
+			t.PromptTemplate, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.PromptTemplate, false)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: prompt_template macro error: %w", t.ID, err)
 			}
 		}
 		if t.Print != "" {
-			t.Print, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.Print)
+			t.Print, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.Print, false)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: print macro error: %w", t.ID, err)
 			}
 		}
 		if t.OutputTemplate != "" {
-			t.OutputTemplate, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.OutputTemplate)
+			t.OutputTemplate, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.OutputTemplate, false)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: output_template macro error: %w", t.ID, err)
 			}
 		}
 		if t.SystemInstruction != "" {
-			t.SystemInstruction, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.SystemInstruction)
+			// The system instruction is the deepest stable prefix every
+			// provider cache keys on, so it expands with stablePrefix=true:
+			// wall-clock macros degrade to day granularity there (see
+			// expandOne's "now" case and the provider-kv-cache blueprint E1).
+			t.SystemInstruction, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.SystemInstruction, true)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: system_instruction macro error: %w", t.ID, err)
 			}
@@ -138,25 +143,25 @@ func (m *MacroEnv) ExecEnv(
 		// payload values without callers doing manual string replacement.
 		if t.ExecuteConfig != nil {
 			if t.ExecuteConfig.Model != "" {
-				t.ExecuteConfig.Model, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.ExecuteConfig.Model)
+				t.ExecuteConfig.Model, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.ExecuteConfig.Model, false)
 				if err != nil {
 					return nil, DataTypeAny, nil, fmt.Errorf("task %s: execute_config.model macro error: %w", t.ID, err)
 				}
 			}
 			if t.ExecuteConfig.Provider != "" {
-				t.ExecuteConfig.Provider, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.ExecuteConfig.Provider)
+				t.ExecuteConfig.Provider, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.ExecuteConfig.Provider, false)
 				if err != nil {
 					return nil, DataTypeAny, nil, fmt.Errorf("task %s: execute_config.provider macro error: %w", t.ID, err)
 				}
 			}
 			if t.ExecuteConfig.Think != "" {
-				t.ExecuteConfig.Think, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.ExecuteConfig.Think)
+				t.ExecuteConfig.Think, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.ExecuteConfig.Think, false)
 				if err != nil {
 					return nil, DataTypeAny, nil, fmt.Errorf("task %s: execute_config.think macro error: %w", t.ID, err)
 				}
 			}
 			if t.ExecuteConfig.MaxTokensTemplate != "" {
-				expanded, err := m.expandSpecialTemplates(ctx, &clone, allowlist, t.ExecuteConfig.MaxTokensTemplate)
+				expanded, err := m.expandSpecialTemplates(ctx, &clone, allowlist, t.ExecuteConfig.MaxTokensTemplate, false)
 				if err != nil {
 					return nil, DataTypeAny, nil, fmt.Errorf("task %s: execute_config.max_tokens macro error: %w", t.ID, err)
 				}
@@ -177,7 +182,11 @@ func (m *MacroEnv) ExecEnv(
 // unified macro: {{namespace}} or {{namespace:payload}}
 var macroRe = regexp.MustCompile(`\{\{([a-zA-Z0-9_]+)(?::([^}]*))?\}\}`)
 
-func (m *MacroEnv) expandSpecialTemplates(ctx context.Context, chain *TaskChainDefinition, allowlist []string, in string) (string, error) {
+// expandSpecialTemplates expands all macros in one template string.
+// stablePrefix marks strings that become part of the request's stable prefix
+// (today: SystemInstruction) — wall-clock macros expand at coarser
+// granularity there so provider prefix caches survive across requests.
+func (m *MacroEnv) expandSpecialTemplates(ctx context.Context, chain *TaskChainDefinition, allowlist []string, in string, stablePrefix bool) (string, error) {
 	matches := macroRe.FindAllStringSubmatchIndex(in, -1)
 	if len(matches) == 0 {
 		return in, nil
@@ -199,7 +208,7 @@ func (m *MacroEnv) expandSpecialTemplates(ctx context.Context, chain *TaskChainD
 			payload = strings.TrimSpace(in[payloadStart:payloadEnd])
 		}
 
-		replacement, err := m.expandOne(ctx, chain, allowlist, namespace, payload, in[start:end])
+		replacement, err := m.expandOne(ctx, chain, allowlist, namespace, payload, in[start:end], stablePrefix)
 		if err != nil {
 			return "", err
 		}
@@ -211,7 +220,7 @@ func (m *MacroEnv) expandSpecialTemplates(ctx context.Context, chain *TaskChainD
 	return buf.String(), nil
 }
 
-func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, allowlist []string, namespace, payload, original string) (string, error) {
+func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, allowlist []string, namespace, payload, original string, stablePrefix bool) (string, error) {
 	switch namespace {
 	case "toolservice":
 		if m.toolsProvider == nil {
@@ -274,8 +283,25 @@ func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, al
 		return time.Now().Format(layout), nil
 	case "now":
 		layout := time.RFC3339
-		if payload != "" {
+		switch {
+		case payload != "":
+			// An explicit layout is author intent — always respected, even in
+			// the stable prefix. Authors who put {{now:15:04:05}} in a system
+			// instruction are consciously trading cache reuse for precision.
 			layout = payload
+		case stablePrefix:
+			// Provider-kv-cache blueprint E1/§4.1(1): provider prefix caches
+			// key on the exact system-instruction bytes, so a default
+			// second-precision {{now}} there re-cold-starts the cache on
+			// EVERY request. Of the blueprint's options (vet warning, moving
+			// the macro to the user turn, coarsening) this is the least
+			// invasive one implementable at the macro seam: only the default
+			// layout, and only in stable-prefix strings, degrades to day
+			// granularity — matching {{date}}, which already invalidates at
+			// most daily. Chains that need real time in the conversation
+			// should place {{now}} in the prompt template (user turn), where
+			// it is a cache-safe suffix.
+			layout = "2006-01-02"
 		}
 		return time.Now().Format(layout), nil
 	case "chain":
@@ -366,8 +392,20 @@ func containsAll(names []string, required ...string) bool {
 	return true
 }
 
+// sortedCopy returns names sorted ascending without mutating the input.
+// Every tool-name list rendered into a prompt goes through this: rendered
+// names land in the system instruction, which provider prefix caches key on
+// byte-for-byte, so registry/allowlist enumeration order must never show
+// through (provider-kv-cache blueprint E2/E7).
+func sortedCopy(names []string) []string {
+	out := make([]string, len(names))
+	copy(out, names)
+	sort.Strings(out)
+	return out
+}
+
 func (m *MacroEnv) renderToolsNamesJSON(names []string) (string, error) {
-	b, err := json.Marshal(names)
+	b, err := json.Marshal(sortedCopy(names))
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal tools names: %w", err)
 	}
@@ -386,6 +424,10 @@ func (m *MacroEnv) renderToolsAndToolsJSON(ctx context.Context, names []string) 
 		for _, t := range tools {
 			fnNames = append(fnNames, t.Function.Name)
 		}
+		// Pin the inner arrays too: json.Marshal already sorts the map keys,
+		// but the per-tools function lists would otherwise follow registry
+		// order, which is not guaranteed stable across requests (E2).
+		sort.Strings(fnNames)
 		result[name] = fnNames
 	}
 
@@ -417,6 +459,8 @@ func (m *MacroEnv) renderToolsForToolsJSON(ctx context.Context, allowed []string
 	for _, t := range tools {
 		names = append(names, t.Function.Name)
 	}
+	// Stable prompt bytes regardless of registry enumeration order (E2).
+	sort.Strings(names)
 	b, err := json.Marshal(names)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal tools for tools %s: %w", toolsName, err)

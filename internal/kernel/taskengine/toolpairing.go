@@ -82,3 +82,39 @@ func repairToolCallPairing(msgs []Message) []Message {
 	}
 	return out
 }
+
+// resumableToolCallBatch locates the OPEN tool-call batch at the tail of a
+// transcript: the last assistant message carrying tool calls, tolerating a
+// trailing block of tool results that answer SOME of them. It returns the
+// assistant message's index and the set of call IDs those trailing results
+// already answered, or (-1, nil) when the transcript does not end in a batch
+// with at least one unanswered call.
+//
+// The tolerance is what makes a suspended run's checkpoint re-enterable: the
+// interrupted batch persists as "assistant calls + partial results", and the
+// resume path re-runs execute_tool_calls over exactly that shape, executing
+// only the calls the trailing results have not answered. For an untouched
+// transcript (last message IS the assistant call) it degenerates to the
+// pre-S6 behavior: index len-1, nothing answered.
+func resumableToolCallBatch(msgs []Message) (assistantIdx int, answered map[string]bool) {
+	i := len(msgs) - 1
+	answered = map[string]bool{}
+	for i >= 0 && msgs[i].Role == "tool" {
+		if msgs[i].ToolCallID != "" {
+			answered[msgs[i].ToolCallID] = true
+		}
+		i--
+	}
+	if i < 0 || msgs[i].Role != "assistant" || len(msgs[i].CallTools) == 0 {
+		return -1, nil
+	}
+	for _, tc := range msgs[i].CallTools {
+		// An ID-less call can never be matched by a result, so it counts as
+		// unanswered (mirroring the execution loop, which runs it).
+		if tc.ID == "" || !answered[tc.ID] {
+			return i, answered
+		}
+	}
+	// Every call of the batch is already answered: nothing to execute.
+	return -1, nil
+}

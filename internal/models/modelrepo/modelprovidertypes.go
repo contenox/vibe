@@ -3,6 +3,7 @@ package modelrepo
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // ErrRefused is returned when the model refuses to generate a response
@@ -12,6 +13,10 @@ var ErrRefused = errors.New("model refused the request")
 type ChatResult struct {
 	Message   Message
 	ToolCalls []ToolCall
+	// Usage is the provider-reported token accounting for this non-streaming
+	// call (streaming reports usage on the terminal StreamParcel instead).
+	// nil means the provider did not report usage.
+	Usage *TokenUsage
 }
 
 type ToolCall struct {
@@ -95,10 +100,30 @@ type ToolCallDelta struct {
 // TokenUsage is provider-reported token accounting. Zero fields mean
 // "not reported"; the assembler merges later reports over earlier ones
 // field-wise.
+//
+// Normalization rule (provider-kv-cache blueprint §4.4): PromptTokens is the
+// TOTAL prompt token count on every provider, cached or not. Providers whose
+// wire format reports only the uncached remainder (Anthropic input_tokens,
+// Bedrock inputTokens) must add their cache read/write counts back in before
+// populating this struct; providers whose prompt count already includes cached
+// tokens (OpenAI prompt_tokens, Gemini/Vertex promptTokenCount, ollama
+// prompt_eval_count) pass it through unchanged.
 type TokenUsage struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	// CacheReadTokens is the number of prompt tokens served from the
+	// provider's prompt/prefix cache (anthropic cache_read_input_tokens,
+	// openai prompt_tokens_details.cached_tokens / input_tokens_details
+	// .cached_tokens, bedrock cacheReadInputTokens, gemini/vertex
+	// usageMetadata.cachedContentTokenCount). ollama/vllm report no cache
+	// dimension today and leave it zero.
+	CacheReadTokens int
+	// CacheWriteTokens is the number of prompt tokens written to the
+	// provider's cache this request (anthropic cache_creation_input_tokens,
+	// bedrock cacheWriteInputTokens, openai gpt-5.6+ cache_write_tokens).
+	// Zero elsewhere.
+	CacheWriteTokens int
 }
 
 // StreamTerminal is the typed terminal event of a stream: the provider's
@@ -149,6 +174,36 @@ type FunctionTool struct {
 	Parameters  interface{} `json:"parameters,omitempty"`
 }
 
+// CacheHints tells a provider where the stable/volatile boundary of a request
+// lies so it can place native cache controls (anthropic cache_control,
+// bedrock cachePoint, openai prompt_cache_key). Providers map what they can
+// and ignore the rest — omission changes nothing, and a hint may NEVER change
+// what the model sees: only cache metadata differs between a hinted and an
+// unhinted request. Any provider that would have to reorder or rewrite
+// content to honor a hint must drop the hint instead.
+type CacheHints struct {
+	// SessionKey is an opaque per-session cache-affinity key (already hashed;
+	// never a raw internal ID). OpenAI sends it as prompt_cache_key; other
+	// providers ignore it (vLLM keys on prefix bytes server-side, so the key
+	// is deliberately not sent there).
+	SessionKey string
+	// StableSystem asserts the system instruction is byte-stable across the
+	// session, i.e. it is safe to place a cache breakpoint after it.
+	StableSystem bool
+	// StableTools asserts the tool list (order and encoding) is byte-stable
+	// across the session.
+	StableTools bool
+	// StableHistoryLen is the number of leading history messages asserted
+	// unchanged since the previous request of this session (0 = no
+	// assertion). Providers with explicit breakpoints may mark the last of
+	// these.
+	StableHistoryLen int
+	// TTL is an advisory cache lifetime for providers with explicit TTLs
+	// (anthropic/bedrock support 5m and 1h tiers). Zero means the provider
+	// default.
+	TTL time.Duration
+}
+
 type ChatConfig struct {
 	Temperature *float64 `json:"temperature,omitempty"`
 	MaxTokens   *int     `json:"max_tokens,omitempty"`
@@ -163,6 +218,10 @@ type ChatConfig struct {
 	Shift *bool `json:"shift,omitempty"`
 	// Truncate instructs the provider to truncate history on overflow.
 	Truncate *bool `json:"truncate,omitempty"`
+	// CacheHints declares the stable/volatile boundary of this request for
+	// provider-side prompt caching. nil changes nothing. Never serialized:
+	// each adapter maps it onto its own wire format's cache metadata.
+	CacheHints *CacheHints `json:"-"`
 }
 
 // WithThink is a ChatArgument that enables/controls reasoning mode.

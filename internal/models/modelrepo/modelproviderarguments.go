@@ -55,3 +55,15 @@ func WithTools(tools ...Tool) ChatArgument {
 		},
 	}
 }
+
+// WithCacheHints declares the request's stable/volatile boundary for
+// provider-side prompt caching (see CacheHints). The hints are copied so the
+// caller's value cannot be mutated through the config afterwards.
+func WithCacheHints(hints CacheHints) ChatArgument {
+	return &chatArgument{
+		applyFunc: func(config *ChatConfig) {
+			h := hints
+			config.CacheHints = &h
+		},
+	}
+}

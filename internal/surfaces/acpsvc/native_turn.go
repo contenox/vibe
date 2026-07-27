@@ -129,6 +129,14 @@ func (tr *nativeEventTranslator) publish(ctx context.Context, sid libacp.Session
 		if ev.Thinking != "" {
 			tr.emit(ctx, libacp.SessionNotification{SessionID: sid, Update: libacp.NewAgentThoughtChunk(ev.Thinking)})
 		}
+	case taskengine.TaskEventStepStreamEnd:
+		// Consumed without a wire notification, mirroring Transport.publishEvent:
+		// ACP end-of-stream is implicit and usage comes from token_usage.
+	case taskengine.TaskEventChainSuspended:
+		// Consumed without a wire notification: the approval card the
+		// permission flow already rendered IS the suspension UI — the run is
+		// checkpointed (S6) and the verdict on that card resumes it. A second
+		// frame here would double-render one pending decision.
 	case taskengine.TaskEventStepStarted:
 		if taskengine.IsToolBearingHandler(ev.TaskHandler) {
 			return
@@ -410,7 +418,14 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 		"request_id":            reqID,
 		"dropped_content_kinds": droppedContentKinds,
 	})
-	return nativeturn.Result{StopReason: stopReason}
+	// A suspended chain (S6) ends this turn's goroutine BY DESIGN: the run is
+	// checkpointed, and answering the approval resumes it — same process as a
+	// fresh turn re-entering through agentservice, or any other process via
+	// the resume hook. The Registry surfaces it as StateSuspended until reaped.
+	return nativeturn.Result{
+		StopReason: stopReason,
+		Suspended:  resp != nil && resp.StopReason == agentservice.StopSuspended,
+	}
 }
 
 // emitSessionInfo journals the post-turn session_info update (freshened updatedAt +

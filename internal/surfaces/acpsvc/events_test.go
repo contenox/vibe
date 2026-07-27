@@ -1,6 +1,7 @@
 package acpsvc
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -10,6 +11,90 @@ import (
 	"github.com/contenox/beam/libacp"
 	"github.com/stretchr/testify/require"
 )
+
+// engineEventTranslationMatrix is the translator side of the engine-events
+// contract (docs/development/engine-events.md §ACP translation): for every
+// TaskEvent kind the engine can emit, a representative event and the exact
+// number of ACP notifications this surface renders for it. Driven by
+// taskengine.AllTaskEventKinds, so adding an event kind without deciding its
+// ACP translation fails here rather than being dropped silently.
+var engineEventTranslationMatrix = map[taskengine.TaskEventKind]struct {
+	event         taskengine.TaskEvent
+	notifications int
+}{
+	// Chain brackets are engine/journal facts; ACP has no frame for them.
+	taskengine.TaskEventChainStarted:   {taskengine.TaskEvent{Kind: taskengine.TaskEventChainStarted, ChainID: "c"}, 0},
+	taskengine.TaskEventChainCompleted: {taskengine.TaskEvent{Kind: taskengine.TaskEventChainCompleted, ChainID: "c"}, 0},
+	taskengine.TaskEventChainFailed:    {taskengine.TaskEvent{Kind: taskengine.TaskEventChainFailed, ChainID: "c", Error: "boom"}, 0},
+	// Suspension (S6) renders nothing: the permission flow's approval card is
+	// already on screen and answering it resumes the checkpointed run.
+	taskengine.TaskEventChainSuspended: {taskengine.TaskEvent{Kind: taskengine.TaskEventChainSuspended, ChainID: "c", ApprovalID: "call-1"}, 0},
+	// Step lifecycle renders as a task card unless the handler is tool-bearing
+	// (then the tool events below are the card).
+	taskengine.TaskEventStepStarted:   {taskengine.TaskEvent{Kind: taskengine.TaskEventStepStarted, TaskID: "t1", TaskHandler: "noop"}, 1},
+	taskengine.TaskEventStepCompleted: {taskengine.TaskEvent{Kind: taskengine.TaskEventStepCompleted, TaskID: "t1", TaskHandler: "noop"}, 1},
+	taskengine.TaskEventStepFailed:    {taskengine.TaskEvent{Kind: taskengine.TaskEventStepFailed, TaskID: "t1", TaskHandler: "noop", Error: "boom"}, 1},
+	// Prose chunks split into message + thought notifications.
+	taskengine.TaskEventStepChunk: {taskengine.TaskEvent{Kind: taskengine.TaskEventStepChunk, TaskHandler: "chat_completion", Content: "hi", Thinking: "hm"}, 2},
+	// Stream bracket: consumed, deliberately not rendered (end-of-stream is
+	// implicit in ACP; usage indicators come from token_usage).
+	taskengine.TaskEventStepStreamEnd: {taskengine.TaskEvent{Kind: taskengine.TaskEventStepStreamEnd, TaskHandler: "chat_completion", ChunkCount: 3, FinishReason: "stop"}, 0},
+	// Approval/HITL events are rendered by the permission flow, not this translator.
+	taskengine.TaskEventApprovalRequested: {taskengine.TaskEvent{Kind: taskengine.TaskEventApprovalRequested, ApprovalID: "a1", ToolName: "write_file"}, 0},
+	taskengine.TaskEventHITLDecision:      {taskengine.TaskEvent{Kind: taskengine.TaskEventHITLDecision, HITLAction: "allow"}, 0},
+	taskengine.TaskEventToolCallPending:   {taskengine.TaskEvent{Kind: taskengine.TaskEventToolCallPending, ToolName: "local_fs.read_file", ApprovalID: "call-1"}, 1},
+	taskengine.TaskEventToolCall:          {taskengine.TaskEvent{Kind: taskengine.TaskEventToolCall, ToolName: "local_fs.read_file", ApprovalID: "call-1", Content: `"ok"`}, 1},
+	taskengine.TaskEventPrint:             {taskengine.TaskEvent{Kind: taskengine.TaskEventPrint, Content: "hello"}, 1},
+	taskengine.TaskEventTokenUsage:        {taskengine.TaskEvent{Kind: taskengine.TaskEventTokenUsage, TokenUsed: 100, TokenSize: 1000}, 1},
+}
+
+// TestUnit_EngineEventContract_TranslatorConsumesEveryKind drives the native
+// event translator (which mirrors Transport.publishEvent case-for-case) with
+// one representative event per engine kind and asserts the documented
+// translation matrix, including that events with a populated Scope address
+// still translate identically (scope is additive; this surface ignores it).
+func TestUnit_EngineEventContract_TranslatorConsumesEveryKind(t *testing.T) {
+	for _, kind := range taskengine.AllTaskEventKinds() {
+		row, ok := engineEventTranslationMatrix[kind]
+		require.True(t, ok, "engine event kind %q has no documented ACP translation; update engineEventTranslationMatrix and docs/development/engine-events.md", kind)
+
+		t.Run(string(kind), func(t *testing.T) {
+			for _, withScope := range []bool{false, true} {
+				ev := row.event
+				if withScope {
+					ev.Scope = taskengine.EventScope{Chain: "c", Task: "t1", ToolCall: "call-1"}
+				}
+				payload, err := json.Marshal(ev)
+				require.NoError(t, err)
+
+				var got []libacp.SessionNotification
+				tr := newNativeEventTranslator(func(_ context.Context, n libacp.SessionNotification) {
+					got = append(got, n)
+				}, nil)
+				tr.publish(context.Background(), libacp.SessionID("sess-1"), payload)
+				require.Len(t, got, row.notifications,
+					"kind %q (scope populated: %v) must render exactly %d notification(s)", kind, withScope, row.notifications)
+			}
+		})
+	}
+}
+
+// TestUnit_EngineEventContract_TransportPublishEventHandlesEveryKind runs the
+// connection-bound translator over every kind (scope fields populated) on a
+// bare Transport: new engine fields must never break this consumer.
+func TestUnit_EngineEventContract_TransportPublishEventHandlesEveryKind(t *testing.T) {
+	tr := &Transport{}
+	for _, kind := range taskengine.AllTaskEventKinds() {
+		row := engineEventTranslationMatrix[kind]
+		ev := row.event
+		ev.Scope = taskengine.EventScope{Chain: "c", Task: "t1", ToolCall: "call-1"}
+		payload, err := json.Marshal(ev)
+		require.NoError(t, err)
+		require.NotPanics(t, func() {
+			tr.publishEvent(context.Background(), libacp.SessionID("sess-1"), payload)
+		}, "publishEvent must consume kind %q", kind)
+	}
+}
 
 func TestUnit_ToolCallUpdate_FsWriteResultProducesDiff(t *testing.T) {
 	fw := localtools.FsWriteResult{

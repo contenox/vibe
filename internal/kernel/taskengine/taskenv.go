@@ -178,6 +178,10 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 	_, reportChangeChain, endChain := env.tracker.Start(ctx, "chain_exec", chain.ID, "chain_id", chain.ID)
 	defer endChain()
 
+	// Address invariant: every event of this run carries at least the chain in
+	// its scope. Task attempts below override this with the full task scope.
+	ctx = WithTaskEventScope(ctx, TaskEventScope{ChainID: chain.ID})
+
 	stack := env.inspector.Start(ctx)
 
 	defer func() {
@@ -185,9 +189,24 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 		chainEvent.ChainID = chain.ID
 		chainEvent.OutputType = resultType.String()
 		if retErr != nil {
-			chainEvent.Kind = TaskEventChainFailed
-			chainEvent.Error = retErr.Error()
-			chainEvent.OutputType = ""
+			var susp *ChainSuspendedError
+			if errors.As(retErr, &susp) {
+				// A suspension is a typed terminal, not a failure: the segment
+				// ends with chain_suspended carrying the S5 interrupt address
+				// and the approval/checkpoint key. Published AFTER the
+				// checkpoint is persisted (suspendRun saved it before
+				// returning), so a consumer reacting to this event can already
+				// resume.
+				chainEvent.Kind = TaskEventChainSuspended
+				chainEvent.ApprovalID = susp.ApprovalID
+				chainEvent.Scope = susp.Scope
+				chainEvent.TaskID = susp.Scope.Task
+				chainEvent.OutputType = ""
+			} else {
+				chainEvent.Kind = TaskEventChainFailed
+				chainEvent.Error = retErr.Error()
+				chainEvent.OutputType = ""
+			}
 		}
 		publishTaskEventBestEffort(ctx, env.tracker, env.eventSink, chainEvent)
 	}()
@@ -222,6 +241,30 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 	// traversed during this chain run. Consulted by OpEdgeTraversedAtLeast to
 	// bound workflow loops and other cyclic chains. Per-Execute, no DB.
 	edgeCounts := map[string]int{}
+
+	// Resume path (S6): a checkpoint on the context re-enters the chain at the
+	// interrupted task with the suspended run's variable state, edge counts,
+	// and transcript restored. Everything after this block is the NORMAL
+	// execution path — resume is a controlled re-entry, not a second engine.
+	resumeFirstAttempt := false
+	if cp := resumeCheckpointFromContext(ctx); cp != nil {
+		currentTask, err = findTaskByID(chain.Tasks, cp.TaskID)
+		if err != nil {
+			return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("resume checkpoint %s names task %q which this chain does not contain: %w", cp.ApprovalID, cp.TaskID, err)
+		}
+		for k, v := range cp.Vars {
+			vars[k] = v
+		}
+		for k, t := range cp.VarTypes {
+			varTypes[k] = t
+		}
+		for k, n := range cp.EdgeCounts {
+			edgeCounts[k] = n
+		}
+		output = cp.History
+		outputType = DataTypeChatHistory
+		resumeFirstAttempt = true
+	}
 
 	chainContext := &ChainContext{
 		Tools:       map[string]ToolWithResolution{},
@@ -294,30 +337,39 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 		taskInput := output
 		taskInputType := outputType
 		inputVar = currentTask.ID
-		if currentTask.InputVar != "" {
-			var ok bool
-			inputVar = currentTask.InputVar
+		if resumeFirstAttempt {
+			// The resumed task re-enters with the checkpointed transcript
+			// VERBATIM: no input_var redirection, no prompt-template render, no
+			// input cap — the pending tool calls live in that transcript, and
+			// replacing or truncating it would resume a different run than the
+			// one that suspended. Subsequent tasks take the normal path.
+			resumeFirstAttempt = false
+		} else {
+			if currentTask.InputVar != "" {
+				var ok bool
+				inputVar = currentTask.InputVar
 
-			taskInput, ok = vars[inputVar]
-			if !ok {
-				return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: input variable %q not found", currentTask.ID, currentTask.InputVar)
+				taskInput, ok = vars[inputVar]
+				if !ok {
+					return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: input variable %q not found", currentTask.ID, currentTask.InputVar)
+				}
+				taskInputType, ok = varTypes[inputVar]
+				if !ok {
+					return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: input variable %q missing type info", currentTask.ID, currentTask.InputVar)
+				}
 			}
-			taskInputType, ok = varTypes[inputVar]
-			if !ok {
-				return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: input variable %q missing type info", currentTask.ID, currentTask.InputVar)
-			}
-		}
 
-		// Render prompt template if exists
-		if currentTask.PromptTemplate != "" {
-			rendered, err := renderTemplate(expandStepMacros(currentTask.PromptTemplate, edgeCounts), vars)
-			if err != nil {
-				return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: template error: %v", currentTask.ID, err)
+			// Render prompt template if exists
+			if currentTask.PromptTemplate != "" {
+				rendered, err := renderTemplate(expandStepMacros(currentTask.PromptTemplate, edgeCounts), vars)
+				if err != nil {
+					return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s: template error: %v", currentTask.ID, err)
+				}
+				taskInput = rendered
+				taskInputType = DataTypeString
 			}
-			taskInput = rendered
-			taskInputType = DataTypeString
+			taskInput, taskInputType = capTaskInputForExecution(taskInput, taskInputType, currentTask.InputMaxBytes)
 		}
-		taskInput, taskInputType = capTaskInputForExecution(taskInput, taskInputType, currentTask.InputMaxBytes)
 		maxRetries := max(currentTask.RetryOnFailure, 0)
 
 		for retry := 0; retry <= maxRetries; retry++ {
@@ -379,6 +431,17 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 			if cancel != nil {
 				cancel()
 			}
+
+			// S6 suspension: a tool call is parked on a human approval past the
+			// fast window. Persist the checkpoint (the durable approval row
+			// already exists — row first, checkpoint second) and release the
+			// run with a typed terminal (release third). Deliberately BEFORE
+			// the retry/on_failure machinery: a pending approval is neither a
+			// failure to retry nor one to route around.
+			var pendErr *ApprovalPendingError
+			if errors.As(taskErr, &pendErr) {
+				return env.suspendRun(ctx, stack, chain, currentTask, retry, vars, varTypes, edgeCounts, output, pendErr)
+			}
 			duration := time.Since(startTime)
 			errState := ErrorResponse{
 				ErrorInternal: taskErr,
@@ -387,6 +450,7 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 				errState.Error = taskErr.Error()
 			}
 			step := CapturedStateUnit{
+				Scope:       EventScope{Chain: chain.ID, Task: currentTask.ID},
 				TaskID:      currentTask.ID,
 				TaskHandler: currentTask.Handler.String(),
 				InputType:   taskInputType,

@@ -116,7 +116,10 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 
 	if err != nil {
 		reportErr(err)
-		return modelrepo.ChatResult{}, fmt.Errorf("ollama API chat request failed for model %s: %w", c.modelName, err)
+		wrapped := fmt.Errorf("ollama API chat request failed for model %s: %w", c.modelName, err)
+		// Ollama reports context overflow only as an error string; classify it
+		// so callers get the typed sentinel.
+		return modelrepo.ChatResult{}, modelrepo.ClassifyProviderError(wrapped, 0, "", err.Error())
 	}
 
 	// Check if we received any response
@@ -185,6 +188,16 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	result := modelrepo.ChatResult{
 		Message:   message,
 		ToolCalls: toolCalls,
+		// Ollama reports no cache dimension: prompt_eval_count already
+		// INCLUDES tokens reused from the per-slot KV cache (llama-server's
+		// cache_n is not surfaced through the ollama API), so PromptTokens is
+		// the total and the cache fields stay zero. The local warm signal is
+		// TTFT, not usage.
+		Usage: &modelrepo.TokenUsage{
+			PromptTokens:     finalResponse.Metrics.PromptEvalCount,
+			CompletionTokens: finalResponse.Metrics.EvalCount,
+			TotalTokens:      finalResponse.Metrics.PromptEvalCount + finalResponse.Metrics.EvalCount,
+		},
 	}
 
 	reportChange("chat_completed", map[string]any{

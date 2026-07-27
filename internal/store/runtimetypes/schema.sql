@@ -266,6 +266,31 @@ CREATE TABLE IF NOT EXISTS llm_model_registry (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_model_registry_created_at ON llm_model_registry(created_at);
 
+-- chain_checkpoints: durable suspended chain runs (S6, runtime/taskengine +
+-- runtime/agentservice). A run that parks on a human approval past the fast
+-- window is checkpointed here, keyed by the approval ID whose verdict resumes
+-- it (id == hitl_approvals.id == the engine-minted tool-call ID on
+-- execute_tool_calls paths). payload is the engine's VERSIONED JSON envelope
+-- (taskengine.Checkpoint, schema_version mirrored into its own column for
+-- operator queries); this layer never interprets it. claimed_at is the
+-- resume claim CAS: exactly one resumer proceeds, and a claim gone stale
+-- (resumer killed mid-run) is reclaimable. failure keeps a run whose resume
+-- errored findable instead of silently lost; a successful terminal DELETES
+-- the row. Migration-safe by construction: CREATE TABLE IF NOT EXISTS on a
+-- brand-new table.
+CREATE TABLE IF NOT EXISTS chain_checkpoints (
+    id             VARCHAR(255) PRIMARY KEY,
+    schema_version INT NOT NULL,
+    payload        TEXT NOT NULL,
+    session_id     VARCHAR(255) NOT NULL DEFAULT '',
+    request_id     VARCHAR(255) NOT NULL DEFAULT '',
+    failure        TEXT,
+    claimed_at     TIMESTAMP,
+    created_at     TIMESTAMP NOT NULL,
+    updated_at     TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chain_checkpoints_created_at ON chain_checkpoints(created_at);
+
 CREATE TABLE IF NOT EXISTS local_fs_reads (
     session_id    VARCHAR(255) NOT NULL DEFAULT '',
     path          TEXT NOT NULL,

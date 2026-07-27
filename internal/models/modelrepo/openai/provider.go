@@ -28,7 +28,7 @@ type OpenAIProvider struct {
 
 func NewOpenAIProvider(apiKey, modelName string, backendURLs []string, capability modelrepo.CapabilityConfig, httpClient *http.Client, tracker libtracker.ActivityTracker) modelrepo.Provider {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = modelrepo.SharedHTTPClient
 	}
 	if len(backendURLs) == 0 {
 		backendURLs = []string{"https://api.openai.com/v1"}

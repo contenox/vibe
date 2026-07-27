@@ -14,6 +14,7 @@ package bedrock
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -24,10 +25,42 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/models/modelrepo"
 )
+
+// classifyBedrockError maps the SDK's typed errors onto the modelrepo
+// sentinels: ThrottlingException → ErrRateLimited; ValidationException whose
+// message matches the documented "input is too long" phrasing →
+// ErrContextLengthExceeded. Anything else passes through unchanged.
+func classifyBedrockError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var throttled *types.ThrottlingException
+	if errors.As(err, &throttled) {
+		return fmt.Errorf("%w: %w", modelrepo.ErrRateLimited, err)
+	}
+	var validation *types.ValidationException
+	if errors.As(err, &validation) && modelrepo.IsContextLimitMessage(validation.ErrorMessage()) {
+		return fmt.Errorf("%w: %w", modelrepo.ErrContextLengthExceeded, err)
+	}
+	return err
+}
+
+// bedrockBaseModelID strips a cross-region inference-profile geo prefix
+// (us. / eu. / apac. / jp. / global.) so capability checks see the vendor
+// model id regardless of how the model is invoked.
+func bedrockBaseModelID(modelID string) string {
+	for _, prefix := range []string{"us.", "eu.", "apac.", "jp.", "global."} {
+		if strings.HasPrefix(modelID, prefix) {
+			return strings.TrimPrefix(modelID, prefix)
+		}
+	}
+	return modelID
+}
 
 // bedrockClient is the shared transport: a constructed SDK runtime client plus
 // the model id and tracker.

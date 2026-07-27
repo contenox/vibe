@@ -109,6 +109,7 @@ func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	if outText == "" && len(toolCalls) == 0 {
 		empty := modelrepo.ChatResult{
 			Message: modelrepo.Message{Role: "assistant", Content: "", Thinking: thinkingText},
+			Usage:   resp.UsageMetadata.neutralUsage(),
 		}
 		reportChange("chat_completed_empty", empty)
 		return empty, nil
@@ -117,6 +118,7 @@ func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	result := modelrepo.ChatResult{
 		Message:   modelrepo.Message{Role: "assistant", Content: outText, Thinking: thinkingText},
 		ToolCalls: toolCalls,
+		Usage:     resp.UsageMetadata.neutralUsage(),
 	}
 
 	reportChange("chat_completed", result)

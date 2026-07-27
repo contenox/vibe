@@ -54,10 +54,10 @@ const (
 )
 
 // reservedSubcommands are first-arg names that must not be treated as run input
-// (Cobra or our subcommands). RETIRED command names (serve, fleet, mission,
-// approvals, code, vscode-agent, modeld) stay reserved on purpose: an operator
-// typing one gets Cobra's unknown-command error naming the mistake, instead of
-// the word being silently injected as a chat prompt.
+// (Cobra or our subcommands). RETIRED command names (serve, fleet, approvals,
+// code, vscode-agent, modeld) stay reserved on purpose: an operator typing one
+// gets Cobra's unknown-command error naming the mistake, instead of the word
+// being silently injected as a chat prompt.
 var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
@@ -386,6 +386,7 @@ func init() {
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(backendCmd)
 	rootCmd.AddCommand(agentCmd)
+	rootCmd.AddCommand(missionCmd)
 	rootCmd.AddCommand(cacheCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(modelCmd)

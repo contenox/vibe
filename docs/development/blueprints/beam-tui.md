@@ -6,6 +6,22 @@ This is the component plan for contenox beam, the terminal UI that is the produc
 
 Do not relitigate these; every component spec below assumes them.
 
+- **Brand color: beam gold (decided 2026-07-27, implemented on the website
+  same day).** The accent is a warm light-beam gold — the image the name
+  owns — replacing the inherited AI-generic indigo. Ladder: dark terminal
+  `#FBBF24` (amber-400), light terminal `#B45309` (amber-700, AA on white),
+  256-color fallback `214`, 16-color tier: **bold, no color** (brand
+  degrades to emphasis, never to a wrong-looking approximation). TUI usage
+  is a closed list: the liveness spinner during active work, the focused-
+  composer sigil, the running-mission indicator, the active picker row, and
+  one-time brand moments (first-run header). Never body text, never
+  semantic states (user's ANSI red/green/yellow stay theirs), never
+  backgrounds. Rules of the tier doctrine apply: monochrome usable →
+  16-color readable → truecolor beautiful; NO_COLOR and TERM=dumb drop all
+  styling; color is never the only signal. Website tokens, CTA gradients,
+  hover accents, sidebar, and the favicon (scheme-aware SVG: luminous ramp
+  on dark tab strips, darkened amber on light — fixes the washed-out
+  selected-tab case) all migrated to the same ramp.
 - **The testability lesson (maintainer 2026-07-27, from why the old TUI
   lost to a web UI):** a TUI fails when correctness is only observable by a
   human at one terminal size — e2e was human-only, resize made components

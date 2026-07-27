@@ -6,7 +6,7 @@
 
 /* Contenox design-system tokens, vendored from the retired shared UI package
    (the runtime is terminal-first; there is no web UI to share them with
-   anymore). Trimmed to what the site uses: surface/text semantics, the indigo
+   anymore). Trimmed to what the site uses: surface/text semantics, the beam-gold
    primary ramp for focus rings, and the compact prose treatment. */
 
 @layer components {
@@ -32,20 +32,22 @@
 }
 
 @theme {
-  /* Vibrant indigo primary (focus rings, accents) */
-  --color-primary-50: #eef2ff;
-  --color-primary-100: #e0e7ff;
-  --color-primary-200: #c7d2fe;
-  --color-primary-300: #a5b4fc;
-  --color-primary-400: #818cf8;
-  --color-primary-500: #6366f1;
-  --color-primary-600: #4f46e5;
-  --color-primary-700: #4338ca;
-  --color-primary-800: #3730a3;
-  --color-primary-900: #312e81;
+  /* Beam gold primary (focus rings, accents) — the brand accent: a warm
+     light-beam gold. Dark surfaces use the luminous 400; light surfaces the
+     700 for AA contrast. Mirrors the TUI's accent ladder (beam-tui.md). */
+  --color-primary-50: #fffbeb;
+  --color-primary-100: #fef3c7;
+  --color-primary-200: #fde68a;
+  --color-primary-300: #fcd34d;
+  --color-primary-400: #fbbf24;
+  --color-primary-500: #f59e0b;
+  --color-primary-600: #d97706;
+  --color-primary-700: #b45309;
+  --color-primary-800: #92400e;
+  --color-primary-900: #78350f;
   --color-primary: var(--color-primary-600);
 
-  /* Dark-mode primary is neutral-white; indigo stays CTA-only. */
+  /* Dark-mode primary is neutral-white; the gold accent stays CTA-only. */
   --color-dark-primary-500: #ededed;
 
   /* Typography */

@@ -51,7 +51,7 @@ func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Mess
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "vllm", "model", c.modelName)
 	// Note: We don't defer end() here because the stream is asynchronous
 
-	request := buildChatRequest(c.modelName, messages, args, c.canThink)
+	request, nameMap := buildChatRequest(c.modelName, messages, args, c.canThink)
 	c.clampChatRequest(&request)
 	request.Stream = true
 	request.StreamOptions = &streamOptions{IncludeUsage: true}
@@ -90,6 +90,7 @@ func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Mess
 		body, _ := io.ReadAll(resp.Body)
 		err = fmt.Errorf("vLLM API returned non-200 status: %d - %s for model %s",
 			resp.StatusCode, string(body), c.modelName)
+		err = modelrepo.ClassifyProviderError(err, resp.StatusCode, "", string(body))
 		reportErr(err)
 		end()
 		return nil, err
@@ -110,9 +111,9 @@ func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Mess
 			}
 		}
 
-		// vLLM tool names go out unsanitized (see the parity audit), so there
-		// is no sanitized->original map to translate back through.
-		dec := chatcompletions.NewStreamDecoder(nil)
+		// Tool names are sanitized on the way out; the decoder translates the
+		// sanitized names back to the caller's originals.
+		dec := chatcompletions.NewStreamDecoder(nameMap)
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 		var chunkCount int

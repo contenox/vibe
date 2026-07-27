@@ -22,10 +22,20 @@ type openAIResponsesRequest struct {
 	Tools           []openAIResponsesTool     `json:"tools,omitempty"`
 	ToolChoice      string                    `json:"tool_choice,omitempty"`
 	Stream          bool                      `json:"stream,omitempty"`
+	// Store is always sent as false: OpenAI must not retain responses
+	// server-side for this runtime. Pointer so the explicit false serializes.
+	Store *bool `json:"store,omitempty"`
+	// PromptCacheKey routes requests with the same key to the same cache
+	// shard (cache metadata only, never model-visible). Same semantics as the
+	// chat-completions field.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 type openAIResponsesReasoning struct {
 	Effort string `json:"effort,omitempty"`
+	// Summary requests reasoning summaries in the response output ("auto");
+	// without it the API returns no reasoning content at all.
+	Summary string `json:"summary,omitempty"`
 }
 
 type openAIResponsesTool struct {
@@ -50,23 +60,55 @@ type openAIResponseInput struct {
 }
 
 type openAIResponse struct {
-	Output    []openAIResponseOutputItem `json:"output"`
-	Reasoning struct {
-		Effort  string `json:"effort"`
-		Summary string `json:"summary"`
-	} `json:"reasoning"`
+	// Output carries the response items, including "reasoning" items whose
+	// summary parts are the actual reasoning content. The wire also has a
+	// top-level `reasoning` field, but it is a request-config echo and must
+	// never be read as reasoning output.
+	Output []openAIResponseOutputItem `json:"output"`
 	// Usage is reported on the completed response object (and therefore on
-	// the response.completed stream event).
-	Usage *struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-		TotalTokens  int `json:"total_tokens"`
-	} `json:"usage"`
+	// the response.completed stream event). input_tokens already INCLUDES
+	// cached tokens; the cached count is broken out under
+	// input_tokens_details.cached_tokens (and gpt-5.6+ additionally reports
+	// billed cache writes as cache_write_tokens).
+	Usage *openAIResponsesUsage `json:"usage"`
 	// Error is set on response.failed / response.incomplete stream events.
 	Error *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// openAIResponsesUsage is the Responses API usage report. input_tokens is the
+// TOTAL prompt count (cached included) — no normalization needed beyond
+// copying the cached breakdown.
+type openAIResponsesUsage struct {
+	InputTokens        int `json:"input_tokens"`
+	OutputTokens       int `json:"output_tokens"`
+	TotalTokens        int `json:"total_tokens"`
+	InputTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
+	// CacheWriteTokens is reported by gpt-5.6+ models where cache writes are
+	// billed; zero elsewhere.
+	CacheWriteTokens int `json:"cache_write_tokens"`
+}
+
+// neutralUsage maps the wire usage onto the neutral TokenUsage.
+func (u *openAIResponsesUsage) neutralUsage() *modelrepo.TokenUsage {
+	if u == nil {
+		return nil
+	}
+	total := u.TotalTokens
+	if total == 0 {
+		total = u.InputTokens + u.OutputTokens
+	}
+	return &modelrepo.TokenUsage{
+		PromptTokens:     u.InputTokens,
+		CompletionTokens: u.OutputTokens,
+		TotalTokens:      total,
+		CacheReadTokens:  u.InputTokensDetails.CachedTokens,
+		CacheWriteTokens: u.CacheWriteTokens,
+	}
 }
 
 type openAIResponseOutputItem struct {
@@ -77,8 +119,13 @@ type openAIResponseOutputItem struct {
 	Name      string                  `json:"name"`
 	Arguments string                  `json:"arguments"`
 	Content   []openAIResponseContent `json:"content"`
-	Status    string                  `json:"status"`
-	Phase     string                  `json:"phase"`
+	// Summary holds the reasoning summaries of an output item of type
+	// "reasoning" (parts of type "summary_text"). This is where actual
+	// reasoning surfaces; the response's top-level `reasoning` field is only a
+	// config echo.
+	Summary []openAIResponseContent `json:"summary"`
+	Status  string                  `json:"status"`
+	Phase   string                  `json:"phase"`
 }
 
 type openAIResponseContent struct {
@@ -118,6 +165,9 @@ func buildOpenAIResponsesRequestWithCapabilities(modelName string, messages []mo
 	req := openAIResponsesRequest{
 		Model: modelName,
 	}
+	// Never let OpenAI retain responses server-side.
+	storeFalse := false
+	req.Store = &storeFalse
 
 	cfg := &modelrepo.ChatConfig{}
 	for _, a := range args {
@@ -129,12 +179,22 @@ func buildOpenAIResponsesRequestWithCapabilities(modelName string, messages []mo
 	req.TopP = cfg.TopP
 	req.Seed = cfg.Seed
 
+	// Session cache-shard routing; cache metadata only (see the field doc).
+	if cfg.CacheHints != nil && cfg.CacheHints.SessionKey != "" {
+		req.PromptCacheKey = cfg.CacheHints.SessionKey
+	}
+
 	if supportsThink {
 		reasoningEffort := openAIReasoningEffort(modelName, cfg.Think)
-		if reasoningEffort != "" {
+		if reasoningEffort != "" && reasoningEffort != "none" {
 			req.Reasoning = &openAIResponsesReasoning{
 				Effort: reasoningEffort,
+				// Request summaries explicitly; without this the reasoning of
+				// GPT-5-class models never surfaces in the output items.
+				Summary: "auto",
 			}
+		} else if reasoningEffort == "none" {
+			req.Reasoning = &openAIResponsesReasoning{Effort: reasoningEffort}
 		}
 	}
 
@@ -264,6 +324,29 @@ func buildOpenAIResponsesRequestWithCapabilities(modelName string, messages []mo
 	return req, nameMap
 }
 
+// responsesReasoningSummaryText collects the reasoning summaries from output
+// items of type "reasoning" (summary parts of type "summary_text").
+func responsesReasoningSummaryText(resp *openAIResponse) string {
+	if resp == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, item := range resp.Output {
+		if strings.ToLower(item.Type) != "reasoning" {
+			continue
+		}
+		for _, part := range item.Summary {
+			if part.Type == "summary_text" && part.Text != "" {
+				if b.Len() > 0 {
+					b.WriteString("\n\n")
+				}
+				b.WriteString(part.Text)
+			}
+		}
+	}
+	return b.String()
+}
+
 func openAIResponsesToolParameters(params any) any {
 	if params == nil {
 		return map[string]any{}
@@ -287,11 +370,25 @@ func parseOpenAIResponsesResponseFromObject(nameMap map[string]string, response 
 	}
 
 	var textBuilder strings.Builder
+	var thinkingBuilder strings.Builder
 	var toolCalls []modelrepo.ToolCall
 	role := "assistant"
 
 	for _, item := range resp.Output {
 		switch strings.ToLower(item.Type) {
+		case "reasoning":
+			// Reasoning summaries live on output items of type "reasoning" as
+			// summary parts of type "summary_text" — NOT on the response's
+			// top-level `reasoning` field, which merely echoes the request
+			// config.
+			for _, part := range item.Summary {
+				if part.Type == "summary_text" && part.Text != "" {
+					if thinkingBuilder.Len() > 0 {
+						thinkingBuilder.WriteString("\n\n")
+					}
+					thinkingBuilder.WriteString(part.Text)
+				}
+			}
 		case "message":
 			if item.Role != "" {
 				role = item.Role
@@ -336,8 +433,9 @@ func parseOpenAIResponsesResponseFromObject(nameMap map[string]string, response 
 		Message: modelrepo.Message{
 			Role:     role,
 			Content:  textBuilder.String(),
-			Thinking: strings.TrimSpace(resp.Reasoning.Summary),
+			Thinking: strings.TrimSpace(thinkingBuilder.String()),
 		},
 		ToolCalls: toolCalls,
+		Usage:     resp.Usage.neutralUsage(),
 	}, nil
 }

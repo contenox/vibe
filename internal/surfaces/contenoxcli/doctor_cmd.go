@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/contenox/beam/internal/models/statetype"
 	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/services/fleetservice"
 	"github.com/contenox/beam/internal/services/setupcheck"
@@ -66,10 +68,15 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	o.EffectiveDB = dbPath
 	o.EffectiveSkipBackendCycle, _ = cmd.Flags().GetBool("skip-cycle")
 
-	res, err := ComputeReadiness(ctx, db, o)
+	// Built directly (instead of via ComputeReadiness) so the synced runtime
+	// state is readable for the vision summary without a second backend cycle.
+	engine, err := BuildEngine(ctx, db, o)
 	if err != nil {
 		return fmt.Errorf("failed to build engine: %w", err)
 	}
+	res := setupcheck.EnrichResultWithOllamaProbe(ctx, engine.SetupCheck)
+	vision := visionSummaryFromState(engine.State.Get(ctx), res.DefaultModel)
+	engine.Stop()
 
 	jsonOut, _ := cmd.Flags().GetBool("json")
 	if jsonOut {
@@ -78,6 +85,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return enc.Encode(res)
 	}
 	printDoctorText(cmd.OutOrStdout(), res)
+	printVisionSummary(cmd.OutOrStdout(), vision)
 
 	// Advisory: warn when default-max-tokens exceeds the active provider's ceiling.
 	store := runtimetypes.New(db.WithoutTransaction())
@@ -95,6 +103,67 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+// visionSummary is doctor's compact view of vision-capable model availability,
+// derived from the synced runtime state (the same snapshot readiness used).
+type visionSummary struct {
+	// reachable is true when at least one backend synced without error; with
+	// no reachable backend a vision line would be noise on top of the
+	// connectivity errors doctor already prints.
+	reachable        bool
+	visionModels     []string
+	defaultHasVision bool
+	defaultKnown     bool
+}
+
+// visionSummaryFromState collects vision-capable chat models and whether the
+// configured default model is one of them.
+func visionSummaryFromState(state map[string]statetype.BackendRuntimeState, defaultModel string) visionSummary {
+	s := visionSummary{}
+	seen := map[string]bool{}
+	for _, bs := range state {
+		if bs.Error != "" {
+			continue
+		}
+		s.reachable = true
+		for _, pm := range bs.PulledModels {
+			if pm.Model == defaultModel || pm.Name == defaultModel {
+				s.defaultKnown = true
+				if pm.CanVision {
+					s.defaultHasVision = true
+				}
+			}
+			if !pm.CanVision || !pm.CanChat || seen[pm.Model] {
+				continue
+			}
+			seen[pm.Model] = true
+			s.visionModels = append(s.visionModels, pm.Model)
+		}
+	}
+	sort.Strings(s.visionModels)
+	return s
+}
+
+// printVisionSummary keeps doctor's vision line compact and teaching: how many
+// vision-capable models exist, and whether an image request with the current
+// default model would be refused.
+func printVisionSummary(w io.Writer, v visionSummary) {
+	if !v.reachable {
+		return
+	}
+	if len(v.visionModels) == 0 {
+		fmt.Fprintln(w, "Vision: no vision-capable models available — requests with images will be refused.")
+		return
+	}
+	examples := v.visionModels
+	if len(examples) > 3 {
+		examples = examples[:3]
+	}
+	fmt.Fprintf(w, "Vision: %d model(s) accept images (e.g. %s).\n", len(v.visionModels), strings.Join(examples, ", "))
+	if v.defaultKnown && !v.defaultHasVision {
+		fmt.Fprintln(w, "        Note: the default model is text-only; image requests need a vision-capable model (name one or drop the pin).")
+	}
 }
 
 func printDoctorText(w io.Writer, res setupcheck.Result) {

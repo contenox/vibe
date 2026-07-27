@@ -41,7 +41,7 @@ type vertexProvider struct {
 // credJSON is the service account key JSON; empty string falls back to ADC.
 func NewVertexProvider(publisher, modelName string, baseURLs []string, cap modelrepo.CapabilityConfig, credJSON string, httpClient *http.Client, tracker libtracker.ActivityTracker) modelrepo.Provider {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = modelrepo.SharedHTTPClient
 	}
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
@@ -143,7 +143,11 @@ func (p *vertexProvider) GetStreamConnection(_ context.Context, _ string) (model
 }
 
 func (p *vertexProvider) GetEmbedConnection(_ context.Context, _ string) (modelrepo.LLMEmbedClient, error) {
-	return nil, fmt.Errorf("model %s (vertex-%s) does not support embeddings", p.modelName, p.publisher)
+	if !p.CanEmbed() {
+		return nil, fmt.Errorf("model %s (vertex-%s) does not support embeddings; use a text-embedding model such as gemini-embedding-001", p.modelName, p.publisher)
+	}
+	c := p.client()
+	return &vertexEmbedClient{vertexClient: c}, nil
 }
 
 var _ modelrepo.Provider = (*vertexProvider)(nil)

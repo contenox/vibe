@@ -29,7 +29,7 @@ type GeminiProvider struct {
 
 func NewGeminiProvider(apiKey string, modelName string, baseURLs []string, cap modelrepo.CapabilityConfig, httpClient *http.Client, tracker libtracker.ActivityTracker) modelrepo.Provider {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = modelrepo.SharedHTTPClient
 	}
 	if len(baseURLs) == 0 {
 		baseURLs = []string{"https://generativelanguage.googleapis.com"}

@@ -38,6 +38,10 @@ func (p *catalogProvider) Type() string {
 }
 
 func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedModel, error) {
+	// Catalog listing is a non-streaming call: bound it end-to-end.
+	ctx, cancel := modelrepo.NonStreamingContext(ctx)
+	defer cancel()
+
 	client, err := newOllamaHTTPClient(p.spec.BaseURL, p.spec.APIKey, p.httpClient)
 	if err != nil {
 		return nil, err

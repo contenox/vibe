@@ -27,7 +27,7 @@ func init() {
 	modelrepo.RegisterCatalogProvider("anthropic", func(spec modelrepo.BackendSpec, opts modelrepo.CatalogOptions) (modelrepo.CatalogProvider, error) {
 		client := opts.HTTPClient
 		if client == nil {
-			client = http.DefaultClient
+			client = modelrepo.SharedHTTPClient
 		}
 		return &catalogProvider{spec: spec, httpClient: client, tracker: opts.Tracker}, nil
 	})
@@ -43,6 +43,10 @@ func (p *catalogProvider) baseURL() string {
 }
 
 func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedModel, error) {
+	// Catalog listing is a non-streaming call: bound it end-to-end.
+	ctx, cancel := modelrepo.NonStreamingContext(ctx)
+	defer cancel()
+
 	return p.listModels(ctx, "/v1/models")
 }
 

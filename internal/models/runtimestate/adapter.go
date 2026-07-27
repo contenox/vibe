@@ -2,7 +2,6 @@ package runtimestate
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/models/modelrepo"
@@ -26,7 +25,7 @@ func LocalProviderAdapter(ctx context.Context, tracker libtracker.ActivityTracke
 				BaseURL: state.Backend.BaseURL,
 				APIKey:  state.GetAPIKey(),
 			},
-			modelrepo.WithCatalogHTTPClient(http.DefaultClient),
+			modelrepo.WithCatalogHTTPClient(modelrepo.SharedHTTPClient),
 			modelrepo.WithCatalogTracker(tracker),
 		)
 		if err != nil {

@@ -98,6 +98,7 @@ func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		if resp.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(resp.Body)
 			err = fmt.Errorf("gemini API returned non-200 status for stream: %d, body: %s", resp.StatusCode, string(b))
+			err = modelrepo.ClassifyProviderError(err, resp.StatusCode, "", string(b))
 			reportErr(err)
 			send(&modelrepo.StreamParcel{Error: err})
 			return
@@ -137,11 +138,7 @@ func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 				return
 			}
 			if chunk.UsageMetadata != nil {
-				usage = &modelrepo.TokenUsage{
-					PromptTokens:     chunk.UsageMetadata.PromptTokenCount,
-					CompletionTokens: chunk.UsageMetadata.CandidatesTokenCount,
-					TotalTokens:      chunk.UsageMetadata.TotalTokenCount,
-				}
+				usage = chunk.UsageMetadata.neutralUsage()
 			}
 			if len(chunk.Candidates) == 0 {
 				continue

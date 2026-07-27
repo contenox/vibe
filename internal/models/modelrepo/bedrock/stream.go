@@ -21,19 +21,23 @@ type bedrockStreamClient struct{ bedrockClient }
 // terminal parcel from messageStop + metadata. Assembly belongs to the
 // engine-side modelrepo.StreamAssembler.
 func (c *bedrockStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
-	in, toOriginal := buildConverseInput(c.modelName, messages, chatConfigFromArgs(args), c.maxOutputTokens)
+	in, toOriginal, err := buildConverseInput(c.modelName, messages, chatConfigFromArgs(args), c.maxOutputTokens)
+	if err != nil {
+		return nil, err
+	}
 	streamIn := &bedrockruntime.ConverseStreamInput{
-		ModelId:         in.ModelId,
-		Messages:        in.Messages,
-		System:          in.System,
-		ToolConfig:      in.ToolConfig,
-		InferenceConfig: in.InferenceConfig,
+		ModelId:                      in.ModelId,
+		Messages:                     in.Messages,
+		System:                       in.System,
+		ToolConfig:                   in.ToolConfig,
+		InferenceConfig:              in.InferenceConfig,
+		AdditionalModelRequestFields: in.AdditionalModelRequestFields,
 	}
 
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "bedrock", "model", c.modelName)
 	out, err := c.api.ConverseStream(ctx, streamIn)
 	if err != nil {
-		err = fmt.Errorf("bedrock converse-stream (model=%s): %w", c.modelName, err)
+		err = classifyBedrockError(fmt.Errorf("bedrock converse-stream (model=%s): %w", c.modelName, err))
 		reportErr(err)
 		end()
 		return nil, err
@@ -144,12 +148,11 @@ func relayConverseEvents(ctx context.Context, events <-chan types.ConverseStream
 			sawTermEvent = true
 
 		case *types.ConverseStreamOutputMemberMetadata:
-			if v.Value.Usage != nil {
-				usage = &modelrepo.TokenUsage{
-					PromptTokens:     int(aws.ToInt32(v.Value.Usage.InputTokens)),
-					CompletionTokens: int(aws.ToInt32(v.Value.Usage.OutputTokens)),
-					TotalTokens:      int(aws.ToInt32(v.Value.Usage.TotalTokens)),
-				}
+			// usageFromConverse applies the normalization rule: Bedrock's
+			// inputTokens excludes cache reads/writes, so PromptTokens is the
+			// recomputed total.
+			if u := usageFromConverse(v.Value.Usage); u != nil {
+				usage = u
 			}
 		}
 	}

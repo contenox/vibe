@@ -324,6 +324,13 @@ func mapStopReason(r agentservice.StopReason) libacp.StopReason {
 		return libacp.StopReasonMaxTurnRequests
 	case agentservice.StopCancelled:
 		return libacp.StopReasonCancelled
+	case agentservice.StopSuspended:
+		// ACP has no "suspended" stop reason: from the client's view the turn
+		// ended cleanly, with the still-open permission card telling the user
+		// what the run is waiting for. Answering the approval resumes the run
+		// server-side (S6) and the continuation reaches the client as a fresh
+		// turn's updates.
+		return libacp.StopReasonEndTurn
 	}
 	return libacp.StopReasonEndTurn
 }

@@ -107,6 +107,7 @@ func (c *vertexChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	result := modelrepo.ChatResult{
 		Message:   modelrepo.Message{Role: "assistant", Content: outText, Thinking: thinkingText},
 		ToolCalls: toolCalls,
+		Usage:     resp.UsageMetadata.neutralUsage(),
 	}
 	reportChange("chat_completed", result)
 	return result, nil

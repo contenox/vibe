@@ -16,13 +16,22 @@ const TaskEventSubjectAll = "taskengine.events"
 type TaskEventKind string
 
 const (
-	TaskEventChainStarted   TaskEventKind = "chain_started"
-	TaskEventStepStarted    TaskEventKind = "step_started"
-	TaskEventStepChunk      TaskEventKind = "step_chunk"
-	TaskEventStepCompleted  TaskEventKind = "step_completed"
-	TaskEventStepFailed     TaskEventKind = "step_failed"
+	TaskEventChainStarted  TaskEventKind = "chain_started"
+	TaskEventStepStarted   TaskEventKind = "step_started"
+	TaskEventStepChunk     TaskEventKind = "step_chunk"
+	TaskEventStepStreamEnd TaskEventKind = "step_stream_end"
+	TaskEventStepCompleted TaskEventKind = "step_completed"
+	TaskEventStepFailed    TaskEventKind = "step_failed"
+
 	TaskEventChainCompleted TaskEventKind = "chain_completed"
 	TaskEventChainFailed    TaskEventKind = "chain_failed"
+	// TaskEventChainSuspended terminates a run segment that parked on a human
+	// approval past the fast window (S6): the checkpoint is persisted, the
+	// goroutine is released, and answering the approval resumes the chain as a
+	// fresh run segment under the same request ID. Carries the S5 address of
+	// the interrupt point ({chain, task, tool_call}) and approval_id (== the
+	// checkpoint key). See docs/development/engine-events.md.
+	TaskEventChainSuspended TaskEventKind = "chain_suspended"
 
 	TaskEventApprovalRequested TaskEventKind = "approval_requested"
 	TaskEventHITLDecision      TaskEventKind = "hitl_decision"
@@ -32,22 +41,64 @@ const (
 	TaskEventTokenUsage        TaskEventKind = "token_usage"
 )
 
+// AllTaskEventKinds enumerates every kind the engine can emit — the contract
+// surface documented in docs/development/engine-events.md. Contract tests
+// iterate it so that adding a kind without updating the documented matrix (and
+// its consumers) fails CI rather than drifting silently.
+func AllTaskEventKinds() []TaskEventKind {
+	return []TaskEventKind{
+		TaskEventChainStarted,
+		TaskEventStepStarted,
+		TaskEventStepChunk,
+		TaskEventStepStreamEnd,
+		TaskEventStepCompleted,
+		TaskEventStepFailed,
+		TaskEventChainCompleted,
+		TaskEventChainFailed,
+		TaskEventChainSuspended,
+		TaskEventApprovalRequested,
+		TaskEventHITLDecision,
+		TaskEventToolCallPending,
+		TaskEventToolCall,
+		TaskEventPrint,
+		TaskEventTokenUsage,
+	}
+}
+
+// EventScope is the hierarchical address of an event or captured state unit:
+// which chain / which task / which tool call produced it. It is the address
+// contract checkpoints (S6) and nested consumers name positions with —
+// structured, never re-parsed out of loose strings. Fields are filled
+// top-down: Chain is set on every event of a run, Task on every event emitted
+// inside a task attempt, ToolCall only on events attributable to one tool
+// invocation. The legacy flat TaskEvent fields (ChainID, TaskID) remain
+// populated for wire compatibility; Scope is the additive, authoritative form.
+type EventScope struct {
+	Chain    string `json:"chain,omitempty"`
+	Task     string `json:"task,omitempty"`
+	ToolCall string `json:"tool_call,omitempty"`
+}
+
 type TaskEvent struct {
-	Kind         TaskEventKind `json:"kind"`
-	Timestamp    time.Time     `json:"timestamp"`
-	RequestID    string        `json:"request_id,omitempty"`
-	ChainID      string        `json:"chain_id,omitempty"`
-	TaskID       string        `json:"task_id,omitempty"`
-	TaskHandler  string        `json:"task_handler,omitempty"`
-	Retry        int           `json:"retry"`
-	ModelName    string        `json:"model_name,omitempty"`
-	ProviderType string        `json:"provider_type,omitempty"`
-	BackendID    string        `json:"backend_id,omitempty"`
-	OutputType   string        `json:"output_type,omitempty"`
-	Transition   string        `json:"transition,omitempty"`
-	Content      string        `json:"content,omitempty"`
-	Thinking     string        `json:"thinking,omitempty"`
-	Error        string        `json:"error,omitempty"`
+	Kind      TaskEventKind `json:"kind"`
+	Timestamp time.Time     `json:"timestamp"`
+	RequestID string        `json:"request_id,omitempty"`
+	// Scope is the event's hierarchical address (chain/task/tool-call). It is
+	// additive on the wire: consumers that predate it keep reading the flat
+	// ChainID/TaskID fields below, which stay populated identically.
+	Scope        EventScope `json:"scope,omitzero"`
+	ChainID      string     `json:"chain_id,omitempty"`
+	TaskID       string     `json:"task_id,omitempty"`
+	TaskHandler  string     `json:"task_handler,omitempty"`
+	Retry        int        `json:"retry"`
+	ModelName    string     `json:"model_name,omitempty"`
+	ProviderType string     `json:"provider_type,omitempty"`
+	BackendID    string     `json:"backend_id,omitempty"`
+	OutputType   string     `json:"output_type,omitempty"`
+	Transition   string     `json:"transition,omitempty"`
+	Content      string     `json:"content,omitempty"`
+	Thinking     string     `json:"thinking,omitempty"`
+	Error        string     `json:"error,omitempty"`
 
 	ApprovalID   string         `json:"approval_id,omitempty"`
 	HookName     string         `json:"hook_name,omitempty"`
@@ -71,6 +122,17 @@ type TaskEvent struct {
 	// For token_usage
 	TokenUsed int `json:"token_used,omitempty"`
 	TokenSize int `json:"token_size,omitempty"`
+
+	// For step_stream_end: the terminal bracket of one model stream.
+	// ChunkCount is the number of parcels that carried visible content or
+	// thinking (i.e. the number of step_chunk events a subscribed sink saw —
+	// counted independently of Wants, so the bracket is truthful even when no
+	// sink consumed chunks). FinishReason is the provider's verbatim finish
+	// reason ("" on the non-streaming fallback, which reports none). Usage is
+	// provider-reported token usage when available.
+	ChunkCount   int         `json:"chunk_count,omitempty"`
+	FinishReason string      `json:"finish_reason,omitempty"`
+	Usage        *TokenUsage `json:"usage,omitempty"`
 }
 
 type TaskEventScope struct {
@@ -181,6 +243,13 @@ func taskEventScopeFromContext(ctx context.Context) (TaskEventScope, bool) {
 	return scope, ok
 }
 
+// NewTaskEvent builds an event of the given kind addressed from ctx: the
+// request ID, the chain/task scope installed by the executor (ExecEnv wraps
+// the whole run in a chain-level scope; each task attempt overrides it with
+// the full task scope), and — when the emission site runs inside one tool
+// invocation (ContextKeyToolCallID) — the tool-call address. Emission sites
+// that know a more precise tool-call ID than the context carries set
+// Scope.ToolCall explicitly after construction.
 func NewTaskEvent(ctx context.Context, kind TaskEventKind) TaskEvent {
 	event := TaskEvent{
 		Kind:      kind,
@@ -194,6 +263,11 @@ func NewTaskEvent(ctx context.Context, kind TaskEventKind) TaskEvent {
 		event.TaskID = scope.TaskID
 		event.TaskHandler = scope.TaskHandler
 		event.Retry = scope.Retry
+		event.Scope.Chain = scope.ChainID
+		event.Scope.Task = scope.TaskID
+	}
+	if callID, ok := ctx.Value(ContextKeyToolCallID).(string); ok && callID != "" {
+		event.Scope.ToolCall = callID
 	}
 	return event
 }

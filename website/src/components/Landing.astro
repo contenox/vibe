@@ -60,7 +60,7 @@ const btnGhost = 'rounded-lg border border-neutral-200 px-4 py-2 text-sm font-se
   </h1>
   <p class="mx-auto mt-6 max-w-xl text-neutral-600 dark:text-neutral-400">{t.lede}</p>
   <div class="mt-8 flex flex-wrap justify-center gap-3">
-    <a href="/docs/use-cases/" class="rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-indigo-500/20 transition-all hover:scale-105 hover:shadow-indigo-500/40">{t.ctaRecipe}</a>
+    <a href="/docs/use-cases/" class="rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-amber-500/20 transition-all hover:scale-105 hover:shadow-amber-500/40">{t.ctaRecipe}</a>
     <a href="/docs/specification/" class={btnGhost}>{t.ctaPackage}</a>
     <a href="https://github.com/contenox/beam" class={btnGhost}>{t.ctaGithub}</a>
   </div>
@@ -88,14 +88,14 @@ const btnGhost = 'rounded-lg border border-neutral-200 px-4 py-2 text-sm font-se
   />
   <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-3">
     {t.tuiPoints.map(([title, body]) => (
-      <div class="rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-indigo-500/30 hover:shadow-lg hover:shadow-indigo-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-indigo-400/30">
+      <div class="rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-amber-400/30">
         <h3 class="font-semibold">{title}</h3>
         <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
       </div>
     ))}
   </div>
   <div class="mt-8 text-center text-sm">
-    <a href="/docs/reference/contenox-cli/" class="font-semibold text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300">{t.tuiCta} →</a>
+    <a href="/docs/reference/contenox-cli/" class="font-semibold text-amber-700 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300">{t.tuiCta} →</a>
   </div>
 </section>
 
@@ -103,7 +103,7 @@ const btnGhost = 'rounded-lg border border-neutral-200 px-4 py-2 text-sm font-se
   <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.capsEyebrow}</p>
   <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-2">
     {t.caps.map(([title, body]) => (
-      <div class="rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-indigo-500/30 hover:shadow-lg hover:shadow-indigo-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-indigo-400/30">
+      <div class="rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-amber-400/30">
         <h3 class="font-semibold">{title}</h3>
         <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
       </div>
@@ -177,7 +177,7 @@ const btnGhost = 'rounded-lg border border-neutral-200 px-4 py-2 text-sm font-se
   <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.standardsH2}</h2>
   <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-3">
     {t.standards.map(([name, body, href]) => (
-      <a href={href} class="rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-indigo-500/30 hover:shadow-lg hover:shadow-indigo-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-indigo-400/30 no-underline">
+      <a href={href} class="rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-amber-400/30 no-underline">
         <h3 class="font-semibold">{name}</h3>
         <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
       </a>
@@ -206,7 +206,7 @@ const btnGhost = 'rounded-lg border border-neutral-200 px-4 py-2 text-sm font-se
     <span>curl -fsSL https://contenox.com/install.sh | sh</span>
   </div>
   <div class="mt-6 flex flex-wrap justify-center gap-3">
-    <a href="/docs/guide/quickstart/" class="rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-indigo-500/20 transition-all hover:scale-105 hover:shadow-indigo-500/40">{t.bottomCta}</a>
+    <a href="/docs/guide/quickstart/" class="rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-amber-500/20 transition-all hover:scale-105 hover:shadow-amber-500/40">{t.bottomCta}</a>
   </div>
   <p class="mt-6 text-sm text-neutral-500" set:html={t.bottomContact} />
   

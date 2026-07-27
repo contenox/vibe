@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/contenox/beam/internal/kernel/reasoning"
 	"github.com/contenox/beam/internal/libtracker"
@@ -44,6 +42,11 @@ type openAIChatRequest struct {
 	// chat-completions `reasoning_effort` parameter without widening the public
 	// package API. Supported values are model-dependent.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// PromptCacheKey routes requests with the same key to the same cache
+	// shard (per-session keys are OpenAI's documented best practice; the
+	// `user` field is deprecated for this purpose). Cache metadata only —
+	// never model-visible.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 // apiChatMessage is the wire-format message sent to the OpenAI REST API.
@@ -126,102 +129,71 @@ func (c *openAIClient) sendRequest(ctx context.Context, endpoint string, request
 		}
 	}
 
-	const maxRateLimitRetries = 1
-	for attempt := 0; attempt <= maxRateLimitRetries; attempt++ {
+	// Non-streaming call: bounded end-to-end, retried on 429/529/5xx with
+	// Retry-After honored (modelrepo.DoWithRetry).
+	ctx, cancel := modelrepo.NonStreamingContext(ctx)
+	defer cancel()
+
+	resp, err := modelrepo.DoWithRetry(ctx, c.httpClient, func() (*http.Request, error) {
 		var reqBody io.Reader
 		if body != nil {
-			reqBody = bytes.NewBuffer(body)
+			reqBody = bytes.NewReader(body)
 		}
-
 		req, err := http.NewRequestWithContext(ctx, "POST", url, reqBody)
 		if err != nil {
-			err = fmt.Errorf("failed to create request: %w", err)
-			reportErr(err)
-			return err
+			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		return req, nil
+	})
+	if err != nil {
+		err = fmt.Errorf("HTTP request failed for model %s: %w", c.modelName, err)
+		reportErr(err)
+		return err
+	}
+	defer resp.Body.Close()
 
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			err = fmt.Errorf("HTTP request failed for model %s: %w", c.modelName, err)
+	reportChange("http_response", map[string]any{
+		"status_code": resp.StatusCode,
+		"headers":     resp.Header,
+	})
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResponse struct {
+			Error struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+				Code    any    `json:"code"`
+			} `json:"error"`
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		code, message := "", ""
+		if jsonErr := json.Unmarshal(bodyBytes, &errorResponse); jsonErr == nil && errorResponse.Error.Message != "" {
+			code = fmt.Sprintf("%v", errorResponse.Error.Code)
+			message = errorResponse.Error.Message
+			err = fmt.Errorf("OpenAI API returned non-200 status: %d, Type: %s, Code: %v, Message: %s for model %s",
+				resp.StatusCode, errorResponse.Error.Type, errorResponse.Error.Code, errorResponse.Error.Message, c.modelName)
+		} else {
+			message = string(bodyBytes)
+			err = fmt.Errorf("OpenAI API returned non-200 status: %d, body: %s for model %s",
+				resp.StatusCode, string(bodyBytes), c.modelName)
+		}
+		err = modelrepo.ClassifyProviderError(err, resp.StatusCode, code, message)
+		reportErr(err)
+		return err
+	}
+
+	if response != nil {
+		if err := json.NewDecoder(resp.Body).Decode(response); err != nil {
+			err = fmt.Errorf("failed to decode response for model %s: %w", c.modelName, err)
 			reportErr(err)
 			return err
 		}
-
-		reportChange("http_response", map[string]any{
-			"status_code": resp.StatusCode,
-			"headers":     resp.Header,
-		})
-
-		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRateLimitRetries {
-			wait := parseRetryAfterMs(resp.Header)
-			resp.Body.Close()
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(wait):
-			}
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			var errorResponse struct {
-				Error struct {
-					Message string `json:"message"`
-					Type    string `json:"type"`
-					Code    any    `json:"code"`
-				} `json:"error"`
-			}
-			bodyBytes, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if readErr == nil {
-				if jsonErr := json.Unmarshal(bodyBytes, &errorResponse); jsonErr == nil && errorResponse.Error.Message != "" {
-					err = fmt.Errorf("OpenAI API returned non-200 status: %d, Type: %s, Code: %v, Message: %s for model %s",
-						resp.StatusCode, errorResponse.Error.Type, errorResponse.Error.Code, errorResponse.Error.Message, c.modelName)
-					reportErr(err)
-					return err
-				}
-				err = fmt.Errorf("OpenAI API returned non-200 status: %d, body: %s for model %s",
-					resp.StatusCode, string(bodyBytes), c.modelName)
-				reportErr(err)
-				return err
-			}
-			err = fmt.Errorf("OpenAI API returned non-200 status: %d for model %s", resp.StatusCode, c.modelName)
-			reportErr(err)
-			return err
-		}
-
-		if response != nil {
-			if err := json.NewDecoder(resp.Body).Decode(response); err != nil {
-				resp.Body.Close()
-				err = fmt.Errorf("failed to decode response for model %s: %w", c.modelName, err)
-				reportErr(err)
-				return err
-			}
-		}
-		resp.Body.Close()
-
-		reportChange("request_completed", nil)
-		return nil
 	}
-	return fmt.Errorf("OpenAI API rate limit exceeded for model %s", c.modelName)
-}
 
-// parseRetryAfterMs reads Retry-After-Ms (milliseconds) or Retry-After (seconds)
-// from the response headers. Falls back to 2 seconds if neither is present.
-func parseRetryAfterMs(h http.Header) time.Duration {
-	if ms := h.Get("Retry-After-Ms"); ms != "" {
-		if n, err := strconv.ParseInt(ms, 10, 64); err == nil && n > 0 {
-			return time.Duration(n) * time.Millisecond
-		}
-	}
-	if s := h.Get("Retry-After"); s != "" {
-		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
-			return time.Duration(n) * time.Second
-		}
-	}
-	return 2 * time.Second
+	reportChange("request_completed", nil)
+	return nil
 }
 
 // buildOpenAIRequest builds a compliant request and sanitizes tool names per
@@ -268,6 +240,12 @@ func buildOpenAIRequestWithCapabilities(modelName string, messages []modelrepo.M
 
 	if supportsThink {
 		req.ReasoningEffort = openAIReasoningEffort(modelName, cfg.Think)
+	}
+
+	// OpenAI prefix caching is automatic (≥1024 tokens); the session cache
+	// key only steers shard routing so one session's requests hit one cache.
+	if cfg.CacheHints != nil && cfg.CacheHints.SessionKey != "" {
+		req.PromptCacheKey = cfg.CacheHints.SessionKey
 	}
 
 	// OpenAI's sampling parameter support depends on both model family and

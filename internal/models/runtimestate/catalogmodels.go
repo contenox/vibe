@@ -5,6 +5,7 @@ import (
 
 	"github.com/contenox/beam/internal/models/modelrepo"
 	"github.com/contenox/beam/internal/models/statetype"
+	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
 const observedDisplayNameMetaKey = "display_name"
@@ -41,6 +42,36 @@ func observedModelFromPullStatus(model statetype.ModelPullStatus) modelrepo.Obse
 		},
 		Meta: meta,
 	}
+}
+
+// mergeDeclaredOverObserved builds the runtime entry for a declared model from
+// the observed catalog entry, overlaying admin intent: identity fields come
+// from the declaration, a declared context length > 0 wins over the observed
+// one, and declared capability trues merge in additively. Capabilities the
+// declared row cannot express (CanVision, CanThink) always survive from
+// observation; a declared false never suppresses an observed true — manual
+// suppression goes through capability overrides instead.
+func mergeDeclaredOverObserved(declared *runtimetypes.Model, observed modelrepo.ObservedModel) statetype.ModelPullStatus {
+	lmr := pullStatusFromObservedModel(observed)
+	lmr.Name = declared.ID
+	lmr.Model = declared.Model
+	lmr.ModifiedAt = declared.UpdatedAt
+	if declared.ContextLength > 0 {
+		lmr.ContextLength = declared.ContextLength
+	}
+	if declared.CanChat {
+		lmr.CanChat = true
+	}
+	if declared.CanEmbed {
+		lmr.CanEmbed = true
+	}
+	if declared.CanPrompt {
+		lmr.CanPrompt = true
+	}
+	if declared.CanStream {
+		lmr.CanStream = true
+	}
+	return lmr
 }
 
 func pullStatusFromObservedModel(model modelrepo.ObservedModel) statetype.ModelPullStatus {

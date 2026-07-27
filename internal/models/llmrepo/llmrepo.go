@@ -21,7 +21,17 @@ type Request struct {
 	ProviderTypes []string // Optional: if empty, uses all default providers
 	ModelNames    []string // Optional: if empty, any model is considered
 	ContextLength int      // Minimum required context length
-	Tracker       libtracker.ActivityTracker
+	// SessionKey is an opaque per-session cache-affinity key (derive it with
+	// DeriveSessionKey — never pass a raw internal session ID). A non-empty
+	// key pins the whole session to one provider/backend so server-side
+	// prefix caches stay warm; empty keeps today's random resolution. When
+	// the construction site has no session identity the key may also travel
+	// on the context via WithSessionKey; an explicit field value wins.
+	SessionKey string
+	// CacheHints declares where the stable/volatile boundary of this request
+	// lies (see CacheHints). Optional; nil changes nothing.
+	CacheHints *CacheHints
+	Tracker    libtracker.ActivityTracker
 }
 
 type EmbedRequest struct {
@@ -196,16 +206,20 @@ func (e *modelManager) PromptExecute(
 	}
 
 	resolverReq := e.convertToResolverRequest(req, nil)
+	// Session-sticky resolution (blueprint §4.1.5): with a session key the
+	// same session lands on the same provider/backend so its prefix cache
+	// stays warm; without one this is exactly the old Randomly policy.
+	policy := llmresolver.StickyOrRandom(effectiveSessionKey(ctx, req))
 	client, provider, backend, err := llmresolver.PromptExecute(ctx,
 		resolverReq,
 		runtimeStateResolution,
-		llmresolver.Randomly,
+		policy,
 	)
 	if err != nil && e.reconcileForResolution(ctx, err) {
 		client, provider, backend, err = llmresolver.PromptExecute(ctx,
 			resolverReq,
 			e.GetRuntime(ctx),
-			llmresolver.Randomly,
+			policy,
 		)
 	}
 	if err != nil {
@@ -250,16 +264,19 @@ func (e *modelManager) Chat(
 	}
 
 	resolverReq := e.convertToResolverRequest(req, messages)
+	// Session-sticky resolution (blueprint §4.1.5); empty key == Randomly.
+	sessionKey := effectiveSessionKey(ctx, req)
+	policy := llmresolver.StickyOrRandom(sessionKey)
 	client, provider, backend, err := llmresolver.Chat(ctx,
 		resolverReq,
 		runtimeStateResolution,
-		llmresolver.Randomly,
+		policy,
 	)
 	if err != nil && e.reconcileForResolution(ctx, err) {
 		client, provider, backend, err = llmresolver.Chat(ctx,
 			resolverReq,
 			e.GetRuntime(ctx),
-			llmresolver.Randomly,
+			policy,
 		)
 	}
 	if err != nil {
@@ -267,7 +284,7 @@ func (e *modelManager) Chat(
 	}
 	defer safeClose(client)
 
-	response, err := client.Chat(ctx, messages, opts...)
+	response, err := client.Chat(ctx, messages, withCanonicalRequestShape(opts, providerCacheHints(req.CacheHints, sessionKey))...)
 	if err != nil {
 		return libmodelprovider.ChatResult{}, Meta{}, fmt.Errorf("chat execution failed: %w", err)
 	}
@@ -276,6 +293,12 @@ func (e *modelManager) Chat(
 		ModelName:    provider.ModelName(),
 		ProviderType: provider.GetType(),
 		BackendID:    backend,
+	}
+	// Non-streaming usage reporting: providers attach their token accounting
+	// to the ChatResult; record it on the same tracker event the stream path
+	// uses so cache hit rates are observable on both paths.
+	if response.Usage != nil {
+		e.reportTokenUsage(ctx, req, meta, *response.Usage)
 	}
 	return response, meta, nil
 }
@@ -300,6 +323,9 @@ func (e *modelManager) Embed(
 	}
 
 	resolverReq := e.convertToResolverEmbedRequest(embedReq)
+	// Embedding stays on Randomly deliberately: EmbedRequest carries no
+	// session identity, and embeddings gain nothing from prefix caches (each
+	// request is an independent document, not an append-only conversation).
 	client, provider, backend, err := llmresolver.Embed(ctx,
 		resolverReq,
 		runtimeStateResolution,
@@ -355,54 +381,133 @@ func (e *modelManager) Stream(
 	}
 
 	resolverReq := e.convertToResolverRequest(req, messages)
+	// Session-sticky resolution (blueprint §4.1.5); empty key == Randomly.
+	sessionKey := effectiveSessionKey(ctx, req)
+	policy := llmresolver.StickyOrRandom(sessionKey)
 	client, provider, backend, err := llmresolver.Stream(ctx,
 		resolverReq,
 		runtimeStateResolution,
-		llmresolver.Randomly,
+		policy,
 	)
 	if err != nil && e.reconcileForResolution(ctx, err) {
 		client, provider, backend, err = llmresolver.Stream(ctx,
 			resolverReq,
 			e.GetRuntime(ctx),
-			llmresolver.Randomly,
+			policy,
 		)
 	}
 	if err != nil {
 		return nil, Meta{}, fmt.Errorf("stream: client resolution failed: %w", err)
 	}
 
-	stream, err := client.Stream(ctx, messages, opts...)
+	stream, err := client.Stream(ctx, messages, withCanonicalRequestShape(opts, providerCacheHints(req.CacheHints, sessionKey))...)
 	if err != nil {
 		safeClose(client)
 		return nil, Meta{}, fmt.Errorf("stream initialization failed: %w", err)
 	}
-
-	// Wrap the stream to close the client when done. Every relay send selects
-	// on ctx.Done() so an abandoned consumer can never strand this goroutine
-	// (and the client it holds) on a blocked channel send.
-	wrappedStream := make(chan *libmodelprovider.StreamParcel)
-	go func() {
-		defer close(wrappedStream)
-		defer safeClose(client)
-
-		for parcel := range stream {
-			select {
-			case wrappedStream <- parcel:
-			case <-ctx.Done():
-				return
-			}
-			if parcel.Error != nil {
-				break
-			}
-		}
-	}()
 
 	meta := Meta{
 		ModelName:    provider.ModelName(),
 		ProviderType: provider.GetType(),
 		BackendID:    backend,
 	}
+
+	// Wrap the stream to close the client when done. Every relay send selects
+	// on ctx.Done() so an abandoned consumer can never strand this goroutine
+	// (and the client it holds) on a blocked channel send. The relay also
+	// observes provider usage reports (mid-stream and terminal parcels) and
+	// records them in the tracker once per request, so token accounting exists
+	// even for callers that ignore the parcels themselves.
+	wrappedStream := make(chan *libmodelprovider.StreamParcel)
+	go func() {
+		defer close(wrappedStream)
+		defer safeClose(client)
+
+		var usage libmodelprovider.TokenUsage
+		sawUsage := false
+		for parcel := range stream {
+			if parcel.Usage != nil {
+				mergeTokenUsage(&usage, parcel.Usage)
+				sawUsage = true
+			}
+			if parcel.Terminal != nil && parcel.Terminal.Usage != nil {
+				mergeTokenUsage(&usage, parcel.Terminal.Usage)
+				sawUsage = true
+			}
+			select {
+			case wrappedStream <- parcel:
+			case <-ctx.Done():
+				if sawUsage {
+					e.reportTokenUsage(ctx, req, meta, usage)
+				}
+				return
+			}
+			if parcel.Error != nil {
+				break
+			}
+		}
+		if sawUsage {
+			e.reportTokenUsage(ctx, req, meta, usage)
+		}
+	}()
+
 	return wrappedStream, meta, nil
+}
+
+// mergeTokenUsage merges a later provider usage report over an earlier one
+// field-wise: zero means "not reported" (per the TokenUsage contract), so a
+// provider that reports prompt tokens at stream start and completion tokens
+// at the end accumulates into one complete record.
+func mergeTokenUsage(dst *libmodelprovider.TokenUsage, src *libmodelprovider.TokenUsage) {
+	if src.PromptTokens != 0 {
+		dst.PromptTokens = src.PromptTokens
+	}
+	if src.CompletionTokens != 0 {
+		dst.CompletionTokens = src.CompletionTokens
+	}
+	if src.TotalTokens != 0 {
+		dst.TotalTokens = src.TotalTokens
+	}
+	if src.CacheReadTokens != 0 {
+		dst.CacheReadTokens = src.CacheReadTokens
+	}
+	if src.CacheWriteTokens != 0 {
+		dst.CacheWriteTokens = src.CacheWriteTokens
+	}
+}
+
+// reportTokenUsage records one request's provider-reported token accounting
+// in the tracker. This is the measurement seam for cache utilization
+// (blueprint §4.4): once modelrepo.TokenUsage grows cache-read/cache-write
+// counters, they ride this same event and warm/cold hit rates become
+// observable without touching any caller.
+func (e *modelManager) reportTokenUsage(ctx context.Context, req Request, meta Meta, usage libmodelprovider.TokenUsage) {
+	tracker := req.Tracker
+	if tracker == nil {
+		tracker = e.tracker
+	}
+	if tracker == nil {
+		return
+	}
+	// The stream often ends because the consumer's context was canceled or
+	// completed; the usage record must still land.
+	ctx = context.WithoutCancel(ctx)
+	_, reportChange, end := tracker.Start(ctx, "report", "token_usage",
+		"model", meta.ModelName,
+		"provider_type", meta.ProviderType,
+		"backend_id", meta.BackendID,
+	)
+	defer end()
+	reportChange("token_usage", map[string]any{
+		"prompt_tokens":     usage.PromptTokens,
+		"completion_tokens": usage.CompletionTokens,
+		"total_tokens":      usage.TotalTokens,
+		// Cache accounting (blueprint §4.4): prompt_tokens is the TOTAL prompt
+		// count on every provider, so the warm hit rate of a request is
+		// cache_read / (prompt_tokens - cache_write).
+		"cache_read":  usage.CacheReadTokens,
+		"cache_write": usage.CacheWriteTokens,
+	})
 }
 
 func (e *modelManager) GetRuntime(ctx context.Context) runtimestate.ProviderFromRuntimeState {

@@ -28,7 +28,7 @@ type anthropicProvider struct {
 // NewAnthropicProvider returns a modelrepo.Provider for the direct Anthropic API.
 func NewAnthropicProvider(apiKey, modelName string, backendURLs []string, capability modelrepo.CapabilityConfig, httpClient *http.Client, tracker libtracker.ActivityTracker) modelrepo.Provider {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = modelrepo.SharedHTTPClient
 	}
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}

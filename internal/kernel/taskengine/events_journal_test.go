@@ -56,6 +56,76 @@ func TestUnit_KVJournalTaskEventSink_SkipsChunksAndAnonymousEvents(t *testing.T)
 	require.Empty(t, replayed)
 }
 
+// TestUnit_KVJournalTaskEventSink_JournalingMatrix pins the per-kind
+// journaling column of docs/development/engine-events.md against the actual
+// sink, driven by AllTaskEventKinds so a new kind cannot ship without an
+// explicit journaling decision: step_chunk is the ONLY unjournaled kind;
+// step_stream_end in particular IS journaled (replay carries stream brackets).
+func TestUnit_KVJournalTaskEventSink_JournalingMatrix(t *testing.T) {
+	kv := journalTestKV(t)
+	sink := NewKVJournalTaskEventSink(nil, kv, libtracker.NoopTracker{})
+	ctx := context.Background()
+
+	for _, kind := range AllTaskEventKinds() {
+		require.NoError(t, sink.PublishTaskEvent(ctx, TaskEvent{
+			Kind:      kind,
+			RequestID: "req-matrix",
+			Scope:     EventScope{Chain: "c", Task: "t"},
+		}))
+	}
+
+	replayed, err := GetJournaledEvents(ctx, kv, "req-matrix")
+	require.NoError(t, err)
+
+	var want []TaskEventKind
+	for _, kind := range AllTaskEventKinds() {
+		if kind == TaskEventStepChunk {
+			continue
+		}
+		want = append(want, kind)
+	}
+	var got []TaskEventKind
+	for _, ev := range replayed {
+		got = append(got, ev.Kind)
+		require.Equal(t, EventScope{Chain: "c", Task: "t"}, ev.Scope,
+			"the hierarchical address must survive the journal round-trip")
+	}
+	require.Equal(t, want, got, "journal must keep arrival order and drop exactly step_chunk")
+}
+
+// TestUnit_KVJournalTaskEventSink_StreamEndBracketFieldsSurvive asserts the
+// replayed stream bracket keeps its payload — the reason step_stream_end
+// exists (a replayed run could not previously tell streaming happened).
+func TestUnit_KVJournalTaskEventSink_StreamEndBracketFieldsSurvive(t *testing.T) {
+	kv := journalTestKV(t)
+	sink := NewKVJournalTaskEventSink(nil, kv, libtracker.NoopTracker{})
+	ctx := context.Background()
+
+	require.NoError(t, sink.PublishTaskEvent(ctx, TaskEvent{
+		Kind:      TaskEventStepChunk,
+		RequestID: "req-bracket",
+		Content:   "streamed text",
+	}))
+	require.NoError(t, sink.PublishTaskEvent(ctx, TaskEvent{
+		Kind:         TaskEventStepStreamEnd,
+		RequestID:    "req-bracket",
+		Scope:        EventScope{Chain: "c", Task: "t"},
+		ChunkCount:   3,
+		FinishReason: "length",
+		Usage:        &TokenUsage{Prompt: 5, Completion: 9, Total: 14},
+	}))
+
+	replayed, err := GetJournaledEvents(ctx, kv, "req-bracket")
+	require.NoError(t, err)
+	require.Len(t, replayed, 1, "chunks are dropped; the bracket survives")
+	ev := replayed[0]
+	require.Equal(t, TaskEventStepStreamEnd, ev.Kind)
+	require.Equal(t, 3, ev.ChunkCount)
+	require.Equal(t, "length", ev.FinishReason)
+	require.NotNil(t, ev.Usage)
+	require.Equal(t, TokenUsage{Prompt: 5, Completion: 9, Total: 14}, *ev.Usage)
+}
+
 func TestUnit_KVJournalTaskEventSink_CapsLargeTextFields(t *testing.T) {
 	kv := journalTestKV(t)
 	sink := NewKVJournalTaskEventSink(nil, kv, libtracker.NoopTracker{})

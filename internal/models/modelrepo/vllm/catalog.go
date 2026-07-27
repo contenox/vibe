@@ -33,6 +33,10 @@ func (p *catalogProvider) Type() string {
 }
 
 func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedModel, error) {
+	// Catalog listing is a non-streaming call: bound it end-to-end.
+	ctx, cancel := modelrepo.NonStreamingContext(ctx)
+	defer cancel()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(p.spec.BaseURL, "/")+"/v1/models", nil)
 	if err != nil {
 		return nil, err

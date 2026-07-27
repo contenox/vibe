@@ -74,7 +74,7 @@ func (c *vertexClient) postJSON(ctx context.Context, endpoint string, request an
 	)
 	defer end()
 
-	var reqBody io.Reader
+	var payload []byte
 	if request != nil {
 		b, err := json.Marshal(request)
 		if err != nil {
@@ -82,22 +82,28 @@ func (c *vertexClient) postJSON(ctx context.Context, endpoint string, request an
 			reportErr(err)
 			return nil, err
 		}
-		reqBody = bytes.NewBuffer(b)
+		payload = b
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, reqBody)
-	if err != nil {
-		err = fmt.Errorf("failed to create request: %w", err)
-		reportErr(err)
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if err := c.authHeaders(ctx, req); err != nil {
-		reportErr(err)
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
+	// Non-streaming call: bounded end-to-end, retried on 429/5xx with
+	// Retry-After honored.
+	ctx, cancel := modelrepo.NonStreamingContext(ctx)
+	defer cancel()
+	resp, err := modelrepo.DoWithRetry(ctx, c.httpClient, func() (*http.Request, error) {
+		var reqBody io.Reader
+		if payload != nil {
+			reqBody = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if err := c.authHeaders(ctx, req); err != nil {
+			return nil, err
+		}
+		return req, nil
+	})
 	if err != nil {
 		err = fmt.Errorf("HTTP request failed for model %s: %w", c.modelName, err)
 		reportErr(err)
@@ -115,12 +121,16 @@ func (c *vertexClient) postJSON(ctx context.Context, endpoint string, request an
 	if resp.StatusCode != http.StatusOK {
 		var eresp vertexErrorResponse
 		if jsonErr := json.Unmarshal(body, &eresp); jsonErr == nil && eresp.Error.Message != "" {
+			// Same documented shapes as Gemini: RESOURCE_EXHAUSTED → rate
+			// limit, INVALID_ARGUMENT with token phrasing → context overflow.
 			err = fmt.Errorf("vertex API error: %d %s - %s (model=%s url=%s)",
 				resp.StatusCode, eresp.Error.Status, eresp.Error.Message, c.modelName, endpoint)
+			err = modelrepo.ClassifyProviderError(err, resp.StatusCode, eresp.Error.Status, eresp.Error.Message)
 			reportErr(err)
 			return nil, err
 		}
 		err = fmt.Errorf("vertex API error: %d - %s (model=%s url=%s)", resp.StatusCode, string(body), c.modelName, endpoint)
+		err = modelrepo.ClassifyProviderError(err, resp.StatusCode, "", string(body))
 		reportErr(err)
 		return nil, err
 	}

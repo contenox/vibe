@@ -113,7 +113,7 @@ func (registryCatalogFactory) NewCatalogProvider(spec BackendSpec, opts ...Catal
 	}
 
 	options := CatalogOptions{
-		HTTPClient: http.DefaultClient,
+		HTTPClient: SharedHTTPClient,
 		Tracker:    libtracker.NoopTracker{},
 	}
 	for _, opt := range opts {
@@ -122,7 +122,7 @@ func (registryCatalogFactory) NewCatalogProvider(spec BackendSpec, opts ...Catal
 		}
 	}
 	if options.HTTPClient == nil {
-		options.HTTPClient = http.DefaultClient
+		options.HTTPClient = SharedHTTPClient
 	}
 	if options.Tracker == nil {
 		options.Tracker = libtracker.NoopTracker{}

@@ -63,20 +63,41 @@ func (c *anthropicClient) post(ctx context.Context, path string, request any) ([
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: marshal request: %w", err)
 	}
-	req, err := c.newRequest(ctx, path, b, false)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.httpClient.Do(req)
+	// Non-streaming call: bounded end-to-end, retried on 429/529 (Anthropic
+	// overloaded)/5xx with Retry-After honored.
+	ctx, cancel := modelrepo.NonStreamingContext(ctx)
+	defer cancel()
+	resp, err := modelrepo.DoWithRetry(ctx, c.httpClient, func() (*http.Request, error) {
+		return c.newRequest(ctx, path, b, false)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: request failed for model %s: %w", c.modelName, err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("anthropic API error: %d - %s (model=%s)", resp.StatusCode, strings.TrimSpace(string(body)), c.modelName)
+		return nil, anthropicAPIError(resp.StatusCode, body, c.modelName)
 	}
 	return body, nil
+}
+
+// anthropicAPIError builds the API error and wraps it with the typed sentinel
+// matching Anthropic's documented shapes: 429 and 529 (overloaded_error) are
+// rate/capacity limits; a 400 invalid_request_error whose message says the
+// prompt exceeds the context window is a context-length overflow.
+func anthropicAPIError(status int, body []byte, modelName string) error {
+	err := fmt.Errorf("anthropic API error: %d - %s (model=%s)", status, strings.TrimSpace(string(body)), modelName)
+	var payload struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	message := string(body)
+	if json.Unmarshal(body, &payload) == nil && payload.Error.Message != "" {
+		message = payload.Error.Message
+	}
+	return modelrepo.ClassifyProviderError(err, status, "", message)
 }
 
 func (c *anthropicClient) openStream(ctx context.Context, path string, request any) (*http.Response, error) {
@@ -95,7 +116,7 @@ func (c *anthropicClient) openStream(ctx context.Context, path string, request a
 	if resp.StatusCode != http.StatusOK {
 		bd, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("anthropic API stream error: %d - %s", resp.StatusCode, strings.TrimSpace(string(bd)))
+		return nil, anthropicAPIError(resp.StatusCode, bd, c.modelName)
 	}
 	return resp, nil
 }
@@ -131,6 +152,15 @@ func applyAnthropicThinking(req *msgcodec.Request, modelName string, cfg *modelr
 		return
 	}
 	req.Thinking = &msgcodec.ThinkingConfig{Type: "enabled", BudgetTokens: budget}
+}
+
+// stripThinkingUnlessEnabled drops replayed thinking blocks whenever the
+// outgoing request does not turn thinking on: Anthropic rejects history
+// thinking blocks unless the request enables thinking (enabled/adaptive).
+func stripThinkingUnlessEnabled(req *msgcodec.Request) {
+	if req.Thinking == nil || req.Thinking.Type == "disabled" {
+		msgcodec.StripThinkingBlocks(req)
+	}
 }
 
 func anthropicThinkingBudget(level string, maxTokens int) int {
@@ -224,6 +254,7 @@ func (c *anthropicChatClient) Chat(ctx context.Context, messages []modelrepo.Mes
 	if c.canThink {
 		applyAnthropicThinking(&req, c.modelName, cfg)
 	}
+	stripThinkingUnlessEnabled(&req)
 
 	raw, err := c.post(ctx, "/v1/messages", req)
 	if err != nil {
@@ -253,6 +284,7 @@ func (c *anthropicStreamClient) Stream(ctx context.Context, messages []modelrepo
 	if c.canThink {
 		applyAnthropicThinking(&req, c.modelName, cfg)
 	}
+	stripThinkingUnlessEnabled(&req)
 	req.Stream = true
 	dec := msgcodec.NewStreamDecoder(nameMap)
 

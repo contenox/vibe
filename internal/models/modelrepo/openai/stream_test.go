@@ -262,8 +262,12 @@ func TestUnit_OpenAIStreamClient_ResponsesAPIEmitsReasoningSummary(t *testing.T)
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "event: response.output_text.delta\n")
 		fmt.Fprint(w, `data: {"type":"response.output_text.delta","delta":"ans"}`+"\n\n")
+		// Real wire shape: reasoning surfaces as an output item of type
+		// "reasoning" with summary_text parts. The top-level "reasoning"
+		// field is a request-config echo and must be ignored — the fixture
+		// carries a decoy to pin that.
 		fmt.Fprint(w, "event: response.completed\n")
-		fmt.Fprint(w, `data: {"type":"response.completed","response":{"output":[],"reasoning":{"summary":"I reasoned this"}}}`+"\n\n")
+		fmt.Fprint(w, `data: {"type":"response.completed","response":{"output":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"I reasoned this"}]}],"reasoning":{"effort":"medium","summary":"auto"}}}`+"\n\n")
 	}))
 	defer srv.Close()
 

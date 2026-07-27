@@ -243,6 +243,8 @@ func TestTaskEvents_ChatStreamingPublishesChunks(t *testing.T) {
 		taskengine.TaskEventStepChunk,
 		taskengine.TaskEventStepChunk,
 		taskengine.TaskEventStepChunk,
+		// Stream bracket: closes after the last chunk, before step_completed.
+		taskengine.TaskEventStepStreamEnd,
 		taskengine.TaskEventStepCompleted,
 		taskengine.TaskEventChainCompleted,
 	}, kinds)

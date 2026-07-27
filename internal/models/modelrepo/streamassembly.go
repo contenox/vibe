@@ -159,6 +159,12 @@ func (a *StreamAssembler) mergeUsage(u TokenUsage) {
 	if u.TotalTokens != 0 {
 		a.usage.TotalTokens = u.TotalTokens
 	}
+	if u.CacheReadTokens != 0 {
+		a.usage.CacheReadTokens = u.CacheReadTokens
+	}
+	if u.CacheWriteTokens != 0 {
+		a.usage.CacheWriteTokens = u.CacheWriteTokens
+	}
 }
 
 // Result finalizes the assembly. It fails when the stream errored, when a

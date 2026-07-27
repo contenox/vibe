@@ -28,7 +28,7 @@ type OllamaProvider struct {
 
 func NewOllamaProvider(name string, backends []string, httpClient *http.Client, caps modelrepo.CapabilityConfig, apiKey string, tracker libtracker.ActivityTracker) modelrepo.Provider {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = modelrepo.SharedHTTPClient
 	}
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}

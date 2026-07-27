@@ -22,6 +22,16 @@ const (
 	// StateFinished: the turn's chain has ended (its result is available) and the
 	// session is awaiting viewer detach / reaper cleanup.
 	StateFinished = "finished"
+	// StateSuspended: the turn's chain SUSPENDED on a pending human approval
+	// (S6) — checkpointed durably, its goroutine ended (that is the point: no
+	// parked goroutine holds the run). Lifecycle-wise it is a finished turn
+	// (same teardown/reap rules); the distinct state tells the operator board
+	// "answer the approval to continue" apart from "done". A later resume in
+	// this process attaches as a FRESH turn with a fresh journal — the
+	// documented linkage is the session ID plus the run's request ID, under
+	// which the durable engine-event journal is continuous across the
+	// suspension (the in-memory journal here is per-turn and is not).
+	StateSuspended = "suspended"
 )
 
 // Result is the outcome of one turn, returned by a TurnFunc and read back by the
@@ -34,6 +44,11 @@ type Result struct {
 	// for a clean end and for a user/grace CANCELLATION — a cancellation resolves
 	// with StopReasonCancelled and no error, per the ACP contract.
 	Err error
+	// Suspended marks a turn whose chain parked on a pending human approval and
+	// checkpointed (S6): not a failure (Err is nil), and the turn's status reads
+	// StateSuspended instead of StateFinished until it is reaped. The approval
+	// card the permission flow already rendered stands in for further UI.
+	Suspended bool
 }
 
 // TurnFunc runs one turn's work. ctx is the serve-rooted, hard-deadline-bounded
@@ -244,6 +259,8 @@ func (ts *turnSession) status() TurnStatus {
 	defer ts.mu.Unlock()
 	state := StateRunning
 	switch {
+	case ts.finished && ts.result.Suspended:
+		state = StateSuspended
 	case ts.finished:
 		state = StateFinished
 	case len(ts.viewers) == 0:

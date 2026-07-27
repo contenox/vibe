@@ -17,6 +17,35 @@ type OpenAIChatClient struct {
 // is treated as best-effort compatibility rather than a guaranteed contract.
 type openAIChatCompletionResponse struct {
 	Choices []openAIChatCompletionChoice `json:"choices"`
+	Usage   *openAIChatCompletionUsage   `json:"usage"`
+}
+
+// openAIChatCompletionUsage is the chat-completions usage report.
+// prompt_tokens already INCLUDES cached tokens (no normalization needed); the
+// cached count is broken out under prompt_tokens_details.cached_tokens.
+type openAIChatCompletionUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+}
+
+func (u *openAIChatCompletionUsage) neutralUsage() *modelrepo.TokenUsage {
+	if u == nil {
+		return nil
+	}
+	total := u.TotalTokens
+	if total == 0 {
+		total = u.PromptTokens + u.CompletionTokens
+	}
+	return &modelrepo.TokenUsage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      total,
+		CacheReadTokens:  u.PromptTokensDetails.CachedTokens,
+	}
 }
 
 type openAIChatCompletionChoice struct {
@@ -113,6 +142,7 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	result := modelrepo.ChatResult{
 		Message:   message,
 		ToolCalls: toolCalls,
+		Usage:     response.Usage.neutralUsage(),
 	}
 	reportChange("chat_completed", result)
 	return result, nil

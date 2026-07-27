@@ -33,7 +33,7 @@ func newGoogleCatalog(spec modelrepo.BackendSpec, opts modelrepo.CatalogOptions)
 	}
 	client := opts.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = modelrepo.SharedHTTPClient
 	}
 	return &googleCatalogProvider{
 		spec:       spec,
@@ -45,6 +45,10 @@ func newGoogleCatalog(spec modelrepo.BackendSpec, opts modelrepo.CatalogOptions)
 func (p *googleCatalogProvider) Type() string { return "vertex-google" }
 
 func (p *googleCatalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedModel, error) {
+	// Catalog listing is a non-streaming call: bound it end-to-end.
+	ctx, cancel := modelrepo.NonStreamingContext(ctx)
+	defer cancel()
+
 	return p.listGoogleModelsFromVertexPublisher(ctx)
 }
 

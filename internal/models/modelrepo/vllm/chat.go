@@ -35,7 +35,7 @@ func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message,
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "vllm", "model", c.modelName)
 	defer end()
 
-	request := buildChatRequest(c.modelName, messages, args, c.canThink)
+	request, nameMap := buildChatRequest(c.modelName, messages, args, c.canThink)
 	c.clampChatRequest(&request)
 
 	var response chatResponse
@@ -61,11 +61,20 @@ func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message,
 	}
 
 	// Convert tool calls
-	toolCalls := convertChatToolCalls(choice.Message.ToolCalls)
+	toolCalls := convertChatToolCalls(choice.Message.ToolCalls, nameMap)
 
 	result := modelrepo.ChatResult{
 		Message:   message,
 		ToolCalls: toolCalls,
+		// vLLM reports no usable cache dimension per request (the V1 engine's
+		// cached_tokens detail is broken/null — vllm#44961), so the cache
+		// fields stay zero; Automatic Prefix Caching hits are measured
+		// server-side (vllm:prefix_cache_* counters) and show up as TTFT.
+		Usage: &modelrepo.TokenUsage{
+			PromptTokens:     response.Usage.PromptTokens,
+			CompletionTokens: response.Usage.CompletionTokens,
+			TotalTokens:      response.Usage.TotalTokens,
+		},
 	}
 
 	switch choice.FinishReason {

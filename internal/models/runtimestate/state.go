@@ -453,19 +453,29 @@ func (s *State) processVLLMBackend(ctx context.Context, backend *runtimetypes.Ba
 	for _, m := range models {
 		declaredModelMap[m.Model] = m
 	}
-	catalog, err := s.newCatalogProvider(backend, "")
+
+	// vLLM endpoints may require a bearer token (configured under the
+	// OpenAI-compatible provider key). The key must reach both the catalog
+	// (model listing) and the runtime state (the adapter hands it to the
+	// chat/stream client), or authenticated vLLM cannot work at all.
+	apiKey := ""
+	if key, err := s.loadProviderAPIKey(ctx, backend.Type); err == nil {
+		apiKey = key
+	}
+
+	catalog, err := s.newCatalogProvider(backend, apiKey)
 	if err != nil {
-		storeBackendError(s, backend, "", err, nil)
+		storeBackendError(s, backend, apiKey, err, nil)
 		return
 	}
 
 	observedModels, err := catalog.ListModels(ctx)
 	if err != nil {
-		storeBackendError(s, backend, "", err, nil)
+		storeBackendError(s, backend, apiKey, err, nil)
 		return
 	}
 	if len(observedModels) == 0 {
-		storeBackendError(s, backend, "", fmt.Errorf("No models found in response"), nil)
+		storeBackendError(s, backend, apiKey, fmt.Errorf("No models found in response"), nil)
 		return
 	}
 
@@ -475,6 +485,7 @@ func (s *State) processVLLMBackend(ctx context.Context, backend *runtimetypes.Ba
 		Models:  observedModelNames(observedModels),
 		Backend: *backend,
 	}
+	res.SetAPIKey(apiKey)
 
 	pulledModels := make([]statetype.ModelPullStatus, 0, len(observedModels))
 	for _, observed := range observedModels {
@@ -487,17 +498,13 @@ func (s *State) processVLLMBackend(ctx context.Context, backend *runtimetypes.Ba
 				_ = runtimetypes.New(s.dbInstance.WithoutTransaction()).UpdateModel(ctx, &declCopy)
 			}
 
-			lmr := statetype.ModelPullStatus{
-				Name:            declaredModel.ID,
-				Model:           declaredModel.Model,
-				ModifiedAt:      declaredModel.UpdatedAt,
-				ContextLength:   effectiveContextLen,
-				MaxOutputTokens: observed.MaxOutputTokens,
-				CanChat:         declaredModel.CanChat,
-				CanEmbed:        declaredModel.CanEmbed,
-				CanPrompt:       declaredModel.CanPrompt,
-				CanStream:       declaredModel.CanStream,
-			}
+			// Observed capabilities are the base and declared trues merge in
+			// additively (the ollama path is the reference): the declared row
+			// (runtimetypes.Model) has no vision/think fields, so rebuilding
+			// capabilities from it alone would strip CanVision/CanThink from
+			// every hand-declared model.
+			lmr := mergeDeclaredOverObserved(declaredModel, observed)
+			lmr.ContextLength = effectiveContextLen
 			lmr = s.applyCapabilityOverrides(ctx, backend.Type, lmr)
 			pulledModels = append(pulledModels, lmr)
 			continue
@@ -683,17 +690,11 @@ func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.
 	pulledModels := make([]statetype.ModelPullStatus, 0, len(observedModels))
 	for _, observed := range observedModels {
 		if declaredModel, exists := declaredModels[observed.Name]; exists {
-			lmr := statetype.ModelPullStatus{
-				Name:            declaredModel.ID,
-				Model:           declaredModel.Model,
-				ModifiedAt:      declaredModel.UpdatedAt,
-				ContextLength:   declaredModel.ContextLength,
-				MaxOutputTokens: observed.MaxOutputTokens,
-				CanChat:         declaredModel.CanChat,
-				CanEmbed:        declaredModel.CanEmbed,
-				CanPrompt:       declaredModel.CanPrompt,
-				CanStream:       declaredModel.CanStream,
-			}
+			// Observed capabilities are the base and declared trues merge in
+			// additively (the ollama path is the reference): the declared row
+			// has no vision/think fields, so a hand-declared gpt-4o must keep
+			// the vision capability the catalog observed for it.
+			lmr := mergeDeclaredOverObserved(declaredModel, observed)
 			lmr = s.applyCapabilityOverrides(ctx, backend.Type, lmr)
 			pulledModels = append(pulledModels, lmr)
 			continue

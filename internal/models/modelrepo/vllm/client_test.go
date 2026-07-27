@@ -20,7 +20,7 @@ import (
 // while a text-only turn stays a bare-string content (unchanged wire shape).
 func TestUnit_BuildChatRequest_SerializesImageAsContentParts(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
-	req := buildChatRequest("vlm", []modelrepo.Message{
+	req, _ := buildChatRequest("vlm", []modelrepo.Message{
 		{Role: "user", Content: "just text"},
 		{Role: "user", Content: "describe this", Images: []modelrepo.ImagePart{
 			{Data: pngBytes, MimeType: "image/png"},
@@ -108,7 +108,7 @@ func TestUnit_BuildChatRequest_MapsThinkingLevels(t *testing.T) {
 		},
 	}
 
-	req := buildChatRequest("model", []modelrepo.Message{{Role: "user", Content: "hi"}}, []modelrepo.ChatArgument{
+	req, _ := buildChatRequest("model", []modelrepo.Message{{Role: "user", Content: "hi"}}, []modelrepo.ChatArgument{
 		modelrepo.WithTool(tool),
 		modelrepo.WithThink("xhigh"),
 	})
@@ -117,14 +117,14 @@ func TestUnit_BuildChatRequest_MapsThinkingLevels(t *testing.T) {
 	require.NotNil(t, req.ChatTemplateKwargs)
 	assert.Equal(t, true, req.ChatTemplateKwargs["enable_thinking"])
 
-	req = buildChatRequest("model", []modelrepo.Message{{Role: "user", Content: "hi"}}, []modelrepo.ChatArgument{
+	req, _ = buildChatRequest("model", []modelrepo.Message{{Role: "user", Content: "hi"}}, []modelrepo.ChatArgument{
 		modelrepo.WithThink("none"),
 	})
 	assert.Equal(t, "none", req.ReasoningEffort)
 	require.NotNil(t, req.ChatTemplateKwargs)
 	assert.Equal(t, false, req.ChatTemplateKwargs["enable_thinking"])
 
-	req = buildChatRequest("model", []modelrepo.Message{{Role: "user", Content: "hi"}}, []modelrepo.ChatArgument{
+	req, _ = buildChatRequest("model", []modelrepo.Message{{Role: "user", Content: "hi"}}, []modelrepo.ChatArgument{
 		modelrepo.WithThink("high"),
 	}, false)
 	assert.Empty(t, req.ReasoningEffort, "provider with CanThink=false must omit vLLM reasoning effort")
@@ -134,7 +134,7 @@ func TestUnit_BuildChatRequest_MapsThinkingLevels(t *testing.T) {
 func TestUnit_VLLMClient_ClampsChatMaxTokens(t *testing.T) {
 	t.Parallel()
 
-	req := buildChatRequest("model", []modelrepo.Message{{Role: "user", Content: "hi"}}, []modelrepo.ChatArgument{
+	req, _ := buildChatRequest("model", []modelrepo.Message{{Role: "user", Content: "hi"}}, []modelrepo.ChatArgument{
 		modelrepo.WithMaxTokens(4096),
 	})
 	client := &vLLMClient{maxOutputTokens: 1024}

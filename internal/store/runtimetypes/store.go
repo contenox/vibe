@@ -245,6 +245,17 @@ type Store interface {
 	ListHITLApprovalsForMission(ctx context.Context, missionID string, limit int) ([]*HITLApproval, error)
 	EstimateHITLApprovalCount(ctx context.Context) (int64, error)
 
+	// Chain checkpoints back the S6 suspend/resume machinery: a suspended
+	// chain run is a row here, keyed by the approval ID whose verdict resumes
+	// it (see runtimetypes/checkpoints.go and
+	// docs/development/blueprints/eino-evaluation.md §T4).
+	CreateChainCheckpoint(ctx context.Context, cp *ChainCheckpoint) error
+	GetChainCheckpoint(ctx context.Context, id string) (*ChainCheckpoint, error)
+	ClaimChainCheckpoint(ctx context.Context, id string, now, staleBefore time.Time) error
+	SetChainCheckpointFailure(ctx context.Context, id string, failure string) error
+	DeleteChainCheckpoint(ctx context.Context, id string) error
+	ListChainCheckpoints(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*ChainCheckpoint, error)
+
 	EnforceMaxRowCount(ctx context.Context, count int64) error
 }
 

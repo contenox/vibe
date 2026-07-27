@@ -14,10 +14,14 @@ func (c *bedrockChatClient) Chat(ctx context.Context, messages []modelrepo.Messa
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "bedrock", "model", c.modelName)
 	defer end()
 
-	in, toOriginal := buildConverseInput(c.modelName, messages, chatConfigFromArgs(args), c.maxOutputTokens)
+	in, toOriginal, err := buildConverseInput(c.modelName, messages, chatConfigFromArgs(args), c.maxOutputTokens)
+	if err != nil {
+		reportErr(err)
+		return modelrepo.ChatResult{}, err
+	}
 	out, err := c.api.Converse(ctx, in)
 	if err != nil {
-		err = fmt.Errorf("bedrock converse (model=%s): %w", c.modelName, err)
+		err = classifyBedrockError(fmt.Errorf("bedrock converse (model=%s): %w", c.modelName, err))
 		reportErr(err)
 		return modelrepo.ChatResult{}, err
 	}

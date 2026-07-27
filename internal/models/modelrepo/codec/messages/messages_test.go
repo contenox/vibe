@@ -21,8 +21,8 @@ func TestUnit_Build_SystemExtractionAndDefaults(t *testing.T) {
 	if req.MaxTokens != DefaultMaxTokens {
 		t.Fatalf("max_tokens default not applied: %d", req.MaxTokens)
 	}
-	if req.Model != "" || req.AnthropicVersion != "" {
-		t.Fatalf("codec must not set model/version (transport does)")
+	if req.Model != "" {
+		t.Fatalf("codec must not set model (transport does)")
 	}
 	if len(req.Messages) != 1 || req.Messages[0].Role != "user" {
 		t.Fatalf("system message must be lifted out of messages: %+v", req.Messages)

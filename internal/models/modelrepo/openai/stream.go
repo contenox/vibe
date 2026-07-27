@@ -76,6 +76,7 @@ func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		body, _ := io.ReadAll(resp.Body)
 		err = fmt.Errorf("OpenAI API returned non-200 status: %d - %s for model %s",
 			resp.StatusCode, string(body), c.modelName)
+		err = modelrepo.ClassifyProviderError(err, resp.StatusCode, "", string(body))
 		reportErr(err)
 		end()
 		return nil, err
@@ -297,19 +298,19 @@ func streamResponsesSSE(
 
 		case "response.completed":
 			// Reasoning summary fallback for gateways that never emitted
-			// summary deltas; skipped when deltas already streamed it.
-			if !emittedReasoning && ev.Response != nil && ev.Response.Reasoning.Summary != "" {
-				if !send(&modelrepo.StreamParcel{Thinking: ev.Response.Reasoning.Summary}) {
-					return
+			// summary deltas; skipped when deltas already streamed it. Read
+			// from the "reasoning" output items — the top-level reasoning
+			// field is a request-config echo, not content.
+			if !emittedReasoning {
+				if summary := responsesReasoningSummaryText(ev.Response); summary != "" {
+					if !send(&modelrepo.StreamParcel{Thinking: summary}) {
+						return
+					}
 				}
 			}
 			term := &modelrepo.StreamTerminal{FinishReason: "stop"}
-			if ev.Response != nil && ev.Response.Usage != nil {
-				term.Usage = &modelrepo.TokenUsage{
-					PromptTokens:     ev.Response.Usage.InputTokens,
-					CompletionTokens: ev.Response.Usage.OutputTokens,
-					TotalTokens:      ev.Response.Usage.TotalTokens,
-				}
+			if ev.Response != nil {
+				term.Usage = ev.Response.Usage.neutralUsage()
 			}
 			if !send(&modelrepo.StreamParcel{Terminal: term}) {
 				return

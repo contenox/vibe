@@ -1,5 +1,7 @@
 package gemini
 
+import "github.com/contenox/beam/internal/models/modelrepo"
+
 type geminiToolRequest struct {
 	FunctionDeclarations []geminiFunctionDeclaration `json:"functionDeclarations,omitempty"`
 }
@@ -60,10 +62,37 @@ type geminiGenerateContentResponse struct {
 
 // geminiUsageMetadata is the API's token accounting, attached to (the last
 // chunk of) a generateContent / streamGenerateContent response.
+// promptTokenCount is already the TOTAL prompt count (cached included);
+// cachedContentTokenCount breaks out the tokens served from Gemini's implicit
+// (or explicit) cache.
 type geminiUsageMetadata struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
+	PromptTokenCount        int `json:"promptTokenCount"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount"`
+	TotalTokenCount         int `json:"totalTokenCount"`
+	CachedContentTokenCount int `json:"cachedContentTokenCount"`
+}
+
+// neutralUsage maps usageMetadata onto the neutral TokenUsage. Prompt caching
+// on Gemini is IMPLICIT (enabled by default on 2.5+ models, ~90% discount on
+// cached tokens, best-effort): nothing is sent on the wire to activate it —
+// the client-side contract is byte-stable prefixes plus session affinity, and
+// this counter is where hits become visible. Explicit cachedContents
+// (guaranteed discount, storage billed per token-hour) is a recorded
+// follow-up (blueprint S1b.6) gated on measured implicit hit rates.
+func (u *geminiUsageMetadata) neutralUsage() *modelrepo.TokenUsage {
+	if u == nil {
+		return nil
+	}
+	total := u.TotalTokenCount
+	if total == 0 {
+		total = u.PromptTokenCount + u.CandidatesTokenCount
+	}
+	return &modelrepo.TokenUsage{
+		PromptTokens:     u.PromptTokenCount,
+		CompletionTokens: u.CandidatesTokenCount,
+		TotalTokens:      total,
+		CacheReadTokens:  u.CachedContentTokenCount,
+	}
 }
 
 // geminiFunctionDeclaration matches Gemini API's FunctionDeclaration exactly

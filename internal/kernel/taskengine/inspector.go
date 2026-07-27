@@ -15,6 +15,11 @@ type StackTrace interface {
 }
 
 type CapturedStateUnit struct {
+	// Scope is the unit's hierarchical address (chain + task); the same
+	// address contract TaskEvent carries, so checkpoints and replay name the
+	// position of captured state without re-deriving it from loose IDs.
+	// Additive JSON field; TaskID below stays populated identically.
+	Scope       EventScope    `json:"scope,omitzero"`
 	TaskID      string        `json:"taskID" example:"validate_input"`
 	TaskHandler string        `json:"taskHandler" example:"chat_completion"`
 	InputType   DataType      `json:"inputType" example:"string" openapi_include_type:"string"`

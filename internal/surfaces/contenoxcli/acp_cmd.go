@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,13 +23,11 @@ import (
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/models/modelrepo"
 	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/clikv"
 	"github.com/contenox/beam/internal/services/fleetservice"
 	"github.com/contenox/beam/internal/services/hitlservice"
 	"github.com/contenox/beam/internal/services/localtools"
 	"github.com/contenox/beam/internal/services/missionservice"
 	"github.com/contenox/beam/internal/services/missiontools"
-	"github.com/contenox/beam/internal/services/operatorinbox"
 	"github.com/contenox/beam/internal/services/presence"
 	"github.com/contenox/beam/internal/services/reportrouter"
 	"github.com/contenox/beam/internal/services/updatecheck"
@@ -515,91 +512,50 @@ type inProcessFleetDeps struct {
 }
 
 // buildInProcessFleet embeds the fleet the standalone editor dispatches
-// `/mission` through — the ontology's in-process subagent kernel (a mission is a
-// subagent of THIS process).
-// It mirrors serve_cmd.go's composition (agentregistryservice + agentinstance
-// kernel + operatorinbox + reportrouter + fleetservice) minimally, over the same
-// db and bus this process opened. It returns the dispatcher, the agent resolver,
-// and ONE teardown that stops the router and Closes the kernel — reaping every
-// dispatched child subprocess — on process shutdown.
+// `/mission` through — the ontology's in-process subagent kernel (a mission is
+// a subagent of THIS process). The composition itself lives in the service
+// layer (fleetservice.BuildInProcess — the build-on-services rule); this
+// adapter contributes only what the EDITOR surface knows:
+//
+//   - live-parent delivery through this connection's late-bound transport
+//     (missionReportDeliverer: the live editor session first, the kernel second);
+//   - the autonomous answer edge serve has too — a unit's question may be
+//     offered to the agent driving the session that fired it, when that
+//     mission's envelope allows. Without this an editor-fired mission could
+//     ask, and be answered by a human, but never by the very agent holding the
+//     conversation the mission came from — the case this is most useful in,
+//     since Zed and other ACP clients render no answer box of their own;
+//   - chain-agent discovery over this editor's .contenox dirs, and the same
+//     envelope-existence guard the serve path enforces over its policy files,
+//     so `/mission --policy typo.json` is refused here too.
 func buildInProcessFleet(ctx context.Context, deps inProcessFleetDeps) (fleetservice.Service, agentregistryservice.Service, func(), error) {
-	agents := agentregistryservice.New(deps.db)
-
-	// Declare the operator's agent-*.json chains (and any registered external
-	// agents) as dispatchable, exactly as serve does — the privileged discovery
-	// lane, safe. Best-effort: a failed pass leaves the fleet whatever was already
-	// declared rather than refusing to start the editor.
-	discoverChainAgents(ctx, agents, deps.contenoxDir)
-
-	// The kernel is an embeddable LIBRARY, not a serve-bound service — the false
-	// premise the old forwarding path rested on. WithStderr routes a dispatched
-	// unit's stderr to this process's stderr (the editor's log) so a unit that
-	// fails to boot is diagnosable. No unattended permission answerer is wired here
-	// (unlike serve): a dispatched unit runs bounded/ungated work or `--auto`, and
-	// routing a unit's permission ask into the PARENT editor's permission UI is a
-	// named follow-up.
-	kernel := agentinstance.New(agents, agentinstance.WithStderr(os.Stderr))
-
-	operatorInbox := operatorinbox.New(deps.db)
-
-	// The report router delivers a fired unit's report onto the session that fired
-	// it (missionReportDeliverer: the live editor session first, the kernel second),
-	// falling back to the operator inbox when no live parent owns it. It runs off
-	// the shared SQLite bus, so a unit's cross-process ReportAddedEvent reaches it.
-	router, err := reportrouter.New(reportrouter.Deps{
-		Bus: deps.bus,
-		Sessions: missionReportDeliverer{
-			chat:   func() contenoxSessionDeliverer { return chatDeliverer(deps.transport()) },
-			kernel: kernel,
+	// A dispatched mission's cwd defaults to this editor's working directory (the
+	// project Zed launched us in) when the request names none.
+	projectRoot, _ := os.Getwd()
+	return fleetservice.BuildInProcess(ctx, fleetservice.InProcessDeps{
+		DB:           deps.db,
+		Bus:          deps.bus,
+		Missions:     deps.missions,
+		ProjectRoot:  projectRoot,
+		Tracker:      deps.tracker,
+		PolicySource: hitlPolicySource(deps.contenoxDir),
+		DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
+			discoverChainAgents(dctx, agents, deps.contenoxDir)
 		},
-		Inbox:   operatorInbox,
-		Tracker: deps.tracker,
-		// The editor topology gets the same autonomous edge serve has: a unit's
-		// question may be offered to the agent driving the session that fired it,
-		// when that mission's envelope allows. Without this an editor-fired mission
-		// could ask, and be answered by a human, but never by the very agent holding
-		// the conversation the mission came from — the case this is most useful in,
-		// since Zed and other ACP clients render no answer box of their own.
+		SessionDeliverer: func(kernel agentinstance.Manager) reportrouter.SessionDeliverer {
+			return missionReportDeliverer{
+				chat:   func() contenoxSessionDeliverer { return chatDeliverer(deps.transport()) },
+				kernel: kernel,
+			}
+		},
 		AgentSupervisor: agentAnswerOffer{
 			hitl:     deps.hitl,
 			missions: deps.missions,
 			prompter: transportPrompter{transport: deps.transport},
 			tracker:  deps.tracker,
 		},
+		Stderr: os.Stderr,
 	})
-	if err != nil {
-		_ = kernel.Close()
-		return nil, nil, nil, fmt.Errorf("build report router: %w", err)
-	}
-	stopRouter, err := router.Start(ctx)
-	if err != nil {
-		_ = kernel.Close()
-		return nil, nil, nil, fmt.Errorf("start report router: %w", err)
-	}
-
-	// A dispatched mission's cwd defaults to this editor's working directory (the
-	// project Zed launched us in) when the request names none.
-	projectRoot, _ := os.Getwd()
-	fleetOpts := []fleetservice.Option{
-		// Same envelope-existence guard the serve path enforces, over this editor's
-		// .contenox policy files, so `/mission --policy typo.json` is refused here too.
-		fleetservice.WithPolicyValidator(hitlservice.NewPolicyValidator(hitlPolicySource(deps.contenoxDir), runtimetypes.LocalTenantID, "")),
-	}
-	// The operator's fleet-width cap. Absent or unparsable keeps the enforced
-	// default (fleetservice.DefaultMaxParallel); the knob and the gate share one
-	// key constant so they cannot drift.
-	if raw := clikv.Read(ctx, runtimetypes.New(deps.db.WithoutTransaction()), fleetservice.MaxParallelConfigKey); raw != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
-			fleetOpts = append(fleetOpts, fleetservice.WithMaxParallel(n))
-		}
-	}
-	fleet := fleetservice.New(kernel, agents, deps.missions, nil, projectRoot, deps.tracker, fleetOpts...)
-
-	stop := func() {
-		stopRouter()
-		_ = kernel.Close()
-	}
-	return fleet, agents, stop, nil
 }
 
 // missionReportDeliverer is the report router's SessionDeliverer for the

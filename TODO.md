@@ -59,7 +59,19 @@ structurally, the way the eino framework does it (decision record:
 *Gate:* streamed tool-calling proven by fixtures on all 7 surviving
 providers; the old per-provider assembly code is deleted.
 
-### S1b — Provider cache utilization — M — [DESIGN DONE → maintainer review]
+### S1b — Provider cache utilization — LANDED 2026-07-27 (waves 1+2)
+Done: session-sticky resolution (StickyOrRandom, rendezvous-hashed), prefix
+determinism (day-granular {{now}} in system prompts, canonical tool order,
+chunked history trim that also fixed the AGENTS.md-dropped-forever bug),
+cache-aware usage extraction with a strict normalization rule (PromptTokens
+= total on every provider; anthropic/bedrock sum their uncached remainder),
+and wire placement: anthropic cache_control breakpoints (with the required
+thinking-block skip), bedrock cachePoints (claude/nova-gated), openai
+prompt_cache_key from the session key, the vllm provenance wire-leak fixed
+with byte-stability tests, gemini/vertex implicit (documented).
+DEFERRED (recorded): taskexec rich history hints + trim-shift half (was S6
+agent territory); gemini explicit cachedContents (evidence-gated); ollama
+keep_alive config; PromptExecute path reports no usage.
 Design doc landed: `docs/development/blueprints/provider-kv-cache.md`
 (cite-checked provider facts, the recovered modeld stable-prefix doctrine,
 a file:line inventory of every prefix-breaking behavior, a thin CacheHints
@@ -85,7 +97,8 @@ define how savings are measured rather than assumed. Deliverable:
 `docs/development/blueprints/provider-kv-cache.md` for maintainer review,
 then implementation sub-slices.
 
-### S2 — Capability truth — S/M
+### S2 — Capability truth — DONE 2026-07-27 (vertex embeddings IMPLEMENTED;
+### bedrock CanEmbed lie also caught+fixed; pin-override now teach-refuses)
 Audit findings where the model catalog lies to the request router:
 - vertex advertises embedding support but its embed connection
   unconditionally errors — implement embeddings there or stop advertising;
@@ -105,7 +118,9 @@ confusing.
 *Gate:* a declared gpt-4o/claude routes vision correctly; embedding on
 vertex either works or is refused at the catalog, never at the connection.
 
-### S3 — Provider correctness round 2 — M
+### S3 — Provider correctness round 2 — DONE 2026-07-27 (typed sentinels,
+### Responses reasoning fixed, anthropic thinking round-trip, vllm auth,
+### shared HTTP client + retry, bedrock inference profiles + Think)
 Remaining audit items, in priority order:
 - [ ] Typed error sentinels first: context-window-exceeded and rate-limited
       become distinguishable error values mapped per provider (today they
@@ -149,7 +164,9 @@ validation with teaching errors:
 *Gate:* the mid-run type-error class is unreachable in tests; broken files
 teach at load.
 
-### S5 — Engine event contract — S
+### S5 — Engine event contract — DONE 2026-07-27 (step_stream_end journaled,
+### hierarchical addresses, docs/development/engine-events.md is normative
+### with drift-failing contract tests)
 Prepares both the durable-envelope slice (S6) and the beam TUI. Three
 hardening steps to the engine's event stream: an explicit "stream ended"
 event carrying chunk count and usage (today the end of streaming is only a
@@ -162,7 +179,18 @@ contract exists only implicitly inside the ACP translator code).
 *Gate:* replay carries stream brackets; the documented matrix is asserted
 against the translator in a test.
 
-### S6 — Durable envelopes — L — **the identity slice**
+### S6 — Durable envelopes — DONE 2026-07-27 — **the identity slice**
+Gate met (two-instance form): suspend in process A, tear down, respond in
+process B → chain completes exactly once; deny variant proven; double-
+respond/resume inert. Versioned checkpoint + migration engine + reflection
+guard on Message fields; claim CAS picks one resumer; 30s park window
+preserves interactive latency; chain_suspended event in the contract.
+FOLLOW-UPS: (a) production resume-hook registration lands with the post-S6
+`approvals respond` verb; (b) mission_ask_attention does NOT ride the HITL
+wrapper (missiontools are HITL-exempt) — detaching attention waits needs a
+park window at the attention seam + text-answer verdict injection; (c) wart:
+fleet-unit topology double-files an approval into the inbox (child + parent
+rows) — answering the child works, the twin expires; clean up.
 Today a pending approval parks a goroutine (with the full chat history in
 memory) for up to an hour, and a process restart loses the in-flight chain
 entirely — the approval row survives but the work is gone. Rebuild

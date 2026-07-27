@@ -1,5 +1,7 @@
 package vertex
 
+import "github.com/contenox/beam/internal/models/modelrepo"
+
 // vertexRequest is the wire format for generateContent / streamGenerateContent.
 // The schema is identical to the Gemini AI Studio API.
 type vertexRequest struct {
@@ -92,10 +94,37 @@ type vertexResponse struct {
 
 // vertexUsageMetadata is the API's token accounting, attached to (the last
 // chunk of) a generateContent / streamGenerateContent response.
+// promptTokenCount is already the TOTAL prompt count (cached included);
+// cachedContentTokenCount breaks out the tokens served from the context
+// cache.
 type vertexUsageMetadata struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
+	PromptTokenCount        int `json:"promptTokenCount"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount"`
+	TotalTokenCount         int `json:"totalTokenCount"`
+	CachedContentTokenCount int `json:"cachedContentTokenCount"`
+}
+
+// neutralUsage maps usageMetadata onto the neutral TokenUsage. Like the
+// Gemini Developer API, Vertex context caching is IMPLICIT by default on
+// 2.5+ models — nothing is sent on the wire to activate it; byte-stable
+// prefixes plus session affinity are the whole client-side contract, and
+// this counter is where hits become visible. Explicit cachedContents
+// resources (project/region-scoped, storage billed hourly) are a recorded
+// follow-up (blueprint S1b.6) gated on measured implicit hit rates.
+func (u *vertexUsageMetadata) neutralUsage() *modelrepo.TokenUsage {
+	if u == nil {
+		return nil
+	}
+	total := u.TotalTokenCount
+	if total == 0 {
+		total = u.PromptTokenCount + u.CandidatesTokenCount
+	}
+	return &modelrepo.TokenUsage{
+		PromptTokens:     u.PromptTokenCount,
+		CompletionTokens: u.CandidatesTokenCount,
+		TotalTokens:      total,
+		CacheReadTokens:  u.CachedContentTokenCount,
+	}
 }
 
 // vertexErrorResponse is used to parse structured API errors.

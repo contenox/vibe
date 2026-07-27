@@ -32,7 +32,7 @@ func TestUnit_BuildConverseInput_RolesSystemToolsAndInference(t *testing.T) {
 		{Role: "tool", ToolCallID: "t1", Content: `{"files":["a"]}`},
 	}
 
-	in, toOrig := buildConverseInput("anthropic.claude-3-5-sonnet-20241022-v2:0", msgs, cfg, 0)
+	in, toOrig, _ := buildConverseInput("anthropic.claude-3-5-sonnet-20241022-v2:0", msgs, cfg, 0)
 
 	require.Equal(t, "anthropic.claude-3-5-sonnet-20241022-v2:0", aws.ToString(in.ModelId))
 	require.Len(t, in.System, 1)
@@ -65,7 +65,7 @@ func TestUnit_BuildConverseInput_ImageInputMapsToImageBlock(t *testing.T) {
 		{Role: "user", Content: "describe this", Images: []modelrepo.ImagePart{{Data: raw, MimeType: "image/png"}}},
 	}
 
-	in, _ := buildConverseInput("anthropic.claude-3-5-sonnet-20241022-v2:0", msgs, &modelrepo.ChatConfig{}, 0)
+	in, _, _ := buildConverseInput("anthropic.claude-3-5-sonnet-20241022-v2:0", msgs, &modelrepo.ChatConfig{}, 0)
 
 	require.Len(t, in.Messages, 1)
 	require.Equal(t, types.ConversationRoleUser, in.Messages[0].Role)
@@ -85,7 +85,7 @@ func TestUnit_BuildConverseInput_ImageInputMapsToImageBlock(t *testing.T) {
 	require.Equal(t, raw, src.Value)
 
 	// A text-only user message still maps to a single text block.
-	textOnly, _ := buildConverseInput("m", []modelrepo.Message{{Role: "user", Content: "just text"}}, &modelrepo.ChatConfig{}, 0)
+	textOnly, _, _ := buildConverseInput("m", []modelrepo.Message{{Role: "user", Content: "just text"}}, &modelrepo.ChatConfig{}, 0)
 	require.Len(t, textOnly.Messages, 1)
 	require.Len(t, textOnly.Messages[0].Content, 1)
 	tob, ok := textOnly.Messages[0].Content[0].(*types.ContentBlockMemberText)
@@ -105,7 +105,7 @@ func TestUnit_BuildConverseInput_ImageFormatsAndUnknownSkipped(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.mime, func(t *testing.T) {
-			in, _ := buildConverseInput("m", []modelrepo.Message{
+			in, _, _ := buildConverseInput("m", []modelrepo.Message{
 				{Role: "user", Images: []modelrepo.ImagePart{{Data: []byte{1}, MimeType: c.mime}}},
 			}, &modelrepo.ChatConfig{}, 0)
 			require.Len(t, in.Messages, 1)
@@ -118,7 +118,7 @@ func TestUnit_BuildConverseInput_ImageFormatsAndUnknownSkipped(t *testing.T) {
 
 	// An unrecognised MIME type is skipped: a text-only-plus-bad-image message
 	// yields only the text block, and an image-only message yields no message.
-	in, _ := buildConverseInput("m", []modelrepo.Message{
+	in, _, _ := buildConverseInput("m", []modelrepo.Message{
 		{Role: "user", Content: "hi", Images: []modelrepo.ImagePart{{Data: []byte{1}, MimeType: "image/tiff"}}},
 	}, &modelrepo.ChatConfig{}, 0)
 	require.Len(t, in.Messages, 1)
@@ -126,7 +126,7 @@ func TestUnit_BuildConverseInput_ImageFormatsAndUnknownSkipped(t *testing.T) {
 	_, ok := in.Messages[0].Content[0].(*types.ContentBlockMemberText)
 	require.True(t, ok, "unknown image type must be skipped, leaving only the text block")
 
-	in, _ = buildConverseInput("m", []modelrepo.Message{
+	in, _, _ = buildConverseInput("m", []modelrepo.Message{
 		{Role: "user", Images: []modelrepo.ImagePart{{Data: []byte{1}, MimeType: "application/pdf"}}},
 	}, &modelrepo.ChatConfig{}, 0)
 	require.Empty(t, in.Messages, "an image-only message with an unknown type produces no content")
@@ -136,7 +136,7 @@ func TestUnit_BuildConverseInput_ClampsMaxTokens(t *testing.T) {
 	maxTok := 9000
 	cfg := &modelrepo.ChatConfig{MaxTokens: &maxTok}
 
-	in, _ := buildConverseInput("anthropic.claude-3-5-sonnet-20241022-v2:0", []modelrepo.Message{{Role: "user", Content: "hi"}}, cfg, 4096)
+	in, _, _ := buildConverseInput("anthropic.claude-3-5-sonnet-20241022-v2:0", []modelrepo.Message{{Role: "user", Content: "hi"}}, cfg, 4096)
 
 	require.NotNil(t, in.InferenceConfig)
 	require.NotNil(t, in.InferenceConfig.MaxTokens)
@@ -177,7 +177,7 @@ func TestUnit_ObservedFromSummary_CanVisionFromInputModalities(t *testing.T) {
 	visionModel := observedFromSummary(bedrocktypes.FoundationModelSummary{
 		ModelId:         aws.String("anthropic.claude-3-5-sonnet-20241022-v2:0"),
 		InputModalities: []bedrocktypes.ModelModality{bedrocktypes.ModelModalityText, bedrocktypes.ModelModalityImage},
-	})
+	}, "anthropic.claude-3-5-sonnet-20241022-v2:0")
 	require.Equal(t, "anthropic.claude-3-5-sonnet-20241022-v2:0", visionModel.Name)
 	require.True(t, visionModel.CanVision, "IMAGE input modality must set CanVision")
 	require.True(t, visionModel.CanChat)
@@ -186,7 +186,7 @@ func TestUnit_ObservedFromSummary_CanVisionFromInputModalities(t *testing.T) {
 	textModel := observedFromSummary(bedrocktypes.FoundationModelSummary{
 		ModelId:         aws.String("meta.llama3-70b-instruct-v1:0"),
 		InputModalities: []bedrocktypes.ModelModality{bedrocktypes.ModelModalityText},
-	})
+	}, "meta.llama3-70b-instruct-v1:0")
 	require.False(t, textModel.CanVision, "TEXT-only input modality must not set CanVision")
 	require.True(t, textModel.CanChat)
 
@@ -194,15 +194,17 @@ func TestUnit_ObservedFromSummary_CanVisionFromInputModalities(t *testing.T) {
 	lowerModel := observedFromSummary(bedrocktypes.FoundationModelSummary{
 		ModelId:         aws.String("some.multimodal-v1:0"),
 		InputModalities: []bedrocktypes.ModelModality{"image"},
-	})
+	}, "some.multimodal-v1:0")
 	require.True(t, lowerModel.CanVision, "modality comparison must be case-insensitive")
 
-	// An embedding model keeps its embed classification.
+	// An embedding model must NOT advertise CanEmbed: the provider speaks the
+	// Converse API only and GetEmbedConnection refuses, so advertising would
+	// lie to the request router (catalog truth over half-support).
 	embedModel := observedFromSummary(bedrocktypes.FoundationModelSummary{
 		ModelId:         aws.String("amazon.titan-embed-text-v2:0"),
 		InputModalities: []bedrocktypes.ModelModality{bedrocktypes.ModelModalityText},
-	})
-	require.True(t, embedModel.CanEmbed)
+	}, "amazon.titan-embed-text-v2:0")
+	require.False(t, embedModel.CanEmbed, "bedrock embeddings are unimplemented; the catalog must not advertise them")
 	require.False(t, embedModel.CanChat)
 	require.False(t, embedModel.CanVision)
 }
@@ -311,7 +313,7 @@ func TestUnit_BuildConverseInput_NoToolsDegradesToolBlocksToText(t *testing.T) {
 		{Role: "user", Content: "summarise what happened"},
 	}
 
-	in, _ := buildConverseInput("deepseek.v3.2", msgs, &modelrepo.ChatConfig{}, 0)
+	in, _, _ := buildConverseInput("deepseek.v3.2", msgs, &modelrepo.ChatConfig{}, 0)
 
 	require.Nil(t, in.ToolConfig)
 	for _, m := range in.Messages {

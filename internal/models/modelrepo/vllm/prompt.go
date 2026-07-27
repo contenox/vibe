@@ -12,7 +12,7 @@ import (
 // NewVLLMPromptClient creates a new prompt client
 func NewVLLMPromptClient(ctx context.Context, baseURL, modelName string, contextLength, maxOutputTokens int, httpClient *http.Client, apiKey string, canThink bool, tracker libtracker.ActivityTracker) (modelrepo.LLMPromptExecClient, error) {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = modelrepo.SharedHTTPClient
 	}
 
 	client := &vLLMPromptClient{
@@ -46,7 +46,7 @@ func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, tempe
 		{Role: "user", Content: prompt},
 	}
 
-	request := buildChatRequest(c.modelName, messages, []modelrepo.ChatArgument{
+	request, _ := buildChatRequest(c.modelName, messages, []modelrepo.ChatArgument{
 		modelrepo.WithTemperature(float64(temperature)),
 		modelrepo.WithMaxTokens(c.maxTokens),
 	})
