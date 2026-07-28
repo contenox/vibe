@@ -16,19 +16,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/reasoning"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/services/project"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/internal/version"
+	"github.com/contenox/contenox/internal/kernel/reasoning"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/project"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/version"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
 // Version is an optional link-time override via
-// -ldflags "-X github.com/contenox/beam/internal/surfaces/contenoxcli.Version=…"
+// -ldflags "-X github.com/contenox/contenox/internal/surfaces/contenoxcli.Version=…"
 // (e.g. distro packagers). When empty, CLIVersion uses runtime/version/version.txt.
 var Version string
 
@@ -179,7 +179,7 @@ func firstNonFlagIsReserved(args []string) bool {
 
 var rootCmd = &cobra.Command{
 	Use:   "contenox",
-	Short: "An open coding harness: chat, chains, and missions from your terminal.",
+	Short: "Fire coding work at an agent, under rules you can read — chat, chains, and missions from your terminal.",
 	Long: `Contenox is an open coding harness. Chat and shell in your terminal, use
 the same harness from any ACP editor, and package repeatable work into chains —
 prompts, model routing, tools, retries, and approval gates in one versioned
@@ -524,7 +524,7 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 		// Marking a project doesn't grant it as a workspace root; that's a
 		// separate decision, made with this verb.
 		fmt.Fprintf(cmd.OutOrStdout(),
-			"To let sessions open it (serve + Beam picker): contenox workspace add %s\n", cwd)
+			"To let sessions open it (the beam picker): contenox workspace add %s\n", cwd)
 		return nil
 	}
 	contenoxDir, err = ResolveContenoxDir(cmd)

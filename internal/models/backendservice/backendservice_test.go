@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/google/uuid"
 )
 

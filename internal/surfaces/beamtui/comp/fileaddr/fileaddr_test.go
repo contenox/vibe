@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/services/vfs"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/fileaddr"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/picker"
+	"github.com/contenox/contenox/internal/services/vfs"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/fileaddr"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/picker"
 )
 
 // writeFile creates dir/name with content, making parents as needed.

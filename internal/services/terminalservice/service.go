@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/beam/internal/errdefs"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/terminalstore"
+	"github.com/contenox/contenox/internal/errdefs"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/terminalstore"
 )
 
 type CreateRequest struct {

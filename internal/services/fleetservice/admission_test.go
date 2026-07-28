@@ -8,11 +8,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/contenox/beam/internal/errdefs"
-	"github.com/contenox/beam/internal/kernel/agentinstance"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/stretchr/testify/require"
 )
 

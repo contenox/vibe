@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/localtools"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/stretchr/testify/require"
 )
 

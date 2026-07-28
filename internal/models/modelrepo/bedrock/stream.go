@@ -8,7 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 type bedrockStreamClient struct{ bedrockClient }

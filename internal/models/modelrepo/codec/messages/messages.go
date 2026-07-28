@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 // DefaultMaxTokens is used when the caller does not set ChatConfig.MaxTokens.

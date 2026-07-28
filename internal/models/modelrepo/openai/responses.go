@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 // request payloads and response parsing for the OpenAI Responses API.

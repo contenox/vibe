@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 const (

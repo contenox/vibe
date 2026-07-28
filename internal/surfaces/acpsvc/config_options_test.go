@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/enginesvc"
-	"github.com/contenox/beam/internal/kernel/reasoning"
-	libbus "github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/models/runtimestate"
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/enginesvc"
+	"github.com/contenox/contenox/internal/kernel/reasoning"
+	libbus "github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/models/runtimestate"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

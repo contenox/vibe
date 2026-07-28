@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // Pins that a timeout whose message contains "not found" is not misclassified.

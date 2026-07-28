@@ -7,8 +7,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/vfs"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/vfs"
 )
 
 // Op names the access being evaluated: OpRead or OpWrite.

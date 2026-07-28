@@ -3,7 +3,7 @@ package composer
 import (
 	"unicode"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/sanitize"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
 )
 
 // The @-mention seam: file-addressing finds, ranks, and resolves

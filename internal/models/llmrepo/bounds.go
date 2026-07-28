@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
+	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 // ErrResolutionOutOfBounds is the sentinel every allowlist refusal wraps, so a

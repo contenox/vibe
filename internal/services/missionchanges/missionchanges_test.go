@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/libacp"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/libacp"
 )
 
 // Notification builders construct the shapes acpsvc/events.go emits. Each

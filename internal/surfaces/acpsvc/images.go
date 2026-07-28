@@ -3,8 +3,8 @@ package acpsvc
 import (
 	"encoding/base64"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/libacp"
 )
 
 // extractImageParts splits content blocks into image attachments (as

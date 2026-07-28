@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/contenox/beam/internal/services/vfs"
+	"github.com/contenox/contenox/internal/services/vfs"
 )
 
 // Chunk is one indexed span of one file: a citation (workspace-relative

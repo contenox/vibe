@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
 

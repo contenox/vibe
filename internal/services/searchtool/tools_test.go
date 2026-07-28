@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/workspaceindex"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/workspaceindex"
 )
 
 const testWorkspaceID = "ws-test"

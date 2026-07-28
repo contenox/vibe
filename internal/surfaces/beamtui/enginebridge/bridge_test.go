@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/enginesvc"
-	"github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/approvalflow"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/enginesvc"
+	"github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/approvalflow"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

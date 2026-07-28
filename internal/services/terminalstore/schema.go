@@ -3,7 +3,7 @@ package terminalstore
 import (
 	"context"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 )
 
 // InitSchema creates the local terminal session metadata table if it is missing.

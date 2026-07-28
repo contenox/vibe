@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/ollamatokenizer"
+	"github.com/contenox/contenox/internal/models/ollamatokenizer"
 	"github.com/stretchr/testify/require"
 )
 

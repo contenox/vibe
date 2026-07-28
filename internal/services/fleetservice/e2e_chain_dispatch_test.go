@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/agentinstance"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/chainagents"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/chainagents"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,7 +37,7 @@ const chainFixtureReply = "contenox chain unit fixture reply"
 func buildContenoxBinary(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "contenox")
-	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/beam/cmd/contenox")
+	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/contenox/cmd/contenox")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build contenox: %v\n%s", err, out)

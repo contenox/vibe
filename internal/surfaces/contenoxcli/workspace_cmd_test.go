@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/project"
-	"github.com/contenox/beam/internal/services/workspacegrants"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/services/project"
+	"github.com/contenox/contenox/internal/services/workspacegrants"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

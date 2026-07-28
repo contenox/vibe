@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/brand"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/statusbar"
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/keymap"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/brand"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/statusbar"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/keymap"
 )
 
 // buildFrame assembles the one frame this iteration commits. It is the only

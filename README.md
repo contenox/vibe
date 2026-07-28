@@ -8,7 +8,7 @@ approval gates. Missions are what envelopes make safe: fire one, detach,
 come back to done. Envelopes survive restarts — an unanswered approval
 checkpoints the run; answer it later with `contenox approvals respond`, from
 any terminal, and the run resumes exactly once. Terminal CLI, the same
-sessions inside Zed, JetBrains, or any ACP editor, and beam on the way. Any
+sessions inside Zed, JetBrains, or any ACP editor, and the beam TUI. Any
 model, any MCP server, any OpenAPI spec as tools, in combination. SQLite.
 No account.
 
@@ -37,7 +37,7 @@ less install.sh
 sh install.sh
 ```
 
-*Pre-built release downloads and source builds are also available on the [releases page](https://github.com/contenox/beam/releases).*
+*Pre-built release downloads and source builds are also available on the [releases page](https://github.com/contenox/contenox/releases).*
 
 ---
 
@@ -175,8 +175,8 @@ one is not exposed yet, so nothing on a stock install takes that path.
 The CLI is pure Go — no C toolchain, no native dependencies.
 
 ```bash
-git clone https://github.com/contenox/beam
-cd beam
+git clone https://github.com/contenox/contenox
+cd contenox
 task build        # https://taskfile.dev — or: CGO_ENABLED=0 go build ./cmd/contenox
 ```
 

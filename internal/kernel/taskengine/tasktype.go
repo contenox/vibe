@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine/llmretry"
+	"github.com/contenox/contenox/internal/kernel/taskengine/llmretry"
 	"gopkg.in/yaml.v3"
 )
 

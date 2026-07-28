@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"text/tabwriter"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/spf13/cobra"
 )
 

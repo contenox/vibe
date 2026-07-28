@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 // Terse by default: a description is paid on every turn, and most of what a

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/services/operatorinbox"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/operatorinbox"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
 

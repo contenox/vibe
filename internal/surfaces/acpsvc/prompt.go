@@ -5,14 +5,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/llmrepo"
-	"github.com/contenox/beam/internal/services/agentservice"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/missiontools"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/models/llmrepo"
+	"github.com/contenox/contenox/internal/services/agentservice"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missiontools"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libacp"
 )
 
 // Prompt resolves the session and dispatches the turn to its driver. The driver

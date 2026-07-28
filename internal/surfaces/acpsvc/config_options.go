@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/contenox/beam/internal/kernel/reasoning"
-	"github.com/contenox/beam/internal/models/runtimestate"
-	"github.com/contenox/beam/internal/services/project"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/reasoning"
+	"github.com/contenox/contenox/internal/models/runtimestate"
+	"github.com/contenox/contenox/internal/services/project"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 const (

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 func TestUnit_MacroEnv_NowMacro_DayGranularInSystemInstruction(t *testing.T) {

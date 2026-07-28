@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/models/modelrepo/vllm"
+	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo/vllm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

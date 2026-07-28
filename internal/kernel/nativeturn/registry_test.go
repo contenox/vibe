@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // recViewer is a thread-safe Viewer that records every event it is delivered, so a

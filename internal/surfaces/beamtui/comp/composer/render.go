@@ -3,8 +3,8 @@ package composer
 import (
 	"strconv"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 // ASCIISigil is the composer's beam-bar in a Mono terminal, without its

@@ -3,8 +3,8 @@ package contenoxcli
 import (
 	"context"
 
-	"github.com/contenox/beam/internal/kernel/agentinstance"
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	"github.com/contenox/contenox/internal/libtracker"
 )
 
 // newInstanceEventSink adapts the agentinstance lifecycle EventSink onto the

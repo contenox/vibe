@@ -3,8 +3,8 @@ package contenoxcli
 import (
 	"context"
 
-	"github.com/contenox/beam/internal/services/presence"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/services/presence"
+	"github.com/contenox/contenox/libacp"
 )
 
 // presenceAgent decorates the ACP transport to feed the fleet-presence

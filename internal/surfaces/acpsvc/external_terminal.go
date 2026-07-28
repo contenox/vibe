@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/contenox/beam/internal/services/shellsession"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/services/shellsession"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // This file implements the terminal/* client-callback family for the external-

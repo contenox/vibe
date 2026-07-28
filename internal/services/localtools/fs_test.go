@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/localtools"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/localtools"
 )
 
 func TestUnit_LocalFSTools_Exec(t *testing.T) {

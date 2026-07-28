@@ -8,8 +8,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/beam/internal/errdefs"
-	"github.com/contenox/beam/internal/kernel/agentinstance"
+	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
 )
 
 // MaxParallelConfigKey is the config key an operator sets the fleet-width cap

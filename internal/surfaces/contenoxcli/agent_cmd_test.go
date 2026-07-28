@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

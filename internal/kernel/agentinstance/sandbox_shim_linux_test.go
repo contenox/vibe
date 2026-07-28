@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/contenox/beam/internal/libsandbox"
+	"github.com/contenox/contenox/internal/libsandbox"
 )
 
 // TestMain makes this test binary a valid sandbox-shim host: spawning an

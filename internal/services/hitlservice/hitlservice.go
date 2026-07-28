@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/google/uuid"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 )
 
 // hitlLog reports one approval-lifecycle step through the service's tracker,

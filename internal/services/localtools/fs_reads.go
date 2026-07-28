@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 // SQLDialect selects the placeholder style used for the local_fs_reads table.

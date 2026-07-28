@@ -7,12 +7,12 @@ import (
 	"os"
 	"strings"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/localtools"
-	"github.com/contenox/beam/internal/services/vfs"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	libacp "github.com/contenox/beam/libacp"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/localtools"
+	"github.com/contenox/contenox/internal/services/vfs"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 var osFallback = localtools.NewOSFileIO()

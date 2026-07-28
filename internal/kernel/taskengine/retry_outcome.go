@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/contenox/beam/internal/kernel/taskengine/llmretry"
+	"github.com/contenox/contenox/internal/kernel/taskengine/llmretry"
 )
 
 // RetryOutcomeSink collects per-call retry outcomes from chat_completion tasks

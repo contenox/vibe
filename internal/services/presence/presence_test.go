@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libkvstore"
-	"github.com/contenox/beam/internal/services/presence"
+	"github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libkvstore"
+	"github.com/contenox/contenox/internal/services/presence"
 )
 
 // openKV opens a fresh file-backed SQLite KV manager, exercising the real

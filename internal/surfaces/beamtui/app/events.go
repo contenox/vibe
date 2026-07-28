@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/approval"
-	"github.com/contenox/beam/internal/surfaces/beamtui/enginebridge"
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/liveness"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/approval"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/liveness"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // notifiableStopReasons are the turn endings worth a completion bell: the

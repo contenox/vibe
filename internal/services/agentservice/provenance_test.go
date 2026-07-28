@@ -3,7 +3,7 @@ package agentservice
 import (
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 func TestUnit_StampTurnProvenance_StampsOnlyUnstampedMessages(t *testing.T) {

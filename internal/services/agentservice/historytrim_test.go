@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 func msg(role, content string) taskengine.Message {

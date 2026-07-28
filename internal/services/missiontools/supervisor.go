@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/missionservice"
 )
 
 // The supervisor half of this package's tool surface: what a session that

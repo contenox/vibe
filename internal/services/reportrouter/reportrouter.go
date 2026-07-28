@@ -12,11 +12,11 @@ import (
 	"strings"
 	"sync"
 
-	libbus "github.com/contenox/beam/internal/libbus"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/services/operatorinbox"
-	"github.com/contenox/beam/libacp"
+	libbus "github.com/contenox/contenox/internal/libbus"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/operatorinbox"
+	"github.com/contenox/contenox/libacp"
 )
 
 // SessionDeliverer injects a report update into a supervising session's

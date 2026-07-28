@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/testkit"
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/testkit"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 // goldenWidths is the resize matrix: narrow, the two common widths, and wide.

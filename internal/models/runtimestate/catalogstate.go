@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/contenox/beam/internal/libkvstore"
-	"github.com/contenox/beam/internal/models/modelcapability"
-	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/libkvstore"
+	"github.com/contenox/contenox/internal/models/modelcapability"
+	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 // observedModelCachePrefix is the KV key prefix under which each backend's

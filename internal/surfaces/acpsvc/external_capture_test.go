@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

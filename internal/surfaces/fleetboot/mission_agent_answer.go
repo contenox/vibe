@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/services/missiontools"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/missiontools"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 )
 
 // Mirrors missiontools' own constants so the instruction given to the model

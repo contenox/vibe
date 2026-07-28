@@ -9,8 +9,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/contenox/beam/internal/errdefs"
-	"github.com/contenox/beam/internal/services/terminalstore"
+	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/internal/services/terminalstore"
 	"github.com/google/uuid"
 	"golang.org/x/sys/windows"
 )

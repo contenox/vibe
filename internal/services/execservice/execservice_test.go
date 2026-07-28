@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/contenox/beam/internal/errdefs"
+	"github.com/contenox/contenox/internal/errdefs"
 )
 
 func TestUnit_ExecService_Execute_RejectsEmptyPrompt(t *testing.T) {

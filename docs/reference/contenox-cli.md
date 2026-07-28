@@ -146,9 +146,9 @@ contenox beam --plain         # no color or unicode, ASCII glyphs only
 | `--light`          | Render for a light terminal background (overrides automatic detection)      |
 | `--plain`          | Drop all color and unicode: ASCII glyphs, no styling                        |
 
-Beam requires a real terminal on stdout; it refuses to start on a non-TTY. Unlike `chat`, `local_shell` is enabled by default in Beam (pass `--shell=false` to disable). Beam supports the `/mission` slash command the same way an ACP editor session does — see [The `/mission` slash command](#the-mission-slash-command) below.
+The beam TUI requires a real terminal on stdout; it refuses to start on a non-TTY. Unlike `chat`, `local_shell` is enabled by default here (pass `--shell=false` to disable). It also supports the `/mission` slash command the same way an ACP editor session does — see [The `/mission` slash command](#the-mission-slash-command) below.
 
-Beam loads its own chain, `~/.contenox/default-beam-chain.json` (override with `CONTENOX_BEAM_CHAIN_PATH`), and its own HITL envelope, `hitl-policy-beam.json` — a copy of the editor profile's policy tuned for the attended terminal UI (see [HITL Policies](/docs/guide/hitl/#built-in-presets)).
+`contenox beam` loads its own chain, `~/.contenox/default-beam-chain.json` (override with `CONTENOX_BEAM_CHAIN_PATH`), and its own HITL envelope, `hitl-policy-beam.json` — a copy of the editor profile's policy tuned for the attended terminal UI (see [HITL Policies](/docs/guide/hitl/#built-in-presets)).
 
 ### `contenox doctor`
 
@@ -581,7 +581,7 @@ See [Least-privilege shell environment](/docs/guide/environment-scrubbing/) for 
 
 Missions are the dual of chat mode. In chat you prompt turn by turn and approve each gated action yourself. In mission mode you fire a one-line intent at a declared agent under an **envelope** — a HITL policy that bounds what it may do unattended — and keep working; the unit acts inside the envelope, and only crossing it costs your attention.
 
-From inside a session (`contenox acp`, or the Beam TUI) fire a mission without leaving the conversation:
+From inside a session (`contenox acp`, or the beam TUI) fire a mission without leaving the conversation:
 
 - `/mission <intent>` — fires the configured `default-mission-agent` under the `default-mission-policy` envelope.
 - `/mission <agent-name> <intent>` — fires the named agent instead.

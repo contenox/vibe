@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/project"
+	"github.com/contenox/contenox/internal/services/project"
 )
 
 // TestUnit_InitProject_ForcesLocalMarker asserts `init --project` gives a nested child directory its own local marker and workspace id, rather than reusing an ancestor's.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

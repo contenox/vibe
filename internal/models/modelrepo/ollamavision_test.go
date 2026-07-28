@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/models/modelrepo/ollama"
+	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo/ollama"
 	"github.com/ollama/ollama/api"
 	"github.com/stretchr/testify/require"
 )

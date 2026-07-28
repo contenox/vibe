@@ -8,8 +8,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/contenox/beam/internal/version"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/version"
+	"github.com/contenox/contenox/libacp"
 )
 
 // driverClientName is the ClientInfo.Name the kernel presents to a

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/contenox/beam/internal/errdefs"
-	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/contenox/internal/errdefs"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/stretchr/testify/require"
 )
 

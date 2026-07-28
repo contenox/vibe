@@ -59,7 +59,7 @@ Contenox ships six policy presets under `~/.contenox/`. Switch between them with
 | Dev | `hitl-policy-dev.json` | Allow-all by default — most tool calls pass silently. `local_shell` itself still prompts for approval (with a handful of destructive commands denied outright even here). For local development when you trust the chain and don't want interruptions outside the shell. |
 | ACP | `hitl-policy-acp.json` | Transport-specific: editor (ACP) sessions — Zed, JetBrains, AionUi. |
 | ACPX | `hitl-policy-acpx.json` | Transport-specific: headless/untrusted-driver sessions (OpenClaw). Deny-by-default with no approval tier. |
-| Beam | `hitl-policy-beam.json` | Transport-specific: `contenox beam`'s attended terminal session — a copy of the ACP preset tuned for the TUI's own approval card. |
+| beam | `hitl-policy-beam.json` | Transport-specific: `contenox beam`'s attended terminal session — a copy of the ACP preset tuned for the TUI's own approval card. |
 
 ## Where to next
 

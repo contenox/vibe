@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
 

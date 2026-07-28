@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 // Tool schemas are terse by default: a description is paid on every turn,

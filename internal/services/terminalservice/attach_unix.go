@@ -9,7 +9,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/contenox/beam/internal/services/terminalstore"
+	"github.com/contenox/contenox/internal/services/terminalstore"
 	"github.com/creack/pty"
 )
 

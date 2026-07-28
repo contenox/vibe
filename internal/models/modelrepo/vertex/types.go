@@ -1,6 +1,6 @@
 package vertex
 
-import "github.com/contenox/beam/internal/models/modelrepo"
+import "github.com/contenox/contenox/internal/models/modelrepo"
 
 // vertexRequest is the wire format for generateContent / streamGenerateContent.
 // The schema is identical to the Gemini AI Studio API.

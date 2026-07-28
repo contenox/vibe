@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/enginesvc"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/services/operatorinbox"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/enginesvc"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/operatorinbox"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

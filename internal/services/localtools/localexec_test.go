@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libsandbox"
-	"github.com/contenox/beam/internal/services/localtools"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libsandbox"
+	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 )
 
 // EncodeLines renders lines in the reference golden encoding: a styled span

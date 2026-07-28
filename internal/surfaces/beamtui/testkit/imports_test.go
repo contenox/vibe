@@ -16,7 +16,7 @@ import (
 // beamtuiModule is the import-path prefix every package under
 // internal/surfaces/beamtui carries; rules (b) and (c) test against it
 // since Go import specs are always fully-qualified.
-const beamtuiModule = "github.com/contenox/beam/internal/surfaces/beamtui/"
+const beamtuiModule = "github.com/contenox/contenox/internal/surfaces/beamtui/"
 
 // termOnlyImports is the set of packages restricted to beamtui/term (and
 // its subpackages): the real terminal-control dependencies (raw mode,

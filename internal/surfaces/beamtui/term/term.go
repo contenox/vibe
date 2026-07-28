@@ -7,8 +7,8 @@
 package term
 
 import (
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/input"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
 )
 
 // StyleResolver turns a semantic StyleID into the SGR prefix/suffix pair

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // TestUnit_ViewerHub_JournalSnapshot pins that every delivered update is

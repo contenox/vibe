@@ -9,9 +9,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/libtracker"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 func init() {

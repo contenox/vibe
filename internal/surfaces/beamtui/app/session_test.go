@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/enginebridge"
-	"github.com/contenox/beam/internal/surfaces/beamtui/input"
-	"github.com/contenox/beam/internal/surfaces/beamtui/keymap"
-	"github.com/contenox/beam/internal/surfaces/beamtui/testkit"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/keymap"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/testkit"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // sessionBridge decorates testkit.FakeBridge with scripted results for

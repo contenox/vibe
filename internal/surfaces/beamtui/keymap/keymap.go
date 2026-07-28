@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/input"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
 )
 
 // Scope names one keybinding context: the global catch-all, a focusable

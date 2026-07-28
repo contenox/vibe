@@ -5,7 +5,7 @@
 // sequence or invent a color; Styles is the only path from role to attribute.
 package style
 
-import "github.com/contenox/beam/internal/surfaces/beamtui/frame"
+import "github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 
 // resetSuffix ends any non-empty prefix. SGR 0 clears every attribute the
 // prefix set, so spans never bleed into the text that follows them.

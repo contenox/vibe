@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/contenox/beam/internal/models/runtimestate"
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/services/fleetservice"
-	"github.com/contenox/beam/internal/services/setupcheck"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/models/runtimestate"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/fleetservice"
+	"github.com/contenox/contenox/internal/services/setupcheck"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
 )
 

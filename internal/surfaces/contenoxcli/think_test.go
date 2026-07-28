@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 )

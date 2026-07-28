@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libdbexec"
 )
 
 var ErrNotFound = errors.New("not found")

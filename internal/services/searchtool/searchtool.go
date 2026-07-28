@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/contenox/beam/internal/services/workspaceindex"
+	"github.com/contenox/contenox/internal/services/workspaceindex"
 )
 
 // ToolsProviderName is the tools-provider key this package registers under.

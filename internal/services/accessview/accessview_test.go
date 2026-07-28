@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/accessview"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/vfs"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/accessview"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/stretchr/testify/require"
 )
 

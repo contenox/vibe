@@ -32,3 +32,13 @@ The maintainer uploads; nothing here was touched in S3, and no binary was added 
 - UPLOADED `backend-manager-demo.mp4` (source: maintainer's personal backup, `product-demo.mp4`; NEW slot, embedded on beam-web page) → live
 - Still needed: beam-login.png, beam-new-chat.png, modeld-console.png, ui-library-storybook.png (captures from archived builds)
 - CORRECTED 2026-07-28: beam-demo.webm on S3 replaced with the true production demo (368KB, fetched from the live site root); poster regenerated from it. The earlier 2.9MB backup recording (old chain-runner web UI) preserved as media/chain-runner-demo.webm — unused, available for a future lab embed.
+
+## Lab screenshot harvest — uploaded 2026-07-28
+
+15 screenshots from the archive stack (launched locally via compose) uploaded as `lab-*.png`:
+bob-{dashboard,connectors,search,beam,files,members}, site-{home,bob-signup,admin-login},
+admin-bob-{tenants,tenants2,worker-pools,apps}, minio-console, mailpit-inbox.
+Embedded so far: bob.md (5), api-layer.md (2), ui-library.md (1), vald-operator.md (2).
+Unused-but-available: bob-files, bob-members, admin-bob-tenants, minio-console, mailpit-inbox.
+NOT uploaded (flagged): admin-dashboard.png (checkout-order record with an email address),
+admin-analytics.png (404 page), registry-catalog.png (raw JSON).

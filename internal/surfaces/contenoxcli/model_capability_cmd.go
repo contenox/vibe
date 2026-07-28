@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/modelcapability"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/models/modelcapability"
 	"github.com/spf13/cobra"
 )
 

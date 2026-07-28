@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/stretchr/testify/require"
 )
 

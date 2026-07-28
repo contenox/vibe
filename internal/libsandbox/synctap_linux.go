@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/libtracker"
 	"golang.org/x/sys/unix"
 )
 

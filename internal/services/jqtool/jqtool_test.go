@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/jqtool"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/jqtool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

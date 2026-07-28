@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 func TestFlattenContent(t *testing.T) {

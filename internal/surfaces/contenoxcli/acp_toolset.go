@@ -5,19 +5,19 @@
 package contenoxcli
 
 import (
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/gointel"
-	"github.com/contenox/beam/internal/services/gojatool"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/jqtool"
-	"github.com/contenox/beam/internal/services/localtools"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/services/missiontools"
-	"github.com/contenox/beam/internal/services/searchtool"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/gointel"
+	"github.com/contenox/contenox/internal/services/gojatool"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/jqtool"
+	"github.com/contenox/contenox/internal/services/localtools"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/missiontools"
+	"github.com/contenox/contenox/internal/services/searchtool"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 )
 
 // acpToolset is the CLI's full localToolset (engine.go) plus the ACP fs/shell

@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/gointel"
-	"github.com/contenox/beam/internal/services/gojatool"
-	"github.com/contenox/beam/internal/services/jqtool"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/gointel"
+	"github.com/contenox/contenox/internal/services/gojatool"
+	"github.com/contenox/contenox/internal/services/jqtool"
 	"github.com/stretchr/testify/require"
 )
 

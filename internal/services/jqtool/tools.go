@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/getkin/kin-openapi/openapi3"
 )
 

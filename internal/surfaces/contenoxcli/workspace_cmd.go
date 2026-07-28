@@ -10,12 +10,12 @@ import (
 	"context"
 	"fmt"
 
-	libbus "github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/project"
-	"github.com/contenox/beam/internal/services/vfs"
-	"github.com/contenox/beam/internal/services/workspacegrants"
+	libbus "github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/project"
+	"github.com/contenox/contenox/internal/services/vfs"
+	"github.com/contenox/contenox/internal/services/workspacegrants"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ var workspaceCmd = &cobra.Command{
 	Use:   "workspace",
 	Short: "Grant or revoke workspace roots a session may run in.",
 	Long: `Manage the workspace-root allowlist — the directories a session (a chat, a
-dispatched mission unit, or a Beam file browse) may choose as its working
+dispatched mission unit, or a beam file browse) may choose as its working
 directory. Granting a root grants everything UNDER it; a directory outside every
 granted root is refused.
 
@@ -48,7 +48,7 @@ pick it up. Granting a path already granted is a no-op.
 
 The granted directory is also registered as a project: its
 .contenox/workspace.id marker is created if absent, and --name stamps a friendly
-display name into it (shown by 'workspace list', the API, and the Beam picker;
+display name into it (shown by 'workspace list', the API, and the beam picker;
 default: the folder's basename shows). Re-adding an already-granted path with a
 new --name renames the project.`,
 	Args: cobra.ExactArgs(1),

@@ -15,7 +15,7 @@ import (
 const (
 	cacheTTL    = 24 * time.Hour
 	httpTimeout = 5 * time.Second
-	apiURL      = "https://api.github.com/repos/contenox/beam/releases/latest"
+	apiURL      = "https://api.github.com/repos/contenox/contenox/releases/latest"
 )
 
 type cacheEntry struct {

@@ -14,7 +14,7 @@ import (
 	"sort"
 	"time"
 
-	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
+	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 // sessionKeyContextKeyType is unexported so no other package can collide with

@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
 )
 
 // ToolsProviderName is the tools-provider key this package registers under.

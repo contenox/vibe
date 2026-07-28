@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 type vertexPromptClient struct {

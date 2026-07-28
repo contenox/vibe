@@ -6,12 +6,12 @@ import (
 	"os"
 	"strings"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/models/backendservice"
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
-	"github.com/contenox/beam/libacp"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/models/backendservice"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	"github.com/contenox/contenox/libacp"
 )
 
 // Environment variables of the non-interactive ACP setup route: process-level

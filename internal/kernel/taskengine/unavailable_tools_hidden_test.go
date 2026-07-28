@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/llmrepo"
-	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/models/llmrepo"
+	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/require"
 )

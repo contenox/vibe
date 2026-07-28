@@ -13,7 +13,7 @@ description: Install Contenox and connect a model.
 curl -fsSL https://contenox.com/install.sh | sh
 ```
 
-Or download the binary directly from [GitHub Releases](https://github.com/contenox/beam/releases/latest).
+Or download the binary directly from [GitHub Releases](https://github.com/contenox/contenox/releases/latest).
 
 The whole path — install, setup, first prompt — in one take:
 
@@ -91,7 +91,7 @@ If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) fo
 
 ## Next steps
 
-- **Beam, the terminal UI** — run `contenox beam` for chat, plan, and shell in one persistent session
+- **The beam TUI** — run `contenox beam` for chat, plan, and shell in one persistent session
 - [**Your first chain**](/docs/guide/first-chain/) — author your own agent in five edits
 - [Core concepts](/docs/guide/concepts/) — how chains, tasks, and tools fit together
 - [MCP integration](/docs/integrations/tools/mcp/) — connect external tools

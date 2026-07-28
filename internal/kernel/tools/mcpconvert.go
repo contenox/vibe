@@ -3,8 +3,8 @@ package tools
 import (
 	"encoding/json"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 // mcpToolToTaskTool converts a runtimetypes.MCPTool (received from mcpworker via NATS)

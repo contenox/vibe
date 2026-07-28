@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/jqtool"
-	"github.com/contenox/beam/internal/services/localtools"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/jqtool"
+	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

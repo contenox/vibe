@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/contenox/beam/internal/services/vfs"
+	"github.com/contenox/contenox/internal/services/vfs"
 )
 
 const (

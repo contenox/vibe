@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/stretchr/testify/require"
 )
 

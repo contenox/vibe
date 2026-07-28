@@ -5,12 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/stretchr/testify/require"
 )
 

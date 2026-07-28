@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/testkit"
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/testkit"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 // TestUnit_PickerHeader_Goldens: the header is the overlay's first row,

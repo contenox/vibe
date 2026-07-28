@@ -9,8 +9,6 @@ description: Contenox's cross-backend local inference daemon — a live-hardware
 
 Its most distinctive piece was the capacity planner: on opening a session it took a live free-memory snapshot of the target device, parsed the model's own metadata (layer count, KV heads, sliding-window pattern), and computed exactly what context window actually fit right now — shedding GPU layers if needed to guarantee a usable "hot" context floor rather than guessing from a static config. A cooperative, cross-process lease file gave one daemon per data root a single owner, so multiple frontends could share one resident model and one GPU without fighting over it, while an idle reaper returned memory to the system after inactivity. Sessions kept KV state warm across turns, could snapshot and restore for branching, and a single `modeld` binary registered as a remote backend served a laptop and a dedicated GPU box through the exact same protocol. Later builds added native vision (VLM) support through llama.cpp's multimodal stack, with capability truth reported per model rather than inferred from its name.
 
-![modeld's capacity planner reporting effective context, hot context tokens, and device stats for a resident model](/modeld-console.png)
-
 ## What it proved
 
 - **A live-hardware capacity planner beats static config.** Computing effective context from an actual memory snapshot plus real KV math — including GQA and sliding windows — solved the "why did this just OOM" problem instead of hand-waving it.

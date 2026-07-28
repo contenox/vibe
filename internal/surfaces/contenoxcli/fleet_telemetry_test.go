@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/agentinstance"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

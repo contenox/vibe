@@ -10,12 +10,12 @@ import (
 	"text/tabwriter"
 	"unicode"
 
-	libbus "github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/modelservice"
-	"github.com/contenox/beam/internal/models/runtimestate"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	libbus "github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/models/modelservice"
+	"github.com/contenox/contenox/internal/models/runtimestate"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
 )
 

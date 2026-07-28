@@ -16,14 +16,14 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/contenox/beam/internal/libbus"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/services/fleetservice"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/libbus"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/fleetservice"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
 )
 

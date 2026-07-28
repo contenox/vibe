@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/beam/internal/services/agenthost"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/services/agenthost"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libacp"
 	"github.com/google/uuid"
 )
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"maps"
 
-	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
+	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 type templateVarsKey struct{}

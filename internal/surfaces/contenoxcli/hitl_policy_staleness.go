@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/contenox/beam/internal/services/setupcheck"
+	"github.com/contenox/contenox/internal/services/setupcheck"
 )
 
 // RefreshPoliciesCommand rewrites the shipped HITL policy presets and nothing

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/llmresolver"
-	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/kernel/llmresolver"
+	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 func stickyCandidates(n int) []libmodelprovider.Provider {

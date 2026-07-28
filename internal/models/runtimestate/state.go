@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
-	libbus "github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libkvstore"
-	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	libbus "github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libkvstore"
+	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 // ProviderCacheDuration defines how long the state of models from an external

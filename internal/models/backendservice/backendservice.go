@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 var ErrInvalidBackend = errors.New("invalid backend data")

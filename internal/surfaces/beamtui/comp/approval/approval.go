@@ -11,11 +11,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/contenox/beam/internal/services/approvalflow"
-	"github.com/contenox/beam/internal/surfaces/beamtui/enginebridge"
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/sanitize"
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/services/approvalflow"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 const (

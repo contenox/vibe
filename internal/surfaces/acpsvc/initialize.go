@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/contenox/beam/internal/version"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/version"
+	"github.com/contenox/contenox/libacp"
 )
 
 // Initialize negotiates the protocol version and reports which auth methods,

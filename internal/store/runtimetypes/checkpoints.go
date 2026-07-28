@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 )
 
 // ChainCheckpoint is one suspended chain run, keyed by the approval ID whose

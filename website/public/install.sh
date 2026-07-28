@@ -4,7 +4,7 @@
 #   curl -fsSL https://contenox.com/install.sh | sh
 set -e
 
-REPO="contenox/beam"
+REPO="contenox/contenox"
 BIN="contenox"
 
 # ── Detect OS ─────────────────────────────────────────────────────────────────

@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/enginebridge"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // EngineBridge is the subset of *enginebridge.Bridge's API a beam surface

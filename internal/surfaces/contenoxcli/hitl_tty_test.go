@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/hitlservice"
 )
 
 // These tests pin the CLI half of the rendering contract shared with comp/approval's card.

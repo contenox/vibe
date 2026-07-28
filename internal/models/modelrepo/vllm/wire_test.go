@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 // vllmWireFixture builds the same logical conversation twice: once as it

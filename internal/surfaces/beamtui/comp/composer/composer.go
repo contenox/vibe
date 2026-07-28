@@ -9,8 +9,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/sanitize"
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 // MaxRows is the composer's tallest rendering; taller drafts scroll

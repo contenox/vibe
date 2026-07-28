@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/contenox/beam/internal/services/localtools"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/services/localtools"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 var acpTerminalOutputByteLimit int64 = 1 * 1024 * 1024

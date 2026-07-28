@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/libsandbox"
+	"github.com/contenox/contenox/internal/libsandbox"
 	"github.com/stretchr/testify/require"
 )
 

@@ -13,7 +13,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/contenox/beam/internal/libkvstore"
+	"github.com/contenox/contenox/internal/libkvstore"
 )
 
 // Kind is which contenox surface a process is — the primary way the board

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/errdefs"
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/getkin/kin-openapi/openapi3"
 	"golang.org/x/sync/errgroup"
 )

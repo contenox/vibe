@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/term"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/term"
 )
 
 // Styles must satisfy the terminal engine's resolver seam.

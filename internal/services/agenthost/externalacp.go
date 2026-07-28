@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/libsandbox"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/libacp"
-	"github.com/contenox/beam/libacp/acpexec"
+	"github.com/contenox/contenox/internal/libsandbox"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libacp/acpexec"
 )
 
 // closeTimeout bounds how long Handle.Close waits for the read loop to return.

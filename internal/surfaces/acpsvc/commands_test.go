@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/models/modelcapability"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/models/modelcapability"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 func TestParseCommand(t *testing.T) {

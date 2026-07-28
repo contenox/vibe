@@ -9,9 +9,9 @@ package testkit
 import (
 	"encoding/json"
 
-	"github.com/contenox/beam/internal/services/approvalflow"
-	"github.com/contenox/beam/internal/surfaces/beamtui/enginebridge"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/services/approvalflow"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // FixtureStreamingTurn scripts a whole ordinary turn: user message echoed
@@ -366,7 +366,7 @@ func FixtureShellRun(sessionID libacp.SessionID) []enginebridge.Event {
 		enginebridge.TerminalChunk{
 			SessionID: sessionID,
 			Offset:    int64(len(snapshot)),
-			Chunk:     "\x1b[32mok\x1b[0m  \tgithub.com/contenox/beam/internal/ingest\t0.412s\n",
+			Chunk:     "\x1b[32mok\x1b[0m  \tgithub.com/contenox/contenox/internal/ingest\t0.412s\n",
 			Reset:     false,
 		},
 		enginebridge.ShellRunResult{SessionID: sessionID, Offset: int64(len(snapshot)) + 60, Started: true},

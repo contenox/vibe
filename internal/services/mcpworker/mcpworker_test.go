@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/libbus"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/mcpworker"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/libbus"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/mcpworker"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/beam/internal/models/llmrepo"
+	"github.com/contenox/contenox/internal/models/llmrepo"
 )
 
 // EmbedSeam is the one method the index needs from llmrepo's model manager.

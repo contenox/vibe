@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/localtools"
-	"github.com/contenox/beam/internal/services/localtools/mcpoauth"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/localtools"
+	"github.com/contenox/contenox/internal/services/localtools/mcpoauth"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"golang.org/x/oauth2"
 )
 
@@ -114,7 +114,7 @@ func (s *service) StartOAuth(ctx context.Context, id, redirectBase string) (*OAu
 	redirectBase = strings.TrimRight(redirectBase, "/")
 	redirectURI := redirectBase + "/api/mcp/oauth/callback"
 
-	o2cfg, meta, err := s.resolveOAuthConfig(ctx, srv, "contenox-beam", srv.OAuthClientID, srv.ResolveOAuthClientSecret(), redirectURI, nil)
+	o2cfg, meta, err := s.resolveOAuthConfig(ctx, srv, "contenox", srv.OAuthClientID, srv.ResolveOAuthClientSecret(), redirectURI, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/enginebridge"
-	"github.com/contenox/beam/internal/surfaces/beamtui/liveness"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/liveness"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // allFixtures is every session-scoped fixture constructor in fixtures.go,

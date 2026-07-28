@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/contenox/beam/internal/kernel/reasoning"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/modelrepo"
-	msgcodec "github.com/contenox/beam/internal/models/modelrepo/codec/messages"
+	"github.com/contenox/contenox/internal/kernel/reasoning"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/models/modelrepo"
+	msgcodec "github.com/contenox/contenox/internal/models/modelrepo/codec/messages"
 )
 
 const (

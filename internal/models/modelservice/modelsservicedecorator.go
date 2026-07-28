@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 type activityTrackerDecorator struct {

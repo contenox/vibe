@@ -12,9 +12,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/contenox/beam/internal/errdefs"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/libacp"
 )
 
 // DOI (Degree-of-Interest) weights for Stage 1 scoring. These are tunable

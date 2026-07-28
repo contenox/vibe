@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/fileaddr"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/picker"
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/fileaddr"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/picker"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 // buildBrowseWorkspace lays out a tree with real depth for navigation tests:

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
 )
 
 type activityTrackerTaskEnvDecorator struct {

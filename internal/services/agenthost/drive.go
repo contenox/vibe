@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/internal/version"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/version"
+	"github.com/contenox/contenox/libacp"
 )
 
 // RecordingHarness is the minimal libacp.Client harness for observing a

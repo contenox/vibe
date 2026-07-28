@@ -3,9 +3,9 @@ package stateservice
 import (
 	"context"
 
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/runtimestate"
-	"github.com/contenox/beam/internal/services/setupcheck"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/models/runtimestate"
+	"github.com/contenox/contenox/internal/services/setupcheck"
 )
 
 type activityTrackerDecorator struct {

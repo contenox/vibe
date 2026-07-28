@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/chatservice"
-	"github.com/contenox/beam/internal/services/missionservice"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/chatservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

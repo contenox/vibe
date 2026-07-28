@@ -11,10 +11,10 @@ package transcript
 import (
 	"strings"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/enginebridge"
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/sanitize"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // Transcript is the transcript state machine. The zero value is not usable;

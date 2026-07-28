@@ -1,6 +1,6 @@
 package term
 
-import "github.com/contenox/beam/internal/surfaces/beamtui/input"
+import "github.com/contenox/contenox/internal/surfaces/beamtui/input"
 
 // newParser is the single point where the engine binds to the real input
 // decoder. Everything else in this package talks to eventParser, which is

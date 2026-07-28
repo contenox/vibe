@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 // TestUnit_LineStripsEverythingDangerous is the ingest contract in one table:

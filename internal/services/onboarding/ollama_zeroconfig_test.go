@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/services/setupcheck"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/setupcheck"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 // TestDecide pins the pure decision table: only a virgin install with a reachable, chat-capable probe fires.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/input"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
 )
 
 func TestUnit_ChordOfTable(t *testing.T) {

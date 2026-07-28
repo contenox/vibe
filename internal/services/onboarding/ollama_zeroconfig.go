@@ -10,16 +10,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/models/backendservice"
-	"github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/models/backendservice"
+	"github.com/contenox/contenox/internal/models/modelrepo"
 	// Blank-imported so the "ollama" catalog provider is registered even if
 	// no other import already pulled it in; production wiring does this
 	// transitively, but this package should not depend on that surviving refactors.
-	_ "github.com/contenox/beam/internal/models/modelrepo/ollama"
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/services/setupcheck"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	_ "github.com/contenox/contenox/internal/models/modelrepo/ollama"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/setupcheck"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/google/uuid"
 )
 

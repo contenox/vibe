@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security reports
-    url: https://github.com/contenox/beam/security/policy
+    url: https://github.com/contenox/contenox/security/policy
     about: Please report security vulnerabilities through the security policy instead of a public issue.

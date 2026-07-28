@@ -8,6 +8,22 @@ import path from 'node:path';
 const S3_MEDIA_BASE =
   'https://contenox-website-assets-573643652148.s3.amazonaws.com/media/';
 const S3_MEDIA = new Set([
+  'lab-mvp-selfreview.jpg',
+  'lab-bob-dashboard.png',
+  'lab-bob-connectors.png',
+  'lab-bob-search.png',
+  'lab-bob-beam.png',
+  'lab-bob-files.png',
+  'lab-bob-members.png',
+  'lab-site-home.png',
+  'lab-site-bob-signup.png',
+  'lab-site-admin-login.png',
+  'lab-admin-bob-tenants.png',
+  'lab-admin-bob-tenants2.png',
+  'lab-admin-bob-worker-pools.png',
+  'lab-admin-bob-apps.png',
+  'lab-minio-console.png',
+  'lab-mailpit-inbox.png',
   'hero.gif',
   'install.gif',
   'quickstart.gif',
@@ -28,6 +44,8 @@ const S3_MEDIA = new Set([
   'beam-new-chat.png',
   'modeld-console.png',
   'vscode-extension-icon.png',
+  'lab-blueprints-ticket-triage.png',
+  'lab-blueprints-ticket-triage-form.png',
   'ui-library-storybook.png',
 ]);
 
@@ -73,11 +91,11 @@ export default function remarkMdLinks() {
       if (repoDir) {
         const resolved = path.posix.normalize(path.posix.join(repoDir, url));
         if (!resolved.startsWith('..')) {
-          node.url = `https://github.com/contenox/beam/blob/main/${resolved}`;
+          node.url = `https://github.com/contenox/contenox/blob/main/${resolved}`;
         } else {
           // Climbs out of docs/ — a repo source path like ../../runtime/foo.go.
           const fromRepoRoot = path.posix.normalize(path.posix.join(repoDir.replace(/^docs/, ''), url)).replace(/^\/+/, '');
-          node.url = `https://github.com/contenox/beam/blob/main/${fromRepoRoot}`;
+          node.url = `https://github.com/contenox/contenox/blob/main/${fromRepoRoot}`;
         }
       }
     });

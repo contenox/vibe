@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/backendservice"
+	"github.com/contenox/contenox/internal/models/backendservice"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

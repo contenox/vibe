@@ -9,6 +9,13 @@ vald-operator provisioned a dedicated vector-search cluster for every tenant tha
 
 The fields that could silently corrupt a live index if changed — dimension, distance metric, object type — were declared immutable and enforced by the Kubernetes API server itself, through CEL validation on the resource's own schema, so no separate admission webhook was needed and no code path could accidentally slip a mutation through. Changing an embedding model was never an in-place edit; it meant standing up a second cluster and cutting over. The operator's own scope stayed deliberately narrow — provision and observe, not rebalance or drain — and it was proven at three test tiers: pure unit tests, a real API server via envtest, and a full kind cluster driving a live resource to ready.
 
+
+Provisioned infrastructure surfaced back in the operator console, where worker pools and hosted app instances were tracked per deployment.
+
+![The operator console's worker-pools view](/lab-admin-bob-worker-pools.png)
+
+![The operator console's hosted-apps view, where an OCI chart becomes a per-tenant instance](/lab-admin-bob-apps.png)
+
 ## What it proved
 
 - **Modeling a piece of infrastructure as one declarative custom resource, reconciled the same way Kubernetes reconciles everything else, kept per-tenant provisioning boring, observable, and easy to test.**

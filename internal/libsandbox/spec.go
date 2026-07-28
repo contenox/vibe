@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/libtracker"
 )
 
 // Access modes for an FSCarveout.

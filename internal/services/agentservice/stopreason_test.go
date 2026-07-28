@@ -6,8 +6,8 @@ package agentservice_test
 import (
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/agentservice"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/stretchr/testify/require"
 )
 

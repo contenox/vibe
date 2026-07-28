@@ -17,13 +17,13 @@ import (
 	"testing"
 	"time"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/services/operatorinbox"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/libacp"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/operatorinbox"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -293,7 +293,7 @@ func (b *fwdLockedBuffer) String() string {
 func fwdBuildBin(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "contenox")
-	out, err := exec.Command("go", "build", "-o", binPath, "github.com/contenox/beam/cmd/contenox").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", binPath, "github.com/contenox/contenox/cmd/contenox").CombinedOutput()
 	require.NoErrorf(t, err, "build contenox:\n%s", out)
 	return binPath
 }

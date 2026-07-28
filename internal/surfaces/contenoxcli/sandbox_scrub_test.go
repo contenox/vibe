@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/shellenvservice"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/shellenvservice"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

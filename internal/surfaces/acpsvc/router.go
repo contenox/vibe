@@ -5,10 +5,10 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/libacp"
 
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 // ErrNoBoundSession reports that no live ACP transport owns the contenox

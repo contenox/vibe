@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/input"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
 )
 
 // doublePressWindow is how long a first "g"-style press waits for its

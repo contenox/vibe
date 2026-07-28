@@ -16,15 +16,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/enginesvc"
-	"github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/approvalflow"
-	"github.com/contenox/beam/internal/services/shellsession"
-	"github.com/contenox/beam/internal/services/vfs"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/enginesvc"
+	"github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/approvalflow"
+	"github.com/contenox/contenox/internal/services/shellsession"
+	"github.com/contenox/contenox/internal/services/vfs"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // extMethodTerminalRun mirrors acpsvc's unexported constant of the same name:

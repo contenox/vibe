@@ -50,7 +50,7 @@ You don't have to start there. You can write your own.
 
 Chains live as files in `~/.contenox/` (and your workspace `.contenox/`); the
 CLI picks one per invocation with `--chain`, or falls back to the configured
-`default-chain`. Sessions in the Beam TUI (`contenox beam`) and in ACP editors
+`default-chain`. Sessions in the beam TUI (`contenox beam`) and in ACP editors
 run the workspace's default chain the same way.
 
 ---

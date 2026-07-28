@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/libtracker"
 	"github.com/google/uuid"
 )
 

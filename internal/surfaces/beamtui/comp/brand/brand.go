@@ -8,8 +8,8 @@ package brand
 import (
 	"strings"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 // CompactWidth is the narrowest width that still fits the logo-mark header;

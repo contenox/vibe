@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 // E2E hardening: hostile arguments cannot panic or escape the workspace, concurrent queries/edits/teardown do not race, and real-world module shapes answer rather than hang. Tests loading this repository are gated on -short.

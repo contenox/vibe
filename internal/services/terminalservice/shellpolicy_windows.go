@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/contenox/beam/internal/services/localtools"
+	"github.com/contenox/contenox/internal/services/localtools"
 )
 
 func defaultTerminalShell() string {

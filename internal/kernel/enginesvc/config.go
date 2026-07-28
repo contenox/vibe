@@ -3,17 +3,17 @@ package enginesvc
 import (
 	"context"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libbus"
-	"github.com/contenox/beam/internal/libkvstore"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/llmrepo"
-	"github.com/contenox/beam/internal/models/runtimestate"
-	"github.com/contenox/beam/internal/services/execservice"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/localtools"
-	"github.com/contenox/beam/internal/services/mcpworker"
-	"github.com/contenox/beam/internal/services/setupcheck"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libbus"
+	"github.com/contenox/contenox/internal/libkvstore"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/models/llmrepo"
+	"github.com/contenox/contenox/internal/models/runtimestate"
+	"github.com/contenox/contenox/internal/services/execservice"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/localtools"
+	"github.com/contenox/contenox/internal/services/mcpworker"
+	"github.com/contenox/contenox/internal/services/setupcheck"
 )
 
 type Config struct {

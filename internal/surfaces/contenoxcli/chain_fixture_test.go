@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/stretchr/testify/require"
 )
 

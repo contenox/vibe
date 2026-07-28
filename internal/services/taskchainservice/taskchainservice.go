@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/localfileservice"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/localfileservice"
 )
 
 type Service interface {

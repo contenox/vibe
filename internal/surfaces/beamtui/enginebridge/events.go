@@ -3,9 +3,9 @@ package enginebridge
 import (
 	"encoding/json"
 
-	"github.com/contenox/beam/internal/services/approvalflow"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/services/approvalflow"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // Event is one fact produced by the runtime, already destructured out of the

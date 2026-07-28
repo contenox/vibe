@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/agentinstance"
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/approvalflow"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/approvalflow"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/libacp"
 )
 
 // UnattendedPermissionDeps is what an answerer needs to turn "a unit nobody is

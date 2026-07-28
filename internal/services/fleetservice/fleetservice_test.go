@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/errdefs"
-	"github.com/contenox/beam/internal/kernel/agentinstance"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/services/vfs"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/vfs"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -606,7 +606,7 @@ func TestFleetService_Cancel_UnknownInstancePropagatesNotFound(t *testing.T) {
 func buildStubAgentBin(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
-	out, err := exec.Command("go", "build", "-o", binPath, "github.com/contenox/beam/libacp/cmd/acp-stub-agent").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", binPath, "github.com/contenox/contenox/libacp/cmd/acp-stub-agent").CombinedOutput()
 	require.NoError(t, err, "build acp-stub-agent:\n%s", out)
 	return binPath
 }

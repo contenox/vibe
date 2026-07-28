@@ -1,7 +1,7 @@
 package acpsvc
 
 import (
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 func mockTransportForFS(caps libacp.FileSystemCapabilities) *Transport {

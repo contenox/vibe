@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/contenox/beam/internal/services/clikv"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 // ConfigKey is the clikv key the durable grant list is stored under

@@ -32,7 +32,7 @@ package sanitize
 import (
 	"strings"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 // DefaultTabStop is the tab width beam expands to: 8, matching what every

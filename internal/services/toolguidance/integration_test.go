@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/localtools"
-	"github.com/contenox/beam/internal/services/toolguidance"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/localtools"
+	"github.com/contenox/contenox/internal/services/toolguidance"
 )
 
 // TestUnit_ToolGuidance_RealLocalFS_RepeatMarker pins that the decorator appends the repeat marker without altering the real local_fs listing.

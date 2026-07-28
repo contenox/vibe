@@ -7,10 +7,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/enginesvc"
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/agentservice"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/enginesvc"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/agentservice"
+	"github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

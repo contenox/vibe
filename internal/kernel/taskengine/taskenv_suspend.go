@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/libtracker"
 )
 
 // suspendRun turns an in-flight ApprovalPendingError into a durable

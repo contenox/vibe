@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 func TestUnit_MCPServerService_ValidateTransportRequirements(t *testing.T) {

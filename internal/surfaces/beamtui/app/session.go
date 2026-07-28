@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/picker"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/transcript"
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/picker"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/transcript"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // Session management: beam shows exactly one session at a time, so every act

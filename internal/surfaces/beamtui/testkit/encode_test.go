@@ -3,7 +3,7 @@ package testkit
 import (
 	"testing"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 )
 
 func TestUnit_EncodeLinesStyleTags(t *testing.T) {

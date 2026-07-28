@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/ollama/ollama/api"
 	ollamamodel "github.com/ollama/ollama/types/model"
 )

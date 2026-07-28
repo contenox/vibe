@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/llmresolver"
-	"github.com/contenox/beam/internal/libtracker"
-	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
-	"github.com/contenox/beam/internal/models/ollamatokenizer"
-	"github.com/contenox/beam/internal/models/runtimestate"
+	"github.com/contenox/contenox/internal/kernel/llmresolver"
+	"github.com/contenox/contenox/internal/libtracker"
+	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/ollamatokenizer"
+	"github.com/contenox/contenox/internal/models/runtimestate"
 )
 
 var _ ModelRepo = (*modelManager)(nil)

@@ -1,6 +1,6 @@
 package gemini
 
-import "github.com/contenox/beam/internal/models/modelrepo"
+import "github.com/contenox/contenox/internal/models/modelrepo"
 
 type geminiToolRequest struct {
 	FunctionDeclarations []geminiFunctionDeclaration `json:"functionDeclarations,omitempty"`

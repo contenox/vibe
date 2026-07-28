@@ -11,17 +11,17 @@ import (
 	"context"
 	"os"
 
-	"github.com/contenox/beam/internal/kernel/agentinstance"
-	"github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/fleetservice"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/missionservice"
-	"github.com/contenox/beam/internal/services/reportrouter"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	"github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/fleetservice"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/reportrouter"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	"github.com/contenox/contenox/libacp"
 )
 
 // Deps are the collaborators BuildInProcessFleet wires the embedded fleet

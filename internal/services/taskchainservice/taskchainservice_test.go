@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/localfileservice"
-	"github.com/contenox/beam/internal/services/taskchainservice"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/localfileservice"
+	"github.com/contenox/contenox/internal/services/taskchainservice"
 	"github.com/stretchr/testify/require"
 )
 

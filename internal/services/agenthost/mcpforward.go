@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libacp"
 )
 
 // McpServerResolver is the narrow lookup surface ResolveForwardedMcpServers

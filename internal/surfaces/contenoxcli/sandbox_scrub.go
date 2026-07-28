@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libsandbox"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/shellenvservice"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libsandbox"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/shellenvservice"
 )
 
 // shellEnvCacheTTL bounds how stale a shellenvservice read can be; a Beam/CLI

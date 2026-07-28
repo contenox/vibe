@@ -1,6 +1,6 @@
 package agentservice
 
-import "github.com/contenox/beam/internal/kernel/taskengine"
+import "github.com/contenox/contenox/internal/kernel/taskengine"
 
 // trimHistoryChunked enforces the HistoryTrim message budget (never
 // exceeded) while keeping the kept prefix byte-identical across turns until

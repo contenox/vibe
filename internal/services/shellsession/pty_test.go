@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/libsandbox"
+	"github.com/contenox/contenox/internal/libsandbox"
 )
 
 // requireBash skips a test that needs the real bash semantics (rc files,

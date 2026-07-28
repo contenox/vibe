@@ -3,13 +3,13 @@ package testkit
 import (
 	"testing"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/approval"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/brand"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/composer"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/palette"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/picker"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/transcript"
-	"github.com/contenox/beam/internal/surfaces/beamtui/style"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/approval"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/brand"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/composer"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/palette"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/picker"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/transcript"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/style"
 )
 
 // TestUnit_ASCIIGlyphParity pins that style's Mono glyphs and each

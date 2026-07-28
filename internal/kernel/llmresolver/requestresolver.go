@@ -8,8 +8,8 @@ import (
 	"math/rand"
 	"strings"
 
-	"github.com/contenox/beam/internal/libtracker"
-	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/libtracker"
+	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 func filterCandidates(

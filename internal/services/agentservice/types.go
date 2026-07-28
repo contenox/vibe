@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 type PromptRequest struct {

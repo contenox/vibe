@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 func newTestTools(t *testing.T) (taskengine.ToolsRepo, *index) {

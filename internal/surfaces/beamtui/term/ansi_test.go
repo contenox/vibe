@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/input"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
 	"github.com/creack/pty"
 	xterm "golang.org/x/term"
 )

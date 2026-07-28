@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/brand"
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/sanitize"
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/brand"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
 )
 
 // Health is the closed vocabulary connection-lifecycle publishes, closed by

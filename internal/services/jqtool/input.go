@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/vfs"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"gopkg.in/yaml.v3"
 )
 

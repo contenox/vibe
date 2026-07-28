@@ -12,7 +12,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 const queryDescription = "Run a jq program over ONE JSON or YAML document and get the values it emits. " +

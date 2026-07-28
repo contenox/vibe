@@ -3,9 +3,9 @@ package contenoxcli
 import (
 	"context"
 
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
-	"github.com/contenox/beam/internal/services/chainagents"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/chainagents"
 )
 
 // discoverChainAgents runs one chain-agent discovery pass over the workspace

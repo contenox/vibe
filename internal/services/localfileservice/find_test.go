@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/localfileservice"
-	"github.com/contenox/beam/internal/services/vfs"
+	"github.com/contenox/contenox/internal/services/localfileservice"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/stretchr/testify/require"
 )
 

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/gointel"
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/gointel"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -233,12 +233,12 @@ func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *te
 
 				res, ok := out.(*gointel.DefinitionResult)
 				require.Truef(t, ok, "result is %T, not the declared schema", out)
-				require.Equal(t, "github.com/contenox/beam/internal/surfaces/beamtui/frame.StyleBrand", res.Symbol)
+				require.Equal(t, "github.com/contenox/contenox/internal/surfaces/beamtui/frame.StyleBrand", res.Symbol)
 				require.Equal(t, "const", res.Kind)
 				require.Equal(t, "internal/surfaces/beamtui/frame/frame.go:37:2", res.Location,
 					"ground truth moved: check where frame.StyleBrand is declared")
 				require.Contains(t, res.Line, "StyleBrand")
-				require.Equal(t, "github.com/contenox/beam", res.Module)
+				require.Equal(t, "github.com/contenox/contenox", res.Module)
 				require.Contains(t, res.Toolchain, "advisory")
 				t.Logf("go_definition took %v", time.Since(start))
 			})
@@ -251,7 +251,7 @@ func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *te
 
 				res, ok := out.(*gointel.DescribeResult)
 				require.Truef(t, ok, "result is %T", out)
-				require.Equal(t, "github.com/contenox/beam/internal/surfaces/beamtui/frame.StyleID", res.Symbol)
+				require.Equal(t, "github.com/contenox/contenox/internal/surfaces/beamtui/frame.StyleID", res.Symbol)
 				require.Equal(t, "type", res.Kind)
 				require.Equal(t, "string", res.Underlying, "StyleID is a defined string type")
 				require.Contains(t, res.Location, "internal/surfaces/beamtui/frame/frame.go:")
@@ -396,7 +396,7 @@ func TestSystem_GoIntel_EnginePathTolerantOfSloppyButHonestArguments(t *testing.
 		{"max negative", gointel.ToolReferences, map[string]string{"symbol": "frame.StyleBrand", "max": "-1"}},
 		{"max zero", gointel.ToolReferences, map[string]string{"symbol": "frame.StyleBrand", "max": "0"}},
 		{"symbol with surrounding space", gointel.ToolDefinition, map[string]string{"symbol": "  frame.StyleBrand  "}},
-		{"full import path", gointel.ToolDefinition, map[string]string{"symbol": "github.com/contenox/beam/internal/surfaces/beamtui/frame.StyleBrand"}},
+		{"full import path", gointel.ToolDefinition, map[string]string{"symbol": "github.com/contenox/contenox/internal/surfaces/beamtui/frame.StyleBrand"}},
 		{"import path suffix", gointel.ToolDefinition, map[string]string{"symbol": "beamtui/frame.StyleBrand"}},
 		{"dir with redundant segments", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": "internal/../internal/surfaces"}},
 		{"dir naming a file", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": "internal/surfaces/beamtui/frame/frame.go"}},

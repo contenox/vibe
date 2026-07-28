@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/contenox/beam/internal/errdefs"
-	"github.com/contenox/beam/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/stretchr/testify/require"
 )
 

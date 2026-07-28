@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/models/modelrepo"
 )
 
 func TestUnit_OpenAIReasoningEffort(t *testing.T) {

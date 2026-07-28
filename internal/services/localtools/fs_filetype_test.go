@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/localtools"
+	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/stretchr/testify/require"
 )
 

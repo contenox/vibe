@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/services/vfs"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/services/vfs"
 )
 
 const MaxWriteSize = 10 * 1024 * 1024

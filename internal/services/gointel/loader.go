@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/contenox/beam/internal/services/vfs"
+	"github.com/contenox/contenox/internal/services/vfs"
 )
 
 // ToolsProviderName is the tools-provider key this package registers under. Every tool it exposes is a pure read at allow tier.

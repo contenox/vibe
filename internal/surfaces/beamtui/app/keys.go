@@ -4,12 +4,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/composer"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/fileaddr"
-	"github.com/contenox/beam/internal/surfaces/beamtui/comp/palette"
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/input"
-	"github.com/contenox/beam/internal/surfaces/beamtui/keymap"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/composer"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/fileaddr"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/palette"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/keymap"
 )
 
 // Binding ids are stable identities the dispatch switch reads — never a raw

@@ -9,7 +9,10 @@ description: A versioned, Storybook-catalogued React 19 + Tailwind design system
 
 The catalog ran to roughly seventy components across five families: interaction primitives (buttons, inputs, selects, dialogs, tabs, tables, forms, pagination); a full chat kit (`ChatThread`, `ChatComposer`, `ChatMessage`, `ApprovalCard`, `ToolCallCard`, typing indicators, transcript embeds); a terminal kit (`TerminalOutput`, `TerminalLine`, ANSI rendering, a terminal prompt input); a visual workflow kit built on `dagre` graph layout (`WorkflowVisualizer`, `WorkflowNode`, `WorkflowEdge`, `ExecutionTimeline`, `StateVisualizer`); and structural pieces — resizable panels, a file tree, drag-and-drop, a command bar, a setup wizard. It was the library Beam's entire admin and chat surface was built from.
 
-![The @contenox/ui component catalog in Storybook](/ui-library-storybook.png)
+
+The component library dressed every surface the platform shipped — the marketing site, the workspace dashboard, and the operator console alike.
+
+![The hosted platform's marketing homepage, built from the shared component library](/lab-site-home.png)
 
 ## What it proved
 

@@ -5,8 +5,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/contenox/beam/internal/libsandbox"
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/libsandbox"
+	"github.com/contenox/contenox/internal/libtracker"
 	"github.com/stretchr/testify/require"
 )
 

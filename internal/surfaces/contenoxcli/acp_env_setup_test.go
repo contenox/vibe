@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/agentinstance"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/models/backendservice"
-	"github.com/contenox/beam/internal/store/runtimetypes"
-	"github.com/contenox/beam/internal/surfaces/acpsvc"
+	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/models/backendservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

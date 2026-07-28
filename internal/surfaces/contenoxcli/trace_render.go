@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/libtracker"
 )
 
 // traceDrainGrace is the time we wait after a chain returns before cancelling

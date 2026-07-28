@@ -10,7 +10,7 @@
 // passthrough.
 //
 // A connection reads from any io.ReadWriteCloser; the subpackage
-// github.com/contenox/beam/libacp/acpexec spawns an agent subprocess over
+// github.com/contenox/contenox/libacp/acpexec spawns an agent subprocess over
 // stdio and hands back the transport.
 //
 // Client-role usage — spawn, connect, initialize, open a session, prompt:

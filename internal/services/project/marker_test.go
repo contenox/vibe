@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/project"
+	"github.com/contenox/contenox/internal/services/project"
 	"github.com/stretchr/testify/require"
 )
 

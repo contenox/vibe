@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/services/messagestore"
-	"github.com/contenox/beam/internal/services/sessionservice"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/services/messagestore"
+	"github.com/contenox/contenox/internal/services/sessionservice"
 	"github.com/spf13/cobra"
 )
 

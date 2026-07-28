@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/internal/services/localtools"
-	"github.com/contenox/beam/internal/surfaces/beamtui/sanitize"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/localtools"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
 )
 
 // ErrApprovalAborted is returned when the operator aborts the whole run from an

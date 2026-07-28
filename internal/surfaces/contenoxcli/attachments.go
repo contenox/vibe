@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 // maxAttachmentBytes bounds a single --attach file. Providers cap image inputs

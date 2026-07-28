@@ -11,7 +11,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/contenox/beam/internal/services/terminalstore"
+	"github.com/contenox/contenox/internal/services/terminalstore"
 	"golang.org/x/sys/windows"
 )
 

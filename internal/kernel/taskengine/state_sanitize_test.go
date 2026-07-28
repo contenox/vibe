@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/libbus"
-	libdb "github.com/contenox/beam/internal/libdbexec"
-	"github.com/contenox/beam/internal/libkvstore"
-	"github.com/contenox/beam/internal/libtracker"
+	"github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libkvstore"
+	"github.com/contenox/contenox/internal/libtracker"
 	"github.com/stretchr/testify/require"
 )
 

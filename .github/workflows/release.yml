@@ -74,7 +74,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           TAG="${{ needs.verify.outputs.tag }}"
-          LDFLAGS="-X github.com/contenox/beam/internal/surfaces/contenoxcli.Version=${TAG}"
+          LDFLAGS="-X github.com/contenox/contenox/internal/surfaces/contenoxcli.Version=${TAG}"
           mkdir -p bin
           EXT=""
           if [ "${{ matrix.goos }}" = "windows" ]; then

@@ -11,10 +11,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
-	"github.com/contenox/beam/internal/surfaces/beamtui/sanitize"
-	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
-	libacp "github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // ASCIIMarker is the selection marker on a Mono terminal, exported so

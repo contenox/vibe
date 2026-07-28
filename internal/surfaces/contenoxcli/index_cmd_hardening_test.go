@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/workspaceindex"
+	"github.com/contenox/contenox/internal/services/workspaceindex"
 	"github.com/stretchr/testify/require"
 )
 

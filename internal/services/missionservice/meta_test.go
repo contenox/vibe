@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/contenox/beam/internal/services/missionservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/stretchr/testify/require"
 )
 

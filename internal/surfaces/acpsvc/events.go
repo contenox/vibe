@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/libacp"
 )
 
 func (t *Transport) translateEvents(ctx context.Context, sid libacp.SessionID, ch <-chan []byte) {

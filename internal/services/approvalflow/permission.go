@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/contenox/beam/internal/services/hitlservice"
-	"github.com/contenox/beam/libacp"
+	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/libacp"
 )
 
 const (

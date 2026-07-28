@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/beam/internal/kernel/taskengine/llmretry"
-	"github.com/contenox/beam/internal/libtracker"
-	"github.com/contenox/beam/internal/models/llmrepo"
-	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
+	"github.com/contenox/contenox/internal/kernel/taskengine/llmretry"
+	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/internal/models/llmrepo"
+	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/google/uuid"
 )
 

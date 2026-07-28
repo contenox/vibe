@@ -1,6 +1,6 @@
 ---
 title: "Lab"
-description: The contenox Lab — research built, shipped, and run for real. Beam web UI, modeld, the VS Code extension, the HTTP API layer, the UI component library, Bob, runnerd, vald-operator, and blueprints.
+description: The contenox Lab — research built, shipped, and run for real. Beam web UI, modeld, the VS Code extension, the HTTP API layer, the UI component library, Bob, runnerd, vald-operator, the early Telegram/GitHub MVP, and blueprints.
 ---
 
 # Lab
@@ -15,4 +15,5 @@ Research, built for real. Every line here was shipped and run — each one feeds
 - **[Bob: the hosted document & search dashboard](/docs/rnd/bob/)** — a multi-tenant SaaS dashboard with pluggable source connectors, real-embedding semantic search, and a one-click hosted-apps catalog.
 - **[runnerd: the self-hosted simulation runner](/docs/rnd/runner/)** — an outbound-only agent that ran branching, human-and-AI tabletop exercises and shipped an auditable, redaction-safe evidence bundle.
 - **[vald-operator](/docs/rnd/vald-operator/)** — a Kubernetes operator provisioning one vector-search cluster per tenant, with its unsafe fields made immutable at the API boundary.
-- **[blueprints](/docs/rnd/blueprints/)** — a schema-validated page format plus a bounded AI draft-and-repair loop that turned a plain-English ask into a working, edit-preserving app.
+- **[The schema-validated app generator](/docs/rnd/blueprints/)** — a schema-validated page format plus a bounded AI draft-and-repair loop that turned a plain-English ask into a working, edit-preserving app.
+- **[The MVP: Telegram and GitHub bots on one chain engine](/docs/rnd/mvp/)** — a Telegram co-pilot and an autonomous GitHub PR bot sharing one lease-based job queue and declarative chain engine, first shipped April 2025.

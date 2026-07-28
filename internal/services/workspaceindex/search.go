@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 // Query answers a natural-language question with ranked citations. FTS5

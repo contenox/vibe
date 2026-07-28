@@ -3,7 +3,7 @@ package taskengine_test
 import (
 	"testing"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 func TestUnit_ExtractJSONObject(t *testing.T) {

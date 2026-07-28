@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/runtimestate"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/models/runtimestate"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 func TestSystem_Evaluate_missingDefaults(t *testing.T) {

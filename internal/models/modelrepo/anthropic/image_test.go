@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/contenox/beam/internal/models/modelrepo"
-	msgcodec "github.com/contenox/beam/internal/models/modelrepo/codec/messages"
+	"github.com/contenox/contenox/internal/models/modelrepo"
+	msgcodec "github.com/contenox/contenox/internal/models/modelrepo/codec/messages"
 	"github.com/stretchr/testify/require"
 )
 

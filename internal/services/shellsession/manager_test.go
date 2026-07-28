@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/beam/internal/services/vfs"
-	"github.com/contenox/beam/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/services/vfs"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 func newTestManager(t *testing.T, idle time.Duration) *manager {

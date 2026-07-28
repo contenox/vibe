@@ -3,8 +3,8 @@ package contenoxcli
 import (
 	"os"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/services/agentsmd"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/agentsmd"
 )
 
 const (

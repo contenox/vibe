@@ -3,7 +3,7 @@ package execservice
 import (
 	"context"
 
-	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
 type TasksEnvService interface {

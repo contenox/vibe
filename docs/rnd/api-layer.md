@@ -9,6 +9,13 @@ Contenox ran on a shared HTTP layer, `apiframework`: authentication, CORS, a str
 
 The generator was strict by design, not best-effort. A coverage gate rejected any documented operation missing a `@response` annotation, or any non-GET/DELETE operation missing `@request` — with explicit `none`/`binary`/`sse`/`redirect` forms as the only escape hatches, each requiring its own stated reason. A freshness test regenerated the spec from the working tree on every `go test ./...` run and byte-compared it against the committed file, so a route could never silently drift out of sync with its documented contract. Generation was fully deterministic — the same tree always produced identical output — and a full `apitests/` pytest suite exercised the compiled routes against that same described contract: backends, missions, chains, tools, HITL policies, MCP servers, model registry, and health, end to end.
 
+
+The platform that rode this API layer shipped a full account surface — workspace signup, member sign-in, and a separate operator entrance — all served by the same typed contracts.
+
+![The hosted platform's workspace signup form](/lab-site-bob-signup.png)
+
+![The operator sign-in page, a separate entrance from the tenant-facing one](/lab-site-admin-login.png)
+
 ## What it proved
 
 - **A spec generated straight from source annotations can be both fully automatic and byte-deterministic** — no hand-maintained YAML drifting away from the code it describes.
