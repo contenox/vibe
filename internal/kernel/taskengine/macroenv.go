@@ -53,13 +53,13 @@ func (m *MacroEnv) ExecEnv(
 		return nil, DataTypeAny, nil, fmt.Errorf("chain is nil")
 	}
 
-	// Shallow copy the chain, deep copy tasks so we don't mutate the original.
+	// Shallow-copy the chain, then deep-copy tasks and their pointer fields
+	// so macro expansion never mutates the globally-cached chain definition,
+	// which may be shared across goroutines.
 	clone := *chain
 	clone.Tasks = make([]TaskDefinition, len(chain.Tasks))
 	copy(clone.Tasks, chain.Tasks)
 
-	// deep-copy pointer fields so macro expansion never mutates the
-	// globally-cached chain definition that may be shared across goroutines.
 	for i := range clone.Tasks {
 		if clone.Tasks[i].ExecuteConfig != nil {
 			ec := *clone.Tasks[i].ExecuteConfig
@@ -71,11 +71,9 @@ func (m *MacroEnv) ExecEnv(
 		}
 	}
 
-	// Expand macros in all relevant string fields of each task.
 	for i := range clone.Tasks {
 		t := &clone.Tasks[i]
 
-		// Determine the allowlist for this specific task.
 		var allowlist []string
 		if t.ExecuteConfig != nil {
 			allowlist = t.ExecuteConfig.Tools
@@ -104,7 +102,7 @@ func (m *MacroEnv) ExecEnv(
 			// The system instruction is the deepest stable prefix every
 			// provider cache keys on, so it expands with stablePrefix=true:
 			// wall-clock macros degrade to day granularity there (see
-			// expandOne's "now" case and the provider-kv-cache blueprint E1).
+			// expandOne's "now" case).
 			t.SystemInstruction, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.SystemInstruction, true)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: system_instruction macro error: %w", t.ID, err)
@@ -116,7 +114,6 @@ func (m *MacroEnv) ExecEnv(
 				allowed, _ = resolveToolsNames(ctx, allowlist, m.toolsProvider)
 			}
 
-			// Auto-append tools summary if tools are available and not already mentioned
 			if len(allowed) > 0 && !strings.Contains(t.SystemInstruction, "Available tools") && !strings.Contains(t.SystemInstruction, "tool") {
 				summary, _ := m.renderToolsAndToolsJSON(ctx, allowed)
 				if summary != "" {
@@ -124,12 +121,10 @@ func (m *MacroEnv) ExecEnv(
 				}
 			}
 
-			// Auto-append a preference nudge when both file-touching tool groups
-			// are available. local_fs enforces a read-before-write contract,
-			// sandbox boundaries, and size limits that local_shell does not, so
-			// when both are exposed we steer the model toward local_fs for file
-			// ops. Chain authors who want different behaviour exclude one of the
-			// groups from the task's tools allowlist.
+			// When both file-touching tool groups are available, steer the
+			// model toward local_fs (read-before-write, sandboxed, size
+			// limits) over local_shell. Authors who want different behavior
+			// exclude one group from the task's tools allowlist.
 			if containsAll(allowed, "local_fs", "local_shell") {
 				t.SystemInstruction += "\n\nTOOL PREFERENCE: For inspecting or modifying files in the project, prefer the local_fs.* tools over their local_shell equivalents (cat / head / tail / grep / sed against files). local_fs enforces sandbox boundaries, output-size limits, denied-path policies, and a read-before-write contract that local_shell does not. Use local_shell only for genuine shell operations: running tests, builds, git, environment inspection."
 			}
@@ -175,7 +170,6 @@ func (m *MacroEnv) ExecEnv(
 		}
 	}
 
-	// Delegate to the real EnvExecutor with the rewritten chain.
 	return m.inner.ExecEnv(ctx, &clone, input, dataType)
 }
 
@@ -285,22 +279,17 @@ func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, al
 		layout := time.RFC3339
 		switch {
 		case payload != "":
-			// An explicit layout is author intent — always respected, even in
-			// the stable prefix. Authors who put {{now:15:04:05}} in a system
-			// instruction are consciously trading cache reuse for precision.
+			// An explicit layout is author intent, always respected even in
+			// the stable prefix — a conscious trade of cache reuse for precision.
 			layout = payload
 		case stablePrefix:
-			// Provider-kv-cache blueprint E1/§4.1(1): provider prefix caches
-			// key on the exact system-instruction bytes, so a default
-			// second-precision {{now}} there re-cold-starts the cache on
-			// EVERY request. Of the blueprint's options (vet warning, moving
-			// the macro to the user turn, coarsening) this is the least
-			// invasive one implementable at the macro seam: only the default
-			// layout, and only in stable-prefix strings, degrades to day
-			// granularity — matching {{date}}, which already invalidates at
-			// most daily. Chains that need real time in the conversation
-			// should place {{now}} in the prompt template (user turn), where
-			// it is a cache-safe suffix.
+			// Provider prefix caches key on the exact system-instruction
+			// bytes, so a default second-precision {{now}} there would
+			// re-cold-start the cache on every request. Only the default
+			// layout, only in stable-prefix strings, degrades to day
+			// granularity, matching {{date}}. Chains needing real time
+			// should place {{now}} in the prompt template (user turn)
+			// instead, a cache-safe suffix.
 			layout = "2006-01-02"
 		}
 		return time.Now().Format(layout), nil
@@ -396,7 +385,7 @@ func containsAll(names []string, required ...string) bool {
 // Every tool-name list rendered into a prompt goes through this: rendered
 // names land in the system instruction, which provider prefix caches key on
 // byte-for-byte, so registry/allowlist enumeration order must never show
-// through (provider-kv-cache blueprint E2/E7).
+// through.
 func sortedCopy(names []string) []string {
 	out := make([]string, len(names))
 	copy(out, names)
@@ -417,8 +406,7 @@ func (m *MacroEnv) renderToolsAndToolsJSON(ctx context.Context, names []string) 
 	for _, name := range names {
 		tools, err := m.toolsProvider.GetToolsForToolsByName(ctx, name)
 		if err != nil {
-			// Skip broken tools; you can also choose to fail hard here.
-			continue
+			continue // skip broken tools
 		}
 		fnNames := make([]string, 0, len(tools))
 		for _, t := range tools {
@@ -426,7 +414,7 @@ func (m *MacroEnv) renderToolsAndToolsJSON(ctx context.Context, names []string) 
 		}
 		// Pin the inner arrays too: json.Marshal already sorts the map keys,
 		// but the per-tools function lists would otherwise follow registry
-		// order, which is not guaranteed stable across requests (E2).
+		// order, which is not guaranteed stable across requests.
 		sort.Strings(fnNames)
 		result[name] = fnNames
 	}
@@ -439,7 +427,6 @@ func (m *MacroEnv) renderToolsAndToolsJSON(ctx context.Context, names []string) 
 }
 
 func (m *MacroEnv) renderToolsForToolsJSON(ctx context.Context, allowed []string, toolsName string) (string, error) {
-	// Respect the allowlist: only expose tools if the tools is allowed.
 	permitted := false
 	for _, a := range allowed {
 		if a == toolsName {
@@ -459,7 +446,7 @@ func (m *MacroEnv) renderToolsForToolsJSON(ctx context.Context, allowed []string
 	for _, t := range tools {
 		names = append(names, t.Function.Name)
 	}
-	// Stable prompt bytes regardless of registry enumeration order (E2).
+	// Stable prompt bytes regardless of registry enumeration order.
 	sort.Strings(names)
 	b, err := json.Marshal(names)
 	if err != nil {

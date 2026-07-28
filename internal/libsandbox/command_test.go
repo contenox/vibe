@@ -10,8 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeTracker counts ActivityTracker lifecycle calls so a test can assert the
-// wall is instrumented from the start.
+// fakeTracker counts ActivityTracker lifecycle calls for assertions below.
 type fakeTracker struct {
 	starts, ends, changes int
 	errs                  []error
@@ -26,10 +25,7 @@ func (f *fakeTracker) Start(ctx context.Context, operation, subject string, kvAr
 
 var _ libtracker.ActivityTracker = (*fakeTracker)(nil)
 
-// A minimal valid spec assembles a command with the environment scrubbed, HOME
-// forced to the scoped home, and the working directory pinned to the workspace.
-// Gated to Linux: off Linux the wall cannot be built, so Command fails closed
-// (see TestUnit_Command_FailsClosedOffLinux) and returns no command to inspect.
+// A minimal valid spec assembles a command with env scrubbed, HOME forced, cwd pinned. Linux-only: off Linux Command fails closed (see TestUnit_Command_FailsClosedOffLinux).
 func TestUnit_Command_AssemblesMinimalValidSpec(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Command assembles a runnable command only on Linux; off Linux it fails closed")
@@ -49,8 +45,6 @@ func TestUnit_Command_AssemblesMinimalValidSpec(t *testing.T) {
 	require.NotNil(t, cmd)
 	require.Equal(t, ws, cmd.Dir)
 	require.Equal(t, []string{"true", "arg1"}, cmd.Args)
-	// PATH is the operator's PATH filtered to the exec surface: /usr/bin is within
-	// SystemExecDirs, so it survives; a secret var never rides along.
 	require.Contains(t, cmd.Env, "PATH=/usr/bin")
 	require.Contains(t, cmd.Env, "HOME="+home)
 	for _, kv := range cmd.Env {
@@ -58,16 +52,11 @@ func TestUnit_Command_AssemblesMinimalValidSpec(t *testing.T) {
 	}
 }
 
-// The regression scenario, fixed: the confined PATH is the operator's PATH filtered
-// to the exec surface. A toolchain dir UNDER a carve-out (node under a carved
-// ~/.nvm-style tree) survives so the agent can find node; an UNcarved profile dir is
-// dropped. This is what makes a `#!/usr/bin/env node` agent resolve its interpreter
-// under confinement. Gated to Linux, where Command assembles a runnable command.
+// The confined PATH keeps a carved toolchain dir (so e.g. node resolves) and drops an uncarved profile dir. Linux-only.
 func TestUnit_Command_ConfinedPathKeepsCarvedToolchainDropsUncarved(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Command assembles a runnable command only on Linux")
 	}
-	// Operator PATH: a carved toolchain bin, a system dir, and an UNcarved profile dir.
 	t.Setenv("PATH", "/opt/toolchain/node/bin:/usr/bin:/home/dev/.cargo/bin")
 
 	cmd, err := libsandbox.Command(context.Background(), libsandbox.Spec{
@@ -77,14 +66,10 @@ func TestUnit_Command_ConfinedPathKeepsCarvedToolchainDropsUncarved(t *testing.T
 	}, "true")
 
 	require.NoError(t, err)
-	// The carved toolchain bin and the system dir survive; the uncarved cargo dir does not.
 	require.Contains(t, cmd.Env, "PATH=/opt/toolchain/node/bin:/usr/bin")
 }
 
-// An EnvSet PATH override that names a directory with no matching FS carve-out is
-// hard-rejected before the wall is built — fail-closed, with the offending entry
-// surfaced as ErrInvalidSpec rather than a run-time Landlock EACCES. This runs on
-// every platform because the rejection precedes applyIsolation.
+// An EnvSet PATH override naming an uncarved directory is rejected before the wall is built, on every platform.
 func TestUnit_Command_RejectsPathOutsideExecSurface(t *testing.T) {
 	_, err := libsandbox.Command(context.Background(), libsandbox.Spec{
 		WorkspaceRoot: "/ws",
@@ -95,8 +80,7 @@ func TestUnit_Command_RejectsPathOutsideExecSurface(t *testing.T) {
 	require.ErrorIs(t, err, libsandbox.ErrInvalidSpec)
 }
 
-// A relative EnvSet PATH entry — the implicit-current-directory exec hazard — is
-// rejected for the same reason, on every platform.
+// A relative EnvSet PATH entry (implicit-current-directory exec hazard) is rejected the same way.
 func TestUnit_Command_RejectsRelativePathEntry(t *testing.T) {
 	_, err := libsandbox.Command(context.Background(), libsandbox.Spec{
 		WorkspaceRoot: "/ws",
@@ -107,10 +91,7 @@ func TestUnit_Command_RejectsRelativePathEntry(t *testing.T) {
 	require.ErrorIs(t, err, libsandbox.ErrInvalidSpec)
 }
 
-// An EnvSet PATH override IS admitted when the directory is covered by a declared
-// FS carve-out: the coupling the design intends — a toolchain dir on PATH only if
-// it is also granted through the wall. Gated to Linux, where a valid spec
-// assembles a real command (off Linux Command fails closed regardless).
+// An EnvSet PATH override is admitted when the directory is covered by a matching FS carve-out. Linux-only.
 func TestUnit_Command_AllowsPathWithinCarveout(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("a successful Command assembly is only reachable on Linux")
@@ -157,9 +138,7 @@ func TestUnit_Command_RejectsInvalidCarveout(t *testing.T) {
 	require.ErrorIs(t, err, libsandbox.ErrInvalidCarveout)
 }
 
-// The tracker sees a full Start→change→end lifecycle on success, with no error
-// reported. Gated to Linux for the same reason as the assembly test: success is
-// only reachable where the wall can actually be built.
+// The tracker sees a full Start→change→end lifecycle on success, with no error reported. Linux-only.
 func TestUnit_Command_EmitsTrackerLifecycleOnSuccess(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("a successful Command assembly is only reachable on Linux")
@@ -179,8 +158,7 @@ func TestUnit_Command_EmitsTrackerLifecycleOnSuccess(t *testing.T) {
 	require.Empty(t, tr.errs)
 }
 
-// A failure still ends the tracked operation and reports the error to the
-// tracker rather than swallowing it.
+// A failure still ends the tracked operation and reports the error to the tracker.
 func TestUnit_Command_ReportsErrorToTracker(t *testing.T) {
 	tr := &fakeTracker{}
 
@@ -193,12 +171,7 @@ func TestUnit_Command_ReportsErrorToTracker(t *testing.T) {
 	require.Equal(t, 1, tr.ends)
 }
 
-// Off Linux the OS-level wall cannot be built, so a spec that is otherwise valid
-// must FAIL CLOSED — Command returns (nil, ErrIsolation), never a runnable
-// command carrying the real agent binary with zero confinement. This is the
-// portable half of the fail-closed guarantee; the Linux enforcement is proved by
-// the //go:build linux integration suite. On Linux there is nothing to assert
-// here (the wall IS built), so it skips.
+// Off Linux, where the wall cannot be built, Command must fail closed: (nil, ErrIsolation), never a runnable-but-unconfined command.
 func TestUnit_Command_FailsClosedOffLinux(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		t.Skip("on Linux the wall is built; the off-Linux fail-closed path does not apply")

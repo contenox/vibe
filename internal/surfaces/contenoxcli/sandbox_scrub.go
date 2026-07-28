@@ -8,22 +8,34 @@ import (
 	"sync"
 	"time"
 
+	libdb "github.com/contenox/beam/internal/libdbexec"
 	"github.com/contenox/beam/internal/libsandbox"
 	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/shellenvservice"
 )
 
-// resolveSandboxScrubs turns the SANDBOX_* configuration into the two environment
-// scrub hooks serve threads into the shells it spawns: one for agent-reachable
-// shells (the local_shell tool and the shell_session PTY / "!" passthrough), one
-// for the interactive terminal panel. Each hook maps the parent environment to
-// the one a spawned shell inherits; a nil hook means "inherit everything" (mode
-// off). The operator's SANDBOX_ENV_ALLOW / SANDBOX_ENV_DENY extend whichever scrub
-// is active. Agent shells default to deny-secrets (strip known credentials, keep
-// the toolchain), the operator terminal to off (a trusted human shell).
-//
-// warnW receives one line per misspelled SANDBOX_*_SCRUB value (see
-// resolveScrubMode); nil silences it.
+// shellEnvCacheTTL bounds how stale a shellenvservice read can be; a Beam/CLI
+// edit lands within this window with no restart.
+const shellEnvCacheTTL = 3 * time.Second
+
+// resolvedSandboxEnv is the one composition every agent-shell spawn root and
+// the `sandbox env` preview share, so the preview never drifts from what a
+// spawned shell actually receives. db may be a nil interface in tests that
+// never invoke the returned hooks.
+func resolvedSandboxEnv(db libdb.DBManager, tracker libtracker.ActivityTracker, warnW io.Writer) (shell, terminal func([]string) []string, err error) {
+	config := &sandboxEnvConfig{}
+	if err := loadEnvConfig(config); err != nil {
+		return nil, nil, fmt.Errorf("load sandbox env config: %w", err)
+	}
+	injectGlobal := newLiveGlobalShellEnv(shellenvservice.New(db), shellEnvCacheTTL, tracker)
+	shell, terminal = resolveSandboxScrubs(config, injectGlobal, warnW)
+	return shell, terminal, nil
+}
+
+// resolveSandboxScrubs turns SANDBOX_* config into the env-scrub hooks for
+// agent-reachable shells and the interactive terminal panel; a nil hook means
+// inherit everything. Agent shells default to deny-secrets, the terminal to
+// off. warnW receives one line per misspelled SANDBOX_*_SCRUB value; nil silences it.
 func resolveSandboxScrubs(config *sandboxEnvConfig, injectGlobal func() map[string]string, warnW io.Writer) (shell, terminal func([]string) []string) {
 	extraAllow := libsandbox.ParseEnvList(config.SandboxEnvAllow)
 	extraDeny := libsandbox.ParseEnvList(config.SandboxEnvDeny)
@@ -32,12 +44,9 @@ func resolveSandboxScrubs(config *sandboxEnvConfig, injectGlobal func() map[stri
 	return composeShellEnv(shellFilter, injectGlobal), composeShellEnv(terminalFilter, injectGlobal)
 }
 
-// composeShellEnv builds the env hook a shell-exec site receives: run the scrub
-// filter (strip serve's credentials) if one is active, then overlay the operator's
-// live global shell-env variables on top — so injected values win over whatever
-// the policy passed, and apply even when the scrub is off. Returns nil only when
-// there is nothing to do (no filter, no injector), preserving the legacy full
-// inherit for an unconfigured serve.
+// composeShellEnv runs the scrub filter, if any, then overlays the operator's
+// global shell-env variables so they win even when the scrub is off. Returns
+// nil when both are absent, preserving full inherit when nothing is configured.
 func composeShellEnv(filter func([]string) []string, injectGlobal func() map[string]string) func([]string) []string {
 	if filter == nil && injectGlobal == nil {
 		return nil
@@ -55,16 +64,9 @@ func composeShellEnv(filter func([]string) []string, injectGlobal func() map[str
 }
 
 // newLiveGlobalShellEnv returns a getter for the operator's global shell-env
-// variables, cached for ttl so a frequent local_shell does not read the database
-// per command while a Beam/CLI edit still takes effect within the TTL. A read
-// error keeps the last known value (and reports it), so a transient DB blip never
-// strips the injected variables or breaks a spawning shell.
-//
-// The failed read is TELEMETRY, not a message: this getter runs per shell spawn
-// with no operator watching and no command to speak in the voice of, the
-// degradation is silent and self-healing on the next TTL refresh, and there is
-// nothing for anyone to do about a blip that already recovered. nil tracker
-// degrades to Noop.
+// variables, cached for ttl so a frequent local_shell does not hit the
+// database per command. A read error keeps the last known value and reports
+// it via tracker (telemetry only); nil tracker degrades to Noop.
 func newLiveGlobalShellEnv(svc shellenvservice.Service, ttl time.Duration, tracker libtracker.ActivityTracker) func() map[string]string {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
@@ -94,18 +96,10 @@ func newLiveGlobalShellEnv(svc shellenvservice.Service, ttl time.Duration, track
 	}
 }
 
-// resolveScrubMode returns raw when it names a recognized posture, else def. An
-// empty value takes the default silently (unset is normal); a NON-empty but
-// unrecognized value is a typo, so it is named on warnW and falls back to the
-// default — failing closed to a safe posture rather than silently disabling the
-// scrub.
-//
-// Named, not tracked. The value came from the operator's own environment and is
-// being ignored; the only person who can correct SANDBOX_SHELL_SCRUB=deny-secrit
-// is the one who typed it, and the one command that reaches this code
-// (`contenox sandbox env`) exists precisely to show them the effective posture —
-// so a typo that silently downgrades to the default is the exact thing it must
-// not hide in a log. nil warnW silences it.
+// resolveScrubMode returns raw when it names a recognized posture, else def.
+// An empty value takes the default silently; a non-empty but unrecognized
+// value is a typo, so it is warned on warnW and falls back to def rather than
+// silently disabling the scrub. nil warnW silences the warning.
 func resolveScrubMode(raw, def string, warnW io.Writer) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

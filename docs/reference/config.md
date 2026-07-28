@@ -1,3 +1,8 @@
+---
+title: Configuration
+description: Backends, defaults, and workspace state — all stored in SQLite, managed with CLI commands.
+---
+
 # Configuration
 
 Contenox stores all configuration in a single SQLite database at `~/.contenox/local.db`.
@@ -78,6 +83,8 @@ contenox config set default-alt-model gemini-2.5-flash
 contenox config set default-alt-provider gemini
 contenox config set default-autocomplete-model qwen2.5-coder:7b
 contenox config set default-autocomplete-provider ollama
+contenox config set default-embed-model nomic-embed-text
+contenox config set default-embed-provider ollama
 contenox config set default-max-tokens 8192
 contenox config set default-think high
 contenox config set default-chain    .contenox/default-chain.json
@@ -92,14 +99,17 @@ contenox config list   # review current settings and their scope
 | `default-provider` | global | Provider type used when `--provider` is not passed |
 | `default-alt-model` | global | Secondary model exposed to chains through `{{var:alt_model}}` |
 | `default-alt-provider` | global | Secondary provider exposed to chains through `{{var:alt_provider}}` |
-| `default-autocomplete-model` | global | Optional autocomplete model exposed to chains through `{{var:autocomplete_model}}` |
-| `default-autocomplete-provider` | global | Optional autocomplete provider exposed to chains through `{{var:autocomplete_provider}}` |
+| `default-autocomplete-model` | global | Model used for VS Code code-completion requests, independent of `default-model` |
+| `default-autocomplete-provider` | global | Provider for the autocomplete model, independent of `default-provider` |
+| `default-embed-model` | global | Embedding model used by `contenox index` / `contenox search`. Unset falls back to `default-model`, which embeds only on some providers |
+| `default-embed-provider` | global | Provider for the embedding model, independent of `default-provider`. Unset uses `default-provider` |
 | `default-max-tokens` | global | Optional response token cap exposed through `{{var:max_tokens}}` |
 | `default-think` | global | Default reasoning level for supported models (`auto`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
 | `telemetry-enabled` | global | Enable local telemetry logs (`true` / `false`) |
 | `update-check` | global | Enable automatic update checks (`true` / `false`) |
-| `default-mission-agent` | global | Declared agent `/mission` and `mission fire` fall back to when none is named |
-| `default-mission-policy` | global | Envelope (HITL policy) `/mission` and `mission fire` fall back to when none is named |
+| `default-mission-agent` | global | Declared agent the ACP `/mission <intent>` slash command falls back to when none is named. `contenox mission fire` always takes the agent as a required argument, so this key does not affect it |
+| `default-mission-policy` | global | Envelope (HITL policy) both `/mission` and `contenox mission fire --policy` fall back to when none is named |
+| `fleet-max-parallel` | global | Max concurrently open mission units across the fleet (integer; `0` = unlimited; default 8) |
 | `default-chain` | workspace | Chain file used in this workspace; falls back to the global value when unset |
 | `hitl-policy-name` | workspace | Active HITL policy for this workspace; falls back to the global value when unset |
 

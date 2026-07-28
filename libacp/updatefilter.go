@@ -2,17 +2,15 @@ package libacp
 
 import "context"
 
-// FilterSessionUpdates wraps a Client so that session/update notifications for
-// any session other than live are dropped before reaching inner.SessionUpdate;
-// every other Client method passes straight through. It is opt-in middleware: a
-// ClientSideConnection forwards every session/update regardless of session id
-// (correct at the library layer — the app owns session bookkeeping), so a
-// driver that reconnects or swaps sessions must filter stale updates itself, or
-// a just-abandoned session's chunks leak into the new turn's UI. This wrapper
-// lets consumers inherit the guard instead of re-learning it.
+// FilterSessionUpdates wraps a Client so session/update notifications for any
+// session other than live are dropped before reaching inner.SessionUpdate;
+// every other method passes through. ClientSideConnection forwards updates
+// regardless of session id (session bookkeeping is the app's job), so a
+// driver that reconnects or swaps sessions needs this guard or a
+// just-abandoned session's chunks leak into the new turn's UI.
 //
-// Wrap the Client the ClientFactory returns; update live (by constructing a new
-// wrapper) whenever the driver's active session changes.
+// Wrap the Client the ClientFactory returns; construct a new wrapper with the
+// updated live id whenever the driver's active session changes.
 func FilterSessionUpdates(live SessionID, inner Client) Client {
 	return sessionUpdateFilter{Client: inner, live: live}
 }

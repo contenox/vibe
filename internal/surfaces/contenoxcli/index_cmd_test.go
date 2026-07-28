@@ -28,22 +28,15 @@ import (
 
 // ─── the rig ────────────────────────────────────────────────────────────────
 
-// fakeEmbedder is a deterministic bag-of-words embedder: no model, no network,
-// no provider. It is enough for the CLI's job, which is rendering what the index
-// returns — ranking QUALITY is workspaceindex's own test's problem.
-//
-// The counter is guarded because the thing under test embeds CONCURRENTLY:
-// workspaceindex.embedBatch runs a bounded pool (Config.EmbedConcurrency,
-// four by default), so an unsynchronised int here is a data race in every test
-// that builds an index, and `go test -race ./internal/surfaces/contenoxcli/`
-// fails on the fake rather than on the code. Reading it through calls() keeps
-// the assertions race-free too.
+// fakeEmbedder is a deterministic bag-of-words embedder: no model, no
+// network, no provider. The counter is mutex-guarded because the code under
+// test embeds concurrently (workspaceindex.embedBatch's bounded pool), so an
+// unsynchronised int here would be a data race in every test that builds an
+// index.
 type fakeEmbedder struct {
 	mu     sync.Mutex
 	nCalls int
-	// fail, when non-nil, makes every call fail — the unusable-embedding-model
-	// path, which must be discovered by the dimension probe before a whole tree
-	// is spent.
+	// fail, when non-nil, makes every call fail: the unusable-embedding-model path.
 	fail error
 }
 
@@ -71,9 +64,9 @@ func (f *fakeEmbedder) calls() int {
 	return f.nCalls
 }
 
-// newIndexTestDeps builds the two verbs' dependencies over a REAL SQLite file
-// (the same schema and the same store the runtime uses) and a fake embedder, so
-// the flow under test is the production one end to end minus the provider.
+// newIndexTestDeps builds the two verbs' dependencies over a real SQLite
+// file and a fake embedder, so the flow under test is production end to end
+// minus the provider.
 func newIndexTestDeps(t *testing.T) (*indexDeps, *fakeEmbedder) {
 	t.Helper()
 	ctx := context.Background()
@@ -149,9 +142,8 @@ func TestUnit_LocalToolset_RegistersWorkspaceSearchAlwaysOn(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, supported, searchtool.ToolSearch)
 
-	// UNBOUND (no engine yet, or no embedding model resolved): the tool must
-	// degrade to the runnable instruction — never panic, and never answer as if
-	// the index existed and were empty.
+	// Unbound (no engine yet, or no embedding model resolved): must degrade to
+	// the runnable instruction, never panic or answer as if empty.
 	out, _, err := repo.Exec(context.Background(), time.Now(),
 		map[string]any{"question": "where is retry backoff"}, false,
 		&taskengine.ToolsCall{Name: searchtool.ToolSearch})
@@ -166,12 +158,7 @@ func mustJSON(t *testing.T, v any) string {
 	return string(raw)
 }
 
-// TestUnit_SeededPolicies_AllowWorkspaceSearch verifies the envelope half on a
-// FRESH directory — the path a new install actually takes through the preset
-// seeder — and on the no-file fallback, which is hitlservice's own
-// defaultPolicy(). A rule present in the JSON but missing from defaultPolicy()
-// (or the reverse) would gate the tool differently depending on whether the
-// operator happened to have a policy file, which is the worst kind of drift.
+// TestUnit_SeededPolicies_AllowWorkspaceSearch asserts both shipped policy presets allow workspace_search, while the no-file fallback does not and asks instead.
 func TestUnit_SeededPolicies_AllowWorkspaceSearch(t *testing.T) {
 	ctx := context.Background()
 	args := map[string]any{"question": "where is retry backoff", "top_k": 5}
@@ -185,11 +172,11 @@ func TestUnit_SeededPolicies_AllowWorkspaceSearch(t *testing.T) {
 		require.Equal(t, hitlservice.ActionAllow, r.Action, "%s must allow workspace_search: it is a read", name)
 	}
 
-	// No policy file anywhere: hitlservice falls back to defaultPolicy().
+	// No policy file anywhere: fail-closed, everything asks, including this read.
 	svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()), testTenant, nopKV{}, libtracker.NoopTracker{}, "hitl-policy-default.json")
 	r, err := svc.Evaluate(ctx, searchtool.ToolsProviderName, searchtool.ToolSearch, args)
 	require.NoError(t, err)
-	require.Equal(t, hitlservice.ActionAllow, r.Action, "the no-file fallback must match the seeded presets")
+	require.Equal(t, hitlservice.ActionApprove, r.Action, "the no-file fallback must ask — allow tiers live only in seeded, readable policy files")
 }
 
 // ─── directory resolution ───────────────────────────────────────────────────

@@ -21,9 +21,8 @@ import (
 	libacp "github.com/contenox/beam/libacp"
 )
 
-// The app-shell consumes the Bridge interface, and both testkit doubles
-// satisfy it — the assertion the production file cannot make without pulling
-// test infrastructure into the binary.
+// Both testkit doubles satisfy Bridge; asserted here rather than in the
+// production file, which cannot import test infrastructure.
 var (
 	_ Bridge = (*testkit.FakeBridge)(nil)
 	_ Bridge = (testkit.EngineBridge)(nil)
@@ -32,7 +31,7 @@ var (
 const testSession = libacp.SessionID("beam-test-session")
 
 // baseTime is the fixed clock every scripted test starts at: goldens and
-// liveness assertions compare renders across TICKS, never across wall time.
+// liveness assertions compare renders across ticks, never wall time.
 var baseTime = time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 
 // fakeTerm is the headless terminal: it hands the loop the events a test
@@ -41,9 +40,9 @@ type fakeTerm struct {
 	events chan input.Event
 	frames []frame.Frame
 	bells  int
-	// suspends counts handovers; suspendFrames records the frame that was on
-	// screen when each one began, which is how a test checks beam did not hand
-	// another program a live region it can never reclaim.
+	// suspends counts handovers; suspendFrames records the frame on screen
+	// when each one began, to check beam never hands over an unreclaimable
+	// live region.
 	suspends      int
 	suspendFrames []frame.Frame
 	closed        int
@@ -67,8 +66,7 @@ func (f *fakeTerm) Commit(fr frame.Frame) error {
 func (f *fakeTerm) Size() (int, int) { return f.width, f.height }
 
 // Suspend runs fn inline: the real engine's cooked-mode dance has no headless
-// equivalent, and what a test cares about is that the app handed the editor
-// the draft and took the answer back.
+// equivalent.
 func (f *fakeTerm) Suspend(fn func() error) error {
 	f.suspends++
 	var on frame.Frame
@@ -83,9 +81,8 @@ func (f *fakeTerm) Bell()                                { f.bells++ }
 func (f *fakeTerm) CopyToClipboard(string) (bool, error) { return false, nil }
 func (f *fakeTerm) Close() error                         { f.closed++; return nil }
 
-// harness drives the app-shell one event at a time, committing after each —
-// the same order run() uses, minus the select, so a scenario is a script
-// rather than a race.
+// harness drives the app-shell one event at a time, committing after each,
+// so a scenario is a script rather than a race.
 type harness struct {
 	t      *testing.T
 	a      *app
@@ -120,8 +117,7 @@ func newHarness(t *testing.T, mut ...func(*Deps)) *harness {
 	return h
 }
 
-// start performs the loop's initial commit (the frame drawn before any event
-// arrives).
+// start performs the loop's initial commit.
 func (h *harness) start() *harness {
 	h.t.Helper()
 	if err := h.a.commit(); err != nil {
@@ -153,6 +149,15 @@ func (h *harness) chord(r rune, ctrl, alt bool) {
 	h.input(input.KeyEvent{Key: input.KeyRune, Rune: r, Ctrl: ctrl, Alt: alt})
 }
 
+// openEditor drives the Ctrl+X, Ctrl+E chord that hands the draft to
+// $EDITOR: two keystrokes, one per h.input/commit cycle, exactly as a real
+// terminal delivers them.
+func (h *harness) openEditor() {
+	h.t.Helper()
+	h.chord('x', true, false)
+	h.chord('e', true, false)
+}
+
 func (h *harness) deliver(events ...enginebridge.Event) {
 	h.t.Helper()
 	for _, ev := range events {
@@ -171,8 +176,7 @@ func (h *harness) last() frame.Frame {
 	return h.term.frames[len(h.term.frames)-1]
 }
 
-// scrollback is every line every commit appended, in order: the terminal's
-// real history as this session would have printed it.
+// scrollback is every line every commit appended, in order.
 func (h *harness) scrollback() string {
 	var b strings.Builder
 	for _, f := range h.term.frames {
@@ -197,9 +201,8 @@ func requireNotContains(t *testing.T, got, unwanted, what string) {
 	}
 }
 
-// TestUnit_Bindings_NoCollisions is the free enforcement the keymap registry
-// exists for: every binding beam declares, checked against every other one in
-// a simultaneously-reachable scope, at build time.
+// TestUnit_Bindings_NoCollisions pins that no two bindings in a
+// simultaneously-reachable scope claim the same chord.
 func TestUnit_Bindings_NoCollisions(t *testing.T) {
 	r := keymap.NewRegistry()
 	registerBindings(r) // MustRegister panics on a collision, naming both owners
@@ -214,32 +217,29 @@ func TestUnit_Bindings_NoCollisions(t *testing.T) {
 	}
 }
 
-// TestUnit_FreshSession_WelcomeThenStatusBar pins the very first frame: the
-// brand header printed ONCE into scrollback, and a live region that is the
-// composer plus the status bar and nothing else.
+// TestUnit_FreshSession_WelcomeThenStatusBar pins the first frame: the brand
+// header prints once into scrollback and never reprints.
 func TestUnit_FreshSession_WelcomeThenStatusBar(t *testing.T) {
 	h := newHarness(t).start()
 
 	testkit.Golden(t, "fresh_session_first_frame", testkit.EncodeFrame(h.last()))
 
-	// The header never repaints and never reprints.
 	h.typeText("x")
 	if got := testkit.EncodeLines(h.last().Scrollback); got != "" {
 		t.Fatalf("welcome reprinted on a later commit:\n%s", got)
 	}
 }
 
-// TestUnit_StreamingTurn_Scrollback replays the standard turn fixture through
-// the whole shell and pins the history it prints.
+// TestUnit_StreamingTurn_Scrollback pins the scrollback history produced by
+// the standard streaming-turn fixture.
 func TestUnit_StreamingTurn_Scrollback(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FreshSession = false }).start()
 	h.deliver(testkit.FixtureStreamingTurn(testSession)...)
 	testkit.Golden(t, "streaming_turn_scrollback", h.scrollback())
 }
 
-// TestUnit_Submit_RecordsPrompt is the core loop: typed text becomes one
-// SubmitPrompt, echoes into the transcript (the bridge never echoes the
-// operator's own line), and leaves the composer empty.
+// TestUnit_Submit_RecordsPrompt pins that typed text becomes one
+// SubmitPrompt, echoes into the transcript, and leaves the composer empty.
 func TestUnit_Submit_RecordsPrompt(t *testing.T) {
 	h := newHarness(t).start()
 	h.typeText("hello")
@@ -257,8 +257,7 @@ func TestUnit_Submit_RecordsPrompt(t *testing.T) {
 		t.Fatal("liveness not ticking during a turn")
 	}
 
-	// A second submit while the turn runs is refused with a notice and keeps
-	// the operator's text.
+	// A second submit while running is refused and keeps the text.
 	h.typeText("again")
 	h.press(input.KeyEnter)
 	requireContains(t, testkit.EncodeLines(h.last().Scrollback), "a turn is already running", "in-flight notice")
@@ -270,7 +269,8 @@ func TestUnit_Submit_RecordsPrompt(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellLine_RunsShell covers the `!` classification seam end to end.
+// TestUnit_ShellLine_RunsShell pins that a `!` line routes to RunShellLine,
+// never SubmitPrompt.
 func TestUnit_ShellLine_RunsShell(t *testing.T) {
 	h := newHarness(t).start()
 	h.typeText("!go test ./...")
@@ -280,9 +280,8 @@ func TestUnit_ShellLine_RunsShell(t *testing.T) {
 	requireNotContains(t, h.calls(), "SubmitPrompt", "a shell line must never become a turn")
 }
 
-// TestUnit_Palette_QuitFlow walks the `/qu` journey: the trigger opens the
-// menu, typing filters it, Enter completes the selection, and Enter again
-// runs the local command.
+// TestUnit_Palette_QuitFlow pins the `/qu` journey: trigger opens, typing
+// filters, Enter completes, Enter again runs the local command.
 func TestUnit_Palette_QuitFlow(t *testing.T) {
 	h := newHarness(t).start()
 
@@ -297,7 +296,7 @@ func TestUnit_Palette_QuitFlow(t *testing.T) {
 	}
 	testkit.Golden(t, "palette_open_frame", testkit.EncodeFrame(h.last()))
 
-	h.press(input.KeyEnter) // completes
+	h.press(input.KeyEnter) // completes the selection
 	if got := h.a.comp.Draft(); got != "/quit " {
 		t.Fatalf("Enter did not complete the selection: %q", got)
 	}
@@ -312,8 +311,8 @@ func TestUnit_Palette_QuitFlow(t *testing.T) {
 	requireNotContains(t, h.calls(), "SubmitPrompt", "a local command must not reach the agent")
 }
 
-// TestUnit_Palette_RemoteCommandGoesToTheAgent proves the parity rule: a
-// command the agent advertised is sent verbatim, not reimplemented.
+// TestUnit_Palette_RemoteCommandGoesToTheAgent pins that a command the agent
+// advertised is sent verbatim, not reimplemented.
 func TestUnit_Palette_RemoteCommandGoesToTheAgent(t *testing.T) {
 	h := newHarness(t).start()
 	h.deliver(enginebridge.CommandsUpdated{SessionID: testSession, Commands: []libacp.AvailableCommand{
@@ -325,8 +324,8 @@ func TestUnit_Palette_RemoteCommandGoesToTheAgent(t *testing.T) {
 	requireContains(t, h.calls(), `SubmitPrompt(beam-test-session, "/mission audit deps")`, "bridge calls")
 }
 
-// TestUnit_Help_IsGeneratedFromTheRegistry checks both help surfaces are
-// projections of the registrations rather than hand-written text.
+// TestUnit_Help_IsGeneratedFromTheRegistry pins that both help surfaces are
+// projections of the registrations, not hand-written text.
 func TestUnit_Help_IsGeneratedFromTheRegistry(t *testing.T) {
 	h := newHarness(t).start()
 
@@ -335,7 +334,7 @@ func TestUnit_Help_IsGeneratedFromTheRegistry(t *testing.T) {
 	printed := h.scrollback()
 	requireContains(t, printed, "compose the draft in $EDITOR", "the /help key list")
 	requireContains(t, printed, "/quit", "the /help command list")
-	requireNotContains(t, h.calls(), "SubmitPrompt", "/help is client-side (D45)")
+	requireNotContains(t, h.calls(), "SubmitPrompt", "/help is client-side")
 
 	// `?` on an empty composer opens the overlay; on a non-empty one it types.
 	h.input(input.KeyEvent{Key: input.KeyRune, Rune: '?'})
@@ -356,11 +355,9 @@ func TestUnit_Help_IsGeneratedFromTheRegistry(t *testing.T) {
 	}
 }
 
-// TestUnit_Help_OverlayGroupsByScope: a flat projection of the registry
-// listed `esc` five times with five different meanings and nothing to say
-// which one was live. The overlay now groups by the context a chord answers
-// in, leads with the scopes actually reachable from where the operator is,
-// and files the rest under one "elsewhere" divider.
+// TestUnit_Help_OverlayGroupsByScope pins that the overlay groups by scope,
+// leads with scopes reachable from where the operator is, and files the rest
+// under one "elsewhere" divider.
 func TestUnit_Help_OverlayGroupsByScope(t *testing.T) {
 	h := newHarness(t).start()
 	h.input(input.KeyEvent{Key: input.KeyRune, Rune: '?'})
@@ -394,8 +391,7 @@ func TestUnit_Help_OverlayGroupsByScope(t *testing.T) {
 			t.Fatalf("no %q section header in:\n%s", name, strings.Join(texts, "\n"))
 		}
 	}
-	// With no modal open the reachable scopes are the composer and the
-	// globals, so those two lead and everything else is filed away.
+	// With no modal open, composer and global lead; everything else follows.
 	if composer > elsewhere || anywhere > elsewhere {
 		t.Fatalf("a reachable scope was filed under elsewhere:\n%s", strings.Join(texts, "\n"))
 	}
@@ -403,9 +399,7 @@ func TestUnit_Help_OverlayGroupsByScope(t *testing.T) {
 		t.Fatalf("an unreachable scope led the overlay:\n%s", strings.Join(texts, "\n"))
 	}
 
-	// Every chord shares one column, wide enough for the widest chord list —
-	// which is what the fixed sixteen-cell column was not, so "ctrl+j /
-	// alt+enter" used to shove its own description out of alignment.
+	// Every chord shares one column, wide enough for the widest chord list.
 	col, seen := -1, false
 	for _, l := range h.a.helpRows(false) {
 		if len(l) != 2 {
@@ -428,11 +422,9 @@ func TestUnit_Help_OverlayGroupsByScope(t *testing.T) {
 	}
 }
 
-// TestUnit_Palette_EscHoldsForTheTokenNotForever: Esc closed the menu and
-// nothing short of clearing the line brought it back, so an operator who
-// dismissed it over "/mis" and kept typing never saw it again. The dismissal
-// is now keyed to the command TOKEN — it survives navigation, and lapses the
-// moment the operator types another letter of the name.
+// TestUnit_Palette_EscHoldsForTheTokenNotForever pins that a palette
+// dismissal is keyed to the command token: it survives navigation and lapses
+// the moment another letter of the name is typed.
 func TestUnit_Palette_EscHoldsForTheTokenNotForever(t *testing.T) {
 	h := newHarness(t).start()
 
@@ -461,16 +453,14 @@ func TestUnit_Palette_EscHoldsForTheTokenNotForever(t *testing.T) {
 		t.Fatal("typing more of the command never reopened the menu")
 	}
 
-	// Arguments are still the same command, so a dismissal survives them —
-	// which is the point of keying on the token rather than on the buffer.
+	// Arguments are still the same command, so a dismissal survives them.
 	h.press(input.KeyEscape)
 	h.typeText(" now")
 	if h.a.pal.IsOpen() {
 		t.Fatal("typing an argument resurrected a dismissed menu")
 	}
 
-	// Leaving command shape drops the latch entirely, so the next command
-	// starts from a clean slate.
+	// Leaving command shape drops the latch entirely.
 	h.chord('u', true, false) // kill to start
 	if h.a.hasPalDismissed {
 		t.Fatal("the latch outlived the command line it belonged to")
@@ -481,9 +471,8 @@ func TestUnit_Palette_EscHoldsForTheTokenNotForever(t *testing.T) {
 	}
 }
 
-// TestUnit_ApprovalFlow_AllowResolvesOnce drives the HITL gate: the card
-// blocks the composer, y answers allow exactly once, and the tool call
-// resumes.
+// TestUnit_ApprovalFlow_AllowResolvesOnce pins the HITL gate: the card blocks
+// the composer, y answers allow exactly once, and the tool call resumes.
 func TestUnit_ApprovalFlow_AllowResolvesOnce(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FreshSession = false }).start()
 
@@ -491,8 +480,7 @@ func TestUnit_ApprovalFlow_AllowResolvesOnce(t *testing.T) {
 	events := testkit.FixtureApprovalFlow(testSession)
 	for i, ev := range events {
 		if req, ok := ev.(enginebridge.PermissionRequested); ok {
-			// The fixture's Resolve is inert by design; swap in a recorder and
-			// keep everything else about the scripted gate.
+			// The fixture's Resolve is inert by design; swap in a recorder.
 			req.Resolve = func(allow bool) { resolved = append(resolved, allow) }
 			events[i] = req
 		}
@@ -507,8 +495,7 @@ func TestUnit_ApprovalFlow_AllowResolvesOnce(t *testing.T) {
 	}
 	testkit.Golden(t, "approval_card_frame", testkit.EncodeFrame(h.last()))
 
-	// The composer is blocked while the card is up. (The text avoids y and n,
-	// which the card itself claims.)
+	// Blocked while the card is up (text avoids y/n, which the card claims).
 	h.typeText("xxx")
 	if !h.a.comp.Empty() {
 		t.Fatalf("composer accepted input while an approval was pending: %q", h.a.comp.Draft())
@@ -527,8 +514,8 @@ func TestUnit_ApprovalFlow_AllowResolvesOnce(t *testing.T) {
 	requireContains(t, h.scrollback(), "write_file: internal/config/limits.go", "resumed tool card")
 }
 
-// TestUnit_Approval_EscCancelsTheTurn checks Esc on a card asks the bridge to
-// cancel and leaves the card pending until the cancel comes back.
+// TestUnit_Approval_EscCancelsTheTurn pins that Esc on a card asks the bridge
+// to cancel and leaves the card pending until the cancel comes back.
 func TestUnit_Approval_EscCancelsTheTurn(t *testing.T) {
 	h := newHarness(t).start()
 	events := testkit.FixtureApprovalFlow(testSession)
@@ -546,7 +533,8 @@ func TestUnit_Approval_EscCancelsTheTurn(t *testing.T) {
 	}
 }
 
-// TestUnit_CtrlC_ThreeWay pins D3 against a scripted clock.
+// TestUnit_CtrlC_ThreeWay pins the clear/interrupt/quit Ctrl+C policy against
+// a scripted clock.
 func TestUnit_CtrlC_ThreeWay(t *testing.T) {
 	h := newHarness(t).start()
 	ctrlC := input.KeyEvent{Key: input.KeyRune, Rune: 'c', Ctrl: true}
@@ -561,7 +549,9 @@ func TestUnit_CtrlC_ThreeWay(t *testing.T) {
 		t.Fatal("ctrl+c quit while clearing")
 	}
 
-	// 2. An in-flight turn is interrupted, not quit.
+	// 2. An in-flight turn is interrupted, not quit, and the cancelled prompt
+	// is restored into the (now empty) composer so it can be edited and
+	// resent — the cancelled line itself stays put in scrollback.
 	h.typeText("run something")
 	h.press(input.KeyEnter)
 	h.input(ctrlC)
@@ -569,7 +559,21 @@ func TestUnit_CtrlC_ThreeWay(t *testing.T) {
 	if h.a.quit {
 		t.Fatal("ctrl+c quit while a turn was running")
 	}
+	if got := h.a.comp.Draft(); got != "run something" {
+		t.Fatalf("cancelled prompt not restored into the composer: %q", got)
+	}
+	requireContains(t, h.scrollback(), "run something", "the cancelled line stays in scrollback")
 	h.deliver(enginebridge.TurnEnded{SessionID: testSession, StopReason: libacp.StopReasonCancelled})
+
+	// The restored text is an ordinary draft now: a further ctrl+c clears it
+	// like any other, rather than re-arming the quit offer.
+	h.input(ctrlC)
+	if !h.a.comp.Empty() {
+		t.Fatal("ctrl+c did not clear the restored draft")
+	}
+	if h.a.quit {
+		t.Fatal("ctrl+c quit while clearing the restored draft")
+	}
 
 	// 3. Idle: the first press offers, the second (inside the window) quits.
 	mark := len(h.term.frames)
@@ -577,9 +581,7 @@ func TestUnit_CtrlC_ThreeWay(t *testing.T) {
 	if h.a.quit {
 		t.Fatal("a single idle ctrl+c quit")
 	}
-	// The offer is LIVE, not history: a two-second instruction printed into
-	// scrollback outlives its own window and every stray ctrl+c leaves another
-	// permanent copy.
+	// The offer is live, not history: it must never reach scrollback.
 	requireContains(t, testkit.EncodeLines(h.last().Live), quitHintText, "the offer")
 	requireNotContains(t, scrollbackFrom(h, mark), quitHintText, "the offer must never be scrollback")
 	if !h.a.ticking() {
@@ -587,8 +589,7 @@ func TestUnit_CtrlC_ThreeWay(t *testing.T) {
 	}
 
 	h.advance(3 * time.Second) // window elapsed: this press only re-offers
-	// The lapsed offer clears itself on the next frame, with no event of its
-	// own — which is what the armed ticker above buys.
+	// The lapsed offer clears itself on the next frame, with no event.
 	requireNotContains(t, testkit.EncodeLines(h.a.buildFrame().Live), quitHintText, "a lapsed offer")
 	if h.a.ticking() {
 		t.Fatal("the ticker stayed armed past the offer's window")
@@ -604,8 +605,95 @@ func TestUnit_CtrlC_ThreeWay(t *testing.T) {
 	}
 }
 
-// TestUnit_Editor_CarriesTheDraftBothWays is the pair of prior-art
-// regressions the blueprint names by hand.
+// TestUnit_Cancel_EscRestoresPromptIntoEmptyComposer pins that Esc — beam's
+// dedicated "cancel the running turn" key — restores the cancelled prompt
+// exactly like ctrl+c's own cancel arm does.
+func TestUnit_Cancel_EscRestoresPromptIntoEmptyComposer(t *testing.T) {
+	h := newHarness(t).start()
+
+	h.typeText("please cancel me")
+	h.press(input.KeyEnter)
+	h.press(input.KeyEscape)
+
+	requireContains(t, h.calls(), "Cancel(beam-test-session)", "bridge calls")
+	if got := h.a.comp.Draft(); got != "please cancel me" {
+		t.Fatalf("esc-cancel did not restore the prompt: %q", got)
+	}
+	requireContains(t, h.scrollback(), "please cancel me", "the cancelled line stays in scrollback")
+}
+
+// TestUnit_Cancel_NeverClobbersAnInProgressDraft pins the "never" half of the
+// restore rule: Esc has no composer-clearing arm of its own (unlike ctrl+c),
+// so it is the path where a draft typed over the cancelled turn is at risk.
+func TestUnit_Cancel_NeverClobbersAnInProgressDraft(t *testing.T) {
+	h := newHarness(t).start()
+
+	h.typeText("first message")
+	h.press(input.KeyEnter)
+	if !h.a.inFlight {
+		t.Fatal("turn not marked in flight")
+	}
+
+	h.typeText("a fresh thought")
+	h.press(input.KeyEscape)
+	requireContains(t, h.calls(), "Cancel(beam-test-session)", "bridge calls")
+	if got := h.a.comp.Draft(); got != "a fresh thought" {
+		t.Fatalf("esc-cancel clobbered the in-progress draft: %q", got)
+	}
+
+	h.deliver(enginebridge.TurnEnded{SessionID: testSession, StopReason: libacp.StopReasonCancelled})
+	if got := h.a.comp.Draft(); got != "a fresh thought" {
+		t.Fatalf("draft changed once the cancelled turn actually ended: %q", got)
+	}
+
+	// The abandoned "first message" is not queued forever: sending the
+	// redraft overwrites it, so the NEXT cancel restores what was really
+	// just sent, never the earlier, stale prompt.
+	h.press(input.KeyEnter)
+	requireContains(t, h.calls(), `SubmitPrompt(beam-test-session, "a fresh thought")`, "bridge calls")
+	h.press(input.KeyEscape)
+	if got := h.a.comp.Draft(); got != "a fresh thought" {
+		t.Fatalf("cancel restored a stale prompt instead of the one just sent: %q", got)
+	}
+}
+
+// TestUnit_ArrowUp_RecallsPreviousSubmissions pins the composer history
+// generalization end to end: Up in an empty composer walks submitted turns
+// most-recent-first, and Down walks back toward empty.
+func TestUnit_ArrowUp_RecallsPreviousSubmissions(t *testing.T) {
+	h := newHarness(t).start()
+
+	h.typeText("first")
+	h.press(input.KeyEnter)
+	h.deliver(enginebridge.TurnEnded{SessionID: testSession, StopReason: libacp.StopReasonEndTurn})
+
+	h.typeText("second")
+	h.press(input.KeyEnter)
+	h.deliver(enginebridge.TurnEnded{SessionID: testSession, StopReason: libacp.StopReasonEndTurn})
+
+	if !h.a.comp.Empty() {
+		t.Fatal("composer not empty before recall")
+	}
+	h.press(input.KeyUp)
+	if got := h.a.comp.Draft(); got != "second" {
+		t.Fatalf("arrow-up did not recall the most recent submission: %q", got)
+	}
+	h.press(input.KeyUp)
+	if got := h.a.comp.Draft(); got != "first" {
+		t.Fatalf("second arrow-up did not recall the earlier submission: %q", got)
+	}
+	h.press(input.KeyDown)
+	if got := h.a.comp.Draft(); got != "second" {
+		t.Fatalf("arrow-down did not walk forward: %q", got)
+	}
+	h.press(input.KeyDown)
+	if !h.a.comp.Empty() {
+		t.Fatalf("arrow-down past the newest did not return to empty: %q", h.a.comp.Draft())
+	}
+}
+
+// TestUnit_Editor_CarriesTheDraftBothWays pins that Ctrl+X, Ctrl+E seeds the
+// editor with the draft and carries the result back into the buffer.
 func TestUnit_Editor_CarriesTheDraftBothWays(t *testing.T) {
 	var seen []string
 	h := newHarness(t, func(d *Deps) {
@@ -616,7 +704,7 @@ func TestUnit_Editor_CarriesTheDraftBothWays(t *testing.T) {
 	}).start()
 
 	h.typeText("a first line")
-	h.chord('e', true, false)
+	h.openEditor()
 
 	if h.term.suspends != 1 {
 		t.Fatalf("editor did not suspend the terminal: suspends=%d", h.term.suspends)
@@ -629,18 +717,9 @@ func TestUnit_Editor_CarriesTheDraftBothWays(t *testing.T) {
 	}
 }
 
-// TestUnit_Editor_SuspendRepaintsTheLiveRegionOnly is the duplicated-block
-// regression: every Ctrl+E left a frozen copy of the transcript's live tail —
-// with the pre-suspend composer baked into it — sitting in the terminal's
-// history, and a second Ctrl+E left another.
-//
-// The cause is structural rather than cosmetic. Suspend gives the screen to
-// another program, and the engine disowns the live region on the way back
-// because it cannot know what the child did; whatever the region held at that
-// moment therefore stops being repaintable and becomes permanent output. So
-// beam must hand the terminal over EMPTY, and the two things this checks are
-// exactly that: nothing is on screen when the child starts, and no line of
-// scrollback is ever printed twice however many cycles run.
+// TestUnit_Editor_SuspendRepaintsTheLiveRegionOnly pins that Ctrl+X, Ctrl+E
+// hands the terminal over with an empty live region and never prints a
+// scrollback line twice, however many suspend cycles run.
 func TestUnit_Editor_SuspendRepaintsTheLiveRegionOnly(t *testing.T) {
 	const cycles = 3
 	h := newHarness(t, func(d *Deps) {
@@ -648,8 +727,7 @@ func TestUnit_Editor_SuspendRepaintsTheLiveRegionOnly(t *testing.T) {
 		d.Editor = func(seed string) (string, error) { return seed, nil }
 	}).start()
 
-	// A settled block plus a still-streaming tail: the live region is holding
-	// real transcript content, which is what used to get stranded.
+	// A settled block plus a still-streaming tail occupy the live region.
 	h.deliver(enginebridge.TextDelta{
 		SessionID: testSession, MessageID: "m1",
 		Text: "a settled line of the last block\n",
@@ -661,7 +739,7 @@ func TestUnit_Editor_SuspendRepaintsTheLiveRegionOnly(t *testing.T) {
 	h.typeText("half a draft")
 
 	for range cycles {
-		h.chord('e', true, false)
+		h.openEditor()
 	}
 	if h.term.suspends != cycles {
 		t.Fatalf("suspends = %d, want %d", h.term.suspends, cycles)
@@ -673,9 +751,7 @@ func TestUnit_Editor_SuspendRepaintsTheLiveRegionOnly(t *testing.T) {
 		}
 	}
 
-	// Nothing beam printed as history is ever printed again — which is what
-	// "the last block got re-appended, duplicating per suspend" looked like
-	// from the terminal's side.
+	// Nothing beam printed as history is ever printed again.
 	seen := make(map[string]int)
 	for _, f := range h.term.frames {
 		for _, l := range f.Scrollback {
@@ -690,7 +766,7 @@ func TestUnit_Editor_SuspendRepaintsTheLiveRegionOnly(t *testing.T) {
 		}
 	}
 
-	// And the live region comes back whole on the far side.
+	// The live region comes back whole on the far side.
 	live := testkit.EncodeLines(h.last().Live)
 	requireContains(t, live, "and a live tail", "the live tail after a resume")
 	requireContains(t, live, "half a draft", "the draft after a resume")
@@ -703,16 +779,15 @@ func TestUnit_Editor_AbortKeepsTheDraft(t *testing.T) {
 	}).start()
 
 	h.typeText("keep me")
-	h.chord('e', true, false)
+	h.openEditor()
 	if got := h.a.comp.Draft(); got != "keep me" {
 		t.Fatalf("an aborted editor destroyed the draft: %q", got)
 	}
 	requireContains(t, h.scrollback(), "aborted due to empty prompt", "abort notice")
 }
 
-// TestUnit_Resize_LeavesSettledScrollbackAlone is the inline model's headline
-// property: a resize re-wraps the live region and cannot touch a line the
-// terminal has already printed.
+// TestUnit_Resize_LeavesSettledScrollbackAlone pins that a resize re-wraps
+// the live region without touching a line already printed to scrollback.
 func TestUnit_Resize_LeavesSettledScrollbackAlone(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FreshSession = false }).start()
 
@@ -742,8 +817,8 @@ func TestUnit_Resize_LeavesSettledScrollbackAlone(t *testing.T) {
 	}
 }
 
-// TestUnit_TooSmallTerminal_RendersOneHonestLine guards the relayout lesson,
-// and that nothing settled is thrown away while the terminal is unusable.
+// TestUnit_TooSmallTerminal_RendersOneHonestLine pins that a too-small
+// terminal shows one line and queues settled content instead of dropping it.
 func TestUnit_TooSmallTerminal_RendersOneHonestLine(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FreshSession = false }).start()
 	h.input(input.ResizeEvent{Width: 10, Height: 4})
@@ -761,9 +836,8 @@ func TestUnit_TooSmallTerminal_RendersOneHonestLine(t *testing.T) {
 	requireContains(t, h.scrollback(), "hidden for now", "queued lines print once the terminal is usable again")
 }
 
-// TestUnit_Liveness_MicroMotionThenStillness is the maintainer's acceptance
-// metric applied to the composed frame: motion while a mission heartbeat is
-// open, a still frame once it closes.
+// TestUnit_Liveness_MicroMotionThenStillness pins motion while a mission
+// heartbeat is open and a still frame once it closes.
 func TestUnit_Liveness_MicroMotionThenStillness(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FreshSession = false }).start()
 	events := testkit.FixtureMissionHeartbeat(testSession)
@@ -785,8 +859,54 @@ func TestUnit_Liveness_MicroMotionThenStillness(t *testing.T) {
 	}
 }
 
-// TestUnit_Bell_UnfocusedOnlyAndCoalesced pins the completion-notification
-// MVP: focus suppression, the always-ring exception, and the rate floor.
+// TestUnit_Liveness_TurnSpinnerAdvancesWithNoEvents pins the dogfood
+// complaint this closes: a submitted turn that draws zero further bridge
+// events — the silent stretch before the first token, or between tool
+// calls — must still visibly animate every tick, off the clock alone.
+// TestUnit_Liveness_MicroMotionThenStillness covers a heartbeat's motion;
+// this is the same assertion with no events at all after submit, which is
+// exactly what a hung-looking turn would otherwise look like.
+func TestUnit_Liveness_TurnSpinnerAdvancesWithNoEvents(t *testing.T) {
+	h := newHarness(t).start()
+	h.typeText("run something")
+	h.press(input.KeyEnter)
+	if !h.a.inFlight {
+		t.Fatal("turn not marked in flight")
+	}
+
+	render := func(tick int) string {
+		h.clock = baseTime.Add(time.Duration(tick) * tickInterval)
+		return testkit.EncodeFrame(h.a.buildFrame())
+	}
+	render(0) // drain the settled queue so the comparison is about motion only
+	testkit.AssertMicroMotion(t, render, 12)
+}
+
+// TestUnit_Liveness_IdleRendersNoSpinner pins the other half: with nothing
+// in flight, there is no spinner glyph to show and the frame holds
+// perfectly still tick over tick — motion is exclusively an
+// in-flight-turn signal, never a decorative idle animation.
+func TestUnit_Liveness_IdleRendersNoSpinner(t *testing.T) {
+	h := newHarness(t).start()
+	if h.a.live.Ticking() {
+		t.Fatal("ticking while idle")
+	}
+	if got := h.a.spinner(); got != "" {
+		t.Fatalf("spinner() = %q while idle, want none", got)
+	}
+	if got := h.a.status().Spinner; got != "" {
+		t.Fatalf("status().Spinner = %q while idle, want none", got)
+	}
+
+	render := func(tick int) string {
+		h.clock = baseTime.Add(time.Duration(tick) * tickInterval)
+		return testkit.EncodeFrame(h.a.buildFrame())
+	}
+	testkit.AssertStabilizes(t, render, 8)
+}
+
+// TestUnit_Bell_UnfocusedOnlyAndCoalesced pins focus suppression, the
+// always-ring exception, and the rate floor.
 func TestUnit_Bell_UnfocusedOnlyAndCoalesced(t *testing.T) {
 	h := newHarness(t).start()
 
@@ -824,18 +944,11 @@ func TestUnit_Bell_UnfocusedOnlyAndCoalesced(t *testing.T) {
 	}
 }
 
-// TestUnit_Bell_RuleTable is the completion-notification rule set as shipped
-// (blueprint 4.20), one row per fact beam can ring for, each played into a
-// fresh app so the rate floor never masks a rule.
-//
-// The table exists because the rules are not one rule with exceptions — they
-// are two different questions. "Is the operator already looking at this?" is
-// answerable for a turn ending or a mission landing, and focus suppresses those.
-// It is NOT answerable for a blocking ask or an inbox arrival: an ask holds a
-// unit hostage whether or not the window has focus, and an inbox item exists
-// precisely because no session was watching, so there is no surface for focus to
-// be measured against. Those ring regardless, and the wantFocused column is what
-// keeps the distinction from eroding into "ring on everything".
+// TestUnit_Bell_RuleTable pins the full bell rule set, one row per fact beam
+// can ring for, each played into a fresh app so the rate floor never masks a
+// rule. Focus suppresses a turn ending or mission landing; a blocking ask or
+// inbox arrival rings regardless, since neither has a surface to suppress
+// against.
 func TestUnit_Bell_RuleTable(t *testing.T) {
 	status := func(to, reason string) enginebridge.Event {
 		return enginebridge.MissionStatusChanged{
@@ -847,8 +960,8 @@ func TestUnit_Bell_RuleTable(t *testing.T) {
 	cases := []struct {
 		name string
 		ev   enginebridge.Event
-		// wantFocused/wantUnfocused are bell counts after ONE event, with the
-		// window focused and unfocused respectively.
+		// wantFocused/wantUnfocused are bell counts after one event, focused
+		// and unfocused respectively.
 		wantFocused   int
 		wantUnfocused int
 	}{
@@ -857,10 +970,9 @@ func TestUnit_Bell_RuleTable(t *testing.T) {
 		{"mission stuck", status(enginebridge.MissionStatusStuck, "needs a credential"), 0, 1},
 		{"mission abandoned", status(enginebridge.MissionStatusAbandoned, ""), 0, 1},
 
-		// Opening a mission is the operator's own act, one keystroke ago.
+		// Opening a mission is the operator's own act.
 		{"mission opened", status(enginebridge.MissionStatusOpen, ""), 0, 0},
-		// A status this build does not know is treated as still running, so it
-		// cannot ring a completion that may not have happened.
+		// An unknown status is treated as still running.
 		{"unknown mission status", status("paused", ""), 0, 0},
 
 		{"plan revision", enginebridge.MissionPlanRevised{
@@ -916,11 +1028,9 @@ func TestUnit_Bell_RuleTable(t *testing.T) {
 	}
 }
 
-// TestUnit_Bell_NewFactsCoalesceWithTheOldOnes: the rate floor is ONE floor for
-// the whole surface, not one per event kind. An always-ring fact still opens the
-// window that suppresses the next ring, and a focus-suppressed fact that never
-// rang must not consume it — otherwise a busy mission's progress reports would
-// silently eat the bell an inbox arrival is owed.
+// TestUnit_Bell_NewFactsCoalesceWithTheOldOnes pins that the rate floor is
+// one floor for the whole surface: an always-ring fact opens the coalescing
+// window, and a fact suppressed by focus never consumes it.
 func TestUnit_Bell_NewFactsCoalesceWithTheOldOnes(t *testing.T) {
 	h := newHarness(t).start()
 
@@ -932,7 +1042,7 @@ func TestUnit_Bell_NewFactsCoalesceWithTheOldOnes(t *testing.T) {
 		Old: enginebridge.MissionStatusOpen, New: enginebridge.MissionStatusLanded,
 	}
 
-	// A suppressed fact leaves the floor untouched: still focused, nothing rang.
+	// A suppressed fact leaves the floor untouched.
 	h.deliver(landed)
 	if h.term.bells != 0 {
 		t.Fatalf("a focused mission landing rang: bells=%d", h.term.bells)
@@ -959,10 +1069,8 @@ func TestUnit_Bell_NewFactsCoalesceWithTheOldOnes(t *testing.T) {
 	}
 }
 
-// TestUnit_InboxBadgeCountsArrivals wires the last leg: an inbox event the
-// bridge relayed becomes a number on the status bar that outlives the sound.
-// The bell is gone in a second; the badge is what an operator who stepped away
-// comes back to.
+// TestUnit_InboxBadgeCountsArrivals pins that an inbox event becomes a
+// number on the status bar that outlives the bell.
 func TestUnit_InboxBadgeCountsArrivals(t *testing.T) {
 	h := newHarness(t).start()
 
@@ -981,9 +1089,8 @@ func TestUnit_InboxBadgeCountsArrivals(t *testing.T) {
 	requireContains(t, testkit.EncodeLines(h.last().Live), "✉ 2", "status bar inbox badge")
 }
 
-// TestUnit_MissionLifecycleReachesTheTranscript pins the app-shell's half of the
-// mission-lifecycle wiring: it hands every bridge event to the transcript, so
-// the cards land in scrollback without app-shell knowing what they look like.
+// TestUnit_MissionLifecycleReachesTheTranscript pins that every bridge event
+// reaches the transcript, so mission cards land in scrollback.
 func TestUnit_MissionLifecycleReachesTheTranscript(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FreshSession = false }).start()
 	h.deliver(testkit.FixtureMissionLifecycle(testSession)...)
@@ -996,8 +1103,8 @@ func TestUnit_MissionLifecycleReachesTheTranscript(t *testing.T) {
 	requireContains(t, back, "migration applied; 3 tables updated", "landing reason")
 }
 
-// TestUnit_Mention_PickerSplicesAPath covers the `@` seam over a real
-// fileaddr source.
+// TestUnit_Mention_PickerSplicesAPath pins the `@` seam over a real fileaddr
+// source.
 func TestUnit_Mention_PickerSplicesAPath(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "retry.go"), []byte("package ingest\n"), 0o600); err != nil {
@@ -1017,9 +1124,7 @@ func TestUnit_Mention_PickerSplicesAPath(t *testing.T) {
 		t.Fatalf("picker matched nothing for %q", "ret")
 	}
 	h.press(input.KeyEnter)
-	// The "@" comes back with the path: MentionSpan's span includes the sigil,
-	// so splicing the bare label would quietly turn an attachment into a
-	// filename in a sentence.
+	// The "@" comes back with the path: MentionSpan's span includes the sigil.
 	if got := h.a.comp.Draft(); got != "look at @retry.go " {
 		t.Fatalf("mention was not spliced: %q", got)
 	}
@@ -1028,15 +1133,12 @@ func TestUnit_Mention_PickerSplicesAPath(t *testing.T) {
 	}
 }
 
-// TestUnit_Mention_QueryReachesPastTheCandidateCap is the cap-before-filter
-// bug: the picker used to fetch one unfiltered page of candidates per open and
-// filter it locally, but the source caps AFTER ranking — so an unfiltered
-// fetch caps ALPHABETICALLY, and in a workspace with more files than the cap
-// everything past the cap-th name was invisible. Typing its exact path
-// produced "no matching files" for a file plainly on disk.
+// TestUnit_Mention_QueryReachesPastTheCandidateCap pins that a query is
+// ranked and capped after matching, not filtered from an alphabetically
+// capped unfiltered fetch — a file past the cap must still be findable.
 func TestUnit_Mention_QueryReachesPastTheCandidateCap(t *testing.T) {
 	root := t.TempDir()
-	// Comfortably past pickerCandidateCap, and named so the wanted file sorts
+	// Comfortably past pickerCandidateCap, named so the wanted file sorts
 	// last: an alphabetical cap could not include it.
 	for i := 0; i < pickerCandidateCap+40; i++ {
 		name := filepath.Join(root, fmt.Sprintf("aaa%04d.go", i))
@@ -1068,11 +1170,8 @@ func TestUnit_Mention_QueryReachesPastTheCandidateCap(t *testing.T) {
 	}
 }
 
-// TestUnit_Mention_TruncatedIndexSaysSo: fileaddr's walk budget is otherwise
-// INVISIBLE — the walk stops early, the overlay shows an ordinary short list
-// or an ordinary "no matching files", and an operator whose file did not make
-// it concludes it is not there. One muted footer says the index is partial and
-// what to do about it.
+// TestUnit_Mention_TruncatedIndexSaysSo pins that a truncated walk shows a
+// muted footer rather than silently rendering an incomplete list as final.
 func TestUnit_Mention_TruncatedIndexSaysSo(t *testing.T) {
 	root := t.TempDir()
 	for i := 0; i <= fileaddr.WalkBudget; i++ {
@@ -1092,17 +1191,15 @@ func TestUnit_Mention_TruncatedIndexSaysSo(t *testing.T) {
 	}
 	requireContains(t, testkit.EncodeLines(h.last().Live), indexTruncatedText(false), "the truncation footer")
 
-	// It is a footer, not an extra row: the overlay still fits the budget the
-	// app-shell handed it.
+	// A footer, not an extra row: the overlay still fits its row budget.
 	live := h.last().Live
 	overlay := len(live) - len(h.a.comp.Render(h.a.width, true, h.a.ascii)) - 1
 	if overlay > h.a.rowBudget() {
 		t.Fatalf("the picker spent %d rows of a %d-row budget", overlay, h.a.rowBudget())
 	}
 
-	// Backspacing back to browse mode takes it with it: a directory listing is
-	// one read with no budget to exceed, so the flag left over from the last
-	// WALK must not stand over a list that is complete.
+	// Backspacing back to browse mode takes the footer with it: a directory
+	// listing has no walk budget to exceed.
 	h.press(input.KeyBackspace)
 	h.press(input.KeyBackspace)
 	if h.a.pickerQuery != "" {
@@ -1115,9 +1212,9 @@ func TestUnit_Mention_TruncatedIndexSaysSo(t *testing.T) {
 	requireNotContains(t, testkit.EncodeLines(h.last().Live), indexTruncatedText(false), "the closed picker")
 }
 
-// TestUnit_Mention_RequeriesOnlyOnQueryChange pins the other half of the fix:
-// the source is asked once per CHANGED query, so a re-render or a keystroke
-// that leaves the token alone costs no walk.
+// TestUnit_Mention_RequeriesOnlyOnQueryChange pins that the source is asked
+// once per changed query; a keystroke that leaves the token alone costs no
+// walk.
 func TestUnit_Mention_RequeriesOnlyOnQueryChange(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "retry.go"), []byte("package ingest\n"), 0o600); err != nil {
@@ -1134,8 +1231,7 @@ func TestUnit_Mention_RequeriesOnlyOnQueryChange(t *testing.T) {
 		t.Fatalf("picker query = %q, want %q", h.a.pickerQuery, "ret")
 	}
 
-	// Left then right returns the caret to the same token: the query is
-	// unchanged, so nothing is re-fetched and the list stands.
+	// Left then right returns to the same token; nothing is re-fetched.
 	h.press(input.KeyLeft)
 	h.press(input.KeyRight)
 	if h.a.pickerQuery != "ret" {
@@ -1157,17 +1253,15 @@ func TestUnit_Mention_NoSourceShowsTheFixedEmptyState(t *testing.T) {
 	h := newHarness(t).start()
 	h.typeText("@")
 	requireContains(t, testkit.EncodeLines(h.last().Live), fileaddr.NoRootText, "picker empty state")
-	// Fixed means fixed: no breadcrumb over it, because there is no tree for
-	// one to be a crumb of.
+	// No breadcrumb: there is no tree for one to be a crumb of.
 	if got := h.a.pick.Header(); got != "" {
 		t.Fatalf("rootless picker header = %q, want none", got)
 	}
 }
 
-// browseWorkspace is the tree the browsing tests walk. It is two levels deep,
-// and "target.go" deliberately lives in two different directories: a search
-// that is scoped to a subtree and one that is not produce different answers
-// for it, which is the only way to tell them apart from the outside.
+// browseWorkspace is the tree the browsing tests walk, two levels deep, with
+// "target.go" deliberately duplicated across directories to distinguish a
+// scoped search from an unscoped one.
 func browseWorkspace(t *testing.T) *fileaddr.Source {
 	t.Helper()
 	root := t.TempDir()
@@ -1193,10 +1287,9 @@ func browseWorkspace(t *testing.T) *fileaddr.Source {
 	return src
 }
 
-// pickerRows is the file list as the operator reads it, top to bottom. The
-// picker publishes a selection rather than its filtered slice, so the rows are
-// walked with the same Move the arrow keys use and the selection is put back
-// where it was found.
+// pickerRows is the file list as the operator reads it, top to bottom,
+// walked with the same Move the arrow keys use since the picker publishes a
+// selection rather than its filtered slice.
 func (h *harness) pickerRows() []string {
 	h.t.Helper()
 	n := h.a.pick.FilteredLen()
@@ -1216,11 +1309,8 @@ func (h *harness) pickerRows() []string {
 	return rows
 }
 
-// TestUnit_Mention_BrowseOpensAtTheRoot: a bare `@` is a directory listing of
-// the workspace root, dirs first, under a breadcrumb that says where those
-// rows came from. Before this the empty query meant the whole walk in
-// alphabetical order — the one list a user who does not yet know the filename
-// has no way to read.
+// TestUnit_Mention_BrowseOpensAtTheRoot pins that a bare `@` is a directory
+// listing of the workspace root, dirs first, under a breadcrumb.
 func TestUnit_Mention_BrowseOpensAtTheRoot(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FileSource = browseWorkspace(t) }).start()
 	h.typeText("@")
@@ -1234,21 +1324,17 @@ func TestUnit_Mention_BrowseOpensAtTheRoot(t *testing.T) {
 	if got := strings.Join(h.pickerRows(), " "); got != "docs/ src/ README.md" {
 		t.Fatalf("root listing = %q, want the two directories then the file", got)
 	}
-	// The breadcrumb is the overlay's first row, not a fact only the test can
-	// see.
 	requireContains(t, testkit.EncodeLines(h.last().Live), "[muted]/[/]", "the breadcrumb row")
 
-	// Esc closes it, and the next `@` starts over at the root rather than
-	// wherever the last mention was hunted down.
+	// Esc closes it, and the next `@` starts over at the root.
 	h.press(input.KeyEscape)
 	if h.a.pickerOpen || h.a.browser != nil {
 		t.Fatal("Esc left the browser alive")
 	}
 }
 
-// TestUnit_Mention_EnterOnADirectoryDescends: Enter means two different things
-// on the two kinds of row, and fileaddr.IsDir — the trailing slash the row
-// itself shows — is the branch.
+// TestUnit_Mention_EnterOnADirectoryDescends pins that Enter descends on a
+// directory row and splices on a file row, branching on fileaddr.IsDir.
 func TestUnit_Mention_EnterOnADirectoryDescends(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FileSource = browseWorkspace(t) }).start()
 	h.typeText("@")
@@ -1266,8 +1352,7 @@ func TestUnit_Mention_EnterOnADirectoryDescends(t *testing.T) {
 	if got := strings.Join(h.pickerRows(), " "); got != "deep/ src/main.go src/target.go" {
 		t.Fatalf("listing after descending = %q", got)
 	}
-	// Descending is navigation, not selection: the draft still holds the bare
-	// mention and the overlay is still open over it.
+	// Descending is navigation, not selection.
 	if got := h.a.comp.Draft(); got != "@" {
 		t.Fatalf("descending edited the draft: %q", got)
 	}
@@ -1275,8 +1360,7 @@ func TestUnit_Mention_EnterOnADirectoryDescends(t *testing.T) {
 		t.Fatal("descending closed the file list")
 	}
 
-	// A file row from the subdirectory splices its FULL root-relative path, so
-	// the mention addresses the same file it would have from the root.
+	// A file row from the subdirectory splices its full root-relative path.
 	h.press(input.KeyDown)
 	h.press(input.KeyDown)
 	h.press(input.KeyEnter)
@@ -1288,14 +1372,10 @@ func TestUnit_Mention_EnterOnADirectoryDescends(t *testing.T) {
 	}
 }
 
-// TestUnit_Mention_DescendingClearsTheQuery: a query is scoped to the
-// directory it was typed in, so carrying it down would re-run somebody's old
-// search against a tree they have just left.
-//
-// descend is called directly because the keystroke path cannot reach this
-// state today — a typed query searches for FILES, so no directory row is on
-// screen to press Enter on — and a rule that only holds because the caller
-// happens never to break it is not a rule.
+// TestUnit_Mention_DescendingClearsTheQuery pins that a query is scoped to
+// the directory it was typed in and does not carry into a descend. Calls
+// descend directly since the keystroke path cannot reach this state (a typed
+// query shows files, not directory rows).
 func TestUnit_Mention_DescendingClearsTheQuery(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FileSource = browseWorkspace(t) }).start()
 	h.typeText("look at @tar and more")
@@ -1308,9 +1388,8 @@ func TestUnit_Mention_DescendingClearsTheQuery(t *testing.T) {
 
 	h.a.descend(h.ctx, "src")
 
-	// The "@" survives — the overlay is still open over the same mention — and
-	// everything the operator typed after it is gone, along with the text after
-	// the token being left exactly where it was.
+	// The "@" survives; the query typed after it is gone, and the trailing
+	// text is left exactly where it was.
 	if got, want := h.a.comp.Draft(), "look at @ and more"; got != want {
 		t.Fatalf("draft = %q, want %q", got, want)
 	}
@@ -1329,9 +1408,9 @@ func TestUnit_Mention_DescendingClearsTheQuery(t *testing.T) {
 	}
 }
 
-// TestUnit_Mention_TypingIsScopedToTheCurrentDirectory: descending narrows a
-// search, not just the view. "target.go" exists in two directories and only
-// the one under the browsed subtree may appear.
+// TestUnit_Mention_TypingIsScopedToTheCurrentDirectory pins that descending
+// narrows a search, not just the view: only the copy under the browsed
+// subtree may match.
 func TestUnit_Mention_TypingIsScopedToTheCurrentDirectory(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FileSource = browseWorkspace(t) }).start()
 
@@ -1341,7 +1420,7 @@ func TestUnit_Mention_TypingIsScopedToTheCurrentDirectory(t *testing.T) {
 		t.Fatalf("root search = %q, want both copies", got)
 	}
 
-	// Back to browse mode, into src/, and the same query now answers for that
+	// Back to browse mode, into src/, and the same query answers for that
 	// subtree alone.
 	for i := 0; i < len("target"); i++ {
 		h.press(input.KeyBackspace)
@@ -1355,8 +1434,7 @@ func TestUnit_Mention_TypingIsScopedToTheCurrentDirectory(t *testing.T) {
 	if got := strings.Join(h.pickerRows(), " "); got != "src/target.go" {
 		t.Fatalf("scoped search = %q, want only the copy under src/", got)
 	}
-	// A deeper file still matches from src/, so the search is recursive rather
-	// than one directory level.
+	// A deeper file still matches, so the search is recursive.
 	for i := 0; i < len("target"); i++ {
 		h.press(input.KeyBackspace)
 	}
@@ -1366,11 +1444,9 @@ func TestUnit_Mention_TypingIsScopedToTheCurrentDirectory(t *testing.T) {
 	}
 }
 
-// TestUnit_Mention_BackspaceAscendsThenDeletesTheAt is the one binding that
-// spends most of its life declining. It navigates only where navigating is
-// what the key can mean: with a query typed it edits the query, and at the
-// root it falls through to the composer and deletes the "@" that opened the
-// overlay.
+// TestUnit_Mention_BackspaceAscendsThenDeletesTheAt pins that Backspace edits
+// a typed query, ascends when the query is empty, and at the root falls
+// through to delete the "@" that opened the overlay.
 func TestUnit_Mention_BackspaceAscendsThenDeletesTheAt(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FileSource = browseWorkspace(t) }).start()
 	h.typeText("look at @")
@@ -1381,8 +1457,7 @@ func TestUnit_Mention_BackspaceAscendsThenDeletesTheAt(t *testing.T) {
 		t.Fatalf("breadcrumb = %q, want %q", got, want)
 	}
 
-	// With something typed, Backspace is a text edit: the browser stays put and
-	// the shortened query re-runs against the same subtree.
+	// With something typed, Backspace edits the query; the browser stays put.
 	h.typeText("handlerx")
 	h.press(input.KeyBackspace)
 	if got, want := h.a.comp.Draft(), "look at @handler"; got != want {
@@ -1411,8 +1486,7 @@ func TestUnit_Mention_BackspaceAscendsThenDeletesTheAt(t *testing.T) {
 		t.Fatalf("breadcrumb back at the root = %q, want %q", got, want)
 	}
 
-	// At the root there is no parent, so the key means what it means
-	// everywhere else: it deletes the "@" and the overlay goes with it.
+	// At the root there is no parent; the key deletes the "@" instead.
 	h.press(input.KeyBackspace)
 	if got := h.a.comp.Draft(); got != "look at " {
 		t.Fatalf("draft = %q, want the mention deleted", got)
@@ -1425,12 +1499,9 @@ func TestUnit_Mention_BackspaceAscendsThenDeletesTheAt(t *testing.T) {
 	}
 }
 
-// TestUnit_Mention_BackspaceDeclinesUnderTheSessionList: the switcher shares
-// ScopePicker, so this binding declines while the SESSION list is the picker
-// on screen — the inverse of the j/k rule, which declines while the FILE list
-// is. openSessions closes the file list on its way in, so the guard is
-// belt-and-braces today; it is asserted directly because what it protects
-// against is precisely the two overlays' states being read out of sync.
+// TestUnit_Mention_BackspaceDeclinesUnderTheSessionList pins that pickerAscend
+// declines while the session list, not the file list, is the picker on
+// screen.
 func TestUnit_Mention_BackspaceDeclinesUnderTheSessionList(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FileSource = browseWorkspace(t) }).start()
 	h.typeText("look at @")
@@ -1444,8 +1515,7 @@ func TestUnit_Mention_BackspaceDeclinesUnderTheSessionList(t *testing.T) {
 	if got, want := h.a.pick.Header(), "/src"; got != want {
 		t.Fatalf("breadcrumb = %q, want %q", got, want)
 	}
-	// The keystroke reaches no text either: a modal that owns the keyboard
-	// blocks the composer outright.
+	// The keystroke reaches no text either: the modal blocks the composer.
 	h.press(input.KeyBackspace)
 	if got := h.a.comp.Draft(); got != "look at @" {
 		t.Fatalf("draft = %q, want it untouched", got)

@@ -75,10 +75,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build engine: %w", err)
 	}
 	res := setupcheck.EnrichResultWithOllamaProbe(ctx, engine.SetupCheck)
-	// A policy envelope written before a toolset existed sends every call to
-	// that toolset through default_action — an approval card per read on an
-	// install that has simply been upgraded. It is not a failure (nothing here
-	// blocks), but it is invisible from the inside, so doctor says it.
+	// A policy predating a toolset is invisible from the inside (an approval
+	// card per read, not a failure), so doctor names it.
 	res = setupcheck.AddStalePolicyPresetIssue(res, stalePolicyPresetIssues(policyDirs(contenoxDir)), RefreshPoliciesCommand)
 	vision := visionSummaryFromState(engine.State.Get(ctx), res.DefaultModel)
 	engine.Stop()
@@ -114,8 +112,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 // derived from the synced runtime state (the same snapshot readiness used).
 type visionSummary struct {
 	// reachable is true when at least one backend synced without error; with
-	// no reachable backend a vision line would be noise on top of the
-	// connectivity errors doctor already prints.
+	// none, a vision line would be noise on top of the connectivity errors.
 	reachable        bool
 	visionModels     []string
 	defaultHasVision bool
@@ -176,9 +173,7 @@ func printDoctorText(w io.Writer, res setupcheck.Result) {
 	fmt.Fprintf(w, "Default provider: %s\n", res.DefaultProvider)
 	fmt.Fprintf(w, "Backends (registered): %d\n", res.BackendCount)
 	fmt.Fprintf(w, "Reachable backends:    %d\n", res.ReachableBackendCount)
-	// Fleet activity is process-lifetime, so this line only means something in
-	// a long-lived process (an editor session); a fresh doctor run shows it only
-	// if this very invocation dispatched — render nothing rather than "0/0/0".
+	// Fleet activity is process-lifetime; render nothing rather than "0/0/0".
 	if c := fleetservice.Counters(); c.Dispatches > 0 || c.CapRefusals > 0 || c.VerificationDowngrades > 0 {
 		fmt.Fprintf(w, "Fleet: %d dispatched, %d refused at cap, %d results downgraded\n",
 			c.Dispatches, c.CapRefusals, c.VerificationDowngrades)

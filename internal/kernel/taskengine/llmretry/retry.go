@@ -1,14 +1,9 @@
 // Package llmretry wraps a single LLM call with classified retry, exponential
 // backoff, and an optional model fallback. It has no contenox-internal
-// dependencies and is safe to use from any task handler.
-//
-// The classifier inspects formatted error strings because contenox's provider
-// clients (modelrepo/{openai,vllm,gemini,...}) return errors as
-// fmt.Errorf-wrapped strings of the shape:
-//
-//	"OpenAI API returned non-200 status: 429, body: …"
-//
-// Substring matching keeps llmretry decoupled from any specific provider.
+// dependencies and is safe to use from any task handler. The classifier
+// matches substrings in the formatted error (provider clients return
+// fmt.Errorf-wrapped strings, not typed errors), keeping it decoupled from
+// any specific provider.
 package llmretry
 
 import (

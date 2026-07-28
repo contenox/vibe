@@ -8,12 +8,10 @@ import (
 	"github.com/ollama/ollama/api"
 )
 
-// defaultKeepAlive is the model-residency window every ollama request asserts.
-// The server's own default is 5m, which is shorter than a thinking user's gap
-// between turns — the per-slot KV cache (and the loaded model) would evict
-// mid-conversation and the next turn would pay a cold start (provider-kv-cache
-// P5). Twice the server default keeps a session warm without pinning a model
-// forever on a shared box.
+// defaultKeepAlive is the model-residency window every ollama request
+// asserts: twice the server's 5m default, so a session stays warm across a
+// user's thinking gap between turns without pinning a model forever on a
+// shared box.
 const defaultKeepAlive = 10 * time.Minute
 
 // keepAliveEnv overrides the residency window ("30m", "1h", ollama duration
@@ -31,10 +29,8 @@ var keepAliveOnce = sync.OnceValue(func() *api.Duration {
 })
 
 // keepAlive returns the residency window to set on every model-loading
-// request (chat, stream, generate, embed). Consistency matters as much as the
-// value: a request that omits keep_alive resets residency to the server
-// default, so one un-annotated call path would silently shorten every
-// session's warmth.
+// request (chat, stream, generate, embed). Every call path must set it: an
+// omitted keep_alive resets residency to the server default.
 func keepAlive() *api.Duration {
 	return keepAliveOnce()
 }

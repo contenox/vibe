@@ -34,8 +34,7 @@ func TestUnit_ComposeUserInput_ContextArtifactsInjected(t *testing.T) {
 	}
 }
 
-// The context block must be strictly *prepended* — the client's optimistic
-// echo matcher relies on the original input remaining a suffix.
+// The context block must be strictly prepended; the original input stays a suffix.
 func TestUnit_ComposeUserInput_OriginalInputIsSuffix(t *testing.T) {
 	contextBundle := map[string]any{
 		"artifacts": []any{

@@ -1,14 +1,8 @@
-// Package shellenvservice persists the operator-defined environment variables
-// contenox injects into the shells it spawns — the local_shell tool, the
-// shell_session PTY, and the interactive terminal. It is the deliberate-injection
-// counterpart to the environment scrub (see libsandbox): where the scrub decides
-// what serve's own environment LOSES on the way into a shell, these variables are
-// what an operator explicitly ADDS, layered on top so they always win.
-//
-// Scope is global — one map applied to every spawned shell. Values are stored
-// plaintext in the kv table, matching every other config value in the runtime, so
-// do not put secrets here. The map is read live at each spawn, so an edit takes
-// effect on the next shell without a serve restart.
+// Package shellenvservice persists the operator-defined environment
+// variables contenox injects into shells it spawns (local_shell,
+// shell_session, the interactive terminal), layered on top of the
+// environment scrub so they always win. Scope is global; values are
+// plaintext in the kv table, so no secrets belong here.
 package shellenvservice
 
 import (

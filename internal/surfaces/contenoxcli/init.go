@@ -36,6 +36,9 @@ var initACPChain string
 //go:embed chain-acpx.json
 var initACPXChain string
 
+//go:embed chain-beam.json
+var initBeamChain string
+
 //go:embed chain-fim.json
 var initFIMChain string
 
@@ -68,12 +71,10 @@ func seedHeadlessACPChainIfMissing(contenoxDir string) error {
 }
 
 // seedACPChainIfMissing writes the default-acp-chain.json preset when it is
-// absent, so the `acp` profile is self-sufficient on a fresh install the same
-// way `acpx` is via seedHeadlessACPChainIfMissing. Without this, a clean
-// environment that never ran `contenox init`/`--setup` hard-errors at launch
-// in LoadChainRegistryFrom (the registry validator runs in exactly such an
-// isolated HOME), so the ACP transport never starts and `initialize` is never
-// answered.
+// absent, so the `acp` profile is self-sufficient on a fresh install, the
+// same way `acpx` is via seedHeadlessACPChainIfMissing. Without this, a
+// clean environment that never ran `contenox init`/`--setup` hard-errors at
+// launch in LoadChainRegistryFrom.
 func seedACPChainIfMissing(contenoxDir string) error {
 	dst := filepath.Join(contenoxDir, "default-acp-chain.json")
 	if _, err := os.Stat(dst); err == nil {
@@ -83,6 +84,25 @@ func seedACPChainIfMissing(contenoxDir string) error {
 		return err
 	}
 	return os.WriteFile(dst, []byte(initACPChain), 0644)
+}
+
+// defaultBeamChainFilename is the on-disk name beam loads its chain from,
+// parallel to default-acp-chain.json for the acp profile.
+const defaultBeamChainFilename = "default-beam-chain.json"
+
+// seedBeamChainIfMissing writes the embedded beam chain to contenoxDir only
+// when absent, the same self-sufficiency seedACPChainIfMissing gives the
+// editor profile: a clean environment that never ran `contenox init` still
+// gets a working `contenox beam` rather than a hard-error in LoadChainRegistryFrom.
+func seedBeamChainIfMissing(contenoxDir string) error {
+	dst := filepath.Join(contenoxDir, defaultBeamChainFilename)
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, []byte(initBeamChain), 0644)
 }
 
 // providerConfig holds the provider-specific values used during init.
@@ -185,9 +205,11 @@ func RunGlobalInit(out io.Writer) error {
 	if err := writeFile(filepath.Join(homeDir, headlessACPChainFilename), initACPXChain); err != nil {
 		return err
 	}
-	// The resident-planner profile (mission-plans.md, slice 4). Named by the
-	// agent-* convention so chain-agent discovery declares it as a fleet-
-	// dispatchable agent; its envelope grants only the mission tools.
+	if err := writeFile(filepath.Join(homeDir, defaultBeamChainFilename), initBeamChain); err != nil {
+		return err
+	}
+	// Named by the agent-* convention so chain-agent discovery declares it
+	// as a fleet-dispatchable agent; its envelope grants only mission tools.
 	if err := writeFile(filepath.Join(homeDir, "agent-planner.json"), initPlannerChain); err != nil {
 		return err
 	}
@@ -198,11 +220,9 @@ func RunGlobalInit(out io.Writer) error {
 }
 
 // RunInit scaffolds .contenox/ with default chain files.
-// provider is "" (defaults to the already-configured provider or "ollama"), or one of providerConfigs.
-// contenoxDir is the target data directory (e.g. from --data-dir or the default .contenox/).
-// projectName is the friendly name to stamp into the marker — an explicit name
-// renames an already-named project; "" leaves the marker's name (or lack of one)
-// alone, preserving legacy bare-UUID-equivalent behavior for a plain init.
+// provider is "" (defaults to the configured provider or "ollama") or one of providerConfigs.
+// contenoxDir is the target data directory. projectName, if non-empty, renames
+// an already-named project's marker; "" leaves the marker's name alone.
 func RunInit(out, errOut io.Writer, force, update bool, provider string, contenoxDir string, projectName string) error {
 	provider = modelrepo.CanonicalBackendType(provider)
 	if provider == "" {
@@ -232,11 +252,8 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
 		return fmt.Errorf("failed to create .contenox directory: %w", err)
 	}
-	// The project package owns the marker format (JSON {id,name}); a fresh marker
-	// gets a new UUID, an existing one keeps its ID (an explicit projectName
-	// renames it; "" leaves the stored name alone). ResolveWorkspaceID reads both
-	// this and the legacy bare-UUID form, so an existing install's DB token stays
-	// stable.
+	// A fresh marker gets a new UUID; an existing one keeps its ID (an
+	// explicit projectName renames it, "" leaves the stored name alone).
 	marker, err := project.EnsureInContenoxDir(contenoxDir, projectName)
 	if err != nil {
 		return fmt.Errorf("failed to write project marker: %w", err)
@@ -315,9 +332,11 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	if err := writeFile(filepath.Join(homeDir, headlessACPChainFilename), initACPXChain); err != nil {
 		return err
 	}
-	// The resident-planner profile (mission-plans.md, slice 4). Named by the
-	// agent-* convention so chain-agent discovery declares it as a fleet-
-	// dispatchable agent; its envelope grants only the mission tools.
+	if err := writeFile(filepath.Join(homeDir, defaultBeamChainFilename), initBeamChain); err != nil {
+		return err
+	}
+	// Named by the agent-* convention so chain-agent discovery declares it
+	// as a fleet-dispatchable agent; its envelope grants only mission tools.
 	if err := writeFile(filepath.Join(homeDir, "agent-planner.json"), initPlannerChain); err != nil {
 		return err
 	}

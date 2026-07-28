@@ -11,13 +11,9 @@ import (
 	libacp "github.com/contenox/beam/libacp"
 )
 
-// allFixtures is every SESSION-SCOPED fixture constructor in fixtures.go, named
-// for sub-test reporting. Adding a fixture without adding it here is caught by
-// nothing automatically — this list is the deliberate, reviewable inventory.
-//
-// FixtureInboxArrival is deliberately absent: it takes no session id, because
-// an operator-inbox item exists precisely because no session was watching. It
-// has its own tests below.
+// allFixtures is every session-scoped fixture constructor in fixtures.go,
+// named for sub-test reporting. FixtureInboxArrival is deliberately absent
+// (it takes no session id); it has its own tests below.
 func allFixtures() map[string]func(libacp.SessionID) []enginebridge.Event {
 	return map[string]func(libacp.SessionID) []enginebridge.Event{
 		"StreamingTurn":               FixtureStreamingTurn,
@@ -34,12 +30,9 @@ func allFixtures() map[string]func(libacp.SessionID) []enginebridge.Event {
 	}
 }
 
-// TestUnit_InboxFixtureIsSessionless pins the one property FixtureInboxArrival
-// exists to carry: an inbox item belongs to NO session. A "helpful" session id
-// added later — by symmetry with every other fixture in the corpus — would
-// quietly assert a routing edge the whole operator inbox exists because of the
-// absence of, and a consumer that filtered by session would then look correct
-// while dropping exactly the notices nobody is watching for.
+// TestUnit_InboxFixtureIsSessionless pins that FixtureInboxArrival's events
+// carry no session id, since a "helpful" session added later would hide the
+// exact notices the operator inbox exists to catch.
 func TestUnit_InboxFixtureIsSessionless(t *testing.T) {
 	events := FixtureInboxArrival()
 	if len(events) == 0 {
@@ -80,10 +73,8 @@ func TestUnit_FixturesYieldEventsForTheirSession(t *testing.T) {
 	}
 }
 
-// TestUnit_FixturesAreDeterministic calls each fixture twice with the same
-// session id and requires byte-identical (deep-equal) results — the
-// "versioned fixture corpus" promise: no time.Now, no randomness, no
-// hidden mutable state shared across calls.
+// TestUnit_FixturesAreDeterministic pins that each fixture called twice with
+// the same session id produces byte-identical (deep-equal) results.
 func TestUnit_FixturesAreDeterministic(t *testing.T) {
 	const sid = libacp.SessionID("sess-fixture-2")
 	for name, build := range allFixtures() {
@@ -94,12 +85,8 @@ func TestUnit_FixturesAreDeterministic(t *testing.T) {
 				t.Fatalf("fixture %s: call 1 produced %d events, call 2 produced %d", name, len(first), len(second))
 			}
 			for i := range first {
-				// PermissionRequested carries a Resolve func: reflect.DeepEqual
-				// treats any two non-nil funcs as unequal (even the same closure
-				// compared to itself), so strip it before comparing. Every other
-				// field, including pointer fields like UsageCost, DeepEqual
-				// compares by pointed-to value, not address, which is what
-				// "byte-identical" means here.
+				// PermissionRequested carries a Resolve func, and reflect.DeepEqual
+				// treats any two non-nil funcs as unequal, so strip it before comparing.
 				if !reflect.DeepEqual(stripResolve(first[i]), stripResolve(second[i])) {
 					t.Errorf("fixture %s: event %d differs between calls:\n- %#v\n+ %#v", name, i, first[i], second[i])
 				}
@@ -108,13 +95,10 @@ func TestUnit_FixturesAreDeterministic(t *testing.T) {
 	}
 }
 
-// TestUnit_EmptyMessageIDFixturesCarryNoIDs pins the one property those three
-// fixtures exist for. They look like ordinary scripts, and an id "helpfully"
-// added back — by a copy-paste from the identified variant, or by somebody
-// making the corpus look tidy — would silently turn them into duplicates of
-// the fixtures they are the counterpart to, and the defect class they cover
-// (every assistant message in a process sharing one key) would go untested
-// again.
+// TestUnit_EmptyMessageIDFixturesCarryNoIDs pins that these three fixtures
+// carry no MessageID at all; an id added back would silently turn them into
+// duplicates of the identified variant and leave the shared-key defect
+// class untested again.
 func TestUnit_EmptyMessageIDFixturesCarryNoIDs(t *testing.T) {
 	const sid = libacp.SessionID("sess-fixture-3")
 	fixtures := map[string]func(libacp.SessionID) []enginebridge.Event{
@@ -224,10 +208,8 @@ func TestUnit_AssertMicroMotionOnActiveTracker(t *testing.T) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	tr.Open(liveness.KindTurn, "turn-1", "thinking", base)
 
-	// render is a pure function of tick: it derives "now" from a fixed base
-	// plus a fixed per-tick advance and reads a liveness.Tracker snapshot
-	// through it — never a real clock, exactly the shape this harness
-	// documents as the expected contract for render.
+	// render derives "now" from a fixed base plus a fixed per-tick advance,
+	// never a real clock, per the harness's render contract.
 	render := func(tick int) string {
 		now := base.Add(time.Duration(tick) * 130 * time.Millisecond)
 		snap, ok := tr.Snapshot("turn-1", now, 8)

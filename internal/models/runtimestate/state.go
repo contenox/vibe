@@ -1,13 +1,8 @@
-// Package runtimestate reconciles the declared state of LLM backends (from
-// dbInstance) with their actual observed state. It keeps runtime observation
-// read-only and is intended to be executed repeatedly within background tasks
-// managed externally.
-//
-// The central type is State (constructed via New), which other packages
-// — notably llmrepo — consult through ProviderFromRuntimeState to enumerate
-// currently-available modelrepo.Provider instances. Init{Embeder,PromptExec,
-// ChatExec} bootstrap default model configurations from a Config; provider
-// subpackages register their catalogs via blank imports.
+// Package runtimestate reconciles the declared state of LLM backends against
+// their observed state, read-only, intended to run repeatedly from an
+// external background task. State (via New) exposes the result through
+// ProviderFromRuntimeState; provider subpackages register their catalogs via
+// blank imports.
 package runtimestate
 
 import (
@@ -31,10 +26,8 @@ import (
 const ProviderCacheDuration = 1 * time.Hour
 
 // ReconcileDebounceInterval bounds how often a read-triggered reconcile
-// (ReconcileIfStale) actually re-scans backends. The runtime reconciles at
-// startup and on explicit refresh only (no periodic loop), so a read view that
-// self-heals must debounce or a burst of UI polls would stampede a full cycle
-// each time. It is a package var so tests can shorten it.
+// (ReconcileIfStale) re-scans backends, so a burst of UI polls cannot
+// stampede a full cycle. A package var so tests can shorten it.
 var ReconcileDebounceInterval = 15 * time.Second
 
 // providerCacheEntry holds the data and metadata for a cached provider state.
@@ -94,11 +87,8 @@ func WithAutoDiscoverModels() Option {
 	}
 }
 
-// New creates and initializes a new State manager.
-// It requires a database manager (dbInstance) to load the desired configurations
-// and a messenger instance (psInstance) for event handling and progress updates.
-// Options allow enabling experimental features like group-based reconciliation.
-// Returns an initialized State ready for use.
+// New creates a State manager backed by dbInstance and psInstance; options
+// enable optional features such as group-based reconciliation.
 func New(ctx context.Context, dbInstance libdb.DBManager, psInstance libbus.Messenger, options ...Option) (*State, error) {
 	s := &State{
 		dbInstance: dbInstance,
@@ -111,25 +101,17 @@ func New(ctx context.Context, dbInstance libdb.DBManager, psInstance libbus.Mess
 	if dbInstance == nil {
 		return nil, errors.New("dbInstance cannot be nil")
 	}
-	// Apply options to configure the State instance
 	for _, option := range options {
 		option(s)
 	}
 	return s, nil
 }
 
-// RunBackendCycle performs a single reconciliation check for all configured LLM backends.
-// It compares the desired state (from configuration) with the observed state
-// (by communicating with the backends) and refreshes the runtime snapshot.
-// This method should be called periodically in a background process.
-// DESIGN NOTE: This method executes one complete reconciliation cycle and then returns.
-// It does not manage its own background execution (e.g., via internal goroutines or timers).
-// This deliberate design choice delegates execution management (scheduling, concurrency control,
-// lifecycle via context, error handling, circuit breaking, etc.) entirely to the caller.
-//
-// Consequently, this method should be called periodically by an external process
-// responsible for its scheduling and lifecycle.
-// When the group feature is enabled via Withgroups option, it uses group-aware reconciliation.
+// RunBackendCycle performs one reconciliation check for all configured LLM
+// backends, comparing desired state against observed state and refreshing
+// the runtime snapshot. It runs exactly one cycle and returns; scheduling,
+// lifecycle, and retry policy are the caller's responsibility. When the
+// group feature is enabled via WithGroups, it uses group-aware reconciliation.
 func (s *State) RunBackendCycle(ctx context.Context) error {
 	var err error
 	if s.withgroups {
@@ -137,20 +119,17 @@ func (s *State) RunBackendCycle(ctx context.Context) error {
 	} else {
 		err = s.syncBackends(ctx)
 	}
-	// Feed the debounce clock so an explicit refresh (or the chat-path reconcile)
-	// suppresses a redundant read-triggered cycle right after. Recorded even on
-	// error so a persistently-failing backend cannot be polled into a hot loop.
+	// Feeds the debounce clock (even on error) so a read-triggered cycle right
+	// after is suppressed rather than polling a failing backend in a hot loop.
 	s.markReconciled(time.Now())
 	return err
 }
 
-// ReconcileIfStale runs one RunBackendCycle when the last reconcile is older than
-// ReconcileDebounceInterval, otherwise it is a no-op. The runtime reconciles at
-// startup and on explicit refresh only (no periodic loop), so a backend that
-// comes up afterwards — most commonly a local backend (e.g. ollama) being
-// (re)started after the runtime — would otherwise stay invisible to read-only
-// views (`contenox state`, `contenox doctor`) until a restart. Calling this from those read paths lets
-// them self-heal, debounced so a burst of UI polls coalesces into one re-scan.
+// ReconcileIfStale runs one RunBackendCycle when the last reconcile is older
+// than ReconcileDebounceInterval, otherwise it is a no-op. Read paths
+// (`contenox state`, `contenox doctor`) call this to self-heal when a backend
+// comes up after the runtime's last reconcile, debounced so a burst of polls
+// coalesces into one re-scan.
 func (s *State) ReconcileIfStale(ctx context.Context) error {
 	if !s.claimReconcile(time.Now()) {
 		return nil
@@ -158,11 +137,10 @@ func (s *State) ReconcileIfStale(ctx context.Context) error {
 	return s.RunBackendCycle(ctx)
 }
 
-// claimReconcile reports whether a reconcile is due (last one older than
-// ReconcileDebounceInterval) and, when it is, claims the window by advancing the
-// clock before returning. Claiming under the lock means concurrent callers skip
-// instead of stampeding a second cycle. Pure decision + injected clock so the
-// debounce is unit-testable without running a real cycle.
+// claimReconcile reports whether a reconcile is due and, if so, claims the
+// window by advancing the clock under the lock so concurrent callers skip
+// instead of stampeding a second cycle. Pure decision + injected clock keeps
+// the debounce unit-testable.
 func (s *State) claimReconcile(now time.Time) bool {
 	s.reconcileMu.Lock()
 	defer s.reconcileMu.Unlock()
@@ -187,17 +165,14 @@ func (s *State) Get(ctx context.Context) map[string]BackendRuntimeState {
 	s.state.Range(func(key, value any) bool {
 		backend, ok := value.(*BackendRuntimeState)
 		if !ok {
-			// log.Fatalf("invalid type in state: %T", value)
 			return true
 		}
 		var backendCopy BackendRuntimeState
 		raw, err := json.Marshal(backend)
 		if err != nil {
-			// log.Fatalf("failed to marshal backend: %v", err)
 		}
 		err = json.Unmarshal(raw, &backendCopy)
 		if err != nil {
-			// log.Fatalf("failed to unmarshal backend: %v", err)
 		}
 		backendCopy.SetAPIKey(backend.GetAPIKey())
 		state[backend.ID] = backendCopy
@@ -206,16 +181,14 @@ func (s *State) Get(ctx context.Context) map[string]BackendRuntimeState {
 	return state
 }
 
-// cleanupStaleBackends removes state entries for backends not present in currentIDs.
-// It performs type checking on state keys and logs errors for invalid key types.
-// This centralizes the state cleanup logic used by all reconciliation flows.
+// cleanupStaleBackends removes state entries for backends not present in
+// currentIDs. It is the shared cleanup used by every reconciliation flow.
 func (s *State) cleanupStaleBackends(currentIDs map[string]struct{}) error {
 	var err error
 	s.state.Range(func(key, value any) bool {
 		id, ok := key.(string)
 		if !ok {
 			err = fmt.Errorf("BUG: invalid key type: %T %v", key, key)
-			// log.Printf("BUG: %v", err)
 			return true
 		}
 		if _, exists := currentIDs[id]; !exists {
@@ -226,21 +199,10 @@ func (s *State) cleanupStaleBackends(currentIDs map[string]struct{}) error {
 	return err
 }
 
-// syncBackendsWithgroups is the group-aware reconciliation logic called by RunBackendCycle.
-// It:
-//  1. Fetches all configured groups from the database.
-//  2. For each group:
-//     a. Retrieves its associated backends and models.
-//     b. Aggregates models for each backend, collecting a unique set of all models
-//     that a backend should have based on all groups it belongs to.
-//     c. Tracks all active backend IDs encountered.
-//  3. After processing all groups and aggregating models:
-//     a. For each unique backend, processes it once with its complete aggregated set of models.
-//  4. Performs global cleanup of state entries for backends not found in any group (those not
-//     associated with any group).
-//
-// This fixed version aggregates backend IDs across all groups before cleanup to prevent
-// premature deletion of valid cross-group backends.
+// syncBackendsWithgroups is the group-aware reconciliation logic called by
+// RunBackendCycle. It aggregates each backend's model set across every group
+// it belongs to and processes it once, so cleanup of backends absent from
+// every group never prematurely deletes a backend still valid in another.
 func (s *State) syncBackendsWithgroups(ctx context.Context) error {
 	tx := s.dbInstance.WithoutTransaction()
 	dbStore := runtimetypes.New(tx)
@@ -279,7 +241,6 @@ func (s *State) syncBackendsWithgroups(ctx context.Context) error {
 		}
 	}
 
-	// Now, process each unique backend once with its fully aggregated list of models.
 	for backendID, backendObj := range allBackendObjects {
 		modelsForThisBackend := make([]*runtimetypes.Model, 0, len(backendToAggregatedModels[backendID]))
 		for _, model := range backendToAggregatedModels[backendID] {
@@ -291,14 +252,9 @@ func (s *State) syncBackendsWithgroups(ctx context.Context) error {
 	return s.cleanupStaleBackends(activeBackendIDs)
 }
 
-// syncBackends is the global reconciliation logic called by RunBackendCycle.
-// It:
-// 1. Fetches all configured backends from the database
-// 2. Retrieves all models regardless of group association
-// 3. Processes each backend with the full model list
-// 4. Cleans up state entries for backends no longer present in the database
-// This version uses the shared helper methods but maintains its original non-group
-// behavior by operating on the global backend/model lists.
+// syncBackends is the global (non-group) reconciliation logic called by
+// RunBackendCycle: every backend is processed against the full model list,
+// then state entries for backends no longer in the database are cleaned up.
 func (s *State) syncBackends(ctx context.Context) error {
 	tx := s.dbInstance.WithoutTransaction()
 	storeInstance := runtimetypes.New(tx)
@@ -318,7 +274,6 @@ func (s *State) syncBackends(ctx context.Context) error {
 	return s.cleanupStaleBackends(currentIDs)
 }
 
-// Helper method to process backends and collect their IDs
 func (s *State) processBackends(ctx context.Context, backends []*runtimetypes.Backend, models []*runtimetypes.Model, currentIDs map[string]struct{}) {
 	for _, backend := range backends {
 		currentIDs[backend.ID] = struct{}{}
@@ -326,11 +281,8 @@ func (s *State) processBackends(ctx context.Context, backends []*runtimetypes.Ba
 	}
 }
 
-// processBackend routes the backend processing logic based on the backend's Type.
-// It acts as a dispatcher to type-specific handling functions (e.g., for Ollama).
-// It updates the internal state map with the results of the processing,
-// including any errors encountered for unsupported types.
-// Helper method to process backends and collect their IDs
+// processBackend dispatches to the type-specific handler for backend.Type and
+// stores the result in the state map, including an error for unsupported types.
 func (s *State) processBackend(ctx context.Context, backend *runtimetypes.Backend, declaredModels []*runtimetypes.Model) {
 	switch modelrepo.CanonicalBackendType(backend.Type) {
 	case "ollama":
@@ -395,7 +347,6 @@ func (s *State) processOllamaBackend(ctx context.Context, backend *runtimetypes.
 	}
 	stateservice.SetAPIKey(apiKey)
 
-	// Create proper model entries with capabilities.
 	pulledModels := make([]ModelPullStatus, 0, len(observedModels))
 	for _, observed := range observedModels {
 		lmr := pullStatusFromObservedModel(observed)
@@ -453,10 +404,9 @@ func (s *State) processVLLMBackend(ctx context.Context, backend *runtimetypes.Ba
 		declaredModelMap[m.Model] = m
 	}
 
-	// vLLM endpoints may require a bearer token (configured under the
-	// OpenAI-compatible provider key). The key must reach both the catalog
-	// (model listing) and the runtime state (the adapter hands it to the
-	// chat/stream client), or authenticated vLLM cannot work at all.
+	// vLLM's bearer token (the OpenAI-compatible provider key) must reach
+	// both the catalog and the runtime state, since the adapter hands it to
+	// the chat/stream client.
 	apiKey := ""
 	if key, err := s.loadProviderAPIKey(ctx, backend.Type); err == nil {
 		apiKey = key
@@ -497,11 +447,8 @@ func (s *State) processVLLMBackend(ctx context.Context, backend *runtimetypes.Ba
 				_ = runtimetypes.New(s.dbInstance.WithoutTransaction()).UpdateModel(ctx, &declCopy)
 			}
 
-			// Observed capabilities are the base and declared trues merge in
-			// additively (the ollama path is the reference): the declared row
-			// (runtimetypes.Model) has no vision/think fields, so rebuilding
-			// capabilities from it alone would strip CanVision/CanThink from
-			// every hand-declared model.
+			// Observed capabilities are the base; declared trues merge in
+			// additively, since the declared row has no vision/think fields.
 			lmr := mergeDeclaredOverObserved(declaredModel, observed)
 			lmr.ContextLength = effectiveContextLen
 			lmr = s.applyCapabilityOverrides(ctx, backend.Type, lmr)
@@ -566,7 +513,6 @@ func (s *State) processGeminiBackend(ctx context.Context, backend *runtimetypes.
 		return
 	}
 
-	// Update state
 	stateInstance.Models = observedModelNames(observedModels)
 	stateInstance.PulledModels = make([]ModelPullStatus, 0, len(observedModels))
 	for _, model := range observedModels {
@@ -575,7 +521,6 @@ func (s *State) processGeminiBackend(ctx context.Context, backend *runtimetypes.
 	}
 	s.state.Store(backend.ID, stateInstance)
 
-	// Store successful result in cache
 	s.storeObservedModelCache(ctx, backend.ID, apiKey, observedModels)
 }
 
@@ -589,11 +534,10 @@ func (s *State) processBedrockBackend(ctx context.Context, backend *runtimetypes
 	s.processOptionalCredCloudBackend(ctx, backend, models)
 }
 
-// processOptionalCredCloudBackend reconciles a cloud backend whose credentials
-// are OPTIONAL: a stored cred blob (Vertex service-account JSON / Bedrock static
-// keys) is used when present, and an empty blob is fine — the provider falls
-// back to the ambient credential chain (GCP ADC / AWS default chain). This
-// differs from processOpenAIBackend, which errors when no API key is stored.
+// processOptionalCredCloudBackend reconciles a cloud backend whose
+// credentials are optional: a stored cred blob is used when present, and an
+// empty blob falls back to the ambient credential chain (GCP ADC / AWS
+// default), unlike processOpenAIBackend which errors with no API key.
 func (s *State) processOptionalCredCloudBackend(ctx context.Context, backend *runtimetypes.Backend, _ []*runtimetypes.Model) {
 	stateInstance := &BackendRuntimeState{
 		ID:           backend.ID,
@@ -660,7 +604,6 @@ func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.
 	}
 	stateInstance.SetAPIKey(apiKey)
 
-	// Create lookup map for declared models
 	declaredModels := make(map[string]*runtimetypes.Model)
 	for _, model := range models {
 		name, _ := strings.CutSuffix(model.Model, ":latest")
@@ -684,15 +627,12 @@ func (s *State) processOpenAIBackend(ctx context.Context, backend *runtimetypes.
 		s.storeObservedModelCache(ctx, backend.ID, apiKey, observedModels)
 	}
 
-	// Update state
 	stateInstance.Models = observedModelNames(observedModels)
 	pulledModels := make([]ModelPullStatus, 0, len(observedModels))
 	for _, observed := range observedModels {
 		if declaredModel, exists := declaredModels[observed.Name]; exists {
-			// Observed capabilities are the base and declared trues merge in
-			// additively (the ollama path is the reference): the declared row
-			// has no vision/think fields, so a hand-declared gpt-4o must keep
-			// the vision capability the catalog observed for it.
+			// Observed capabilities are the base; declared trues merge in
+			// additively, so a hand-declared gpt-4o keeps its observed vision.
 			lmr := mergeDeclaredOverObserved(declaredModel, observed)
 			lmr = s.applyCapabilityOverrides(ctx, backend.Type, lmr)
 			pulledModels = append(pulledModels, lmr)

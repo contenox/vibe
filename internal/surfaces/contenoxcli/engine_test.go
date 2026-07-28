@@ -112,25 +112,14 @@ func TestReadinessDefaults(t *testing.T) {
 	}
 }
 
-// TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated pins the two registration
-// decisions this file makes.
-//
-// git is unconditional: the whole point of the toolset is that an agent can SEE
-// the repository, and gating that behind --shell is what produced "I can't run
-// git" on a surface that had git sitting right there. What the agent may DO with
-// it is the envelope's call, not this one — the seeded policies allow the reads
-// and hold the four mutations at an approval.
-//
-// local_shell stays gated: enabling raw command execution is still an explicit
-// choice (beam makes it, `contenox chat` does not).
+// TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated asserts git is always registered regardless of --shell, while local_shell stays gated behind it.
 func TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated(t *testing.T) {
 	tracker := libtracker.NoopTracker{}
 
 	goIndex := gointel.NewIndex(gointel.Config{})
 	t.Cleanup(goIndex.Shutdown)
 
-	// No ScriptDir: the provider is still registered, carrying goja_eval alone.
-	// That is the always-on shape an operator who never wrote a script gets.
+	// No ScriptDir: the provider still registers, carrying goja_eval alone.
 	gt, err := gojatool.New(gojatool.Config{})
 	require.NoError(t, err)
 	t.Cleanup(gt.Shutdown)
@@ -146,8 +135,6 @@ func TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated(t *testing.T) {
 	require.Contains(t, on, "git")
 	require.Contains(t, on, "local_shell")
 
-	// The registered provider is the real toolset, addressed by the same name
-	// the seeded envelopes' rules use.
 	supported, err := off["git"].Supports(context.Background())
 	require.NoError(t, err)
 	require.Contains(t, supported, "git_status")
@@ -158,13 +145,8 @@ func TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated(t *testing.T) {
 	require.Contains(t, gojaSupported, gojatool.ToolEval)
 }
 
-// TestUnit_LocalToolset_JQIsAlwaysOn pins the jq registration and, more
-// importantly, the CONTAINMENT CLAIM the seeded allow rule rests on: jq_query is
-// constructed with exactly the directory local_fs is, so the set of files it can
-// read is a subset of the set read_file can read. If those two ever diverge —
-// one gaining a cwd fallback the other lacks, say — the "reads a file the agent
-// may already read" clause in the envelope stops being true and this test is
-// where it should be noticed.
+// TestUnit_LocalToolset_JQIsAlwaysOn asserts jq_query is scoped to the same
+// directory as local_fs, so what it can read stays a subset of read_file.
 func TestUnit_LocalToolset_JQIsAlwaysOn(t *testing.T) {
 	tracker := libtracker.NoopTracker{}
 
@@ -192,8 +174,6 @@ func TestUnit_LocalToolset_JQIsAlwaysOn(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, supported, jqtool.ToolQuery)
 
-		// The registered provider is the real toolset, scoped to the same
-		// workspace local_fs got, answering a real query.
 		res, dt, err := tools[jqtool.ToolsProviderName].Exec(context.Background(), time.Now(),
 			map[string]any{"path": "chain.json", "filter": `[.tasks[] | select(.handler=="tools") | .id]`}, false,
 			&taskengine.ToolsCall{Name: jqtool.ToolsProviderName, ToolName: jqtool.ToolQuery})
@@ -204,12 +184,128 @@ func TestUnit_LocalToolset_JQIsAlwaysOn(t *testing.T) {
 		require.Equal(t, 1, out.Count)
 		require.JSONEq(t, `["read"]`, string(out.Values[0]))
 
-		// And the boundary is the SAME boundary: a path outside the workspace is
-		// refused, not read.
+		// Same boundary: a path outside the workspace is refused, not read.
 		_, _, err = tools[jqtool.ToolsProviderName].Exec(context.Background(), time.Now(),
 			map[string]any{"path": "../outside.json", "filter": "."}, false,
 			&taskengine.ToolsCall{Name: jqtool.ToolsProviderName, ToolName: jqtool.ToolQuery})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "escapes allowed directory")
 	}
+}
+
+// TestUnit_LocalToolset_WriteFileInvalidatesGoIntelIndex pins the seam wired in
+// localToolset: a write through the local_fs TOOL PATH (not a bare os.WriteFile,
+// as gointel's own freshness tests use) reaches gointel.Index.Invalidate via
+// WithOnFileMutated, so a query issued immediately after sees the edit rather
+// than depending on the mtime-sweep backstop.
+func TestUnit_LocalToolset_WriteFileInvalidatesGoIntelIndex(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/onmutate\n\ngo 1.21\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "pkg.go"), []byte("package pkg\n\n// Original is here from the start.\nfunc Original() int { return 1 }\n"), 0o644))
+
+	goIndex := gointel.NewIndex(gointel.Config{AllowedDir: root})
+	t.Cleanup(goIndex.Shutdown)
+	gt, err := gojatool.New(gojatool.Config{})
+	require.NoError(t, err)
+	t.Cleanup(gt.Shutdown)
+
+	tools := localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, goIndex, gt)
+
+	// Warm the index on the pre-edit source.
+	_, _, err = tools[gointel.ToolsProviderName].Exec(context.Background(), time.Now(),
+		map[string]any{"symbol": "pkg.Original"}, false,
+		&taskengine.ToolsCall{Name: gointel.ToolsProviderName, ToolName: gointel.ToolDefinition})
+	require.NoError(t, err, "warm-up query")
+
+	// Read-then-write through the real local_fs tool path, exactly as an agent would.
+	_, _, err = tools["local_fs"].Exec(context.Background(), time.Now(),
+		map[string]any{"path": "pkg.go"}, false, &taskengine.ToolsCall{Name: "local_fs", ToolName: "read_file"})
+	require.NoError(t, err)
+
+	newContent := "package pkg\n\n// Original is here from the start.\nfunc Original() int { return 1 }\n\n" +
+		"// Added lands via the tool path, the way an agent's edit would.\nfunc Added() int { return 2 }\n"
+	_, _, err = tools["local_fs"].Exec(context.Background(), time.Now(),
+		map[string]any{"path": "pkg.go", "content": newContent}, false,
+		&taskengine.ToolsCall{Name: "local_fs", ToolName: "write_file"})
+	require.NoError(t, err, "write_file through the tool path")
+
+	// No sleep, no second edit to trip the mtime sweep: if Invalidate fired,
+	// this resolves immediately.
+	out, _, err := tools[gointel.ToolsProviderName].Exec(context.Background(), time.Now(),
+		map[string]any{"symbol": "pkg.Added"}, false,
+		&taskengine.ToolsCall{Name: gointel.ToolsProviderName, ToolName: gointel.ToolDefinition})
+	require.NoError(t, err, "go_definition immediately after a write_file through the tool path — "+
+		"WithOnFileMutated must have called gointel.Index.Invalidate")
+	res, ok := out.(*gointel.DefinitionResult)
+	require.True(t, ok, "unexpected result type %T", out)
+	require.Contains(t, res.Location, "pkg.go:")
+}
+
+// fakeGoIndex is a gointel.Index that only records Invalidate calls. Queries
+// return zero values — this fake exists solely to isolate the WithOnFileMutated
+// wiring from gointel's own mtime-sweep backstop, which independently catches a
+// stale snapshot and would make a real-index test pass even if the wiring were
+// broken.
+type fakeGoIndex struct {
+	invalidated []string
+}
+
+func (f *fakeGoIndex) Describe(context.Context, gointel.Request) (*gointel.DescribeResult, error) {
+	return nil, nil
+}
+func (f *fakeGoIndex) Definition(context.Context, gointel.Request) (*gointel.DefinitionResult, error) {
+	return nil, nil
+}
+func (f *fakeGoIndex) References(context.Context, gointel.Request) (*gointel.ReferencesResult, error) {
+	return nil, nil
+}
+func (f *fakeGoIndex) Implementations(context.Context, gointel.Request) (*gointel.ImplementationsResult, error) {
+	return nil, nil
+}
+func (f *fakeGoIndex) Symbols(context.Context, gointel.Request) (*gointel.SymbolsResult, error) {
+	return nil, nil
+}
+func (f *fakeGoIndex) Diagnostics(context.Context, gointel.Request) (*gointel.DiagnosticsResult, error) {
+	return nil, nil
+}
+func (f *fakeGoIndex) Invalidate(paths ...string) { f.invalidated = append(f.invalidated, paths...) }
+func (f *fakeGoIndex) Shutdown()                  {}
+
+var _ gointel.Index = (*fakeGoIndex)(nil)
+
+// TestUnit_LocalToolset_OnFileMutatedCallsGoIntelInvalidate pins the wiring
+// itself, isolated from gointel's mtime-sweep backstop: write_file, sed, and
+// edit_file must each call Invalidate with the absolute path just written, and
+// a denied mutation (no prior read) must call it zero times.
+func TestUnit_LocalToolset_OnFileMutatedCallsGoIntelInvalidate(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha bravo\n"), 0o644))
+	abs := filepath.Join(root, "a.txt")
+
+	fake := &fakeGoIndex{}
+	gt, err := gojatool.New(gojatool.Config{})
+	require.NoError(t, err)
+	t.Cleanup(gt.Shutdown)
+
+	// db is nil, so the read-before-write guard is a no-op — this test is
+	// about the mutate callback, not that gate.
+	tools := localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, fake, gt)
+
+	_, _, err = tools["local_fs"].Exec(context.Background(), time.Now(),
+		map[string]any{"path": "a.txt", "content": "alpha bravo\n"}, false,
+		&taskengine.ToolsCall{Name: "local_fs", ToolName: "write_file"})
+	require.NoError(t, err)
+	require.Equal(t, []string{abs}, fake.invalidated, "write_file must call Invalidate with the absolute path")
+
+	_, _, err = tools["local_fs"].Exec(context.Background(), time.Now(),
+		map[string]any{"path": "a.txt", "pattern": "alpha", "replacement": "ALPHA"}, false,
+		&taskengine.ToolsCall{Name: "local_fs", ToolName: "sed"})
+	require.NoError(t, err)
+	require.Equal(t, []string{abs, abs}, fake.invalidated, "sed must call Invalidate too")
+
+	_, _, err = tools["local_fs"].Exec(context.Background(), time.Now(),
+		map[string]any{"path": "a.txt", "old_string": "bravo", "new_string": "BRAVO"}, false,
+		&taskengine.ToolsCall{Name: "local_fs", ToolName: "edit_file"})
+	require.NoError(t, err)
+	require.Equal(t, []string{abs, abs, abs}, fake.invalidated, "edit_file must call Invalidate too")
 }

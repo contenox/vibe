@@ -17,7 +17,6 @@ type OllamaEmbedClient struct {
 }
 
 func (c *OllamaEmbedClient) Embed(ctx context.Context, text string) ([]float64, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "embed", "ollama", "model", c.modelName)
 	defer end()
 

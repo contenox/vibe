@@ -14,7 +14,6 @@ type activityTrackerTaskEnvDecorator struct {
 }
 
 func (d *activityTrackerTaskEnvDecorator) Execute(ctx context.Context, chain *taskengine.TaskChainDefinition, input any, inputType taskengine.DataType) (any, taskengine.DataType, []taskengine.CapturedStateUnit, error) {
-	// Extract useful metadata from the chain
 	chainID := chain.ID
 
 	reportErrFn, reportChangeFn, endFn := d.tracker.Start(

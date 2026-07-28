@@ -44,13 +44,12 @@ func filterMCPSchema(rawSchema json.RawMessage, injectParams map[string]string) 
 
 	var schema map[string]any
 	if err := json.Unmarshal(rawSchema, &schema); err != nil {
-		// Can't parse — return raw, let providers deal with it.
+		// Unparseable — return raw, let providers deal with it.
 		var out any
 		_ = json.Unmarshal(rawSchema, &out)
 		return out
 	}
 
-	// Strip injected keys from "properties".
 	if props, ok := schema["properties"].(map[string]any); ok {
 		for k := range injectParams {
 			delete(props, k)
@@ -58,7 +57,6 @@ func filterMCPSchema(rawSchema json.RawMessage, injectParams map[string]string) 
 		schema["properties"] = props
 	}
 
-	// Strip injected keys from "required".
 	if reqRaw, ok := schema["required"].([]any); ok {
 		filtered := reqRaw[:0]
 		for _, v := range reqRaw {

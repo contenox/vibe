@@ -2,28 +2,20 @@ package libacp
 
 import "strings"
 
-// FlattenContent projects a content block list down to a single string, and is
-// the missing inverse of the constructor half in content.go (NewTextContent,
-// NewResourceLink, ...): those build the structured wire form, this collapses it
-// back for a consumer that can only accept flat text — a plain-string prompt
-// field, a log line, a title.
+// FlattenContent projects a content block list down to a single string — the
+// inverse of content.go's constructors — for a consumer that can only accept
+// flat text (a prompt field, a log line, a title).
 //
-// It is a LOSSY TEXT PROJECTION. Image, audio, binary-blob resources and any
-// unknown block type carry no text and are simply gone from the result; a
-// resource block contributes only its inline Resource.Text, never its Blob.
+// Lossy: image, audio, blob resources, and unknown block types carry no text
+// and are dropped; a resource block contributes only its inline Resource.Text,
+// never its Blob. Blocks join with a single newline (empty pieces contribute
+// nothing) and a resource link renders as "name: uri" — one rendering policy,
+// not a canonical one; a caller needing a different shape should write its
+// own walk.
 //
-// The exact rendering is *a* policy, not *the* canonical one: blocks are joined
-// with a single newline (empty pieces contribute nothing, so no blank runs) and
-// a resource link renders as "name: uri", degrading to whichever of the two is
-// present. Nothing in the protocol blesses that shape — a caller that needs
-// markdown links or space-joined text should write its own walk rather than
-// bend this one.
-//
-// The dropped return is deliberate and must not be optimized away: it is the
-// deduplicated, first-seen-ordered list of block types that could not be
-// represented, so a caller can tell the user "3 images were not sent to the
-// model" instead of silently losing them. Ignoring it turns a visible
-// degradation into a silent one.
+// dropped is the deduplicated, first-seen-ordered list of block types that
+// could not be represented, so a caller can report the loss instead of
+// silently swallowing it.
 func FlattenContent(blocks []ContentBlock) (text string, dropped []string) {
 	var b strings.Builder
 	seen := map[string]bool{}

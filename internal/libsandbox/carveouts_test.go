@@ -17,7 +17,7 @@ func TestUnit_LoadCarveouts_DenyDefaultOnEmptyReader(t *testing.T) {
 	require.Empty(t, net)
 }
 
-// An empty JSON object (and a "null" document) likewise allows nothing.
+// An empty object or "null" document likewise allows nothing.
 func TestUnit_LoadCarveouts_DenyDefaultOnEmptyObject(t *testing.T) {
 	for _, doc := range []string{`{}`, `null`} {
 		fs, net, err := libsandbox.LoadCarveouts(strings.NewReader(doc))

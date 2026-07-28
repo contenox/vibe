@@ -7,33 +7,28 @@ import (
 	"io"
 )
 
-// carveoutDoc is the on-disk necessity-list shape (see LoadCarveouts). The
-// entry types are FSCarveout/NetCarveout themselves, so the wire format and the
-// in-memory Spec share one definition.
+// carveoutDoc is the on-disk necessity-list shape (see LoadCarveouts),
+// sharing FSCarveout/NetCarveout with the in-memory Spec.
 type carveoutDoc struct {
 	Filesystem []FSCarveout  `json:"filesystem"`
 	Network    []NetCarveout `json:"network"`
 }
 
-// LoadCarveouts decodes a necessity list — the JSON that names the wall's holes
-// and, for each, why the agent breaks without it:
+// LoadCarveouts decodes a necessity list naming the wall's holes and why
+// each is needed:
 //
 //	{
 //	  "filesystem": [ {"path":"~/.claude","mode":"ro","needs":"agent auth/config to start"} ],
 //	  "network":    [ {"host":"registry.npmjs.org","needs":"npm install fetch"} ]
 //	}
 //
-// It is deny-default: an empty or absent document (empty reader, "{}", "null")
-// yields empty lists — nothing is allowed unless it is written down. Unknown
-// fields are rejected (DisallowUnknownFields), so a typo like "mods" instead of
-// "mode" fails loudly rather than silently widening or narrowing a hole. Every
-// entry is validated — mode ∈ {ModeRO, ModeRW}, a non-empty justification, no
-// ".." traversal in a path, a non-empty host — because a hole that cannot say
-// why it exists must not be admitted.
+// Deny-default: an empty or absent document yields empty lists. Unknown
+// fields are rejected (DisallowUnknownFields) so a typo like "mods" fails
+// loudly instead of silently mis-widening a hole. Every entry is validated
+// (mode, justification, traversal, host).
 //
-// All errors wrap ErrInvalidCarveout. The returned lists are ready to place in a
-// Spec; this function does not resolve "~" or otherwise interpret paths — that
-// belongs to the enforcement layer, not the parser.
+// All errors wrap ErrInvalidCarveout. This function does not resolve "~" or
+// otherwise interpret paths — that belongs to the enforcement layer.
 func LoadCarveouts(r io.Reader) (fs []FSCarveout, net []NetCarveout, err error) {
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
@@ -41,9 +36,7 @@ func LoadCarveouts(r io.Reader) (fs []FSCarveout, net []NetCarveout, err error) 
 	var doc carveoutDoc
 	if derr := dec.Decode(&doc); derr != nil {
 		if errors.Is(derr, io.EOF) {
-			// Deny-default: an empty document allows nothing. This is a benign
-			// "nothing to load", not a malformed list, so it is not an error.
-			return nil, nil, nil
+			return nil, nil, nil // empty document: deny-default, not an error
 		}
 		return nil, nil, fmt.Errorf("%w: decode: %w", ErrInvalidCarveout, derr)
 	}

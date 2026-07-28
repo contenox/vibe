@@ -103,8 +103,7 @@ func TestUnit_Evaluate_HostConditionDeniesByURLHost(t *testing.T) {
 	}`))
 	svc := hitlservice.New(src, testTenant, fixedKVReader{"hitl-policy.json"}, libtracker.NoopTracker{})
 
-	// Host parsing must survive scheme, :port and path — the cases a raw URL
-	// glob would let slip through.
+	// Host parsing must survive scheme, :port and path.
 	denied := []string{
 		"http://localhost/",
 		"http://localhost:8080/api",
@@ -168,7 +167,7 @@ func TestUnit_Evaluate_BuiltinDefaultIsFailClosedForUnaccountedTool(t *testing.T
 
 	r, err = svc.Evaluate(context.Background(), "local_fs", "read_file", nil)
 	require.NoError(t, err)
-	assert.Equal(t, hitlservice.ActionAllow, r.Action, "read-only tools stay allowed so fail-closed HITL remains usable")
+	assert.Equal(t, hitlservice.ActionApprove, r.Action, "even reads ask under the fallback: it is the absence of an envelope, and allow tiers exist only in seeded, readable policy files")
 }
 
 func TestUnit_Evaluate_DefaultPolicyOverrideSelectsACPPolicyWhenKVUnset(t *testing.T) {

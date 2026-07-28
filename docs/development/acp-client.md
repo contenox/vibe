@@ -5,12 +5,11 @@ the conversation:
 
 - **Agent side** — `libacp.AgentSideConnection` serving a `libacp.Agent`.
   This is the upward direction: `internal/surfaces/acpsvc` implements the production
-  agent that ACP clients (Zed, JetBrains, the Beam TUI) drive via
+  agent that ACP clients (Zed, JetBrains, the beam TUI) drive via
   `contenox acp`.
 - **Client side** — `libacp.ClientSideConnection` driving a `libacp.Client`.
   This is the downward direction: contenox itself opening sessions on other
-  ACP agents (see the blueprint in
-  [blueprints/acp/acp-client-engine.md](blueprints/acp/acp-client-engine.md)).
+  ACP agents.
   The client exposes every agent-bound method (`Initialize`, `NewSession`,
   `Prompt`, `CancelPrompt`, session config options, ext-method passthrough)
   as outbound calls, receives streamed `session/update` notifications in
@@ -32,8 +31,8 @@ implemented** peers from the reference Rust SDK
 
 | Target | Validates | Peer binary |
 | --- | --- | --- |
-| `task acp-conformance` | our **agent** side (`libacp/cmd/acp-stub-agent` via `AgentSideConnection`) | `acp-validator`, a conformance-checking ACP client |
-| `task acp-client-e2e` | our **client** side (`ClientSideConnection` over `acpexec`) | `testy`, the SDK's deterministic test agent |
+| `task acp-conformance` | the **agent** side (`libacp/cmd/acp-stub-agent` via `AgentSideConnection`) | `acp-validator`, a conformance-checking ACP client |
+| `task acp-client-e2e` | the **client** side (`ClientSideConnection` over `acpexec`) | `testy`, the SDK's deterministic test agent |
 
 Both targets skip-or-fail cleanly when their binary env var is unset:
 
@@ -88,8 +87,6 @@ pass-down is pinned by `TestHostE2E_Testy_McpPassDownThroughComposedPath`
 The slash commands a hosted agent advertises (`available_commands_update`)
 are recorded by the harness (`RecordingHarness.AvailableCommands`) and
 printed by `agent check`. *Merging* them with contenox's own acpsvc command
-set is deliberately not built here — it belongs to the future re-exposure
-layer (front-end ↔ contenox-as-agent ↔ hosted agent), where acpsvc's
-leading-slash interception is the natural merge point and a collision policy
-is required (a real case: claude-code-acp and acpsvc both advertise
-`/compact`).
+set is not implemented: acpsvc's leading-slash interception is the natural
+merge point, and a collision policy is required since command sets can
+overlap (claude-code-acp and acpsvc both advertise `/compact`).

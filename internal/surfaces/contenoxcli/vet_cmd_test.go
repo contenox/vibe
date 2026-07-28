@@ -9,16 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_Vet_IsAReservedSubcommand: without the reservation, `contenox vet`
-// would be silently injected as chat input.
+// TestUnit_Vet_IsAReservedSubcommand asserts "vet" is reserved so it dispatches as a subcommand rather than being injected as chat input.
 func TestUnit_Vet_IsAReservedSubcommand(t *testing.T) {
 	require.True(t, reservedSubcommands["vet"], `"vet" must be reserved so it dispatches as a subcommand`)
 }
 
-// TestUnit_Vet_AllInRepoChainsAndPoliciesPass is the S4 gate: every chain and
-// hitl-policy file the repo ships must pass its own vet. A failure here means
-// either the linter grew a false positive or a shipped file carries a real
-// latent bug — fix whichever is actually wrong, never weaken the check.
+// TestUnit_Vet_AllInRepoChainsAndPoliciesPass asserts every chain and hitl-policy file the repo ships passes its own vet.
 func TestUnit_Vet_AllInRepoChainsAndPoliciesPass(t *testing.T) {
 	var files []string
 	entries, err := os.ReadDir(".")
@@ -43,9 +39,7 @@ func TestUnit_Vet_AllInRepoChainsAndPoliciesPass(t *testing.T) {
 			vetted, err, diags := vetOneFile(path)
 			require.True(t, vetted, "shipped file %s must classify as chain or envelope", path)
 			require.NoError(t, err)
-			// No SHIPPED file may lean on a field the runtime does not enforce.
-			// A warning here means a preset is making a claim contenox cannot
-			// keep — which is the exact defect the diagnostics exist to catch.
+			// No shipped file may lean on a field the runtime does not enforce.
 			require.Empty(t, diags, "shipped file %s must not declare unenforced fields", path)
 		})
 	}
@@ -60,9 +54,7 @@ func TestUnit_Vet_ClassifiesByContentThenName(t *testing.T) {
 	require.Equal(t, vetKindSkip, classifyVetFile("notes.json", []byte(`[1,2,3]`)))
 }
 
-// TestUnit_Vet_ReportsPerFileAndCountsFailures drives the vet verb's engine
-// over a mixed directory: passing chain, failing chain, failing envelope,
-// and a skipped bystander file.
+// TestUnit_Vet_ReportsPerFileAndCountsFailures asserts vet reports each file's verdict and counts only real failures, not skips.
 func TestUnit_Vet_ReportsPerFileAndCountsFailures(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) string {
@@ -101,14 +93,7 @@ func TestUnit_Vet_ReportsPerFileAndCountsFailures(t *testing.T) {
 	require.Contains(t, report, "skip "+skipped)
 }
 
-// A valid envelope that declares a field the runtime does not enforce must be
-// reported to the operator writing it — that operator will never read the Go doc
-// comment recording the deferral, and a security field that parses silently reads
-// as a security field that works.
-//
-// The verdict stays "ok" and the run stays green: the file IS valid, and a
-// warning that failed the run would pressure an operator into deleting the field
-// rather than understanding it.
+// TestUnit_Vet_WarnsOnDeclaredButUnenforcedEnvelopeFields asserts an envelope declaring an unenforced field still verdicts "ok" but prints a WARN line.
 func TestUnit_Vet_WarnsOnDeclaredButUnenforcedEnvelopeFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "hitl-policy-pause.json")
@@ -131,7 +116,7 @@ func TestUnit_Vet_WarnsOnDeclaredButUnenforcedEnvelopeFields(t *testing.T) {
 	require.Contains(t, report, "finish_stuck")
 }
 
-// An envelope that uses no unenforced field is silent — no WARN line at all.
+// TestUnit_Vet_IsSilentForEnvelopesThatClaimOnlyWhatIsEnforced asserts an envelope using no unenforced field prints no WARN line.
 func TestUnit_Vet_IsSilentForEnvelopesThatClaimOnlyWhatIsEnforced(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "hitl-policy-bounded.json")
@@ -146,8 +131,7 @@ func TestUnit_Vet_IsSilentForEnvelopesThatClaimOnlyWhatIsEnforced(t *testing.T) 
 	require.NotContains(t, out.String(), "WARN")
 }
 
-// TestUnit_Vet_CollectExpandsDirectoriesRecursively pins the path argument
-// semantics: a file is itself, a directory is every .json under it.
+// TestUnit_Vet_CollectExpandsDirectoriesRecursively asserts a file argument collects itself and a directory collects every .json under it.
 func TestUnit_Vet_CollectExpandsDirectoriesRecursively(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "nested")

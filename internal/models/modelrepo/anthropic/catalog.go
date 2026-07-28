@@ -168,10 +168,8 @@ func anthropicCapabilitiesCanThink(caps *modelCapabilities) bool {
 	return effort.Supported || effort.Low.Supported || effort.Medium.Supported || effort.High.Supported || effort.XHigh.Supported || effort.Max.Supported
 }
 
-// anthropicCapabilitiesCanVision reports whether the model accepts image input,
-// read from the model resource's capabilities.image_input.supported field
-// returned by GET /v1/models (documented as "Whether the model accepts image
-// content blocks").
+// anthropicCapabilitiesCanVision reports whether the model accepts image
+// input, read from capabilities.image_input.supported on GET /v1/models.
 func anthropicCapabilitiesCanVision(caps *modelCapabilities) bool {
 	if caps == nil {
 		return false

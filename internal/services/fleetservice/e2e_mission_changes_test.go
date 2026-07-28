@@ -19,24 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// missionChangesChain is the deterministic, model-free chain the dispatched unit
-// runs: it writes two files (alpha.txt in the root, sub/bravo.txt in a
-// subdirectory) and files a mission_report so its turn is not silent — the report
-// is what stops the unattended-mission nudge from re-running the whole chain and
-// doubling every write. Every task is a `tools` handler calling a real local_fs /
-// mission tool with static args; no model is ever resolved.
-//
-// The paths are relative to the dispatched unit's cwd, which local_fs roots the
-// writes at, so the journaled diff paths come back absolute under that cwd —
-// exactly the workspace root the scope check compares against.
-//
-// Read/stat/list tool events carry their path only in the model-driven
-// tool-calling flow; the DETERMINISTIC `tools` handler journals a diff (and thus
-// a path) for a write but no path for a read, so the read attention that lifts
-// alpha above bravo in the ordering assertion is injected as a real-shaped read
-// event below (a fidelity the deterministic harness cannot itself produce). The
-// edit signal — the load-bearing one for the changed-files list — is entirely
-// real.
+// missionChangesChain writes two files (root and a subdirectory) via
+// local_fs and files a mission_report so the turn is not silent.
 const missionChangesChain = `{
   "id": "e2e-mission-changes",
   "tasks": [
@@ -66,22 +50,10 @@ const missionChangesChain = `{
   ]
 }`
 
-// TestFleetService_E2E_MissionChanges is the acceptance for runtime/missionchanges,
-// end to end through a REAL dispatched unit and the REAL kernel journal:
-//
-//   - Scenario 1 (real writes): a unit dispatched on a mission writes two files
-//     (one twice) into its cwd. The changed-files endpoint, folding the unit's
-//     own journaled diffs, must list both with the right first/last text and
-//     status, ordered by edit-weighted Degree-of-Interest (the twice-written file
-//     first), with a scope summary that counts the distinct files/dirs and raises
-//     NO anomaly (everything is under the workspace root).
-//
-//   - Scenario 2 (scope anomaly): an out-of-cwd read is injected into the same
-//     session's journal (DeliverToSession — exactly how an out-of-band update
-//     lands), standing in for a derailed unit's wander into another tree. The same
-//     fold must now trip scopeAnomaly and name the offending path, while the real
-//     changed files stay put. This is the scope-not-steps premise as the fleet's
-//     cheapest alarm — and it is ADVICE: the flag never stops the unit.
+// TestFleetService_E2E_MissionChanges: a unit's real writes are listed by
+// the changed-files endpoint ordered by edit-weighted DOI with no scope
+// anomaly; an injected out-of-cwd read then trips scopeAnomaly as advice,
+// without blocking the unit or losing the real changed files.
 func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("e2e: builds the contenox binary and spawns a real ACP subprocess")
@@ -100,9 +72,8 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	// A model must be configured for the unit to build its engine even though the
-	// chain resolves none; a deliberately fake name fails loudly on any accidental
-	// model call.
+	// A model must be configured even though the chain resolves none; the
+	// fake name fails loudly on any accidental model call.
 	runContenox(t, bin, "config", "set", "default-model", "fake-e2e-model-does-not-exist")
 
 	chainPath := filepath.Join(contenoxDir, "mission-changes-chain.json")
@@ -124,17 +95,10 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	missions := missionservice.New(db)
 	svc := New(kernel, agents, missions, nil, tmpHome, libtracker.NoopTracker{})
 
-	// The unit's workspace: local_fs roots every write here, so the journaled diff
-	// paths come back absolute under it and the scope check has a known root.
-	//
-	// It is $HOME, deliberately. This unit is declared as an EXTERNAL agent, so it
-	// is spawned inside the agent sandbox, whose one writable root is this cwd —
-	// and it is a contenox binary, so it must also reach its own
-	// $HOME/.contenox/local.db to boot at all. A cwd in some other temp dir leaves
-	// that database outside the wall and the unit dies on `unable to open database
-	// file` before it can write anything. (A contenox-runs-contenox unit in
-	// production is a CHAIN agent, self-spawned and unconfined, so it has no such
-	// constraint — see agenthost.ExternalACPAgent.SelfSpawn.)
+	// The unit's workspace: local_fs roots every write here. It is $HOME
+	// deliberately: this unit is an external agent, spawned inside the agent
+	// sandbox whose only writable root is this cwd, and it must also reach
+	// its own $HOME/.contenox/local.db to boot at all.
 	missionCwd := tmpHome
 
 	result, err := svc.Dispatch(ctx, DispatchRequest{
@@ -146,9 +110,8 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.NoError(t, err, "dispatch stderr:\n%s", stderr.String())
 	require.NotEmpty(t, result.MissionID)
 
-	// The attention-layer service under test, reading the REAL kernel journal via
-	// the SessionJournal accessor (reached through the optional-capability
-	// assertion the serve wiring also uses).
+	// The attention-layer service under test, reading the kernel journal via
+	// the SessionJournal accessor.
 	reader, ok := kernel.(missionchanges.SessionJournalReader)
 	require.True(t, ok, "the concrete kernel Manager must satisfy SessionJournalReader")
 	changesSvc := missionchanges.New(missions, reader)
@@ -189,11 +152,8 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.Equal(t, alpha.Score, bravo.Score, "one edit each until an interaction differentiates them")
 
 	// --- Scenario 1b: edit-weighted ordering via a real-shaped read of alpha ---
-	//
-	// Inject a read of alpha's exact path (the attention a model-driven unit would
-	// have journaled). alpha now carries edit+read, bravo only edit, so alpha must
-	// lead the ordered changed-files list: review starts where attention
-	// concentrated, and the ordering is by edit-weighted score, not by path.
+	// Inject a read of alpha's path; alpha now carries edit+read and must
+	// lead the ordered changed-files list.
 	require.NoError(t, kernel.DeliverToSession(ctx,
 		libacp.SessionID(result.SessionID),
 		libacp.SessionNotification{Update: libacp.SessionUpdate{
@@ -215,9 +175,8 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 
 	// --- Scenario 2: scope anomaly from an out-of-cwd touch ---
 
-	// A path in a DIFFERENT tree than the mission cwd — the wander a derailed unit
-	// makes. Injected into the live session journal exactly as any out-of-band
-	// session update would arrive.
+	// A path in a different tree than the mission cwd, the wander a
+	// derailed unit makes.
 	outsidePath := filepath.Join(t.TempDir(), "wander.txt")
 	require.NoError(t, kernel.DeliverToSession(ctx,
 		libacp.SessionID(result.SessionID),

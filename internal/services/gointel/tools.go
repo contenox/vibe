@@ -14,11 +14,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// Tool names. The provider ("gointel") is one ToolsRepo exposing six function
-// tools, every one of them a pure read of an in-memory type-checked snapshot —
-// no process is spawned by a query, nothing is written, and nothing leaves the
-// workspace. They are expected to sit at allow tier; the names are stable and
-// carry no arguments a policy would need to inspect.
+// Tool names. The provider ("gointel") exposes six function tools, each a pure read of an in-memory type-checked snapshot: no process spawned, no write, nothing leaves the workspace. Expected to sit at allow tier.
 const (
 	ToolDescribe        = "go_describe"
 	ToolDefinition      = "go_definition"
@@ -38,17 +34,12 @@ var toolNames = []string{
 	ToolDiagnostics,
 }
 
-// tools implements taskengine.ToolsRepo over an Index. Dispatch follows
-// localtools.LocalFSTools.execDispatch exactly: accept args from the chain input
-// map or from the declarative ToolsCall.Args, reject unknown argument NAMES per
-// tool, then hand off to a typed handler.
+// tools implements taskengine.ToolsRepo over an Index. Dispatch accepts args from the chain input map or from the declarative ToolsCall.Args, rejects unknown argument names per tool, then hands off to a typed handler.
 type tools struct {
 	ix Index
 }
 
-// NewTools returns the gointel ToolsRepo. Register it in the engine's local
-// tools map under ToolsProviderName the same way local_fs and shell_session are
-// registered, so it is HITL-wrapped like every other toolset.
+// NewTools returns the gointel ToolsRepo. Register it in the engine's local tools map under ToolsProviderName so it is HITL-wrapped like every other toolset.
 func NewTools(ix Index) taskengine.ToolsRepo {
 	return &tools{ix: ix}
 }
@@ -118,10 +109,7 @@ func (h *tools) Exec(ctx context.Context, _ time.Time, input any, _ bool, call *
 	}
 }
 
-// jsonResult adapts a typed query result to the engine's (any, DataType, error)
-// shape. The result travels as a struct with DataTypeJSON, the same way
-// local_fs returns FsWriteResult — the engine serialises it once, so the payload
-// the model sees is exactly the declared schema and nothing else.
+// jsonResult adapts a typed query result to the engine's (any, DataType, error) shape, so the payload the model sees is exactly the declared schema.
 func jsonResult[T any](res *T, err error) (any, taskengine.DataType, error) {
 	if err != nil {
 		return nil, taskengine.DataTypeAny, err
@@ -133,24 +121,14 @@ func (h *tools) Supports(context.Context) ([]string, error) {
 	return append([]string{ToolsProviderName}, toolNames...), nil
 }
 
-// GetSchemasForSupportedTools returns no OpenAPI documents: gointel is a local
-// toolset with hand-written function schemas, exactly like local_fs and
-// shell_session. The model-facing contract is GetToolsForToolsByName.
+// GetSchemasForSupportedTools returns no OpenAPI documents: gointel is a local toolset with hand-written function schemas; the model-facing contract is GetToolsForToolsByName.
 func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
 	return map[string]*openapi3.T{}, nil
 }
 
-// ---------------------------------------------------------------------------
-// Argument decoding
-//
-// Coercion follows localtools/args.go: small models routinely emit JSON scalars
-// as strings ({"max": "20"}), and a strict type assertion silently drops the
-// argument and answers a DIFFERENT question than the one asked. Argument NAMES
-// stay strict — rejectUnknownArgs is the guard, mirroring fs.go's dispatch.
-// ---------------------------------------------------------------------------
+// Argument decoding: small models routinely emit JSON scalars as strings ({"max": "20"}), and a strict type assertion would silently answer a different question than the one asked. Argument names stay strict — rejectUnknownArgs is the guard.
 
-// callArgs assembles the argument map from the chain input or, for declarative
-// `tools` tasks that carry arguments on the call itself, from ToolsCall.Args.
+// callArgs assembles the argument map from the chain input or, for declarative `tools` tasks that carry arguments on the call itself, from ToolsCall.Args.
 func callArgs(input any, call *taskengine.ToolsCall) (map[string]any, error) {
 	if m, ok := input.(map[string]any); ok && len(m) > 0 {
 		return m, nil
@@ -179,9 +157,7 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 	var unknown []string
 	for key := range args {
 		if _, ok := allowedSet[key]; !ok {
-			// The KEY is model-supplied too, so it is clamped like every other
-			// echoed argument — an unknown-argument error must not be a channel
-			// for a megabyte of model-chosen text.
+			// The key is model-supplied too, so it is clamped like every other echoed argument.
 			unknown = append(unknown, echoName(key))
 		}
 	}
@@ -216,9 +192,7 @@ func argString(args map[string]any, key string) string {
 	return ""
 }
 
-// argStrings accepts a JSON array, a Go []string, or a comma-separated string —
-// the three shapes a model actually emits for a list argument. Same generosity
-// as localtools/args.go's stringSliceArg, minus the shell-splitting.
+// argStrings accepts a JSON array, a Go []string, or a comma-separated string — the three shapes a model actually emits for a list argument.
 func argStrings(args map[string]any, key string) []string {
 	x, ok := args[key]
 	if !ok || x == nil {
@@ -252,12 +226,7 @@ func argStrings(args map[string]any, key string) []string {
 	return nil
 }
 
-// intFromFloat converts a JSON number to an int WITHOUT the undefined behaviour
-// Go's float→int conversion has outside the integer range. A model that emits
-// 1e30 or NaN for `max` is not a hypothetical — it is one bad completion — and
-// int(1e30) is unspecified, so the clamp happens here rather than downstream.
-// Out-of-range saturates; NaN reads as "no value", which takes the documented
-// default. Every caller clamps again to its own ceiling.
+// intFromFloat converts a JSON number to an int without Go's undefined float→int behavior outside the integer range. Out-of-range saturates; NaN reads as "no value" (documented default). Callers clamp again to their own ceiling.
 func intFromFloat(f float64) (int, bool) {
 	switch {
 	case f != f: // NaN

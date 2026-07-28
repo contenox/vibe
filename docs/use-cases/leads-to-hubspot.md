@@ -1,3 +1,7 @@
+---
+description: Tavily finds fresh leads on the web; an OpenAPI sub-spec writes them straight into HubSpot — companies, contacts, and associations, no glue code.
+---
+
 # Leads → HubSpot
 
 Two contenox flows chained: Tavily MCP finds fresh leads on the web, then a narrow OpenAPI sub-spec writes them into HubSpot — companies, contacts, descriptions, associations.

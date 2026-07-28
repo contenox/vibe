@@ -1,3 +1,7 @@
+---
+description: Read and write your HubSpot CRM through HubSpot's own MCP server — OAuth 2.1 + PKCE, tokens stored locally.
+---
+
 # HubSpot via MCP
 
 Read and write your HubSpot CRM with contenox using HubSpot's own MCP server — OAuth 2.1 + PKCE, your tokens stored locally, your data routed direct between CLI and HubSpot.

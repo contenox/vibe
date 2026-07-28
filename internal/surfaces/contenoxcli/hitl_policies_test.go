@@ -2,6 +2,7 @@ package contenoxcli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -63,9 +64,13 @@ func assertSeededSecretInvariant(t *testing.T, name, content string) {
 		"/usr/bin/x",
 		"/home/u/.contenox/hitl-policy-acp.json",
 		"proj/hitl-policy-strict.json",
+		// .git internals are an execution boundary: a planted config key or
+		// hook can run as a command. The typed go-git toolset is unaffected.
+		"proj/.git/config",
+		".git/hooks/pre-commit",
 	}
 	for _, path := range persistence {
-		for _, tool := range []string{"write_file", "sed"} {
+		for _, tool := range []string{"write_file", "sed", "edit_file"} {
 			r, err := svc.Evaluate(ctx, "local_fs", tool, map[string]any{"path": path})
 			require.NoError(t, err)
 			assert.Equal(t, hitlservice.ActionDeny, r.Action, "%s: local_fs.%s(%q) must be denied", name, tool, path)
@@ -90,6 +95,16 @@ func TestUnit_SeededACPPolicy_SecretInvariant(t *testing.T) {
 	assertSeededSecretInvariant(t, "hitl-policy-acp.json", hitlPolicyACP)
 }
 
+func TestUnit_SeededBeamPolicy_SecretInvariant(t *testing.T) {
+	t.Parallel()
+	assertSeededSecretInvariant(t, "hitl-policy-beam.json", hitlPolicyBeam)
+}
+
+func TestUnit_SeededDefaultPolicy_SecretInvariant(t *testing.T) {
+	t.Parallel()
+	assertSeededSecretInvariant(t, "hitl-policy-default.json", hitlPolicyDefault)
+}
+
 func TestUnit_SeededStrictPolicy_SecretInvariant(t *testing.T) {
 	t.Parallel()
 	assertSeededSecretInvariant(t, "hitl-policy-strict.json", hitlPolicyStrict)
@@ -102,11 +117,8 @@ func TestUnit_SeededACPXPolicy_SecretInvariantAndHeavyDeltas(t *testing.T) {
 	svc := seededPolicyService(t, "hitl-policy-acpx.json", hitlPolicyACPX)
 	ctx := context.Background()
 
-	// acpx is the untrusted-driver profile. There is no interactive operator on
-	// a non-interactive channel (e.g. OpenClaw's Telegram bridge), so "approve"
-	// is not a valid action class here: it would only ever degrade to deny or
-	// allow at the host. The policy is therefore pure allow/deny — every
-	// mutating capability is an explicit deny, not an unhonorable "approve".
+	// acpx is the untrusted-driver profile: no interactive operator exists to
+	// answer "approve", so the policy is pure allow/deny.
 	deny := map[string][2]string{
 		"shell":      {"local_shell", "local_shell"},
 		"web_post":   {"webtools", "web_post"},
@@ -136,10 +148,7 @@ func TestUnit_SeededACPXPolicy_SecretInvariantAndHeavyDeltas(t *testing.T) {
 	assert.Equal(t, hitlservice.ActionDeny, r.Action, "acpx default_action must be deny (untrusted driver, least privilege)")
 }
 
-// TestUnit_SeededPolicies_PassTheEnvelopeVet runs the authoring-time validator
-// `contenox vet` runs over every shipped preset. It is stricter than the load
-// path (unknown fields, dead timeouts, patterns that can never match), so a
-// preset edited by hand fails here rather than silently disarming a rule.
+// TestUnit_SeededPolicies_PassTheEnvelopeVet asserts every shipped preset passes `contenox vet`.
 func TestUnit_SeededPolicies_PassTheEnvelopeVet(t *testing.T) {
 	t.Parallel()
 	for _, p := range HITLPolicyPresets {
@@ -151,14 +160,13 @@ func TestUnit_SeededPolicies_PassTheEnvelopeVet(t *testing.T) {
 	}
 }
 
-// TestUnit_InteractivePolicies_GitToolTiers pins the git envelope on the two
-// presets a person is sitting in front of: looking at the repository never
-// interrupts, changing it always asks.
+// TestUnit_InteractivePolicies_GitToolTiers asserts git reads never ask and git writes always ask.
 func TestUnit_InteractivePolicies_GitToolTiers(t *testing.T) {
 	t.Parallel()
 	for name, content := range map[string]string{
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
+		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -180,12 +188,7 @@ func TestUnit_InteractivePolicies_GitToolTiers(t *testing.T) {
 	}
 }
 
-// TestUnit_InteractivePolicies_RuleForEveryGitTool closes the drift seam between
-// the toolset and the envelopes that gate it: a git tool added or renamed in
-// localtools without a rule here would fall through to default_action, which on
-// these presets means it silently starts asking (or, on a permissive one,
-// silently stops). The toolset is the source of truth; the presets must name
-// every operation it declares.
+// TestUnit_InteractivePolicies_RuleForEveryGitTool asserts every git tool the toolset declares has a rule, so none silently falls through to default_action.
 func TestUnit_InteractivePolicies_RuleForEveryGitTool(t *testing.T) {
 	t.Parallel()
 	declared, err := localtools.NewGitTools(t.TempDir()).GetToolsForToolsByName(context.Background(), localtools.GitToolsName)
@@ -195,6 +198,7 @@ func TestUnit_InteractivePolicies_RuleForEveryGitTool(t *testing.T) {
 	for name, content := range map[string]string{
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
+		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -207,14 +211,70 @@ func TestUnit_InteractivePolicies_RuleForEveryGitTool(t *testing.T) {
 	}
 }
 
-// TestUnit_InteractivePolicies_ShellSafeVerbTiers pins the shell tiers: the
-// read-only and build verbs run unattended, and every tier above and below them
-// keeps its old verdict.
+// policyRuleDoc is the minimal shape needed to inspect a seeded preset's rules
+// for the drift check below.
+type policyRuleDoc struct {
+	Rules []struct {
+		Tools  string `json:"tools"`
+		Tool   string `json:"tool"`
+		Action string `json:"action"`
+		When   []struct {
+			Key   string `json:"key"`
+			Op    string `json:"op"`
+			Value string `json:"value"`
+		} `json:"when"`
+	} `json:"rules"`
+}
+
+// TestUnit_InteractivePolicies_RuleForEveryMutatingLocalFSTool asserts every
+// mutating local_fs tool has a deny rule guarding .git/** and hitl-policy*.json
+// in the presets that protect those globs, so the next mutating tool added to
+// local_fs without matching envelope coverage fails this build instead of
+// silently falling through.
+func TestUnit_InteractivePolicies_RuleForEveryMutatingLocalFSTool(t *testing.T) {
+	t.Parallel()
+	mutators := []string{"write_file", "sed", "edit_file"}
+	protectedGlobs := []string{"**/hitl-policy*.json", "{**/.git/**,.git/**}"}
+
+	for name, content := range map[string]string{
+		"hitl-policy-default.json": hitlPolicyDefault,
+		"hitl-policy-acp.json":     hitlPolicyACP,
+		"hitl-policy-strict.json":  hitlPolicyStrict,
+		"hitl-policy-beam.json":    hitlPolicyBeam,
+	} {
+		name, content := name, content
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var doc policyRuleDoc
+			require.NoError(t, json.Unmarshal([]byte(content), &doc))
+
+			for _, glob := range protectedGlobs {
+				for _, tool := range mutators {
+					found := false
+					for _, r := range doc.Rules {
+						if r.Tools != "local_fs" || r.Tool != tool || r.Action != "deny" {
+							continue
+						}
+						for _, w := range r.When {
+							if w.Key == "path" && w.Op == "glob" && w.Value == glob {
+								found = true
+							}
+						}
+					}
+					assert.Truef(t, found, "%s has no local_fs.%s deny rule guarding %q", name, tool, glob)
+				}
+			}
+		})
+	}
+}
+
+// TestUnit_InteractivePolicies_ShellSafeVerbTiers asserts read-only/build verbs run unattended while every other tier keeps asking or denying as before.
 func TestUnit_InteractivePolicies_ShellSafeVerbTiers(t *testing.T) {
 	t.Parallel()
 	for name, content := range map[string]string{
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
+		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -223,9 +283,6 @@ func TestUnit_InteractivePolicies_ShellSafeVerbTiers(t *testing.T) {
 			ctx := context.Background()
 
 			allow := []map[string]any{
-				{"command": "git", "args": []any{"status"}},
-				{"command": "git", "args": []any{"diff", "--stat"}},
-				{"command": "git", "args": []any{"log", "--oneline", "-10"}},
 				{"command": "go", "args": []any{"build", "./..."}},
 				{"command": "go", "args": []any{"test", "-short", "./internal/..."}},
 				{"command": "ls", "args": []any{"-la"}},
@@ -239,6 +296,13 @@ func TestUnit_InteractivePolicies_ShellSafeVerbTiers(t *testing.T) {
 			}
 
 			ask := []map[string]any{
+				// Every shell git verb asks, read-looking ones included: a git
+				// subprocess can execute repo-local config, so no prefix is
+				// provably read-only. The no-nag reads are the typed go-git
+				// toolset, pinned above.
+				{"command": "git", "args": []any{"status"}},
+				{"command": "git", "args": []any{"diff", "--stat"}},
+				{"command": "git", "args": []any{"log", "--oneline", "-10"}},
 				{"command": "git", "args": []any{"clean", "-fd"}},
 				{"command": "git", "args": []any{"reset", "--hard"}},
 				{"command": "git", "args": []any{"push"}},
@@ -251,7 +315,7 @@ func TestUnit_InteractivePolicies_ShellSafeVerbTiers(t *testing.T) {
 				{"command": "python3"},
 				{"command": "curl", "args": []any{"https://example.com"}},
 				// An allowlisted verb carrying the rest of a shell line with it.
-				{"command": "git", "args": "status; rm -rf /"},
+				{"command": "go", "args": "build; rm -rf /"},
 				{"command": "ls", "args": []any{"-la"}, "shell": true},
 				{"command": "echo", "args": "$(id)"},
 			}
@@ -277,6 +341,7 @@ func TestUnit_InteractivePoliciesRequireApprovalForPlainShellFallback(t *testing
 		"hitl-policy-dev.json":     hitlPolicyDev,
 		"hitl-policy-acp.json":     hitlPolicyACP,
 		"hitl-policy-strict.json":  hitlPolicyStrict,
+		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -289,10 +354,7 @@ func TestUnit_InteractivePoliciesRequireApprovalForPlainShellFallback(t *testing
 	}
 }
 
-// TestUnit_PolicyPresetUpgrade covers the deployment gap that made a shipped
-// read tool ask for approval on an existing install: presets were written
-// once and never refreshed, so an envelope predating a toolset had no rule
-// for it and every call fell through to default_action.
+// TestUnit_PolicyPresetUpgrade asserts untouched presets refresh automatically while hand-edited or unrecorded ones are left alone and reported stale.
 func TestUnit_PolicyPresetUpgrade(t *testing.T) {
 	name := HITLPolicyPresets[0].Name
 
@@ -337,10 +399,8 @@ func TestUnit_PolicyPresetUpgrade(t *testing.T) {
 	})
 
 	t.Run("a byte-identical preset with no record is adopted", func(t *testing.T) {
-		// The transition case: an install that predates .preset-state.json but
-		// whose preset happens to match this build. Nothing is written, nothing
-		// is reported — the hash is simply recorded, so the NEXT build upgrades
-		// this install automatically instead of holding it back forever.
+		// Transition case: predates .preset-state.json but matches this
+		// build byte for byte, so it's adopted rather than held back.
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(HITLPolicyPresets[0].Content), 0644))
 		require.NoFileExists(t, filepath.Join(dir, presetStateFile))
@@ -369,21 +429,13 @@ func TestUnit_PolicyPresetUpgrade(t *testing.T) {
 	})
 }
 
-// TestUnit_InteractivePolicies_JQIsAllowed pins the seeded jq envelope on a
-// FRESH policy directory — the seeded file is written to a temp dir and loaded
-// through the real service, so this asserts what an operator actually gets, not
-// what the JSON literal says.
-//
-// The tier is allow BY CONSTRUCTION and the reasons are structural (jq_query
-// reads a file read_file already reaches, writes nothing, reaches no network,
-// and is deadline-bounded including recursion). If any of those stops being
-// true, this test is the tripwire: it fails loudly rather than letting a tool
-// that gained a capability keep the tier it earned without one.
+// TestUnit_InteractivePolicies_JQIsAllowed asserts every declared jq tool is allowed, and that the seeded justification comment still states why.
 func TestUnit_InteractivePolicies_JQIsAllowed(t *testing.T) {
 	t.Parallel()
 	for name, content := range map[string]string{
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
+		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -391,11 +443,8 @@ func TestUnit_InteractivePolicies_JQIsAllowed(t *testing.T) {
 			svc := seededPolicyService(t, name, content)
 			ctx := context.Background()
 
-			// Every tool the toolset DECLARES must be allowed — the same
-			// drift guard the git test applies, so a second jq tool added
-			// later cannot inherit this rule silently... it would, since the
-			// rule is toolset-wide, which is exactly why the assertion is
-			// written over the declared list rather than over one name.
+			// Asserted over the declared tool list, not one name, so a new
+			// jq tool is covered automatically.
 			declared, err := jqtool.NewTools(t.TempDir()).GetToolsForToolsByName(ctx, jqtool.ToolsProviderName)
 			require.NoError(t, err)
 			require.NotEmpty(t, declared)
@@ -408,11 +457,8 @@ func TestUnit_InteractivePolicies_JQIsAllowed(t *testing.T) {
 					name, tool.Function.Name)
 			}
 
-			// The justification comment is load-bearing documentation, not
-			// decoration: it is what the next reader weighs the tier against.
-			// Asserted with a bare boolean rather than assert.Contains so a
-			// failure reports the missing phrase instead of dumping the whole
-			// 40 KB preset into the test log.
+			// Bare boolean, not assert.Contains, so a failure reports the
+			// missing phrase instead of dumping the whole preset.
 			for _, phrase := range []string{"DEADLINE-BOUNDED", "CANNOT WRITE", "EMPTY object"} {
 				assert.Truef(t, strings.Contains(content, phrase),
 					"%s: the jq rule must state %q — the allow tier is only defensible while that clause is true", name, phrase)
@@ -421,18 +467,140 @@ func TestUnit_InteractivePolicies_JQIsAllowed(t *testing.T) {
 	}
 }
 
-// TestUnit_DefaultPolicy_JQMatchesTheSeededPresets closes the drift seam between
-// the built-in fallback policy (hitlservice.defaultPolicy, used when no preset
-// file is present) and the shipped JSON. A tool allowed by the file and unruled
-// in the fallback would nag on exactly the installs that have no policy dir yet.
-func TestUnit_DefaultPolicy_JQMatchesTheSeededPresets(t *testing.T) {
+// TestUnit_NoFilePolicyFallback_FailsClosed asserts the no-file fallback has no allow/deny tiers of its own — everything asks, since rules live only in the seeded, readable presets.
+func TestUnit_NoFilePolicyFallback_FailsClosed(t *testing.T) {
 	t.Parallel()
 	// An empty policy dir forces the built-in fallback.
 	svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()),
 		testTenant, nopKV{}, libtracker.NoopTracker{}, "hitl-policy-default.json")
-	r, err := svc.Evaluate(context.Background(), jqtool.ToolsProviderName, jqtool.ToolQuery,
-		map[string]any{"path": "chain.json", "filter": "."})
+	ctx := context.Background()
+	for _, call := range []struct {
+		tools, tool string
+		args        map[string]any
+	}{
+		{jqtool.ToolsProviderName, jqtool.ToolQuery, map[string]any{"path": "chain.json", "filter": "."}},
+		{"local_fs", "read_file", map[string]any{"path": "src/main.go"}},
+		{"local_shell", "local_shell", map[string]any{"command": "ls"}},
+		{"gointel", "go_symbols", map[string]any{"path": "."}},
+	} {
+		r, err := svc.Evaluate(ctx, call.tools, call.tool, call.args)
+		require.NoError(t, err)
+		assert.Equalf(t, hitlservice.ActionApprove, r.Action,
+			"%s.%s: with no loadable policy file, everything asks — allow tiers exist only in seeded, readable envelopes", call.tools, call.tool)
+	}
+}
+
+// TestUnit_InteractivePolicies_RuleForEveryReadOnlyLocalFSTool asserts every
+// read-only local_fs tool (the toolset's declared Supports() list minus the
+// three mutators) evaluates to allow on every interactive preset, plus
+// strict.json's read tier. find_files shipped without a rule beside
+// list_dir's, so a plain read triggered an approval card in production; this
+// pins the whole read-only set so the next read-only tool added without a
+// matching rule fails the build instead of surprising a human with a card.
+func TestUnit_InteractivePolicies_RuleForEveryReadOnlyLocalFSTool(t *testing.T) {
+	t.Parallel()
+	declared, err := localtools.NewLocalFSTools(t.TempDir(), nil).Supports(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, hitlservice.ActionAllow, r.Action,
-		"hitlservice.defaultPolicy() must allow jq exactly as the seeded presets do")
+	require.NotEmpty(t, declared)
+
+	mutators := map[string]bool{"write_file": true, "sed": true, "edit_file": true}
+	var readOnly []string
+	for _, name := range declared {
+		if name == localtools.LocalFSToolsName || mutators[name] {
+			continue
+		}
+		readOnly = append(readOnly, name)
+	}
+	require.NotEmpty(t, readOnly)
+
+	for name, content := range map[string]string{
+		"hitl-policy-default.json": hitlPolicyDefault,
+		"hitl-policy-acp.json":     hitlPolicyACP,
+		"hitl-policy-beam.json":    hitlPolicyBeam,
+		"hitl-policy-strict.json":  hitlPolicyStrict,
+		"hitl-policy-acpx.json":    hitlPolicyACPX,
+	} {
+		name, content := name, content
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc := seededPolicyService(t, name, content)
+			ctx := context.Background()
+			for _, tool := range readOnly {
+				r, err := svc.Evaluate(ctx, "local_fs", tool, nil)
+				require.NoError(t, err)
+				assert.Equalf(t, hitlservice.ActionAllow, r.Action,
+					"%s: local_fs.%s is a read-only tool and must be in the allow tier beside list_dir's", name, tool)
+			}
+		})
+	}
+}
+
+// TestUnit_InteractivePolicies_JSAndPythonShellTiers asserts JS/Python build-and-test verbs run unasked while their mutating, network, or arbitrary-execution siblings still ask.
+func TestUnit_InteractivePolicies_JSAndPythonShellTiers(t *testing.T) {
+	t.Parallel()
+	for name, content := range map[string]string{
+		"hitl-policy-default.json": hitlPolicyDefault,
+		"hitl-policy-acp.json":     hitlPolicyACP,
+		"hitl-policy-beam.json":    hitlPolicyBeam,
+	} {
+		name, content := name, content
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc := seededPolicyService(t, name, content)
+			ctx := context.Background()
+
+			allowed := []map[string]any{
+				{"command": "pytest", "args": "-q tests/"},
+				{"command": "python", "args": []any{"-m", "pytest", "tests/"}},
+				{"command": "python3", "args": []any{"-m", "pytest"}},
+				{"command": "npm", "args": "test"},
+				{"command": "npm", "args": []any{"ls"}},
+				{"command": "vitest", "args": []any{"run"}},
+				{"command": "jest", "args": "--ci"},
+				{"command": "mypy", "args": "--strict app/"},
+				{"command": "ruff", "args": []any{"check", "."}},
+				{"command": "tsc", "args": "--noEmit"},
+				{"command": "eslint", "args": []any{"src/"}},
+				{"command": "pip", "args": []any{"list"}},
+				{"command": "pip", "args": "show requests"},
+			}
+			for _, args := range allowed {
+				r, err := svc.Evaluate(ctx, "local_shell", "local_shell", args)
+				require.NoError(t, err)
+				assert.Equal(t, hitlservice.ActionAllow, r.Action, "%s: safe verb must not ask: %v", name, args)
+			}
+
+			// The documented DELIBERATELY ABSENT set: each must keep asking.
+			stillAsks := []map[string]any{
+				{"command": "pip", "args": "install requests"},       // network + env mutation
+				{"command": "npm", "args": "install eslint"},         // network + env mutation
+				{"command": "npx", "args": "eslint ."},               // install-on-missing
+				{"command": "npx", "args": []any{"tsc", "--noEmit"}}, // install-on-missing
+				{"command": "uv", "args": "run pytest"},              // install-on-missing
+				{"command": "python", "args": "-c print(1)"},         // arbitrary execution
+				{"command": "node", "args": "evil.js"},               // arbitrary execution
+				{"command": "vitest"},                                // watch mode never exits
+				{"command": "ruff", "args": "format ."},              // rewrites sources
+				{"command": "tsc"},                                   // bare tsc emits files
+				{"command": "pytest2"},                               // token-wise, not substring
+			}
+			for _, args := range stillAsks {
+				r, err := svc.Evaluate(ctx, "local_shell", "local_shell", args)
+				require.NoError(t, err)
+				assert.NotEqual(t, hitlservice.ActionAllow, r.Action, "%s: must not be auto-allowed: %v", name, args)
+			}
+
+			// The ask-always tier is untouched by the wider allow tier beside
+			// it, including through a compound line that STARTS allowlisted.
+			for _, args := range []map[string]any{
+				{"command": "rm", "args": "-rf /tmp/x"},
+				{"command": "sudo", "args": "ls"},
+				{"command": "pytest && rm -rf /tmp/x"},
+			} {
+				r, err := svc.Evaluate(ctx, "local_shell", "local_shell", args)
+				require.NoError(t, err)
+				assert.NotEqual(t, hitlservice.ActionAllow, r.Action, "%s: destructive path must never be auto-allowed: %v", name, args)
+			}
+		})
+	}
 }

@@ -15,12 +15,10 @@ import (
 	"github.com/contenox/beam/internal/models/modelrepo"
 )
 
-// vLLMPromptClient handles prompt execution
 type vLLMPromptClient struct {
 	vLLMClient
 }
 
-// vLLMChatClient handles chat interaction
 type vLLMChatClient struct {
 	vLLMClient
 }
@@ -38,9 +36,9 @@ type vLLMClient struct {
 
 type chatRequest struct {
 	Model string `json:"model"`
-	// Messages is []any so text/tool turns serialize as the neutral
-	// modelrepo.Message (unchanged wire shape) while image-bearing turns
-	// serialize as the OpenAI content-parts form (see toVLLMRequestMessages).
+	// Messages is []any: text/tool turns serialize as vllmWireMessage,
+	// image-bearing turns as the OpenAI content-parts form (see
+	// toVLLMRequestMessages).
 	Messages    []any    `json:"messages"`
 	Temperature *float64 `json:"temperature,omitempty"`
 	MaxTokens   *int     `json:"max_tokens,omitempty"`
@@ -142,8 +140,7 @@ func (c *vLLMClient) sendRequest(ctx context.Context, endpoint string, request i
 	)
 	defer end()
 
-	// Non-streaming call: bounded end-to-end, retried on 429/5xx with
-	// Retry-After honored.
+	// Non-streaming: bounded end-to-end, retried on 429/5xx honoring Retry-After.
 	ctx, cancel := modelrepo.NonStreamingContext(ctx)
 	defer cancel()
 	resp, err := modelrepo.DoWithRetry(ctx, c.httpClient, func() (*http.Request, error) {
@@ -164,7 +161,6 @@ func (c *vLLMClient) sendRequest(ctx context.Context, endpoint string, request i
 	}
 	defer resp.Body.Close()
 
-	// Log headers
 	reportChange("http_response", map[string]any{
 		"status_code": resp.StatusCode,
 		"headers":     resp.Header,
@@ -173,8 +169,7 @@ func (c *vLLMClient) sendRequest(ctx context.Context, endpoint string, request i
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		err = fmt.Errorf("vLLM API returned non-200 status: %d, body: %s for model %s", resp.StatusCode, string(bodyBytes), c.modelName)
-		// vLLM reports context overflow as a 400 with OpenAI-style "maximum
-		// context length" phrasing.
+		// vLLM reports context overflow as a 400 with OpenAI-style phrasing.
 		err = modelrepo.ClassifyProviderError(err, resp.StatusCode, "", string(bodyBytes))
 		reportErr(err)
 		return err
@@ -191,14 +186,12 @@ func (c *vLLMClient) sendRequest(ctx context.Context, endpoint string, request i
 }
 
 // vllmWireMessage is the explicit wire form of a text/tool message sent to
-// vLLM's chat/completions endpoint. It exists so the neutral modelrepo.Message
-// is NEVER serialized raw: the neutral struct carries provenance fields —
-// history `thinking` and tool-call `provider_meta` (e.g. a Gemini
-// thought_signature) — whose presence flips with where the history came from.
-// Leaking them onto the wire perturbs vLLM's token-prefix cache (identical
-// conversations produce different bytes) and sends the model content it must
-// never see. Field order mirrors the neutral struct so requests without those
-// fields stay byte-identical to the pre-fix wire shape.
+// vLLM's chat/completions endpoint. The neutral modelrepo.Message is never
+// serialized raw: it carries provenance fields (history `thinking`, tool-call
+// `provider_meta` such as a Gemini thought_signature) that must not reach the
+// wire — leaking them perturbs vLLM's token-prefix cache (identical
+// conversations would produce different bytes) and exposes content the model
+// must never see.
 type vllmWireMessage struct {
 	Role       string             `json:"role"`
 	Content    string             `json:"content"`
@@ -236,8 +229,7 @@ type vllmImageURL struct {
 
 // toVLLMRequestMessages maps neutral messages to the request wire form: an
 // image-bearing message becomes the OpenAI content-parts shape, every other
-// message becomes the explicit vllmWireMessage. Provenance fields (thinking,
-// tool-call provider_meta) never reach the wire — see vllmWireMessage.
+// message becomes the explicit vllmWireMessage.
 func toVLLMRequestMessages(messages []modelrepo.Message, origToSanitized map[string]string) []any {
 	out := make([]any, 0, len(messages))
 	for _, m := range messages {
@@ -291,9 +283,8 @@ func vllmImageDataURI(mimeType string, data []byte) string {
 }
 
 // buildChatRequest builds the wire request and returns a sanitized->original
-// tool-name map: the engine qualifies tool names as "toolsName.toolName" and
-// the dot breaks vLLM chat templates / OpenAI-compat validation, so names are
-// sanitized like every other provider and translated back on decode.
+// tool-name map: engine-qualified names ("toolsName.toolName") break vLLM
+// chat templates, so names are sanitized and translated back on decode.
 func buildChatRequest(modelName string, messages []modelrepo.Message, args []modelrepo.ChatArgument, canThink ...bool) (chatRequest, map[string]string) {
 	config := &modelrepo.ChatConfig{}
 	for _, arg := range args {
@@ -304,12 +295,11 @@ func buildChatRequest(modelName string, messages []modelrepo.Message, args []mod
 }
 
 func buildChatRequestFromConfig(modelName string, messages []modelrepo.Message, config *modelrepo.ChatConfig, canThink ...bool) (chatRequest, map[string]string) {
-	// config.CacheHints is deliberately NOT mapped to any wire field: vLLM's
-	// Automatic Prefix Caching keys on the exact token prefix server-side
-	// (after chat-template rendering), so byte-stable serialization plus
-	// session→backend affinity is the whole client-side contract. OpenAI's
-	// prompt_cache_key is not sent — vLLM does not use it, and adding
-	// per-session bytes to the request would gain nothing.
+	// config.CacheHints is deliberately not mapped to any wire field: vLLM's
+	// Automatic Prefix Caching keys on the exact token prefix server-side, so
+	// byte-stable serialization plus session-backend affinity is the whole
+	// client-side contract. OpenAI's prompt_cache_key is not sent; vLLM does
+	// not use it.
 	tools, nameMap, origToSanitized := sanitizeVLLMTools(config.Tools)
 	req := chatRequest{
 		Model:       modelName,

@@ -27,35 +27,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSystem_ACPMissionInProcess is the house-idiom ACCEPTANCE for the ontology-
-// correcting refit: a
-// standalone `contenox acp` editor — what a Zed/ACP-registry user launches, with
-// NO serve anywhere — embeds the fleet IN-PROCESS and fires `/mission` as a
-// SUBAGENT of ITSELF. It runs END TO END against the real binary, driven over
-// stdio by a real libacp client, and proves the whole journey the serve-forwarded
-// topology could not:
-//
-//	no serve       → /mission IS advertised on a fresh session;
-//	invoke it      → the editor's embedded kernel dispatches a REAL child
-//	                 subprocess (a mission unit), which files a report through its
-//	                 mission_report tool;
-//	the report     → is delivered LIVE into the FIRING session's own stream —
-//	                 the `contenox.missionReport` _meta update arrives at the
-//	                 client, NOT the operator inbox (the fix: the firing session
-//	                 lives in THIS process, so its report router reaches it);
-//	the mission    → is a durable record in the shared db;
-//	kill the editor→ reaps the child (no orphan) — mission lifetime ≤ process
-//	                 lifetime.
-//
-// Hermetic like the forwarding e2e: an isolated HOME, `contenox init`, a
-// deterministic no-model chain-agent fixture, a fake default model so any
-// accidental resolution fails loudly. No LLM, GPU, or network.
+// TestSystem_ACPMissionInProcess asserts a standalone `contenox acp` editor with no serve advertises /mission, dispatches a real child subprocess, delivers its report live into the firing session (not the operator inbox), persists the mission in the shared db, and reaps the child when the editor exits.
 
-// inprocReporterChain is the deterministic, model-free chain the dispatched CHILD
-// runs as its first and only turn: it files a RESULT report through its granted
-// mission tool, then a noop terminator — no model touched, and no mission_finish,
-// so the unit stays a live idle ACP server (proving reaping kills it, not a
-// self-exit).
+// inprocReporterChain is the deterministic, model-free chain the dispatched
+// child runs: files a result report, then a noop terminator, with no
+// mission_finish, so it stays a live idle server until reaped.
 const inprocReporterChain = `{
   "id": "inproc-reporter-chain",
   "description": "In-process e2e: file a result report, then a noop terminator.",
@@ -91,10 +67,9 @@ func TestSystem_ACPMissionInProcess(t *testing.T) {
 	require.NoError(t, os.MkdirAll(homeDir, 0o755))
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
 
-	// NOTE: CONTENOX_SERVER_URL is deliberately EMPTY — no forwarding, no serve.
-	// The editor must embed the fleet in-process. CONTENOX_ACP_CHAIN_PATH is empty
-	// too, so THIS process is a top-level editor (not a dispatched unit) and hosts
-	// the fleet; the child unit gets the chain path from its declared agent env.
+	// CONTENOX_SERVER_URL and CONTENOX_ACP_CHAIN_PATH are both empty: no
+	// forwarding, and this process is a top-level editor (not a dispatched
+	// unit), so it hosts the fleet in-process.
 	baseEnv := append(os.Environ(),
 		"HOME="+homeDir,
 		"CONTENOX_DEFAULT_MODEL=inproc-e2e-fake-model",
@@ -106,8 +81,8 @@ func TestSystem_ACPMissionInProcess(t *testing.T) {
 
 	fwdRunCLI(t, bin, baseEnv, "--data-dir", dataDir, "--db", dbPath, "init", "--force")
 
-	// The child's chain goes in a PLAIN directory — NOT under .contenox, which
-	// control-plane isolation refuses to discover from — read via the agent's env.
+	// The child's chain lives in a plain directory, not under .contenox, which
+	// control-plane isolation refuses to discover from.
 	chainsDir := filepath.Join(root, "chains")
 	require.NoError(t, os.MkdirAll(chainsDir, 0o755))
 	chainPath := filepath.Join(chainsDir, "inproc-reporter.json")
@@ -115,8 +90,8 @@ func TestSystem_ACPMissionInProcess(t *testing.T) {
 
 	inprocSeed(t, dbPath, bin, chainPath)
 
-	// A handle to the ONE shared store for assertions (the mission record lands
-	// here; the report is delivered live rather than inboxed, which we also assert).
+	// A handle to the shared store for assertions: the mission record lands
+	// here; the report is delivered live rather than inboxed.
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
@@ -150,9 +125,9 @@ func TestSystem_ACPMissionInProcess(t *testing.T) {
 		"the IN-PROCESS confirmation must promise live delivery into this session, not the inbox as the primary home")
 
 	// ── The child's report is delivered LIVE into the firing session's stream ────
-	// This is the whole point of the refit: the report router reaches THIS session
-	// (the firing editor session lives in this process), so the update — carrying
-	// the contenox.missionReport _meta — arrives at the client, not the inbox.
+	// The report router reaches this session because it lives in this process,
+	// so the update carrying contenox.missionReport _meta arrives at the
+	// client, not the inbox.
 	reportUpdate := waitForMissionReport(t, h, inprocReportText)
 	require.Equal(t, sid, reportUpdate.SessionID,
 		"the live report is delivered on the FIRING session the client knows")
@@ -177,7 +152,7 @@ func TestSystem_ACPMissionInProcess(t *testing.T) {
 		"the firing session id rode the dispatch as the supervision edge")
 
 	// ── The live-delivered report did NOT also fall into the operator inbox ──────
-	// A supervised report has a home; the inbox is only the no-live-parent fallback.
+	// The inbox is only the no-live-parent fallback.
 	inboxItems, err := inbox.List(ctx, 100)
 	require.NoError(t, err)
 	for _, it := range inboxItems {
@@ -186,11 +161,9 @@ func TestSystem_ACPMissionInProcess(t *testing.T) {
 	}
 
 	// ── Killing the editor reaps the child (no orphan) ───────────────────────────
-	// The dispatched unit is a live child subprocess of the editor. Capture it,
-	// then shut the editor down (closing its stdin — the Zed-disconnect path, which
-	// drives the graceful teardown: conn.Run returns, the deferred kernel.Close
-	// stops every instance) and prove the child does not outlive its parent — the
-	// ontology's "mission lifetime ≤ acp process lifetime".
+	// Capture the dispatched unit's pid, shut the editor down via its stdin
+	// (the Zed-disconnect path, which drives graceful teardown), and prove the
+	// child does not outlive its parent.
 	var kids []int
 	require.Eventuallyf(t, func() bool {
 		kids = childPIDs(editorPID)
@@ -237,9 +210,8 @@ type fwdACPHarness struct {
 
 func (h *fwdACPHarness) stderr() string { return h.stderrBuf.String() }
 
-// newSessionCommands opens a fresh session and returns its id and the advertised
-// slash-command names (from the available_commands_update the agent emits after
-// the session/new result).
+// newSessionCommands opens a fresh session and returns its id and the
+// advertised slash-command names.
 func (h *fwdACPHarness) newSessionCommands(t *testing.T, ctx context.Context, cwd string) (libacp.SessionID, []string) {
 	t.Helper()
 	resp, err := h.client.NewSession(ctx, libacp.NewSessionRequest{Cwd: cwd, McpServers: []libacp.McpServer{}})
@@ -261,9 +233,8 @@ func (h *fwdACPHarness) newSessionCommands(t *testing.T, ctx context.Context, cw
 	}
 }
 
-// promptFor sends one prompt (here always a `/mission …` slash command, which
-// acpsvc intercepts) and returns the text of the agent_message_chunk the command
-// emits — the confirmation, or the teaching/command error rendered inline.
+// promptFor sends one prompt and returns the text of the agent_message_chunk
+// the command emits.
 func (h *fwdACPHarness) promptFor(t *testing.T, ctx context.Context, sid libacp.SessionID, text string) string {
 	t.Helper()
 	_, err := h.client.Prompt(ctx, libacp.PromptRequest{
@@ -286,9 +257,8 @@ func (h *fwdACPHarness) promptFor(t *testing.T, ctx context.Context, sid libacp.
 	}
 }
 
-// stdioRWC adapts a subprocess's stdout (read) + stdin (write) into the single
-// ReadWriteCloser libacp speaks over — exactly how an editor talks to `contenox
-// acp`, but with the pipes an exec.Cmd hands back instead of the editor's tty.
+// stdioRWC adapts a subprocess's stdout (read) + stdin (write) into the
+// single ReadWriteCloser libacp speaks over.
 type stdioRWC struct {
 	r io.Reader
 	w io.WriteCloser
@@ -348,11 +318,10 @@ func fwdFreePort(t *testing.T) int {
 	return port
 }
 
-// inprocSeed declares the fired agent as an external `contenox acp --auto` unit
-// bound to its chain (the child inherits the editor's $HOME/DB via os.Environ),
-// and seeds the global config the in-process /mission handler reads. One db handle,
-// closed before it returns, so the editor and its child open the SQLite file
-// without contending with this seeding write.
+// inprocSeed declares the fired agent as an external `contenox acp --auto`
+// unit bound to its chain, and seeds the global config the in-process
+// /mission handler reads. Closes its db handle before returning so the
+// editor and its child don't contend with this seeding write.
 func inprocSeed(t *testing.T, dbPath, bin, chainPath string) {
 	t.Helper()
 	ctx := context.Background()
@@ -364,8 +333,8 @@ func inprocSeed(t *testing.T, dbPath, bin, chainPath string) {
 	require.NoError(t, agent.SetExternalACPConfig(runtimetypes.ExternalACPConfig{
 		Transport: runtimetypes.ExternalACPTransportStdio,
 		Command:   bin,
-		// --auto: the unit runs its mission_report tool unattended (no HITL), and
-		// the chain path marks it a DISPATCHED UNIT so it hosts no fleet of its own.
+		// --auto: the unit runs its mission_report tool unattended (no HITL); the
+		// chain path marks it a dispatched unit hosting no fleet of its own.
 		Args: []string{"acp", "--auto"},
 		Env:  map[string]string{"CONTENOX_ACP_CHAIN_PATH": chainPath},
 	}))
@@ -391,14 +360,11 @@ func inprocSeedConfig(t *testing.T, dbPath string) {
 	require.NoError(t, clikv.WriteConfig(ctx, store, "", "update-check", "false"))
 }
 
-// inprocSpawnACP starts `contenox acp` and drives it with a real libacp client
-// over its stdio, returning the harness, the *exec.Cmd (so the test owns the
-// process and can read its pid for the reaping assertion), and a `shutdown` that
-// closes the editor's stdin — the Zed-disconnect path. Closing stdin is what
-// actually shuts a stdio ACP process down: its conn.Run is blocked on an os.Stdin
-// read that a mere SIGTERM (ctx cancel) cannot interrupt, so EOF is the reliable
-// teardown trigger (the same reason fwdSpawnACP's cleanup closes stdin). Reuses
-// the forwarding e2e's client harness types.
+// inprocSpawnACP starts `contenox acp` and drives it with a real libacp
+// client over its stdio, returning the harness, the *exec.Cmd, and a
+// `shutdown` that closes the editor's stdin — the only reliable teardown
+// trigger, since conn.Run blocks on an os.Stdin read that SIGTERM can't
+// interrupt.
 func inprocSpawnACP(t *testing.T, bin string, env []string) (*fwdACPHarness, *exec.Cmd, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -447,10 +413,9 @@ type inprocReportMeta struct {
 	} `json:"contenox.missionReport"`
 }
 
-// waitForMissionReport drains the client's update stream for the live report: an
-// agent_message_chunk carrying both the summary text and the contenox.missionReport
-// _meta — the routed report the firing session must see, recognizable as a mission
-// report rather than as an ordinary agent message.
+// waitForMissionReport drains the client's update stream for the live
+// report: an agent_message_chunk carrying both the summary text and the
+// contenox.missionReport _meta.
 func waitForMissionReport(t *testing.T, h *fwdACPHarness, summary string) libacp.SessionNotification {
 	t.Helper()
 	deadline := time.After(90 * time.Second)

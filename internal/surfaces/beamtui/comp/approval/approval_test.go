@@ -14,8 +14,7 @@ import (
 	libacp "github.com/contenox/beam/libacp"
 )
 
-// goldenWidths is the blueprint's resize matrix: narrow, default terminal,
-// wide.
+// goldenWidths is the resize matrix: narrow, default terminal, wide.
 var goldenWidths = []int{60, 80, 120}
 
 const sampleDiff = `--- a/internal/app.go
@@ -24,8 +23,8 @@ const sampleDiff = `--- a/internal/app.go
 -    return errors.New("todo")
 +    return run(ctx, cfg)`
 
-// sampleEvent is a realistic gated write: three arguments (one of them a
-// body far past the display cap), a named policy rule, and a short diff.
+// sampleEvent is a realistic gated write: three arguments (one past the
+// display cap), a named policy rule, and a short diff.
 func sampleEvent(resolve func(bool)) enginebridge.PermissionRequested {
 	args := map[string]any{
 		"path":    "/repo/internal/app.go",
@@ -58,22 +57,19 @@ func sampleEvent(resolve func(bool)) enginebridge.PermissionRequested {
 	}
 }
 
-// sampleScriptCode is the argument that motivated the block renderer: real
-// source, with a tab indent and a literal "\n" INSIDE a string, so a golden
-// that ever re-escapes the value gives itself away twice.
+// sampleScriptCode is a multi-line argument: real source with a tab indent
+// and a literal "\n" inside a string, so a golden that re-escapes the value
+// gives itself away.
 const sampleScriptCode = `const notes = host.tool("local_fs.read_file", { path: "CHANGELOG.md" });
 if (!notes) {
 	throw new Error("CHANGELOG.md is empty");
 }
 return { lines: notes.split("\n").length };`
 
-// scriptEvent is the card dogfooding reported: a goja call whose decisive
-// argument is code, with no diff anywhere to fall back on, and a declared reach
-// that is the only thing on the card saying what the code will touch.
-//
-// The reach is FIXTURE data — it pins how a declaration renders, and says
-// nothing about which policy tier any particular tool sits in. mayCall/declared
-// are parameters so one fixture drives all three states of the declaration.
+// scriptEvent is a goja call whose decisive argument is code, with no diff to
+// fall back on and a declared reach as the only signal of what it will
+// touch. mayCall/declared are parameters so one fixture drives all three
+// states of the declaration.
 func scriptEvent(mayCall []string, declared *bool) enginebridge.PermissionRequested {
 	args := map[string]any{
 		"code":       sampleScriptCode,
@@ -116,9 +112,8 @@ func texts(lines []frame.Line) []string {
 	return out
 }
 
-// TestUnit_CardGoldens pins the whole card in every state and both glyph
-// variants. The ORDER is the contract inherited from hitl_tty.go: identity,
-// sorted args, policy, diff, decision.
+// TestUnit_CardGoldens pins the whole card's rendering, in every state and
+// glyph variant, in its fixed order: identity, sorted args, policy, diff, decision.
 func TestUnit_CardGoldens(t *testing.T) {
 	states := []struct {
 		name  string
@@ -147,9 +142,7 @@ func TestUnit_CardGoldens(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgsAreSortedAndSummarised: a human pattern-matching under
-// fatigue gets the same layout every time, and a 1 KB body reads as one
-// line with its true size visible rather than scrolling the diff away.
+// TestUnit_ArgsAreSortedAndSummarised: arguments render in stable sorted order, and a long value elides to one line with its true size visible.
 func TestUnit_ArgsAreSortedAndSummarised(t *testing.T) {
 	c := New(sampleEvent(nil))
 	lines := texts(c.Render(200, false, ""))
@@ -174,7 +167,7 @@ func TestUnit_ArgsAreSortedAndSummarised(t *testing.T) {
 	if args[1] != "  create = true" {
 		t.Fatalf("bool arg = %q", args[1])
 	}
-	// The body is elided WITH its size — hitl_tty.go's visible-elision rule.
+	// The body is elided with its size shown, not silently.
 	if !strings.Contains(args[0], "bytes") || !strings.Contains(args[0], "lines") {
 		t.Fatalf("long arg lacks a visible elision marker: %q", args[0])
 	}
@@ -187,8 +180,7 @@ func TestUnit_ArgsAreSortedAndSummarised(t *testing.T) {
 	}
 }
 
-// TestUnit_DiffIsLast is the ordering rule that motivated the CLI layout:
-// the change under review sits immediately above the decision.
+// TestUnit_DiffIsLast: the diff sits immediately above the decision line, and its lines are styled by their own first character.
 func TestUnit_DiffIsLast(t *testing.T) {
 	c := New(sampleEvent(nil))
 	lines := texts(c.Render(200, false, ""))
@@ -219,8 +211,7 @@ func TestUnit_DiffIsLast(t *testing.T) {
 	}
 }
 
-// TestUnit_DiffTruncationWarnsWithExactCounts: the cap is hitl_tty.go's
-// 120, and the notice states the consequence of approving unseen changes.
+// TestUnit_DiffTruncationWarnsWithExactCounts: a diff past maxDiffLines is cut with an exact-count warning; one exactly at the cap warns of nothing.
 func TestUnit_DiffTruncationWarnsWithExactCounts(t *testing.T) {
 	body := make([]string, 200)
 	for i := range body {
@@ -240,7 +231,7 @@ func TestUnit_DiffTruncationWarnsWithExactCounts(t *testing.T) {
 	if shown != maxDiffLines {
 		t.Fatalf("rendered %d diff lines, want %d", shown, maxDiffLines)
 	}
-	// The cut is the FIRST 120 lines: body, then warning, then decision.
+	// The cut is the first 120 lines: body, then warning, then decision.
 	if got := lines[len(lines)-3]; got != "+line 119" {
 		t.Fatalf("last shown diff line = %q, want +line 119", got)
 	}
@@ -269,8 +260,7 @@ func TestUnit_DiffTruncationWarnsWithExactCounts(t *testing.T) {
 	}
 }
 
-// TestUnit_TruncationWarningSurvivesNarrowWidths: the one line whose whole
-// sentence is load-bearing wraps instead of being elided.
+// TestUnit_TruncationWarningSurvivesNarrowWidths: the warning wraps rather than eliding, reassembling to the same sentence at every width.
 func TestUnit_TruncationWarningSurvivesNarrowWidths(t *testing.T) {
 	body := make([]string, 200)
 	for i := range body {
@@ -297,10 +287,7 @@ func TestUnit_TruncationWarningSurvivesNarrowWidths(t *testing.T) {
 	}
 }
 
-// TestUnit_DiffLinesAreUnwrapped is the copy-cleanliness property: a diff
-// body line is emitted verbatim as ONE span even when it is wider than the
-// terminal, so selecting it yields the real line — never a wrapped or
-// elided approximation.
+// TestUnit_DiffLinesAreUnwrapped: a diff line is emitted verbatim as one span even when wider than the terminal, never wrapped or elided.
 func TestUnit_DiffLinesAreUnwrapped(t *testing.T) {
 	long := "+" + strings.Repeat("x", 300)
 	ev := sampleEvent(nil)
@@ -327,13 +314,7 @@ func TestUnit_DiffLinesAreUnwrapped(t *testing.T) {
 	}
 }
 
-// TestUnit_DiffLinesAreSanitized is the security half of the diff's verbatim
-// rule. A diff is the most attacker-controlled string on this card — it comes
-// out of a repository and is shown to a human as the exact change they are
-// authorising — so "verbatim" cannot mean "raw bytes to the terminal": a CSI
-// erases the lines above it, and a bidi override displays a line as the
-// reverse of what it applies. Neither is allowed to reach a span; the diff's
-// exemption is from WRAPPING and ELISION, not from sanitizing.
+// TestUnit_DiffLinesAreSanitized: a diff line's exemption from wrapping and elision does not extend to control or bidi characters — those are stripped.
 func TestUnit_DiffLinesAreSanitized(t *testing.T) {
 	cases := []struct {
 		name string
@@ -385,9 +366,7 @@ func TestUnit_DiffLinesAreSanitized(t *testing.T) {
 	}
 }
 
-// TestUnit_TabIndentSurvivesAtEveryWidth: expansion happens once, at ingest,
-// so a diff line's indentation is the same string whatever the terminal is —
-// and it is still one unwrapped span.
+// TestUnit_TabIndentSurvivesAtEveryWidth: a diff line's tab-expanded indentation is the same string, as one unwrapped span, at every width.
 func TestUnit_TabIndentSurvivesAtEveryWidth(t *testing.T) {
 	const want = "+       fmt.Println(\"a line long enough that a narrow card cannot hold it at all\")"
 	ev := sampleEvent(nil)
@@ -406,10 +385,7 @@ func TestUnit_TabIndentSurvivesAtEveryWidth(t *testing.T) {
 	}
 }
 
-// TestUnit_CardChromeIsSanitized: every peer-supplied string on the card —
-// not just the diff — is somebody else's, and the card names what the
-// operator is about to authorise. None of it may rewrite the card around
-// itself.
+// TestUnit_CardChromeIsSanitized: every peer-supplied string on the card, not just the diff, is stripped of control and bidi characters.
 func TestUnit_CardChromeIsSanitized(t *testing.T) {
 	const evil = "a\x1b[2Jb\x1b]0;t\x07c\td\x7f‮e"
 
@@ -449,8 +425,7 @@ func TestUnit_CardChromeIsSanitized(t *testing.T) {
 	}
 }
 
-// TestUnit_ResolveCallsTheBridgeExactlyOnce: a doubled keystroke, or a
-// resolve after a cancel, must never answer twice.
+// TestUnit_ResolveCallsTheBridgeExactlyOnce: a doubled keystroke, or a resolve after a cancel, never answers the bridge twice.
 func TestUnit_ResolveCallsTheBridgeExactlyOnce(t *testing.T) {
 	var calls []bool
 	c := New(sampleEvent(func(allow bool) { calls = append(calls, allow) }))
@@ -486,9 +461,7 @@ func TestUnit_ResolveCallsTheBridgeExactlyOnce(t *testing.T) {
 	New(sampleEvent(nil)).Resolve(true)
 }
 
-// TestUnit_CancelledCardStopsWaiting is item 10: a cancelled turn flips its
-// pending card rather than leaving it spinning — and does NOT put an
-// answer on the wire the operator never gave.
+// TestUnit_CancelledCardStopsWaiting: a cancelled turn flips its pending card rather than leaving it spinning, without answering the bridge.
 func TestUnit_CancelledCardStopsWaiting(t *testing.T) {
 	var calls int
 	c := New(sampleEvent(func(bool) { calls++ }))
@@ -517,8 +490,7 @@ func TestUnit_CancelledCardStopsWaiting(t *testing.T) {
 	}
 }
 
-// TestUnit_PendingFooterCarriesTheSpinner: the pending line is the only
-// animated part of the card, and it degrades to keys alone without one.
+// TestUnit_PendingFooterCarriesTheSpinner: the pending footer shows the spinner when given one, and degrades to keys alone without it.
 func TestUnit_PendingFooterCarriesTheSpinner(t *testing.T) {
 	c := New(sampleEvent(nil))
 
@@ -536,8 +508,7 @@ func TestUnit_PendingFooterCarriesTheSpinner(t *testing.T) {
 	}
 }
 
-// TestUnit_NoDiffFallsBackToANewContentSummary: never a blank diff section,
-// and never a dump of content that was never diffed (item 1).
+// TestUnit_NoDiffFallsBackToANewContentSummary: no diff and new content summarizes as a line count, never a blank section or a content dump.
 func TestUnit_NoDiffFallsBackToANewContentSummary(t *testing.T) {
 	ev := sampleEvent(nil)
 	ev.Meta.Diff = ""
@@ -559,8 +530,7 @@ func TestUnit_NoDiffFallsBackToANewContentSummary(t *testing.T) {
 	}
 }
 
-// TestUnit_RawInputShapes: a non-object payload is shown rather than
-// dropped, and an absent one produces no argument rows at all.
+// TestUnit_RawInputShapes: a non-object payload is shown rather than dropped, and an absent one produces no argument rows at all.
 func TestUnit_RawInputShapes(t *testing.T) {
 	ev := sampleEvent(nil)
 	ev.Meta.Diff = ""
@@ -577,8 +547,7 @@ func TestUnit_RawInputShapes(t *testing.T) {
 	}
 }
 
-// TestUnit_ToolIdentityFallsBackToTitle: a peer that sent no _meta still
-// gets a card that names what it is asking about.
+// TestUnit_ToolIdentityFallsBackToTitle: a peer that sent no _meta still gets a card naming what it is asking about, via Title then "unknown tool".
 func TestUnit_ToolIdentityFallsBackToTitle(t *testing.T) {
 	ev := sampleEvent(nil)
 	ev.Meta = approvalflow.Meta{}
@@ -597,8 +566,7 @@ func TestUnit_ToolIdentityFallsBackToTitle(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderNeverExceedsWidth is the resize property for everything
-// except diff bodies, whose exemption is deliberate and tested above.
+// TestUnit_RenderNeverExceedsWidth: no rendered line exceeds width, except diff bodies, whose exemption is tested separately.
 func TestUnit_RenderNeverExceedsWidth(t *testing.T) {
 	ev := sampleEvent(nil)
 	ev.Meta.Diff = ""
@@ -632,10 +600,7 @@ func TestUnit_RenderNeverExceedsWidth(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgBlockGoldens pins the multi-line argument block at the resize
-// matrix in both glyph sets. This is the card the dogfooding hunt found
-// rendering its `code` argument as a "\n"-escaped one-liner cut at 240 bytes:
-// the one argument that had to be read was the least readable thing on it.
+// TestUnit_ArgBlockGoldens pins the multi-line argument block's rendering at the resize matrix, in both glyph sets.
 func TestUnit_ArgBlockGoldens(t *testing.T) {
 	for _, ascii := range []bool{false, true} {
 		for _, w := range goldenWidths {
@@ -652,9 +617,7 @@ func TestUnit_ArgBlockGoldens(t *testing.T) {
 	}
 }
 
-// TestUnit_MultiLineArgIsABlockNotAnEscapedOneLiner is defect 1 itself: every
-// source line gets its own frame line, at the block indent, with no "\n"
-// anywhere and nothing cut mid-content.
+// TestUnit_MultiLineArgIsABlockNotAnEscapedOneLiner: every source line gets its own frame line at the block indent, with no "\n" and nothing cut mid-content.
 func TestUnit_MultiLineArgIsABlockNotAnEscapedOneLiner(t *testing.T) {
 	lines := texts(New(scriptEvent(nil, nil)).Render(120, false, ""))
 	joined := strings.Join(lines, "\n")
@@ -692,7 +655,7 @@ func TestUnit_MultiLineArgIsABlockNotAnEscapedOneLiner(t *testing.T) {
 		t.Fatalf("line after the block = %q, want the next argument", got)
 	}
 	// Copy fidelity in the other direction: a backslash-n that is part of the
-	// SOURCE stays a backslash-n. The block neither escapes newlines nor
+	// source stays a backslash-n. The block neither escapes newlines nor
 	// un-escapes what the author wrote.
 	if got := lines[start+len(want)]; got != `    return { lines: notes.split("\n").length };` {
 		t.Fatalf("the source's own escape was rewritten: %q", got)
@@ -708,9 +671,7 @@ func TestUnit_MultiLineArgIsABlockNotAnEscapedOneLiner(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgBlockLinesAreUnwrapped is the copy-cleanliness rule the diff body
-// already has: a code line the card split would paste back as something that is
-// not what would run, so it is emitted whole at any width.
+// TestUnit_ArgBlockLinesAreUnwrapped: a block's code line is emitted whole at any width, same as a diff body line.
 func TestUnit_ArgBlockLinesAreUnwrapped(t *testing.T) {
 	long := "const payload = \"" + strings.Repeat("x", 300) + "\";"
 	ev := scriptEvent(nil, nil)
@@ -732,9 +693,7 @@ func TestUnit_ArgBlockLinesAreUnwrapped(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgBlockIsSanitized: the body is peer-supplied text shown to a human
-// as the thing they are authorising, so its exemption is from WRAPPING, never
-// from sanitizing.
+// TestUnit_ArgBlockIsSanitized: a block body's exemption from wrapping does not extend to control or bidi characters, which are stripped.
 func TestUnit_ArgBlockIsSanitized(t *testing.T) {
 	ev := scriptEvent(nil, nil)
 	ev.RawInput = mustArgs(t, map[string]any{
@@ -763,10 +722,7 @@ func TestUnit_ArgBlockIsSanitized(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgBlockCapAnnouncesWhatIsHidden: the cap is visible, states the
-// consequence, and — like the diff's own notice — is wrapped rather than
-// truncated at every width, because that sentence is what makes the elision
-// honest.
+// TestUnit_ArgBlockCapAnnouncesWhatIsHidden: a block past maxArgBlockLines is cut with a wrapped, exact-count cap notice; one at the cap announces nothing.
 func TestUnit_ArgBlockCapAnnouncesWhatIsHidden(t *testing.T) {
 	body := make([]string, 140)
 	for i := range body {
@@ -819,10 +775,7 @@ func TestUnit_ArgBlockCapAnnouncesWhatIsHidden(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgBlockYieldsToTheDiff: when a diff IS rendered, the scalar
-// summary's "see diff" is true and the diff is the better rendering of the same
-// bytes — so the card does not print the body twice and does not push the diff
-// away with it.
+// TestUnit_ArgBlockYieldsToTheDiff: when a diff is rendered, the argument stays a scalar "see diff" summary instead of duplicating the body as a block.
 func TestUnit_ArgBlockYieldsToTheDiff(t *testing.T) {
 	lines := texts(New(sampleEvent(nil)).Render(120, false, ""))
 	if !strings.HasPrefix(lines[2], "  content = ") || !strings.Contains(lines[2], "see diff") {
@@ -833,9 +786,7 @@ func TestUnit_ArgBlockYieldsToTheDiff(t *testing.T) {
 	}
 }
 
-// TestUnit_MayCallLine is defect 2's rendering half: what the operator learns
-// about a call whose arguments cannot say what it will touch. All three states
-// of the declaration read differently, because they mean different things.
+// TestUnit_MayCallLine: the three states of Meta.MayCallDeclared each render a different reach line, and the list is capped, sanitized and deduplicated.
 func TestUnit_MayCallLine(t *testing.T) {
 	line := func(ev enginebridge.PermissionRequested, w int, ascii bool) string {
 		for _, l := range texts(New(ev).Render(w, ascii, "")) {
@@ -922,8 +873,7 @@ func TestUnit_MayCallLine(t *testing.T) {
 	})
 }
 
-// TestUnit_ArgBlockChromeNeverExceedsWidth: the block's exemption covers its
-// BODY only. The key line and the cap notice are chrome and still fit.
+// TestUnit_ArgBlockChromeNeverExceedsWidth: the block's unwrapped exemption covers its body only; the key line and cap notice still fit width.
 func TestUnit_ArgBlockChromeNeverExceedsWidth(t *testing.T) {
 	body := make([]string, 60)
 	for i := range body {

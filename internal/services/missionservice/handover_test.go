@@ -10,9 +10,7 @@ import (
 
 // ─── typed handover on reports ──────────────────────────────────────────────
 
-// A report may carry a full typed hand-off; AddReport stores it verbatim and
-// ListReports round-trips it, so the next mission reads real context rather than
-// prose off the report.
+// TestUnit_AddReport_StoresTypedHandover pins that AddReport/ListReports round-trip a typed hand-off verbatim.
 func TestUnit_AddReport_StoresTypedHandover(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -42,9 +40,7 @@ func TestUnit_AddReport_StoresTypedHandover(t *testing.T) {
 	require.Equal(t, want.Caveats, reports[0].Handover.Caveats)
 }
 
-// A report without a hand-off is a legacy report: it stores and reads back with
-// a nil Handover, fully compatible with every report written before the field
-// existed.
+// TestUnit_AddReport_AbsentHandoverIsLegacyReport pins that a report with no hand-off round-trips with a nil Handover.
 func TestUnit_AddReport_AbsentHandoverIsLegacyReport(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -59,8 +55,7 @@ func TestUnit_AddReport_AbsentHandoverIsLegacyReport(t *testing.T) {
 	require.Nil(t, reports[0].Handover, "a report with no hand-off carries a nil Handover")
 }
 
-// An all-empty hand-off is collapsed to nil at storage, so "a hand-off with
-// nothing in it" and "no hand-off" are the same durable fact.
+// TestUnit_AddReport_EmptyHandoverCollapsesToNil pins that an all-blank hand-off is stored as no hand-off.
 func TestUnit_AddReport_EmptyHandoverCollapsesToNil(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -79,9 +74,7 @@ func TestUnit_AddReport_EmptyHandoverCollapsesToNil(t *testing.T) {
 	require.Nil(t, reports[0].Handover, "an all-blank hand-off is stored as no hand-off")
 }
 
-// The hand-off rides the ReportAddedEvent on the bus, so a routing service that
-// forwards the report to the next mission has the full hand-off in the event
-// (the self-contained-payload rule).
+// TestUnit_AddReport_HandoverRidesTheEvent pins that the hand-off rides the ReportAddedEvent without a read-back.
 func TestUnit_AddReport_HandoverRidesTheEvent(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{}
@@ -146,9 +139,7 @@ func manyArtifacts(n int) []string {
 	return out
 }
 
-// A report whose hand-off violates a shape cap is rejected at AddReport, so the
-// tool that filed it gets a legible error to correct — the report is not stored
-// with a corrupt hand-off.
+// TestUnit_AddReport_RejectsOversizedHandover pins that a hand-off violating a shape cap is rejected, not stored.
 func TestUnit_AddReport_RejectsOversizedHandover(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -167,9 +158,7 @@ func TestUnit_AddReport_RejectsOversizedHandover(t *testing.T) {
 	require.Empty(t, reports, "a report with a corrupt hand-off is not stored")
 }
 
-// The Report JSON is additive: a hand-off-carrying report and a legacy report
-// differ only by the presence of the `handover` key, and a legacy JSON blob (no
-// key) decodes to a nil Handover.
+// TestUnit_Report_HandoverJSONIsAdditive pins that the handover key is additive: absent on legacy JSON, present only when set.
 func TestUnit_Report_HandoverJSONIsAdditive(t *testing.T) {
 	var legacy Report
 	require.NoError(t, json.Unmarshal([]byte(`{"id":"r1","kind":"result","summary":"done"}`), &legacy))

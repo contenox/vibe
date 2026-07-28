@@ -33,10 +33,9 @@ func NewSQLiteManager(db libdbexec.DBManager) *SQLiteManager {
 	return &SQLiteManager{db: db}
 }
 
-// Executor returns a KVExecutor bound to a non-transactional connection.
-// The manager itself is handed to the executor as well so that the compound
-// read-modify-write operations (lists and sets) can open a real transaction;
-// a bare libdbexec.Exec cannot start one.
+// Executor returns a KVExecutor bound to a non-transactional connection. The
+// manager is handed along too, so list/set read-modify-write ops can open a
+// real transaction; a bare libdbexec.Exec cannot start one.
 func (m *SQLiteManager) Executor(_ context.Context) (KVExecutor, error) {
 	return &sqliteExecutor{exec: m.db.WithoutTransaction(), db: m.db}, nil
 }
@@ -46,11 +45,9 @@ func (m *SQLiteManager) Close() error {
 	return m.db.Close()
 }
 
-// sqliteExecutor implements KVExecutor using a libdbexec.Exec.
-//
-// db is the manager that produced exec. It is nil only for executors created
-// internally to run inside an already-open transaction (see withWriteTx), which
-// must never try to nest another one.
+// sqliteExecutor implements KVExecutor using a libdbexec.Exec. db is nil for
+// executors created internally to run inside an already-open transaction (see
+// withWriteTx), which must never try to nest another one.
 type sqliteExecutor struct {
 	exec libdbexec.Exec
 	db   libdbexec.DBManager
@@ -71,29 +68,19 @@ func translateSQLiteKVError(err error) error {
 	return fmt.Errorf("libkvstore/sqlite: %w", err)
 }
 
-// withWriteTx runs fn inside a transaction that already holds SQLite's write lock,
-// so a read-modify-write cycle cannot interleave with another writer's.
-//
-// WHY the lock has to be taken up front: libdbexec only exposes BeginTx with default
-// options, i.e. a DEFERRED transaction, and there is no way to ask it for
-// BEGIN IMMEDIATE. A deferred transaction that reads first and writes later takes a
-// read snapshot and then tries to upgrade; in WAL mode that upgrade fails outright
-// with SQLITE_BUSY_SNAPSHOT if anyone else wrote in between, and busy_timeout does
-// not retry it. Issuing a write statement as the very first thing in the transaction
-// promotes it to a write transaction immediately, which is exactly what BEGIN
-// IMMEDIATE does; from there busy_timeout (5s, set in the DSN) serialises writers.
-// The no-op UPDATE is used rather than an INSERT because it must not materialise a
-// row for a key that does not exist — ListRPop on a missing key has to stay a miss.
-//
-// This is a real database-level lock, so it holds across separate PROCESSES sharing
-// the same database file, not merely across goroutines in one process.
+// withWriteTx runs fn inside a transaction that already holds SQLite's write
+// lock, so a read-modify-write cycle cannot interleave with another writer's.
+// libdbexec only exposes DEFERRED transactions; a deferred tx that reads then
+// writes fails to upgrade with SQLITE_BUSY_SNAPSHOT under WAL if another writer
+// intervened. Issuing a no-op write first promotes it immediately (BEGIN
+// IMMEDIATE semantics) without materialising a row for a missing key. The lock
+// is a real database-level lock: it holds across processes sharing the file,
+// not just goroutines.
 func (e *sqliteExecutor) withWriteTx(ctx context.Context, key Key, fn func(txe *sqliteExecutor) error) error {
 	if e.db == nil {
 		return fmt.Errorf("libkvstore/sqlite: executor has no transaction capability")
 	}
-	// A handful of retries covers the window where busy_timeout expires under heavy
-	// fan-out; beyond that the caller deserves the error.
-	const maxAttempts = 8
+	const maxAttempts = 8 // covers the window where busy_timeout expires under heavy fan-out
 	var err error
 	for attempt := range maxAttempts {
 		err = e.writeTxOnce(ctx, key, fn)
@@ -161,7 +148,6 @@ func (e *sqliteExecutor) Get(ctx context.Context, key Key) (json.RawMessage, err
 
 	// Honour TTL: treat expired entries as not found.
 	if expiresAtNs.Valid && time.Now().UnixNano() > expiresAtNs.Int64 {
-		// Lazy delete
 		_, _ = e.exec.ExecContext(ctx, `DELETE FROM kv_store WHERE key = ?`, key)
 		return nil, ErrNotFound
 	}
@@ -205,10 +191,8 @@ func (e *sqliteExecutor) Exists(ctx context.Context, key Key) (bool, error) {
 }
 
 func (e *sqliteExecutor) Keys(ctx context.Context, pattern string) ([]Key, error) {
-	// SQLite LIKE uses % and _ wildcards; convert glob-style * to %.
-	// The ESCAPE clause is mandatory, not cosmetic: SQLite's LIKE has NO default
-	// escape character, so globToLike's backslash escapes would be matched literally
-	// and any key containing a % or _ would be unreachable.
+	// ESCAPE is mandatory: SQLite's LIKE has no default escape character, so
+	// globToLike's backslash escapes would otherwise match literally.
 	likePattern := globToLike(pattern)
 	rows, err := e.exec.QueryContext(ctx,
 		`SELECT key FROM kv_store WHERE key LIKE ? ESCAPE '\' AND (expires_at IS NULL OR expires_at > ?)`,
@@ -257,10 +241,8 @@ func (e *sqliteExecutor) listSave(ctx context.Context, key Key, list []json.RawM
 	return e.Set(ctx, key, data)
 }
 
-// ListPush prepends value (LPUSH semantics). The load/mutate/store cycle runs under
-// a write transaction so that concurrent pushes cannot clobber each other — the
-// valkey backend gets this for free from LPUSH being atomic, and callers are entitled
-// to treat the two backends as interchangeable.
+// ListPush prepends value (LPUSH semantics), under a write transaction so
+// concurrent pushes can't clobber each other, matching valkey's atomic LPUSH.
 func (e *sqliteExecutor) ListPush(ctx context.Context, key Key, value json.RawMessage) error {
 	return e.withWriteTx(ctx, key, func(txe *sqliteExecutor) error {
 		list, err := txe.listLoad(ctx, key)
@@ -299,8 +281,7 @@ func (e *sqliteExecutor) ListTrim(ctx context.Context, key Key, start, stop int6
 		if err != nil {
 			return err
 		}
-		// Work on copies: withWriteTx may run this closure more than once and the
-		// normalisation below is not idempotent.
+		// withWriteTx may retry this closure; the normalisation below isn't idempotent.
 		lo, hi := start, stop
 		n := int64(len(list))
 		if lo < 0 {
@@ -328,8 +309,8 @@ func (e *sqliteExecutor) ListLength(ctx context.Context, key Key) (int64, error)
 	return int64(len(list)), nil
 }
 
-// ListRPop removes and returns the tail element. Transactional for the reason given
-// on ListPush: without it two poppers can return the same element.
+// ListRPop removes and returns the tail element; transactional so two poppers
+// can't return the same element.
 func (e *sqliteExecutor) ListRPop(ctx context.Context, key Key) (json.RawMessage, error) {
 	var popped json.RawMessage
 	err := e.withWriteTx(ctx, key, func(txe *sqliteExecutor) error {
@@ -402,10 +383,8 @@ func (e *sqliteExecutor) SetRemove(ctx context.Context, key Key, member json.Raw
 
 // ── utilities ─────────────────────────────────────────────────────────────────
 
-// globToLike converts a Redis/glob-style pattern (using *) to an SQL LIKE pattern (using %).
-// The escapes it emits only work if the query carries ESCAPE '\' — see Keys.
-// A literal backslash in the pattern is doubled for the same reason: with ESCAPE '\'
-// active, a lone backslash would swallow the character after it.
+// globToLike converts a glob-style pattern (*, ?) to an SQL LIKE pattern (%, _),
+// escaping literal %, _, and \. Only correct paired with ESCAPE '\' — see Keys.
 func globToLike(pattern string) string {
 	out := make([]byte, 0, len(pattern))
 	for i := 0; i < len(pattern); i++ {

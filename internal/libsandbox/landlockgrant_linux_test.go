@@ -8,11 +8,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// TestUnit_llWrite_NoDeviceNodeCreation is the FIX 5 regression: the writable
-// grant must NOT confer device-node creation (MAKE_CHAR/MAKE_BLOCK) or device
-// ioctls (IOCTL_DEV) — the agent holds CAP_MKNOD in its userns, so granting those
-// would let it mint device nodes as an escape primitive. It must still confer the
-// node types real tooling needs.
+// TestUnit_llWrite_NoDeviceNodeCreation pins that llWrite never confers
+// device-node creation (MAKE_CHAR/MAKE_BLOCK) or IOCTL_DEV — a CAP_MKNOD escape
+// primitive — while still granting the node types real tooling needs.
 func TestUnit_llWrite_NoDeviceNodeCreation(t *testing.T) {
 	forbidden := map[string]uint64{
 		"MAKE_CHAR":  unix.LANDLOCK_ACCESS_FS_MAKE_CHAR,
@@ -44,11 +42,9 @@ func TestUnit_llWrite_NoDeviceNodeCreation(t *testing.T) {
 	}
 }
 
-// TestUnit_supportedFS_StillHandlesDeviceRights proves the other half of FIX 5:
-// the device-node rights stay in the HANDLED set, so the kernel actively DENIES
-// them (a handled-but-never-granted right is denied; an unhandled right is
-// allowed). If these were dropped from `handled`, device creation would silently
-// become permitted again.
+// TestUnit_supportedFS_StillHandlesDeviceRights pins that device-node rights
+// stay in the HANDLED set (denied unless granted) rather than dropped, which
+// would silently permit them again.
 func TestUnit_supportedFS_StillHandlesDeviceRights(t *testing.T) {
 	handled := supportedFS(5) // ABI 5+ is where IOCTL_DEV exists
 	for name, bit := range map[string]uint64{
@@ -62,10 +58,9 @@ func TestUnit_supportedFS_StillHandlesDeviceRights(t *testing.T) {
 	}
 }
 
-// TestUnit_DeviceFloor_Composition pins the /dev floor's split so a careless edit
-// cannot quietly break it: /dev/null must be in the writable half (a read-only
-// /dev/null breaks "cmd 2>/dev/null" for a confined Bash), and the two halves must
-// stay disjoint so each device's intended access is declared in exactly one place.
+// TestUnit_DeviceFloor_Composition pins that /dev/null is in the writable half
+// (needed for shell redirection) and the read-only/writable device lists stay
+// disjoint.
 func TestUnit_DeviceFloor_Composition(t *testing.T) {
 	if len(systemRuntimeWritableDevices) == 0 {
 		t.Fatal("systemRuntimeWritableDevices is empty: /dev/null must be granted writable")

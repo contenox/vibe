@@ -1,23 +1,9 @@
-// workspace_cmd.go is the `contenox workspace` command tree — the shell-side
-// grant verbs for the workspace-root allowlist that bounds what a session (a
-// chat, a dispatched unit, a Beam file browse) may choose as its working
-// directory.
-//
-// Unlike `contenox fleet` / `mission`, these do NOT reach serve over REST. A
-// grant is DURABLE config in the shared ~/.contenox/local.db every process opens,
-// so `workspace add/remove` writes it directly (the config-command register of
-// `contenox config`) and then rings a reload doorbell on the shared SQLite bus —
-// the same cross-process rail the report-routing slice proved (CLI writer → serve
-// reader). A running `contenox serve` re-reads the config on that signal and
-// swaps its live root set without a restart; a serve started later reads the same
-// durable config at boot. So these verbs work whether or not serve is up, and a
-// running serve applies them live.
-//
-// `workspace` manages the GRANTS — the roots an operator adds beyond serve's
-// launch-time roots (its served directory, --workspace-root flags,
-// WORKSPACE_ROOTS). serve always also allows its own launched default root; that
-// one is not a grant and is not listed here (it shows in the API / Beam picker,
-// GET /workspace/roots).
+// workspace_cmd.go is the `contenox workspace` command tree: shell-side grant
+// verbs for the workspace-root allowlist that bounds a session's working
+// directory. Grants are durable config in the shared database; writing one
+// also publishes a bus event (workspacegrants.RootsChangedSubject), but
+// nothing subscribes to it today, so there is no live reload of an
+// already-open session.
 package contenoxcli
 
 import (
@@ -41,27 +27,24 @@ dispatched mission unit, or a Beam file browse) may choose as its working
 directory. Granting a root grants everything UNDER it; a directory outside every
 granted root is refused.
 
-Grants are durable config in the shared database, so these verbs work whether or
-not 'contenox serve' is running. When serve IS running, a grant applies LIVE —
-these verbs ring a reload signal serve picks up without a restart.
+Grants are durable config in the shared database. Writing one also publishes a
+reload event on the bus, but nothing subscribes to it today, so a grant does
+not apply to an already-open session — it takes effect the next time a
+session is opened.
 
   contenox workspace add /home/me/src        # grant a root (and everything under it)
   contenox workspace add /home/me/scratch
   contenox workspace list                     # the roots you have granted
-  contenox workspace remove /home/me/scratch  # revoke a grant
-
-serve always also allows its own launched default root (its served directory, or
-home for a bare 'contenox serve'); that is not a grant and is not listed here —
-it appears in the API and the Beam folder picker (GET /workspace/roots).`,
+  contenox workspace remove /home/me/scratch  # revoke a grant`,
 }
 
 var workspaceAddCmd = &cobra.Command{
 	Use:   "add <path>",
 	Short: "Grant a directory as a project workspace root.",
 	Long: `Grant <path> as a workspace root. The path must be an existing directory;
-granting it grants everything under it. The grant is durable and, if a
-'contenox serve' is running, applies live (no restart). Granting a path already
-granted is a no-op.
+granting it grants everything under it. The grant is durable immediately, but
+nothing today reloads it into an already-open session — open a new session to
+pick it up. Granting a path already granted is a no-op.
 
 The granted directory is also registered as a project: its
 .contenox/workspace.id marker is created if absent, and --name stamps a friendly
@@ -76,9 +59,9 @@ var workspaceRemoveCmd = &cobra.Command{
 	Use:   "remove <path>",
 	Short: "Revoke a workspace-root grant.",
 	Long: `Revoke the grant for <path>. Sessions may no longer choose it (or anything
-under it) unless it is still covered by another granted root or serve's launched
-default. Revoking a path that was never granted is a no-op. The path need not
-still exist, so a grant to a since-deleted directory can be cleaned up.`,
+under it) unless it is still covered by another granted root. Revoking a path
+that was never granted is a no-op. The path need not still exist, so a grant
+to a since-deleted directory can be cleaned up.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWorkspaceRemove,
 }
@@ -87,8 +70,7 @@ var workspaceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List the granted workspace roots.",
 	Long: `Print the workspace roots you have granted, one per line. This is the durable
-grant list these verbs manage; serve additionally allows its own launched default
-root, which is shown by the API and the Beam folder picker, not here.`,
+grant list these verbs manage.`,
 	Args: cobra.NoArgs,
 	RunE: runWorkspaceList,
 }
@@ -101,20 +83,17 @@ func init() {
 }
 
 func runWorkspaceAdd(cmd *cobra.Command, args []string) error {
-	// Same boundary rule as the REST mutator (workspace_reload.go): a bad friendly
-	// name is refused BEFORE anything persists, never silently dropped.
+	// Reject a bad friendly name before anything persists (same validation
+	// project.Register applies).
 	rawName, _ := cmd.Flags().GetString("name")
 	name, err := project.NormalizeName(rawName)
 	if err != nil {
 		return fmt.Errorf("%w: %v", workspacegrants.ErrInvalidGrant, err)
 	}
 
-	// Control-plane isolation (vfs-invariant slice): refuse granting the runtime's
-	// own state dir (~/.contenox: config, database, HITL policies, declared agents)
-	// as a workspace root. This CLI runs in a SEPARATE process from serve, which is
-	// where the vfs global denylist is set, so we compute the control-plane dirs
-	// here (the same set serve denies) and check against them directly. See
-	// runtime/vfs/controlplane.go.
+	// Refuse granting the runtime's own state dir (~/.contenox) as a workspace
+	// root. There is no separate daemon to defer to, so this CLI computes the
+	// control-plane dirs itself.
 	if contenoxDir, derr := ResolveContenoxDir(cmd); derr == nil {
 		if denied, ok := vfs.WithinControlPlane(controlPlaneDirs(contenoxDir), args[0]); ok {
 			return fmt.Errorf("%w: %q is inside the runtime's control plane (%s) and can never be a workspace root — the runtime never lets a session reach its own config, database, or policies", workspacegrants.ErrInvalidGrant, args[0], denied)
@@ -132,12 +111,9 @@ func runWorkspaceAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Register the granted directory as a project — the SAME best-effort marker
-	// stamp the serve-side REST mutator applies (fresh markers default their name
-	// to the folder basename; an explicit --name renames), so a CLI grant and a
-	// Beam "Add project" produce the same on-disk result. The grant is already
-	// durable, so a marker write failure (e.g. a read-only folder) only costs the
-	// friendly name, never the grant.
+	// Register the granted directory as a project so it gets a friendly name
+	// and a stable workspace id. The grant is already durable, so a marker
+	// write failure only costs the friendly name, never the grant.
 	if _, merr := project.Register(args[0], name); merr != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"note: root granted, but its project marker could not be written (the name falls back to the folder name): %v\n", merr)
@@ -176,17 +152,17 @@ func runWorkspaceList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ringReloadDoorbell publishes the reload signal on the shared SQLite bus so a
-// running serve applies the change live. Best-effort by contract: the grant is
-// already durable, so a publish failure (no serve to hear it, a bus hiccup)
-// leaves the grant intact and serve converges on its next boot or signal — it is
-// noted on stderr, never a command failure.
+// ringReloadDoorbell publishes the workspace-roots-changed event on the bus.
+// No process subscribes to it today, so this is forward-looking rather than
+// a working live reload; the grant itself is what's durable regardless.
+// Best-effort: a publish failure is noted on stderr, never a command
+// failure, since the grant is already durable.
 func ringReloadDoorbell(ctx context.Context, cmd *cobra.Command, db libdb.DBManager, roots []string) {
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
 	if err := workspacegrants.PublishChanged(ctx, bus, roots); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
-			"note: workspace-root change saved, but the live-reload signal to a running serve failed: %v\n", err)
+			"note: workspace-root change saved, but publishing the reload event failed: %v\n", err)
 	}
 }
 
@@ -198,8 +174,7 @@ func printWorkspaceGrants(cmd *cobra.Command, roots []string) {
 	}
 	fmt.Fprintln(out, "Granted workspace roots:")
 	for _, r := range roots {
-		// The project's friendly name, when its marker carries one — the same label
-		// the API and the Beam picker show for this root.
+		// The project's friendly name, when its marker carries one.
 		if m, ok := project.ReadFromProjectRoot(r); ok && m.Name != "" {
 			fmt.Fprintf(out, "  %s  (%s)\n", r, m.Name)
 			continue

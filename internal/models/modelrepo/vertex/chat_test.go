@@ -156,7 +156,6 @@ func TestUnit_BuildVertexRequest_ImageInputAddsInlineDataPart(t *testing.T) {
 	req, err := buildVertexRequest("gemini-flash-latest", msgs, nil)
 	require.NoError(t, err)
 
-	// White-box: the user content carries a text part then an inlineData part.
 	require.Len(t, req.Contents, 1)
 	parts := req.Contents[0].Parts
 	require.Len(t, parts, 2)
@@ -165,8 +164,7 @@ func TestUnit_BuildVertexRequest_ImageInputAddsInlineDataPart(t *testing.T) {
 	require.Equal(t, "image/jpeg", parts[1].InlineData.MimeType)
 	require.Equal(t, imgBytes, parts[1].InlineData.Data)
 
-	// Wire shape: the marshaled JSON carries the inlineData part with the
-	// base64 payload and correct mime type.
+	// Wire shape: base64 payload and mime type round-trip in the marshaled JSON.
 	raw, err := json.Marshal(req)
 	require.NoError(t, err)
 	js := string(raw)

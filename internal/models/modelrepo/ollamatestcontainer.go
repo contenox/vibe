@@ -37,7 +37,6 @@ func SetupOllamaLocalInstance(ctx context.Context, tag string) (string, testcont
 	if tag == "" {
 		tag = "latest"
 	}
-	// Mount the unique volume
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:           "ollama/ollama:" + tag,

@@ -22,10 +22,7 @@ func shippedPreset(t *testing.T, name string) string {
 	return ""
 }
 
-// TestUnit_MissingPolicyToolsets is the detector's own contract. The claim it
-// makes is narrow on purpose: "this envelope has no rule for that toolset AT
-// ALL" is evidence the file predates the toolset; anything weaker is evidence of
-// nothing and must never produce a warning about someone's security boundary.
+// TestUnit_MissingPolicyToolsets asserts a toolset counts as missing only when the envelope has no rule for it at all — nothing weaker triggers a warning.
 func TestUnit_MissingPolicyToolsets(t *testing.T) {
 	t.Parallel()
 
@@ -46,8 +43,8 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 
 	t.Run("reordered or reworded rules are not staleness", func(t *testing.T) {
 		t.Parallel()
-		// Same three toolsets, different order, different tool names, an extra
-		// condition, a tightened action: all of it is the operator's business.
+		// Reordering, renaming tools, adding conditions, tightening actions:
+		// all the operator's business, none of it staleness.
 		onDisk := `{
 			"default_action": "deny",
 			"rules": [
@@ -112,9 +109,7 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 	})
 }
 
-// TestUnit_StalePolicyPresets_PreStateFileInstall walks the shape that actually
-// shipped the bug: an install whose ~/.contenox predates gointel/goja/jq/
-// workspace and has no provenance record, so the upgrade cannot touch it.
+// TestUnit_StalePolicyPresets_PreStateFileInstall asserts an install predating gointel/goja/jq/workspace, with no provenance record, is detected as stale and left untouched.
 func TestUnit_StalePolicyPresets_PreStateFileInstall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -150,9 +145,7 @@ func TestUnit_StalePolicyPresets_PreStateFileInstall(t *testing.T) {
 	require.NotContains(t, notice, "\n", "the startup notice is one line, not a wall")
 }
 
-// TestUnit_StalePolicyNotice_StopsAfterRefresh is the anti-noise guarantee: the
-// line appears until the envelope has the rules, by either route, and then never
-// again.
+// TestUnit_StalePolicyNotice_StopsAfterRefresh asserts the notice appears until the envelope gains the rules, by refresh or by hand, and never again after.
 func TestUnit_StalePolicyNotice_StopsAfterRefresh(t *testing.T) {
 	t.Parallel()
 	previous := `{"default_action":"approve","rules":[{"tools":"local_fs","tool":"read_file","action":"allow"}]}`
@@ -212,10 +205,7 @@ func TestUnit_StalePolicyNotice_StopsAfterRefresh(t *testing.T) {
 	})
 }
 
-// TestUnit_StalePolicyPresets_ReadsTheFileTheLoaderWouldRead pins the search
-// order: the engine's policy source takes the first match along the path, so a
-// current preset in the workspace dir must not be judged by a stale one in
-// $HOME (or the reverse).
+// TestUnit_StalePolicyPresets_ReadsTheFileTheLoaderWouldRead asserts staleness is judged on the first policy file along the search path, matching the loader.
 func TestUnit_StalePolicyPresets_ReadsTheFileTheLoaderWouldRead(t *testing.T) {
 	t.Parallel()
 	workspace, home := t.TempDir(), t.TempDir()
@@ -230,9 +220,7 @@ func TestUnit_StalePolicyPresets_ReadsTheFileTheLoaderWouldRead(t *testing.T) {
 		"with the stale copy first, that is the one the loader reads")
 }
 
-// TestUnit_DoctorStalePolicyWarning covers the doctor surface end to end: the
-// warning is rendered, it names the toolsets and the refresh verb, and it never
-// makes doctor report a blocked runtime.
+// TestUnit_DoctorStalePolicyWarning asserts doctor renders the stale-preset warning without ever reporting a blocked runtime.
 func TestUnit_DoctorStalePolicyWarning(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -264,8 +252,7 @@ func TestUnit_DoctorStalePolicyWarning(t *testing.T) {
 	require.Contains(t, cleanOut.String(), "All checks passed.")
 }
 
-// TestUnit_PolicyDirs mirrors hitlPolicySource's search path, and collapses the
-// duplicate beam produces by resolving its primary dir to $HOME/.contenox.
+// TestUnit_PolicyDirs asserts policyDirs mirrors hitlPolicySource's search path and dedupes when the primary dir is already $HOME/.contenox.
 func TestUnit_PolicyDirs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

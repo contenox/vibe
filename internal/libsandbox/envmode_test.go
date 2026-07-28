@@ -6,8 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// deny-secrets keeps an inherited toolchain variable while stripping a known
-// credential and the control plane — the low-breakage default posture.
+// deny-secrets keeps an inherited toolchain variable while stripping a credential and the control plane.
 func TestUnit_EnvPolicyForMode_DenySecrets(t *testing.T) {
 	scrub := EnvScrub(ScrubDenySecrets, nil, nil)
 	require.NotNil(t, scrub)
@@ -22,8 +21,7 @@ func TestUnit_EnvPolicyForMode_DenySecrets(t *testing.T) {
 	require.Equal(t, []string{"GOCACHE=/c", "PATH=/usr/bin"}, got)
 }
 
-// strict passes only the safe base set plus an explicit extra allow; an
-// un-named toolchain variable that deny-secrets would have kept is absent here.
+// strict passes only the safe base set plus an explicit extra allow; an un-named variable is absent.
 func TestUnit_EnvPolicyForMode_Strict(t *testing.T) {
 	scrub := EnvScrub(ScrubStrict, []string{"GOCACHE"}, nil)
 	require.NotNil(t, scrub)
@@ -31,15 +29,14 @@ func TestUnit_EnvPolicyForMode_Strict(t *testing.T) {
 	got := scrub([]string{
 		"PATH=/usr/bin",
 		"GOCACHE=/c",
-		"CARGO_HOME=/h", // not allowed in strict — dropped
+		"CARGO_HOME=/h",
 		"AWS_SECRET_ACCESS_KEY=shhh",
 	})
 
 	require.Equal(t, []string{"GOCACHE=/c", "PATH=/usr/bin"}, got)
 }
 
-// off (and any unrecognized mode) is inactive: EnvScrub returns nil so the caller
-// leaves the environment untouched, and EnvPolicyForMode reports active=false.
+// off, and any unrecognized mode, is inactive: EnvScrub returns nil, EnvPolicyForMode reports active=false.
 func TestUnit_EnvPolicyForMode_OffAndUnknownAreInactive(t *testing.T) {
 	require.Nil(t, EnvScrub(ScrubOff, nil, nil))
 	require.Nil(t, EnvScrub("typo-mode", nil, nil))
@@ -50,15 +47,13 @@ func TestUnit_EnvPolicyForMode_OffAndUnknownAreInactive(t *testing.T) {
 	require.False(t, active)
 }
 
-// The operator's extra deny is layered onto both postures, and the operator's
-// extra allow onto strict, without mutating the shared default literals.
+// Extra allow/deny lists layer in without mutating the shared default literals.
 func TestUnit_EnvPolicyForMode_ExtraListsLayerIn(t *testing.T) {
 	strict, _ := EnvPolicyForMode(ScrubStrict, []string{"FOO_*"}, []string{"BAR"})
 	require.Contains(t, strict.Allow, "FOO_*")
 	require.Contains(t, strict.Deny, "BAR")
-	require.Contains(t, strict.Deny, "CONTENOX_*") // control plane always present
+	require.Contains(t, strict.Deny, "CONTENOX_*")
 
-	// A fresh policy is not tainted by the previous call's extras.
 	fresh, _ := EnvPolicyForMode(ScrubStrict, nil, nil)
 	require.NotContains(t, fresh.Allow, "FOO_*")
 }

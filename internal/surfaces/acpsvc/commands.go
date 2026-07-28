@@ -23,15 +23,10 @@ import (
 	libacp "github.com/contenox/beam/libacp"
 )
 
-// allACPCommands is the full, capability-unfiltered admin command set — every
-// command this package knows how to dispatch, regardless of what the current
-// transport can actually run. It exists so parseCommand's recognition (via
-// acpCommandNames, below) is never narrower than what (*Transport).acpCommands
-// advertises: a command that got dropped from the advertised menu must still be
-// recognized as a command when a client sends it anyway (see handleMission's
-// teaching error for /mission), not silently forwarded as ordinary prompt text.
-// Use (*Transport).acpCommands for anything that reaches a client — the menu,
-// /help, session/new's available_commands — never this directly.
+// allACPCommands is the full, capability-unfiltered admin command set, so
+// parseCommand recognizes a command even when it's dropped from the
+// advertised menu (see handleMission's teaching error). Use
+// (*Transport).acpCommands for anything reaching a client.
 func allACPCommands() []libacp.AvailableCommand {
 	return []libacp.AvailableCommand{
 		{Name: "help", Description: "List the available commands."},
@@ -49,15 +44,10 @@ func allACPCommands() []libacp.AvailableCommand {
 	}
 }
 
-// acpCommands is the admin command set actually advertised to THIS transport's
-// ACP clients — capability-filtered from allACPCommands. /mission is dropped
-// unless hasMissionCapability reports the fleet kernel and agent resolver it
-// needs are both wired (only true in a serve-hosted session): ACP is
-// advertise-what-works, so a standalone `contenox acp` process (what Zed
-// spawns, with no fleet kernel of its own) must never list a command that can
-// only error out. The protocol only uses this list as a client-side
-// autocomplete/menu hint — an invoked command arrives back as ordinary prompt
-// text, which Prompt intercepts.
+// acpCommands is the admin command set advertised to this transport's ACP
+// clients: allACPCommands filtered by capability. /mission is dropped unless
+// hasMissionCapability reports both the fleet kernel and agent resolver
+// wired — never advertise a command that can only error out.
 func (t *Transport) acpCommands() []libacp.AvailableCommand {
 	all := allACPCommands()
 	if t.hasMissionCapability() {
@@ -73,9 +63,9 @@ func (t *Transport) acpCommands() []libacp.AvailableCommand {
 	return out
 }
 
-// acpCommandNames is the set of recognized command names, used by parseCommand.
-// Built from allACPCommands (the unfiltered superset), not the per-transport
-// advertised list — see allACPCommands' doc comment for why.
+// acpCommandNames is the set of recognized command names, used by
+// parseCommand. Built from allACPCommands, not the per-transport advertised
+// list.
 var acpCommandNames = func() map[string]struct{} {
 	m := make(map[string]struct{}, len(allACPCommands()))
 	for _, c := range allACPCommands() {
@@ -105,30 +95,18 @@ func parseCommand(input string) (name, args string, ok bool) {
 	return first, args, true
 }
 
-// commandShapeRE matches the token AFTER the leading slash of an input that is
-// SHAPED like one of this server's slash commands: lowercase letters, digits
-// and dashes only, which is the shape every name in allACPCommands has.
-//
-// It is deliberately much narrower than parseCommand's "everything up to the
-// first space", because it is what decides whether an UNRECOGNIZED leading
-// slash is answered locally or handed to the model. The three shapes that
-// legitimately begin with a slash all fall outside the class and keep reaching
-// the model untouched: an absolute path carries a second slash ("/etc/passwd",
-// "/home/x y"), a capitalized or extension-bearing path carries characters
-// outside it ("/Users/foo", "/tmp/a.txt"), and prose that merely MENTIONS a
-// path never leads with one ("what does /etc do").
+// commandShapeRE matches the token after a leading slash shaped like a slash
+// command (lowercase letters, digits, dashes). Deliberately narrower than
+// parseCommand's "up to the first space": it decides whether an unrecognized
+// leading slash is answered locally or handed to the model, and must let
+// paths ("/etc/passwd", "/Users/foo") and prose mentioning a path reach the
+// model untouched.
 var commandShapeRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 
-// unknownCommandName reports the name of an input that LOOKS like one of this
-// server's slash commands but names none of them — "/totallyfakecommand" —
-// together with true. It is the second half of the dispatch decision
-// parseCommand opens: parseCommand answers "is this a command I can run", this
-// answers "is this a command at all".
-//
-// Without it an unrecognized slash line fell through as ordinary prompt text:
-// the model spent a real turn improvising an error message, which cost tokens,
-// took seconds, and was different every time — a non-deterministic answer to a
-// question the server can answer exactly. See answerUnknownCommand.
+// unknownCommandName reports whether input looks like a slash command but
+// names none of them. Without this, an unrecognized command fell through as
+// prompt text and cost a real (non-deterministic) model turn to answer what
+// the server can answer exactly. See answerUnknownCommand.
 func unknownCommandName(input string) (string, bool) {
 	s := strings.TrimSpace(input)
 	if !strings.HasPrefix(s, "/") {
@@ -148,26 +126,16 @@ func unknownCommandName(input string) (string, bool) {
 }
 
 // unknownCommandMessage is the teaching line an unknown command is answered
-// with. It carries the "⚠️  " prefix every other command failure carries (see
-// dispatchCommand's error path) so the operator reads one refusal vocabulary,
-// and it names the ONE next action rather than dumping the whole menu.
+// with, using the same "⚠️ " prefix as other command failures.
 func unknownCommandMessage(name string) string {
 	return fmt.Sprintf("⚠️  unknown command: /%s — /help lists commands", name)
 }
 
-// answerUnknownCommand ends the turn locally with the teaching line: one
-// agent_message_chunk, StopReasonEndTurn, and NO model call at all.
-//
-// It deliberately does NOT persistCommandTurn, unlike dispatchCommand's error
-// path, which persists a KNOWN command that ran and failed. The distinction is
-// what actually happened: `/model bogus` is an act whose failure explains why
-// the model did not change, so the transcript owes the operator that record;
-// `/totallyfakecommand` never entered dispatch, changed nothing, and cost
-// nothing. Writing it would put a typo in the durable transcript — and, when it
-// is a session's FIRST message, make that typo the session's derived title
-// (see firstUserMessageTitle) for the rest of its life. This is the same
-// "the transcript is not the right home for this" exception
-// commandRewritesHistory carves out, decided one step earlier.
+// answerUnknownCommand ends the turn locally with the teaching line and no
+// model call. Deliberately skips persistCommandTurn: unlike a known command
+// that ran and failed, nothing here actually happened, so writing a typo to
+// the durable transcript (and possibly the session's derived title) would be
+// wrong.
 func (t *Transport) answerUnknownCommand(ctx context.Context, sid libacp.SessionID, name string) libacp.PromptResponse {
 	t.sendUpdate(ctx, libacp.SessionNotification{
 		SessionID: sid,
@@ -233,13 +201,8 @@ func (t *Transport) dispatchCommand(ctx context.Context, sid libacp.SessionID, s
 	}
 	t.persistCommandTurn(ctx, sess, name, args, out)
 	if commandUpdatesSessionInfo(name) {
-		// An ordinary turn pushes session_info_update from Prompt's own
-		// AfterResponse; a command returns before ever reaching it, so a
-		// command that CHANGES the session's label has to push its own — else
-		// the operator renames a session and watches the old label sit there
-		// until a full re-list. Deferred past the response for the same reason
-		// Prompt defers its: a client maps the update to a session it already
-		// knows about, in the order the wire delivered.
+		// A command returns before Prompt's own AfterResponse push, so one
+		// that changes the session's label pushes its own here.
 		libacp.AfterResponse(ctx, func() {
 			update := libacp.SessionUpdate{
 				SessionUpdate: libacp.SessionUpdateSessionInfo,
@@ -260,22 +223,11 @@ func (t *Transport) dispatchCommand(ctx context.Context, sid libacp.SessionID, s
 	return libacp.PromptResponse{StopReason: libacp.StopReasonEndTurn}, nil
 }
 
-// persistCommandTurn records a slash-command exchange — the line the operator
-// typed and the answer they got — in the session's durable transcript, the same
-// store an ordinary turn writes to.
-//
-// Without this a command is a WIRE EVENT ONLY: it renders once and is gone on
-// reload. That was invisible for /help, and badly wrong for /mission, whose whole
-// point is a durable act — an operator who fired a mission as a session's FIRST
-// message came back to a session with no messages at all, which has no title (the
-// sidebar falls back to a short id), no last-activity timestamp (so beam's
-// freshest-first roster sorts it below every real chat), and an empty transcript.
-// The session looked deleted. It was merely never written to.
-//
-// The two history-rewriting commands are excluded, because for them the
-// transcript is the OUTPUT, not the record: /clear empties it (appending the
-// command that emptied it would leave the one line it just promised to remove)
-// and /compact replaces it with a summary.
+// persistCommandTurn records a slash-command exchange in the session's
+// durable transcript, the same store an ordinary turn writes to — without
+// this a command is a wire event only, gone on reload. commandRewritesHistory
+// commands are excluded: for them the transcript is the output, not a record
+// to append to.
 func (t *Transport) persistCommandTurn(ctx context.Context, sess *sessionEntry, name, args, out string) {
 	if t.deps.DB == nil || sess == nil || commandRewritesHistory(name) {
 		return
@@ -302,8 +254,8 @@ func (t *Transport) persistCommandTurn(ctx context.Context, sess *sessionEntry, 
 	}
 }
 
-// commandRewritesHistory reports whether a command owns the transcript itself, in
-// which case persistCommandTurn must not append to it. See there.
+// commandRewritesHistory reports whether a command owns the transcript
+// itself, in which case persistCommandTurn must not append to it.
 func commandRewritesHistory(name string) bool {
 	switch name {
 	case "clear", "compact":
@@ -313,8 +265,8 @@ func commandRewritesHistory(name string) bool {
 	}
 }
 
-// commandUpdatesSessionInfo reports whether a command changed what the session
-// is CALLED, which every attached client needs pushed rather than polled.
+// commandUpdatesSessionInfo reports whether a command changed the session's
+// name, which every attached client needs pushed rather than polled.
 func commandUpdatesSessionInfo(name string) bool {
 	return name == "rename"
 }
@@ -337,11 +289,10 @@ func commandUpdatesConfigOptions(name string) bool {
 	}
 }
 
-// sendAvailableCommands advertises the admin command set for a session. The
-// client uses it to populate its slash-command menu. It MUST run only after the
-// session's creation/load result has reached the client (callers schedule it via
-// libacp.AfterResponse): a client maps the update to a session it already knows,
-// and drops it otherwise — which silently disables the menu.
+// sendAvailableCommands advertises the admin command set for a session. Must
+// run only after the session's creation/load result reaches the client
+// (callers schedule via libacp.AfterResponse) — an unmapped session id is
+// dropped by the client, silently disabling the menu.
 func (t *Transport) sendAvailableCommands(ctx context.Context, sid libacp.SessionID) {
 	t.sendUpdate(ctx, libacp.SessionNotification{
 		SessionID: sid,
@@ -375,7 +326,7 @@ func (t *Transport) handleDoctor(ctx context.Context) (string, error) {
 	}
 	summary := res.Summary()
 
-	// Advisory: warn when default-max-tokens exceeds the active provider's ceiling.
+	// Advisory: default-max-tokens exceeding the provider's ceiling.
 	ceiling := res.DefaultMaxOutputTokens
 	if ceiling > 0 {
 		maxTok := t.maxTokens()
@@ -603,10 +554,8 @@ func parseCapabilitySetArgs(fields []string) (string, string, bool, error) {
 	return provider, model, canThink, nil
 }
 
-// handlePolicy shows or switches the active HITL approval policy. Switching
-// writes the global cli.hitl-policy-name key — the key the engine reads live on
-// every gated tool call — so the change takes effect on the next gated call. It
-// just does what it's told: the operator owns the policy.
+// handlePolicy shows or switches the active HITL approval policy, writing the
+// global cli.hitl-policy-name key the engine reads live on every gated call.
 func (t *Transport) handlePolicy(ctx context.Context, args string) (string, error) {
 	store := runtimetypes.New(t.deps.DB.WithoutTransaction())
 	value := strings.TrimSpace(args)
@@ -620,8 +569,8 @@ func (t *Transport) handlePolicy(ctx context.Context, args string) (string, erro
 	return fmt.Sprintf("HITL policy set to %s. Applies to the next gated tool call.", value), nil
 }
 
-// policyStatus renders the effective policy and the selectable presets. With no
-// override set, the effective policy is the engine's fallback default.
+// policyStatus renders the effective policy and selectable presets; with no
+// override, the effective policy is the engine's fallback default.
 func (t *Transport) policyStatus(active string) string {
 	effective := active
 	if effective == "" {

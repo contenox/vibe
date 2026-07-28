@@ -9,19 +9,18 @@ import (
 )
 
 // doublePressWindow is how long a first "g"-style press waits for its
-// second before the pair expires (blueprint 4.5).
+// second before the pair expires.
 const doublePressWindow = 600 * time.Millisecond
 
-// Binding declares one keybinding. Every field is required — Register
-// rejects a Binding missing any of them, by design: an unowned or
-// undocumented chord is exactly the scattered-switch failure mode this
-// package exists to prevent.
+// Binding declares one keybinding. Every field is required; Register
+// rejects a Binding missing any of them, so no chord is ever unowned or
+// undocumented.
 type Binding struct {
-	ID    string // stable identity; survives a later user-remap file (not built yet)
-	Owner string // the component registering this binding, named in collision errors
+	ID    string // stable identity
+	Owner string // named in collision errors
 	Keys  []Chord
 	Scope Scope
-	Help  string // one-line description; the sole source of the help overlay's text
+	Help  string // the sole source of the help overlay's text for this binding
 }
 
 // Action is what a resolved chord becomes: routed to the focused
@@ -32,10 +31,8 @@ type Action struct {
 	Chord     Chord
 }
 
-// HelpEntry is one row of the help overlay's content model. The overlay
-// renders from Registry.Help's output and nothing else — every field here
-// is copied verbatim from a registered Binding, so "zero hardcoded
-// strings" is structural, not a convention someone can forget.
+// HelpEntry is one row of the help overlay's content model, copied
+// verbatim from a registered Binding: the overlay has no hardcoded strings.
 type HelpEntry struct {
 	Scope Scope
 	Keys  []Chord
@@ -52,12 +49,10 @@ type pending struct {
 	set  bool
 }
 
-// Registry is the single arbiter of every keybinding in beam. It holds
-// every Binding.ID*Chord registration, resolves raw input.KeyEvents to
-// semantic Actions (Resolve), and is the sole source of the help overlay's
-// content (Help). A Registry is not safe for concurrent use — beam's input
-// loop is single-threaded by construction (the term engine's select loop),
-// so none is needed.
+// Registry is the single arbiter of every keybinding in beam: it holds
+// every registration, resolves raw input.KeyEvents to semantic Actions
+// (Resolve), and is the sole source of the help overlay's content (Help).
+// Not safe for concurrent use; beam's input loop is single-threaded.
 type Registry struct {
 	// byScope[scope][chord] is the Binding that owns chord within scope;
 	// chord may be a plain chord or a double-press composite ("g g").
@@ -79,22 +74,16 @@ func NewRegistry() *Registry {
 	}
 }
 
-// Register validates and adds b, returning a descriptive error instead of
-// registering it. Errors name both owners in a collision so a human fixing
-// it never has to go hunting for the other claimant:
+// Register validates and adds b, returning a descriptive error naming both
+// owners in a collision instead of registering it:
 //
 //   - a missing ID, Owner, Scope, Help, or empty/duplicate Keys;
-//   - any binding whose Owner is not the reserved owner but whose Keys
-//     include "ctrl+c" or "?" (reserved chords stay live under every
-//     modal and are never overridable — blueprint 4.5, D3);
-//   - a chord collision between b and any previously registered binding
-//     whose scope is simultaneously reachable with b.Scope (see
-//     reachable): the same scope, or one global and one pane scope. Two
-//     different pane scopes never collide (only one pane is focused at
-//     once); a modal scope collides only within itself.
+//   - a binding not owned by the reserved owner claiming "ctrl+c" or "?",
+//     which stay live under every modal and are never overridable;
+//   - a chord collision with any binding whose scope is simultaneously
+//     reachable with b.Scope (see reachable);
 //   - a double-press chord ("g g") colliding with a plain binding on its
-//     seed ("g") in a reachable scope, or vice versa — both would make
-//     the first keypress ambiguous.
+//     seed ("g") in a reachable scope, or vice versa.
 func (r *Registry) Register(b Binding) error {
 	if err := validate(b); err != nil {
 		return err
@@ -137,9 +126,8 @@ func (r *Registry) Register(b Binding) error {
 	return nil
 }
 
-// MustRegister calls Register and panics on error. Component init code
-// uses this: a collision is a programming error meant to fail loudly in
-// development and as a test failure in CI, never to be handled at runtime.
+// MustRegister calls Register and panics on error: a collision is a
+// programming error meant to fail loudly, never handled at runtime.
 func (r *Registry) MustRegister(b Binding) {
 	if err := r.Register(b); err != nil {
 		panic(err)
@@ -217,27 +205,19 @@ func (r *Registry) findSeed(scope Scope, chord Chord) (Binding, Scope, bool) {
 	return Binding{}, "", false
 }
 
-// Resolve turns one decoded keystroke into an Action, or reports false
-// when it binds nothing. active names the scopes to check, in priority
-// order — FocusManager.ActiveScopes supplies exactly this: the topmost
-// open modal plus ScopeGlobal, or the focused pane plus ScopeGlobal.
-// Resolve itself decides, from active[0] alone, whether Global should
-// answer only reserved chords: whenever active[0] is a modal scope, a
-// non-reserved Global binding never resolves (the modal shadows it), but
-// "ctrl+c" and "?" resolve from Global regardless (blueprint 4.5: reserved
-// chords stay live under every modal).
+// Resolve turns one decoded keystroke into an Action, or reports false when
+// it binds nothing. active names the scopes to check in priority order
+// (FocusManager.ActiveScopes supplies it). Whenever active[0] is a modal
+// scope, a non-reserved Global binding never resolves, but "ctrl+c" and "?"
+// resolve from Global regardless.
 //
-// Double-press: when the chord for k is the first half of some
-// double-press binding reachable from active, Resolve returns false and
-// remembers the pending seed (stateful — see the Registry doc). The very
-// next call to Resolve either completes the pair within doublePressWindow
-// of now and returns its Action, or resolves nothing at all — even if the
-// interrupting key would otherwise bind something on its own — and clears
-// the pending state. A seed whose window has expired is not silently
-// dropped: the current keystroke is then evaluated fresh, so a slow
-// "g ... g" restarts the wait on the second "g" rather than eating it.
+// When the chord is the first half of a double-press binding reachable
+// from active, Resolve returns false and remembers the pending seed. The
+// next call either completes the pair within doublePressWindow and returns
+// its Action, or resolves nothing and clears the pending state; an expired
+// seed is discarded and the current keystroke evaluated fresh.
 //
-// now is the only clock Resolve uses; nothing here calls time.Now.
+// now is the only clock Resolve uses.
 func (r *Registry) Resolve(active []Scope, k input.KeyEvent, now time.Time) (Action, bool) {
 	chord := ChordOf(k)
 	modalTop := len(active) > 0 && IsModal(active[0])
@@ -253,8 +233,7 @@ func (r *Registry) Resolve(active []Scope, k input.KeyEvent, now time.Time) (Act
 			}
 			return Action{}, false
 		}
-		// Expired: fall through and evaluate this keystroke fresh, as if no
-		// pending seed existed.
+		// Expired: fall through and evaluate this keystroke fresh.
 	}
 
 	if r.hasSeed(active, chord, modalTop) {
@@ -296,12 +275,9 @@ func (r *Registry) hasSeed(active []Scope, chord Chord, modalTop bool) bool {
 	return false
 }
 
-// Help returns every registered Binding whose Scope is among active, as
-// the pure-data content model the help overlay renders from — the overlay
-// contains zero hardcoded strings because every field it shows came from a
-// Binding passed to Register. Order is stable: by Scope, then by
-// Binding.ID (ID itself is not exposed on HelpEntry, only used to order
-// it), so a golden test of the overlay never flakes on map order.
+// Help returns every registered Binding whose Scope is among active, sorted
+// by Scope then Binding.ID so a golden test of the overlay never flakes on
+// map order.
 func (r *Registry) Help(active []Scope) []HelpEntry {
 	want := make(map[Scope]bool, len(active))
 	for _, s := range active {

@@ -30,14 +30,10 @@ var notifiableReportKinds = map[string]bool{
 	"result":  true,
 }
 
-// onBridge folds one runtime event into every consumer: the transcript
-// (which renders it), the liveness tracker (which decides whether anything is
-// happening), the status-bar counters, the palette's remote half, the
-// approval card, and the completion bell.
-//
-// The transcript sees EVERY event — it ignores the ones that are not
-// transcript facts itself — which is what keeps "one event, one place that
-// decides what it looks like" true.
+// onBridge folds one runtime event into every consumer: the transcript, the
+// liveness tracker, the status-bar counters, the palette's remote half, the
+// approval card, and the completion bell. The transcript sees every event and
+// ignores the ones that are not transcript facts itself.
 func (a *app) onBridge(ev enginebridge.Event) {
 	a.tr.Apply(ev)
 	now := a.now()
@@ -71,30 +67,25 @@ func (a *app) onBridge(ev enginebridge.Event) {
 		a.pal.SetRemote(e.Commands)
 
 	case enginebridge.ConfigOptionUpdated:
-		// The session's config selects are also the ARGUMENT domains of the
-		// commands that set them: the model select is the answer to "what can
-		// /model be", and it is the server's answer, re-pushed whenever it
-		// changes. Handing them to the palette is the whole of beam's
-		// value-completion source — there is no list here to go stale, and a
-		// session that advertised nothing completes nothing.
+		// The session's config selects are the argument domains of the
+		// commands that set them (e.g. what /model accepts); this is beam's
+		// whole value-completion source, re-pushed by the server on change.
 		a.pal.SetValueDomains(enginebridge.ValueDomains(e.Options))
 
 	case enginebridge.ReplayEnded:
-		// Nothing on the wire ends a replay, so the trailing replayed
-		// message would sit unsettled in the live region forever without
-		// this — new notices would print above it.
+		// Nothing on the wire ends a replay; without this the trailing
+		// replayed message would sit unsettled in the live region forever.
 		a.tr.EndReplay()
 
 	case enginebridge.SessionInfoUpdated:
-		// The server derives a title from the first user message and pushes
-		// it after the turn; the status bar adopts it live instead of
-		// waiting for the next switch or roster open.
+		// Adopt the server-derived title live instead of waiting for the
+		// next switch or roster open.
 		a.setSessionTitle(e.SessionID, e.Title)
 
 	case enginebridge.PermissionRequested:
 		a.card = approval.New(e)
-		// An unanswered ask blocks a tool call until its ceiling expires, so
-		// it rings even when beam has focus (D23).
+		// Rings even when beam has focus: an unanswered ask blocks a tool
+		// call until its ceiling expires.
 		a.bell(now, true)
 
 	case enginebridge.MissionReport:
@@ -104,28 +95,23 @@ func (a *app) onBridge(ev enginebridge.Event) {
 		}
 
 	case enginebridge.MissionAsk:
-		// A unit is BLOCKED until this is answered — the same shape as a
-		// permission gate, and rung on the same rule: always, focus or not.
+		// A unit is blocked until this is answered, same rule as a
+		// permission gate: rings always, focus or not.
 		a.bell(now, true)
 
 	case enginebridge.MissionStatusChanged:
-		// A mission coming to rest is a completion, so it rings under the
-		// ordinary focus-suppressed rule. Opening one is not: the operator
-		// just fired it and is looking at the line that did.
+		// A mission coming to rest rings under the focus-suppressed rule;
+		// opening one does not, since the operator just fired it.
 		if enginebridge.MissionStatusTerminal(e.New) {
 			a.bell(now, false)
 		}
 
 	case enginebridge.MissionPlanRevised:
-		// Deliberately silent. A unit reorganizing its own work is the thing
-		// the operator delegated; ringing for it would make the one signal
-		// that means "you are needed" fire for a unit getting on with it.
+		// Deliberately silent: a unit reorganizing its own work is not a
+		// signal that the operator is needed.
 
 	case enginebridge.InboxItemAdded:
-		// An inbox item exists precisely BECAUSE no session was watching, so
-		// there is no surface for focus to suppress against: the operator is
-		// by definition not looking at the mission this came from. It rings
-		// always, and leaves a badge behind for after the sound is gone.
+		// No session was watching, so there is no focus to suppress against.
 		a.inbox++
 		a.bell(now, true)
 
@@ -140,8 +126,6 @@ func (a *app) onBridge(ev enginebridge.Event) {
 	case enginebridge.TurnEnded:
 		a.endTurn(now)
 		if e.StopReason == libacp.StopReasonCancelled && a.card != nil {
-			// The cancel beam asked for came back: the card stops pretending
-			// to wait for a keystroke.
 			a.card.MarkCancelled()
 			a.card = nil
 		}
@@ -155,6 +139,7 @@ func (a *app) onBridge(ev enginebridge.Event) {
 			a.card.MarkCancelled()
 			a.card = nil
 		}
+		a.noticef(frame.StyleError, "turn failed: %v", e.Err)
 	}
 }
 

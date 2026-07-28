@@ -16,35 +16,22 @@ import (
 	"github.com/google/uuid"
 )
 
-// TaskExecutor executes individual tasks within a workflow.
-// Implementations should handle all task types and return appropriate outputs.
+// TaskExecutor executes individual tasks within a workflow. Implementations
+// must handle every TaskHandler and return appropriate outputs.
 type TaskExecutor interface {
-	// TaskExec executes a single task with the given input and data type.
-	// Returns:
-	// - output: The processed task result
-	// - outputType: The data type of the output
-	// - transitionEval: String used for transition evaluation
-	// - error: Any execution error encountered
-	//
-	// Parameters:
-	// - ctx: Context for cancellation and timeouts
-	// - startingTime: Chain start time for consistent timing
-	// - ctxLength: Token context length limit for LLM operations
-	// - chainContext: Immutable context of the chain
-	// - currentTask: The task definition to execute
-	// - input: Task input data
-	// - dataType: Type of the input data
+	// TaskExec executes currentTask against input/dataType and returns its
+	// output, output type, and transition-eval string (see TaskTransition).
+	// ctxLength bounds LLM token usage; startingTime anchors timing for the
+	// whole chain run.
 	TaskExec(ctx context.Context, startingTime time.Time, ctxLength int, chainContext *ChainContext, currentTask *TaskDefinition, input any, dataType DataType) (any, DataType, string, error)
 }
 
-// ensureUniqueToolCallID ensures a tool call ID is unique by appending
-// a short UUID suffix. This prevents duplicate IDs that can confuse
-// ACP clients when the model reuses IDs across turns.
+// ensureUniqueToolCallID appends a short UUID suffix so a reused model ID
+// doesn't collide across turns and confuse ACP clients.
 func ensureUniqueToolCallID(id string) string {
 	if id == "" {
 		return uuid.NewString()
 	}
-	// Append 4-char UUID suffix to ensure uniqueness
 	return id + "-" + uuid.NewString()[:4]
 }
 
@@ -100,23 +87,13 @@ func (exe *SimpleExec) publishStepChunk(ctx context.Context, meta llmrepo.Meta, 
 	publishTaskEventBestEffort(ctx, exe.tracker, exe.eventSink, event)
 }
 
-// publishStepStreamEnd closes a step's stream bracket. Invariants (the
-// engine-events contract, docs/development/engine-events.md):
-//   - emitted exactly once per successfully completed model call of a step
-//     attempt, after the last step_chunk of that call and before the attempt's
-//     step_completed;
-//   - emitted for the non-streaming fallback too (the coalesced single-chunk
-//     path), so "step_chunk sequences on a successful attempt are closed by
-//     step_stream_end" holds unconditionally; the fallback carries no finish
-//     reason or usage;
-//   - NOT emitted when the call fails mid-stream — step_failed closes the
-//     attempt instead;
-//   - chunkCount counts content/thinking-bearing parcels independently of
-//     Wants(step_chunk), so replay can tell streaming happened even when no
-//     sink consumed chunks.
-//
-// Unlike step_chunk, this event is journaled: a replayed run carries its
-// stream brackets.
+// publishStepStreamEnd closes a step's stream bracket: emitted exactly once
+// per successfully completed model call, including the non-streaming
+// fallback, but never when the call fails mid-stream (step_failed closes
+// that attempt instead). chunkCount counts content/thinking-bearing parcels
+// independently of
+// Wants(step_chunk), so replay can tell streaming happened even when no sink
+// consumed chunks. Unlike step_chunk, this event is journaled.
 func (exe *SimpleExec) publishStepStreamEnd(ctx context.Context, meta llmrepo.Meta, chunkCount int, finishReason string, usage *libmodelprovider.TokenUsage) {
 	if exe.eventSink == nil || !exe.eventSink.Wants(TaskEventStepStreamEnd) {
 		return
@@ -144,13 +121,12 @@ func countsAsStreamChunk(parcel *libmodelprovider.StreamParcel) bool {
 	return parcel != nil && (parcel.Data != "" || parcel.Thinking != "")
 }
 
-// countTokensAndCheckLimit counts tokens for text and checks against context limit.
-// If ctxLength <= 0 (chain token_limit not set and no per-request/session override),
-// no limit is enforced at this layer. The prompt proceeds; the underlying model/provider
-// is responsible for any limits. Usage indicators will use model ContextLength as fallback size.
+// countTokensAndCheckLimit counts tokens for text and checks against
+// ctxLength. If ctxLength <= 0, no limit is enforced at this layer — the
+// underlying model/provider is responsible for any limit.
 func (exe *SimpleExec) countTokensAndCheckLimit(ctx context.Context, modelName string, text string, ctxLength int) (int, error) {
 	if ctxLength <= 0 {
-		return 0, nil // No limit enforced
+		return 0, nil
 	}
 
 	tokenCount, err := exe.repo.CountTokens(ctx, modelName, text)
@@ -165,16 +141,14 @@ func (exe *SimpleExec) countTokensAndCheckLimit(ctx context.Context, modelName s
 	return tokenCount, nil
 }
 
-// countChatHistoryTokens counts total tokens in chat history.
-// If ctxLength <= 0 (no effective session token budget set on the chain or override),
-// we do not enforce or slide here. See main check in executeLLM for Shift behavior when a
-// positive budget is present. Indicators fall back to model-reported context window.
+// countChatHistoryTokens counts total tokens in chat history. If ctxLength <=
+// 0, no limit is enforced or slid here (see executeLLM for Shift behavior
+// when a positive budget is present).
 func (exe *SimpleExec) countChatHistoryTokens(ctx context.Context, modelName string, history ChatHistory, ctxLength int) (int, error) {
 	if ctxLength <= 0 {
-		return 0, nil // No limit to enforce
+		return 0, nil
 	}
 
-	// If tokens are already calculated and valid, use them
 	if history.InputTokens > 0 && history.OutputTokens > 0 {
 		totalTokens := history.InputTokens + history.OutputTokens
 		if totalTokens > ctxLength {
@@ -310,10 +284,9 @@ func (exe *SimpleExec) shiftMessagesToFit(ctx context.Context, modelName string,
 	return out, total, nil
 }
 
-// getPrimaryModel extracts the primary model name from execution config
-// temperatureValue unwraps an optional temperature. ok is false when the field
-// is nil (unset), in which case callers must NOT send a temperature so the
-// provider default applies. See LLMExecutionConfig.Temperature.
+// temperatureValue unwraps an optional temperature. ok is false when the
+// field is nil (unset), in which case callers must not send a temperature so
+// the provider default applies. See LLMExecutionConfig.Temperature.
 func temperatureValue(t *float32) (float32, bool) {
 	if t == nil {
 		return 0, false
@@ -321,6 +294,8 @@ func temperatureValue(t *float32) (float32, bool) {
 	return *t, true
 }
 
+// GetPrimaryModel returns llmCall's primary model name, falling back to
+// "default" for token counting when none is configured.
 func GetPrimaryModel(llmCall *LLMExecutionConfig) string {
 	if llmCall.Model != "" {
 		return llmCall.Model
@@ -328,7 +303,7 @@ func GetPrimaryModel(llmCall *LLMExecutionConfig) string {
 	if len(llmCall.Models) > 0 {
 		return llmCall.Models[0]
 	}
-	return "default" // Fallback model name for token counting
+	return "default"
 }
 
 func routeHistoryPrompt(history ChatHistory) string {
@@ -360,7 +335,6 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 		return "", err
 	}
 
-	// Count tokens and check limits
 	modelName := GetPrimaryModel(&llmCall)
 	combinedText := systemInstruction + "\n" + prompt
 	promptTokens, err := exe.countTokensAndCheckLimit(ctx, modelName, combinedText, ctxLength)
@@ -390,9 +364,9 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 		Tracker:       exe.tracker,
 	}
 
-	// Keep prompt/route temperature behavior stable: unset is sent as 0.
-	// Preserve that — route handlers depend on temp-0 determinism to emit exactly
-	// one label. Only the chat path treats nil as "use the provider default".
+	// Unset temperature is sent as 0 here (unlike the chat path, which treats
+	// nil as "use the provider default"): route handlers depend on
+	// temp-0 determinism to emit exactly one label.
 	promptTemp, _ := temperatureValue(llmCall.Temperature)
 	streamArgs := []libmodelprovider.ChatArgument{
 		libmodelprovider.WithTemperature(float64(promptTemp)),
@@ -404,10 +378,8 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 		streamArgs = append(streamArgs, libmodelprovider.WithShift{})
 	}
 
-	// ONE execution path (mirroring executeLLM): prompts stream and are
-	// assembled engine-side; the sink only observes. PromptExecute survives as
-	// the fallback when stream setup fails, taken identically with or without
-	// a sink.
+	// Prompts stream and are assembled engine-side; the sink only observes.
+	// PromptExecute is the fallback when stream setup fails.
 	messages := []libmodelprovider.Message{}
 	if systemInstruction != "" {
 		messages = append(messages, libmodelprovider.Message{Role: "system", Content: systemInstruction})
@@ -446,9 +418,8 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 		return "", err
 	}
 
-	// The streaming branch reports usage via step_stream_end; the fallback has
-	// no stream bracket, so publish the provider-reported usage as a token
-	// usage event (used ~ total, size = ctx), mirroring the post-shift emission.
+	// The streaming branch reports usage via step_stream_end; this fallback
+	// has no stream bracket, so publish it as a token usage event instead.
 	if promptMeta.Usage != nil && exe.eventSink.Wants(TaskEventTokenUsage) {
 		ev := NewTaskEvent(ctx, TaskEventTokenUsage)
 		ev.ModelName = promptMeta.ModelName
@@ -460,15 +431,11 @@ func (exe *SimpleExec) Prompt(ctx context.Context, systemInstruction string, llm
 	return strings.TrimSpace(response), nil
 }
 
-// promptWithRetry wraps repo.PromptExecute with [llmretry.Do] when the task's
-// LLMExecutionConfig declares a RetryPolicy. Used by the route handler's
-// single-shot classification call.
-// The streaming branch in [Prompt] is intentionally not retried because
-// parcels may already have been published to the user; only the
-// non-streaming fallback path is wrapped.
-//
-// Mirrors [chatWithRetry] except it calls PromptExecute, which has no tool
-// dispatch.
+// promptWithRetry wraps repo.PromptExecute with [llmretry.Do] when the
+// task's LLMExecutionConfig declares a RetryPolicy. Only the non-streaming
+// fallback is wrapped — [Prompt]'s streaming branch is not retried, since
+// parcels may already have reached the user. Mirrors [chatWithRetry], minus
+// tool dispatch.
 func (exe *SimpleExec) promptWithRetry(
 	ctx context.Context,
 	reportChange func(id string, data any),
@@ -525,7 +492,6 @@ func (exe *SimpleExec) promptWithRetry(
 	return pr.response, pr.meta, nil
 }
 
-// TaskExec dispatches task execution based on the task type.
 func declaredRoutes(branches []TransitionBranch) []string {
 	routes := make([]string, 0, len(branches))
 	for _, b := range branches {
@@ -551,6 +517,9 @@ func selectRoute(answer string, routes []string) string {
 	return chosen
 }
 
+// TaskExec dispatches execution to currentTask.Handler (chat_completion,
+// execute_tool_calls, tools, route, raise_error, noop) and returns its
+// output plus a transition-eval string (see TaskTransition).
 func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time, ctxLength int, chainContext *ChainContext, currentTask *TaskDefinition, input any, dataType DataType) (any, DataType, string, error) {
 	var transitionEval string
 	var taskErr error
@@ -690,11 +659,10 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 				return nil, DataTypeAny, "", fmt.Errorf("input data for handler %s claimed to be %s but was %T", currentTask.Handler, dataType.String(), input)
 			}
 
-			// GUARD: If the last message is an unanswered tool call (e.g., from a state-machine
-			// budget handoff), flush those tools inline so we don't hand the provider a dangling
-			// tool_call. After flushing, fall through to the normal chat_completion path so this
-			// task's system_instruction is still applied and the LLM gets a turn with the fresh
-			// tool results in context.
+			// If the last message is an unanswered tool call (e.g. from a
+			// state-machine budget handoff), flush those tools inline so the
+			// provider is never handed a dangling tool_call, then fall
+			// through to the normal chat_completion path.
 			if len(chatHistory.Messages) > 0 {
 				last := chatHistory.Messages[len(chatHistory.Messages)-1]
 				if last.Role == "assistant" && len(last.CallTools) > 0 {
@@ -705,10 +673,10 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 					if flushErr != nil {
 						var pendErr *ApprovalPendingError
 						if errors.As(flushErr, &pendErr) {
-							// The flushed batch parked on a human approval: propagate
-							// the suspension upward WITH the partial history, so the
-							// checkpoint captures the results the flush already
-							// produced instead of losing them.
+							// The flushed batch parked on a human approval:
+							// propagate the suspension upward with the partial
+							// history, so the checkpoint captures what the
+							// flush already produced.
 							if h, ok := flushOut.(ChatHistory); ok {
 								return h, DataTypeChatHistory, "", flushErr
 							}
@@ -724,7 +692,7 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			}
 
 		case DataTypeString:
-			// Automatically coerce simple string input into a chat-compatible format
+			// Coerce simple string input into a chat-compatible format.
 			strInput, ok := input.(string)
 			if !ok {
 				return nil, DataTypeAny, "", fmt.Errorf("input data for handler %s claimed to be string but was %T", currentTask.Handler, input)
@@ -739,7 +707,6 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			return nil, DataTypeAny, "", fmt.Errorf("handler '%s' requires input of type 'chat_history' or 'string', used var: %s but got '%s'", currentTask.Handler, currentTask.InputVar, dataType.String())
 		}
 
-		// Count tokens and check limits for chat completion
 		modelName := GetPrimaryModel(finalExecConfig)
 		if !finalExecConfig.Shift {
 			if _, err := exe.countChatHistoryTokens(taskCtx, modelName, chatHistory, ctxLength); err != nil {
@@ -758,8 +725,8 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			if !alreadyPresent {
 				messages := []Message{{ID: uuid.NewString(), Role: "system", Content: currentTask.SystemInstruction, Timestamp: time.Now().UTC()}}
 				chatHistory.Messages = append(messages, chatHistory.Messages...)
-				// Fix 9: force recount — the system instruction tokens are not in
-				// the old InputTokens value, so executeLLM would skip counting.
+				// Force recount: the system instruction tokens are not in the
+				// old InputTokens value, so executeLLM would skip counting.
 				chatHistory.InputTokens = 0
 			}
 		}
@@ -835,7 +802,6 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			argsStr := normalizedToolArguments(toolCall.Function.Arguments)
 			repeatIndex := nextToolCallRepeatIndex(priorToolMessages, batchRepeatCounts, toolCall.Function.Name, argsStr)
 
-			// robust resolution: try direct key, then scan by Function.Name / ToolsName
 			resolutionInfo, found := resolveToolWithResolution(chainContext, toolCall.Function.Name)
 			if !found {
 				errStr := fmt.Sprintf("tool %s not found", toolCall.Function.Name)
@@ -883,14 +849,13 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			}
 			toolsCall := &ToolsCall{
 				Name: resolutionInfo.ToolsName,
-				// Strip the "toolsName." prefix: tools are advertised to the model as
-				// "toolsName.toolName" for namespacing, but Exec() only needs the leaf name.
+				// Tools are advertised to the model as "toolsName.toolName" for
+				// namespacing; Exec() only needs the leaf name.
 				ToolName: strings.TrimPrefix(toolCall.Function.Name, resolutionInfo.ToolsName+"."),
-				// NOTE: dynamic args are passed as `input` to Exec; Tools.Args is static/template-level (may be empty for execute_tool_calls)
+				// Dynamic args are passed as `input` to Exec; Args is static/template-level.
 				Args: toolsArgs,
 			}
 
-			// Apply tools policies if defined in the current task
 			callCtx := taskCtx
 			if currentTask.ExecuteConfig != nil {
 				if policy, ok := currentTask.ExecuteConfig.ToolsPolicies[resolutionInfo.ToolsName]; ok && len(policy) > 0 {
@@ -898,7 +863,7 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 				}
 			}
 
-			// Calculate a safe byte limit for the tool output to prevent context overflow
+			// Safe byte limit for the tool output, to prevent context overflow.
 			currentTokens := chatHistory.InputTokens + chatHistory.OutputTokens
 			if currentTokens == 0 && currentTask.ExecuteConfig != nil {
 				modelName := GetPrimaryModel(currentTask.ExecuteConfig)
@@ -912,10 +877,9 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			budgetBytes := max(int64(remainingTokens-500)*3, 0)
 			callCtx = context.WithValue(callCtx, ContextKeyOutputByteLimit, budgetBytes)
 			callCtx = context.WithValue(callCtx, ContextKeyToolCallID, toolCall.ID)
-			// This is the ONE execution site whose task output is the
-			// ChatHistory suspendRun needs — mark the call suspendable so
-			// park-and-release askers (mission_ask_attention) may checkpoint
-			// here and only here.
+			// The one execution site whose task output is the ChatHistory
+			// suspendRun needs, so only here may a park-and-release asker
+			// (mission_ask_attention) checkpoint.
 			callCtx = WithSuspendableToolCall(callCtx)
 
 			toolReportErr, toolReportChange, toolEnd := exe.tracker.Start(
@@ -940,12 +904,11 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 
 			var pendErr *ApprovalPendingError
 			if errors.As(err, &pendErr) {
-				// Third HITL outcome: the call is awaiting a human past the fast
-				// window. No result message is appended for this call and the
-				// batch stops here — its unanswered tail is exactly what the
-				// checkpoint records and what resume re-executes. The call's
-				// tool_call_pending event stays unbracketed until the resumed
-				// segment re-emits the pair (see engine-events.md §4).
+				// The call is awaiting a human past the fast window. No result
+				// message is appended and the batch stops here — its
+				// unanswered tail is what the checkpoint records and what
+				// resume re-executes. The tool_call_pending event stays
+				// unbracketed until the resumed segment re-emits the pair.
 				toolEnd()
 				taskErr = err
 				suspendedBatch = true
@@ -1033,7 +996,7 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 		case executedAny:
 			transitionEval = TransitionToolsExecuted
 		default:
-			// We *had* tool calls, but none resolved to tools
+			// There were tool calls, but none resolved to tools.
 			transitionEval = TransitionNoCallsFound
 		}
 
@@ -1145,14 +1108,12 @@ func (exe *SimpleExec) executeLLM(
 	// provider sees it.
 	input.Messages = repairToolCallPairing(input.Messages)
 
-	// Build the full list of tools
 	tools := []libmodelprovider.Tool{}
 	hiddenTools := map[string]struct{}{}
 	for _, toolName := range llmCall.HideTools {
 		hiddenTools[toolName] = struct{}{}
 	}
 
-	// 1. Client tools (if allowed)
 	if llmCall.PassClientsTools {
 		for _, t := range clientTools {
 			if _, ok := hiddenTools[t.Function.Name]; ok {
@@ -1169,7 +1130,6 @@ func (exe *SimpleExec) executeLLM(
 		}
 	}
 
-	// 2. Tools tools (if any tools are allowed)
 	if len(llmCall.Tools) > 0 {
 		resolvedNames, err := resolveToolsNames(ctx, llmCall.Tools, exe.toolsProvider)
 		if err != nil {
@@ -1206,12 +1166,10 @@ func (exe *SimpleExec) executeLLM(
 		})
 	}
 
-	// Token counting
 	modelName := GetPrimaryModel(llmCall)
 
 	var messagesTokens int
 
-	// Count messages tokens if not already set
 	if input.InputTokens > 0 {
 		messagesTokens = input.InputTokens
 	} else {
@@ -1238,7 +1196,6 @@ func (exe *SimpleExec) executeLLM(
 	}
 	messagesTokens += preludeTokens
 
-	// Count tool tokens
 	toolTokens, err := exe.countToolTokens(ctx, modelName, tools)
 	if err != nil {
 		reportErr(err)
@@ -1247,14 +1204,12 @@ func (exe *SimpleExec) executeLLM(
 
 	totalTokens := messagesTokens + toolTokens
 
-	// Log token usage
 	reportChange("token_usage", map[string]any{
 		"messages_tokens": messagesTokens,
 		"tool_tokens":     toolTokens,
 		"total_tokens":    totalTokens,
 		"limit":           ctxLength,
 	})
-	// Also publish as TaskEvent for ACP etc. to pick up (used ~ total input, size = ctx)
 	if exe.eventSink.Wants(TaskEventTokenUsage) {
 		ev := NewTaskEvent(ctx, TaskEventTokenUsage)
 		ev.ModelName = modelName
@@ -1263,17 +1218,11 @@ func (exe *SimpleExec) executeLLM(
 		publishTaskEventBestEffort(ctx, nil, exe.eventSink, ev)
 	}
 
-	// Check limit and decide on sliding.
-	// - If ctxLength (the effective session token budget from chain.TokenLimit or per-session override)
-	//   is 0 or unset: no limit is enforced here. We pass the (potentially large) prompt to the provider.
-	//   The model/provider may still reject it. Indicators should fall back to model ContextLength if known.
-	// - If ctxLength > 0 but totalTokens > ctxLength:
-	//     - If Shift == false (the default for LLMExecutionConfig, or explicitly set on the task):
-	//       We return ErrContextLengthExceeded. No history is dropped. The turn fails.
-	//       A pre-check token_usage event has already been emitted, so usage indicators can still
-	//       show the state that hit the hard limit.
-	//     - If Shift == true (common on chat_completion tasks in default chains):
-	//       We slide (drop oldest non-system units) and continue. A post_shift event is emitted.
+	// ctxLength <= 0 means no limit is enforced here; the provider may still
+	// reject an oversized prompt. Otherwise, totalTokens > ctxLength either
+	// fails with ErrContextLengthExceeded (Shift == false, the default) or
+	// slides out the oldest non-system units and continues (Shift == true),
+	// emitting a post-shift usage event.
 	trimFired := false
 	if ctxLength > 0 && totalTokens > ctxLength {
 		if !llmCall.Shift {
@@ -1313,7 +1262,6 @@ func (exe *SimpleExec) executeLLM(
 
 	messagesC := providerMessagesFromEngine(prelude, input.Messages)
 
-	// Prepare chat arguments
 	chatArgs := chatArgsForLLMCall(llmCall, tools)
 	toolSchemaBytes := 0
 	if len(tools) > 0 {
@@ -1350,12 +1298,11 @@ func (exe *SimpleExec) executeLLM(
 	if llmCall.Models != nil {
 		modelNames = append(modelNames, llmCall.Models...)
 	}
-	// The rich history hint the provider breakpoints wait on: everything but
-	// the volatile last message is asserted stable — the incremental
-	// per-turn-reuse shape (anthropic BP3 lands on the previous turn's final
-	// message). A trim this call changed the prefix, so the request is
-	// expected-cold and asserts nothing. Over-assertion can only cost a cache
-	// write, never correctness: hints never change what the model sees.
+	// Everything but the volatile last message is asserted stable, for the
+	// provider's incremental per-turn cache reuse. A trim this call changed
+	// the prefix, so nothing is asserted — over-assertion can only cost a
+	// cache write, never correctness, since hints never change what the
+	// model sees.
 	stableHistoryLen := 0
 	if !trimFired && len(messagesC) > 1 {
 		stableHistoryLen = len(messagesC) - 1
@@ -1372,13 +1319,10 @@ func (exe *SimpleExec) executeLLM(
 		},
 	}
 
-	// ONE execution path: every chat streams and is assembled engine-side by
-	// modelrepo.StreamAssembler; the event sink only observes (publishStepChunk
-	// gates itself per-kind via Wants). Whether a sink listens can never select
-	// a different code path — that fork is what let streamed tool calls diverge
-	// from the non-streaming path. The non-streaming Chat call survives only as
-	// the fallback when stream setup fails (e.g. the resolved model cannot
-	// stream), and that fallback is taken identically with or without a sink.
+	// Every chat streams and is assembled engine-side; the event sink only
+	// observes. Whether a sink listens never selects a different code path.
+	// The non-streaming Chat call survives only as the fallback when stream
+	// setup fails (e.g. the resolved model cannot stream).
 	streamed, resp, meta, err := exe.streamChatOnce(ctx, reportChange, req, messagesC, chatArgs)
 	if !streamed && err != nil {
 		resp, meta, err = exe.chatWithRetry(ctx, reportChange, llmCall, req, messagesC, chatArgs)
@@ -1403,10 +1347,8 @@ func (exe *SimpleExec) executeLLM(
 		}
 		if err == nil {
 			// The fallback response was never streamed, so publish it as one
-			// chunk (streamed replies were already published incrementally),
-			// then close the bracket so the contract "a successful attempt's
-			// chunks end with step_stream_end" holds on this path too. The
-			// non-streaming Chat call reports no finish reason or usage.
+			// chunk, then close the bracket so "a successful attempt's chunks
+			// end with step_stream_end" holds on this path too.
 			fallbackChunks := 0
 			if resp.Message.Content != "" || resp.Message.Thinking != "" {
 				fallbackChunks = 1
@@ -1419,7 +1361,6 @@ func (exe *SimpleExec) executeLLM(
 		return nil, DataTypeAny, "", fmt.Errorf("chat failed: %w", err)
 	}
 
-	// Process response
 	callTools := make([]ToolCall, len(resp.ToolCalls))
 	for i, tc := range resp.ToolCalls {
 		function := FunctionCall{
@@ -1443,7 +1384,7 @@ func (exe *SimpleExec) executeLLM(
 		Timestamp: time.Now().UTC(),
 	})
 
-	// Count output tokens (only for the response content, not tool calls)
+	// Count output tokens for the response content only, not tool calls.
 	var outputTokensCount int
 	if message := resp.Message; len(message.Content) != 0 {
 		outputTokensCount, err = exe.repo.CountTokens(ctx, meta.ModelName, message.Content)
@@ -1454,8 +1395,7 @@ func (exe *SimpleExec) executeLLM(
 		}
 	}
 	input.OutputTokens = outputTokensCount
-	// The provider's verbatim finish reason rides the history to the capture
-	// site — a "length"-class value is how a truncated success stays visible.
+	// A "length"-class finish reason is how a truncated success stays visible.
 	input.FinishReason = resp.FinishReason
 
 	if len(callTools) > 0 {
@@ -1465,12 +1405,10 @@ func (exe *SimpleExec) executeLLM(
 }
 
 // streamChatOnce runs one chat over the streaming path and assembles the
-// result with modelrepo.StreamAssembler — the single place streamed deltas
-// become tool calls. streamed=false with an error means stream SETUP failed
+// result. streamed=false with an error means stream setup failed
 // (resolution/connect) and the caller may fall back to non-streaming Chat;
-// streamed=true means parcels were (possibly) already observed, so mid-stream
-// failures are final — re-running the model after publishing chunks would
-// show the user two divergent replies.
+// streamed=true means parcels may already have been observed, so mid-stream
+// failures are final.
 func (exe *SimpleExec) streamChatOnce(
 	ctx context.Context,
 	reportChange func(id string, data any),
@@ -1489,9 +1427,6 @@ func (exe *SimpleExec) streamChatOnce(
 		if err := asm.Consume(parcel); err != nil {
 			return true, libmodelprovider.ChatResult{}, meta, fmt.Errorf("chat stream failed: %w", err)
 		}
-		// Observation only: visible content/thinking deltas fan out to the
-		// sink; tool-call fragments, usage, and terminal parcels never leak
-		// into the transcript.
 		if countsAsStreamChunk(parcel) {
 			chunkCount++
 		}
@@ -1502,13 +1437,9 @@ func (exe *SimpleExec) streamChatOnce(
 		return true, libmodelprovider.ChatResult{}, meta, fmt.Errorf("chat stream failed: %w", err)
 	}
 	// Bracket the completed stream: after the last chunk, before the caller's
-	// step_completed. On mid-stream failure (returns above) no bracket closes —
-	// step_failed does.
+	// step_completed. On mid-stream failure (returns above) no bracket closes.
 	exe.publishStepStreamEnd(ctx, meta, chunkCount, res.FinishReason, res.Usage)
 
-	// The terminal parcel's finish reason and usage are part of the response
-	// truth: length/content_filter endings and provider token accounting are
-	// recorded instead of ignored.
 	finish := map[string]any{
 		"finish_reason": res.FinishReason,
 		"model":         meta.ModelName,
@@ -1544,10 +1475,8 @@ func chatArgsForLLMCall(llmCall *LLMExecutionConfig, tools []libmodelprovider.To
 	if llmCall.Think != "" {
 		chatArgs = append(chatArgs, libmodelprovider.WithThink(llmCall.Think))
 	}
-	// Only forward an explicit max_tokens. Falling back to ctxLength conflates
-	// the input+output context window with the per-response output cap and trips
-	// per-model output limits (e.g. Vertex Gemini 2.5 Pro caps maxOutputTokens
-	// at 65536, well below typical 131072 ctxLength settings).
+	// Only forward an explicit max_tokens (see LLMExecutionConfig.MaxTokens);
+	// ctxLength is the context window, not an output cap.
 	if llmCall.MaxTokens != nil && *llmCall.MaxTokens > 0 {
 		chatArgs = append(chatArgs, libmodelprovider.WithMaxTokens(*llmCall.MaxTokens))
 	}
@@ -1646,7 +1575,6 @@ func (exe *SimpleExec) toolsengine(
 		tools.Args = make(map[string]string)
 	}
 
-	// Call the provider with the new, simple signature.
 	toolsOutput, dataType, err := exe.toolsProvider.Exec(ctx, startingTime, input, debug, tools)
 	if err != nil {
 		return nil, dataType, TransitionFailed, err
@@ -1657,17 +1585,15 @@ func (exe *SimpleExec) toolsengine(
 		return nil, DataTypeAny, TransitionFailed, normErr
 	}
 
-	// On success, process the output. Default eval matches execute_tool_calls'
-	// success token; an OutputTemplate (below) overrides it with its rendered text.
+	// Default eval matches execute_tool_calls' success token; an
+	// OutputTemplate below overrides it with its rendered text.
 	finalOutput := toolsOutput
 	finalOutputType := dataType
 	finalTransitionEval := TransitionToolsExecuted
 
-	// Apply the output template if it's defined.
 	if outputTemplate != "" {
 		rendered, tplErr := renderTemplate(outputTemplate, finalOutput)
 		if tplErr != nil {
-			// Return a descriptive error if templating fails.
 			return nil, DataTypeAny, TransitionFailed, fmt.Errorf("failed to render tools output template: %w", tplErr)
 		}
 		finalOutput = rendered
@@ -1675,24 +1601,21 @@ func (exe *SimpleExec) toolsengine(
 		finalTransitionEval = rendered
 	}
 
-	// Return the processed results.
 	return finalOutput, finalOutputType, finalTransitionEval, nil
 }
 
-// resolveToolWithResolution tries to find a ToolWithResolution for a given tool name.
-// It first looks up by key, then falls back to scanning by Function.Name / ToolsName.
-// This makes us robust to how chainContext.Tools was keyed.
+// resolveToolWithResolution finds a ToolWithResolution for toolName: direct
+// lookup by key, then a fallback scan by Function.Name / ToolsName, robust to
+// how chainContext.Tools was keyed.
 func resolveToolWithResolution(chainContext *ChainContext, toolName string) (ToolWithResolution, bool) {
 	if chainContext == nil {
 		return ToolWithResolution{}, false
 	}
 
-	// 1) Direct lookup by key
 	if twr, ok := chainContext.Tools[toolName]; ok {
 		return twr, true
 	}
 
-	// 2) Fallback: scan for matching Function.Name or ToolsName
 	for _, twr := range chainContext.Tools {
 		if twr.Function.Name == toolName || twr.ToolsName == toolName {
 			return twr, true
@@ -1990,13 +1913,11 @@ func (exe *SimpleExec) appendToolErrorResult(ctx context.Context, chatHistory *C
 	}
 }
 
-// chatWithRetry wraps repo.Chat with [llmretry.Do] when llmCall.RetryPolicy is
-// set; otherwise it issues a single call (preserving today's behavior). On
-// fallback, the request's ModelNames slice is replaced with the fallback id so
-// the underlying resolver targets that model directly.
-//
+// chatWithRetry wraps repo.Chat with [llmretry.Do] when llmCall.RetryPolicy
+// is set; otherwise it issues a single call. On fallback, ModelNames is
+// replaced with the fallback id so the resolver targets that model directly.
 // Every invocation appends an [llmretry.Outcome] to the context-bound sink
-// (see [WithRetryOutcomeSink]) so callers can inspect what happened.
+// (see [WithRetryOutcomeSink]).
 func (exe *SimpleExec) chatWithRetry(
 	ctx context.Context,
 	reportChange func(id string, data any),

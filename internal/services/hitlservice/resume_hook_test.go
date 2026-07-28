@@ -1,9 +1,7 @@
 package hitlservice_test
 
-// S6 wire-in tests: Respond triggers the registered resume hook exactly when
-// the waiter is GONE (the released case), never when a waiter is parked, and
-// never from the wrapper's inline resolve. Scaffolding (setupHITLDB,
-// newDurableService, testTenant) comes from durable_approval_test.go.
+// Resume wire-in tests: Respond triggers the registered resume hook only when
+// the waiter is gone, never when parked, and never from the inline resolve.
 
 import (
 	"context"
@@ -53,8 +51,7 @@ func TestUnit_ResumeHook_FiresOnWaiterlessRespond(t *testing.T) {
 	hitlservice.SetResumeHook(svc, rec.hook)
 
 	pendingRow(t, ctx, svc, "appr-1")
-	// Nobody is parked on appr-1 (the suspended-run shape): Respond must run
-	// the hook, and ErrNoCheckpoint must be treated as a clean no-op.
+	// Nobody is parked on appr-1: Respond must run the hook.
 	require.NoError(t, svc.Respond(ctx, "appr-1", true))
 	require.Equal(t, []string{"appr-1"}, rec.callIDs())
 }
@@ -121,8 +118,7 @@ func TestUnit_ResumeHook_SweepExpiredResumesWithTimeoutOutcome(t *testing.T) {
 	hitlservice.SetResumeHook(svc, rec.hook)
 
 	recorder := svc.(hitlservice.ApprovalRecorder)
-	// TimeoutS 1 puts expiry ~1s out; back-dating via the request's rule
-	// timeout keeps this test fast without reaching into the store.
+	// TimeoutS 1 puts expiry ~1s out, keeping this test fast.
 	require.NoError(t, recorder.RecordPendingApproval(ctx, "appr-exp", hitlservice.ApprovalRequest{
 		ToolsName: "local_fs", ToolName: "write_file", TimeoutS: 1,
 	}))

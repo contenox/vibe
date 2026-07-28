@@ -1,5 +1,6 @@
 ---
 title: Task Chains
+description: The JSON state machine that defines how your agent behaves — composable, inspectable, backend-agnostic.
 ---
 
 # Task Chains

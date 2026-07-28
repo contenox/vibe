@@ -19,12 +19,7 @@ type BuildOptions struct {
 	PolicyName string
 	PolicyPath string
 
-	// MayCall and MayCallDeclared are the gated call's declared reach, when the
-	// caller knows it — see Meta.MayCall for what it is for and Meta.
-	// MayCallDeclared for why the flag is a pointer. They are supplied here
-	// rather than derived from the request because only the site that built the
-	// toolset (which owns the script registry) can know a script's declared
-	// reach; approvalflow never infers it.
+	// MayCall and MayCallDeclared are the gated call's declared reach; see Meta.MayCall.
 	MayCall         []string
 	MayCallDeclared *bool
 }
@@ -38,51 +33,14 @@ type Meta struct {
 	DiffOld    string `json:"diffOld,omitempty"`
 	DiffNew    string `json:"diffNew,omitempty"`
 
-	// MayCall is the DECLARED reach of the gated call: the tool identities it
-	// may itself invoke while it runs, in the declaration's own order.
-	//
-	// It exists because a script tool (goja.<script_name>) is the one gated
-	// call whose arguments do not describe what it will do. The tools a script
-	// calls raise their own cards when they are gated — but an ALLOW-tier call
-	// raises none at all, so an operator approving the script has no way to
-	// know it will read files or run git. This field is that missing sentence,
-	// and a surface renders it as the card's "may call" line.
-	//
-	// It is a DECLARATION, not a proof: it is what the script's author said it
-	// would reach, carried through so a human can weigh it. Nothing in this
-	// package enforces it, and a surface must not present it as a guarantee.
-	//
-	// It carries gojatool's Script.Tools verbatim, in declaration order.
+	// MayCall is the gated call's declared reach, in order; a declaration, not a proof.
 	MayCall []string `json:"mayCall,omitempty"`
 
-	// MayCallDeclared says how to READ MayCall, and is a pointer because the
-	// three states it distinguishes are genuinely three:
-	//
-	//   nil   — nothing is known about this call's reach. Every ordinary tool
-	//           call, and any peer that sent no envelope. A surface says
-	//           nothing at all, because it has nothing to say.
-	//   true  — MayCall is EXHAUSTIVE. Empty then means the call declared it
-	//           reaches nothing, which is a strong statement, not an absent one.
-	//   false — the call is one that CAN reach other tools but declared no list,
-	//           so its reach is bounded only by the policy envelope.
-	//
-	// Collapsing the last two — the shape a plain bool forces — would render a
-	// script that declared "I touch nothing" identically to one that declared
-	// nothing at all, and those are opposite ends of the range (gojatool's
-	// Script.ToolsDeclared makes the same distinction, and this field carries
-	// it: &script.ToolsDeclared).
+	// MayCallDeclared: nil = unknown; true = MayCall exhaustive; false = reaches others, undeclared.
 	MayCallDeclared *bool `json:"mayCallDeclared,omitempty"`
 }
 
-// IsZero reports whether the envelope carries nothing at all, so a caller can
-// tell "the downstream said nothing" from "the downstream said nothing useful".
-//
-// It is reflect-based rather than a hand-written field list because Meta grows:
-// a field added without a matching clause in a hand-written comparison would
-// make a populated envelope read as empty, and MarshalMeta would then drop it
-// on the wire silently. Meta is also no longer comparable with == (MayCall is a
-// slice), so every zero check in this package and its surfaces goes through
-// here.
+// IsZero reports whether the envelope carries nothing at all.
 func (m Meta) IsZero() bool { return reflect.DeepEqual(m, Meta{}) }
 
 func BuildRequest(req hitlservice.ApprovalRequest, opts BuildOptions) libacp.RequestPermissionRequest {

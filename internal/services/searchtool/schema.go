@@ -7,27 +7,11 @@ import (
 	"github.com/contenox/beam/internal/kernel/taskengine"
 )
 
-// ---------------------------------------------------------------------------
-// Tool schema
-//
-// Terse by default, for the reason localtools/fs_schema.go and gointel/schema.go
-// both document: a description is paid on EVERY turn, while most of what a long
-// description pre-teaches is re-taught by the error or the note at the moment it
-// matters, with the concrete value filled in.
-//
-// Four things are stated anyway, because none of them can be re-taught by
-// something that fires later:
-//
-//   - WHAT IT SEARCHES (indexed content in any language, not just Go), because a
-//     model that thinks this is a Go tool never asks it about a markdown doc;
-//   - THAT IT IS NOT gointel, because two workspace-reading toolsets with
-//     overlapping names is exactly how a model picks the wrong one;
-//   - THAT IT IS NOT A LIVE READ, because a stale or absent answer read as a
-//     live one is a silent wrong answer, not an error; and
-//   - THAT A MISSING INDEX IS AN INSTRUCTION, because a model taught to treat it
-//     as a broken tool will stop calling the tool for the whole session instead
-//     of telling the human the one command that fixes it.
-// ---------------------------------------------------------------------------
+// Terse by default: a description is paid on every turn, and most of what a
+// long one pre-teaches is re-taught by the error or note when it matters.
+// Four things are stated anyway since nothing later re-teaches them: what it
+// searches (any language, not just Go), that it is not gointel, that it is
+// not a live read, and that a missing index is an instruction, not a fault.
 
 const searchToolDoc = "Semantic search over this workspace's INDEXED CONTENT — prose, markdown, configuration and source in ANY language — " +
 	"for questions like \"where is retry backoff explained\" or \"what configures the embedding model\". " +

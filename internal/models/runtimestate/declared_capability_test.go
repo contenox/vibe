@@ -24,10 +24,7 @@ func newDeclaredCapabilityTestDB(t *testing.T) (context.Context, libdb.DBManager
 	return ctx, db, runtimetypes.New(db.WithoutTransaction())
 }
 
-// TestUnit_RunBackendCycle_DeclaredModelKeepsObservedVision pins the declared-
-// model capability merge: a hand-declared gpt-4o must keep the CanVision the
-// catalog observed for it, because the declared row (runtimetypes.Model) cannot
-// express vision/think and rebuilding capabilities from it alone stripped them.
+// A hand-declared gpt-4o must keep the CanVision the catalog observed for it, since the declared row cannot express vision/think itself.
 func TestUnit_RunBackendCycle_DeclaredModelKeepsObservedVision(t *testing.T) {
 	ctx, db, store := newDeclaredCapabilityTestDB(t)
 
@@ -49,7 +46,6 @@ func TestUnit_RunBackendCycle_DeclaredModelKeepsObservedVision(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.SetKV(ctx, OpenaiKey, data))
 
-	// Declared by hand: the row carries chat capability only — no vision field exists.
 	require.NoError(t, store.AppendModel(ctx, &runtimetypes.Model{
 		ID:        "declared-gpt-4o",
 		Model:     "gpt-4o",
@@ -60,7 +56,6 @@ func TestUnit_RunBackendCycle_DeclaredModelKeepsObservedVision(t *testing.T) {
 
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
-	// No WithAutoDiscoverModels: the declared-model branch is under test.
 	state, err := New(ctx, db, bus)
 	require.NoError(t, err)
 	require.NoError(t, state.RunBackendCycle(ctx))
@@ -77,10 +72,7 @@ func TestUnit_RunBackendCycle_DeclaredModelKeepsObservedVision(t *testing.T) {
 	require.True(t, pm.CanStream)
 }
 
-// TestUnit_RunBackendCycle_VLLMPassesConfiguredAuthToken asserts that the vLLM
-// reconcile path reads the configured bearer token (OpenAI-compatible provider
-// key), sends it on the catalog request, and stores it on the backend state so
-// the provider adapter hands it to chat/stream clients.
+// The vLLM reconcile path must read the configured bearer token, send it on the catalog request, and store it on the backend state.
 func TestUnit_RunBackendCycle_VLLMPassesConfiguredAuthToken(t *testing.T) {
 	ctx, db, store := newDeclaredCapabilityTestDB(t)
 
@@ -125,10 +117,7 @@ func TestUnit_RunBackendCycle_VLLMPassesConfiguredAuthToken(t *testing.T) {
 	require.Len(t, bs.PulledModels, 1)
 }
 
-// TestUnit_RunBackendCycle_VLLMDeclaredModelKeepsObservedCaps pins the vLLM
-// declared-model branch of the merge: observed capabilities are the base and
-// declared trues add on top, so a declared row with no capability flags does
-// not strip what the backend reports.
+// In the vLLM declared-model merge, observed capabilities are the base and declared trues add on top, so a bare declaration never strips them.
 func TestUnit_RunBackendCycle_VLLMDeclaredModelKeepsObservedCaps(t *testing.T) {
 	ctx, db, store := newDeclaredCapabilityTestDB(t)
 

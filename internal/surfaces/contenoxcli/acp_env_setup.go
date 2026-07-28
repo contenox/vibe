@@ -14,11 +14,9 @@ import (
 	"github.com/contenox/beam/libacp"
 )
 
-// Environment variables of the non-interactive ACP setup route. They serve two
-// roles: as process-level config overrides on every `acp`/`acpx` launch
-// ("default envs"), and as the ACP env_var auth method's contract — a client
-// collects them from the user and relaunches the agent with them set, after
-// which setup completes without the terminal wizard.
+// Environment variables of the non-interactive ACP setup route: process-level
+// config overrides on every `acp`/`acpx` launch, and the ACP env_var auth
+// method's contract that a client relaunches the agent with set.
 const (
 	envDefaultModel       = "CONTENOX_DEFAULT_MODEL"
 	envDefaultProvider    = "CONTENOX_DEFAULT_PROVIDER"
@@ -58,17 +56,14 @@ func acpEnvSetupVars() []libacp.AuthEnvVar {
 			vars = append(vars, libacp.AuthEnvVar{Name: sp.envKey, Label: sp.label + " API key", Optional: true})
 		}
 	}
-	// envBaseURL (CONTENOX_BASE_URL) is honored by completeEnvSetup for
-	// account-specific providers (vertex-google) but intentionally not advertised
-	// here: acpEnvSetupVars keeps a fixed shape (provider, model, then per-provider
-	// API keys) that TestUnit_ACPEnvSetupVars_ContractShape guards.
+	// envBaseURL is honored by completeEnvSetup but intentionally not advertised
+	// here; acpEnvSetupVars keeps a fixed shape guarded by a test.
 	return vars
 }
 
 // completeEnvSetup performs the setup wizard's effects non-interactively from
-// the environment: validate the provider, resolve the model and API key,
-// register the provider backend (idempotent), and persist default-provider /
-// default-model. Errors name the exact variable that is missing so an ACP
+// the environment, registering the provider backend and persisting
+// default-provider/default-model. Errors name the missing variable so an ACP
 // client can show an actionable message.
 func completeEnvSetup(ctx context.Context, db libdb.DBManager) error {
 	provider := strings.ToLower(strings.TrimSpace(os.Getenv(envDefaultProvider)))

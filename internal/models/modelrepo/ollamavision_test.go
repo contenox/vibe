@@ -1,10 +1,5 @@
 package modelrepo_test
 
-// The cost-gated real-model vision check: a genuine image through the ollama
-// provider against a real vision model, proving the capability end to end at
-// the provider seam (the wire-level image encoding is covered per adapter by
-// unit tests; the live editor journey was proven manually via `--attach`).
-
 import (
 	"bytes"
 	"image"

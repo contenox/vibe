@@ -1,17 +1,11 @@
 package llmrepo
 
-// This file is the engine-side groundwork for provider KV-cache utilization
-// (docs/development/blueprints/provider-kv-cache.md). It owns three concerns:
-//
-//  1. Session identity for cache affinity: an opaque SessionKey derived from
-//     the internal session ID, threaded to the resolver so a session sticks
-//     to one provider/backend (blueprint §4.1.5, fixes P1).
-//  2. Canonical tool ordering: the last-applied ChatArgument that guarantees
-//     the tool list every adapter serializes is byte-stable across turns
-//     (blueprint §4.1.2, fixes E7).
-//  3. CacheHints: the thin, omission-tolerant stable/volatile-boundary
-//     declaration that adapters translate into provider cache controls in a
-//     later slice (blueprint §4.2).
+// This file is the engine-side groundwork for provider KV-cache utilization:
+// session identity for cache affinity (SessionKey, derived from the internal
+// session ID, threaded to the resolver so a session sticks to one
+// provider/backend), canonical tool ordering (byte-stable serialization
+// across turns), and CacheHints (the stable/volatile-boundary declaration
+// adapters translate into provider cache controls).
 
 import (
 	"context"
@@ -53,13 +47,11 @@ func SessionKeyFromContext(ctx context.Context) string {
 }
 
 // DeriveSessionKey turns an internal session identifier into the opaque key
-// used for cache affinity. The key eventually reaches third parties (it is
-// the natural input for OpenAI's prompt_cache_key), so the internal session
-// UUID must never travel raw — we send a one-way hash instead. A plain
-// domain-separated SHA-256 is used rather than an HMAC with a runtime secret
-// because the key must stay stable across process restarts (a restart must
-// not cold-start every provider cache) and a session UUID already carries
-// enough entropy that the hash is not invertible in practice.
+// used for cache affinity (the natural input for OpenAI's prompt_cache_key),
+// so the internal session UUID never travels raw. A domain-separated SHA-256
+// is used rather than an HMAC with a runtime secret so the key stays stable
+// across process restarts; a session UUID already carries enough entropy
+// that the hash is not invertible in practice.
 func DeriveSessionKey(sessionID string) string {
 	if sessionID == "" {
 		return ""
@@ -83,9 +75,9 @@ func effectiveSessionKey(ctx context.Context, req Request) string {
 // lies so it can place cache breakpoints (anthropic cache_control, bedrock
 // cachePoint, gemini cachedContents, openai prompt_cache_key). Providers map
 // what they can and ignore the rest — omission changes nothing, and a hint
-// may NEVER change what the model sees: only cache metadata differs. Any
-// provider that would have to reorder or rewrite content to honor a hint must
-// drop the hint instead.
+// must never change what the model sees: only cache metadata differs. A
+// provider that would have to reorder or rewrite content to honor a hint
+// must drop the hint instead.
 //
 // The session affinity key is not part of this struct: it lives on
 // Request.SessionKey (and is filled into the provider-facing hints when
@@ -109,17 +101,12 @@ type CacheHints struct {
 
 // providerCacheHints translates llmrepo's engine-side CacheHints into the
 // provider-facing modelrepo.CacheHints at the canonical-request seam, filling
-// the provider cache key from the resolved session key.
-//
-// PRODUCER (until the task engine emits rich per-call hints): when the caller
+// the provider cache key from the resolved session key. When the caller
 // supplied no hints, llmrepo synthesizes conservative defaults on every chat
-// and stream request — StableSystem and StableTools are asserted because the
-// post-canonicalization request shape makes both byte-stable across a session
-// (day-granular {{now}}, canonical tool ordering), and StableHistoryLen stays
-// 0 because only the trim logic knows the stable history prefix. This
-// activates provider caching with zero caller changes; richer per-call hints
-// (history prefix length from the chunked trim) are the deferred taskengine
-// follow-up.
+// and stream request: StableSystem and StableTools are asserted because the
+// post-canonicalization request shape makes both byte-stable across a
+// session, and StableHistoryLen stays 0 because only the trim logic knows
+// the stable history prefix.
 func providerCacheHints(hints *CacheHints, sessionKey string) libmodelprovider.CacheHints {
 	out := libmodelprovider.CacheHints{
 		SessionKey:   sessionKey,
@@ -142,13 +129,13 @@ func providerCacheHints(hints *CacheHints, sessionKey string) libmodelprovider.C
 	return out
 }
 
-// canonicalToolOrder is appended by llmrepo as the LAST ChatArgument on every
+// canonicalToolOrder is appended by llmrepo as the last ChatArgument on every
 // chat and stream request. Provider prefix caches key on the exact serialized
 // request bytes, and tools render before everything else on most providers —
-// a wobbling tool order is a full cache invalidation (blueprint E7). Sorting
-// here, at the one seam every request passes through, makes registry and
-// allowlist enumeration order irrelevant. Sorting is metadata-only from the
-// model's perspective: the same tools are advertised, just in a stable order.
+// a wobbling tool order is a full cache invalidation. Sorting here, at the
+// one seam every request passes through, makes registry and allowlist
+// enumeration order irrelevant; it is metadata-only, advertising the same
+// tools in a stable order.
 type canonicalToolOrder struct{}
 
 func (canonicalToolOrder) Apply(cfg *libmodelprovider.ChatConfig) {

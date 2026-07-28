@@ -22,29 +22,10 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// goja on the ENGINE PATH.
-//
-// The package's own suite proves the sandbox: the limits hold, the refusals
-// refuse, host.tool routes through whatever HostToolCaller it was handed. What
-// it structurally CANNOT prove is the claim the whole feature rests on — the one
-// boundary rule:
-//
-//	a script calling a tool meets the SAME envelope a model call would.
-//
-// That claim is not about gojatool at all. It is about what BuildEngine wires
-// into SetHost: the HITL-wrapped aggregate repo and nothing shallower. A single
-// wrong argument at that one line — the raw repo, or the repo before the gate —
-// turns every script tool into a policy bypass, and every unit test in the tree
-// stays green while it happens: the sandbox works, the policy file parses, the
-// script returns the right answer. The bypass is invisible everywhere except
-// here.
-//
-// So the assertions below are about WHO EVALUATED WHAT, taken from the engine's
-// own hitl_decision events rather than from a green result:
-//
-//	a script reaching an allow-tier tool must NOT raise a card
-//	a script reaching an approve-tier tool MUST raise one, naming that tool
-//	a denied inner call must not become data the script mistakes for a result
+// goja on the engine path: asserts a script's host.tool call meets the same
+// envelope a model call would, as wired by BuildEngine into SetHost.
+// Assertions read the engine's hitl_decision events rather than green
+// results, since a bypass here is invisible to every other test in the tree.
 // ---------------------------------------------------------------------------
 
 // gojaAsker answers approval requests by rule and records every one it saw. The
@@ -125,9 +106,8 @@ func (s *gojaSink) decisions() []string {
 
 // --- the example scripts -----------------------------------------------------
 //
-// These are written as an operator would write them, into the harness's
-// $CONTENOX_DIR/tools. They are also the honest sample of what the convention
-// costs to use: a descriptor, a run function, and no ceremony.
+// Written as an operator would write them, into $CONTENOX_DIR/tools: a
+// descriptor, a run function, no ceremony.
 
 const scriptStatsSummary = `// A pure-compute script tool: no host.tool, no I/O, just arithmetic the model
 // should never be doing token-by-token.
@@ -265,15 +245,13 @@ type gojaHarness struct {
 	scriptDir   string
 }
 
-// newGojaHarness builds a REAL engine through BuildEngine with HITL on, the
-// SHIPPED policy presets seeded into an isolated .contenox dir, and the example
-// scripts in the tools/ directory BuildEngine loads from. Everything under test
-// here is what this binary ships.
+// newGojaHarness builds a real engine through BuildEngine with HITL on, the
+// shipped policy presets seeded into an isolated .contenox dir, and the
+// example scripts in the tools/ directory BuildEngine loads from.
 func newGojaHarness(t *testing.T, scripts map[string]string, answer func(hitlservice.ApprovalRequest) bool) *gojaHarness {
 	t.Helper()
 
-	// No interactive answer is obtainable from this process: a gate that reaches
-	// for a TTY fails at once rather than parking the test.
+	// A gate that reaches for a TTY must fail at once, not park the test.
 	devnull, err := os.Open(os.DevNull)
 	require.NoError(t, err)
 	realStdin := os.Stdin
@@ -292,8 +270,7 @@ func newGojaHarness(t *testing.T, scripts map[string]string, answer func(hitlser
 		require.NoError(t, os.WriteFile(filepath.Join(scriptDir, name), []byte(body), 0o644))
 	}
 
-	// The workspace the tools are scoped to. Written, not borrowed: note_append
-	// writes into it.
+	// The workspace the tools are scoped to; note_append writes into it.
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "README.md"),
 		[]byte("# fixture\n\nsome text\n\n## second heading\n\nmore text\n"), 0o644))
@@ -394,10 +371,7 @@ func exampleScripts() map[string]string {
 // Row 1 — registration: the provider exists, and it gates the way it was seeded
 // ---------------------------------------------------------------------------
 
-// TestSystem_Goja_RegisteredAndGatedUnderShippedPolicies is the acceptance test
-// for the registration decision. goja_eval must be reachable through a real
-// engine, must compute correctly, and must raise exactly one approval card
-// naming itself — the seeded rule, evaluated from the file on disk.
+// TestSystem_Goja_RegisteredAndGatedUnderShippedPolicies asserts goja_eval is reachable through a real engine, computes correctly, and raises exactly one approval card naming itself per the seeded rule.
 func TestSystem_Goja_RegisteredAndGatedUnderShippedPolicies(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -430,11 +404,7 @@ func TestSystem_Goja_RegisteredAndGatedUnderShippedPolicies(t *testing.T) {
 	}
 }
 
-// TestSystem_Goja_ScriptToolsAreRegisteredAndFallToDefaultAction pins the other
-// half of the seeded posture: a script tool carries NO rule, so it lands on
-// default_action. That is the blueprint's trust stance for
-// operator-authored-but-unreviewed-by-us code, and it is only observable here —
-// no unit test can see which rule did not match.
+// TestSystem_Goja_ScriptToolsAreRegisteredAndFallToDefaultAction asserts a script tool carries no rule and so lands on default_action.
 func TestSystem_Goja_ScriptToolsAreRegisteredAndFallToDefaultAction(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -463,19 +433,10 @@ func TestSystem_Goja_ScriptToolsAreRegisteredAndFallToDefaultAction(t *testing.T
 }
 
 // ---------------------------------------------------------------------------
-// Row 2 — THE ONE BOUNDARY RULE
+// Row 2 — the one boundary rule
 // ---------------------------------------------------------------------------
 
-// TestSystem_Goja_HostToolMeetsTheSameEnvelopeAModelWould is the test this file
-// exists for. It is the ONLY place in the tree that can fail when SetHost is
-// wired to the wrong repo, and it fails in both directions:
-//
-//   - a script reaching local_fs.read_file (allow tier) must produce a decision
-//     event for local_fs.read_file and NO card. If no decision appears at all,
-//     the bridge went around the gate — the bypass.
-//   - a script reaching local_fs.write_file (approve tier) must raise a card
-//     NAMING local_fs.write_file. Approving the SCRIPT is not approving what the
-//     script does.
+// TestSystem_Goja_HostToolMeetsTheSameEnvelopeAModelWould asserts an allow-tier inner call (local_fs.read_file) produces a decision event with no card, and an approve-tier inner call (local_fs.write_file) raises a card naming that tool — approving the script does not approve what it reaches.
 func TestSystem_Goja_HostToolMeetsTheSameEnvelopeAModelWould(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -531,19 +492,7 @@ func TestSystem_Goja_HostToolMeetsTheSameEnvelopeAModelWould(t *testing.T) {
 	})
 }
 
-// TestSystem_Goja_AnApprovalCardDoesNotBurnTheScriptsDeadline is the regression
-// test for the bug that only live use could find, and the reason this file has a
-// SLOW asker in it at all.
-//
-// Every other test here answers the card in microseconds, which is the one thing
-// a real operator never does. Reaching an approve-tier tool means a human reading
-// a card; the sandbox's deadline defaults to 2 seconds; and the deadline used to
-// run straight through the wait. So the headline capability — a script tool that
-// reaches a gated tool — failed 100% of the time in front of a person, while
-// every test in the tree stayed green.
-//
-// The asker below takes THREE TIMES the sandbox's default budget to answer, which
-// is still faster than any human. The script must come back with a result.
+// TestSystem_Goja_AnApprovalCardDoesNotBurnTheScriptsDeadline asserts the sandbox deadline does not run while host.tool is parked waiting on a human's approval answer.
 func TestSystem_Goja_AnApprovalCardDoesNotBurnTheScriptsDeadline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -580,15 +529,7 @@ func TestSystem_Goja_AnApprovalCardDoesNotBurnTheScriptsDeadline(t *testing.T) {
 	require.Contains(t, string(body), "answered by a slow human")
 }
 
-// TestSystem_Goja_DeniedInnerCallDoesNotBecomeData is the failure mode the
-// bridge's own doc names: a refusal that arrives as a VALUE lets a script carry
-// on and answer confidently with nonsense.
-//
-// The engine's gate returns its denial as an ordinary string result (a model is
-// expected to read it and change course). A SCRIPT cannot read anything: it does
-// `text.split("\n")` on the denial and returns a confident wrong answer. So the
-// bridge turns a denial into a thrown JS exception — the same treatment its own
-// refusals get — and a script that wants to continue must say so with try/catch.
+// TestSystem_Goja_DeniedInnerCallDoesNotBecomeData asserts a denied inner host.tool call surfaces to the script as a thrown JS exception, not as a value it can silently use as data.
 func TestSystem_Goja_DeniedInnerCallDoesNotBecomeData(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -617,9 +558,7 @@ func TestSystem_Goja_DeniedInnerCallDoesNotBecomeData(t *testing.T) {
 	require.True(t, os.IsNotExist(statErr), "a denied write created the file anyway")
 }
 
-// TestSystem_Goja_ScriptToolsStillGateWhileGojaEvalDoesNot is the other half of
-// the tier decision: allowing goja_eval must not have allowed anything else on
-// the provider. A script tool carries no rule and still lands on default_action.
+// TestSystem_Goja_ScriptToolsStillGateWhileGojaEvalDoesNot asserts allowing goja_eval does not allow other tools on the same provider; a script tool still lands on default_action.
 func TestSystem_Goja_ScriptToolsStillGateWhileGojaEvalDoesNot(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -641,11 +580,7 @@ func TestSystem_Goja_ScriptToolsStillGateWhileGojaEvalDoesNot(t *testing.T) {
 	}
 }
 
-// TestUnit_Goja_EvalTierMatchesInEveryPolicySource pins the tier in the three
-// places it is written down, because a rule that disagrees with itself gates a
-// tool differently depending on whether the operator happens to have a policy
-// file — the worst kind of drift, and invisible until someone else's install
-// behaves differently from yours.
+// TestUnit_Goja_EvalTierMatchesInEveryPolicySource asserts goja_eval's allow tier is set in both shipped presets, and that the no-file fallback carries no such tier and asks instead.
 func TestUnit_Goja_EvalTierMatchesInEveryPolicySource(t *testing.T) {
 	ctx := context.Background()
 	args := map[string]any{"code": "1 + 1"}
@@ -660,15 +595,15 @@ func TestUnit_Goja_EvalTierMatchesInEveryPolicySource(t *testing.T) {
 			"%s must allow goja_eval: no filesystem, no network, no require, no process — an approval there protects nothing and every host.tool call it makes is gated on its own rule", name)
 	}
 
-	// No policy file anywhere: hitlservice falls back to defaultPolicy(), which
-	// must say the same thing.
+	// No policy file anywhere: fail-closed, no allow tier, goja_eval asks like
+	// everything else. The allow rule above exists only in seeded files.
 	svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()), testTenant, nopKV{}, libtracker.NoopTracker{}, "hitl-policy-default.json")
 	r, err := svc.Evaluate(ctx, gojatool.ToolsProviderName, gojatool.ToolEval, args)
 	require.NoError(t, err)
-	require.Equal(t, hitlservice.ActionAllow, r.Action, "the no-file fallback must match the seeded presets")
+	require.Equal(t, hitlservice.ActionApprove, r.Action, "the no-file fallback must ask — allow tiers live only in seeded, readable policy files")
 
-	// And a SCRIPT tool must match nothing, in every source: operator-authored
-	// code nobody reviewed falls to default_action by design.
+	// A script tool must match nothing, in every source: unreviewed
+	// operator-authored code falls to default_action by design.
 	for _, name := range []string{"hitl-policy-default.json", "hitl-policy-acp.json"} {
 		svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(fresh), testTenant, nopKV{}, libtracker.NoopTracker{}, name)
 		r, err := svc.Evaluate(ctx, gojatool.ToolsProviderName, "some_operator_script", args)
@@ -678,9 +613,7 @@ func TestUnit_Goja_EvalTierMatchesInEveryPolicySource(t *testing.T) {
 	}
 }
 
-// TestSystem_Goja_ADeniedCallIsCatchableByAScriptThatMeantIt is the other half:
-// throwing must not take the option away. An author who wrote the try/catch made
-// an explicit decision and keeps their turn.
+// TestSystem_Goja_ADeniedCallIsCatchableByAScriptThatMeantIt asserts a script that wraps host.tool in try/catch can still catch a denial and keep its turn.
 func TestSystem_Goja_ADeniedCallIsCatchableByAScriptThatMeantIt(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -711,10 +644,7 @@ func TestSystem_Goja_ADeniedCallIsCatchableByAScriptThatMeantIt(t *testing.T) {
 // Row 3 — the refusals, through the whole stack
 // ---------------------------------------------------------------------------
 
-// TestSystem_Goja_RefusalsHoldOnTheEnginePath runs each documented limit through
-// the real dispatch. The package suite proves each one in isolation; what is
-// asserted here is that the refusal survives the trip as a READABLE error rather
-// than a panic, a hang, or a chain abort — the turn has to continue.
+// TestSystem_Goja_RefusalsHoldOnTheEnginePath asserts each documented sandbox limit, run through real dispatch, surfaces as a readable error rather than a panic, a hang, or a chain abort.
 func TestSystem_Goja_RefusalsHoldOnTheEnginePath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -790,8 +720,7 @@ func TestSystem_Goja_RefusalsHoldOnTheEnginePath(t *testing.T) {
 		})
 	}
 
-	// The output cap: not an error, a TRUNCATION with an explicit marker, because
-	// a capped result is still an answer.
+	// The output cap truncates rather than errors, with an explicit marker.
 	t.Run("the output cap truncates with a notice", func(t *testing.T) {
 		h.sink.drain()
 		res, _ := h.eval(t, ctx, `"x".repeat(200000)`)
@@ -801,8 +730,8 @@ func TestSystem_Goja_RefusalsHoldOnTheEnginePath(t *testing.T) {
 		require.LessOrEqual(t, len(res.Value), gojatool.DefaultOutputCap+len(res.Notice)+16)
 	})
 
-	// console.log is captured, not ambient — a model writes it by reflex and must
-	// get it back rather than a ReferenceError.
+	// console.log is captured, not ambient, so a model's reflexive use of it
+	// doesn't hit a ReferenceError.
 	t.Run("console output comes back with the result", func(t *testing.T) {
 		h.sink.drain()
 		res, value := h.eval(t, ctx, `console.log("step", 1); console.warn("careful"); ({ ok: true })`)
@@ -815,10 +744,7 @@ func TestSystem_Goja_RefusalsHoldOnTheEnginePath(t *testing.T) {
 // Row 4 — startup and teardown
 // ---------------------------------------------------------------------------
 
-// TestSystem_Goja_ABadScriptIsAStartupErrorNamingTheFile pins the fail-fast rule
-// where it is actually paid: BuildEngine. A silently skipped script is a tool the
-// operator believes exists, the model never sees, and nothing ever complains
-// about.
+// TestSystem_Goja_ABadScriptIsAStartupErrorNamingTheFile asserts BuildEngine fails startup and names the file for a bad script, rather than silently skipping it.
 func TestSystem_Goja_ABadScriptIsAStartupErrorNamingTheFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -867,9 +793,7 @@ func TestSystem_Goja_ABadScriptIsAStartupErrorNamingTheFile(t *testing.T) {
 	}
 }
 
-// TestSystem_Goja_NoScriptDirIsNotAnError is the other side of fail-fast: an
-// operator who never wrote a script tool must not be punished for it. goja_eval
-// is still there.
+// TestSystem_Goja_NoScriptDirIsNotAnError asserts a missing scripts directory is not a startup error, and goja_eval is still reachable.
 func TestSystem_Goja_NoScriptDirIsNotAnError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -882,10 +806,7 @@ func TestSystem_Goja_NoScriptDirIsNotAnError(t *testing.T) {
 	require.Equal(t, float64(4), value)
 }
 
-// TestSystem_Goja_EngineStopClosesTheSandbox pins the lifecycle engine.go wires
-// up. A call arriving after teardown — a chain goroutine still draining while
-// the process exits — must be refused promptly and typed, not served by a
-// runtime nothing is waiting on any more.
+// TestSystem_Goja_EngineStopClosesTheSandbox asserts a goja call arriving after engine.Stop is refused promptly and typed, not served or hung.
 func TestSystem_Goja_EngineStopClosesTheSandbox(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -924,9 +845,7 @@ func TestSystem_Goja_EngineStopClosesTheSandbox(t *testing.T) {
 	}
 }
 
-// TestSystem_Goja_ScriptsAreIsolatedFromEachOther pins the property the whole
-// safety story rests on: one runtime per execution. Two scripts, and two calls
-// to the same script, must not be able to see each other's state.
+// TestSystem_Goja_ScriptsAreIsolatedFromEachOther asserts one runtime per execution: separate calls must not see each other's global state.
 func TestSystem_Goja_ScriptsAreIsolatedFromEachOther(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -948,10 +867,7 @@ func TestSystem_Goja_ScriptsAreIsolatedFromEachOther(t *testing.T) {
 	}
 }
 
-// gojaDenyMessageIsStillTheEngineSurface documents, in an executable place, that
-// the deny STRING the gate returns is a localtools constant this package's
-// bridge has to recognise. If the message ever changes, this fails here rather
-// than silently turning denials back into data.
+// TestUnit_Goja_DenyMessageIsRecognisedByTheBridge asserts the bridge still recognises the gate's deny-string constant, so a denial can't silently turn back into data.
 func TestUnit_Goja_DenyMessageIsRecognisedByTheBridge(t *testing.T) {
 	require.True(t, gojatool.IsDenyMessage(localtools.DenyMessage),
 		"the engine's deny message is no longer recognised by the bridge: a denied inner call would come back to a script as ordinary data")

@@ -8,13 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_FlattenPromptBlocks_ResourceLinkFromMention pins the server side of
-// the @-mention wire contract: beam's composer emits a text block plus one
-// resource_link block per mention ({type:"resource_link", name:<path>,
-// uri:<path>} — see packages/beam/.../mentions.ts promptBlocksFromDraft), and
-// the runtime must consume the resource_link as a "name: uri" line appended to
-// the prompt (the reference the agent follows with local_fs), never dropping it.
-// Reference only: no embedded resource content is required for a mention.
+// TestUnit_FlattenPromptBlocks_ResourceLinkFromMention pins: a resource_link block (an @-mention) becomes a "name: uri" line, never dropped.
 func TestUnit_FlattenPromptBlocks_ResourceLinkFromMention(t *testing.T) {
 	blocks := []libacp.ContentBlock{
 		{Type: string(libacp.ContentKindText), Text: "review @src/main.go"},
@@ -26,8 +20,7 @@ func TestUnit_FlattenPromptBlocks_ResourceLinkFromMention(t *testing.T) {
 		"the mention must reach the agent as a resolvable name: uri reference line")
 }
 
-// TestUnit_FlattenPromptBlocks_ResourceLinkUriOnly covers the degenerate mention
-// shape (uri without a distinct name): it still surfaces the uri, not a drop.
+// TestUnit_FlattenPromptBlocks_ResourceLinkUriOnly pins: a resource_link with no name still surfaces its uri, not a drop.
 func TestUnit_FlattenPromptBlocks_ResourceLinkUriOnly(t *testing.T) {
 	out, dropped := libacp.FlattenContent([]libacp.ContentBlock{
 		{Type: string(libacp.ContentKindResourceLink), URI: "notes.md"},

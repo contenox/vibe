@@ -7,15 +7,8 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
-// The program-facing result contract.
-//
-// Every test here is a form of ONE question: can a script hold a tool's answer
-// and be wrong about what it is, without anything saying so? The answer has to
-// be no on every path, because the failure this file guards is invisible —
-// live use found a script reporting "4 staged, 2 other, no untracked" for a tree
-// with one modified and one untracked file, and it returned successfully.
-// ---------------------------------------------------------------------------
+// The program-facing result contract: a script must never be able to hold a
+// tool's answer and be wrong about what it is without an error saying so.
 
 // textHost answers every call with prose, like most tools do.
 func textHost(t *testing.T, text string) *sandbox {
@@ -25,9 +18,8 @@ func textHost(t *testing.T, text string) *sandbox {
 	}))
 }
 
-// TestUnit_HostResult_TextCannotBeMisparsedSilently is the matrix. Each row is a
-// way a script could reach for a string, and every one of them must fail at the
-// line that tried rather than produce a plausible wrong value.
+// Every string operation on a text result fails at the line that tried,
+// rather than producing a plausible wrong value.
 func TestUnit_HostResult_TextCannotBeMisparsedSilently(t *testing.T) {
 	sb := textHost(t, "branch main\nuntracked:\n  x.go\n")
 
@@ -59,9 +51,8 @@ func TestUnit_HostResult_TextCannotBeMisparsedSilently(t *testing.T) {
 	}
 }
 
-// TestUnit_HostResult_TextIsReadableDeliberately is the other half: the guard
-// must not take the capability away. Reading prose on purpose is one property
-// access, and everything about the value is inspectable.
+// A text result is fully readable through .text and its other properties,
+// and the guard cannot be papered over by reassigning toString.
 func TestUnit_HostResult_TextIsReadableDeliberately(t *testing.T) {
 	sb := textHost(t, "line one\nline two")
 
@@ -78,26 +69,21 @@ func TestUnit_HostResult_TextIsReadableDeliberately(t *testing.T) {
 		t.Fatalf("bytes = %s", got)
 	}
 
-	// Returning the wrapper is data, not a throw: the guard is about mistaking
-	// prose for a parseable string, not about touching the value at all.
 	got := string(mustEval(t, sb, `host.tool("x.y")`).Value)
 	if !strings.Contains(got, `"shape":"text"`) || !strings.Contains(got, `"text":"line one\nline two"`) {
 		t.Fatalf("returning a text result did not marshal as data: %s", got)
 	}
-	// console.log must not throw either — a model logs by reflex.
 	if logs := mustEval(t, sb, `console.log(host.tool("x.y")); 1`).Logs; len(logs) != 1 {
 		t.Fatalf("logs = %v", logs)
 	}
 
-	// And the guard cannot be papered over: the properties are non-writable.
 	if _, err := eval(t, sb, `const v = host.tool("x.y"); v.toString = () => "gotcha"; String(v)`, 0); err == nil {
 		t.Fatal("a script reassigned toString and defeated the guard")
 	}
 }
 
-// TestUnit_HostResult_RawIsTheDeclaredEscapeHatch pins the door. Parsing prose is
-// sometimes exactly right; what the design buys is that the decision is visible
-// at the call site instead of being the default nobody chose.
+// {raw: true} hands back the bare value; a misspelled or non-boolean option
+// is refused by name rather than ignored.
 func TestUnit_HostResult_RawIsTheDeclaredEscapeHatch(t *testing.T) {
 	sb := textHost(t, "v1.2.3\n")
 
@@ -107,12 +93,9 @@ func TestUnit_HostResult_RawIsTheDeclaredEscapeHatch(t *testing.T) {
 	if got := string(mustEval(t, sb, `host.tool("x.y", {}, {raw: true}).trim()`).Value); got != `"v1.2.3"` {
 		t.Fatalf("raw = %s", got)
 	}
-	// raw: false is the default, spelled out.
 	if _, err := eval(t, sb, `host.tool("x.y", {}, {raw: false}).trim()`, 0); err == nil {
 		t.Fatal("raw: false did not restore the guard")
 	}
-	// A typo in the options object is refused by name rather than ignored —
-	// silently ignoring it would mean a script that believes it asked for raw.
 	_, err := eval(t, sb, `host.tool("x.y", {}, {rw: true})`, 0)
 	if err == nil || !strings.Contains(err.Error(), "unknown option") || !strings.Contains(err.Error(), "rw") {
 		t.Fatalf("a misspelled option was not refused by name: %v", err)
@@ -122,8 +105,8 @@ func TestUnit_HostResult_RawIsTheDeclaredEscapeHatch(t *testing.T) {
 	}
 }
 
-// TestUnit_HostResult_StructuredDataArrivesAsData is the happy path the whole
-// design is FOR: a tool that answers with a Go value hands a script fields.
+// A tool that answers with a Go value hands a script fields, and stringifying
+// it is refused the same way a text mis-parse is.
 func TestUnit_HostResult_StructuredDataArrivesAsData(t *testing.T) {
 	type status struct {
 		Branch    string   `json:"branch"`
@@ -143,8 +126,6 @@ func TestUnit_HostResult_StructuredDataArrivesAsData(t *testing.T) {
 		t.Fatalf("stringify = %s", got)
 	}
 
-	// But "[object Object]" is a mis-parse too, and JS produces it without a
-	// word of complaint.
 	_, err := eval(t, sb, `String(host.tool("git.git_status")).split("\n").length`, 0)
 	if err == nil {
 		t.Fatal("a script stringified a structured result and got a plausible wrong answer")
@@ -156,8 +137,8 @@ func TestUnit_HostResult_StructuredDataArrivesAsData(t *testing.T) {
 
 // --- the stand-in results ---------------------------------------------------
 
-// stubResult is the shape localtools.FsUnchangedResult has: a value whose
-// model-facing rendering stands in for something a program actually needs.
+// stubResult is a value whose model-facing rendering stands in for something
+// a program actually needs.
 type stubResult struct {
 	Unchanged bool `json:"unchanged"`
 	content   string
@@ -166,16 +147,14 @@ type stubResult struct {
 func (s stubResult) String() string              { return "File unchanged since last read — …" }
 func (s stubResult) ProgramText() (string, bool) { return s.content, true }
 
-// refusalResult is the shape localtools.FsRefusalResult has: nothing happened,
-// and here is why.
+// refusalResult is a stand-in with no program-facing equivalent.
 type refusalResult struct{ reason string }
 
 func (r refusalResult) String() string          { return r.reason }
 func (r refusalResult) ProgramUnusable() string { return r.reason }
 
-// TestUnit_HostResult_AStandInIsRedeemedNotHandedOver is the regression test for
-// the live read_file failure. A result that declares itself a stand-in gives the
-// program the thing it stood in for — never the sentence.
+// A redeemable stand-in hands the program what it stood in for, never the
+// rendered sentence — even through the raw escape hatch.
 func TestUnit_HostResult_AStandInIsRedeemedNotHandedOver(t *testing.T) {
 	sb := sandboxWithHost(t, HostFunc(func(context.Context, string, string, map[string]any) (any, error) {
 		return stubResult{Unchanged: true, content: "the real file\nsecond line\n"}, nil
@@ -185,17 +164,14 @@ func TestUnit_HostResult_AStandInIsRedeemedNotHandedOver(t *testing.T) {
 	if got := string(res.Value); got != `"the real file"` {
 		t.Fatalf("a script was handed the stand-in instead of what it stood in for: %s", got)
 	}
-	// Even the escape hatch cannot reach the sentence: {raw: true} asks for the
-	// exact value, and the exact value a program should see is the content.
 	res = mustEval(t, sb, `host.tool("local_fs.read_file", {path: "a.txt"}, {raw: true}).split("\n")[0]`)
 	if got := string(res.Value); got != `"the real file"` {
 		t.Fatalf("raw = %s", got)
 	}
 }
 
-// TestUnit_HostResult_AnUnusableStandInThrows is the other kind: a refusal has
-// no program-facing equivalent, so it must stop the script rather than be parsed
-// as a receipt for work that never happened.
+// An unusable stand-in throws, keeping its sentinel and the tool's own words,
+// and a script can still catch it to continue.
 func TestUnit_HostResult_AnUnusableStandInThrows(t *testing.T) {
 	const reason = "local_fs: cannot modify existing file a.txt without reading it first."
 	sb := sandboxWithHost(t, HostFunc(func(context.Context, string, string, map[string]any) (any, error) {
@@ -213,8 +189,6 @@ func TestUnit_HostResult_AnUnusableStandInThrows(t *testing.T) {
 		t.Fatalf("the tool's own words were dropped: %v", err)
 	}
 
-	// A script that means to continue can still say so — the same deal every
-	// other bridge refusal offers.
 	res := mustEval(t, sb, `
 		let out;
 		try { host.tool("local_fs.write_file", {path: "a.txt", content: "x"}); out = "wrote"; }

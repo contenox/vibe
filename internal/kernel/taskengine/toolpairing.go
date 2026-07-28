@@ -83,19 +83,17 @@ func repairToolCallPairing(msgs []Message) []Message {
 	return out
 }
 
-// resumableToolCallBatch locates the OPEN tool-call batch at the tail of a
+// resumableToolCallBatch locates the open tool-call batch at the tail of a
 // transcript: the last assistant message carrying tool calls, tolerating a
-// trailing block of tool results that answer SOME of them. It returns the
+// trailing block of tool results that answer some of them. It returns the
 // assistant message's index and the set of call IDs those trailing results
 // already answered, or (-1, nil) when the transcript does not end in a batch
 // with at least one unanswered call.
 //
-// The tolerance is what makes a suspended run's checkpoint re-enterable: the
-// interrupted batch persists as "assistant calls + partial results", and the
-// resume path re-runs execute_tool_calls over exactly that shape, executing
-// only the calls the trailing results have not answered. For an untouched
-// transcript (last message IS the assistant call) it degenerates to the
-// pre-S6 behavior: index len-1, nothing answered.
+// This tolerance is what makes a suspended run's checkpoint re-enterable:
+// the interrupted batch persists as "assistant calls + partial results", and
+// resume re-runs execute_tool_calls over exactly that shape, executing only
+// the calls the trailing results have not answered.
 func resumableToolCallBatch(msgs []Message) (assistantIdx int, answered map[string]bool) {
 	i := len(msgs) - 1
 	answered = map[string]bool{}

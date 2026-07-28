@@ -48,6 +48,8 @@ func scriptDir(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+// A well-formed script loads, registers under its declared unprefixed name,
+// and executes with host.tool wired through.
 func TestUnit_Script_LoadAndExecute(t *testing.T) {
 	dir := scriptDir(t, map[string]string{"wordcount.js": goodScript})
 	host := &recordingHost{reply: func(_, _ string, _ map[string]any) (any, error) {
@@ -64,8 +66,6 @@ func TestUnit_Script_LoadAndExecute(t *testing.T) {
 		t.Fatalf("loaded %d scripts, want 1", len(scripts))
 	}
 	sc := scripts[0]
-	// Registered under its DECLARED name, unprefixed: the provider is the
-	// namespace, so the model addresses this as goja.wordcount.
 	if sc.Name != "wordcount" {
 		t.Fatalf("name = %q, want the declared name unprefixed", sc.Name)
 	}
@@ -89,9 +89,7 @@ func TestUnit_Script_LoadAndExecute(t *testing.T) {
 	}
 }
 
-// The failure matrix. Every case is a startup error that NAMES THE FILE — the
-// blueprint's fail-fast rule. A silently skipped script is a tool the operator
-// believes exists, the model never sees, and nothing ever complains about.
+// Every descriptor validation failure is a startup error naming the file.
 func TestUnit_Script_LoaderFailureMatrix(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -206,8 +204,6 @@ func TestUnit_Script_LoaderFailureMatrix(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := scriptDir(t, map[string]string{"broken.js": tc.body})
-			// A short deadline keeps the top-level-loop case quick; every other
-			// case fails before it runs a single instruction.
 			ts, err := New(Config{ScriptDir: dir, Deadline: 200 * time.Millisecond, Host: &recordingHost{}})
 			if err == nil {
 				ts.Shutdown()
@@ -226,8 +222,9 @@ func TestUnit_Script_LoaderFailureMatrix(t *testing.T) {
 	}
 }
 
+// A script name colliding with a built-in, another script, or a
+// caller-reserved name fails the load, naming every file involved.
 func TestUnit_Script_NameCollisionsAreRefused(t *testing.T) {
-	// Against a built-in.
 	dir := scriptDir(t, map[string]string{
 		"mine.js": `const tool = { name: "goja_eval", description: "d", schema: { type: "object", properties: {} } }; function run(){}`,
 	})
@@ -235,14 +232,10 @@ func TestUnit_Script_NameCollisionsAreRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("a script shadowed a built-in tool")
 	}
-	// goja_eval is caught by the reserved-prefix rule first, which is the more
-	// specific teaching error; either way the load fails and names the file.
 	if !errors.Is(err, ErrScriptLoad) || !strings.Contains(err.Error(), "mine.js") {
 		t.Fatalf("error = %v", err)
 	}
 
-	// Against another script: BOTH files are named, because the operator has to
-	// decide which one to rename.
 	body := `const tool = { name: "dup", description: "d", schema: { type: "object", properties: {} } }; function run(){ return 1 }`
 	dir = scriptDir(t, map[string]string{"a_first.js": body, "b_second.js": body})
 	_, err = New(Config{ScriptDir: dir})
@@ -253,7 +246,6 @@ func TestUnit_Script_NameCollisionsAreRefused(t *testing.T) {
 		t.Fatalf("collision error names only one side: %q", err)
 	}
 
-	// Against a name the caller reserved.
 	dir = scriptDir(t, map[string]string{
 		"x.js": `const tool = { name: "read_file", description: "d", schema: { type: "object", properties: {} } }; function run(){}`,
 	})
@@ -262,9 +254,8 @@ func TestUnit_Script_NameCollisionsAreRefused(t *testing.T) {
 	}
 }
 
+// An absent or empty ScriptDir is not a failure; goja_eval still registers.
 func TestUnit_Script_AbsentDirectoryIsNotAFailure(t *testing.T) {
-	// An operator who has never written a script tool has no tools directory.
-	// Refusing to start over its absence would make non-use a failure.
 	ts, err := New(Config{ScriptDir: filepath.Join(t.TempDir(), "never-created")})
 	if err != nil {
 		t.Fatalf("a missing script directory failed the build: %v", err)
@@ -273,13 +264,11 @@ func TestUnit_Script_AbsentDirectoryIsNotAFailure(t *testing.T) {
 	if len(ts.Scripts()) != 0 {
 		t.Fatal("scripts appeared from nowhere")
 	}
-	// goja_eval is still registered.
 	names, _ := ts.Supports(context.Background())
 	if len(names) != 2 || names[1] != ToolEval {
 		t.Fatalf("Supports = %v", names)
 	}
 
-	// An empty ScriptDir is the same case.
 	if ts2, err := New(Config{}); err != nil {
 		t.Fatalf("Config{} failed: %v", err)
 	} else {
@@ -287,6 +276,7 @@ func TestUnit_Script_AbsentDirectoryIsNotAFailure(t *testing.T) {
 	}
 }
 
+// Only .js files are loaded, in deterministic sorted order.
 func TestUnit_Script_NonJSFilesAndSubdirectoriesAreIgnored(t *testing.T) {
 	dir := scriptDir(t, map[string]string{
 		"tool.js":       goodScript,
@@ -309,13 +299,12 @@ func TestUnit_Script_NonJSFilesAndSubdirectoriesAreIgnored(t *testing.T) {
 	if len(ts.Scripts()) != 2 {
 		t.Fatalf("loaded %d scripts, want the two .js files", len(ts.Scripts()))
 	}
-	// Deterministic order: sorted by path, so the tool list is stable across
-	// restarts and the model's cache is not invalidated by directory iteration.
 	if ts.Scripts()[0].Name != "shouty" || ts.Scripts()[1].Name != "wordcount" {
 		t.Fatalf("load order = %s, %s", ts.Scripts()[0].Name, ts.Scripts()[1].Name)
 	}
 }
 
+// A declared deadline_ms is honored under the ceiling and clamped above it.
 func TestUnit_Script_DeclaredDeadlineIsClamped(t *testing.T) {
 	mk := func(ms string) string {
 		return fmt.Sprintf(`const tool = { name: "slow", description: "d", deadline_ms: %s, schema: { type: "object", properties: {} } }; function run(){ return 1 }`, ms)
@@ -331,8 +320,6 @@ func TestUnit_Script_DeclaredDeadlineIsClamped(t *testing.T) {
 		t.Fatalf("declared deadline = %s, want 5s", got)
 	}
 
-	// Above the ceiling: clamped, not refused. The ceiling is a property of the
-	// sandbox, and a script asking for more gets the most the sandbox has.
 	dir = scriptDir(t, map[string]string{"slow.js": mk("600000")})
 	ts2, err := New(Config{ScriptDir: dir})
 	if err != nil {
@@ -344,6 +331,8 @@ func TestUnit_Script_DeclaredDeadlineIsClamped(t *testing.T) {
 	}
 }
 
+// A script tool is deadline-bounded the same way goja_eval is, and its error
+// names the script, not "goja_eval".
 func TestUnit_Script_ExecutionIsBoundedLikeEval(t *testing.T) {
 	dir := scriptDir(t, map[string]string{
 		"spin.js": `const tool = { name: "spin", description: "d", deadline_ms: 150, schema: { type: "object", properties: {} } };
@@ -363,13 +352,12 @@ func TestUnit_Script_ExecutionIsBoundedLikeEval(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("a script tool ran %s against its declared 150ms deadline", elapsed)
 	}
-	// The script's OWN name is in the error, not "goja_eval": the model has to
-	// know which tool failed.
 	if !strings.Contains(err.Error(), "spin") {
 		t.Errorf("error does not name the script tool: %q", err)
 	}
 }
 
+// A throw inside run() preserves the message and the JS source position.
 func TestUnit_Script_ThrowInsideRunTeaches(t *testing.T) {
 	dir := scriptDir(t, map[string]string{
 		"boom.js": `const tool = { name: "boom", description: "d", schema: { type: "object", properties: {} } };
@@ -388,8 +376,6 @@ func TestUnit_Script_ThrowInsideRunTeaches(t *testing.T) {
 	if !strings.Contains(err.Error(), "the input was not what I expected") {
 		t.Fatalf("error = %q, want the thrown message preserved", err)
 	}
-	// The JS source position survives: it is the most useful thing in the
-	// message when the author is fixing the script.
 	if !strings.Contains(err.Error(), "boom.js") {
 		t.Errorf("error does not carry the script position: %q", err)
 	}

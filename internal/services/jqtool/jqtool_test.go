@@ -16,9 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// chainFixture is a miniature of the document this tool exists for: a contenox
-// chain file. Every semantics assertion below queries it, so the tests read like
-// the calls an agent debugging a chain would actually make.
+// chainFixture is a miniature contenox chain file, queried by every semantics assertion below.
 const chainFixture = `{
   "id": "acp-session",
   "description": "the coding chain",
@@ -99,7 +97,6 @@ func TestUnit_JQTool_SemanticsOverAChainFile(t *testing.T) {
 		want   []string
 	}{
 		{
-			// The motivating query, verbatim from the package doc.
 			name:   "select",
 			filter: `.tasks[] | select(.handler=="tools") | .id`,
 			want:   []string{`"read"`, `"edit"`},
@@ -107,9 +104,7 @@ func TestUnit_JQTool_SemanticsOverAChainFile(t *testing.T) {
 		{
 			name:   "project",
 			filter: `.tasks[] | {id, handler}`,
-			// gojq.Marshal sorts object keys, so the projection comes back in
-			// key order rather than in the order the filter named them. Pinned
-			// because a caller diffing two results depends on it being stable.
+			// Pinned: gojq.Marshal sorts object keys, so output order is stable.
 			want: []string{
 				`{"handler":"model","id":"plan"}`,
 				`{"handler":"tools","id":"read"}`,
@@ -138,8 +133,7 @@ func TestUnit_JQTool_SemanticsOverAChainFile(t *testing.T) {
 			want:   []string{`{"model":2,"tools":2}`},
 		},
 		{
-			// gojq is fed json.Number, so a 64-bit id in a config file survives
-			// the round trip. A float64 decode would answer 9007199254740992.
+			// Pinned: gojq is fed json.Number, so a 64-bit id survives the round trip.
 			name:   "big integers keep their precision",
 			filter: `.token_limit`,
 			want:   []string{`9007199254740993`},
@@ -172,8 +166,7 @@ func TestUnit_JQTool_BothInputSources(t *testing.T) {
 	assert.Equal(t, `["plan","read","edit","respond"]`, values(fromPath)[0])
 	assert.Contains(t, fromInline.Source, "inline")
 
-	// A model that passes an already-decoded object rather than a string is
-	// being helpful, not wrong.
+	// An already-decoded object rather than a string is accepted too.
 	asValue := mustExec(t, tools, map[string]any{
 		"input":  map[string]any{"tasks": []any{map[string]any{"id": "plan"}}},
 		"filter": `[.tasks[].id]`,
@@ -207,8 +200,6 @@ func TestUnit_JQTool_YAMLInput(t *testing.T) {
 	})
 
 	t.Run("explicit format wins over the extension", func(t *testing.T) {
-		// A .json file whose content is YAML: with the extension believed, this
-		// must fail; with format=yaml stated, it must work.
 		writeFixture(t, dir, "mislabelled.json", yamlFixture)
 		_, err := exec(t, tools, map[string]any{"path": "mislabelled.json", "filter": `.id`})
 		require.Error(t, err, "a .json file that is not JSON must be reported, not silently reparsed")
@@ -226,8 +217,6 @@ func TestUnit_JQTool_YAMLInput(t *testing.T) {
 	})
 
 	t.Run("yaml shapes json does not have are normalized", func(t *testing.T) {
-		// Non-string keys, a timestamp and a binary — the three shapes that
-		// reach gojq as unsupported Go types if nobody normalizes them.
 		writeFixture(t, dir, "shapes.yaml", "1: one\ntrue: yes-key\nwhen: 2026-07-27T10:00:00Z\n")
 		res := mustExec(t, tools, map[string]any{"path": "shapes.yaml", "filter": `keys`})
 		assert.Equal(t, []string{`["1","true","when"]`}, values(res))
@@ -288,13 +277,9 @@ func TestUnit_JQTool_EmptyResultIsAnAnswer(t *testing.T) {
 
 // --- the capability boundary --------------------------------------------------
 
-// TestUnit_JQTool_NoAmbientCapabilities is the allow-tier justification as a
-// test. Each of these is a one-line filter that would otherwise reach out of the
-// document it was handed.
+// TestUnit_JQTool_NoAmbientCapabilities pins that no filter can reach outside the document it was handed.
 func TestUnit_JQTool_NoAmbientCapabilities(t *testing.T) {
-	// No t.Parallel: t.Setenv is the point of the first subtest — the secret has
-	// to be really present in this process's environment for "env is empty" to
-	// mean anything.
+	// No t.Parallel: t.Setenv requires the secret to be really present in this process's environment.
 	t.Setenv("JQTOOL_TEST_SECRET", "super-secret-api-key")
 	tools := newTools(t, t.TempDir())
 
@@ -324,10 +309,7 @@ func TestUnit_JQTool_NoAmbientCapabilities(t *testing.T) {
 
 // --- the bounds matrix --------------------------------------------------------
 
-// TestUnit_JQTool_DeadlineBoundsNonTerminatingFilters is the property the whole
-// allow-tier argument rests on, asserted as a TIMING bound rather than as a
-// message: a filter that never terminates must be stopped by the clock, close to
-// the deadline, not eventually.
+// TestUnit_JQTool_DeadlineBoundsNonTerminatingFilters pins that a non-terminating filter is stopped by the clock, not eventually.
 func TestUnit_JQTool_DeadlineBoundsNonTerminatingFilters(t *testing.T) {
 	t.Parallel()
 	tools := newTools(t, t.TempDir())
@@ -336,11 +318,8 @@ func TestUnit_JQTool_DeadlineBoundsNonTerminatingFilters(t *testing.T) {
 		name   string
 		filter string
 	}{
-		// Non-terminating recursion: no amount of memory or time finishes it.
 		{"infinite recursion", `def f: f; f`},
-		// A compute bomb: it terminates in principle, just not this decade.
 		{"compute bomb", `[range(100000000)] | length`},
-		// Unbounded emission driven by recursion.
 		{"unbounded repeat", `[repeat(.)] | length`},
 	}
 	for _, tc := range cases {
@@ -363,8 +342,7 @@ func TestUnit_JQTool_DeadlineBoundsNonTerminatingFilters(t *testing.T) {
 				"the message must name the two ways a filter fails to terminate")
 			assert.GreaterOrEqual(t, elapsed, budget/2,
 				"stopping far too early would mean the deadline is not what stopped it")
-			// Generous upper bound: this asserts BOUNDED, not precise. A loaded
-			// CI box can be slow between VM instruction checks.
+			// Generous upper bound: this asserts bounded, not precise.
 			assert.Less(t, elapsed, 10*time.Second,
 				"the %v deadline must bound %s; it took %v", budget, tc.name, elapsed)
 		})
@@ -375,12 +353,10 @@ func TestUnit_JQTool_DeadlineIsClampedNotRefused(t *testing.T) {
 	t.Parallel()
 	tools := newTools(t, t.TempDir())
 
-	// A model asking for ten minutes gets the ceiling and an answer, not an
-	// argument error.
+	// A huge value clamps to the ceiling; a nonsense one takes the default.
 	res := mustExec(t, tools, map[string]any{"input": `{"a":1}`, "filter": `.a`, "deadline_ms": 600000})
 	assert.Equal(t, []string{`1`}, values(res))
 
-	// And a nonsense one takes the default.
 	res = mustExec(t, tools, map[string]any{"input": `{"a":1}`, "filter": `.a`, "deadline_ms": -5})
 	assert.Equal(t, []string{`1`}, values(res))
 }
@@ -394,8 +370,7 @@ func TestUnit_JQTool_OversizeFileIsRefusedFromTheStat(t *testing.T) {
 	path := filepath.Join(dir, "huge.json")
 	f, err := os.Create(path)
 	require.NoError(t, err)
-	// Sparse where the filesystem supports it: the refusal reads the SIZE, not
-	// the bytes, so the test does not need to write 8 MB either.
+	// Sparse: the refusal reads the stat size, so 8 MB need not be written.
 	require.NoError(t, f.Truncate(jqtool.MaxInputBytes+1))
 	require.NoError(t, f.Close())
 
@@ -439,8 +414,7 @@ func TestUnit_JQTool_OutputCapTruncatesWithAMarker(t *testing.T) {
 	t.Parallel()
 	tools := newTools(t, t.TempDir())
 
-	// Each emitted value is ~1 KB, so the 32 KB byte cap bites well before the
-	// 200-value count cap does.
+	// ~1 KB per value: the byte cap bites well before the 200-value count cap.
 	res := mustExec(t, tools, map[string]any{
 		"input":  `null`,
 		"filter": `range(100) | ("x" * 1000)`,
@@ -584,9 +558,7 @@ func TestUnit_JQTool_HostileArgs(t *testing.T) {
 		}
 	})
 
-	// A NUL in the FILTER is the silent-wrong-answer case, not a cosmetic one:
-	// gojq's lexer stops at it, so ".\x00[garbage" would parse cleanly as "."
-	// and return the whole document as if the filter had asked for it.
+	// gojq's lexer stops at a NUL, so an unrefused one would silently truncate the filter.
 	t.Run("a NUL in the filter is refused, not silently truncated", func(t *testing.T) {
 		res, err := exec(t, tools, map[string]any{"input": `{"a":1}`, "filter": ".\x00[garbage"})
 		require.Error(t, err, "a NUL-truncated filter must be refused; got result %+v", res)
@@ -722,9 +694,7 @@ func TestUnit_JQTool_MalformedDocuments(t *testing.T) {
 
 // --- the three error shapes ------------------------------------------------------
 
-// TestUnit_JQTool_ThreeErrorShapes pins that a parse failure, a compile failure
-// and a runtime failure each name a DIFFERENT thing to fix. A model that cannot
-// tell them apart retries the wrong correction.
+// TestUnit_JQTool_ThreeErrorShapes pins that parse, compile and runtime failures each name a different fix.
 func TestUnit_JQTool_ThreeErrorShapes(t *testing.T) {
 	t.Parallel()
 	tools := newTools(t, t.TempDir())
@@ -788,8 +758,6 @@ func TestUnit_JQTool_ToolsRepoContract(t *testing.T) {
 	fn := declared[0].Function
 	assert.Equal(t, jqtool.ToolQuery, fn.Name)
 
-	// The description must say what the tool is NOT, because none of these are
-	// ever taught by an error that fires.
 	assert.Contains(t, fn.Description, "NEVER writes")
 	assert.Contains(t, fn.Description, "goja_eval")
 	assert.Contains(t, fn.Description, "not a pipe")
@@ -816,8 +784,7 @@ func TestUnit_JQTool_DeclarativeArgsOnTheCall(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, "chain.json", chainFixture)
 
-	// A declarative `tools` task carries its arguments on the ToolsCall rather
-	// than in the chain input — the same fallback local_fs and git take.
+	// Arguments carried on the ToolsCall rather than in the chain input.
 	res, _, err := jqtool.NewTools(dir).Exec(context.Background(), time.Now(), "some chat history", false,
 		&taskengine.ToolsCall{
 			Name:     jqtool.ToolsProviderName,
@@ -834,11 +801,7 @@ func TestUnit_JQTool_NilToolsCallIsRefused(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestUnit_JQTool_DocumentStreamCapIsNeverSilent covers the third truncation
-// axis (the other two are the count cap and the byte cap): a JSON Lines file
-// with more documents than the reader will take must SAY so. Without the marker
-// a `.lvl` over a 5000-line log answers about the first 1000 and reads exactly
-// like a complete answer.
+// TestUnit_JQTool_DocumentStreamCapIsNeverSilent pins the document-count truncation marker (the third cap, after count and bytes).
 func TestUnit_JQTool_DocumentStreamCapIsNeverSilent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

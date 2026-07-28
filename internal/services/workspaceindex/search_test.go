@@ -1,8 +1,6 @@
 package workspaceindex
 
-// Search tests. Same offline harness as the indexer tests: a real SQLite store
-// (so FTS5 and the dimension checks are exercised) and a deterministic
-// hash-derived fake embedder — no model, no network.
+// Search tests share the indexer harness: real SQLite store, deterministic fake embedder.
 
 import (
 	"context"
@@ -40,18 +38,15 @@ func TestUnit_Query_RanksThePlantedNearDuplicateFirst(t *testing.T) {
 	require.Contains(t, hits[0].Text, "Retry backoff is explained here")
 	require.False(t, hits[0].Stale, "an untouched file is not stale")
 
-	// A hit is a CITATION: the line range must name real lines of the file.
 	require.GreaterOrEqual(t, hits[0].StartLine, 1)
 	require.GreaterOrEqual(t, hits[0].EndLine, hits[0].StartLine)
 
-	// Scores descend.
 	for i := 1; i < len(hits); i++ {
 		require.GreaterOrEqual(t, hits[i-1].Score, hits[i].Score, "hits must be returned in rank order")
 	}
 }
 
-// The lexical prefilter is the primary path: when the question shares terms with
-// the corpus, FTS5 narrows and the bounded fallback scan is never reached.
+// TestUnit_Query_UsesTheLexicalPrefilter pins that a matching question narrows via FTS5 and never reaches the bounded fallback scan.
 func TestUnit_Query_UsesTheLexicalPrefilter(t *testing.T) {
 	h := newHarness(t, Config{})
 	searchFixture(t, h)
@@ -66,9 +61,7 @@ func TestUnit_Query_UsesTheLexicalPrefilter(t *testing.T) {
 	require.Equal(t, beforeScans, scans, "a matching prefilter must not fall back to a scan")
 }
 
-// A question sharing no term with the corpus is exactly what semantic search is
-// for, so an empty prefilter falls back to a BOUNDED scan rather than returning
-// nothing.
+// TestUnit_Query_FallsBackWhenThePrefilterMatchesNothing pins that an empty prefilter falls back to a bounded scan rather than returning nothing.
 func TestUnit_Query_FallsBackWhenThePrefilterMatchesNothing(t *testing.T) {
 	h := newHarness(t, Config{})
 	searchFixture(t, h)
@@ -82,8 +75,7 @@ func TestUnit_Query_FallsBackWhenThePrefilterMatchesNothing(t *testing.T) {
 	require.Equal(t, beforeScans+1, scans, "the bounded fallback scan must be the path taken")
 }
 
-// A hit whose file changed underneath is a lie. It is still returned — the text
-// may be what the caller wants — but never as if it were current.
+// TestUnit_Query_MarksStaleHitsAfterAnEdit pins that a hit whose file changed underneath is marked, never silently returned as current.
 func TestUnit_Query_MarksStaleHitsAfterAnEdit(t *testing.T) {
 	h := newHarness(t, Config{})
 	searchFixture(t, h)
@@ -92,7 +84,6 @@ func TestUnit_Query_MarksStaleHitsAfterAnEdit(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, fresh[0].Stale)
 
-	// Edit the file WITHOUT re-indexing.
 	h.write(t, "docs/retry.md", "Retry backoff is explained here: the delay doubles on every attempt until a ceiling.\nA new line changes the file's sha.\n")
 
 	stale, err := h.svc.Query(h.ctx, h.ws, "where is retry backoff explained", 1)
@@ -100,7 +91,6 @@ func TestUnit_Query_MarksStaleHitsAfterAnEdit(t *testing.T) {
 	require.Equal(t, "docs/retry.md", stale[0].Path)
 	require.True(t, stale[0].Stale, "a hit whose file moved must be marked, never silently returned")
 
-	// Re-indexing clears it.
 	h.build(t, false)
 	current, err := h.svc.Query(h.ctx, h.ws, "where is retry backoff explained", 1)
 	require.NoError(t, err)
@@ -118,8 +108,7 @@ func TestUnit_Query_DeletedFileIsStaleNotAbsent(t *testing.T) {
 	require.True(t, hits[0].Stale, "a hit whose file is gone must be marked stale, not reported as current")
 }
 
-// No index for the workspace degrades to a typed error the caller renders as
-// "run contenox index" — never a hard failure, because retrieval is optional.
+// TestUnit_Query_EmptyIndexDegradesToErrNoIndex pins that a missing index degrades to ErrNoIndex, never a hard failure.
 func TestUnit_Query_EmptyIndexDegradesToErrNoIndex(t *testing.T) {
 	h := newHarness(t, Config{})
 
@@ -130,8 +119,7 @@ func TestUnit_Query_EmptyIndexDegradesToErrNoIndex(t *testing.T) {
 	_, err = h.svc.Status(h.ctx, h.ws)
 	require.ErrorIs(t, err, ErrNoIndex)
 
-	// An index that exists but holds nothing is a different, quieter case: no
-	// hits, no error.
+	// An index that exists but holds nothing returns no hits, no error.
 	h.write(t, "empty.md", "\n")
 	_, err = h.svc.Build(h.ctx, h.root, h.opts(false))
 	require.NoError(t, err)
@@ -174,9 +162,7 @@ func TestUnit_Query_EmptyQuestionIsRefused(t *testing.T) {
 	}
 }
 
-// Querying an index whose vectors came from a different-width model must fail
-// loudly. Scoring a 16-dimension question against 32-dimension chunks would
-// silently return nonsense.
+// TestUnit_Query_DimensionMismatchIsLoud pins that querying with a different-width model fails loudly instead of scoring nonsense.
 func TestUnit_Query_DimensionMismatchIsLoud(t *testing.T) {
 	h := newHarness(t, Config{})
 	searchFixture(t, h)
@@ -196,7 +182,6 @@ func TestUnit_FTSMatchQuery_QuotesEveryTermAndDropsNoise(t *testing.T) {
 	require.Equal(t, `"retry" OR "backoff"`, ftsMatchQuery("Retry, backoff!"), "terms are folded and deduplicated")
 	require.Equal(t, `"retry"`, ftsMatchQuery("retry retry a b"), "single-character terms are dropped")
 
-	// Nothing a user types may be interpreted as FTS5 syntax.
 	got := ftsMatchQuery(`what does NOT * "quoted" mean`)
 	require.NotContains(t, strings.ReplaceAll(got, `"`, ""), "*")
 	require.Contains(t, got, `"not"`)

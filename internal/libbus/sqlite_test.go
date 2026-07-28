@@ -257,7 +257,6 @@ func TestUnit_SQLiteBus_Stream_UnsubscribeStopsDelivery(t *testing.T) {
 	sub, err := b.Stream(ctx, "unsub.subject", ch)
 	require.NoError(t, err)
 
-	// Publish + receive one message.
 	require.NoError(t, b.Publish(ctx, "unsub.subject", []byte("before")))
 	select {
 	case msg := <-ch:
@@ -266,7 +265,6 @@ func TestUnit_SQLiteBus_Stream_UnsubscribeStopsDelivery(t *testing.T) {
 		t.Fatal("did not receive message before unsubscribe")
 	}
 
-	// Unsubscribe then publish another.
 	require.NoError(t, sub.Unsubscribe())
 	require.NoError(t, b.Publish(ctx, "unsub.subject", []byte("after")))
 

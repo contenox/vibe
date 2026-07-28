@@ -18,13 +18,11 @@ type GeminiStreamClient struct {
 	geminiClient
 }
 
-// Stream emits raw deltas per the modelrepo.StreamParcel contract: text /
-// thinking deltas as they arrive, each streamed functionCall part as one
-// whole-call ToolCallDelta (Gemini delivers calls complete, so each gets the
-// next sequential index), then one typed terminal parcel with the candidate's
-// finishReason and usageMetadata. Assembly belongs to the engine-side
-// modelrepo.StreamAssembler. buildGeminiRequest hoists system messages, so
-// the stream path carries the system prompt exactly like chat.
+// Stream emits raw deltas per the modelrepo.StreamParcel contract: text and
+// thinking deltas as they arrive, each functionCall part as one whole-call
+// ToolCallDelta (Gemini delivers calls complete, so each gets the next
+// sequential index), then one terminal parcel with finishReason and usage.
+// Assembly belongs to the engine-side modelrepo.StreamAssembler.
 func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	parcels := make(chan *modelrepo.StreamParcel)
 	request, err := buildGeminiRequest(c.modelName, messages, args, c.canThink)
@@ -89,7 +87,6 @@ func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		}
 		defer resp.Body.Close()
 
-		// Log headers
 		reportChange("gemini_stream_response", map[string]any{
 			"status":  resp.StatusCode,
 			"headers": resp.Header,
@@ -127,7 +124,6 @@ func (c *GeminiStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 
 			var chunk geminiGenerateContentResponse
 			if err := json.Unmarshal([]byte(jsonData), &chunk); err != nil {
-				// ignore malformed frame; continue
 				continue
 			}
 

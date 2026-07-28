@@ -10,18 +10,14 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/keymap"
 )
 
-// buildFrame assembles the one frame this iteration commits.
-//
-// It is the only mutating renderer in beam, and it mutates exactly twice: it
-// DRAINS the transcript's settled lines and the queued notices, because both
-// are append-only history the terminal takes ownership of the moment they are
-// printed. Everything else is rebuilt from scratch, which is what makes a
-// resize re-wrap the live region for free and leave scrollback untouched.
+// buildFrame assembles the one frame this iteration commits. It is the only
+// mutating renderer in beam: it drains the transcript's settled lines and
+// queued notices, both append-only history the terminal takes ownership of
+// once printed. Everything else is rebuilt from scratch.
 func (a *app) buildFrame() frame.Frame {
 	if a.width < minWidth || a.height < minHeight {
-		// Nothing is drained here: the settled lines stay queued until there
-		// is a sane width to fix their shape at, because a taken line's shape
-		// is final forever.
+		// Nothing is drained: settled lines stay queued until width is sane,
+		// since a taken line's shape is final forever.
 		return frame.Frame{
 			Live:   []frame.Line{frame.Styled(frame.StyleWarn, tooSmallText)},
 			Cursor: frame.Cursor{Hidden: true},
@@ -53,24 +49,15 @@ func (a *app) buildFrame() frame.Frame {
 	case a.helpOpen:
 		live = append(live, a.overlayHelp()...)
 	case a.sessionsOpen:
-		// One row of the budget goes to the key hint: the switcher is the one
-		// overlay an operator arrives at without having typed anything, so it
-		// is the one that has to say how to leave.
+		// One row of the budget goes to the key hint, since the switcher is
+		// the one overlay an operator arrives at without typing anything.
 		live = append(live, a.sessions.Render(a.width, a.rowBudget()-1, a.ascii)...)
 		live = append(live, frame.Styled(frame.StyleMuted, sessionsHint))
 	case a.pickerOpen:
-		// The walk budget is otherwise INVISIBLE: in a big tree fileaddr stops
-		// early, the list looks like an ordinary short list, and an operator
-		// whose file did not make it concludes it is not there. One muted row
-		// says the index is partial and that narrowing the query is what
-		// reaches the rest — which is true, because the query goes to the
-		// source and the source re-walks under it (see refreshPicker).
-		//
-		// Only under a QUERY, though. Browse mode is one directory read, which
-		// has no budget to exceed and always shows the whole listing, while
-		// Truncated reflects the last WALK — so a search that hit the budget
-		// would otherwise leave the warning standing over a complete listing
-		// the operator backspaced their way to.
+		// The walk budget is otherwise invisible, so a truncated index gets a
+		// muted footer telling the operator to narrow the query. Only under a
+		// query: browse mode always shows the whole directory listing, and
+		// Truncated reflects the last walk, not the current one.
 		budget := a.rowBudget()
 		truncated := a.pickerQuery != "" && a.deps.FileSource.Truncated()
 		if truncated && budget > 1 {
@@ -98,10 +85,8 @@ func (a *app) buildFrame() frame.Frame {
 	return frame.Frame{
 		Scrollback: scrollback,
 		Live:       live,
-		// The caret follows the composer wherever the overlays push it, and
-		// hides when a modal owns the keyboard outright — with the palette or
-		// the file list open the operator is still typing into the composer,
-		// so hiding it there would hide the very caret they are steering.
+		// Hidden only when a modal owns the keyboard outright; the palette
+		// and file list keep it visible since the operator is still typing.
 		Cursor: frame.Cursor{Row: above + row, Col: col, Hidden: blocked},
 	}
 }
@@ -119,8 +104,8 @@ func (a *app) rowBudget() int {
 	return budget
 }
 
-// spinner is the current activity glyph, or "" when nothing is open — an
-// empty glyph is what keeps an idle frame byte-identical across ticks.
+// spinner is the current activity glyph, or "" when nothing is open, which
+// keeps an idle frame byte-identical across ticks.
 func (a *app) spinner() string {
 	frames := a.glyphs.SpinnerFrames
 	if len(frames) == 0 {
@@ -138,9 +123,7 @@ func (a *app) spinner() string {
 func (a *app) status() statusbar.State {
 	s := statusbar.State{
 		ASCII: a.ascii,
-		// The session segment shows the LABEL, not the id: `beam-<uuid>` is
-		// the one string in the bar that told an operator nothing about the
-		// session it names (D17).
+		// The session segment shows the label, not the id.
 		Session:  a.sessionLabel(),
 		Messages: a.messages,
 		Model:    a.deps.Model,
@@ -159,10 +142,9 @@ func (a *app) status() statusbar.State {
 			s.Spinner = frames[snap.SpinnerIndex%len(frames)]
 		}
 	}
-	// The quit offer outranks the activity line for the two seconds it stands.
-	// It is the one thing on the bar that is about to expire, and it is only
-	// ever armed on an idle beam (onCtrlC interrupts a running turn instead of
-	// offering), so there is no real activity for it to hide.
+	// The quit offer outranks the activity line for the two seconds it
+	// stands; it is only ever armed on an idle beam, so there is no real
+	// activity for it to hide.
 	if a.ctrlCArmed() {
 		s.Activity = quitHintText
 		s.Spinner = ""
@@ -170,8 +152,7 @@ func (a *app) status() statusbar.State {
 	return s
 }
 
-// quitHintText is the Ctrl+C double-press offer, rendered live in the status
-// bar for exactly as long as the window stands (D3, and see onCtrlC).
+// quitHintText is the Ctrl+C double-press offer (see onCtrlC).
 const quitHintText = "press ctrl+c again to quit"
 
 // indexTruncatedText is the file picker's partial-index footer.
@@ -182,22 +163,10 @@ func indexTruncatedText(ascii bool) string {
 	return "index truncated — keep typing"
 }
 
-// overlayHelp is the `?` overlay: the registry's own registrations, GROUPED
-// by the context they answer in, clipped to the rows the terminal can spare
-// with a count of what did not fit.
-//
-// It gets a larger budget than the palette and the picker on purpose — those
-// two are a menu beside a line the operator is still typing, this one IS the
-// answer to their question — but it still leaves the composer, the status bar
-// and a line of transcript alone.
-//
-// The grouping is the whole point of the rewrite. A flat projection of the
-// registry listed `esc` five times with five different meanings and no way to
-// tell which one was live, which is not a help screen, it is the registry's
-// internal state with the labels removed. Now each scope is a section under
-// its own muted header, the scopes reachable from where the operator actually
-// IS come first, and everything else sits under one "elsewhere" divider — so
-// the first thing on screen is the answer to "what can I press right now".
+// overlayHelp is the `?` overlay: the registry's registrations grouped by the
+// scope they answer in, clipped to the rows the terminal can spare with a
+// count of what did not fit. Scopes reachable from where the operator
+// actually is come first; everything else sits under one "elsewhere" divider.
 func (a *app) overlayHelp() []frame.Line {
 	rows := a.helpRows(true)
 	budget := a.height - 4
@@ -213,10 +182,8 @@ func (a *app) overlayHelp() []frame.Line {
 }
 
 // helpLines is `/help`'s scrollback output: the same grouped key list the
-// overlay shows, then the commands. Both halves are projections — every key
-// row comes from a Binding's own Help and every command row from the merged
-// palette set — so beam cannot document a key it does not bind or a command
-// the agent does not advertise.
+// overlay shows, then the commands. Both are projections of the registry and
+// the palette, so beam cannot document a key or command that does not exist.
 func (a *app) helpLines() []frame.Line {
 	out := a.helpRows(false)
 	out = append(out, frame.Plain(""), frame.Styled(frame.StyleHeading, "commands"))
@@ -237,8 +204,7 @@ const helpIndent = "  "
 // helpColumnGap is the space between the widest chord and the help text.
 const helpColumnGap = 2
 
-// helpScopeLabel names each scope in the language of the thing it belongs to,
-// not the language of the keymap. The order is the display order: the two
+// helpScopeLabels names each scope for display, in display order: the two
 // scopes an operator is normally in first, then the modals.
 var helpScopeLabels = []struct {
 	scope keymap.Scope
@@ -253,13 +219,9 @@ var helpScopeLabels = []struct {
 }
 
 // helpColumn is the column every help row's text hangs off: the widest chord
-// list, the widest command name, and the indent they both carry.
-//
-// It is computed rather than fixed because it used to be fixed, at sixteen
-// cells, and "ctrl+j / alt+enter" is eighteen — so the one binding with two
-// chords pushed its own description out of the column and broke the alignment
-// of every row after it. Chords and command names are ASCII, so byte length
-// is cell width here.
+// list or command name plus indent. Computed rather than fixed, since a
+// binding with multiple chords can exceed any fixed guess. Chords and
+// command names are ASCII, so byte length is cell width here.
 func (a *app) helpColumn() int {
 	widest := 0
 	for _, e := range a.reg.Help(helpScopes) {

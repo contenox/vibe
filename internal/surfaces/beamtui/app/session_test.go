@@ -13,11 +13,9 @@ import (
 	libacp "github.com/contenox/beam/libacp"
 )
 
-// sessionBridge decorates testkit.FakeBridge with the two scripted RESULTS a
-// session-management test needs and the shared double has no opinion about: a
-// roster for ListSessions and an id for NewSession. Every call still goes
-// through FakeBridge first, so the ordered call log — which is what the switch
-// semantics are actually asserted against — stays the shared one.
+// sessionBridge decorates testkit.FakeBridge with scripted results for
+// ListSessions and NewSession; every call still passes through FakeBridge
+// first, so the ordered call log stays the shared one.
 type sessionBridge struct {
 	*testkit.FakeBridge
 	roster  []libacp.SessionInfo
@@ -56,9 +54,7 @@ const (
 	secondSession = libacp.SessionID("beam-second")
 )
 
-// newSessionHarness is newHarness with the bridge wrapped. It deliberately
-// does not touch newHarness itself: the wrapper goes in as a Deps mutator,
-// which is the seam that already exists for exactly this.
+// newSessionHarness is newHarness with the bridge wrapped via a Deps mutator.
 func newSessionHarness(t *testing.T, mut ...func(*Deps)) (*harness, *sessionBridge) {
 	t.Helper()
 	var sb *sessionBridge
@@ -80,8 +76,7 @@ func newSessionHarness(t *testing.T, mut ...func(*Deps)) (*harness, *sessionBrid
 }
 
 // scrollbackFrom joins the scrollback of every frame committed from index i
-// on, which is how a test asks "what got printed AFTER this point" — the
-// harness's own scrollback() is the whole session's history.
+// on: what got printed after that point, vs. the harness's whole history.
 func scrollbackFrom(h *harness, i int) string {
 	var b strings.Builder
 	for _, f := range h.term.frames[i:] {
@@ -96,9 +91,8 @@ func (h *harness) runCommand(line string) {
 	h.press(input.KeyEnter)
 }
 
-// TestUnit_NewSession_MintsSwitchesAndReprintsTheWelcome covers /new: the
-// bridge's documented unfiltered-window order, and the brand header printing
-// again because a new session is a new place.
+// TestUnit_NewSession_MintsSwitchesAndReprintsTheWelcome pins /new's bridge
+// call order and that the welcome header reprints for the new session.
 func TestUnit_NewSession_MintsSwitchesAndReprintsTheWelcome(t *testing.T) {
 	h, _ := newSessionHarness(t, func(d *Deps) { d.Cwd = "/work/repo" })
 	h.start()
@@ -118,14 +112,13 @@ func TestUnit_NewSession_MintsSwitchesAndReprintsTheWelcome(t *testing.T) {
 	requireContains(t, printed, "beam-fresh", "the welcome header names the new session")
 	requireNotContains(t, h.calls(), "SubmitPrompt", "/new is client-side")
 
-	// The new session's turns go to the NEW id, which is the whole point of
-	// holding it outside Deps.
+	// Turns after /new must go to the new id, not the one in Deps.
 	h.runCommand("hello there")
 	requireContains(t, h.calls(), `SubmitPrompt(beam-fresh, "hello there")`, "prompt routing after /new")
 }
 
-// TestUnit_Sessions_PickerShowsTheRoster covers /sessions: the overlay opens
-// on ListSessions content, labelled by title, with the active row marked.
+// TestUnit_Sessions_PickerShowsTheRoster pins /sessions rendering the roster
+// labelled by title, with the active row marked.
 func TestUnit_Sessions_PickerShowsTheRoster(t *testing.T) {
 	h, _ := newSessionHarness(t)
 	h.start()
@@ -141,8 +134,6 @@ func TestUnit_Sessions_PickerShowsTheRoster(t *testing.T) {
 	requireContains(t, live, "(active)", "the current session is marked")
 	requireContains(t, live, sessionsHint, "the switcher says how to leave")
 
-	// A session the agent gave no title for still has to be selectable, so it
-	// falls back to its id rather than rendering as a blank row.
 	requireContains(t, live, string(secondSession), "an untitled session falls back to its id")
 
 	h.press(input.KeyEscape)
@@ -152,14 +143,13 @@ func TestUnit_Sessions_PickerShowsTheRoster(t *testing.T) {
 	requireNotContains(t, h.calls(), "LoadSession", "closing the switcher must not switch")
 }
 
-// TestUnit_Sessions_EnterSwitchesAndRebuildsTheTranscript is the core of
-// blueprint requirement 7: the filter order, and a transcript that does not
-// carry one session's lines into the next.
+// TestUnit_Sessions_EnterSwitchesAndRebuildsTheTranscript pins the bridge
+// filter order and that no line from the old session survives the switch.
 func TestUnit_Sessions_EnterSwitchesAndRebuildsTheTranscript(t *testing.T) {
 	h, _ := newSessionHarness(t)
 	h.start()
 
-	// One settled line and one still-streaming tail, both the OLD session's.
+	// One settled line and one still-streaming tail, both the old session's.
 	h.deliver(enginebridge.TextDelta{
 		SessionID: testSession, MessageID: "m1",
 		Text: "a settled line from the session being left\n",
@@ -171,7 +161,7 @@ func TestUnit_Sessions_EnterSwitchesAndRebuildsTheTranscript(t *testing.T) {
 	requireContains(t, testkit.EncodeLines(h.last().Live), "a live tail", "the tail is live before the switch")
 
 	h.runCommand("/sessions")
-	h.input(input.KeyEvent{Key: input.KeyRune, Rune: 'j'}) // active row leads; j selects the next
+	h.input(input.KeyEvent{Key: input.KeyRune, Rune: 'j'}) // active row leads; j selects the next row
 	mark := len(h.term.frames)
 	h.press(input.KeyEnter)
 
@@ -184,15 +174,12 @@ func TestUnit_Sessions_EnterSwitchesAndRebuildsTheTranscript(t *testing.T) {
 		t.Fatalf("the loop is still driving %q", h.a.sessionID)
 	}
 
-	// The rebuilt transcript carries nothing over: the live tail is gone from
-	// the live region, and the settled line — already printed once, into the
-	// terminal's real history — is never printed a second time.
+	// The rebuilt transcript carries nothing over.
 	after := testkit.EncodeLines(h.last().Live)
 	requireNotContains(t, after, "a live tail", "the old session's live tail survived the switch")
 	requireNotContains(t, scrollbackFrom(h, mark), "a settled line from the session being left",
 		"a settled line reprinted into the new session")
 
-	// Per-session counters start over with it.
 	if h.a.messages != 0 || h.a.used != 0 || h.a.size != 0 {
 		t.Fatalf("per-session counters leaked: messages=%d used=%d size=%d", h.a.messages, h.a.used, h.a.size)
 	}
@@ -200,14 +187,13 @@ func TestUnit_Sessions_EnterSwitchesAndRebuildsTheTranscript(t *testing.T) {
 		t.Fatalf("the composer's recall list leaked across the switch: %v", h.a.history)
 	}
 
-	// The replay the load produces hydrates the NEW transcript.
+	// The replay the load produces hydrates the new transcript.
 	h.deliver(enginebridge.UserEcho{SessionID: olderSession, MessageID: "r1", Text: "replayed from the older session"})
 	requireContains(t, h.scrollback(), "replayed from the older session", "the replay hydrates the new transcript")
 }
 
-// TestUnit_Sessions_SwitchIsRefusedDuringATurn pins the documented choice: a
-// switch under a running turn is refused with a notice (D16), never silently
-// cancelled out from under the operator.
+// TestUnit_Sessions_SwitchIsRefusedDuringATurn pins that a switch during a
+// running turn is refused with a notice, never silently cancelled.
 func TestUnit_Sessions_SwitchIsRefusedDuringATurn(t *testing.T) {
 	h, _ := newSessionHarness(t)
 	h.start()
@@ -227,7 +213,7 @@ func TestUnit_Sessions_SwitchIsRefusedDuringATurn(t *testing.T) {
 		t.Fatalf("the refused switch moved the session to %q", h.a.sessionID)
 	}
 
-	// /new is refused on the same terms, for the same reason.
+	// /new is refused on the same terms.
 	h.runCommand("/new")
 	requireNotContains(t, h.calls(), "NewSession", "/new during a turn must not mint a session")
 
@@ -239,9 +225,8 @@ func TestUnit_Sessions_SwitchIsRefusedDuringATurn(t *testing.T) {
 	requireContains(t, h.calls(), "LoadSession(beam-older)", "the switch works once the turn is over")
 }
 
-// TestUnit_Sessions_ListFailureKeepsYouWhereYouAre is D16 on the fetch path:
-// the overlay does not open onto an empty lie, and the notice names what
-// still works.
+// TestUnit_Sessions_ListFailureKeepsYouWhereYouAre pins that a failed roster
+// fetch reports the error and does not open the switcher.
 func TestUnit_Sessions_ListFailureKeepsYouWhereYouAre(t *testing.T) {
 	h, sb := newSessionHarness(t)
 	sb.listErr = errors.New("database is gone")
@@ -255,10 +240,8 @@ func TestUnit_Sessions_ListFailureKeepsYouWhereYouAre(t *testing.T) {
 	requireContains(t, h.scrollback(), "/new", "the notice suggests what still works")
 }
 
-// TestUnit_Sessions_LoadFailureRestoresTheFilter is the failure path that
-// would otherwise be invisible: an abandoned switch must not leave the update
-// filter parked on the unfiltered window, where every session's chunks would
-// pour into this transcript.
+// TestUnit_Sessions_LoadFailureRestoresTheFilter pins that a failed load
+// restores the active-session filter instead of leaving it unfiltered.
 func TestUnit_Sessions_LoadFailureRestoresTheFilter(t *testing.T) {
 	h, sb := newSessionHarness(t)
 	sb.loadErr = errors.New("unknown session")
@@ -279,9 +262,8 @@ func TestUnit_Sessions_LoadFailureRestoresTheFilter(t *testing.T) {
 	requireContains(t, h.scrollback(), "you are still on", "the failure says where you ended up")
 }
 
-// TestUnit_Rename_ForwardsToTheAgentAndRelabels covers the round trip: the
-// line goes to the agent verbatim (the title is server-side truth, shared with
-// every other surface) and the status bar adopts it immediately.
+// TestUnit_Rename_ForwardsToTheAgentAndRelabels pins that /rename sends the
+// line verbatim and the status bar adopts the new title immediately.
 func TestUnit_Rename_ForwardsToTheAgentAndRelabels(t *testing.T) {
 	h, _ := newSessionHarness(t)
 	h.start()
@@ -300,9 +282,9 @@ func TestUnit_Rename_ForwardsToTheAgentAndRelabels(t *testing.T) {
 	requireContains(t, testkit.EncodeLines(h.last().Live), "beam-0001", "reset falls back to the session name")
 }
 
-// TestUnit_Session_TitleFromTheServerReachesTheStatusBar covers D17's read
-// side: a title the agent derived (or an operator set from another surface)
-// labels the bar, and one addressed to a different session never does.
+// TestUnit_Session_TitleFromTheServerReachesTheStatusBar pins that a title
+// published for the current session labels the bar, and one for another
+// session never does.
 func TestUnit_Session_TitleFromTheServerReachesTheStatusBar(t *testing.T) {
 	h, _ := newSessionHarness(t)
 	h.start()
@@ -319,8 +301,7 @@ func TestUnit_Session_TitleFromTheServerReachesTheStatusBar(t *testing.T) {
 	h.input(input.ResizeEvent{Width: 80, Height: 24})
 	requireContains(t, testkit.EncodeLines(h.last().Live), "rewrite the ingest retry", "status bar")
 
-	// Opening the switcher re-reads the roster, which is the freshest thing
-	// that ever says what this session is called.
+	// Opening the switcher re-reads the roster, the freshest title source.
 	h.a.sessionTitle = ""
 	h.runCommand("/sessions")
 	if got := h.a.sessionLabel(); got != "the session under test" {
@@ -328,12 +309,8 @@ func TestUnit_Session_TitleFromTheServerReachesTheStatusBar(t *testing.T) {
 	}
 }
 
-// TestUnit_Session_UuidLabelIsShortenedUntilATitleLands: a fresh session has
-// no title until the server has seen a message, so the status bar spent the
-// whole first turn labelled by a forty-one character uuid — which pushed the
-// model and the gauge off the bar and identified the session no better than
-// its first eight hex digits do. The full id still names every error message
-// and every row of the switcher.
+// TestUnit_Session_UuidLabelIsShortenedUntilATitleLands pins that a fresh
+// session's status-bar label is a shortened uuid until a title lands.
 func TestUnit_Session_UuidLabelIsShortenedUntilATitleLands(t *testing.T) {
 	const full = "beam-20a88ab8-4f2e-4b0d-9c31-6f1a2b3c4d5e"
 	h, _ := newSessionHarness(t, func(d *Deps) { d.SessionName = full })
@@ -346,13 +323,12 @@ func TestUnit_Session_UuidLabelIsShortenedUntilATitleLands(t *testing.T) {
 	requireContains(t, live, "beam-20a88ab8", "the status bar")
 	requireNotContains(t, live, full, "the full uuid on the status bar")
 
-	// A title is what an operator actually wanted, and it replaces the id
-	// outright the moment the server publishes one.
+	// A title replaces the id outright once the server publishes one.
 	h.a.setSessionTitle(testSession, "rewrite the ingest retry")
 	h.input(input.ResizeEvent{Width: 80, Height: 24})
 	requireContains(t, testkit.EncodeLines(h.last().Live), "rewrite the ingest retry", "the status bar")
 
-	// A name that is not id-shaped is nobody's uuid and is left alone.
+	// A name that is not id-shaped is left alone.
 	for _, name := range []string{"beam-0001", "notes", "the ingest rewrite"} {
 		if got := shortSessionName(name); got != name {
 			t.Fatalf("shortSessionName(%q) = %q, want it untouched", name, got)
@@ -360,10 +336,9 @@ func TestUnit_Session_UuidLabelIsShortenedUntilATitleLands(t *testing.T) {
 	}
 }
 
-// TestUnit_Sessions_BindingIsRegisteredAndDiscoverable checks the two
-// discoverability surfaces are projections, not hand-written text: the chord
-// carries Help in the registry, and the locals reach /help through the
-// palette with no extra registration.
+// TestUnit_Sessions_BindingIsRegisteredAndDiscoverable pins that ctrl+s and
+// the session locals are discoverable via the registry, /help and the bare
+// "/" menu, with no separate hand-written text.
 func TestUnit_Sessions_BindingIsRegisteredAndDiscoverable(t *testing.T) {
 	r := keymap.NewRegistry()
 	registerBindings(r) // panics on a collision — ctrl+s must be unclaimed
@@ -391,15 +366,14 @@ func TestUnit_Sessions_BindingIsRegisteredAndDiscoverable(t *testing.T) {
 		requireContains(t, printed, want, "/help is a projection of the registry and the palette")
 	}
 
-	// The bare `/` menu lists them too, which is where an operator who does
-	// not know a command's name actually finds it.
+	// The bare `/` menu lists them too.
 	h.typeText("/")
 	requireContains(t, testkit.EncodeLines(h.last().Live), "sessions", "the bare / menu")
 }
 
-// TestUnit_Sessions_CtrlSOpensAndJKMoveOnlyThere pins the one subtlety of
-// sharing ScopePicker with the file list: j and k steer the session switcher,
-// and are ordinary letters everywhere else.
+// TestUnit_Sessions_CtrlSOpensAndJKMoveOnlyThere pins that j/k steer the
+// session switcher while it owns ScopePicker, and are ordinary letters
+// everywhere else, including the file picker sharing the same scope.
 func TestUnit_Sessions_CtrlSOpensAndJKMoveOnlyThere(t *testing.T) {
 	h, _ := newSessionHarness(t)
 	h.start()
@@ -412,7 +386,7 @@ func TestUnit_Sessions_CtrlSOpensAndJKMoveOnlyThere(t *testing.T) {
 		t.Fatal("the caret must hide while the switcher owns the keyboard")
 	}
 
-	// The active row leads, so the selection starts on the current session.
+	// The active row leads.
 	if it, ok := h.a.sessions.Selected(); !ok || it.ID != string(testSession) {
 		t.Fatalf("the switcher did not open on the active session: %+v", it)
 	}
@@ -430,8 +404,7 @@ func TestUnit_Sessions_CtrlSOpensAndJKMoveOnlyThere(t *testing.T) {
 	}
 	h.press(input.KeyEscape)
 
-	// With the FILE picker open the very same keys are text, because there the
-	// operator is typing a query.
+	// With the file picker open the same keys are text.
 	h.typeText("look at @j")
 	if !h.a.pickerOpen {
 		t.Fatal("`@` did not open the file picker")
@@ -443,8 +416,7 @@ func TestUnit_Sessions_CtrlSOpensAndJKMoveOnlyThere(t *testing.T) {
 }
 
 // requireOrderedCalls asserts want appears in the bridge's call log in this
-// order (other calls may interleave). Order is the whole contract for a
-// session switch — the same three calls in the wrong order lose the replay.
+// order (other calls may interleave).
 func requireOrderedCalls(t *testing.T, log string, want ...string) {
 	t.Helper()
 	rest := log

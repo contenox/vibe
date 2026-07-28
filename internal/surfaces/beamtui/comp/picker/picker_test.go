@@ -9,8 +9,7 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
 )
 
-// goldenWidths is the blueprint's resize matrix for an overlay that lives in
-// the live region: the narrow terminal and the default one.
+// goldenWidths: the narrow terminal and the default one.
 var goldenWidths = []int{60, 80}
 
 func TestUnit_PickerRank_TierOrder(t *testing.T) {
@@ -72,11 +71,11 @@ func TestUnit_PickerRank_CaseInsensitive(t *testing.T) {
 
 func TestUnit_PickerFilter_TiersThenLabel(t *testing.T) {
 	items := []Item{
-		{ID: "1", Label: "zzz/other.go"},         // subsequence: o..e via "other"? no — see below
-		{ID: "2", Label: "internal/comp/one.go"}, // path substring "comp"
-		{ID: "3", Label: "comp/beta.go"},         // path substring "comp"
+		{ID: "1", Label: "zzz/other.go"},         // no match
+		{ID: "2", Label: "internal/comp/one.go"}, // path substring
+		{ID: "3", Label: "comp/beta.go"},         // path substring
 		{ID: "4", Label: "comp.go"},              // basename prefix
-		{ID: "5", Label: "acompb.go"},            // basename prefix? no: substring
+		{ID: "5", Label: "acompb.go"},            // path substring
 		{ID: "6", Label: "c/o/m/p.go"},           // subsequence only
 		{ID: "7", Label: "nothing"},              // no match
 	}
@@ -86,17 +85,13 @@ func TestUnit_PickerFilter_TiersThenLabel(t *testing.T) {
 		labels = append(labels, it.Label)
 	}
 	want := []string{
-		// tier 0 (basename prefix)
-		"comp.go",
-		// tier 1 (path substring), sorted by label
-		"acompb.go", "comp/beta.go", "internal/comp/one.go",
-		// tier 2 (subsequence)
-		"c/o/m/p.go",
+		"comp.go",                                           // tier 0
+		"acompb.go", "comp/beta.go", "internal/comp/one.go", // tier 1, by label
+		"c/o/m/p.go", // tier 2
 	}
 	if strings.Join(labels, ",") != strings.Join(want, ",") {
 		t.Fatalf("Filter order:\n got %v\nwant %v", labels, want)
 	}
-	// Rank is an output field: every survivor carries the tier it matched at.
 	if got[0].Rank != RankBasenamePrefix {
 		t.Fatalf("first item Rank = %d, want %d", got[0].Rank, RankBasenamePrefix)
 	}
@@ -106,8 +101,6 @@ func TestUnit_PickerFilter_TiersThenLabel(t *testing.T) {
 }
 
 func TestUnit_PickerFilter_StableWithinTier(t *testing.T) {
-	// Duplicate labels in one tier must keep input order, so a caller's
-	// tie-break (recency, first-seen) is never scrambled.
 	items := []Item{
 		{ID: "first", Label: "dup.go"},
 		{ID: "second", Label: "dup.go"},
@@ -125,8 +118,6 @@ func TestUnit_PickerFilter_StableWithinTier(t *testing.T) {
 }
 
 func TestUnit_PickerFilter_EmptyQueryPreservesCallerOrder(t *testing.T) {
-	// The session picker depends on this: an unqueried roster must stay in
-	// the order engine-bridge handed it over, not become alphabetical.
 	items := []Item{
 		{ID: "c", Label: "zeta"},
 		{ID: "a", Label: "alpha"},
@@ -146,8 +137,8 @@ func TestUnit_PickerFilter_EmptyQueryPreservesCallerOrder(t *testing.T) {
 	}
 }
 
-// sampleItems is the shared fixture for the render goldens: enough rows to
-// force a window and a footer, with details of varying length.
+// sampleItems is the shared render-golden fixture: enough rows to force a
+// window and a footer.
 func sampleItems() []Item {
 	paths := []string{
 		"picker.go",
@@ -177,15 +168,10 @@ func TestUnit_PickerRender_Goldens(t *testing.T) {
 		move    int
 		query   string
 	}{
-		// Everything fits: no footer, selection on the first row.
 		{"fits", 10, 0, ""},
-		// More items than rows: window at the top plus the "+N more" footer.
 		{"capped-top", 4, 0, ""},
-		// Selection pushed into the middle: the window scrolls with it.
 		{"capped-middle", 4, 3, ""},
-		// Selection at the very end: the window clamps to the list bottom.
 		{"capped-end", 4, 99, ""},
-		// A query reorders into tiers before any of the above applies.
 		{"queried", 5, 0, "picker"},
 	}
 	for _, sc := range scenarios {
@@ -232,13 +218,10 @@ func TestUnit_PickerRender_EmptyState(t *testing.T) {
 	}
 	testkit.Golden(t, "empty-default", testkit.EncodeLines(lines))
 
-	// The caller owns the text — file-addressing's fixed no-root state comes
-	// through here.
 	p.SetEmptyText("no workspace root — @ needs a granted directory")
 	lines = p.Render(80, 6, false)
 	testkit.Golden(t, "empty-custom", testkit.EncodeLines(lines))
 
-	// An empty item set is the same state, not a panic.
 	q := New()
 	if lines := q.Render(80, 6, false); len(lines) != 1 {
 		t.Fatalf("empty item set rendered %d lines, want 1", len(lines))
@@ -252,8 +235,7 @@ func TestUnit_PickerRender_EmptyState(t *testing.T) {
 }
 
 // TestUnit_PickerRender_FooterCountsHiddenItems: the footer counts each
-// direction separately, because each number answers a different question —
-// what scrolling down would reach, and what scrolling up would.
+// scroll direction separately.
 func TestUnit_PickerRender_FooterCountsHiddenItems(t *testing.T) {
 	p := New()
 	p.SetItems(sampleItems())
@@ -261,16 +243,10 @@ func TestUnit_PickerRender_FooterCountsHiddenItems(t *testing.T) {
 	if len(lines) != 4 {
 		t.Fatalf("got %d lines, want 4", len(lines))
 	}
-	// Window at the top: 3 item rows + footer, out of 8 items => 5 below and
-	// nothing above, so the note says one thing. It is indented to the row
-	// column, so it reads as a note about the list, not as another row of it.
 	if got, want := lines[3].Text(), "  +5 more"; got != want {
 		t.Fatalf("footer = %q, want %q", got, want)
 	}
 
-	// Scrolled into the middle, the below-count drops and an above-count
-	// appears: items ABOVE the window are not below it, and saying otherwise
-	// sends the operator hunting for rows that are behind them.
 	p.Move(3)
 	lines = p.Render(80, 4, false)
 	if len(lines) != 4 {
@@ -280,9 +256,6 @@ func TestUnit_PickerRender_FooterCountsHiddenItems(t *testing.T) {
 		t.Fatalf("scrolled footer = %q, want %q", got, want)
 	}
 
-	// At the bottom nothing is below the window, which is exactly the moment
-	// the rows above are the ONLY hidden ones. The footer stands and says so
-	// rather than handing its line back and leaving them unannounced.
 	p.Move(99)
 	lines = p.Render(80, 4, false)
 	if len(lines) != 4 {
@@ -298,14 +271,10 @@ func TestUnit_PickerRender_FooterCountsHiddenItems(t *testing.T) {
 		t.Fatalf("last item row = %q, want the final item", last)
 	}
 
-	// Mono gets the same note with the caret the rest of the live region
-	// falls back to.
 	if got, want := p.Render(80, 4, true)[3].Text(), "  ^5 above"; got != want {
 		t.Fatalf("ascii footer = %q, want %q", got, want)
 	}
 
-	// A single-row budget spends its one line on the item, not on a footer
-	// that would have nothing above it.
 	p.Move(-99)
 	one := p.Render(80, 1, false)
 	if len(one) != 1 {
@@ -327,13 +296,8 @@ func TestUnit_PickerRender_DegenerateSizes(t *testing.T) {
 }
 
 // TestUnit_PickerRender_NeverExceedsWidth walks every width from one cell up,
-// in BOTH glyph modes, over the states that actually stress the arithmetic:
-// a long label, a long detail, an empty state, a footer.
-//
-// ASCII from w=1 is the case that mattered. "..." is three cells where "…" is
-// one, and a truncation helper handed a tail wider than its budget returns
-// the bare tail — so the narrow ASCII rows overflowed while the unicode ones
-// the old test sampled looked fine.
+// in both glyph modes, over states that stress the arithmetic: a long label,
+// a long detail, an empty state, a footer.
 func TestUnit_PickerRender_NeverExceedsWidth(t *testing.T) {
 	sets := map[string][]Item{
 		"sample": sampleItems(),
@@ -367,9 +331,8 @@ func TestUnit_PickerRender_NeverExceedsWidth(t *testing.T) {
 	}
 }
 
-// TestUnit_PickerRender_NeverExceedsMaxRows: the footer lives inside the row
-// budget, so a caller that reserved maxRows lines gets at most that many at
-// every width and every selection.
+// TestUnit_PickerRender_NeverExceedsMaxRows: a caller that reserved maxRows
+// lines gets at most that many, at every width and selection.
 func TestUnit_PickerRender_NeverExceedsMaxRows(t *testing.T) {
 	p := New()
 	p.SetItems(sampleItems())
@@ -386,9 +349,8 @@ func TestUnit_PickerRender_NeverExceedsMaxRows(t *testing.T) {
 	}
 }
 
-// TestUnit_PickerItemsAreSanitized: a candidate's Label is a filename, and a
-// filesystem will accept very nearly anything in one. ID is exempt on
-// purpose — it is the caller's identity token and is never drawn.
+// TestUnit_PickerItemsAreSanitized: Label/Detail are sanitized; ID is exempt
+// since it is never drawn.
 func TestUnit_PickerItemsAreSanitized(t *testing.T) {
 	const evil = "ev\x1b[2Jil\x1b]0;t\x07\tname\x7f‮txt"
 	p := New()
@@ -436,7 +398,6 @@ func TestUnit_PickerMove_ClampsAndPages(t *testing.T) {
 		t.Fatalf("moving down past the end = %d, want %d (clamped)", p.SelectedIndex(), n-1)
 	}
 
-	// PageMove steps by the configured page size.
 	p.SetPageSize(3)
 	p.Move(-100)
 	p.PageMove(1)
@@ -462,7 +423,6 @@ func TestUnit_PickerSelected_TracksFilteredList(t *testing.T) {
 		t.Fatalf("Len/FilteredLen = %d/%d, want 8/8", p.Len(), p.FilteredLen())
 	}
 
-	// A query re-ranks AND resets the selection to the best match.
 	p.SetQuery("picker")
 	if p.SelectedIndex() != 0 {
 		t.Fatalf("SetQuery left the selection at %d, want 0", p.SelectedIndex())
@@ -471,9 +431,6 @@ func TestUnit_PickerSelected_TracksFilteredList(t *testing.T) {
 	if !ok {
 		t.Fatal("Selected reported not-ok with matches present")
 	}
-	// Both "picker.go" and ".../picker/picker.go" have the basename
-	// "picker.go", so both are tier 0 and Label decides between them — the
-	// documented within-tier rule, not path depth.
 	if sel.Rank != RankBasenamePrefix {
 		t.Fatalf("best match %q is tier %d, want %d", sel.Label, sel.Rank, RankBasenamePrefix)
 	}
@@ -487,7 +444,6 @@ func TestUnit_PickerSelected_TracksFilteredList(t *testing.T) {
 		t.Fatalf("FilteredLen = %d, want fewer than the 8 total", p.FilteredLen())
 	}
 
-	// Refreshing the item set under a live query re-applies it.
 	p.SetItems([]Item{{ID: "x", Label: "picker.go"}, {ID: "y", Label: "unrelated"}})
 	if p.FilteredLen() != 1 {
 		t.Fatalf("after SetItems, FilteredLen = %d, want 1", p.FilteredLen())

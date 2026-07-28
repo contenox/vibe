@@ -1,8 +1,6 @@
-// resume.go is the service half of the S6 durable-envelope slice: persisting
-// a suspended run's checkpoint (checkpointSaver, installed on every Prompt
-// context) and resuming it from ANY process (ResumeFromCheckpoint — the entry
-// the post-S6 `contenox approvals respond` verb and hitlservice's resume hook
-// both build on).
+// Package agentservice runs prompts against a task chain and persists their
+// session history. resume.go persists a suspended run's checkpoint and
+// resumes it from any process via ResumeFromCheckpoint.
 package agentservice
 
 import (
@@ -23,26 +21,16 @@ import (
 )
 
 var (
-	// ErrNoCheckpoint reports that no suspended run is stored under the
-	// approval ID — the clean "nothing to resume" answer (an in-session
-	// fast-path approval, or an approval that never gated a suspension).
+	// ErrNoCheckpoint reports no suspended run stored under the approval ID.
 	ErrNoCheckpoint = errors.New("agentservice: no suspended run is checkpointed under this approval")
-	// ErrApprovalUnanswered reports a resume attempted before the approval's
-	// verdict landed. Resume is verdict-driven: answer the approval
-	// (hitlservice.Respond) and the resume follows.
+	// ErrApprovalUnanswered reports a resume attempted before the verdict landed.
 	ErrApprovalUnanswered = errors.New("agentservice: the approval backing this checkpoint has no verdict yet; respond to it first")
 )
 
-// resumeClaimStaleness bounds how long a resume claim excludes other
-// resumers: a process killed mid-resume relinquishes its claim by staleness,
-// so the run stays recoverable without any cooperative unlock.
+// resumeClaimStaleness bounds how long a resume claim excludes other resumers.
 const resumeClaimStaleness = 10 * time.Minute
 
-// checkpointSaver adapts the runtimetypes checkpoint table to
-// taskengine.CheckpointSaver, enriching the engine's checkpoint with the
-// identity only this layer knows (session, chain ref) before it is
-// serialized. Installed per run by Prompt and by ResumeFromCheckpoint (a
-// resumed run may suspend again on a later gated call).
+// checkpointSaver adapts the runtimetypes checkpoint table to taskengine.CheckpointSaver.
 type checkpointSaver struct {
 	store     runtimetypes.Store
 	sessionID string
@@ -78,12 +66,7 @@ func (a *agent) checkpointSaver(sessionID, chainRef string) taskengine.Checkpoin
 	}
 }
 
-// ResumeHook adapts this package's resume entry into the hook
-// hitlservice.Respond invokes when a verdict arrives for an approval whose
-// waiter is gone. Registration happens at the composition root
-// (hitlservice.SetResumeHook(svc, agentservice.ResumeHook(deps))), keeping
-// the dependency arrow pointing from the root downward — hitlservice never
-// imports this package.
+// ResumeHook adapts ResumeFromCheckpoint into hitlservice.Respond's resume hook.
 func ResumeHook(deps Deps) hitlservice.ResumeHook {
 	return func(ctx context.Context, approvalID string) error {
 		_, err := ResumeFromCheckpoint(ctx, deps, approvalID)
@@ -94,11 +77,7 @@ func ResumeHook(deps Deps) hitlservice.ResumeHook {
 	}
 }
 
-// resumeIfAlreadyAnswered closes the suspend-time race window: when the
-// approval's verdict landed before the suspending Prompt could even return,
-// no hook had a checkpoint to resume — so the suspending process resumes
-// inline. Reported resumed=false whenever the approval is still pending (the
-// normal case) or anything about the check fails (the hook path remains).
+// resumeIfAlreadyAnswered resumes inline when a verdict beats the suspending Prompt's return.
 func (a *agent) resumeIfAlreadyAnswered(ctx context.Context, approvalID string) (*PromptResponse, bool) {
 	store := runtimetypes.New(a.deps.DB.WithoutTransaction())
 	row, err := store.GetHITLApproval(ctx, approvalID)
@@ -107,8 +86,6 @@ func (a *agent) resumeIfAlreadyAnswered(ctx context.Context, approvalID string) 
 	}
 	resp, err := ResumeFromCheckpoint(ctx, a.deps, approvalID)
 	if err != nil {
-		// The checkpoint stays annotated/claim-stale-recoverable; surfacing a
-		// suspended response here keeps "prompt returned" truthful.
 		reportErr, _, end := a.tracker().Start(ctx, "resume", "inline_after_suspend", "approval_id", approvalID)
 		reportErr(err)
 		end()
@@ -118,24 +95,9 @@ func (a *agent) resumeIfAlreadyAnswered(ctx context.Context, approvalID string) 
 }
 
 // ResumeFromCheckpoint loads the run suspended under approvalID, injects the
-// approval's verdict, and runs the chain to completion with the SAME
-// persistence and event behavior as a normal run. It is process-independent
-// by construction: any process that can build Deps (engine + DB) can resume a
-// run another process suspended — the property the post-S6 CLI
-// `approvals respond` verb depends on.
-//
-// Semantics:
-//   - approved → the pending tool call executes and the chain continues;
-//   - denied/expired → the existing deny semantics (the model sees the
-//     standard deny message and the chain continues);
-//   - the resumed run may suspend AGAIN on a later gated call — then the
-//     consumed checkpoint is replaced by the new one and the response reports
-//     the new approval ID;
-//   - a successful terminal DELETES the checkpoint; a resume failure RETAINS
-//     it with a failure annotation (never silently lose a run).
-//
-// Exactly one resumer proceeds per checkpoint (a claim CAS in the store); a
-// concurrent resume observes ErrNoCheckpoint.
+// verdict, and runs the chain to completion, from any process holding Deps.
+// Success deletes the checkpoint; failure retains it annotated. Exactly one
+// resumer proceeds per checkpoint; a concurrent resume observes ErrNoCheckpoint.
 func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*PromptResponse, error) {
 	if deps.Engine == nil || deps.DB == nil {
 		return nil, fmt.Errorf("agentservice: ResumeFromCheckpoint requires an engine and a database")
@@ -149,9 +111,7 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		}
 		return nil, fmt.Errorf("agentservice: load approval %s: %w", approvalID, err)
 	}
-	// An attention ask resumes with TEXT, not a boolean: the operator's words
-	// (or the recorded fact that nobody gave any) are injected for the asking
-	// tool to consume. A permission ask keeps the boolean verdict path.
+	// An attention ask resumes with text; a permission ask keeps the boolean path.
 	isAttention := hitlservice.IsAttentionAsk(row)
 	var approved bool
 	if isAttention {
@@ -168,8 +128,7 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 	now := time.Now().UTC()
 	if err := store.ClaimChainCheckpoint(ctx, approvalID, now, now.Add(-resumeClaimStaleness)); err != nil {
 		if errors.Is(err, libdb.ErrNotFound) {
-			// No checkpoint, or another live resumer holds the claim — either
-			// way there is nothing for THIS caller to run.
+			// No checkpoint, or another live resumer holds the claim.
 			return nil, fmt.Errorf("%w (approval %s)", ErrNoCheckpoint, approvalID)
 		}
 		return nil, fmt.Errorf("agentservice: claim checkpoint %s: %w", approvalID, err)
@@ -180,16 +139,12 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 	}
 	cp, err := taskengine.UnmarshalCheckpoint(cpRow.Payload)
 	if err != nil {
-		// Version drift or corruption: annotate and keep — the run is stranded
-		// but visible, and a newer binary may load it.
+		// Version drift or corruption: annotate and keep, stranded but visible.
 		_ = store.SetChainCheckpointFailure(ctx, approvalID, "decode: "+err.Error())
 		return nil, fmt.Errorf("agentservice: decode checkpoint %s (retained with failure annotation): %w", approvalID, err)
 	}
 
-	// Rebuild the exec environment the suspended run held: same request ID
-	// (the durable event journal of that request continues across the
-	// suspension — the documented linkage), same template vars, allowlist,
-	// context length, and session identity.
+	// Rebuild the suspended run's exec environment.
 	if cp.RequestID != "" {
 		ctx = context.WithValue(ctx, libtracker.ContextKeyRequestID, cp.RequestID)
 	} else {
@@ -206,17 +161,11 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		ctx = context.WithValue(ctx, runtimetypes.SessionIDContextKey, cp.SessionID)
 		ctx = llmrepo.WithSessionKey(ctx, llmrepo.DeriveSessionKey(cp.SessionID))
 	}
-	// The mission binding is part of the environment the suspended run held:
-	// without it the mission tools are invisible to the resumed chain (their
-	// exposure gates on it), so a unit's resumed ask could neither consume its
-	// answer nor file its blocker. The ask row's attribution is the durable
-	// source of truth for which mission that was.
+	// Without it, mission tools are invisible to the resumed chain.
 	if row.MissionID != nil && *row.MissionID != "" {
 		ctx = missiontools.WithMissionID(ctx, *row.MissionID)
 	}
-	// The verdict rides the context; the consuming tool reads it for exactly
-	// this call ID instead of asking again. Later gated calls of the resumed
-	// run gate normally (and may suspend afresh).
+	// The verdict rides the context, keyed by call ID.
 	if isAttention {
 		ans := taskengine.AttentionAnswer{}
 		if text := strings.TrimSpace(hitlservice.AnswerOf(row)); text != "" {
@@ -237,8 +186,7 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 
 	var susp *taskengine.ChainSuspendedError
 	if execErr != nil && errors.As(execErr, &susp) {
-		// Suspended again on a later call: the run is now represented by the
-		// NEW checkpoint; the consumed one is done.
+		// Suspended again: the run is now represented by the new checkpoint.
 		if err := store.DeleteChainCheckpoint(ctx, approvalID); err != nil && !errors.Is(err, libdb.ErrNotFound) {
 			return nil, fmt.Errorf("agentservice: run re-suspended as approval %s but deleting consumed checkpoint %s failed: %w", susp.ApprovalID, approvalID, err)
 		}
@@ -251,8 +199,7 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		}, nil
 	}
 	if execErr != nil {
-		// Keep the checkpoint, annotated: the verdict is recorded and a retry
-		// (after the claim goes stale) can run the chain again.
+		// Keep the checkpoint, annotated, so a retry can run it again.
 		if annErr := store.SetChainCheckpointFailure(ctx, approvalID, execErr.Error()); annErr != nil {
 			return nil, fmt.Errorf("agentservice: resume of approval %s failed (%v) AND annotating its checkpoint failed: %w", approvalID, execErr, annErr)
 		}
@@ -264,18 +211,14 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		}, fmt.Errorf("agentservice: resume of approval %s failed (checkpoint retained with failure annotation): %w", approvalID, execErr)
 	}
 
-	// Same persistence behavior as a normal run: SynthesizeHistory over the
-	// checkpointed prior transcript + the resumed run's steps, deduped by
-	// message ID in PersistDiff, so nothing the suspended segment already
-	// produced is written twice.
+	// Deduped by message ID: nothing already produced is written twice.
 	if cp.SessionID != "" {
 		resumer := &agent{deps: deps}
 		resumer.persistHistory(ctx, cp.SessionID, cp.History, units, nil, cp.ChainRef)
 	}
 
 	if err := store.DeleteChainCheckpoint(ctx, approvalID); err != nil && !errors.Is(err, libdb.ErrNotFound) {
-		// The run completed and persisted; a leftover row is noise, not loss —
-		// report through the response error would overstate it, so wrap softly.
+		// The run completed and persisted; a leftover row is noise, not loss.
 		return nil, fmt.Errorf("agentservice: resumed run for approval %s completed, but deleting its checkpoint failed: %w", approvalID, err)
 	}
 
@@ -287,11 +230,8 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 	}, nil
 }
 
-// verdictFromApproval maps a terminal approval row to the boolean verdict the
-// resume injects. Expired rows carry their OnTimeout outcome in the stored
-// resolution payload ({"approved": bool} — the documented shape on
-// runtimetypes.HITLApproval.Resolution); absent or unparseable resolution
-// denies, the safe direction.
+// verdictFromApproval maps a terminal approval row to the injected verdict;
+// absent or unparseable resolution denies.
 func verdictFromApproval(row *runtimetypes.HITLApproval) (bool, error) {
 	switch row.State {
 	case runtimetypes.HITLApprovalApproved:

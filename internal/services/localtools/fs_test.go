@@ -25,12 +25,8 @@ func TestUnit_LocalFSTools_Exec(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	// testFileContent is the canonical fixture every test.txt subtest starts
-	// from. Subtests must not depend on each other's leftovers: `sed` rewrites
-	// test.txt in place, so without a per-subtest reseed the assertions below
-	// only hold when the whole parent runs top to bottom. Running one subtest
-	// alone — which is what an IDE's per-test run button does — would then fail
-	// on a file that was never created.
+	// Subtests share this fixture but sed mutates test.txt in place, so any
+	// subtest depending on its content must reseed via seedTestFile.
 	const testFileContent = "hello world\nline 2\nline 3"
 
 	seedTestFile := func(t *testing.T) {
@@ -40,10 +36,8 @@ func TestUnit_LocalFSTools_Exec(t *testing.T) {
 		}
 	}
 
-	// seedBigFile writes the oversized fixture for the read/output size-policy
-	// tests. Content is ASCII text, not NUL bytes: an all-zero fixture would be
-	// refused as binary before ever reaching the size checks these tests
-	// exercise (see TestUnit_LocalFSTools_ReadFile_RefusesBinary).
+	// ASCII content, not NUL bytes, so the fixture isn't refused as binary
+	// before the size checks under test run.
 	seedBigFile := func(t *testing.T) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(tempDir, "big.bin"), bytes.Repeat([]byte("a"), 2*1024*1024), 0644); err != nil {
@@ -315,9 +309,8 @@ func TestUnit_LocalFSTools_Exec(t *testing.T) {
 	})
 
 	t.Run("maxOutputBytesTruncatesRatherThanErrors", func(t *testing.T) {
-		// Rec 4 (tool-hardening.md): read_file no longer hard-errors when its output
-		// exceeds _max_output_bytes — it returns a bounded head plus a notice naming
-		// the exact next step ("start_line: N"), so nothing is dropped silently.
+		// read_file does not hard-error when output exceeds _max_output_bytes:
+		// it returns a bounded head plus a notice naming the next step.
 		seedBigFile(t)
 		ctxSmallOut := taskengine.WithToolsArgs(ctx, localtools.LocalFSToolsName, map[string]string{
 			"_max_read_bytes":   "-1",
@@ -704,7 +697,7 @@ func TestUnit_LocalFSTools_InjectedNamePlumbsThrough(t *testing.T) {
 		t.Fatalf("GetToolsForToolsByName(scoped_fs): %v", err)
 	}
 	want := map[string]bool{
-		"read_file": true, "write_file": true, "list_dir": true, "grep": true,
+		"read_file": true, "write_file": true, "edit_file": true, "list_dir": true, "grep": true,
 		"find_files": true,
 		"sed":        true, "count_stats": true, "read_file_range": true, "stat_file": true,
 	}

@@ -31,10 +31,8 @@ func TestUnit_VLLM_TypedSentinels(t *testing.T) {
 	require.ErrorIs(t, err, modelrepo.ErrContextLengthExceeded)
 }
 
-// TestUnit_VLLM_ToolNameSanitization: engine-qualified tool names carry dots
-// ("toolsName.toolName") which break vLLM chat templates, so they are
-// sanitized on the way out — in the tool schemas AND in prior-turn assistant
-// tool calls — and translated back on decode.
+// Engine-qualified tool names ("toolsName.toolName") are sanitized in both
+// the tool schemas and prior-turn assistant tool calls, and translated back.
 func TestUnit_VLLM_ToolNameSanitization(t *testing.T) {
 	fn := &modelrepo.FunctionTool{Name: "filesystem.list_directory"}
 	cfg := &modelrepo.ChatConfig{Tools: []modelrepo.Tool{{Type: "function", Function: fn}}}
@@ -61,7 +59,6 @@ func TestUnit_VLLM_ToolNameSanitization(t *testing.T) {
 	require.Equal(t, "filesystem_list_directory", assistant.ToolCalls[0].Function.Name,
 		"history tool calls must carry the sanitized name too")
 
-	// Decoding translates the sanitized name back to the caller's original.
 	wireCall := chatToolCall{ID: "t2", Type: "function"}
 	wireCall.Function.Name = "filesystem_list_directory"
 	wireCall.Function.Arguments = `{"path":"/"}`

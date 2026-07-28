@@ -13,7 +13,7 @@ import (
 	libacp "github.com/contenox/beam/libacp"
 )
 
-// goldenWidths is the blueprint's resize matrix: narrow, default, wide.
+// goldenWidths is the resize matrix: narrow, default, wide.
 var goldenWidths = []int{60, 80, 120}
 
 const (
@@ -125,16 +125,14 @@ func texts(lines []frame.Line) []string {
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// Scenarios. Each is one hand-built event script; the goldens below render
-// every one at every width in both glyph variants.
-// ---------------------------------------------------------------------------
+// Scenarios: hand-built event scripts rendered at every width in both glyph
+// variants by the goldens below.
 
 func streamScript() []enginebridge.Event {
 	return []enginebridge.Event{
 		user("wire up the transcript component"),
 		thought("m0", "The flush policy is the part that matters.\n"),
-		// Chunk boundaries deliberately fall mid-word and mid-sentence.
+		// Chunk boundaries fall mid-word and mid-sentence.
 		text("m1", "I'll start with the flush poli"),
 		text("m1", "cy, because it is what decides when a line can never change again.\n\n"),
 		text("m1", "## Plan\n"),
@@ -153,8 +151,7 @@ func markdownScript() []enginebridge.Event {
 		text("m1", "> a quoted line that is long enough to need wrapping at sixty columns\n"),
 		text("m1", "1. first numbered item that also runs past the narrow width to wrap\n"),
 		text("m1", "Ambiguity degrades: **unterminated, `unclosed, 2 * 3 * 4, ***both***.\n"),
-		// A table is column-aligned data: every row ships verbatim, and the
-		// separator row is a row even though it opens without a pipe.
+		// The separator row counts even though it opens without a pipe.
 		text("m1", "| component | owns                                    |\n"),
 		text("m1", "|:----------|-----------------------------------------|\n"),
 		text("m1", "| transcript| the ordered record of one beam session  |\n"),
@@ -187,12 +184,9 @@ func missionScript() []enginebridge.Event {
 	}
 }
 
-// missionLifeScript walks the whole lifecycle vocabulary past the renderer in
-// one script: the opening transition (which claims no outcome), a plan revision
-// with its counts, and all four terminal states, each of which has to arrive in
-// its own style. The last two rows drop the agent name and the explanation to
-// pin the fallbacks — an unattributed mission still gets a card, and a plan
-// revised without a stated reason still shows its shape.
+// missionLifeScript walks the whole lifecycle vocabulary: the opening
+// transition, a plan revision, and all four terminal states. The last two
+// rows drop the agent name and explanation to pin the fallbacks.
 func missionLifeScript() []enginebridge.Event {
 	return []enginebridge.Event{
 		text("m1", "Dispatching the units now.\n"),
@@ -236,9 +230,8 @@ var scenarios = map[string][]enginebridge.Event{
 	"notice":      noticeScript(),
 }
 
-// TestUnit_ScenarioGoldens is the resize matrix: every scenario at 60, 80 and
-// 120 columns plus the ASCII variant at 80. Scrollback and live are encoded
-// separately, because the whole component is the boundary between them.
+// TestUnit_ScenarioGoldens pins every scenario at 60/80/120 columns plus the
+// ASCII variant at 80, scrollback and live encoded separately.
 func TestUnit_ScenarioGoldens(t *testing.T) {
 	for name, script := range scenarios {
 		for _, w := range goldenWidths {
@@ -254,8 +247,8 @@ func TestUnit_ScenarioGoldens(t *testing.T) {
 	}
 }
 
-// TestUnit_StreamSettlesOnNewline is the heart of the flush policy: a chunk
-// that ends mid-word settles nothing, and the newline settles the whole line.
+// TestUnit_StreamSettlesOnNewline pins that a mid-word chunk settles nothing
+// and a newline settles the whole line.
 func TestUnit_StreamSettlesOnNewline(t *testing.T) {
 	tr := apply(text("m1", "Hello, wo"))
 
@@ -271,7 +264,7 @@ func TestUnit_StreamSettlesOnNewline(t *testing.T) {
 
 	tr.Apply(text("m1", "rld!\nAnd the next li"))
 	if got := texts(tr.TakeAppends(80, false)); len(got) != 1 || got[0] != "Hello, world!" {
-		t.Fatalf("settled %q, want [\"Hello, world!\"] — the newline settles the WHOLE line", got)
+		t.Fatalf("settled %q, want [\"Hello, world!\"]", got)
 	}
 	if got := texts(tr.Live(80, false, "")); len(got) != 1 || got[0] != "And the next li" {
 		t.Fatalf("live tail = %q, want the new unterminated line", got)
@@ -287,8 +280,7 @@ func TestUnit_StreamSettlesOnNewline(t *testing.T) {
 	}
 }
 
-// TestUnit_TakeAppendsDrains pins the take contract: taken means gone, because
-// the terminal already owns those rows.
+// TestUnit_TakeAppendsDrains pins that taken means gone.
 func TestUnit_TakeAppendsDrains(t *testing.T) {
 	tr := apply(text("m1", "one\ntwo\n"))
 	first := tr.TakeAppends(80, false)
@@ -303,8 +295,7 @@ func TestUnit_TakeAppendsDrains(t *testing.T) {
 	}
 }
 
-// TestUnit_LiveIdleEmpty: an idle transcript renders no live region at all —
-// the composer must be free to sit directly under the last settled line.
+// TestUnit_LiveIdleEmpty pins that an idle transcript renders no live region.
 func TestUnit_LiveIdleEmpty(t *testing.T) {
 	if got := New().Live(80, false, "⠙"); len(got) != 0 {
 		t.Fatalf("fresh transcript live = %q, want empty", texts(got))
@@ -319,9 +310,8 @@ func TestUnit_LiveIdleEmpty(t *testing.T) {
 	}
 }
 
-// TestUnit_MessageIDChangeStartsNewMessage: a mid-stream id change is a new
-// message, so the old one's unterminated line settles rather than absorbing
-// the new one's text.
+// TestUnit_MessageIDChangeStartsNewMessage pins that a mid-stream id change
+// settles the old message's unterminated line rather than absorbing new text.
 func TestUnit_MessageIDChangeStartsNewMessage(t *testing.T) {
 	tr := apply(text("m1", "first message tail"), text("m2", "second message\n"))
 	got := texts(tr.TakeAppends(80, false))
@@ -331,9 +321,8 @@ func TestUnit_MessageIDChangeStartsNewMessage(t *testing.T) {
 	}
 }
 
-// TestUnit_MissionReportNeverSplicesTheLiveStream is blueprint requirement 2:
-// a report races the stream it arrives beside and must settle as its own card
-// while the live tail keeps exactly the text it had.
+// TestUnit_MissionReportNeverSplicesTheLiveStream pins that a report racing
+// a live stream settles as its own card, leaving the live tail untouched.
 func TestUnit_MissionReportNeverSplicesTheLiveStream(t *testing.T) {
 	tr := apply(text("m1", "still streaming when the report lands"))
 	tr.TakeAppends(80, false)
@@ -351,27 +340,16 @@ func TestUnit_MissionReportNeverSplicesTheLiveStream(t *testing.T) {
 	if got := texts(tr.Live(80, false, "")); len(got) != 1 || got[0] != "still streaming when the report lands" {
 		t.Fatalf("live tail = %q, want it untouched by the report", got)
 	}
-	// And the stream is still the SAME message: its next chunk continues the
-	// line the report interrupted.
+	// The stream is still the same message.
 	tr.Apply(text("m1", " and keeps going\n"))
 	if got := texts(tr.TakeAppends(80, false)); len(got) != 2 || got[1] != "still streaming when the report lands and keeps going" {
 		t.Fatalf("continued line = %q, want the interrupted line completed", got)
 	}
 }
 
-// TestUnit_ToolCardLifecycle: pending and in_progress live in the live region
-// as ONE line updated in place; the terminal status settles exactly one line,
-// and a late update never re-appends it.
-// TestUnit_MissionLifecycleCardsSettleOnArrival is the report's splice rule
-// applied to the lifecycle half. Both cards arrive COMPLETE — there is no later
-// event that could change what "landed" or "plan rev 2" says — so each settles
-// on the instant it lands rather than waiting in the live region, and neither
-// touches the message that happened to be streaming beside it.
-//
-// The failure this guards is specific: a mission fired from a busy session
-// reports its own progress while the operator's turn is still producing prose,
-// and a card that joined that stream would put a mission's status inside a
-// sentence the model was writing.
+// TestUnit_MissionLifecycleCardsSettleOnArrival pins that plan and status
+// cards settle the instant they land, complete, never joining a message
+// streaming beside them.
 func TestUnit_MissionLifecycleCardsSettleOnArrival(t *testing.T) {
 	tr := apply(text("m1", "still streaming when the unit lands"))
 	tr.TakeAppends(80, false)
@@ -404,10 +382,8 @@ func TestUnit_MissionLifecycleCardsSettleOnArrival(t *testing.T) {
 	}
 }
 
-// TestUnit_MissionStatusStyles pins the one thing a golden cannot state as a
-// rule: which style role each lifecycle state takes. In a colored terminal the
-// operator reads the role before the word, so a landed mission wearing the
-// failed role is a legibility defect that no amount of correct text fixes.
+// TestUnit_MissionStatusStyles pins which style role each lifecycle state
+// takes.
 func TestUnit_MissionStatusStyles(t *testing.T) {
 	cases := []struct {
 		status string
@@ -417,8 +393,7 @@ func TestUnit_MissionStatusStyles(t *testing.T) {
 		{enginebridge.MissionStatusDerailed, frame.StyleFailed},
 		{enginebridge.MissionStatusStuck, frame.StyleWarn},
 		{enginebridge.MissionStatusAbandoned, frame.StyleMuted},
-		// Neither of these claims an outcome: a mission that just opened has
-		// none, and a status this build never heard of must not be given one.
+		// Neither claims an outcome: open and unknown status alike.
 		{enginebridge.MissionStatusOpen, frame.StyleStrong},
 		{"paused", frame.StyleStrong},
 	}
@@ -435,6 +410,8 @@ func TestUnit_MissionStatusStyles(t *testing.T) {
 	}
 }
 
+// TestUnit_ToolCardLifecycle pins that pending/in-progress update one live
+// line in place and a terminal status settles it exactly once.
 func TestUnit_ToolCardLifecycle(t *testing.T) {
 	tr := apply(toolOpen("t1", "Read frame.go", libacp.ToolKindRead, libacp.ToolCallStatusPending))
 	if got := tr.TakeAppends(80, false); len(got) != 0 {
@@ -476,7 +453,7 @@ func TestUnit_ToolCardLifecycle(t *testing.T) {
 	}
 }
 
-// TestUnit_ToolCardStatusGlyphs pins the status vocabulary in both variants.
+// TestUnit_ToolCardStatusGlyphs pins the status glyph vocabulary in both variants.
 func TestUnit_ToolCardStatusGlyphs(t *testing.T) {
 	cases := []struct {
 		status         libacp.ToolCallStatus
@@ -500,8 +477,8 @@ func TestUnit_ToolCardStatusGlyphs(t *testing.T) {
 	}
 }
 
-// TestUnit_OpenToolCallNeverDangles is blueprint requirement 12: a call the
-// turn ended underneath settles as unfinished instead of spinning forever.
+// TestUnit_OpenToolCallNeverDangles pins that a call the turn ended
+// underneath settles as unfinished instead of spinning forever.
 func TestUnit_OpenToolCallNeverDangles(t *testing.T) {
 	tr := apply(
 		toolOpen("t1", "Search the workspace", libacp.ToolKindSearch, libacp.ToolCallStatusInProgress),
@@ -519,9 +496,8 @@ func TestUnit_OpenToolCallNeverDangles(t *testing.T) {
 	}
 }
 
-// TestUnit_CodeFenceIsNeverWrapped is the constitutional copy-fidelity rule: a
-// fenced line is one span at any width, byte-identical to the source, because
-// a line this component split would paste back as two.
+// TestUnit_CodeFenceIsNeverWrapped pins that a fenced line is one span at
+// any width, byte-identical to the source.
 func TestUnit_CodeFenceIsNeverWrapped(t *testing.T) {
 	src := strings.Repeat("abcdefghij", 20) // 200 columns
 
@@ -541,7 +517,7 @@ func TestUnit_CodeFenceIsNeverWrapped(t *testing.T) {
 		})
 	}
 
-	// The live tail inside a fence is code too, and equally unwrapped.
+	// The live tail inside a fence is code too.
 	open := apply(text("m1", "```go\n"), text("m1", src))
 	open.TakeAppends(40, false)
 	live := open.Live(40, false, "")
@@ -550,9 +526,8 @@ func TestUnit_CodeFenceIsNeverWrapped(t *testing.T) {
 	}
 }
 
-// TestUnit_InlineMarkdown is the styling table, ambiguity fallbacks included.
-// Rendering is width-independent here (240 columns), so each row is exactly
-// one encoded line.
+// TestUnit_InlineMarkdown pins the inline styling table, ambiguity fallbacks
+// included.
 func TestUnit_InlineMarkdown(t *testing.T) {
 	cases := []struct {
 		name string
@@ -593,16 +568,11 @@ func TestUnit_InlineMarkdown(t *testing.T) {
 }
 
 // proseSources is one source line in each shape the prose renderer knows.
-//
-// want is the text it must settle as — only the inline markdown markers are
-// ever consumed; every other rune, whitespace included, has to survive. first
-// and cont are the prefixes the LIVE region hangs its wrapped rows off, and
-// are the only text that path is allowed to add.
+// want is the text it must settle as (only markdown markers are consumed);
+// first and cont are the prefixes the live region hangs wrapped rows off.
 var proseSources = []struct{ src, want, first, cont string }{
 	{src: "the quick brown fox jumps over the lazy dog while text keeps its spans"},
-	// A padded key/value line: the space run is longer than every narrow
-	// width, so a wrapper would have to put a whole chunk of pure whitespace
-	// on a row of its own.
+	// A padded key/value line: the space run outlasts every narrow width.
 	{src: "name" + strings.Repeat(" ", 45) + "value"},
 	{src: "trailing spaces at the end   "},
 	{src: "   leading spaces at the start"},
@@ -617,15 +587,8 @@ var proseSources = []struct{ src, want, first, cont string }{
 	},
 }
 
-// TestUnit_SettledProseIsOneUnwrappedLine is the constitutional copy/paste
-// rule, and the reason this component wraps nothing it settles: beam prints
-// scrollback RAW, so a soft-wrapped row is still ONE logical line that a
-// terminal selection rejoins — while a break the component inserts is a real
-// newline in the middle of the paragraph somebody just copied. `beam --help`
-// promises native copy; a hard-wrapped transcript does not deliver it.
-//
-// So one source line settles as exactly one line, at every width, carrying its
-// source verbatim.
+// TestUnit_SettledProseIsOneUnwrappedLine pins that one source line settles
+// as exactly one line at every width, carrying its source verbatim.
 func TestUnit_SettledProseIsOneUnwrappedLine(t *testing.T) {
 	for _, c := range proseSources {
 		want := c.want
@@ -646,12 +609,9 @@ func TestUnit_SettledProseIsOneUnwrappedLine(t *testing.T) {
 	}
 }
 
-// TestUnit_SettledTranscriptIsWidthIndependent states the same property over
-// whole scripts rather than single lines: everything a prose turn settles is
-// byte-identical at 4 columns and at 140, because none of it is laid out
-// against a width at all. (Tool cards are excluded on purpose — a card is one
-// line by definition and truncates instead; that is TestUnit_CardNeverExceeds-
-// Width's job.)
+// TestUnit_SettledTranscriptIsWidthIndependent pins the same property over
+// whole scripts: settled output is byte-identical at 4 columns and at 140.
+// Tool cards are excluded (see TestUnit_CardNeverExceedsWidth).
 func TestUnit_SettledTranscriptIsWidthIndependent(t *testing.T) {
 	script := []enginebridge.Event{
 		user(strings.Repeat("a user turn that keeps going ", 6) + "\nand a second line of it"),
@@ -674,25 +634,15 @@ func TestUnit_SettledTranscriptIsWidthIndependent(t *testing.T) {
 	}
 }
 
-// TestUnit_LiveWrappingLosesNothing is the copy/paste property on the one path
-// that still wraps. The live region is row-addressed and repainted, so the
-// engine TRUNCATES a row too wide for it — an unwrapped tail would simply be
-// invisible past the right edge until its newline arrived — and the component
-// wraps it itself. Nothing may be lost doing so.
-//
-// The predecessor of this test normalised spaces out of both sides before
-// comparing, which made it blind to the exact defect it was guarding — the
-// wrapper's break-trimming deleted whole runs of whitespace, and a test that
-// deletes whitespace before comparing agrees enthusiastically.
+// TestUnit_LiveWrappingLosesNothing pins that wrapping the live region loses
+// no text: joining the wrapped rows back together reproduces the source.
 func TestUnit_LiveWrappingLosesNothing(t *testing.T) {
 	for _, c := range proseSources {
 		want := c.want
 		if want == "" {
 			want = c.src
 		}
-		// The prefixes are the only thing wrapping may add: a quote's gutter
-		// and a list's hanging indent are repeated per row on purpose, so the
-		// body is what has to rejoin.
+		// Prefixes are the only thing wrapping may add.
 		body := strings.TrimPrefix(want, c.first)
 		for w := 12; w <= 120; w++ {
 			// No trailing newline: the line stays in the live region.
@@ -718,9 +668,8 @@ func TestUnit_LiveWrappingLosesNothing(t *testing.T) {
 	}
 }
 
-// TestUnit_LiveWrappingKeepsWhitespaceRuns is the regression proper: a column
-// of padding wider than the wrap width used to vanish entirely, because the
-// chunk holding it was all spaces and both ends were trimmed.
+// TestUnit_LiveWrappingKeepsWhitespaceRuns pins that a padding column wider
+// than the wrap width survives rather than being trimmed away.
 func TestUnit_LiveWrappingKeepsWhitespaceRuns(t *testing.T) {
 	src := "name" + strings.Repeat(" ", 45) + "value"
 	joined := strings.Join(texts(apply(text("m1", src)).Live(40, false, "")), "")
@@ -733,9 +682,8 @@ func TestUnit_LiveWrappingKeepsWhitespaceRuns(t *testing.T) {
 	}
 }
 
-// TestUnit_StylesSurviveAWrap: an inline span that straddles a break keeps its
-// style on both rows. Re-hanging spans over the wrapper's breaks is the one
-// place a styled renderer silently corrupts itself.
+// TestUnit_StylesSurviveAWrap pins that an inline span straddling a break
+// keeps its style on both rows.
 func TestUnit_StylesSurviveAWrap(t *testing.T) {
 	src := "leading words **emphasised body text** trailing words"
 	for w := 12; w <= 60; w++ {
@@ -754,11 +702,8 @@ func TestUnit_StylesSurviveAWrap(t *testing.T) {
 	}
 }
 
-// TestUnit_MarkdownTableRowsShipVerbatim is P19: a table is column-aligned
-// data whose layout lives in its spacing and its pipes. The inline pass used
-// to eat an asterisk in a cell and the wrapper used to shred the columns into
-// rows of pipe fragments; a row now takes the code-fence treatment — one span,
-// unstyled, verbatim.
+// TestUnit_MarkdownTableRowsShipVerbatim pins that a table row renders as
+// one unstyled span, verbatim, like a fenced code line.
 func TestUnit_MarkdownTableRowsShipVerbatim(t *testing.T) {
 	rows := []string{
 		"| component | owns |",
@@ -784,8 +729,7 @@ func TestUnit_MarkdownTableRowsShipVerbatim(t *testing.T) {
 		})
 	}
 
-	// Prose that merely contains a pipe is NOT a table, and neither is a
-	// horizontal rule or a bulleted line with a pipe in it.
+	// Prose merely containing a pipe is not a table.
 	for _, src := range []string{"run `go test ./... | tee log`", "---", "- a | b"} {
 		got := apply(text("m1", src+"\n")).TakeAppends(80, false)
 		if len(got) != 1 || got[0][0].Style == frame.StyleNone {
@@ -799,9 +743,7 @@ func TestUnit_MarkdownTableRowsShipVerbatim(t *testing.T) {
 		t.Fatalf("fenced pipe line = %+v, want StyleCode", lines[1])
 	}
 
-	// The live tail of a table row is unwrapped too, exactly like a fenced
-	// code line: the columns are the content, and a row split across two
-	// terminal rows is not a table any more.
+	// The live tail of a table row is unwrapped too.
 	wide := "| a table row | with columns wider than any terminal beam supports |"
 	live := apply(text("m1", wide)).Live(20, false, "")
 	if len(live) != 1 || live[0].Text() != wide {
@@ -809,8 +751,8 @@ func TestUnit_MarkdownTableRowsShipVerbatim(t *testing.T) {
 	}
 }
 
-// TestUnit_UserEchoPrefixAndIndent: the sigil carries the styling, the text
-// stays unstyled, and continuations line up under it.
+// TestUnit_UserEchoPrefixAndIndent pins that the sigil carries the styling,
+// text stays unstyled, and continuations line up under it.
 func TestUnit_UserEchoPrefixAndIndent(t *testing.T) {
 	tr := apply(user("first line\nsecond line"))
 	got := testkit.EncodeLines(tr.TakeAppends(80, false))
@@ -819,8 +761,7 @@ func TestUnit_UserEchoPrefixAndIndent(t *testing.T) {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 
-	// A line longer than the terminal is still ONE line: what the operator
-	// typed pastes back as what the operator typed.
+	// A line longer than the terminal is still one line.
 	long := strings.Repeat("word ", 12)
 	lines := apply(user(long)).TakeAppends(30, false)
 	if len(lines) != 1 {
@@ -836,8 +777,8 @@ func TestUnit_UserEchoPrefixAndIndent(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellSanitizer: escape sequences are stripped, newlines settle
-// lines, and a sequence split across chunks is still one sequence.
+// TestUnit_ShellSanitizer pins that escape sequences are stripped, newlines
+// settle lines, and a sequence split across chunks is still recognized whole.
 func TestUnit_ShellSanitizer(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -849,15 +790,13 @@ func TestUnit_ShellSanitizer(t *testing.T) {
 		{"osc_bel", []string{"\x1b]0;window title\x07after\n"}, []string{"after"}},
 		{"osc_st", []string{"\x1b]8;;http://x\x1b\\link\n"}, []string{"link"}},
 		{"cursor_motion", []string{"a\x1b[2Kb\x1b[1;1Hc\n"}, []string{"abc"}},
-		// CR is a carriage return, not a character and not a line ending:
-		// the line is rewritten from column zero and the last write wins.
+		// CR overwrites the line from column zero; last write wins.
 		{"carriage_return", []string{"progress\rdone\n"}, []string{"done"}},
 		{"progress_counter", []string{"10%\r20%\r30%\n"}, []string{"30%"}},
 		{"progress_across_chunks", []string{"10%", "\r20%\n"}, []string{"20%"}},
 		{"crlf_is_one_line_ending", []string{"one\r\ntwo\r\n"}, []string{"one", "two"}},
 		{"crlf_split_across_chunks", []string{"one\r", "\ntwo\n"}, []string{"one", "two"}},
-		// Tabs are column alignment, so they expand to the 8-column stops a
-		// terminal would have used rather than collapsing or reaching a span.
+		// Tabs expand to 8-column stops.
 		{"tab_expands", []string{"a\tb\n"}, []string{"a       b"}},
 		{"c0_dropped", []string{"a\x00\x08b\x07\n"}, []string{"ab"}},
 		{"utf8_survives", []string{"日本語 ✓\n"}, []string{"日本語 ✓"}},
@@ -886,11 +825,8 @@ func TestUnit_ShellSanitizer(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellResetReplaces: a re-delivered snapshot REPLACES the buffer and
-// says so, rather than silently doubling the output — and the unterminated
-// tail the reset displaces SETTLES first. That tail is output the operator
-// already watched arrive; dropping it to make room for the replay would read
-// as the terminal losing a line.
+// TestUnit_ShellResetReplaces pins that a re-delivered snapshot replaces the
+// buffer, announces itself, and settles the displaced unterminated tail first.
 func TestUnit_ShellResetReplaces(t *testing.T) {
 	tr := apply(terminal("first output\npartial tail"), terminalReset("first output\n"))
 	got := texts(tr.TakeAppends(80, false))
@@ -903,9 +839,8 @@ func TestUnit_ShellResetReplaces(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellTailSettlesOnSessionChange is the same rule on the other
-// trigger: a chunk from a different session ends the current shell stream,
-// and its unterminated tail settles instead of evaporating.
+// TestUnit_ShellTailSettlesOnSessionChange pins that a chunk from a
+// different session ends the current shell stream and settles its tail.
 func TestUnit_ShellTailSettlesOnSessionChange(t *testing.T) {
 	tr := apply(
 		terminal("kept tail"),
@@ -918,8 +853,8 @@ func TestUnit_ShellTailSettlesOnSessionChange(t *testing.T) {
 	}
 }
 
-// TestUnit_TurnNotices: end_turn is silent, every other reason annotates, and
-// a failed turn is unmistakably not assistant prose.
+// TestUnit_TurnNotices pins that end_turn is silent, every other reason
+// annotates, and a failed turn is unmistakably not assistant prose.
 func TestUnit_TurnNotices(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -953,9 +888,8 @@ func TestUnit_TurnNotices(t *testing.T) {
 	}
 }
 
-// TestUnit_SettledLinesNeverChange is the inline model's core property: lines
-// taken at one width are byte-identical to what a run that never saw the
-// second width produced. Flushed means flushed — the terminal owns those rows.
+// TestUnit_SettledLinesNeverChange pins that lines taken at one width are
+// byte-identical to a run that never saw a later resize.
 func TestUnit_SettledLinesNeverChange(t *testing.T) {
 	for name, script := range scenarios {
 		t.Run(name, func(t *testing.T) {
@@ -982,8 +916,8 @@ func TestUnit_SettledLinesNeverChange(t *testing.T) {
 	}
 }
 
-// TestUnit_IgnoresNonTranscriptEvents: the component may be handed the whole
-// stream, and the facts other components own must leave no mark.
+// TestUnit_IgnoresNonTranscriptEvents pins that events other components own
+// leave no mark, even when handed the whole stream.
 func TestUnit_IgnoresNonTranscriptEvents(t *testing.T) {
 	evs := []enginebridge.Event{
 		enginebridge.PlanUpdated{SessionID: sess},
@@ -1007,15 +941,15 @@ func TestUnit_IgnoresNonTranscriptEvents(t *testing.T) {
 		t.Fatal("HasOpenWork = true from non-transcript events")
 	}
 
-	// A PermissionRequested does NOT open a card: approval-cards owns it.
+	// A PermissionRequested does not open a card: approval-cards owns it.
 	tr.Apply(toolOpen("t1", "Write file", libacp.ToolKindEdit, libacp.ToolCallStatusCompleted))
 	if got := texts(tr.TakeAppends(80, false)); len(got) != 1 {
 		t.Fatalf("settled %q, want the one real tool card", got)
 	}
 }
 
-// TestUnit_CrossSessionEventStartsANewMessage: a MessageID collision across
-// sessions must not splice two agents' prose into one line.
+// TestUnit_CrossSessionEventStartsANewMessage pins that a MessageID
+// collision across sessions never splices two agents' prose into one line.
 func TestUnit_CrossSessionEventStartsANewMessage(t *testing.T) {
 	tr := apply(
 		text("m1", "session one tail"),
@@ -1028,20 +962,13 @@ func TestUnit_CrossSessionEventStartsANewMessage(t *testing.T) {
 	}
 }
 
-// TestUnit_NoticesNeverExceedWidth: beam's own turn chrome is not transcript
-// content anybody copies, so it is the one settled thing still laid out
-// against the width — and it has to respect it.
-//
-// It starts at 4, the narrowest width beam claims to lay out, because that is
-// where the elision markers stop fitting: ASCII spends three cells on "...",
-// and a truncation helper handed a tail wider than its budget returns the
-// bare tail. Sampling from 20 never reaches the arithmetic that breaks.
+// TestUnit_NoticesNeverExceedWidth pins that beam's own turn chrome, unlike
+// transcript content, is laid out against the width and must respect it,
+// down to width 4 where elision markers stop fitting.
 func TestUnit_NoticesNeverExceedWidth(t *testing.T) {
 	script := []enginebridge.Event{
 		enginebridge.TurnFailed{SessionID: sess, Err: errors.New(strings.Repeat("a long transport failure ", 8))},
-		// Two short shell lines: short enough to fit the narrowest width (shell
-		// output is emitted unwrapped, like code), and enough to make the
-		// re-delivery read as a reconnect so its notice is scripted too.
+		// Short enough to fit the narrowest width; re-delivery is scripted too.
 		terminal("ok\n"),
 		terminalReset("ok\n"),
 		ended(libacp.StopReasonMaxTokens),
@@ -1057,10 +984,8 @@ func TestUnit_NoticesNeverExceedWidth(t *testing.T) {
 	}
 }
 
-// TestUnit_CardNeverExceedsWidth is the same property for the one line that
-// truncates rather than wraps. A card title is a file path somebody else
-// chose, so the bound is real; the ASCII column is where it bites, because
-// "..." costs three of the cells a narrow card does not have.
+// TestUnit_CardNeverExceedsWidth pins the same width property for the one
+// line that truncates rather than wraps.
 func TestUnit_CardNeverExceedsWidth(t *testing.T) {
 	titles := []string{
 		"Read internal/surfaces/beamtui/comp/transcript/render.go",
@@ -1091,14 +1016,12 @@ func TestUnit_CardNeverExceedsWidth(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Sanitizing. Every string in an event is somebody else's — agent prose, a
-// path out of the workspace, an error from a peer — and every one becomes a
-// frame.Span the engine draws as literal cells.
-// ---------------------------------------------------------------------------
+// Sanitizing: every event string is untrusted and becomes a frame.Span the
+// engine draws as literal cells, so ANSI/C0 and bidi controls must never
+// reach one.
 
 // TestUnit_UntrustedTextNeverReachesASpan runs one hostile string through
-// every ingest point and asserts the same thing about all of them.
+// every ingest point and asserts none of them leaks a control character.
 func TestUnit_UntrustedTextNeverReachesASpan(t *testing.T) {
 	const evil = "before\x1b[2Jafter\x1b]0;retitled\x07\ttab\x7f‮flip"
 
@@ -1110,9 +1033,7 @@ func TestUnit_UntrustedTextNeverReachesASpan(t *testing.T) {
 		"ToolCallUpdated": {enginebridge.ToolCallUpdated{SessionID: sess, ToolCallID: "t1", Title: evil, Status: libacp.ToolCallStatusFailed}},
 		"MissionReport":   {report(evil, evil, evil)},
 		"MissionAsk":      {ask(evil, evil)},
-		// The lifecycle cards' strings are just as untrusted as a report's: an
-		// agent name is whatever the fleet was configured with, and a status
-		// reason and a plan explanation are both written by a unit.
+		// Lifecycle-card strings are just as untrusted as a report's.
 		"MissionStatusChanged": {missionStatus(evil, evil, evil, evil)},
 		"MissionPlanRevised":   {missionPlan(evil, 3, evil, 1, 1, 1)},
 		"ShellRunStarted":      {shellRun(evil)},
@@ -1140,9 +1061,8 @@ func TestUnit_UntrustedTextNeverReachesASpan(t *testing.T) {
 	}
 }
 
-// TestUnit_EscapeInProseIsStrippedNotDrawn pins the escape-injection case:
-// the clear-screen sequence a peer put in its answer must not clear the
-// operator's screen, and the words around it must survive.
+// TestUnit_EscapeInProseIsStrippedNotDrawn pins that a clear-screen sequence
+// in agent prose is stripped, never executed, while the surrounding words survive.
 func TestUnit_EscapeInProseIsStrippedNotDrawn(t *testing.T) {
 	got := texts(apply(text("m1", "before\x1b[2Jafter\n")).TakeAppends(80, false))
 	if len(got) != 1 || got[0] != "beforeafter" {
@@ -1150,13 +1070,10 @@ func TestUnit_EscapeInProseIsStrippedNotDrawn(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Closed-message hygiene.
-// ---------------------------------------------------------------------------
 
-// TestUnit_LateDeltaAfterTurnEndIsDropped: the chunks still in flight behind
-// a cancel arrive AFTER the notice that said the turn was over. Re-opening
-// the message would append a second copy of a turn the operator watched end.
+// TestUnit_LateDeltaAfterTurnEndIsDropped pins that a chunk arriving after
+// the turn-end notice is dropped rather than reopening the message.
 func TestUnit_LateDeltaAfterTurnEndIsDropped(t *testing.T) {
 	tr := apply(text("m1", "the answer\n"), ended(libacp.StopReasonCancelled))
 	tr.TakeAppends(80, false)
@@ -1172,22 +1089,16 @@ func TestUnit_LateDeltaAfterTurnEndIsDropped(t *testing.T) {
 		t.Fatal("HasOpenWork = true after a late delta for an ended message")
 	}
 
-	// A genuinely NEW message is unaffected: only the ended key is closed.
+	// A genuinely new message is unaffected.
 	tr.Apply(text("m2", "the next turn\n"))
 	if got := texts(tr.TakeAppends(80, false)); len(got) != 2 || got[1] != "the next turn" {
 		t.Fatalf("new message after the close settled %q", got)
 	}
 }
 
-// TestUnit_UnidentifiedMessageReopensAfterTurnEnd is the regression for the
-// blocker the first dogfooding hunt found: on the real wire NOTHING stamps a
-// MessageID on an agent_message_chunk (libacp.NewAgentMessageChunk carries
-// content and nothing else), so every assistant message in a process shares
-// the key {session, "", assistant}. Closing that key on the first TurnEnded
-// closed it for the rest of the process: turn two's reply, and every reply
-// after it, was dropped in delta() while the status bar happily advanced.
-//
-// Two turns in, two turns out.
+// TestUnit_UnidentifiedMessageReopensAfterTurnEnd pins that an id-less
+// message key reopens after a turn ends, since every assistant message in a
+// process shares one such key on the real wire.
 func TestUnit_UnidentifiedMessageReopensAfterTurnEnd(t *testing.T) {
 	tr := apply(
 		text("", "first reply\n"),
@@ -1201,8 +1112,7 @@ func TestUnit_UnidentifiedMessageReopensAfterTurnEnd(t *testing.T) {
 		t.Fatalf("settled %q, want %q — an id-less second turn must still render", got, want)
 	}
 
-	// The same for thoughts, which are equally id-less on the wire, and for a
-	// turn that ended by cancel rather than by end_turn.
+	// The same for thoughts, equally id-less, and a cancel instead of end_turn.
 	tr = apply(
 		thought("", "thinking once\n"),
 		ended(libacp.StopReasonCancelled),
@@ -1215,10 +1125,9 @@ func TestUnit_UnidentifiedMessageReopensAfterTurnEnd(t *testing.T) {
 	}
 }
 
-// TestUnit_UnidentifiedThoughtAndTextAlternate is the same defect inside ONE
-// turn: an agent that interleaves reasoning and prose switches the stream key
-// on every alternation, which closed the assistant key long before the turn
-// ended. Everything the agent said after its second thought vanished.
+// TestUnit_UnidentifiedThoughtAndTextAlternate pins that an agent
+// interleaving reasoning and prose within one turn loses nothing, even
+// though each switch changes the stream key.
 func TestUnit_UnidentifiedThoughtAndTextAlternate(t *testing.T) {
 	tr := apply(
 		thought("", "let me look\n"),
@@ -1237,12 +1146,9 @@ func TestUnit_UnidentifiedThoughtAndTextAlternate(t *testing.T) {
 	}
 }
 
-// TestUnit_ReplayedHistorySettlesItsLastMessage is M10: a session/load replay
-// ends without a TurnEnded, so the last replayed message had nothing to settle
-// it and sat in the live region forever — every notice the app queued after it
-// printed ABOVE it, because scrollback is by definition above the live region.
-//
-// The replay is also the id-less shape: UserEcho is what separates the turns.
+// TestUnit_ReplayedHistorySettlesItsLastMessage pins that EndReplay settles
+// the last replayed message, which a replay's missing TurnEnded would
+// otherwise leave stuck in the live region forever.
 func TestUnit_ReplayedHistorySettlesItsLastMessage(t *testing.T) {
 	tr := apply(
 		user("first question"),
@@ -1272,16 +1178,15 @@ func TestUnit_ReplayedHistorySettlesItsLastMessage(t *testing.T) {
 		t.Fatal("HasOpenWork = true after the replay ended")
 	}
 
-	// A live turn after the replay is unaffected: the settle is not a close.
+	// A live turn after the replay is unaffected.
 	tr.Apply(text("", "a live answer\n"))
 	if got := texts(tr.TakeAppends(80, false)); len(got) != 2 || got[1] != "a live answer" {
 		t.Fatalf("post-replay turn settled %q, want it rendered", got)
 	}
 }
 
-// TestUnit_EndReplayLeavesNothingDangling: a replay that ends under a tool call
-// nobody will ever update again must not leave it spinning (blueprint
-// requirement 12, on the one path no TurnEnded reaches).
+// TestUnit_EndReplayLeavesNothingDangling pins that a replay ending under an
+// open tool call settles it as abandoned rather than leaving it spinning.
 func TestUnit_EndReplayLeavesNothingDangling(t *testing.T) {
 	tr := apply(toolOpen("t1", "Read frame.go", libacp.ToolKindRead, libacp.ToolCallStatusInProgress))
 	tr.EndReplay()
@@ -1293,12 +1198,9 @@ func TestUnit_EndReplayLeavesNothingDangling(t *testing.T) {
 	}
 }
 
-// TestUnit_EveryTurnOfAnUnidentifiedFixtureRenders replays the corpus's
-// real-wire fixtures — the ones that carry no MessageID at all, because that
-// is what the wire carries — and asserts that every turn's prose reaches the
-// transcript. The hand-built scripts above pin the mechanism; this pins it
-// against the shared fixtures, so the next component to consume them inherits
-// the same guarantee instead of rediscovering the blocker.
+// TestUnit_EveryTurnOfAnUnidentifiedFixtureRenders pins the same id-less
+// guarantee against the shared real-wire fixtures rather than hand-built
+// scripts.
 func TestUnit_EveryTurnOfAnUnidentifiedFixtureRenders(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -1352,9 +1254,8 @@ func TestUnit_EveryTurnOfAnUnidentifiedFixtureRenders(t *testing.T) {
 	}
 }
 
-// TestUnit_EmptyDeltaIsInvisible: a zero-length chunk is not a message. One
-// that opened a stream would pin HasOpenWork true and spin an activity
-// indicator over nothing at all.
+// TestUnit_EmptyDeltaIsInvisible pins that a zero-length chunk is not a
+// message and never pins HasOpenWork true on its own.
 func TestUnit_EmptyDeltaIsInvisible(t *testing.T) {
 	tr := apply(text("m1", ""))
 	if tr.HasOpenWork() {
@@ -1367,7 +1268,7 @@ func TestUnit_EmptyDeltaIsInvisible(t *testing.T) {
 		t.Fatalf("empty delta produced live lines %q", texts(got))
 	}
 
-	// It must not close a stream that IS open either.
+	// It must not close a stream that is open either.
 	tr = apply(text("m1", "streaming tail"), text("m2", ""))
 	if got := texts(tr.Live(80, false, "")); len(got) != 1 || got[0] != "streaming tail" {
 		t.Fatalf("live = %q, want the open stream untouched by an empty delta", got)
@@ -1377,15 +1278,11 @@ func TestUnit_EmptyDeltaIsInvisible(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Separators.
-// ---------------------------------------------------------------------------
 
-// TestUnit_InterleavedStreamsDoNotChurnSeparators: an assistant message and a
-// shell command running at the same time interleave their flushes. A blank
-// line per switch turned a fifty-line build log into a hundred lines of
-// alternating text and blanks — neither group has ENDED, so neither has
-// earned a separator.
+// TestUnit_InterleavedStreamsDoNotChurnSeparators pins that an assistant
+// message and a shell command running at once interleave their flushes with
+// no separator, since neither group has ended.
 func TestUnit_InterleavedStreamsDoNotChurnSeparators(t *testing.T) {
 	tr := apply(
 		text("m1", "assistant one\n"),
@@ -1400,8 +1297,7 @@ func TestUnit_InterleavedStreamsDoNotChurnSeparators(t *testing.T) {
 		t.Fatalf("settled %q, want %q with no separators", got, want)
 	}
 
-	// Once the message has ended, the next group DOES get its separator: the
-	// rule suppresses churn, not structure.
+	// Once the message has ended, the next group gets its separator.
 	tr.Apply(ended(libacp.StopReasonEndTurn))
 	tr.Apply(report("scout", "finding", "a finding"))
 	got = texts(tr.TakeAppends(80, false))
@@ -1410,9 +1306,8 @@ func TestUnit_InterleavedStreamsDoNotChurnSeparators(t *testing.T) {
 	}
 }
 
-// TestUnit_DegenerateWidths: a component renders before the first resize
-// event and on terminals narrower than any glyph it owns. Degenerate widths
-// must degrade, never panic.
+// TestUnit_DegenerateWidths pins that a width narrower than any glyph
+// degrades gracefully rather than panicking.
 func TestUnit_DegenerateWidths(t *testing.T) {
 	for name, script := range scenarios {
 		for _, w := range []int{-1, 0, 1, 2, 3, 5} {
@@ -1431,8 +1326,8 @@ func TestUnit_DegenerateWidths(t *testing.T) {
 	}
 }
 
-// TestUnit_UsesOnlyClosedStyleIDs enforces frame's closed set: a component may
-// not invent a role.
+// TestUnit_UsesOnlyClosedStyleIDs pins that the component never invents a
+// StyleID outside frame's closed set.
 func TestUnit_UsesOnlyClosedStyleIDs(t *testing.T) {
 	known := map[frame.StyleID]bool{}
 	for _, id := range frame.All() {
@@ -1455,9 +1350,8 @@ func TestUnit_UsesOnlyClosedStyleIDs(t *testing.T) {
 	}
 }
 
-// TestUnit_ASCIIVariantIsPureASCII: the fallback exists for terminals that
-// cannot draw the unicode set, so not one of those runes may leak into it.
-// Agent-authored content is exempt — the component renders what it is given.
+// TestUnit_ASCIIVariantIsPureASCII pins that no unicode glyph leaks into the
+// ASCII variant (agent-authored content is exempt).
 func TestUnit_ASCIIVariantIsPureASCII(t *testing.T) {
 	script := []enginebridge.Event{
 		user("plain"),

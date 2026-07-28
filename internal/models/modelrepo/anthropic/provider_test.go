@@ -283,9 +283,7 @@ func TestUnit_AnthropicCatalog_PaginatesListModels(t *testing.T) {
 	require.Contains(t, names, "claude-sonnet-4-6")
 }
 
-// Regression: claude-sonnet-5 rejects thinking.type=enabled ("Use
-// thinking.type.adaptive and output_config.effort") and deprecates
-// temperature — same contract as fable-5.
+// claude-sonnet-5 rejects thinking.type=enabled and deprecates temperature, same as fable-5.
 func TestUnit_AnthropicSonnet5_UsesAdaptiveThinkingAndStripsTemperature(t *testing.T) {
 	cfg := &modelrepo.ChatConfig{}
 	modelrepo.WithThink("high").Apply(cfg)

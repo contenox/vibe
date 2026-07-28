@@ -52,8 +52,7 @@ func fakeMCPServer(name string) *runtimetypes.MCPServer {
 	}
 }
 
-// TestUnit_MCPWorker_StartStop verifies that StartWorker registers the NATS
-// subjects and StopWorker unregisters them.
+// TestUnit_MCPWorker_StartStop pins that StartWorker registers NATS subjects and StopWorker unregisters them.
 func TestUnit_MCPWorker_StartStop(t *testing.T) {
 	ctx := t.Context()
 	bus := libbus.NewInMem()
@@ -95,8 +94,7 @@ func TestUnit_MCPWorker_StartStop(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond, "handler should be gone after StopWorker")
 }
 
-// TestUnit_MCPWorker_WatchCreated verifies that publishing mcp.servers.created
-// causes the Manager to automatically start a new worker.
+// TestUnit_MCPWorker_WatchCreated pins that mcp.servers.created starts a new worker.
 func TestUnit_MCPWorker_WatchCreated(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -118,8 +116,7 @@ func TestUnit_MCPWorker_WatchCreated(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond, "worker should start after created event")
 }
 
-// TestUnit_MCPWorker_WatchDeleted verifies that publishing mcp.servers.deleted
-// stops the named worker.
+// TestUnit_MCPWorker_WatchDeleted pins that mcp.servers.deleted stops the named worker.
 func TestUnit_MCPWorker_WatchDeleted(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -149,8 +146,7 @@ func TestUnit_MCPWorker_WatchDeleted(t *testing.T) {
 	require.ErrorIs(t, err, libbus.ErrRequestTimeout)
 }
 
-// TestUnit_MCPWorker_IdempotentStart verifies that starting a worker that
-// already exists replaces it cleanly (no duplicate handlers, no panic).
+// TestUnit_MCPWorker_IdempotentStart pins that starting an existing worker replaces it cleanly.
 func TestUnit_MCPWorker_IdempotentStart(t *testing.T) {
 	ctx := t.Context()
 	bus := libbus.NewInMem()
@@ -171,8 +167,7 @@ func TestUnit_MCPWorker_IdempotentStart(t *testing.T) {
 	assert.Equal(t, 1, count, "should only have one worker per name")
 }
 
-// TestUnit_MCPWorker_StopNonExistentWorker verifies that stopping a worker
-// that was never started is a no-op.
+// TestUnit_MCPWorker_StopNonExistentWorker pins that stopping a never-started worker is a no-op.
 func TestUnit_MCPWorker_StopNonExistentWorker(t *testing.T) {
 	ctx := t.Context()
 	bus := libbus.NewInMem()
@@ -215,8 +210,7 @@ func contains(ss []string, s string) bool {
 	return false
 }
 
-// TestUnit_MCPWorker_BootLoadsFromDB verifies that New() calls ListMCPServers
-// and starts a worker for each returned config.
+// TestUnit_MCPWorker_BootLoadsFromDB pins that New() starts a worker for each server ListMCPServers returns.
 func TestUnit_MCPWorker_BootLoadsFromDB(t *testing.T) {
 	ctx := t.Context()
 	bus := libbus.NewInMem()
@@ -249,8 +243,7 @@ func (s *preloadedStore) ListMCPServers(_ context.Context, _ *time.Time, _ int) 
 	return s.servers, nil
 }
 
-// TestUnit_MCPWorker_DecodeToolReply_ErrorPropagation verifies that tool error
-// responses from workers are correctly decoded back to Go errors.
+// TestUnit_MCPWorker_DecodeToolReply_ErrorPropagation pins that tool error replies decode back to Go errors.
 func TestUnit_MCPWorker_DecodeToolReply_ErrorPropagation(t *testing.T) {
 	data, err := json.Marshal(mcpworker.MCPToolReply{Error: "tool execution failed: file not found"})
 	require.NoError(t, err)
@@ -260,7 +253,7 @@ func TestUnit_MCPWorker_DecodeToolReply_ErrorPropagation(t *testing.T) {
 	assert.Contains(t, decodeErr.Error(), "file not found")
 }
 
-// TestUnit_MCPWorker_DecodeToolReply_Success verifies happy-path decoding.
+// TestUnit_MCPWorker_DecodeToolReply_Success pins happy-path decoding.
 func TestUnit_MCPWorker_DecodeToolReply_Success(t *testing.T) {
 	data, err := json.Marshal(mcpworker.MCPToolReply{Result: "hello world"})
 	require.NoError(t, err)
@@ -270,8 +263,7 @@ func TestUnit_MCPWorker_DecodeToolReply_Success(t *testing.T) {
 	assert.Equal(t, "hello world", result)
 }
 
-// TestUnit_MCPWorker_DecodeListToolsReply_ErrorPropagation verifies list-tools
-// error responses are decoded properly.
+// TestUnit_MCPWorker_DecodeListToolsReply_ErrorPropagation pins that list-tools error replies decode properly.
 func TestUnit_MCPWorker_DecodeListToolsReply_ErrorPropagation(t *testing.T) {
 	data, err := json.Marshal(mcpworker.MCPToolListReply{Error: "connection refused"})
 	require.NoError(t, err)

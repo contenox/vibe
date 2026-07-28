@@ -1,3 +1,7 @@
+---
+description: Connect contenox to your Notion workspace via the official MCP server — read, create, and update pages like any chat message.
+---
+
 # Notion as a Tool
 
 Connect `contenox` to your Notion workspace via the official Notion MCP server. The model can read, create, and update Notion pages as naturally as answering a chat message — no scripts, no SDKs.

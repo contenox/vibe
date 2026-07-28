@@ -16,27 +16,19 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// tools implements taskengine.ToolsRepo over a Querier. Dispatch follows
-// gointel's, which follows localtools.LocalFSTools.execDispatch: accept args
-// from the chain input map or from the declarative ToolsCall.Args, reject
-// unknown argument NAMES, then hand off to a typed handler.
+// tools implements taskengine.ToolsRepo over a Querier: args come from the
+// chain input map or ToolsCall.Args, unknown argument names are rejected,
+// then dispatch hands off to a typed handler.
 type tools struct {
 	q           Querier
 	workspaceID string
 }
 
-// NewTools returns the workspace-search ToolsRepo.
-//
-// It takes the narrow Querier rather than *workspaceindex.Service so this
-// package never depends on a store, an embedding model, or a database — and so
-// every test here runs offline. Register it in the engine's local tools map
-// under ToolsProviderName the way gointel and local_fs are registered, so it is
-// HITL-wrapped like every other toolset.
-//
-// workspaceID is fixed at construction because it is a property of the PROCESS's
-// workspace, not of a call: letting the model name the workspace would make one
-// project's index readable from another's session, which is the one containment
-// property this feature has.
+// NewTools returns the workspace-search ToolsRepo. It takes the narrow
+// Querier rather than *workspaceindex.Service so this package depends on no
+// store, embedding model, or database. workspaceID is fixed at
+// construction — a model naming its own workspace would make one project's
+// index readable from another's session.
 func NewTools(q Querier, workspaceID string) taskengine.ToolsRepo {
 	return &tools{q: q, workspaceID: workspaceID}
 }
@@ -83,17 +75,10 @@ func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openap
 	return map[string]*openapi3.T{}, nil
 }
 
-// search runs the one query and renders the result payload.
-//
-// Three things happen here and nowhere else, and each is a rule from the
-// blueprint rather than a preference:
-//
-//   - ErrNoIndex becomes a RESULT with a runnable instruction. A workspace
-//     nobody has indexed is the normal state of a fresh install, not a fault.
-//   - Every hit carries its file:line-range, so the model can hand a human a
-//     location it can verify, or re-read the range with a file tool.
-//   - The payload is capped in tokens and says what it withheld. A silent cut
-//     would let a model conclude "there is nothing else" from a budget decision.
+// search runs the one query and renders the result payload. ErrNoIndex
+// becomes a result with a runnable instruction, not a fault; every hit
+// carries its file:line-range; and the payload is capped in tokens and
+// says what it withheld.
 func (h *tools) search(ctx context.Context, question string, topK int) (*Result, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
@@ -113,11 +98,8 @@ func (h *tools) search(ctx context.Context, question string, topK int) (*Result,
 		if errors.Is(err, workspaceindex.ErrEmptyQuestion) {
 			return nil, recoverablef("%s: question %s has no searchable content", ToolSearch, echoArg(question))
 		}
-		// Everything else is a real failure of the index (a dimension mismatch
-		// after the embedding model changed, a store error). It is still
-		// recoverable in the marker's sense — the caller can ask differently or
-		// tell the human what to run — and the underlying text already names
-		// the fix where one exists.
+		// Everything else is a real index failure, still recoverable in the
+		// marker's sense; the underlying text already names the fix where one exists.
 		if hasSeverityMarker(err.Error()) {
 			return nil, fmt.Errorf("%s: %w", ToolSearch, err)
 		}
@@ -129,9 +111,8 @@ func (h *tools) search(ctx context.Context, question string, topK int) (*Result,
 	return res, nil
 }
 
-// renderHits turns ranked index hits into the capped payload. Split out from
-// search so the budget, the truncation marker and the staleness accounting are
-// testable without a Querier at all.
+// renderHits turns ranked index hits into the capped payload, split out
+// from search so the budget/truncation/staleness logic is testable without a Querier.
 func renderHits(question string, hits []workspaceindex.Hit) *Result {
 	res := &Result{
 		Question: echoQuestion(question),
@@ -148,8 +129,7 @@ func renderHits(question string, hits []workspaceindex.Hit) *Result {
 	for _, hit := range hits {
 		text, truncated, spent := clipText(hit.Text, budget)
 		if text == "" {
-			// The budget is gone; every remaining hit is withheld, and the note
-			// below says exactly how many and why.
+			// Budget is gone; remaining hits are withheld (see the note below).
 			break
 		}
 		budget -= spent
@@ -183,13 +163,11 @@ func renderHits(question string, hits []workspaceindex.Hit) *Result {
 	return res
 }
 
-// clipText fits one chunk into what is left of the budget. It returns the text
-// to show, whether it was cut, and how much of the budget it spent. An empty
-// return means "this hit does not fit at all" — the caller stops there rather
-// than emitting a citation with no text under it.
-//
-// The floor matters: a hit clipped below minHitRunes teaches nothing but costs a
-// citation line, so the remaining budget is spent on nobody.
+// clipText fits one chunk into what is left of the budget, returning the
+// text to show, whether it was cut, and how much budget it spent. An empty
+// return means the hit does not fit at all. A hit clipped below
+// minHitRunes teaches nothing but still costs a citation line, so it is
+// dropped instead.
 func clipText(text string, budget int) (string, bool, int) {
 	const minHitRunes = 120
 	if budget < minHitRunes {
@@ -217,15 +195,8 @@ func echoQuestion(q string) string {
 	return q
 }
 
-// ---------------------------------------------------------------------------
-// Argument decoding
-//
-// Verbatim gointel's (internal/services/gointel/tools.go), which is verbatim
-// localtools/args.go's rule: argument NAMES are strict, argument VALUES are
-// lenient. Small models routinely emit JSON scalars as strings ({"top_k": "3"}),
-// and a strict type assertion silently drops the argument and answers a
-// DIFFERENT question than the one asked.
-// ---------------------------------------------------------------------------
+// --- Argument decoding: names are strict, values are lenient, since small
+// models routinely emit JSON scalars as strings ({"top_k": "3"}). ---
 
 // callArgs assembles the argument map from the chain input or, for declarative
 // `tools` tasks that carry arguments on the call itself, from ToolsCall.Args.
@@ -257,9 +228,7 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 	var unknown []string
 	for key := range args {
 		if _, ok := allowedSet[key]; !ok {
-			// The KEY is model-supplied too, so it is clamped like every other
-			// echoed argument — an unknown-argument error must not be a channel
-			// for a megabyte of model-chosen text.
+			// The key is model-supplied too, so it is clamped like every echoed argument.
 			unknown = append(unknown, echoName(key))
 		}
 	}
@@ -294,12 +263,10 @@ func argString(args map[string]any, key string) string {
 	return ""
 }
 
-// intFromFloat converts a JSON number to an int WITHOUT the undefined behaviour
-// Go's float→int conversion has outside the integer range. A model that emits
-// 1e30 or NaN for top_k is not a hypothetical — it is one bad completion — and
-// int(1e30) is unspecified, so the clamp happens here rather than downstream.
-// Out-of-range saturates; NaN reads as "no value", which takes the default.
-// clampTopK clamps again to this toolset's own ceiling.
+// intFromFloat converts a JSON number to an int without Go's undefined
+// float->int behavior outside the integer range: out-of-range saturates,
+// NaN reads as "no value" (the default). clampTopK clamps again to this
+// toolset's own ceiling.
 func intFromFloat(f float64) (int, bool) {
 	switch {
 	case f != f: // NaN

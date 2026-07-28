@@ -1,26 +1,7 @@
 // Package workspaceindex builds and queries a local semantic index over a
-// workspace: `contenox index` fills it, `contenox search` reads it, and a local
-// tool exposes the same read to the agent.
-//
-// It composes seams that already exist rather than introducing any of its own
-// (docs/development/blueprints/workspace-index.md, ratified 2026-07-27 —
-// "this should map 1:1 into everything we already do including the store
-// interfaces etc, there is ZERO new invention here"):
-//
-//   - embeddings — llmrepo's Embed, behind the one-method Embedder seam below
-//   - persistence — runtimetypes' store interface, over the same SQLite file
-//     everything else uses (workspace_index_configs, workspace_chunks, and the
-//     FTS5 mirror)
-//   - containment — vfs.Contain, on every walked candidate
-//   - file selection — the gitignore/skip-dir matcher find_files and
-//     @-completion share (noise.go, with the extraction TODO both other copies
-//     carry)
-//   - token budgeting — ollamatokenizer's estimator, the one acpsvc budgets with
-//
-// What it is NOT: a vector database, a service to run, multi-tenant, or a
-// document-sync product. One local index per workspace. V1 accepts a linear
-// cosine scan over an FTS5-narrowed candidate set; ANN is a later optimization
-// gated on measured pain.
+// workspace: `contenox index` fills it, `contenox search` reads it, and a
+// local tool exposes the same read to the agent. One local index per
+// workspace; V1 is a linear cosine scan over an FTS5-narrowed candidate set.
 package workspaceindex
 
 import (
@@ -41,9 +22,8 @@ import (
 )
 
 // ErrNoIndex is the typed refusal every degraded read returns: this workspace
-// has no index yet. It is a first-class result, not a failure — the blueprint's
-// rule is that a missing index degrades to "run contenox index", never to a hard
-// error, because many local setups have no embedding model pulled at all.
+// has no index yet. It is a first-class result, not a failure — a missing
+// index degrades to "run contenox index", never a hard error.
 var ErrNoIndex = errors.New("no index for this workspace; run contenox index")
 
 // ErrEmptyQuestion is returned by Query for a blank question. Embedding
@@ -52,52 +32,36 @@ var ErrNoIndex = errors.New("no index for this workspace; run contenox index")
 var ErrEmptyQuestion = errors.New("search question is empty")
 
 const (
-	// embedConcurrencyDefault bounds in-flight embed calls. Local Ollama
-	// serializes embedding requests anyway, so a larger pool buys nothing
-	// there; against a remote provider four concurrent calls keep the pipe busy
-	// without looking like an attack from a laptop.
+	// embedConcurrencyDefault bounds in-flight embed calls.
 	embedConcurrencyDefault = 4
 
 	// writeBatchDefault is how many embedded chunks accumulate before one
-	// AppendWorkspaceChunks call. Bounded by the store's own per-call ceiling
-	// (SQLite's host-parameter limit); this also bounds how much embedded text
-	// is held in memory at once.
+	// AppendWorkspaceChunks call; bounded by SQLite's host-parameter limit.
 	writeBatchDefault = 64
 
-	// candidateLimitDefault is how many chunks the FTS5 lexical prefilter hands
-	// to the cosine stage. Large enough that the right chunk is nearly always
-	// inside it, small enough that ranking is a scan of hundreds rather than of
-	// the whole index — the "FTS5 narrows, vectors rank" split.
+	// candidateLimitDefault is how many chunks the FTS5 lexical prefilter
+	// hands to the cosine ranking stage.
 	candidateLimitDefault = 200
 
-	// fullScanLimit bounds the degraded path taken ONLY when the lexical
-	// prefilter matched nothing at all — a question sharing no term with the
-	// corpus, which is precisely the case semantic search exists for. It is the
-	// store's own list ceiling rather than a number invented here, so this can
-	// never be an unbounded table scan. An index larger than this answers such
-	// questions from a prefix of itself, and THAT is the measured pain that
-	// would justify ANN.
+	// fullScanLimit bounds the degraded path taken when the lexical
+	// prefilter matches nothing at all; it is the store's own list ceiling,
+	// never an unbounded scan.
 	fullScanLimit = runtimetypes.MAXLIMIT
 
-	// topKDefault / topKMax bound how many hits a query returns. topKMax exists
-	// because every returned hit costs a staleness check (one file read), and
-	// because fifty citations is already past what any caller reads.
+	// topKDefault / topKMax bound how many hits a query returns.
 	topKDefault = 8
 	topKMax     = 50
 )
 
-// Embedder is the narrow seam onto embedding generation: one method, one
-// direction, no model manager. The index depends on this and never on
-// llmrepo's concrete manager, which is what lets every test in this package run
-// against a deterministic fake with no model and no network. NewLLMRepoEmbedder
-// adapts the real thing.
+// Embedder is the narrow seam onto embedding generation, letting tests run
+// against a deterministic fake with no model and no network.
+// NewLLMRepoEmbedder adapts the real thing.
 type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }
 
-// Store is the subset of runtimetypes.Store the index uses. runtimetypes.Store
-// satisfies it, so production wiring passes the real store unchanged; the
-// narrowing documents exactly which rows this service can touch.
+// Store is the subset of runtimetypes.Store the index uses;
+// runtimetypes.Store satisfies it.
 type Store interface {
 	CreateWorkspaceIndexConfig(ctx context.Context, cfg *runtimetypes.WorkspaceIndexConfig) error
 	GetActiveWorkspaceIndexConfig(ctx context.Context, workspaceID string) (*runtimetypes.WorkspaceIndexConfig, error)
@@ -110,45 +74,35 @@ type Store interface {
 	CountWorkspaceChunks(ctx context.Context, configID string) (int64, error)
 }
 
-// Service is the workspace index. Plan answers "what would this cost" without
-// spending anything; Build spends it; Query reads; Status reports what exists.
+// Service is the workspace index. Plan reports cost without spending it;
+// Build spends it; Query reads; Status reports what exists.
 type Service interface {
-	// Plan reports what a Build would do — files, chunks, and above all the
-	// number of embed calls — WITHOUT making a single one. The blueprint's
-	// cost-honesty rule: one embed call per chunk is the dominant cost of this
-	// feature, and the operator sees the number before it is spent.
+	// Plan reports what a Build would do — files, chunks, and the number of
+	// embed calls — without making any.
 	Plan(ctx context.Context, root string, opts BuildOptions) (*BuildPlan, error)
 
 	// Build indexes root into the workspace's index, creating it if needed.
-	// Incremental by default: only files whose content sha changed are
-	// re-embedded, and files that disappeared drop their chunks. opts.Force
-	// rebuilds everything.
+	// Incremental by default; opts.Force rebuilds everything.
 	Build(ctx context.Context, root string, opts BuildOptions) (*BuildReport, error)
 
-	// Query returns the topK chunks most similar to question, each a citation
-	// (path + line range) with its text, its score, and whether the file has
-	// changed under the index since it was written.
+	// Query returns the topK chunks most similar to question, each a
+	// citation (path + line range) with its text, score, and staleness.
 	Query(ctx context.Context, workspaceID string, question string, topK int) ([]Hit, error)
 
 	// Status describes the workspace's active index, or ErrNoIndex.
 	Status(ctx context.Context, workspaceID string) (*Status, error)
 }
 
-// Config is the service's construction-time policy. Every field has a documented
-// default; the zero Config is usable except for EmbedModel, which names what
-// produced the vectors and is recorded on every index generation.
+// Config is the service's construction-time policy. The zero Config is
+// usable except for EmbedModel, which is recorded on every index generation.
 type Config struct {
 	// EmbedModel / EmbedProvider identify the embedding model behind Embedder.
-	// They are recorded on the index config so a later build can tell whether
-	// it may extend an index or must cut over to a new one.
 	EmbedModel    string
 	EmbedProvider string
-	// ChunkTokens is the per-chunk token budget (see ChunkTokensForContext).
+	// ChunkTokens is the per-chunk token budget.
 	ChunkTokens int
-	// OverlapLines is how many lines each chunk repeats from its predecessor.
-	// Zero means the default, not "no overlap": a struct field cannot tell the
-	// two apart, and an index with no overlap loses every passage that straddles
-	// a boundary.
+	// OverlapLines is how many lines each chunk repeats from its
+	// predecessor. Zero means the default, not "no overlap".
 	OverlapLines int
 	// MaxFileBytes is the file-size cap; larger files are counted and skipped.
 	MaxFileBytes int64
@@ -186,8 +140,8 @@ type BuildOptions struct {
 	WorkspaceID string
 	// Force rebuilds every file instead of only the changed ones.
 	Force bool
-	// Progress, when set, is called as the build advances so a CLI can render
-	// it. It is called from the build's own goroutine, never concurrently.
+	// Progress, when set, is called as the build advances, from the build's
+	// own goroutine only.
 	Progress func(Progress)
 }
 
@@ -200,8 +154,8 @@ const (
 	PhaseDone      Phase = "done"
 )
 
-// Progress is one step report. Totals come from the plan, so a caller can render
-// a proportion from the first event onward.
+// Progress is one step report. Totals come from the plan, so a caller can
+// render a proportion from the first event onward.
 type Progress struct {
 	Phase       Phase
 	Path        string
@@ -216,30 +170,26 @@ type Progress struct {
 type BuildPlan struct {
 	WorkspaceID string
 	Root        string
-	// ConfigID is the existing index generation this build would extend, or ""
-	// when it would create one.
+	// ConfigID is the existing index generation this build would extend, or
+	// "" when it would create one.
 	ConfigID      string
 	EmbedModel    string
 	EmbedProvider string
-	// CutOver reports that this build would create a NEW index generation
-	// because the embedding model or chunking changed — the create-once
-	// discipline, not a mutation of the existing index.
+	// CutOver reports that this build would create a new index generation
+	// rather than extend the existing one.
 	CutOver bool
 	// Files / Chunks describe the whole selected tree.
 	Files  int
 	Chunks int
 	Bytes  int64
-	// FilesChanged / EmbedCalls describe the WORK: one embed call per chunk of
-	// a changed file. This is the number the operator is shown before starting.
+	// FilesChanged / EmbedCalls describe the work: one embed call per chunk
+	// of a changed file.
 	FilesChanged int
 	EmbedCalls   int
 	// ChunksReused / FilesDeleted describe what incremental avoids and cleans.
 	ChunksReused int
 	FilesDeleted int
-	// SkippedBinary / SkippedOversize / SkippedGenerated are files selection
-	// refused, reported so "N files indexed" is never mistaken for "the whole
-	// tree". SkippedGenerated counts dependency lockfiles, which the size cap
-	// was documented to exclude but could not (see generatedArtefactNames).
+	// SkippedBinary / SkippedOversize / SkippedGenerated are files selection refused.
 	SkippedBinary    int
 	SkippedOversize  int
 	SkippedGenerated int
@@ -251,8 +201,8 @@ type BuildReport struct {
 	ConfigID      string
 	ChunksWritten int
 	ChunksDeleted int
-	// EmbedCalls counts the calls actually made, including the one dimension
-	// probe a new index generation costs.
+	// EmbedCalls counts calls actually made, including the dimension probe
+	// a new index generation costs.
 	EmbedCalls int
 	Duration   time.Duration
 }
@@ -271,18 +221,17 @@ type Status struct {
 	CreatedAt     time.Time
 }
 
-// Hit is one ranked search result: a citation, its text, its score, and whether
-// the file moved underneath it.
+// Hit is one ranked search result: a citation, its text, its score, and
+// whether the file moved underneath it.
 type Hit struct {
 	Path      string
 	StartLine int
 	EndLine   int
 	Text      string
 	Score     float64
-	// Stale means the file's content sha no longer matches what was indexed (or
-	// the file is gone). A stale hit is still returned — the text may well
-	// still be what the user wants — but it is never returned as if it were
-	// current. Silently serving a hit whose file changed is a lie.
+	// Stale means the file's content sha no longer matches what was
+	// indexed (or the file is gone). A stale hit is still returned, never
+	// silently presented as current.
 	Stale bool
 }
 
@@ -293,9 +242,8 @@ type service struct {
 	cfg      Config
 }
 
-// New builds the index service over the store, an embedding seam, and a token
-// counter. All three are interfaces: production passes runtimetypes.Store,
-// NewLLMRepoEmbedder(...), and ollamatokenizer.NewEstimateTokenizer().
+// New builds the index service over the store, an embedding seam, and a
+// token counter.
 func New(store Store, embedder Embedder, tokens TokenCounter, cfg Config) Service {
 	return &service{
 		store:    store,
@@ -329,7 +277,7 @@ func (s *service) Status(ctx context.Context, workspaceID string) (*Status, erro
 }
 
 // activeConfig loads the workspace's live index generation, translating "no
-// rows" into ErrNoIndex so every caller degrades the same way.
+// rows" into ErrNoIndex.
 func (s *service) activeConfig(ctx context.Context, workspaceID string) (*runtimetypes.WorkspaceIndexConfig, error) {
 	cfg, err := s.store.GetActiveWorkspaceIndexConfig(ctx, workspaceID)
 	if err != nil {
@@ -346,9 +294,9 @@ func (s *service) Plan(ctx context.Context, root string, opts BuildOptions) (*Bu
 	return plan, err
 }
 
-// plan walks the tree, chunks it, and diffs it against what is already indexed,
-// WITHOUT embedding anything. It returns the plan plus the per-file chunk counts
-// keyed by path, which Build reuses so the diff is computed exactly once.
+// plan walks the tree, chunks it, and diffs it against what is already
+// indexed, without embedding anything. It returns the plan plus the
+// per-file content shas keyed by path, which Build reuses.
 func (s *service) plan(ctx context.Context, root string, opts BuildOptions) (*BuildPlan, map[string]string, error) {
 	if strings.TrimSpace(opts.WorkspaceID) == "" {
 		return nil, nil, errors.New("workspaceindex: WorkspaceID is required")
@@ -375,9 +323,8 @@ func (s *service) plan(ctx context.Context, root string, opts BuildOptions) (*Bu
 	case s.compatible(active, resolvedRoot):
 		plan.ConfigID = active.ID
 	default:
-		// The embedding model, chunking, or root changed: extending would mix
-		// vectors from two models in one table. A new generation is created and
-		// cut over to instead — see runtimetypes.WorkspaceIndexConfig.
+		// Incompatible config: cut over to a new generation rather than mix
+		// vectors from two models in one table.
 		plan.CutOver = true
 	}
 
@@ -426,9 +373,8 @@ func (s *service) plan(ctx context.Context, root string, opts BuildOptions) (*Bu
 	return plan, onDisk, nil
 }
 
-// compatible reports whether an existing index generation may be EXTENDED by a
-// build under the current config. Anything that would put differently-produced
-// vectors, or vectors about a different tree, into one table means no.
+// compatible reports whether an existing index generation may be extended
+// by a build under the current config.
 func (s *service) compatible(active *runtimetypes.WorkspaceIndexConfig, root string) bool {
 	return active.EmbedModel == s.cfg.EmbedModel &&
 		active.EmbedProvider == s.cfg.EmbedProvider &&
@@ -445,7 +391,7 @@ func (s *service) Build(ctx context.Context, root string, opts BuildOptions) (*B
 	}
 	report := &BuildReport{Plan: *plan, ConfigID: plan.ConfigID}
 
-	// Cost honesty: the caller learns the embed-call count BEFORE the first call.
+	// The caller learns the embed-call count before the first call.
 	emit(opts.Progress, Progress{
 		Phase:       PhasePlanning,
 		FilesTotal:  plan.FilesChanged,
@@ -459,8 +405,7 @@ func (s *service) Build(ctx context.Context, root string, opts BuildOptions) (*B
 	}
 	report.ConfigID = indexConfig.ID
 
-	// Clear what this build replaces: everything on a forced/new generation,
-	// otherwise just the files that changed or vanished.
+	// Forced/new generation clears everything; otherwise only changed/vanished files.
 	if opts.Force && !plan.CutOver {
 		before, err := s.store.CountWorkspaceChunks(ctx, indexConfig.ID)
 		if err != nil {
@@ -479,16 +424,11 @@ func (s *service) Build(ctx context.Context, root string, opts BuildOptions) (*B
 			if err := s.store.DeleteWorkspaceChunksForPaths(ctx, indexConfig.ID, stale...); err != nil {
 				return nil, err
 			}
-			// Counted, not merely done: an incremental refresh that drops the
-			// chunks of edited and deleted files and then reports "0 dropped" is
-			// understating what it changed, which is the same class of dishonesty
-			// as understating what it spent.
 			report.ChunksDeleted = staleChunks
 		}
 	}
 
-	// Nothing to embed: an incremental no-op still had to walk the tree to know
-	// that, and still had to drop deleted files' chunks above.
+	// Nothing to embed, but the walk above still ran and any deletions already happened.
 	if plan.EmbedCalls == 0 {
 		emit(opts.Progress, Progress{Phase: PhaseDone, ChunksTotal: 0, FilesTotal: 0, Plan: plan})
 		report.Plan = *plan
@@ -515,14 +455,10 @@ func (s *service) Build(ctx context.Context, root string, opts BuildOptions) (*B
 	return report, nil
 }
 
-// ensureConfig returns the index generation this build writes into, creating one
-// when the workspace has none or when the model/chunking/root changed.
-//
-// A new generation needs its vector DIMENSION up front, and only the model can
-// say what that is — so one probe embed runs first. That call is not overhead:
-// it turns "the configured model cannot embed" (the exact failure the
-// chat-model-as-embedding-model bug produced) into an error before N real calls
-// are spent, and it is counted in the report so the arithmetic still adds up.
+// ensureConfig returns the index generation this build writes into,
+// creating one when the workspace has none or when the model/chunking/root
+// changed. A new generation needs its vector dimension up front, so one
+// probe embed runs first and is counted in the report.
 func (s *service) ensureConfig(ctx context.Context, plan *BuildPlan, opts BuildOptions, report *BuildReport) (*runtimetypes.WorkspaceIndexConfig, error) {
 	if !plan.CutOver && plan.ConfigID != "" {
 		return s.store.GetActiveWorkspaceIndexConfig(ctx, opts.WorkspaceID)
@@ -553,10 +489,8 @@ func (s *service) ensureConfig(ctx context.Context, plan *BuildPlan, opts BuildO
 	return cfg, nil
 }
 
-// stalePaths lists the indexed paths whose chunks this build must drop: files
-// whose content changed, and files that no longer exist. It also returns how
-// many CHUNKS those paths hold, so the build report can state what it dropped
-// instead of leaving the number at zero.
+// stalePaths lists the indexed paths whose chunks this build must drop —
+// changed or deleted files — and how many chunks they hold.
 func (s *service) stalePaths(ctx context.Context, configID string, onDisk map[string]string) ([]string, int, error) {
 	indexed, err := s.store.ListWorkspaceIndexedFiles(ctx, configID)
 	if err != nil {
@@ -575,12 +509,10 @@ func (s *service) stalePaths(ctx context.Context, configID string, onDisk map[st
 	return out, chunks, nil
 }
 
-// embedAndWrite walks the tree a second time, embedding the chunks of changed
-// files through a bounded worker pool and writing them in batches.
-//
-// The second walk is deliberate: the first (in plan) held no file content, so
-// peak memory is one file plus one batch regardless of repository size. Re-reading
-// and re-hashing costs microseconds against an embed call's milliseconds.
+// embedAndWrite walks the tree a second time, embedding the chunks of
+// changed files through a bounded worker pool and writing them in batches.
+// The second walk keeps peak memory at one file plus one batch regardless
+// of repository size.
 func (s *service) embedAndWrite(ctx context.Context, cfg *runtimetypes.WorkspaceIndexConfig, plan *BuildPlan, opts BuildOptions, onDisk map[string]string) (int, int, error) {
 	indexed := map[string]string{}
 	if !plan.CutOver && !opts.Force {
@@ -602,14 +534,11 @@ func (s *service) embedAndWrite(ctx context.Context, cfg *runtimetypes.Workspace
 		filesChanged = plan.FilesChanged
 	)
 
-	// flush embeds and writes everything accumulated. It is only ever called on a
-	// FILE BOUNDARY, which is what makes an interrupted build safe: a file's
-	// chunks are written together or not at all, so a cancelled build never
-	// leaves a file half-indexed under a sha that matches disk — which the next
-	// incremental build would read as "already done" and skip forever.
-	//
-	// The one remaining window is a multi-statement write failing part-way, so a
-	// failure there deletes every path in the flush before returning.
+	// flush embeds and writes everything accumulated, only ever at a file
+	// boundary: a file's chunks are written together or not at all, so a
+	// cancelled build never leaves a file half-indexed under a sha that
+	// reads as done. A failing write deletes every path in the flush before
+	// returning.
 	flush := func() error {
 		if len(pending) == 0 {
 			return nil
@@ -667,10 +596,8 @@ func (s *service) embedAndWrite(ctx context.Context, cfg *runtimetypes.Workspace
 	return written, calls, nil
 }
 
-// discardPartialFlush drops the chunks of every path in a failed flush, so no
-// file is left partially indexed under a sha that matches disk. It runs on a
-// context detached from cancellation: the cleanup of a build that was cancelled
-// is exactly the case that must still happen.
+// discardPartialFlush drops the chunks of every path in a failed flush, on
+// a context detached from cancellation so cleanup still runs.
 func (s *service) discardPartialFlush(ctx context.Context, configID string, pending []Chunk) {
 	seen := map[string]struct{}{}
 	paths := make([]string, 0, len(pending))
@@ -687,11 +614,10 @@ func (s *service) discardPartialFlush(ctx context.Context, configID string, pend
 	_ = s.store.DeleteWorkspaceChunksForPaths(context.WithoutCancel(ctx), configID, paths...)
 }
 
-// embedBatch embeds one batch of chunks through a bounded pool, preserving order
-// so the written rows read back in file order. A single failure cancels the rest
-// of the batch: half-embedded chunks are worth nothing. It returns how many
-// calls were ATTEMPTED alongside the rows, so a failed build still reports the
-// cost it incurred.
+// embedBatch embeds one batch of chunks through a bounded pool, preserving
+// order. A single failure cancels the rest; it returns how many calls were
+// attempted even on failure, so a failed build still reports the cost it
+// incurred.
 func (s *service) embedBatch(ctx context.Context, cfg *runtimetypes.WorkspaceIndexConfig, chunks []Chunk) ([]*runtimetypes.WorkspaceChunk, int, error) {
 	rows := make([]*runtimetypes.WorkspaceChunk, len(chunks))
 	g, gctx := errgroup.WithContext(ctx)

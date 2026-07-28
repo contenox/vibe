@@ -352,10 +352,8 @@ func TestUnit_BracketedPaste(t *testing.T) {
 	})
 }
 
-// A terminal is free to split "\x1b[200~" across writes, and the engine's idle
-// flush can land in that split. The ESC is then already resolved as Escape —
-// so the parser puts it back rather than let the opener decode as five runes
-// and the whole pasted document arrive as keystrokes.
+// TestUnit_SplitPasteOpenerSurvivesAnIdleFlush pins that a paste opener
+// split by an idle flush still decodes as a paste, not five keystrokes.
 func TestUnit_SplitPasteOpenerSurvivesAnIdleFlush(t *testing.T) {
 	p := NewParser()
 	if evs := p.Feed([]byte{esc}); evs != nil {
@@ -378,10 +376,8 @@ func TestUnit_SplitPasteOpenerSurvivesAnIdleFlush(t *testing.T) {
 	}
 }
 
-// The re-attachment is narrow on purpose: only a WHOLE paste opener may
-// revive a flushed ESC. Anything else keeps the Escape the app was already
-// told about and decodes normally — in particular a user who presses Escape
-// and then types "[" gets their bracket.
+// TestUnit_FlushedEscapeOnlyRevivesForAPasteOpener pins that only a whole
+// paste opener revives a flushed ESC; anything else decodes normally.
 func TestUnit_FlushedEscapeOnlyRevivesForAPasteOpener(t *testing.T) {
 	cases := []struct {
 		name string
@@ -404,9 +400,8 @@ func TestUnit_FlushedEscapeOnlyRevivesForAPasteOpener(t *testing.T) {
 	}
 }
 
-// A CSI parameter field with twenty digits is a probe, not a keystroke:
-// decoded naively it overflows the accumulator and can land on 200, opening
-// paste mode from a sequence no terminal would send.
+// TestUnit_AbsurdCSIParametersAreDroppedWhole pins that an oversized CSI
+// parameter field is dropped rather than overflowing onto a value like 200.
 func TestUnit_AbsurdCSIParametersAreDroppedWhole(t *testing.T) {
 	cases := []string{
 		"\x1b[" + strings.Repeat("0", 17) + "200~",

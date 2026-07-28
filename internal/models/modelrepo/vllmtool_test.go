@@ -19,16 +19,13 @@ func TestSystem_VLLM_Tools(t *testing.T) {
 	ctx := context.Background()
 
 	// Qwen2.5-Instruct ships Hermes-style tool-use in its chat template, so vLLM
-	// serves tool calls with --tool-call-parser hermes. The 0.5B variant is the
-	// smallest ungated model that actually supports tool calling on CPU.
-	// (DialoGPT/GPT-2 have no chat template and cannot do tools at all.)
+	// serves tool calls with --tool-call-parser hermes; the 0.5B variant is the
+	// smallest ungated model that supports tool calling on CPU.
 	model := "Qwen/Qwen2.5-0.5B-Instruct"
 	tag := "latest"
 
 	t.Logf("Setting up vLLM container with model: %s", model)
 
-	// Set up vLLM instance
-	// deepseek_v3,granite-20b-fc,granite,hermes,internlm,jamba,llama4_pythonic,llama4_json,llama3_json,mistral,phi4_mini_json,pythonic
 	apiBase, _, cleanup, err := modelrepo.SetupVLLMLocalInstance(ctx, model, tag, "hermes")
 	require.NoError(t, err, "failed to setup vLLM instance")
 	defer cleanup()
@@ -50,7 +47,6 @@ func TestSystem_VLLM_Tools(t *testing.T) {
 		chatClient, err := provider.GetChatConnection(ctx, apiBase)
 		require.NoError(t, err)
 
-		// Define a simple tool
 		tools := []modelrepo.Tool{
 			{
 				Type: "function",
@@ -75,7 +71,6 @@ func TestSystem_VLLM_Tools(t *testing.T) {
 			},
 		}
 
-		// Test conversation with tools
 		messages := []modelrepo.Message{
 			{
 				Role: "system",
@@ -91,9 +86,8 @@ func TestSystem_VLLM_Tools(t *testing.T) {
 		resp, err := chatClient.Chat(ctx, messages, modelrepo.WithTools(tools...))
 		require.NoError(t, err)
 		assert.Equal(t, "assistant", resp.Message.Role)
-		// A tool-calling response carries tool_calls with (usually) empty content;
-		// a plain answer carries content. The integration flow is healthy as long
-		// as one of them is present — a small model may not always choose to call.
+		// A small model may not always choose to call; either content or a tool
+		// call means the integration flow is healthy.
 		assert.True(t, resp.Message.Content != "" || len(resp.ToolCalls) > 0,
 			"response must contain either content or tool calls")
 
@@ -103,11 +97,9 @@ func TestSystem_VLLM_Tools(t *testing.T) {
 			for i, toolCall := range resp.ToolCalls {
 				t.Logf("Tool call %d: %s with args: %s", i, toolCall.Function.Name, toolCall.Function.Arguments)
 
-				// Verify the tool call structure
 				assert.Equal(t, "function", toolCall.Type)
 				assert.Equal(t, "get_weather", toolCall.Function.Name)
 
-				// Parse the arguments to verify they're valid JSON
 				var args map[string]interface{}
 				err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args)
 				assert.NoError(t, err)
@@ -133,7 +125,6 @@ func TestSystem_VLLM_Tools(t *testing.T) {
 		chatClient, err := provider.GetChatConnection(ctx, apiBase)
 		require.NoError(t, err)
 
-		// Define a single tool
 		tool := modelrepo.Tool{
 			Type: "function",
 			Function: &modelrepo.FunctionTool{

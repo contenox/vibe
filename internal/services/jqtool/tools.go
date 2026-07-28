@@ -1,14 +1,10 @@
 package jqtool
 
-// tools.go is the taskengine.ToolsRepo surface.
-//
-// Dispatch and argument decoding follow internal/services/gointel/tools.go,
-// which follows localtools.LocalFSTools.execDispatch: accept arguments from the
-// chain input map or from the declarative ToolsCall.Args, reject unknown
-// argument NAMES, then hand off to a typed handler. Argument VALUES are coerced
-// generously (a model routinely emits {"max": "20"}) while argument NAMES stay
-// strict — a silently dropped argument answers a DIFFERENT question than the one
-// asked, which is worse than a refusal.
+// tools.go is the taskengine.ToolsRepo surface: arguments come from the chain
+// input map or from ToolsCall.Args, unknown argument names are rejected, and
+// values are coerced generously (a model routinely emits {"max": "20"})
+// while names stay strict — a silently dropped argument answers a different
+// question than the one asked.
 
 import (
 	"context"
@@ -25,27 +21,25 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// tools implements taskengine.ToolsRepo. The fields mirror
-// localtools.GitTools: a constructor-supplied allowed directory, the toolset
-// name policy rules address it by, and the per-call cwd resolver surfaces whose
-// workspace is a property of the session rather than of the process.
+// tools implements taskengine.ToolsRepo: a constructor-supplied allowed
+// directory, the toolset name policy rules address it by, and a per-call cwd
+// resolver for surfaces whose workspace is a property of the session.
 type tools struct {
 	allowedDir  string
 	name        string
 	cwdResolver func(context.Context) string
 }
 
-// NewTools creates the jq toolset scoped to allowedDir, the same way
-// localtools.NewGitTools takes its directory. An empty allowedDir means no
-// declared boundary: `path` arguments are refused (with a message naming how a
-// root is supplied) and inline `input` still works.
+// NewTools creates the jq toolset scoped to allowedDir. An empty allowedDir
+// means no declared boundary: `path` arguments are refused and inline `input`
+// still works.
 func NewTools(allowedDir string) taskengine.ToolsRepo {
 	return NewToolsWith(allowedDir, ToolsProviderName, nil)
 }
 
-// NewToolsWith is NewTools with the toolset name and a per-call working
-// directory resolver, mirroring NewLocalFSToolsWith and NewGitToolsWith for
-// surfaces (ACP) whose cwd belongs to the session.
+// NewToolsWith is NewTools with an explicit toolset name and a per-call
+// working directory resolver, for surfaces (ACP) whose cwd belongs to the
+// session.
 func NewToolsWith(allowedDir, name string, cwdResolver func(context.Context) string) taskengine.ToolsRepo {
 	cleaned := allowedDir
 	if cleaned != "" {
@@ -109,13 +103,10 @@ func (h *tools) query(ctx context.Context, args map[string]any) (*Result, error)
 	})
 }
 
-// resolveInput enforces the EXACTLY-ONE-SOURCE rule.
-//
-// It is a refusal rather than a precedence rule ("path wins") on purpose: a call
-// carrying both a path and an inline document is a model that changed its mind
-// halfway through composing the call, and silently querying one of the two
-// produces an answer about a document nobody asked about — the exact failure
-// mode a tool result cannot self-correct, because it looks like a success.
+// resolveInput enforces the exactly-one-source rule: a call carrying both
+// `path` and `input` is refused rather than resolved by precedence, since
+// silently picking one would answer a question about a document nobody asked
+// about and look like a success.
 func (h *tools) resolveInput(ctx context.Context, args map[string]any, format string) (*loaded, error) {
 	path := argString(args, "path")
 	raw, hasInput := args["input"]
@@ -171,8 +162,7 @@ func (h *tools) Supports(context.Context) ([]string, error) {
 }
 
 // GetSchemasForSupportedTools returns no OpenAPI documents: jq is a local
-// toolset with a hand-written function schema, exactly like local_fs, gointel,
-// workspace and goja. The model-facing contract is GetToolsForToolsByName.
+// toolset with a hand-written function schema (GetToolsForToolsByName).
 func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
 	return map[string]*openapi3.T{}, nil
 }
@@ -211,9 +201,8 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 	var unknown []string
 	for key := range args {
 		if _, ok := allowedSet[key]; !ok {
-			// The KEY is model-supplied too, so it is clamped like every other
-			// echoed argument — an unknown-argument error must not be a channel
-			// for a megabyte of model-chosen text.
+			// The key is model-supplied too, so it's clamped like any other
+			// echoed argument.
 			unknown = append(unknown, echoName(key))
 		}
 	}
@@ -226,10 +215,8 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 		toolName, strings.Join(unknown, ", "), strings.Join(allowed, ", "), severityRecoverable)
 }
 
-// argRaw returns a string argument WITHOUT trimming. Used for `filter` only:
-// jq is whitespace-insensitive at the edges, but trimming a model-supplied
-// program before echoing it back in an error would report a program that is not
-// quite the one that was sent.
+// argRaw returns a string argument without trimming. Used for `filter` only,
+// so an echoed error reports exactly the program that was sent.
 func argRaw(args map[string]any, key string) string {
 	if s, ok := args[key].(string); ok {
 		return s

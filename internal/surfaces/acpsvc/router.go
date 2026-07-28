@@ -12,28 +12,15 @@ import (
 )
 
 // ErrNoBoundSession reports that no live ACP transport owns the contenox
-// session named in the request context. serve's shared AskApproval keys its
-// fallback on this: when the router cannot route (a headless/API caller, or a
-// session with no live WS connection), the engine's HITL request goes to the
-// approval-API path instead of hanging on a permission prompt nobody answers.
+// session named in the request context. AskApproval's caller falls back to
+// the approval-API path instead of hanging on an unanswerable prompt.
 var ErrNoBoundSession = errors.New("acpsvc: no ACP transport bound to contenox session")
 
-// SessionRouter maps a contenox session id to the ACP Transport that owns
-// it. serve runs many ACP WebSocket connections (each its own Transport)
-// behind a SINGLE shared process, so anything that must reach "the connection
-// hosting session X" cannot close over a single transport the way the stdio ACP
-// path does (acp_cmd.go late-binds its lone transport directly). Instead each
-// Transport registers its live (contenox session -> this transport) bindings
-// here, and the two out-of-band paths into a session consult the router:
-//
-//   - AskApproval dispatches session/request_permission to the exact WS
-//     connection whose client raised the gated tool call — the one beam's
-//     PermissionGate is waiting on.
-//   - DeliverToContenoxSession pushes a mission report onto the session that
-//     FIRED the mission, which is what makes the supervision edge close on serve
-//     rather than falling to the operator inbox (see that method).
-//
-// The stdio ACP path leaves Deps.SessionRouter nil: it has exactly one
+// SessionRouter maps a contenox session id to the ACP Transport that owns it.
+// serve runs many WebSocket connections, each its own Transport, behind one
+// shared engine; AskApproval and DeliverToContenoxSession consult this router
+// to reach the connection currently hosting a session. Safe for concurrent
+// use. The stdio ACP path leaves Deps.SessionRouter nil: it has exactly one
 // transport and needs no routing.
 type SessionRouter struct {
 	mu       sync.RWMutex
@@ -46,11 +33,9 @@ func NewSessionRouter() *SessionRouter {
 	return &SessionRouter{bindings: make(map[string]*Transport)}
 }
 
-// bind records that t owns the given contenox session. A nil receiver (the
-// stdio path, which passes no router) and empty inputs are no-ops so callers
-// need no guard. Last writer wins: if the same session is loaded on a second
-// connection, the newer transport becomes the routing target, matching the
-// per-transport contenoxToACPID map's own last-writer-wins semantics.
+// bind records that t owns contenoxSessionID. A nil receiver or empty input
+// is a no-op. Last writer wins, matching the per-transport contenoxToACPID
+// map's own semantics.
 func (r *SessionRouter) bind(contenoxSessionID string, t *Transport) {
 	if r == nil || contenoxSessionID == "" || t == nil {
 		return
@@ -60,9 +45,9 @@ func (r *SessionRouter) bind(contenoxSessionID string, t *Transport) {
 	r.mu.Unlock()
 }
 
-// unbind drops the binding for contenoxSessionID, but only when it still points
-// at t. Guarding on identity means a transport tearing down a session that a
-// newer connection has since re-bound does not evict the live binding.
+// unbind drops the binding for contenoxSessionID, but only when it still
+// points at t: a transport tearing down a session that a newer connection has
+// since re-bound must not evict the live binding.
 func (r *SessionRouter) unbind(contenoxSessionID string, t *Transport) {
 	if r == nil || contenoxSessionID == "" {
 		return
@@ -84,13 +69,12 @@ func (r *SessionRouter) transportFor(contenoxSessionID string) (*Transport, bool
 	return t, ok
 }
 
-// AskApproval bridges an engine HITL request to the ACP transport that owns the
-// contenox session named in ctx (runtimetypes.SessionIDContextKey), driving that
-// connection's session/request_permission flow. It returns ErrNoBoundSession
-// when no live transport owns the session so the caller can fall back to a
-// non-ACP approval path; a genuine deny resolves as (false, nil) and a client
-// cancellation as (false, context.Canceled) — neither is ErrNoBoundSession, so
-// neither triggers a fallback.
+// AskApproval bridges an engine HITL request to the ACP transport owning the
+// contenox session in ctx (runtimetypes.SessionIDContextKey), driving that
+// connection's session/request_permission flow. Returns ErrNoBoundSession only
+// when no transport owns the session; a genuine deny resolves (false, nil)
+// and a client cancellation (false, context.Canceled) — neither triggers the
+// caller's fallback.
 func (r *SessionRouter) AskApproval(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
 	contenoxSessionID, _ := ctx.Value(runtimetypes.SessionIDContextKey).(string)
 	t, ok := r.transportFor(contenoxSessionID)
@@ -100,20 +84,10 @@ func (r *SessionRouter) AskApproval(ctx context.Context, req hitlservice.Approva
 	return t.AskApproval(ctx, req)
 }
 
-// DeliverToContenoxSession routes an out-of-band update — a mission report the
-// report router is delivering on the supervision edge — to whichever live WS
-// connection owns contenoxSessionID, and returns ErrSessionNotLive when none
-// does.
-//
-// This is serve's half of what the in-process editor already had. `/mission`
-// sets the mission's ParentSessionID to the FIRING chat session's contenox id
-// (handleMission), but serve's report router was given only the agent-instance
-// kernel as its deliverer — and the kernel knows unit sessions, never a beam
-// chat session. Every report from a beam-fired mission therefore missed and was
-// inboxed as "parent gone" while the operator sat watching the very session that
-// fired it. Routing through here is what closes that edge: same key, same
-// bind/unbind lifecycle as the approval path above, so a report reaches the
-// session for exactly as long as a connection holds it.
+// DeliverToContenoxSession routes an out-of-band mission report to whichever
+// live WS connection owns contenoxSessionID, returning ErrSessionNotLive when
+// none does. Ownership follows the same bind/unbind lifecycle as AskApproval,
+// so a report reaches the session for exactly as long as a connection holds it.
 func (r *SessionRouter) DeliverToContenoxSession(ctx context.Context, contenoxSessionID string, n libacp.SessionNotification) error {
 	t, ok := r.transportFor(contenoxSessionID)
 	if !ok {

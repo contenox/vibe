@@ -59,25 +59,19 @@ func TestUnit_StripCommentLines(t *testing.T) {
 			want: "hello\nworld\n",
 		},
 		{
-			// The blank line directly touching a comment block is the
-			// template's own boundary blank (buildEditorTemplate always
-			// inserts exactly one) and must go with it.
+			// The blank line touching a comment block is the template's own boundary blank and goes with it.
 			name: "drops single boundary blank before comment run",
 			in:   "content\n\n# banner\n",
 			want: "content\n",
 		},
 		{
-			// A blank line NOT touching a comment run is user content (a
-			// paragraph break), never scaffolding, and must survive.
+			// A blank line not adjacent to a comment run is user content and must survive.
 			name: "keeps blank line not adjacent to a comment run",
 			in:   "a\n\nb\n# c\n",
 			want: "a\n\nb\n",
 		},
 		{
-			// M5 defect 3: the trim is bounded to exactly the one line the
-			// template inserted. A second, user-added blank line right
-			// before the boundary blank must survive even though it also
-			// sits next to the (now-removed) comment block.
+			// The trim removes only the one boundary blank; an extra user blank before it survives.
 			name: "keeps extra blank beyond the single boundary",
 			in:   "a\n\n\n# c\n",
 			want: "a\n\n",
@@ -105,9 +99,7 @@ func TestUnit_BuildEditorTemplate_NoSeed(t *testing.T) {
 	}
 }
 
-// TestUnit_BuildEditorTemplate_NoSeed_ByteExact pins the exact no-seed shape:
-// a blank line, then the fenced banner, and nothing else. This is the shape
-// M5 says must NOT change.
+// TestUnit_BuildEditorTemplate_NoSeed_ByteExact pins the no-seed shape: a blank line, then the fenced banner, and nothing else.
 func TestUnit_BuildEditorTemplate_NoSeed_ByteExact(t *testing.T) {
 	got := string(buildEditorTemplate(nil, ""))
 	want := "\n" +
@@ -126,10 +118,7 @@ func TestUnit_BuildEditorTemplate_NoModelHint(t *testing.T) {
 	}
 }
 
-// TestUnit_BuildEditorTemplate_WithSeed_ByteExact is the M5 regression test
-// for defect (1): the seed must land ABOVE the banner (cursor lands on it,
-// and the "write your prompt above" instruction is actually true), separated
-// from the banner by exactly one blank line.
+// TestUnit_BuildEditorTemplate_WithSeed_ByteExact asserts the seed lands above the banner, separated by exactly one blank line.
 func TestUnit_BuildEditorTemplate_WithSeed_ByteExact(t *testing.T) {
 	seed := []byte("panic: runtime error\nstack trace line\n")
 	got := string(buildEditorTemplate(seed, ""))
@@ -170,9 +159,7 @@ func TestUnit_BuildEditorTemplate_SeedWithoutTrailingNewline(t *testing.T) {
 	}
 }
 
-// writeNoopEditor points $EDITOR at a script that exits without touching the
-// file at all — simulating an operator opening $EDITOR and immediately
-// quitting (beam: Ctrl+E then :q).
+// writeNoopEditor points $EDITOR at a script that exits without touching the file, simulating an immediate quit.
 func writeNoopEditor(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "noop-editor.sh")
@@ -182,9 +169,7 @@ func writeNoopEditor(t *testing.T) string {
 	return path
 }
 
-// writeReplaceEditor points $EDITOR at a script that overwrites whatever
-// captureFromEditor wrote with finalContent, simulating an operator who
-// actually edited the buffer. finalContent must end in "\n".
+// writeReplaceEditor points $EDITOR at a script that overwrites the buffer with finalContent, which must end in "\n".
 func writeReplaceEditor(t *testing.T, finalContent string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "replace-editor.sh")
@@ -195,12 +180,7 @@ func writeReplaceEditor(t *testing.T, finalContent string) string {
 	return path
 }
 
-// TestUnit_CaptureFromEditor_UnchangedWithSeed_ReturnsSeedVerbatim is the M5
-// regression test for defect (2): quitting $EDITOR without touching a seeded
-// buffer must hand back the seed exactly, not errEmptyPrompt. It also proves
-// round-trip stability across TWO consecutive invocations — chaining the
-// first call's output into the second call's seed — so a stray scaffolding
-// leftover can't accumulate into the draft across repeated Ctrl+E/:q cycles.
+// TestUnit_CaptureFromEditor_UnchangedWithSeed_ReturnsSeedVerbatim asserts quitting without editing a seeded buffer returns the seed unchanged, stable across repeated round-trips.
 func TestUnit_CaptureFromEditor_UnchangedWithSeed_ReturnsSeedVerbatim(t *testing.T) {
 	editor := writeNoopEditor(t)
 	t.Setenv("EDITOR", editor)
@@ -216,8 +196,7 @@ func TestUnit_CaptureFromEditor_UnchangedWithSeed_ReturnsSeedVerbatim(t *testing
 		t.Fatalf("first round: got %q, want seed %q unchanged", got1, seed)
 	}
 
-	// Feed the result straight back in as the next seed, as beam does on a
-	// second Ctrl+E over the same draft.
+	// Feed the result back in as the next seed, as on a second edit of the same draft.
 	got2, err := captureFromEditor([]byte(got1), "some-model")
 	if err != nil {
 		t.Fatalf("second round: unexpected error: %v", err)
@@ -230,10 +209,7 @@ func TestUnit_CaptureFromEditor_UnchangedWithSeed_ReturnsSeedVerbatim(t *testing
 	}
 }
 
-// TestUnit_CaptureFromEditor_UnchangedNoSeed_Aborts is the M5 regression
-// test that the no-seed abort path is untouched: quitting $EDITOR without
-// writing anything, and without a seed to fall back to, is genuinely
-// "nothing to send".
+// TestUnit_CaptureFromEditor_UnchangedNoSeed_Aborts asserts quitting without writing and without a seed aborts as empty.
 func TestUnit_CaptureFromEditor_UnchangedNoSeed_Aborts(t *testing.T) {
 	editor := writeNoopEditor(t)
 	t.Setenv("EDITOR", editor)
@@ -245,11 +221,7 @@ func TestUnit_CaptureFromEditor_UnchangedNoSeed_Aborts(t *testing.T) {
 	}
 }
 
-// TestUnit_CaptureFromEditor_Edited_StripsCommentsAndBoundaryBlank exercises
-// the full captureFromEditor pipeline against a buffer an operator actually
-// edited: their own paragraph-break blank line must survive, while the
-// template's boundary blank (the one directly touching the banner) and the
-// banner itself must be gone.
+// TestUnit_CaptureFromEditor_Edited_StripsCommentsAndBoundaryBlank asserts an edited buffer keeps its own blank lines while the template's banner and boundary blank are stripped.
 func TestUnit_CaptureFromEditor_Edited_StripsCommentsAndBoundaryBlank(t *testing.T) {
 	final := "My prompt\n" +
 		"\n" +
@@ -272,10 +244,7 @@ func TestUnit_CaptureFromEditor_Edited_StripsCommentsAndBoundaryBlank(t *testing
 	}
 }
 
-// TestUnit_CaptureFromEditor_Edited_LeadingBlankSurvives is the M5
-// regression test for defect (3)'s bound: a draft that legitimately starts
-// with a blank line after editing must survive, because that blank line is
-// not the one the template inserted (it isn't adjacent to the banner).
+// TestUnit_CaptureFromEditor_Edited_LeadingBlankSurvives asserts a leading blank line the operator wrote survives since it isn't adjacent to the banner.
 func TestUnit_CaptureFromEditor_Edited_LeadingBlankSurvives(t *testing.T) {
 	final := "\n" +
 		"Actual prompt\n" +
@@ -297,9 +266,7 @@ func TestUnit_CaptureFromEditor_Edited_LeadingBlankSurvives(t *testing.T) {
 	}
 }
 
-// TestUnit_CaptureFromEditor_GenuinelyEmptied_Aborts keeps errEmptyPrompt
-// semantics for a buffer the operator actually emptied out, seed or no seed:
-// this is not the "unchanged" case, it's a real abort.
+// TestUnit_CaptureFromEditor_GenuinelyEmptied_Aborts asserts a buffer the operator emptied out aborts with errEmptyPrompt regardless of seed.
 func TestUnit_CaptureFromEditor_GenuinelyEmptied_Aborts(t *testing.T) {
 	final := "   \n" +
 		templateBannerRule + "\n" +

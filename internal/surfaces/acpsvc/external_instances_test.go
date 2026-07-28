@@ -19,19 +19,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file exercises the Manager-backed external-agent path: an external session
-// ATTACHES to an agentinstance.Manager-owned instance whose subprocess lives OFF any
-// single connection. It proves the point of the whole rewire — the agent's process
-// (and thus its context) survives a client disconnect/reload, a reloaded session
-// re-attaches to the SAME still-running instance, only a delete stops it — and that
-// the nil-Instances fallback is byte-for-byte today's connCtx-owned spawn. The
-// downstream side is the hermetic in-repo acp-stub-agent; there is no LLM backend.
+// This file exercises the Manager-backed external-agent path: a session attaches
+// to an agentinstance.Manager-owned instance whose subprocess outlives any single
+// connection, survives disconnect/reload, and re-attaches on load; only delete
+// stops it.
 
-// instancesFixture wires a Manager-backed acpsvc Deps and opens MULTIPLE loopback ACP
-// connections against it, mirroring serve (one acpsvc.New factory fronting many WS
-// connections behind ONE shared agentinstance.Manager + DB). It is the harness for the
-// re-attach story: session/new on connection A, A dropped, session/load on connection
-// B re-attaching to the same live instance.
+// instancesFixture wires a Manager-backed acpsvc Deps and opens multiple
+// loopback connections against it, mirroring serve: one factory fronting many
+// connections behind one shared Manager + DB.
 type instancesFixture struct {
 	t       *testing.T
 	db      libdb.DBManager
@@ -46,10 +41,8 @@ func newInstancesFixture(t *testing.T) *instancesFixture {
 	})
 }
 
-// newInstancesFixtureWith is newInstancesFixture with the Manager supplied by the
-// caller — so a test can wire kernel Options (an event sink, a journal size) or swap in
-// a double whose Get/Attach it fully controls. build receives the fixture's DB because
-// the real Manager resolves declared agents against it.
+// newInstancesFixtureWith is newInstancesFixture with the Manager supplied by
+// the caller, so a test can wire kernel options or swap in a double.
 func newInstancesFixtureWith(t *testing.T, build func(libdb.DBManager) agentinstance.Manager) *instancesFixture {
 	t.Helper()
 	db, err := libdb.NewSQLiteDBManager(context.Background(), filepath.Join(t.TempDir(), "instances.db"), runtimetypes.SchemaSQLite)
@@ -65,8 +58,7 @@ func newInstancesFixtureWith(t *testing.T, build func(libdb.DBManager) agentinst
 		Instances:     mgr,
 	})
 	t.Cleanup(func() {
-		// LIFO after every connection has dropped: stop all surviving instances
-		// (killing their subprocesses) then close the DB — the leak-free teardown.
+		// Stop instances (killing subprocesses) before closing the DB.
 		_ = mgr.Close()
 		_ = db.Close()
 	})
@@ -116,9 +108,8 @@ func (f *instancesFixture) connect() *instConn {
 	return ic
 }
 
-// drop simulates the upstream connection ending: it cancels the connection ctx, which
-// fires connCtx (the SOLE WebSocket teardown hook — Transport.Close is never called on
-// a WS drop), and waits for both run loops to exit. Idempotent.
+// drop simulates the upstream connection ending: cancels connCtx (the sole
+// WebSocket teardown hook) and waits for both run loops to exit. Idempotent.
 func (ic *instConn) drop() {
 	if ic.dropped {
 		return
@@ -166,10 +157,8 @@ func extHandle(ed *externalDriver) *agenthost.Handle {
 	return ed.handle
 }
 
-// liveInstances counts the Manager's currently-running instances across the
-// config+runtime join List returns. Under the R1 kernel List reports one FleetEntry
-// per DECLARED agent (idle or not), so a running-instance count sums each entry's
-// live Instances rather than counting entries.
+// liveInstances counts the Manager's currently-running instances by summing
+// each List entry's live Instances, since List reports one entry per agent.
 func liveInstances(t *testing.T, mgr agentinstance.Manager) int {
 	t.Helper()
 	entries, err := mgr.List(context.Background())
@@ -181,11 +170,8 @@ func liveInstances(t *testing.T, mgr agentinstance.Manager) int {
 	return n
 }
 
-// TestLoopback_ExternalInstance_SurvivesConnectionDrop is the assertion this rewire
-// exists for: a Manager-backed external session's downstream process is owned by the
-// Manager (the driver holds NO handle, only an instance id), and a client disconnect
-// (connCtx cancel) does NOT tear it down — it stays Running and answers again through a
-// fresh connection.
+// TestLoopback_ExternalInstance_SurvivesConnectionDrop pins: a Manager-backed
+// instance's process survives a client disconnect and answers again on reconnect.
 func TestLoopback_ExternalInstance_SurvivesConnectionDrop(t *testing.T) {
 	f := newInstancesFixture(t)
 	agentName := registerStubAgentInDB(t, f.db, "claude-stub-survive", nil)
@@ -211,7 +197,6 @@ func TestLoopback_ExternalInstance_SurvivesConnectionDrop(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, agentinstance.StateRunning, st.State)
 
-	// It answers on the first connection.
 	promptResp, err := c1.client.Prompt(ctx, libacp.PromptRequest{
 		SessionID: newResp.SessionID,
 		Prompt:    []libacp.ContentBlock{libacp.NewTextContent("hello")},
@@ -219,18 +204,16 @@ func TestLoopback_ExternalInstance_SurvivesConnectionDrop(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, libacp.StopReasonEndTurn, promptResp.StopReason)
 
-	// Drop the connection (connCtx cancel — the WS teardown hook).
 	c1.drop()
 
-	// The instance SURVIVES: never leaves Running (had the subprocess been bound to
-	// connCtx, the Manager's monitor would have flipped it to error within this window).
+	// If the subprocess were bound to connCtx, the Manager's monitor would flip
+	// this to error within the window; it never leaves Running.
 	require.Never(t, func() bool {
 		st, gerr := f.mgr.Get(instanceID)
 		return gerr != nil || st.State != agentinstance.StateRunning
 	}, 500*time.Millisecond, 50*time.Millisecond, "the instance must survive the connection drop")
 	require.Equal(t, 1, liveInstances(t, f.mgr))
 
-	// A fresh connection re-attaches (session/load) and it answers AGAIN.
 	c2 := f.connect()
 	_, err = c2.client.Initialize(ctx, libacp.InitializeRequest{ProtocolVersion: libacp.ProtocolVersion})
 	require.NoError(t, err)
@@ -248,10 +231,8 @@ func TestLoopback_ExternalInstance_SurvivesConnectionDrop(t *testing.T) {
 		"the surviving instance must answer a prompt on the re-attached connection")
 }
 
-// TestLoopback_ExternalInstance_SessionLoadReattachesSameInstance pins that a
-// session/load after a disconnect re-attaches to the SAME still-running instance
-// (identical instance id, and NO second instance spawned) instead of freshly
-// respawning — the downstream agent's context is preserved across the reload.
+// TestLoopback_ExternalInstance_SessionLoadReattachesSameInstance pins:
+// session/load re-attaches to the same instance instead of spawning a second.
 func TestLoopback_ExternalInstance_SessionLoadReattachesSameInstance(t *testing.T) {
 	f := newInstancesFixture(t)
 	agentName := registerStubAgentInDB(t, f.db, "claude-stub-reattach", nil)
@@ -300,9 +281,8 @@ func TestLoopback_ExternalInstance_SessionLoadReattachesSameInstance(t *testing.
 	require.Equal(t, 1, liveInstances(t, f.mgr), "re-attach must NOT spawn a second instance")
 }
 
-// TestLoopback_ExternalInstance_DeleteStopsInstance proves the teardown asymmetry: a
-// plain disconnect/close only detaches (the instance survives — the other tests), but
-// DeleteSession actually STOPS the instance and removes it from the Manager, leak-free.
+// TestLoopback_ExternalInstance_DeleteStopsInstance pins: DeleteSession stops
+// and removes the Manager instance, unlike a plain disconnect (detach only).
 func TestLoopback_ExternalInstance_DeleteStopsInstance(t *testing.T) {
 	f := newInstancesFixture(t)
 	agentName := registerStubAgentInDB(t, f.db, "claude-stub-delete", nil)
@@ -328,24 +308,21 @@ func TestLoopback_ExternalInstance_DeleteStopsInstance(t *testing.T) {
 	require.Equal(t, 0, liveInstances(t, f.mgr), "DeleteSession must stop the Manager instance")
 	_, gerr := f.mgr.Get(instanceID)
 	require.ErrorIs(t, gerr, agentinstance.ErrNotFound)
-	// Truly gone, not merely detached: every Manager entry point that resolves the
-	// instance id fails — observing it (Attach) AND driving it (OpenSession). The
-	// Manager exposes no raw-connection accessor to probe; these are the surfaces a
-	// consumer actually holds.
+	// No raw accessor exists to probe deletion directly; check both consumer
+	// surfaces that resolve an instance id — Attach and OpenSession.
 	_, aerr := f.mgr.Attach(ctx, instanceID, "any-session", newExternalBridge(c1.tr, "any-session", true))
 	require.ErrorIs(t, aerr, agentinstance.ErrNotFound)
 	_, oerr := f.mgr.OpenSession(ctx, instanceID, agentinstance.SessionSpec{Cwd: cwd})
 	require.ErrorIs(t, oerr, agentinstance.ErrNotFound)
 }
 
-// TestLoopback_ExternalInstance_NilInstancesFallsBackToConnCtxSpawn pins the fallback
-// contract: with Deps.Instances nil the external path is today's connCtx-owned spawn
-// (the driver OWNS a live handle, holds NO instance id); with a Manager wired it is the
-// inverse (the driver holds an instance id, NO handle — the Manager owns the process).
+// TestLoopback_ExternalInstance_NilInstancesFallsBackToConnCtxSpawn pins: nil
+// Deps.Instances yields a connCtx-owned handle; a wired Manager yields an
+// instance id and no handle.
 func TestLoopback_ExternalInstance_NilInstancesFallsBackToConnCtxSpawn(t *testing.T) {
 	ctx := context.Background()
 
-	// nil Instances (the stdio-parity default harness): connCtx-owned subprocess.
+	// nil Instances: connCtx-owned subprocess (the default harness).
 	h := newLoopbackHarness(t)
 	require.Nil(t, h.tr.deps.Instances, "the default harness must wire no Manager")
 	nilAgent := registerStubAgent(t, h, "claude-stub-nil")
@@ -361,7 +338,7 @@ func TestLoopback_ExternalInstance_NilInstancesFallsBackToConnCtxSpawn(t *testin
 	require.Empty(t, extInstanceID(nilEd), "no Manager => no instance id")
 	require.NotNil(t, extHandle(nilEd), "no Manager => the driver owns the connCtx-bound subprocess")
 
-	// Instances wired: the Manager owns the process; the driver holds no handle.
+	// Instances wired: the Manager owns the process, the driver holds no handle.
 	f := newInstancesFixture(t)
 	mgrAgent := registerStubAgentInDB(t, f.db, "claude-stub-mgr", nil)
 	c := f.connect()
@@ -378,15 +355,8 @@ func TestLoopback_ExternalInstance_NilInstancesFallsBackToConnCtxSpawn(t *testin
 	require.Nil(t, extHandle(mgrEd), "a Manager => the driver does not own the process")
 }
 
-// TestLoopback_ExternalInstance_DisabledAgentRejected proves the Manager-owned
-// spawn path refuses a disabled agent through the same shared judgment
-// (agentregistryservice.ResolveForSpawn, called from resolveExternalAgent) the
-// connCtx-owned path and fleetservice.Dispatch use — the actual C5 gap
-// fleet-consolidation.md's D6 named: before this change
-// agentinstance.Manager.Start had no notion of Enabled, so a disabled agent's
-// session/new against a Manager-backed acpsvc would have reached Start and
-// spawned anyway. Uses /bin/true as the command: resolution is refused before
-// anything is ever spawned, so no real stub binary is needed.
+// TestLoopback_ExternalInstance_DisabledAgentRejected pins: the Manager-owned
+// spawn path refuses a disabled agent before ever reaching Manager.Start.
 func TestLoopback_ExternalInstance_DisabledAgentRejected(t *testing.T) {
 	f := newInstancesFixture(t)
 	ctx := context.Background()

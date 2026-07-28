@@ -30,10 +30,8 @@ func TestUnit_OpenAICache_PromptCacheKeyFromSessionKey(t *testing.T) {
 	}
 }
 
+// Without a session key, the marshaled request must carry no prompt_cache_key and nothing else must move.
 func TestUnit_OpenAICache_HintsAbsentByteIdentical(t *testing.T) {
-	// Without hints (and with hints but no session key) the marshaled request
-	// must be byte-identical to the pre-change shape: no prompt_cache_key and
-	// nothing else moved.
 	plain, _ := buildOpenAIRequestWithCapabilities("gpt-4o", openaiCacheFixtureMessages(), nil, true)
 	noKey, _ := buildOpenAIRequestWithCapabilities("gpt-4o", openaiCacheFixtureMessages(), []modelrepo.ChatArgument{
 		modelrepo.WithCacheHints(modelrepo.CacheHints{StableSystem: true, StableTools: true}),
@@ -54,7 +52,7 @@ func TestUnit_OpenAICache_HintsAbsentByteIdentical(t *testing.T) {
 		t.Fatalf("prompt_cache_key must be omitted when absent: %s", rawPlain)
 	}
 
-	// With a key, the request differs ONLY by the prompt_cache_key member.
+	// With a key, the request differs only by the prompt_cache_key member.
 	keyed, _ := buildOpenAIRequestWithCapabilities("gpt-4o", openaiCacheFixtureMessages(), []modelrepo.ChatArgument{
 		modelrepo.WithCacheHints(modelrepo.CacheHints{SessionKey: "k"}),
 	}, true)
@@ -78,8 +76,7 @@ func TestUnit_OpenAICache_HintsAbsentByteIdentical(t *testing.T) {
 }
 
 func TestUnit_OpenAICache_ChatCompletionsUsageIncludesCachedTokens(t *testing.T) {
-	// OpenAI prompt_tokens already INCLUDES cached tokens: no summation, the
-	// cached count is read from prompt_tokens_details.cached_tokens.
+	// prompt_tokens already includes cached tokens; cached count is read from prompt_tokens_details.cached_tokens.
 	body := `{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
 		"usage":{"prompt_tokens":1200,"completion_tokens":9,"total_tokens":1209,
 		"prompt_tokens_details":{"cached_tokens":1024}}}`

@@ -10,9 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_CatalogProvider_VisionFromImageInputCapability asserts that CanVision
-// is derived solely from the model resource's capabilities.image_input.supported
-// field reported by GET /v1/models, never from the model name.
+// CanVision must derive solely from capabilities.image_input.supported, never from the model name.
 func TestUnit_CatalogProvider_VisionFromImageInputCapability(t *testing.T) {
 	const body = `{
 		"data": [
@@ -78,12 +76,7 @@ func TestUnit_CatalogProvider_VisionFromImageInputCapability(t *testing.T) {
 	require.False(t, catalog.ProviderFor(byName["claude-haiku-text-only"]).CanVision())
 }
 
-// TestUnit_CatalogProvider_DocumentedListModelsShape pins our parsing against
-// the documented GET /v1/models response (platform.claude.com/docs/en/api/
-// models-list): each model carries max_input_tokens (context window),
-// max_tokens (output ceiling — there is no max_output_tokens field), and a
-// capabilities object whose leaves are {"supported": bool}; pagination uses
-// has_more/first_id/last_id with after_id as the cursor parameter.
+// Context window comes from max_input_tokens, output ceiling from max_tokens (there is no max_output_tokens field); pagination uses after_id/has_more/last_id.
 func TestUnit_CatalogProvider_DocumentedListModelsShape(t *testing.T) {
 	const page1 = `{
 		"data": [

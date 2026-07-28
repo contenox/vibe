@@ -1,9 +1,7 @@
 package enginesvc
 
-// resolveEmbeddingModel decides which model produces embeddings. Before the
-// workspace-index prerequisite fix, llmrepo.Config.DefaultEmbeddingModel was set
-// to the CHAT model unconditionally — correct only where a provider's chat model
-// also embeds. These tests pin the resolution order and the never-fail rule.
+// These tests pin resolveEmbeddingModel's resolution order and its
+// never-fail-Build rule.
 
 import (
 	"context"
@@ -16,10 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// recSpan captures one tracked span. The fallback signal used to be a
-// slog.Warn, which no test could see; recording the operation/subject pair, the
-// kvArgs and the change payload is what makes "it degrades, loudly" assertable
-// rather than aspirational.
+// recSpan captures one tracked span, so a test can assert what the fallback
+// reported instead of only that it happened.
 type recSpan struct {
 	op         string
 	subject    string
@@ -106,9 +102,8 @@ func TestUnit_ResolveEmbeddingModel_ReadsConfigKeys(t *testing.T) {
 		"resolution from the KV keys is the configured path, not a fallback")
 }
 
-// An unset embedding provider is the NORMAL single-backend case (one provider
-// serves both models) and falls back silently; only an unset MODEL is worth a
-// report, because that is the case where the chat model gets used to embed.
+// TestUnit_ResolveEmbeddingModel_ProviderAloneFallsBack pins that an unset
+// provider alone falls back silently; only an unset model is reported.
 func TestUnit_ResolveEmbeddingModel_ProviderAloneFallsBack(t *testing.T) {
 	ctx, store := runtimetypes.SetupStore(t)
 	require.NoError(t, clikv.SetString(ctx, store, "default-embed-model", "nomic-embed-text"))
@@ -124,9 +119,9 @@ func TestUnit_ResolveEmbeddingModel_ProviderAloneFallsBack(t *testing.T) {
 		"the provider falling back alone is silent by design; reporting it would train operators to ignore the report that matters")
 }
 
-// With nothing configured anywhere, resolution must still produce a usable
-// model: retrieval is optional and an unset embedding model can never fail the
-// engine build. The honesty lives in the tracker report and the doctor issue.
+// TestUnit_ResolveEmbeddingModel_FallsBackToChatModel pins that resolution
+// still produces a usable model with nothing configured; the substitution is
+// reported through the tracker, never fails Build.
 func TestUnit_ResolveEmbeddingModel_FallsBackToChatModel(t *testing.T) {
 	ctx, store := runtimetypes.SetupStore(t)
 
@@ -138,10 +133,8 @@ func TestUnit_ResolveEmbeddingModel_FallsBackToChatModel(t *testing.T) {
 	require.Equal(t, "qwen2.5:7b", got.Name)
 	require.Equal(t, "ollama", got.Provider)
 
-	// The chat model silently doing the embedding is the failure mode this whole
-	// resolver exists to make visible, so assert the span's full contents: an
-	// operator reading it has to learn which model was substituted, under which
-	// provider, and what to type to fix it.
+	// Assert the span's full contents: an operator reading it must learn
+	// which model was substituted, under which provider, and the remedy.
 	span := tracker.find("resolve", "embedding_model")
 	require.NotNil(t, span, "substituting the chat model must be reported through the tracker")
 	require.Equal(t, 1, span.changes, "the fallback must be reported exactly once")
@@ -160,16 +153,15 @@ func TestUnit_ResolveEmbeddingModel_ToleratesEmptyEverything(t *testing.T) {
 	got := resolveEmbeddingModel(ctx, store, Config{}, tracker)
 	require.Empty(t, got.Name)
 	require.Empty(t, got.Provider)
-	// An empty Config has no chat model to fall back TO, so the fallback is
-	// vacuous — but it is still the unconfigured path, and staying silent here
-	// would hide the emptiest configuration of all.
+	// An empty Config has no chat model to fall back to, but it is still the
+	// unconfigured path and must still be reported.
 	require.NotNil(t, tracker.find("resolve", "embedding_model"),
 		"an unset embedding model is reported even when the fallback resolves to nothing")
 }
 
-// A nil tracker is a legitimate caller state (Config.Tracker is optional), and
-// must degrade to the Noop rather than panic on the fallback path — the path
-// that is by definition reached when the caller configured the least.
+// TestUnit_ResolveEmbeddingModel_NilTrackerDegradesToNoop pins that a nil
+// tracker (Config.Tracker is optional) degrades to the Noop rather than
+// panicking on the fallback path.
 func TestUnit_ResolveEmbeddingModel_NilTrackerDegradesToNoop(t *testing.T) {
 	ctx, store := runtimetypes.SetupStore(t)
 	var nilTracker libtracker.ActivityTracker

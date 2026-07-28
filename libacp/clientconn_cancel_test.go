@@ -18,11 +18,8 @@ import (
 )
 
 // clientCancelHarness drives a ClientSideConnection directly over the wire,
-// playing the role of the agent with full control over raw requests and
-// notifications. It mirrors cancelHarness (conn_cancel_test.go) but from the
-// opposite side, so ClientSideConnection's cancellation behavior can be
-// exercised at the JSON-RPC level without needing a full
-// AgentSideConnection.
+// playing the agent role with raw requests/notifications (mirrors
+// cancelHarness in conn_cancel_test.go, from the opposite side).
 type clientCancelHarness struct {
 	t          *testing.T
 	writer     func(v any) error
@@ -78,10 +75,8 @@ func (h *clientCancelHarness) expectResponse(id int64) libacp.Response {
 	return in.Response
 }
 
-// wireGenericConnections is wireUpTestConnections (clientconn_test.go)
-// generalized to any libacp.Agent/libacp.Client pair, so tests in this file
-// can use agents that need their AgentSideConnection wired back in
-// (setConn) without depending on the *testAgent concrete type.
+// wireGenericConnections generalizes wireUpTestConnections (clientconn_test.go)
+// to any libacp.Agent/libacp.Client pair.
 func wireGenericConnections(t *testing.T, ctx context.Context, agentFactory libacp.AgentFactory, clientFactory libacp.ClientFactory) (*libacp.AgentSideConnection, *libacp.ClientSideConnection, func()) {
 	t.Helper()
 
@@ -110,10 +105,8 @@ func wireGenericConnections(t *testing.T, ctx context.Context, agentFactory liba
 	return agentConn, clientConn, cleanup
 }
 
-// blockingReadClient's ReadTextFile parks on its context and returns
-// ctx.Err() when cancelled, signalling its start on entered. This models a
-// Client whose fs/read_text_file implementation is genuinely slow (e.g. a
-// large file) when the agent abandons the request.
+// blockingReadClient models a slow fs/read_text_file: ReadTextFile parks on
+// its context and returns ctx.Err() when cancelled, signalling start on entered.
 type blockingReadClient struct {
 	libacp.UnimplementedClient
 	entered chan struct{}
@@ -125,10 +118,9 @@ func (c *blockingReadClient) ReadTextFile(ctx context.Context, _ libacp.ReadText
 	return libacp.ReadTextFileResponse{}, ctx.Err()
 }
 
-// "$/cancel_request" aborts the request with that JSON-RPC id on
-// ClientSideConnection too — session-agnostic protocol-level cancellation,
-// mirroring TestUnit_CancelRequest_AbortsInFlightPromptByRequestID
-// (conn_cancel_test.go) on the agent side.
+// Invariant: "$/cancel_request" aborts the request with that JSON-RPC id on
+// ClientSideConnection too, session-agnostic (mirrors
+// TestUnit_CancelRequest_AbortsInFlightPromptByRequestID on the agent side).
 func TestUnit_CancelRequest_AbortsInFlightFSReadByRequestID(t *testing.T) {
 	client := &blockingReadClient{entered: make(chan struct{})}
 	h := newClientCancelHarness(t, client)
@@ -143,31 +135,22 @@ func TestUnit_CancelRequest_AbortsInFlightFSReadByRequestID(t *testing.T) {
 	h.notify(libacp.MethodCancelRequest, libacp.CancelRequestNotification{RequestID: libacp.NewRequestIDNumber(5)})
 
 	resp := h.expectResponse(5)
-	// Unlike session/prompt (which has a spec-mandated "cancelled" stop
-	// reason carve-out), fs/read_text_file has no such special response
-	// shape: conn.go's callMethod has no per-method translation for it
-	// either, so whatever error the handler returns for its cancelled
-	// context is wrapped as a plain JSON-RPC error via AsError.
+	// Unlike session/prompt, fs/read_text_file has no "cancelled" carve-out:
+	// its cancelled-context error is wrapped as a plain JSON-RPC error.
 	require.NotNil(t, resp.Error, "wire: cancelling a non-prompt request must still answer it, as an error response")
 	assert.Equal(t, libacp.ErrInternalError, resp.Error.Code)
 
 	// Unknown ids are ignored, and the connection stays healthy.
 	h.notify(libacp.MethodCancelRequest, libacp.CancelRequestNotification{RequestID: libacp.NewRequestIDNumber(999)})
 	h.send(libacp.MethodFSReadTextFile, 6, libacp.ReadTextFileRequest{SessionID: "sess-1", Path: "/tmp/y.txt"})
-	// The second read blocks forever on its own ctx (never cancelled); cancel
-	// it too so the harness's cleanup doesn't leak a goroutine past the test.
 	h.notify(libacp.MethodCancelRequest, libacp.CancelRequestNotification{RequestID: libacp.NewRequestIDNumber(6)})
 	resp = h.expectResponse(6)
 	require.NotNil(t, resp.Error)
 }
 
-// blockingAgent (conn_cancel_test.go) is reused below for outbound-call
-// cancellation scenarios that don't need an agent-initiated request.
-
-// outbound Prompt ctx cancelled -> $/cancel_request observed by the agent
-// side, Prompt returns ctx.Err(). Mirrors
-// TestUnit_AbandonedClientCall_SendsCancelRequest (conn_cancel_test.go) but
-// for ClientSideConnection's outbound call.
+// Invariant: cancelling an outbound Prompt's ctx emits "$/cancel_request" for
+// the abandoned request and returns ctx.Err() (mirrors
+// TestUnit_AbandonedClientCall_SendsCancelRequest for the outbound call).
 func TestUnit_ClientSideConnection_PromptCtxCancel_EmitsCancelRequestAndReturnsCtxErr(t *testing.T) {
 	client := &testClient{}
 	h := newClientCancelHarness(t, client)
@@ -182,8 +165,7 @@ func TestUnit_ClientSideConnection_PromptCtxCancel_EmitsCancelRequestAndReturnsC
 		done <- err
 	}()
 
-	// Observe the outbound session/prompt request; the fake agent never
-	// answers it.
+	// Observe the outbound session/prompt request; the fake agent never answers it.
 	line, err := h.reader()
 	require.NoError(t, err)
 	in, err := libacp.ParseIncoming(line)
@@ -194,10 +176,8 @@ func TestUnit_ClientSideConnection_PromptCtxCancel_EmitsCancelRequestAndReturnsC
 
 	promptCancel()
 
-	// The outbound call's $/cancel_request notification is a blocking pipe
-	// write (the test harness has no buffering); it must be drained before
-	// Prompt's own return can be observed, since call() writes it
-	// synchronously right before returning ctx.Err().
+	// call() writes $/cancel_request synchronously before returning ctx.Err(),
+	// so it must be drained before Prompt's own return is observed.
 	line, err = h.reader()
 	require.NoError(t, err)
 	in, err = libacp.ParseIncoming(line)
@@ -216,10 +196,8 @@ func TestUnit_ClientSideConnection_PromptCtxCancel_EmitsCancelRequestAndReturnsC
 	}
 }
 
-// permissionTurnAgent's Prompt asks the client for permission and, once that
-// resolves, translates a "cancelled" outcome into the turn's own stop reason
-// — an agent proactively honoring the cancellation it learns about through
-// the permission response, rather than through its own ctx.
+// permissionTurnAgent's Prompt asks the client for permission and translates
+// a "cancelled" outcome into the turn's own stop reason.
 type permissionTurnAgent struct {
 	libacp.UnimplementedAgent
 	conn     *libacp.AgentSideConnection
@@ -245,14 +223,9 @@ func (a *permissionTurnAgent) Prompt(ctx context.Context, req libacp.PromptReque
 		},
 	})
 	if err != nil {
-		// AgentSideConnection.call() (conn.go) races this outbound call's own
-		// ctx.Done() (cancelled the instant session/cancel arrives) against
-		// the client's real response arriving on the wire; when both are
-		// ready together, which one the select picks is unspecified. This is
-		// exactly the scenario prompt-turn.mdx warns about: "Agents MUST
-		// catch these errors and return the semantically meaningful
-		// cancelled stop reason." A cancelled ctx here always means the turn
-		// is being cancelled, regardless of which side of the race fired.
+		// call() races this outbound call's ctx.Done() against the client's
+		// real response; a cancelled ctx here always means the turn is being
+		// cancelled, per the spec's "catch and return cancelled" contract.
 		if errors.Is(err, context.Canceled) {
 			return libacp.PromptResponse{StopReason: libacp.StopReasonCancelled}, nil
 		}
@@ -265,11 +238,9 @@ func (a *permissionTurnAgent) Prompt(ctx context.Context, req libacp.PromptReque
 	return libacp.PromptResponse{StopReason: libacp.StopReasonEndTurn}, nil
 }
 
-// countingPermClient's RequestPermission blocks on its context — modelling a
-// UI permission dialog awaiting user input — signalling entered once invoked
-// and counting invocations, so tests can assert whether CancelPrompt's forced
-// resolution bypassed it (calls == 0) or raced an already-invoked call
-// (calls == 1, but its real return value must still lose to the forced one).
+// countingPermClient's RequestPermission blocks on its context, modelling a UI
+// permission dialog, and counts invocations so tests can assert whether
+// CancelPrompt's forced resolution bypassed it or raced an already-invoked call.
 type countingPermClient struct {
 	libacp.UnimplementedClient
 	calls   atomic.Int32
@@ -283,13 +254,9 @@ func (c *countingPermClient) RequestPermission(ctx context.Context, _ libacp.Req
 	return libacp.RequestPermissionResponse{}, ctx.Err()
 }
 
-// TestUnit_ClientSideConnection_CancelPrompt_ForceResolvesPendingPermission
-// drives ClientSideConnection directly over the wire (clientCancelHarness), so
-// it observes exactly what this connection puts on the wire for a pending
-// session/request_permission request once CancelPrompt is called — without
-// the added, unrelated raciness of a real AgentSideConnection also reacting
-// to session/cancel by cancelling its own outbound call's context (see the
-// loopback test below for that end-to-end behavior instead).
+// Invariant: CancelPrompt force-resolves a pending session/request_permission
+// request as "cancelled" on the wire, observed here without a real
+// AgentSideConnection's added raciness (see the loopback test below for that).
 func TestUnit_ClientSideConnection_CancelPrompt_ForceResolvesPendingPermission(t *testing.T) {
 	client := &countingPermClient{entered: make(chan struct{})}
 	h := newClientCancelHarness(t, client)
@@ -301,9 +268,8 @@ func TestUnit_ClientSideConnection_CancelPrompt_ForceResolvesPendingPermission(t
 		})
 	}()
 
-	// Observe the outbound session/prompt request: by the time it is on the
-	// wire, Prompt has already registered its promptTurns entry, so a
-	// subsequent CancelPrompt for this session is guaranteed to find it.
+	// By the time this request is on the wire, Prompt has already registered
+	// its promptTurns entry, so a subsequent CancelPrompt is guaranteed to find it.
 	line, err := h.reader()
 	require.NoError(t, err)
 	in, err := libacp.ParseIncoming(line)
@@ -324,16 +290,12 @@ func TestUnit_ClientSideConnection_CancelPrompt_ForceResolvesPendingPermission(t
 		t.Fatal("permission request never reached the client handler")
 	}
 
-	// CancelPrompt's forced write (and CancelSession's notify write right
-	// after it) are blocking pipe writes with no buffering on the harness
-	// side, so it must run concurrently with draining the wire below rather
-	// than before it.
+	// Blocking pipe writes with no harness buffering, so run concurrently
+	// with draining the wire below.
 	cancelErr := make(chan error, 1)
 	go func() { cancelErr <- h.clientConn.CancelPrompt("sess-1") }()
 
-	// forceCancelSessionPermissions writes the permission response before
-	// CancelPrompt sends session/cancel, so wire order puts the response
-	// first.
+	// forceCancelSessionPermissions writes before CancelPrompt's session/cancel.
 	resp := h.expectResponse(100)
 	require.Nil(t, resp.Error, "the forced cancellation must be a valid result, never an error response")
 	var permResp libacp.RequestPermissionResponse
@@ -357,16 +319,9 @@ func TestUnit_ClientSideConnection_CancelPrompt_ForceResolvesPendingPermission(t
 	assert.Equal(t, int32(1), client.calls.Load(), "the application handler was invoked once (it was already in flight when cancelled) but its own answer must never reach the wire")
 }
 
-// Full prompt-turn cancellation loopback, with a real AgentSideConnection on
-// the other end: the client prompts, the agent requests permission, the
-// client cancels the turn while that permission request is still pending,
-// and the agent resolves session/prompt with stopReason "cancelled" — which
-// Prompt returns. permissionTurnAgent's error handling (above) accounts for
-// conn.go's own inherent, pre-existing race between an outbound call's ctx
-// cancellation and a legitimate response arriving at nearly the same time;
-// TestUnit_ClientSideConnection_CancelPrompt_ForceResolvesPendingPermission
-// above is the deterministic test of this connection's own contribution to
-// that behavior.
+// Invariant: end-to-end with a real AgentSideConnection, cancelling a turn
+// while its permission request is pending resolves session/prompt with
+// stopReason "cancelled".
 func TestUnit_FullPromptTurnCancellation_PendingPermissionAutoResolved(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -410,8 +365,7 @@ func TestUnit_FullPromptTurnCancellation_PendingPermissionAutoResolved(t *testin
 		t.Fatal("permission request never reached the client handler")
 	}
 
-	// The permission request is now genuinely pending (blocked on user
-	// input). Cancel the turn.
+	// The permission request is now genuinely pending; cancel the turn.
 	require.NoError(t, clientConn.CancelPrompt(newSess.SessionID))
 
 	select {
@@ -426,8 +380,7 @@ func TestUnit_FullPromptTurnCancellation_PendingPermissionAutoResolved(t *testin
 }
 
 // gatedPermissionAgent only asks for permission once told to proceed, so a
-// test can cancel the turn strictly before the permission request is even
-// sent — the "new request" half of the pending-permission rule.
+// test can cancel the turn strictly before the request is sent.
 type gatedPermissionAgent struct {
 	libacp.UnimplementedAgent
 	conn     *libacp.AgentSideConnection
@@ -447,13 +400,10 @@ func (a *gatedPermissionAgent) NewSession(_ context.Context, _ libacp.NewSession
 func (a *gatedPermissionAgent) Prompt(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
 	close(a.started)
 	<-a.proceed
-	// Spec: the Agent MAY still send updates (and, by extension, still have
-	// in-flight tool activity) after session/cancel, as long as it resolves
-	// before responding to session/prompt. Using a fresh context here models
-	// exactly that: this permission request is sent after the turn's own ctx
-	// is already cancelled, deliberately not tied to it, so the request
-	// reaches the wire (and the client) rather than being aborted locally by
-	// the agent's own outbound-call cancellation (conn.go).
+	// Spec: the agent may still have in-flight activity after session/cancel
+	// as long as it resolves before responding. A fresh, untied context here
+	// models that, so the request reaches the wire instead of being aborted
+	// locally by the turn's own cancelled context.
 	resp, err := a.conn.RequestPermission(context.Background(), libacp.RequestPermissionRequest{
 		SessionID: req.SessionID,
 		ToolCall:  libacp.PermissionToolCall{ToolCallID: "tc-1"},
@@ -536,10 +486,7 @@ func TestUnit_CancelPrompt_AutoResolvesNewPermissionRequest_WithoutInvokingHandl
 }
 
 // stressAgent/stressClient exercise inbound and outbound cancellation
-// concurrently: the agent randomly asks for permission (an inbound request to
-// the client that may be cancelled from either side, and may itself be
-// abandoned if the agent's own ctx dies), and the turn itself may time out or
-// be cancelled by the test.
+// concurrently: random permission requests and turn timeouts/cancellations.
 type stressAgent struct {
 	libacp.UnimplementedAgent
 	conn *libacp.AgentSideConnection
@@ -563,15 +510,8 @@ func (a *stressAgent) Prompt(ctx context.Context, req libacp.PromptRequest) (lib
 			},
 		})
 		if err != nil {
-			// In this synthetic scenario every error RequestPermission can
-			// produce traces back to cancellation somewhere in the chain —
-			// either observed directly (ctx.Err()) or, once the client's own
-			// cancelled-ctx error has crossed the wire as a JSON-RPC error
-			// response, wrapped as a *libacp.Error whose message says
-			// "context canceled" but which errors.Is no longer recognizes as
-			// context.Canceled. A real agent facing a genuine (non-
-			// cancellation) permission error would propagate it; here there
-			// is no such case, so it always resolves the turn as cancelled.
+			// Every error here traces back to cancellation somewhere in the
+			// chain, so it always resolves the turn as cancelled.
 			return libacp.PromptResponse{StopReason: libacp.StopReasonCancelled}, nil
 		}
 		if resp.Outcome.Outcome == libacp.PermissionOutcomeCancelled {
@@ -601,11 +541,9 @@ func (c *stressClient) RequestPermission(ctx context.Context, _ libacp.RequestPe
 	}
 }
 
-// TestUnit_ConcurrentCancellationStress hammers the same ClientSideConnection
-// with many goroutines issuing overlapping outbound calls, inbound
-// agent-initiated requests, and random cancellations (ctx cancel, ctx
-// timeout, CancelPrompt), meant to be run with -race: nothing here asserts a
-// specific outcome per call beyond "no panic, no unexpected error, no hang".
+// Invariant (race-detector target): overlapping outbound calls, inbound
+// requests, and random cancellations never panic, hang, or produce an
+// unexpected error.
 func TestUnit_ConcurrentCancellationStress(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
@@ -675,8 +613,7 @@ func TestUnit_ConcurrentCancellationStress(t *testing.T) {
 }
 
 // closeAwareClient signals cancelled once its in-flight ReadTextFile handler
-// observes ctx.Done(), so a test can confirm connection shutdown propagates
-// to already-running handlers.
+// observes ctx.Done(), confirming shutdown propagates to running handlers.
 type closeAwareClient struct {
 	libacp.UnimplementedClient
 	entered   chan struct{}
@@ -690,9 +627,9 @@ func (c *closeAwareClient) ReadTextFile(ctx context.Context, _ libacp.ReadTextFi
 	return libacp.ReadTextFileResponse{}, ctx.Err()
 }
 
-// Connection close mid-request: a pending outbound call fails fast with
-// ErrConnectionClosed, and an in-flight inbound handler's context is
-// cancelled — mirroring conn.go's shutdown() behavior on the agent side.
+// Invariant: closing the connection mid-request fails a pending outbound
+// call fast with ErrConnectionClosed and cancels an in-flight inbound
+// handler's context (mirrors conn.go's shutdown on the agent side).
 func TestUnit_ConnectionClose_FailsPendingCallsAndCancelsHandlers(t *testing.T) {
 	client := &closeAwareClient{entered: make(chan struct{}), cancelled: make(chan struct{})}
 	h := newClientCancelHarness(t, client)
@@ -713,8 +650,7 @@ func TestUnit_ConnectionClose_FailsPendingCallsAndCancelsHandlers(t *testing.T) 
 		promptDone <- err
 	}()
 
-	// Read the outbound session/prompt request off the wire so we know it is
-	// registered as pending before closing the connection out from under it.
+	// Confirm the request is registered as pending before closing the connection.
 	line, err := h.reader()
 	require.NoError(t, err)
 	in, err := libacp.ParseIncoming(line)

@@ -2,32 +2,18 @@ package transcript
 
 import "strings"
 
-// sanitizer strips terminal control sequences out of shell output so the
-// transcript only ever holds literal cells — [frame.Span] text may not carry
-// escape codes, and a cursor-motion sequence printed into scrollback would
-// scribble over lines the terminal already owns.
-//
-// This is the MVP simplification of blueprint 4.17 requirement 7, which asks
-// for SGR to be PARSED and re-rendered through the style table while
-// everything else is stripped. Here SGR is stripped too: shell output renders
-// in one StyleShell role, and colored program output loses its color rather
-// than its content. What requirement 7 does get in full is the hard part —
-// the parser is a state machine carried across chunk boundaries, so an escape
-// split between two TerminalChunk events is still recognized as one sequence
-// rather than leaking its tail into the transcript as text. That exact defect
-// was found and fixed once already in the deleted web frontend's sanitizer.
-//
-// Bytes >= 0x80 always pass through: they are UTF-8 continuation bytes, never
-// C1 controls, and treating them as controls is how a sanitizer eats non-ASCII
-// text.
+// sanitizer strips terminal control sequences (all SGR/CSI/OSC/DCS escapes
+// and C0 controls except newline/tab) out of shell output so the transcript
+// only ever holds literal cells: escape codes and cursor-motion sequences
+// must never reach frame.Span text or scrollback. The parser is a state
+// machine carried across chunk boundaries, so an escape split across two
+// TerminalChunk events is still recognized as one sequence. Bytes >= 0x80
+// always pass through as UTF-8 continuation bytes.
 type sanitizer struct {
 	state sanState
-	// cr records a carriage return held back one byte. CR is not a control
-	// to drop and not a line ending on its own: "\r\n" is ONE line ending
-	// and a lone "\r" is a cursor return that overwrites its line. Which one
-	// it is depends on the next byte, and that byte may be in the next chunk
-	// — the same cross-chunk problem the escape parser above solves, for the
-	// same reason.
+	// cr records a carriage return held back one byte, since "\r\n" is one
+	// line ending but a lone "\r" is a cursor return, and the next byte that
+	// disambiguates it may be in the next chunk.
 	cr bool
 }
 
@@ -45,12 +31,10 @@ const (
 )
 
 // write returns the printable text of chunk. Newlines, tabs and carriage
-// returns survive — newlines settle a line, a tab is column alignment the
-// caller expands, and a CR is a cursor motion the caller resolves against the
-// line it lands on (see applyCR) — every other C0 control and DEL is dropped.
+// returns survive (the caller resolves CR against the line it lands on, see
+// applyCR); every other C0 control and DEL is dropped.
 func (s *sanitizer) write(chunk string) string {
-	// The common case is a chunk with nothing to strip, in which case the
-	// input is returned as-is and no buffer is allocated.
+	// The common case allocates nothing: nothing to strip, return as-is.
 	if s.state == sanText && !s.cr && !needsStrip(chunk) {
 		return chunk
 	}
@@ -59,9 +43,8 @@ func (s *sanitizer) write(chunk string) string {
 	for i := 0; i < len(chunk); i++ {
 		c := chunk[i]
 		if s.cr {
-			// Resolve the held CR now that its successor is known. A CR can
-			// only be held from sanText, and it is consumed on the very next
-			// byte, so the state below is still sanText here.
+			// Resolve the held CR now that its successor is known; a held CR
+			// can only come from sanText, so the state below is still sanText.
 			s.cr = false
 			if c == '\n' {
 				b.WriteByte('\n')
@@ -137,8 +120,8 @@ func (s *sanitizer) write(chunk string) string {
 }
 
 // needsStrip reports whether chunk holds anything the sanitizer would remove
-// or hold back. A CR counts: it is not removed, but it must go through the
-// state machine so a "\r\n" split across chunks is still one line ending.
+// or hold back; a CR counts, since it must pass through the state machine so
+// a "\r\n" split across chunks is still one line ending.
 func needsStrip(chunk string) bool {
 	for i := 0; i < len(chunk); i++ {
 		if c := chunk[i]; (c < 0x20 && c != '\n' && c != '\t') || c == 0x7f {

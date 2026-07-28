@@ -10,22 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The injected permission fallback (WithPermissionFallback) is the kernel's one
-// concession to human-in-the-loop, and its whole point is that the kernel learns
-// nothing from it. These tests pin the three properties that makes true:
-//
-//  1. UNWIRED IS UNCHANGED. No fallback means the built-in headless deny, byte
-//     for byte — an existing deployment that never sets the option sees exactly
-//     what it saw before the seam existed.
-//  2. WIRED MEANS ANSWERED. The fallback receives the instance's identity
-//     without asking for it, and whatever it returns is what the downstream
-//     gets — including a GRANT, which the kernel has no opinion about.
-//  3. A BROKEN ANSWERER IS NOT WORSE THAN NO ANSWERER. A fallback that errors
-//     falls back to the deny rather than faulting the downstream turn.
-//
-// They exercise the hub directly rather than through a spawned subprocess: the
-// subject is the routing decision, and the end-to-end path (a real unit, really
-// unattended, really asking) is covered by fleetservice's e2e.
+// These tests pin WithPermissionFallback's three properties: unwired keeps
+// the built-in deny unchanged; wired, the fallback's answer (including a
+// grant) passes through untouched; and a fallback that errors falls back to
+// the deny rather than faulting the downstream turn. Most exercise the hub
+// directly rather than a spawned subprocess.
 
 // permissionRequest is the request shape the tests answer, offering both an
 // allow and a reject option so every outcome is expressible.
@@ -144,9 +133,8 @@ func TestUnit_PermissionFallback_ErrorFallsBackToDeny(t *testing.T) {
 	require.Equal(t, []libacp.SessionID{"sess-1"}, *denies)
 }
 
-// A session WITH a controller never reaches the fallback: an attached human (or
-// a bridge relaying to one) outranks any headless answerer, so the option cannot
-// quietly take over supervised sessions.
+// A session with a controller never reaches the fallback: an attached
+// answerer outranks the headless fallback.
 func TestUnit_PermissionFallback_ControllerWins(t *testing.T) {
 	called := false
 	hub, _, _ := hubWithFallback(func(_ context.Context, _ libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error) {
@@ -163,13 +151,12 @@ func TestUnit_PermissionFallback_ControllerWins(t *testing.T) {
 	resp, err := hub.requestPermission(context.Background(), permissionRequest("sess-1"))
 	require.NoError(t, err)
 	require.Equal(t, "yes", resp.Outcome.OptionID)
-	require.False(t, called, "an attached controller answers; the fallback is for UNATTENDED sessions only")
+	require.False(t, called, "an attached controller answers; the fallback is for unattended sessions only")
 }
 
-// The Manager closes the instance's identity over the fallback, so an answerer
-// knows which unit is asking without calling back into the Manager (which the
-// EventSink contract forbids, and which would deadlock the session it answers
-// for). This is a white-box check of that wiring: bringUp is what builds it.
+// The Manager closes the instance's identity over the fallback, so an
+// answerer knows which unit is asking without calling back into the Manager.
+// White-box check of the wiring bringUp builds.
 func TestUnit_PermissionFallback_CarriesInstanceIdentity(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)

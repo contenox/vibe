@@ -12,11 +12,10 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
 )
 
-// Escape sequences beam is allowed to emit. The list is deliberately short:
-// no alternate screen, no mouse tracking, no full-screen erase (ED) and no
-// absolute cursor addressing (CUP), because the engine paints inside a
-// region it does not own the boundaries of. Blanking is therefore always
-// EL2 plus relative cursor movement, one row at a time.
+// Escape sequences beam is allowed to emit. No alternate screen, mouse
+// tracking, full-screen erase (ED), or absolute cursor addressing (CUP): the
+// engine paints inside a region it does not own the boundaries of, so
+// blanking is always EL2 plus relative cursor movement, one row at a time.
 const (
 	seqSyncBegin  = "\x1b[?2026h" // begin synchronized update
 	seqSyncEnd    = "\x1b[?2026l" // end synchronized update
@@ -51,35 +50,19 @@ func cursorRight(n int) string {
 	return "\x1b[" + strconv.Itoa(n) + "C"
 }
 
-// painter turns Frames into terminal bytes. It is the whole commit
-// algorithm with none of the terminal syscalls: size is injected and output
-// goes to any io.Writer, so every rendering invariant is testable headless.
+// painter turns Frames into terminal bytes: the whole commit algorithm with
+// none of the terminal syscalls, so every rendering invariant is testable
+// headless. Coordinates are relative — the painter never assumes a screen
+// row, only "the row the cursor was on when this region started" — which is
+// what lets scrollback scroll the terminal naturally.
 //
-// Coordinates are relative throughout. The painter knows the live region's
-// origin only as "the row the cursor was on when this region started", and
-// tracks its own physical row within the region; it never assumes a screen
-// row, which is what lets scrollback scroll the terminal naturally.
-//
-// Auto-margin assumption (the one thing the painter believes about the
-// terminal it cannot see): DECAWM is on and the wrap is DEFERRED — writing
-// the last cell of a row leaves the cursor on that row with a pending-wrap
-// flag, and the next printable rune, not the last one, is what moves to the
-// following row. CR (and therefore every "\r\n" and every "\r" + EL2 the
-// painter emits) cancels a pending wrap without consuming a row. Every
-// modern terminal in beam's target set behaves this way (xterm's
-// last-column flag and its descendants: VTE, kitty, alacritty, WezTerm,
-// iTerm2, Windows Terminal/ConPTY, tmux). The consequences the painter
-// depends on: a live row rendered to exactly `width` cells still occupies
-// exactly one physical row, and a scrollback line of exactly `width` cells
-// followed by "\r\n" produces one row of history and no blank row after it.
-//
-// The invariant that follows from it: the painter never emits an ERASE while
-// a wrap is pending — EL2 would erase the row the cursor is still parked on
-// rather than the row the text belongs to — and it does not have to, because
-// every erase it emits is immediately preceded by CR, which resolves the flag
-// first. Cursor MOVES need no such care: a move resolves the pending wrap as
-// a side effect and lands on the row the painter's own model says it is on,
-// which is why moveToRow is safe to emit at any point in a frame.
+// It assumes DECAWM auto-margin with deferred wrap: writing the last cell of
+// a row leaves a pending-wrap flag that only the next printable rune
+// resolves, and CR cancels a pending wrap without consuming a row. Every
+// erase the painter emits is therefore preceded by CR, so it never erases
+// the row a pending wrap parked the cursor on instead of the row the text
+// belongs to; cursor moves resolve the pending wrap themselves, so
+// moveToRow is safe to emit at any point in a frame.
 type painter struct {
 	out    io.Writer
 	styles StyleResolver
@@ -95,21 +78,12 @@ type painter struct {
 	invalid  bool         // the next commit must fully repaint
 }
 
-// resize records a new terminal size and DISOWNS the live region, exactly as
-// reset() does.
-//
-// Invalidating the diff cache is not enough. Every terminal in beam's target
-// set reflows on resize: the rows the painter measured at the old width are
-// rewrapped, so both the row count it remembers and the anchor it would move
-// up to are wrong. Moving over them and repainting in place is how a resize
-// produces interleaved fragments of two frames. So the painter forgets the
-// region instead: the next commit paints fresh wherever the cursor now is and
-// reclaims nothing.
-//
-// The accepted artifact is that one stale copy of the region may be left
-// above the new one — a snapshot of the composer scrolled into history. That
-// is honest (it looks like output, because it is) and strictly better than
-// erasing rows the painter can no longer locate.
+// resize records a new terminal size and disowns the live region, exactly as
+// reset() does: a resize reflows the rows the painter measured at the old
+// width, so both its remembered row count and anchor are wrong, and
+// repainting in place would interleave fragments of two frames. A stale
+// snapshot may be left scrolled into history instead, which is strictly
+// better than erasing rows the painter can no longer locate.
 func (p *painter) resize(width, height int) {
 	if width == p.width && height == p.height {
 		return
@@ -119,10 +93,8 @@ func (p *painter) resize(width, height int) {
 }
 
 // reset forgets the live region entirely: the next commit paints fresh at
-// the cursor's current position without reclaiming rows above it. Used after
-// Suspend, where another program owned the screen and nothing about the old
-// region is still true, and after a resize, where the terminal reflowed the
-// region out from under the painter (see resize).
+// the cursor's current position without reclaiming rows above it. Used
+// after Suspend and after a resize (see resize).
 func (p *painter) reset() {
 	p.prev = nil
 	p.prevRows = 0
@@ -132,47 +104,25 @@ func (p *painter) reset() {
 	p.invalid = true
 }
 
-// commit renders one frame: Scrollback lines are printed once into terminal
-// history above the live region, then the live region is repainted —
-// minimally when only its rows changed — inside one synchronized-output
-// bracket with the cursor hidden. A frame that changes nothing writes no
-// bytes at all.
+// commit renders one frame: scrollback lines print once into terminal
+// history above the live region, then the live region repaints — minimally
+// when only its rows changed — inside one synchronized-output bracket with
+// the cursor hidden. A frame that changes nothing writes no bytes.
 //
-// The scrollback path is deliberately not row-arithmetic. Printing history
-// RAW is constitutional (see renderRaw), so how many physical rows a commit
-// prints is unknowable to the painter — it depends on the terminal's
-// wrapping. The path is therefore built to never need the answer:
+// The scrollback path avoids row arithmetic, since printing history raw
+// (see renderRaw) makes the physical row count unknowable to the painter:
 //
-//  1. move to live row 0 and blank the ENTIRE previous live region (EL2 per
-//     row, moving down, then back up). Nothing stale can survive below,
-//     however far the printing that follows scrolls the screen.
-//  2. print each scrollback line as CR + EL2 + raw text + "\r\n". The
-//     terminal soft-wraps whatever is too wide; a soft-wrapped line stays
-//     ONE logical line for native selection. The EL2 is redundant for the
-//     rows step 1 blanked and is kept for the one path where step 1 blanks
-//     nothing: after reset() (Suspend) the painter deliberately owns no
-//     rows, so the row a history line starts on may still hold another
-//     program's output. It is always emitted at column 0 of a row this
-//     commit is about to fill, so it can neither clobber a pending wrap nor
-//     erase anything beam wants to keep. Continuation rows of a
-//     soft-wrapped line are NOT erased — that would mean knowing the wrap
-//     the whole design refuses to predict; the terminal supplies blank rows
-//     when it scrolls, and beam never prints above its own last output.
-//  3. after the last "\r\n" the cursor sits at column 0 of the row below all
-//     printed content, whatever wrapping occurred. That row is the live
-//     region's new origin: re-anchor there and paint every live row fresh.
-//     The diff cache is invalid by definition on this path, and no vacated
-//     rows remain to clear — step 1 already blanked them.
+//  1. blank the entire previous live region (EL2 per row).
+//  2. print each scrollback line as CR + EL2 + raw text + "\r\n", letting
+//     the terminal soft-wrap anything too wide.
+//  3. after the last "\r\n" the cursor sits below all printed content —
+//     the live region's new origin — so re-anchor there and paint fresh.
 func (p *painter) commit(f frame.Frame) error {
 	live, cursor := f.Live, f.Cursor
 	if p.height > 0 && len(live) > p.height {
 		dropped := len(live) - p.height
 		live = live[dropped:] // invariant: a too-tall region shows its tail
-		// The frame's cursor is addressed in Live's coordinates; the rows the
-		// clamp dropped are not on screen, so the caret has to move up with
-		// them or it lands on the wrong line. placeCursor clamps what is left
-		// into the region, which is what puts a caret in a scrolled-off row at
-		// the top of the visible tail rather than at its bottom.
+		// The clamped rows are off-screen, so the caret moves up with them.
 		cursor.Row -= dropped
 	}
 	rows := make([]string, len(live))
@@ -217,25 +167,17 @@ func (p *painter) commit(f frame.Frame) error {
 	p.placeCursor(&b, cursor, len(rows))
 	b.WriteString(seqSyncEnd)
 
-	// One Write per commit, and the bookkeeping is published only once that
-	// Write has fully succeeded. Publishing first would describe a frame the
-	// screen may not be showing: a short or failed write can leave any prefix
-	// of the frame painted, and a cache claiming otherwise makes the identical
-	// retry a no-op — the diff finds nothing to do and the terminal keeps a
-	// half-drawn frame forever.
+	// Bookkeeping publishes only once the Write fully succeeds: publishing
+	// first would let a cache describe a frame the screen may not show,
+	// making an identical retry a no-op that leaves a half-drawn frame.
 	if _, err := p.out.Write(b.Bytes()); err != nil {
-		// What is on screen is now unknown, so the next commit must repaint
-		// everything; prev/prevRows/painted keep describing the last frame
-		// that did land, and the anchor is rewound to match them. Neither is
-		// certainly true of the screen — nothing can be after a partial write
-		// — but they are the only self-consistent state left, and the full
-		// repaint is what recovers from it.
+		// What is on screen is now unknown, so the next commit repaints
+		// everything; the anchor rewinds to match the last frame that did
+		// land, the only self-consistent state left.
 		p.invalid = true
 		p.row = anchor
-		// The frame opened a synchronized-output bracket and hid the cursor.
-		// If the write died between those and the end of the frame, the
-		// terminal is frozen and blind until something closes them; this is
-		// the only chance to try.
+		// Close the sync bracket and show the cursor in case the write died
+		// mid-frame, or the terminal stays frozen and blind.
 		_, _ = io.WriteString(p.out, seqSyncEnd+seqCursorShow)
 		return fmt.Errorf("beam term: commit: %w", err)
 	}
@@ -249,15 +191,10 @@ func (p *painter) commit(f frame.Frame) error {
 }
 
 // blankRegion erases every physical row the live region currently occupies
-// and returns to the first of them, leaving the cursor at column 0. It is
-// the scrollback path's substitute for row arithmetic: once the region is
-// blank, printing history over it cannot expose a fragment of the old
-// composer no matter how the terminal wraps or scrolls, and no row the
-// region vacates has to be tracked down afterwards.
-//
-// Only EL2 and relative cursor movement are used — ED and CUP stay
-// forbidden — and every erase is preceded by CR, so a pending wrap is
-// always resolved by that CR rather than clobbered by the erase.
+// and returns to the first of them, leaving the cursor at column 0, so
+// history printed over it cannot expose a fragment of the old composer.
+// Only EL2 and relative cursor movement are used, each preceded by CR so a
+// pending wrap is resolved rather than clobbered by the erase.
 func (p *painter) blankRegion(b *bytes.Buffer) {
 	for i := range p.prevRows {
 		if i > 0 {
@@ -271,10 +208,8 @@ func (p *painter) blankRegion(b *bytes.Buffer) {
 
 // clear erases every physical row the region owns and forgets the region,
 // leaving the cursor at column 0 of the row where the region began — the
-// clean line the shell's next prompt lands on. This is Close's structural
-// guarantee: no beam chrome (gutter, status bar) can survive an orderly
-// exit, no matter what the final frame held or whether the app remembered
-// to commit an empty one.
+// clean line the shell's next prompt lands on. This is Close's guarantee
+// that no beam chrome survives an orderly exit.
 func (p *painter) clear() error {
 	if p.prevRows == 0 {
 		return nil
@@ -361,9 +296,8 @@ func (p *painter) placeCursor(b *bytes.Buffer, c frame.Cursor, height int) {
 		return
 	}
 	if height == 0 {
-		// An empty live region has no row to address, but every frame hides
-		// the cursor on the way in. Leaving it hidden here would hand the user
-		// an invisible caret for as long as the region stays empty.
+		// An empty region has no row to address, but every frame hides the
+		// cursor on the way in, so it must still be shown here.
 		b.WriteString(seqCursorShow)
 		return
 	}
@@ -403,12 +337,10 @@ func (p *painter) moveToRow(b *bytes.Buffer, target int) {
 }
 
 // renderLine resolves every span through the StyleResolver and truncates the
-// result to the terminal width. Live rows are truncated rather than wrapped
-// on purpose: the region's height is len(Live) by contract, and silently
-// growing it would corrupt every offset the app computed. That geometry
-// contract is why the live region keeps its width clamp while scrollback
-// (renderRaw) deliberately loses it: live rows are repainted, never copied
-// out of history, so truncation costs nothing a redraw does not fix.
+// result to the terminal width. Live rows truncate rather than wrap: the
+// region's height is len(Live) by contract, and growing it would corrupt
+// every offset the app computed. Live rows are repainted, never copied out
+// of history, so truncation costs nothing a redraw does not fix.
 func (p *painter) renderLine(line frame.Line, width int) string {
 	if width <= 0 {
 		return ""
@@ -443,18 +375,12 @@ func (p *painter) sgr(id frame.StyleID) (string, string) {
 }
 
 // renderRaw resolves a scrollback line's spans and hands the result to the
-// terminal WHOLE: no truncation, no wrapping, not even at the terminal's
-// width. This is the copy/paste ruling made mechanical (blueprint section 1,
-// acceptance test 1). A line wider than the terminal is soft-wrapped by the
-// terminal itself, which keeps it ONE logical line in the selection model,
-// so dragging over a long code line and pasting it yields exactly that line.
-// The painter used to hard-wrap here instead, emitting "\r\n" at each wrap
-// point; those are real line breaks in terminal history, and they came back
-// out of every paste as phantom newlines in the middle of the user's code.
-//
-// The price is that the painter cannot know how many physical rows a
-// scrollback line consumed — which is why commit's scrollback path is built
-// to never ask.
+// terminal whole: no truncation, no wrapping, not even at the terminal's
+// width. A line wider than the terminal is soft-wrapped by the terminal
+// itself, keeping it one logical line in the selection model, so a paste
+// never gains a phantom newline mid-line. The price is that the painter
+// cannot know how many physical rows a scrollback line consumed, which is
+// why commit's scrollback path never asks.
 func (p *painter) renderRaw(line frame.Line) string {
 	var b strings.Builder
 	for _, s := range line {
@@ -471,21 +397,13 @@ func (p *painter) renderRaw(line frame.Line) string {
 }
 
 // spanText enforces frame.Span's "printable cells only" contract instead of
-// trusting it. The engine is the last place a byte can turn into terminal
-// behaviour, and the whole rendering model rests on beam emitting a closed
-// list of escape sequences: one ESC smuggled through a span could clear the
-// screen, enable the alternate screen or the mouse, or move the cursor out of
-// the region the painter believes it owns — and a lone \n or \t would silently
-// break the one-span-row-is-one-terminal-row geometry every offset depends on.
-//
-// So every rune a span cannot legitimately carry is DROPPED here: C0 controls
-// (ESC included — no attempt is made to parse and skip "the rest" of a
-// sequence, since there is no rest that would be legitimate either), DEL, the
-// C1 range that 8-bit terminals read as controls in its own right, and bytes
-// that are not valid UTF-8 at all (a raw 0x9b is a CSI introducer). Comp-layer
-// sanitizers do this upstream where the text still has meaning and something
-// better than deletion is possible; this is the structural backstop that makes
-// the guarantee hold for spans that never went through them.
+// trusting it: the engine is the last place a byte can become terminal
+// behavior, so any ESC smuggled through a span could hijack the screen, and
+// a stray \n or \t would break the one-span-row-is-one-terminal-row geometry.
+// Every rune a span cannot legitimately carry is dropped: C0 controls
+// (including ESC, never parsed as a sequence to skip), DEL, the C1 range,
+// and invalid UTF-8. Comp-layer sanitizers do this upstream where better
+// recovery than deletion is possible; this is the structural backstop.
 func spanText(s string) string {
 	if isPrintableASCII(s) {
 		return s

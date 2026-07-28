@@ -39,10 +39,8 @@ var approvalsRespondCmd = &cobra.Command{
 	RunE:  runApprovalsRespond,
 }
 
-// openApprovalsService opens the shared database the way the mission read
-// verbs do and builds the durable-ask service over it. The policy source is
-// only needed for evaluation, not for the inbox verbs, but the constructor is
-// the one the whole codebase uses — no second construction path.
+// openApprovalsService opens the shared database and builds the durable-ask
+// service over it, using the one constructor the whole codebase uses.
 func openApprovalsService(cmd *cobra.Command) (io.Closer, hitlservice.Service, runtimetypes.Store, error) {
 	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {
@@ -73,9 +71,8 @@ func runApprovalsList(cmd *cobra.Command, args []string) error {
 	}
 	defer closer.Close()
 
-	// The inbox read IS the sweeper's production tick: an expired ask must
-	// resolve (running its on_timeout verdict) rather than sit pending forever,
-	// and a process listing the inbox is exactly a process that cares.
+	// The inbox read is the sweeper's tick: an expired ask must resolve
+	// rather than sit pending forever.
 	if swept, err := svc.SweepExpired(ctx); err == nil && swept > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Swept %d expired ask(s) to their on-timeout verdict.\n\n", swept)
 	}
@@ -162,16 +159,13 @@ func runApprovalsRespond(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ask %s is a permission ask (%s.%s) — it takes --approve or --deny, not text", askID, row.ToolsName, row.ToolName)
 	}
 
-	// Whether a suspended run is waiting decides what "respond" means here:
-	// with a checkpoint the verdict RESUMES the run in this process, without
-	// one it is only recorded (the asker is either still parked in its own
-	// process, or already gone past its deadline).
+	// With a checkpoint the verdict resumes the run in this process; without
+	// one it is only recorded.
 	_, checkpointErr := store.GetChainCheckpoint(ctx, askID)
 	hasCheckpoint := checkpointErr == nil
 
-	// The resume hook needs an engine. When none can be built (typically: no
-	// model configured), degrade honestly — record the verdict hook-less and
-	// say so — instead of refusing to answer at all.
+	// Degrade honestly when no engine can be built (e.g. no model
+	// configured): record the verdict hook-less rather than refuse to answer.
 	engineReady := false
 	if hasCheckpoint {
 		contenoxDir, dirErr := ResolveContenoxDir(cmd)

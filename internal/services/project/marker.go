@@ -1,14 +1,8 @@
 // Package project owns a project's portable identity marker —
-// <projectRoot>/.contenox/workspace.id — read and written the SAME way by serve,
-// the CLI, and the /workspace/roots API so a "project" means one thing everywhere.
-//
-// The marker carries a stable UUID (the DB workspace-scoping token every session
-// under the project is filed under) plus an optional friendly Name (what the Beam
-// project registry shows). It is the SOURCE OF TRUTH for the name: the name
-// travels WITH the directory (portable across hosts), not in the host-local grant
-// list. A legacy bare-UUID marker (what `contenox init` historically wrote) is
-// read as {ID: <content>, Name: ""}, so existing installs keep their token — the
-// only content-reader of the file, contenoxcli.ResolveWorkspaceID, delegates here.
+// <projectRoot>/.contenox/workspace.id — read and written the same way by
+// serve, the CLI, and the /workspace/roots API. The marker carries a stable
+// UUID (the DB workspace-scoping token) plus an optional friendly Name,
+// which travels with the directory rather than the host-local grant list.
 package project
 
 import (
@@ -94,10 +88,8 @@ func DisplayName(projectRoot string) string {
 	return filepath.Base(strings.TrimRight(projectRoot, string(filepath.Separator)))
 }
 
-// MarkerName is the project's EXPLICIT marker name — "" when the root carries no
-// marker or an unnamed one. Unlike DisplayName it never invents a fallback, so a
-// caller (the /workspace/roots response) can tell a real named project from a
-// structural root it would label by basename itself.
+// MarkerName is the project's explicit marker name — "" when the root
+// carries no marker or an unnamed one. Unlike DisplayName it never invents a fallback.
 func MarkerName(projectRoot string) string {
 	if m, ok := ReadFromProjectRoot(projectRoot); ok {
 		return m.Name
@@ -105,12 +97,10 @@ func MarkerName(projectRoot string) string {
 	return ""
 }
 
-// Register makes projectRoot a REGISTERED, named project — the operation behind
-// `workspace add` and the POST /workspace/roots mutator. Registering is naming:
-// an empty `name` defaults to the directory's basename (the same default
-// `init --project` applies) — but only onto a fresh or unnamed marker, so
-// re-registering without a name NEVER clobbers a name someone chose. An explicit
-// non-empty name renames (EnsureInProjectRoot semantics).
+// Register makes projectRoot a registered, named project. An empty name
+// defaults to the directory's basename, but only onto a fresh or unnamed
+// marker — re-registering without a name never clobbers a chosen one. An
+// explicit non-empty name renames.
 func Register(projectRoot, name string) (Marker, error) {
 	if strings.TrimSpace(name) == "" {
 		if m, ok := ReadFromProjectRoot(projectRoot); ok && m.Name != "" {
@@ -121,11 +111,9 @@ func Register(projectRoot, name string) (Marker, error) {
 	return EnsureInProjectRoot(projectRoot, name)
 }
 
-// NormalizeName validates and canonicalizes a friendly project name arriving
-// from any boundary (the REST add body, CLI --name flags): trimmed, with ""
-// meaning "no name given" (always valid). Control characters and names longer
-// than MaxNameLen runes are refused — the name is rendered verbatim in pickers,
-// chips, and CLI output, so it must stay a plain single-line label.
+// NormalizeName validates and canonicalizes a friendly project name:
+// trimmed, "" means "no name given". Control characters and names over
+// MaxNameLen runes are refused, since the name renders verbatim in the UI.
 func NormalizeName(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
@@ -142,12 +130,10 @@ func NormalizeName(raw string) (string, error) {
 	return name, nil
 }
 
-// EnsureInContenoxDir makes contenoxDir a project: absent → write a marker with a
-// fresh UUID and `name`; present → return the existing marker, with a non-empty
-// `name` that differs REPLACING the stored one (an explicit name is an explicit
-// rename — re-registering a project under a new name is the rename affordance).
-// An empty `name` never clears an existing one, and the ID is never rewritten,
-// so session/message rows stay attached. Returns the effective marker.
+// EnsureInContenoxDir makes contenoxDir a project: absent creates a marker
+// with a fresh UUID and name; present returns the existing marker, with a
+// non-empty differing name replacing the stored one (an explicit rename).
+// An empty name never clears an existing one; the ID is never rewritten.
 func EnsureInContenoxDir(contenoxDir, name string) (Marker, error) {
 	name = strings.TrimSpace(name)
 	if m, ok := ReadFromContenoxDir(contenoxDir); ok {

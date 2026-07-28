@@ -16,10 +16,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// seccompUserNotifSupported mirrors the library's own capability probe so the tap
-// tests skip gracefully on a kernel without SECCOMP_RET_USER_NOTIF (needs
-// SECCOMP_FILTER_FLAG_NEW_LISTENER, ~5.0+). It is unprivileged and installs no
-// filter.
+// seccompUserNotifSupported mirrors the library's own capability probe so the
+// tap tests skip gracefully on a kernel without SECCOMP_RET_USER_NOTIF (~5.0+).
 func seccompUserNotifSupported() bool {
 	action := uint32(unix.SECCOMP_RET_USER_NOTIF)
 	_, _, e := unix.Syscall(unix.SYS_SECCOMP,
@@ -27,10 +25,8 @@ func seccompUserNotifSupported() bool {
 	return e == 0
 }
 
-// runTapExecProbe (layer 2, the confined agent) execs the path in probePathEnv. On
-// a successful exec the image is replaced, so a return means exec failed; classify
-// maps a permission error (Landlock deny) to exitDenied. It is the syscall the tap
-// observes.
+// runTapExecProbe (layer 2) execs the path in probePathEnv; a return means
+// exec failed, and classify maps a permission error to exitDenied.
 func runTapExecProbe() int {
 	path := os.Getenv(probePathEnv)
 	if path == "" {
@@ -52,8 +48,8 @@ func kvString(kv []any, key string) string {
 	return ""
 }
 
-// hasSyscall reports whether a "sandbox-syscall" event was recorded for the given
-// syscall whose reported path contains pathSubstr (pass "" to match any path).
+// hasSyscall reports whether a "sandbox-syscall" event was recorded for
+// syscallName whose reported path contains pathSubstr ("" matches any path).
 func (t *recTracker) hasSyscall(syscallName, pathSubstr string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -71,8 +67,8 @@ func (t *recTracker) hasSyscall(syscallName, pathSubstr string) bool {
 	return false
 }
 
-// findAllowedExecutable returns a stock executable Landlock permits (it lives under
-// systemRuntimePaths) that exits 0, or skips if the host has none.
+// findAllowedExecutable returns a stock executable Landlock permits (under
+// systemRuntimePaths), or skips if the host has none.
 func findAllowedExecutable(t *testing.T) string {
 	t.Helper()
 	for _, p := range []string{"/bin/true", "/usr/bin/true", "/bin/echo", "/usr/bin/echo"} {
@@ -97,11 +93,9 @@ func requireTapPreconditions(t *testing.T) {
 	}
 }
 
-// TestIntegration_SyscallTap_RecordsAndAllowsExec proves record-then-ALLOW on the
-// happy path: with the tap on, the confined agent execs a stock binary; the tap
-// records the attempt as a "sandbox-syscall" event naming the exec'd path AND the
-// exec still SUCCEEDS (the binary actually runs, exit 0) — the tap observed without
-// gating.
+// TestIntegration_SyscallTap_RecordsAndAllowsExec pins record-then-allow: with
+// the tap on, an exec of a stock binary is recorded as a "sandbox-syscall"
+// event naming the path, and still succeeds.
 func TestIntegration_SyscallTap_RecordsAndAllowsExec(t *testing.T) {
 	requireTapPreconditions(t)
 	execTarget := findAllowedExecutable(t)
@@ -133,11 +127,9 @@ func TestIntegration_SyscallTap_RecordsAndAllowsExec(t *testing.T) {
 		"the tap must record a %q sandbox-syscall event naming the exec'd path %q", "execve", execTarget)
 }
 
-// TestIntegration_SyscallTap_RecordsDeniedExec proves the tap sees bypass attempts
-// the floor would swallow: the agent execs a path OUTSIDE the wall (not the
-// workspace, a carve-out, or a system path). Landlock denies it (EACCES), yet the
-// tap STILL records the attempt — the syscall-entry notification fires before the
-// kernel's Landlock check, so an attempt that is denied there is observed here.
+// TestIntegration_SyscallTap_RecordsDeniedExec pins that the tap still records
+// an exec Landlock denies (EACCES): the notification fires before the
+// kernel's Landlock check, so a denied attempt is still observed.
 func TestIntegration_SyscallTap_RecordsDeniedExec(t *testing.T) {
 	requireTapPreconditions(t)
 
@@ -146,9 +138,8 @@ func TestIntegration_SyscallTap_RecordsDeniedExec(t *testing.T) {
 	secret := t.TempDir() // outside the wall, not carved out
 
 	deniedProg := filepath.Join(secret, "prog")
-	// Deliberately NOT a valid executable: the ONLY way this returns "denied" is a
-	// Landlock EACCES at exec time. If the wall ever leaked, the exec would instead
-	// fail ENOEXEC → exitOther and this test would fail loudly.
+	// Deliberately not a valid executable: a leaked wall would fail ENOEXEC
+	// (exitOther) instead of the expected Landlock EACCES.
 	require.NoError(t, os.WriteFile(deniedProg, []byte("x"), 0o755))
 
 	tracker := &recTracker{}
@@ -175,11 +166,8 @@ func TestIntegration_SyscallTap_RecordsDeniedExec(t *testing.T) {
 		"the tap must STILL record the DENIED execve attempt naming %q", deniedProg)
 }
 
-// TestIntegration_SyscallTap_WallUnchanged is the regression that the tap is
-// telemetry, not enforcement: with SyscallTap ON, the fs-wall verdicts are exactly
-// as with it off (the existing suites cover the off case) — an allowed read still
-// succeeds, a read/write outside the wall is still denied. The tap adds observation
-// without changing what the wall permits.
+// TestIntegration_SyscallTap_WallUnchanged pins that the tap is telemetry, not
+// enforcement: fs-wall verdicts are unchanged with SyscallTap on.
 func TestIntegration_SyscallTap_WallUnchanged(t *testing.T) {
 	requireTapPreconditions(t)
 
@@ -222,10 +210,8 @@ func TestIntegration_SyscallTap_WallUnchanged(t *testing.T) {
 	}
 }
 
-// TestUnit_SyscallTap_UnsupportedKernelFailsClosed asserts the opt-in tap fails
-// closed up front on a kernel without user-notify: Command returns ErrIsolation
-// rather than silently running the agent unobserved. It only runs where the tap is
-// genuinely unavailable (otherwise there is nothing to assert).
+// TestUnit_SyscallTap_UnsupportedKernelFailsClosed pins that the opt-in tap
+// fails closed on a kernel without user-notify (Command returns ErrIsolation).
 func TestUnit_SyscallTap_UnsupportedKernelFailsClosed(t *testing.T) {
 	if seccompUserNotifSupported() {
 		t.Skip("seccomp user-notify IS supported here; nothing to assert about the unsupported path")

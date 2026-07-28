@@ -2,19 +2,11 @@ package taskengine
 
 import "strings"
 
-// This file is the CLOSED handler I/O contract table. taskexec.go's handler
-// switch implements these contracts implicitly — each case decides at runtime
-// which input DataTypes it tolerates and what it hands back. This table freezes
-// that judgement as data so the load-time chain linter (chainlint.go) can walk a
-// chain's dataflow BEFORE anything runs and reject an impossible edge with a
-// teaching error, instead of the runtime discovering it mid-run as a SEVERBUG.
-//
-// INVARIANT: every entry here must match what the corresponding case in
-// SimpleExec.TaskExec actually does. A handler added to tasktype.go without a
-// row here fails LintChain for every chain that uses it (unknown handler), so
-// the table cannot silently fall behind the vocabulary. The behavioral half of
-// the invariant is pinned by handler_signatures_test.go, which drives the real
-// executor against each contract.
+// This file is the closed handler I/O contract table: it freezes as data
+// the input/output judgement taskexec.go's handler switch makes implicitly,
+// so chainlint.go can reject an impossible edge before anything runs.
+// Every entry must match what the corresponding TaskExec case actually
+// does; handler_signatures_test.go pins the behavioral half.
 
 // HandlerOutputMode names how a handler's success-output type derives from its
 // input type.
@@ -84,44 +76,41 @@ func (s HandlerSignature) acceptsDescription() string {
 	return strings.Join(names, ", ")
 }
 
-// handlerSignatures is THE table. Each row documents where in taskexec.go the
-// contract is implemented, so a change there knows what to update here.
+// handlerSignatures is the frozen contract table. Each row documents where
+// in taskexec.go the contract is implemented, so a change there knows what
+// to update here.
 var handlerSignatures = map[TaskHandler]HandlerSignature{
-	// chat_completion coerces a string into a single-user-message history and
-	// otherwise requires ChatHistory; every other type is rejected with
-	// "requires input of type 'chat_history' or 'string'". It always yields the
-	// updated ChatHistory and evaluates to tool_call (model requested tools) or
-	// executed (finished turn).
+	// chat_completion coerces a string into a single-user-message history,
+	// otherwise requires ChatHistory. Always yields the updated ChatHistory,
+	// evaluating to tool_call or executed.
 	HandleChatCompletion: {
 		Inputs:       []DataType{DataTypeString, DataTypeChatHistory},
 		Mode:         HandlerOutputFixed,
 		Output:       DataTypeChatHistory,
 		SuccessEvals: []string{TransitionToolCall, TransitionExecuted},
 	},
-	// execute_tool_calls only understands a ChatHistory whose last message may
-	// carry tool calls; it appends tool results and returns the history.
-	// TransitionFailed is listed although the engine routes a failing task via
-	// on_failure before branches are evaluated — a defensive equals:"failed"
-	// branch is dead-but-harmless config, not an authoring error worth failing.
+	// execute_tool_calls only understands a ChatHistory whose last message
+	// may carry tool calls; it appends tool results and returns the
+	// history. TransitionFailed is listed even though on_failure routes a
+	// failing task first, so a defensive equals:"failed" branch is
+	// dead-but-harmless rather than an authoring error.
 	HandleExecuteToolCalls: {
 		Inputs:       []DataType{DataTypeChatHistory},
 		Mode:         HandlerOutputFixed,
 		Output:       DataTypeChatHistory,
 		SuccessEvals: []string{TransitionNoop, TransitionNoCallsFound, TransitionToolsExecuted, TransitionFailed},
 	},
-	// route classifies via getPrompt (string, int) or a rendered history
-	// (chat_history) and returns THE INPUT unchanged — its product is the
-	// transition label. The label vocabulary is the task's own equals branches,
-	// so SuccessEvals stays open here; the linter separately requires that a
-	// route task declares at least one equals branch.
+	// route classifies via getPrompt and returns the input unchanged; its
+	// product is the transition label. SuccessEvals stays open since the
+	// vocabulary is the task's own equals branches (the linter separately
+	// requires at least one).
 	HandleRoute: {
 		Inputs: []DataType{DataTypeString, DataTypeInt, DataTypeChatHistory},
 		Mode:   HandlerOutputPassthrough,
 	},
-	// tools passes the input to ToolsRepo.Exec verbatim, so any type goes in;
-	// what comes out is whatever the tool returned (normalized), unknowable at
-	// load time. An OutputTemplate rewrites both the output (to a rendered
-	// string) and the eval (to that same text), so the vocabulary is open.
+	// tools passes the input to ToolsRepo.Exec verbatim; the output type is
+	// whatever the tool returned, unknowable at load time. An OutputTemplate
+	// rewrites both output and eval to its rendered text.
 	HandleTools: {
 		Mode: HandlerOutputDynamic,
 	},
@@ -130,10 +119,9 @@ var handlerSignatures = map[TaskHandler]HandlerSignature{
 		Mode:         HandlerOutputPassthrough,
 		SuccessEvals: []string{TransitionNoop},
 	},
-	// raise_error turns its input into an error message via getPrompt, which
-	// reads string, int, and chat_history. Any other type still errors, but
-	// with getPrompt's complaint instead of the author's message — which is why
-	// the accept set is closed. It never succeeds.
+	// raise_error turns its input into an error message via getPrompt
+	// (string, int, chat_history); the accept set is closed so any other
+	// type reports getPrompt's complaint, not the author's message. Never succeeds.
 	HandleRaiseError: {
 		Inputs: []DataType{DataTypeString, DataTypeInt, DataTypeChatHistory},
 		Mode:   HandlerOutputNone,

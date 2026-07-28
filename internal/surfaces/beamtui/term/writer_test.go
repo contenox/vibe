@@ -11,8 +11,7 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
 )
 
-// flakyWriter counts writes and can fail one of them halfway through, which
-// is what a tty does when the terminal goes away or the pipe fills mid-frame.
+// flakyWriter counts writes and can fail one of them halfway through.
 type flakyWriter struct {
 	buf    bytes.Buffer
 	writes int
@@ -173,10 +172,8 @@ func TestUnit_CommitScrollbackPrintsOnceInOrderAboveLive(t *testing.T) {
 	}
 }
 
-// A commit carrying scrollback cannot know how far printing scrolls, so it
-// blanks every row the old live region owned BEFORE printing rather than
-// hunting vacated rows afterwards. Nothing stale can survive that, whatever
-// the terminal does with an over-wide history line.
+// TestUnit_CommitScrollbackBlanksTheWholePreviousLiveRegionFirst pins that
+// scrollback blanks the entire old live region before printing.
 func TestUnit_CommitScrollbackBlanksTheWholePreviousLiveRegionFirst(t *testing.T) {
 	p, buf := newTestPainter(20, 10)
 	commit(t, p, buf, frame.Frame{Live: lines("a", "b", "c", "d"), Cursor: frame.Cursor{Row: 0}})
@@ -205,9 +202,8 @@ func TestUnit_CommitScrollbackBlanksTheWholePreviousLiveRegionFirst(t *testing.T
 	}
 }
 
-// The live region growing in the same commit that carries scrollback: it is
-// re-anchored below the printed history and painted fresh at the new height,
-// with no vacated-row arithmetic left over from the old one.
+// TestUnit_CommitScrollbackWithGrowingLiveRegion pins that a live region
+// growing alongside scrollback re-anchors below the printed history.
 func TestUnit_CommitScrollbackWithGrowingLiveRegion(t *testing.T) {
 	p, buf := newTestPainter(20, 10)
 	commit(t, p, buf, frame.Frame{Live: lines("a"), Cursor: frame.Cursor{Row: 0}})
@@ -232,12 +228,9 @@ func TestUnit_CommitScrollbackWithGrowingLiveRegion(t *testing.T) {
 	}
 }
 
-// A live region taller than the terminal shows its tail, so it owns exactly
-// the terminal's height in rows — the blanking pass reclaims those and no
-// more, and can never walk off the bottom of the screen. The frame's cursor
-// row (4) is remapped by the two rows the clamp dropped and lands on the last
-// visible row; see TestUnit_CommitClampedLiveRemapsTheCursorRow for the cases
-// where remapping and clamping disagree.
+// TestUnit_CommitScrollbackWithLiveTallerThanTerminal pins that a
+// too-tall live region's blanking pass reclaims exactly the terminal's
+// height and never walks off the bottom of the screen.
 func TestUnit_CommitScrollbackWithLiveTallerThanTerminal(t *testing.T) {
 	p, buf := newTestPainter(20, 3)
 	live := lines("a", "b", "c", "d", "e")
@@ -264,9 +257,8 @@ func TestUnit_CommitScrollbackWithLiveTallerThanTerminal(t *testing.T) {
 	}
 }
 
-// A commit with scrollback and no live region at all still leaves the region
-// owning the one blanked row it parked on, so the next scrollback commit
-// reclaims it.
+// TestUnit_CommitScrollbackWithEmptyLiveRegion pins that an empty live
+// region still owns the one blanked row it parked on.
 func TestUnit_CommitScrollbackWithEmptyLiveRegion(t *testing.T) {
 	p, buf := newTestPainter(20, 10)
 	commit(t, p, buf, frame.Frame{Live: lines("a", "b"), Cursor: frame.Cursor{Row: 0}})
@@ -299,8 +291,8 @@ func TestUnit_CommitScrollbackWithEmptyLiveRegion(t *testing.T) {
 	}
 }
 
-// The blanking pass only reclaims rows the painter owns: on the first commit,
-// and after reset() hands the screen back, it owns none.
+// TestUnit_CommitScrollbackOnAFreshRegionReclaimsNothing pins that the
+// blanking pass reclaims no rows on the first commit or after reset().
 func TestUnit_CommitScrollbackOnAFreshRegionReclaimsNothing(t *testing.T) {
 	p, buf := newTestPainter(20, 10)
 	got := commit(t, p, buf, frame.Frame{
@@ -374,13 +366,9 @@ func TestUnit_CommitLiveTallerThanTerminalRendersTail(t *testing.T) {
 	}
 }
 
-// TestUnit_ScrollbackLongLineEmittedRaw is acceptance test 1 of the
-// copy/paste ruling made mechanical (blueprint section 1): a code line three
-// times wider than the terminal reaches history as ONE contiguous run with
-// exactly one trailing "\r\n". The terminal soft-wraps it, so it stays one
-// logical line for native selection. Any "\r\n" inside that run would be a
-// real line break in scrollback, and pasting the selected code would come
-// back with phantom newlines in it — the defect this test exists to prevent.
+// TestUnit_ScrollbackLongLineEmittedRaw pins that a line wider than the
+// terminal reaches history as one contiguous run with one trailing "\r\n",
+// so the terminal's own soft-wrap keeps it one logical line for selection.
 func TestUnit_ScrollbackLongLineEmittedRaw(t *testing.T) {
 	const width = 10
 	cases := []struct {
@@ -423,10 +411,8 @@ func TestUnit_ScrollbackLongLineEmittedRaw(t *testing.T) {
 	}
 }
 
-// The auto-margin edge, twice in a row: a history line of exactly `width`
-// cells leaves the terminal with a pending wrap, and the next line's CR
-// resolves it without consuming a row. Two full-width history lines therefore
-// produce two rows of history — not four, and not one with a blank between.
+// TestUnit_ScrollbackWidthExactLineFollowedByAnother pins that two
+// full-width history lines in a row produce exactly two rows of history.
 func TestUnit_ScrollbackWidthExactLineFollowedByAnother(t *testing.T) {
 	const width = 10
 	p, buf := newTestPainter(width, 10)
@@ -500,9 +486,9 @@ func TestUnit_CommitCursorPlacement(t *testing.T) {
 	}
 }
 
-// A live region taller than the terminal shows its tail, and the caret is
-// addressed in the FRAME's coordinates — so it has to move up by however many
-// rows the clamp dropped, or it lands on the wrong line entirely.
+// TestUnit_CommitClampedLiveRemapsTheCursorRow pins that a caret addressed
+// in the frame's coordinates moves up by however many rows the clamp
+// dropped.
 func TestUnit_CommitClampedLiveRemapsTheCursorRow(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -533,9 +519,8 @@ func TestUnit_CommitClampedLiveRemapsTheCursorRow(t *testing.T) {
 	}
 }
 
-// An empty live region has no row to address, but the cursor was hidden on
-// the way into the frame: leaving it hidden hands the user an invisible caret
-// for as long as the region stays empty.
+// TestUnit_CommitEmptyLiveRegionStillShowsTheCursor pins that an empty live
+// region still shows the cursor rather than leaving it hidden.
 func TestUnit_CommitEmptyLiveRegionStillShowsTheCursor(t *testing.T) {
 	p, buf := newTestPainter(20, 10)
 	commit(t, p, buf, frame.Frame{Live: lines("a"), Cursor: frame.Cursor{Row: 0}})
@@ -579,8 +564,8 @@ func TestUnit_CommitIsAlwaysSynchronizedAndHidesTheCursor(t *testing.T) {
 
 func TestUnit_CommitNeverClearsTheScreenOrJumpsHome(t *testing.T) {
 	p, buf := newTestPainter(20, 4)
-	// The hostile line is the same forbidden set arriving as span TEXT: if
-	// spans were trusted, every sequence below would reach the terminal.
+	// The forbidden set arriving as span text: if spans were trusted, every
+	// sequence below would reach the terminal.
 	hostile := frame.L(
 		frame.S(frame.StyleNone, "\x1b[2J"),
 		frame.S(frame.StyleNone, "\x1b[H\x1b[?1049h"),
@@ -607,12 +592,9 @@ func TestUnit_CommitNeverClearsTheScreenOrJumpsHome(t *testing.T) {
 	}
 }
 
-// frame.Span is defined as printable cells, and the comp layer sanitizes text
-// on the way in. term does not trust that: it is the last place a byte can
-// become terminal behaviour, so it strips what a span may not carry rather
-// than assuming nothing does. A span that slipped through unsanitized must be
-// unable to clear the screen, ring the bell, or break the one-line-per-row
-// geometry every cursor offset depends on.
+// TestUnit_SpanTextIsStrippedOfControlBytes pins that term strips what a
+// span may not carry regardless of upstream sanitizing, since it is the
+// last place a byte can become terminal behavior.
 func TestUnit_SpanTextIsStrippedOfControlBytes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -658,8 +640,8 @@ func TestUnit_SpanTextIsStrippedOfControlBytes(t *testing.T) {
 	}
 }
 
-// A span whose entire content is control bytes renders to nothing, and the
-// row it lives on still occupies exactly one physical row.
+// TestUnit_SpanOfPureControlBytesRendersEmpty pins that a span of pure
+// control bytes renders to nothing while its row still occupies one line.
 func TestUnit_SpanOfPureControlBytesRendersEmpty(t *testing.T) {
 	p, buf := newTestPainter(20, 10)
 	got := commit(t, p, buf, frame.Frame{
@@ -686,11 +668,9 @@ func TestUnit_ResizeForcesAFullRepaint(t *testing.T) {
 	}
 }
 
-// A resize reflows the terminal: the rows the painter measured at the old
-// width have been rewrapped, so it can no longer say where they are. It
-// therefore disowns them exactly as reset() does — paints fresh in place and
-// reclaims nothing — rather than moving up over rows that are not where it
-// left them and interleaving two frames.
+// TestUnit_ResizeDisownsTheRegion pins that a resize disowns the region
+// exactly as reset() does, rather than moving over rows it can no longer
+// locate.
 func TestUnit_ResizeDisownsTheRegion(t *testing.T) {
 	p, buf := newTestPainter(20, 10)
 	commit(t, p, buf, frame.Frame{Live: lines("a", "b", "c"), Cursor: frame.Cursor{Row: 2}})
@@ -712,9 +692,9 @@ func TestUnit_ResizeDisownsTheRegion(t *testing.T) {
 	}
 }
 
-// commit publishes its bookkeeping only after the write lands. Publishing it
-// first describes a frame the screen may not be showing: the identical retry
-// then diffs to nothing and the half-drawn frame stays on screen forever.
+// TestUnit_CommitWriteFailureInvalidatesAndRepaints pins that commit
+// publishes its bookkeeping only after the write lands, and a retry after a
+// failure repaints everything.
 func TestUnit_CommitWriteFailureInvalidatesAndRepaints(t *testing.T) {
 	w := &flakyWriter{err: errors.New("terminal went away")}
 	p := &painter{out: w, styles: plainStyles{}, width: 20, height: 10}
@@ -758,9 +738,8 @@ func TestUnit_CommitWriteFailureInvalidatesAndRepaints(t *testing.T) {
 	}
 }
 
-// One frame, one Write. The single write is what makes a frame's failure
-// semantics decidable at all (see the failure test above) and what keeps a
-// synchronized-output bracket from being split across syscalls.
+// TestUnit_CommitPerformsExactlyOneWrite pins that one frame is one Write,
+// never splitting a synchronized-output bracket across syscalls.
 func TestUnit_CommitPerformsExactlyOneWrite(t *testing.T) {
 	w := &flakyWriter{}
 	p := &painter{out: w, styles: plainStyles{}, width: 20, height: 4}
@@ -850,8 +829,8 @@ func TestUnit_RenderLineResolvesEverySpan(t *testing.T) {
 	}
 }
 
-// Scrollback goes through the resolver span by span like any other line; the
-// only difference from the live region is that width does not clamp it.
+// TestUnit_ScrollbackResolvesSpansWithoutTruncating pins that scrollback
+// resolves spans like any other line, without the live region's width clamp.
 func TestUnit_ScrollbackResolvesSpansWithoutTruncating(t *testing.T) {
 	styles := &tagStyles{}
 	var buf bytes.Buffer

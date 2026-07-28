@@ -11,12 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestIntegration_EtcNarrowed_DeniesUngrantedEtcFile proves FIX 4 has teeth: a
-// world-readable regular file directly under /etc that is NOT in the narrowed
-// system-runtime set is UNREADABLE under the wall. Under the old whole-/etc grant
-// it would have been readable; now only the enumerated loader / resolver / trust
-// files are. Choosing a WORLD-READABLE file makes the denial attributable to
-// Landlock (a non-world-readable file could be denied by ordinary unix perms).
+// TestIntegration_EtcNarrowed_DeniesUngrantedEtcFile proves a world-readable
+// /etc file outside the narrowed system-runtime set is unreadable under the
+// wall (world-readable so the denial is attributable to Landlock, not unix perms).
 func TestIntegration_EtcNarrowed_DeniesUngrantedEtcFile(t *testing.T) {
 	if !landlockSupported() {
 		t.Skip("landlock filesystem ABI unavailable on this kernel")
@@ -41,11 +38,9 @@ func TestIntegration_EtcNarrowed_DeniesUngrantedEtcFile(t *testing.T) {
 		"an ungranted /etc file (%s) must be unreadable under the narrowed /etc grant", target)
 }
 
-// findUngrantedWorldReadableEtcFile returns a regular, non-symlink, world-readable
-// file directly under /etc whose name is NOT in the FIX-4 grant set, or skips if
-// the host has none. Symlinks are skipped because one might resolve into a granted
-// directory (e.g. /etc/os-release → /usr/lib/os-release), which would muddy the
-// assertion.
+// findUngrantedWorldReadableEtcFile returns a regular, non-symlink,
+// world-readable /etc file outside the grant set, or skips if none exists.
+// Symlinks are excluded since one might resolve into a granted directory.
 func findUngrantedWorldReadableEtcFile(t *testing.T) string {
 	t.Helper()
 	granted := map[string]bool{

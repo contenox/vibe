@@ -38,18 +38,14 @@ type eventParser interface {
 }
 
 // ANSI is beam's production Engine: an inline renderer over a raw-mode tty.
-// It never enables the alternate screen and never enables a mouse mode —
-// both are constitutional, because the terminal's own selection is beam's
-// copy/paste story and either one would break it. The third clause of that
-// same rule is that scrollback is printed raw and left for the terminal to
-// soft-wrap (painter.renderRaw): a line beam wrapped itself would carry a
-// real newline into history and paste back broken.
+// It never enables the alternate screen or a mouse mode, since the
+// terminal's own selection is beam's copy/paste story; scrollback prints
+// raw and lets the terminal soft-wrap it (painter.renderRaw).
 //
 // Every method except Events and Restore must be called from the single
-// app-shell loop goroutine. That restriction is the design: one writer means
-// interleaved escape sequences cannot corrupt a frame. Restore is the one
-// exception, so a deferred panic handler on any goroutine can hand the
-// terminal back.
+// app-shell loop goroutine: one writer means interleaved escape sequences
+// cannot corrupt a frame. Restore is the exception, so a deferred panic
+// handler on any goroutine can hand the terminal back.
 type ANSI struct {
 	in, out *os.File
 	painter *painter
@@ -137,15 +133,9 @@ func New(in, out *os.File, styles StyleResolver) (*ANSI, error) {
 // Events yields decoded input events; the channel closes on EOF or Close.
 func (e *ANSI) Events() <-chan input.Event { return e.events.ch }
 
-// Commit renders one frame into the terminal. See painter.commit for the
-// algorithm; the engine's only addition is picking up a size change the
-// resize goroutine observed.
-//
-// A commit that carries Scrollback blanks the whole previous live region,
-// prints the new history lines unwrapped, and re-anchors the live region on
-// the row printing ended at — the painter never predicts how many physical
-// rows the terminal spent on them, which is what lets those lines stay
-// natively selectable as single logical lines.
+// Commit renders one frame into the terminal (see painter.commit); the
+// engine's only addition is picking up a size change the resize goroutine
+// observed.
 func (e *ANSI) Commit(f frame.Frame) error {
 	e.painter.resize(e.Size())
 	return e.painter.commit(f)
@@ -172,11 +162,9 @@ func (e *ANSI) Suspend(fn func() error) (err error) {
 		return nil
 	}
 	e.park()
-	// Erase the live region before handing the terminal over. Resume
-	// cannot know what the child drew, so the painter disowns the region
-	// (reset) — anything left on those rows at handover would become
-	// permanent scrollback, duplicated on every suspend. Engine-owned so
-	// no caller has to remember to commit an empty frame first.
+	// Erase the live region before handover: resume cannot know what the
+	// child drew, so anything left on screen would become permanent,
+	// duplicated scrollback.
 	_ = e.painter.clear()
 	if rerr := e.Restore(); rerr != nil {
 		e.paused.Store(false)
@@ -199,8 +187,7 @@ func (e *ANSI) Close() error {
 		close(e.done)
 		stopResize(e.winch)
 		e.wake()
-		// No engine goroutine may touch the tty after Close returns: the
-		// caller is free to close it or hand it to another process.
+		// No engine goroutine may touch the tty after Close returns.
 		select {
 		case <-e.readerDone:
 		case <-time.After(readerStopWait):
@@ -209,11 +196,8 @@ func (e *ANSI) Close() error {
 		case <-e.watcherDone:
 		case <-time.After(readerStopWait):
 		}
-		// Erase the live region before restoring: the shell prompt must
-		// land on a clean line where the region began, never beside a
-		// leftover gutter glyph or above a stale status bar. Engine-owned
-		// so no caller can forget it; the panic path (bare Restore) stays
-		// minimal by design.
+		// Erase the live region so the shell's next prompt lands on a
+		// clean line, never beside leftover chrome.
 		_ = e.painter.clear()
 		err = e.Restore()
 		e.events.close()
@@ -226,11 +210,8 @@ func (e *ANSI) Close() error {
 // park pauses the input reader and waits for it to confirm, so a child
 // process started by Suspend gets every keystroke typed at it.
 func (e *ANSI) park() {
-	// Drain the token an earlier park left behind. The reader posts one
-	// non-blockingly each time it parks and never takes it back, so a stale
-	// token would satisfy this park instantly — before the reader has let go
-	// of the tty — and the child's first keystrokes would be swallowed by a
-	// poll that is still running.
+	// Drain a stale token an earlier park left behind, or this park would
+	// return before the reader actually let go of the tty.
 	select {
 	case <-e.parked:
 	default:
@@ -268,9 +249,8 @@ func (e *ANSI) restoreLocked() error {
 	}
 	_, werr := io.WriteString(e.out, seqSyncEnd+seqCursorShow+seqPasteOff+seqFocusOff)
 	if rerr := xterm.Restore(int(e.in.Fd()), e.state); rerr != nil {
-		// The terminal is still raw. Keeping raw/state set is what lets a
-		// later Restore or Close try again; forgetting them here would mark
-		// the job done and strand the user in a shell with no echo.
+		// The terminal is still raw; keep raw/state set so a later Restore
+		// or Close can try again.
 		return fmt.Errorf("beam term: restore: %w", rerr)
 	}
 	e.raw = false
@@ -290,11 +270,8 @@ func (e *ANSI) enterRawLocked() error {
 		return fmt.Errorf("beam term: raw mode: %w", err)
 	}
 	if _, werr := io.WriteString(e.out, seqPasteOn+seqFocusOn); werr != nil {
-		// Raw mode took, the mode-enable write did not. Returning here without
-		// undoing MakeRaw hands back an error AND a raw terminal that the
-		// caller has no engine to Close: New's caller drops the half-built
-		// engine on the floor, and the shell it returns to has no echo, no
-		// line editing and no Ctrl+C. Give the termios back first.
+		// Raw mode took, the mode-enable write did not. New's caller has no
+		// engine to Close on error, so give the termios back before returning.
 		if rerr := xterm.Restore(int(e.in.Fd()), state); rerr != nil {
 			return fmt.Errorf("beam term: enable terminal modes: %w (restoring raw mode also failed: %v)", werr, rerr)
 		}
@@ -305,11 +282,8 @@ func (e *ANSI) enterRawLocked() error {
 	return nil
 }
 
-// resume runs on the app-shell loop, which is the only reader of the event
-// channel — so nothing it does may block on that channel. sendResize is the
-// non-blocking path; painter.reset() has already guaranteed the next Commit
-// repaints in full, and Commit re-reads the size from the engine, so a resize
-// the queue cannot take right now costs nothing but the wakeup.
+// resume runs on the app-shell loop, the event channel's only reader, so
+// nothing here may block on it; sendResize is the non-blocking path.
 func (e *ANSI) resume() error {
 	e.mu.Lock()
 	err := e.enterRawLocked()
@@ -331,9 +305,9 @@ func (e *ANSI) refreshSize() (int, int) {
 }
 
 // readLoop polls the tty rather than blocking in Read, so a paused engine
-// consumes nothing while a child process owns the terminal, an ambiguous
-// prefix is flushed on an idle gap, and Close is never left waiting on a
-// keystroke that may never come.
+// consumes nothing while a child owns the terminal, an ambiguous prefix
+// flushes on an idle gap, and Close never waits on a keystroke that may
+// never come.
 func (e *ANSI) readLoop() {
 	defer close(e.readerDone)
 	defer e.events.close()
@@ -378,8 +352,7 @@ func (e *ANSI) readLoop() {
 			if e.parser.Pending() {
 				e.emit(e.parser.Flush())
 			}
-			// The idle tick is also what bounds how long a resize can sit in
-			// the coalescing slot when the app loop let the queue fill up.
+			// Bounds how long a resize can sit in the coalescing slot.
 			e.events.flushResize()
 			continue
 		}
@@ -420,29 +393,15 @@ func (e *ANSI) emit(events []input.Event) {
 	}
 }
 
-// eventSink is the engine's outbound queue. It exists to make two things
-// structurally impossible.
-//
-// One: a send that outlives the channel. close() may run while a producer is
-// blocked on a full queue, and closing a channel under a blocked sender
-// panics. Producers therefore register themselves under the mutex and release
-// it before blocking, so close() can mark the sink closed (no new producers),
-// signal the ones already in flight to abandon, wait them out, and only then
-// close the channel. No producer ever holds the mutex across its blocking
-// send, so a full queue can wedge neither close() nor another producer.
-//
-// Two: a send that blocks the consumer. resume() runs on the app-shell loop —
-// the channel's only reader — so a blocking send from it deadlocks the process
-// with the terminal raw and ISIG off: no keystroke can reach the app, and
-// Ctrl+C is not a signal any more. Resizes therefore never block. They go
-// through a one-deep coalescing slot: a resize that does not fit overwrites
-// the pending one, and the next producer to find room places it ahead of what
-// it was about to queue — or the reader's idle tick does, which bounds how
-// long it can sit there to one poll. Dropping the intermediate sizes is
-// free — only the latest one is true — and dropping the delivery entirely
-// would still be safe, because Commit reads the authoritative size from the
-// engine and the resume path invalidates the painter regardless. The event is
-// a wakeup, not the size itself.
+// eventSink is the engine's outbound queue. It makes two things structurally
+// impossible: a send outliving the channel (producers register under a
+// mutex and release it before blocking, so close() can signal them to
+// abandon and wait them out before closing the channel with none in
+// flight), and a send blocking the consumer (resume runs on the event
+// channel's only reader, so a blocking send from it would deadlock the
+// process with the terminal raw and ISIG off; resizes instead go through a
+// one-deep coalescing slot that never blocks, since only the latest size is
+// ever true and Commit re-reads it from the engine anyway).
 type eventSink struct {
 	mu       sync.Mutex
 	ch       chan input.Event

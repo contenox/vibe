@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// wireBody mirrors the subset of the Anthropic Messages request body relevant to
-// content-block serialization. Source is a pointer so its absence (text-only
-// blocks) is distinguishable from an emitted image source.
+// wireBody mirrors the subset of the Anthropic Messages request body relevant
+// to content-block serialization. Source is a pointer so its absence is
+// distinguishable from an emitted image source.
 type wireBody struct {
 	Messages []struct {
 		Role    string `json:"role"`
@@ -28,13 +28,9 @@ type wireBody struct {
 	} `json:"messages"`
 }
 
-// TestUnit_AnthropicImageInput_Serialization asserts that a user message with an
-// image attachment serializes to the Anthropic content-blocks array — a text
-// block followed by a base64 `image` block — and that a text-only user message
-// keeps its prior single-text-block shape unchanged.
 func TestUnit_AnthropicImageInput_Serialization(t *testing.T) {
-	// Raw bytes standing in for image data (PNG magic header); the codec must
-	// base64-encode these verbatim, not the already-encoded form.
+	// PNG magic header standing in for image data; the codec must base64-encode
+	// these raw bytes verbatim, not an already-encoded form.
 	raw := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02, 0x03}
 
 	t.Run("user message with one image emits a base64 image block", func(t *testing.T) {

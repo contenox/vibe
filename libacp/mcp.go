@@ -65,13 +65,10 @@ type mcpServerStdioWire struct {
 	Meta    json.RawMessage `json:"_meta,omitempty"`
 }
 
-// MarshalJSON forces args/env (McpServerStdio) and headers (McpServerHttp/
-// McpServerSse) onto the wire as `[]` rather than omitting them when empty:
-// the spec (and the reference Rust implementation) declares these fields as
-// plain, always-serialized arrays with no default, so a strict receiver
-// rejects a payload missing them. omitempty alone cannot express this on the
-// flattened McpServer struct — it treats a zero-length slice as absent
-// regardless of nil-ness — hence the two per-transport wire shapes below.
+// MarshalJSON forces args/env (stdio) and headers (http/sse) onto the wire as
+// `[]` rather than omitting them when empty, since the spec declares them
+// always-serialized with no default and omitempty can't express that on the
+// flattened McpServer struct — hence the two per-transport wire shapes above.
 func (m McpServer) MarshalJSON() ([]byte, error) {
 	switch m.Kind() {
 	case McpServerKindHTTP, McpServerKindSSE:

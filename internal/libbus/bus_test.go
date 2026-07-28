@@ -24,17 +24,14 @@ func TestSystem_Stream(t *testing.T) {
 	subject := "test.stream"
 	message := []byte("streamed message")
 
-	// Create a channel for streaming messages.
 	streamCh := make(chan []byte, 1)
 	sub, err := ps.Stream(ctx, subject, streamCh)
 	require.NoError(t, err)
 	defer sub.Unsubscribe()
 
-	// Publish the message.
 	err = ps.Publish(ctx, subject, message)
 	require.NoError(t, err)
 
-	// Wait for the streamed message.
 	select {
 	case received := <-streamCh:
 		require.Equal(t, message, received)
@@ -51,11 +48,9 @@ func TestSystem_PublishWithClosedConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init test stream %s", err)
 	}
-	// Close the connection.
 	err = ps.Close()
 	require.NoError(t, err)
 
-	// Attempt to publish after closing.
 	err = ps.Publish(ctx, "test.closed", []byte("data"))
 	require.Error(t, err)
 	require.Equal(t, libbus.ErrConnectionClosed, err)
@@ -73,18 +68,15 @@ func TestSystem_RequestReply(t *testing.T) {
 	requestMessage := []byte("hello worker")
 	responseMessage := []byte("hello client")
 
-	// Define the worker handler.
 	handler := func(ctx context.Context, data []byte) ([]byte, error) {
 		require.Equal(t, requestMessage, data)
 		return responseMessage, nil
 	}
 
-	// Start the worker to serve requests.
 	sub, err := ps.Serve(ctx, subject, handler)
 	require.NoError(t, err)
 	defer sub.Unsubscribe()
 
-	// Send a request and wait for the reply.
 	reply, err := ps.Request(ctx, subject, requestMessage)
 	require.NoError(t, err)
 	require.Equal(t, responseMessage, reply)
@@ -97,11 +89,9 @@ func TestSystem_RequestReplyTimeout(t *testing.T) {
 
 	subject := "test.request.timeout"
 
-	// Create a context that times out immediately.
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	// Send a request that is expected to time out.
 	_, err = ps.Request(ctx, subject, []byte("should timeout"))
 	require.Error(t, err)
 	require.Equal(t, libbus.ErrRequestTimeout, err)
@@ -119,21 +109,17 @@ func TestSystem_ServeWithHandlerError(t *testing.T) {
 	requestMessage := []byte("this will fail")
 	expectedError := "handler failed"
 
-	// Define a worker handler that always returns an error.
 	handler := func(ctx context.Context, data []byte) ([]byte, error) {
 		return nil, errors.New(expectedError)
 	}
 
-	// Start the worker.
 	sub, err := ps.Serve(ctx, subject, handler)
 	require.NoError(t, err)
 	defer sub.Unsubscribe()
 
-	// Send a request.
 	reply, err := ps.Request(ctx, subject, requestMessage)
-	require.NoError(t, err) // The request itself doesn't fail, it gets a reply.
+	require.NoError(t, err) // the request itself doesn't fail; the handler error becomes the reply body
 
-	// Check that the reply contains the error message.
 	expectedReply := fmt.Appendf(nil, "error: %s", expectedError)
 	require.Equal(t, expectedReply, reply)
 }

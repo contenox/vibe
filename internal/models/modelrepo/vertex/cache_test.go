@@ -6,9 +6,7 @@ import (
 )
 
 func TestUnit_VertexUsage_CachedContentTokenCount(t *testing.T) {
-	// Vertex mirrors Gemini: promptTokenCount is already the TOTAL prompt
-	// count; cachedContentTokenCount breaks out context-cache hits and must
-	// NOT be added on top.
+	// cachedContentTokenCount must not be added on top of promptTokenCount.
 	body := `{"promptTokenCount":4200,"candidatesTokenCount":15,"totalTokenCount":4215,"cachedContentTokenCount":4096}`
 	var meta vertexUsageMetadata
 	if err := json.Unmarshal([]byte(body), &meta); err != nil {

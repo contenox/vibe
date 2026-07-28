@@ -1,3 +1,7 @@
+---
+description: Point contenox at your source tree and get living architecture guides, API references, and onboarding docs — without leaving the terminal.
+---
+
 # Codebase Documentation
 
 Read your source code locally and produce living documentation — architecture guides, API references, onboarding wikis — without leaving the terminal.
@@ -24,7 +28,7 @@ contenox --shell "Read the Go source files under ./internal and ./taskengine. \
   and the relationship between runtimestate, llmrepo, and taskengine."
 ```
 
-The model uses `list_directory` and `read_file` to traverse the repo, synthesises the architecture, and returns a full markdown document — grounded in actual code, not guesses.
+The model uses `list_dir` and `read_file` to traverse the repo, synthesises the architecture, and returns a full markdown document — grounded in actual code, not guesses.
 
 ---
 

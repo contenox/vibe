@@ -8,10 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_DeliverToSession_UnknownSessionNotFound is the fast, subprocess-free
-// half: a Manager that hosts no instance owning the id reports ErrNotFound, and
-// an empty id is a plain argument error. ErrNotFound is the signal the report
-// router turns into an inbox fallback, so it must be a branchable sentinel.
+// TestUnit_DeliverToSession_UnknownSessionNotFound pins that a Manager
+// hosting no owning instance reports ErrNotFound, while an empty id is a
+// plain argument error.
 func TestUnit_DeliverToSession_UnknownSessionNotFound(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	mgr := New(svc)
@@ -27,14 +26,9 @@ func TestUnit_DeliverToSession_UnknownSessionNotFound(t *testing.T) {
 	require.NotErrorIs(t, err, ErrNotFound, "an empty id is an argument error, not a missing session")
 }
 
-// TestManager_DeliverToSession_InjectsIntoSessionStream proves the delivery
-// mechanism the supervision edge rides: an out-of-band update injected into a
-// live session's stream reaches every attached viewer AND is journaled, so a
-// viewer that attaches later replays it. This is what makes a sub-mission's
-// report land in its supervising session's transcript.
-//
-// Not a TestUnit_ (it spawns the stub ACP agent), so it is excluded from the
-// short fast-test run and covered by the full suite.
+// TestManager_DeliverToSession_InjectsIntoSessionStream pins that an
+// out-of-band update reaches every attached viewer and is journaled, so a
+// later viewer replays it too.
 func TestManager_DeliverToSession_InjectsIntoSessionStream(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -62,9 +56,7 @@ func TestManager_DeliverToSession_InjectsIntoSessionStream(t *testing.T) {
 		"the attached viewer receives the injected report update")
 	requireDeliveredWithSessionID(t, viewer, reportLine, sid)
 
-	// The injected update is journaled: a viewer attaching AFTER it replays it,
-	// so the report persists in the session transcript rather than only reaching
-	// whoever happened to be watching at the instant it arrived.
+	// The injected update is journaled: a viewer attaching after it replays it.
 	late := newMockViewer("late-supervisor")
 	_, err = mgr.Attach(ctx, id, sid, late)
 	require.NoError(t, err)

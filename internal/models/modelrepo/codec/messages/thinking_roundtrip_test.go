@@ -8,11 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_ThinkingRoundTrip_NonStreaming pins the fix for thinking+tool-use
-// multi-turn: DecodeResponse persists the turn's signed thinking blocks into
-// the first tool call's ProviderMeta (the one field the engine round-trips),
-// and Build replays them at the head of the assistant turn — the shape
-// Anthropic requires or the follow-up request 400s.
+// DecodeResponse persists the turn's signed thinking blocks into the first
+// tool call's ProviderMeta, and Build replays them at the head of the
+// assistant turn — the shape Anthropic requires or the follow-up request 400s.
 func TestUnit_ThinkingRoundTrip_NonStreaming(t *testing.T) {
 	raw := []byte(`{
 		"role": "assistant",
@@ -41,8 +39,8 @@ func TestUnit_ThinkingRoundTrip_NonStreaming(t *testing.T) {
 	require.Equal(t, "redacted_thinking", blocks[1]["type"])
 	require.Equal(t, "opaque-blob", blocks[1]["data"])
 
-	// Next turn: the assistant message (with its tool calls carrying the meta)
-	// re-enters the history. Build must replay the thinking blocks FIRST.
+	// Next turn: the assistant message re-enters the history. Build must
+	// replay the thinking blocks first.
 	next := []modelrepo.Message{
 		{Role: "user", Content: "list my files"},
 		{Role: "assistant", Content: "Let me check.", ToolCalls: res.ToolCalls},
@@ -69,9 +67,8 @@ func TestUnit_ThinkingRoundTrip_NonStreaming(t *testing.T) {
 	require.JSONEq(t, `{"type":"thinking","thinking":"I should list the files.","signature":"sig-abc"}`, string(wire))
 }
 
-// TestUnit_ThinkingRoundTrip_Streaming pins the same round-trip through the
-// stream decoder: thinking_delta + signature_delta accumulate into blocks that
-// ride the first tool_use ToolCallDelta's ProviderMeta.
+// Same round-trip through the stream decoder: thinking_delta + signature_delta
+// accumulate into blocks that ride the first tool_use ToolCallDelta's ProviderMeta.
 func TestUnit_ThinkingRoundTrip_Streaming(t *testing.T) {
 	d := NewStreamDecoder(nil)
 
@@ -113,8 +110,8 @@ func TestUnit_ThinkingRoundTrip_Streaming(t *testing.T) {
 	require.Equal(t, "sig-xyz", blocks[0].Signature)
 }
 
-// TestUnit_StripThinkingBlocks: replayed blocks are removed when the outgoing
-// request does not enable thinking, and emptied messages disappear.
+// Replayed blocks are removed when the outgoing request does not enable
+// thinking, and emptied messages disappear.
 func TestUnit_StripThinkingBlocks(t *testing.T) {
 	req := Request{Messages: []wireMessage{
 		{Role: "user", Content: []wireBlock{{Type: "text", Text: "hi"}}},

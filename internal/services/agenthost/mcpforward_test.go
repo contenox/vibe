@@ -36,10 +36,8 @@ func TestUnit_McpServerForACP_StdioAndHttpShapes(t *testing.T) {
 	require.Equal(t, "X-B", http.Headers[1].Name)
 }
 
-// TestUnit_McpServerForACP_NeverForwardsAuthSynthesis locks in the trust
-// boundary: contenox-side auth machinery (authToken/authEnvKey/oauth/
-// injectParams) must not leak into the payload handed to a foreign agent —
-// only explicitly configured headers travel.
+// TestUnit_McpServerForACP_NeverForwardsAuthSynthesis pins that contenox-side
+// auth machinery never leaks into the payload handed to a foreign agent.
 func TestUnit_McpServerForACP_NeverForwardsAuthSynthesis(t *testing.T) {
 	const secret = "super-secret-token-do-not-forward"
 	srv, err := agenthost.McpServerForACP(&runtimetypes.MCPServer{
@@ -69,10 +67,7 @@ func TestUnit_McpServerForACP_RejectsBrokenRows(t *testing.T) {
 }
 
 // TestUnit_ResolveForwardedMcpServers_MissingNameIsLoud pins that an
-// allowlist entry with no matching registered server fails the resolution
-// outright instead of being skipped: the allowlist is written-down consent,
-// and silently driving the agent with less context than declared is exactly
-// the failure mode this seam exists to prevent.
+// unresolvable allowlist name fails loudly instead of being skipped.
 func TestUnit_ResolveForwardedMcpServers_MissingNameIsLoud(t *testing.T) {
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "mcpforward.db"), runtimetypes.SchemaSQLite)

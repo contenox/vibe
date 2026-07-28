@@ -11,10 +11,8 @@ import (
 	"github.com/contenox/beam/internal/services/presence"
 )
 
-// openKV opens a fresh file-backed SQLite KV manager. A FILE (not :memory:) is
-// used so a second manager over the same path exercises the real cross-process
-// path — an editor writer and serve's reader are separate processes sharing
-// $HOME/.contenox/local.db.
+// openKV opens a fresh file-backed SQLite KV manager, exercising the real
+// cross-process path a second manager over the same file would take.
 func openKV(t *testing.T, dir string) libkvstore.KVManager {
 	t.Helper()
 	path := filepath.Join(dir, "local.db")
@@ -77,10 +75,8 @@ func TestUnit_Store_StaleDerivation(t *testing.T) {
 	ctx := context.Background()
 	kv := openKV(t, t.TempDir())
 
-	// Drive the store clock so staleness is deterministic. The KV row's own hard
-	// TTL is left at the default (90s) so the row stays ALIVE in real time while
-	// we advance the logical clock past the staleness threshold — this isolates
-	// staleness-derivation from aging-out.
+	// Drive the clock so staleness is deterministic; the row's hard TTL stays
+	// default so aging-out never interferes.
 	base := time.Now().UTC()
 	clock := base
 	store := presence.NewStore(kv,
@@ -102,8 +98,7 @@ func TestUnit_Store_StaleDerivation(t *testing.T) {
 		t.Fatalf("within TTL the entry must be fresh: %+v", entries)
 	}
 
-	// Past the TTL since LastSeen: stale, but still listed (not yet aged out) so
-	// an operator can SEE it died.
+	// Past the TTL: stale, but still listed until it ages out.
 	clock = base.Add(31 * time.Second)
 	entries, err = store.List(ctx)
 	if err != nil {
@@ -121,9 +116,7 @@ func TestUnit_Store_AgesOutAfterHardTTL(t *testing.T) {
 	ctx := context.Background()
 	kv := openKV(t, t.TempDir())
 
-	// A short hard TTL drives real aging-out via the KV row's native expiry — the
-	// "filter-on-read" reap: a dead editor's row disappears from the listing with
-	// no reaper, because the store treats an expired row as absent.
+	// A short hard TTL drives real aging-out via the KV row's native expiry.
 	store := presence.NewStore(kv,
 		presence.WithStaleTTL(10*time.Millisecond),
 		presence.WithHardTTL(40*time.Millisecond),
@@ -181,11 +174,7 @@ func TestUnit_Store_RegisterRejectsIncompleteRecord(t *testing.T) {
 	}
 }
 
-// TestUnit_Board_ComposedFleetView is the slice's composed case: two fresh
-// "editor" registrations plus one that has gone stale past its hard TTL. The
-// board reader (a SEPARATE KV manager over the same db file, the real
-// cross-process shape) must show the two fresh ones marked External, and the
-// stale one aged out of the listing.
+// TestUnit_Board_ComposedFleetView pins that a separate reader over the same db shows live editors External and drops the aged-out one.
 func TestUnit_Board_ComposedFleetView(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

@@ -13,24 +13,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestVLLM_Smoke tests the minimal functionality of the vLLM provider
+// TestSystem_VLLM_Smoke exercises the vLLM provider against a live container.
 func TestSystem_VLLM_Smoke(t *testing.T) {
 	requireVLLMContainerTests(t)
 
 	ctx := context.Background()
 
-	// Use tiny model for CPU testing
 	model := "HuggingFaceTB/SmolLM2-360M-Instruct"
 	tag := "latest"
 
 	t.Logf("Setting up vLLM container with model: %s", model)
 
-	// Set up vLLM instance (shared across all subtests)
 	apiBase, _, cleanup, err := modelrepo.SetupVLLMLocalInstance(ctx, model, tag, "none")
 	require.NoError(t, err, "failed to setup vLLM instance")
 	defer cleanup()
 
-	// Define test cases that reuse the same container setup
 	tests := []struct {
 		name     string
 		caps     modelrepo.CapabilityConfig
@@ -43,7 +40,6 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				CanChat:       true,
 			},
 			testFunc: func(t *testing.T, provider modelrepo.Provider, apiBase string) {
-				// Verify basic metadata
 				assert.Equal(t, model, provider.ModelName())
 				assert.Equal(t, "vllm:"+model, provider.GetID())
 				assert.Equal(t, "vllm", provider.GetType())
@@ -53,11 +49,9 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				assert.False(t, provider.CanStream())
 				assert.False(t, provider.CanPrompt())
 
-				// Get chat client
 				chatClient, err := provider.GetChatConnection(ctx, apiBase)
 				require.NoError(t, err, "failed to get chat connection")
 
-				// Test a minimal conversation
 				messages := []modelrepo.Message{
 					{Role: "user", Content: "Hello"},
 				}
@@ -87,28 +81,24 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				chatClient, err := provider.GetChatConnection(ctx, apiBase)
 				require.NoError(t, err, "failed to get chat connection")
 
-				// More directive prompt to force counting behavior
 				messages := []modelrepo.Message{
 					{Role: "user", Content: "Count from 1 to 5. Each number on its own line. No additional text."},
 				}
 
-				// Test with custom temperature and max tokens
 				ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 				defer cancel()
 
 				t.Log("Testing chat with custom options...")
 				resp, err := chatClient.Chat(ctx, messages,
-					modelrepo.WithTemperature(0.1), // Very deterministic
+					modelrepo.WithTemperature(0.1),
 					modelrepo.WithMaxTokens(30),
 				)
 				require.NoError(t, err, "failed to get chat response with options")
 				assert.NotEmpty(t, resp.Message.Content, "response should not be empty")
 
-				// More flexible validation - check for presence of numbers
 				content := strings.ToLower(resp.Message.Content)
 				t.Logf("Received response: %q", content)
 
-				// Check if response contains all required numbers
 				hasOne := strings.Contains(content, "1")
 				hasTwo := strings.Contains(content, "2")
 				hasThree := strings.Contains(content, "3")
@@ -127,7 +117,6 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				CanPrompt:     true,
 			},
 			testFunc: func(t *testing.T, provider modelrepo.Provider, apiBase string) {
-				// Verify metadata for prompt capability
 				assert.True(t, provider.CanPrompt())
 				assert.False(t, provider.CanChat())
 
@@ -149,7 +138,6 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				assert.NotEmpty(t, resp, "prompt response should not be empty")
 				t.Logf("Prompt response in %v: %q", elapsed, resp)
 
-				// Basic validation - should contain "Paris" (case-insensitive)
 				assert.True(t, strings.Contains(strings.ToLower(resp), "paris"),
 					"response should mention Paris: %q", resp)
 			},
@@ -161,14 +149,12 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				CanStream:     true,
 			},
 			testFunc: func(t *testing.T, provider modelrepo.Provider, apiBase string) {
-				// Verify metadata for streaming capability
 				assert.True(t, provider.CanStream())
 				assert.False(t, provider.CanChat())
 
 				streamClient, err := provider.GetStreamConnection(ctx, apiBase)
 				require.NoError(t, err, "failed to get stream connection")
 
-				// Simpler prompt that's less likely to cause issues
 				prompt := "Say 'Hello' and stop."
 
 				ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -181,14 +167,12 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 
 				t.Logf("Stream setup took %v", time.Since(start))
 
-				// Process streamed response with better error diagnostics
 				var fullResponse string
 				var parcelCount int
 				var firstError error
 
 				for parcel := range stream {
 					if parcel.Error != nil {
-						// Capture first error but keep processing
 						if firstError == nil {
 							firstError = parcel.Error
 							t.Logf("First stream error encountered: %v", parcel.Error)
@@ -204,10 +188,8 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 
 				elapsed := time.Since(start)
 
-				// If we got an error but also some data, log it as a warning
 				if firstError != nil {
 					t.Logf("Stream completed with partial data due to error: %v", firstError)
-					// Only fail if we got no data at all
 					if fullResponse == "" {
 						require.Fail(t, "streaming failed with no data", "error: %v", firstError)
 					}
@@ -217,7 +199,6 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				assert.Greater(t, parcelCount, 0, "should receive at least one stream parcel")
 				t.Logf("Stream completed in %v, %d parcels: %q", elapsed, parcelCount, fullResponse)
 
-				// Basic validation of streaming content
 				assert.True(t, strings.Contains(strings.ToLower(fullResponse), "hello"),
 					"streamed response should contain 'hello': %q", fullResponse)
 			},
@@ -232,7 +213,6 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				chatClient, err := provider.GetChatConnection(ctx, apiBase)
 				require.NoError(t, err, "failed to get chat connection")
 
-				// Simple prompt where we can verify determinism
 				messages := []modelrepo.Message{
 					{Role: "system", Content: "You are a helpful assistant. Answer briefly."},
 					{Role: "user", Content: "How many moons does Earth have?"},
@@ -241,16 +221,14 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 				defer cancel()
 
-				// First request with seed 123
 				resp1, err := chatClient.Chat(ctx, messages,
 					modelrepo.WithSeed(123),
-					modelrepo.WithTemperature(0.7), // Keep some randomness but controlled
+					modelrepo.WithTemperature(0.7),
 					modelrepo.WithMaxTokens(10),
 				)
 				require.NoError(t, err, "failed to get first response")
 				require.NotEmpty(t, resp1.Message.Content, "first response should not be empty")
 
-				// Second request with SAME seed
 				resp2, err := chatClient.Chat(ctx, messages,
 					modelrepo.WithSeed(123),
 					modelrepo.WithTemperature(0.7),
@@ -259,13 +237,11 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				require.NoError(t, err, "failed to get second response")
 				require.NotEmpty(t, resp2.Message.Content, "second response should not be empty")
 
-				// Critical check: same seed = same output
 				assert.Equal(t, resp1.Message.Content, resp2.Message.Content,
 					"Responses with identical seed should be identical")
 
 				t.Logf("Verified deterministic output with seed 123: %q", resp1.Message.Content)
 
-				// Third request with DIFFERENT seed
 				resp3, err := chatClient.Chat(ctx, messages,
 					modelrepo.WithSeed(456),
 					modelrepo.WithTemperature(0.7),
@@ -274,8 +250,7 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 				require.NoError(t, err, "failed to get third response")
 				require.NotEmpty(t, resp3.Message.Content, "third response should not be empty")
 
-				// Sanity check: different seed should produce different output
-				// (not guaranteed but highly likely - warn if same)
+				// Different seeds usually (not guaranteed) produce different output.
 				if resp1.Message.Content == resp3.Message.Content {
 					t.Logf("WARNING: Responses with different seeds were identical. "+
 						"This is unusual but can happen with very short completions. \n\n%s\n%s\n%s", resp1.Message.Content, resp2.Message.Content, resp3.Message.Content)
@@ -286,7 +261,6 @@ func TestSystem_VLLM_Smoke(t *testing.T) {
 		},
 	}
 
-	// Run all test cases with shared container
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			provider := vllm.NewVLLMProvider(

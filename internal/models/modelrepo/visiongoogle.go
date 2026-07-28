@@ -2,20 +2,16 @@ package modelrepo
 
 import "strings"
 
-// The Gemini and Vertex model-listing APIs do NOT report input modalities — unlike
-// Ollama, Bedrock, and Anthropic, whose vision capability we
-// detect at runtime from their API responses. Image-input support for Google
-// models is therefore MAINTAINED BY HAND below.
+// The Gemini and Vertex model-listing APIs report no input-modality field,
+// unlike Ollama, Bedrock, and Anthropic, where vision support is detected at
+// runtime. Google model vision support is therefore maintained here by hand
+// from https://ai.google.dev/gemini-api/docs/models: the mainline
+// generateContent families are multimodal, while the same family names also
+// cover embedding/TTS/speech-translation/generation models excluded by
+// geminiNonVisionMarkers.
 //
-// Source: https://ai.google.dev/gemini-api/docs/models (verified 2026-07-22). The
-// mainline Gemini generateContent families are multimodal (accept image input);
-// the same family names also cover text-embedding, text-to-speech, live speech
-// translation, and music/video/image generation models, which take no image input
-// and are excluded by geminiNonVisionMarkers.
-//
-// MAINTENANCE: when Google ships a new multimodal Gemini family (e.g. gemini-4),
-// add its prefix to geminiVisionFamilies. When they ship a new non-vision variant
-// within an existing family, add a marker to geminiNonVisionMarkers.
+// Add new multimodal family prefixes to geminiVisionFamilies, and new
+// non-vision variants within an existing family to geminiNonVisionMarkers.
 var geminiVisionFamilies = []string{
 	"gemini-1.5",
 	"gemini-2.0",

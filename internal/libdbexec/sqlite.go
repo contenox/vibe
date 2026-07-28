@@ -25,9 +25,8 @@ func NewSQLiteDBManager(ctx context.Context, path string, schema string) (DBMana
 	if err := ensureSQLiteParentDir(path); err != nil {
 		return nil, fmt.Errorf("sqlite parent dir: %w", err)
 	}
-	// Append WAL mode, busy timeout and foreign_keys to the DSN so ALL connections
-	// spawned from the pool inherit them.  Previously foreign_keys was set via a
-	// single db.ExecContext call which only applied to one leased connection.
+	// Set via DSN pragmas, not a one-off ExecContext, so every pooled connection
+	// inherits WAL mode, busy timeout, and foreign_keys — not just one leased connection.
 	dsn := path
 	if !strings.Contains(dsn, "?") {
 		dsn += "?"
@@ -46,10 +45,8 @@ func NewSQLiteDBManager(ctx context.Context, path string, schema string) (DBMana
 	}
 
 	if schema != "" {
-		// Execute statements one-by-one so that an ALTER TABLE failing because a
-		// column already exists (on an upgraded DB) only skips that one statement —
-		// subsequent migrations still run.  The old single-shot ExecContext halted at
-		// the first error, leaving any columns added after the failing ALTER missing.
+		// Execute one statement at a time so an ALTER TABLE failing because a column
+		// already exists (upgraded DB) skips only that statement; later migrations still run.
 		for _, stmt := range splitSQLStatements(schema) {
 			if _, err = db.ExecContext(ctx, stmt); err != nil {
 				msg := err.Error()

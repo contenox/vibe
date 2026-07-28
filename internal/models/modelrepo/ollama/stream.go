@@ -81,11 +81,10 @@ func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		req.Truncate = config.Truncate
 	}
 
-	// Raw-delta contract (modelrepo.StreamParcel): content / thinking / tool
-	// calls are forwarded as raw deltas — Ollama delivers each tool call whole,
-	// so each gets the next sequential index — and the done=true response
-	// becomes the typed terminal parcel (done_reason + eval counts). Assembly
-	// belongs to the engine-side modelrepo.StreamAssembler.
+	// Raw-delta contract (modelrepo.StreamParcel): content/thinking/tool-call
+	// deltas are forwarded as-is — Ollama delivers each tool call whole, so
+	// each gets the next sequential index — and done=true becomes the typed
+	// terminal parcel. Assembly belongs to the engine-side StreamAssembler.
 	ch := make(chan *modelrepo.StreamParcel)
 	go func() {
 		defer close(ch)
@@ -153,8 +152,7 @@ func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 			return
 		}
 		if terminal == nil {
-			// The connection ended without a done=true response; surface it
-			// instead of letting a truncated stream read as success.
+			// A truncated stream must not read as success.
 			err := fmt.Errorf("ollama stream for model %s ended without a done response", c.modelName)
 			reportErr(err)
 			send(&modelrepo.StreamParcel{Error: err})

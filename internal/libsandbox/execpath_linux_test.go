@@ -10,12 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The load-bearing coupling invariant: every SystemExecDir — the dirs the emulated
-// PATH is built from — must lie within the read+execute system runtime the Landlock
-// wall actually grants (systemRuntimePaths). If it did not, the confined PATH would
-// name a directory the wall denies, reintroducing exactly the findable-but-denied
-// mismatch the single-source-of-truth design removes. This test is what keeps the
-// two lists from drifting apart when someone edits either one.
+// Every SystemExecDir must lie within systemRuntimePaths (the Landlock exec grant), or the emulated PATH would name a dir the wall denies.
 func TestUnit_SystemExecDirs_WithinLandlockExecSurface(t *testing.T) {
 	for _, execDir := range SystemExecDirs() {
 		require.Truef(t, coveredBySystemRuntime(execDir),

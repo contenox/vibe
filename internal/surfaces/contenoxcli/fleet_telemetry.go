@@ -8,17 +8,11 @@ import (
 )
 
 // newInstanceEventSink adapts the agentinstance lifecycle EventSink onto the
-// shared ActivityTracker: every Event (state change, attach, detach,
-// unsupervised deny) is REPORTED through the tracker for after-the-fact audit
-// and nothing else. It is PASSIVE per the fleet-manager telemetry ruling —
-// record and return, no bus subject, no goroutine, no product behavior triggered
-// off a lifecycle fact. With tracing off the tracker is a Noop, so the sink is a
-// no-op too; it rides the tracing gate like every other subsystem.
-//
-// Payload discipline: the Event is identity-and-fact by construction (ids, agent
-// name, state, kind — never prompt/output content), so it is safe to record
-// whole. The EventSink contract forbids blocking or calling back into the
-// Manager; a synchronous tracker.Start/reportChange/end obeys both.
+// shared ActivityTracker: every event is reported for audit and nothing
+// else — no bus subject, no goroutine, no behavior triggered off it. The
+// event carries only ids/state/kind, never prompt content, so it's safe to
+// record whole; the synchronous Start/reportChange/end never blocks or calls
+// back into the Manager.
 func newInstanceEventSink(tracker libtracker.ActivityTracker) agentinstance.EventSink {
 	return func(ev agentinstance.Event) {
 		_, reportChange, end := tracker.Start(

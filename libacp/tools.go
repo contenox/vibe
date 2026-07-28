@@ -50,10 +50,8 @@ type ToolCallContent struct {
 }
 
 // MarshalJSON forces path/newText onto the wire for the "diff" variant even
-// when empty — e.g. newText:"" is the correct (and spec-required) shape for a
-// diff that clears a file's content, but plain omitempty can't distinguish
-// that from "absent" for a string. Every other field, and every other
-// ToolCallContent kind, keeps its normal omitempty behavior.
+// when empty — newText:"" is the correct shape for a diff clearing a file's
+// content, which plain omitempty can't distinguish from absent.
 func (c ToolCallContent) MarshalJSON() ([]byte, error) {
 	w := struct {
 		Type       ToolCallContentKind `json:"type"`

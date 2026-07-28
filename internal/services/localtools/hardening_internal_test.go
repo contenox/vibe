@@ -1,9 +1,8 @@
 package localtools
 
-// Internal-package tests for the tool-hardening primitives (Rec 4/5/7 of
-// docs/development/blueprints/tool-hardening.md). These exercise the unexported
-// building blocks directly: the streaming line reader's parity with
-// strings.Split, the spool retention policy, and the fuzzy suggestion helpers.
+// Internal-package tests exercising unexported building blocks directly: the
+// streaming line reader's parity with strings.Split, the spool retention
+// policy, and the fuzzy suggestion helpers.
 
 import (
 	"bytes"

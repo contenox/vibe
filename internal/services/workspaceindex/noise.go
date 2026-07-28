@@ -7,34 +7,12 @@ import (
 	"strings"
 )
 
-// ---------------------------------------------------------------------------
-// DUPLICATED NOISE FILTER — extraction pending
-//
-// Everything below is a copy of the matcher the agent's own local_fs find_files
-// uses: internal/services/localtools/fs_gitignore.go (ignoreRule, ignoreMatcher,
-// parseIgnoreFile) and internal/services/localtools/fs_policy.go's
-// defaultSkipDirNames. Not one of those identifiers is exported, so there is
-// nothing to import today — internal/surfaces/beamtui/comp/fileaddr/noise.go is
-// a second copy of the same code, for the same reason.
-//
-// TODO(blueprint beam-tui.md section 3, item 9 — "Extract the gitignore/skip-dirs
-// matcher"): that item exists precisely because @-mention completion and
-// find_files MUST filter identically, or the human's list and the agent's list
-// disagree about which files exist. The index is now a THIRD party to that
-// agreement — a semantic search that indexes files the agent cannot see, or
-// misses files it can, is worse than no search — so the extraction is now
-// overdue rather than merely pending. Where the shared matcher lands (its own
-// package, or folded into vfs/localfileservice) is still an open design
-// decision. When it lands, DELETE this file and call it; there will be three
-// copies to delete, which is the point.
-//
-// Scope note, unchanged from both originals: this is a NOISE filter, never
-// access control. Containment is vfs's job, and walkWorkspace runs every
-// candidate through vfs.Contain for exactly that reason.
-// ---------------------------------------------------------------------------
+// This is a copy of the noise-filter matcher used by localtools' find_files
+// (fs_gitignore.go, fs_policy.go) and beamtui's fileaddr package; none of
+// those identifiers are exported. It is a noise filter only, never access
+// control — containment is vfs's job, enforced separately in walkWorkspace.
 
-// defaultSkipDirNames is a verbatim copy of localtools' fallback set of
-// directory basenames omitted from listings. See the extraction TODO above.
+// defaultSkipDirNames is a copy of localtools' fallback skip-dir set.
 var defaultSkipDirNames = map[string]bool{
 	".git": true, ".hg": true, ".svn": true,
 	"node_modules": true, "bower_components": true, "Pods": true,
@@ -52,12 +30,10 @@ var defaultSkipDirNames = map[string]bool{
 func skipDir(base string) bool { return defaultSkipDirNames[base] }
 
 // ignoreRule and ignoreMatcher mirror localtools' partial gitignore
-// implementation: comments, negation (last match wins), directory-only patterns,
-// root-anchored patterns, filepath.Match globs matched against the basename when
-// the pattern has no slash and against the root-relative path when it does, and
-// a leading "**/" meaning "at any depth". Nested .gitignore files,
-// .git/info/exclude, core.excludesFile, and mid-pattern "**" are out of scope
-// there and therefore out of scope here.
+// implementation: comments, negation (last match wins), directory-only and
+// root-anchored patterns, filepath.Match globs, and a leading "**/" meaning
+// "at any depth". Nested .gitignore files, .git/info/exclude,
+// core.excludesFile, and mid-pattern "**" are out of scope.
 type ignoreRule struct {
 	pattern string
 	negate  bool
@@ -115,8 +91,7 @@ func (r ignoreRule) matches(rel string) bool {
 		}
 		return false
 	}
-	// No separator: the pattern applies to any path segment, and matching a
-	// segment ignores everything below it.
+	// No separator: pattern applies to any segment; matching one ignores everything below it.
 	for _, seg := range strings.Split(rel, "/") {
 		if ok, _ := filepath.Match(r.pattern, seg); ok {
 			return true
@@ -160,13 +135,9 @@ func parseIgnoreFile(data []byte) *ignoreMatcher {
 	return m
 }
 
-// gitignoreFor loads the root's .gitignore. A missing or unreadable file yields
-// nil, which Match treats as "nothing is ignored".
-//
-// Like fileaddr's copy and unlike localtools', this does not cache: an index
-// build walks the tree once and then does thousands of times more work per file
-// embedding it, so a matcher cache would buy microseconds in exchange for
-// staleness rules nobody asked for.
+// gitignoreFor loads the root's .gitignore. A missing or unreadable file
+// yields nil, which Match treats as "nothing is ignored". Unlike
+// localtools', this does not cache: a build walks the tree once.
 func gitignoreFor(absRoot string) *ignoreMatcher {
 	path := filepath.Join(absRoot, ".gitignore")
 	info, err := os.Stat(path)

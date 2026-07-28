@@ -20,32 +20,17 @@ type ptySession struct {
 }
 
 // startPTY launches an interactive shell rooted at cwd on a fresh PTY sized
-// rows x cols. The PTY becomes the shell's controlling terminal, so job control
-// behaves as on a real terminal.
-//
-// Two properties are established BEFORE the shell execs, because a shell that
-// starts up on a "normal" terminal saves those attributes and can restore them
-// later:
-//
-//   - ECHO is cleared on the pair. beam submits whole lines programmatically and
-//     the surface already shows the user what it sent; a terminal that echoes
-//     them back makes every `!` line appear twice in the shared scrollback.
-//   - The window size is applied to the pair, so the shell's very first prompt
-//     already sees the caller's geometry and no startup SIGWINCH is needed.
-//
-// Doing this through pty.Open + an explicit Start (rather than pty.Start, which
-// hides the slave) is what removes the race: with pty.Start the child can be
-// running — and can have snapshotted a terminal with ECHO on — before the parent
-// gets a chance to touch termios.
+// rows x cols, becoming its controlling terminal. ECHO is cleared and the
+// window size applied on the PTY pair before the shell execs (via pty.Open
+// + an explicit Start, not pty.Start, to avoid a race where the child could
+// snapshot termios with ECHO still on).
 func startPTY(cwd, shell string, scrub func([]string) []string, rows, cols int) (*ptySession, error) {
 	if shell == "" {
 		shell = defaultShell()
 	}
 	cmd := exec.Command(shell, shellSpawnArgs(shell)...)
 	cmd.Dir = cwd
-	// Scrub serve's credentials out of the shell's environment when configured;
-	// TERM and the prompt-suppression vars are appended last so they win
-	// regardless of the policy.
+	// Scrub serve's credentials when configured; TERM/prompt-suppression vars are appended last so they win.
 	parent := os.Environ()
 	if scrub != nil {
 		parent = scrub(parent)
@@ -57,21 +42,18 @@ func startPTY(cwd, shell string, scrub func([]string) []string, rows, cols int) 
 		return nil, err
 	}
 	_ = pty.Setsize(master, winsize(rows, cols))
-	// The master and the slave share one termios on every platform we build for,
-	// so clearing ECHO on the slave we still hold configures the pair.
+	// Master and slave share one termios, so clearing ECHO on the slave configures the pair.
 	_ = disableEcho(tty)
 
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
-	// Setsid + Setctty (with the slave as fd 0) is what makes the PTY the shell's
-	// controlling terminal — the same thing pty.Start does for us normally.
+	// Setsid + Setctty makes the PTY the shell's controlling terminal.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
 	if err := cmd.Start(); err != nil {
 		_ = tty.Close()
 		_ = master.Close()
 		return nil, err
 	}
-	// The child holds its own descriptors now; keeping ours open would stop the
-	// master from ever reporting EOF when the shell dies.
+	// Close our copy so the master reports EOF once the shell exits.
 	_ = tty.Close()
 	return &ptySession{master: master, cmd: cmd}, nil
 }
@@ -89,18 +71,11 @@ func shellFamily(shell string) string {
 	}
 }
 
-// shellSpawnArgs picks the argv for a shell family.
-//
-// bash and zsh are started interactive (-i) on purpose: the user's rc file is
-// what defines their aliases and functions, and `!ll` has to mean what it means
-// in their own terminal.
-//
-// bash additionally gets --noediting. beam never delivers keystrokes to this
-// PTY — Run submits one complete line at a time — so readline buys nothing here
-// while costing a line-editing layer that re-echoes input and wraps every prompt
-// in bracketed-paste escapes (\e[?2004h/l) that are pure noise in a scrollback
-// the agent also reads. Disabling the editor does NOT make the shell
-// non-interactive: rc files, aliases, job control and history all still apply.
+// shellSpawnArgs picks the argv for a shell family. bash/zsh start
+// interactive (-i) so the user's rc file defines their aliases. bash also
+// gets --noediting: Run submits one complete line at a time, so readline
+// buys nothing while adding re-echoed input and bracketed-paste escapes to
+// the scrollback. rc files, aliases, job control, and history still apply.
 func shellSpawnArgs(shell string) []string {
 	switch shellFamily(shell) {
 	case "bash":
@@ -112,24 +87,13 @@ func shellSpawnArgs(shell string) []string {
 	}
 }
 
-// promptSuppressionEnv returns the environment additions that stop an
-// interactive shell from drawing a prompt into the scrollback.
-//
-// A prompt is both noise (it doubles the line count of `!echo AAA`) and a
-// privacy leak: the stock bash prompt embeds the login name, the hostname and
-// the absolute cwd, and this scrollback is read by the agent and shows up in
-// shared transcripts.
-//
-// Clearing PS1 through the environment is not enough on its own for bash: an
-// interactive bash sources the user's rc file AFTER importing the environment,
-// and distro defaults (Debian/Ubuntu's /etc/skel/.bashrc, for one) assign PS1
-// unconditionally. PROMPT_COMMAND is the hook that runs immediately before each
-// prompt is drawn, so re-clearing PS1/PS2 from there wins over the rc file —
-// including for the very first prompt.
-//
-// This is best-effort by construction. A shell we do not recognize, or an rc
-// file that itself owns PROMPT_COMMAND (starship, oh-my-bash, powerline) or
-// zsh's precmd hooks, can still draw a prompt; the surface must tolerate one.
+// promptSuppressionEnv returns environment additions that stop an
+// interactive shell from drawing a prompt into the scrollback (noise and a
+// privacy leak: the stock bash prompt embeds login, host, and cwd).
+// Clearing PS1 alone is not enough for bash, since an rc file can reassign
+// it after the environment loads; PROMPT_COMMAND re-clears it immediately
+// before each prompt. Best-effort: a shell owning its own prompt hook can
+// still draw one.
 func promptSuppressionEnv(shell string) []string {
 	switch shellFamily(shell) {
 	case "bash":

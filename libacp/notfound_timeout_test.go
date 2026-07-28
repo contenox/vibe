@@ -8,10 +8,7 @@ import (
 	"github.com/contenox/beam/libacp"
 )
 
-// A code that already states the failure must not be overridden by sniffing
-// its message: a timeout whose text happens to contain "not found" is still a
-// timeout, and misreading it as a missing resource both lies about the cause
-// and discards the retryability IsRetryableError would otherwise grant.
+// Pins that a timeout whose message contains "not found" is not misclassified.
 func TestUnit_IsNotFound_TimeoutIsNotMisreadAsNotFound(t *testing.T) {
 	e := libacp.AsError(fmt.Errorf("upstream model not found in cache: %w", context.DeadlineExceeded))
 	t.Logf("code=%d msg=%q", e.Code, e.Message)

@@ -58,11 +58,23 @@ A policy is a JSON file with an optional `default_action` and a list of `rules`:
 | `rules[].tools` | string | Tools name (`local_fs`, `local_shell`, a remote tool name, …) |
 | `rules[].tool` | string | Tool name within that tool (`write_file`, `sed`, `local_shell`, …) |
 | `rules[].action` | `"approve"` \| `"allow"` \| `"deny"` | What to do when this rule matches |
-| `rules[].when` | array | Optional conditions on the call's arguments; **all** must hold for the rule to match (AND). Each is `{ "key": …, "op": …, "value": … }`. Ops include `command_blacklist`, `command_ask_always`, and `no_command_substitution`. Omit for a name-only match. |
+| `rules[].when` | array | Optional conditions on the call's arguments; **all** must hold for the rule to match (AND). Each is `{ "key": …, "op": …, "value": … }`. Omit for a name-only match. |
 | `rules[].timeout_s` | int | Seconds to wait for a human response when `action` is `approve`. `0` (default) waits indefinitely until the context is cancelled. |
 | `rules[].on_timeout` | `"approve"` \| `"deny"` | Fallback action when an approval window expires. `"allow"` is rejected (it would silently bypass approval). |
 
 Rules are evaluated top-to-bottom; the first match wins.
+
+### Condition operators (`when[].op`)
+
+| Op | Matches |
+|---|---|
+| `eq` | Argument value equals `value` exactly |
+| `glob` | Argument value (a path) matches a glob pattern; supports `*`, `?`, and `**` |
+| `host` | Argument value, parsed as a URL, has a host equal to or a subdomain of one of the comma-separated hosts in `value` |
+| `command_blacklist` | Command basename is in the comma-separated denylist in `value` (also catches every command in a compound shell line, where readable) |
+| `command_ask_always` | Same match as `command_blacklist`, for pairing with `action: "approve"` instead of `deny` |
+| `no_command_substitution` | Command line contains shell substitution syntax (`$()`, backticks, `<()`, `>()`) |
+| `command_prefix_allowlist` | Command line, as tokens, starts with one of the comma-separated safe prefixes in `value` (e.g. `"git log"` covers `git log --oneline` but not `git clean -fd`); refuses to match any call using shell mode or containing a control/substitution character |
 
 A rule with `when` conditions gates a tool only for calls whose arguments match — for example, prompting only for shell commands in a blacklist:
 
@@ -104,7 +116,7 @@ a person) answered it.
 
 ## Built-in presets
 
-Contenox ships five policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the last two are the profiles the ACP editor transports load.
+Contenox ships six policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the last three are the profiles the ACP editor transports and Beam load.
 
 | Name | Behaviour |
 |---|---|
@@ -113,12 +125,14 @@ Contenox ships five policy presets, written to `~/.contenox/` by `contenox init`
 | `hitl-policy-dev.json` | `default_action: allow`, but explicit rules still gate `local_shell` (every shell call requires approval, and a fixed blacklist is always denied); useful for local development when you don't want prompts on filesystem/webtools calls |
 | `hitl-policy-acp.json` | Profile for editor (ACP) sessions — gated tool calls route through the editor's own approval UI |
 | `hitl-policy-acpx.json` | Hardened profile for headless / untrusted-driver (ACPX, e.g. OpenClaw) sessions — shell, writes, and network are denied outright rather than offered for approval |
+| `hitl-policy-beam.json` | Beam's default envelope — a copy of `hitl-policy-acp.json` tuned for the attended terminal UI: approve-tier writes and shell commands surface as a one-keypress card in the transcript rather than an editor approval dialog |
 
 Each preset also states who may answer a unit's question (see [`attention`](#who-may-answer-a-units-question-attention)) rather than inheriting the invisible default, and the stances follow each preset's character:
 
 | Name | `attention` |
 |---|---|
 | `hitl-policy-acp.json` | agent may answer, up to 3 — an editor session's agent holds the conversation the mission was fired in |
+| `hitl-policy-beam.json` | agent may answer, up to 3 — same stance as `hitl-policy-acp.json`, for Beam's attended session |
 | `hitl-policy-default.json` | agent may answer, up to 2 — routine questions, while whatever the unit then *does* stays gated by this same envelope |
 | `hitl-policy-dev.json` | agent may answer, up to 5 — the permissive local-development posture |
 | `hitl-policy-strict.json` | **human only** — a policy whose character is "a human decides" does not hand the deciding to a model |
@@ -140,6 +154,6 @@ When HITL is enabled and a tool call needs evaluation, the engine resolves the p
 1. Read the `hitl-policy-name` key from the KV store.
 2. If set, load that file from the workspace `.contenox/` directory, falling back to `~/.contenox/`.
 3. If the key is empty or the file is missing, fall back to `hitl-policy-default.json`.
-4. If that file is also missing, use a built-in fail-closed policy (same shape as `hitl-policy-default.json`: reads and safe webtools verbs are allowed, everything else — including any tool call that matches no rule — requires approval).
+4. If that file is also missing, use a built-in fail-closed policy with no rules: every tool call, including reads, requires approval.
 
 See [`contenox workspace`](/docs/reference/contenox-cli/#contenox-workspace) in the CLI reference for granting and revoking the workspace roots sessions may run in.

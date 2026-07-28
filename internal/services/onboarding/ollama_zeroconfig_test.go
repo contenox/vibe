@@ -15,11 +15,7 @@ import (
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
-// TestDecide is the pure decision-function table: virgin
-// install + a reachable probe with a chat model fires; an existing backend,
-// an already-set default, or a probe with no chat-capable model must never
-// fire. Decide takes no context and does no I/O, so this needs no server,
-// no DB, and no injected clock.
+// TestDecide pins the pure decision table: only a virgin install with a reachable, chat-capable probe fires.
 func TestDecide(t *testing.T) {
 	t.Parallel()
 
@@ -175,10 +171,8 @@ func TestChatModels(t *testing.T) {
 	}
 }
 
-// setupOnboardingDB opens a throwaway SQLite DB, the same helper pattern
-// backendservice_test.go uses, so Apply/tryZeroConfig can be exercised
-// against real store code (backendservice.Create, clikv.WriteConfig) rather
-// than a mock.
+// setupOnboardingDB opens a throwaway SQLite DB so Apply/tryZeroConfig can
+// run against real store code rather than a mock.
 func setupOnboardingDB(t *testing.T) (context.Context, libdbexec.DBManager) {
 	t.Helper()
 	ctx := context.Background()
@@ -190,11 +184,7 @@ func setupOnboardingDB(t *testing.T) (context.Context, libdbexec.DBManager) {
 	return ctx, db
 }
 
-// TestApply_HappyPath covers the registrar's mutating half directly: given
-// an already-computed probe (injected — no network), it must register
-// exactly one "ollama"-typed backend and persist default-provider/
-// default-model, mirroring `contenox backend add ollama --type ollama`
-// followed by two `contenox config set` calls.
+// TestApply_HappyPath pins that Apply registers exactly one ollama backend and persists default-provider/default-model.
 func TestApply_HappyPath(t *testing.T) {
 	t.Parallel()
 	ctx, db := setupOnboardingDB(t)
@@ -250,9 +240,7 @@ func TestApply_RejectsEmptyModelOrBaseURL(t *testing.T) {
 	}
 }
 
-// TestTryZeroConfig_NonVirginNeverProbes proves the virgin-install gate runs
-// before any I/O: an install with a backend already registered must not
-// touch the DB, using a probeFunc that fails the test if it is ever called.
+// TestTryZeroConfig_NonVirginNeverProbes pins that the virgin-install gate runs before any I/O, including the probe itself.
 func TestTryZeroConfig_NonVirginNeverProbes(t *testing.T) {
 	t.Parallel()
 	ctx, db := setupOnboardingDB(t)
@@ -284,10 +272,7 @@ func TestTryZeroConfig_NonVirginNeverProbes(t *testing.T) {
 	}
 }
 
-// TestTryZeroConfig_InjectedProbe_HappyPath exercises the full
-// probe->decide->apply orchestration with an injected prober (no live
-// Ollama daemon, no httptest server), the "if the registrar can take an
-// injected prober/services, cover the happy path" case.
+// TestTryZeroConfig_InjectedProbe_HappyPath pins the full probe->decide->apply orchestration with an injected prober.
 func TestTryZeroConfig_InjectedProbe_HappyPath(t *testing.T) {
 	t.Parallel()
 	ctx, db := setupOnboardingDB(t)
@@ -327,9 +312,7 @@ func TestTryZeroConfig_InjectedProbe_HappyPath(t *testing.T) {
 	}
 }
 
-// TestTryZeroConfig_InjectedProbe_NoChatModelDoesNothing proves the "Ollama
-// up but no [chat] models" shape (blueprint 4.3) never registers anything,
-// even though the install is virgin.
+// TestTryZeroConfig_InjectedProbe_NoChatModelDoesNothing pins that "Ollama up but no chat models" never registers anything, even on a virgin install.
 func TestTryZeroConfig_InjectedProbe_NoChatModelDoesNothing(t *testing.T) {
 	t.Parallel()
 	ctx, db := setupOnboardingDB(t)
@@ -357,11 +340,7 @@ func TestTryZeroConfig_InjectedProbe_NoChatModelDoesNothing(t *testing.T) {
 }
 
 // fakeOllamaServer stands in for a local Ollama daemon: GET /api/tags lists
-// models, POST /api/show reports capabilities for one of them. This is the
-// only test that exercises ProbeOllamaModels itself (real HTTP, real JSON,
-// real modelrepo/ollama catalog code) end to end, proving the zero-config
-// probe's capability detection agrees with the vendor package the real
-// backend sync uses — not a hand-rolled name heuristic.
+// models, POST /api/show reports capabilities for one of them.
 func fakeOllamaServer(t *testing.T, models []struct {
 	name         string
 	capabilities []string
@@ -406,11 +385,7 @@ func fakeOllamaServer(t *testing.T, models []struct {
 	return srv
 }
 
-// TestProbeOllamaModels_RealHTTPAgainstFakeServer runs ProbeOllamaModels
-// itself (not an injected stub) against a fake Ollama daemon, proving the
-// end-to-end probe — /api/tags, then /api/show per model via
-// modelrepo.NewCatalogProvider — correctly separates a chat-capable model
-// from an embedding-only one.
+// TestProbeOllamaModels_RealHTTPAgainstFakeServer pins that ProbeOllamaModels correctly separates a chat-capable model from an embedding-only one over real HTTP.
 func TestProbeOllamaModels_RealHTTPAgainstFakeServer(t *testing.T) {
 	srv := fakeOllamaServer(t, []struct {
 		name         string
@@ -436,10 +411,7 @@ func TestProbeOllamaModels_RealHTTPAgainstFakeServer(t *testing.T) {
 	}
 }
 
-// TestTryZeroConfig_EndToEndAgainstFakeServer wires TryZeroConfig's public
-// entry point (real ProbeOllamaModels, not an injected stub) to the fake
-// server and a real SQLite DB — the closest this package gets to the beam
-// gate's actual call.
+// TestTryZeroConfig_EndToEndAgainstFakeServer pins TryZeroConfig's public entry point end to end against a fake server and a real SQLite DB.
 func TestTryZeroConfig_EndToEndAgainstFakeServer(t *testing.T) {
 	srv := fakeOllamaServer(t, []struct {
 		name         string

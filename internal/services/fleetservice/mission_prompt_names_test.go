@@ -11,21 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem is the regression for a
-// silent, expensive drift: the unattended preamble and nudge named the mission
-// tools BARE (`mission_report`), while taskengine offers every tool qualified by
-// its provider ("mission.mission_report") and resolves calls by that same
-// qualified name. A dispatched unit was therefore ordered — twice — to call a
-// function absent from its own tool list. It answered in prose, was nudged,
-// returned an empty turn, and the runtime filed a blocker against a unit that had
-// done the work and had no reachable way to report it.
-//
-// The prompts are now derived from the tool package's constants, so this test
-// guards the remaining gap that derivation cannot close on its own: that the
-// QUALIFICATION rule the prompts assume is the one taskengine actually applies.
+// TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem: the mission prompts
+// (preamble, nudge) must name tools exactly as taskengine qualifies and
+// offers them to the model, never the bare form.
 func TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem(t *testing.T) {
-	// The names taskengine will put in the model's tool list, derived the way it
-	// derives them (taskenv.go: toolsName + "." + tool.Function.Name).
+	// The names taskengine puts in the model's tool list (see taskenv.go).
 	tools, err := missiontools.New(schemaOnlyStore{}, nil).GetToolsForToolsByName(
 		missiontools.WithMissionID(context.Background(), "m-1"),
 		missiontools.ToolsProviderName,
@@ -50,8 +40,8 @@ func TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem(t *testing.T) {
 		for _, name := range []string{toolAskAttention, toolReport, toolFinish} {
 			require.Contains(t, prompt.text, name, "the %s must name %q the way the model sees it", prompt.what, name)
 		}
-		// And must not name the bare form, which is what broke: a bare mention
-		// reads to the model as a different, non-existent function.
+		// Must not name the bare form: it reads to the model as a different,
+		// non-existent function.
 		for _, bare := range []string{
 			missiontools.ToolNameAskAttention,
 			missiontools.ToolNameReport,
@@ -64,8 +54,7 @@ func TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem(t *testing.T) {
 	}
 }
 
-// mentionsBare reports whether text names tool WITHOUT its provider prefix —
-// i.e. an occurrence not immediately preceded by "mission.".
+// mentionsBare reports whether text names tool without its provider prefix.
 func mentionsBare(text, tool string) bool {
 	prefix := missiontools.ToolsProviderName + "."
 	for i := 0; ; {
@@ -89,9 +78,8 @@ func keys(m map[string]bool) []string {
 	return out
 }
 
-// schemaOnlyStore satisfies missiontools.MissionStore for a test that only reads
-// tool SCHEMAS — no method is ever called, so each is a bare stub rather than a
-// fake with behaviour to keep in sync.
+// schemaOnlyStore satisfies missiontools.MissionStore for a test that only
+// reads tool schemas; no method is ever called.
 type schemaOnlyStore struct{}
 
 func (schemaOnlyStore) AddReport(context.Context, string, *missionservice.Report) error {

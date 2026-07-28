@@ -47,16 +47,15 @@ type streamErrorChunk struct {
 // they arrive, then one typed terminal parcel. Assembly belongs to the
 // engine-side modelrepo.StreamAssembler, never to this client.
 func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "vllm", "model", c.modelName)
-	// Note: We don't defer end() here because the stream is asynchronous
+	// end() is not deferred here; the stream is asynchronous, so it runs from
+	// the goroutine below instead.
 
 	request, nameMap := buildChatRequest(c.modelName, messages, args, c.canThink)
 	c.clampChatRequest(&request)
 	request.Stream = true
 	request.StreamOptions = &streamOptions{IncludeUsage: true}
 
-	// Prepare the request
 	url := c.baseURL + "/v1/chat/completions"
 	reqBody, err := json.Marshal(request)
 	if err != nil {
@@ -84,7 +83,6 @@ func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Mess
 		return nil, err
 	}
 
-	// Check response status
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
@@ -96,11 +94,10 @@ func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Mess
 		return nil, err
 	}
 
-	// Process the stream in a separate goroutine
 	go func() {
 		defer close(streamCh)
 		defer resp.Body.Close()
-		defer end() // End tracking when the stream completes
+		defer end()
 
 		send := func(p *modelrepo.StreamParcel) bool {
 			select {

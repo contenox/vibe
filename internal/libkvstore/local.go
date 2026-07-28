@@ -55,15 +55,6 @@ func SetupLocalPDInstance(ctx context.Context) (string, testcontainers.Container
 		return "", nil, cleanup, fmt.Errorf("pd terminated on start")
 	}
 
-	// req, err := http.NewRequest("GET", uri+"/pd/api/v1/health", nil)
-	// if err != nil {
-	// 	return "", nil, cleanup, err
-	// }
-	// res, err := http.DefaultClient.Do(req)
-	// if err != nil {
-	// 	return "", nil, cleanup, err
-	// }
-	// println(res)
 	return uri, container, cleanup, nil
 }
 
@@ -106,18 +97,6 @@ func SetupLocalTiKVInstance(ctx context.Context) (string, testcontainers.Contain
 	if err != nil {
 		return "", nil, cleanup, err
 	}
-
-	// host, err := container.Host(ctx)
-	// if err != nil {
-	// 	return "", nil, cleanup, err
-	// }
-
-	// mappedPort, err := container.MappedPort(ctx, "20160")
-	// if err != nil {
-	// 	return "", nil, cleanup, err
-	// }
-
-	// uri := fmt.Sprintf("http://%s:%s", host, mappedPort.Port())
 
 	return con, pdContainer, cleanup, nil
 }

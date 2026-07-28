@@ -79,8 +79,7 @@ func resultEvent(parentSessionID string) missionservice.ReportAddedEvent {
 	}
 }
 
-// TestUnit_Route_ParentSessionDelivered: with a live parent session, the report
-// is delivered into it and nothing lands in the inbox.
+// TestUnit_Route_ParentSessionDelivered pins that a live parent session gets the report and nothing lands in the inbox.
 func TestUnit_Route_ParentSessionDelivered(t *testing.T) {
 	del := &fakeDeliverer{}
 	inbox := &fakeInbox{}
@@ -92,8 +91,6 @@ func TestUnit_Route_ParentSessionDelivered(t *testing.T) {
 	require.Equal(t, libacp.SessionID("parent-42"), del.sessions[0])
 	require.Empty(t, inbox.list(), "a delivered report does not also land in the inbox")
 
-	// The delivered update is a transcript-legible agent_message_chunk carrying
-	// the mission-report attribution in its _meta envelope.
 	n := del.notes[0]
 	require.Equal(t, libacp.SessionUpdateAgentMessageChunk, n.Update.SessionUpdate)
 	require.NotNil(t, n.Update.Content)
@@ -109,9 +106,7 @@ func TestUnit_Route_ParentSessionDelivered(t *testing.T) {
 	require.Equal(t, "result", meta.Report.Kind)
 }
 
-// TestUnit_Route_ParentGoneFallsBackToInbox: a named parent that cannot be
-// reached (deliverer errors) falls back to the inbox marked parent_gone. A
-// supervisor ending must never drop a report.
+// TestUnit_Route_ParentGoneFallsBackToInbox pins that an unreachable parent falls back to the inbox marked parent_gone, never dropped.
 func TestUnit_Route_ParentGoneFallsBackToInbox(t *testing.T) {
 	del := &fakeDeliverer{err: fmt.Errorf("agentinstance: session %q: not found", "parent-42")}
 	inbox := &fakeInbox{}
@@ -127,8 +122,7 @@ func TestUnit_Route_ParentGoneFallsBackToInbox(t *testing.T) {
 	require.Equal(t, "shipped the board", items[0].Report.Summary)
 }
 
-// TestUnit_Route_OperatorFiredToInbox: no parent session → straight to the
-// operator inbox, never a delivery attempt.
+// TestUnit_Route_OperatorFiredToInbox pins that no parent session means straight to the inbox, never a delivery attempt.
 func TestUnit_Route_OperatorFiredToInbox(t *testing.T) {
 	del := &fakeDeliverer{}
 	inbox := &fakeInbox{}
@@ -144,8 +138,7 @@ func TestUnit_Route_OperatorFiredToInbox(t *testing.T) {
 	require.Equal(t, "m1", items[0].MissionID)
 }
 
-// TestUnit_Route_InboxWriteFailureNeverPanics: an inbox write failure is
-// tolerated (tracked, not crashed) — routing is best-effort.
+// TestUnit_Route_InboxWriteFailureNeverPanics pins that an inbox write failure is tolerated, not crashed.
 func TestUnit_Route_InboxWriteFailureNeverPanics(t *testing.T) {
 	del := &fakeDeliverer{}
 	inbox := &fakeInbox{err: fmt.Errorf("store down")}
@@ -164,9 +157,7 @@ func TestUnit_New_RequiresCollaborators(t *testing.T) {
 	require.Error(t, err, "Inbox is required")
 }
 
-// TestUnit_StartConsumesBusEvents drives the full loop: an event published on
-// the bus after Start is decoded and routed. Uses the in-memory bus, so it is
-// fast and needs no subprocess.
+// TestUnit_StartConsumesBusEvents pins that an event published after Start is decoded and routed.
 func TestUnit_StartConsumesBusEvents(t *testing.T) {
 	del := &fakeDeliverer{}
 	inbox := &fakeInbox{}
@@ -189,10 +180,7 @@ func TestUnit_StartConsumesBusEvents(t *testing.T) {
 	require.Equal(t, libacp.SessionID("parent-42"), del.sessions[0])
 }
 
-// TestUnit_RouteAsk_DeliversTheQuestionToTheFiringSession is the ask half of the
-// supervision edge: a unit's QUESTION must reach the session that fired the
-// mission, carrying the handle an answer is given against, so the operator can
-// answer where they already are instead of hunting through a separate queue.
+// TestUnit_RouteAsk_DeliversTheQuestionToTheFiringSession pins that an ask reaches the firing session carrying its answer handle.
 func TestUnit_RouteAsk_DeliversTheQuestionToTheFiringSession(t *testing.T) {
 	sessions := &fakeDeliverer{}
 	inbox := &fakeInbox{}
@@ -219,9 +207,7 @@ func TestUnit_RouteAsk_DeliversTheQuestionToTheFiringSession(t *testing.T) {
 		"an ask is already durable in its own queue — the report inbox must not be double-written")
 }
 
-// TestUnit_RouteAsk_OperatorFiredStaysInTheQueue pins the no-parent case: nothing
-// is delivered and nothing is inboxed, because the ask queue IS where an operator
-// who fired directly answers.
+// TestUnit_RouteAsk_OperatorFiredStaysInTheQueue pins that no-parent asks are delivered nowhere and never inboxed.
 func TestUnit_RouteAsk_OperatorFiredStaysInTheQueue(t *testing.T) {
 	sessions := &fakeDeliverer{}
 	inbox := &fakeInbox{}
@@ -236,9 +222,7 @@ func TestUnit_RouteAsk_OperatorFiredStaysInTheQueue(t *testing.T) {
 	require.Empty(t, inbox.items)
 }
 
-// TestUnit_RouteAsk_ParentNotLiveIsNotAFault covers the reconnect gap: a firing
-// session that is not currently held by a connection cannot be told, and that is
-// a missed notification — the question stays answerable in the queue.
+// TestUnit_RouteAsk_ParentNotLiveIsNotAFault pins that an unreachable parent is a missed notification, not an inbox write.
 func TestUnit_RouteAsk_ParentNotLiveIsNotAFault(t *testing.T) {
 	sessions := &fakeDeliverer{err: libdb.ErrNotFound}
 	inbox := &fakeInbox{}
@@ -252,11 +236,7 @@ func TestUnit_RouteAsk_ParentNotLiveIsNotAFault(t *testing.T) {
 	require.Empty(t, inbox.items, "a missed ask notification is not an inbox report")
 }
 
-// TestUnit_DeliveredAsksCarryTheirOwnMessageID is the regression for two
-// questions rendering as one: streamed chunks group by message id, so a delivery
-// that carries none is folded into whatever message the session is accumulating.
-// Two questions then shared one transcript bubble and one answer box — and once
-// the first was answered, the second had no field at all.
+// TestUnit_DeliveredAsksCarryTheirOwnMessageID pins that distinct asks get distinct message ids.
 func TestUnit_DeliveredAsksCarryTheirOwnMessageID(t *testing.T) {
 	first := buildAskNotification(missionservice.AttentionAskedEvent{
 		MissionID: "m-1", AskID: "ask-1", ParentSessionID: "cnx", Summary: "which project?",
@@ -299,10 +279,7 @@ func planEvent(parentSessionID string) missionservice.PlanRevisedEvent {
 	}
 }
 
-// TestUnit_RouteStatus_DeliversToFiringSession: a unit's ending reaches the
-// session that fired it, carrying the pinned _meta envelope a client renders a
-// lifecycle line from. The literals here are CONTRACT — other surfaces decode
-// exactly these keys — so they are asserted by name, not by shape.
+// TestUnit_RouteStatus_DeliversToFiringSession pins the _meta envelope keys as contract: other surfaces decode them by name.
 func TestUnit_RouteStatus_DeliversToFiringSession(t *testing.T) {
 	del := &fakeDeliverer{}
 	inbox := &fakeInbox{}
@@ -330,8 +307,7 @@ func TestUnit_RouteStatus_DeliversToFiringSession(t *testing.T) {
 	require.Contains(t, string(n.Update.Meta), "contenox.missionStatus")
 }
 
-// TestUnit_RouteStatus_DerailedCarriesItsReason: the "why" is the whole value of
-// a failure notice, so it rides in both the body and the envelope.
+// TestUnit_RouteStatus_DerailedCarriesItsReason pins that a failure reason rides in both the body and the envelope.
 func TestUnit_RouteStatus_DerailedCarriesItsReason(t *testing.T) {
 	del := &fakeDeliverer{}
 	r := newTestRouter(t, del, &fakeInbox{})
@@ -346,9 +322,7 @@ func TestUnit_RouteStatus_DerailedCarriesItsReason(t *testing.T) {
 	require.Equal(t, "build never went green", meta.Status.Reason)
 }
 
-// TestUnit_RouteStatus_NoParentIsDroppedNotFiled pins the drop rule's first half:
-// an operator who fired the mission directly reads its status from the mission,
-// so nothing is delivered and — critically — nothing is written to the inbox.
+// TestUnit_RouteStatus_NoParentIsDroppedNotFiled pins that an operator-fired status change is delivered and inboxed nowhere.
 func TestUnit_RouteStatus_NoParentIsDroppedNotFiled(t *testing.T) {
 	del := &fakeDeliverer{}
 	inbox := &fakeInbox{}
@@ -361,9 +335,7 @@ func TestUnit_RouteStatus_NoParentIsDroppedNotFiled(t *testing.T) {
 		"every mission that ever finishes would otherwise drown the worklist the inbox exists for")
 }
 
-// TestUnit_RouteStatus_ParentGoneIsDroppedNotFiled pins the second half: a
-// supervisor that ended misses the notification, and that is all it misses — the
-// terminal status is durable on the mission record.
+// TestUnit_RouteStatus_ParentGoneIsDroppedNotFiled pins that an unreachable parent drops the status change rather than filing it.
 func TestUnit_RouteStatus_ParentGoneIsDroppedNotFiled(t *testing.T) {
 	del := &fakeDeliverer{err: libdb.ErrNotFound}
 	inbox := &fakeInbox{}
@@ -375,9 +347,7 @@ func TestUnit_RouteStatus_ParentGoneIsDroppedNotFiled(t *testing.T) {
 	require.Empty(t, inbox.list(), "an undeliverable status change is dropped, never filed")
 }
 
-// TestUnit_RoutePlan_DeliversToFiringSession: a re-plan reaches the firing
-// session with the counts a supervisor decides from, without reading the mission
-// back. Same contract-literal assertions as the status lane.
+// TestUnit_RoutePlan_DeliversToFiringSession pins that a re-plan reaches the firing session with its counts, contract-literal like the status lane.
 func TestUnit_RoutePlan_DeliversToFiringSession(t *testing.T) {
 	del := &fakeDeliverer{}
 	inbox := &fakeInbox{}
@@ -409,8 +379,7 @@ func TestUnit_RoutePlan_DeliversToFiringSession(t *testing.T) {
 	require.Contains(t, string(n.Update.Meta), "contenox.missionPlan")
 }
 
-// TestUnit_RoutePlan_DroppedWithoutInboxWrites covers both drop cases for the
-// plan lane in one table, mirroring the status lane's rule exactly.
+// TestUnit_RoutePlan_DroppedWithoutInboxWrites pins both drop cases for the plan lane, mirroring the status lane's rule.
 func TestUnit_RoutePlan_DroppedWithoutInboxWrites(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -434,11 +403,7 @@ func TestUnit_RoutePlan_DroppedWithoutInboxWrites(t *testing.T) {
 	}
 }
 
-// TestUnit_DeliveredStatusAndPlanCarryStableMessageIDs is the twin of the
-// ask/report message-id regressions, plus the property those two get for free
-// and this lane had to construct: the id is DERIVED from the event, so a
-// redelivery off the at-least-once SQLite bus collapses into the message the
-// client already has instead of rendering the same landing twice.
+// TestUnit_DeliveredStatusAndPlanCarryStableMessageIDs pins that message ids are derived from the event, stable under redelivery.
 func TestUnit_DeliveredStatusAndPlanCarryStableMessageIDs(t *testing.T) {
 	landed := buildStatusNotification(statusEvent("cnx", missionservice.StatusLanded, ""))
 	derailed := buildStatusNotification(statusEvent("cnx", missionservice.StatusDerailed, "nope"))
@@ -458,8 +423,7 @@ func TestUnit_DeliveredStatusAndPlanCarryStableMessageIDs(t *testing.T) {
 		"one revision redelivered is one message")
 }
 
-// TestUnit_StatusAndPlanTextNameAnUnnamedUnit keeps the anonymous case legible,
-// the way reportText/askText already do.
+// TestUnit_StatusAndPlanTextNameAnUnnamedUnit pins that an empty AgentName still reads as legible text.
 func TestUnit_StatusAndPlanTextNameAnUnnamedUnit(t *testing.T) {
 	ev := statusEvent("cnx", missionservice.StatusLanded, "")
 	ev.AgentName = ""
@@ -471,8 +435,7 @@ func TestUnit_StatusAndPlanTextNameAnUnnamedUnit(t *testing.T) {
 	require.Contains(t, planText(pev), "unit a mission unit revised its plan (rev 3)\n")
 }
 
-// TestUnit_StartConsumesStatusAndPlanEvents drives the full loop for the two new
-// lanes: both subjects are subscribed by Start and both reach the firing session.
+// TestUnit_StartConsumesStatusAndPlanEvents pins that Start subscribes both the status and plan lanes.
 func TestUnit_StartConsumesStatusAndPlanEvents(t *testing.T) {
 	del := &fakeDeliverer{}
 	bus := libbus.NewInMem()
@@ -506,8 +469,7 @@ func TestUnit_StartConsumesStatusAndPlanEvents(t *testing.T) {
 	require.True(t, ids["mission-plan-m1-3"])
 }
 
-// TestUnit_DeliveredReportsCarryTheirOwnMessageID holds the same line for
-// reports: two reports are two things a unit said, not one run-on message.
+// TestUnit_DeliveredReportsCarryTheirOwnMessageID pins that distinct reports get distinct message ids.
 func TestUnit_DeliveredReportsCarryTheirOwnMessageID(t *testing.T) {
 	first := buildReportNotification(missionservice.ReportAddedEvent{
 		MissionID: "m-1", ParentSessionID: "cnx",

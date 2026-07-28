@@ -24,8 +24,7 @@ const (
 )
 
 // ApprovalRequest describes a tool invocation that requires human review.
-// Diff is populated for file-mutation tools (write_file, sed) to show the
-// unified diff of what would change.
+// Diff is populated for file-mutation tools to show the unified diff.
 type ApprovalRequest struct {
 	ToolCallID string
 	ToolsName  string
@@ -36,27 +35,17 @@ type ApprovalRequest struct {
 	DiffNew    string
 
 	// PolicyName, MatchedRule, TimeoutS, and OnTimeout carry the policy
-	// verdict (hitlservice.EvaluationResult) that produced this ask.
-	// HITLWrapper.Exec populates them from the same Evaluate() call it
-	// already makes; RequestApproval persists them onto the durable row so an
-	// operator can always name which rule gated an action, and so it knows
-	// how long to wait and what to do if nobody answers in time. Zero values
-	// are safe: TimeoutS<=0 means "the matched rule set no timeout of its
-	// own" and OnTimeout=="" means "default deny". The attached-session path
-	// (acpsvc.Transport.AskApproval) ignores these fields.
+	// verdict that produced this ask, persisted onto the durable row. Zero
+	// values are safe: TimeoutS<=0 means no rule timeout; OnTimeout==""
+	// means default deny.
 	PolicyName  string
 	MatchedRule *int
 	TimeoutS    int
 	OnTimeout   Action
 
-	// InstanceID, SessionID, AgentName and MissionID attribute the ask to the
-	// fleet unit that raised it, and are persisted onto the durable row (see
-	// runtimetypes.HITLApproval's "Attribution" section for why an inbox needs
-	// them). All four are OPTIONAL: an ask raised by a native chain turn with
-	// no unit behind it leaves them empty, and MissionID is empty for an
-	// unattended session that is not on a mission. They are supplied by the
-	// unattended-permission answerer (fleetservice), which is the only caller
-	// that HAS this identity; the attached-session path ignores them.
+	// InstanceID, SessionID, AgentName, and MissionID attribute the ask to
+	// the fleet unit that raised it. All four are optional, supplied by the
+	// unattended-permission answerer; the attached-session path ignores them.
 	InstanceID string
 	SessionID  string
 	AgentName  string
@@ -69,71 +58,36 @@ type ConditionOp string
 const (
 	// OpEq requires the argument value to equal the condition value exactly.
 	OpEq ConditionOp = "eq"
-	// OpGlob matches the argument value against a glob pattern.
-	// Both value and pattern are normalized with path.Clean before matching,
-	// preventing path-traversal bypass (e.g. ./src/../etc/passwd → etc/passwd).
-	// Supports * (within a path component), ? (single char), and ** (across separators).
+	// OpGlob matches the argument value against a glob pattern. Both value
+	// and pattern are normalized with path.Clean before matching, preventing
+	// path-traversal bypass. Supports *, ? (single char), and ** (across separators).
 	OpGlob ConditionOp = "glob"
-	// OpHost treats the argument value as a URL and matches its host against a
-	// comma-separated list of host patterns in Value. It is the policy-native
-	// way to express SSRF-style host denial (e.g. webtools to localhost or a
-	// cloud-metadata endpoint): the host is parsed out of the URL, so a trailing
-	// :port or path cannot evade the match the way a raw URL glob can. IP
-	// literals match exactly; bare names match the host and any subdomain
-	// (api.example.com matches example.com).
+	// OpHost parses the argument as a URL and matches its host against
+	// comma-separated patterns in Value — SSRF-style host denial that a
+	// trailing :port or path cannot evade. IP literals match exactly; bare
+	// names match the host and any subdomain.
 	OpHost ConditionOp = "host"
-	// OpCommandBlacklist matches the command basename against a comma-separated
-	// list of denied commands. Used to block dangerous commands like rm, sudo, dd.
-	//
-	// It matches the first token of the call AND, when the call is a shell line
-	// the analyzer could read (see shellstructure.go), EVERY command that line
-	// runs — so `git status && rm -rf ~` is caught by its rm, and `r''m` is
-	// caught as rm. The structural half only ever ADDS catches: a call this
-	// operator denied before is denied now.
+	// OpCommandBlacklist matches the command basename against a
+	// comma-separated denylist. It catches the call's own first token and,
+	// for a shell line the analyzer can read (see shellstructure.go), every
+	// command that line runs — structure only ever adds catches.
 	OpCommandBlacklist ConditionOp = "command_blacklist"
-	// OpCommandAskAlways matches the command basename against a comma-separated
-	// list of commands that should always require human approval (e.g., rm, sudo, chmod).
-	// Unlike OpCommandBlacklist which denies, this operator with action:"approve" creates
-	// a HITL pause point for safety-critical commands. It sees the same set of
-	// commands OpCommandBlacklist does, including every command of a compound line.
+	// OpCommandAskAlways matches like OpCommandBlacklist but pairs with
+	// action:"approve" instead of deny, for safety-critical commands.
 	OpCommandAskAlways ConditionOp = "command_ask_always"
-	// OpNoCommandSubstitution blocks commands containing shell substitution
-	// patterns ($(), backticks, <(), >()) that could indicate command injection.
-	//
-	// For a shell line the analyzer could read it is additionally a STRUCTURAL
-	// question — "does the AST contain a CmdSubst (or ProcSubst/ArithmExp)
-	// node?" — which has no false negatives from creative quoting.
+	// OpNoCommandSubstitution blocks shell substitution patterns ($(),
+	// backticks, <(), >()); for a readable shell line it also checks the AST
+	// for a CmdSubst node, which quoting tricks cannot evade.
 	OpNoCommandSubstitution ConditionOp = "no_command_substitution"
-	// OpCommandPrefixAllowlist matches the tool call's command line against a
-	// comma-separated list of SAFE COMMAND PREFIXES — "git status", "go build",
-	// "ls" — and is the positive half of the shell vocabulary: with
-	// action:"allow" it is how an envelope says "these verbs never interrupt
-	// anyone", so a coding agent can look at the repository without filing an
-	// approval for every `git status`.
-	//
-	// It matches on the command line as TOKENS, not on the program basename,
-	// because a basename allowlist cannot express the distinction that matters:
-	// `git status` is a read and `git reset --hard` destroys work, and both are
-	// "git". The command's basename is the first token (so /usr/bin/git matches
-	// a "git ..." prefix) and the remaining tokens come from args; a listed
-	// prefix matches when it is a token-wise prefix of that line, so "git log"
-	// covers `git log --oneline -20` and never covers `git clean -fd`.
-	//
-	// It deliberately REFUSES TO MATCH anything that is not a plain argv call:
-	// a call asking for shell mode, or carrying a shell control or substitution
-	// character (; | & > < newline, backtick, $( ) in any token, never matches a
-	// prefix and therefore falls through to the tiers below. That refusal is
-	// what makes this an allowlist rather than a hole — `git status && rm -rf ~`
-	// cannot enter through the entry that allows `git status`.
-	//
-	// A SHELL LINE the analyzer can read in full (see shellstructure.go) gets a
-	// second chance at the same list: the line is decomposed into its commands
-	// and matches only when EVERY one of them is on the list, so `git status &&
-	// go build` — two allowlisted verbs — stops interrupting the operator while
-	// `git status && rm -rf ~` still cannot enter. That upgrade is bounded by
-	// the node audit: simple commands, && || |, and literal words only. A
-	// redirect, an env assignment, a subshell, a substitution, a glob or a `;`
-	// keeps the refusal above, unchanged.
+	// OpCommandPrefixAllowlist matches the call's command line, as tokens,
+	// against comma-separated safe prefixes (action:"allow") — e.g. "git log"
+	// covers `git log --oneline` but not `git clean -fd`. It matches only a
+	// plain argv call: shell mode, or any control/substitution character
+	// (; | & > < newline, backtick, $( ) in any token, refuses the match
+	// outright, so `git status && rm -rf ~` cannot enter through a `git
+	// status` entry. For a shell line the structural analyzer can fully
+	// parse (see shellstructure.go), the same list gets a second chance: it
+	// matches when every command in the line is on it.
 	OpCommandPrefixAllowlist ConditionOp = "command_prefix_allowlist"
 )
 
@@ -144,116 +98,59 @@ type Condition struct {
 	Value string      `json:"value"`
 }
 
-// Rule matches a tools+tool pair (with optional conditions) and assigns an action.
-// When contains zero conditions the name match alone is sufficient.
-// All conditions in When must hold for the rule to match (AND semantics).
+// Rule matches a tools+tool pair (with optional AND-conditions) and assigns
+// an action.
 type Rule struct {
 	Tools  string      `json:"tools"`
 	Tool   string      `json:"tool"`
 	When   []Condition `json:"when,omitempty"`
 	Action Action      `json:"action"`
-	// TimeoutS is the number of seconds to wait for a human response when Action is
-	// ActionApprove. Zero means no timeout (block indefinitely until ctx is cancelled).
+	// TimeoutS is how long to wait for a human response when Action is
+	// ActionApprove; 0 means block indefinitely.
 	TimeoutS int `json:"timeout_s,omitempty"`
-	// OnTimeout is the fallback action when the approval window expires.
-	// Only "deny" and "approve" are valid (allow would silently bypass approval).
+	// OnTimeout is the fallback when the approval window expires; only
+	// "deny" or "approve" is valid (allow would silently bypass approval).
 	OnTimeout Action `json:"on_timeout,omitempty"`
 }
 
 // Policy is the top-level document stored as hitl-policy.json in the VFS.
-// Rules are evaluated in order; the first matching rule wins.
-// DefaultAction is applied when no rule matches; it is fail-closed to "approve"
-// when absent so an unaccounted-for tool pauses for a human.
+// Rules are evaluated in order, first match wins; DefaultAction applies when
+// none match and is fail-closed to "approve" when absent.
 //
-// Compute is the OPTIONAL compute half of the envelope (see ComputeBounds). A nil
-// Compute is the default and means UNBOUNDED — an envelope with no compute block
-// bounds only ACTIONS (the rules above), exactly as it did before this field
-// existed. It is a pointer so its absence is a first-class, wire-visible fact: a
-// policy that never grew a compute block round-trips through JSON byte-for-byte as
-// before, and the enforcement seams read `Compute == nil` as "this mission is
-// bounded only by its rules".
+// Compute is the optional compute half of the envelope (see ComputeBounds);
+// a nil Compute is unbounded, matching pre-existing behavior byte-for-byte.
 type Policy struct {
 	DefaultAction Action         `json:"default_action,omitempty"`
 	Rules         []Rule         `json:"rules"`
 	Compute       *ComputeBounds `json:"compute,omitempty"`
-	// Attention is the OPTIONAL attention half of the envelope: who may answer a
-	// unit's question (see AttentionBounds). Nil — the default — means a HUMAN
-	// must, which is what the escalation was for.
+	// Attention is the optional attention half: who may answer a unit's
+	// question (see AttentionBounds). Nil means a human must.
 	Attention *AttentionBounds `json:"attention,omitempty"`
 }
 
-// OnExhausted names what a mission does when it crosses one of its envelope's
-// compute bounds. It is a small, closed set — the terminal-vs-pause choice the
-// operator declares up front, the compute analogue of Rule.OnTimeout.
+// OnExhausted names what a mission does when it crosses a compute bound —
+// the compute analogue of Rule.OnTimeout.
 type OnExhausted string
 
 const (
-	// OnExhaustedFinishStuck finishes the mission at StatusStuck through the
-	// runtime's real terminal machinery, with a reason naming the bound. It is the
-	// default when OnExhausted is unset, and the only behavior enforced today.
+	// OnExhaustedFinishStuck finishes the mission at StatusStuck; the
+	// default and only behavior enforced today.
 	OnExhaustedFinishStuck OnExhausted = "finish_stuck"
-	// OnExhaustedPauseAsk is DECLARED but not implemented: it will file a durable
-	// ask ("this mission hit its compute bound — extend it or let it stop?") instead
-	// of finishing. Until that machinery lands, an envelope that sets it is honored
-	// AS finish_stuck at the enforcement seam.
-	//
-	// The deferral is not left to this comment. `contenox vet` warns on it at
-	// authoring time and the mission's terminal record names it at the moment the
-	// substitution happens — see hitlservice.PolicyDiagnostics, which is the single
-	// source of that wording. A comment here protects the developer; those two
-	// protect the operator, who is the one making a security decision on the
-	// strength of the field.
-	//
-	// Why it is still accepted rather than rejected: implementing it needs a
-	// budget-EXTENSION concept the runtime does not have (an approved "keep going"
-	// has to mean going by some amount, and nothing today can express that), so the
-	// honest options were "parse it and say plainly what it does" or "remove it".
-	// It stays parsed, and says so out loud, in both places an operator looks.
+	// OnExhaustedPauseAsk is declared but not implemented: until the
+	// machinery lands, an envelope that sets it is honored as finish_stuck
+	// at the enforcement seam. `contenox vet` warns on it at authoring time.
 	OnExhaustedPauseAsk OnExhausted = "pause_ask"
 )
 
-// ComputeBounds is the envelope's COMPUTE half: the ceiling a mission's TOTAL
-// compute is held under, alongside the per-tool ACTION rules above. It is the
-// constitutional widening of the envelope from "what a unit may DO" to "how much a
-// unit may SPEND" — the same envelope, now the unit's total boundary. These are
-// GATES by design, the legitimate kind: envelope-declared, operator-authored, and
-// deterministic at the boundary (turn start, tool dispatch) — not the advice the
-// attention layer appends.
+// ComputeBounds is the envelope's compute half: a ceiling on a mission's
+// total compute, alongside the per-tool action rules above. Every bound is a
+// ceiling and opt-in — zero/absent is unbounded, and bounds only ever
+// restrict. Exhaustion is never silent (see OnExhausted).
 //
-// Every bound is a CEILING and OPT-IN: a zero/absent field is unbounded, so an
-// envelope with no compute block (or an empty one) runs exactly as it did before —
-// bounds only ever RESTRICT, never grant. Bounds are per MISSION, checked at
-// deterministic seams, and exhaustion is never silent (see OnExhausted).
-//
-// What is measured and what is NOT yet enforced (honest scope, per the blueprint):
-//
-//   - MaxTurns and MaxToolCalls are countable deterministically host-side and ARE
-//     enforced — the drive loop's prompt turns, and the unattended answerer's
-//     envelope-gated tool dispatches.
-//
-//   - MaxTokens is BEST-EFFORT: it is enforced only from the usage the downstream
-//     unit actually reports (ACP usage_update), which not every provider emits — it
-//     bounds a mission whose unit reports usage and is inert for one whose unit does
-//     not, rather than guessing.
-//
-//   - ModelAllowlist / BackendAllowlist ARE enforced, at the resolution seam rather
-//     than host-side, because that is where the choice is made. The supervising
-//     process cannot watch it — a dispatched unit resolves its own models in its own
-//     process, and no ACP session update carries a model identity — so the BOUND
-//     travels to the unit instead of the observation travelling back: the dispatcher
-//     puts the allowlists on the unit's session/new `_meta`
-//     (missionservice.MissionMeta), the unit binds them onto every turn context, and
-//     llmrepo refuses a resolution outside them BEFORE anything is sent
-//     (llmrepo.WithResolutionBounds / ErrResolutionOutOfBounds). Matching is exact,
-//     case-insensitive, whole-string; a backend matches by its operator-facing name
-//     or its id. The allowlist is TOTAL across chat, prompt, stream AND embed — a
-//     mission that embeds must name its embedding model.
-//
-//     Its ONE structural limit, stated at its true strength: it binds a unit that is
-//     this runtime (agentinstance's chain branch — the only user-declarable agent
-//     kind, so every mission unit today), and it binds it at session construction,
-//     exactly as the mission-tool grant is bound. It is not a wall around a foreign
-//     process that resolves models by means of its own.
+// MaxTurns and MaxToolCalls are enforced host-side. MaxTokens is
+// best-effort, enforced only when the unit reports usage. ModelAllowlist and
+// BackendAllowlist are enforced at the resolution seam, covering chat,
+// prompt, stream, and embed.
 type ComputeBounds struct {
 	MaxTurns         int         `json:"maxTurns,omitempty"`
 	MaxToolCalls     int         `json:"maxToolCalls,omitempty"`
@@ -263,12 +160,9 @@ type ComputeBounds struct {
 	OnExhausted      OnExhausted `json:"onExhausted,omitempty"`
 }
 
-// Compute-bound validation caps. They are DEFENSIVE, not aesthetic (the register
-// of the plan/handover caps in missionservice): they exist to reject a negative or
-// an absurd value a hand-edited or hallucinated policy might carry, not to impose a
-// house style on how tight a bound should be. A real operator ceiling sits far
-// below these; a value past them is a typo (an extra digit, a sign flip) that must
-// fail the policy to load rather than silently bound a mission at ten billion.
+// Compute-bound validation caps are defensive, not aesthetic: they reject a
+// negative or absurd value (a typo) rather than impose a house style on how
+// tight a bound should be.
 const (
 	maxComputeTurns               = 100_000
 	maxComputeToolCalls           = 10_000_000
@@ -291,18 +185,14 @@ type EvaluationResult struct {
 	TimeoutS    int
 	OnTimeout   Action
 	PolicyName  string
-	// Detail NAMES what in the call the matched rule actually caught, when the
-	// rule matched something a caller could not have read off the arguments —
-	// today, the command a structural shell reading found. `git status && rm
-	// -rf ~` is denied by the rm, and an operator (or a model choosing what to
-	// try next) is owed which part was refused, not just that the line was.
-	// Empty whenever the match is self-evident from the args.
+	// Detail names what in the call the matched rule actually caught, when
+	// not self-evident from the args — e.g. which command a structural shell
+	// reading found.
 	Detail string
 }
 
-// evalScope carries everything the condition matchers need beyond the args, and
-// caches the ONE structural shell reading of the call so a policy with several
-// shell rules parses the line once rather than once per rule.
+// evalScope carries what condition matchers need beyond args, and caches the
+// one structural shell reading so multiple shell rules parse the line once.
 type evalScope struct {
 	args      map[string]any
 	shellKind ShellKind
@@ -426,18 +316,11 @@ func conditionMatches(c Condition, scope *evalScope, note *matchNote) bool {
 	return false
 }
 
-// ─── the shell operators, with their structural second reading ───────────────
-//
-// Each of the four is "today's answer OR what the structure shows". The OR is
-// the FLOOR guarantee in one line: a call the tokenizer already denied stays
-// denied, a call it already allowed stays allowed, and structure only ever adds
-// a catch the tokenizer could not make — or, for the allowlist alone and only
-// under the A2 clearance, an upgrade the tokenizer could not justify. See
-// shellstructure.go for the node audit that says which lines qualify.
+// The four shell operators below share one shape: today's tokenizer answer,
+// widened by what the AST structurally shows (see shellstructure.go).
 
-// commandInListMatch backs both OpCommandBlacklist and OpCommandAskAlways,
-// which differ only in the action their rule carries. It returns the name that
-// matched so a decision can say WHICH command it was.
+// commandInListMatch backs both OpCommandBlacklist and OpCommandAskAlways.
+// It returns the name that matched.
 func commandInListMatch(scope *evalScope, list string) (string, bool) {
 	if commandBasenameInList(scope.args, list) {
 		return commandBasename(scope.args), true
@@ -452,22 +335,17 @@ func commandInListMatch(scope *evalScope, list string) (string, bool) {
 	return "", false
 }
 
-// commandSubstitutionMatch is the textual pattern search plus the AST question
-// ("does the line contain a CmdSubst node?"), so quoting tricks that defeat the
-// former are caught by the latter.
+// commandSubstitutionMatch combines the textual pattern search with the AST
+// question, so quoting tricks that defeat the former are still caught.
 func commandSubstitutionMatch(scope *evalScope) bool {
 	return detectCommandSubstitution(scope.args) || structuralCommandSubstitution(scope.shell())
 }
 
-// commandPrefixAllowMatch is today's token-wise prefix match, plus the ONE
-// widening this work introduces: a compound line whose every command is on the
-// same allowlist. `git status && go build` stops interrupting the operator;
-// anything the tokenizer refuses AND the audit has not cleared still asks.
-//
-// The tokenizer's own match is additionally REVOKED when the structure shows a
-// command it was not reading — the newline hole in strings.Fields (see
-// structuralContradictsPrefix). That direction is a tightening, so it is the
-// one place a structural reading overrides an allow rather than adding one.
+// commandPrefixAllowMatch is the token-wise prefix match, widened to a
+// compound line whose every command is on the same allowlist. The
+// tokenizer's own match is revoked when structure shows a command it wasn't
+// reading (see structuralContradictsPrefix) — the one place a structural
+// reading overrides an allow rather than adding one.
 func commandPrefixAllowMatch(scope *evalScope, prefixList string) bool {
 	if isCommandPrefixAllowed(scope.args, prefixList) {
 		return !structuralContradictsPrefix(scope.shell(), prefixList)
@@ -476,10 +354,7 @@ func commandPrefixAllowMatch(scope *evalScope, prefixList string) bool {
 }
 
 // urlHostMatches parses rawURL and reports whether its host equals, or is a
-// subdomain of, any comma-separated pattern in patternsCSV. Parsing the host
-// out of the URL (rather than substring-matching the raw URL) is what makes a
-// host deny rule robust against :port and path evasion. IP literals match
-// exactly; bare names match the host and any subdomain.
+// subdomain of, any pattern in patternsCSV. IP literals match exactly.
 func urlHostMatches(rawURL, patternsCSV string) bool {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
@@ -505,10 +380,8 @@ func urlHostMatches(rawURL, patternsCSV string) bool {
 	return false
 }
 
-// conditionValues flattens an argument value into the strings a condition is
-// tested against. A slice argument (e.g. {"path": ["a","/etc/passwd"]}) is
-// tested element-wise so a single stringified "[a /etc/passwd]" cannot slip a
-// restricted entry past a glob.
+// conditionValues flattens an argument value into strings a condition is
+// tested against, element-wise for slices so stringifying can't hide an entry.
 func conditionValues(v any) []string {
 	switch t := v.(type) {
 	case string:
@@ -526,9 +399,8 @@ func conditionValues(v any) []string {
 	}
 }
 
-// globMatch reports whether s matches the glob pattern.
-// Both pattern and s are normalized with path.Clean before comparison to prevent
-// path-traversal bypasses. Supports *, ?, and ** (which matches across path separators).
+// globMatch reports whether s matches pattern; both are path.Clean'd first to
+// prevent traversal bypass. Supports *, ?, and ** (across separators).
 func globMatch(pattern, s string) bool {
 	s = path.Clean(s)
 	for _, expanded := range expandGlobBraces(pattern) {
@@ -552,11 +424,8 @@ func globMatchOne(pattern, s string) bool {
 }
 
 // expandGlobBraces expands {a,b,c} alternations into the cross product of
-// concrete patterns, supporting nesting and slashes inside an alternative.
-// Go's path.Match has no brace support, so "**/{.ssh,.gnupg}/**" would
-// otherwise match a literal "{" and silently never fire. Unbalanced braces
-// are treated literally. Expansion is bounded; past the cap the original
-// pattern is returned unexpanded.
+// concrete patterns (Go's path.Match has no brace support). Unbalanced
+// braces are literal; expansion is capped at maxGlobExpansions.
 const maxGlobExpansions = 4096
 
 func expandGlobBraces(pattern string) []string {
@@ -634,8 +503,8 @@ func splitTopLevelCommas(s string) []string {
 	return append(parts, s[start:])
 }
 
-// matchDoubleGlob handles patterns that contain **.
-// ** matches zero or more path components.
+// matchDoubleGlob handles patterns containing **, which matches zero or more
+// path components.
 func matchDoubleGlob(pattern, s string) bool {
 	idx := strings.Index(pattern, "**")
 	prefix := strings.TrimSuffix(pattern[:idx], "/")
@@ -677,22 +546,19 @@ func matchSuffix(pattern, s string) bool {
 	return matchDoubleGlob(pattern, s)
 }
 
-// commandSubstitutionPatterns are shell metacharacters that enable command
-// substitution and should be blocked to prevent injection attacks.
+// commandSubstitutionPatterns are shell metacharacters that enable command substitution.
 var commandSubstitutionPatterns = []string{
-	"$(",  // Command substitution
-	"`",   // Backtick command substitution
-	"<(",  // Process substitution (read)
-	">(",  // Process substitution (write)
-	"$[",  // Arithmetic expansion
-	"${}", // Parameter expansion
-	"$((", // Arithmetic expansion
+	"$(",
+	"`",
+	"<(",
+	">(",
+	"$[",
+	"${}",
+	"$((",
 }
 
-// detectCommandSubstitution checks if a command string or any of its arguments
-// contain shell metacharacters that could enable command injection.
+// detectCommandSubstitution checks args for shell metacharacters enabling injection.
 func detectCommandSubstitution(args map[string]any) bool {
-	// Check all argument values for substitution patterns
 	for _, v := range args {
 		for _, s := range conditionValues(v) {
 			for _, pattern := range commandSubstitutionPatterns {
@@ -705,21 +571,18 @@ func detectCommandSubstitution(args map[string]any) bool {
 	return false
 }
 
-// getCommandFromArgs extracts the command string from tool arguments.
-// For local_shell, this checks both "command" and the first element of "args".
+// getCommandFromArgs extracts the command string from tool arguments,
+// checking both "command" and the first element of "args".
 func getCommandFromArgs(args map[string]any) string {
 	if cmd, ok := args["command"].(string); ok {
 		return cmd
 	}
-	// If args is a string, it might contain the full command
 	if argStr, ok := args["args"].(string); ok {
-		// Extract first word as command
 		parts := strings.Fields(argStr)
 		if len(parts) > 0 {
 			return parts[0]
 		}
 	}
-	// If args is an array, first element might be command
 	if argList, ok := args["args"].([]string); ok && len(argList) > 0 {
 		return argList[0]
 	}
@@ -727,8 +590,7 @@ func getCommandFromArgs(args map[string]any) string {
 }
 
 // commandBasename extracts the bare program name a rule's command list is
-// compared against: the basename of the command, minus any arguments that came
-// along in the same string ("/sbin/mkfs" -> "mkfs", "rm -rf" -> "rm").
+// compared against ("/sbin/mkfs" -> "mkfs", "rm -rf" -> "rm").
 func commandBasename(args map[string]any) string {
 	cmd := getCommandFromArgs(args)
 	if cmd == "" {
@@ -741,10 +603,8 @@ func commandBasename(args map[string]any) string {
 	return fields[0]
 }
 
-// commandBasenameInList reports whether the call's command basename appears in a
-// comma-separated list of bare command names. It is the one matcher behind both
-// the blacklist and the ask-always operators, which differ only in the ACTION
-// their rule carries, never in how they match.
+// commandBasenameInList reports whether the call's command basename appears
+// in a comma-separated list; backs both the blacklist and ask-always operators.
 func commandBasenameInList(args map[string]any, commandList string) bool {
 	if commandList == "" {
 		return false
@@ -761,32 +621,13 @@ func commandBasenameInList(args map[string]any, commandList string) bool {
 	return false
 }
 
-// isCommandBlacklisted checks if the command matches any in the blacklist.
-// The blacklist is a comma-separated string of command names (basenames).
-func isCommandBlacklisted(args map[string]any, blacklist string) bool {
-	return commandBasenameInList(args, blacklist)
-}
-
-// isCommandInAskAlwaysList checks if the command matches any in the ask-always list.
-// The list is a comma-separated string of command names (basenames) that should
-// always require human approval before execution.
-func isCommandInAskAlwaysList(args map[string]any, commandList string) bool {
-	return commandBasenameInList(args, commandList)
-}
-
-// shellControlChars are the characters that make a command line something other
-// than a plain argv call — chaining, piping, redirection, substitution. A token
-// carrying any of them disqualifies the whole call from prefix-allowlist
-// matching (see OpCommandPrefixAllowlist), so an allowlisted verb can never be
-// the doorway for what follows it. A lone "$" is NOT here: without a shell,
-// "$HOME" is a literal argument, and OpNoCommandSubstitution already draws the
-// same line for the "$(" form.
+// shellControlChars disqualify a token from prefix-allowlist matching
+// (chaining, piping, redirection, substitution). A lone "$" is excluded:
+// without a shell, "$HOME" is a literal argument.
 const shellControlChars = ";|&><`\n\r"
 
-// commandTokens flattens a local_shell call into the token sequence a prefix is
-// compared against — the command basename followed by its arguments. ok is false
-// when the call is not a plain argv call (shell mode requested, or a shell
-// control character anywhere in it), which is exactly when no prefix may match.
+// commandTokens flattens a local_shell call into the token sequence a prefix
+// is compared against. ok is false when the call is not a plain argv call.
 func commandTokens(args map[string]any) (tokens []string, ok bool) {
 	if shellModeRequested(args) {
 		return nil, false
@@ -815,10 +656,8 @@ func commandTokens(args map[string]any) (tokens []string, ok bool) {
 	return raw, true
 }
 
-// shellModeRequested reports whether the call asked for the platform shell.
-// local_shell already refuses shell mode whenever a tools policy is active, but
-// the envelope must not depend on that: an allowlist that matched a shell string
-// would be allowlisting everything after the first metacharacter.
+// shellModeRequested reports whether the call asked for the platform shell,
+// so a matched allowlist entry cannot be smuggled through a shell string.
 func shellModeRequested(args map[string]any) bool {
 	switch v := args["shell"].(type) {
 	case bool:
@@ -832,9 +671,8 @@ func shellModeRequested(args map[string]any) bool {
 	return false
 }
 
-// argTokens flattens an "args" value into tokens. A single string is split on
-// whitespace (it is a command line); an array is taken element-wise (each entry
-// is already one argv slot and may legitimately contain spaces).
+// argTokens flattens an "args" value into tokens: a string is split on
+// whitespace, an array is taken element-wise.
 func argTokens(v any) []string {
 	switch t := v.(type) {
 	case nil:
@@ -854,9 +692,8 @@ func argTokens(v any) []string {
 	}
 }
 
-// isCommandPrefixAllowed reports whether the call's command line begins with one
-// of the comma-separated safe prefixes. See OpCommandPrefixAllowlist for the
-// semantics and for why a non-argv call never matches.
+// isCommandPrefixAllowed reports whether the call's command line begins with
+// one of the comma-separated safe prefixes. See OpCommandPrefixAllowlist.
 func isCommandPrefixAllowed(args map[string]any, prefixList string) bool {
 	if strings.TrimSpace(prefixList) == "" {
 		return false
@@ -868,10 +705,9 @@ func isCommandPrefixAllowed(args map[string]any, prefixList string) bool {
 	return prefixListMatchesTokens(tokens, prefixList)
 }
 
-// prefixListMatchesTokens reports whether a token line begins with one of the
-// comma-separated prefixes. It is shared by the tokenizer path above and by the
-// structural path (shellstructure.go), so a compound line's commands are judged
-// by exactly the same prefix semantics as a plain one — one matcher, no drift.
+// prefixListMatchesTokens reports whether a token line begins with one of
+// the comma-separated prefixes. Shared by the tokenizer and structural
+// (shellstructure.go) paths, so both are judged by the same semantics.
 func prefixListMatchesTokens(tokens []string, prefixList string) bool {
 	for _, entry := range strings.Split(prefixList, ",") {
 		want := strings.Fields(entry)
@@ -910,21 +746,16 @@ func loadPolicy(ctx context.Context, src PolicySource, tenantID, policyPath stri
 	return &p, nil
 }
 
-// rejectUnknownComputeFields strict-decodes JUST the policy's "compute" sub-object
-// so a typo in a NEW bound (maxTurn, onExhaust) fails the policy to load rather
-// than silently running the mission unbounded on the field the operator thought
-// they set. The strictness is deliberately scoped to the block being introduced:
-// the rest of the policy stays laxly parsed (json.Unmarshal above), so every
-// existing policy carrying an incidental extra top-level key — a "//"-style comment
-// note, a future field — keeps loading exactly as before. Only "compute" is held to
-// deny-unknown-fields, and only when it is present.
+// rejectUnknownComputeFields strict-decodes just the policy's "compute"
+// sub-object, so a typo in a new bound fails the policy to load rather than
+// silently running the mission unbounded. The rest of the policy stays
+// laxly parsed.
 func rejectUnknownComputeFields(data []byte) error {
 	var probe struct {
 		Compute json.RawMessage `json:"compute"`
 	}
 	if err := json.Unmarshal(data, &probe); err != nil {
-		// A malformed document was already reported by the top-level Unmarshal in
-		// loadPolicy; nothing to add here.
+		// Already reported by the top-level Unmarshal in loadPolicy.
 		return nil
 	}
 	if len(probe.Compute) == 0 {
@@ -980,11 +811,8 @@ func validatePolicy(p *Policy) error {
 	return nil
 }
 
-// validateComputeBounds checks the envelope's compute block for shape: every
-// ceiling non-negative and within its defensive cap, the onExhausted value known,
-// and each allowlist within bounds. It is HARD on shape and silent on tightness —
-// it will not tell an operator their maxTurns is too small, only that it is not a
-// negative or an absurd one — the same stance the plan/handover validators take.
+// validateComputeBounds checks shape only — non-negative and within its
+// defensive cap — never tightness.
 func validateComputeBounds(c *ComputeBounds) error {
 	if err := validateComputeCeiling("maxTurns", c.MaxTurns, maxComputeTurns); err != nil {
 		return err
@@ -1031,11 +859,8 @@ func validateComputeAllowlist(name string, entries []string) error {
 	return nil
 }
 
-// validateGlobValue rejects glob patterns that would silently fail to match at
-// runtime: unbalanced braces (path.Match would treat "{" literally) and brace
-// expressions that explode past the expansion cap. A rejected policy fails to
-// load, so evaluation falls back to the built-in default rather than running
-// with a deny rule that never fires.
+// validateGlobValue rejects glob patterns that would silently fail to match:
+// unbalanced braces, or brace expressions exploding past the expansion cap.
 func validateGlobValue(value string) error {
 	depth := 0
 	for i := 0; i < len(value); i++ {
@@ -1058,177 +883,10 @@ func validateGlobValue(value string) error {
 	return nil
 }
 
-// secretDenyRules is the universal known-bad prefix: paths that never belong
-// in any agent workflow on any machine (credential stores, key material,
-// shell/persistence init, system dirs). It is kept in sync with
-// hitl-policy-acp.json by TestSeededACPPolicySecretInvariant.
-func secretDenyRules() []Rule {
-	const allTools = "*"
-	q := func(g string) Rule {
-		return Rule{Tools: "local_fs", Tool: allTools, Action: ActionDeny, When: []Condition{{Key: "path", Op: OpGlob, Value: g}}}
-	}
-	w := func(g string) []Rule {
-		return []Rule{
-			{Tools: "local_fs", Tool: "write_file", Action: ActionDeny, When: []Condition{{Key: "path", Op: OpGlob, Value: g}}},
-			{Tools: "local_fs", Tool: "sed", Action: ActionDeny, When: []Condition{{Key: "path", Op: OpGlob, Value: g}}},
-		}
-	}
-	rules := []Rule{
-		q("**/{.ssh,.gnupg,.aws,.azure,.kube,.config/gcloud,.config/doctl,.oci}/**"),
-		q("**/{.password-store,.local/share/keyrings,Library/Keychains,.config/1Password,.config/Bitwarden,.config/keepassxc}/**"),
-		q("**/{.electrum,.bitcoin,.ethereum/keystore}/**"),
-		q("**/{wallet.dat,*.kdbx}"),
-		q("**/{.mozilla,.config/google-chrome,.config/chromium,.config/BraveSoftware}/**"),
-		q("**/Library/Application Support/{Google/Chrome,Firefox,BraveSoftware}/**"),
-		q("**/{.bash_history,.zsh_history,.python_history,.netrc,.git-credentials,.npmrc,.pypirc}"),
-		q("**/.docker/config.json"),
-		q("**/{id_rsa,id_dsa,id_ecdsa,id_ed25519}*"),
-	}
-	rules = append(rules, w("**/{.ssh,.gnupg}/**")...)
-	rules = append(rules, w("**/{.config/autostart,.config/systemd/user,Library/LaunchAgents,Library/LaunchDaemons}/**")...)
-	rules = append(rules, w("**/{.bashrc,.zshrc,.profile,.bash_profile,.zprofile,.bash_login,.zshenv,.kshrc,crontab,.crontab}")...)
-	rules = append(rules, w("**/.config/fish/config.fish")...)
-	rules = append(rules, w("/{etc,usr,bin,sbin,boot,lib,lib64,opt,System}/**")...)
-	rules = append(rules, w("**/hitl-policy*.json")...)
-	return rules
-}
-
-// safeShellPrefixes is the built-in fallback's safe-verb allow tier, byte-for-byte
-// the value the shipped hitl-policy-default.json and hitl-policy-acp.json carry
-// (their "//" note justifies every entry). The bar for membership is narrow: a
-// prefix earns a place only if it cannot delete or modify a file, cannot run an
-// arbitrary program, and cannot reach the network — plus the project's own build
-// and test verbs, which run the code the agent is already editing.
-//
-// Notable absences and why: `find` (its -delete and -exec would walk straight
-// around the rm/sudo ask-always tier), bare `gofmt` (gofmt -w rewrites sources —
-// the read-only -l and -d forms are listed instead), `go run`/`go generate`
-// (arbitrary execution), `go get`/`go mod` (network, and they rewrite go.mod),
-// and every mutating git verb (`git commit`, `git reset`, `git clean`, `git
-// checkout`, `git push` — those go through the git toolset's approve rules or
-// through an explicit approval).
-const safeShellPrefixes = "git status,git diff,git log,git show,git blame,git branch,git ls-files,git rev-parse," +
-	"go build,go test,go vet,go list,go doc,go env,go version,gofmt -l,gofmt -d," +
-	"ls,cat,head,tail,wc,pwd,echo,grep,rg"
-
+// defaultPolicy is the fallback when the named policy cannot be loaded. It
+// must stay rule-free and fail-closed (every call asks a human): a load
+// failure must never silently substitute a permissive ruleset. Fix the
+// underlying policy file; `contenox vet` explains what is broken.
 func defaultPolicy() *Policy {
-	return &Policy{
-		DefaultAction: ActionApprove,
-		Rules: append(secretDenyRules(), []Rule{
-			{Tools: "local_fs", Tool: "read_file", Action: ActionAllow},
-			{Tools: "local_fs", Tool: "read_file_range", Action: ActionAllow},
-			{Tools: "local_fs", Tool: "list_dir", Action: ActionAllow},
-			{Tools: "local_fs", Tool: "grep", Action: ActionAllow},
-			{Tools: "local_fs", Tool: "stat_file", Action: ActionAllow},
-			{Tools: "local_fs", Tool: "count_stats", Action: ActionAllow},
-			{Tools: "local_fs", Tool: "write_file", Action: ActionApprove},
-			{Tools: "local_fs", Tool: "sed", Action: ActionApprove},
-			// git: reading the repository is what the tools are FOR — a coding
-			// agent that must file an approval to run `git status` is a coding
-			// agent nobody leaves running. The four operations that change the
-			// repository ask, and git_restore asks because it destroys work.
-			{Tools: "git", Tool: "git_status", Action: ActionAllow},
-			{Tools: "git", Tool: "git_diff", Action: ActionAllow},
-			{Tools: "git", Tool: "git_log", Action: ActionAllow},
-			{Tools: "git", Tool: "git_show", Action: ActionAllow},
-			{Tools: "git", Tool: "git_branch_list", Action: ActionAllow},
-			{Tools: "git", Tool: "git_blame", Action: ActionAllow},
-			{Tools: "git", Tool: "git_add", Action: ActionApprove},
-			{Tools: "git", Tool: "git_commit", Action: ActionApprove},
-			{Tools: "git", Tool: "git_checkout_branch", Action: ActionApprove},
-			{Tools: "git", Tool: "git_restore", Action: ActionApprove},
-			// local_shell: block commands that are never allowed under any circumstance.
-			// Values must be bare basenames — the matcher extracts path.Base(command) and compares
-			// exactly, so multi-word entries like "rm -rf" would silently never fire.
-			{Tools: "local_shell", Tool: "local_shell", Action: ActionDeny, When: []Condition{{Key: "command", Op: OpCommandBlacklist, Value: "mkfs,mke2fs,fdisk,shred,wipefs"}}},
-			// local_shell: require approval for command injection patterns. This
-			// sits ABOVE the allow tier on purpose: a command line carrying a
-			// substitution is never a "safe verb", whatever verb it starts with.
-			{Tools: "local_shell", Tool: "local_shell", Action: ActionApprove, When: []Condition{{Key: "args", Op: OpNoCommandSubstitution, Value: ""}}},
-			// local_shell: the safe-verb allow tier — read-only inspection and the
-			// project's own build/test verbs run without interrupting anyone. Kept
-			// in sync with hitl-policy-default.json, where each entry is justified
-			// individually; see OpCommandPrefixAllowlist for why these are PREFIXES
-			// (so `git log` is allowed and `git clean -fd` is not).
-			{Tools: "local_shell", Tool: "local_shell", Action: ActionAllow, When: []Condition{{Key: "command", Op: OpCommandPrefixAllowlist, Value: safeShellPrefixes}}},
-			// local_shell: require approval for dangerous commands (ask-always list)
-			{Tools: "local_shell", Tool: "local_shell", Action: ActionApprove, When: []Condition{{Key: "command", Op: OpCommandAskAlways, Value: "rm,sudo,dd,chmod,chown,mv,cp,>:,>>"}}},
-			// local_shell: default to requiring approval (fail-closed safety)
-			{Tools: "local_shell", Tool: "local_shell", Action: ActionApprove},
-			// shell_session: reading scrollback is reference-only and never gated;
-			// submitting a line (shell_session_run) is gated exactly like local_shell,
-			// falling through to DefaultAction (approve) below.
-			{Tools: "shell_session", Tool: "shell_session_read", Action: ActionAllow},
-			{Tools: "webtools", Tool: "web_get", Action: ActionAllow},
-			{Tools: "webtools", Tool: "web_head", Action: ActionAllow},
-			{Tools: "webtools", Tool: "web_post", Action: ActionApprove},
-			{Tools: "webtools", Tool: "web_put", Action: ActionApprove},
-			{Tools: "webtools", Tool: "web_patch", Action: ActionApprove},
-			{Tools: "webtools", Tool: "web_delete", Action: ActionApprove},
-			{Tools: "gointel", Action: ActionAllow},
-			// workspace: workspace_search reads the semantic index of files the
-			// agent may already read and returns file:line-range citations.
-			// Nothing is written and nothing is spent — the embedding calls were
-			// paid by `contenox index`. Kept in sync with
-			// hitl-policy-default.json / hitl-policy-acp.json, where the rule is
-			// justified in full.
-			{Tools: "workspace", Action: ActionAllow},
-			// goja_eval: ALLOW, structurally rather than optimistically. The
-			// sandbox has no ambient I/O BY CONSTRUCTION — no filesystem, no
-			// network, no require/import, no process, no event loop — so an
-			// approval here protects nothing: the sandbox's only reach out is
-			// host.tool, and every call it makes is evaluated by THIS policy under
-			// the rule for the tool it addresses, exactly as a model's own call
-			// would be. What is left is pure compute, bounded by the deadline
-			// interrupt, the call-stack cap and the output cap, none of which need
-			// a human. The one soft limit is memory: goja has no cap, so an
-			// allocation bomb is bounded by RATE (~200 MB/s measured) until the
-			// deadline fires — a transient ceiling in the low hundreds of MB, then
-			// GC — which is documented, and which an approval card cannot reduce.
-			// Dogfooding argued this down from approve: 8 live approvals in one
-			// session, each costing more than the call did, none of which could
-			// have prevented anything.
-			//
-			// WHAT REVOKES IT: any ambient capability ever reaching the sandbox (a
-			// filesystem shim, a network fetch, a module loader, a VM that outlives
-			// the call) puts this back to approve — the argument above is entirely
-			// about there being nothing here to reach.
-			//
-			// Script tools still get NO rule on purpose: operator-authored code we
-			// never reviewed falls to default_action, and an operator who trusts
-			// their own script adds an allow rule for it by name, like any other
-			// envelope edit. Kept in sync with hitl-policy-default.json and
-			// hitl-policy-acp.json, where the rule is justified in full.
-			{Tools: "goja", Tool: "goja_eval", Action: ActionAllow},
-			// jq: jq_query runs a jq program over ONE JSON or YAML document.
-			// ALLOW, structurally:
-			//   - it READS a file the agent may already read — `path` goes
-			//     through the same vfs containment local_fs does, so the bytes
-			//     reachable here are a SUBSET of what read_file (allow, above)
-			//     already reaches;
-			//   - it COMPUTES DETERMINISTICALLY and CANNOT WRITE — gojq has no
-			//     write path and the package adds none, so `.a = 1` returns a
-			//     modified COPY and the file on disk is untouched;
-			//   - it CANNOT REACH THE NETWORK OR THIS PROCESS — jq has no I/O
-			//     builtins, and the three doors it does have are shut at compile
-			//     time: no input iterator (`input`/`inputs` refused), no module
-			//     loader (`import`/`include` refused), and an explicitly disabled
-			//     environ loader, so `env`/`$ENV` is an EMPTY object and no filter
-			//     can read this process's API keys;
-			//   - and it is FULLY DEADLINE-BOUNDED INCLUDING RECURSION, which is
-			//     what makes the tier structural rather than optimistic: gojq
-			//     checks the context between VM instructions, so `def f: f; f` and
-			//     `[range(1e8)]` both stop AT the 2s deadline (measured 2.009s /
-			//     2.004s), and regexes are RE2 so they cannot backtrack
-			//     catastrophically. Strictly stronger than the goja rule above,
-			//     whose memory is bounded only by rate.
-			// WHAT REVOKES IT: an in-place write mode, a module loader, an input
-			// iterator, or an environ loader ever wired into jqtool — one clause
-			// each. Kept in sync with hitl-policy-default.json and
-			// hitl-policy-acp.json, where the rule is justified in full.
-			{Tools: "jq", Action: ActionAllow},
-			{Tools: "echo", Action: ActionAllow},
-			{Tools: "print", Action: ActionAllow},
-		}...),
-	}
+	return &Policy{DefaultAction: ActionApprove}
 }

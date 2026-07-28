@@ -28,7 +28,8 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 ├── hitl-policy-strict.json
 ├── hitl-policy-dev.json
 ├── hitl-policy-acp.json        ← editor (ACP) sessions
-└── hitl-policy-acpx.json       ← headless / untrusted-driver (ACPX) sessions
+├── hitl-policy-acpx.json       ← headless / untrusted-driver (ACPX) sessions
+└── hitl-policy-beam.json       ← contenox beam's attended terminal session
 
 ./my-project/.contenox/         ← project-local workspace marker
 └── workspace.id                ← unique workspace ID
@@ -124,7 +125,7 @@ The agent now answers in your voice, not the model's default voice.
 }
 ```
 
-Authored resilience: when the local model is down, you fall back to OpenAI. You picked the order; the vendor didn't.
+When the local model is unreachable, the chain falls back to OpenAI in the order you listed.
 
 See [the providers guide](/docs/integrations/providers/ollama/) for backend setup.
 
@@ -196,7 +197,7 @@ If the task uses tools, you author the policy. Allowlists, denylists, per-tool c
 }
 ```
 
-The vendor didn't decide what `local_shell` can run on your machine. You did.
+`_allowed_commands` and `_denied_commands` constrain what `local_shell` can run for this task, independent of any other chain.
 
 ![A sudo command is refused because the chain's command policy denies it; the policy is plain JSON](/chain-blocked.gif)
 
@@ -222,25 +223,23 @@ Transient failures shouldn't kill a CI step. Author the retry behavior in the ch
 }
 ```
 
-Combined with `transition.on_failure`, you control exactly what happens when something goes wrong — retry, route to a recovery task, or escalate. The pause, the retry, the rerouting: all yours.
+Combine `retry_policy` with `transition.on_failure` to decide what happens when something goes wrong: retry, route to a recovery task, or escalate.
 
 ---
 
-## You authored an agent
-
-That's it. You've written:
+## What you've written
 
 - A system prompt
 - Model selection with a fallback policy
-- Branching with a numeric operator
+- Branching with a routing operator
 - A tool policy with allowlists
 - A retry policy with backoff and jitter
 
-This file works against Ollama, OpenAI, Gemini, or a self-hosted vLLM endpoint by changing one config line. It works on your laptop today; the same artifact runs on Contenox Services tomorrow without modification.
+Switch providers by changing `execute_config.provider` and `execute_config.model` — the rest of the chain is unchanged.
 
 ## Next
 
-- [Annotated examples](/docs/specification/examples/) — four longer chains, fully commented
+- [Annotated examples](/docs/specification/examples/) — five longer chains, fully commented
 - [Handlers reference](/docs/specification/handlers/) — every available task type
 - [Transitions & branching](/docs/specification/transitions/) — operators, edges, and `on_failure`
 - [Use cases](/docs/use-cases/) — end-to-end recipes for real workflows

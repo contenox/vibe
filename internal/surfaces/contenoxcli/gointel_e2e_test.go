@@ -20,26 +20,10 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// gointel on the ENGINE PATH.
-//
-// The package's own suite proves the answers and the surface. What it cannot
-// see is the thing that actually decides whether a coding session works: a
-// gointel call travelling through BuildEngine → the aggregate tools repo → the
-// REAL HITL wrapper → the SHIPPED policy file on disk, and coming back with a
-// fact instead of an approval prompt.
-//
-// That distinction is the whole point of registering gointel always-on. A read
-// toolset that stops to ask permission is a read toolset nobody leaves enabled,
-// and the failure is silent on every unit test in the tree: the policy JSON
-// parses, the tool works in isolation, and the session still hangs. So the
-// assertions here are deliberately blunt:
-//
-//	an ASK is a failure. a DENY is a failure. only ALLOW passes.
-//
-// Two belts, one pair of braces. The AskApproval injected below records and
-// denies rather than prompting, so a regression fails loudly instead of hanging;
-// and os.Stdin is pointed at /dev/null for the duration, so anything that
-// reaches for an interactive answer by another route fails immediately too.
+// gointel on the engine path: asserts a gointel call travelling through
+// BuildEngine, the aggregate tools repo, the real HITL wrapper, and the
+// shipped policy file comes back with a fact rather than an approval prompt.
+// An ask or a deny is a failure; only allow passes.
 // ---------------------------------------------------------------------------
 
 // gointelAsker is the approval callback an allow-tier toolset must never reach.
@@ -61,9 +45,9 @@ func (a *gointelAsker) seen() []string {
 	return append([]string(nil), a.asks...)
 }
 
-// gointelSink captures the engine's hitl_decision events. It is the only honest
-// evidence of WHICH envelope evaluated a call and what it decided — a green tool
-// result alone cannot tell an allow from a policy that was never consulted.
+// gointelSink captures the engine's hitl_decision events: the only evidence
+// of which envelope evaluated a call, since a green result alone cannot tell
+// an allow from a policy that was never consulted.
 type gointelSink struct {
 	mu     sync.Mutex
 	events []taskengine.TaskEvent
@@ -112,14 +96,14 @@ type gointelHarness struct {
 	contenoxDir string
 }
 
-// newGointelHarness builds a REAL engine through BuildEngine with HITL on and
-// the SHIPPED policy presets seeded into an isolated .contenox dir, which
-// hitlPolicySource consults BEFORE the user's ~/.contenox — so these tests
-// evaluate the envelopes this binary ships, not whatever is on the machine.
+// newGointelHarness builds a real engine through BuildEngine with HITL on and
+// the shipped policy presets seeded into an isolated .contenox dir, so these
+// tests evaluate the envelopes this binary ships, not whatever is on the
+// machine.
 func newGointelHarness(t *testing.T, allowedDir string) *gointelHarness {
 	t.Helper()
 
-	// Belt: no interactive answer is obtainable from this process. A prompt that
+	// No interactive answer is obtainable from this process: a prompt that
 	// tries to read one fails at once rather than parking the test.
 	devnull, err := os.Open(os.DevNull)
 	require.NoError(t, err)
@@ -224,11 +208,7 @@ func (h *gointelHarness) requireAllowedWithoutAsking(t *testing.T, policyName, t
 // Row 1 — the headline: real engine, real wrapper, shipped policies
 // ---------------------------------------------------------------------------
 
-// TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies is the
-// acceptance test for the always-on registration decision. Three gointel tools
-// run against THIS repository through a real engine, under each interactive
-// envelope this binary ships, and every one must come back with verifiable
-// ground truth and an ALLOW.
+// TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies asserts three gointel tools, run against this repository through a real engine under each shipped policy, return verifiable ground truth with an allow decision.
 func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine and type-checks this repository")
@@ -240,9 +220,8 @@ func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *te
 	for _, policy := range []string{"hitl-policy-default.json", "hitl-policy-acp.json"} {
 		policy := policy
 		t.Run(policy, func(t *testing.T) {
-			// The per-request pin is the production mechanism an ACP session uses
-			// to choose its envelope (acpsvc/prompt.go). Pinning it here means the
-			// decision events below name the file that was actually consulted.
+			// Pinning the policy here means the decision events below name the
+			// file that was actually consulted.
 			ctx := hitlservice.WithPolicyName(context.Background(), policy)
 			h.sink.drain()
 
@@ -302,18 +281,7 @@ func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *te
 	}
 }
 
-// TestSystem_GoIntel_EnginePathHonoursTheEnvelopeOnDisk is the control that
-// makes the test above mean something. Without it, "allow" could equally be the
-// built-in fallback policy speaking after the file failed to load.
-//
-// hitl-policy-acpx.json — the untrusted-driver envelope, also shipped — has a
-// deny floor and no gointel rule, so pinning it must DENY the identical call.
-// One envelope allows, another denies, same engine and same tool: the decision
-// is coming from the file on disk.
-//
-// It also records a real finding: on acpx an agent gets no Go intelligence at
-// all. That is the envelope's call to make, not this file's — reported, not
-// changed.
+// TestSystem_GoIntel_EnginePathHonoursTheEnvelopeOnDisk asserts pinning hitl-policy-acpx.json (a deny floor, no gointel rule) denies the identical call that hitl-policy-default.json allows, proving the decision comes from the file on disk.
 func TestSystem_GoIntel_EnginePathHonoursTheEnvelopeOnDisk(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine and type-checks this repository")
@@ -347,12 +315,7 @@ func TestSystem_GoIntel_EnginePathHonoursTheEnvelopeOnDisk(t *testing.T) {
 // Row 2 — hostile arguments through the engine's own dispatch
 // ---------------------------------------------------------------------------
 
-// TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping fires the
-// arguments a model actually controls at the engine path. The package suite
-// covers the same matrix against the ToolsRepo directly; what THIS adds is the
-// engine's own argument marshalling (chain args are strings, coerced on the way
-// in) and the guarantee that a refusal travels back as a task error rather than
-// a panic that takes the turn — or the process — with it.
+// TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping asserts hostile arguments, through the engine's own string-coerced argument marshalling, refuse as a task error rather than panic or escape containment.
 func TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine and type-checks this repository")
@@ -393,8 +356,7 @@ func TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			h.sink.drain()
 			out, err := h.call(ctx, tc.tool, tc.args)
-			// The gate still ran and still allowed: a hostile ARGUMENT is the
-			// tool's problem to refuse, not the policy's to gate on.
+			// A hostile argument is the tool's problem to refuse, not the policy's to gate on.
 			h.requireAllowedWithoutAsking(t, "hitl-policy-default.json", tc.tool)
 
 			require.Errorf(t, err, "hostile input was accepted, returning %#v", out)
@@ -415,11 +377,7 @@ func TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping(t *test
 	}
 }
 
-// TestSystem_GoIntel_EnginePathTolerantOfSloppyButHonestArguments is the other
-// half of hostility: arguments that are merely BAD, not malicious. A small model
-// emits numbers as strings and paths with redundant segments, and every one of
-// these must answer rather than refuse — a tool that is strict about spelling is
-// a tool that spends turns on spelling.
+// TestSystem_GoIntel_EnginePathTolerantOfSloppyButHonestArguments asserts merely sloppy (not malicious) arguments — stringified numbers, redundant path segments — answer rather than refuse.
 func TestSystem_GoIntel_EnginePathTolerantOfSloppyButHonestArguments(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine and type-checks this repository")
@@ -463,12 +421,7 @@ func TestSystem_GoIntel_EnginePathTolerantOfSloppyButHonestArguments(t *testing.
 // Rows 3 and 4 — teardown and freshness, on the engine path
 // ---------------------------------------------------------------------------
 
-// TestSystem_GoIntel_EngineStopClosesTheIndexForLateCalls pins the lifecycle
-// engine.go wires up. The index owns a reaper goroutine and a ~110 MB snapshot,
-// and it rides engine.Stop. A tool call arriving after that — a chain goroutine
-// still draining while the process shuts down — must be REFUSED, promptly and
-// typed. Serving it would rebuild the snapshot into a cache whose reaper has
-// already exited, so nothing would ever drop it again.
+// TestSystem_GoIntel_EngineStopClosesTheIndexForLateCalls asserts a gointel call arriving after engine.Stop is refused promptly and typed, not served into a cache whose reaper has already exited.
 func TestSystem_GoIntel_EngineStopClosesTheIndexForLateCalls(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine and type-checks this repository")
@@ -508,10 +461,7 @@ func TestSystem_GoIntel_EngineStopClosesTheIndexForLateCalls(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_EnginePathConcurrentCallsStayCorrect runs the engine path
-// from many goroutines at once — the shape a model with parallel tool calls
-// produces — while a writer churns a file in the workspace. Under -race this is
-// where a shared snapshot read without a lock would show up.
+// TestSystem_GoIntel_EnginePathConcurrentCallsStayCorrect asserts the engine path stays correct under concurrent calls from many goroutines while a writer churns a workspace file, catching an unlocked shared-snapshot read under -race.
 func TestSystem_GoIntel_EnginePathConcurrentCallsStayCorrect(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine and type-checks this repository")
@@ -589,11 +539,7 @@ func TestSystem_GoIntel_EnginePathConcurrentCallsStayCorrect(t *testing.T) {
 	require.Empty(t, h.asker.seen())
 }
 
-// TestSystem_GoIntel_EnginePathSeesAnEditImmediately is the no-stale-answers
-// promise where it is actually consumed. The V1.1 post-write middleware that
-// calls Invalidate does not exist yet, so TODAY every edit an agent makes
-// reaches the index only through the mtime sweep — which means this is not a
-// belt-and-braces test, it is the only mechanism there is.
+// TestSystem_GoIntel_EnginePathSeesAnEditImmediately asserts an edit, a new file, a deletion, and a new call site are all picked up by the mtime sweep, the only mechanism that keeps the index from going stale.
 func TestSystem_GoIntel_EnginePathSeesAnEditImmediately(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine and type-checks this repository")
@@ -677,26 +623,7 @@ func writeGointelModule(t *testing.T, root string) {
 	}
 }
 
-// TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably reproduces the
-// wiring `contenox beam` actually runs with, and it is here because a live
-// session found it: EffectiveLocalExecAllowedDir is EMPTY unless the operator
-// passes --local-exec-allowed-dir, and engine.go builds the index as
-// gointel.NewIndex(gointel.Config{AllowedDir: opts.EffectiveLocalExecAllowedDir})
-// with no CwdResolver. So in a default beam session gointel advertises six tools
-// and refuses every call, while local_fs works — because the ACP chain hands
-// local_fs, git and local_shell an "_allowed_dir" through tools_policies and
-// never mentions gointel.
-//
-// FINDING, REPORTED NOT FIXED — the three places it can be closed all belong to
-// other owners:
-//
-//	engine.go        wire Config.CwdResolver (the seam gointel already declares)
-//	chain-acp.json   give gointel a tools_policies entry like local_fs's
-//	beam_cmd.go      default the allowed dir to the session's workspace root
-//
-// What this test pins is the half that IS gointel's: the refusal must be marked
-// FATAL and must name how the root is supplied, so the next person to hit it
-// reads the cause instead of concluding the tool is broken.
+// TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably asserts that with no allowed dir (the default `contenox beam` wiring), gointel's refusal is marked fatal and names how to supply the root, rather than reading as broken.
 func TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine")
@@ -711,16 +638,11 @@ func TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably(t *testing.T
 	require.Containsf(t, msg, "(fatal:", "the refusal is not marked fatal, but no retry can fix a wiring gap: %q", msg)
 	require.Containsf(t, msg, "--local-exec-allowed-dir", "the refusal does not name how to supply the root: %q", msg)
 
-	// It still does not gate: an unusable tool that ALSO interrupts would be the
-	// worst of both.
+	// It still does not gate: an unusable tool that also interrupts would be the worst of both.
 	h.requireAllowedWithoutAsking(t, "hitl-policy-default.json", gointel.ToolDefinition)
 }
 
-// TestSystem_GoIntel_EnginePathHandlesANonGoWorkspace closes the shape a
-// registration decision must survive: gointel is ALWAYS on, so it is registered
-// in workspaces that hold no Go at all. Its refusal must be a teaching error the
-// model can act on — and, critically, must not gate, because an approval prompt
-// for a tool that cannot work in this workspace is the worst outcome available.
+// TestSystem_GoIntel_EnginePathHandlesANonGoWorkspace asserts gointel, always registered even with no Go present, refuses with a typed teaching error and does not gate.
 func TestSystem_GoIntel_EnginePathHandlesANonGoWorkspace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine")

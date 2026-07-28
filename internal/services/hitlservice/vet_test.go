@@ -8,9 +8,7 @@ import (
 )
 
 func TestUnit_VetPolicy_AcceptsShippedShapes(t *testing.T) {
-	// The shape every shipped preset uses, including the "//"-comment
-	// convention ("//compute" in hitl-policy-default.json) and rule-level
-	// timeout on an approve rule.
+	// The shape every shipped preset uses, including the "//"-comment convention.
 	good := `{
 		"//compute": "add a compute block to bound total spend",
 		"default_action": "approve",
@@ -73,8 +71,7 @@ func TestUnit_VetPolicy_UnknownFields(t *testing.T) {
 }
 
 func TestUnit_VetPolicy_InvalidRuleShapes(t *testing.T) {
-	// Unknown action and forbidden on_timeout come from the runtime's own
-	// validatePolicy, reused so vet and load can never disagree.
+	// Comes from the runtime's own validatePolicy, reused by vet.
 	err := VetPolicy([]byte(`{"rules": [{"tools": "x", "tool": "y", "action": "permit"}]}`))
 	require.ErrorIs(t, err, ErrEnvelopeVet)
 	require.Contains(t, err.Error(), `unknown action "permit"`)
@@ -125,11 +122,9 @@ func TestUnit_VetPolicy_CollectsEverythingAtOnce(t *testing.T) {
 	}
 }
 
-// TestUnit_VetPolicy_ShippedPresetsPass pins that vet accepts what the
-// runtime ships; the CLI-side vet test covers the actual embedded files.
+// TestUnit_VetPolicy_ShippedDefaultPolicyShapePasses pins that the built-in
+// default policy round-trips through JSON and passes vet.
 func TestUnit_VetPolicy_ShippedDefaultPolicyShapePasses(t *testing.T) {
-	// defaultPolicy() is the built-in fallback; round-trip it through JSON and
-	// vet the result.
 	p := defaultPolicy()
 	data, err := json.Marshal(p)
 	require.NoError(t, err)

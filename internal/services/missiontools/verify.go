@@ -1,30 +1,11 @@
-// verify.go is the conclusion verification gate: the check that a unit's
-// CLAIMED deliverables actually exist before its "done, see file" report is
-// filed as a result. A model can hallucinate an artifact as easily as a
-// sentence, and a result report naming a file that was never written is worse
-// than no report — it reads as success to the operator (and to the next
-// mission a hand-off feeds) precisely because it is structured.
-//
-// The gate rides mission_report's EXISTING write path — the report always
-// lands, through the same AddReport the routing/inbox machinery already hangs
-// off — and only ever ANNOTATES:
-//
-//   - Result reports whose claimed refs/artifacts include a POSITIVELY MISSING
-//     local path (os.Stat says not-exists) are downgraded result → progress —
-//     the closed ReportKind set's honest word for "partial" — with a warning
-//     appended to the detail naming exactly what is missing.
-//   - Everything unverifiable counts as PRESENT (fail-open): URLs, prose,
-//     relative paths when no workdir is known, and any stat error other than
-//     not-exists (permissions, an unreadable parent). Only a positive "that
-//     path does not exist" downgrades — the gate must never punish a unit for
-//     the runtime's limited view.
-//   - NOTHING is ever discarded: summary, detail, refs, and hand-over all land
-//     verbatim; the kind changes and a warning is appended, that is all.
-//
-// Local paths are resolved against the unit's WORKING DIRECTORY, carried on the
-// tool-call context by the transport (WithWorkdir, the same construction-time
-// binding WithMissionID uses). A transport that binds no workdir simply leaves
-// relative refs unverifiable — absolute paths are still checked.
+// verify.go is the conclusion verification gate: it checks that a unit's
+// claimed deliverables actually exist before a "done" report is filed as a
+// result. It rides mission_report's existing write path and only ever
+// annotates: a result whose claimed refs/artifacts include a positively
+// missing local path is downgraded to progress with a warning appended.
+// Everything unverifiable (URLs, prose, relative paths with no known
+// workdir, non-not-exists stat errors) counts as present — fail-open.
+// Nothing is ever discarded; only the kind changes and a warning is appended.
 package missiontools
 
 import (
@@ -36,17 +17,13 @@ import (
 	"unicode"
 )
 
-// workdirCtxKey is the unexported context key for the unit's working directory,
-// mirroring missionCtxKey: set once by the transport that built the session,
-// never an argument the agent passes.
+// workdirCtxKey is the unexported context key for the unit's working
+// directory, mirroring missionCtxKey.
 type workdirCtxKey struct{}
 
 // WithWorkdir binds the unit's session working directory to ctx, for the
-// verification gate to resolve a report's RELATIVE artifact refs against. The
-// transport that constructs a dispatched unit's session calls it alongside
-// WithMissionID, from the same session record (the acpsvc sessionEntry's Cwd).
-// An empty dir returns ctx unchanged, so "no workdir known" stays an absent
-// fact rather than a blank one.
+// verification gate to resolve a report's relative artifact refs against.
+// An empty dir returns ctx unchanged.
 func WithWorkdir(ctx context.Context, dir string) context.Context {
 	if strings.TrimSpace(dir) == "" {
 		return ctx
@@ -54,21 +31,18 @@ func WithWorkdir(ctx context.Context, dir string) context.Context {
 	return context.WithValue(ctx, workdirCtxKey{}, dir)
 }
 
-// WorkdirFromContext returns the working directory bound by WithWorkdir, or ""
-// when the transport bound none (relative refs are then unverifiable and count
-// as present — the fail-open default).
+// WorkdirFromContext returns the working directory bound by WithWorkdir, or
+// "" when none was bound (relative refs are then unverifiable and count as
+// present).
 func WorkdirFromContext(ctx context.Context) string {
 	dir, _ := ctx.Value(workdirCtxKey{}).(string)
 	return dir
 }
 
-// WithDowngradeRecorder wires the OPTIONAL telemetry hook the gate calls once
-// per downgraded report. The composition point passes the fleet's counter bump
-// (fleetservice.RecordVerificationDowngrade) — a plain func, not an interface,
-// because one notification is the entire contract. It cannot be the import the
-// other way around: fleetservice already imports this package for its tool-name
-// constants. Nil (or never calling this option) is fully supported: the
-// provider keeps a no-op, so the gate itself never nil-checks.
+// WithDowngradeRecorder wires the optional telemetry hook the gate calls
+// once per downgraded report. A plain func, not an interface, since one
+// notification is the whole contract. Nil (or unset) is fully supported:
+// the provider keeps a no-op, so the gate itself never nil-checks.
 func WithDowngradeRecorder(record func()) Option {
 	return func(p *provider) {
 		if record != nil {
@@ -77,15 +51,11 @@ func WithDowngradeRecorder(record func()) Option {
 	}
 }
 
-// verificationWarningLead is the stable, greppable lead of the warning the gate
-// appends to a downgraded report's detail — the same teaching-gate register as
-// fleetservice's computeBoundLead: an operator (or a test) keys on it to tell a
-// verification downgrade from anything else in a report.
+// verificationWarningLead is the stable, greppable lead of the warning
+// appended to a downgraded report's detail.
 const verificationWarningLead = "claimed artifacts not found"
 
-// verificationWarning builds the teaching annotation for a downgraded report:
-// it names exactly what is missing and where the gate looked, states what the
-// gate did (and did not) change, and points at the remedy.
+// verificationWarning builds the teaching annotation for a downgraded report.
 func verificationWarning(missing []string) string {
 	return fmt.Sprintf(
 		"%s: %s — the unit's result named artifacts that do not exist at their claimed paths. "+
@@ -95,10 +65,9 @@ func verificationWarning(missing []string) string {
 }
 
 // missingArtifacts returns, of the claimed refs, exactly the ones that are
-// POSITIVELY missing: refs that parse as a local path (see verifiablePath),
-// resolve against workdir, and for which os.Stat reports not-exists. Order
-// follows the claim order, duplicates deduplicated, so the warning reads like
-// the report that earned it.
+// positively missing: refs that parse as a local path (see verifiablePath)
+// and for which os.Stat reports not-exists. Order follows the claim order,
+// deduplicated.
 func missingArtifacts(workdir string, refs []string) []string {
 	var missing []string
 	seen := map[string]bool{}
@@ -112,25 +81,19 @@ func missingArtifacts(workdir string, refs []string) []string {
 			continue // URL, prose, or unresolvable — fail-open, counts as present.
 		}
 		if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
-			// Only the positive absence downgrades. Any OTHER stat error — a
-			// permission wall, an unreadable parent — is the runtime's limited
-			// view, not evidence against the unit, and counts as present.
+			// Only positive absence downgrades; any other stat error (a
+			// permission wall, an unreadable parent) counts as present.
 			missing = append(missing, ref)
 		}
 	}
 	return missing
 }
 
-// verifiablePath decides whether a claimed ref is a LOCAL PATH the gate can
-// honestly stat, and resolves it if so. Everything it declines is fail-open
-// (counts as present):
-//
-//   - URLs (anything carrying a scheme separator) are not local facts.
-//   - Prose (anything containing whitespace) is a description, not a path; the
-//     refs schema asks for "file paths or URLs", so a single whitespace-free
-//     token IS treated as the path it claims to be.
-//   - Relative paths resolve against the unit's workdir; with no workdir bound
-//     there is nothing honest to resolve against, so they are unverifiable.
+// verifiablePath decides whether a claimed ref is a local path the gate can
+// honestly stat, and resolves it if so. URLs (a scheme separator) and prose
+// (containing whitespace) are not local facts; a relative path resolves
+// against workdir, or is unverifiable with none bound. Everything declined
+// here is fail-open (counts as present).
 func verifiablePath(workdir, ref string) (string, bool) {
 	if ref == "" || strings.Contains(ref, "://") {
 		return "", false
@@ -147,17 +110,15 @@ func verifiablePath(workdir, ref string) (string, bool) {
 	return filepath.Join(workdir, ref), true
 }
 
-// claimedRefs gathers everything a report CLAIMS as a deliverable: its Refs and
-// its hand-over's Artifacts, in that order. Both carry "paths or URLs, by
-// reference only" by schema, so both are the gate's business on a result.
+// claimedRefs gathers everything a report claims as a deliverable: Refs then
+// the hand-over's Artifacts.
 func claimedRefs(report reportClaims) []string {
 	refs := append([]string(nil), report.refs...)
 	return append(refs, report.artifacts...)
 }
 
-// reportClaims is the minimal read the gate takes of a report — kept as a tiny
-// value type so missingArtifacts/verifiablePath stay pure and trivially
-// testable without constructing missionservice rows.
+// reportClaims is the minimal read the gate takes of a report, kept as a
+// tiny value type so missingArtifacts/verifiablePath stay pure and testable.
 type reportClaims struct {
 	refs      []string
 	artifacts []string

@@ -25,12 +25,9 @@ type Agent interface {
 	SessionNew(ctx context.Context, name string) (string, error)
 	SessionList(ctx context.Context) ([]*SessionInfo, error)
 	SessionLoad(ctx context.Context, name string) (contenoxSessionID string, messages []taskengine.Message, err error)
-	// SessionResume switches to an existing session without loading its
-	// message history — the reconnect path for clients that kept their
-	// transcript.
+	// SessionResume switches sessions without loading message history.
 	SessionResume(ctx context.Context, name string) (contenoxSessionID string, err error)
-	// SessionDelete removes a session and its messages by name; missing
-	// sessions are not an error (delete is idempotent).
+	// SessionDelete removes a session and its messages by name; idempotent.
 	SessionDelete(ctx context.Context, name string) error
 	SessionEnsureDefault(ctx context.Context) (string, error)
 	Prompt(ctx context.Context, req PromptRequest) (*PromptResponse, error)
@@ -125,8 +122,6 @@ func (a *agent) SessionResume(ctx context.Context, name string) (string, error) 
 func (a *agent) SessionDelete(ctx context.Context, name string) error {
 	_, err := a.sessionSvc().Delete(ctx, a.deps.Identity, name)
 	if err != nil && errors.Is(err, messagestore.ErrNotFound) {
-		// Deleting a session that does not exist is a success: the desired
-		// state (no such session) already holds.
 		return nil
 	}
 	return err
@@ -181,11 +176,7 @@ func (a *agent) Prompt(ctx context.Context, req PromptRequest) (*PromptResponse,
 
 	if req.SessionID != "" {
 		ctx = context.WithValue(ctx, runtimetypes.SessionIDContextKey, req.SessionID)
-		// Cache-affinity key for sticky model resolution (provider-kv-cache
-		// blueprint §4.1.5): derived (one-way hashed) here, at the session
-		// owner, so the raw session ID never travels toward providers. The
-		// task engine builds llmrepo requests without session identity, so
-		// the key rides the context down to llmrepo.
+		// Cache-affinity key, one-way hashed so the raw ID never reaches providers.
 		ctx = llmrepo.WithSessionKey(ctx, llmrepo.DeriveSessionKey(req.SessionID))
 	}
 
@@ -196,26 +187,15 @@ func (a *agent) Prompt(ctx context.Context, req PromptRequest) (*PromptResponse,
 		}
 	}
 
-	// S6: install the durable checkpoint sink so a run that parks on a human
-	// approval past the fast window can suspend instead of pinning this
-	// goroutine. The saver enriches the engine's checkpoint with the identity
-	// only this layer knows (session, chain ref).
+	// Lets a run that parks on approval suspend instead of blocking.
 	ctx = taskengine.WithCheckpointSaver(ctx, a.checkpointSaver(req.SessionID, req.ChainRef))
 
 	output, outputType, stateUnits, execErr := a.deps.Engine.TaskService.Execute(ctx, chain, inputVal, inputType)
 
-	// Suspension is a typed terminal, not a failure. The session history is
-	// deliberately NOT persisted here: the checkpoint is the durable
-	// transcript of the in-flight turn, and persisting now would write
-	// repair-stubbed tool results that the resumed run's REAL results could
-	// never displace (PersistDiff is append-only by message ID). The resume
-	// path persists the completed turn once.
+	// Suspension is a typed terminal, not a failure; the resume path persists once.
 	var susp *taskengine.ChainSuspendedError
 	if execErr != nil && errors.As(execErr, &susp) {
-		// Close the row-vs-checkpoint race: a verdict that landed between the
-		// checkpoint write and this return had no checkpoint to resume yet —
-		// this process resumes it inline, exactly as if the verdict had come
-		// one moment later.
+		// Closes the row-vs-checkpoint race: resume inline if no hook exists yet.
 		if resp, resumed := a.resumeIfAlreadyAnswered(ctx, susp.ApprovalID); resumed {
 			return resp, nil
 		}
@@ -229,9 +209,7 @@ func (a *agent) Prompt(ctx context.Context, req PromptRequest) (*PromptResponse,
 	}
 
 	if req.SessionID != "" {
-		// Pre-flight Guard: If the input immediately triggers a context length overflow,
-		// do not save it to the session history. This prevents the "poison pill" effect
-		// where a massive input permanently bricks the session.
+		// An overflowing input is not saved, or it would poison the session.
 		isPoisonPill := false
 		if execErr != nil && errors.Is(execErr, taskengine.ErrContextLengthExceeded) {
 			// If it failed before any real LLM steps could execute, it's an input failure
@@ -304,10 +282,7 @@ func (a *agent) startObserving(ctx context.Context, obs Observer) func() {
 	}
 }
 
-// ComposeUserInput renders the effective user message the model sees:
-// per-turn context artifacts (from Beam's ArtifactRegistry, sent as
-// {artifacts: [{kind, payload}, ...]}) are prepended as an
-// "Additional context" block. Plain input passes through unchanged.
+// ComposeUserInput prepends per-turn context artifacts as an "Additional context" block.
 func ComposeUserInput(input string, contextBundle map[string]any) string {
 	content := input
 
@@ -366,11 +341,8 @@ func (a *agent) buildChatInput(ctx context.Context, req PromptRequest) (any, tas
 	return chatInput, taskengine.DataTypeChatHistory, nil
 }
 
-// stampTurnProvenance sets RequestID/ChainRef on messages that don't carry
-// provenance yet (i.e. the messages produced by this turn). Messages from
-// prior turns already have their own provenance — or, for pre-provenance
-// history, get transiently stamped here but are dropped by PersistDiff's
-// ID-based dedupe before reaching storage.
+// stampTurnProvenance sets RequestID/ChainRef on messages without
+// provenance yet, so PersistDiff's dedupe can drop stale ones safely.
 func stampTurnProvenance(msgs []taskengine.Message, requestID, chainRef string) {
 	for i := range msgs {
 		if msgs[i].RequestID != "" {

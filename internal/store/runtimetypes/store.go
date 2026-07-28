@@ -55,19 +55,9 @@ type Model struct {
 	UpdatedAt     time.Time `json:"updatedAt" example:"2023-11-15T14:30:45Z"`
 }
 
-// AffinityGroup represents a logical grouping that defines preferred relationships
-// between models and backends. Entities can
-// belong to multiple affinity groups simultaneously.
-//
-// Affinity groups enable:
-//   - Selective model-backend relationships (not all backends serve all models)
-//   - Performance tiering (assigning models to appropriate backend tiers)
-//   - Custom routing strategies based on application requirements
-//
-// Example use cases:
-//   - "embedding-affinity": Contains embedding models and their dedicated backends
-//   - "low-latency-affinity": Contains critical models that need fastest response
-//   - "high-throughput-affinity": Contains models that benefit from batch processing
+// AffinityGroup is a logical grouping of preferred model-backend
+// relationships (e.g. tiering, routing strategy); entities can belong to
+// multiple groups at once.
 type AffinityGroup struct {
 	ID          string `json:"id" example:"p9a8b7c6-d5e4-f3a2-b1c0-d9e8f7a6b5c4"`
 	Name        string `json:"name" example:"production-chat"`
@@ -231,11 +221,7 @@ type Store interface {
 	ListAgents(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Agent, error)
 	EstimateAgentCount(ctx context.Context) (int64, error)
 
-	// CreateHITLApproval, GetHITLApproval, ResolveHITLApproval,
-	// ListExpiredHITLApprovals, ListHITLApprovals, and
-	// EstimateHITLApprovalCount back runtime/hitlservice's durable pending-ask
-	// table (see runtime/runtimetypes/hitl_approvals.go and
-	// docs/development/blueprints/acp/fleet-consolidation.md slice C1).
+	// HITL* methods back runtime/hitlservice's durable pending-ask table (see hitl_approvals.go).
 	CreateHITLApproval(ctx context.Context, a *HITLApproval) error
 	GetHITLApproval(ctx context.Context, id string) (*HITLApproval, error)
 	ResolveHITLApproval(ctx context.Context, id string, state HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error
@@ -244,10 +230,9 @@ type Store interface {
 	ListHITLApprovalsForMission(ctx context.Context, missionID string, limit int) ([]*HITLApproval, error)
 	EstimateHITLApprovalCount(ctx context.Context) (int64, error)
 
-	// Chain checkpoints back the S6 suspend/resume machinery: a suspended
+	// Chain checkpoints back the suspend/resume machinery: a suspended
 	// chain run is a row here, keyed by the approval ID whose verdict resumes
-	// it (see runtimetypes/checkpoints.go and
-	// docs/development/blueprints/eino-evaluation.md §T4).
+	// it (see runtimetypes/checkpoints.go).
 	CreateChainCheckpoint(ctx context.Context, cp *ChainCheckpoint) error
 	GetChainCheckpoint(ctx context.Context, id string) (*ChainCheckpoint, error)
 	ClaimChainCheckpoint(ctx context.Context, id string, now, staleBefore time.Time) error
@@ -256,10 +241,8 @@ type Store interface {
 	ListChainCheckpoints(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*ChainCheckpoint, error)
 
 	// Workspace semantic index: an immutable index-config generation plus its
-	// chunks and their FTS5 lexical mirror (see runtimetypes/workspaceindex.go
-	// and docs/development/blueprints/workspace-index.md). Note the absent
-	// UpdateWorkspaceIndexConfig — a config is create-once, and changing the
-	// embedding model means a new config and a cutover, never a mutation.
+	// chunks and their FTS5 lexical mirror (see workspaceindex.go). Note the
+	// absent UpdateWorkspaceIndexConfig — a config is create-once.
 	CreateWorkspaceIndexConfig(ctx context.Context, cfg *WorkspaceIndexConfig) error
 	GetWorkspaceIndexConfig(ctx context.Context, id string) (*WorkspaceIndexConfig, error)
 	GetActiveWorkspaceIndexConfig(ctx context.Context, workspaceID string) (*WorkspaceIndexConfig, error)

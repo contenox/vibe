@@ -8,11 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_Initialize_AdvertisesTerminalAuth_WithNilEngine is the registry gate,
-// made local: the ACP registry validator launches the binary in an isolated HOME
-// with no prior configuration (so the engine is nil — setup-only mode), sends a
-// single initialize, and requires an authMethod of type "agent" or "terminal".
-// initialize must therefore never depend on a built engine.
+// TestUnit_Initialize_AdvertisesTerminalAuth_WithNilEngine pins: Initialize never depends on a built engine.
 func TestUnit_Initialize_AdvertisesTerminalAuth_WithNilEngine(t *testing.T) {
 	tr := transportWithMeta(`{"terminal-auth":true}`)
 	require.Nil(t, tr.deps.Engine, "guards the precondition: this exercises the setup-only (no model) path")
@@ -33,9 +29,7 @@ func TestUnit_Initialize_AdvertisesTerminalAuth_WithNilEngine(t *testing.T) {
 		"setup-only mode must still advertise the terminal auth method, or the registry validator fails and a fresh install can never reach setup")
 }
 
-// TestUnit_NewSession_SetupOnly_ReturnsActionableError verifies that once a
-// client gets past initialize/auth without a configured model, session creation
-// fails with a clear, actionable error instead of nil-panicking on the engine.
+// TestUnit_NewSession_SetupOnly_ReturnsActionableError pins: no engine yields an actionable error, not a nil-panic.
 func TestUnit_NewSession_SetupOnly_ReturnsActionableError(t *testing.T) {
 	tr := transportWithMeta("")
 	require.Nil(t, tr.deps.Engine)

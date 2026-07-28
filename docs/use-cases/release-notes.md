@@ -1,3 +1,7 @@
+---
+description: Pipe git log into contenox run and get grouped, categorized release notes back — no custom chain, no setup.
+---
+
 # Automated Release Notes
 
 Pipe `git log` into `contenox run` and get grouped markdown release notes back. No custom chain, no setup — just shell composition.

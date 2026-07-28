@@ -1,3 +1,7 @@
+---
+description: Connect any MCP server — local, SSE, or HTTP — with persistent, session-scoped connections instead of one-shot calls.
+---
+
 # Model Context Protocol (MCP)
 
 Contenox is a full native MCP client. Every chat session and `contenox run` invocation can connect to any MCP-compatible server—local child processes, remote SSE streams, or HTTP endpoints.

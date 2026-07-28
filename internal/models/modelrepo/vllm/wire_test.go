@@ -31,10 +31,8 @@ func vllmWireFixture(withProvenance bool) []modelrepo.Message {
 }
 
 func TestUnit_VLLMWire_ProvenanceNeverLeaksAndBytesAreStable(t *testing.T) {
-	// P6 fix: history `thinking` and tool-call `provider_meta` must not reach
-	// the wire — identical conversations must produce byte-identical request
-	// bodies regardless of history provenance, or vLLM's prefix cache misses
-	// on semantically identical requests.
+	// Identical conversations must produce byte-identical request bodies
+	// regardless of history provenance, or vLLM's prefix cache misses.
 	reqA, _ := buildChatRequest("m", vllmWireFixture(false), nil)
 	reqB, _ := buildChatRequest("m", vllmWireFixture(true), nil)
 
@@ -57,8 +55,7 @@ func TestUnit_VLLMWire_ProvenanceNeverLeaksAndBytesAreStable(t *testing.T) {
 }
 
 func TestUnit_VLLMWire_KeepsRoleContentToolShape(t *testing.T) {
-	// The explicit wire struct must keep the fields vLLM needs: role/content,
-	// sanitized tool-call names, and the tool_call_id correlation.
+	// Must keep role/content, sanitized tool-call names, and tool_call_id.
 	req, _ := buildChatRequest("m", vllmWireFixture(true), nil)
 	raw, err := json.Marshal(req.Messages)
 	if err != nil {
@@ -88,8 +85,7 @@ func TestUnit_VLLMWire_KeepsRoleContentToolShape(t *testing.T) {
 }
 
 func TestUnit_VLLMCache_NoWireFieldForHints(t *testing.T) {
-	// vLLM's APC keys on the token prefix server-side; CacheHints (and the
-	// session key) must not add any bytes to the request.
+	// CacheHints (and the session key) must not add any bytes to the request.
 	plain, _ := buildChatRequest("m", vllmWireFixture(false), nil)
 	hinted, _ := buildChatRequest("m", vllmWireFixture(false), []modelrepo.ChatArgument{
 		modelrepo.WithCacheHints(modelrepo.CacheHints{

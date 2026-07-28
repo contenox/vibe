@@ -6,26 +6,16 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/sanitize"
 )
 
-// The @-mention seam (blueprint MVP item 10). file-addressing owns finding,
-// ranking, and resolving candidates; the composer stays the keystroke and
-// textarea owner and exposes exactly two calls: read the token the caret is
-// in, and splice a chosen replacement over it.
-//
-// Both use rune offsets into Draft() — the flat buffer text, newlines
-// included — so a caller can check a span against the same string it read,
-// and the pair stays meaningful across a multiline draft.
+// The @-mention seam: file-addressing finds, ranks, and resolves
+// candidates; the composer only reads the token the caret is in and
+// splices a replacement over it, both via rune offsets into Draft().
 
-// MentionSpan reports the `@` token the caret is in.
+// MentionSpan reports the `@` token the caret is in: it is a mention only
+// when its first rune is `@` (at the buffer start or preceded by
+// whitespace), so "user@host" never triggers.
 //
-// The token runs between whitespace boundaries, so the trigger rule falls
-// out of the shape of the text rather than a second scan: a token is a
-// mention only when its FIRST rune is `@`, which is true exactly when the
-// `@` is at the buffer start or preceded by whitespace. "user@host" is one
-// token beginning with 'u' and never triggers.
-//
-// start and length locate the token in Draft() (rune offsets, the `@`
-// included); query is the token's text after the `@`, empty for a bare `@`
-// the user has just typed. ok is false when the caret is not in a mention.
+// start and length locate the token in Draft() (rune offsets, `@`
+// included); query is its text after the `@`. ok is false outside a mention.
 func (c *Composer) MentionSpan() (start, length int, query string, ok bool) {
 	runes := c.draftRunes()
 	pos := c.flatIndex()
@@ -44,29 +34,25 @@ func (c *Composer) MentionSpan() (start, length int, query string, ok bool) {
 	return start, end - start, string(runes[start+1 : end]), true
 }
 
-// SpliceMention replaces the span at start (rune offsets into Draft(), as
-// returned by MentionSpan) with replacement plus one trailing space, and
-// leaves the caret after that space — so selecting a completion lands the
-// user mid-sentence, ready to keep typing.
-//
-// An out-of-range span is ignored rather than panicking: the completion that
-// produced it is asynchronous and the buffer may have moved on. Like any
-// edit it detaches the buffer from history recall.
+// SpliceMention replaces the span at start (as returned by MentionSpan)
+// with replacement plus one trailing space, caret after it. An out-of-range
+// span is ignored rather than panicking, since the async completion that
+// produced it may be stale. Like any edit it detaches from history recall.
 func (c *Composer) SpliceMention(start, length int, replacement string) {
 	runes := c.draftRunes()
 	if start < 0 || length < 0 || start+length > len(runes) {
 		return
 	}
-	// The replacement is a filename out of the workspace, which a filesystem
-	// will happily let contain an escape sequence. Same gate as a paste.
+	// A workspace filename may contain an escape sequence; sanitize it
+	// like a paste.
 	rep := []rune(sanitize.Line(replacement))
 	out := concat(runes[:start], rep, []rune{' '}, runes[start+length:])
 	c.setFlat(out, start+len(rep)+1)
 	c.touch()
 }
 
-// draftRunes is the buffer flattened to runes, newlines included — the
-// coordinate space MentionSpan and SpliceMention share with Draft().
+// draftRunes is the buffer flattened to runes, the coordinate space
+// MentionSpan and SpliceMention share with Draft().
 func (c *Composer) draftRunes() []rune {
 	return []rune(c.Draft())
 }
@@ -80,9 +66,8 @@ func (c *Composer) flatIndex() int {
 	return n + c.off
 }
 
-// setFlat replaces the buffer from flat runes and places the caret at a flat
-// offset. Newlines in runes become line breaks; sanitize already ran, so
-// nothing else needs normalizing.
+// setFlat replaces the buffer from flat runes and places the caret at a
+// flat offset; newlines become line breaks.
 func (c *Composer) setFlat(runes []rune, caret int) {
 	if caret < 0 {
 		caret = 0

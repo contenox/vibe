@@ -42,10 +42,9 @@ func NewPubSub(ctx context.Context, cfg *Config) (Messenger, error) {
 		nats.ReconnectHandler(func(nc *nats.Conn) {
 			log.Printf("NATS reconnected to %s", nc.ConnectedUrl())
 		}),
-		// Without this, asynchronous errors — above all nats.ErrSlowConsumer, which
-		// is how this backend reports that it DISCARDED messages for a subscriber
-		// whose buffer overflowed — are swallowed by the client. Data loss would be
-		// completely invisible: no log line, no error return, nothing to alert on.
+		// Without this, async errors — above all nats.ErrSlowConsumer, reported when
+		// a subscriber's buffer overflows and messages are discarded — are
+		// swallowed by the client, making data loss invisible.
 		nats.ErrorHandler(func(_ *nats.Conn, sub *nats.Subscription, err error) {
 			subject := "<unknown>"
 			if sub != nil {
@@ -139,7 +138,6 @@ func (p *ps) stream(ctx context.Context, subject, queue string, ch chan<- []byte
 			select {
 			case msg, ok := <-natsChan:
 				if !ok {
-					// Channel was closed by NATS client, exit goroutine.
 					return
 				}
 				select {
@@ -167,17 +165,14 @@ func (p *ps) Request(ctx context.Context, subject string, data []byte) ([]byte, 
 			return nil, ErrRequestTimeout
 		case errors.Is(err, nats.ErrConnectionClosed):
 			return nil, ErrConnectionClosed
-		// Handle the race condition where "no responders" can occur just before a timeout.
 		case errors.Is(err, nats.ErrNoResponders):
-			// If the context has a deadline, the user's intent was a timeout.
-			// Prioritize the timeout error over the "no responders" error in this ambiguous case.
+			// "No responders" can race with a timeout; with a deadline set, prefer
+			// reporting the timeout since that was the caller's intent.
 			if _, hasDeadline := ctx.Deadline(); hasDeadline {
 				return nil, ErrRequestTimeout
 			}
-			// Otherwise, if no deadline is set, it's a genuine "no responders" error.
 			return nil, err
 		default:
-			// This correctly propagates other errors, including context.Canceled.
 			return nil, err
 		}
 	}
@@ -189,14 +184,10 @@ func (p *ps) Serve(ctx context.Context, subject string, handler Handler) (Subscr
 		return nil, ErrConnectionClosed
 	}
 
-	// Bound in-flight handlers. Previously every message spawned an unbounded
-	// goroutine, so a burst (or a handler that blocks on a downstream dependency)
-	// could grow the goroutine count without limit until the process died — a
-	// failure mode that only ever appears in production, since the in-memory and
-	// SQLite backends run handlers one at a time. Acquiring the slot inside the
-	// NATS callback applies backpressure to the subscription instead: at the cap,
-	// dispatch stalls and, if it stays stalled, the client reports a slow consumer
-	// through the ErrorHandler registered in natsOpts.
+	// Bounds in-flight handlers so a burst or a blocked downstream dependency
+	// can't grow goroutines without limit. Acquiring the slot inside the NATS
+	// callback applies backpressure to the subscription: at the cap, dispatch
+	// stalls and the client reports a slow consumer via natsOpts' ErrorHandler.
 	sem := make(chan struct{}, maxHandlerConcurrency)
 
 	sub, err := p.nc.QueueSubscribe(subject, subject, func(msg *nats.Msg) {
@@ -207,7 +198,6 @@ func (p *ps) Serve(ctx context.Context, subject string, handler Handler) (Subscr
 		}
 		go func() {
 			defer func() { <-sem }()
-			// Add recovery for panics in handler
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("handler for subject %s panicked: %v", subject, r)

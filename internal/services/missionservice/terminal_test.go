@@ -10,9 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// statusChangedEvents decodes every StatusChangedEvent this publisher captured,
-// asserting each rode StatusChangedSubject. It is the terminal-transition twin
-// of report_events_test.go's events() helper.
+// statusChangedEvents decodes every StatusChangedEvent this publisher captured.
 func (p *fakePublisher) statusChangedEvents(t *testing.T) []StatusChangedEvent {
 	t.Helper()
 	p.mu.Lock()
@@ -51,8 +49,7 @@ func TestUnit_MissionService_FinishMovesOpenToTerminal(t *testing.T) {
 	}
 }
 
-// Finish refuses a non-terminal target: you cannot Finish a mission back to
-// open (or to any non-terminal value) — Finish only records END states.
+// TestUnit_MissionService_FinishRejectsNonTerminalTarget pins that Finish only records terminal states, never open.
 func TestUnit_MissionService_FinishRejectsNonTerminalTarget(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -71,10 +68,7 @@ func TestUnit_MissionService_FinishRejectsNonTerminalTarget(t *testing.T) {
 	require.Equal(t, StatusOpen, persisted.Status, "a rejected Finish leaves the mission untouched")
 }
 
-// The core guard: a mission already terminal is immutable through Finish. A
-// second Finish naming the SAME status is an idempotent no-op (safe retry); a
-// DIFFERENT terminal status is a conflict (a landed mission never becomes
-// derailed).
+// TestUnit_MissionService_FinishIsIdempotentForSameStatusAndConflictsOnDifferent pins the core guard: same-status retry is a no-op, different-status is a conflict.
 func TestUnit_MissionService_FinishIsIdempotentForSameStatusAndConflictsOnDifferent(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -114,8 +108,7 @@ func TestUnit_MissionService_FinishUnknownReturnsNotFound(t *testing.T) {
 
 // ─── status_changed events ─────────────────────────────────────────────────
 
-// A successful Finish publishes a self-contained StatusChangedEvent carrying the
-// supervision edge, the old→new transition, and the reason.
+// TestUnit_MissionService_FinishPublishesStatusChangedEvent pins that Finish publishes a self-contained StatusChangedEvent.
 func TestUnit_MissionService_FinishPublishesStatusChangedEvent(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{}
@@ -140,8 +133,7 @@ func TestUnit_MissionService_FinishPublishesStatusChangedEvent(t *testing.T) {
 	require.Equal(t, "ran into a wall", ev.Reason)
 }
 
-// The idempotent no-op path publishes nothing: a retried Finish that changed
-// nothing must not emit a second status_changed event.
+// TestUnit_MissionService_FinishIdempotentNoOpDoesNotRepublish pins that a retried no-op Finish emits no second event.
 func TestUnit_MissionService_FinishIdempotentNoOpDoesNotRepublish(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{}
@@ -158,8 +150,7 @@ func TestUnit_MissionService_FinishIdempotentNoOpDoesNotRepublish(t *testing.T) 
 	require.Len(t, pub.statusChangedEvents(t), 1, "an idempotent no-op emits no second event")
 }
 
-// The best-effort invariant: a publish failure never turns a durably-recorded
-// terminal transition into a failed Finish.
+// TestUnit_MissionService_FinishPublishFailureDoesNotFailFinish pins that a publish failure never fails an already-durable Finish.
 func TestUnit_MissionService_FinishPublishFailureDoesNotFailFinish(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{err: fmt.Errorf("bus is down")}
@@ -177,8 +168,7 @@ func TestUnit_MissionService_FinishPublishFailureDoesNotFailFinish(t *testing.T)
 	require.Equal(t, StatusStuck, persisted.Status, "the terminal status is durable regardless of the routing nudge")
 }
 
-// The publisher is optional: a service built without one finishes missions and
-// simply publishes nothing.
+// TestUnit_MissionService_FinishNoPublisherStillStores pins that a service without a publisher finishes missions and publishes nothing.
 func TestUnit_MissionService_FinishNoPublisherStillStores(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db) // no publisher

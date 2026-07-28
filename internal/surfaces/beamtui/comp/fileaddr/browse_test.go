@@ -13,13 +13,9 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
 )
 
-// buildBrowseWorkspace lays out a tree with real depth: two levels of
-// directories, noise of every shape at every level, and both flavours of
-// escaping symlink. It returns the root.
-//
-// It is a separate fixture from buildWorkspace on purpose — the flat
-// candidate suite's tree is deliberately shallow, and a navigation test needs
-// somewhere to navigate to.
+// buildBrowseWorkspace lays out a tree with real depth for navigation tests:
+// two levels of directories, noise at every level, both flavours of escaping
+// symlink. Returns the root.
 func buildBrowseWorkspace(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -41,18 +37,16 @@ func buildBrowseWorkspace(t *testing.T) string {
 	writeFile(t, root, "src/nested/deeper/bottom.go", "package deeper")
 	writeFile(t, root, "docs/guide.md", "guide")
 
-	// Noise directories: one skip-listed, one gitignored.
 	writeFile(t, root, "node_modules/pkg/index.js", "noise")
 	writeFile(t, root, ".git/config", "[core]")
 	writeFile(t, root, "generated/gen.go", "noise")
 	writeFile(t, root, "src/node_modules/dep/dep.js", "noise at depth")
 
-	// A symlink to an in-root regular file: a legitimate entry.
+	// In-root regular-file symlink: legitimate.
 	if err := os.Symlink(filepath.Join(root, "main.go"), filepath.Join(root, "link-main.go")); err != nil {
 		t.Skipf("symlinks unsupported here: %v", err)
 	}
-	// A symlink whose target is outside the root, and one to the outside
-	// DIRECTORY: neither may be listed, let alone entered.
+	// Escaping-file and escaping-directory symlinks: neither listed nor enterable.
 	writeFile(t, outside, "outside-secret.txt", "off limits")
 	if err := os.Symlink(filepath.Join(outside, "outside-secret.txt"), filepath.Join(root, "escape.txt")); err != nil {
 		t.Fatalf("symlink escape.txt: %v", err)
@@ -60,8 +54,7 @@ func buildBrowseWorkspace(t *testing.T) string {
 	if err := os.Symlink(outside, filepath.Join(root, "escape-dir")); err != nil {
 		t.Fatalf("symlink escape-dir: %v", err)
 	}
-	// A symlink to an IN-root directory. The recursive walk does not follow
-	// one, so listing it would offer a subtree the search half cannot see.
+	// In-root directory symlink: the walk does not follow it.
 	if err := os.Symlink(filepath.Join(root, "src"), filepath.Join(root, "src-link")); err != nil {
 		t.Fatalf("symlink src-link: %v", err)
 	}
@@ -91,10 +84,6 @@ func TestUnit_FileAddrList_OneLevel(t *testing.T) {
 		want   []string
 	}{
 		{
-			// Directories first, then files, each lexicographic. Absent:
-			// .git and node_modules (skip-listed), generated (gitignored
-			// directory rule), escape.txt and escape-dir (out-of-root symlink
-			// targets), src-link (a symlink to a directory).
 			name:   "root",
 			relDir: "",
 			want: []string{
@@ -113,9 +102,7 @@ func TestUnit_FileAddrList_OneLevel(t *testing.T) {
 		{
 			name:   "a subdirectory keeps filtering",
 			relDir: "src",
-			// node_modules is skip-listed at depth too; ignored-here.go is
-			// gitignored by an anchored path rule and trace.log by a glob.
-			want: []string{"nested/", "app.go", "util.go"},
+			want:   []string{"nested/", "app.go", "util.go"},
 		},
 		{
 			name:   "a trailing slash is the same directory",
@@ -178,8 +165,6 @@ func TestUnit_FileAddrList_RefusesEscapesAndMissingDirs(t *testing.T) {
 		{rel: "no-such-dir", why: "a directory that is not there"},
 		{rel: "main.go", why: "a file"},
 		{rel: "escape-dir", why: "a symlink out of the root"},
-		// The filter binds the ARGUMENT, not just the entries: a directory the
-		// browser hides is one nothing can list the inside of.
 		{rel: ".git", why: "a skip-listed directory", filtered: true},
 		{rel: "node_modules", why: "a skip-listed directory", filtered: true},
 		{rel: "node_modules/pkg", why: "a path under a skip-listed directory", filtered: true},
@@ -227,7 +212,6 @@ func TestUnit_FileAddrList_RootlessSourceIsInert(t *testing.T) {
 		t.Fatalf("rootless Breadcrumb = %q, want %q", got, "/")
 	}
 
-	// A nil *Browser is inert too, so a caller may hold one unconditionally.
 	var nilB *fileaddr.Browser
 	if nilB.Cwd() != "" || nilB.Ascend() || nilB.Breadcrumb(20, false) != "/" {
 		t.Fatal("a nil Browser is not inert")
@@ -295,8 +279,6 @@ func TestUnit_FileAddrBrowser_Navigation(t *testing.T) {
 		t.Fatal("Ascend walked out of the root")
 	}
 
-	// A directory row's Label is what the caller has in hand, so Descend
-	// takes it with or without the trailing slash.
 	if err := b.Descend("src/"); err != nil {
 		t.Fatalf("Descend(\"src/\"): %v", err)
 	}
@@ -367,10 +349,7 @@ func TestUnit_FileAddrBrowser_Breadcrumb(t *testing.T) {
 		{15, false, "/…/deeper"},
 		{17, true, "/.../deeper"},
 		{9, false, "/…/deeper"},
-		// Below the last whole segment the crumb is cut rune-safely and
-		// spends every remaining cell on the name rather than on a second
-		// elision marker.
-		{8, false, "/…/deepe"},
+		{8, false, "/…/deepe"}, // below the last whole segment: a rune-safe cut
 		{1, false, "/"},
 		{0, false, ""},
 	}
@@ -381,8 +360,6 @@ func TestUnit_FileAddrBrowser_Breadcrumb(t *testing.T) {
 		}
 	}
 
-	// The invariant behind the table: never wider than the budget, always
-	// rooted, at every width and in both glyph modes.
 	for _, ascii := range []bool{false, true} {
 		for w := 0; w <= 60; w++ {
 			got := b.Breadcrumb(w, ascii)
@@ -396,8 +373,8 @@ func TestUnit_FileAddrBrowser_Breadcrumb(t *testing.T) {
 	}
 }
 
-// TestUnit_FileAddrBrowser_BreadcrumbAtGoldenWidths pins the blueprint's
-// resize matrix against a path deep enough to need every branch.
+// TestUnit_FileAddrBrowser_BreadcrumbAtGoldenWidths pins the resize matrix
+// against a path deep enough to need every branch.
 func TestUnit_FileAddrBrowser_BreadcrumbAtGoldenWidths(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "internal/surfaces/beamtui/comp/fileaddr/keep.go", "package fileaddr")
@@ -451,7 +428,6 @@ func TestUnit_FileAddrBrowser_EntriesRowShapes(t *testing.T) {
 			if fileaddr.DirName(it) != strings.TrimSuffix(it.Label, "/") {
 				t.Errorf("DirName(%q) = %q", it.Label, fileaddr.DirName(it))
 			}
-			// The name DirName produces is one Descend accepts.
 			probe := fileaddr.NewBrowser(newSource(t, root))
 			if err := probe.Descend(fileaddr.DirName(it)); err != nil {
 				t.Errorf("Descend(DirName(%q)): %v", it.Label, err)
@@ -466,7 +442,6 @@ func TestUnit_FileAddrBrowser_EntriesRowShapes(t *testing.T) {
 		}
 	}
 
-	// The ASCII fallback is a caller decision, like every other glyph here.
 	b.SetASCII(true)
 	asciiItems, err := b.Entries(context.Background())
 	if err != nil {
@@ -488,10 +463,9 @@ func TestUnit_FileAddrBrowser_EntriesRowShapes(t *testing.T) {
 	}
 }
 
-// TestUnit_FileAddrBrowser_FileRowsSpliceTheFullPath is the property the
-// whole rebuild hangs on: browsing changes what you SEE, never what a
-// selection MEANS. A file chosen three directories down still splices the
-// path that resolves from the workspace root.
+// TestUnit_FileAddrBrowser_FileRowsSpliceTheFullPath: browsing changes what
+// you see, never what a selection means — a file chosen three directories
+// down still splices the path that resolves from the workspace root.
 func TestUnit_FileAddrBrowser_FileRowsSpliceTheFullPath(t *testing.T) {
 	root := buildBrowseWorkspace(t)
 	b := fileaddr.NewBrowser(newSource(t, root))
@@ -519,8 +493,6 @@ func TestUnit_FileAddrBrowser_FileRowsSpliceTheFullPath(t *testing.T) {
 		t.Fatalf("ID = %q, want %q", it.ID, want)
 	}
 
-	// The same file reached through a search from the same place: identical
-	// mention text, so it does not matter how the user found it.
 	found, err := b.Query(context.Background(), "bottom", 20)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
@@ -537,7 +509,6 @@ func TestUnit_FileAddrBrowser_QueryIsScopedToTheSubtree(t *testing.T) {
 	root := buildBrowseWorkspace(t)
 	b := fileaddr.NewBrowser(newSource(t, root))
 
-	// From the root, a search reaches everything.
 	all, err := b.Query(context.Background(), "go", 100)
 	if err != nil {
 		t.Fatalf("Query: %v", err)
@@ -559,8 +530,6 @@ func TestUnit_FileAddrBrowser_QueryIsScopedToTheSubtree(t *testing.T) {
 			t.Errorf("scoped search missed %q: %v", want, labels)
 		}
 	}
-	// The point of scoping: a match OUTSIDE the current directory is gone,
-	// even though it matched a moment ago from the root.
 	for _, forbidden := range []string{"main.go", "link-main.go", "docs/guide.md"} {
 		if contains(labels, forbidden) {
 			t.Errorf("scoped search returned %q, which is outside %q", forbidden, b.Cwd())
@@ -573,7 +542,6 @@ func TestUnit_FileAddrBrowser_QueryIsScopedToTheSubtree(t *testing.T) {
 		}
 	}
 
-	// Deeper still, and the scope narrows with it.
 	if err := b.Descend("nested"); err != nil {
 		t.Fatalf("Descend(nested): %v", err)
 	}
@@ -587,8 +555,6 @@ func TestUnit_FileAddrBrowser_QueryIsScopedToTheSubtree(t *testing.T) {
 		}
 	}
 
-	// An empty query is browse mode — this directory's own entries, one
-	// level, directories first.
 	browse, err := b.Query(context.Background(), "", 100)
 	if err != nil {
 		t.Fatalf("Query(\"\"): %v", err)
@@ -631,9 +597,7 @@ func TestUnit_FileAddrBrowser_QueryRanksWithTheFuzzyScorer(t *testing.T) {
 }
 
 // TestUnit_FileAddrBrowser_QueryReportsTruncation: a scoped search reuses the
-// walk's budget, so it must reuse the walk's way of saying it stopped early —
-// otherwise a monorepo subdirectory shows "no matching files" for a file that
-// is right there.
+// walk's budget and must reuse its truncation reporting too.
 func TestUnit_FileAddrBrowser_QueryReportsTruncation(t *testing.T) {
 	root := t.TempDir()
 	for i := 0; i < fileaddr.WalkBudget+50; i++ {
@@ -698,9 +662,8 @@ func TestUnit_FileAddrBrowser_CancelledContext(t *testing.T) {
 	}
 }
 
-// TestUnit_FileAddrBrowser_FeedsThePickerHeader wires the two halves the way
-// the app-shell is meant to: the breadcrumb is the picker's header, the
-// entries are its items, and the whole thing stays inside the row budget.
+// TestUnit_FileAddrBrowser_FeedsThePickerHeader: breadcrumb as header, entries
+// as items, all inside the row budget.
 func TestUnit_FileAddrBrowser_FeedsThePickerHeader(t *testing.T) {
 	root := buildBrowseWorkspace(t)
 	b := fileaddr.NewBrowser(newSource(t, root))

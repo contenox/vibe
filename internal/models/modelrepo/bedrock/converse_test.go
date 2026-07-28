@@ -42,7 +42,6 @@ func TestUnit_BuildConverseInput_RolesSystemToolsAndInference(t *testing.T) {
 	require.NotNil(t, in.ToolConfig)
 	require.Len(t, in.ToolConfig.Tools, 1)
 
-	// Check mapping/sanitisation
 	require.Equal(t, "fs.list", toOrig["fs_list"])
 
 	// user, assistant(tool_use), user(tool_result)
@@ -116,8 +115,8 @@ func TestUnit_BuildConverseInput_ImageFormatsAndUnknownSkipped(t *testing.T) {
 		})
 	}
 
-	// An unrecognised MIME type is skipped: a text-only-plus-bad-image message
-	// yields only the text block, and an image-only message yields no message.
+	// An unrecognised MIME type is skipped: text-plus-bad-image keeps only the
+	// text block, and an image-only message yields no message.
 	in, _, _ := buildConverseInput("m", []modelrepo.Message{
 		{Role: "user", Content: "hi", Images: []modelrepo.ImagePart{{Data: []byte{1}, MimeType: "image/tiff"}}},
 	}, &modelrepo.ChatConfig{}, 0)
@@ -169,10 +168,7 @@ func TestUnit_DecodeConverse_TextAndToolUse(t *testing.T) {
 	require.Equal(t, "/x", got["path"])
 }
 
-// CanVision must be detected from the model's advertised input modalities
-// (ListFoundationModels -> FoundationModelSummary.InputModalities), not a
-// hardcoded model-name list. A summary listing the IMAGE modality is vision
-// capable; a TEXT-only summary is not.
+// CanVision must come from InputModalities (ListFoundationModels), not a hardcoded model-name list.
 func TestUnit_ObservedFromSummary_CanVisionFromInputModalities(t *testing.T) {
 	visionModel := observedFromSummary(bedrocktypes.FoundationModelSummary{
 		ModelId:         aws.String("anthropic.claude-3-5-sonnet-20241022-v2:0"),
@@ -197,9 +193,8 @@ func TestUnit_ObservedFromSummary_CanVisionFromInputModalities(t *testing.T) {
 	}, "some.multimodal-v1:0")
 	require.True(t, lowerModel.CanVision, "modality comparison must be case-insensitive")
 
-	// An embedding model must NOT advertise CanEmbed: the provider speaks the
-	// Converse API only and GetEmbedConnection refuses, so advertising would
-	// lie to the request router (catalog truth over half-support).
+	// An embedding model must not advertise CanEmbed: the provider speaks only
+	// the Converse API and GetEmbedConnection refuses.
 	embedModel := observedFromSummary(bedrocktypes.FoundationModelSummary{
 		ModelId:         aws.String("amazon.titan-embed-text-v2:0"),
 		InputModalities: []bedrocktypes.ModelModality{bedrocktypes.ModelModalityText},
@@ -217,9 +212,8 @@ func TestUnit_RegionFromURL(t *testing.T) {
 }
 
 // isAWSCredentialError reports whether err is an environment problem (missing,
-// expired, or rejected AWS credentials) rather than a product defect. The
-// system test skips on these so the gate stays green on machines without a
-// live AWS login, per the TestSystem_ probe-and-skip convention.
+// expired, or rejected credentials) rather than a product defect, so the
+// system test can skip instead of failing on machines without AWS login.
 func isAWSCredentialError(err error) bool {
 	msg := err.Error()
 	for _, s := range []string{
@@ -301,10 +295,9 @@ func tc(id, name, args string) modelrepo.ToolCall {
 	return t
 }
 
-// Regression: Bedrock rejects toolUse/toolResult blocks unless toolConfig is
-// set ("The toolConfig field must be defined when using toolUse and toolResult
-// content blocks"). Tasks without tools (recovery/summarise steps) still
-// receive tool-bearing histories; those blocks must degrade to text.
+// Bedrock rejects toolUse/toolResult blocks unless toolConfig is set; tasks
+// without tools that still receive tool-bearing histories must degrade those
+// blocks to text.
 func TestUnit_BuildConverseInput_NoToolsDegradesToolBlocksToText(t *testing.T) {
 	msgs := []modelrepo.Message{
 		{Role: "user", Content: "list /tmp"},

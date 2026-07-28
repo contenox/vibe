@@ -8,29 +8,25 @@ import (
 	"strings"
 )
 
-// chainlint.go is the load-time chain linter (eino transfer T3): a dataflow
-// walk over every goto and on_failure edge that propagates DataType sets from
-// the entry task to a fixpoint, checked against the closed handler contract
-// table in handler_signatures.go.
+// chainlint.go is the load-time chain linter: a dataflow walk over every
+// goto and on_failure edge that propagates DataType sets from the entry task
+// to a fixpoint, checked against the closed handler contract table in
+// handler_signatures.go.
 //
-// The verdict per edge is TRI-STATE, on purpose:
-//   - impossible (no type the source can produce is accepted by the target,
-//     and DataTypeAny is not in play)  → load error, teaching voice, naming
-//     both endpoints;
-//   - maybe (DataTypeAny flows, or at least one produced type is accepted)
-//     → silence here; ExecEnv's existing runtime checks stay the backstop;
-//   - fine → silence.
-// The linter therefore NEVER rejects a chain the runtime could execute: type
-// sets only ever over-approximate what can really flow, so "impossible" is
-// proof, not heuristic.
+// The verdict per edge is tri-state: impossible (no type the source can
+// produce is accepted by the target, and DataTypeAny is not in play) is a
+// load error; maybe (DataTypeAny flows, or at least one produced type is
+// accepted) and fine are both silent, leaving ExecEnv's runtime checks as
+// the backstop. Type sets only ever over-approximate what can really flow,
+// so an "impossible" verdict is proof, not heuristic — the linter never
+// rejects a chain the runtime could execute.
 //
 // Beyond types it checks what validateChain (taskenv.go) cannot: input_var
-// references a variable some predecessor actually produces, template and macro
-// references name known variables/edges, route tasks declare a label
+// references a variable some predecessor actually produces, template and
+// macro references name known variables/edges, route tasks declare a label
 // vocabulary, and branches that can never fire against a handler's closed
-// transition vocabulary. Structural checks (duplicate task IDs, unknown
-// handlers, goto/on_failure targets, operator validity) are delegated to
-// validateChain so the two can never disagree.
+// transition vocabulary. Structural checks are delegated to validateChain so
+// the two can never disagree.
 
 // ErrChainLint marks every defect the load-time chain linter reports, so
 // services can distinguish "this chain is invalid" (disable it, teach the
@@ -91,8 +87,8 @@ func LintChain(chain *TaskChainDefinition, entryTypes ...DataType) error {
 	if chain == nil {
 		return fmt.Errorf("%w: chain is nil", ErrChainLint)
 	}
-	// Structural checks first: the dataflow walk below assumes IDs are unique,
-	// handlers are known, and every goto/on_failure target resolves.
+	// Structural checks first: the dataflow walk assumes IDs are unique,
+	// handlers known, and every goto/on_failure target resolves.
 	if err := validateChain(chain.Tasks); err != nil {
 		return fmt.Errorf("%w: chain[%s]: %w", ErrChainLint, chain.ID, err)
 	}
@@ -121,15 +117,12 @@ type chainLinter struct {
 
 	entrySet dtSet
 
-	// inSets[t] is the union of type sets arriving at t via direct flow (the
-	// previous task's output). input_var and prompt_template override direct
-	// flow; effectiveInput applies the same precedence ExecEnv does.
+	// inSets[t] is the union of type sets arriving at t via direct flow;
+	// input_var and prompt_template override it (see effectiveInput).
 	inSets map[string]dtSet
-	// varSets[name] is the union of types the engine variable name can hold
-	// when read (task outputs by id, input, previous_output, *_error).
+	// varSets[name] is the union of types the engine variable can hold when read.
 	varSets map[string]dtSet
-	// avail[t] is the set of variable names some path reaching t has produced
-	// (may-availability: input_var naming none of these is definitely broken).
+	// avail[t] is the set of variable names some path reaching t has produced.
 	avail map[string]map[string]bool
 	// reachable[t]: some success/on_failure path from the entry reaches t.
 	reachable map[string]bool
@@ -228,7 +221,6 @@ func (l *chainLinter) propagate() {
 			sOut := l.successOut(t)
 			fOut := l.failureOut(t)
 
-			// Variables this task publishes.
 			if l.growVar(t.ID, sOut) {
 				changed = true
 			}
@@ -250,8 +242,7 @@ func (l *chainLinter) propagate() {
 				}
 			}
 
-			// Success edges. A handler that never succeeds has no live success
-			// edges, so nothing flows and nothing becomes reachable through them.
+			// A handler that never succeeds has no live success edges.
 			if !sOut.isEmpty() {
 				for _, g := range successTargets(t) {
 					if l.growIn(g, sOut) {
@@ -266,7 +257,6 @@ func (l *chainLinter) propagate() {
 					}
 				}
 			}
-			// Failure edge.
 			if f := t.Transition.OnFailure; f != "" {
 				if l.growIn(f, fOut) {
 					changed = true
@@ -335,8 +325,7 @@ func (l *chainLinter) check() []error {
 		errs = append(errs, l.checkDeadBranches(t, sig)...)
 
 		if !l.reachable[id] {
-			// Dataflow facts exist only for reachable tasks; the static checks
-			// above still apply.
+			// Dataflow facts exist only for reachable tasks.
 			continue
 		}
 		errs = append(errs, l.checkInputVar(t)...)
@@ -380,8 +369,8 @@ func (l *chainLinter) checkInputTypes(t *TaskDefinition, sig HandlerSignature) [
 	accepts := acceptSet(sig)
 	acceptsAny := len(sig.Inputs) == 0
 
-	// A prompt_template replaces the input with its rendered string for every
-	// path into this task, so the verdict is path-independent.
+	// A prompt_template replaces the input with its rendered string on
+	// every path, so the verdict is path-independent.
 	if strings.TrimSpace(t.PromptTemplate) != "" {
 		if !acceptsAny && !accepts.has(DataTypeString) {
 			return []error{fmt.Errorf("task[%s] handler %s cannot take a prompt_template: a rendered template is a string, and %s accepts %s",
@@ -390,12 +379,10 @@ func (l *chainLinter) checkInputTypes(t *TaskDefinition, sig HandlerSignature) [
 		return nil
 	}
 
-	// input_var: the variable's whole type set is the incoming set for every
-	// path, so check it once, naming the variable.
 	if t.InputVar != "" {
 		s := l.varSets[t.InputVar]
 		if s.isEmpty() || s.has(DataTypeAny) || acceptsAny {
-			return nil // unknown or runtime-checked — the backstop's job
+			return nil
 		}
 		if !s.intersects(accepts) {
 			return []error{fmt.Errorf("task[%s] handler %s cannot accept input from input_var %q (produces %s; accepts %s)",
@@ -408,8 +395,8 @@ func (l *chainLinter) checkInputTypes(t *TaskDefinition, sig HandlerSignature) [
 		return nil
 	}
 
-	// Direct flow: check each incoming edge separately so the error names both
-	// endpoints of the exact edge that can never carry a valid value.
+	// Check each incoming edge separately so the error names both endpoints
+	// of the exact edge that can never carry a valid value.
 	var errs []error
 	entryID := l.chain.Tasks[0].ID
 	if t.ID == entryID {
@@ -450,20 +437,19 @@ func (l *chainLinter) checkEdge(p, t *TaskDefinition, sig HandlerSignature, acce
 		carried = carried.union(l.failureOut(p))
 	}
 	if carried.isEmpty() || carried.has(DataTypeAny) {
-		return nil // no live edge, or unknown types: runtime backstop
+		return nil // no live edge, or unknown types
 	}
 	if carried.intersects(accepts) {
-		return nil // at least one runtime value can pass: maybe, not impossible
+		return nil // at least one runtime value can pass
 	}
 	return fmt.Errorf("task[%s] handler %s cannot accept input from task[%s] (produces %s; accepts %s)",
 		t.ID, t.Handler, p.ID, carried.describe(), sig.acceptsDescription())
 }
 
-// checkDeadBranches proves a branch can never fire when the handler's success
-// transition vocabulary is closed and no vocabulary entry can match. This is
-// the "transition operator valid for the produced value" check: the classic
-// defect it catches is branching on a stale token spelling ("tool-call") or on
-// model text where only control tokens ever flow.
+// checkDeadBranches proves a branch can never fire when the handler's
+// success transition vocabulary is closed and no entry can match — e.g. a
+// stale token spelling ("tool-call") or branching on model text where only
+// control tokens ever flow.
 func (l *chainLinter) checkDeadBranches(t *TaskDefinition, sig HandlerSignature) []error {
 	if sig.SuccessEvals == nil {
 		return nil

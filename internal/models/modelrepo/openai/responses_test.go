@@ -12,11 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_OpenAIChatClient_ResponsesReasoningAndStore pins the Responses API
-// contract fixes: every request carries store:false (no server-side response
-// retention), reasoning summaries are requested via reasoning.summary, and the
-// reply's reasoning is parsed from output items of type "reasoning"
-// (summary_text parts) — never from the top-level reasoning config echo.
+// Every request carries store:false, and reasoning is parsed from the "reasoning" output item, never the top-level config echo.
 func TestUnit_OpenAIChatClient_ResponsesReasoningAndStore(t *testing.T) {
 	t.Parallel()
 

@@ -32,14 +32,11 @@ func newReconcileTestState(t *testing.T, opts ...runtimestate.Option) (context.C
 	return ctx, state, db
 }
 
-// reconcileForResolution must only fire for the resolver's no-models / no-match
-// errors, and must debounce so a burst of failing requests does not re-scan every
-// backend repeatedly.
+// reconcileForResolution must only fire for the resolver's no-models/no-match errors, and must debounce repeated failures.
 func TestUnit_ReconcileForResolution_OnlyResolutionErrorsAndDebounced(t *testing.T) {
 	ctx, state, _ := newReconcileTestState(t)
 	mm := &modelManager{runtime: state, tracker: libtracker.NoopTracker{}}
 
-	// A non-resolution error never triggers a backend cycle.
 	if mm.reconcileForResolution(ctx, errors.New("downstream boom")) {
 		t.Fatal("non-resolution error should not request a retry")
 	}
@@ -47,7 +44,6 @@ func TestUnit_ReconcileForResolution_OnlyResolutionErrorsAndDebounced(t *testing
 		t.Fatal("non-resolution error should not run a backend cycle")
 	}
 
-	// A no-models error runs one cycle and asks the caller to retry.
 	if !mm.reconcileForResolution(ctx, llmresolver.ErrNoAvailableModels) {
 		t.Fatal("ErrNoAvailableModels should run a cycle and request a retry")
 	}
@@ -56,8 +52,6 @@ func TestUnit_ReconcileForResolution_OnlyResolutionErrorsAndDebounced(t *testing
 		t.Fatal("a backend cycle should have run")
 	}
 
-	// A second failure inside the debounce window retries against the just-run
-	// cycle without scanning every backend again.
 	if !mm.reconcileForResolution(ctx, llmresolver.ErrNoSatisfactoryModel) {
 		t.Fatal("debounced call should still request a retry")
 	}
@@ -66,10 +60,7 @@ func TestUnit_ReconcileForResolution_OnlyResolutionErrorsAndDebounced(t *testing
 	}
 }
 
-// When a backend (e.g. modeld) becomes available after the runtime already
-// reconciled to an empty state, a resolution failure must re-scan and discover
-// it, so the retried request can succeed instead of being stuck on
-// "no models found in runtime state".
+// When a backend becomes available after the runtime reconciled to an empty state, a resolution failure must re-scan and discover it.
 func TestUnit_ReconcileForResolution_DiscoversBackendThatAppearsLater(t *testing.T) {
 	ctx, state, db := newReconcileTestState(t, runtimestate.WithAutoDiscoverModels())
 	mm := &modelManager{runtime: state, tracker: libtracker.NoopTracker{}}
@@ -84,11 +75,9 @@ func TestUnit_ReconcileForResolution_DiscoversBackendThatAppearsLater(t *testing
 
 	req := llmresolver.Request{ProviderTypes: []string{"openai"}, ModelNames: []string{"gpt-5"}}
 
-	// Nothing is configured yet: resolution finds no backend at all.
 	_, _, _, err := llmresolver.Chat(ctx, req, mm.GetRuntime(ctx), llmresolver.Randomly)
 	require.ErrorIs(t, err, llmresolver.ErrNoAvailableModels)
 
-	// The backend comes up after startup.
 	store := runtimetypes.New(db.WithoutTransaction())
 	require.NoError(t, store.CreateBackend(ctx, &runtimetypes.Backend{
 		ID:      "openai-backend",
@@ -100,7 +89,6 @@ func TestUnit_ReconcileForResolution_DiscoversBackendThatAppearsLater(t *testing
 	require.NoError(t, err)
 	require.NoError(t, store.SetKV(ctx, runtimestate.OpenaiKey, keyData))
 
-	// The self-heal hook re-scans and discovers it.
 	require.True(t, mm.reconcileForResolution(ctx, llmresolver.ErrNoAvailableModels))
 
 	rt := state.Get(ctx)
@@ -109,7 +97,6 @@ func TestUnit_ReconcileForResolution_DiscoversBackendThatAppearsLater(t *testing
 	require.Len(t, rt["openai-backend"].PulledModels, 1)
 	require.Equal(t, "gpt-5", rt["openai-backend"].PulledModels[0].Model)
 
-	// The retried resolution is no longer blocked on an empty runtime state.
 	_, _, _, err = llmresolver.Chat(ctx, req, mm.GetRuntime(ctx), llmresolver.Randomly)
 	require.NotErrorIs(t, err, llmresolver.ErrNoAvailableModels)
 }

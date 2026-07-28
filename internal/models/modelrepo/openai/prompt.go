@@ -12,19 +12,16 @@ type OpenAIPromptClient struct {
 }
 
 func (c *OpenAIPromptClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, *modelrepo.TokenUsage, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "prompt", "openai", "model", c.modelName)
 	defer end()
 
-	// Convert to chat format for consistency
 	messages := []modelrepo.Message{
 		{Role: "system", Content: systemInstruction},
 		{Role: "user", Content: prompt},
 	}
 
-	// Use the chat client to handle the prompt. Keep the provider-specific
-	// parameter rules internal: legacy GPT-5 chat completions reject sampling
-	// params, while newer GPT-5.x snapshots may allow them in `reasoning=none`.
+	// Legacy GPT-5 chat completions reject sampling params; newer GPT-5.x
+	// snapshots may allow them under reasoning=none.
 	var args []modelrepo.ChatArgument
 	if !openAIShouldOmitSamplingParams(c.modelName, "") {
 		args = append(args, modelrepo.WithTemperature(float64(temperature)))

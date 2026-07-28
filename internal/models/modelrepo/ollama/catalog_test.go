@@ -75,8 +75,7 @@ func TestUnit_CatalogProvider_ListModels(t *testing.T) {
 	require.False(t, model.CanVision, "non-vision model must not claim vision")
 }
 
-// TestUnit_CatalogProvider_DetectsVisionFromShowCapabilities asserts CanVision
-// is read from the provider's own /api/show capabilities list, not inferred.
+// CanVision is read from /api/show capabilities, not inferred from the name.
 func TestUnit_CatalogProvider_DetectsVisionFromShowCapabilities(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -103,9 +102,7 @@ func TestUnit_CatalogProvider_DetectsVisionFromShowCapabilities(t *testing.T) {
 	require.True(t, catalog.ProviderFor(models[0]).CanVision())
 }
 
-// TestUnit_CatalogProvider_DetectsThinkingFromShowCapabilities asserts CanThink
-// is read from the /api/show capabilities list — API detection, not the
-// model-name inference the provider deliberately avoids.
+// CanThink is read from /api/show capabilities, not inferred from the name.
 func TestUnit_CatalogProvider_DetectsThinkingFromShowCapabilities(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

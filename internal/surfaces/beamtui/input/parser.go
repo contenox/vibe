@@ -9,24 +9,20 @@ import (
 const (
 	esc = 0x1b
 
-	// maxPasteBytes caps one bracketed paste. A paste that grows past it is
-	// terminated with what has accumulated, so a lost terminator cannot turn
-	// a paste into unbounded memory growth. The overflow is then swallowed up
-	// to the terminator rather than replayed (see scanPaste).
+	// maxPasteBytes caps one bracketed paste; past it the paste is
+	// terminated with what accumulated and the overflow is swallowed up to
+	// the terminator rather than replayed (see scanPaste).
 	maxPasteBytes = 10 << 20
 
-	// maxPendingBytes bounds an unresolved prefix. Incomplete sequences are
-	// never resolved by time (Flush would have to guess, and guessing wrong
-	// turns a paste body into keystrokes), so they are bounded by LENGTH
-	// instead: no escape sequence beam decodes comes close to this, and a
-	// prefix that outgrows it is malformed by construction and dropped whole
-	// — never re-parsed as runes.
+	// maxPendingBytes bounds an unresolved prefix by length rather than
+	// time, since Flush cannot guess an incomplete sequence without risking
+	// a paste body decoded as keystrokes.
 	maxPendingBytes = 64
 
 	// maxCSIParams and maxCSIDigits bound what a CSI sequence may claim to
-	// be. A parameter field with twenty digits is not a real key: decoding it
-	// would overflow the accumulator and could alias onto a meaningful value
-	// (200, the paste opener). Such a sequence is dropped whole.
+	// be. An oversized field could overflow the accumulator and alias onto
+	// a meaningful value (200, the paste opener); such a sequence is
+	// dropped whole.
 	maxCSIParams = 16
 	maxCSIDigits = 6
 )
@@ -44,11 +40,9 @@ var pasteStart = []byte("\x1b[200~")
 var pasteNewlines = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
 // Parser decodes a raw terminal byte stream into Events. It is a pure state
-// machine: no I/O, no clock, no goroutines — feeding the same bytes always
-// yields the same events regardless of how they are chunked, which is what
-// makes decoding testable against byte fixtures.
-//
-// A Parser serves one input stream and is not safe for concurrent use.
+// machine (no I/O, no clock, no goroutines), so feeding the same bytes
+// always yields the same events regardless of chunking. Serves one input
+// stream and is not safe for concurrent use.
 type Parser struct {
 	buf     []byte
 	paste   []byte
@@ -70,21 +64,15 @@ type Parser struct {
 func NewParser() *Parser { return &Parser{} }
 
 // Feed decodes b and returns every event it completes, in stream order.
-// Bytes forming an incomplete prefix — a partial escape sequence or a
-// partial UTF-8 rune — are buffered and decoded when the rest arrives. An
-// open bracketed paste accumulates across calls and yields exactly one
-// PasteEvent at its terminator.
+// Bytes forming an incomplete prefix (a partial escape sequence or UTF-8
+// rune) are buffered and decoded when the rest arrives. An open bracketed
+// paste accumulates across calls and yields exactly one PasteEvent at its
+// terminator.
 //
-// One repair happens here. A terminal may split "\x1b[200~" across writes,
-// and if the engine's idle gap falls in that split the ESC has already been
-// resolved as KeyEscape (Flush). Feeding "[200~" on its own would then decode
-// the opener as five runes and hand the whole pasted document to the app as
-// keystrokes. So when the previous Flush emitted a lone ESC and these bytes
-// spell the rest of the opener, the ESC is put back. The trade is one spurious
-// KeyEscape ahead of the paste — an escape the app already saw and cannot
-// unsee — which is strictly cheaper than a paste arriving as keys. The flag is
-// consumed by this call whether or not it is used, and nothing else
-// re-attaches: see completesPasteStart for why the match is that strict.
+// One repair happens here: if the previous Flush resolved a lone ESC as
+// KeyEscape and these bytes spell the rest of a split paste opener, the ESC
+// is put back so the opener is still recognized whole, at the cost of one
+// spurious KeyEscape the app already saw.
 func (p *Parser) Feed(b []byte) []Event {
 	if len(b) == 0 {
 		return nil
@@ -103,27 +91,19 @@ func (p *Parser) Feed(b []byte) []Event {
 }
 
 // Pending reports whether an idle gap would resolve something: a lone ESC,
-// the one ambiguity in the protocol that only time can settle (Escape, or the
-// start of a sequence still in flight). Every other incomplete prefix waits
-// for bytes, not for a clock, so it is not pending — reporting it would ask
-// the engine to poll fast for an answer Flush will never give. An open paste
-// is never pending either: it is accumulating, and only its terminator ends
-// it.
+// the one ambiguity in the protocol that only time can settle. Every other
+// incomplete prefix waits for bytes, not a clock, and is therefore not
+// pending; an open paste is never pending either.
 func (p *Parser) Pending() bool {
 	return !p.inPaste && !p.discarding && len(p.buf) == 1 && p.buf[0] == esc
 }
 
 // Flush resolves the lone-ESC ambiguity as KeyEscape; the engine calls it
-// after a short idle whenever Pending reports true. It resolves NOTHING else:
-// a multi-byte partial sequence stays buffered until the rest of it arrives,
-// because discarding it on a timer is what turns a split paste opener into a
-// document typed at the app. Buffered prefixes are bounded by length instead
-// (maxPendingBytes).
-//
-// By design Flush cannot end an open paste: a paste interrupted by EOF or
-// Close is dropped rather than delivered half-complete. Half a paste is
-// indistinguishable from a whole one at the app layer, and silently inserting
-// a truncated document is worse than inserting nothing.
+// after a short idle whenever Pending reports true. It resolves nothing
+// else: a multi-byte partial sequence stays buffered, bounded by length
+// instead (maxPendingBytes). Flush cannot end an open paste either — one
+// interrupted by EOF or Close is dropped rather than delivered
+// half-complete, since a truncated document is worse than none.
 func (p *Parser) Flush() []Event {
 	if p.inPaste || p.discarding || len(p.buf) == 0 {
 		return nil
@@ -240,9 +220,7 @@ func (p *Parser) scanCSI() ([]Event, int, bool) {
 
 // saneParams rejects a parameter string no terminal would emit: more fields
 // than any key encoding uses, or a field with more digits than csiParams can
-// accumulate without overflowing. A twenty-digit field is a probe, not a
-// keystroke, and an overflowed accumulator can land on a value that means
-// something — 200, which opens paste mode.
+// accumulate without overflowing onto a meaningful value like 200.
 func saneParams(s string) bool {
 	if s == "" {
 		return true
@@ -317,16 +295,10 @@ func (p *Parser) csiEvent(params string, final byte) []Event {
 }
 
 // scanPaste accumulates paste payload until the exact ESC[201~ terminator,
-// holding back only the tail that could still grow into it. Bytes that
-// cannot be part of the terminator are committed immediately, so a paste
-// larger than one read still costs one copy.
-//
-// Blowing the cap does not end paste mode, it only ends the EVENT: what fits
-// is emitted (cut back to a rune boundary, so the text handed to the app is
-// always valid UTF-8), and the parser then discards everything up to the
-// terminator. Feeding the overflow back through key decoding would deliver a
-// pasted document as keystrokes — every \r an Enter — which is exactly the
-// hazard bracketed paste exists to remove.
+// holding back only the tail that could still grow into it. Blowing the cap
+// does not end paste mode, only the event: what fits is emitted (cut back
+// to a rune boundary), and the parser discards everything up to the
+// terminator rather than feeding the overflow back through key decoding.
 func (p *Parser) scanPaste() ([]Event, int, bool) {
 	take, consumed, done := len(p.buf), len(p.buf), false
 	if i := bytes.Index(p.buf, pasteEnd); i >= 0 {
@@ -380,16 +352,9 @@ func trimPartialRune(b []byte) int {
 }
 
 // completesPasteStart reports whether b, appended to an ESC that Flush
-// already resolved, spells the bracketed-paste opener WHOLE.
-//
-// Requiring the whole opener in one chunk is what keeps the repair from
-// costing anything. Accepting a prefix would mean re-attaching on a bare "["
-// too, and a user who presses Escape and then types "[" delivers exactly that
-// — one byte per read — so their bracket would vanish into a CSI that never
-// arrives. A terminal splitting a paste opener does not type: it hands over
-// the rest of the sequence with the payload behind it. The residual gap is an
-// opener fragmented into three or more reads with the idle flush landing in
-// the first split, which no rule could repair without guessing.
+// already resolved, spells the bracketed-paste opener whole. Requiring the
+// whole opener in one chunk avoids re-attaching on a bare "[", which would
+// otherwise swallow a user pressing Escape then typing "[".
 func completesPasteStart(b []byte) bool {
 	return bytes.HasPrefix(b, pasteStart[1:])
 }

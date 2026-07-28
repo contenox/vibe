@@ -1,20 +1,8 @@
-// Package vfs is the single home for workspace-root containment: normalizing a
-// candidate path against a root and rejecting anything that escapes it, symlinks
-// included. Two callers used to carry their own copy of this logic — the
-// local_fs agent tool (runtime/localtools) and the /files browse API
-// (runtime/localfileservice); both now delegate here so there is exactly one
-// symlink-escape guard to reason about.
-//
-// The API is deliberately small:
-//
-//   - Contain(root, candidate) resolves a path within a root and is the core
-//     primitive. It tolerates a non-existent leaf (resolving the deepest
-//     existing parent) so create/write paths validate before any I/O.
-//   - Within(root, abs) is the raw within-root predicate for callers that have
-//     already resolved the absolute path themselves.
-//   - Factory holds the serve-level allowlist of workspace roots and vends
-//     rooted Views. A session may only operate within an allowlisted root.
-//   - View is a Factory-vended, root-bound convenience wrapper over Contain.
+// Package vfs is the single home for workspace-root containment: resolving a
+// candidate path against a root and rejecting anything that escapes it,
+// symlinks included. Contain resolves a path within a root; Within is the
+// raw predicate; Factory holds the serve-level root allowlist and vends
+// rooted Views.
 package vfs
 
 import (
@@ -33,9 +21,8 @@ var ErrEscape = errors.New("path escapes workspace root")
 // allowlist.
 var ErrNotAllowed = errors.New("workspace root is not allowed")
 
-// ResolveRoot returns the cleaned, absolute, symlink-resolved form of root. A
-// non-existent root is tolerated (its cleaned absolute form is returned) so a
-// workspace directory that has not been created yet still validates.
+// ResolveRoot returns the cleaned, absolute, symlink-resolved form of root.
+// A non-existent root is tolerated: its cleaned absolute form is returned.
 func ResolveRoot(root string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", errors.New("vfs: empty root")
@@ -53,12 +40,11 @@ func ResolveRoot(root string) (string, error) {
 }
 
 // Contain resolves candidate (absolute, or relative to root) to a cleaned,
-// symlink-resolved absolute path guaranteed to lie within root. Symlinks are
-// followed so an in-sandbox link pointing outside the root is caught before any
-// I/O. A non-existent leaf is permitted: the deepest existing parent is
-// resolved and the missing suffix re-appended, so writing "link/new.txt" where
-// "link" escapes is still rejected. Returns an error wrapping ErrEscape when the
-// path leaves root.
+// symlink-resolved absolute path guaranteed to lie within root. A
+// non-existent leaf is permitted: the deepest existing parent is resolved
+// and the missing suffix re-appended, so a write through an escaping symlink
+// is still rejected. Returns an error wrapping ErrEscape when the path
+// leaves root.
 func Contain(root, candidate string) (string, error) {
 	realRoot, err := ResolveRoot(root)
 	if err != nil {
@@ -71,10 +57,9 @@ func containWithin(realRoot, displayRoot, candidate string) (string, error) {
 	return containWithinOpts(realRoot, displayRoot, candidate, false)
 }
 
-// containWithinOpts is containWithin with the privileged escape hatch for the
-// runtime's OWN reads of its control plane (see OpenPrivilegedView). Escape
-// containment is enforced unconditionally — privilege waives only the
-// control-plane deny, never the root boundary.
+// containWithinOpts is containWithin with a privileged escape hatch for the
+// runtime's own reads of its control plane (see OpenPrivilegedView); the
+// root-escape check is always enforced regardless.
 func containWithinOpts(realRoot, displayRoot, candidate string, privileged bool) (string, error) {
 	absPath := candidate
 	if !filepath.IsAbs(candidate) {
@@ -92,15 +77,9 @@ func containWithinOpts(realRoot, displayRoot, candidate string, privileged bool)
 	if !within(realRoot, real) {
 		return "", fmt.Errorf("%w: %s escapes %s", ErrEscape, candidate, displayRoot)
 	}
-	// Control-plane carveout (vfs-invariant slice, 2026-07-21 — containment made
-	// it live): a path that stays WITHIN a legitimate root is STILL refused when
-	// it lands at or under the runtime's control plane. This is the traversal-side
-	// half of the carveout (the root-selection half is Factory.Resolve): it closes
-	// the /files explorer "enter .contenox" path and the local_fs agent tool, both
-	// of which resolve a RELATIVE path inside a granted root and never touch the
-	// Factory's root selection. `real` is already symlink-resolved above, so a link
-	// inside the root pointing into the control plane is caught by its real target.
-	// See controlplane.go.
+	// A path within root is still refused if it lands under the runtime's
+	// control plane; real is already symlink-resolved, so a link into the
+	// control plane is caught too. See controlplane.go.
 	if !privileged {
 		if denied, ok := deniedResolved(real); ok {
 			return "", controlPlaneError(candidate, denied)
@@ -109,9 +88,9 @@ func containWithinOpts(realRoot, displayRoot, candidate string, privileged bool)
 	return real, nil
 }
 
-// Within reports whether abs lies within root. root is symlink-resolved; abs is
-// compared as given (callers that resolved it via EvalSymlinks pass the real
-// path). Both are made absolute first.
+// Within reports whether abs lies within root. root is symlink-resolved; abs
+// is compared as given (callers that resolved it via EvalSymlinks pass the
+// real path). Both are made absolute first.
 func Within(root, abs string) bool {
 	realRoot, err := ResolveRoot(root)
 	if err != nil {
@@ -133,10 +112,9 @@ func within(realRoot, abs string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+sep))
 }
 
-// resolveLeaf resolves symlinks for an existing target, and for a non-existing
-// target resolves the deepest existing parent directory before appending the
-// missing suffix. This prevents writes such as "link/new.txt" where "link" is a
-// symlink escaping the sandbox.
+// resolveLeaf resolves symlinks for an existing target; for a non-existing
+// target it resolves the deepest existing parent and re-appends the missing
+// suffix, so a write through an escaping symlink is still caught.
 func resolveLeaf(absPath string) (string, error) {
 	absPath = filepath.Clean(absPath)
 

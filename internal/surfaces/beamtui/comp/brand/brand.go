@@ -1,17 +1,8 @@
 // Package brand renders beam's identity device: the fresh-session welcome
-// header and the persistent status-bar identity segment.
-//
-// The device is the vertical gold beam-bar `▌` — the same mark that is the
-// composer sigil — plus, once per session, the website logo-mark (three
-// mitered beam strokes forming an open C) as three rows of block art in the
-// favicon's luminance ramp. The header is printed ONCE into scrollback by
-// the app, so it survives in screenshots and history and never repaints; the
-// status segment is the quiet, never-animated counterpart that stays.
-//
-// Everything here is a pure function of (state, width) → []frame.Line: no
-// terminal reads, no capability probing, no SGR. Callers decide the ASCII
-// fallback (Info.ASCII) from their own Caps snapshot, which is what keeps
-// this package testable at every width without a terminal.
+// header and the persistent status-bar identity segment, both built around
+// the vertical brand-mint beam-bar `▌` and, once per session, the logo-mark as
+// block art. Everything is a pure function of (state, width) → []frame.Line
+// — no terminal reads, no SGR — with ASCII fallback via the caller's Caps.
 package brand
 
 import (
@@ -21,14 +12,12 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
 )
 
-// CompactWidth is the narrowest width that still fits the logo-mark
-// header. Below it Welcome drops the art and prints two rows: the brand
-// moment is a courtesy, never a reason to mangle a narrow terminal.
+// CompactWidth is the narrowest width that still fits the logo-mark header;
+// below it Welcome drops the art and prints two rows instead.
 const CompactWidth = 66
 
-// Wordmark and tagline are fixed brand copy: lowercase
-// "contenox", em-dash in the unicode variant and a plain hyphen in ASCII.
-// Do not paraphrase either string.
+// wordmark and tagline are fixed brand copy: lowercase "contenox", em-dash
+// in unicode, plain hyphen in ASCII — do not paraphrase either string.
 const (
 	wordmark       = "contenox beam"
 	taglineUnicode = " — open coding harness"
@@ -36,9 +25,8 @@ const (
 )
 
 // ASCIIGutter is the beam-bar a Mono terminal sees, exported so testkit's
-// glyph-parity test can hold every surface's ASCII marker against the style
-// package's GlyphSet in one place. Components may not import style, so the
-// agreement can only be checked from outside.
+// glyph-parity test can check it against style's GlyphSet without this
+// package importing style.
 const ASCIIGutter = "|"
 
 const (
@@ -65,32 +53,24 @@ type artSpan struct {
 	text  string
 }
 
-// artUnicode is the logo-mark rasterized from website/public/logo-mark.svg's
-// actual geometry: three blades — each a quarter-arc outer edge around its
-// own offset center with a straight inner edge and mitered ends — arranged
-// pinwheel-style around a square core, opening right. Rendered at 9x10
-// pixels via half-blocks (one text row = two pixel rows), each blade in its
-// favicon ramp stop, lightest at the top. The shape was produced by
-// supersampled rasterization of the SVG paths, not drawn by hand; keep any
-// future change faithful to the source mark the same way.
+// artUnicode is the logo-mark rasterized from website/public/logo-mark.svg:
+// three blades — quarter-arc outer edge, straight inner edge, mitered ends —
+// pinwheel-arranged around a square core, opening right. Rendered via
+// half-blocks (one text row = two pixel rows) in the favicon's ramp,
+// lightest at top; keep any future change faithful to the source mark.
 var artUnicode = [5][]artSpan{
 	{{frame.StyleNone, "    "}, {frame.StyleBrandRamp1, "▄▄███"}},
-	{{frame.StyleNone, "  "}, {frame.StyleBrandRamp2, "▄"}, {frame.StyleNone, " "}, {frame.StyleBrandRamp1, "▀▀▀▀▀"}},
+	{{frame.StyleNone, " "}, {frame.StyleBrandRamp2, "▄▄"}, {frame.StyleNone, " "}, {frame.StyleBrandRamp1, "▀▀▀▀▀"}},
 	{{frame.StyleBrandRamp2, "▄██"}},
-	{{frame.StyleBrandRamp2, "▀██"}, {frame.StyleNone, " "}, {frame.StyleBrandRamp3, "▄▄▄▄▄"}},
+	{{frame.StyleBrandRamp2, "███"}, {frame.StyleNone, " "}, {frame.StyleBrandRamp3, "▄▄▄▄▄"}},
 	{{frame.StyleNone, "    "}, {frame.StyleBrandRamp3, "▀▀███"}},
 }
 
 // artASCII suggests the same swirl in characters a legacy console can draw:
-// the diagonals stand in for the arc, the gaps stay.
-//
-// The mark is SYMMETRIC about its middle row, because the mark it stands in
-// for is: the unicode art gives the top blade an inner edge ("▀▀▀▀▀") and the
-// bottom blade the mirrored one ("▄▄▄▄▄"). This column used to draw only the
-// bottom one, so the ASCII device read as a lopsided hook rather than as the
-// same open C every other surface shows. The two bars ride at the two heights
-// ASCII has to offer — tildes near the top of their row, underscores on the
-// baseline — which is as close to ▀/▄ as a legacy console gets.
+// diagonals stand in for the arc, gaps stay. The mark is symmetric about its
+// middle row, matching the unicode art's mirrored top/bottom edges, so ASCII
+// reads as the same open C rather than a lopsided hook; tildes and
+// underscores approximate ▀/▄ at the two heights ASCII offers.
 var artASCII = [5][]artSpan{
 	{{frame.StyleNone, "    "}, {frame.StyleBrandRamp1, ",==="}},
 	{{frame.StyleNone, "   "}, {frame.StyleBrandRamp2, "/"}, {frame.StyleNone, " "}, {frame.StyleBrandRamp1, "~~~"}},
@@ -99,39 +79,33 @@ var artASCII = [5][]artSpan{
 	{{frame.StyleNone, "    "}, {frame.StyleBrandRamp3, "`==="}},
 }
 
-// wordmarkRow is the art row the wordmark hangs beside — the mark's
-// vertical middle.
+// wordmarkRow is the art row the wordmark hangs beside, the mark's vertical middle.
 const wordmarkRow = 2
 
 // hint is one key and what it opens. Keys print unstyled so they read as
 // literal keystrokes; the label carries the muted style.
 type hint struct{ key, label string }
 
-// fullHints is the welcome header's one hint line — the four affordances a
-// first-run user cannot discover by typing, plus the key list itself.
+// fullHints is the welcome header's hint line: the affordances a first-run user cannot discover by typing.
 var fullHints = []hint{
 	{"/", "commands"},
 	{"@", "files"},
 	{"!", "shell"},
-	{"Ctrl+E", "editor"},
+	{"Ctrl+X Ctrl+E", "editor"},
 	{"?", "keys"},
 }
 
-// compactHints is the same set at narrow widths, abbreviated rather than
-// truncated so every affordance survives.
-const compactHints = "/ cmds  @ files  ! shell  ^E editor  ? keys"
+// compactHints is the same set at narrow widths, abbreviated so every affordance survives.
+const compactHints = "/ cmds  @ files  ! shell  ^X^E editor  ? keys"
 
-// identity is the status bar's wordmark: the product name, not the
-// surface's.
+// identity is the status bar's wordmark: the product name, not the surface's.
 const identity = "contenox"
 
 // Info is the session context the welcome header may show. The zero value
 // renders the pure brand moment — no model, no provider, no session.
 //
 // ASCII selects the character fallback and must be true exactly when the
-// caller's caps profile is Mono. This package never probes: the caller
-// already holds the one Caps snapshot per process and passes the answer
-// down, so the same header is reproducible in a test at any width.
+// caller's caps profile is Mono; this package never probes for it itself.
 type Info struct {
 	ASCII    bool
 	Model    string
@@ -139,16 +113,15 @@ type Info struct {
 	Session  string
 }
 
-// Welcome renders the fresh-session header for width. The app prints the
-// result once into scrollback, never into the live region — it must not
-// repaint, and it must survive resize as literal history.
+// Welcome renders the fresh-session header for width, printed once into
+// scrollback (never the live region) so it survives resize as literal
+// history.
 //
 // At width >= CompactWidth the layout is the logo-mark art beside the
-// wordmark, an optional session line, and one hint line, all hung off a
-// continuous gold gutter. Below that it collapses to wordmark + abbreviated
-// hints. Either way the last line is an empty separator, so the caller
-// appends the header and the first turn without inserting spacing of its
-// own. No returned line is ever wider than width.
+// wordmark, an optional session line, and one hint line; below that it
+// collapses to wordmark + abbreviated hints. The last line is always an
+// empty separator, so the caller can append transcript directly without
+// spacing of its own. No returned line is ever wider than width.
 func Welcome(width int, info Info) []frame.Line {
 	var lines []frame.Line
 	if width < CompactWidth {
@@ -217,13 +190,9 @@ func full(info Info) []frame.Line {
 }
 
 // compact is the narrow-width fallback: the wordmark still reads, the
-// affordances still list, the art is simply not worth the rows.
-//
-// The gutter gap is the same two cells the full layout uses. It was missing
-// here, which put the wordmark hard against the beam-bar and made the device
-// read as a bullet on a list item rather than as the continuous stroke the
-// full layout documents — and a user narrowing their terminal watched the
-// mark change meaning. Two spaces is all "one device at two sizes" costs.
+// affordances still list, the art is simply not worth the rows. The gutter
+// gap matches the full layout's, so the device reads as the same continuous
+// stroke at both sizes rather than a bullet on a list item.
 func compact(info Info) []frame.Line {
 	g := gutter(info.ASCII)
 	return []frame.Line{
@@ -241,9 +210,8 @@ func compact(info Info) []frame.Line {
 	}
 }
 
-// hintLine lists the keys a first-run user cannot guess. Keys are unstyled
-// (a literal keystroke should look like one), labels are muted, and the
-// separators join the muted run so the whole line dims as a unit.
+// hintLine lists the keys a first-run user cannot guess: keys unstyled (a
+// literal keystroke), labels muted, joined so the whole line dims as a unit.
 func hintLine(g string) frame.Line {
 	l := frame.Line{
 		frame.S(frame.StyleBrand, g),
@@ -275,10 +243,9 @@ func sessionText(info Info) string {
 	return b.String()
 }
 
-// StatusSegment is the persistent identity: the gold beam-bar and the
-// product name, muted. It is the status bar's leftmost segment, never
-// animated, and the caller drops it whole below minimum width rather than
-// abbreviating it.
+// StatusSegment is the persistent identity: the mint beam-bar and product
+// name, muted. It is the status bar's leftmost segment, never animated; the
+// caller drops it whole below minimum width rather than abbreviating it.
 func StatusSegment(ascii bool) frame.Line {
 	return frame.L(
 		frame.S(frame.StyleBrand, gutter(ascii)),
@@ -287,9 +254,8 @@ func StatusSegment(ascii bool) frame.Line {
 	)
 }
 
-// StatusSegmentWidth is the cell width StatusSegment occupies, for the
-// status bar's layout math — so the bar budgets its remaining segments
-// without rendering the identity first.
+// StatusSegmentWidth is the cell width StatusSegment occupies, so the status
+// bar can budget its remaining segments without rendering identity first.
 func StatusSegmentWidth(ascii bool) int {
 	return textwidth.Width(StatusSegment(ascii).Text())
 }
@@ -323,9 +289,8 @@ func ellipsis(ascii bool) string {
 }
 
 // clamp cuts l to at most width cells, rune-safely and span-wise, marking
-// the cut with an ellipsis when one fits. Model, provider and session names
-// are caller data of unbounded length, so this is a real bound and not just
-// a defence for the compact layout.
+// the cut with an ellipsis when one fits — model, provider and session
+// names are caller data of unbounded length.
 func clamp(l frame.Line, width int, ascii bool) frame.Line {
 	if width <= 0 {
 		return frame.Line{}

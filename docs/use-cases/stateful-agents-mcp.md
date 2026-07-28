@@ -1,3 +1,7 @@
+---
+description: Give a model a persistent memory graph, the local filesystem, and live web pages through native MCP — state that survives across calls.
+---
+
 # Stateful Agents with MCP
 
 Connect your models to the local filesystem, a persistent memory graph, and live web pages using Contenox's native MCP (Model Context Protocol) integration.

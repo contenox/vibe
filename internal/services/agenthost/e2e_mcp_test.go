@@ -17,19 +17,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file covers MCP forwarding through the composed host path: an agent
-// row's mcp_servers allowlist resolved against the registered MCP servers
-// (same DB, same services the CLI uses) and passed down in session/new, the
-// way runtime/acpsvc consumes servers when contenox is on the agent side of
-// the same exchange.
+// This file covers MCP forwarding: an agent row's mcp_servers allowlist
+// resolved against registered MCP servers and passed down in session/new.
 
 const hostMcpEchoBinEnv = "ACP_MCP_ECHO_BIN"
 
-// registerAgentWithMcp is registerAgent (drive_test.go) plus the MCP leg: one
-// DB carries both the agents row (with its mcp_servers allowlist) and the
-// registered MCP server rows, and the allowlist is resolved through the real
-// mcpserverservice — returning exactly what a caller passes to
-// TurnRequest.McpServers.
+// registerAgentWithMcp is registerAgent plus the MCP leg: it registers
+// mcpRows and resolves allowlist into TurnRequest.McpServers.
 func registerAgentWithMcp(t *testing.T, name, command string, mcpRows []*runtimetypes.MCPServer, allowlist []string) (context.Context, *runtimetypes.Agent, []libacp.McpServer) {
 	t.Helper()
 	ctx := context.Background()
@@ -61,12 +55,8 @@ func registerAgentWithMcp(t *testing.T, name, command string, mcpRows []*runtime
 	return ctx, resolved, servers
 }
 
-// TestHostE2E_Testy_McpPassDownThroughComposedPath drives the full forwarding
-// loop against the reference agent: a registered stdio MCP server (the rust
-// SDK's mcp-echo-server), allowlisted on the agent row, resolved and passed
-// down via DriveTurn — then testy is asked to list that server's tools,
-// proving the spec we forwarded was complete enough for a foreign agent to
-// actually connect to the server and use it.
+// TestHostE2E_Testy_McpPassDownThroughComposedPath pins that a forwarded MCP
+// server spec is complete enough for testy to connect and use it.
 func TestHostE2E_Testy_McpPassDownThroughComposedPath(t *testing.T) {
 	requireSandboxable(t)
 	testyBin := testyBinFromEnv(t)
@@ -100,16 +90,13 @@ func TestHostE2E_Testy_McpPassDownThroughComposedPath(t *testing.T) {
 	require.Equal(t, []string{"echo"}, res.ForwardedMcpServers)
 	require.Empty(t, res.DroppedMcpServers)
 
-	// testy connected to the forwarded server and listed its real tools.
 	reply := harness.MessageText()
 	require.Contains(t, reply, "echo", "testy stderr:\n%s", stderr.String())
 	require.Contains(t, reply, "Echoes back the input message", "testy stderr:\n%s", stderr.String())
 }
 
-// TestHost_DriveTurn_McpCapabilityFilterDropsUnsupported pins the capability
-// gate hermetically: the stub advertises no http/sse mcpCapabilities, so a
-// forwarded http server must be withheld — and reported as dropped — while a
-// stdio server passes through as the protocol baseline.
+// TestHost_DriveTurn_McpCapabilityFilterDropsUnsupported pins that an
+// unsupported-transport server is withheld and reported.
 func TestHost_DriveTurn_McpCapabilityFilterDropsUnsupported(t *testing.T) {
 	requireSandboxable(t)
 	stubBin := buildStubAgent(t)

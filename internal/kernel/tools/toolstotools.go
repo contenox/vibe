@@ -8,10 +8,8 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// ToolProtocol defines the methods required to interact with a remote service
-// that exposes tools via a standardized protocol (e.g., OpenAPI).
-// It is responsible for discovering available tools and executing tool calls.
-// ToolProtocol defines the interface for interacting with remote tools via OpenAPI.
+// ToolProtocol discovers and executes tool calls against a remote service
+// exposing tools via a standardized protocol (e.g. OpenAPI).
 type ToolProtocol interface {
 	FetchSchema(ctx context.Context, endpointURL string, httpClient *http.Client) (*openapi3.T, error)
 	FetchTools(ctx context.Context, endpointURL string, injectParams map[string]ParamArg, httpClient *http.Client) ([]taskengine.Tool, error)

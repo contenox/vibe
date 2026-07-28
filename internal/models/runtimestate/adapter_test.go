@@ -51,15 +51,12 @@ func TestUnit_ModelProviderAdapter_SetsCorrectModelCapabilities(t *testing.T) {
 		},
 	}
 
-	// 2. Get the adapter function
 	adapterFunc := runtimestate.LocalProviderAdapter(ctx, nil, runtime)
 
-	// 3. Get the providers
 	providers, err := adapterFunc(ctx, "ollama")
 	require.NoError(t, err)
 	require.Len(t, providers, 3, "Should create one provider per model")
 
-	// 4. Verify capabilities
 	foundChat := false
 	foundEmbed := false
 	foundUnknown := false
@@ -90,7 +87,6 @@ func TestUnit_ModelProviderAdapter_PropagatesCapabilitiesCorrectly(t *testing.T)
 	backendID := "backend-test"
 	backendURL := "http://host:1234"
 
-	// Define models with specific capabilities
 	runtime := map[string]runtimestate.BackendRuntimeState{
 		backendID: {
 			ID:      backendID,
@@ -137,7 +133,6 @@ func TestUnit_ModelProviderAdapter_PropagatesCapabilitiesCorrectly(t *testing.T)
 	require.NoError(t, err, "should not return error")
 	require.Len(t, providers, 3, "should create one provider per model")
 
-	// Verify capabilities
 	for _, p := range providers {
 		switch p.ModelName() {
 		case "chat-model":
@@ -170,7 +165,6 @@ func TestUnit_ModelProviderAdapter_HandlesMissingCapabilities(t *testing.T) {
 	backendID := "backend-test"
 	backendURL := "http://host:1234"
 
-	// Define model with partial capabilities
 	runtime := map[string]runtimestate.BackendRuntimeState{
 		backendID: {
 			ID:      backendID,
@@ -181,7 +175,6 @@ func TestUnit_ModelProviderAdapter_HandlesMissingCapabilities(t *testing.T) {
 					Name:       "partial-model",
 					Model:      "partial-model",
 					ModifiedAt: now,
-					// Missing capability fields
 				},
 			},
 		},
@@ -193,7 +186,6 @@ func TestUnit_ModelProviderAdapter_HandlesMissingCapabilities(t *testing.T) {
 	require.NoError(t, err, "should not return error")
 	require.Len(t, providers, 1, "should create one provider")
 
-	// Verify zero-value capabilities
 	p := providers[0]
 	require.False(t, p.CanChat(), "should default to no chat support")
 	require.False(t, p.CanEmbed(), "should default to no embedding support")

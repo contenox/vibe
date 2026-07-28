@@ -8,10 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_VisionSummary covers doctor's vision availability line: it lists
-// vision-capable chat models compactly, teaches when the default model is
-// text-only, and stays silent when no backend is reachable (connectivity
-// errors already dominate that output).
+// TestUnit_VisionSummary asserts doctor's vision line lists vision-capable models, flags a text-only default, and stays silent with no reachable backend.
 func TestUnit_VisionSummary(t *testing.T) {
 	state := map[string]runtimestate.BackendRuntimeState{
 		"b1": {

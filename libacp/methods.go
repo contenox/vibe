@@ -24,11 +24,9 @@ const (
 	MethodSessionUpdate          = "session/update"
 	MethodSessionSetMode         = "session/set_mode"
 	MethodSessionSetConfigOption = "session/set_config_option"
-	// MethodSessionSetModel is the UNSTABLE Zed model-picker method: switch a
-	// session's active model (see SetSessionModelRequest / SessionModelState). The
-	// client-side driver surfaces it as `unstable_setSessionModel`; it is dispatched
-	// over this `session/set_model` method name. This is an experimental extension,
-	// NOT part of the stable ACP spec, and MAY change or be removed.
+	// MethodSessionSetModel is the UNSTABLE model-picker method: switch a
+	// session's active model (see SetSessionModelRequest / SessionModelState).
+	// Experimental, not part of the stable ACP spec; may change or be removed.
 	MethodSessionSetModel = "session/set_model"
 
 	MethodSessionRequestPermission = "session/request_permission"
@@ -49,8 +47,7 @@ const (
 )
 
 // ExtensionMethodPrefix is the reserved namespace for custom "extension"
-// methods and notifications. Per extensibility.mdx: "The protocol reserves
-// any method name starting with an underscore (_) for custom extensions."
+// methods and notifications: any method name starting with underscore.
 // "$/"-prefixed methods (MethodCancelRequest) are a separate, protocol-owned
 // namespace and are never extension-eligible.
 const ExtensionMethodPrefix = "_"
@@ -62,25 +59,18 @@ func IsExtensionMethod(method string) bool {
 	return strings.HasPrefix(method, ExtensionMethodPrefix)
 }
 
-// ExtRequestHandler handles an inbound extension request: a JSON-RPC request
-// whose method is not part of the core ACP method set but is extension-
-// eligible (IsExtensionMethod). params is the request's raw, unparsed params
-// exactly as received (nil if the request omitted them) — extension methods
-// define their own wire schema, so libacp does not attempt to interpret them.
-// A handler returns either a raw JSON result or an *Error, mirroring how a
-// core method handler returns (response, error): both are written back
-// through the same JSON-RPC result/error machinery, and the request
-// participates in "$/cancel_request" cancellation via ctx like any other
-// inbound request.
+// ExtRequestHandler handles an inbound extension request (method not in the
+// core ACP set but IsExtensionMethod). params is the raw, unparsed request
+// params (nil if omitted) — extension methods define their own wire schema.
+// Returns a raw JSON result or an *Error, written back through the same
+// JSON-RPC machinery as a core handler; participates in "$/cancel_request"
+// cancellation via ctx like any other inbound request.
 //
-// See ExtRequest/ExtResponse in the ACP schema (v1) and protocol docs:
-// https://agentclientprotocol.com/protocol/extensibility
+// See ExtRequest/ExtResponse: https://agentclientprotocol.com/protocol/extensibility
 type ExtRequestHandler func(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *Error)
 
-// ExtNotificationHandler handles an inbound extension notification —
-// fire-and-forget, matching the spec's "implementations SHOULD ignore
-// unrecognized notifications" for anything it doesn't recognize itself.
+// ExtNotificationHandler handles an inbound extension notification,
+// fire-and-forget.
 //
-// See ExtNotification in the ACP schema (v1) and protocol docs:
-// https://agentclientprotocol.com/protocol/extensibility
+// See ExtNotification: https://agentclientprotocol.com/protocol/extensibility
 type ExtNotificationHandler func(ctx context.Context, method string, params json.RawMessage)

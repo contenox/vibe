@@ -12,11 +12,10 @@ import (
 
 const cloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 
-// NewTokenSource returns a caching oauth2.TokenSource. Call this ONCE per
-// provider and reuse the returned source — it caches the access token until
-// expiry and only round-trips to the token endpoint on refresh. Creating a new
-// source per request (as the BearerToken* helpers do) round-trips every time
-// and adds ~100–400ms of auth latency to every chat/stream call.
+// NewTokenSource returns a caching oauth2.TokenSource. Call it once per
+// provider and reuse the source: it caches the access token until expiry,
+// unlike the BearerToken* helpers, which mint a source per call and add
+// ~100-400ms of auth latency to every chat/stream call.
 //
 // credJSON is the service account key JSON; empty falls back to ADC.
 func NewTokenSource(ctx context.Context, credJSON string) (oauth2.TokenSource, error) {

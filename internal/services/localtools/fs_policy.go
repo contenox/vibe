@@ -12,12 +12,10 @@ import (
 // ---------------------------------------------------------------------------
 // Argument coercion
 //
-// Small local models (qwen3-4b and friends) routinely emit JSON-encoded
-// scalars as strings: {"start_line": "5"}, {"recursive": "true"}. The strict
-// type assertions this package used previously caused those calls to silently
-// fall through to defaults — a ranged read would become a full read, and the
-// model got no signal that its argument had been dropped. Coercion here is
-// deliberately generous; rejectUnknownArgs still guards the argument *names*.
+// Small local models routinely emit JSON-encoded scalars as strings, e.g.
+// {"start_line": "5"}. Coercion here is deliberately generous so those calls
+// are not silently dropped to defaults; rejectUnknownArgs still guards the
+// argument *names*.
 // ---------------------------------------------------------------------------
 
 // argString returns a string value for key, accepting a real string or any
@@ -131,18 +129,11 @@ func argInt(args map[string]any, key string) (int, bool) {
 // ---------------------------------------------------------------------------
 
 const (
-	// defaultMaxOutputBytes is the ceiling on any single tool result.
-	//
-	// This used to be 512 KiB, which is roughly 130k tokens of text — a cap
-	// calibrated to what a filesystem can hand back rather than to what a
-	// model can accept. It could not fire before the context window did, so
-	// oversized results sailed through this check and failed later at model
-	// resolution, wedging the session with an unshrinkable history entry.
-	// 32 KiB is ~8k tokens: large enough for real listings, small enough that
-	// a single tool result cannot dominate a small model's context.
-	//
-	// Prefer setting _model_context_tokens and letting the budget be derived
-	// (see maxOutputBytesFromPolicy) over overriding this directly.
+	// defaultMaxOutputBytes is the ceiling on any single tool result: ~8k
+	// tokens, large enough for real listings but small enough that one result
+	// cannot dominate a small model's context. Prefer setting
+	// _model_context_tokens and letting the budget be derived (see
+	// maxOutputBytesFromPolicy) over overriding this directly.
 	defaultMaxOutputBytes = 32 * 1024
 
 	// defaultMaxReadBytes caps a whole-file read. Files above this must be
@@ -226,11 +217,8 @@ func (h *LocalFSTools) maxListEntriesScannedFromPolicy(ctx context.Context) int 
 }
 
 // maxGrepMatchesFromPolicy caps the number of grep matches returned.
-// Policy key: _max_grep_matches — default 500.
-//
-// Lowered from 5000: at the previous value, hitting the cap was an error that
-// discarded every match already found. Matches are now returned with a
-// truncation notice, so the cap is about result size rather than aborting.
+// Policy key: _max_grep_matches — default 500. Matches up to the cap are
+// still returned, with a truncation notice, rather than erroring.
 func (h *LocalFSTools) maxGrepMatchesFromPolicy(ctx context.Context) int {
 	return h.policyInt(ctx, "_max_grep_matches", 500, 1, 500000)
 }
@@ -318,13 +306,9 @@ func (h *LocalFSTools) maxReadBytesFromPolicy(ctx context.Context) (limit int64,
 }
 
 // defaultSkipDirNames is the fallback set of directory basenames omitted from
-// listings when .gitignore is unavailable or disabled.
-//
-// Basename matching alone is a losing game — it can only ever enumerate the
-// noise directories someone thought of in advance, and misses every
-// project-specific one (build output, scratch dirs, vendored comparison
-// checkouts, local model caches). .gitignore is the real filter; this list is
-// the backstop for trees that aren't git repositories.
+// listings when .gitignore is unavailable or disabled. Basename matching alone
+// misses project-specific noise directories that .gitignore would catch; this
+// list is only the backstop for non-git trees.
 var defaultSkipDirNames = []string{
 	".git", ".hg", ".svn",
 	"node_modules", "bower_components", "Pods",

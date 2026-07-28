@@ -8,34 +8,21 @@ import (
 	"github.com/google/uuid"
 )
 
-// SynthesizeHistory rebuilds a conversation transcript from a chain run by
-// walking the captured step stream. It exists so that hard-failed turns
-// (errors, timeouts, cancellations, denied/timed-out HITL gates) make it
-// into the persisted ChatHistory — the chain's returned ChatHistory only
-// contains messages from steps that completed successfully.
+// SynthesizeHistory rebuilds a conversation transcript from a chain run's
+// captured step stream (units, from Inspector.GetExecutionHistory), so
+// hard-failed turns (errors, timeouts, cancellations, denied HITL gates)
+// make it into the persisted ChatHistory — unlike the chain's returned
+// ChatHistory, which only contains messages from steps that completed
+// successfully. prior is the session history sent into the chain; chainErr
+// is the chain runner's error, if any.
 //
-// prior is the session history that was sent into the chain.
-// units is the captured step stream from Inspector.GetExecutionHistory().
-// chainErr is the error returned by the chain runner, if any.
-//
-// Messages are collected by identity (Message.ID, with a content-derived
-// fallback for messages that predate creation-time IDs), never by index
-// arithmetic: task handlers legitimately mutate the message list between a
-// unit's input and output (system-instruction prepends, shift-to-fit
-// trimming), so positional diffing re-emits or drops messages.
-//
-// Engine-injected system messages are excluded: task-level system
-// instructions are re-applied from the task definition on every run and must
-// not accumulate in the session transcript.
-//
-// The result satisfies the tool-call pairing invariant (see
-// repairToolCallPairing): a chain that dies between an assistant tool call
-// and its execution must not persist a transcript that strict providers
-// reject on every subsequent turn.
-//
-// The result is a candidate []Message ready for chatservice.PersistDiff —
-// PersistDiff handles dedupe against already-stored messages by ID, so the
-// synthesizer is free to emit overlapping prefixes between runs.
+// Messages are deduped by identity (Message.ID, or a content hash for
+// pre-ID messages), never by index, since handlers legitimately mutate the
+// message list between a unit's input and output. Engine-injected system
+// messages are excluded, since task system instructions are re-applied from
+// the task definition on every run. The result satisfies the tool-call
+// pairing invariant (see repairToolCallPairing) and is a candidate
+// []Message ready for chatservice.PersistDiff, which dedupes by ID.
 func SynthesizeHistory(prior []Message, units []CapturedStateUnit, chainErr error) []Message {
 	out := make([]Message, 0, len(prior)+len(units))
 	out = append(out, prior...)

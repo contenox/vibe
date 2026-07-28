@@ -19,16 +19,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file exercises the external-agent-backed ACP session: a session whose
-// contenox.agent `_meta` binds it to a REGISTERED external ACP agent, spawned
-// and driven downstream via runtime/agenthost, instead of the native chain
-// engine. It runs the REAL production Transport against a REAL
-// ClientSideConnection (via newLoopbackHarness), and the downstream side is the
-// hermetic in-repo acp-stub-agent — no LLM backend, no mocked host seam.
+// This file exercises the external-agent-backed ACP session: contenox.agent
+// `_meta` binds a session to a registered external agent, spawned and driven
+// via runtime/agenthost instead of the native chain engine, against the
+// hermetic in-repo acp-stub-agent.
 
 // buildStubAgentBin compiles libacp/cmd/acp-stub-agent into t.TempDir() and
-// returns its path, mirroring agenthost's buildStubAgent. The go build cache
-// makes reruns cheap.
+// returns its path, mirroring agenthost's buildStubAgent.
 func buildStubAgentBin(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
@@ -40,11 +37,9 @@ func buildStubAgentBin(t *testing.T) string {
 	return binPath
 }
 
-// registerStubAgentInDB creates an enabled external_acp agents row pointing at a
-// freshly built stub agent in the given DB — the same DB the Transport resolves
-// the contenox.agent name against — carrying an optional per-agent env (used to
-// opt the stub into ACP_STUB_ADVERTISE_COMMANDS without a process-global setenv),
-// and returns the registered name.
+// registerStubAgentInDB creates an enabled external_acp agents row for a
+// freshly built stub agent, with an optional per-agent env (to opt into
+// scenarios like ACP_STUB_ADVERTISE_COMMANDS), and returns its name.
 func registerStubAgentInDB(t *testing.T, db libdb.DBManager, name string, env map[string]string) string {
 	t.Helper()
 	bin := buildStubAgentBin(t)
@@ -74,13 +69,8 @@ func metaAgent(t *testing.T, meta json.RawMessage) string {
 	return parseAgentMeta(meta)
 }
 
-// TestLoopback_ExternalAgent_NewSessionAndPromptRelays is the keystone: a
-// session/new carrying contenox.agent against a registered stub agent spawns and
-// drives it downstream, the response `_meta` echoes the key, external sessions
-// advertise no chain-engine model/think/token selects (only contenox's own
-// per-session HITL policy select, since a non-advertising stub carries no
-// downstream surface), and a prompt turn relays the stub's "ack" chunk up on the
-// UPSTREAM session id and returns end_turn.
+// TestLoopback_ExternalAgent_NewSessionAndPromptRelays pins: session/new with
+// contenox.agent spawns the stub and relays its prompt reply upstream.
 func TestLoopback_ExternalAgent_NewSessionAndPromptRelays(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -110,8 +100,6 @@ func TestLoopback_ExternalAgent_NewSessionAndPromptRelays(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, libacp.StopReasonEndTurn, promptResp.StopReason)
 
-	// The stub's plain-prompt path acks with one agent_message_chunk; the bridge
-	// relays it up, plus the post-turn session_info_update.
 	updates := h.lc.drain(t, 2)
 	byKind := make(map[libacp.SessionUpdateKind]libacp.SessionNotification, len(updates))
 	for _, u := range updates {
@@ -127,15 +115,8 @@ func TestLoopback_ExternalAgent_NewSessionAndPromptRelays(t *testing.T) {
 		"an external turn still pushes the post-turn session_info_update")
 }
 
-// TestLoopback_ExternalAgent_AcceptsMentionResourceLink proves an @-mention works
-// on an external session. beam's composer serializes a mention as a reference-only
-// resource_link content block (promptBlocksFromDraft), and externalDriver.Prompt
-// forwards the prompt blocks VERBATIM downstream. resource_link is a base ACP
-// content type gated by NO promptCapability (embeddedContext gates only embedded
-// `resource` blocks, which this path never emits), so it needs no downstream
-// capability and requires no degrade. The turn completes (the stub acks) and the
-// mention reference is persisted into the session's history, so session/list
-// reflects it — proof the block reached the external driver's Prompt path intact.
+// TestLoopback_ExternalAgent_AcceptsMentionResourceLink pins: an @-mention
+// resource_link block needs no downstream capability and persists into history.
 func TestLoopback_ExternalAgent_AcceptsMentionResourceLink(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -151,8 +132,7 @@ func TestLoopback_ExternalAgent_AcceptsMentionResourceLink(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// A text block plus one @-mention as a resource_link — exactly what beam's
-	// promptBlocksFromDraft puts on the wire for `review @main.go`.
+	// As beam's promptBlocksFromDraft puts on the wire for `review @main.go`.
 	promptResp, err := h.client.Prompt(ctx, libacp.PromptRequest{
 		SessionID: newResp.SessionID,
 		Prompt: []libacp.ContentBlock{
@@ -164,7 +144,6 @@ func TestLoopback_ExternalAgent_AcceptsMentionResourceLink(t *testing.T) {
 	require.Equal(t, libacp.StopReasonEndTurn, promptResp.StopReason,
 		"an external turn carrying an @-mention resource_link must complete normally")
 
-	// The downstream stub acks; the bridge relays it plus the post-turn info update.
 	updates := h.lc.drain(t, 2)
 	var acked bool
 	for _, u := range updates {
@@ -175,8 +154,6 @@ func TestLoopback_ExternalAgent_AcceptsMentionResourceLink(t *testing.T) {
 	}
 	require.True(t, acked, "the downstream agent must complete the turn (no capability rejection)")
 
-	// The mention reference survives into persisted history, so session/list shows
-	// it — proof the resource_link block reached the external driver's Prompt path.
 	listResp, err := h.client.ListSessions(ctx, libacp.ListSessionsRequest{})
 	require.NoError(t, err)
 	var found *libacp.SessionInfo
@@ -191,9 +168,8 @@ func TestLoopback_ExternalAgent_AcceptsMentionResourceLink(t *testing.T) {
 		"the @-mention's resource_link reference must be persisted in the external session's history")
 }
 
-// TestLoopback_ExternalAgent_UnknownAgentRejected pins that an unknown
-// contenox.agent name fails session/new with a clear error and creates NO
-// session (and, resolving before any spawn, leaks no process).
+// TestLoopback_ExternalAgent_UnknownAgentRejected pins: an unknown contenox.agent
+// name fails session/new with a clear error and creates no session.
 func TestLoopback_ExternalAgent_UnknownAgentRejected(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -215,14 +191,8 @@ func TestLoopback_ExternalAgent_UnknownAgentRejected(t *testing.T) {
 	require.Zero(t, n, "a rejected external agent must not create a session")
 }
 
-// TestLoopback_ExternalAgent_DisabledAgentRejected proves the connCtx-owned
-// (nil-Instances / stdio `contenox acp`) spawn path refuses a disabled agent
-// through the shared agentregistryservice.ResolveForSpawn judgment used by
-// resolveExternalAgent — the actual C5 gap fleet-consolidation.md's D6 named:
-// before this change only fleetservice.Dispatch enforced Enabled, and a
-// disabled agent's session/new straight against acpsvc would have spawned its
-// subprocess anyway. Uses /bin/true as the command: resolution is refused
-// before anything is ever spawned, so no real stub binary is needed.
+// TestLoopback_ExternalAgent_DisabledAgentRejected pins: the connCtx-owned
+// spawn path refuses a disabled agent before ever spawning a subprocess.
 func TestLoopback_ExternalAgent_DisabledAgentRejected(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -255,10 +225,8 @@ func TestLoopback_ExternalAgent_DisabledAgentRejected(t *testing.T) {
 	require.Zero(t, n, "a refused agent must not create a session")
 }
 
-// TestLoopback_ExternalAgent_NoMetaKeyIsNative is the regression guard at this
-// layer: a session/new without the contenox.agent key takes the native chain
-// path unchanged — it holds no external handle and advertises the usual config
-// options.
+// TestLoopback_ExternalAgent_NoMetaKeyIsNative pins: session/new without the
+// contenox.agent key takes the native chain path, unchanged.
 func TestLoopback_ExternalAgent_NoMetaKeyIsNative(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -281,9 +249,8 @@ func TestLoopback_ExternalAgent_NoMetaKeyIsNative(t *testing.T) {
 	require.IsType(t, &nativeDriver{}, entry.driver, "a native session must be backed by a native driver")
 }
 
-// TestLoopback_ExternalAgent_CloseTearsDownProcess proves an explicit
-// session/close tears down the spawned downstream connection (its subprocess),
-// so external agents do not leak past the session that owns them.
+// TestLoopback_ExternalAgent_CloseTearsDownProcess pins: session/close tears
+// down the spawned downstream subprocess.
 func TestLoopback_ExternalAgent_CloseTearsDownProcess(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -319,10 +286,8 @@ func TestLoopback_ExternalAgent_CloseTearsDownProcess(t *testing.T) {
 	}
 }
 
-// TestLoopback_ExternalAgent_PersistsHistoryForListing proves an external turn's
-// user prompt and downstream reply are persisted, so the session appears in
-// session/list with a title derived from the first user message and carries its
-// contenox.agent attribution in `_meta`.
+// TestLoopback_ExternalAgent_PersistsHistoryForListing pins: an external turn
+// persists, so session/list shows its title and contenox.agent attribution.
 func TestLoopback_ExternalAgent_PersistsHistoryForListing(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -361,15 +326,9 @@ func TestLoopback_ExternalAgent_PersistsHistoryForListing(t *testing.T) {
 		"session/list entry must carry contenox.agent attribution in _meta")
 }
 
-// TestE2E_Wire_ExternalAgent_CommandMenuAfterNewSessionResult is the regression
-// for the dropped downstream slash-command menu. Driven at the raw wire against
-// the real Transport (so notification-vs-response ORDER is observable), it pins
-// that a downstream agent's available_commands_update — advertised immediately
-// after its own session/new — is relayed to the upstream client STRICTLY AFTER
-// the external session/new result, never before it (a client drops updates for a
-// session id it has not yet learned, which is why the menu never rendered in
-// beam). The downstream side is the hermetic acp-stub-agent opted into
-// ACP_STUB_ADVERTISE_COMMANDS via its per-agent env.
+// TestE2E_Wire_ExternalAgent_CommandMenuAfterNewSessionResult pins: the
+// downstream command menu relays strictly after the session/new result, never
+// before (a client drops updates for a session id it hasn't learned yet).
 func TestE2E_Wire_ExternalAgent_CommandMenuAfterNewSessionResult(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -387,9 +346,7 @@ func TestE2E_Wire_ExternalAgent_CommandMenuAfterNewSessionResult(t *testing.T) {
 	clientSide := &wirePipe{r: clientR, w: clientW}
 
 	factory := New(Deps{
-		// A bare engine is enough for the external session lifecycle here; no
-		// native chain runs (the downstream stub owns the turn).
-		Engine:      &enginesvc.Engine{},
+		Engine:      &enginesvc.Engine{}, // no native chain runs; the stub owns the turn
 		DB:          db,
 		WorkspaceID: "wire-external-ws",
 	})
@@ -430,7 +387,6 @@ func TestE2E_Wire_ExternalAgent_CommandMenuAfterNewSessionResult(t *testing.T) {
 	require.Equal(t, agentName, parseAgentMeta(newResp.Meta),
 		"external session/new result must echo the contenox.agent attribution")
 
-	// The relayed downstream menu must be the FIRST notification after the result.
 	after := client.drainNotifications(1)
 	require.Equal(t, libacp.MethodSessionUpdate, after[0].Method)
 	var cmdNote libacp.SessionNotification
@@ -443,10 +399,8 @@ func TestE2E_Wire_ExternalAgent_CommandMenuAfterNewSessionResult(t *testing.T) {
 		"the relayed menu must carry the downstream agent's advertised commands")
 }
 
-// TestLoopback_ExternalAgent_RelaysDownstreamCommandMenu proves, through the real
-// client stack, that an external session's upstream client actually RECEIVES the
-// downstream agent's slash-command menu (remapped onto the upstream session id).
-// This is the delivery counterpart to the wire-ordering test above.
+// TestLoopback_ExternalAgent_RelaysDownstreamCommandMenu pins: the client
+// receives the downstream's slash-command menu, remapped onto the session id.
 func TestLoopback_ExternalAgent_RelaysDownstreamCommandMenu(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -463,8 +417,6 @@ func TestLoopback_ExternalAgent_RelaysDownstreamCommandMenu(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// The external session/new emits no menu/usage/banner of its own; the only
-	// update it produces is the re-emitted downstream command menu.
 	updates := h.lc.drain(t, 1)
 	require.Equal(t, libacp.SessionUpdateAvailableCommands, updates[0].Update.SessionUpdate,
 		"the downstream agent's command menu must be relayed to the upstream client")
@@ -478,13 +430,9 @@ func TestLoopback_ExternalAgent_RelaysDownstreamCommandMenu(t *testing.T) {
 		"the relayed menu must carry the stub's deterministic advertised commands")
 }
 
-// TestLoopback_ExternalAgent_SessionNewCarriesDownstreamConfigOptions proves the
-// keystone of the config-option pass-through: a downstream agent's OWN advertised
-// config options (here the stub's deterministic "stub-verbosity" select, carried in
-// its session/new response) reach the upstream client synchronously in the external
-// session/new response, and externalDriver.ConfigOptions surfaces them. Contrast the
-// non-advertising stub tests above, which still see an empty set — nothing is
-// synthesized, the pass-through only carries what the downstream advertises.
+// TestLoopback_ExternalAgent_SessionNewCarriesDownstreamConfigOptions pins: a
+// downstream agent's own config options reach the client in the session/new
+// response; nothing is synthesized.
 func TestLoopback_ExternalAgent_SessionNewCarriesDownstreamConfigOptions(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -508,8 +456,6 @@ func TestLoopback_ExternalAgent_SessionNewCarriesDownstreamConfigOptions(t *test
 		"the downstream agent's option value must be passed through as-is")
 	require.True(t, configOptionHasValue(verbosity, "high"))
 
-	// The driver surfaces the downstream set followed by contenox's own HITL policy
-	// select — no chain-engine model/think/token selects folded in.
 	h.tr.sessionMu.Lock()
 	entry := h.tr.sessions[newResp.SessionID]
 	h.tr.sessionMu.Unlock()
@@ -521,12 +467,8 @@ func TestLoopback_ExternalAgent_SessionNewCarriesDownstreamConfigOptions(t *test
 		"contenox's HITL policy select is appended after the downstream surface")
 }
 
-// TestLoopback_ExternalAgent_SetConfigOptionRoundTripsToDownstream proves an
-// upstream session/set_config_option on an external session is forwarded to the
-// downstream agent's session/set_config_option and its confirmed value round-trips:
-// the upstream response reflects the new value (proving it went downstream and back,
-// not mutated locally), and the downstream's confirming config_option_update is
-// relayed up onto the upstream session id.
+// TestLoopback_ExternalAgent_SetConfigOptionRoundTripsToDownstream pins: a
+// set_config_option forwards downstream and its confirmed value round-trips.
 func TestLoopback_ExternalAgent_SetConfigOptionRoundTripsToDownstream(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -552,15 +494,12 @@ func TestLoopback_ExternalAgent_SetConfigOptionRoundTripsToDownstream(t *testing
 	require.Equal(t, "high", optionByID(t, setResp.ConfigOptions, "stub-verbosity").CurrentValue,
 		"the set_config_option response must carry the downstream agent's confirmed value")
 
-	// The downstream agent's confirming config_option_update is relayed upstream,
-	// remapped onto the upstream session id.
 	updates := h.lc.drain(t, 1)
 	require.Equal(t, libacp.SessionUpdateConfigOption, updates[0].Update.SessionUpdate)
 	require.Equal(t, newResp.SessionID, updates[0].SessionID,
 		"a relayed downstream config_option_update must be remapped onto the upstream session id")
 	require.Equal(t, "high", optionByID(t, updates[0].Update.ConfigOptions, "stub-verbosity").CurrentValue)
 
-	// A rejected value is the downstream's call to refuse, surfaced to the client.
 	_, err = h.client.SetSessionConfigOption(ctx, libacp.SetSessionConfigOptionRequest{
 		SessionID: newResp.SessionID,
 		ConfigID:  "stub-verbosity",
@@ -569,12 +508,8 @@ func TestLoopback_ExternalAgent_SetConfigOptionRoundTripsToDownstream(t *testing
 	require.Error(t, err, "the downstream agent rejects an unknown value and the error surfaces upstream")
 }
 
-// TestLoopback_ExternalAgent_LazyRespawnPushesConfigOptions proves the reload path:
-// after the downstream connection is torn down (as it is after a session/load, which
-// deliberately does not resurrect the downstream), the first subsequent prompt lazily
-// respawns it and pushes a config_option_update so the reloaded session regains the
-// downstream agent's pickers. Close() reproduces the post-load state (fresh driver,
-// no live handle) deterministically without the session/load replay machinery.
+// TestLoopback_ExternalAgent_LazyRespawnPushesConfigOptions pins: after the
+// downstream dies, the next prompt lazily respawns it and restores its pickers.
 func TestLoopback_ExternalAgent_LazyRespawnPushesConfigOptions(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -591,8 +526,7 @@ func TestLoopback_ExternalAgent_LazyRespawnPushesConfigOptions(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Tear the downstream down, mirroring the post-session/load state where the
-	// entry is external but no downstream process is live yet.
+	// Close() reproduces the post-session/load state without the replay machinery.
 	h.tr.sessionMu.Lock()
 	ext := h.tr.sessions[newResp.SessionID].driver.(*externalDriver)
 	h.tr.sessionMu.Unlock()
@@ -605,8 +539,6 @@ func TestLoopback_ExternalAgent_LazyRespawnPushesConfigOptions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, libacp.StopReasonEndTurn, promptResp.StopReason)
 
-	// The respawn pushes a config_option_update (before the downstream turn's ack and
-	// the post-turn session_info_update): the reloaded session's pickers are restored.
 	updates := h.lc.drain(t, 3)
 	var restored *libacp.SessionNotification
 	for i := range updates {
@@ -620,13 +552,8 @@ func TestLoopback_ExternalAgent_LazyRespawnPushesConfigOptions(t *testing.T) {
 	require.Equal(t, "low", optionByID(t, restored.Update.ConfigOptions, "stub-verbosity").CurrentValue)
 }
 
-// TestE2E_Wire_ExternalAgent_ConfigOptionUpdateAfterNewSessionResult is the
-// config-option counterpart to the command-menu wire-ordering test: a downstream
-// agent that advertises its config options as a DEFERRED config_option_update after
-// its own session/new (rather than in the response) must have that update relayed to
-// the upstream client STRICTLY AFTER the external session/new result — never before,
-// when the client cannot yet resolve the session id. It pins the pre-bind caching:
-// acpsvc holds the update and re-emits it via markBound after the result.
+// TestE2E_Wire_ExternalAgent_ConfigOptionUpdateAfterNewSessionResult pins: a
+// deferred downstream config_option_update relays strictly after session/new.
 func TestE2E_Wire_ExternalAgent_ConfigOptionUpdateAfterNewSessionResult(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -683,7 +610,6 @@ func TestE2E_Wire_ExternalAgent_ConfigOptionUpdateAfterNewSessionResult(t *testi
 	require.NoError(t, json.Unmarshal(resp.Result, &newResp))
 	require.NotEmpty(t, newResp.SessionID)
 
-	// The relayed downstream config options must be the FIRST notification after the result.
 	after := client.drainNotifications(1)
 	require.Equal(t, libacp.MethodSessionUpdate, after[0].Method)
 	var cfgNote libacp.SessionNotification
@@ -696,20 +622,17 @@ func TestE2E_Wire_ExternalAgent_ConfigOptionUpdateAfterNewSessionResult(t *testi
 		"the relayed config_option_update must carry the downstream agent's advertised options")
 }
 
-// wireExternalConn is one live production Transport wired to a wireClient over an
-// NDJSON pipe, for tests that need to reconnect a FRESH Transport against the same DB
-// (reproducing a new process / new connection over a persisted session). shutdown
-// tears the connection down; it is idempotent (safe to call manually then again from
-// t.Cleanup).
+// wireExternalConn is one live production Transport wired to a wireClient, for
+// tests that reconnect a fresh Transport against the same DB. shutdown is
+// idempotent.
 type wireExternalConn struct {
 	client   *wireClient
 	shutdown func()
 }
 
-// dialWireTransport spins up a production Transport bound to the given DB and returns
-// a wireClient talking to it plus an idempotent shutdown. The DB is owned by the
-// caller (not closed here), so several connections can share one DB across a
-// disconnect/reconnect. Mirrors the wire setup in TestE2E_Wire_* but reusable.
+// dialWireTransport spins up a production Transport bound to the given DB and
+// returns a wireClient plus an idempotent shutdown. The DB is owned by the
+// caller, not closed here.
 func dialWireTransport(ctx context.Context, t *testing.T, db libdb.DBManager, workspaceID string) *wireExternalConn {
 	t.Helper()
 	agentR, clientW := io.Pipe()
@@ -743,9 +666,8 @@ func dialWireTransport(ctx context.Context, t *testing.T, db libdb.DBManager, wo
 	return &wireExternalConn{client: &wireClient{t: t, rw: clientSide}, shutdown: shutdown}
 }
 
-// drainForCommandMenu reads notifications after a response until an
-// available_commands_update arrives (or the deadline), returning it. It tolerates
-// unrelated notifications (e.g. a usage update) preceding the menu.
+// drainForCommandMenu reads notifications until an available_commands_update
+// arrives (or the deadline), tolerating unrelated notifications ahead of it.
 func drainForCommandMenu(t *testing.T, c *wireClient) libacp.SessionNotification {
 	t.Helper()
 	for i := 0; i < 8; i++ {
@@ -761,27 +683,16 @@ func drainForCommandMenu(t *testing.T, c *wireClient) libacp.SessionNotification
 	return libacp.SessionNotification{}
 }
 
-// TestE2E_Wire_ExternalAgent_ReloadRestoresMenuAndConfigOptions is the regression for
-// the dropped downstream surface after a reconnect. An external session is created,
-// its downstream agent advertises both a slash-command menu and config-option pickers,
-// and a turn is driven; then the whole connection (and with it the downstream process)
-// is torn down. A FRESH Transport on the SAME DB then session/loads the session with NO
-// prompt, and must:
-//   - carry the downstream config options in the session/load RESPONSE (restored from
-//     persistence, since the downstream is not respawned during load), and
-//   - re-emit the downstream command menu STRICTLY AFTER the load result, never before
-//     it (a client drops updates for a session id it has not yet learned).
-//
-// Before this fix a reopened external session had no menu and no pickers until the
-// first prompt lazily respawned the downstream. Driven at the raw wire so the
-// notification-vs-response order is observable.
+// TestE2E_Wire_ExternalAgent_ReloadRestoresMenuAndConfigOptions pins: a fresh
+// Transport's session/load (no prompt) restores config options in its response
+// and re-emits the command menu strictly after the load result.
 func TestE2E_Wire_ExternalAgent_ReloadRestoresMenuAndConfigOptions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "wire-external-reload.db"), runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
-	// Registered so it runs LAST (LIFO) — after every connection's shutdown Cleanup.
+	// Registered last so it runs after every connection's shutdown Cleanup (LIFO).
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
 	const ws = "wire-external-reload-ws"
@@ -791,8 +702,6 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresMenuAndConfigOptions(t *testing.T)
 		"ACP_STUB_ADVERTISE_CONFIG_OPTIONS": "1",
 	})
 
-	// --- Connection 1: create the external session, capture its advertised surface,
-	// drive a turn, then drop the connection (killing the downstream process). ---
 	c1 := dialWireTransport(ctx, t, db, ws)
 
 	resp, _ := c1.client.call(libacp.MethodInitialize, libacp.InitializeRequest{
@@ -814,13 +723,9 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresMenuAndConfigOptions(t *testing.T)
 	require.NotEmpty(t, newResp.ConfigOptions,
 		"the external session/new response must carry the downstream config options")
 
-	// Receiving the relayed menu upstream proves the bridge processed (and persisted)
-	// the downstream available_commands_update.
 	menu := drainForCommandMenu(t, c1.client)
 	require.Equal(t, newResp.SessionID, menu.SessionID)
 
-	// Drive a turn so the reloaded session also has history to replay (the menu
-	// re-emit must coexist with replay).
 	resp, _ = c1.client.call(libacp.MethodSessionPrompt, libacp.PromptRequest{
 		SessionID: newResp.SessionID,
 		Prompt:    []libacp.ContentBlock{libacp.NewTextContent("hello over the wire")},
@@ -829,7 +734,6 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresMenuAndConfigOptions(t *testing.T)
 
 	c1.shutdown() // downstream process dies with the connection
 
-	// --- Connection 2: fresh Transport, same DB. session/load with NO prompt. ---
 	c2 := dialWireTransport(ctx, t, db, ws)
 
 	resp, _ = c2.client.call(libacp.MethodInitialize, libacp.InitializeRequest{
@@ -845,15 +749,12 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresMenuAndConfigOptions(t *testing.T)
 	})
 	require.Nil(t, resp.Error)
 
-	// The load response restores the downstream config options from persistence —
-	// without any prompt having respawned the downstream.
 	var loadResp libacp.LoadSessionResponse
 	require.NoError(t, json.Unmarshal(resp.Result, &loadResp))
 	require.NotEmpty(t, loadResp.ConfigOptions,
 		"session/load must restore the downstream config options from persistence, no prompt required")
 	require.Equal(t, "stub-verbosity", optionByID(t, loadResp.ConfigOptions, "stub-verbosity").ID)
 
-	// The command menu must NOT precede the load result (only replayed history may).
 	for _, n := range notes {
 		require.Equal(t, libacp.MethodSessionUpdate, n.Method, "only history replay precedes the load result")
 		var sn libacp.SessionNotification
@@ -862,7 +763,6 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresMenuAndConfigOptions(t *testing.T)
 			"the downstream command menu must NOT precede the load result")
 	}
 
-	// The persisted menu is re-emitted after the load result — restored with no prompt.
 	reloaded := drainForCommandMenu(t, c2.client)
 	require.Equal(t, newResp.SessionID, reloaded.SessionID,
 		"the re-emitted menu must be remapped onto the upstream session id")
@@ -874,10 +774,8 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresMenuAndConfigOptions(t *testing.T)
 		"the re-emitted menu must carry the downstream agent's advertised commands")
 }
 
-// TestLoopback_NativeSession_LoadUnaffectedByReloadPath is the (b) regression guard:
-// the external reload path must not touch a NATIVE session. A native session/load still
-// carries the chain-engine config options in its response and still emits the contenox
-// slash-command menu after the result, and the loaded entry stays native.
+// TestLoopback_NativeSession_LoadUnaffectedByReloadPath pins: the external
+// reload path does not touch a native session/load.
 func TestLoopback_NativeSession_LoadUnaffectedByReloadPath(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -890,7 +788,6 @@ func TestLoopback_NativeSession_LoadUnaffectedByReloadPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, newResp.ConfigOptions, "a native session/new advertises the chain config options")
 	h.lc.drain(t, 1) // deferred available_commands_update after session/new
-
 	loadResp, err := h.client.LoadSession(ctx, libacp.LoadSessionRequest{
 		SessionID:  newResp.SessionID,
 		Cwd:        cwd,
@@ -912,16 +809,8 @@ func TestLoopback_NativeSession_LoadUnaffectedByReloadPath(t *testing.T) {
 	require.IsType(t, &nativeDriver{}, entry.driver, "a native session/load stays backed by a native driver")
 }
 
-// TestLoopback_ExternalAgent_SlashPromptPassesThroughVerbatim pins passthrough
-// purity: a prompt beginning with "/" on an external session reaches the
-// downstream agent as ordinary prompt text with ZERO contenox interception. It
-// uses "/help now" — the name of a REAL contenox admin command that a NATIVE
-// session intercepts (returning the help listing) — and asserts the reply is the
-// downstream stub's plain "ack", never the contenox help output nor an "unknown
-// command" error. The nativeDriver's slash handling (parseCommand/dispatchCommand)
-// lives only in nativeDriver.Prompt; externalDriver.Prompt forwards the prompt
-// blocks straight to the downstream session/prompt, so it is structurally
-// unreachable for an external session — this proves it behaviorally.
+// TestLoopback_ExternalAgent_SlashPromptPassesThroughVerbatim pins: a "/"
+// prompt on an external session reaches the downstream verbatim, uninterpreted.
 func TestLoopback_ExternalAgent_SlashPromptPassesThroughVerbatim(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -945,8 +834,6 @@ func TestLoopback_ExternalAgent_SlashPromptPassesThroughVerbatim(t *testing.T) {
 	require.Equal(t, libacp.StopReasonEndTurn, promptResp.StopReason,
 		"a slash prompt on an external session ends via the downstream turn, not a contenox command")
 
-	// The stub's plain-prompt path acks with one agent_message_chunk; the bridge
-	// relays it up, plus the post-turn session_info_update.
 	updates := h.lc.drain(t, 2)
 	var acked bool
 	for _, u := range updates {
@@ -964,14 +851,9 @@ func TestLoopback_ExternalAgent_SlashPromptPassesThroughVerbatim(t *testing.T) {
 	require.True(t, acked, "the downstream agent's ack must be relayed upstream")
 }
 
-// TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModeOption is the keystone of
-// the mode pass-through: a downstream agent that advertises session Modes ONLY (here
-// the stub opted into ACP_STUB_ADVERTISE_MODES, Code/Ask with Code current, and no
-// config options of its own — the claude-code-acp shape) surfaces those modes as the
-// single synthetic "Mode" select (id contenox.agent-mode) in the external session/new
-// response, so the toolbar is no longer empty. The synthetic option leads the set,
-// its value id/label come from each availableMode, and its currentValue mirrors the
-// downstream currentModeId.
+// TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModeOption pins: a
+// downstream agent advertising session Modes surfaces them as a leading
+// synthetic "Mode" select mirroring currentModeId.
 func TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModeOption(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -1000,9 +882,6 @@ func TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModeOption(t *testing.
 	require.True(t, configOptionHasValue(mode, "ask"),
 		"each downstream availableMode must be a selectable value")
 
-	// The driver surfaces the synthetic mode option followed by contenox's own HITL
-	// policy select — a modes-only downstream agent advertises no real config options,
-	// and no chain-engine model/think/token selects are folded in.
 	h.tr.sessionMu.Lock()
 	entry := h.tr.sessions[newResp.SessionID]
 	h.tr.sessionMu.Unlock()
@@ -1014,13 +893,9 @@ func TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModeOption(t *testing.
 		"contenox's HITL policy select is appended last, after the downstream surface")
 }
 
-// TestLoopback_ExternalAgent_SetModeOptionRoundTripsToDownstream proves an upstream
-// set_config_option on the synthetic mode id is translated to the downstream agent's
-// session/set_mode, and the confirmed mode round-trips: the upstream response reflects
-// the new mode (proving it went downstream, not mutated locally), and the downstream's
-// confirming current_mode_update is relayed up (translated to a config_option_update)
-// onto the upstream session id — receiving which proves the stub actually received
-// session/set_mode.
+// TestLoopback_ExternalAgent_SetModeOptionRoundTripsToDownstream pins: setting
+// the synthetic mode id translates to downstream session/set_mode and
+// round-trips.
 func TestLoopback_ExternalAgent_SetModeOptionRoundTripsToDownstream(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -1046,8 +921,6 @@ func TestLoopback_ExternalAgent_SetModeOptionRoundTripsToDownstream(t *testing.T
 	require.Equal(t, "ask", optionByID(t, setResp.ConfigOptions, AgentModeConfigOptionID).CurrentValue,
 		"the set_config_option response must carry the downstream agent's confirmed mode")
 
-	// The stub's SetSessionMode emits a confirming current_mode_update, which contenox
-	// translates and relays as a config_option_update onto the upstream session id.
 	updates := h.lc.drain(t, 1)
 	require.Equal(t, libacp.SessionUpdateConfigOption, updates[0].Update.SessionUpdate)
 	require.Equal(t, newResp.SessionID, updates[0].SessionID,
@@ -1055,11 +928,8 @@ func TestLoopback_ExternalAgent_SetModeOptionRoundTripsToDownstream(t *testing.T
 	require.Equal(t, "ask", optionByID(t, updates[0].Update.ConfigOptions, AgentModeConfigOptionID).CurrentValue)
 }
 
-// TestLoopback_ExternalAgent_CurrentModeUpdateRelaysAsConfigOption pins the relay
-// TRANSLATION: a downstream current_mode_update is surfaced to the upstream client as
-// a config_option_update over the synthetic mode id — never as a raw current_mode_update
-// (contenox exposes no first-class client mode toggle on external sessions). Driven by a
-// set on the synthetic id, which makes the stub emit the current_mode_update.
+// TestLoopback_ExternalAgent_CurrentModeUpdateRelaysAsConfigOption pins: a
+// downstream current_mode_update surfaces as a config_option_update, never raw.
 func TestLoopback_ExternalAgent_CurrentModeUpdateRelaysAsConfigOption(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -1097,13 +967,9 @@ func TestLoopback_ExternalAgent_CurrentModeUpdateRelaysAsConfigOption(t *testing
 		"the refreshed synthetic option must still list every downstream mode")
 }
 
-// TestE2E_Wire_ExternalAgent_ReloadRestoresModePicker is the reload regression for the
-// mode picker: an external session whose downstream advertises modes only is created,
-// then the whole connection (and the downstream process) is torn down. A FRESH Transport
-// on the SAME DB session/loads it with NO prompt and must restore the synthetic mode
-// picker in the load RESPONSE — from persistence, since the downstream is not respawned
-// during load. Before this the reopened toolbar lost the mode picker until the first
-// prompt lazily respawned the downstream.
+// TestE2E_Wire_ExternalAgent_ReloadRestoresModePicker pins: session/load (no
+// prompt) on a fresh Transport restores the synthetic mode picker from
+// persistence.
 func TestE2E_Wire_ExternalAgent_ReloadRestoresModePicker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -1117,7 +983,6 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresModePicker(t *testing.T) {
 	agentName := registerStubAgentInDB(t, db, "claude-stub-modes-reload",
 		map[string]string{"ACP_STUB_ADVERTISE_MODES": "1"})
 
-	// --- Connection 1: create the external session, then drop the connection. ---
 	c1 := dialWireTransport(ctx, t, db, ws)
 	resp, _ := c1.client.call(libacp.MethodInitialize, libacp.InitializeRequest{
 		ProtocolVersion: libacp.ProtocolVersion,
@@ -1140,7 +1005,6 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresModePicker(t *testing.T) {
 
 	c1.shutdown() // downstream process dies with the connection
 
-	// --- Connection 2: fresh Transport, same DB. session/load with NO prompt. ---
 	c2 := dialWireTransport(ctx, t, db, ws)
 	resp, _ = c2.client.call(libacp.MethodInitialize, libacp.InitializeRequest{
 		ProtocolVersion: libacp.ProtocolVersion,
@@ -1167,9 +1031,8 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresModePicker(t *testing.T) {
 		"the restored mode picker must still list every downstream mode")
 }
 
-// TestLoopback_NativeSession_NoSyntheticModeOption is the (e) guard: the synthetic
-// downstream-mode option is external-only. A native (chain-engine) session/new still
-// advertises its chain selects and must NEVER carry the contenox.agent-mode option.
+// TestLoopback_NativeSession_NoSyntheticModeOption pins: the synthetic mode
+// option is external-only; a native session/new never carries it.
 func TestLoopback_NativeSession_NoSyntheticModeOption(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -1189,13 +1052,9 @@ func TestLoopback_NativeSession_NoSyntheticModeOption(t *testing.T) {
 	}
 }
 
-// TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModelOption is the model
-// keystone: a downstream agent that advertises the UNSTABLE `models` state ONLY (here
-// the stub opted into ACP_STUB_ADVERTISE_MODELS, Fast/Smart with Fast current, and no
-// modes or config options of its own) surfaces those models as the single synthetic
-// "Model" select (id contenox.agent-model) in the external session/new response. The
-// synthetic option leads the downstream surface, its value id/label come from each
-// availableModel, and its currentValue mirrors the downstream currentModelId.
+// TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModelOption pins: a
+// downstream agent advertising the unstable `models` state surfaces them as a
+// leading synthetic "Model" select mirroring currentModelId.
 func TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModelOption(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -1224,8 +1083,6 @@ func TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModelOption(t *testing
 	require.True(t, configOptionHasValue(model, "stub-model-smart"),
 		"each downstream availableModel must be a selectable value")
 
-	// The driver surfaces the synthetic model option followed by contenox's own HITL
-	// policy select — a models-only downstream agent advertises no real config options.
 	h.tr.sessionMu.Lock()
 	entry := h.tr.sessions[newResp.SessionID]
 	h.tr.sessionMu.Unlock()
@@ -1237,11 +1094,8 @@ func TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModelOption(t *testing
 		"contenox's HITL policy select is appended last, after the downstream surface")
 }
 
-// TestLoopback_ExternalAgent_SessionNewCarriesModeAndModelInOrder pins the full
-// synthetic ordering: a downstream agent advertising BOTH session modes AND the
-// UNSTABLE model picker (and no config options of its own) surfaces them in the fixed
-// order mode, model, then contenox's own HITL policy select last — the toolbar order
-// beam renders (mode, model, downstream options, hitl-policy).
+// TestLoopback_ExternalAgent_SessionNewCarriesModeAndModelInOrder pins: mode,
+// model, then the HITL policy select is the fixed synthetic-option order.
 func TestLoopback_ExternalAgent_SessionNewCarriesModeAndModelInOrder(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -1269,12 +1123,9 @@ func TestLoopback_ExternalAgent_SessionNewCarriesModeAndModelInOrder(t *testing.
 	require.Equal(t, "stub-model-fast", optionByID(t, newResp.ConfigOptions, AgentModelConfigOptionID).CurrentValue)
 }
 
-// TestLoopback_ExternalAgent_SetModelOptionRoundTripsToDownstream proves an upstream
-// set_config_option on the synthetic model id is translated to the downstream agent's
-// UNSTABLE session/set_model, and the confirmed model round-trips: the upstream response
-// reflects the new model (proving it went downstream and was adopted, not mutated
-// blindly). Unlike the mode path there is NO relayed update afterward — the ACP stream
-// carries no model-update kind, so the stateless set_model response is the truth.
+// TestLoopback_ExternalAgent_SetModelOptionRoundTripsToDownstream pins: setting
+// the synthetic model id translates to downstream session/set_model and
+// round-trips, with no relayed update after (ACP has no model-update kind).
 func TestLoopback_ExternalAgent_SetModelOptionRoundTripsToDownstream(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -1303,12 +1154,9 @@ func TestLoopback_ExternalAgent_SetModelOptionRoundTripsToDownstream(t *testing.
 		"the refreshed synthetic option must still list every downstream model")
 }
 
-// TestE2E_Wire_ExternalAgent_ReloadRestoresModelPicker is the reload regression for the
-// model picker: an external session whose downstream advertises the UNSTABLE model state
-// only is created, then the whole connection (and the downstream process) is torn down.
-// A FRESH Transport on the SAME DB session/loads it with NO prompt and must restore the
-// synthetic model picker in the load RESPONSE — from persistence, since the downstream
-// is not respawned during load.
+// TestE2E_Wire_ExternalAgent_ReloadRestoresModelPicker pins: session/load (no
+// prompt) on a fresh Transport restores the synthetic model picker from
+// persistence.
 func TestE2E_Wire_ExternalAgent_ReloadRestoresModelPicker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -1322,7 +1170,6 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresModelPicker(t *testing.T) {
 	agentName := registerStubAgentInDB(t, db, "claude-stub-models-reload",
 		map[string]string{"ACP_STUB_ADVERTISE_MODELS": "1"})
 
-	// --- Connection 1: create the external session, then drop the connection. ---
 	c1 := dialWireTransport(ctx, t, db, ws)
 	resp, _ := c1.client.call(libacp.MethodInitialize, libacp.InitializeRequest{
 		ProtocolVersion: libacp.ProtocolVersion,
@@ -1345,7 +1192,6 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresModelPicker(t *testing.T) {
 
 	c1.shutdown() // downstream process dies with the connection
 
-	// --- Connection 2: fresh Transport, same DB. session/load with NO prompt. ---
 	c2 := dialWireTransport(ctx, t, db, ws)
 	resp, _ = c2.client.call(libacp.MethodInitialize, libacp.InitializeRequest{
 		ProtocolVersion: libacp.ProtocolVersion,
@@ -1372,9 +1218,8 @@ func TestE2E_Wire_ExternalAgent_ReloadRestoresModelPicker(t *testing.T) {
 		"the restored model picker must still list every downstream model")
 }
 
-// TestLoopback_NativeSession_NoSyntheticModelOption is the native guard: the synthetic
-// downstream-model option is external-only. A native (chain-engine) session/new still
-// advertises its chain selects and must NEVER carry the contenox.agent-model option.
+// TestLoopback_NativeSession_NoSyntheticModelOption pins: the synthetic model
+// option is external-only; a native session/new never carries it.
 func TestLoopback_NativeSession_NoSyntheticModelOption(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -1394,19 +1239,13 @@ func TestLoopback_NativeSession_NoSyntheticModelOption(t *testing.T) {
 	}
 }
 
-// TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists proves the
-// external session's contenox-NATIVE HITL policy select: it is appended AFTER the
-// downstream agent's surface, a set on it routes through the native per-session path
-// (validated + stored on the session, resolved for enforcement, and NEVER forwarded to
-// the downstream agent — which knows no such id), and the selection survives a
-// session/load that rebuilds the entry with the sentinel default. This is the picker
-// beam's file-explorer agent-view evaluates its HITL labels against, so exposing it —
-// and keeping its value — is what fixes the labels for external sessions.
+// TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists pins:
+// the HITL policy select is appended last, sets route through the native
+// per-session path (never forwarded downstream), and it survives reload.
 func TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists(t *testing.T) {
 	h := newLoopbackHarness(t)
-	// The HITL policy select validates a concrete pick against the operator's known
-	// presets. Set before any RPC reads them — this happens-before the agent
-	// goroutine's read (a client call writes the request pipe, which synchronizes).
+	// Set before any RPC reads them: a client call writes the request pipe, which
+	// happens-before the agent goroutine's read.
 	h.tr.deps.KnownPolicies = []string{"strict", "dev"}
 	h.tr.deps.HITLDefaultPolicyName = "strict"
 	ctx := context.Background()
@@ -1422,7 +1261,6 @@ func TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists(t 
 		Meta:       agentMetaJSON(agentName),
 	})
 	require.NoError(t, err)
-	// The HITL policy select rides AFTER the downstream agent's own surface.
 	require.Equal(t, "stub-verbosity", newResp.ConfigOptions[0].ID, "the downstream option comes first")
 	require.Equal(t, configIDHITLPolicy, newResp.ConfigOptions[len(newResp.ConfigOptions)-1].ID,
 		"contenox's HITL policy select is appended last, after the downstream surface")
@@ -1430,10 +1268,9 @@ func TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists(t 
 		optionByID(t, newResp.ConfigOptions, configIDHITLPolicy).CurrentValue,
 		"a fresh external session defaults to the sentinel policy")
 
-	// Setting the HITL policy routes through the NATIVE per-session path: stored on the
-	// session and reflected in the response WITHOUT reaching the downstream stub (which
-	// would reject an unknown "hitl-policy" id — the round trip succeeding proves it
-	// never went downstream, and the downstream option below stays put).
+	// Setting the HITL policy routes through the native per-session path: the
+	// downstream stub would reject an unknown "hitl-policy" id, so success here
+	// proves it never went downstream.
 	setResp, err := h.client.SetSessionConfigOption(ctx, libacp.SetSessionConfigOptionRequest{
 		SessionID: newResp.SessionID,
 		ConfigID:  configIDHITLPolicy,
@@ -1445,8 +1282,6 @@ func TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists(t 
 	require.Equal(t, "low", optionByID(t, setResp.ConfigOptions, "stub-verbosity").CurrentValue,
 		"the downstream option is untouched — the HITL set never went downstream")
 
-	// It resolved through the native per-session enforcement path — what prompt.go and
-	// the runtime-mediated (terminal bridge / future fs) gating read.
 	h.tr.sessionMu.Lock()
 	entry := h.tr.sessions[newResp.SessionID]
 	h.tr.sessionMu.Unlock()
@@ -1454,9 +1289,6 @@ func TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists(t 
 	require.Equal(t, "dev", h.tr.resolveSessionHITLPolicy(entry),
 		"the external session's HITL policy resolves to its own name for gating")
 
-	// Reload: session/load rebuilds the entry with the sentinel default;
-	// markExternalIfPersisted must restore the persisted selection and
-	// reloadedConfigOptions must re-advertise the picker with the value intact.
 	store := runtimetypes.New(h.tr.deps.DB.WithoutTransaction())
 	reloaded := &sessionEntry{HITLPolicy: hitlPolicyDefaultValue, driver: &nativeDriver{t: h.tr}}
 	h.tr.markExternalIfPersisted(ctx, store, newResp.SessionID, reloaded)
@@ -1469,12 +1301,9 @@ func TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists(t 
 		"the reloaded picker shows the previously-chosen value, not the sentinel default")
 }
 
-// TestLoopback_NativeSession_PolicySlashCommandStillWorks is the /policy regression
-// guard: the NATIVE slash command still switches the GLOBAL cli.hitl-policy-name KV
-// (the operator-owned default the engine reads live) — distinct from the per-session
-// toolbar HITL picker, which never writes that KV. External sessions instead pass
-// "/policy" through to the downstream agent verbatim (see the passthrough test above);
-// this pins that leaving that passthrough pure did not regress the native command.
+// TestLoopback_NativeSession_PolicySlashCommandStillWorks pins: the native
+// /policy slash command still switches the global cli.hitl-policy-name KV,
+// distinct from the per-session toolbar HITL picker, which never writes it.
 func TestLoopback_NativeSession_PolicySlashCommandStillWorks(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -1497,8 +1326,8 @@ func TestLoopback_NativeSession_PolicySlashCommandStillWorks(t *testing.T) {
 	require.Equal(t, libacp.StopReasonEndTurn, promptResp.StopReason,
 		"a native /policy command resolves as an ended turn, not a downstream prompt")
 
-	// dispatchCommand emits the command's confirmation as an agent_message_chunk and,
-	// because /policy updates config options, a follow-up config_option_update.
+	// dispatchCommand emits the confirmation as an agent_message_chunk, plus a
+	// follow-up config_option_update since /policy updates config options.
 	updates := h.lc.drain(t, 2)
 	var confirmed bool
 	for _, u := range updates {
@@ -1510,8 +1339,7 @@ func TestLoopback_NativeSession_PolicySlashCommandStillWorks(t *testing.T) {
 	}
 	require.True(t, confirmed, "the /policy confirmation must reach the client")
 
-	// The native slash path writes the GLOBAL KV (contrast the per-session toolbar
-	// picker, which the test above proves never does).
+	// The native slash path writes the global KV, unlike the per-session picker.
 	require.Equal(t, "dev", clikv.ReadHITLPolicy(ctx, runtimetypes.New(h.tr.deps.DB.WithoutTransaction())),
 		"native /policy still writes the global cli.hitl-policy-name KV")
 }

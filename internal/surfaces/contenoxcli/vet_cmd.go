@@ -150,9 +150,8 @@ func classifyVetFile(path string, data []byte) vetFileKind {
 		}
 		return vetKindSkip
 	}
-	// Keys must hold ARRAYS, not merely exist: a tokenizer vocab.json maps
-	// every token string to a number, and "tasks"/"rules" are common enough
-	// to be tokens — presence alone misclassified those files as chains.
+	// Keys must hold arrays, not merely exist: a vocab.json can map "tasks" or
+	// "rules" to a token number, which presence-alone would misclassify.
 	if raw, ok := probe["tasks"]; ok && jsonIsArray(raw) {
 		return vetKindChain
 	}
@@ -174,15 +173,10 @@ func jsonIsArray(raw json.RawMessage) bool {
 	return len(trimmed) > 0 && trimmed[0] == '['
 }
 
-// vetOneFile returns nil for a passing file, the teaching error otherwise.
-// The bool reports whether the file was actually vetted (false = skipped).
-//
-// The third return is the file's DIAGNOSTICS: fields that parsed, validate, and
-// still do less than they read like (hitlservice.PolicyDiagnostics). They are not
-// defects — a warned file loads and governs normally — so they never influence
-// the verdict or the exit code. They exist because an envelope is a security
-// document read by an operator who will never open the Go source that records the
-// caveat, and "it parses" must not be mistaken for "it is enforced".
+// vetOneFile returns nil for a passing file, the teaching error otherwise; the
+// bool reports whether the file was actually vetted (false = skipped). The
+// third return is diagnostics: fields that parse and validate but enforce
+// less than they read like. They never influence the verdict or exit code.
 func vetOneFile(path string) (bool, error, []hitlservice.PolicyDiagnostic) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -203,13 +197,8 @@ func vetOneFile(path string) (bool, error, []hitlservice.PolicyDiagnostic) {
 }
 
 // runVetOnFiles vets each file, reporting per-file verdicts to out, and
-// returns how many failed.
-//
-// A file can be both "ok" and warned: the verdict answers "would the runtime
-// accept this?", the warnings answer "does it do what you think?". Both are
-// printed, and only the verdict counts toward the failure tally — a WARN that
-// failed the run would pressure an operator into deleting the field rather than
-// understanding it.
+// returns how many failed. A file can be both "ok" and warned; only the
+// verdict counts toward the failure tally.
 func runVetOnFiles(out io.Writer, files []string) int {
 	failed := 0
 	for _, path := range files {
@@ -223,9 +212,7 @@ func runVetOnFiles(out io.Writer, files []string) int {
 		default:
 			fmt.Fprintf(out, "ok   %s\n", path)
 		}
-		// Warnings print for a passing file AND a failing one: a defect elsewhere
-		// in the document is no reason to withhold the fact that another field is
-		// not enforced.
+		// Warnings print for both passing and failing files.
 		for _, d := range diags {
 			fmt.Fprintf(out, "WARN %s\n%s\n", path, indentVetLines(d.String()))
 		}

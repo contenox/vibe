@@ -13,9 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_VertexEmbedClient_Embed pins the Vertex text-embedding wire shape:
-// POST .../models/{model}:predict with instances[].content, embedding values
-// read from predictions[0].embeddings.values.
+// Pins the Vertex text-embedding wire shape: POST .../models/{model}:predict
+// with instances[].content; values read from predictions[0].embeddings.values.
 func TestUnit_VertexEmbedClient_Embed(t *testing.T) {
 	t.Parallel()
 
@@ -75,9 +74,8 @@ func TestUnit_VertexEmbedClient_NoValues(t *testing.T) {
 	require.Contains(t, err.Error(), "gemini-embedding-001", "error must teach which kind of model to use")
 }
 
-// TestUnit_VertexProvider_EmbedConnectionGate asserts the catalog capability
-// gates the embed connection: advertised models connect, others refuse with a
-// teaching error instead of failing at request time.
+// Advertised models connect; others refuse with a teaching error instead of
+// failing at request time.
 func TestUnit_VertexProvider_EmbedConnectionGate(t *testing.T) {
 	t.Parallel()
 

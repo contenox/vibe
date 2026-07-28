@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
-	"github.com/contenox/beam/internal/libtracker"
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
@@ -29,12 +28,6 @@ type LocalExecResult struct {
 	Command         string  `json:"command,omitempty"`
 	Shell           string  `json:"shell,omitempty"`
 	OS              string  `json:"os,omitempty"`
-	// Filter names the tool-output filter applied to Stdout (S8 / pando
-	// F2-G1); empty when the output is raw. FilterNotice names the filter,
-	// its tier, the measured compression, and the spool path holding the
-	// untouched raw stream.
-	Filter       string `json:"filter,omitempty"`
-	FilterNotice string `json:"filter_notice,omitempty"`
 }
 
 // LocalExecTools runs commands on the local host (same machine as the process).
@@ -47,8 +40,6 @@ type LocalExecTools struct {
 	runner          CommandRunner
 	shell           PlatformShell
 	scrubEnv        func([]string) []string // if set, the default runner scrubs the child environment
-	filterEngine    *OutputFilterEngine     // S8 tool-output filter; nil = raw passthrough
-	filterEngineSet bool
 }
 
 // LocalExecOption configures LocalExecTools.
@@ -102,18 +93,6 @@ func WithLocalExecScrubEnv(scrub func([]string) []string) LocalExecOption {
 	}
 }
 
-// WithLocalExecOutputFilter sets the tool-output filter engine applied to
-// stdout before the inline size cap (S8 / pando-mining.md F2-G1). Pass nil to
-// disable filtering entirely; when the option is omitted a default engine
-// (embedded defaults + project/user config discovery, no accounting tracker)
-// is used.
-func WithLocalExecOutputFilter(engine *OutputFilterEngine) LocalExecOption {
-	return func(h *LocalExecTools) {
-		h.filterEngine = engine
-		h.filterEngineSet = true
-	}
-}
-
 // NewLocalExecTools creates a new LocalExecTools with the given options.
 func NewLocalExecTools(opts ...LocalExecOption) taskengine.ToolsRepo {
 	return NewLocalExecToolsWith(nil, opts...)
@@ -126,9 +105,6 @@ func NewLocalExecToolsWith(runner CommandRunner, opts ...LocalExecOption) tasken
 	}
 	for _, opt := range opts {
 		opt(h)
-	}
-	if !h.filterEngineSet {
-		h.filterEngine = NewOutputFilterEngine(libtracker.NoopTracker{})
 	}
 	if runner == nil {
 		runner = NewOSCommandRunnerWithShellAndScrub(h.shell, h.scrubEnv)
@@ -272,13 +248,11 @@ func (h *LocalExecTools) parseArgs(tools *taskengine.ToolsCall, input any) (comm
 }
 
 func (h *LocalExecTools) checkAllowlist(command string, useShell bool, allowedCommands []string, allowedDir string, deniedCommands []string) error {
-	// Security: forbid shell mode entirely when any policy is active.
-	// It is impossible to statically analyse a raw shell string for pipes (|),
-	// logic operators (&&, ||) and subshells ($(...)), so we refuse to run
-	// a platform shell string when an allowlist, denylist or allowed-dir policy is
-	// configured.  Without this guard, an LLM could bypass
-	// This prevents the model from escaping policy via shell injection, e.g.
-	// with _allowed_commands=git and: {"command":"git status; rm -rf /","shell":true}
+	// Security: shell mode is refused whenever any policy is active. A raw
+	// shell string cannot be statically checked for pipes (|), logic operators
+	// (&&, ||) or subshells ($(...)), so allowing it would let a model escape
+	// an allowlist/denylist/allowed-dir policy via shell injection, e.g. with
+	// _allowed_commands=git and {"command":"git status; rm -rf /","shell":true}.
 	if useShell && (len(allowedCommands) > 0 || allowedDir != "" || len(deniedCommands) > 0) {
 		return fmt.Errorf("local_shell: 'shell: true' is strictly forbidden when security " +
 			"policies (allowlist / denylist / allowed-dir) are active to prevent command injection; " +
@@ -380,11 +354,10 @@ func (h *LocalExecTools) run(ctx context.Context, command string, argsSlice []st
 		limit = val
 	}
 
-	// Rec 4 (tool-hardening.md): never truncate silently. The spool writers keep
-	// a bounded 20%-head/80%-tail slice for the inline result AND spill the FULL
-	// stream to a durable file so the truncated result can name it concretely
-	// ("full output: <path>"). Errors cluster at the tail (gemini-cli's finding),
-	// so the 80% weight is on the end of the stream.
+	// Never truncate silently: the spool writers keep a bounded 20%-head/80%-tail
+	// slice for the inline result and spill the full stream to a durable file so
+	// the truncated result can name it concretely ("full output: <path>").
+	// Errors cluster at the tail, so the 80% weight is on the end of the stream.
 	stdout := newSpoolWriter(ctx, "local_shell-stdout", limit)
 	stderr := newSpoolWriter(ctx, "local_shell-stderr", limit)
 
@@ -415,45 +388,19 @@ func (h *LocalExecTools) run(ctx context.Context, command string, argsSlice []st
 	stdoutPath := stdout.close()
 	stderrPath := stderr.close()
 
-	// S8 (pando-mining.md F2-G1): tool-output filter. Filtering runs BEFORE
-	// the inline size cap so compression buys context headroom — a filtered
-	// stream that fits the budget never triggers the truncation posture at
-	// all. Structural guarantee: only stdout is ever filtered; stderr, the
-	// exit code, and the failure suffix are assembled below, after filtering,
-	// and are untouchable. When a filter rewrites output, the raw stream is
-	// always preserved in the spool and FilterNotice names filter + path.
-	// Filtering applies to complete streams only: a clean run or a plain
-	// non-zero exit (*exec.ExitError). Timeouts, kills, and start failures
-	// leave a partial stream that must stay raw.
-	var filtered *filteredStdout
-	var exitErr *exec.ExitError
-	if runErr == nil || errors.As(runErr, &exitErr) {
-		filtered = filterShellStdout(ctx, h.filterEngine, spec, stdout, stdoutPath, exitCode, limit)
-	}
-	if filtered != nil {
-		result.Stdout = strings.TrimRight(filtered.inline, "\r\n")
-		result.Filter = filtered.name
-		result.FilterNotice = filtered.notice
-	} else {
-		result.Stdout = strings.TrimRight(stdout.inlineOutput(), "\r\n")
-	}
+	result.Stdout = strings.TrimRight(stdout.inlineOutput(), "\r\n")
 	result.Stderr = strings.TrimRight(stderr.inlineOutput(), "\r\n")
 
-	stdoutOverBudget := (filtered == nil && stdout.truncated()) || (filtered != nil && filtered.overBudget)
-	if stdoutOverBudget || stderr.truncated() {
+	if stdout.truncated() || stderr.truncated() {
 		// Never silent: the inline Stdout/Stderr already carry the 20/80 split with
 		// an embedded spool pointer; the Error field names the concrete next step
-		// and its severity (Rec 5). A spool that could not be written is the only
+		// and its severity. A spool that could not be written is the only
 		// genuinely fatal case here (disk full / spool unwritable).
 		result.Success = false
 		result.ExitCode = -1
 		var parts []string
-		if stdoutOverBudget {
-			if filtered != nil {
-				parts = append(parts, fmt.Sprintf("Output truncated: stdout exceeded the context budget (%d bytes) even after filtering by %q; full raw output: %s.", limit, filtered.name, filtered.rawSpoolPath))
-			} else {
-				parts = append(parts, spoolNotice("stdout", stdout, stdoutPath, limit))
-			}
+		if stdout.truncated() {
+			parts = append(parts, spoolNotice("stdout", stdout, stdoutPath, limit))
 		}
 		if stderr.truncated() {
 			parts = append(parts, spoolNotice("stderr", stderr, stderrPath, limit))
@@ -477,8 +424,8 @@ func (h *LocalExecTools) run(ctx context.Context, command string, argsSlice []st
 }
 
 // spoolNotice renders the truncation notice for one stream: it names the exact
-// retrieval step (the spool file path and full size) per Rec 4, and always
-// contains the phrase "context budget" so callers keying on it keep working.
+// retrieval step (the spool file path and full size), and always contains the
+// phrase "context budget" so callers keying on it keep working.
 func spoolNotice(stream string, w *spoolWriter, path string, budget int64) string {
 	if w.spoolErr != nil {
 		return fmt.Sprintf("Output truncated: %s exceeded the context budget (%d bytes); the full output could not be spooled (%v).", stream, budget, w.spoolErr)
@@ -589,8 +536,6 @@ func (h *LocalExecTools) GetSchemasForSupportedTools(ctx context.Context) (map[s
 							"command":          {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
 							"shell":            {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
 							"os":               {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}}},
-							"filter":           {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Name of the output filter applied to stdout, if any"}},
-							"filter_notice":    {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "Filter application notice naming the filter, measured compression, and the spool file holding the raw output"}},
 						},
 					},
 				},
@@ -609,7 +554,7 @@ func (h *LocalExecTools) GetToolsForToolsByName(ctx context.Context, name string
 	}
 	allowedCommands, allowedDir, deniedCommands := h.resolvePolicy(ctx)
 	shellDesc := h.shell.ShellModeDescription()
-	desc := "Run a terminal command on the local host. Returns {stdout, stderr, exitCode, success, durationSeconds}. Output is capped at the remaining context budget; when it exceeds the cap the FULL output is spooled to a file and stdout/stderr instead carry a 20%-head/80%-tail slice (errors cluster at the tail) with an inline pointer, while the error field names the spool concretely ('full output: <path> (N KiB)') so nothing is lost silently. Errors carry a severity marker you can key on: '(recoverable: adjust parameters and retry)' for anything a corrected call fixes (output too large, bad command, denied path), and '(fatal: <reason>)' only when the environment is broken (disk full, spool unwritable) and retrying will not help. For file operations prefer local_fs.* tools: read_file, write_file, sed, find_files. They enforce sandbox boundaries, size limits, and a read-before-write contract that local_shell does not. Use local_shell for operations with no dedicated tool: running tests, builds, git commands, environment inspection. Verbose output from known noisy commands (go test -json, linters, package installs) may be compressed by an output filter; when that happens the result's filter/filter_notice fields name the filter and the spool file holding the untouched raw stdout, and stderr/exit code are never filtered. " + shellDesc
+	desc := "Run a terminal command on the local host. Returns {stdout, stderr, exitCode, success, durationSeconds}. Output is capped at the remaining context budget; when it exceeds the cap the FULL output is spooled to a file and stdout/stderr instead carry a 20%-head/80%-tail slice (errors cluster at the tail) with an inline pointer, while the error field names the spool concretely ('full output: <path> (N KiB)') so nothing is lost silently. Errors carry a severity marker you can key on: '(recoverable: adjust parameters and retry)' for anything a corrected call fixes (output too large, bad command, denied path), and '(fatal: <reason>)' only when the environment is broken (disk full, spool unwritable) and retrying will not help. For file operations prefer local_fs.* tools: read_file, write_file, sed, find_files. They enforce sandbox boundaries, size limits, and a read-before-write contract that local_shell does not. Use local_shell for operations with no dedicated tool: running tests, builds, git commands, environment inspection. " + shellDesc
 	if len(allowedCommands) > 0 {
 		desc += " Allowed commands: " + strings.Join(allowedCommands, ", ") + "."
 	}

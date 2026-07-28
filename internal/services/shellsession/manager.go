@@ -1,20 +1,8 @@
-// Package shellsession manages one persistent PTY-backed shell per chat session.
-//
-// It is the backend of the "Shell Sessions" surface (see
-// docs/development/blueprints/beam/shell-sessions.md). A shell is created on
-// demand, rooted at the session's workspace root, and outlives individual
-// commands: cwd, environment, history, and long-running processes persist
-// between submitted lines. Output is captured in a bounded scrollback ring with
-// monotonically increasing offsets so both the agent (via the read tool) and the
-// live UI stream (via subscribers) can consume "everything since a marker"
-// cheaply and without races.
-//
-// Two reference-only ingestion paths exist, matching the files/@-mention
-// principle: the agent NEVER receives terminal output streamed into its context;
-// it must ask for scrollback explicitly through the read tool, and the human
-// watches the live stream through subscribers. Line input is the approval unit:
-// Run submits exactly one line, gated upstream by the same HITL machinery that
-// wraps every tool.
+// Package shellsession manages one persistent PTY-backed shell per chat
+// session, rooted at the session's workspace root and outliving individual
+// commands. Output lives in a bounded scrollback ring with monotonically
+// increasing offsets; the agent never receives it streamed and must read
+// scrollback explicitly. Run submits exactly one line, gated by HITL.
 package shellsession
 
 import (
@@ -40,10 +28,8 @@ const (
 	runCaptureWindow = 250 * time.Millisecond
 	readChunkBytes   = 32 * 1024
 	subscriberBuffer = 1024
-	// defaultRows/defaultCols size a PTY whose client never reported a geometry.
-	// Width matters: `ls`, `git log --graph`, `go test` output and every
-	// column-aware tool formats against COLUMNS, so a shell that assumes a size
-	// nobody has produces wrapped or truncated output in the panel.
+	// defaultRows/defaultCols size a PTY whose client never reported a
+	// geometry; a wrong width wraps or truncates column-aware tool output.
 	defaultRows = 24
 	defaultCols = 120
 )
@@ -86,18 +72,14 @@ type Manager interface {
 	// Read returns scrollback for sessionID: bytes since `since` when since >= 0,
 	// otherwise the last `tailBytes`. Never creates a shell.
 	Read(sessionID string, since int64, tailBytes int) ReadResult
-	// Resize records the terminal geometry for sessionID and applies it to the
-	// live shell when there is one. It is deliberately total: an unknown session,
-	// a shell that has already been reaped, or a non-positive dimension are all
-	// no-ops rather than errors, because the caller is a UI reporting its own
-	// window and has no useful recovery. The size is remembered even when no
-	// shell exists yet, so the NEXT shell for that session is born at the right
-	// geometry instead of flashing a default one first.
+	// Resize records the terminal geometry for sessionID and applies it to
+	// the live shell when there is one. Total: an unknown session, a reaped
+	// shell, or a non-positive dimension are no-ops, not errors. The size is
+	// remembered even with no live shell, so the next one is born at it.
 	Resize(sessionID string, rows, cols int)
-	// Subscribe registers fn for live output of sessionID. fn is invoked from a
-	// dedicated goroutine (so a slow consumer cannot stall the PTY). The current
-	// scrollback is delivered immediately as a Reset chunk. The returned cancel
-	// stops delivery.
+	// Subscribe registers fn for live output of sessionID, invoked from a
+	// dedicated goroutine so a slow consumer cannot stall the PTY. The
+	// current scrollback is delivered immediately as a Reset chunk.
 	Subscribe(sessionID string, fn func(Chunk)) (cancel func())
 	// Kill terminates and forgets sessionID's shell (session close/delete).
 	Kill(sessionID string)
@@ -111,10 +93,8 @@ type Config struct {
 	// given the tool/request context (which carries the session id). Required.
 	CwdResolver func(ctx context.Context) string
 	// Workspace is the operator's workspace-root allowlist, enforced against
-	// whatever CwdResolver returns. It is the ONLY source of the default root:
-	// an unspecified cwd resolves to Workspace.Default(). Nil means no allowlist
-	// is configured, in which case an absolute cwd is taken as given — the same
-	// rule vfs.ResolveSessionCwd applies everywhere else.
+	// whatever CwdResolver returns; the only source of the default root.
+	// Nil means no allowlist, and an absolute cwd is taken as given.
 	Workspace *vfs.Factory
 	// Shell overrides the shell executable; empty picks a platform default.
 	Shell string
@@ -122,9 +102,9 @@ type Config struct {
 	ScrollbackBytes int
 	// IdleTimeout kills inactive shells (default 15m; <=0 disables reaping).
 	IdleTimeout time.Duration
-	// ScrubEnv, when set, maps the parent process environment to the one a spawned
-	// shell inherits — the credential-leak fix, so serve's own secrets do not ride
-	// into an agent-reachable PTY. Nil (the default) inherits the full environment.
+	// ScrubEnv, when set, maps the parent environment to the one a spawned
+	// shell inherits, so serve's own secrets never reach an agent-reachable
+	// PTY. Nil inherits the full environment.
 	ScrubEnv func([]string) []string
 }
 
@@ -136,9 +116,8 @@ type manager struct {
 	mu     sync.Mutex
 	shells map[string]*shell
 	subs   map[string][]*subscriber
-	// sizes is the last geometry each session reported, kept independently of the
-	// shell so it survives idle reaping (the panel is still open; the next run
-	// respawns at the size the window actually has).
+	// sizes is the last geometry each session reported, kept independently
+	// of the shell so it survives idle reaping.
 	sizes map[string]ptySize
 
 	stop     chan struct{}
@@ -170,20 +149,11 @@ func NewManager(cfg Config) Manager {
 	return m
 }
 
-// resolveCwd decides which directory a new shell is rooted at. A PTY is the
-// most consequential consumer of that decision in the process — it is a live
-// interactive foothold, not a single contained read — so this does not trust
-// CwdResolver's answer just because a resolver was supplied. CwdResolver is a
-// pluggable func(ctx) string with no contract that its result was ever checked
-// against anything; the check belongs where the consequence is.
-//
-// The rules are not re-derived here: vfs.ResolveSessionCwd is the ONE decision
-// procedure (absolute-path guard, then the ""/"/" sentinel for "unspecified",
-// then the allowlist), shared with the ACP session paths and fleet dispatch, so
-// the envelope cannot be enforced in one surface and skipped in this one. The
-// fallback is "" because Workspace already carries the default root; a manager
-// with no allowlist has no default of its own to offer, and an empty cwd then
-// leaves the shell in the serving process's working directory as before.
+// resolveCwd decides which directory a new shell is rooted at. A PTY is a
+// live interactive foothold, so the result is validated through
+// vfs.ResolveSessionCwd — the same procedure the ACP session paths and
+// fleet dispatch use — rather than trusting CwdResolver's answer directly.
+// The fallback is "" since Workspace already carries the default root.
 func (m *manager) resolveCwd(ctx context.Context) (string, error) {
 	cwd := ""
 	if m.cfg.CwdResolver != nil {
@@ -201,8 +171,7 @@ func (m *manager) Run(ctx context.Context, sessionID, line string) (RunResult, e
 	if err := sh.submit(line); err != nil {
 		return RunResult{}, err
 	}
-	// Capture a brief window of output for the immediate snapshot, then return —
-	// long-running commands keep streaming to subscribers and the scrollback.
+	// Capture a brief window for the snapshot; long-running output keeps streaming to subscribers.
 	select {
 	case <-time.After(runCaptureWindow):
 	case <-ctx.Done():
@@ -235,8 +204,7 @@ func (m *manager) Subscribe(sessionID string, fn func(Chunk)) func() {
 	sh, ok := m.shells[sessionID]
 	m.mu.Unlock()
 
-	// Deliver the current scrollback immediately as a Reset so a reconnecting
-	// client (or a freshly opened panel) repopulates from a clean slate.
+	// Deliver the current scrollback as a Reset so a reconnecting client repopulates cleanly.
 	data, from, _ := []byte(nil), int64(0), int64(0)
 	if ok {
 		data, from, _ = sh.sb.snapshot()
@@ -271,8 +239,7 @@ func (m *manager) Resize(sessionID string, rows, cols int) {
 	sh := m.shells[sessionID]
 	m.mu.Unlock()
 	if had && prev == size {
-		// Nothing changed: skip the ioctl so a client that reports its geometry on
-		// every run does not spray SIGWINCH at whatever is running in there.
+		// Nothing changed: skip the ioctl so a client reporting geometry every run does not spray SIGWINCH.
 		return
 	}
 	if sh == nil || sh.closed.Load() {
@@ -312,8 +279,7 @@ func (m *manager) ensureShell(ctx context.Context, sessionID string) (*shell, bo
 	if err != nil {
 		return nil, false, err
 	}
-	// Born at the session's last known geometry: a shell respawned after an idle
-	// reap must not silently fall back to the default width the client never had.
+	// Born at the session's last known geometry, not the default.
 	m.mu.Lock()
 	size, ok := m.sizes[sessionID]
 	m.mu.Unlock()
@@ -366,9 +332,7 @@ func (m *manager) killShell(sessionID string, dropSubs bool) {
 	if dropSubs {
 		subs = m.subs[sessionID]
 		delete(m.subs, sessionID)
-		// The session itself is going away (close/delete/shutdown), so its
-		// remembered geometry goes with it. An idle reap passes false and keeps it:
-		// the panel is still open at that size.
+		// Only dropped when the session is going away; idle reap passes false and keeps it.
 		delete(m.sizes, sessionID)
 	}
 	m.mu.Unlock()
@@ -405,8 +369,7 @@ func (m *manager) reap() {
 				}
 			}
 			m.mu.Unlock()
-			// Idle-reaped shells keep their subscribers: the session may still be
-			// open in the UI and a later run re-streams from a fresh shell.
+			// Idle-reaped shells keep their subscribers; a later run re-streams from a fresh shell.
 			for _, id := range idle {
 				m.killShell(id, false)
 			}

@@ -2,10 +2,7 @@ package acpsvc
 
 import "testing"
 
-// The seeded chains resolve execute_config.model via
-// {{var:alt_model|var:default_model}}, so default_model must be present
-// whenever any model is known, or chain execution fails despite a
-// configured default.
+// TestUnit_ChainTemplateVars_SeedsDefaultModelAndProvider pins: default_model/default_provider are always set when a model is known.
 func TestUnit_ChainTemplateVars_SeedsDefaultModelAndProvider(t *testing.T) {
 	tr := &Transport{defaultModel: "gemma4-e4b", defaultProvider: "llama"}
 	sess := &sessionEntry{}
@@ -40,13 +37,7 @@ func TestUnit_ChainTemplateVars_FallsBackToSessionSelection(t *testing.T) {
 	}
 }
 
-// A session model selection (e.g. Zed's model dropdown) is session-only and does
-// not touch the transport-configured default. default_model/default_provider —
-// the recovery fallback for {{var:alt_model|var:default_model}} — must follow the
-// session-effective selection, not the (possibly stale/unreachable) configured
-// default, or recovery/summarise_failure resolves a provider with no models in
-// runtime state while the main tasks succeed on the session model. Power users who
-// want a distinct recovery model still get it via alt_model, which wins the macro.
+// TestUnit_ChainTemplateVars_SessionSelectionSeedsRecoveryFallback pins: the recovery fallback follows the session's model selection, not the stale configured default.
 func TestUnit_ChainTemplateVars_SessionSelectionSeedsRecoveryFallback(t *testing.T) {
 	tr := &Transport{defaultModel: "gemma4-e4b", defaultProvider: "llama", defaultAltModel: "claude-sonnet-5", defaultAltProvider: "anthropic"}
 	sess := &sessionEntry{Provider: "openai", Model: "gpt-5-mini"}

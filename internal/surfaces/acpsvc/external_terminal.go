@@ -15,71 +15,24 @@ import (
 )
 
 // This file implements the terminal/* client-callback family for the external-
-// agent bridge (externalBridge, external.go). When a DOWNSTREAM agent (e.g.
-// claude-code-acp) runs a shell command, it calls terminal/create + terminal/*
-// on its client — which here is the runtime. Instead of the downstream agent
-// running the command inside its own process (surfacing only as a raw tool_call
-// card, with beam's terminal panel left empty), the bridge routes the command
-// through the RUNTIME's own shell-session machinery (runtime/shellsession) — the
-// exact surface the `!` passthrough and the native shell_session tools use. The
-// command's output therefore also streams live into beam's terminal panel via
-// the contenox.terminalOutput session/update path (see terminal.go), so the user
-// watches a foreign agent's shell activity exactly as they watch a native turn's.
+// agent bridge: a downstream agent's shell command routes through the
+// runtime's own shell-session machinery (the same surface the `!` passthrough
+// uses) instead of running inside the downstream process, streaming live to
+// the upstream panel via contenox.terminalOutput with the bridge's internal
+// START/END framing stripped.
 //
-// Unlike the `!` passthrough — which forwards the shell's RAW scrollback verbatim
-// (the user typed that line, so its echo and prompt belong on screen) — the panel
-// feed for an agent's terminal is FILTERED per-terminal by bt.watch: only the
-// bytes between the bridge's START/END markers reach the panel, so the wrapper
-// line, the markers, and their erase sequences (internal bookkeeping) are never
-// shown. beam's panel is an append-only log view that does not process cursor
-// controls, so relying on the `\033[2K\r` erase to hide the markers would leak
-// them; the markers are instead used only to slice, never forwarded.
-//
-// # Mapping onto the shared session shell
-//
-// runtime/shellsession gives ONE persistent PTY-backed shell per chat session
-// (keyed by the internal session id) and a line-oriented Run — it has no native
-// per-command exit code and no per-terminal isolation. So each terminal/create
-// submits one wrapped line to the session's shell and a bridgeTerminal tracks
-// just that command's slice of the shared scrollback:
-//
-//   - a START marker (printed, then erased from the VT-rendered panel) precedes
-//     the command so its output is isolated from the echoed input line regardless
-//     of PTY line-wrapping;
-//   - the command runs in a subshell so `$?` is its own exit status;
-//   - an END marker carries that exit code.
-//
-// Both markers embed a runtime value (`printf '…%d' "$?"`) so the format string
-// as it appears in the ECHOED input line never matches the OUTPUT regex
-// (`marker <digits>`) — only the printed marker does. A per-terminal scrollback
-// watcher (event-driven off shellsession subscriptions, never a timer poll)
-// detects the END marker to resolve WaitForTerminalExit and recover the exit
-// code. Because the shell is shared and persistent, concurrent terminals in one
-// session serialize through the same PTY — the same property the `!` passthrough
-// and native shell_session tools already have; it is a documented consequence of
-// the shell-session design, not a shortcut here.
-//
-// # Gating
-//
-// A foreign agent's terminal command runs on the runtime's shell exactly like
-// the `!` passthrough (direct shellsession.Run, no additional contenox HITL gate).
-// The external path never runs through contenox's chain engine or hitlservice, so
-// there is no native HITL machinery to invoke; the authorization for the agent's
-// tool USE is the downstream agent's own session/request_permission, which the
-// bridge already forwards to the upstream user (RequestPermission, external.go) —
-// the external analogue of the native tool-call HITL approval. Adding a second,
-// contenox-side gate here would be inventing new policy, so it is deliberately not
-// done. This mirrors the existing native gating precisely.
+// The session shell is one persistent PTY per chat session, so concurrent
+// terminals in one session serialize through it. No additional contenox HITL
+// gate applies here: authorization is the downstream agent's own
+// session/request_permission, already forwarded upstream (external.go).
 
-// terminalEraseSeq clears the current line and returns the cursor to column 0.
-// Emitted around each marker so a VT-rendering panel (beam) shows nothing while
-// the raw scrollback still carries the marker bytes for the bridge to parse.
+// terminalEraseSeq clears the current line so a VT panel shows nothing for a
+// marker while its bytes remain in the raw scrollback for the bridge to parse.
 const terminalEraseSeq = "\x1b[2K\r"
 
-// bridgeTerminal tracks one downstream-created terminal: its slice of the shared
-// session scrollback and its resolved exit status. Its watch goroutine owns the
-// scrollback subscription and lives until the terminal exits, is killed/released,
-// or the connection tears down.
+// bridgeTerminal tracks one downstream-created terminal: its slice of the
+// shared scrollback and resolved exit status. Its watch goroutine owns the
+// scrollback subscription for the terminal's lifetime.
 type bridgeTerminal struct {
 	id          string
 	internalID  string // runtime shell-session id (the upstream session's internal id)
@@ -117,11 +70,9 @@ func (bt *bridgeTerminal) isExited() bool {
 	return bt.exited
 }
 
-// locate slices the command's output out of the raw scrollback (read since
-// startOffset) using the START/END markers, and, when the END marker is present,
-// parses the exit code. sawStart is false when the START marker has aged out of
-// the bounded scrollback ring (a > ring-capacity command) — the output is then
-// truncated. sawEnd is false while the command is still running.
+// locate slices the command's output from raw using the START/END markers,
+// parsing the exit code when END is present. sawStart is false once START has
+// aged out of the scrollback ring; sawEnd is false while still running.
 func (bt *bridgeTerminal) locate(raw string) (out string, sawStart, sawEnd bool, code *int) {
 	lo := 0
 	if m := bt.startRe.FindStringIndex(raw); m != nil {
@@ -140,33 +91,20 @@ func (bt *bridgeTerminal) locate(raw string) (out string, sawStart, sawEnd bool,
 		hi = lo
 	}
 	out = raw[lo:hi]
-	// Strip the START marker's own trailing erase sequence and the newline the END
-	// printf injects ahead of its marker, leaving just the command's real output.
+	// Strip the START erase sequence and the newline END's printf injects ahead
+	// of its marker.
 	out = strings.TrimPrefix(out, terminalEraseSeq)
 	out = strings.TrimSuffix(out, "\n")
 	return out, sawStart, sawEnd, code
 }
 
-// watch resolves the terminal's exit AND feeds the upstream client's terminal
-// panel with the command's REAL output, both driven off the same START/END marker
-// locate. It is event-driven: a shellsession subscription pokes signal on each
-// output flush and the loop rescans the shared scrollback since startOffset, so
-// there is no timer poll.
-//
-// Panel feed: only the bytes BETWEEN the markers are forwarded (via panel), so the
-// echoed wrapper line, the START/END markers, and their `\033[2K\r` erase
-// sequences — the bridge's internal framing — never reach beam's append-only
-// terminal panel; it shows just what the command printed. Because locate is rerun
-// against the WHOLE accumulated scrollback each poke (not per-chunk), a marker
-// split across two flushes is handled naturally, and output streams incrementally
-// as it arrives (only the newly-located bytes are sent). While the END marker is
-// not yet fully present a trailing window (panelGuard) is held back so a
-// half-written marker is never forwarded — it flushes the instant the marker
-// completes.
-//
-// It exits when the END marker appears (recording the exit code AFTER forwarding
-// the last of the output), when done is closed by another lifecycle path
-// (kill/release/teardown), or when the connection ends.
+// watch resolves the terminal's exit and streams its real output to the
+// upstream panel, both driven off locate. It is event-driven: a shellsession
+// subscription wakes it on each output flush and it rescans the full
+// scrollback, so a marker split across flushes is handled naturally.
+// panelGuard holds back a trailing window so a half-written END marker is
+// never forwarded. It exits on the END marker, on done closing (kill/release/
+// teardown), or when the connection ends.
 func (bt *bridgeTerminal) watch(mgr shellsession.Manager, connDone <-chan struct{}, panel func(string)) {
 	signal := make(chan struct{}, 1)
 	cancel := mgr.Subscribe(bt.internalID, func(shellsession.Chunk) {
@@ -184,8 +122,7 @@ func (bt *bridgeTerminal) watch(mgr shellsession.Manager, connDone <-chan struct
 		if panel != nil && sawStart {
 			end := len(out)
 			if !sawEnd {
-				// The END marker may be only partially in the scrollback; hold back a
-				// trailing window that could be a nascent marker so framing never leaks.
+				// Hold back panelGuard bytes: END may still be partially written.
 				if end -= bt.panelGuard; end < 0 {
 					end = 0
 				}
@@ -211,19 +148,14 @@ func (bt *bridgeTerminal) watch(mgr shellsession.Manager, connDone <-chan struct
 	}
 }
 
-// CreateTerminal spawns the downstream agent's command in the RUNTIME's session
-// shell (rooted at the session workspace via the same cwd resolver the native
-// tools use) and returns a terminal id the agent tracks with the other terminal/*
-// calls. The command's REAL output also streams live to the upstream client's
-// terminal panel, but through the per-terminal FILTERED forwarder in bt.watch (not
-// the raw session subscription): only the bytes between the START/END markers are
-// forwarded, so the bridge's wrapper line and framing markers never reach the
-// append-only panel. A clean `$ <command>` header is emitted first so the panel
-// reads like a terminal session.
+// CreateTerminal spawns the downstream agent's command in the runtime's session
+// shell and returns a terminal id for the other terminal/* calls. Real output
+// streams live to the upstream terminal panel through the per-terminal filtered
+// forwarder in bt.watch, not the raw session subscription, so the bridge's
+// wrapper line and framing markers never reach it.
 func (b *externalBridge) CreateTerminal(_ context.Context, req libacp.CreateTerminalRequest) (libacp.CreateTerminalResponse, error) {
-	// A downstream agent only calls terminal/* while running a prompt turn, which is
-	// driven by an attached upstream transport — so the relay target is the connection
-	// hosting this turn. Detached (no turn in flight) there is nothing to run against.
+	// terminal/* only arrives mid-turn, when an upstream transport is attached;
+	// detached, there is nothing to run the command against.
 	t := b.transport()
 	if t == nil {
 		return libacp.CreateTerminalResponse{}, libacp.MethodNotFound(libacp.MethodTerminalCreate)
@@ -238,21 +170,17 @@ func (b *externalBridge) CreateTerminal(_ context.Context, req libacp.CreateTerm
 	}
 	internalID := entry.InternalSessionID
 
-	// Drop any RAW session-scoped panel subscription so it cannot forward this
-	// terminal's wrapper line and framing markers verbatim. An external session
-	// never subscribes at session/new, but session/load and session/resume do
-	// (unconditionally, even for external sessions), so a reopened session can carry
-	// a raw subscription; remove it and let the per-terminal FILTERED forwarder in
-	// bt.watch (below) be the sole feed for the panel. The `!` passthrough
-	// re-subscribes on its own next run, unaffected.
+	// session/load and session/resume subscribe a raw panel feed even for
+	// external sessions, which would leak this terminal's wrapper line; drop it
+	// so bt.watch's filtered forwarder is the sole panel feed.
 	t.unsubscribeTerminal(b.upstreamID)
 
 	nonce := strings.ReplaceAll(uuid.NewString(), "-", "")
 	startTok := "CTXS" + nonce
 	endTok := "CTXE" + nonce
 
-	// Capture the scrollback boundary BEFORE submitting, so the START marker (and
-	// hence this command's output) is always at or after it.
+	// Capture the scrollback boundary before submitting so this command's output
+	// is always at or after it.
 	startOffset := mgr.Read(internalID, 0, 0).NextOffset
 
 	var byteLimit int64
@@ -261,9 +189,8 @@ func (b *externalBridge) CreateTerminal(_ context.Context, req libacp.CreateTerm
 	}
 
 	line := composeTerminalCommand(req, startTok, endTok)
-	// shellsession.Run reads the internal session id from ctx to root a fresh shell
-	// at the session workspace (exactly like handleTerminalRun); bind it to connCtx
-	// so its brief capture window respects connection lifetime.
+	// shellsession.Run reads the session id from ctx to root the shell at the
+	// workspace; bind to connCtx so the capture window respects connection lifetime.
 	runCtx := context.WithValue(t.connCtx, runtimetypes.SessionIDContextKey, internalID)
 	if _, err := mgr.Run(runCtx, internalID, line); err != nil {
 		return libacp.CreateTerminalResponse{}, libacp.InternalError("acpsvc terminal: run: " + err.Error())
@@ -276,11 +203,8 @@ func (b *externalBridge) CreateTerminal(_ context.Context, req libacp.CreateTerm
 		startRe:     startMarkerRegexp(startTok),
 		endRe:       endMarkerRegexp(endTok),
 		byteLimit:   byteLimit,
-		// While the END marker is not yet fully in the scrollback its longest
-		// unmatched printed prefix is "\n" + endTok + " " (token + separating space,
-		// before the exit-code digit that completes the regex). Hold back at least
-		// that many trailing bytes from the panel so a half-written marker never
-		// leaks; the slack keeps it safe against the leading newline and any digits.
+		// panelGuard must cover the END marker's longest unmatched printed prefix
+		// ("\n" + endTok + " ") plus slack for the exit-code digits.
 		panelGuard: len(endTok) + 16,
 		done:       make(chan struct{}),
 	}
@@ -291,9 +215,7 @@ func (b *externalBridge) CreateTerminal(_ context.Context, req libacp.CreateTerm
 	b.terminals[bt.id] = bt
 	b.termMu.Unlock()
 
-	// Emit a clean `$ <command>` header (the AGENT's requested command, never the
-	// bridge's bash -c wrapper) before the output flows, so the panel shows what ran.
-	// Sent here, on the request goroutine, strictly before bt.watch starts forwarding
+	// Sent on the request goroutine, strictly before bt.watch starts forwarding
 	// output, so the header always precedes the command's output on the wire.
 	display := req.Command
 	if len(req.Args) > 0 {
@@ -309,9 +231,8 @@ func (b *externalBridge) CreateTerminal(_ context.Context, req libacp.CreateTerm
 }
 
 // TerminalOutput returns the terminal's current output and, once known, its exit
-// status. Output is sliced from the shared scrollback by the terminal's markers
-// and truncated (tail-kept) to the request's byte limit when one was set; a START
-// marker aged out of the bounded ring also reports truncated.
+// status. Output is truncated (tail-kept) to the request's byte limit, and a
+// START marker aged out of the scrollback ring also reports truncated.
 func (b *externalBridge) TerminalOutput(_ context.Context, req libacp.TerminalOutputRequest) (libacp.TerminalOutputResponse, error) {
 	t := b.transport()
 	if t == nil {
@@ -347,10 +268,9 @@ func (b *externalBridge) TerminalOutput(_ context.Context, req libacp.TerminalOu
 	return resp, nil
 }
 
-// WaitForTerminalExit blocks until the command exits (its END marker is observed),
-// the terminal is killed/released, or the connection tears down, then returns the
-// exit code or signal. A downstream $/cancel_request (or connection drop) cancels
-// ctx and the wait returns that error, leaving the command untouched.
+// WaitForTerminalExit blocks until the command exits, is killed/released, or the
+// connection tears down, then returns the exit code or signal. A cancelled ctx
+// returns that error, leaving the command untouched.
 func (b *externalBridge) WaitForTerminalExit(ctx context.Context, req libacp.WaitForTerminalExitRequest) (libacp.WaitForTerminalExitResponse, error) {
 	bt, err := b.lookupTerminal(req.TerminalID)
 	if err != nil {
@@ -366,12 +286,9 @@ func (b *externalBridge) WaitForTerminalExit(ctx context.Context, req libacp.Wai
 	return libacp.WaitForTerminalExitResponse{ExitCode: bt.exitCode, Signal: bt.signal}, nil
 }
 
-// KillTerminal interrupts the running command. The session shell is shared and
-// persistent, so the only per-command lever is Ctrl-C (SIGINT) typed into the PTY
-// — never a whole-shell kill, which would take down the panel and any sibling
-// terminals. A command that ignores SIGINT keeps running in the shell; this is a
-// documented limit of the shared-shell model. The terminal is then resolved with
-// a SIGINT signal so WaitForTerminalExit returns.
+// KillTerminal interrupts the running command via Ctrl-C typed into the shared
+// PTY, never a whole-shell kill (which would take down sibling terminals). A
+// command that ignores SIGINT keeps running; this is a shared-shell limit.
 func (b *externalBridge) KillTerminal(_ context.Context, req libacp.KillTerminalRequest) (libacp.KillTerminalResponse, error) {
 	bt, err := b.lookupTerminal(req.TerminalID)
 	if err != nil {
@@ -385,9 +302,8 @@ func (b *externalBridge) KillTerminal(_ context.Context, req libacp.KillTerminal
 	return libacp.KillTerminalResponse{}, nil
 }
 
-// ReleaseTerminal drops the terminal and frees its watcher. Per spec a still-
-// running command is killed on release, so an unresolved terminal is interrupted
-// (Ctrl-C, as in KillTerminal) before its handle is forgotten.
+// ReleaseTerminal drops the terminal and frees its watcher. A still-running
+// command is killed (Ctrl-C, as in KillTerminal) before its handle is forgotten.
 func (b *externalBridge) ReleaseTerminal(_ context.Context, req libacp.ReleaseTerminalRequest) (libacp.ReleaseTerminalResponse, error) {
 	bt, ok := b.removeTerminal(req.TerminalID)
 	if !ok {
@@ -398,17 +314,15 @@ func (b *externalBridge) ReleaseTerminal(_ context.Context, req libacp.ReleaseTe
 		sig := "SIGINT"
 		bt.finish(nil, &sig)
 	} else {
-		// Already exited: finish is a no-op, but close done idempotently so the
-		// watcher goroutine has certainly stopped.
+		// finish is a no-op here; this just ensures done is closed.
 		bt.finish(bt.exitCode, bt.signal)
 	}
 	return libacp.ReleaseTerminalResponse{}, nil
 }
 
 // closeAllTerminals tears down every live terminal for this bridge. Called from
-// externalDriver.Close (explicit session/close or stdio Transport.Close); the
-// serve WebSocket path, which never calls Close, is covered by each watcher's
-// connCtx.Done() branch instead.
+// externalDriver.Close; the serve WebSocket path (which never calls Close) is
+// covered instead by each watcher's connCtx.Done() branch.
 func (b *externalBridge) closeAllTerminals() {
 	b.termMu.Lock()
 	terms := make([]*bridgeTerminal, 0, len(b.terminals))
@@ -458,36 +372,19 @@ func (b *externalBridge) interrupt(bt *bridgeTerminal) {
 	_, _ = mgr.Run(runCtx, bt.internalID, "\x03")
 }
 
-// composeTerminalCommand builds the single shell line submitted for a terminal:
-// START marker, the command (in a subshell so `$?` is the command's exit, under
-// `env` for the request env and a `cd` for its cwd so neither leaks into the
-// persistent shell), then the exit-code END marker. The markers are wrapped in
-// erase sequences so a VT-rendered panel hides them; their bytes remain in the
-// raw scrollback for the watcher to parse.
+// composeTerminalCommand builds the shell line for a terminal: an erase-wrapped
+// START marker, the command in a subshell (under `env`/`cd` so neither leaks
+// into the persistent shell), then the exit-code END marker.
 //
-// The command has two request shapes, per the ACP terminal spec and how real
-// adapters use it:
-//
-//   - Args EMPTY: req.Command is a full SHELL COMMAND LINE. This is what
-//     claude-code-acp sends — e.g. "echo hello", "git status -s | head" — the
-//     `command` field carries a bash line, not an execvp program. It MUST run
-//     through a shell so word-splitting, pipes, and redirects work; quoting it as
-//     a single execvp atom (`'echo hello'`) makes env/exec look for a program
-//     literally named "echo hello" and fail with exit 127. So it runs as
-//     `bash -c <line>`, with the whole subshell capturing its exit code.
-//   - Args NON-EMPTY: execvp-style program + argv — the command and each arg are
-//     quoted separately and run directly, no shell.
-//
-// env (when present) applies to the whole invocation in both shapes; cwd is
-// entered inside the subshell so neither leaks into the persistent session shell.
+// With Args empty, req.Command is a full shell command line and must run via
+// `bash -c` so pipes/redirects/word-splitting work — quoting it as a single
+// execvp atom fails with exit 127. With Args non-empty it is execvp-style,
+// each atom quoted separately, no shell.
 func composeTerminalCommand(req libacp.CreateTerminalRequest, startTok, endTok string) string {
 	var exec string
 	if len(req.Args) == 0 {
-		// A shell command line: hand it to bash verbatim so pipes/redirects/word-
-		// splitting all work.
 		exec = "bash -c " + shellQuoteArg(req.Command)
 	} else {
-		// execvp-style: program + argv, each a separate quoted atom.
 		parts := make([]string, 0, 1+len(req.Args))
 		parts = append(parts, shellQuoteArg(req.Command))
 		for _, a := range req.Args {
@@ -529,11 +426,10 @@ func shellQuoteArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// startMarkerRegexp / endMarkerRegexp compile the regexes that locate a marker's
-// PRINTED form in the scrollback. Both require a digit immediately after the token
-// (the `%d`-substituted value), so the marker's format string as it appears in the
-// echoed input line — which carries a literal `%d`, not a digit — never matches;
-// only the printed output does. The END regex captures the exit code.
+// startMarkerRegexp / endMarkerRegexp locate a marker's printed form: both
+// require a digit right after the token, so the `%d` in the echoed format
+// string never matches — only the printed output does. The END regex captures
+// the exit code.
 func startMarkerRegexp(tok string) *regexp.Regexp {
 	return regexp.MustCompile(regexp.QuoteMeta(tok) + `(\d)`)
 }

@@ -5,11 +5,7 @@ import (
 	"testing"
 )
 
-// applyOps runs a scripted sequence of semantic operations — the same ones
-// the app-shell binds keys to. Ops are written as "name" or "name:arg" so a
-// table row reads like the keystrokes it stands for; "ins" types its
-// argument one rune at a time (the InsertRune path), "str" pastes it whole
-// (the InsertString path).
+// applyOps runs ops written as "name" or "name:arg"; "ins" types its argument rune by rune, "str" pastes it whole.
 func applyOps(t *testing.T, c *Composer, ops []string) {
 	t.Helper()
 	for _, op := range ops {
@@ -55,11 +51,7 @@ func applyOps(t *testing.T, c *Composer, ops []string) {
 	}
 }
 
-// editCase is one scripted edit: a starting draft (caret at its end, as
-// SetDraft leaves it), the ops, and the buffer plus caret they must produce.
-// wantRow/wantCol are the caret as CursorPos reports it at width 40, where
-// none of these drafts wrap — that is what pins the CELL math, which rune
-// offsets alone would not.
+// editCase is one scripted edit; wantRow/wantCol pin CursorPos at width 40, where none of these drafts wrap.
 type editCase struct {
 	name    string
 	start   string
@@ -71,9 +63,8 @@ type editCase struct {
 	wantCol int
 }
 
-// TestUnit_EditingOps is the multiline editing table. Wide runes and emoji
-// sit on the operation boundaries on purpose: the predecessor TUI panicked
-// slicing a multibyte string, so every case here is also a no-panic case.
+// TestUnit_EditingOps is the multiline editing table; wide runes and emoji
+// sit on operation boundaries so every case also pins no-panic behavior.
 func TestUnit_EditingOps(t *testing.T) {
 	cases := []editCase{
 		{
@@ -244,9 +235,7 @@ func TestUnit_EditingOps(t *testing.T) {
 	}
 }
 
-// TestUnit_PasteIsOneLiteralBlock is blueprint MVP item 3: a multi-line
-// paste lands as one insertion, keeps its shape, and is never re-read as a
-// submit or as a slash/shell trigger.
+// TestUnit_PasteIsOneLiteralBlock pins that a multi-line paste lands as one insertion and is never re-read as a trigger.
 func TestUnit_PasteIsOneLiteralBlock(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -314,9 +303,7 @@ func TestUnit_PasteIsOneLiteralBlock(t *testing.T) {
 	}
 }
 
-// TestUnit_PastedTriggersSubmitAsOneChatTurn closes the loop on item 3: the
-// pasted block classifies by the buffer as a whole, so an embedded `/help`
-// or `!rm` line cannot turn into a command or a shell run.
+// TestUnit_PastedTriggersSubmitAsOneChatTurn pins that a pasted block classifies as a whole, not by an embedded trigger line.
 func TestUnit_PastedTriggersSubmitAsOneChatTurn(t *testing.T) {
 	const paste = "look at this:\n/help\n!rm -rf /\n"
 
@@ -334,9 +321,7 @@ func TestUnit_PastedTriggersSubmitAsOneChatTurn(t *testing.T) {
 	}
 }
 
-// TestUnit_Classify is the trigger table: shell before slash, a bare prefix
-// falling through as chat, and the slash rule kept no stricter than the
-// server's parseCommand trigger.
+// TestUnit_Classify pins the trigger table: shell before slash, bare prefix falls through as chat.
 func TestUnit_Classify(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -377,8 +362,7 @@ func TestUnit_Classify(t *testing.T) {
 	}
 }
 
-// TestUnit_SubmitClearsAndRestoreLastPutsItBack pins the failed-validation
-// path (blueprint MVP item 4) end to end.
+// TestUnit_SubmitClearsAndRestoreLastPutsItBack pins the failed-validation path end to end.
 func TestUnit_SubmitClearsAndRestoreLastPutsItBack(t *testing.T) {
 	const text = "explain 日本語 please\nsecond line"
 
@@ -415,9 +399,7 @@ func TestUnit_SubmitClearsAndRestoreLastPutsItBack(t *testing.T) {
 	}
 }
 
-// TestUnit_RestoreLastYieldsToTypedText: keystrokes made while the
-// submission was in flight win over the restore, so nothing the user typed
-// is ever overwritten.
+// TestUnit_RestoreLastYieldsToTypedText pins that in-flight keystrokes win over the restore.
 func TestUnit_RestoreLastYieldsToTypedText(t *testing.T) {
 	c := New()
 	c.SetDraft("first")
@@ -434,8 +416,7 @@ func TestUnit_RestoreLastYieldsToTypedText(t *testing.T) {
 	}
 }
 
-// TestUnit_SubmitWhitespaceOnlyIsNoOp: blueprint MVP item 2 — the buffer
-// survives, and nothing is retained for RestoreLast.
+// TestUnit_SubmitWhitespaceOnlyIsNoOp pins that the buffer survives and nothing is retained for RestoreLast.
 func TestUnit_SubmitWhitespaceOnlyIsNoOp(t *testing.T) {
 	for _, draft := range []string{"", "   ", "\n", "  \n \n  "} {
 		c := New()
@@ -453,8 +434,7 @@ func TestUnit_SubmitWhitespaceOnlyIsNoOp(t *testing.T) {
 	}
 }
 
-// TestUnit_ClearOrPass is the composer's share of the Ctrl+C contract (D3):
-// consume and clear while there is text, pass the chord on when there is not.
+// TestUnit_ClearOrPass pins Ctrl+C: consume and clear with text, pass the chord on when empty.
 func TestUnit_ClearOrPass(t *testing.T) {
 	c := New()
 	if c.ClearOrPass() {
@@ -482,10 +462,7 @@ func TestUnit_ClearOrPass(t *testing.T) {
 	}
 }
 
-// TestUnit_DraftRoundTrip pins the $EDITOR symmetry: what Draft hands the
-// editor is what the user sees there, and what SetDraft takes back is
-// exactly what they saved — multibyte included. The prior-art bug was the
-// draft not surviving INTO the editor.
+// TestUnit_DraftRoundTrip pins the $EDITOR symmetry: Draft/SetDraft round-trip exactly, multibyte included.
 func TestUnit_DraftRoundTrip(t *testing.T) {
 	cases := []struct {
 		name string
@@ -526,9 +503,7 @@ func TestUnit_DraftRoundTrip(t *testing.T) {
 	}
 }
 
-// TestUnit_SetDraftSanitizes: the editor can hand back anything, but the
-// buffer only ever holds printable runes and line breaks — frame spans are
-// literal cells.
+// TestUnit_SetDraftSanitizes pins that the buffer only ever holds printable runes and line breaks.
 func TestUnit_SetDraftSanitizes(t *testing.T) {
 	c := New()
 	c.SetDraft("a\tb\x07c\r\nsecond\rthird")

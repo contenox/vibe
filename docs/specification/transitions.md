@@ -1,3 +1,8 @@
+---
+title: Transitions & Branching
+description: How a chain decides which task runs next — operators, edges, and on_failure.
+---
+
 # Transitions & Branching
 
 Task chains are state machines. When a task finishes running its `handler`, the chain evaluates its `transition` rules to determine which task to execute next.

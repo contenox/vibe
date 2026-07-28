@@ -29,11 +29,9 @@ func TestUnit_RemoteTools_CreateAndGet(t *testing.T) {
 		},
 	}
 
-	// Create the tools
 	err := s.CreateRemoteTools(ctx, tools)
 	require.NoError(t, err)
 
-	// Retrieve by ID
 	retrieved, err := s.GetRemoteTools(ctx, tools.ID)
 	require.NoError(t, err)
 	require.Equal(t, tools.ID, retrieved.ID)
@@ -45,7 +43,6 @@ func TestUnit_RemoteTools_CreateAndGet(t *testing.T) {
 	require.WithinDuration(t, time.Now().UTC(), retrieved.CreatedAt, 1*time.Second)
 	require.WithinDuration(t, time.Now().UTC(), retrieved.UpdatedAt, 1*time.Second)
 
-	// Retrieve by name
 	retrievedByName, err := s.GetRemoteToolsByName(ctx, tools.Name)
 	require.NoError(t, err)
 	require.Equal(t, tools.ID, retrievedByName.ID)
@@ -128,7 +125,6 @@ func TestUnit_RemoteTools_WithHeaders(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, updatedHeaders, retrieved.Headers)
 
-		// Test updating to nil
 		tools.Headers = nil
 		err = s.UpdateRemoteTools(ctx, tools)
 		require.NoError(t, err)
@@ -157,7 +153,6 @@ func TestUnit_RemoteTools_Update(t *testing.T) {
 
 	require.NoError(t, s.CreateRemoteTools(ctx, original))
 
-	// Update the tools
 	updated := *original
 	updated.Name = "updated-tools"
 	updated.EndpointURL = "https://updated.com"
@@ -172,7 +167,6 @@ func TestUnit_RemoteTools_Update(t *testing.T) {
 	err := s.UpdateRemoteTools(ctx, &updated)
 	require.NoError(t, err)
 
-	// Verify updates
 	retrieved, err := s.GetRemoteTools(ctx, original.ID)
 	require.NoError(t, err)
 	require.Equal(t, updated.Name, retrieved.Name)
@@ -200,11 +194,9 @@ func TestUnit_RemoteTools_Delete(t *testing.T) {
 
 	require.NoError(t, s.CreateRemoteTools(ctx, tools))
 
-	// Delete the tools
 	err := s.DeleteRemoteTools(ctx, tools.ID)
 	require.NoError(t, err)
 
-	// Verify deletion
 	_, err = s.GetRemoteTools(ctx, tools.ID)
 	require.Error(t, err, "Should return error after deletion")
 	require.True(t, errors.Is(err, libdb.ErrNotFound))
@@ -213,7 +205,6 @@ func TestUnit_RemoteTools_Delete(t *testing.T) {
 func TestUnit_RemoteTools_List(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	// Create multiple tools with slight delay
 	tools := []*runtimetypes.RemoteTools{
 		{
 			ID:          uuid.New().String(),
@@ -254,12 +245,10 @@ func TestUnit_RemoteTools_List(t *testing.T) {
 		require.NoError(t, s.CreateRemoteTools(ctx, tools))
 	}
 
-	// List all tools using a large limit to simulate a non-paginated call
 	list, err := s.ListRemoteTools(ctx, nil, 100)
 	require.NoError(t, err)
 	require.Len(t, list, 3)
 
-	// Verify reverse chronological order (newest first)
 	require.Equal(t, tools[2].ID, list[0].ID)
 	require.Equal(t, tools[1].ID, list[1].ID)
 	require.Equal(t, tools[0].ID, list[2].ID)
@@ -268,7 +257,6 @@ func TestUnit_RemoteTools_List(t *testing.T) {
 func TestUnit_RemoteTools_ListPagination(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	// Create 5 tools with a small delay to ensure distinct creation times.
 	var createdTools []*runtimetypes.RemoteTools
 	for i := range 5 {
 		tools := &runtimetypes.RemoteTools{
@@ -287,12 +275,10 @@ func TestUnit_RemoteTools_ListPagination(t *testing.T) {
 		createdTools = append(createdTools, tools)
 	}
 
-	// Paginate through the results with a limit of 2.
 	var receivedTools []*runtimetypes.RemoteTools
 	var lastCursor *time.Time
 	limit := 2
 
-	// Fetch first page
 	page1, err := s.ListRemoteTools(ctx, lastCursor, limit)
 	require.NoError(t, err)
 	require.Len(t, page1, 2)
@@ -300,7 +286,6 @@ func TestUnit_RemoteTools_ListPagination(t *testing.T) {
 
 	lastCursor = &page1[len(page1)-1].CreatedAt
 
-	// Fetch second page
 	page2, err := s.ListRemoteTools(ctx, lastCursor, limit)
 	require.NoError(t, err)
 	require.Len(t, page2, 2)
@@ -308,21 +293,17 @@ func TestUnit_RemoteTools_ListPagination(t *testing.T) {
 
 	lastCursor = &page2[len(page2)-1].CreatedAt
 
-	// Fetch third page (the last one)
 	page3, err := s.ListRemoteTools(ctx, lastCursor, limit)
 	require.NoError(t, err)
 	require.Len(t, page3, 1)
 	receivedTools = append(receivedTools, page3...)
 
-	// Fetch a fourth page, which should be empty
 	page4, err := s.ListRemoteTools(ctx, &page3[0].CreatedAt, limit)
 	require.NoError(t, err)
 	require.Empty(t, page4)
 
-	// Verify all tools were retrieved in the correct order.
 	require.Len(t, receivedTools, 5)
 
-	// The order is newest to oldest, so the last created tools should be first.
 	require.Equal(t, createdTools[4].ID, receivedTools[0].ID)
 	require.Equal(t, createdTools[3].ID, receivedTools[1].ID)
 	require.Equal(t, createdTools[2].ID, receivedTools[2].ID)
@@ -354,10 +335,8 @@ func TestUnit_RemoteTools_UniqueNameConstraint(t *testing.T) {
 		In:    "body",
 	}
 
-	// First creation should succeed
 	require.NoError(t, s.CreateRemoteTools(ctx, tools1))
 
-	// Second with same name should fail
 	err := s.CreateRemoteTools(ctx, &tools2)
 	require.Error(t, err, "Should violate unique name constraint")
 }
@@ -427,7 +406,6 @@ func TestUnit_RemoteTools_ListEmpty(t *testing.T) {
 func TestUnit_RemoteTools_ConcurrentUpdates(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	// Create initial tools
 	tools := &runtimetypes.RemoteTools{
 		ID:          uuid.New().String(),
 		Name:        "concurrent-tools",
@@ -441,7 +419,6 @@ func TestUnit_RemoteTools_ConcurrentUpdates(t *testing.T) {
 	}
 	require.NoError(t, s.CreateRemoteTools(ctx, tools))
 
-	// Simulate concurrent updates
 	updateTools := func(name string) {
 		h, err := s.GetRemoteTools(ctx, tools.ID)
 		require.NoError(t, err)
@@ -451,7 +428,6 @@ func TestUnit_RemoteTools_ConcurrentUpdates(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Run concurrent updates
 	var wg sync.WaitGroup
 	names := []string{"update1", "update2", "update3"}
 	for _, name := range names {
@@ -463,11 +439,9 @@ func TestUnit_RemoteTools_ConcurrentUpdates(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Verify the final state
 	final, err := s.GetRemoteTools(ctx, tools.ID)
 	require.NoError(t, err)
 
-	// Should have one of the updated names
 	require.Contains(t, names, final.Name)
 	require.True(t, final.UpdatedAt.After(tools.UpdatedAt))
 }
@@ -475,7 +449,6 @@ func TestUnit_RemoteTools_ConcurrentUpdates(t *testing.T) {
 func TestUnit_RemoteTools_DeleteCascade(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	// Create tools
 	tools := &runtimetypes.RemoteTools{
 		ID:          uuid.New().String(),
 		Name:        "cascade-test",
@@ -489,7 +462,6 @@ func TestUnit_RemoteTools_DeleteCascade(t *testing.T) {
 	}
 	require.NoError(t, s.CreateRemoteTools(ctx, tools))
 
-	// Delete and recreate with same name should work
 	require.NoError(t, s.DeleteRemoteTools(ctx, tools.ID))
 
 	newTools := *tools
@@ -501,7 +473,6 @@ func TestUnit_RemoteTools_DeleteCascade(t *testing.T) {
 	}
 	require.NoError(t, s.CreateRemoteTools(ctx, &newTools))
 
-	// Verify new tools exists
 	retrieved, err := s.GetRemoteToolsByName(ctx, tools.Name)
 	require.NoError(t, err)
 	require.Equal(t, newTools.ID, retrieved.ID)
@@ -610,12 +581,10 @@ func TestUnit_RemoteTools_SpecURL_RoundTrip(t *testing.T) {
 
 	require.NoError(t, s.CreateRemoteTools(ctx, tools))
 
-	// GetRemoteTools by ID
 	got, err := s.GetRemoteTools(ctx, tools.ID)
 	require.NoError(t, err)
 	require.Equal(t, tools.SpecURL, got.SpecURL)
 
-	// GetRemoteToolsByName
 	gotByName, err := s.GetRemoteToolsByName(ctx, tools.Name)
 	require.NoError(t, err)
 	require.Equal(t, tools.SpecURL, gotByName.SpecURL)
@@ -648,7 +617,6 @@ func TestUnit_RemoteTools_SpecURL_Update(t *testing.T) {
 	}
 	require.NoError(t, s.CreateRemoteTools(ctx, tools))
 
-	// Set spec URL
 	tools.SpecURL = "https://raw.githubusercontent.com/example/repo/main/openapi.yaml"
 	require.NoError(t, s.UpdateRemoteTools(ctx, tools))
 
@@ -656,7 +624,6 @@ func TestUnit_RemoteTools_SpecURL_Update(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, tools.SpecURL, got.SpecURL)
 
-	// Clear spec URL
 	tools.SpecURL = ""
 	require.NoError(t, s.UpdateRemoteTools(ctx, tools))
 

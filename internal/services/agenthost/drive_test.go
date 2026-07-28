@@ -15,12 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// registerAgent walks the real registration leg: it stands up the agent
-// registry service on a fresh SQLite DB, creates an agents row pointing at
-// command, and resolves it back by name — the same
-// registry-row → resolve path the composed e2e is meant to prove, not a
-// hand-built struct handed straight to the host. Shared by every server this
-// package's e2e drives (stub, testy, the contenox loopback, claude).
+// registerAgent creates an agents row via the registry service and resolves it back.
 func registerAgent(t *testing.T, name, command string, args ...string) (context.Context, *runtimetypes.Agent) {
 	t.Helper()
 	ctx := context.Background()
@@ -42,12 +37,8 @@ func registerAgent(t *testing.T, name, command string, args ...string) (context.
 	return ctx, resolved
 }
 
-// TestHost_DriveTurn_RegistryToStubRoundTrip is the composed e2e this slice
-// exists for: an agents row created and resolved through the real registry
-// service, handed to DriveTurn, spawns the hermetic stub agent and drives a
-// full initialize → session/new → prompt turn to a terminal stopReason, with
-// the streamed reply landing on the recording harness — registry → host →
-// live ACP session → answer, no piece mocked.
+// TestHost_DriveTurn_RegistryToStubRoundTrip drives registry → host → live
+// ACP session → answer, with nothing mocked.
 func TestHost_DriveTurn_RegistryToStubRoundTrip(t *testing.T) {
 	requireSandboxable(t)
 	stubBin := buildStubAgent(t)
@@ -71,8 +62,7 @@ func TestHost_DriveTurn_RegistryToStubRoundTrip(t *testing.T) {
 	require.NotEmpty(t, res.SessionID)
 	require.Equal(t, libacp.StopReasonEndTurn, res.StopReason)
 
-	// The plain-prompt path acks with exactly one message chunk; the turn
-	// must have produced displayable output, not just a stopReason.
+	// The plain-prompt path acks with exactly one message chunk.
 	require.Equal(t, "ack", harness.MessageText())
 	tracker := &libacp.TurnTracker{}
 	for _, n := range harness.Updates() {
@@ -81,11 +71,8 @@ func TestHost_DriveTurn_RegistryToStubRoundTrip(t *testing.T) {
 	require.NoError(t, tracker.Err(res.StopReason))
 }
 
-// TestHost_DriveTurn_StreamingUpdatesReachHarness drives the stub's
-// session_updates scenario and asserts the whole notification stream —
-// message chunks and tool_call/tool_call_update — passes through DriveTurn to
-// the caller's harness in wire order, pinning that the harness seam really is
-// pass-through for non-message updates too.
+// TestHost_DriveTurn_StreamingUpdatesReachHarness pins that the whole
+// notification stream reaches the harness in wire order.
 func TestHost_DriveTurn_StreamingUpdatesReachHarness(t *testing.T) {
 	requireSandboxable(t)
 	stubBin := buildStubAgent(t)
@@ -117,12 +104,8 @@ func TestHost_DriveTurn_StreamingUpdatesReachHarness(t *testing.T) {
 	}, kinds)
 }
 
-// TestHost_DriveTurn_RejectsNonExternalKind locks in that DriveTurn refuses a
-// row whose kind it cannot drive with a clear resolve error instead of
-// attempting to spawn anything. DriveTurn is the one-shot driver that builds a
-// spawner FROM a declared record, and it builds only external_acp ones; a chain
-// unit is brought up by the instance kernel, which constructs its spawner
-// itself.
+// TestHost_DriveTurn_RejectsNonExternalKind pins that DriveTurn refuses a
+// non-external_acp row instead of attempting to spawn.
 func TestHost_DriveTurn_RejectsNonExternalKind(t *testing.T) {
 	agent := &runtimetypes.Agent{Name: "future-chain", Kind: runtimetypes.AgentKindChain}
 
@@ -134,9 +117,7 @@ func TestHost_DriveTurn_RejectsNonExternalKind(t *testing.T) {
 	require.Contains(t, err.Error(), "chain")
 }
 
-// TestHost_DriveTurn_RequiresCwdAndPrompt locks in the early, clear errors
-// for the two required TurnRequest fields, so a misassembled call fails
-// before any subprocess is spawned.
+// TestHost_DriveTurn_RequiresCwdAndPrompt pins the required TurnRequest fields.
 func TestHost_DriveTurn_RequiresCwdAndPrompt(t *testing.T) {
 	agent := &runtimetypes.Agent{Name: "unused"}
 	require.NoError(t, agent.SetExternalACPConfig(runtimetypes.ExternalACPConfig{
@@ -157,11 +138,8 @@ func TestHost_DriveTurn_RequiresCwdAndPrompt(t *testing.T) {
 	require.Contains(t, err.Error(), "Prompt")
 }
 
-// The DenyingHarness must answer a permission ask by selecting the agent's own
-// reject option — reject_once preferred, reject_always next — and fall back to
-// the "cancelled" outcome only when the agent offered no reject option at all.
-// A MethodNotFound here is exactly the broken-client signal the type exists to
-// avoid, so every path must produce a well-formed response and record the ask.
+// TestUnit_DenyingHarness_SelectsRejectOptionAndRecords pins the reject_once
+// > reject_always > cancelled order and that every ask is recorded.
 func TestUnit_DenyingHarness_SelectsRejectOptionAndRecords(t *testing.T) {
 	h := &agenthost.DenyingHarness{}
 

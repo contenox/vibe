@@ -6,15 +6,12 @@ import (
 )
 
 // TurnTracker watches one prompt turn's session/update stream and tells a
-// client-side driver whether the agent ever produced a renderable answer. It
-// exists because an agent can return a perfectly normal session/prompt result
-// while never emitting a single agent_message_chunk — an empty-response
-// interop failure a client must guard against. A
-// driver feeds each notification to Observe and, when the turn ends, calls Err
-// to convert "nothing displayable" into an explicit ErrNoDisplayableOutput
-// instead of surfacing an empty message. Opt-in and single-turn: construct a
-// fresh one (or call Reset) per turn. Not safe for concurrent use; drive it
-// from the same goroutine that consumes the turn's updates (the read loop).
+// client-side driver whether the agent ever produced a renderable answer —
+// guarding against an agent returning a normal session/prompt result while
+// never emitting an agent_message_chunk. A driver feeds each notification to
+// Observe and calls Err at turn end to convert "nothing displayable" into an
+// explicit ErrNoDisplayableOutput. Single-turn: construct fresh (or Reset)
+// per turn. Not safe for concurrent use; drive from the read-loop goroutine.
 type TurnTracker struct {
 	sawDisplayable bool
 	toolUpdates    int

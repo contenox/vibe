@@ -8,24 +8,12 @@ import (
 	"github.com/contenox/beam/internal/kernel/taskengine"
 )
 
-// ---------------------------------------------------------------------------
-// Tool schemas
-//
-// Terse by default, for the reason localtools/fs_schema.go documents at length:
-// a description is paid on EVERY turn, while everything a long description
-// pre-teaches is re-taught by the error message at the moment it fires, with the
-// concrete symbol and path filled in. Six tools at 200 words each would be a
-// four-figure token tax per turn before a single answer is read.
-//
-// Two things are stated in the schema anyway, because they cannot be re-taught
-// by an error that never fires:
-//
-//   - the BUILD CONTEXT defaults (host GOOS/GOARCH, no build tags, tests
-//     excluded), because a correct-looking answer produced under a different
-//     build context is a silent wrong answer, not an error; and
-//   - the ADVISORY framing on go_diagnostics, because a model that treats these
-//     findings as a verdict will "fix" phantom errors.
-// ---------------------------------------------------------------------------
+// Tool schemas are terse by default: a description is paid on every turn,
+// while most of what a long one pre-teaches gets re-taught by the error
+// message when it fires. Two things are stated anyway because no error would
+// ever teach them: the build-context defaults (a correct-looking answer under
+// a different build context is a silent wrong answer, not an error) and the
+// advisory framing on go_diagnostics.
 
 // buildContextNote is the one-line build-context statement appended to every
 // tool description. Verbatim-brief on purpose.

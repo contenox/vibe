@@ -11,18 +11,13 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
 )
 
-// goldenWidths is the blueprint's resize matrix for the status bar: narrow,
-// the two common terminal widths, and wide.
+// goldenWidths is the resize matrix: narrow, the two common widths, and wide.
 var goldenWidths = []int{40, 60, 80, 120}
 
-// fullHouse populates every segment at once. Its field values are also the
-// anchor for TestUnit_DropCascadeOrder's substring markers, so the cascade
-// test and the goldens are pinned to the same fixture.
-//
-// Health is deliberately NOT "working" here: working plus an Activity is the
-// one combination that renders no health segment at all (see showHealth), so
-// a fixture meant to exercise every segment cannot use it. That combination
-// has its own test below.
+// fullHouse populates every segment at once; its field values also anchor
+// TestUnit_DropCascadeOrder's substring markers. Health is deliberately not
+// "working" here, since working plus an Activity renders no health segment
+// at all (see showHealth, and TestUnit_HealthYieldsToActivity below).
 func fullHouse(ascii bool) State {
 	spinner := "◐"
 	if ascii {
@@ -44,8 +39,7 @@ func fullHouse(ascii bool) State {
 	}
 }
 
-// TestUnit_RenderGoldens pins the full-house state at the resize matrix,
-// unicode and ASCII, including the 120-column "everything fits" case.
+// TestUnit_RenderGoldens pins the full-house state at the resize matrix, unicode and ASCII.
 func TestUnit_RenderGoldens(t *testing.T) {
 	for _, ascii := range []bool{false, true} {
 		variant := "unicode"
@@ -62,12 +56,7 @@ func TestUnit_RenderGoldens(t *testing.T) {
 	}
 }
 
-// TestUnit_DropCascadeOrder renders the full-house state at every width
-// from comfortably-fits down to nearly nothing, and checks that each
-// segment's marker text disappears exactly once, never reappears at a
-// smaller width, and does so in the documented drop priority: session,
-// activity, missions, gauge, model, health. identity's gutter must remain
-// the first character of every rendered line throughout.
+// TestUnit_DropCascadeOrder pins that segments disappear exactly once, in the documented drop priority, as width shrinks.
 func TestUnit_DropCascadeOrder(t *testing.T) {
 	markers := []struct {
 		name string
@@ -111,8 +100,7 @@ func TestUnit_DropCascadeOrder(t *testing.T) {
 	}
 }
 
-// TestUnit_GaugeThreshold pins the three documented style boundaries: the
-// gauge is muted below 75%, warn at/above 75%, and error at/above 90%.
+// TestUnit_GaugeThreshold pins the gauge style boundaries: muted below 75%, warn at 75%, error at 90%.
 func TestUnit_GaugeThreshold(t *testing.T) {
 	cases := []struct {
 		used, size int
@@ -136,8 +124,7 @@ func TestUnit_GaugeThreshold(t *testing.T) {
 	}
 }
 
-// TestUnit_HealthStyle pins the error/disconnected-vs-everything-else
-// split the blueprint specifies for the health segment.
+// TestUnit_HealthStyle pins the error/disconnected-vs-everything-else style split for the health segment.
 func TestUnit_HealthStyle(t *testing.T) {
 	cases := []struct {
 		health string
@@ -161,8 +148,7 @@ func TestUnit_HealthStyle(t *testing.T) {
 	}
 }
 
-// TestUnit_GaugeHiddenWhenSizeZero guards against ever rendering a
-// misleading "0/0" gauge before the first usage_update lands.
+// TestUnit_GaugeHiddenWhenSizeZero pins that a misleading "0/0" gauge never renders before the first usage_update.
 func TestUnit_GaugeHiddenWhenSizeZero(t *testing.T) {
 	line := Render(80, State{Used: 100, Size: 0}).Text()
 	if strings.Contains(line, "100/") || strings.Contains(line, "%") {
@@ -175,14 +161,7 @@ func TestUnit_GaugeHiddenWhenSizeZero(t *testing.T) {
 	}
 }
 
-// TestUnit_InboxBadge guards the operator-inbox badge: the >=1 gate, both glyph
-// variants, and the style role.
-//
-// StyleHITL is asserted rather than left to the golden because it is the badge's
-// whole claim. Every other count on this bar reports work going fine; this one
-// says a human is needed, and it borrows the approval card's role so a Mono
-// terminal — where the glyph is the plain word "in:" — still puts it in the same
-// visual register as the thing it is a reminder of.
+// TestUnit_InboxBadge pins the operator-inbox badge's >=1 gate, both glyph variants, and its StyleHITL role.
 func TestUnit_InboxBadge(t *testing.T) {
 	if zero := Render(80, State{Inbox: 0}).Text(); strings.Contains(zero, "✉") || strings.Contains(zero, "in:") {
 		t.Fatalf("inbox badge rendered with Inbox==0: %q", zero)
@@ -204,16 +183,14 @@ func TestUnit_InboxBadge(t *testing.T) {
 		t.Fatalf("ascii line carries the unicode envelope: %q", ascii.Text())
 	}
 
-	// The two badges must stay distinguishable in Mono, where neither has a
-	// glyph left to tell them apart by.
+	// The two badges must stay distinguishable in Mono.
 	both := Render(80, State{ASCII: true, Inbox: 2, Missions: 2}).Text()
 	if !strings.Contains(both, "in:2") || !strings.Contains(both, "m:2") {
 		t.Fatalf("ascii inbox and missions badges are not both present: %q", both)
 	}
 }
 
-// TestUnit_MissionsHiddenWhenZero guards the badge's >=1 gate and pins
-// both glyph variants.
+// TestUnit_MissionsHiddenWhenZero pins the badge's >=1 gate and both glyph variants.
 func TestUnit_MissionsHiddenWhenZero(t *testing.T) {
 	zero := Render(80, State{Missions: 0}).Text()
 	if strings.Contains(zero, "◇") || strings.Contains(zero, "m:") {
@@ -229,8 +206,7 @@ func TestUnit_MissionsHiddenWhenZero(t *testing.T) {
 	}
 }
 
-// TestUnit_HealthHiddenWhenReady guards the silent-default rule: "ready"
-// and the unset zero value both render no health segment at all.
+// TestUnit_HealthHiddenWhenReady pins that "ready" and the zero value both render no health segment.
 func TestUnit_HealthHiddenWhenReady(t *testing.T) {
 	ready := Render(80, State{Health: HealthReady}).Text()
 	if strings.Contains(ready, HealthReady) {
@@ -246,9 +222,7 @@ func TestUnit_HealthHiddenWhenReady(t *testing.T) {
 	}
 }
 
-// TestUnit_ASCIISeparators pins the ASCII forms of both joined segments: the
-// session's message count, which must not read as a suffix of the label it
-// follows, and the model's spaced provider separator.
+// TestUnit_ASCIISeparators pins the ASCII forms of the session count and the model/provider separator.
 func TestUnit_ASCIISeparators(t *testing.T) {
 	s := State{ASCII: true, Session: "beam-20a88ab8", Messages: 3, Model: "gpt", Provider: "openai"}
 	line := Render(80, s).Text()
@@ -266,9 +240,7 @@ func TestUnit_ASCIISeparators(t *testing.T) {
 	}
 }
 
-// TestUnit_UnicodeSeparators is ASCIISeparators' unicode counterpart. The
-// model separator is SPACED, matching comp/brand's welcome header, which
-// names the same pair a few rows above it.
+// TestUnit_UnicodeSeparators is ASCIISeparators' unicode counterpart; the model separator matches comp/brand's.
 func TestUnit_UnicodeSeparators(t *testing.T) {
 	s := State{Session: "main", Messages: 3, Model: "gpt", Provider: "openai"}
 	line := Render(80, s).Text()
@@ -280,12 +252,7 @@ func TestUnit_UnicodeSeparators(t *testing.T) {
 	}
 }
 
-// TestUnit_HealthYieldsToActivity is the redundancy rule: while a turn runs
-// the app publishes Health=working AND Activity="working" — the same fact
-// from two publishers — and the bar said "working" twice for the whole turn.
-// Activity wins, because it carries the spinner and the better text; every
-// other health state still renders beside an activity, because none of them
-// are something the activity already said.
+// TestUnit_HealthYieldsToActivity pins that Activity wins over a redundant Health=working, but other health states still render.
 func TestUnit_HealthYieldsToActivity(t *testing.T) {
 	both := Render(120, State{Health: HealthWorking, Activity: "working", Spinner: "◐"}).Text()
 	if strings.Count(both, "working") != 1 {
@@ -307,10 +274,7 @@ func TestUnit_HealthYieldsToActivity(t *testing.T) {
 	}
 }
 
-// TestUnit_ExactWidthProperty is the resize contract every frame producer
-// in beam must satisfy: the rendered line is always padded/dropped to
-// exactly width cells, never more, never less, across the full supported
-// width range and several representative states.
+// TestUnit_ExactWidthProperty pins that the rendered line is always exactly width cells, across widths and states.
 func TestUnit_ExactWidthProperty(t *testing.T) {
 	states := []State{
 		fullHouse(false),
@@ -330,10 +294,7 @@ func TestUnit_ExactWidthProperty(t *testing.T) {
 	}
 }
 
-// TestUnit_IdentityAlwaysLeftmost checks that whenever the line is
-// non-empty, its first character is the identity gutter — identity is
-// dropped last (and only ever truncated, never omitted), so it must
-// anchor the left edge at every width down to 1.
+// TestUnit_IdentityAlwaysLeftmost pins that the identity gutter anchors the left edge at every width down to 1.
 func TestUnit_IdentityAlwaysLeftmost(t *testing.T) {
 	for _, ascii := range []bool{false, true} {
 		want := "▌"
@@ -349,17 +310,7 @@ func TestUnit_IdentityAlwaysLeftmost(t *testing.T) {
 	}
 }
 
-// TestUnit_StateStringsAreSanitized: every string on State comes from
-// somewhere else — a session name off the wire, a model a provider named,
-// activity text composed from events — and this bar is on screen at all
-// times, so it is the most valuable row in the terminal to be able to write
-// to.
-//
-// The tab and the newline are not merely hygiene here. The bar pads itself to
-// EXACTLY width by counting cells on plain text, so a tab breaks the
-// arithmetic; and a newline inside a span violates frame.Line's one-row
-// contract, which would have the engine scroll the screen from the status bar
-// on every repaint.
+// TestUnit_StateStringsAreSanitized pins that control and bidi characters in any State string never reach a rendered span.
 func TestUnit_StateStringsAreSanitized(t *testing.T) {
 	probes := []struct {
 		name  string
@@ -396,9 +347,7 @@ func TestUnit_StateStringsAreSanitized(t *testing.T) {
 							}
 						}
 					}
-					// The exact-width contract has to survive the cleaning:
-					// the cells a stripped control used to occupy are the
-					// padding's problem, not the caller's.
+					// The exact-width contract must survive the cleaning.
 					if got := textwidth.Width(line.Text()); got != w {
 						t.Fatalf("width %d: rendered %d cells", w, got)
 					}
@@ -416,8 +365,7 @@ func TestUnit_StateStringsAreSanitized(t *testing.T) {
 	}
 }
 
-// TestUnit_UsesOnlyClosedStyleIDs enforces frame's closed StyleID set: no
-// span may carry a role the style package's table doesn't know.
+// TestUnit_UsesOnlyClosedStyleIDs enforces frame's closed StyleID set.
 func TestUnit_UsesOnlyClosedStyleIDs(t *testing.T) {
 	known := map[frame.StyleID]bool{}
 	for _, id := range frame.All() {

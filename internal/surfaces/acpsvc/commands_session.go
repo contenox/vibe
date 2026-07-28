@@ -37,15 +37,10 @@ func (t *Transport) handleClear(ctx context.Context, _ libacp.SessionID, sess *s
 	return "Conversation history cleared.", nil
 }
 
-// handleRename sets the session's display title — the label a picker, a
-// sidebar or a status bar shows instead of the minted `beam-<uuid>` id.
-//
-// It is deliberately SERVER-side even though only a TUI asked for it: the
-// title is read back by session/list and pushed by session_info_update, so
-// storing it here is what makes one operator's rename visible to every
-// surface (beam, an ACP editor, the CLI) rather than to the one client that
-// typed it. With no argument it reports the current title; with "-" it
-// clears the override and hands the label back to the derived heuristic.
+// handleRename sets the session's display title, stored server-side so
+// session/list and session_info_update show it to every surface, not just
+// the client that typed it. No argument reports the current title; "-"
+// clears the override back to the derived heuristic.
 func (t *Transport) handleRename(ctx context.Context, sess *sessionEntry, args string) (string, error) {
 	if t.deps.DB == nil {
 		return "", fmt.Errorf("renaming is unavailable without a database")

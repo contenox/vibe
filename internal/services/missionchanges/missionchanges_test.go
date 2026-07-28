@@ -12,12 +12,9 @@ import (
 	"github.com/contenox/beam/libacp"
 )
 
-// --- notification builders: they construct exactly the shapes acpsvc/events.go
-// emits, so the fold is tested against realistic journal contents. Each builder
-// mints a UNIQUE tool-call id per call, exactly as acpsvc's toolCallWireID does
-// for distinct invocations — two writes of one file are two invocations, so they
-// score twice. The *WithID variants let a test model the create+update pair of a
-// single invocation, which SHARE an id. ---
+// Notification builders construct the shapes acpsvc/events.go emits. Each
+// mints a unique tool-call id per call (two writes = two invocations, scored
+// twice); the *WithID variants model a shared-id create+update pair.
 
 var toolCallSeq int
 
@@ -26,11 +23,8 @@ func nextCallID(kind string) string {
 	return fmt.Sprintf("%s#%d", kind, toolCallSeq)
 }
 
-// edit builds the tool-call notification a file write produces: a diff content
-// carrying old/new text AND a location for the same path (acpsvc sets both). Note
-// acpsvc promotes a first-seen update to SessionUpdateToolCall — either kind must
-// score identically, which these tests exercise by using SessionUpdateToolCall
-// here (the deterministic-write shape) and SessionUpdateToolCallUpdate in touch.
+// edit builds the tool-call notification a file write produces: a diff plus
+// a location for the same path.
 func edit(path, oldText, newText string) libacp.SessionNotification {
 	return libacp.SessionNotification{
 		Update: libacp.SessionUpdate{
@@ -44,8 +38,7 @@ func edit(path, oldText, newText string) libacp.SessionNotification {
 	}
 }
 
-// touch builds a non-edit tool-call update (read/stat/list/exec) carrying only a
-// location for the path — the shape a read_file event has.
+// touch builds a non-edit tool-call update carrying only a location.
 func touch(path string, kind libacp.ToolKind) libacp.SessionNotification {
 	return touchWithID(nextCallID(string(kind)), path, kind)
 }
@@ -62,9 +55,8 @@ func touchWithID(id, path string, kind libacp.ToolKind) libacp.SessionNotificati
 	}
 }
 
-// pendingWithID builds the create/pending notification (SessionUpdateToolCall)
-// that precedes an interactive tool call — used with a shared id to prove the
-// create+update pair of ONE invocation is not double-counted.
+// pendingWithID builds the create/pending notification that precedes an
+// interactive tool call, sharing an id with a later update.
 func pendingWithID(id, path string, kind libacp.ToolKind) libacp.SessionNotification {
 	return libacp.SessionNotification{
 		Update: libacp.SessionUpdate{
@@ -104,8 +96,7 @@ func TestUnit_Fold_StatusDerivation(t *testing.T) {
 			want:    StatusDeleted,
 		},
 		{
-			// added precedence: created then emptied is still "added" (new to the
-			// mission), because status checks first-old-empty before last-new-empty.
+			// Created then emptied is still "added": status checks first-old-empty first.
 			name:    "added precedence over deleted",
 			updates: []libacp.SessionNotification{edit("/ws/d.txt", "", "v1"), edit("/ws/d.txt", "v1", "")},
 			path:    "/ws/d.txt",
@@ -140,8 +131,7 @@ func TestUnit_Fold_FirstOldLastNew(t *testing.T) {
 }
 
 func TestUnit_Fold_OrderingByEditWeightedScore(t *testing.T) {
-	// a.txt written twice (2 edits), b.txt written once (1 edit): a must rank
-	// first — the changed-files list is ordered by where attention concentrated.
+	// a.txt written twice ranks first: order follows attention, not path.
 	updates := []libacp.SessionNotification{
 		edit("/ws/b.txt", "", "b"),
 		edit("/ws/a.txt", "", "a1"),
@@ -163,8 +153,7 @@ func TestUnit_Fold_OrderingByEditWeightedScore(t *testing.T) {
 }
 
 func TestUnit_Fold_ReadRaisesScoreOfEditedFile(t *testing.T) {
-	// Two files each edited once; one is ALSO read. The read adds weight, so the
-	// read-and-edited file ranks above the edited-only one — edit > read, additive.
+	// A read adds weight on top of an edit: read-and-edited outranks edit-only.
 	updates := []libacp.SessionNotification{
 		edit("/ws/hot.go", "", "x"),
 		touch("/ws/hot.go", libacp.ToolKindRead),
@@ -183,8 +172,7 @@ func TestUnit_Fold_ReadRaisesScoreOfEditedFile(t *testing.T) {
 }
 
 func TestUnit_Fold_PendingNotDoubleCounted(t *testing.T) {
-	// An interactive call journals a pending create THEN a terminal update, sharing
-	// a ToolCallID. Deduping by that id counts the invocation once.
+	// A shared ToolCallID across pending create + terminal update counts once.
 	updates := []libacp.SessionNotification{
 		pendingWithID("call-1", "/ws/a.go", libacp.ToolKindRead),
 		touchWithID("call-1", "/ws/a.go", libacp.ToolKindRead),
@@ -200,8 +188,7 @@ func TestUnit_Fold_PendingNotDoubleCounted(t *testing.T) {
 }
 
 func TestUnit_Fold_WithinUpdateNoDoubleCount(t *testing.T) {
-	// A write carries both a diff and a location for the same path; it must weigh
-	// as one edit, not edit + read.
+	// A diff plus a location for the same path weighs as one edit, not edit+read.
 	f := fold([]libacp.SessionNotification{edit("/ws/a.go", "", "x")})
 	if f.scores["/ws/a.go"] != weightEdit {
 		t.Fatalf("score = %d, want %d (diff+location for one path is one edit)", f.scores["/ws/a.go"], weightEdit)
@@ -209,8 +196,7 @@ func TestUnit_Fold_WithinUpdateNoDoubleCount(t *testing.T) {
 }
 
 func TestUnit_Fold_ChangedListCap(t *testing.T) {
-	// More than maxChangedFiles edited: the list caps and flags incomplete, keeping
-	// the HIGHEST-attention files (the cap never hides the hot spot).
+	// Over the cap: the list truncates to the highest-attention files, flags Incomplete.
 	var updates []libacp.SessionNotification
 	for i := 0; i < maxChangedFiles+50; i++ {
 		updates = append(updates, edit(fmt.Sprintf("/ws/f%03d.txt", i), "", "x"))
@@ -254,8 +240,7 @@ func TestUnit_Scope_DistinctFilesAndDirs(t *testing.T) {
 }
 
 func TestUnit_Scope_AnomalyOnOutsidePath(t *testing.T) {
-	// The $HOME-wanderer: edits in the repo, but reads an absolute path in another
-	// tree. Scope arithmetic trips the anomaly and samples the offending path.
+	// An absolute path outside cwd trips the anomaly and is sampled.
 	updates := []libacp.SessionNotification{
 		edit("/ws/repo/a.go", "", "x"),
 		touch("/etc/passwd", libacp.ToolKindRead),
@@ -270,8 +255,7 @@ func TestUnit_Scope_AnomalyOnOutsidePath(t *testing.T) {
 }
 
 func TestUnit_Scope_RelativePathsAreInside(t *testing.T) {
-	// A relative path is named relative to the tool's cwd and cannot escape it, so
-	// it never trips the anomaly.
+	// A relative path cannot escape its cwd, so it never trips the anomaly.
 	updates := []libacp.SessionNotification{touch("a/b.txt", libacp.ToolKindRead)}
 	scope := fold(updates).changes("/ws").Scope
 	if scope.Anomaly {
@@ -280,8 +264,7 @@ func TestUnit_Scope_RelativePathsAreInside(t *testing.T) {
 }
 
 func TestUnit_Scope_EmptyRootDisablesAnomaly(t *testing.T) {
-	// With no recorded cwd there is no lane to have left: the anomaly check is
-	// disabled rather than guessing a root (a false alarm is worse than none).
+	// No recorded cwd disables the anomaly check rather than guessing a root.
 	updates := []libacp.SessionNotification{touch("/anywhere/x", libacp.ToolKindRead)}
 	scope := fold(updates).changes("").Scope
 	if scope.Anomaly {
@@ -417,8 +400,7 @@ func TestUnit_Service_MissionNotFoundPropagates(t *testing.T) {
 }
 
 func TestUnit_Service_UnboundMissionYieldsEmpty(t *testing.T) {
-	// A mission with no session/instance bound (never dispatched) reads as empty
-	// changes, not an error.
+	// A mission with nothing bound reads as empty changes, not an error.
 	svc := New(stubMissions{m: &missionservice.Mission{ID: "m1"}}, stubJournal{ok: true})
 	got, err := svc.Changes(context.Background(), "m1")
 	if err != nil {
@@ -430,8 +412,7 @@ func TestUnit_Service_UnboundMissionYieldsEmpty(t *testing.T) {
 }
 
 func TestUnit_Service_GoneInstanceYieldsEmpty(t *testing.T) {
-	// Bound mission, but the kernel no longer owns the session (ok=false): empty,
-	// non-error — "nothing recorded" is honest for a stopped unit.
+	// A stopped unit (ok=false) reads as empty, non-error.
 	svc := New(stubMissions{m: boundMission()}, stubJournal{ok: false})
 	got, err := svc.Changes(context.Background(), "m1")
 	if err != nil {

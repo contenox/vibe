@@ -20,11 +20,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The shim + probe use the standard os/exec re-exec-the-test-binary pattern, but
-// two layers deep. Command re-execs this test binary as the sandbox shim
-// (layer 1); ShimMain applies Landlock and execve's the test binary again as a
-// probe (layer 2); the probe performs ONE filesystem operation and reports the
-// outcome as its exit code. TestMain dispatches by which layer we are.
+// Two-layer re-exec-the-test-binary pattern: Command re-execs this binary as
+// the sandbox shim (layer 1); ShimMain applies Landlock and execve's the
+// binary again as a probe (layer 2), which performs one filesystem operation
+// and reports the outcome as its exit code. TestMain dispatches by layer.
 const (
 	probeEnv     = "CONTENOX_SANDBOX_PROBE_ACTION" // "read"|"write"|"net-enum"|"net-connect"|"noop"
 	probePathEnv = "CONTENOX_SANDBOX_PROBE_PATH"
@@ -45,18 +44,17 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	// Layer 1: re-exec'd by libsandbox.Command as the sandbox shim. On success
-	// ShimMain execve's the probe and never returns; a return means it failed.
+	// Layer 1: on success ShimMain execve's the probe and never returns.
 	if handled, err := libsandbox.ShimMain(); handled {
 		fmt.Fprintln(os.Stderr, "sandbox shim:", err)
 		os.Exit(exitShimFail)
 	}
-	// A support probe: a bare clone (no shim) that checks TUN creation in the netns.
+	// Support probe: a bare clone (no shim) checking TUN creation in the netns.
 	if os.Getenv(egressTunCheckEnv) != "" {
 		egressTunCheckChild()
 		return
 	}
-	// Layer 2: execve'd by the shim, now confined. Run the one probe and exit.
+	// Layer 2: confined. Run the one probe and exit.
 	if action := os.Getenv(probeEnv); action != "" {
 		os.Exit(runProbe(action, os.Getenv(probePathEnv)))
 	}
@@ -97,18 +95,15 @@ func runProbe(action, path string) int {
 	case "tap-exec":
 		return runTapExecProbe()
 	case "noop":
-		// Used only by usernsNetnsSupported: the child just needs to start under
-		// the clone flags and exit cleanly to prove the namespaces are creatable.
-		return exitAllowed
+		return exitAllowed // proves the namespaces are creatable (usernsNetnsSupported)
 	default:
 		return exitOther
 	}
 }
 
-// probeNetEnum enumerates the interfaces visible inside the wall. Deny-by-
-// construction means the fresh netns has no external interface; the loopback
-// decision means "lo" is brought up. So the one healthy outcome is exactly
-// loopback, UP, and nothing else — anything non-loopback is a breach.
+// probeNetEnum enumerates interfaces visible inside the wall. The one healthy
+// outcome is loopback, up, and nothing else; any non-loopback interface is a
+// breach.
 func probeNetEnum() int {
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -134,11 +129,9 @@ func probeNetEnum() int {
 }
 
 // probeNetConnect attempts an outbound TCP connection to a routable literal
-// address (an IP literal, so there is no DNS lookup — there is no resolver in
-// here anyway). In the empty netns with no default route the kernel refuses it
-// immediately with ENETUNREACH, proving the network is absent by construction; a
-// success would mean the wall leaked. 192.0.2.1 is TEST-NET-1 (RFC 5737),
-// reserved and never a real destination.
+// address (192.0.2.1, TEST-NET-1, reserved). The empty netns with no default
+// route refuses it immediately with ENETUNREACH; success would mean the wall
+// leaked.
 func probeNetConnect() int {
 	c, err := net.DialTimeout("tcp", "192.0.2.1:80", 3*time.Second)
 	if err == nil {
@@ -166,13 +159,10 @@ func landlockSupported() bool {
 }
 
 // usernsNetnsSupported reports whether this host lets an unprivileged process
-// create a user+network namespace — the precondition for the network wall (and,
-// now, for the fs wall too, since Command clones into both). It does the
-// definitive check: actually attempt the exact clone the sandbox uses, re-exec'ing
-// this test binary with the "noop" probe (which exits 0 the moment it starts). A
-// kernel or an AppArmor/sysctl policy that forbids the clone makes cmd.Run return
-// non-nil. This is more reliable than reading the sysctls, which do not capture an
-// AppArmor restriction (e.g. Ubuntu 24.04). The wall tests skip when it is false.
+// create a user+network namespace, the precondition for both the network and
+// fs walls. Does the definitive check by attempting the exact clone the
+// sandbox uses (more reliable than reading sysctls, which miss AppArmor
+// restrictions). Wall tests skip when it is false.
 func usernsNetnsSupported() bool {
 	cmd := exec.Command("/proc/self/exe")
 	cmd.Env = append(os.Environ(), probeEnv+"=noop")
@@ -196,18 +186,12 @@ func exitCode(err error) int {
 	return -1
 }
 
-// TestIntegration_FSWall drives the whole seam end to end: for each probe it
-// asks libsandbox.Command to confine THIS test binary (re-exec'd as the shim,
-// then the probe), runs it, and asserts allowed/denied from the probe's exit
-// code. It proves the wall lets the workspace and a ro carve-out through, blocks
-// a write to the ro hole, and blocks reads/writes outside the wall — including a
-// "~/.contenox"-shaped loot path under a pretend real home.
-//
-// As of slice 3 Command also clones into a fresh user+network namespace, so this
-// suite doubles as the composition regression: the fs assertions must still hold
-// with the namespaces in place (Landlock jails the unchanged host mounts inside
-// the new namespaces, and the system-runtime read grant still lets the
-// dynamically linked probe binary load).
+// TestIntegration_FSWall drives the whole seam end to end via Command,
+// asserting the wall lets the workspace and a ro carve-out through, blocks a
+// write to the ro hole, and blocks reads/writes outside the wall (including a
+// "~/.contenox"-shaped loot path under a pretend real home). Also a
+// composition regression: these fs assertions must hold with the user+network
+// namespaces in place too.
 func TestIntegration_FSWall(t *testing.T) {
 	if !landlockSupported() {
 		t.Skip("landlock filesystem ABI unavailable on this kernel")
@@ -269,8 +253,6 @@ func TestIntegration_FSWall(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := newSpec()
-			// The probe action/path travel to layer 2 as scrubbed env (EnvSet
-			// survives the scrub; the shim strips only its own transport vars).
 			spec.EnvSet = map[string]string{
 				probeEnv:     tc.action,
 				probePathEnv: tc.path,
@@ -286,10 +268,8 @@ func TestIntegration_FSWall(t *testing.T) {
 	}
 }
 
-// TestIntegration_TildeResolvesAgainstScopedHome pins the "~" behaviour: a
-// "~/.claude" carve-out reaches the file under the SCOPED home, while the same
-// relative name under a different (real) home is not reachable — the loot paths
-// stay out precisely because "~" resolves into the scoped home, not the real one.
+// TestIntegration_TildeResolvesAgainstScopedHome pins that a "~/.claude"
+// carve-out resolves against the scoped home, not a different real home.
 func TestIntegration_TildeResolvesAgainstScopedHome(t *testing.T) {
 	if !landlockSupported() {
 		t.Skip("landlock filesystem ABI unavailable on this kernel")
@@ -320,20 +300,10 @@ func TestIntegration_TildeResolvesAgainstScopedHome(t *testing.T) {
 		"~/.claude should resolve into the scoped home and be readable")
 }
 
-// TestIntegration_NetWall drives the deny-by-construction network FLOOR end to
-// end. It confines THIS test binary through the full seam (Landlock + the
-// user/network namespaces) with NO network carve-outs and asserts, from inside
-// the wall, that the network is absent by construction: enumerating interfaces
-// shows only loopback (brought up, nothing external), and an outbound connection
-// to a routable address is refused as network-unreachable. Together they prove
-// the fresh netns has no route out while localhost still works.
-//
-// This is the slice-3 net-isolation regression under slice 4: with no carve-outs
-// the egress bridge is never built, so the floor is exactly as before — no TUN,
-// no route. (The metered-egress path a carve-out opens is exercised separately by
-// TestIntegration_NetEgress; a carve-out is deliberately NOT included here, since
-// as of slice 4 it would legitimately create a route and this floor asserts its
-// absence.)
+// TestIntegration_NetWall pins the deny-by-construction network floor with no
+// carve-outs: only loopback is visible (up, nothing external) and an outbound
+// connection is refused as network-unreachable. The metered-egress path a
+// carve-out opens is exercised separately by TestIntegration_NetEgress.
 func TestIntegration_NetWall(t *testing.T) {
 	if !landlockSupported() {
 		t.Skip("landlock filesystem ABI unavailable on this kernel")
@@ -349,7 +319,7 @@ func TestIntegration_NetWall(t *testing.T) {
 		return libsandbox.Spec{
 			WorkspaceRoot: ws,
 			Home:          home,
-			NetworkWall:   true, // this is the network-FLOOR test; opt into the wall it asserts
+			NetworkWall:   true,
 			EnvSet:        map[string]string{probeEnv: action},
 		}
 	}

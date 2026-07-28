@@ -14,14 +14,11 @@ type ChatResult struct {
 	Message   Message
 	ToolCalls []ToolCall
 	// Usage is the provider-reported token accounting for this non-streaming
-	// call (streaming reports usage on the terminal StreamParcel instead).
-	// nil means the provider did not report usage.
+	// call; nil means unreported. Streaming reports usage on StreamParcel.Terminal instead.
 	Usage *TokenUsage
-	// FinishReason is the provider's VERBATIM finish reason (openai "length",
-	// anthropic "max_tokens", gemini "MAX_TOKENS", ollama "length", bedrock
-	// "max_tokens", …). Empty when the provider reported none. Normalization
-	// happens at the consumer (agentservice.InferStopReason) — a truncated
-	// SUCCESS must reach clients as a max-tokens stop, not end_turn.
+	// FinishReason is the provider's raw finish reason, verbatim (openai
+	// "length", gemini "MAX_TOKENS", …), or empty if unreported. Normalized
+	// downstream by agentservice.InferStopReason.
 	FinishReason string
 }
 
@@ -32,41 +29,36 @@ type ToolCall struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
-	// ProviderMeta carries opaque provider-specific data that must be
-	// round-tripped back on the next turn (e.g. Gemini thought_signature).
+	// ProviderMeta carries opaque provider data that must round-trip on the
+	// next turn (e.g. Gemini thought_signature).
 	ProviderMeta map[string]string `json:"provider_meta,omitempty"`
 }
 
-// ImagePart is a binary image attachment carried beside a message's text
-// content. Data holds the raw image bytes (encoding/json base64-encodes
-// []byte on the wire); MimeType is the image media type, e.g. "image/png".
+// ImagePart is a binary image attachment carried beside a message's text.
+// Data holds the raw bytes; MimeType is the media type, e.g. "image/png".
 type ImagePart struct {
 	Data     []byte `json:"data"`
 	MimeType string `json:"mime_type"`
 }
 
-// Message now supports OpenAI-style tool calling:
-// - assistant messages can carry tool_calls
-// - tool messages can carry tool_call_id
+// Message is a chat turn; assistant messages may carry ToolCalls, tool
+// messages carry ToolCallID (OpenAI/vLLM-compatible tool calling).
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 	// Images carries image attachments beside Content. The resolver routes
-	// image-bearing requests only to providers reporting CanVision; providers
-	// without vision support never receive messages with images.
+	// image-bearing requests only to providers reporting CanVision.
 	Images []ImagePart `json:"images,omitempty"`
-	// Thinking contains the model's internal reasoning trace (thinking tokens).
-	// Only populated when thinking is enabled. Never sent back to the model.
+	// Thinking is the model's reasoning trace, populated only when thinking
+	// is enabled, and never sent back to the model.
 	Thinking string `json:"thinking,omitempty"`
 
-	// For tool calling (OpenAI / vLLM compatible).
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
-// MessagesHaveImages reports whether any message carries an image attachment.
-// Callers use it to derive the vision requirement for resolution instead of
-// setting a flag by hand.
+// MessagesHaveImages reports whether any message carries an image
+// attachment, for deriving the vision requirement at resolution time.
 func MessagesHaveImages(messages []Message) bool {
 	for _, m := range messages {
 		if len(m.Images) > 0 {
@@ -81,88 +73,73 @@ type ChatArgument interface {
 }
 
 // ToolCallDelta is one raw streamed tool-call fragment. Providers translate
-// their wire format into these fragments and never assemble them; assembly is
-// engine policy and happens exactly once, in StreamAssembler.
+// their wire format into fragments and never assemble them; assembly happens
+// exactly once, in StreamAssembler.
 //
 // Index groups the fragments of one call: every fragment of the same call
-// carries the same Index, and distinct calls in one response carry distinct
-// Indexes. Providers whose wire format has no index (they deliver each call
-// whole) assign sequential indexes in arrival order.
-//
-// ID, Type, and Name are atomic fields: each is set on at most one fragment
-// per index (conventionally the first). ArgsFragment carries a piece of the
-// argument JSON; fragments are concatenated in arrival order.
+// shares an Index, and distinct calls carry distinct Indexes. Providers whose
+// wire format delivers each call whole assign sequential indexes in arrival
+// order. ID, Type, and Name are atomic: each is set on at most one fragment
+// per index. ArgsFragment pieces concatenate in arrival order.
 type ToolCallDelta struct {
 	Index        int
 	ID           string
 	Type         string
 	Name         string
 	ArgsFragment string
-	// ProviderMeta carries opaque provider-specific data that must round-trip
-	// on the next turn (e.g. Gemini thought_signature).
+	// ProviderMeta carries opaque provider data that must round-trip on the
+	// next turn (e.g. Gemini thought_signature).
 	ProviderMeta map[string]string
 }
 
-// TokenUsage is provider-reported token accounting. Zero fields mean
-// "not reported"; the assembler merges later reports over earlier ones
-// field-wise.
+// TokenUsage is provider-reported token accounting. Zero fields mean "not
+// reported"; the assembler merges later reports over earlier ones field-wise.
 //
-// Normalization rule (provider-kv-cache blueprint §4.4): PromptTokens is the
-// TOTAL prompt token count on every provider, cached or not. Providers whose
-// wire format reports only the uncached remainder (Anthropic input_tokens,
-// Bedrock inputTokens) must add their cache read/write counts back in before
-// populating this struct; providers whose prompt count already includes cached
-// tokens (OpenAI prompt_tokens, Gemini/Vertex promptTokenCount, ollama
-// prompt_eval_count) pass it through unchanged.
+// Normalization rule: PromptTokens is the total prompt token count on every
+// provider, cached or not. Providers reporting only the uncached remainder
+// (Anthropic input_tokens, Bedrock inputTokens) must add their cache
+// read/write counts back in; providers whose count already includes cached
+// tokens (OpenAI, Gemini/Vertex, ollama) pass it through unchanged.
 type TokenUsage struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
-	// CacheReadTokens is the number of prompt tokens served from the
-	// provider's prompt/prefix cache (anthropic cache_read_input_tokens,
-	// openai prompt_tokens_details.cached_tokens / input_tokens_details
-	// .cached_tokens, bedrock cacheReadInputTokens, gemini/vertex
-	// usageMetadata.cachedContentTokenCount). ollama/vllm report no cache
-	// dimension today and leave it zero.
+	// CacheReadTokens is prompt tokens served from the provider's prefix
+	// cache (anthropic cache_read_input_tokens, openai cached_tokens,
+	// bedrock cacheReadInputTokens, gemini/vertex cachedContentTokenCount).
+	// ollama/vllm report no cache dimension and leave it zero.
 	CacheReadTokens int
-	// CacheWriteTokens is the number of prompt tokens written to the
-	// provider's cache this request (anthropic cache_creation_input_tokens,
-	// bedrock cacheWriteInputTokens, openai gpt-5.6+ cache_write_tokens).
-	// Zero elsewhere.
+	// CacheWriteTokens is prompt tokens written to the provider's cache this
+	// request (anthropic cache_creation_input_tokens, bedrock
+	// cacheWriteInputTokens, openai gpt-5.6+ cache_write_tokens). Zero elsewhere.
 	CacheWriteTokens int
 }
 
 // StreamTerminal is the typed terminal event of a stream: the provider's
-// finish reason (verbatim wire value, e.g. "stop", "tool_calls", "length",
-// "content_filter", "MAX_TOKENS") plus final usage when the provider reports
-// it there.
+// verbatim finish reason plus final usage when reported there.
 type StreamTerminal struct {
 	FinishReason string
 	Usage        *TokenUsage
 }
 
-// StreamParcel is ONE raw delta from a provider stream. The contract is exact:
+// StreamParcel is one raw delta from a provider stream:
 //
 //   - Exactly one of Data, Thinking, ToolCall, Usage, Terminal, or Error is
 //     populated per parcel.
-//   - Providers emit raw deltas only. They never accumulate content, never
-//     assemble tool calls, and never reorder events; assembly is engine
-//     policy (StreamAssembler).
+//   - Providers emit raw deltas only — never accumulate content, assemble
+//     tool calls, or reorder events; assembly is StreamAssembler's job.
 //   - A successful stream ends with exactly one Terminal parcel, after which
-//     the channel closes. Nothing follows a Terminal parcel.
-//   - A failed stream ends with an Error parcel (in-stream provider error
-//     events surface here too) and no Terminal.
+//     the channel closes.
+//   - A failed stream ends with an Error parcel and no Terminal.
 type StreamParcel struct {
 	// Data is a visible output-text delta.
 	Data string
-	// Thinking carries a streamed reasoning/thinking delta separate from the
-	// visible output text. Like Message.Thinking, it is provider-facing output
-	// and must never be sent back as conversation history.
+	// Thinking is a streamed reasoning delta, separate from Data. Like
+	// Message.Thinking, it must never be sent back as conversation history.
 	Thinking string
-	// ToolCall is one raw tool-call fragment (see ToolCallDelta).
 	ToolCall *ToolCallDelta
 	// Usage is a provider usage report emitted mid-stream (some providers
-	// report prompt tokens at stream start and completion tokens at the end).
+	// report prompt tokens at stream start, completion tokens at the end).
 	Usage *TokenUsage
 	// Terminal is the typed end-of-stream event: finish reason + final usage.
 	Terminal *StreamTerminal
@@ -180,33 +157,28 @@ type FunctionTool struct {
 	Parameters  interface{} `json:"parameters,omitempty"`
 }
 
-// CacheHints tells a provider where the stable/volatile boundary of a request
-// lies so it can place native cache controls (anthropic cache_control,
-// bedrock cachePoint, openai prompt_cache_key). Providers map what they can
-// and ignore the rest — omission changes nothing, and a hint may NEVER change
-// what the model sees: only cache metadata differs between a hinted and an
-// unhinted request. Any provider that would have to reorder or rewrite
-// content to honor a hint must drop the hint instead.
+// CacheHints tells a provider where the stable/volatile boundary of a
+// request lies so it can place native cache controls (anthropic
+// cache_control, bedrock cachePoint, openai prompt_cache_key). Providers map
+// what they can and ignore the rest — a hint must never change what the
+// model sees, only cache metadata. A provider that would have to reorder or
+// rewrite content to honor a hint must drop it instead.
 type CacheHints struct {
-	// SessionKey is an opaque per-session cache-affinity key (already hashed;
-	// never a raw internal ID). OpenAI sends it as prompt_cache_key; other
-	// providers ignore it (vLLM keys on prefix bytes server-side, so the key
-	// is deliberately not sent there).
+	// SessionKey is an opaque, already-hashed per-session cache-affinity key
+	// (never a raw internal ID). OpenAI sends it as prompt_cache_key; vLLM
+	// keys on prefix bytes server-side and ignores it.
 	SessionKey string
 	// StableSystem asserts the system instruction is byte-stable across the
-	// session, i.e. it is safe to place a cache breakpoint after it.
+	// session, i.e. safe to place a cache breakpoint after it.
 	StableSystem bool
 	// StableTools asserts the tool list (order and encoding) is byte-stable
 	// across the session.
 	StableTools bool
 	// StableHistoryLen is the number of leading history messages asserted
-	// unchanged since the previous request of this session (0 = no
-	// assertion). Providers with explicit breakpoints may mark the last of
-	// these.
+	// unchanged since the previous request (0 = no assertion).
 	StableHistoryLen int
 	// TTL is an advisory cache lifetime for providers with explicit TTLs
-	// (anthropic/bedrock support 5m and 1h tiers). Zero means the provider
-	// default.
+	// (anthropic/bedrock support 5m and 1h). Zero means the provider default.
 	TTL time.Duration
 }
 
@@ -216,17 +188,17 @@ type ChatConfig struct {
 	TopP        *float64 `json:"top_p,omitempty"`
 	Seed        *int     `json:"seed,omitempty"`
 	Tools       []Tool   `json:"tools,omitempty"`
-	// Think controls reasoning-model behaviour. nil = use provider default.
-	// Normalized values are auto, off, minimal, low, medium, high, and xhigh.
+	// Think controls reasoning-model behaviour; nil uses the provider
+	// default. Normalized values: auto, off, minimal, low, medium, high, xhigh.
 	Think *string `json:"think,omitempty"`
 	// Shift instructs the provider to slide the context window on overflow
 	// instead of returning a token-limit error.
 	Shift *bool `json:"shift,omitempty"`
 	// Truncate instructs the provider to truncate history on overflow.
 	Truncate *bool `json:"truncate,omitempty"`
-	// CacheHints declares the stable/volatile boundary of this request for
-	// provider-side prompt caching. nil changes nothing. Never serialized:
-	// each adapter maps it onto its own wire format's cache metadata.
+	// CacheHints declares this request's stable/volatile boundary for
+	// provider-side prompt caching; nil changes nothing. Never serialized —
+	// each adapter maps it onto its own wire format.
 	CacheHints *CacheHints `json:"-"`
 }
 
@@ -246,7 +218,6 @@ func (WithShift) Apply(cfg *ChatConfig) {
 	cfg.Shift = &t
 }
 
-// Client interfaces
 type LLMChatClient interface {
 	Chat(ctx context.Context, messages []Message, args ...ChatArgument) (ChatResult, error)
 }

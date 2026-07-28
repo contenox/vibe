@@ -55,11 +55,7 @@ func TestParseCommand(t *testing.T) {
 	}
 }
 
-// TestUnknownCommandName pins the OTHER half of the dispatch decision: which
-// unrecognized leading slashes are answered locally as a mistyped command, and
-// — the part that must never regress — which ones keep reaching the model as
-// ordinary prompt text. Every pass-through case here is a real thing an
-// operator types at a coding agent.
+// TestUnknownCommandName pins which unrecognized leading slashes are answered locally vs. which must keep reaching the model as prompt text.
 func TestUnknownCommandName(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -108,10 +104,7 @@ func TestUnknownCommandName(t *testing.T) {
 	}
 }
 
-// TestUnknownCommandNameNeverClaimsAKnownCommand is the invariant that keeps the
-// two halves of the dispatch decision from ever both firing: anything
-// parseCommand recognizes must be invisible to unknownCommandName, or a command
-// that got added to the menu would start being refused as unknown.
+// TestUnknownCommandNameNeverClaimsAKnownCommand pins: anything parseCommand recognizes is invisible to unknownCommandName.
 func TestUnknownCommandNameNeverClaimsAKnownCommand(t *testing.T) {
 	for _, c := range allACPCommands() {
 		if name, ok := unknownCommandName("/" + c.Name); ok {
@@ -133,10 +126,8 @@ func TestUnknownCommandMessage(t *testing.T) {
 	}
 }
 
+// TestAcpCommandsCoverDispatch pins: every command in allACPCommands is recognized by parseCommand.
 func TestAcpCommandsCoverDispatch(t *testing.T) {
-	// Every known command (the capability-unfiltered superset) must be
-	// recognized by parseCommand, so no advertised subset of it can ever be
-	// offered by a menu that Prompt would then pass through as plain text.
 	for _, c := range allACPCommands() {
 		if _, _, ok := parseCommand("/" + c.Name); !ok {
 			t.Errorf("known command %q is not recognized by parseCommand", c.Name)

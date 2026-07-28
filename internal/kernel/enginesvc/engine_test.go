@@ -28,11 +28,10 @@ func issueCodes(issues []setupcheck.Issue) []string {
 	return out
 }
 
-// TestSystem_Build_ReadinessDefaultModel_creditsExplicitFlag reproduces B-001: a
-// fresh DB with no persisted default-model must not block preflight when the model
-// was supplied out-of-band (the CLI --model flag), which Build receives via
-// ReadinessDefaultModel. Both the build-time SetupCheck snapshot and the live
-// SetupStatus recompute must credit it.
+// TestSystem_Build_ReadinessDefaultModel_creditsExplicitFlag pins that a
+// model supplied out-of-band via ReadinessDefaultModel (e.g. CLI --model)
+// satisfies preflight even with no persisted default-model, in both the
+// build-time snapshot and the live recompute.
 func TestSystem_Build_ReadinessDefaultModel_creditsExplicitFlag(t *testing.T) {
 	ctx := context.Background()
 	newDB := func(t *testing.T) libdbexec.DBManager {

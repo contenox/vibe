@@ -57,10 +57,9 @@ func TestUnit_KVJournalTaskEventSink_SkipsChunksAndAnonymousEvents(t *testing.T)
 }
 
 // TestUnit_KVJournalTaskEventSink_JournalingMatrix pins the per-kind
-// journaling column of docs/development/engine-events.md against the actual
-// sink, driven by AllTaskEventKinds so a new kind cannot ship without an
-// explicit journaling decision: step_chunk is the ONLY unjournaled kind;
-// step_stream_end in particular IS journaled (replay carries stream brackets).
+// journaling decision for every kind in AllTaskEventKinds: step_chunk is the
+// only unjournaled kind; step_stream_end is journaled (replay carries stream
+// brackets).
 func TestUnit_KVJournalTaskEventSink_JournalingMatrix(t *testing.T) {
 	kv := journalTestKV(t)
 	sink := NewKVJournalTaskEventSink(nil, kv, libtracker.NoopTracker{})

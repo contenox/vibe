@@ -5,10 +5,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
+	"github.com/contenox/beam/internal/libsandbox"
 	"github.com/contenox/beam/internal/services/localtools"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -428,7 +430,7 @@ func TestUnit_LocalExecTools_Exec_NoTrimWhitespace(t *testing.T) {
 	res, ok := out.(*localtools.LocalExecResult)
 	require.True(t, ok)
 	assert.True(t, res.Success)
-	// We expect trailing \n to be removed, but leading spaces and trailing spaces should be preserved.
+	// A trailing \n is removed; leading/trailing spaces are preserved.
 	assert.Equal(t, "  spaced  ", res.Stdout)
 }
 
@@ -469,6 +471,33 @@ func TestUnit_LocalExecTools_Exec_NonZeroExit(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, res.Success)
 	assert.Equal(t, 3, res.ExitCode)
+}
+
+// TestUnit_LocalExecTools_ScrubEnv_StripsSecretKeepsToolchain pins the
+// credential-leak fix: with the default agent-shell posture (deny-secrets)
+// wired via WithLocalExecScrubEnv, a spawned command must not see a
+// credential-shaped variable from the process environment, while PATH/HOME
+// (needed by any real toolchain command) survive.
+func TestUnit_LocalExecTools_ScrubEnv_StripsSecretKeepsToolchain(t *testing.T) {
+	t.Setenv("TESTSECRET_API_KEY", "leaked-value")
+	t.Setenv("HOME", "/home/scrub-test")
+
+	scrub := libsandbox.EnvScrub(libsandbox.ScrubDenySecrets, nil, nil)
+	h := localtools.NewLocalExecTools(localtools.WithLocalExecScrubEnv(scrub)).(*localtools.LocalExecTools)
+
+	ctx := context.Background()
+	toolsCall := &taskengine.ToolsCall{
+		Name: "local_shell",
+		Args: map[string]string{"command": "env"},
+	}
+	out, _, err := h.Exec(ctx, time.Now().UTC(), nil, false, toolsCall)
+	require.NoError(t, err)
+	res, ok := out.(*localtools.LocalExecResult)
+	require.True(t, ok)
+	require.True(t, res.Success, "env: %s", res.Error)
+	assert.NotContains(t, res.Stdout, "TESTSECRET_API_KEY", "the default scrub must strip credential-shaped names")
+	assert.True(t, strings.Contains(res.Stdout, "PATH="), "PATH must survive the default scrub or every spawned shell breaks")
+	assert.True(t, strings.Contains(res.Stdout, "HOME=/home/scrub-test"), "HOME must survive the default scrub (Allow=\"*\" under deny-secrets)")
 }
 
 func TestUnit_LocalExecTools_Exec_NonZeroExit_WithPolicy_Rejected(t *testing.T) {

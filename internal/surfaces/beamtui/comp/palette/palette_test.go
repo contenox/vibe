@@ -12,13 +12,11 @@ import (
 	libacp "github.com/contenox/beam/libacp"
 )
 
-// goldenWidths is the blueprint's resize matrix: narrow, default terminal,
-// wide.
+// goldenWidths is the resize matrix: narrow, default terminal, wide.
 var goldenWidths = []int{60, 80, 120}
 
-// remoteSet is a stand-in for one available_commands_update. `help` is
-// deliberately present so a local can shadow it, and `mission` carries the
-// hint the palette must reproduce verbatim.
+// remoteSet stands in for one available_commands_update; help and mission
+// exist to test shadowing and verbatim hint reproduction.
 func remoteSet() []libacp.AvailableCommand {
 	return []libacp.AvailableCommand{
 		{Name: "model", Description: "Switch the session model"},
@@ -30,8 +28,7 @@ func remoteSet() []libacp.AvailableCommand {
 	}
 }
 
-// appPalette is the wiring the app performs: the advertised set plus the
-// two locals this component's own surface owns.
+// appPalette wires a palette the way the app does: remote set plus its two locals.
 func appPalette(t *testing.T) *Palette {
 	t.Helper()
 	p := New()
@@ -49,9 +46,7 @@ func names(ents []Entry) []string {
 	return out
 }
 
-// TestUnit_FreshPaletteKnowsNothing pins item 2's "never hardcoded": a
-// palette that has been told nothing offers nothing, so a session whose
-// agent advertises no commands cannot show a menu beam invented.
+// TestUnit_FreshPaletteKnowsNothing: a palette told nothing offers nothing.
 func TestUnit_FreshPaletteKnowsNothing(t *testing.T) {
 	p := New()
 	p.Open("")
@@ -63,8 +58,7 @@ func TestUnit_FreshPaletteKnowsNothing(t *testing.T) {
 	}
 }
 
-// TestUnit_SetRemoteReplacesTheSet locks REPLACE over merge: a delegated
-// session swaps the whole menu, and a stale name must not survive.
+// TestUnit_SetRemoteReplacesTheSet: SetRemote replaces the set; it never merges.
 func TestUnit_SetRemoteReplacesTheSet(t *testing.T) {
 	p := New()
 	p.SetRemote(remoteSet())
@@ -80,11 +74,8 @@ func TestUnit_SetRemoteReplacesTheSet(t *testing.T) {
 	}
 }
 
-// TestUnit_SetRemoteKeepsTheSelectionOnItsCommand: these updates arrive
-// unprompted and can land between the operator reading a row and pressing
-// Enter. The selection follows its NAME, because holding the index still
-// would quietly move it onto whatever sorted into that slot — the one way a
-// palette can dispatch a command nobody chose.
+// TestUnit_SetRemoteKeepsTheSelectionOnItsCommand: the selection follows its
+// command by name across a SetRemote update, not the index.
 func TestUnit_SetRemoteKeepsTheSelectionOnItsCommand(t *testing.T) {
 	p := appPalette(t)
 	p.Open("")
@@ -127,8 +118,8 @@ func TestUnit_SetRemoteKeepsTheSelectionOnItsCommand(t *testing.T) {
 	}
 }
 
-// TestUnit_PaletteEntriesAreSanitized: an available_commands_update is a
-// peer's payload and its descriptions are drawn over the composer.
+// TestUnit_PaletteEntriesAreSanitized: peer-supplied names, descriptions and
+// hints never carry control or bidi characters into the render.
 func TestUnit_PaletteEntriesAreSanitized(t *testing.T) {
 	const evil = "ev\x1b[2Jil\x1b]0;t\x07\tname\x7f‮x"
 
@@ -168,10 +159,8 @@ func TestUnit_PaletteEntriesAreSanitized(t *testing.T) {
 	}
 }
 
-// TestUnit_FilterIsAlphabeticalPrefixAndShadowed covers items 3 and 8 at
-// once: bare `/` is the whole merged set in alphabetical order, a prefix
-// narrows it, and the local `/help` replaces the remote one rather than
-// appearing twice.
+// TestUnit_FilterIsAlphabeticalPrefixAndShadowed: bare `/` lists everything
+// alphabetically, a prefix narrows it, and a local shadows its remote twin.
 func TestUnit_FilterIsAlphabeticalPrefixAndShadowed(t *testing.T) {
 	p := appPalette(t)
 
@@ -208,8 +197,7 @@ func TestUnit_FilterIsAlphabeticalPrefixAndShadowed(t *testing.T) {
 	}
 }
 
-// TestUnit_FilterIsCaseInsensitive: the wire names are lowercase but a
-// human types however they type.
+// TestUnit_FilterIsCaseInsensitive: the prefix filter ignores case.
 func TestUnit_FilterIsCaseInsensitive(t *testing.T) {
 	p := appPalette(t)
 	p.SetRemote(append(remoteSet(), libacp.AvailableCommand{Name: "Review", Description: "Review the diff"}))
@@ -226,9 +214,7 @@ func TestUnit_FilterIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestUnit_QueryNormalisation: the composer may hand over the raw buffer;
-// the palette takes the text after the `/` up to the first space either
-// way.
+// TestUnit_QueryNormalisation: a raw buffer or a bare command token filter identically.
 func TestUnit_QueryNormalisation(t *testing.T) {
 	p := appPalette(t)
 	for _, q := range []string{"mi", "/mi", " /mi ", "/mission arg", "mission arg"} {
@@ -239,8 +225,8 @@ func TestUnit_QueryNormalisation(t *testing.T) {
 	}
 }
 
-// TestUnit_RegisterLocalCollisionFailsFast is item 8's fail-fast rule: two
-// components claiming one name must surface at wiring time.
+// TestUnit_RegisterLocalCollisionFailsFast: a duplicate local name errors
+// (or panics via MustRegisterLocal) instead of silently overwriting.
 func TestUnit_RegisterLocalCollisionFailsFast(t *testing.T) {
 	p := New()
 	if err := p.RegisterLocal("/sessions", "Switch session", ""); err != nil {
@@ -270,9 +256,8 @@ func TestUnit_RegisterLocalCollisionFailsFast(t *testing.T) {
 	p.MustRegisterLocal("sessions", "Browse missions", "")
 }
 
-// TestUnit_SelectionAndComplete covers item 4's navigation and Tab
-// semantics: Move clamps at both ends, and completion inserts the name plus
-// exactly one space without submitting.
+// TestUnit_SelectionAndComplete: Move clamps at both ends, and CompleteText
+// inserts the name plus one space without submitting.
 func TestUnit_SelectionAndComplete(t *testing.T) {
 	p := appPalette(t)
 	p.Open("m")
@@ -324,8 +309,8 @@ func TestUnit_SelectionAndComplete(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgHint is item 5: the agent's own hint, verbatim, once a name
-// and a space are typed — and nothing before that.
+// TestUnit_ArgHint: the agent's own hint comes back verbatim once a name and
+// a space are typed, and not before.
 func TestUnit_ArgHint(t *testing.T) {
 	p := appPalette(t)
 
@@ -360,8 +345,8 @@ func TestUnit_ArgHint(t *testing.T) {
 	}
 }
 
-// TestUnit_LookupIsTheDispatchSplit is item 7: local names route
-// in-process, remote names go on the wire, unknown names are prompt text.
+// TestUnit_LookupIsTheDispatchSplit: locals resolve local, remotes resolve
+// remote, unknown names resolve to nothing.
 func TestUnit_LookupIsTheDispatchSplit(t *testing.T) {
 	p := appPalette(t)
 
@@ -382,9 +367,7 @@ func TestUnit_LookupIsTheDispatchSplit(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderGoldens pins the overlay: the full set, a filter, the
-// scrolled window with its footer, and the empty state, at every width and
-// in both glyph variants.
+// TestUnit_RenderGoldens pins the overlay's rendering — full set, filtered, scrolled footer, and empty state — at every width and glyph variant.
 func TestUnit_RenderGoldens(t *testing.T) {
 	variants := []struct {
 		name    string
@@ -417,9 +400,7 @@ func TestUnit_RenderGoldens(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderNeverExceedsWidth is the resize property the goldens can
-// only sample. Descriptions are agent-authored and unbounded, so the clamp
-// is a real bound.
+// TestUnit_RenderNeverExceedsWidth: no rendered line exceeds width, even with unbounded agent-authored descriptions.
 func TestUnit_RenderNeverExceedsWidth(t *testing.T) {
 	long := New()
 	long.SetRemote([]libacp.AvailableCommand{
@@ -447,10 +428,7 @@ func TestUnit_RenderNeverExceedsWidth(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderRespectsTheRowBudget: maxRows is the TOTAL, footer included
-// — the same contract comp/picker has. A caller that reserved four lines of
-// live region and got five would push the composer off the bottom of the
-// terminal.
+// TestUnit_RenderFooterCountsHiddenRows: maxRows is the total budget including the footer, which counts hidden rows on both sides of the scroll window.
 func TestUnit_RenderFooterCountsHiddenRows(t *testing.T) {
 	p := appPalette(t) // 7 commands
 	p.Open("")
@@ -469,9 +447,8 @@ func TestUnit_RenderFooterCountsHiddenRows(t *testing.T) {
 	}
 
 	// The selection always stays visible: the window scrolls to it. At the
-	// end of the list the footer counts what is ABOVE instead — that is the
-	// only hidden half left, and an operator at the bottom of a scrolled menu
-	// otherwise had nothing on screen telling them the list went further up.
+	// end of the list the footer counts what is above instead, since that is
+	// the only hidden half left.
 	p.Move(6)
 	lines = p.Render(80, 4, false)
 	if len(lines) != 4 {
@@ -501,9 +478,7 @@ func TestUnit_RenderFooterCountsHiddenRows(t *testing.T) {
 	}
 }
 
-// TestUnit_FooterASCIIMarker keeps the "there is more above" caret inside
-// ASCII in a Mono terminal — the same "^" comp/composer uses for a scrolled
-// draft, so one character means one thing across the live region.
+// TestUnit_FooterASCIIMarker: the "more above" marker degrades to ASCII "^" in a Mono terminal.
 func TestUnit_FooterASCIIMarker(t *testing.T) {
 	p := appPalette(t)
 	p.Open("")
@@ -520,8 +495,7 @@ func TestUnit_FooterASCIIMarker(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderNeverExceedsMaxRows is the budget as a property, over every
-// selection and every plausible row allowance.
+// TestUnit_RenderNeverExceedsMaxRows: rendered line count never exceeds maxRows, for any selection or row allowance.
 func TestUnit_RenderNeverExceedsMaxRows(t *testing.T) {
 	p := appPalette(t)
 	for _, q := range []string{"", "m", "zzz"} {
@@ -540,8 +514,7 @@ func TestUnit_RenderNeverExceedsMaxRows(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderEmptyStateExplainsFallthrough: nothing matched is not an
-// error state — the line still sends (item 6).
+// TestUnit_RenderEmptyStateExplainsFallthrough: an unmatched filter renders one line saying Enter still sends as chat.
 func TestUnit_RenderEmptyStateExplainsFallthrough(t *testing.T) {
 	p := appPalette(t)
 	p.Open("zzz")
@@ -560,10 +533,9 @@ func TestUnit_RenderEmptyStateExplainsFallthrough(t *testing.T) {
 	}
 }
 
-// modelDomain stands in for one session's advertised model select, projected
-// onto /model's argument domain (enginebridge.ValueDomains does the projecting
-// in the app). Eight values: enough to overflow a four-row budget and to give
-// the filter both prefix and substring work.
+// modelDomain stands in for one session's advertised /model values: eight
+// entries, enough to overflow a four-row budget and exercise both prefix and
+// substring filtering.
 func modelDomain() []string {
 	return []string{
 		"gpt-5-mini",
@@ -577,8 +549,7 @@ func modelDomain() []string {
 	}
 }
 
-// valuePalette is appPalette plus the domains a live session would have pushed
-// in: /model and /policy have one, everything else does not.
+// valuePalette is appPalette with /model and /policy value domains set.
 func valuePalette(t *testing.T) *Palette {
 	t.Helper()
 	p := appPalette(t)
@@ -589,10 +560,7 @@ func valuePalette(t *testing.T) *Palette {
 	return p
 }
 
-// TestUnit_ValueModeNeedsBothASpaceAndADomain pins the trigger. Value mode is
-// the ONLY thing that changes what the overlay lists, so it must be impossible
-// to enter by accident: the command must have a domain, and the space after its
-// name must have been typed.
+// TestUnit_ValueModeNeedsBothASpaceAndADomain: value mode only activates once a command with a domain has its trailing space typed.
 func TestUnit_ValueModeNeedsBothASpaceAndADomain(t *testing.T) {
 	p := valuePalette(t)
 
@@ -611,9 +579,8 @@ func TestUnit_ValueModeNeedsBothASpaceAndADomain(t *testing.T) {
 		t.Fatalf("values = %v, want the whole domain", got)
 	}
 
-	// A command WITHOUT a domain is untouched by all of this: its arguments are
-	// free text, and the overlay keeps listing commands (item 6 — the palette
-	// never gates a submission).
+	// A command without a domain is untouched by all of this: its arguments
+	// are free text, and the overlay keeps listing commands.
 	p.SetQuery("/compact 12")
 	if got := p.FilteredValues(); got != nil {
 		t.Fatalf("/compact has no domain but offered %v", got)
@@ -628,9 +595,8 @@ func TestUnit_ValueModeNeedsBothASpaceAndADomain(t *testing.T) {
 		t.Fatalf("unknown command offered values: %v", got)
 	}
 
-	// Past the FIRST argument the domain is done talking — the /mission seam:
-	// an agent-name domain must not keep filtering once the objective is being
-	// typed.
+	// Past the first argument the domain is done talking: an agent-name
+	// domain must not keep filtering once the objective is being typed.
 	p.SetQuery("/model gpt-5 and then some")
 	if got := p.FilteredValues(); got != nil {
 		t.Fatalf("second argument still in value mode: %v", got)
@@ -647,9 +613,7 @@ func TestUnit_ValueModeNeedsBothASpaceAndADomain(t *testing.T) {
 	}
 }
 
-// TestUnit_ValueFilterIsPrefixThenSubstring pins the ranking: typing the start
-// of a model name behaves like completion, while a fragment still finds the
-// name it sits inside.
+// TestUnit_ValueFilterIsPrefixThenSubstring: value matches rank prefix matches before substring matches, case-insensitively.
 func TestUnit_ValueFilterIsPrefixThenSubstring(t *testing.T) {
 	p := valuePalette(t)
 	p.Open("/model c")
@@ -678,9 +642,7 @@ func TestUnit_ValueFilterIsPrefixThenSubstring(t *testing.T) {
 	}
 }
 
-// TestUnit_ValueCompletionWritesTheValue is Tab's contract in value mode: the
-// buffer comes back as the command plus the chosen value, and a partial that
-// matches nothing is left exactly as the operator typed it.
+// TestUnit_ValueCompletionWritesTheValue: Tab in value mode writes the command plus the selected value, and leaves an unmatched partial untouched.
 func TestUnit_ValueCompletionWritesTheValue(t *testing.T) {
 	p := valuePalette(t)
 	p.Open("/model cla")
@@ -716,7 +678,7 @@ func TestUnit_ValueCompletionWritesTheValue(t *testing.T) {
 		t.Fatalf("after Move(99) the value is %q", got)
 	}
 
-	// A partial with no match completes NOTHING — Tab may not delete what the
+	// A partial with no match completes nothing: Tab may not delete what the
 	// operator typed just because the runtime has not heard of it.
 	p.SetQuery("/model zzz")
 	if got, ok := p.CompleteText(); ok {
@@ -724,10 +686,7 @@ func TestUnit_ValueCompletionWritesTheValue(t *testing.T) {
 	}
 }
 
-// TestUnit_SetValueDomainsReplacesAndFollowsTheSelection mirrors SetRemote's
-// rule for the value half: these updates arrive unprompted (a config_option
-// update after /model, a rebound session) and can land between the operator
-// reading a row and pressing Tab.
+// TestUnit_SetValueDomainsReplacesAndFollowsTheSelection: SetValueDomains replaces rather than merges, and the selection follows its value by name.
 func TestUnit_SetValueDomainsReplacesAndFollowsTheSelection(t *testing.T) {
 	p := valuePalette(t)
 	p.Open("/model ")
@@ -740,7 +699,7 @@ func TestUnit_SetValueDomainsReplacesAndFollowsTheSelection(t *testing.T) {
 		t.Fatalf("selection after replacement = %q, want it to follow the value", got)
 	}
 
-	// REPLACES, not merges: a model the session no longer offers is gone.
+	// Replaces, not merges: a model the session no longer offers is gone.
 	if got := p.FilteredValues(); !equal(got, []string{"gpt-5", "claude-opus-4", "gpt-5-mini"}) {
 		t.Fatalf("values = %v, want only the new set", got)
 	}
@@ -757,8 +716,7 @@ func TestUnit_SetValueDomainsReplacesAndFollowsTheSelection(t *testing.T) {
 	}
 }
 
-// TestUnit_ValueDomainsAreSanitized: values are a peer's payload landing in an
-// overlay drawn over the composer, exactly like command descriptions.
+// TestUnit_ValueDomainsAreSanitized: value-domain strings are sanitized, deduplicated and trimmed before they reach the overlay.
 func TestUnit_ValueDomainsAreSanitized(t *testing.T) {
 	p := appPalette(t)
 	p.SetValueDomains(map[string][]string{
@@ -777,8 +735,7 @@ func TestUnit_ValueDomainsAreSanitized(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgHintCarriesTheDomainSize: the rows above are a filtered window,
-// so the hint line is where the operator learns how big the domain really is.
+// TestUnit_ArgHintCarriesTheDomainSize: ArgHint appends the domain's true size to the agent's hint, or stands alone without one.
 func TestUnit_ArgHintCarriesTheDomainSize(t *testing.T) {
 	p := valuePalette(t)
 
@@ -808,10 +765,7 @@ func TestUnit_ArgHintCarriesTheDomainSize(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderValueGoldens pins the value overlay: the whole domain, the
-// scrolled window with its footer, a narrowing filter, a partial nothing
-// matches, and the no-domain fallback where the overlay is still the command
-// menu — at every width and in both glyph variants.
+// TestUnit_RenderValueGoldens pins the value overlay's rendering — whole domain, scrolled footer, filtered, unmatched, and no-domain fallback.
 func TestUnit_RenderValueGoldens(t *testing.T) {
 	variants := []struct {
 		name    string
@@ -844,9 +798,7 @@ func TestUnit_RenderValueGoldens(t *testing.T) {
 	}
 }
 
-// TestUnit_ValueRenderRespectsTheBudget is the row-budget property again, this
-// time over value rows: an overlay that overspends pushes the composer off the
-// bottom of the terminal whichever list it is drawing.
+// TestUnit_ValueRenderRespectsTheBudget: value-mode rendering also never exceeds maxRows or width.
 func TestUnit_ValueRenderRespectsTheBudget(t *testing.T) {
 	p := valuePalette(t)
 	for _, q := range []string{"/model ", "/model c", "/model zzz"} {

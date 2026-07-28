@@ -34,8 +34,7 @@ func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedM
 	defer cancel()
 
 	// Same credential rules as inference: stored static-creds JSON when
-	// present, ambient AWS chain otherwise (previously the catalog ignored the
-	// stored blob entirely).
+	// present, ambient AWS chain otherwise.
 	cfg, err := loadAWSConfig(ctx, regionFromURL(p.spec.BaseURL), p.spec.APIKey, p.httpClient)
 	if err != nil {
 		return nil, err
@@ -92,12 +91,11 @@ func listInferenceProfileIDs(ctx context.Context, client *bedrock.Client) ([]str
 	}
 }
 
-// resolveInvocableModelID returns the id to invoke a model with. A model whose
-// inferenceTypesSupported includes ON_DEMAND is invocable by its base id; a
-// profile-only model resolves to the system-defined profile whose id is the
-// documented geo prefix + base id (us./eu./apac./jp./global.), preferring the
-// geographic profile over global. ok=false means the model cannot be invoked
-// from this account/region and must not be listed. Pure function for tests.
+// resolveInvocableModelID returns the id to invoke a model with. A model with
+// ON_DEMAND inference is invocable by its base id; a profile-only model
+// resolves to the system-defined profile named "<geo prefix>.<base id>"
+// (us./eu./apac./jp./global.), preferring geographic profiles over global.
+// ok=false means the model cannot be invoked from this account/region.
 func resolveInvocableModelID(modelID string, inferenceTypes []types.InferenceType, profileIDs []string) (string, bool) {
 	for _, t := range inferenceTypes {
 		if t == types.InferenceTypeOnDemand {
@@ -124,18 +122,14 @@ func resolveInvocableModelID(modelID string, inferenceTypes []types.InferenceTyp
 	return matches[0], true
 }
 
-// observedFromSummary maps a Bedrock ListFoundationModels result entry into an
-// ObservedModel named by its invocable id. It is a pure function (no AWS
-// calls) so the capability mapping can be unit-tested without credentials.
+// observedFromSummary maps a ListFoundationModels entry into an ObservedModel
+// named by its invocable id. Pure function, no AWS calls, so it is unit
+// tested without credentials.
 //
-// CanVision is detected from the API rather than a hardcoded model list: the
-// FoundationModelSummary.InputModalities field reports which input modalities
-// the model accepts, and a model that lists ModelModalityImage ("IMAGE") among
-// them accepts image input.
-//
-// CanEmbed is deliberately NEVER advertised: this provider speaks the Converse
-// API only and GetEmbedConnection refuses, so advertising embeddings would lie
-// to the request router. Embedding models are listed with no capabilities.
+// CanVision comes from InputModalities reporting ModelModalityImage, not a
+// hardcoded model list. CanEmbed is always false: this provider speaks only
+// the Converse API and GetEmbedConnection refuses, so advertising embeddings
+// would lie to the request router.
 func observedFromSummary(summary types.FoundationModelSummary, invokeID string) modelrepo.ObservedModel {
 	modelID := aws.ToString(summary.ModelId)
 	isEmbed := strings.Contains(strings.ToLower(modelID), "embed")

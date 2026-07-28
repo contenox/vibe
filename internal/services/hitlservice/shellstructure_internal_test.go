@@ -9,15 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These are the analyzer's own properties — the ones a policy verdict can only
-// show indirectly. The behavioural half lives in policy_shell_structural_test.go.
+// These are the analyzer's own properties; the behavioral half lives in
+// policy_shell_structural_test.go.
 
 func shArgs(cmd string) map[string]any { return map[string]any{"command": cmd} }
 
-// TestUnit_ShellAnalyzer_RedirectTargetIsCaptured is the spike's lesson at the
-// level where it was learned: the walker must SEE `> /etc/passwd`. A walker
-// that visits only call expressions reports `cat f.txt` and silently drops the
-// redirect, because a redirect hangs off the Stmt.
+// TestUnit_ShellAnalyzer_RedirectTargetIsCaptured pins that the walker sees a
+// redirect target rather than dropping it (a redirect hangs off the Stmt).
 func TestUnit_ShellAnalyzer_RedirectTargetIsCaptured(t *testing.T) {
 	t.Parallel()
 	r := analyzeShellArgs(ShellKindPOSIX, shArgs(`cat f.txt > /etc/passwd`))
@@ -30,8 +28,7 @@ func TestUnit_ShellAnalyzer_RedirectTargetIsCaptured(t *testing.T) {
 	assert.Equal(t, "/etc/passwd", r.redirects[0].target, "the TARGET is a first-class policy input")
 	assert.False(t, r.upgradable, "a redirect blocks every upgrade")
 
-	// A here-doc is a redirect too, and a bare redirection has no command at
-	// all yet still truncates a file.
+	// A here-doc is a redirect too; a bare redirection has no command at all.
 	hd := analyzeShellArgs(ShellKindPOSIX, shArgs("cat <<EOF\nhi\nEOF\n"))
 	require.True(t, hd.parsed)
 	require.Len(t, hd.redirects, 1)
@@ -46,8 +43,7 @@ func TestUnit_ShellAnalyzer_RedirectTargetIsCaptured(t *testing.T) {
 	assert.False(t, bare.upgradable)
 }
 
-// TestUnit_ShellAnalyzer_EnumeratesEveryCommand pins the tightening direction:
-// a command hiding inside an uncleared construct is still named.
+// TestUnit_ShellAnalyzer_EnumeratesEveryCommand pins that a command hiding inside an uncleared construct is still named.
 func TestUnit_ShellAnalyzer_EnumeratesEveryCommand(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -64,8 +60,7 @@ func TestUnit_ShellAnalyzer_EnumeratesEveryCommand(t *testing.T) {
 		{`f() { rm -rf /; }; f`, []string{"rm", "f"}},
 		{`sleep 1 & rm -rf /`, []string{"sleep", "rm"}},
 		{`ls | head -20`, []string{"ls", "head"}},
-		// bash-only syntax: only the second parse sees it, and only for
-		// tightening.
+		// bash-only syntax: only the second parse sees it, for tightening only.
 		{`cat <(rm -rf /)`, []string{"cat", "rm"}},
 	} {
 		r := analyzeShellArgs(ShellKindPOSIX, shArgs(tc.src))
@@ -78,11 +73,10 @@ func TestUnit_ShellAnalyzer_EnumeratesEveryCommand(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellAnalyzer_BashOnlyLineNeverUpgrades pins that the wider second
-// parse only ever tightens.
+// TestUnit_ShellAnalyzer_BashOnlyLineNeverUpgrades pins that the wider second parse only ever tightens.
 func TestUnit_ShellAnalyzer_BashOnlyLineNeverUpgrades(t *testing.T) {
 	t.Parallel()
-	// Every verb here is harmless, and the line still cannot be upgraded: sh
+	// Every verb here is harmless, yet the line still cannot upgrade: sh
 	// itself would not accept this reading.
 	r := analyzeShellArgs(ShellKindPOSIX, shArgs(`cat <(ls) && ls`))
 	require.True(t, r.parsed, "the bash parser accepts it")
@@ -90,8 +84,7 @@ func TestUnit_ShellAnalyzer_BashOnlyLineNeverUpgrades(t *testing.T) {
 	assert.True(t, r.hasProcSubst)
 }
 
-// TestUnit_ShellAnalyzer_LiteralWordsRule covers the strict resolution that
-// feeds an allow, and the lenient one that only ever feeds a deny.
+// TestUnit_ShellAnalyzer_LiteralWordsRule pins the strict literal resolution that feeds an allow.
 func TestUnit_ShellAnalyzer_LiteralWordsRule(t *testing.T) {
 	t.Parallel()
 
@@ -131,14 +124,13 @@ func TestUnit_ShellAnalyzer_LiteralWordsRule(t *testing.T) {
 		require.Truef(t, r.parsed, "%q", src)
 		require.NotEmptyf(t, r.commands, "%q", src)
 		// commands[0] is the outer command; a substitution contributes its own
-		// inner commands after it, which is the tightening direction at work.
+		// inner commands after it.
 		assert.Falsef(t, r.commands[0].literal, "%q carries a run-time value and must not be literal", src)
 		assert.Falsef(t, r.upgradable, "%q must never be upgradable", src)
 	}
 }
 
-// TestUnit_ShellAnalyzer_LenientNameResolvesEvasions covers the naming half:
-// a name spelled through quotes or escapes is still the name it will run.
+// TestUnit_ShellAnalyzer_LenientNameResolvesEvasions pins that a name spelled through quotes or escapes still resolves.
 func TestUnit_ShellAnalyzer_LenientNameResolvesEvasions(t *testing.T) {
 	t.Parallel()
 	for src, want := range map[string]string{
@@ -156,8 +148,7 @@ func TestUnit_ShellAnalyzer_LenientNameResolvesEvasions(t *testing.T) {
 		assert.Equalf(t, want, r.commands[0].base, "%q resolves to %s", src, want)
 	}
 
-	// A name that only exists at run time is not named at all — and therefore
-	// never allowed either.
+	// A name that only exists at run time is not named at all.
 	r := analyzeShellArgs(ShellKindPOSIX, shArgs(`$CMD -rf /`))
 	require.True(t, r.parsed)
 	require.Len(t, r.commands, 1)
@@ -166,9 +157,7 @@ func TestUnit_ShellAnalyzer_LenientNameResolvesEvasions(t *testing.T) {
 }
 
 // TestUnit_ShellAnalyzer_ClearedNodeSet is the node audit as an executable
-// table: the cleared shapes, and for each cleared kind the sibling shape that
-// must NOT be cleared. Anything added to the cleared set has to be added here
-// with its would-have-widened counterpart.
+// table: the cleared shapes, and each cleared kind's sibling that must not be.
 func TestUnit_ShellAnalyzer_ClearedNodeSet(t *testing.T) {
 	t.Parallel()
 
@@ -232,8 +221,7 @@ func TestUnit_ShellAnalyzer_ClearedNodeSet(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellAnalyzer_AssignmentAllowlistStartsEmpty pins the rule's shape:
-// the escape hatch exists, and nothing is in it.
+// TestUnit_ShellAnalyzer_AssignmentAllowlistStartsEmpty pins that the escape hatch exists but is empty.
 func TestUnit_ShellAnalyzer_AssignmentAllowlistStartsEmpty(t *testing.T) {
 	t.Parallel()
 	assert.Empty(t, clearedAssignmentNames, "the cleared-harmless assignment list starts EMPTY")
@@ -245,10 +233,8 @@ func TestUnit_ShellAnalyzer_AssignmentAllowlistStartsEmpty(t *testing.T) {
 	assert.False(t, r.upgradable)
 }
 
-// TestUnit_ShellAnalyzer_OnlyShellLinesAreRead pins WHICH calls get a
-// structural reading at all. An argv call is not a shell line: reading the
-// metacharacters in one of its arguments as syntax would be a fiction, and a
-// verdict on a fiction is a bug (a commit message is not a command).
+// TestUnit_ShellAnalyzer_OnlyShellLinesAreRead pins which calls get a
+// structural reading at all; an argv call's metacharacters are ordinary bytes.
 func TestUnit_ShellAnalyzer_OnlyShellLinesAreRead(t *testing.T) {
 	t.Parallel()
 
@@ -273,23 +259,18 @@ func TestUnit_ShellAnalyzer_OnlyShellLinesAreRead(t *testing.T) {
 			"%v is an argv call and must not be read as shell syntax", args)
 	}
 
-	// The reconstruction for a shell-mode call is the script the executor
-	// builds: command, then args joined with spaces.
+	// The reconstruction for shell mode: command, then args joined with spaces.
 	src, ok := shellLineFromArgs(map[string]any{"command": "git", "args": []any{"status", "--short"}, "shell": true})
 	require.True(t, ok)
 	assert.Equal(t, "git status --short", src)
 
-	// An absurdly long line is not a command line; the floor answers it.
+	// An absurdly long line is not a command line.
 	_, ok = shellLineFromArgs(map[string]any{"command": strings.Repeat("x", maxShellLineBytes+1)})
 	assert.False(t, ok)
 }
 
-// TestUnit_ShellAnalyzer_PowerShellNeverReachesTheParser is A1's pin. mvdan
-// parses POSIX/bash and NOT powershell: feeding it a powershell line does not
-// fail cleanly, it yields a different program, and a policy decision taken on
-// that reading could widen. The property is invisible from the outside — a
-// powershell line might coincidentally parse — so it is asserted where it is
-// enforced: the parser is never entered.
+// TestUnit_ShellAnalyzer_PowerShellNeverReachesTheParser is A1's pin: a
+// powershell-kind call must never even enter the parser.
 func TestUnit_ShellAnalyzer_PowerShellNeverReachesTheParser(t *testing.T) {
 	// Not parallel: it reads a process-wide counter.
 	powershellLines := []string{
@@ -309,16 +290,14 @@ func TestUnit_ShellAnalyzer_PowerShellNeverReachesTheParser(t *testing.T) {
 			"kind %q reached the parser — mvdan would read a DIFFERENT program", kind)
 	}
 
-	// The POSIX kind does reach it: the counter is a real instrument, not a
-	// constant.
+	// The POSIX kind does reach it.
 	before := structuralParses.Load()
 	require.True(t, analyzeShellArgs(ShellKindPOSIX, shArgs(`git status && go build`)).parsed)
 	assert.Greater(t, structuralParses.Load(), before)
 }
 
-// TestUnit_ShellAnalyzer_ShellKindGuardTable is A1's decision table, including
-// the finding that no caller declares a kind today: the fallback must be the
-// host's own shape, and it must fail closed on Windows.
+// TestUnit_ShellAnalyzer_ShellKindGuardTable is A1's decision table: the
+// no-declaration fallback follows the host's own shape, failing closed on Windows.
 func TestUnit_ShellAnalyzer_ShellKindGuardTable(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -336,7 +315,7 @@ func TestUnit_ShellAnalyzer_ShellKindGuardTable(t *testing.T) {
 		{"no declaration, unix host", "", "", "linux", true},
 		{"no declaration, darwin host", "", "", "darwin", true},
 		{"no declaration, windows host", "", "", "windows", false},
-		// The args map is model-authored, so a hint may only NARROW.
+		// The args map is model-authored, so a hint may only narrow.
 		{"model hint says powershell", "", "powershell", "linux", false},
 		{"model hint says sh on windows", "", "sh", "windows", false},
 		{"model hint says nonsense", "", "elvish", "linux", false},
@@ -349,8 +328,7 @@ func TestUnit_ShellAnalyzer_ShellKindGuardTable(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellAnalyzer_ContextChannelIsTheTrustedOne documents how a caller
-// declares the kind, which is the plumbing A1 asks for.
+// TestUnit_ShellAnalyzer_ContextChannelIsTheTrustedOne pins how a caller declares the trusted shell kind via context.
 func TestUnit_ShellAnalyzer_ContextChannelIsTheTrustedOne(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, ShellKind(""), ShellKindFromContext(context.Background()))
@@ -360,8 +338,7 @@ func TestUnit_ShellAnalyzer_ContextChannelIsTheTrustedOne(t *testing.T) {
 	assert.Equal(t, ShellKindUnknown, ShellKindFromContext(WithShellKind(context.Background(), "fish")))
 }
 
-// TestUnit_ShellAnalyzer_CommandSubstitutionIsAnASTQuestion covers
-// no_command_substitution's structural form.
+// TestUnit_ShellAnalyzer_CommandSubstitutionIsAnASTQuestion pins no_command_substitution's structural form.
 func TestUnit_ShellAnalyzer_CommandSubstitutionIsAnASTQuestion(t *testing.T) {
 	t.Parallel()
 	for _, src := range []string{

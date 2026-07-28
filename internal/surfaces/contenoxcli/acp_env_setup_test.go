@@ -111,15 +111,7 @@ func TestUnit_ACPEnvSetupVars_ContractShape(t *testing.T) {
 	assert.Contains(t, keyVars, "GEMINI_API_KEY")
 }
 
-// TestUnit_ChainAgentSpawnContract_MatchesTheACPCommand guards the one piece of
-// duplication chains-as-agents needs. The instance kernel spawns a chain unit by
-// re-executing this binary with a subcommand and a chain-path environment
-// variable it has to name literally — it cannot import the CLI or the ACP
-// service to ask, because both sit above it and one imports it (a cycle). This
-// test is the join: if the acp subcommand were renamed, or its chain-path
-// variable changed, every chain unit would silently stop finding its chain, and
-// only an end-to-end spawn would notice. Here it fails at compile-and-assert
-// time instead.
+// TestUnit_ChainAgentSpawnContract_MatchesTheACPCommand asserts the kernel's hardcoded subcommand name and chain-path env var match what `contenox acp` actually reads.
 func TestUnit_ChainAgentSpawnContract_MatchesTheACPCommand(t *testing.T) {
 	assert.Equal(t, acpProfileACP.chainEnv, agentinstance.ChainPathEnvVar,
 		"the kernel's chain-path variable must be the one `contenox acp` reads")

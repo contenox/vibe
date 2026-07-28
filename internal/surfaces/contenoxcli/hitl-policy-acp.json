@@ -1,6 +1,6 @@
 {
-  "//compute": "PRESENT AND REAL. This preset's usual job is an ATTACHED editor session, where compute bounds do nothing at all — they are per-MISSION, and a chat with a human in it is bounded by the rules below. The block is here for the other case: nothing stops an operator naming this policy as a mission envelope (`mission fire --policy`, or `default-mission-policy`), and a mission is fire-and-detach, so an unbounded runaway would spend real money with nobody watching. Ceilings are generous — meant to catch a runaway, not to shape normal work. A mission that crosses one is finished at status \"stuck\" with a reason naming the bound.",
-  "//compute-fields": "maxToolCalls counts envelope-gated tool dispatches and is exact. maxTokens is BEST-EFFORT: it bounds a mission from the usage its unit reports, and is inert for a unit whose provider reports none. maxTurns is deliberately OMITTED, not forgotten: the dispatcher issues at most two prompt turns per mission, so any ceiling above 1 could never fire. modelAllowlist/backendAllowlist ARE enforced when set, but no shipped preset can guess your model names. \"finish_stuck\" is the only implemented onExhausted behavior. See docs/development/blueprints/acp/envelope-compute-bounds.md.",
+  "//compute": "Compute bounds are per-mission and inert for this policy's usual job, an attached editor session; they take effect only when this policy is used as a mission envelope, to catch an unwatched runaway spend.",
+  "//compute-fields": "maxToolCalls is exact; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted because the dispatcher never issues more than two prompt turns per mission. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
   "compute": {
     "maxToolCalls": 300,
     "maxTokens": 2000000,
@@ -142,6 +142,18 @@
     },
     {
       "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/{.ssh,.gnupg}/**"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
       "tool": "write_file",
       "action": "deny",
       "when": [
@@ -155,6 +167,18 @@
     {
       "tools": "local_fs",
       "tool": "sed",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/{.config/autostart,.config/systemd/user,Library/LaunchAgents,Library/LaunchDaemons}/**"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "edit_file",
       "action": "deny",
       "when": [
         {
@@ -190,6 +214,18 @@
     },
     {
       "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/{.bashrc,.zshrc,.profile,.bash_profile,.zprofile,.bash_login,.zshenv,.kshrc,crontab,.crontab}"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
       "tool": "write_file",
       "action": "deny",
       "when": [
@@ -203,6 +239,18 @@
     {
       "tools": "local_fs",
       "tool": "sed",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/.config/fish/config.fish"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "edit_file",
       "action": "deny",
       "when": [
         {
@@ -238,6 +286,18 @@
     },
     {
       "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "/{etc,usr,bin,sbin,boot,lib,lib64,opt,System}/**"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
       "tool": "write_file",
       "action": "deny",
       "when": [
@@ -257,6 +317,55 @@
           "key": "path",
           "op": "glob",
           "value": "**/hitl-policy*.json"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/hitl-policy*.json"
+        }
+      ]
+    },
+    {
+      "//": "Config keys and hooks under .git are commands, not project files, so writes are denied; the typed git toolset below is unaffected since it never goes through local_fs.",
+      "tools": "local_fs",
+      "tool": "write_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "{**/.git/**,.git/**}"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "sed",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "{**/.git/**,.git/**}"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "{**/.git/**,.git/**}"
         }
       ]
     },
@@ -313,6 +422,11 @@
     },
     {
       "tools": "local_fs",
+      "tool": "find_files",
+      "action": "allow"
+    },
+    {
+      "tools": "local_fs",
       "tool": "grep",
       "action": "allow"
     },
@@ -337,7 +451,12 @@
       "action": "approve"
     },
     {
-      "//": "git — reading the repository is the whole point of having the toolset: an agent that must file an approval to run git_status is an agent nobody leaves running. The six read operations are allow; the four that CHANGE the repository ask. git_restore asks because it is the destructive one (it throws uncommitted work away). There are deliberately no network operations to rule on: push/pull/fetch are not in the toolset (see internal/services/localtools/git.go) and go through local_shell under the tiers below.",
+      "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "approve"
+    },
+    {
+      "//": "Reading the repository never asks; only the four operations that change it do, and git_restore asks because it discards uncommitted work.",
       "tools": "git",
       "tool": "git_status",
       "action": "allow"
@@ -418,23 +537,23 @@
       "action": "approve"
     },
     {
-      "//": "gointel: every tool is a read of the workspace's type-checked Go view (describe, definition, references, implementations, symbols, diagnostics). Allowed whole; revisit this rule before any mutating op (rename) ever lands in the toolset.",
+      "//": "Every gointel tool reads the workspace's type-checked Go view, so all are allowed; revisit before any mutating operation is added.",
       "tools": "gointel",
       "action": "allow"
     },
     {
-      "//": "workspace: the single workspace_search tool reads this workspace's semantic INDEX and returns file:line-range citations. It is a read of files the agent may already read — nothing is written, nothing is spent (the embedding calls were paid by `contenox index`), and it reaches no further than the index the operator built. Allowed whole, the same call gointel gets; revisit before any write ever lands in this toolset.",
+      "//": "workspace_search only reads the semantic index the operator already built, so it's allowed like gointel; revisit before any write is added.",
       "tools": "workspace",
       "action": "allow"
     },
     {
-      "//": "goja_eval: ALLOW, and the reasoning is structural rather than optimistic. The sandbox has NO ambient I/O BY CONSTRUCTION — no filesystem, no network, no require/import, no process, no event loop — so there is nothing for an approval to protect: the only reach out of it is host.tool, and every call that makes is evaluated by THIS policy under the rule for the tool it addresses, exactly as if the model had called it directly. What is left to gate is pure compute, and compute is bounded three ways that need no human: the deadline interrupt (2s default, 30s ceiling), the call-stack cap, and the output cap. The one soft limit is memory — goja has no cap, so an allocation bomb is bounded by RATE (~200 MB/s measured) until the deadline fires, i.e. a TRANSIENT ceiling in the low hundreds of MB, then GC; that is documented, not hidden, and it is a cost an approval card cannot reduce. Dogfooding argued this down from approve: 8 live approvals in one session, each costing an operator more than the call did, none of which could have prevented anything. WHAT REVOKES THIS: any ambient capability ever reaching the sandbox — a filesystem shim, a network fetch, a module loader, a VM that outlives the call — puts this rule back to approve, because the argument above is entirely about there being nothing here to reach. Script tools in $CONTENOX_DIR/tools still carry NO rule: operator-authored code nobody reviewed falls to default_action, and an operator who trusts a script adds an allow rule for it by name, exactly like any other envelope edit.",
+      "//": "Allowed because the sandbox has no ambient I/O by construction — no filesystem, network or module loader — so there is nothing here for approval to protect; any reach to a tool is evaluated by this same policy. Compute is bounded by a deadline, call-stack cap and output cap; only memory is a soft, rate-bounded limit until the deadline fires.",
       "tools": "goja",
       "tool": "goja_eval",
       "action": "allow"
     },
     {
-      "//": "jq: the single jq_query tool runs a jq program over ONE JSON or YAML document and returns the values it emits. ALLOW, and structurally rather than optimistically. IT READS A FILE THE AGENT MAY ALREADY READ: `path` goes through the same vfs containment local_fs does, so the bytes reachable here are a SUBSET of what local_fs.read_file — already allow above — reaches. IT COMPUTES DETERMINISTICALLY AND CANNOT WRITE: gojq has no write path and this package adds none; a filter like `.a = 1` returns a modified COPY as its result and the file on disk is untouched. IT CANNOT REACH THE NETWORK OR THIS PROCESS: jq has no I/O builtins, and the three doors it does have are shut at compile time — `input`/`inputs` are refused because no input iterator is supplied, `import`/`include` because no module loader is, and `env`/`$ENV` evaluate to an EMPTY object because the environ loader is explicitly disabled (so no filter can read this process's API keys). AND IT IS FULLY DEADLINE-BOUNDED INCLUDING RECURSION, which is the property that makes the tier structural: gojq checks the context between VM instructions, so `def f: f; f` (non-terminating recursion) and `[range(1e8)]` (a compute bomb) both stop AT the 2s deadline — measured at 2.009s and 2.004s respectively — and regexes go through Go's RE2, which cannot backtrack catastrophically. That is strictly stronger than the goja rule above, whose memory is bounded only by rate; jq's worst native allocation (string repetition) has gojq's own 2 GiB hard ceiling above it. Output is capped in both COUNT and BYTES with an explicit truncation marker, so one filter cannot flood a context window. WHAT REVOKES THIS: an in-place write mode, a module loader, an input iterator, or an environ loader ever being wired into this package — each of those is exactly one of the four clauses above.",
+      "//": "Allowed because jq_query only reads a file local_fs.read_file already reaches, CANNOT WRITE (gojq has no write path), cannot reach the network or this process (env/$ENV evaluates to an EMPTY object; no module or input loader is wired in), and is fully DEADLINE-BOUNDED including recursion.",
       "tools": "jq",
       "action": "allow"
     },
@@ -447,7 +566,7 @@
       "action": "allow"
     },
     {
-      "//": "local_shell tier 1 — never, under any circumstance. Bare basenames only: the matcher compares path.Base(command) exactly, so a multi-word entry would silently never fire.",
+      "//": "Tier 1: always denied, matched only as an exact bare basename.",
       "tools": "local_shell",
       "tool": "local_shell",
       "action": "deny",
@@ -460,7 +579,7 @@
       ]
     },
     {
-      "//": "local_shell tier 2 — command substitution always asks, and it sits ABOVE the allow tier on purpose: a line carrying $(), backticks or process substitution is not a safe verb, whatever verb it starts with.",
+      "//": "Tier 2: a command line containing $() or backticks always asks, regardless of the verb it starts with.",
       "tools": "local_shell",
       "tool": "local_shell",
       "action": "approve",
@@ -473,7 +592,7 @@
       ]
     },
     {
-      "//": "local_shell tier 3 — the safe-verb allow tier: no approval nagging for operations that cannot change anything. Entries are PREFIXES matched token-wise against the command line, which is what lets `git log` through while `git clean -fd` still asks. A call is only ever matched when it is a plain argv call: shell mode, or any of ; | & > < ` $( in a token, disqualifies it and it falls through to the tiers below. WHY EACH ONE: git status/diff/log/show/blame/ls-files/rev-parse and `git branch` inspect the repository without writing to it (a `git branch -D` is reachable here and is deliberate: deleting a local branch loses no committed work and is reflog-recoverable). go build/test/vet/list/doc/env/version are the project's own build and test verbs — `go test` runs the repository's code, which is the same code the agent is already editing, and that is the accepted daily-driver bargain. gofmt -l and gofmt -d report formatting; bare gofmt is NOT listed because gofmt -w rewrites sources. ls/cat/head/tail/wc/pwd/echo/grep/rg read and print. DELIBERATELY ABSENT: find (its -delete and -exec walk straight around the rm/sudo tier below), go run and go generate (arbitrary execution), go get and go mod (network, and they rewrite go.mod), and every mutating git verb. Anything not listed here is not denied — it just asks.",
+      "//": "Tier 3: read-only and build/test verbs across Go, JS and Python run without asking, matched as line-start prefixes with no shell metacharacters present. Every git verb is deliberately absent, since a git subprocess can execute repo-local config even on a read; use the typed git toolset above instead.",
       "tools": "local_shell",
       "tool": "local_shell",
       "action": "allow",
@@ -481,12 +600,12 @@
         {
           "key": "command",
           "op": "command_prefix_allowlist",
-          "value": "git status,git diff,git log,git show,git blame,git branch,git ls-files,git rev-parse,go build,go test,go vet,go list,go doc,go env,go version,gofmt -l,gofmt -d,ls,cat,head,tail,wc,pwd,echo,grep,rg"
+          "value": "go build,go test,go vet,go list,go doc,go env,go version,gofmt -l,gofmt -d,ls,cat,head,tail,wc,pwd,echo,grep,rg,npm test,npm ls,tsc --noEmit,eslint,vitest run,jest,pytest,python -m pytest,python3 -m pytest,ruff check,mypy,pip list,pip show"
         }
       ]
     },
     {
-      "//": "local_shell tier 4 — the ask-always list: commands that delete, escalate or overwrite always show an approval card.",
+      "//": "Tier 4: commands that delete, escalate or overwrite always ask, regardless of the safe-verb tier beside them.",
       "tools": "local_shell",
       "tool": "local_shell",
       "action": "approve",
@@ -499,7 +618,7 @@
       ]
     },
     {
-      "//": "local_shell tier 5 — the floor: an unknown command asks. Secure where it matters.",
+      "//": "Tier 5: the floor — an unrecognized command always asks.",
       "tools": "local_shell",
       "tool": "local_shell",
       "action": "approve"

@@ -12,17 +12,16 @@ type OpenAIChatClient struct {
 }
 
 // openAIChatCompletionResponse matches the /v1/chat/completions JSON body.
-// Some OpenAI-compatible chat-completions backends expose `reasoning_content`.
-// Official OpenAI reasoning summaries live in the Responses API, so this field
-// is treated as best-effort compatibility rather than a guaranteed contract.
+// reasoning_content is a best-effort field exposed by some OpenAI-compatible
+// backends; official OpenAI reasoning summaries live in the Responses API instead.
 type openAIChatCompletionResponse struct {
 	Choices []openAIChatCompletionChoice `json:"choices"`
 	Usage   *openAIChatCompletionUsage   `json:"usage"`
 }
 
-// openAIChatCompletionUsage is the chat-completions usage report.
-// prompt_tokens already INCLUDES cached tokens (no normalization needed); the
-// cached count is broken out under prompt_tokens_details.cached_tokens.
+// openAIChatCompletionUsage is the chat-completions usage report. prompt_tokens
+// already includes cached tokens; the cached count is broken out separately
+// under prompt_tokens_details.cached_tokens.
 type openAIChatCompletionUsage struct {
 	PromptTokens        int `json:"prompt_tokens"`
 	CompletionTokens    int `json:"completion_tokens"`
@@ -69,7 +68,6 @@ type openAIChatCompletionMsg struct {
 }
 
 func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (modelrepo.ChatResult, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "openai", "model", c.modelName)
 	defer end()
 
@@ -112,14 +110,13 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		return modelrepo.ChatResult{}, err
 	}
 
-	// Convert to our format
 	message := modelrepo.Message{
 		Role:     choice.Message.Role,
 		Content:  choice.Message.Content,
 		Thinking: choice.Message.ReasoningContent,
 	}
 
-	// Convert tool calls and translate sanitized names back to the original the caller provided
+	// Translate sanitized tool names back to what the caller originally provided.
 	var toolCalls []modelrepo.ToolCall
 	for _, tc := range choice.Message.ToolCalls {
 		name := tc.Function.Name

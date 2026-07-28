@@ -1,9 +1,7 @@
 package missiontools_test
 
 // Tests for the conclusion verification gate (verify.go), driven through the
-// real Exec path against the real sqlite-backed mission store — the same shape
-// as the rest of this package's tests, so what is asserted is what a dispatched
-// unit's report actually becomes on disk.
+// real Exec path against the real sqlite-backed mission store.
 
 import (
 	"os"
@@ -38,9 +36,7 @@ func storedReport(t *testing.T, svc missionservice.Service, missionID string) *m
 	return reports[0]
 }
 
-// TestUnit_Verify_MissingArtifactDowngradesResult is the gate's core: a result
-// naming a positively missing file lands as PROGRESS, annotated with a warning
-// naming exactly what is missing — and nothing else about it changes.
+// TestUnit_Verify_MissingArtifactDowngradesResult pins the gate's core: a positively missing artifact downgrades result to progress.
 func TestUnit_Verify_MissingArtifactDowngradesResult(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 
@@ -67,8 +63,7 @@ func TestUnit_Verify_MissingArtifactDowngradesResult(t *testing.T) {
 	require.Equal(t, 1, downgrades, "the telemetry hook fires once per downgraded report")
 }
 
-// TestUnit_Verify_AllPresentStaysResult is the negative: a result whose claimed
-// artifacts all exist lands exactly as filed.
+// TestUnit_Verify_AllPresentStaysResult pins that a result whose artifacts all exist lands exactly as filed.
 func TestUnit_Verify_AllPresentStaysResult(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 
@@ -90,14 +85,12 @@ func TestUnit_Verify_AllPresentStaysResult(t *testing.T) {
 	require.Zero(t, downgrades)
 }
 
-// TestUnit_Verify_UnverifiableRefsFailOpen pins every fail-open class at once:
-// URLs, prose, and relative paths with no workdir bound all count as present,
-// so a result claiming only those is never downgraded.
+// TestUnit_Verify_UnverifiableRefsFailOpen pins that URLs, prose, and relative paths with no workdir all count as present.
 func TestUnit_Verify_UnverifiableRefsFailOpen(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
 
-	// NOTE: no WithWorkdir — the relative ref is unverifiable by construction.
+	// No WithWorkdir: the relative ref is unverifiable by construction.
 	toolCtx := missiontools.WithMissionID(ctx, missionID)
 	input, call := resultInput("done, see the links", []string{
 		"https://example.com/build/artifact.tar.gz", // URL: not a local fact
@@ -112,9 +105,7 @@ func TestUnit_Verify_UnverifiableRefsFailOpen(t *testing.T) {
 	require.Empty(t, rep.Detail)
 }
 
-// TestUnit_Verify_AbsoluteMissingPathNeedsNoWorkdir: an absolute claimed path
-// is verifiable even when no workdir was bound — os.IsNotExist on it is the
-// positive absence that downgrades.
+// TestUnit_Verify_AbsoluteMissingPathNeedsNoWorkdir pins that an absolute missing path downgrades even with no workdir bound.
 func TestUnit_Verify_AbsoluteMissingPathNeedsNoWorkdir(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -130,9 +121,7 @@ func TestUnit_Verify_AbsoluteMissingPathNeedsNoWorkdir(t *testing.T) {
 	require.Contains(t, rep.Detail, gone)
 }
 
-// TestUnit_Verify_StatErrorCountsAsPresent: a stat that fails for any reason
-// OTHER than not-exists (here: an unsearchable parent directory) is the
-// runtime's limited view, not evidence against the unit — no downgrade.
+// TestUnit_Verify_StatErrorCountsAsPresent pins that a non-not-exists stat error (e.g. a permission wall) never downgrades.
 func TestUnit_Verify_StatErrorCountsAsPresent(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: permission walls do not apply")
@@ -158,9 +147,7 @@ func TestUnit_Verify_StatErrorCountsAsPresent(t *testing.T) {
 	require.Empty(t, rep.Detail)
 }
 
-// TestUnit_Verify_HandoverArtifactsAreClaimsToo: the hand-over's Artifacts list
-// is a deliverable claim exactly as Refs is — a missing one downgrades, and the
-// hand-over itself still lands verbatim (nothing discarded).
+// TestUnit_Verify_HandoverArtifactsAreClaimsToo pins that a missing hand-over artifact downgrades, and the hand-over still lands verbatim.
 func TestUnit_Verify_HandoverArtifactsAreClaimsToo(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -187,8 +174,7 @@ func TestUnit_Verify_HandoverArtifactsAreClaimsToo(t *testing.T) {
 	require.Equal(t, "module ported", rep.Handover.Outcome)
 }
 
-// TestUnit_Verify_OnlyResultsAreGated: a progress/finding/blocker report naming
-// a missing path is NOT the gate's business — only a claimed conclusion is.
+// TestUnit_Verify_OnlyResultsAreGated pins that a non-result report naming a missing path is never gated.
 func TestUnit_Verify_OnlyResultsAreGated(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -205,9 +191,7 @@ func TestUnit_Verify_OnlyResultsAreGated(t *testing.T) {
 	require.Empty(t, rep.Detail, "a non-result report is never annotated")
 }
 
-// TestUnit_Verify_WarningAppendsToExistingDetail: the unit's own detail comes
-// first, the runtime's warning after — the annotated report reads as the unit's
-// words plus a note, never as a rewrite.
+// TestUnit_Verify_WarningAppendsToExistingDetail pins that the unit's detail comes first, the runtime's warning after.
 func TestUnit_Verify_WarningAppendsToExistingDetail(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)

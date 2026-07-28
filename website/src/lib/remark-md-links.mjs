@@ -20,6 +20,15 @@ const S3_MEDIA = new Set([
   'chain_flow_diagram.png',
   'hooks_architecture.png',
   'aionui-custom-agent.png',
+  // R&D section (docs/rnd/**) — pending upload, see docs/development/internal/rnd-assets.md.
+  'beam-demo.webm',
+  'backend-manager-demo.mp4',
+  'beam-video-cover.png',
+  'beam-login.png',
+  'beam-new-chat.png',
+  'modeld-console.png',
+  'vscode-extension-icon.png',
+  'ui-library-storybook.png',
 ]);
 
 // Rewrites relative links in content:
@@ -43,6 +52,14 @@ export default function remarkMdLinks() {
       if (url.startsWith('/') && S3_MEDIA.has(url.slice(1))) {
         node.url = S3_MEDIA_BASE + url.slice(1);
       }
+    });
+
+    // Raw HTML (e.g. a <video src="/x.webm" poster="/y.png"> demo embed) isn't
+    // a markdown image node, so its root-relative attributes need their own pass.
+    visit(tree, 'html', (node) => {
+      node.value = node.value.replace(/((?:src|poster)=")\/([^"/][^"]*)"/g, (match, prefix, filename) =>
+        S3_MEDIA.has(filename) ? `${prefix}${S3_MEDIA_BASE}${filename}"` : match
+      );
     });
 
     visit(tree, 'link', (node) => {

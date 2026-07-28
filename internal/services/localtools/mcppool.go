@@ -441,21 +441,18 @@ func (srt *sessionRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 
 	resp, err := srt.base.RoundTrip(req2)
 
-	// AUTO-HEAL: server returned 404 because it no longer knows this session
-	// (e.g. it was restarted). Wipe the token, drain the response body to free
-	// the TCP connection, and replay the original request without the header.
+	// Auto-heal: a 404 means the server no longer knows this session (e.g. it
+	// restarted). Wipe the token and replay the original request without it.
 	if err == nil && resp != nil && resp.StatusCode == http.StatusNotFound && injected {
 		// Only replay if the body is replayable (nil body or GetBody available).
 		if req.Body == nil || req.GetBody != nil {
 			srt.setSessionID("") // wipe in-memory + notify KV callback
 
-			// Drain and close the 404 body to reuse the connection.
 			if resp.Body != nil {
 				_, _ = io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
 			}
 
-			// Retry without the stale header.
 			req3 := req.Clone(req.Context())
 			req3.Header.Del("Mcp-Session-Id")
 			if req.Body != nil && req.GetBody != nil {
@@ -658,12 +655,11 @@ func shouldReconnectAfterMCPError(err error) bool {
 	return !errors.Is(err, ErrMCPSessionUnavailable)
 }
 
-// buildOAuthRoundTripper constructs a non-interactive oauth2.Transport.
-//
-// It ONLY injects a previously-stored token and auto-refreshes it.
-// It never opens a browser or binds a long-lived port — if no valid token is
-// found in the store it returns ErrMCPOAuthNotAuthenticated so the caller can
-// tell the user to run `contenox mcp auth <name>`.
+// buildOAuthRoundTripper constructs a non-interactive oauth2.Transport that
+// only injects a previously-stored token and auto-refreshes it — it never
+// opens a browser or binds a port. With no valid stored token it returns
+// ErrMCPOAuthNotAuthenticated so the caller can tell the user to run
+// `contenox mcp auth <name>`.
 func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.RoundTripper, error) {
 	reportErr, reportChange, end := p.tracker.Start(
 		context.Background(), "build_oauth_transport", "mcp_server",
@@ -700,7 +696,6 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 	})
 	discoverEnd()
 
-	// Resolve client ID from stored registration.
 	clientID := cfg.ClientID
 	if clientID == "" {
 		reg, _ := cfg.TokenStore.GetClientRegistration(ctx, p.cfg.Name)
@@ -709,11 +704,9 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 		}
 	}
 
-	// Load the previously stored token.
 	stored, _ := cfg.TokenStore.GetOAuthToken(ctx, p.cfg.Name)
 
 	if stored == nil || stored.AccessToken == "" {
-		// No token at all — the user needs to authenticate first.
 		err := newMCPError(
 			ErrMCPOAuthNotAuthenticated,
 			fmt.Sprintf("mcp %q: authentication required; run 'contenox mcp auth %s'", p.cfg.Name, p.cfg.Name),
@@ -730,7 +723,8 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 		"expiry":      stored.Expiry.String(),
 	})
 
-	// Build a redirect URI to satisfy oauth2.Config (only needed for refresh).
+	// Redirect URI is only needed to satisfy oauth2.Config for refresh; no
+	// callback is ever received here.
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", cfg.ResolveCallbackPort())
 
 	o2cfg := &oauth2.Config{
@@ -744,9 +738,8 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 		},
 	}
 
-	// We have a token (possibly expired but with a refresh token).
-	// oauth2.ReuseTokenSource will call o2cfg.TokenSource which transparently
-	// uses the refresh token when the access token has expired.
+	// ReuseTokenSource transparently refreshes via o2cfg when the access token
+	// has expired.
 	src := oauth2.ReuseTokenSource(stored, o2cfg.TokenSource(ctx, stored))
 
 	// Persist every newly-refreshed token so it survives process restarts.

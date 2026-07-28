@@ -13,17 +13,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A session's TITLE is the label every surface shows instead of the minted
-// `beam-<uuid>` id, and it has exactly one resolution order — the operator's
-// own /rename, then the first-user-message heuristic, then the raw name.
-// These tests pin that order and the storage under it.
+// Session title resolution order: operator /rename override, then the
+// first-user-message heuristic, then the raw session name.
 
 const titleTestWorkspace = "ws-title-test"
 
 // newTitleTransport builds a Transport over a real SQLite DB with one named,
-// empty ACP session, and returns the entry a command handler is called with
-// plus the minted session name — the `beam-<uuid>` string that is the title's
-// last-resort fallback.
+// empty ACP session, returning the entry plus the minted `beam-<uuid>` name.
 func newTitleTransport(t *testing.T) (context.Context, *Transport, *sessionEntry, string) {
 	t.Helper()
 	ctx, db := setupResolverDB(t)
@@ -38,9 +34,9 @@ func newTitleTransport(t *testing.T) (context.Context, *Transport, *sessionEntry
 	return ctx, tr, sess, sessionName
 }
 
-// TestUnit_SessionTitleOverride_RoundTripsAndClears covers the storage on its
-// own: what was written comes back, an empty title clears rather than storing
-// a blank label, and a session nobody renamed reads as "".
+// TestUnit_SessionTitleOverride_RoundTripsAndClears pins the storage: write
+// round-trips, an empty title clears rather than storing a blank, and an
+// unrenamed session reads as "".
 func TestUnit_SessionTitleOverride_RoundTripsAndClears(t *testing.T) {
 	ctx, db := setupResolverDB(t)
 	store := runtimetypes.New(db.WithoutTransaction())
@@ -51,16 +47,14 @@ func TestUnit_SessionTitleOverride_RoundTripsAndClears(t *testing.T) {
 	require.NoError(t, setSessionTitleOverride(ctx, store, "idx-1", "rewrite the ingest retry"))
 	require.Equal(t, "rewrite the ingest retry", sessionTitleOverride(ctx, store, "idx-1"))
 
-	// Clearing hands the label back to the derived heuristic. Clearing twice
-	// is not an error: a missing key is the state the caller asked for.
+	// Clearing twice is not an error: a missing key is the state asked for.
 	require.NoError(t, setSessionTitleOverride(ctx, store, "idx-1", ""))
 	require.Equal(t, "", sessionTitleOverride(ctx, store, "idx-1"))
 	require.NoError(t, setSessionTitleOverride(ctx, store, "idx-1", ""))
 
 	require.Error(t, setSessionTitleOverride(ctx, store, "", "orphan"), "a title needs a session to belong to")
 
-	// Overlong titles are clipped on the way out, so no picker ever has to
-	// render a pasted paragraph as a row label.
+	// Overlong titles are clipped on the way out.
 	long := ""
 	for range 200 {
 		long += "x"
@@ -97,18 +91,15 @@ func TestUnit_HandleRename_SetsShowsAndResets(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestUnit_SessionTitle_OverrideBeatsTheDerivedTitle is the precedence itself,
-// checked on BOTH readers — session/list's Title and the live
-// session_info_update's — because a client that learned the title from a
-// re-list and one that learned it from a push must agree.
+// TestUnit_SessionTitle_OverrideBeatsTheDerivedTitle pins the precedence on
+// both readers, session/list's Title and the live session_info_update's.
 func TestUnit_SessionTitle_OverrideBeatsTheDerivedTitle(t *testing.T) {
 	ctx, tr, sess, sessionName := newTitleTransport(t)
 
 	exec := tr.deps.DB.WithoutTransaction()
 	mgr := chatservice.NewManager(titleTestWorkspace)
 
-	// With no messages at all, the roster falls back to the raw name — the
-	// unreadable `beam-<uuid>` this whole mechanism exists to replace.
+	// No messages: the roster falls back to the raw `beam-<uuid>` name.
 	require.Equal(t, sessionName, tr.sessionListTitle(ctx, mgr, exec, sess.InternalSessionID, sessionName))
 	require.Equal(t, "", tr.sessionInfoTitle(ctx, sess.InternalSessionID), "no message, no live title")
 
@@ -126,22 +117,15 @@ func TestUnit_SessionTitle_OverrideBeatsTheDerivedTitle(t *testing.T) {
 	require.Equal(t, "ingest retry bug", tr.sessionListTitle(ctx, mgr, exec, sess.InternalSessionID, sessionName))
 	require.Equal(t, "ingest retry bug", tr.sessionInfoTitle(ctx, sess.InternalSessionID))
 
-	// Resetting falls back to the derived title, NOT to the raw name: the
-	// message it was derived from is still there.
+	// Resetting falls back to the derived title, not the raw name.
 	_, err = tr.handleRename(ctx, sess, "-")
 	require.NoError(t, err)
 	require.Equal(t, derived, tr.sessionListTitle(ctx, mgr, exec, sess.InternalSessionID, sessionName))
 }
 
-// TestUnit_FirstUserMessageTitle_SkipsCommandShapedMessages is the regression
-// for a session whose first user turn was a slash command: persistCommandTurn
-// deliberately records "/doctor" as an ordinary user message (see there), and
-// firstUserMessageTitle used to take the first non-empty user message
-// verbatim — titling the session "/doctor" forever. It must instead skip every
-// command-shaped user message (known, like "/doctor", or merely
-// command-shaped, like an unrecognized "/frobnicate") and title the session
-// from the first real prose message, falling back to "" (so the caller's
-// fallback name stands) when every user message so far is a command.
+// TestUnit_FirstUserMessageTitle_SkipsCommandShapedMessages pins that a
+// command-shaped user message (known or not) is skipped when deriving a
+// title, falling back to "" when every user message so far is a command.
 func TestUnit_FirstUserMessageTitle_SkipsCommandShapedMessages(t *testing.T) {
 	mgr := chatservice.NewManager(titleTestWorkspace)
 
@@ -200,19 +184,14 @@ func TestUnit_FirstUserMessageTitle_SkipsCommandShapedMessages(t *testing.T) {
 			require.NoError(t, mgr.PersistDiff(ctx, exec, sess.InternalSessionID, msgs))
 
 			require.Equal(t, tc.want, firstUserMessageTitle(ctx, mgr, exec, sess.InternalSessionID))
-			// The live session_info_update path shares the exact same
-			// derivation (see sessionInfoTitle's doc comment), so it must
-			// agree with the direct call above rather than drift back to the
-			// old verbatim behavior.
+			// sessionInfoTitle shares the same derivation; must agree.
 			require.Equal(t, tc.want, tr.sessionInfoTitle(ctx, sess.InternalSessionID))
 		})
 	}
 }
 
-// TestUnit_SessionListTitle_RederivesOnceRealProseArrives is the live-session
-// shape of the same bug: an operator who opens a session with /doctor sees the
-// fallback id at first (not "/doctor"), and the roster title upgrades to real
-// prose the moment they say something — without needing a rename.
+// TestUnit_SessionListTitle_RederivesOnceRealProseArrives pins that a roster
+// title upgrades from the fallback name to real prose without a rename.
 func TestUnit_SessionListTitle_RederivesOnceRealProseArrives(t *testing.T) {
 	ctx, tr, sess, sessionName := newTitleTransport(t)
 	exec := tr.deps.DB.WithoutTransaction()
@@ -234,10 +213,8 @@ func TestUnit_SessionListTitle_RederivesOnceRealProseArrives(t *testing.T) {
 	require.Equal(t, derived, tr.sessionInfoTitle(ctx, sess.InternalSessionID))
 }
 
-// TestUnit_RenameCommand_IsAdvertisedRecognizedAndPushesSessionInfo keeps the
-// three registration points honest with each other: a command that is
-// advertised must parse, and one that changes the session's label must be the
-// one that pushes session_info_update.
+// TestUnit_RenameCommand_IsAdvertisedRecognizedAndPushesSessionInfo pins that
+// /rename is advertised, parses, and is the only command pushing session_info_update.
 func TestUnit_RenameCommand_IsAdvertisedRecognizedAndPushesSessionInfo(t *testing.T) {
 	var advertised bool
 	for _, c := range allACPCommands() {

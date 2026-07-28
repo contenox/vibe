@@ -10,13 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_BuildAgentCmd_SelfInvocationIsNotConfined pins the one exemption from
-// "every spawned agent runs inside the wall": a command that resolves to THIS
-// running executable is contenox spawning contenox — a dispatched mission unit or
-// a chain unit — and runs unconfined, because the wall would deny it the shared
-// runtime state (~/.contenox is not carved) that being contenox is defined by.
-// The observable difference is the assembled command: the target itself, with the
-// parent's environment, rather than the /proc/self/exe shim re-exec.
+// TestUnit_BuildAgentCmd_SelfInvocationIsNotConfined pins that a self-invoked
+// command runs unconfined, inheriting the environment.
 func TestUnit_BuildAgentCmd_SelfInvocationIsNotConfined(t *testing.T) {
 	self, err := os.Executable()
 	require.NoError(t, err)
@@ -39,13 +34,8 @@ func TestUnit_BuildAgentCmd_SelfInvocationIsNotConfined(t *testing.T) {
 		"the declared env is layered on top of the inherited one")
 }
 
-// TestUnit_BuildAgentCmd_ForeignCommandIsConfined is the other half: the very same
-// binary contents at a DIFFERENT path is a foreign agent, so it goes through the
-// wall. Identity is decided by file identity (os.SameFile), which is what keeps
-// the exemption from being reachable by copying or renaming a program.
-//
-// Where the host cannot build the wall at all, buildAgentCmd fails closed — that
-// is the contract, and it is asserted as such rather than skipped.
+// TestUnit_BuildAgentCmd_ForeignCommandIsConfined pins that identical binary
+// contents at a different path is treated as foreign and confined.
 func TestUnit_BuildAgentCmd_ForeignCommandIsConfined(t *testing.T) {
 	self, err := os.Executable()
 	require.NoError(t, err)

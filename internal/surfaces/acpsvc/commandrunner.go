@@ -16,6 +16,10 @@ var acpTerminalOutputByteLimit int64 = 1 * 1024 * 1024
 type acpCommandRunner struct {
 	transport func() *Transport
 	shell     localtools.PlatformShell
+	// scrub, when set, replaces the inherited environment on the local OS-spawn
+	// fallback below (no client terminal capability) — the client-terminal path
+	// spawns in the editor's own process, which contenox does not control.
+	scrub func([]string) []string
 }
 
 func NewACPCommandRunner(transport func() *Transport) localtools.CommandRunner {
@@ -26,13 +30,20 @@ func NewACPCommandRunnerWithShell(transport func() *Transport, shell localtools.
 	return &acpCommandRunner{transport: transport, shell: shell.WithDefaults()}
 }
 
+// NewACPCommandRunnerWithScrub is NewACPCommandRunnerWithShell plus an
+// environment scrub (see libsandbox.EnvScrub) applied to the local OS-spawn
+// fallback. Nil scrub keeps that fallback's full inherit.
+func NewACPCommandRunnerWithScrub(transport func() *Transport, shell localtools.PlatformShell, scrub func([]string) []string) localtools.CommandRunner {
+	return &acpCommandRunner{transport: transport, shell: shell.WithDefaults(), scrub: scrub}
+}
+
 func (a *acpCommandRunner) Run(ctx context.Context, spec localtools.CommandSpec, stdout, stderr io.Writer) (int, error) {
 	t := a.transport()
 	if t == nil {
 		return -1, errors.New("acpsvc: no active ACP transport")
 	}
 	if !t.getClientCaps().Terminal {
-		return localtools.NewOSCommandRunnerWithShell(a.shell).Run(ctx, spec, stdout, stderr)
+		return localtools.NewOSCommandRunnerWithShellAndScrub(a.shell, a.scrub).Run(ctx, spec, stdout, stderr)
 	}
 
 	command, cmdArgs, titleCmd := a.terminalCommand(spec)
@@ -65,11 +76,8 @@ func (a *acpCommandRunner) Run(ctx context.Context, spec localtools.CommandSpec,
 		t.sessionMu.Unlock()
 	}
 
-	// The protocol dance — create, wait, kill-on-cancel, fetch output on a
-	// detached context, release, reconcile the exit code from both sources —
-	// is generic and lives in libacp. Everything below it is service policy:
-	// which terminal to surface upstream, how to render the outcome for beam,
-	// and how a truncated output maps onto the tool budget.
+	// libacp.RunTerminal owns the create/wait/kill-on-cancel/fetch/release
+	// protocol; everything below is service policy over its result.
 	res, err := libacp.RunTerminal(ctx, t.conn, req, func(terminalID string) {
 		if sid == "" {
 			return
@@ -97,8 +105,7 @@ func (a *acpCommandRunner) Run(ctx context.Context, spec localtools.CommandSpec,
 	}
 
 	if res.Output != "" {
-		// Trim excessive trailing newlines from terminal output to avoid UI padding.
-		// Preserve at most 2 trailing newlines (common for command output).
+		// Cap trailing newlines at 2 to avoid UI padding.
 		output := res.Output
 		for strings.HasSuffix(output, "\n\n\n") {
 			output = strings.TrimSuffix(output, "\n")

@@ -21,21 +21,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file drives the REAL production Transport through the REAL loopback the
-// Bridge builds — both libacp Run loops live, on a real SQLite database and a
-// real SQLite event bus. There is no LLM backend and no chain execution
-// anywhere in it: the full-turn coverage rides the slash-command path, which
-// acpsvc intercepts server-side (parseCommand) and answers without ever
-// reaching a model. That is the whole reason /help is the turn under test.
-//
-// The bus is deliberately NOT libbus.NewInMem: prompt.go tears a turn's event
-// subscription down the instant the agent returns, and only the SQLite backend
-// promises to hand over what was published before Unsubscribe. See the header
-// of internal/surfaces/acpsvc/client_loopback_test.go for the full account.
+// This file drives the real production Transport through the real loopback
+// the Bridge builds, on a real SQLite database and event bus, with no LLM
+// backend or chain execution: full-turn coverage rides the slash-command
+// path, which acpsvc answers server-side without reaching a model, so /help
+// is the turn under test. The bus must be the SQLite backend, not
+// libbus.NewInMem — only it promises to hand over what was published before
+// Unsubscribe.
 
 // testChainEnv is the env var the harness points acpsvc's chain loader at. The
-// chain is never executed here (see above) — a valid file with an id and one
-// task is all the loader's fail-closed validation asks for.
+// chain is never executed here — a valid file with an id and one task is all
+// the loader's fail-closed validation asks for.
 const testChainEnv = "CONTENOX_BEAMBRIDGE_TEST_CHAIN_PATH"
 
 type harness struct {
@@ -57,9 +53,8 @@ func newHarness(t *testing.T) *harness {
 	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(dir, "bridge.db"), runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
 
-	// Same backend serve wires, on the schema this DB was created with. The
-	// short poll only makes a turn's events surface promptly; the delivery
-	// guarantee is Unsubscribe's final drain, which does not depend on the tick.
+	// The short poll only makes a turn's events surface promptly; the
+	// delivery guarantee is Unsubscribe's final drain, not the tick.
 	bus := libbus.NewSQLiteWithOptions(db.WithoutTransaction(), libbus.SQLiteBusOptions{
 		EventPoll:   5 * time.Millisecond,
 		RequestPoll: 5 * time.Millisecond,
@@ -82,8 +77,7 @@ func newHarness(t *testing.T) *harness {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		// Bridge first (it joins both Run loops and closes the Transport), then
-		// the bus, then the DB: the bus owns a cleanup goroutine that queries the
+		// Bridge, then bus, then DB: the bus's cleanup goroutine queries the
 		// database, so reversing those two closes on a live query.
 		require.NoError(t, b.Close())
 		require.NoError(t, bus.Close())
@@ -181,10 +175,7 @@ func TestUnit_Deps_ValidateRequiresTheCoreSeam(t *testing.T) {
 // on it is ever called.
 type stubDB struct{ libdb.DBManager }
 
-// TestUnit_Bridge_InitializeDeclaresNoClientSideIO pins blueprint requirement
-// 3: the Bridge advertises neither filesystem nor terminal client
-// capabilities, so acpsvc's ACPFileIO falls back to direct OS file IO and beam
-// implements none of those reverse callbacks.
+// Initialize advertises neither filesystem nor terminal client capabilities.
 func TestUnit_Bridge_InitializeDeclaresNoClientSideIO(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -193,8 +184,8 @@ func TestUnit_Bridge_InitializeDeclaresNoClientSideIO(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, libacp.ProtocolVersion, resp.ProtocolVersion)
 
-	// The other half of the same contract: the callbacks a client that DID
-	// advertise those capabilities would have to answer stay unimplemented.
+	// The callbacks a client that did advertise those capabilities would have
+	// to answer stay unimplemented.
 	c := &bridgeClient{b: h.bridge}
 	_, err = c.ReadTextFile(ctx, libacp.ReadTextFileRequest{Path: "/tmp/x"})
 	require.Error(t, err)
@@ -204,10 +195,7 @@ func TestUnit_Bridge_InitializeDeclaresNoClientSideIO(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestUnit_Bridge_NewSessionSurfacesTheCommandMenu proves the session
-// lifecycle passes through 1:1 and that the deferred
-// available_commands_update — the autocomplete source of blueprint
-// requirement 8 — reaches the event stream.
+// The deferred available_commands_update reaches the event stream after NewSession.
 func TestUnit_Bridge_NewSessionSurfacesTheCommandMenu(t *testing.T) {
 	h := newHarness(t)
 	sid := h.initSession(context.Background())
@@ -228,10 +216,8 @@ func TestUnit_Bridge_NewSessionSurfacesTheCommandMenu(t *testing.T) {
 	require.Contains(t, names, "compact")
 }
 
-// TestUnit_Bridge_SlashCommandRunsAFullTurn drives a complete turn without any
-// LLM: /help goes over the wire as ordinary prompt text, acpsvc's parseCommand
-// intercepts it, and the answer comes back as a streamed agent message
-// followed by an end_turn stop reason on the async result channel.
+// /help runs a complete turn with no LLM: acpsvc intercepts it server-side and
+// streams back an agent message followed by an end_turn stop reason.
 func TestUnit_Bridge_SlashCommandRunsAFullTurn(t *testing.T) {
 	h := newHarness(t)
 	sid := h.initSession(context.Background())
@@ -261,16 +247,7 @@ func TestUnit_Bridge_SlashCommandRunsAFullTurn(t *testing.T) {
 	require.Contains(t, help, "/compact")
 }
 
-// TestUnit_Bridge_CancelledTurnEndsAndNeverFails pins blueprint requirement 5:
-// a cancel is a NORMAL outcome. Whatever else happens, the turn must resolve
-// through TurnEnded — a cancelled turn that surfaced as TurnFailed would be
-// rendered as a runtime error the operator did not cause.
-//
-// The stop reason is deliberately not pinned to "cancelled". /help is answered
-// server-side by parseCommand with no model in the loop, so the turn can win
-// the race against the session/cancel notification and legitimately end with
-// end_turn. Both are correct; the assertion that carries the requirement is
-// "ended, never failed".
+// A cancelled turn always resolves through TurnEnded, never TurnFailed.
 func TestUnit_Bridge_CancelledTurnEndsAndNeverFails(t *testing.T) {
 	h := newHarness(t)
 	sid := h.initSession(context.Background())
@@ -300,16 +277,11 @@ func TestUnit_Bridge_CancelledTurnEndsAndNeverFails(t *testing.T) {
 	require.False(t, h.bridge.hasInflight(sid), "the turn's session must be free again")
 }
 
-// TestUnit_Bridge_UnknownSessionFailsWithoutWedgingTheSession pins the other
-// half of the admission contract: a turn that errors must RELEASE its session.
-// The in-flight mark is what makes the second SubmitPrompt below possible; a
-// failure path that forgot to clear it would wedge the session for the life of
-// the process, and the operator would see "a prompt is already in flight" for a
-// turn that died seconds ago.
+// A turn that fails releases its session's in-flight mark instead of wedging it.
 func TestUnit_Bridge_UnknownSessionFailsWithoutWedgingTheSession(t *testing.T) {
 	h := newHarness(t)
-	// The handshake must happen first — an uninitialized agent rejects
-	// everything, which would prove nothing about session lookup.
+	// The handshake must happen first, or an uninitialized agent rejects
+	// everything and proves nothing about session lookup.
 	_ = h.initSession(context.Background())
 
 	const ghost = libacp.SessionID("acp-no-such-session")
@@ -325,8 +297,7 @@ func TestUnit_Bridge_UnknownSessionFailsWithoutWedgingTheSession(t *testing.T) {
 	require.Error(t, failed.Err)
 
 	// hasInflight blocks on promptMu, which the prompt goroutine holds across
-	// the emit AND the delete — so by the time this returns, the release has
-	// happened. No sleep, no flake.
+	// the emit and the delete, so the release has already happened here.
 	require.False(t, h.bridge.hasInflight(ghost), "a failed turn must release its session")
 
 	require.NoError(t, h.bridge.SubmitPrompt(ghost, "again"),
@@ -337,9 +308,7 @@ func TestUnit_Bridge_UnknownSessionFailsWithoutWedgingTheSession(t *testing.T) {
 	})
 }
 
-// TestUnit_Bridge_SecondPromptForOneSessionIsRejected pins the one-turn-per-
-// session admission rule. The in-flight mark is installed directly so the
-// assertion does not depend on how long a real turn happens to take.
+// A session with an in-flight turn rejects a second SubmitPrompt.
 func TestUnit_Bridge_SecondPromptForOneSessionIsRejected(t *testing.T) {
 	h := newHarness(t)
 	const sid = libacp.SessionID("acp-fake")
@@ -362,9 +331,7 @@ func TestUnit_Bridge_SubmitPromptRejectsEmptyText(t *testing.T) {
 	require.ErrorIs(t, h.bridge.SubmitPrompt("acp-fake", ""), ErrEmptyPrompt)
 }
 
-// TestUnit_Bridge_CancelWithoutInflightPromptIsNotAnError pins the degradation
-// CancelPrompt documents: with no outstanding turn there is nothing to mark or
-// force-resolve, and the bare session/cancel notification is harmless.
+// Cancel on a session with no in-flight prompt is not an error.
 func TestUnit_Bridge_CancelWithoutInflightPromptIsNotAnError(t *testing.T) {
 	h := newHarness(t)
 	sid := h.initSession(context.Background())
@@ -372,13 +339,8 @@ func TestUnit_Bridge_CancelWithoutInflightPromptIsNotAnError(t *testing.T) {
 	require.NoError(t, h.bridge.Cancel("acp-never-existed"))
 }
 
-// TestUnit_Bridge_PermissionResolvePlumbing exercises the HITL seam directly:
-// a gate raised against the Bridge's Client surfaces exactly one
-// PermissionRequested event carrying approvalflow's decoded envelope, and the
-// operator's keystroke resolves it into the selected outcome acpsvc expects.
-// It is driven in-process rather than over the wire because reaching
-// AskApproval through the transport would require a live chain run — i.e. an
-// LLM — which this suite deliberately has none of.
+// A permission gate surfaces as PermissionRequested with approvalflow's
+// decoded envelope, and Resolve returns the selected outcome acpsvc expects.
 func TestUnit_Bridge_PermissionResolvePlumbing(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -453,9 +415,7 @@ func TestUnit_Bridge_PermissionResolvePlumbing(t *testing.T) {
 	}
 }
 
-// TestUnit_Bridge_PendingPermissionResolvesCancelledOnClose pins blueprint
-// requirement 7's teardown half: an unanswered card must not hold a goroutine
-// hostage past exit.
+// An unanswered permission request resolves cancelled on Close, not hanging.
 func TestUnit_Bridge_PendingPermissionResolvesCancelledOnClose(t *testing.T) {
 	h := newHarness(t)
 
@@ -485,9 +445,7 @@ func TestUnit_Bridge_PendingPermissionResolvesCancelledOnClose(t *testing.T) {
 	}
 }
 
-// TestUnit_Bridge_CloseIsIdempotentAndClosesTheEventChannel pins the teardown
-// contract a UI's select loop depends on: Close joins everything within its
-// bound, closes the outlet, and answers the same on every call.
+// Close is idempotent, closes Events(), and every call afterwards answers ErrClosed.
 func TestUnit_Bridge_CloseIsIdempotentAndClosesTheEventChannel(t *testing.T) {
 	h := newHarness(t)
 	_ = h.initSession(context.Background())
@@ -517,14 +475,8 @@ closed:
 	require.ErrorIs(t, err, ErrClosed)
 }
 
-// TestUnit_Bridge_ContextCancellationClosesTheEventSurface pins what New's doc
-// promises: cancelling the context the Bridge was built with is a full teardown
-// of the event surface, not merely of the two Run loops. A consumer ranging
-// over Events() must be released by it — otherwise a process whose context died
-// leaves its UI parked on a channel nobody will ever write to again.
-//
-// Close afterwards is still required (it owns Transport.Close) and must still
-// succeed: the sync.Once guards only the queue-stopping half.
+// Cancelling New's context fully closes the event surface, and a subsequent
+// Close still succeeds (it owns the separate Transport.Close half).
 func TestUnit_Bridge_ContextCancellationClosesTheEventSurface(t *testing.T) {
 	h := newHarness(t)
 	_ = h.initSession(context.Background())
@@ -548,11 +500,8 @@ closed:
 	require.NoError(t, h.bridge.Close(), "Close after cancellation still performs the join and the transport close")
 }
 
-// TestUnit_Bridge_PermissionResolvedRetiresEveryCard pins the deterministic
-// retirement signal: a card must never have to guess that its gate is over.
-// Both wire-observable terminal states are covered here; the third (teardown)
-// is covered by its own subtest, which pins the DOCUMENTED gap rather than
-// pretending there is none.
+// Every permission request retires deterministically: answered, cancelled, or
+// (via Events() closing rather than an event) torn down.
 func TestUnit_Bridge_PermissionResolvedRetiresEveryCard(t *testing.T) {
 	request := func(id string) libacp.RequestPermissionRequest {
 		return libacp.RequestPermissionRequest{
@@ -602,9 +551,8 @@ func TestUnit_Bridge_PermissionResolvedRetiresEveryCard(t *testing.T) {
 		}
 	})
 
-	// A cancelled turn force-resolves its pending permissions through the
-	// request context (libacp's half of the cancellation contract). The card
-	// must retire on that too — nobody is going to press a key on it.
+	// A cancelled turn force-resolves pending permissions through the request
+	// context; the card must retire on that too.
 	t.Run("a cancelled request resolves as cancelled", func(t *testing.T) {
 		h := newHarness(t)
 		reqCtx, cancelReq := context.WithCancel(context.Background())
@@ -640,10 +588,8 @@ func TestUnit_Bridge_PermissionResolvedRetiresEveryCard(t *testing.T) {
 		}
 	})
 
-	// Teardown answers cancelled on the WIRE but delivers no event: the queue
-	// is already stopped when done closes. That is the documented shape, and it
-	// is safe because the consumer learns something stronger in the same
-	// instant — Events() closes, which retires every open card at once.
+	// Teardown answers cancelled on the wire but delivers no event, since the
+	// queue is already stopped; Events() closing retires every card instead.
 	t.Run("teardown answers cancelled and closes the surface instead", func(t *testing.T) {
 		h := newHarness(t)
 		respCh := make(chan libacp.RequestPermissionResponse, 1)
@@ -683,14 +629,8 @@ func TestUnit_Bridge_PermissionResolvedRetiresEveryCard(t *testing.T) {
 	})
 }
 
-// TestUnit_Bridge_ConcurrentSubmitsDuringCloseAreSafe pins the admission
-// barrier. Under -race this is the test that would catch either half of the
-// window it closes: a goroutine admitted after Close stopped counting (never
-// joined, still touching the connection), or the wg.Add/wg.Wait overlap, which
-// panics outright with "WaitGroup is reused before previous Wait has returned".
-//
-// Every submitter must therefore end in one of two states — accepted before the
-// barrier, or rejected with ErrClosed. Nothing else is a legal outcome.
+// Every concurrent submitter racing Close ends up either accepted before the
+// admission barrier or rejected with ErrClosed — never a race or a panic.
 func TestUnit_Bridge_ConcurrentSubmitsDuringCloseAreSafe(t *testing.T) {
 	h := newHarness(t)
 	_ = h.initSession(context.Background())
@@ -703,8 +643,8 @@ func TestUnit_Bridge_ConcurrentSubmitsDuringCloseAreSafe(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			// Distinct sessions: this test is about the teardown race, not
-			// about the one-turn-per-session rule.
+			// Distinct sessions: this is about the teardown race, not the
+			// one-turn-per-session rule.
 			sid := libacp.SessionID(fmt.Sprintf("acp-race-%d", i))
 			if err := h.bridge.SubmitPrompt(sid, "hi"); err != nil && !errors.Is(err, ErrClosed) {
 				t.Errorf("submitter %d: unexpected error %v", i, err)
@@ -721,21 +661,13 @@ func TestUnit_Bridge_ConcurrentSubmitsDuringCloseAreSafe(t *testing.T) {
 	wg.Wait()
 }
 
-// closeOrDeleteDuringInflightPrompt drives the shape both
+// closeOrDeleteDuringInflightPrompt is the shared shape for
 // TestUnit_CloseSessionDuringInflightPrompt and
-// TestUnit_DeleteSessionDuringInflightPrompt need: submit a /help turn, race it
-// with teardown (either CloseSession or DeleteSession — both funnel through
-// acpsvc's dropSessionEntry), and check the two properties that must hold
-// regardless of which way the race lands:
-//
-//  1. no deadlock (bounded) and no error from the teardown call itself;
-//  2. the state the overlap would corrupt — hasInflight's release, and a FRESH
-//     session on the SAME bridge (same Transport, same session map, same
-//     locks, same event pump) — still works end-to-end afterwards.
-//
-// It returns the events collected up to the raced turn's own terminal event,
-// so the caller can additionally judge (and, if it hits the known race, skip
-// on) how THAT turn specifically resolved — see the two test functions below.
+// TestUnit_DeleteSessionDuringInflightPrompt: submit a /help turn, race it
+// with teardown (CloseSession or DeleteSession), and require no deadlock, no
+// teardown error, and a fresh session on the same bridge still working
+// afterwards. It returns the events up to the raced turn's own terminal
+// event, so the caller can judge how that turn specifically resolved.
 func closeOrDeleteDuringInflightPrompt(t *testing.T, teardown func(h *harness, sid libacp.SessionID) error) []Event {
 	t.Helper()
 	h := newHarness(t)
@@ -745,9 +677,8 @@ func closeOrDeleteDuringInflightPrompt(t *testing.T, teardown func(h *harness, s
 	require.NoError(t, h.bridge.SubmitPrompt(sid, "/help"))
 	require.True(t, h.bridge.hasInflight(sid), "the turn must be marked in-flight before teardown races it")
 
-	// The teardown call is itself a blocking round trip. Bound it explicitly
-	// instead of trusting `go test`'s own timeout, so a deadlock reports AS a
-	// deadlock instead of a generic suite-wide timeout with no diagnosis.
+	// Bound the teardown call explicitly so a deadlock reports as one instead
+	// of a generic suite-wide timeout.
 	teardownDone := make(chan error, 1)
 	go func() {
 		teardownDone <- teardown(h, sid)
@@ -759,8 +690,7 @@ func closeOrDeleteDuringInflightPrompt(t *testing.T, teardown func(h *harness, s
 		t.Fatal("session teardown did not return within 15s racing the in-flight prompt — possible deadlock")
 	}
 
-	// The turn must resolve to SOME terminal event on the bridge's outlet —
-	// never silently hang — regardless of how the race landed.
+	// The turn must resolve to some terminal event, never silently hang.
 	events := h.collect(15*time.Second, func(ev Event) bool {
 		switch ev.(type) {
 		case TurnEnded, TurnFailed:
@@ -770,13 +700,10 @@ func closeOrDeleteDuringInflightPrompt(t *testing.T, teardown func(h *harness, s
 	})
 
 	// hasInflight blocks on promptMu, which the prompt goroutine holds across
-	// its emit AND its delete (see SubmitPrompt) — so by the time this
-	// returns, the session's in-flight mark is gone no matter how the race
-	// landed.
+	// its emit and its delete, so the in-flight mark is already gone here.
 	require.False(t, h.bridge.hasInflight(sid), "the torn-down session's turn must release its in-flight mark")
 
-	// The state the overlap would corrupt: a FRESH session on the SAME bridge
-	// must still work end-to-end.
+	// A fresh session on the same bridge must still work end-to-end.
 	sid2 := h.initSession(ctx)
 	require.NotEqual(t, sid, sid2)
 	require.NoError(t, h.bridge.SubmitPrompt(sid2, "/help"))
@@ -800,51 +727,10 @@ func closeOrDeleteDuringInflightPrompt(t *testing.T, teardown func(h *harness, s
 	return events
 }
 
-// TestUnit_CloseSessionDuringInflightPrompt targets a known teardown race:
-// Bridge.CloseSession fires Cancel and then calls the connection's
-// CloseSession WITHOUT waiting for the in-flight prompt goroutine SubmitPrompt
-// started to observe the cancellation, or even to return. acpsvc's
-// Transport.CloseSession can therefore run CONCURRENTLY with a still-unwinding
-// prompt handler for the same session entry. Nobody had verified whether that
-// overlap is tolerated; this test drives it for real, on the real production
-// Transport, rather than reasoning about it from the source.
-//
-// The overlap is not hypothetical: libacp's AgentSideConnection.dispatch
-// (libacp/conn.go) spawns a NEW goroutine per inbound JSON-RPC request —
-// session/prompt and session/close alike — so by the time this test's
-// CloseSession call reaches the wire, the /help prompt's own handler goroutine
-// is, structurally, very likely still running. /help is the turn under test
-// for the same reason the rest of this file uses it (see the file header): it
-// is answered by acpsvc's parseCommand entirely server-side, so this harness
-// (no LLM backend, no chain execution) can run a real, unfaked turn. It is
-// also about the fastest turn the harness can produce, which makes this the
-// TIGHTEST realistic window rather than an artificially widened one.
-//
-// # What this test found (read before "fixing" a red run)
-//
-// The overlap is memory-safe — no data race, confirmed under -race — and never
-// corrupts shared bridge/Transport state: closeOrDeleteDuringInflightPrompt's
-// checks above always hold. But the RACED TURN ITSELF very often does NOT
-// resolve gracefully. acpsvc's Transport.CloseSession has NO database call
-// before it drops the session entry (contrast Transport.DeleteSession, which
-// queries the workspace first — see the sibling test), so it routinely wins
-// the race outright: dropSessionEntry deletes the session from
-// Transport.sessions BEFORE the SAME /help turn's own Transport.Prompt reaches
-// its sessionFor lookup, on the OTHER handler goroutine libacp's dispatch
-// spawned for it. The turn then fails with libacp error -32602 "unknown
-// session ...", surfacing on this Bridge as TurnFailed — not the graceful
-// StopReasonCancelled/StopReasonEndTurn that Bridge.CloseSession's own doc
-// comment implies ("it first cancels any in-flight turn"). That cancel is a
-// no-op here: acpsvc only registers a promptCancel AFTER the slash-command
-// check in nativeDriver.Prompt (prompt.go), and /help never reaches that
-// point, so Bridge.Cancel has nothing to cancel and the outcome is decided
-// purely by which handler goroutine the runtime schedules first.
-//
-// Measured: 8/8 outright failures without -race (immediate scheduling), and
-// still 2/3 under -race -count=3 (the detector's overhead narrows but does not
-// close the window) — so this is not a rare flake, it is the COMMON case for
-// this exact sequence (submit, then close with no wait). See the SKIP branch
-// below.
+// CloseSession races an in-flight /help turn: state never corrupts, but the
+// turn itself often ends as TurnFailed("unknown session") instead of
+// resolving gracefully — a known race (see the t.Skip message for the
+// mechanism), not a hypothetical one.
 func TestUnit_CloseSessionDuringInflightPrompt(t *testing.T) {
 	events := closeOrDeleteDuringInflightPrompt(t, func(h *harness, sid libacp.SessionID) error {
 		_, err := h.bridge.CloseSession(context.Background(), libacp.CloseSessionRequest{SessionID: sid})
@@ -862,30 +748,11 @@ func TestUnit_CloseSessionDuringInflightPrompt(t *testing.T) {
 	require.Equal(t, libacp.StopReasonEndTurn, ended.StopReason)
 }
 
-// TestUnit_DeleteSessionDuringInflightPrompt is
-// TestUnit_CloseSessionDuringInflightPrompt's other half: DeleteSession cancels
-// an in-flight turn the same way CloseSession does (both funnel through
-// acpsvc's dropSessionEntry — see Bridge.DeleteSession), then additionally
-// erases the session's stored history — agentservice.SessionDelete deletes the
-// message_indices row (and, per the schema's ON DELETE CASCADE, every message
-// row under it) while the same /help turn's persistCommandTurn may still be
-// trying to INSERT its own transcript row for that session on another
-// goroutine.
-//
-// Empirically this side of the race is NOT won by teardown in practice:
-// Transport.DeleteSession does a database read (resolveSessionWorkspace)
-// BEFORE it calls dropSessionEntry, which is enough of a head start for the
-// /help turn's own (DB-free, for a command) handler goroutine to reach
-// Transport.Prompt's sessionFor lookup first — 8/8 clean runs observed, and
-// 3/3 under -race -count=3. The turn resolves gracefully and the session's
-// history is intact when it is deleted afterwards. This test still uses
-// closeOrDeleteDuringInflightPrompt's SAME defensive shape as its CloseSession
-// sibling (accept a TurnFailed("unknown session") as the known-race shape and
-// skip on it, hard-fail on anything else) rather than asserting TurnEnded
-// unconditionally: it is the SAME dropSessionEntry race in principle, just
-// currently masked by DeleteSession's slower preamble, and -race widens
-// scheduling windows in ways a future refactor (or a slower CI box) could
-// close differently.
+// DeleteSession races an in-flight /help turn the same way CloseSession does
+// (same underlying dropSessionEntry race), but its database read before
+// dropping the session normally gives the turn enough of a head start to
+// resolve gracefully; this test uses the same defensive shape as its
+// CloseSession sibling in case scheduling closes that gap.
 func TestUnit_DeleteSessionDuringInflightPrompt(t *testing.T) {
 	events := closeOrDeleteDuringInflightPrompt(t, func(h *harness, sid libacp.SessionID) error {
 		_, err := h.bridge.DeleteSession(context.Background(), libacp.DeleteSessionRequest{SessionID: sid})
@@ -903,15 +770,7 @@ func TestUnit_DeleteSessionDuringInflightPrompt(t *testing.T) {
 	require.Equal(t, libacp.StopReasonEndTurn, ended.StopReason)
 }
 
-// TestUnit_CloseSessionIdempotentAndUnknownSession pins the other edge this
-// task asked to be verified alongside the in-flight race: closing/deleting a
-// session id this bridge never opened, and closing/deleting the SAME real
-// session twice in a row, must both be clean no-ops rather than errors or a
-// wedge. This is the documented contract on the acpsvc side — CloseSession's
-// doc says "closing an unknown session succeeds" and DeleteSession's doc says
-// "deleting a nonexistent session succeeds silently, and the session
-// disappears from session/list" — so the assertion here is exactly that
-// silence, not some invented typed error.
+// Closing/deleting an unknown session, or the same session twice, is always a clean no-op.
 func TestUnit_CloseSessionIdempotentAndUnknownSession(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -923,25 +782,20 @@ func TestUnit_CloseSessionIdempotentAndUnknownSession(t *testing.T) {
 	_, err = h.bridge.DeleteSession(ctx, libacp.DeleteSessionRequest{SessionID: ghost})
 	require.NoError(t, err, "deleting a session this bridge never opened must be a clean no-op")
 
-	// A real session, closed twice: the second close must not error and must
-	// not wedge on anything the first close already tore down (driver.Close,
-	// MCP cleanup, terminal, tool-call state).
+	// A real session, closed twice, must not error the second time.
 	sid := h.initSession(ctx)
 	_, err = h.bridge.CloseSession(ctx, libacp.CloseSessionRequest{SessionID: sid})
 	require.NoError(t, err)
 	_, err = h.bridge.CloseSession(ctx, libacp.CloseSessionRequest{SessionID: sid})
 	require.NoError(t, err, "closing an already-closed session must be idempotent")
 
-	// Deleting that same session, twice, must be equally clean — the first
-	// delete erases its stored history, the second finds nothing and
-	// succeeds anyway (DeleteSession's documented idempotence).
+	// Deleting the same session twice must be equally clean.
 	_, err = h.bridge.DeleteSession(ctx, libacp.DeleteSessionRequest{SessionID: sid})
 	require.NoError(t, err)
 	_, err = h.bridge.DeleteSession(ctx, libacp.DeleteSessionRequest{SessionID: sid})
 	require.NoError(t, err, "deleting an already-deleted session must be idempotent")
 
-	// No wedge: the bridge (its Transport, its session map, its locks) is
-	// still healthy for unrelated work afterwards.
+	// No wedge: the bridge is still healthy for unrelated work afterwards.
 	sid2 := h.initSession(ctx)
 	require.NoError(t, h.bridge.SubmitPrompt(sid2, "/help"))
 	events := h.collect(15*time.Second, func(ev Event) bool {
@@ -954,9 +808,7 @@ func TestUnit_CloseSessionIdempotentAndUnknownSession(t *testing.T) {
 	require.Equal(t, libacp.StopReasonEndTurn, ended.StopReason)
 }
 
-// TestUnit_Bridge_ShellPassthroughReportsDisabledRuntime pins the typed
-// absence signal: a runtime with no shell manager answers method-not-found,
-// which must read as "the feature is absent", not as a broken shell.
+// A runtime with no shell manager reports ErrShellDisabled, not a broken shell.
 func TestUnit_Bridge_ShellPassthroughReportsDisabledRuntime(t *testing.T) {
 	h := newHarness(t)
 	sid := h.initSession(context.Background())
@@ -977,9 +829,8 @@ func TestUnit_Bridge_ShellPassthroughReportsDisabledRuntime(t *testing.T) {
 	require.ErrorIs(t, res.Err, ErrShellDisabled)
 }
 
-// TestUnit_Bridge_ActiveSessionFilterDropsOtherSessions pins the re-wrap
-// contract: the connection forwards every session's updates, so a stale
-// session's chunks reach the UI unless a fresh filter is installed on switch.
+// SetActiveSession's filter admits only the active session's updates, and
+// switching sessions re-wraps the filter rather than leaking stale ones.
 func TestUnit_Bridge_ActiveSessionFilterDropsOtherSessions(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -1013,9 +864,8 @@ func TestUnit_Bridge_ActiveSessionFilterDropsOtherSessions(t *testing.T) {
 	require.Equal(t, []string{"live", "now-live", "unfiltered"}, texts)
 }
 
-// TestUnit_Bridge_EventsKeepWireOrder pins blueprint requirement 6: no
-// reordering, no coalescing, no drops — even when the consumer is slower than
-// the producer, which is exactly the case an unbounded queue exists for.
+// Events() preserves wire order with no reordering, coalescing, or drops,
+// even when the consumer is slower than the producer.
 func TestUnit_Bridge_EventsKeepWireOrder(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -1041,11 +891,8 @@ func TestUnit_Bridge_EventsKeepWireOrder(t *testing.T) {
 	}
 }
 
-// TestUnit_Translate_CoversEverySessionUpdateKind is the completeness table:
-// every SessionUpdateKind libacp defines, plus acpsvc's terminal extension
-// kind, plus an unrecognized kind, must produce exactly one typed event of the
-// expected shape. A new kind added upstream without a translation arm shows up
-// here as UnknownUpdate.
+// Every SessionUpdateKind libacp defines, plus acpsvc's terminal extension
+// kind and an unrecognized kind, produces exactly one typed event.
 func TestUnit_Translate_CoversEverySessionUpdateKind(t *testing.T) {
 	const sid = libacp.SessionID("acp-1")
 
@@ -1221,12 +1068,9 @@ func TestUnit_Translate_CoversEverySessionUpdateKind(t *testing.T) {
 		},
 	}
 
-	// Every kind the library defines must appear above. The roster comes from
-	// libacp.AllSessionUpdateKinds() ON PURPOSE: a hardcoded copy here would go
-	// stale in exactly the case this test exists to catch — someone adds a kind
-	// upstream, nobody adds an arm to translate, and the new kind quietly
-	// becomes UnknownUpdate for a release. Iterating the library's own list
-	// turns that into a failing test the moment the const block grows.
+	// The roster comes from libacp.AllSessionUpdateKinds(), not a hardcoded
+	// copy, so a kind added upstream with no translation arm fails here
+	// instead of silently becoming UnknownUpdate for a release.
 	covered := map[libacp.SessionUpdateKind]bool{}
 	for _, tt := range tests {
 		covered[tt.update.SessionUpdate] = true
@@ -1246,9 +1090,8 @@ func TestUnit_Translate_CoversEverySessionUpdateKind(t *testing.T) {
 	}
 }
 
-// TestUnit_Translate_MissionEnvelopes pins the mission attribution the report
-// router stamps onto an ordinary agent_message_chunk. One notification stays
-// one event: a report is a MissionReport INSTEAD OF a TextDelta, never both.
+// A mission `_meta` envelope on an agent_message_chunk becomes its typed
+// mission event instead of a TextDelta, never both.
 func TestUnit_Translate_MissionEnvelopes(t *testing.T) {
 	const sid = libacp.SessionID("acp-parent")
 
@@ -1290,9 +1133,7 @@ func TestUnit_Translate_MissionEnvelopes(t *testing.T) {
 
 	t.Run("status change", func(t *testing.T) {
 		update := libacp.NewAgentMessageChunk("unit alpha landed")
-		// The transition pair, verbatim from reportrouter.statusMessageID: the
-		// bridge carries the id through untouched, so this pins that it does
-		// not try to parse a shape the producer is free to change.
+		// The bridge carries MessageID through untouched, never parsing it.
 		update.MessageID = "mission-status-mis-1-open-landed"
 		update.Meta = mustMeta(map[string]any{missionStatusMetaKey: map[string]any{
 			"missionId": "mis-1", "agentName": "alpha", "intent": "ship the fix",
@@ -1309,10 +1150,8 @@ func TestUnit_Translate_MissionEnvelopes(t *testing.T) {
 		require.Equal(t, "mission-status-mis-1-open-landed", st.MessageID)
 	})
 
-	// Opening a mission has no prior status. The zero-ish shape must survive
-	// translation intact rather than being "helpfully" defaulted: an Old of ""
-	// is the fact that there was nothing before, and a consumer's bell rule
-	// reads New, not the pair.
+	// Opening a mission has no prior status; an empty Old must survive
+	// translation rather than being defaulted to something else.
 	t.Run("status change into open carries no prior status", func(t *testing.T) {
 		update := libacp.NewAgentMessageChunk("unit alpha opened")
 		update.Meta = mustMeta(map[string]any{missionStatusMetaKey: map[string]any{
@@ -1354,10 +1193,8 @@ func TestUnit_Translate_MissionEnvelopes(t *testing.T) {
 		require.Equal(t, "hello", requireType[TextDelta](t, ev).Text)
 	})
 
-	// A claimed-but-undecodable envelope must NOT degrade to prose: rendering a
-	// mission report as an ordinary assistant message loses its attribution and
-	// makes it indistinguishable from something the model said. Same policy as
-	// the terminal-extension arm.
+	// A claimed-but-undecodable envelope must not degrade to prose: that would
+	// lose its attribution and make it indistinguishable from model output.
 	t.Run("a malformed mission envelope is unknown, not prose", func(t *testing.T) {
 		for _, key := range []string{
 			missionReportMetaKey, missionAskMetaKey,
@@ -1373,11 +1210,7 @@ func TestUnit_Translate_MissionEnvelopes(t *testing.T) {
 	})
 }
 
-// TestUnit_MissionStatusTerminal pins the closed set the completion bell rings
-// on. The two arms that are easy to get backwards are the ones spelled out:
-// "open" is not a completion, and a status this build has never heard of is
-// treated as still running — inventing a completion is the failure mode that
-// silently retires a mission the operator is still waiting on.
+// "open" is never terminal, and an unrecognized status is treated as still running.
 func TestUnit_MissionStatusTerminal(t *testing.T) {
 	terminal := []string{MissionStatusLanded, MissionStatusDerailed, MissionStatusStuck, MissionStatusAbandoned}
 	for _, s := range terminal {
@@ -1388,9 +1221,7 @@ func TestUnit_MissionStatusTerminal(t *testing.T) {
 	}
 }
 
-// TestUnit_Translate_TerminalChunkReset pins the replace-vs-append signal: a
-// reset chunk is the (re)subscribe snapshot, and a consumer that appended it
-// would double the scrollback.
+// A reset TerminalChunk is a (re)subscribe snapshot to replace, not append to.
 func TestUnit_Translate_TerminalChunkReset(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1434,9 +1265,7 @@ func TestUnit_Translate_TerminalChunkReset(t *testing.T) {
 	}
 }
 
-// TestUnit_Translate_SurvivesAbsentContent pins the marshalling quirk that
-// content lives on Update.Content for message kinds and on Update.ToolContent
-// for tool kinds: reading the wrong one must yield "", never a panic.
+// translate reads "" rather than panicking when a message kind's Content is absent.
 func TestUnit_Translate_SurvivesAbsentContent(t *testing.T) {
 	for _, kind := range []libacp.SessionUpdateKind{
 		libacp.SessionUpdateUserMessageChunk,
@@ -1452,11 +1281,8 @@ func TestUnit_Translate_SurvivesAbsentContent(t *testing.T) {
 	}
 }
 
-// TestUnit_Bridge_TransportAccessorIsLateBindable pins the ordering the
-// in-process mission fleet forces: the fleet is built BEFORE the Bridge (its
-// dispatcher goes into acpsvc.Deps at construction) yet needs the Transport
-// the Bridge creates, so the accessor must survive being called through a
-// not-yet-assigned Bridge variable.
+// (*Bridge).Transport is nil-safe on a not-yet-assigned Bridge variable, so
+// the fleet can close over one built before the Bridge exists.
 func TestUnit_Bridge_TransportAccessorIsLateBindable(t *testing.T) {
 	var late *Bridge
 	deliverer := func() *acpsvc.Transport { return late.Transport() }
@@ -1496,12 +1322,8 @@ func TestUnit_IsShutdownNoise(t *testing.T) {
 	require.False(t, isShutdownNoise(fmt.Errorf("real failure")))
 }
 
-// TestUnit_NewSessionReplaysItsOpeningConfigOptions pins the seam that used to
-// swallow them: a session's STARTING config options ride the session/new
-// response, not a notification, so a consumer that folds the runtime in through
-// Events() saw no selects at all until the first /model or set_config_option —
-// exactly the state (fresh session, nothing chosen yet) in which a surface most
-// needs to know which models exist.
+// NewSession replays a session's opening config options as ConfigOptionUpdated,
+// since they ride the session/new response rather than a notification.
 func TestUnit_NewSessionReplaysItsOpeningConfigOptions(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -1522,9 +1344,7 @@ func TestUnit_NewSessionReplaysItsOpeningConfigOptions(t *testing.T) {
 	require.Subset(t, ids, []string{"model", "hitl-policy", "think"},
 		"the replayed options must be the session's real selects, not a subset beam invented")
 
-	// And they project onto the command argument domains a completing surface
-	// reads — the think levels are always there, model/provider only once the
-	// runtime has a backend with models.
+	// They also project onto the command argument domains a completing surface reads.
 	require.NotEmpty(t, ValueDomains(opts.Options)[acpsvc.CommandThink])
 }
 

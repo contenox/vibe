@@ -11,11 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeShellManager is a shellsession.Manager that records the calls the
-// transport makes and reproduces the one behaviour under test: every Subscribe
-// opens with a Reset chunk carrying the whole scrollback. That is what makes a
-// redundant re-subscribe expensive, so counting Resets counts full-scrollback
-// repaints.
+// fakeShellManager records shellsession.Manager calls; every Subscribe opens
+// with a Reset chunk carrying the whole scrollback, so counting Resets counts
+// full-scrollback repaints.
 type fakeShellManager struct {
 	mu         sync.Mutex
 	subscribes int
@@ -80,10 +78,8 @@ func (f *fakeShellManager) counts() (subscribes, cancels, resets int) {
 
 var _ shellsession.Manager = (*fakeShellManager)(nil)
 
-// terminalTestTransport builds a Transport with just enough state for
-// handleTerminalRun and one open session. conn stays nil, so sendUpdate is a
-// no-op — the assertions are on what the transport asks the shell manager for,
-// which is where the cost lives.
+// terminalTestTransport builds a Transport with one open session; conn is nil
+// so sendUpdate no-ops and assertions target the shell manager calls instead.
 func terminalTestTransport(shells shellsession.Manager) (*Transport, libacp.SessionID, string) {
 	sid := libacp.SessionID("sess-acp")
 	internalID := "sess-internal"
@@ -103,15 +99,7 @@ func runTerminal(t *testing.T, tr *Transport, p terminalRunParams) {
 	require.Nil(t, rpcErr)
 }
 
-// TestUnit_TerminalRun_ReusesTheLiveSubscription is the regression test for the
-// quadratic replay: handleTerminalRun used to call subscribeTerminal, which is
-// cancel-and-replace, so EVERY `!` line tore down the stream and opened a new
-// one — and every new subscription starts with a Reset carrying the entire
-// scrollback. Three commands meant three full repaints of everything typed so
-// far, which is what made `!echo AAA` look like it was replaying the session.
-//
-// The invariant: N runs in one session cost exactly ONE subscription, hence one
-// Reset, no matter how many lines are typed.
+// TestUnit_TerminalRun_ReusesTheLiveSubscription pins that N `!` runs in one session cost exactly one subscription, hence one Reset.
 func TestUnit_TerminalRun_ReusesTheLiveSubscription(t *testing.T) {
 	shells := &fakeShellManager{}
 	tr, sid, _ := terminalTestTransport(shells)
@@ -127,10 +115,7 @@ func TestUnit_TerminalRun_ReusesTheLiveSubscription(t *testing.T) {
 		"exactly one full-scrollback Reset total; one per run is the quadratic replay bug")
 }
 
-// TestUnit_TerminalRun_SubscribesWhenNothingIsListening keeps the other half of
-// the contract honest: reuse must not turn into "never subscribe". A session
-// bound to an external agent never subscribes at session/new, so the first `!`
-// line is what starts the panel stream.
+// TestUnit_TerminalRun_SubscribesWhenNothingIsListening pins that the first `!` line starts the stream when nothing is listening yet.
 func TestUnit_TerminalRun_SubscribesWhenNothingIsListening(t *testing.T) {
 	shells := &fakeShellManager{}
 	tr, sid, _ := terminalTestTransport(shells)
@@ -144,11 +129,7 @@ func TestUnit_TerminalRun_SubscribesWhenNothingIsListening(t *testing.T) {
 	require.Contains(t, tr.termSubs, sid)
 }
 
-// TestUnit_TerminalReconnect_StillResets pins where the Reset legitimately
-// belongs. A client that reconnects or reloads a session has no buffer, so the
-// replace-and-repaint path (session/new, session/load, reconnect — all calling
-// subscribeTerminal directly) must keep re-delivering the scrollback and must
-// cancel the stale subscription so only one stream is live per session.
+// TestUnit_TerminalReconnect_StillResets pins that only reconnect/reload (subscribeTerminal) re-delivers the scrollback, cancelling the stale subscription.
 func TestUnit_TerminalReconnect_StillResets(t *testing.T) {
 	shells := &fakeShellManager{}
 	tr, sid, internalID := terminalTestTransport(shells)
@@ -167,18 +148,14 @@ func TestUnit_TerminalReconnect_StillResets(t *testing.T) {
 	require.Equal(t, 1, cancels, "and cancel the stale one, so exactly one stream stays live")
 	require.Equal(t, 2, resets, "a reconnecting client has no buffer, so it must be re-sent the scrollback")
 
-	// And a run after the reload reuses the reconnect's subscription rather than
-	// replacing it again.
+	// A run after the reload reuses the reconnect's subscription.
 	runTerminal(t, tr, terminalRunParams{SessionID: string(sid), Command: "echo after-reload"})
 	subs, _, resets = shells.counts()
 	require.Equal(t, 2, subs)
 	require.Equal(t, 2, resets)
 }
 
-// TestUnit_TerminalRun_ForwardsClientGeometry covers the additive resize seam:
-// the client reports the window it is looking at on the run itself, and the
-// size must be applied BEFORE the line is submitted or the command formats
-// against the old width.
+// TestUnit_TerminalRun_ForwardsClientGeometry pins that reported geometry is applied to the shell before the line is submitted.
 func TestUnit_TerminalRun_ForwardsClientGeometry(t *testing.T) {
 	shells := &fakeShellManager{}
 	tr, sid, internalID := terminalTestTransport(shells)
@@ -197,9 +174,7 @@ func TestUnit_TerminalRun_ForwardsClientGeometry(t *testing.T) {
 	require.Equal(t, []string{"ls"}, runs)
 }
 
-// TestUnit_TerminalRun_GeometryIsOptional: rows/cols are additive, so a client
-// that predates them (or a panel that does not know its size) keeps working
-// unchanged. The manager treats a non-positive dimension as "no report".
+// TestUnit_TerminalRun_GeometryIsOptional pins that omitted rows/cols still succeed and pass through as zero.
 func TestUnit_TerminalRun_GeometryIsOptional(t *testing.T) {
 	shells := &fakeShellManager{}
 	tr, sid, _ := terminalTestTransport(shells)

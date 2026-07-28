@@ -30,8 +30,7 @@ func TestUnit_Tools_SupportsNamesTheProviderAndSixTools(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("Supports() = %v, want %v", got, want)
 	}
-	// The names are the HITL policy key. Pinning them here means a rename cannot
-	// land without the policy question being asked.
+	// The names are the HITL policy key.
 	if ToolsProviderName != "gointel" {
 		t.Fatalf("provider name = %q", ToolsProviderName)
 	}
@@ -149,8 +148,7 @@ func TestUnit_Tools_ExecDispatchesEveryTool(t *testing.T) {
 		}},
 		{ToolReferences, map[string]any{"symbol": "shapes.Unit", "max": "2"}, func(v any) error {
 			res := v.(*ReferencesResult)
-			// "2" as a STRING: small models emit JSON scalars as strings, and a
-			// dropped cap would silently answer a different question.
+			// "2" as a string: small models emit JSON scalars as strings.
 			if res.Shown != 2 {
 				t.Errorf("shown = %d, want the string-encoded max to be honoured", res.Shown)
 			}
@@ -237,7 +235,7 @@ func TestUnit_Tools_ExecRefusals(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown tool") {
 		t.Fatalf("unknown tool error = %v", err)
 	}
-	// No rename in V1: the refusal must list what IS available.
+	// The refusal must list what is available.
 	for _, name := range toolNames {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("refusal %q does not offer %s", err, name)

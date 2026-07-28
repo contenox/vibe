@@ -26,11 +26,11 @@ const (
 	TaskEventChainCompleted TaskEventKind = "chain_completed"
 	TaskEventChainFailed    TaskEventKind = "chain_failed"
 	// TaskEventChainSuspended terminates a run segment that parked on a human
-	// approval past the fast window (S6): the checkpoint is persisted, the
-	// goroutine is released, and answering the approval resumes the chain as a
-	// fresh run segment under the same request ID. Carries the S5 address of
-	// the interrupt point ({chain, task, tool_call}) and approval_id (== the
-	// checkpoint key). See docs/development/engine-events.md.
+	// approval past the fast window: the checkpoint is persisted, the
+	// goroutine is released, and answering the approval resumes the chain as
+	// a fresh run segment under the same request ID. Carries the hierarchical
+	// address of the interrupt point ({chain, task, tool_call}) and
+	// approval_id (== the checkpoint key).
 	TaskEventChainSuspended TaskEventKind = "chain_suspended"
 
 	TaskEventApprovalRequested TaskEventKind = "approval_requested"
@@ -41,10 +41,9 @@ const (
 	TaskEventTokenUsage        TaskEventKind = "token_usage"
 )
 
-// AllTaskEventKinds enumerates every kind the engine can emit — the contract
-// surface documented in docs/development/engine-events.md. Contract tests
-// iterate it so that adding a kind without updating the documented matrix (and
-// its consumers) fails CI rather than drifting silently.
+// AllTaskEventKinds enumerates every kind the engine can emit. Contract
+// tests iterate it so that adding a kind without updating the documented
+// matrix and its consumers fails CI rather than drifting silently.
 func AllTaskEventKinds() []TaskEventKind {
 	return []TaskEventKind{
 		TaskEventChainStarted,
@@ -67,7 +66,7 @@ func AllTaskEventKinds() []TaskEventKind {
 
 // EventScope is the hierarchical address of an event or captured state unit:
 // which chain / which task / which tool call produced it. It is the address
-// contract checkpoints (S6) and nested consumers name positions with —
+// contract checkpoints and nested consumers name positions with —
 // structured, never re-parsed out of loose strings. Fields are filled
 // top-down: Chain is set on every event of a run, Task on every event emitted
 // inside a task attempt, ToolCall only on events attributable to one tool

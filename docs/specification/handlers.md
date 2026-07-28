@@ -1,3 +1,8 @@
+---
+title: Handlers
+description: Every task handler type and the fields valid for each.
+---
+
 # Handlers
 
 Every task has a `handler` field that determines what it does. This page documents all available handlers and which fields are valid for each.
@@ -36,7 +41,6 @@ Sends the current input to the LLM and waits for a reply. If the model calls a t
 | `execute_config.shift` | No | Boolean. If true, slides the context window by dropping old messages instead of erroring on token limits. |
 | `execute_config.models` | No | Array of fallback model IDs tried in order when the primary model is unavailable. |
 | `execute_config.providers` | No | Array of fallback provider types, paired index-for-index with `models`. |
-
 | `execute_config.retry_policy` | No | LLM-call retry and model-fallback settings — see [`retry_policy`](#retry_policy) below. |
 
 **Transition values:**

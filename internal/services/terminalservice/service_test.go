@@ -125,9 +125,8 @@ func TestAttach_SecondConnectionPreemptsFirst(t *testing.T) {
 	}
 }
 
-// recordingTracker records every Start (and every error reported through it) so
-// a test can assert what the pty plumbing said. It must be concurrency-safe: the
-// attach pumps report from their own goroutines.
+// recordingTracker records every Start and every error reported through it;
+// concurrency-safe since the attach pumps report from their own goroutines.
 type recordingTracker struct {
 	mu     sync.Mutex
 	events []trackedEvent
@@ -191,11 +190,7 @@ func setupTrackedTerminalService(t *testing.T, tracker libtracker.ActivityTracke
 	return ctx, svc
 }
 
-// TestResizeFailureIsReportedToTracker proves the geometry write is not the only
-// thing that can fail: the durable row updates, the pty resize behind it can
-// still refuse, and that refusal reaches nobody through the return value (the
-// caller already got its nil). The tracker is the only place it can surface, so
-// it must surface there.
+// TestResizeFailureIsReportedToTracker pins that a pty resize failure behind a successful geometry write still surfaces, only through the tracker.
 func TestResizeFailureIsReportedToTracker(t *testing.T) {
 	tracker := &recordingTracker{}
 	ctx, svc := setupTrackedTerminalService(t, tracker)
@@ -205,9 +200,7 @@ func TestResizeFailureIsReportedToTracker(t *testing.T) {
 	require.NoError(t, err)
 
 	// Swap the session's pty for a closed descriptor: the store update still
-	// succeeds, the ioctl behind it cannot. (The real pty is left open and closed
-	// on cleanup, so the session stays in the live map — closing it would end the
-	// shell and remove the session, which is a different code path.)
+	// succeeds, the ioctl behind it cannot.
 	sess := svc.(*service).localByID(out.ID)
 	require.NotNil(t, sess)
 	realTTY := sess.tty
@@ -227,9 +220,7 @@ func TestResizeFailureIsReportedToTracker(t *testing.T) {
 	require.Equal(t, "pty", kvOf(reported[0], "backend"))
 }
 
-// TestAttachStreamsAreReportedToTracker pins the attach pumps' instrumentation:
-// they run on goroutines whose outcome no caller ever sees, so the byte count
-// and the reason a pump stopped exist only if they are reported.
+// TestAttachStreamsAreReportedToTracker pins that a pump's byte count and stop reason are only observable through the tracker.
 func TestAttachStreamsAreReportedToTracker(t *testing.T) {
 	tracker := &recordingTracker{}
 	ctx, svc := setupTrackedTerminalService(t, tracker)

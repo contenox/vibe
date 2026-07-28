@@ -15,14 +15,8 @@ import (
 	"github.com/contenox/beam/internal/libtracker"
 )
 
-// ToolsProviderName is the tools-provider key this package registers under (the
-// `name` a chain's `tools` task, a policy rule, or a runtime allowlist refers
-// to). Policy addressing is `tools: "goja", tool: <name>`.
-//
-// It is "goja" and never "js": "js" drags browser and Node priors into the
-// model's tool choice — a model that reads "js" expects fetch, require and a
-// DOM, and asks for them. "goja" is a distinctive token that means exactly this
-// sandbox and nothing the model has seen elsewhere.
+// ToolsProviderName is the tools-provider key this package registers under.
+// Policy addressing is `tools: "goja", tool: <name>`.
 const ToolsProviderName = "goja"
 
 // ToolEval is the sandbox tool the model drives directly. Script tools are
@@ -33,16 +27,15 @@ const ToolEval = "goja_eval"
 // Config configures a Toolset. Zero values fall back to the documented
 // defaults, so Config{} is a valid, safe configuration with no script tools.
 type Config struct {
-	// ScriptDir is the directory scanned for `*.js` script tools (conventionally
-	// $CONTENOX_DIR/tools). Empty, or absent on disk, means no script tools —
-	// goja_eval is still registered. Anything else that goes wrong while reading
-	// it, or in any file in it, is a fail-fast startup error.
+	// ScriptDir is the directory scanned for `*.js` script tools. Empty, or
+	// absent on disk, means no script tools — goja_eval is still registered.
+	// Anything else that goes wrong while reading it is a fail-fast startup
+	// error.
 	ScriptDir string
 
-	// Host is the engine's real tool path — see HostToolCaller for what it must
-	// be wired to. May be nil at construction and supplied later with SetHost
-	// (the registration site has a construction cycle); until it is set,
-	// host.tool throws ErrHostUnavailable and scripts can only compute.
+	// Host is the engine's real tool path — see HostToolCaller. May be nil
+	// at construction and supplied later with SetHost; until set, host.tool
+	// throws ErrHostUnavailable and scripts can only compute.
 	Host HostToolCaller
 
 	// Deadline is the default per-execution budget (default DefaultDeadline).
@@ -59,26 +52,19 @@ type Config struct {
 	// MaxCallStackSize bounds JS call depth (default defaultMaxCallStack).
 	MaxCallStackSize int
 
-	// ReservedNames are additional tool names a script may not claim — for a
-	// registration site that plans to add built-ins later, or that wants script
-	// names kept clear of another provider's. goja_eval is always reserved.
+	// ReservedNames are additional tool names a script may not claim.
+	// goja_eval is always reserved.
 	ReservedNames []string
 
-	// Tracker is where load-time diagnostics are reported — today, the scripts
-	// that declare no `tools` list (see reportUndeclaredReach). Nil degrades to
-	// libtracker.NoopTracker: the toolset loads and runs identically unwatched,
-	// only the startup diagnostic goes nowhere.
+	// Tracker is where load-time diagnostics are reported (see
+	// reportUndeclaredReach). Nil degrades to libtracker.NoopTracker.
 	Tracker libtracker.ActivityTracker
 }
 
-// Toolset is the taskengine.ToolsRepo for the goja provider: goja_eval plus one
-// tool per loaded script.
-//
-// New returns the concrete type rather than the interface (Go's
-// accept-interfaces-return-structs rule) because the registration site needs two
-// things the interface cannot carry: SetHost, which closes the construction
-// cycle described on HostToolCaller, and Shutdown, which the engine chains onto
-// engine.Stop the way it already chains gointel's index.
+// Toolset is the taskengine.ToolsRepo for the goja provider: goja_eval plus
+// one tool per loaded script. New returns the concrete type, rather than the
+// interface, because the registration site needs SetHost and Shutdown, which
+// the interface cannot carry.
 type Toolset struct {
 	sb      *sandbox
 	scripts []*Script
@@ -89,9 +75,7 @@ type Toolset struct {
 var _ taskengine.ToolsRepo = (*Toolset)(nil)
 
 // New builds the goja toolset, loading and validating every script tool. A
-// single bad script fails construction — the blueprint's fail-fast rule: a
-// silently skipped script is a tool the operator believes exists and the model
-// never sees.
+// single bad script fails construction.
 func New(cfg Config) (*Toolset, error) {
 	sb := newSandbox(cfg.Deadline, cfg.MaxDeadline, cfg.OutputCap, cfg.MaxCallStackSize)
 	sb.host = cfg.Host
@@ -122,17 +106,10 @@ func New(cfg Config) (*Toolset, error) {
 	return t, nil
 }
 
-// reportUndeclaredReach says ONCE, at startup, which scripts declare no `tools`
-// list. It is a diagnostic and not an error because the field is optional by
-// design — every script written before it existed still loads — but silence
-// would make the unrestricted case the invisible default, and the whole value of
-// the declaration is that an operator can see it. One report, naming every
-// script in that state, is the cheapest form that stays readable in a startup
-// log.
-//
-// It reaches the operator through the tracker rather than a log call of its own:
-// the tracker is this repo's single instrumentation seam, and it scrubs the
-// values it reports on the way out.
+// reportUndeclaredReach says once, at startup, which scripts declare no
+// `tools` list — a diagnostic, not an error, since the field is optional.
+// Reported through the tracker rather than a log call of its own, since the
+// tracker is this repo's single instrumentation seam.
 func reportUndeclaredReach(ctx context.Context, tracker libtracker.ActivityTracker, scripts []*Script) {
 	var undeclared []string
 	for _, sc := range scripts {
@@ -155,40 +132,31 @@ func reportUndeclaredReach(ctx context.Context, tracker libtracker.ActivityTrack
 // engine.Stop. Safe to call more than once.
 func (t *Toolset) Shutdown() { t.sb.shutdown() }
 
-// Scripts returns the loaded script tools, in load order. The registration site
-// uses it to report what an operator's script directory actually contributed,
-// and an APPROVAL SURFACE uses it to answer the question a card for a script tool
-// has to answer: what will this touch?
-//
-// That answer is Script.Tools together with Script.ToolsDeclared — read both,
-// because "declares it reaches nothing" and "declares nothing" are opposite
-// answers that both present as an empty list. A card that renders them the same
-// way tells an operator the safest possible thing about the least safe case.
+// Scripts returns the loaded script tools, in load order. An approval
+// surface uses Script.Tools together with Script.ToolsDeclared to answer what
+// a script will touch — read both, since "declares it reaches nothing" and
+// "declares nothing" both present as an empty list.
 func (t *Toolset) Scripts() []*Script {
 	out := make([]*Script, len(t.scripts))
 	copy(out, t.scripts)
 	return out
 }
 
-// Supports names the provider and every tool on it — the gointel shape, and the
-// list the tool registry reads.
+// Supports names the provider and every tool on it.
 func (t *Toolset) Supports(context.Context) ([]string, error) {
 	return append([]string{ToolsProviderName}, t.names...), nil
 }
 
-// Exec dispatches one tool call. It is a thin wrapper over execDispatch that
-// stamps every returned error with the fatal-vs-recoverable severity marker,
-// exactly as LocalFSTools.Exec does: the convention then holds on every return
-// path rather than on the paths someone remembered to tag.
+// Exec dispatches one tool call, stamping every returned error with the
+// fatal-vs-recoverable severity marker.
 func (t *Toolset) Exec(ctx context.Context, startTime time.Time, input any, debug bool, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	res, dt, err := t.execDispatch(ctx, startTime, input, debug, call)
 	return res, dt, markSeverity(err)
 }
 
-// execDispatch resolves the tool and runs it. Argument NAMES are strict
-// (rejectUnknownArgs, as in local_fs and gointel); argument VALUES are coerced,
-// because small models routinely emit JSON scalars as strings and a dropped
-// argument silently answers a different question than the one asked.
+// execDispatch resolves the tool and runs it. Argument names are strict
+// (rejectUnknownArgs); argument values are coerced, since small models
+// routinely emit JSON scalars as strings.
 func (t *Toolset) execDispatch(ctx context.Context, _ time.Time, input any, _ bool, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	if call == nil {
 		return nil, taskengine.DataTypeAny, errors.New("goja: tools required")
@@ -246,11 +214,9 @@ func (t *Toolset) evalTool(ctx context.Context, args map[string]any) (*Result, e
 	return t.sb.runSource(ctx, ToolEval, code, t.sb.clampDeadline(deadline))
 }
 
-// checkScriptArgs enforces the script's OWN declared schema at the boundary:
-// unknown names are refused (unless the schema opts into additionalProperties)
-// and missing required names are named. The script author declared the contract;
-// enforcing it here means every script gets the same argument discipline as a
-// built-in tool without writing a line of validation JavaScript.
+// checkScriptArgs enforces the script's own declared schema at the boundary:
+// unknown names are refused (unless the schema opts into
+// additionalProperties) and missing required names are named.
 func (t *Toolset) checkScriptArgs(sc *Script, args map[string]any) error {
 	if !sc.allowExtra {
 		if err := rejectUnknownArgs(sc.Name, args, sc.properties...); err != nil {
@@ -271,17 +237,14 @@ func (t *Toolset) checkScriptArgs(sc *Script, args map[string]any) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Argument decoding
-//
-// Lifted from gointel/tools.go, which lifted the dispatch shape from
-// localtools/fs.go: accept args from the chain input map or from the declarative
-// ToolsCall.Args, reject unknown argument NAMES per tool, coerce VALUES
+// --- Argument decoding -------------------------------------------------------
+// Accepts args from the chain input map or from the declarative
+// ToolsCall.Args, rejects unknown argument names per tool, coerces values
 // generously.
-// ---------------------------------------------------------------------------
 
-// callArgs assembles the argument map from the chain input or, for declarative
-// `tools` tasks that carry arguments on the call itself, from ToolsCall.Args.
+// callArgs assembles the argument map from the chain input or, for
+// declarative `tools` tasks that carry arguments on the call itself, from
+// ToolsCall.Args.
 func callArgs(input any, call *taskengine.ToolsCall) map[string]any {
 	if m, ok := input.(map[string]any); ok && len(m) > 0 {
 		return m
@@ -310,7 +273,7 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 	var unknown []string
 	for key := range args {
 		if _, ok := allowedSet[key]; !ok {
-			// The KEY is model-supplied too, so it is clamped like every other
+			// The key is model-supplied too, so it is clamped like any other
 			// echoed argument.
 			unknown = append(unknown, echoName(key))
 		}
@@ -329,8 +292,8 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 		toolName, strings.Join(unknown, ", "), shown, severityRecoverable)
 }
 
-// echoName renders a model-supplied argument NAME for an error message: clamped,
-// non-printable runes replaced rather than embedded (gointel's echoName).
+// echoName renders a model-supplied argument name for an error message:
+// clamped, non-printable runes replaced rather than embedded.
 func echoName(s string) string {
 	var b strings.Builder
 	for i, r := range []rune(s) {
@@ -374,10 +337,9 @@ const (
 	minInt = -maxInt - 1
 )
 
-// intFromFloat converts a JSON number to an int WITHOUT the undefined behaviour
-// Go's float→int conversion has outside the integer range (gointel's rule: a
-// model that emits 1e30 for a numeric argument is one bad completion, and
-// int(1e30) is unspecified). Out-of-range saturates; NaN reads as "no value".
+// intFromFloat converts a JSON number to an int without the undefined
+// behaviour Go's float-to-int conversion has outside the integer range.
+// Out-of-range saturates; NaN reads as "no value".
 func intFromFloat(f float64) (int, bool) {
 	switch {
 	case f != f:

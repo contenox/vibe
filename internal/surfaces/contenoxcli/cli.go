@@ -53,19 +53,16 @@ const (
 	defaultTimeout = 5 * time.Minute
 )
 
-// reservedSubcommands are first-arg names that must not be treated as run input
-// (Cobra or our subcommands). RETIRED command names (serve, fleet, approvals,
-// code, vscode-agent, modeld) stay reserved on purpose: an operator typing one
-// gets Cobra's unknown-command error naming the mistake, instead of the word
-// being silently injected as a chat prompt.
+// reservedSubcommands are first-arg names never treated as run input. Retired
+// names stay reserved so typing one gets an unknown-command error rather than
+// being injected as a chat prompt.
 var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true, "index": true, "search": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
 	args := os.Args[1:]
-	// Only inject "run" when no reserved subcommand was given (so "contenox completion" and "contenox help" work).
-	// Scan past leading flags (e.g. --db /path) to find the first non-flag argument.
-	// Also skip injection when args contains only --help/-h so the root command shows its own help.
+	// Only inject "run" when no reserved subcommand was given, and not when
+	// args are help/version-only.
 	onlyHelp := len(args) == 0
 	if !onlyHelp {
 		allRootFlags := true
@@ -81,20 +78,14 @@ func Main() {
 		rootCmd.SetArgs(append([]string{sub}, args...))
 	}
 	err := rootCmd.Execute()
-	// Flush warm-session KV snapshots to the durable store before the process
-	// exits, so the next invocation (one-shot CLI) or the next start (a restarted
-	// server) can restore warm instead of cold-prefilling. Best-effort; a capture
-	// failure must never change the command's exit status.
+	// Flush warm-session KV snapshots before exit so the next start restores
+	// warm instead of cold-prefilling. Best-effort.
 	_ = modelrepo.Shutdown()
 	if err != nil {
 		recordStartupFailure(err)
-		// A command that chose its own exit status (an *exitError) has already
-		// written whatever it wanted the operator to see — `mission fire --wait`
-		// prints its terminal-outcome line, the chain/editor sentinels print
-		// their own guidance. Honor the code and skip the generic "Error:" prefix
-		// so a deliberate non-zero exit (a mission that failed, blocked, or timed
-		// out) reads as a status, not a crash. Every pre-existing exitError uses
-		// code 1, so this changes nothing for them but the cosmetic prefix.
+		// A command with its own exit status (*exitError) has already printed
+		// what it wanted the operator to see, so skip the generic "Error:"
+		// prefix — a deliberate non-zero exit reads as a status, not a crash.
 		var ee *exitError
 		if errors.As(err, &ee) {
 			os.Exit(ee.code)
@@ -108,11 +99,9 @@ func containsExperimentalACPFlag(args []string) bool {
 	return slices.Contains(args, "--experimental-acp")
 }
 
-// dispatchSubcommand decides which subcommand a bare invocation is routed to.
-// Bare input is session-backed chat, as the quickstart and chat help document
-// ("the first run auto-creates a 'default' session"); 'contenox run' remains
-// the explicit stateless path. Returns "" when args already name a subcommand
-// or are help/version-only.
+// dispatchSubcommand decides which subcommand a bare invocation is routed to:
+// bare input is session-backed chat; 'contenox run' is the explicit stateless
+// path. Returns "" when args already name a subcommand or are help/version-only.
 func dispatchSubcommand(args []string, onlyHelp bool) string {
 	switch {
 	case containsExperimentalACPFlag(args) && !firstNonFlagIsReserved(args):
@@ -419,15 +408,9 @@ func init() {
 
 }
 
-// setupTelemetryLogging checks if the user has enabled file logging.
-// If enabled, it sets up slog to write to both os.Stderr and ~/.contenox/telemetry.log.
-// Returns a cleanup function to close the file.
-//
-// This is SINK WIRING, which is why log/slog is imported here and nowhere else
-// in this package's command logic: it points the process default handler — the
-// output the tracker built by libtracker.NewLogActivityTracker writes through —
-// at the operator's telemetry file. Nothing in this package may call slog as an
-// API; see the allowlist in libtracker's TestUnit_NoDirectSlogOutsideSinks.
+// setupTelemetryLogging points slog at both stderr and telemetry.log when the
+// operator has enabled it, returning a cleanup func. Sink wiring only: nothing
+// else in this package's command logic may call slog as an API.
 func setupTelemetryLogging(ctx context.Context, store runtimetypes.Store, contenoxDir string) (func(), error) {
 	enabledStr := clikv.Read(ctx, store, "telemetry-enabled")
 	if enabledStr != "true" {
@@ -445,26 +428,17 @@ func setupTelemetryLogging(ctx context.Context, store runtimetypes.Store, conten
 	return func() { f.Close() }, nil
 }
 
-// warnTelemetryLoggingUnavailable reports a failed setupTelemetryLogging to the
-// operator, on the command's own stderr.
-//
-// PRINTED, NOT TRACKED, and the reason is the same at all three call sites
-// (chat, run, beam): telemetry-enabled is set, so the operator explicitly asked
-// for this log and is silently not getting it. That is a message to a human who
-// can fix it — a bad path, a read-only directory, a full disk — not an event
-// about the program worth correlating later. Reporting it through the tracker
-// would also be circular: the tracker's sink is the logging that just failed to
-// come up.
+// warnTelemetryLoggingUnavailable reports a failed setupTelemetryLogging on
+// the command's own stderr, not through the tracker — whose sink is the
+// logging that just failed to come up.
 func warnTelemetryLoggingUnavailable(w io.Writer, err error) {
 	fmt.Fprintf(w, "warning: telemetry-enabled is set but its log file could not be opened, continuing without it: %v\n"+
 		"         turn it off with: contenox config set telemetry-enabled false\n", err)
 }
 
-// ResolveContenoxDir finds the closest .contenox directory by walking up from the
-// current working directory. If cmd is non-nil and --data-dir is set, that value
-// is returned directly. Otherwise it walks up from cwd; if it hits the root
-// without finding one, it returns the .contenox directory in the current working
-// directory as a fallback.
+// ResolveContenoxDir finds the closest .contenox directory by walking up from
+// cwd, or returns --data-dir directly when set. Falls back to cwd/.contenox
+// if it hits the root without finding one.
 func ResolveContenoxDir(cmd *cobra.Command) (string, error) {
 	if cmd != nil {
 		dataDir, _ := cmd.Root().PersistentFlags().GetString("data-dir")
@@ -482,9 +456,7 @@ func ResolveContenoxDir(cmd *cobra.Command) (string, error) {
 	for {
 		candidate := filepath.Join(dir, ".contenox")
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			// Require workspace.id to be present — a .contenox/ without it is
-			// not a valid workspace (e.g. a backup or pre-init directory).
-			// Keep walking up so callers get a proper workspace or the cwd fallback.
+			// A .contenox/ without workspace.id isn't a valid workspace.
 			if _, werr := os.Stat(filepath.Join(candidate, "workspace.id")); werr == nil {
 				return candidate, nil
 			}
@@ -492,29 +464,18 @@ func ResolveContenoxDir(cmd *cobra.Command) (string, error) {
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			// Hit root without finding it. Fallback to cwd/.contenox
 			return filepath.Join(cwd, ".contenox"), nil
 		}
 		dir = parent
 	}
 }
 
-// controlPlaneDirs is the SINGLE definition of "what the runtime's control plane
-// is" for a given command: the resolved .contenox data/config dir (contenoxDir —
-// chains, HITL policies, declared agents, and, unless split by --db, the local.db)
-// PLUS the home global ~/.contenox (the default database and the model cache).
-// These are the directories no session, browse root, or agent fs tool may reach,
-// per the control-plane isolation invariant (runtime/vfs/controlplane.go).
-//
-// Both serve (which calls vfs.SetControlPlaneDenied at boot) and the
-// `contenox workspace add` grant guard (which runs in a SEPARATE process with no
-// global set, so it consults vfs.WithinControlPlane with these dirs directly)
-// derive the set from here, so the two never disagree about the boundary. --data-dir
-// may point contenoxDir away from home; both are denied, so the split is covered
-// either way. NOTE: a database relocated by --db to an arbitrary directory is an
-// operator's explicit choice and is NOT auto-denied — denying its parent could
-// swallow a legitimate workspace root (e.g. --db ./local.db in the served project);
-// the two canonical control dirs are the boundary the invariant protects.
+// controlPlaneDirs is the single definition of the runtime's control plane for
+// a command: contenoxDir plus the home global ~/.contenox. No session, browse
+// root, or agent fs tool may reach these (runtime/vfs/controlplane.go); serve
+// and the `workspace add` grant guard both derive their denylist from here so
+// the two never disagree. A database relocated by --db is not auto-denied:
+// denying its parent could swallow a legitimate workspace root.
 func controlPlaneDirs(contenoxDir string) []string {
 	dirs := []string{contenoxDir}
 	if home, err := globalContenoxDir(); err == nil {
@@ -524,9 +485,7 @@ func controlPlaneDirs(contenoxDir string) []string {
 }
 
 func ResolveWorkspaceID(contenoxDir string) string {
-	// The project package owns the marker format (JSON {id,name}, with a
-	// legacy bare-UUID read) so serve, the CLI, and the /workspace/roots API
-	// agree on a project's identity. The DB scoping token is the marker's ID.
+	// project owns the marker format so serve, the CLI, and the API agree.
 	if m, ok := project.ReadFromContenoxDir(contenoxDir); ok && m.ID != "" {
 		return m.ID
 	}
@@ -534,9 +493,7 @@ func ResolveWorkspaceID(contenoxDir string) string {
 }
 
 func runInitCmd(cmd *cobra.Command, args []string) error {
-	// The narrow verb the stale-policy notice points at: presets only, no
-	// chains, no marker, no config. It short-circuits everything else because
-	// its whole value is being SMALLER than --force.
+	// Narrower than --force: presets only, no chains, marker, or config.
 	if refresh, _ := cmd.Flags().GetBool("refresh-policies"); refresh {
 		return runRefreshPolicies(cmd.OutOrStdout())
 	}
@@ -555,8 +512,7 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 
 	var contenoxDir string
 	if projectMode {
-		// Force a LOCAL project marker in the current directory, bypassing the
-		// git-style walk-up that would otherwise reuse an ancestor's .contenox.
+		// A local project marker in cwd, bypassing the ancestor walk-up.
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("failed to resolve current directory: %w", err)
@@ -565,9 +521,8 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 		if err := RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, update, provider, contenoxDir, projectName); err != nil {
 			return err
 		}
-		// Marking a project does NOT grant it as a workspace root — that is a
-		// separate, explicit security decision. Bridge the journey with the verb
-		// that registers it for serve and the Beam picker.
+		// Marking a project doesn't grant it as a workspace root; that's a
+		// separate decision, made with this verb.
 		fmt.Fprintf(cmd.OutOrStdout(),
 			"To let sessions open it (serve + Beam picker): contenox workspace add %s\n", cwd)
 		return nil

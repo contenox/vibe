@@ -52,9 +52,9 @@ func TestUnit_LintChain_GoodChainPasses(t *testing.T) {
 	require.NoError(t, taskengine.LintChain(chain, taskengine.DataTypeString))
 }
 
-// TestUnit_LintChain_ImpossibleEdgeIsLoadError: a task that can only produce a
-// string feeding a handler that only accepts chat_history is provably broken —
-// the error must name BOTH endpoints and both type sets.
+// TestUnit_LintChain_ImpossibleEdgeIsLoadError: a task that can only produce
+// a string feeding a handler that only accepts chat_history is provably
+// broken — the error must name both endpoints and both type sets.
 func TestUnit_LintChain_ImpossibleEdgeIsLoadError(t *testing.T) {
 	chain := lintChain(
 		taskengine.TaskDefinition{

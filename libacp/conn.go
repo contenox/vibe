@@ -16,9 +16,8 @@ var (
 )
 
 // afterResponseSink collects callbacks scheduled by a request handler to run
-// once the handler's result has been written to the wire. handleRequest installs
-// one per request and flushes it after the result, so notifications a handler
-// emits are ordered AFTER the response.
+// once its result is written to the wire, so its notifications are ordered
+// after the response. handleRequest installs one per request and flushes it.
 type afterResponseSink struct {
 	mu      sync.Mutex
 	flushed bool
@@ -28,8 +27,8 @@ type afterResponseSink struct {
 func (s *afterResponseSink) add(fn func()) {
 	s.mu.Lock()
 	if s.flushed {
-		// The handler's result is already on the wire; run immediately instead
-		// of appending to a sink that will never be flushed again.
+		// Result already on the wire; run immediately rather than append to a
+		// sink that will never flush again.
 		s.mu.Unlock()
 		fn()
 		return
@@ -51,15 +50,10 @@ func (s *afterResponseSink) run() {
 
 type afterResponseKey struct{}
 
-// AfterResponse schedules fn to run after the result of the request currently
-// being handled has been written to the wire. Use it from a request handler
-// (NewSession, LoadSession, ...) to emit session/update notifications that must
-// reach the client only once it can resolve the session — most importantly the
-// available_commands_update after session/new, which a client (e.g. Zed) drops
-// as an "unknown session" if it arrives before the session/new result.
-//
-// Called outside a request handler (no sink in ctx), fn runs immediately, so it
-// is always safe to use regardless of caller context.
+// AfterResponse schedules fn to run once the current request's result is on
+// the wire — use it to emit a session/update that must reach the client only
+// after it can resolve the session (e.g. available_commands_update after
+// session/new). Outside a request handler, fn runs immediately.
 func AfterResponse(ctx context.Context, fn func()) {
 	if sink, ok := ctx.Value(afterResponseKey{}).(*afterResponseSink); ok {
 		sink.add(fn)
@@ -88,20 +82,16 @@ type AgentSideConnection struct {
 	reqCancelMu    sync.Mutex
 	requestCancels map[string]context.CancelFunc
 
-	// extRequest and extNotification, if set (via SetExtRequestHandler /
-	// SetExtNotificationHandler), handle inbound extension methods and
-	// notifications (see IsExtensionMethod). Nil preserves the connection's
-	// behavior before extension support existed: MethodNotFound for requests,
-	// silent drop for notifications. Set once from the AgentFactory before Run
-	// starts reading, like c.agent itself; no separate synchronization.
+	// extRequest/extNotification, if set via SetExtRequestHandler /
+	// SetExtNotificationHandler before Run starts reading, handle inbound
+	// extension methods and notifications (see IsExtensionMethod). Nil means
+	// MethodNotFound for requests, silent drop for notifications.
 	extRequest      ExtRequestHandler
 	extNotification ExtNotificationHandler
 
-	// handlerMu guards draining and gates handlers: it makes "is shutdown
-	// running?" and "register one more handler goroutine" a single atomic
-	// step, which is what keeps handlers.Add from racing handlers.Wait (an
-	// Add that starts after the counter has hit zero is a data race by the
-	// WaitGroup contract, not merely a lost goroutine).
+	// handlerMu makes "is shutdown running?" and "register one more handler
+	// goroutine" a single atomic step, so handlers.Add can never race
+	// handlers.Wait.
 	handlerMu sync.Mutex
 	draining  bool
 	handlers  sync.WaitGroup
@@ -112,10 +102,8 @@ type AgentSideConnection struct {
 }
 
 // goHandler spawns fn as a tracked handler goroutine and reports whether it
-// was started. It refuses once shutdown has begun: at that point the transport
-// is already closed, so the handler could neither write a response nor touch
-// connection state safely, and admitting it would also race the join in
-// waitHandlers.
+// was started; it refuses once shutdown has begun, since the transport is
+// already closed and admitting it would race the join in waitHandlers.
 func (c *AgentSideConnection) goHandler(fn func()) bool {
 	c.handlerMu.Lock()
 	if c.draining {
@@ -131,30 +119,14 @@ func (c *AgentSideConnection) goHandler(fn func()) bool {
 	return true
 }
 
-// waitHandlers blocks until every handler goroutine spawned by goHandler has
-// RETURNED. It must be called only after shutdown, which cancels every
-// in-flight request context, closes the transport, and fails every pending
-// outbound call — otherwise a handler parked on a peer response, a channel
-// send, or its own context would never be released and this join would
-// deadlock.
-//
-// The contract this puts on Agent implementations is: every handler must
-// return once its context is cancelled. Returning early is genuinely unsafe —
-// Run's caller tears down the state the handlers are still touching (sessions,
-// drivers, DB handles) the moment Run returns — so the join is bounded only as
-// a last resort, by HandlerDrainTimeout, and reports ErrHandlerDrainTimeout
-// rather than pretending it succeeded.
-//
-// The bound exists because the alternative is worse in the one place it bites:
-// an unbounded join makes a single misbehaving handler wedge process shutdown
-// forever, with no diagnosis. A caller that sees ErrHandlerDrainTimeout knows
-// a handler ignored its cancellation, and knows not to trust that teardown was
-// clean.
+// waitHandlers blocks until every handler goroutine spawned by goHandler
+// returns. Call only after shutdown, since every Agent handler must return
+// once its context is cancelled (the caller tears down shared state the
+// moment Run returns). Bounded by HandlerDrainTimeout as a last resort,
+// reporting ErrHandlerDrainTimeout instead of pretending a stuck handler drained.
 func (c *AgentSideConnection) waitHandlers() error {
 	c.handlerMu.Lock()
-	// shutdown has normally already set this; assert it here so a caller that
-	// somehow reaches the join first still closes the admission gate before
-	// waiting.
+	// Assert draining here too, in case a caller reaches the join first.
 	c.draining = true
 	c.handlerMu.Unlock()
 
@@ -180,10 +152,8 @@ func requestCancelKey(id RequestID) string {
 }
 
 // promptCancel tracks the cancelable context of one in-flight session/prompt.
-// Entries are compared by pointer identity so a prompt's cleanup can never
-// remove a successor prompt's registration (context.CancelFunc values are not
-// comparable — printing them with %p yields the shared code pointer, so any
-// func-value comparison degenerates to "always equal").
+// Compared by pointer identity (context.CancelFunc values aren't comparable),
+// so a prompt's cleanup can never remove a successor prompt's registration.
 type promptCancel struct {
 	sessionID SessionID
 	ctx       context.Context
@@ -205,27 +175,24 @@ func NewAgentSideConnection(rw io.ReadWriteCloser, factory AgentFactory) *AgentS
 }
 
 // SetExtRequestHandler installs h to handle inbound extension requests
-// (method names starting with ExtensionMethodPrefix that fall outside the
-// core ACP method set). Call it from the AgentFactory, before Run starts
-// reading. A nil h (the default) leaves extension requests answered with
-// MethodNotFound, exactly as before this seam existed.
+// (method names starting with ExtensionMethodPrefix). Call it from the
+// AgentFactory before Run starts reading. Nil (the default) answers
+// extension requests with MethodNotFound.
 func (c *AgentSideConnection) SetExtRequestHandler(h ExtRequestHandler) {
 	c.extRequest = h
 }
 
 // SetExtNotificationHandler installs h to handle inbound extension
-// notifications. Call it from the AgentFactory, before Run starts reading. A
-// nil h (the default) leaves extension notifications silently ignored,
-// exactly as before this seam existed.
+// notifications. Call it from the AgentFactory before Run starts reading.
+// Nil (the default) silently ignores extension notifications.
 func (c *AgentSideConnection) SetExtNotificationHandler(h ExtNotificationHandler) {
 	c.extNotification = h
 }
 
 func (c *AgentSideConnection) Run(ctx context.Context) (err error) {
-	// Deferred first, so it runs LAST: shutdown must cancel and unblock
-	// everything before the join, never the other way around. By the time Run
-	// returns, no handler goroutine is still executing — callers routinely
-	// close the transport and tear down session state immediately afterwards.
+	// Deferred first so it runs last: shutdown must unblock everything before
+	// the join. By the time Run returns, no handler goroutine is still
+	// executing.
 	defer func() {
 		if derr := c.waitHandlers(); derr != nil {
 			err = errors.Join(err, derr)
@@ -238,8 +205,7 @@ func (c *AgentSideConnection) Run(ctx context.Context) (err error) {
 		case <-ctx.Done():
 			c.shutdown(ctx.Err())
 		case <-c.closed:
-			// Connection ended on its own (EOF, transport error); exit instead
-			// of leaking until the caller's ctx dies.
+			// Connection ended on its own; exit instead of leaking until ctx dies.
 		}
 	}()
 
@@ -247,8 +213,7 @@ func (c *AgentSideConnection) Run(ctx context.Context) (err error) {
 		line, err := c.reader.Next()
 		if err != nil {
 			// A canceled ctx closes the transport out from under the reader, so
-			// the reader's error is a side effect ("file already closed"), not
-			// the cause. Report the cancellation itself.
+			// report the cancellation, not the resulting read error.
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				c.shutdown(ctxErr)
 				return ctxErr
@@ -275,14 +240,10 @@ func (c *AgentSideConnection) shutdown(err error) {
 	c.closeOnce.Do(func() {
 		c.closeErr = err
 
-		// Close the admission gate FIRST. A handler admitted by goHandler has,
-		// by then, already had its cancel func registered in requestCancels by
-		// dispatch (same read-loop goroutine, before the spawn), so barring
-		// admission here guarantees the cancel loops below see every handler
-		// that will ever run. Closing the gate afterwards would leave a window
-		// where a handler is admitted after its registration was already
-		// swept, and would run to completion with a live context while
-		// waitHandlers joins on it.
+		// Close the admission gate first: dispatch always registers a
+		// handler's cancel func before spawning it, so barring admission now
+		// guarantees the cancel loops below see every handler that will ever
+		// run.
 		c.handlerMu.Lock()
 		c.draining = true
 		c.handlerMu.Unlock()
@@ -324,9 +285,8 @@ func (c *AgentSideConnection) dispatch(ctx context.Context, line []byte) {
 	case IncomingKindResponse:
 		c.deliverResponse(msg.Response)
 	case IncomingKindRequest:
-		// Every request runs under its own cancelable context, registered by
-		// JSON-RPC id before the handler goroutine spawns (read-loop order), so
-		// a later $/cancel_request is guaranteed to observe it.
+		// Registered by JSON-RPC id before the handler goroutine spawns, so a
+		// later $/cancel_request is guaranteed to observe it.
 		reqCtx, cancelReq := context.WithCancel(ctx)
 		key := requestCancelKey(msg.Request.ID)
 		c.reqCancelMu.Lock()
@@ -347,36 +307,31 @@ func (c *AgentSideConnection) dispatch(ctx context.Context, line []byte) {
 			defer release()
 			c.handleRequest(reqCtx, msg.Request, pc)
 		}) {
-			// Shutdown is already under way; the transport is closed, so no
-			// response could reach the peer anyway. Drop the request and undo
-			// the registrations dispatch just made.
+			// Shutdown already under way; no response could reach the peer
+			// anyway. Drop the request and undo dispatch's registrations.
 			release()
 			if pc != nil {
 				c.unregisterPromptCancel(pc)
 			}
 		}
 	case IncomingKindNotification:
-		// session/cancel and $/cancel_request are applied inline on the read
-		// loop so wire order is preserved: a cancel that arrives after its
-		// request always observes the request's registration (both happen on
-		// this goroutine), instead of racing it across handler goroutines.
+		// Applied inline on the read loop, not in a handler goroutine, so a
+		// cancel always observes its request's registration in wire order.
 		switch msg.Notification.Method {
 		case MethodSessionCancel:
 			c.applySessionCancel(msg.Notification.Params)
 		case MethodCancelRequest:
 			c.applyCancelRequest(msg.Notification.Params)
 		}
-		// Tracked like a request handler: Agent.Cancel and extension
-		// notification handlers touch the same state Run's caller tears down,
-		// so Run must not return while one is still running. Dropped outright
-		// once shutdown has begun — a notification has no response to owe.
+		// Tracked like a request handler since Agent.Cancel touches the same
+		// state Run's caller tears down; dropped outright once shutdown has
+		// begun, since a notification owes no response.
 		_ = c.goHandler(func() { c.handleNotification(ctx, msg.Notification) })
 	}
 }
 
 // applyCancelRequest aborts the in-flight request the peer no longer awaits.
-// Unknown ids are ignored ("$/" methods are always safe to ignore) — the
-// request may simply have completed already.
+// Unknown ids are ignored: the request may simply have completed already.
 func (c *AgentSideConnection) applyCancelRequest(params json.RawMessage) {
 	var p CancelRequestNotification
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil {
@@ -390,10 +345,9 @@ func (c *AgentSideConnection) applyCancelRequest(params json.RawMessage) {
 	}
 }
 
-// respondToMalformed answers input the dispatcher could not parse. Silently
-// dropping it would leave a requesting peer waiting forever on a response that
-// never comes; JSON-RPC 2.0 prescribes -32700 for invalid JSON and -32600 for
-// structurally invalid messages (id null when it cannot be salvaged).
+// respondToMalformed answers input the dispatcher could not parse, per
+// JSON-RPC 2.0: -32700 for invalid JSON, -32600 for a structurally invalid
+// message (id null when it cannot be salvaged).
 func (c *AgentSideConnection) respondToMalformed(line []byte, parseErr error) {
 	if !json.Valid(line) {
 		_ = c.writer.Write(NewErrorResponse(NewRequestIDNull(), ParseError(parseErr.Error())))
@@ -413,10 +367,9 @@ func (c *AgentSideConnection) respondToMalformed(line []byte, parseErr error) {
 }
 
 // registerPromptCancel creates and registers the cancelable context for a
-// session/prompt request at dispatch time — on the read loop, before the
-// handler goroutine is spawned — so a later session/cancel is guaranteed to
-// observe it. Returns nil when params carry no usable sessionId; the handler
-// will reject those with InvalidParams anyway.
+// session/prompt request at dispatch time, before the handler goroutine is
+// spawned, so a later session/cancel is guaranteed to observe it. Returns nil
+// when params carry no usable sessionId.
 func (c *AgentSideConnection) registerPromptCancel(ctx context.Context, params json.RawMessage) *promptCancel {
 	var probe struct {
 		SessionID SessionID `json:"sessionId"`
@@ -428,8 +381,7 @@ func (c *AgentSideConnection) registerPromptCancel(ctx context.Context, params j
 	pc := &promptCancel{sessionID: probe.SessionID, ctx: promptCtx, cancel: cancel}
 	c.cancelMu.Lock()
 	if prev, ok := c.sessionCancels[probe.SessionID]; ok {
-		// Spec-discouraged but possible: a second prompt on a busy session
-		// supersedes the first turn.
+		// A second prompt on a busy session supersedes the first turn.
 		prev.cancel()
 	}
 	c.sessionCancels[probe.SessionID] = pc
@@ -437,9 +389,8 @@ func (c *AgentSideConnection) registerPromptCancel(ctx context.Context, params j
 	return pc
 }
 
-// unregisterPromptCancel removes pc's registration if — and only if — it is
-// still the current one for its session (pointer identity), then cancels its
-// context to release resources.
+// unregisterPromptCancel removes pc's registration only if it is still the
+// current one for its session (pointer identity), then cancels its context.
 func (c *AgentSideConnection) unregisterPromptCancel(pc *promptCancel) {
 	c.cancelMu.Lock()
 	if existing, ok := c.sessionCancels[pc.sessionID]; ok && existing == pc {
@@ -477,15 +428,13 @@ func (c *AgentSideConnection) handleRequest(ctx context.Context, req Request, pc
 		return
 	}
 	_ = c.writer.Write(NewResultResponse(req.ID, resultRaw))
-	// Now that the result (and any session id it carries) is on the wire, flush
-	// notifications the handler deferred via AfterResponse. They are ordered
-	// after the response, so the client can resolve their session.
+	// Flush notifications deferred via AfterResponse now that the result is
+	// on the wire, so the client can resolve their session.
 	sink.run()
 }
 
 // safeCallMethod converts a panicking Agent handler into an InternalError
-// response instead of tearing down the whole process (and with it every other
-// in-flight session on this connection).
+// response instead of tearing down the whole process.
 func (c *AgentSideConnection) safeCallMethod(ctx context.Context, req Request, pc *promptCancel) (result any, rpcErr *Error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -507,10 +456,6 @@ func (c *AgentSideConnection) handleNotification(ctx context.Context, n Notifica
 		}
 		_ = c.agent.Cancel(ctx, p)
 	default:
-		// "$/"-prefixed methods (MethodCancelRequest) never reach here as an
-		// extension notification: IsExtensionMethod only matches the "_"
-		// namespace, so they fall through and stay ignored, same as any other
-		// unrecognized notification.
 		if IsExtensionMethod(n.Method) && c.extNotification != nil {
 			c.extNotification(ctx, n.Method, n.Params)
 		}
@@ -520,8 +465,7 @@ func (c *AgentSideConnection) handleNotification(ctx context.Context, n Notifica
 func (c *AgentSideConnection) callMethod(ctx context.Context, req Request, pc *promptCancel) (any, *Error) {
 	params := req.Params
 	if len(params) == 0 {
-		// JSON-RPC allows omitting params entirely; treat that as {} so methods
-		// whose params are all optional (session/list) don't fail to unmarshal.
+		// Treat omitted params as {} so all-optional-params methods still unmarshal.
 		params = []byte("{}")
 	}
 	switch req.Method {
@@ -635,9 +579,9 @@ func (c *AgentSideConnection) callMethod(ctx context.Context, req Request, pc *p
 		}
 		return resp, nil
 
-	// MethodSessionSetModel is the UNSTABLE Zed model-picker method (session/set_model).
-	// An agent that advertises no `models` state returns MethodNotFound from
-	// SetSessionModel, mirroring the experimental method's optional-capability contract.
+	// MethodSessionSetModel is the unstable Zed model-picker method
+	// (session/set_model); an agent with no `models` state returns
+	// MethodNotFound from SetSessionModel.
 	case MethodSessionSetModel:
 		var p SetSessionModelRequest
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -668,9 +612,7 @@ func (c *AgentSideConnection) callMethod(ctx context.Context, req Request, pc *p
 			}
 			return nil, InvalidParams(err.Error())
 		}
-		// The cancelable context was registered by dispatch (read-loop order);
-		// pc is nil only when the params were unusable, which the unmarshal
-		// above already rejects for the sessionId-less case.
+		// pc is nil only when params were unusable, already rejected above.
 		promptCtx := ctx
 		if pc != nil {
 			promptCtx = pc.ctx
@@ -679,9 +621,8 @@ func (c *AgentSideConnection) callMethod(ctx context.Context, req Request, pc *p
 
 		resp, err := c.agent.Prompt(promptCtx, p)
 		if err != nil {
-			// Spec: after session/cancel the prompt MUST resolve with the
-			// cancelled stop reason, never a JSON-RPC error. Agents that return
-			// their context's error are translated here as a safety net.
+			// Spec: after session/cancel, prompt must resolve with the
+			// cancelled stop reason, never a JSON-RPC error.
 			if promptCtx.Err() == context.Canceled && errors.Is(err, context.Canceled) {
 				return PromptResponse{StopReason: StopReasonCancelled}, nil
 			}
@@ -690,9 +631,8 @@ func (c *AgentSideConnection) callMethod(ctx context.Context, req Request, pc *p
 		return resp, nil
 
 	default:
-		// req.Params (not the []byte("{}") default above) so the handler sees
-		// exactly what arrived on the wire, including a genuinely absent
-		// params field — extension methods own their own params schema.
+		// req.Params, not the {} default above: extension methods own their
+		// own params schema and must see exactly what arrived on the wire.
 		if IsExtensionMethod(req.Method) && c.extRequest != nil {
 			result, extErr := c.extRequest(ctx, req.Method, req.Params)
 			if extErr != nil {
@@ -751,9 +691,8 @@ func (c *AgentSideConnection) call(ctx context.Context, method string, params an
 		c.pendingMu.Lock()
 		delete(c.pending, id)
 		c.pendingMu.Unlock()
-		// Tell the peer this response is no longer awaited so it can abort the
-		// work — most visibly, tear down a permission dialog whose prompt turn
-		// was cancelled. Best effort by design.
+		// Best-effort: tell the peer this response is no longer awaited so it
+		// can abort the work (e.g. tear down a cancelled permission dialog).
 		_ = c.notify(MethodCancelRequest, CancelRequestNotification{RequestID: rid})
 		return ctx.Err()
 	case <-c.closed:
@@ -856,11 +795,10 @@ func (c *AgentSideConnection) ReleaseTerminal(ctx context.Context, req ReleaseTe
 }
 
 // CallExtMethod sends a custom extension request (method must satisfy
-// IsExtensionMethod) to the client and returns its raw result. This is the
-// outbound half of the extension-method seam; SetExtRequestHandler installs
-// the inbound half. A canceled ctx aborts the wait and best-effort notifies
-// the client with "$/cancel_request", exactly like any other outbound call
-// (see call).
+// IsExtensionMethod) to the client and returns its raw result. Outbound half
+// of the extension-method seam; SetExtRequestHandler installs the inbound
+// half. A canceled ctx aborts the wait and best-effort notifies the client
+// with "$/cancel_request".
 func (c *AgentSideConnection) CallExtMethod(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	if !IsExtensionMethod(method) {
 		return nil, fmt.Errorf("libacp: %q is not an extension method (must start with %q)", method, ExtensionMethodPrefix)

@@ -28,25 +28,22 @@ import (
 )
 
 // errEgressDenied marks a wall-hit on the network surface: a name that is not an
-// egress carve-out, or a connection to an address that was never resolved for
-// one. It is the value passed to reportErr so a deny is a first-class, greppable
-// telemetry event, not a silent drop.
+// egress carve-out, or a connection to an address never resolved for one. Passed
+// to reportErr so a deny is greppable telemetry, not a silent drop.
 var errEgressDenied = errors.New("libsandbox: egress denied")
 
 const egressNICID = 1
 
 // egressBridge is the parent side of the network wall: a userspace TCP/IP stack
-// (gVisor netstack) attached to the fd of the TUN the shim created in the agent's
-// namespace. All of the agent's traffic is carried as bare IP over that fd, so it
-// is transparent and not env-bypassable — there is no host route the agent can
-// reach except through this stack, and this stack answers DNS only for carve-out
-// hosts and dials only the addresses it resolved for them.
+// (gVisor netstack) attached to the TUN fd the shim created in the agent's
+// namespace. All agent traffic is bare IP over that fd — no host route is
+// reachable except through this stack, which answers DNS only for carve-out
+// hosts and dials only addresses it resolved for them.
 //
-// One bridge serves one agent for the life of ctx. It is created (and its
-// goroutine launched) by setupEgress before the process starts; it parks until
-// the shim hands over the TUN fd, serves until ctx is done, then tears the stack
-// down and closes the fd — which is also what lets the agent's now-idle network
-// namespace be reclaimed.
+// One bridge serves one agent for the life of ctx: created by setupEgress before
+// the process starts, parks until the shim hands over the TUN fd, serves until
+// ctx is done, then tears the stack down and closes the fd (reclaiming the
+// agent's netns).
 type egressBridge struct {
 	ctx          context.Context
 	tracker      libtracker.ActivityTracker
@@ -59,24 +56,20 @@ type egressBridge struct {
 	resolved  map[string]resolvedHost // carve-out host -> its resolved+vetted addresses (cached once)
 }
 
-// resolvedHost caches the one-time resolution of a carve-out host: the vetted IPs
-// to dial, or the refusal/failure. Caching is what closes DNS rebinding — a later
-// connection reuses this result rather than re-resolving, so the address the SSRF
-// guard vetted is the address that is dialed.
+// resolvedHost caches the one-time resolution of a carve-out host. Caching
+// closes DNS rebinding: a later connection reuses this result instead of
+// re-resolving, so the address the SSRF guard vetted is the address dialed.
 type resolvedHost struct {
 	ips []net.IP
 	err error
 }
 
 // setupEgress wires the egress bridge for a command whose spec declared network
-// carve-outs. It creates the parent↔shim control socket, hands the child end to
-// the command as an inherited fd, launches the bridge goroutine, and returns the
-// fd number the shim will find the socket at (to record in the plan). The bridge
-// runs until ctx is done, so the caller scopes egress by scoping ctx.
-//
-// It appends exactly one entry to cmd.ExtraFiles; the returned fd number accounts
-// for anything already there. Errors wrap ErrIsolation and leave the command
-// unstarted — fail-closed, no half-wired egress.
+// carve-outs: creates the parent-shim control socket, hands the child end to the
+// command as an inherited fd, launches the bridge goroutine, and returns the fd
+// number the shim will find the socket at. The bridge runs until ctx is done.
+// Appends exactly one entry to cmd.ExtraFiles. Errors wrap ErrIsolation and
+// leave the command unstarted — fail-closed, no half-wired egress.
 func setupEgress(ctx context.Context, cmd *exec.Cmd, spec Spec, tracker libtracker.ActivityTracker) (int, error) {
 	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
@@ -84,17 +77,15 @@ func setupEgress(ctx context.Context, cmd *exec.Cmd, spec Spec, tracker libtrack
 	}
 	parentFD, childFD := pair[0], pair[1]
 
-	// The child end goes to the command as an inherited fd. os/exec reads its Fd at
-	// Start and the file's finalizer closes the parent's copy when the command is
-	// dropped — so the bridge never touches it, which is what keeps its teardown
-	// from racing cmd.Start()'s read of the same *os.File.
+	// The child end goes to the command as an inherited fd; the bridge never
+	// touches it, so its teardown can't race cmd.Start()'s read of the *os.File.
 	childFile := os.NewFile(uintptr(childFD), "contenox-egress-shim")
 	childFDNum := 3 + len(cmd.ExtraFiles)
 	cmd.ExtraFiles = append(cmd.ExtraFiles, childFile)
 
 	parentFile := os.NewFile(uintptr(parentFD), "contenox-egress-parent")
 	conn, err := net.FileConn(parentFile)
-	parentFile.Close() // net.FileConn dups the fd; drop our original
+	parentFile.Close() // FileConn dups the fd; drop our original
 	if err != nil {
 		return 0, fmt.Errorf("%w: egress control conn: %v", ErrIsolation, err)
 	}
@@ -118,7 +109,7 @@ func setupEgress(ctx context.Context, cmd *exec.Cmd, spec Spec, tracker libtrack
 
 // run is the bridge's lifecycle: park for the TUN fd, attach the stack, signal
 // readiness, serve until ctx is done, tear down. A watcher closes the control
-// socket on ctx cancellation so a parked receive unblocks even if the process was
+// socket on ctx cancellation so a parked receive unblocks even if the process
 // never started.
 func (b *egressBridge) run() {
 	watchDone := make(chan struct{})
@@ -156,10 +147,9 @@ func (b *egressBridge) run() {
 }
 
 // teardown stops the stack and releases the device. s.Close stops the link
-// dispatchers through gVisor's internal stop signal (not by closing the fd), so
-// s.Wait returns without a read blocked on the fd; only then is the TUN fd closed
-// — avoiding any window where a dispatcher reads a closed-or-reused descriptor.
-// Closing the fd also lets the agent's now-idle network namespace be reclaimed.
+// dispatchers via gVisor's internal stop signal (not by closing the fd), so
+// s.Wait returns before the TUN fd is closed — no window where a dispatcher
+// reads a closed-or-reused descriptor.
 func (b *egressBridge) teardown(s *stack.Stack, tunFD int) {
 	s.Close()
 	s.Wait()
@@ -174,16 +164,12 @@ func (b *egressBridge) recvTunFD() (int, error) {
 }
 
 // recvOneFD receives exactly one fd sent as SCM_RIGHTS over conn, returning it
-// already close-on-exec. The CLOEXEC is set ATOMICALLY at receipt via
-// MSG_CMSG_CLOEXEC — not by a follow-up CloseOnExec — so there is no window in
-// which the freshly received fd (agent A's live TUN or seccomp-notify fd) could
-// be inherited by a concurrently exec'd sibling agent or local_shell and used to
-// sniff/inject on A's egress or race A's telemetry. Passing the flag requires the
-// raw fd (net.UnixConn.ReadMsgUnix has no flags argument), so this drops to
-// unix.Recvmsg through conn.SyscallConn; readiness and ctx-cancellation still work
-// through the runtime poller (a parked receive unblocks when conn is Closed by the
-// lifecycle watcher). label names the surface for error strings; the one data byte
-// is ignored — the fd is the payload.
+// already close-on-exec. CLOEXEC is set atomically at receipt via
+// MSG_CMSG_CLOEXEC (not a follow-up CloseOnExec call), closing the window where
+// a concurrently exec'd sibling could inherit the fd and sniff/inject on it.
+// Drops to unix.Recvmsg via conn.SyscallConn since ReadMsgUnix has no flags
+// argument; ctx-cancellation still works via the runtime poller. label names the
+// surface for error strings; the one data byte is ignored.
 func recvOneFD(conn *net.UnixConn, label string) (int, error) {
 	data := make([]byte, 4)
 	oob := make([]byte, unix.CmsgSpace(4)) // room for exactly one fd
@@ -197,7 +183,7 @@ func recvOneFD(conn *net.UnixConn, label string) (int, error) {
 		var e error
 		_, oobn, _, _, e = unix.Recvmsg(int(fd), data, oob, unix.MSG_CMSG_CLOEXEC)
 		if e == unix.EAGAIN || e == unix.EWOULDBLOCK || e == unix.EINTR {
-			return false // not ready / interrupted — let the poller wait and retry
+			return false // let the poller wait and retry
 		}
 		opErr = e
 		return true
@@ -221,16 +207,13 @@ func recvOneFD(conn *net.UnixConn, label string) (int, error) {
 	if len(fds) == 0 {
 		return -1, fmt.Errorf("%s: control message carried no fd", label)
 	}
-	// MSG_CMSG_CLOEXEC already made the received fd close-on-exec at receipt, so
-	// there is nothing more to seal and no separate-call leak window.
 	return fds[0], nil
 }
 
-// handleDNS terminates the agent's DNS. Only :53 is served (all other UDP is left
-// unhandled → the stack replies port-unreachable, so there is no non-DNS UDP
-// egress). Each query is decided against the allow-list and logged: an allow is a
-// reportChange against the host, a deny a reportErr — the "watch the wall"
-// telemetry for the name-resolution surface.
+// handleDNS terminates the agent's DNS. Only :53 is served; all other UDP is
+// left unhandled so the stack replies port-unreachable (no non-DNS UDP egress).
+// Each query is decided against the allow-list and logged (reportChange/
+// reportErr).
 func (b *egressBridge) handleDNS(r *udp.ForwarderRequest) bool {
 	if r.ID().LocalPort != egressDNSPort {
 		return false
@@ -261,8 +244,8 @@ func (b *egressBridge) serveDNSQuery(conn *gonet.UDPConn) {
 		"host", decision.Host, "type", decision.Type)
 	switch {
 	case decision.Err != nil:
-		// Allow-listed but unresolvable here (synthetic range exhausted): a distinct,
-		// logged failure, not a policy deny.
+		// Allow-listed but unresolvable (synthetic range exhausted): a distinct
+		// failure, not a policy deny.
 		reportErr(fmt.Errorf("resolve %q: %w", decision.Host, decision.Err))
 	case decision.Allowed:
 		data := map[string]any{"decision": "allow"}
@@ -280,14 +263,12 @@ func (b *egressBridge) serveDNSQuery(conn *gonet.UDPConn) {
 	}
 }
 
-// handleTCP terminates the agent's outbound TCP. The destination address is the
-// synthetic token the DNS step handed out; it is mapped back to the allow-listed
-// host, that host is resolved ONCE and SSRF-vetted, the real address is dialed
-// from the parent's namespace, and bytes are piped. A destination that was never
-// resolved (a literal IP the agent invented, or a name that was denied) maps to
-// nothing and is refused with a RST; so is a port the carve-out did not open, and
-// so is a host that resolves inward when AllowPrivateEgress is off. Every attempt
-// is logged: allow via reportChange, deny/refused via reportErr.
+// handleTCP terminates the agent's outbound TCP. The destination is the
+// synthetic token the DNS step handed out; it maps back to the allow-listed
+// host, that host is resolved once and SSRF-vetted, the real address is dialed
+// from the parent's namespace, and bytes are piped. An unresolved destination, a
+// disallowed port, or a host resolving inward (without AllowPrivateEgress) is
+// refused with a RST. Every attempt is logged (reportChange/reportErr).
 func (b *egressBridge) handleTCP(r *tcp.ForwarderRequest) {
 	id := r.ID()
 	var dst [4]byte
@@ -310,7 +291,7 @@ func (b *egressBridge) handleTCP(r *tcp.ForwarderRequest) {
 		return
 	}
 
-	// Port granularity: a carve-out that named ports is reachable only on those.
+	// A carve-out that named ports is reachable only on those.
 	if !b.policy.portAllowed(host, port) {
 		reportErr(fmt.Errorf("%w: connect to %s:%d refused (port not in the carve-out's allowed ports)",
 			errEgressDenied, host, port))
@@ -319,12 +300,10 @@ func (b *egressBridge) handleTCP(r *tcp.ForwarderRequest) {
 		return
 	}
 
-	// SSRF guard: resolve the carve-out once (cached — no per-connection
-	// re-resolution, which is what closes DNS rebinding) and refuse a host that
-	// resolves to a loopback/link-local/private/unspecified/multicast address
-	// unless AllowPrivateEgress opted in. This is the wall against a carve-out
-	// pivoting the agent onto the host's own network (169.254.169.254, localhost
-	// services, RFC1918 neighbours).
+	// SSRF guard: resolve the carve-out once (cached, closing DNS rebinding) and
+	// refuse a loopback/link-local/private/unspecified/multicast result unless
+	// AllowPrivateEgress opted in — the wall against pivoting onto the host's own
+	// network (169.254.169.254, localhost services, RFC1918 neighbours).
 	vetted, rerr := b.resolveAndGuard(host)
 	if rerr != nil {
 		reportErr(rerr) // the deny/refusal, greppable telemetry
@@ -360,13 +339,11 @@ func (b *egressBridge) handleTCP(r *tcp.ForwarderRequest) {
 	}()
 }
 
-// resolveAndGuard resolves a carve-out host exactly ONCE and applies the SSRF
-// guard, caching the outcome (the vetted addresses or the refusal) for the life
-// of the bridge. Caching is load-bearing security, not just a speed-up: because a
-// later connection reuses the first result instead of re-resolving, a hostname
-// that rebinds to an internal address between DNS answer and TCP connect cannot
-// slip a fresh, unvetted address past the guard. First-writer wins under a race,
-// so two simultaneous first connects still converge on one cached result.
+// resolveAndGuard resolves a carve-out host exactly once and applies the SSRF
+// guard, caching the outcome for the bridge's life. Caching is load-bearing
+// security: a hostname that rebinds to an internal address between DNS answer
+// and TCP connect cannot slip a fresh, unvetted address past the guard.
+// First-writer wins under a race.
 func (b *egressBridge) resolveAndGuard(host string) ([]net.IP, error) {
 	b.resolveMu.Lock()
 	if r, ok := b.resolved[host]; ok {
@@ -389,12 +366,10 @@ func (b *egressBridge) resolveAndGuard(host string) ([]net.IP, error) {
 	return ips, err
 }
 
-// lookupAndVet resolves host in the HOST namespace and keeps only the addresses
-// safe to dial: when AllowPrivateEgress is off, every non-public class (loopback,
+// lookupAndVet resolves host in the host namespace and keeps only addresses
+// safe to dial: with AllowPrivateEgress off, every non-public class (loopback,
 // link-local incl. cloud metadata, private, unspecified, multicast) is dropped.
-// A host that resolves to nothing safe is refused as an egress deny. An IP literal
-// carve-out is handled too — LookupIP returns it directly and it is vetted the
-// same way.
+// A host resolving to nothing safe is refused as an egress deny.
 func (b *egressBridge) lookupAndVet(host string) ([]net.IP, error) {
 	ips, err := net.DefaultResolver.LookupIP(b.ctx, "ip", host)
 	if err != nil {
@@ -415,10 +390,8 @@ func (b *egressBridge) lookupAndVet(host string) ([]net.IP, error) {
 }
 
 // dialVetted dials the vetted addresses in order on port, returning the first
-// connection that comes up (and the address string it reached). Trying each
-// address preserves the dual-stack robustness the old hostname dial had — e.g. a
-// host that resolves to both ::1 and 127.0.0.1 — without ever re-resolving, so the
-// only addresses reachable are the ones the guard already vetted.
+// connection that comes up. Trying each preserves dual-stack robustness (e.g.
+// both ::1 and 127.0.0.1) without ever re-resolving.
 func (b *egressBridge) dialVetted(vetted []net.IP, port int) (net.Conn, string, error) {
 	var lastErr error
 	var lastTarget string
@@ -433,10 +406,9 @@ func (b *egressBridge) dialVetted(vetted []net.IP, port int) (net.Conn, string, 
 	return nil, lastTarget, lastErr
 }
 
-// pipeConns splices two connections until either direction ends, then closes both
-// so the other copy unblocks. This is the whole data path once a connection is
-// authorized: the netstack endpoint on the agent side, the real socket on the
-// host side.
+// pipeConns splices two connections until either direction ends, then closes
+// both so the other copy unblocks: the whole data path once a connection is
+// authorized (netstack endpoint on the agent side, real socket on the host side).
 func pipeConns(a, b net.Conn) {
 	done := make(chan struct{}, 2)
 	go func() { _, _ = io.Copy(a, b); done <- struct{}{} }()
@@ -448,27 +420,21 @@ func pipeConns(a, b net.Conn) {
 }
 
 // buildEgressStack stands up the userspace IPv4 stack over the TUN fd: an L3
-// (no-Ethernet) link endpoint, a NIC in promiscuous + spoofing mode so it accepts
-// and answers for the arbitrary destinations the agent targets, the gateway
-// address, a catch-all route back out the NIC, and the TCP/UDP forwarders that
-// hand new flows to the handlers. It owns nothing it does not create; the caller
-// owns the TUN fd (fdbased does not close it).
+// link endpoint, a NIC in promiscuous+spoofing mode (accepts/answers for the
+// agent's arbitrary destinations), a gateway address, a catch-all route, and
+// TCP/UDP forwarders. Caller owns the TUN fd (fdbased does not close it).
 //
-// Ordering is load-bearing and is why the NIC is created disabled and enabled
-// last: fdbased starts reading the fd — and delivering packets — the moment the
-// NIC is attached, and a freshly-upped TUN already carries stray kernel traffic
-// (IGMP/DAD). Registering the transport handlers before the NIC exists, then
-// configuring the NIC while it is detached (Disabled), then enabling it last,
-// means every piece of state a delivered packet touches is in place before the
-// first packet can be delivered — no concurrent read/write of the handler slot or
-// the NIC flags.
+// Ordering is load-bearing: fdbased starts delivering packets the moment the
+// NIC is attached, so handlers are registered and the NIC configured while
+// Disabled, then enabled last — every piece of state a delivered packet touches
+// must be in place before the first packet can arrive.
 func buildEgressStack(tunFD int, tcpH func(*tcp.ForwarderRequest), udpH udp.ForwarderHandler) (*stack.Stack, error) {
 	s := stack.New(stack.Options{
 		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol},
 		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
 	})
 
-	// Register the forwarders before any NIC exists, so the handler slot is set
+	// Register forwarders before any NIC exists, so the handler slot is set
 	// before the dispatchers that read it can start.
 	tf := tcp.NewForwarder(s, 0, 512, tcpH)
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tf.HandlePacket)

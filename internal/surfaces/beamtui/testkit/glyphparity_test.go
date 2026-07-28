@@ -12,25 +12,9 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/style"
 )
 
-// TestUnit_ASCIIGlyphParity holds beam's two ASCII vocabularies together.
-//
-// The blueprint's import boundaries make this a test's job and nobody else's:
-// components may not import beamtui/style (rule c — a renderer of
-// (state, width) -> frame.Line has no business owning terminal attributes),
-// and style may not import components. So each side spells its own ASCII
-// column out, and nothing in the compiler notices when they disagree. In a
-// Mono terminal those characters ARE the vocabulary — there is no color left
-// to carry the meaning — so "+" meaning "completed" on a tool card and
-// something else in a status glyph is a legibility defect, not a nit.
-//
-// Living here is what makes it possible at all: testkit is the one package
-// under beamtui that may import both sides. It is safe because the imports
-// are test-only in one direction — the components' own tests import testkit's
-// NON-test files, and this file is compiled only into testkit's own test
-// binary, so there is no cycle either way.
-//
-// The pairs are the closed list. Adding a glyph to either side without adding
-// it here is not caught automatically; this table is the deliberate inventory.
+// TestUnit_ASCIIGlyphParity pins that style's Mono glyphs and each
+// component's own ASCII constants agree, since the style/components import
+// boundary keeps the compiler from catching a mismatch itself.
 func TestUnit_ASCIIGlyphParity(t *testing.T) {
 	g := style.Glyphs(style.Caps{Profile: style.ProfileMono})
 
@@ -88,9 +72,7 @@ func TestUnit_ASCIIGlyphParity(t *testing.T) {
 		})
 	}
 
-	// The device must not double as the marker that means "there is more
-	// under this": one identifies beam's input line, the other is a
-	// disclosure hint, and a terminal with no color cannot tell them apart.
+	// A terminal with no color can't tell these apart if they're the same rune.
 	if g.PromptSigil == g.Collapsed {
 		t.Errorf("the ASCII prompt sigil and collapsed marker are both %q", g.PromptSigil)
 	}
@@ -99,8 +81,8 @@ func TestUnit_ASCIIGlyphParity(t *testing.T) {
 	}
 }
 
-// TestUnit_ASCIIGlyphsAreASCII: the fallback exists for terminals that cannot
-// draw the unicode set, so not one rune above 0x7f may hide in it.
+// TestUnit_ASCIIGlyphsAreASCII pins that every Mono-profile glyph and ASCII
+// constant is plain ASCII with no control runes.
 func TestUnit_ASCIIGlyphsAreASCII(t *testing.T) {
 	g := style.Glyphs(style.Caps{Profile: style.ProfileMono})
 	all := append([]string{

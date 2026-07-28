@@ -7,10 +7,9 @@ import (
 	"github.com/contenox/beam/libacp"
 )
 
-// TestUnit_ViewerHub_JournalSnapshot proves the raw-journal read the attention
-// layer folds: every delivered update is journaled whether or not a viewer is
-// attached (a dispatched, unwatched unit's diffs are recoverable), and an unknown
-// session yields nil.
+// TestUnit_ViewerHub_JournalSnapshot pins that every delivered update is
+// journaled whether or not a viewer is attached, and an unknown session
+// yields nil.
 func TestUnit_ViewerHub_JournalSnapshot(t *testing.T) {
 	hub := newViewerHub("inst-1", 512)
 	ctx := context.Background()
@@ -40,9 +39,8 @@ func TestUnit_ViewerHub_JournalSnapshot(t *testing.T) {
 	}
 }
 
-// TestUnit_SessionDriver_Cwd proves the workspace root the scope-anomaly check
-// needs is retained per session and read back policy-free: set on open, "" for an
-// unknown or never-set session.
+// TestUnit_SessionDriver_Cwd pins that a session's cwd is retained and read
+// back verbatim, "" for an unknown or never-set session.
 func TestUnit_SessionDriver_Cwd(t *testing.T) {
 	sd := newSessionDriver()
 	const sid = libacp.SessionID("s1")

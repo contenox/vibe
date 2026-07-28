@@ -14,8 +14,7 @@ import (
 )
 
 // blockingAgent's Prompt parks on its context and returns ctx.Err() when
-// cancelled, signalling each start on `started`. This models an agent whose
-// turn only ends via session/cancel.
+// cancelled, signalling each start on `started`.
 type blockingAgent struct {
 	libacp.UnimplementedAgent
 	started chan libacp.SessionID
@@ -122,10 +121,9 @@ func TestUnit_SessionCancel_CancelsInFlightPrompt(t *testing.T) {
 	requireCancelledStop(t, h.expectResponse(1))
 }
 
-// Regression: the cleanup guard used to compare cancel funcs via %p, which is
-// always true for closures of the same function — the first prompt's cleanup
-// deleted the second prompt's registration, so session/cancel found nothing
-// and the second turn ran forever.
+// Invariant: a superseded first prompt's cleanup must never delete the
+// second prompt's cancel registration (regression: comparing cancel funcs by
+// %p is always equal for closures of the same function).
 func TestUnit_OverlappingPrompts_CancelStillReachesSecondPrompt(t *testing.T) {
 	agent := &blockingAgent{started: make(chan libacp.SessionID, 2)}
 	h := newCancelHarness(t, agent)
@@ -153,9 +151,8 @@ func TestUnit_OverlappingPrompts_CancelStillReachesSecondPrompt(t *testing.T) {
 	requireCancelledStop(t, h.expectResponse(2))
 }
 
-// Wire order is authoritative: a cancel written immediately after its prompt —
-// before the prompt handler goroutine has done anything — must still cancel
-// that prompt, because registration happens at dispatch time on the read loop.
+// Invariant: a cancel written immediately after its prompt still cancels it,
+// since registration happens at dispatch time on the read loop.
 func TestUnit_CancelImmediatelyAfterPrompt_PreservesWireOrder(t *testing.T) {
 	agent := &blockingAgent{started: make(chan libacp.SessionID, 2)}
 	h := newCancelHarness(t, agent)
@@ -233,9 +230,8 @@ func TestUnit_AbandonedClientCall_SendsCancelRequest(t *testing.T) {
 		t.Fatal("prompt never started")
 	}
 
-	// The client sees the permission request but never answers it; instead it
-	// cancels the turn. The agent must abandon the awaited call AND tell the
-	// client via $/cancel_request so the dialog can be torn down.
+	// The client never answers the permission request; the agent must abandon
+	// the awaited call and tell the client via $/cancel_request.
 	line, err := h.reader()
 	require.NoError(t, err)
 	in, err := libacp.ParseIncoming(line)
@@ -289,8 +285,7 @@ func TestUnit_MalformedInput_GetsJSONRPCErrorResponses(t *testing.T) {
 	resp := expectError(libacp.ErrParseError)
 	assert.Equal(t, libacp.NewRequestIDNull(), resp.ID)
 
-	// Valid JSON, invalid JSON-RPC (boolean id): invalid request, id null
-	// because a boolean id cannot be salvaged.
+	// Boolean id cannot be salvaged: invalid request, id null.
 	_, err = h.clientSide.Write([]byte(`{"jsonrpc":"2.0","id":true,"method":"initialize"}` + "\n"))
 	require.NoError(t, err)
 	expectError(libacp.ErrInvalidRequest)

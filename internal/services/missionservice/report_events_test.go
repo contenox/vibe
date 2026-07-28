@@ -11,9 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakePublisher captures every publish so a test can assert the subject and the
-// decoded event, and can be primed to fail so the best-effort contract is
-// testable.
+// fakePublisher captures every publish (subject, payload) and can be primed to fail.
 type fakePublisher struct {
 	mu       sync.Mutex
 	subjects []string
@@ -45,9 +43,7 @@ func (p *fakePublisher) events(t *testing.T) []ReportAddedEvent {
 	return out
 }
 
-// TestUnit_AddReport_PublishesReportAddedEvent proves AddReport announces a
-// stored report on the bus, carrying the supervision edge (ParentSessionID) and
-// the report itself, so a routing service can act without reading anything back.
+// TestUnit_AddReport_PublishesReportAddedEvent pins that AddReport announces a stored report carrying the supervision edge.
 func TestUnit_AddReport_PublishesReportAddedEvent(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{}
@@ -73,9 +69,7 @@ func TestUnit_AddReport_PublishesReportAddedEvent(t *testing.T) {
 	require.Equal(t, m.ID, ev.Report.MissionID)
 }
 
-// TestUnit_AddReport_OperatorFiredEventHasEmptyEdge proves a mission with no
-// parent session publishes an event with an empty ParentSessionID — the router's
-// signal to route the report to the operator inbox.
+// TestUnit_AddReport_OperatorFiredEventHasEmptyEdge pins that a mission with no parent session publishes an empty ParentSessionID.
 func TestUnit_AddReport_OperatorFiredEventHasEmptyEdge(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{}
@@ -90,9 +84,7 @@ func TestUnit_AddReport_OperatorFiredEventHasEmptyEdge(t *testing.T) {
 	require.Empty(t, evs[0].ParentSessionID, "an operator-fired mission carries no supervision edge")
 }
 
-// TestUnit_AddReport_PublishFailureDoesNotFailAddReport is the best-effort
-// invariant: a publish error never turns a successfully-stored report into a
-// failed AddReport, and the report remains durably readable.
+// TestUnit_AddReport_PublishFailureDoesNotFailAddReport pins that a publish failure never fails an already-stored AddReport.
 func TestUnit_AddReport_PublishFailureDoesNotFailAddReport(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{err: fmt.Errorf("bus is down")}
@@ -109,8 +101,7 @@ func TestUnit_AddReport_PublishFailureDoesNotFailAddReport(t *testing.T) {
 	require.Equal(t, "found it", reports[0].Summary)
 }
 
-// TestUnit_AddReport_NoPublisherStillStores proves the publisher is optional: a
-// service built without one stores reports and simply publishes nothing.
+// TestUnit_AddReport_NoPublisherStillStores pins that a service without a publisher stores reports and publishes nothing.
 func TestUnit_AddReport_NoPublisherStillStores(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db) // no publisher
@@ -124,9 +115,7 @@ func TestUnit_AddReport_NoPublisherStillStores(t *testing.T) {
 	require.Len(t, reports, 1)
 }
 
-// recordingTracker records the (operation, subject, error) of every report so a
-// test can assert WHAT a best-effort path said when it shrugged, rather than
-// asserting that it merely stayed silent.
+// recordingTracker records the (operation, subject, error) of every report.
 type recordingTracker struct {
 	mu     sync.Mutex
 	events []trackedEvent
@@ -161,10 +150,7 @@ func (r *recordingTracker) errorsFor(op, subject string) []error {
 
 var _ libtracker.ActivityTracker = (*recordingTracker)(nil)
 
-// TestUnit_PublishFailuresAreReportedToTracker proves the three best-effort
-// publish paths (report, plan revision, terminal status) do not swallow a bus
-// failure: each reports it through the tracker — the one instrumentation seam —
-// while the durable write it announced still stands.
+// TestUnit_PublishFailuresAreReportedToTracker pins that all three best-effort publish paths report a bus failure to the tracker.
 func TestUnit_PublishFailuresAreReportedToTracker(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	busErr := fmt.Errorf("bus is down")
@@ -193,9 +179,7 @@ func TestUnit_PublishFailuresAreReportedToTracker(t *testing.T) {
 	}
 }
 
-// TestUnit_PublishSuccessReportsNothing pins the volume: the tracker hears from
-// these paths only when a publish fails, exactly as the log line it replaced
-// fired only on failure.
+// TestUnit_PublishSuccessReportsNothing pins that the tracker hears from these paths only when a publish fails.
 func TestUnit_PublishSuccessReportsNothing(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	tracker := &recordingTracker{}

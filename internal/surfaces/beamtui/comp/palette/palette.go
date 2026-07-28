@@ -1,27 +1,8 @@
 // Package palette owns slash-command discovery for beam's composer: the
-// merged command set (whatever the last `available_commands_update`
-// advertised, plus the locals other components register), the
-// case-insensitive prefix filter behind the `/` trigger, and the overlay
-// rows the app draws in the live region.
-//
-// The set is never hardcoded. `/mission` is capability-gated and an
-// externally delegated session replaces the whole menu, so the remote half
-// is exactly what SetRemote was last handed and nothing else — the parity
-// criterion in blueprint 4.13 item 2 ("the palette renders the same
-// available_commands set an ACP editor receives").
-//
-// This package is deliberately a lookup table and a renderer, never a gate.
-// It exposes no API by which a submission can be rejected: an unrecognized
-// `/token` is prompt text, which is what acpsvc's parseCommand decides
-// server-side (item 6). Dispatch — a remote name onto the normal send path,
-// a local name into its in-process handler — is the app shell's call, made
-// from Selected/Lookup; the handler itself lives with the component that
-// registered the name, not here.
-//
-// Every render is a pure function of (state, width, maxRows, ascii) →
-// []frame.Line: no terminal reads, no capability probing, no styles beyond
-// the semantic frame IDs. A Palette is owned by one goroutine (the UI loop)
-// and carries no locking of its own.
+// merged remote+local command set, the case-insensitive `/` prefix filter,
+// and the overlay rows drawn in the live region. It is a lookup table and
+// renderer only, never a gate — an unrecognized token is plain prompt text,
+// and dispatch is the app shell's job. A Palette belongs to one goroutine.
 package palette
 
 import (
@@ -36,71 +17,51 @@ import (
 	libacp "github.com/contenox/beam/libacp"
 )
 
-// ASCIIMarker is the selection marker a Mono terminal sees, exported so
-// testkit's glyph-parity test can hold every surface's ASCII beam-bar against
-// the style package's GlyphSet in one place. Components may not import style,
-// so the agreement can only be checked from outside.
+// ASCIIMarker is the selection marker on a Mono terminal, exported so
+// testkit's glyph-parity test can check it against style's GlyphSet.
 const ASCIIMarker = "|"
 
-// EmptyInputHint is the composer's empty-buffer affordance (blueprint 4.13
-// item 11). The copy lives here so the palette owns the one sentence that
-// advertises it; the composer decides when to draw it.
+// EmptyInputHint is the composer's empty-buffer affordance: the palette
+// owns this one sentence; the composer decides when to draw it.
 const EmptyInputHint = "type / for commands"
 
 const (
-	// markerUnicode is the beam-bar in its active-picker role: the same gold
-	// stroke the brand device and the composer sigil use, marking which row
-	// Enter would act on. ASCII degrades to a pipe.
+	// markerUnicode marks the active row; ASCII degrades to a pipe.
 	markerUnicode = "▌"
 	markerASCII   = ASCIIMarker
 
-	// emptyText is what an over-filtered palette says. It states the
-	// consequence rather than the failure: nothing is blocked, the line is
-	// still a perfectly good prompt (item 6).
+	// States the consequence, not a failure: the line still sends as chat.
 	emptyUnicode = "no matching command — Enter sends as chat"
 	emptyASCII   = "no matching command - Enter sends as chat"
 
-	// emptyValueText is the same sentence for an over-filtered VALUE list. A
-	// value the server never advertised is still a legal argument — the
-	// operator may know something the runtime has not discovered yet — so the
-	// line says what Enter will do, not that the value is wrong.
+	// Same, for an over-filtered value list: an unadvertised value is still
+	// a legal argument.
 	emptyValueUnicode = "no matching value — Enter sends it anyway"
 	emptyValueASCII   = "no matching value - Enter sends it anyway"
 
 	ellipsisUnicode = "…"
 	ellipsisASCII   = "..."
 
-	// upUnicode/upASCII mark the footer's "there is more above" count. The
-	// caret is the same one comp/composer uses for a scrolled draft, so one
-	// glyph means "scrolled past" everywhere in the live region.
+	// Marks "scrolled past"; the same glyph comp/composer uses.
 	upUnicode = "↑"
 	upASCII   = "^"
 
-	// nameGap separates a command name from its description; indent is the
-	// unselected row's stand-in for the marker, so names stay in one column
-	// whichever row is selected.
+	// nameGap separates a name from its description; indent stands in for
+	// the marker on unselected rows.
 	nameGap = "  "
 	indent  = "  "
 )
 
-// ErrDuplicateLocal reports two local registrations claiming one name.
-// Blueprint 4.13 item 8 makes this fail-fast rather than last-write-wins:
-// two components silently fighting over `/sessions` is a bug that must
-// surface at wiring time, not at the keystroke that picks the loser.
+// ErrDuplicateLocal reports two local registrations claiming one name;
+// fails fast rather than last-write-wins.
 var ErrDuplicateLocal = errors.New("palette: local command already registered")
 
 // ErrInvalidName reports a registration whose name is empty or contains a
-// space (the buffer splits the command at the first space, so a spaced name
-// could never be typed).
+// space — a spaced name could never be typed.
 var ErrInvalidName = errors.New("palette: invalid command name")
 
-// Entry is one command in the merged set. Name is bare — no leading `/`,
-// which the renderer and CompleteText add — matching the ACP wire, where
-// AvailableCommand.Name is "help", not "/help".
-//
-// Local marks the dispatch half: true means an in-process handler answers
-// it and nothing is sent, false means the line goes to the agent verbatim
-// and acpsvc's parseCommand does the work.
+// Entry is one command in the merged set; Name is bare (no leading `/`).
+// Local true means an in-process handler answers it and nothing is sent.
 type Entry struct {
 	Name        string
 	Description string
@@ -108,56 +69,34 @@ type Entry struct {
 	Local       bool
 }
 
-// Palette is the command menu behind the composer's `/` trigger.
-//
-// The zero value is not usable; call New. A fresh Palette knows no
-// commands at all: locals arrive by registration and remotes by SetRemote,
-// so a session that advertised nothing shows nothing.
+// Palette is the command menu behind the composer's `/` trigger. The zero
+// value is not usable; call New.
 type Palette struct {
 	remote []libacp.AvailableCommand
 	locals map[string]Entry
 
-	// domains are the argument VALUES a command accepts, by bare command name
-	// (see SetValueDomains). A name with no entry has no value mode at all.
+	// domains holds each command's accepted argument values (SetValueDomains).
 	domains map[string][]string
 
 	open  bool
 	query string
-	// arg is the first argument as typed so far, and hasArg records that the
-	// space after the command name has been typed. Together they are the whole
-	// of the value-mode trigger: they are set from whatever Open/SetQuery was
-	// handed, so a caller passing only the command token (the shape the app has
-	// always passed) simply never enters value mode.
+	// arg is the first argument typed so far; hasArg is whether the space
+	// after the command name was typed — together, the value-mode trigger.
 	arg    string
 	hasArg bool
 	sel    int
 }
 
-// New returns an empty palette. Nothing is pre-registered — not even
-// `/quit` or `/help`: the app owns which locals exist, and this package
-// owning a default set would make them unremovable by the surface that
-// hosts them.
+// New returns an empty palette. Nothing is pre-registered — the app owns
+// which locals exist.
 func New() *Palette {
 	return &Palette{locals: make(map[string]Entry)}
 }
 
-// SetRemote replaces the agent-advertised half of the set with whatever the
-// latest CommandsUpdated reported. It REPLACES rather than merges: a
-// re-bound or delegated session legitimately drops commands, and a merge
-// would keep offering a name the agent no longer answers.
-//
-// Two things happen on the way in. Every string is SANITIZED: an
-// available_commands_update is a peer's payload, its descriptions land in an
-// overlay drawn over the composer, and an escape sequence there would write
-// to the terminal from underneath a menu the operator is navigating by
-// muscle memory.
-//
-// And the SELECTION follows its command by name. These updates arrive
-// unprompted — a session rebinds, a mode changes — and can land between the
-// operator reading a row and pressing Enter. Holding the index still would
-// silently move the selection onto whatever command sorted into that slot,
-// which is the one way a palette can dispatch something nobody chose. If the
-// selected name is gone the index clamps, because there is nothing to follow.
+// SetRemote replaces the agent-advertised half of the set with the latest
+// CommandsUpdated report — never merges, so a rebound session's dropped
+// commands actually disappear. Strings are sanitized before reaching the
+// overlay; the selection follows its command by name, clamping if it's gone.
 func (p *Palette) SetRemote(cmds []libacp.AvailableCommand) {
 	selected := p.selectedName()
 
@@ -188,9 +127,8 @@ func (p *Palette) SetRemote(cmds []libacp.AvailableCommand) {
 	p.sel = clampIndex(p.sel, len(ents))
 }
 
-// selectedName is the highlighted entry's name regardless of whether the
-// overlay is open, so SetRemote can restore a selection the operator will see
-// the moment they reopen it.
+// selectedName is the highlighted entry's name, open or not, so SetRemote
+// can restore the selection when the overlay reopens.
 func (p *Palette) selectedName() string {
 	ents := p.Filtered()
 	if len(ents) == 0 {
@@ -199,24 +137,15 @@ func (p *Palette) selectedName() string {
 	return ents[clampIndex(p.sel, len(ents))].Name
 }
 
-// RegisterLocal adds a TUI-local command. Locals shadow same-named remotes
-// (the in-process handler wins), and a second local on one name is
-// ErrDuplicateLocal — never a silent overwrite.
-//
-// A leading `/` on name is accepted and stripped, so a caller may register
-// the string it shows the user.
+// RegisterLocal adds a TUI-local command, shadowing same-named remotes. A
+// second local on one name returns ErrDuplicateLocal; a leading `/` on name
+// is accepted and stripped.
 func (p *Palette) RegisterLocal(name, description, hint string) error {
-	// Sanitize before validating, so validation sees the name that will
-	// actually be stored and looked up — a name that changed shape after the
-	// check would be registered under one string and matched against another.
-	// Descriptions and hints are rendered, so they go through the same gate:
-	// a local is in-process today, but "in-process" is not "trusted to hold a
-	// well-formed string".
+	// Sanitize before validating: a name must not change shape after the check.
 	name = sanitize.Line(name)
 
-	// Validate before normalize: normalize CUTS at the first space (a query
-	// is one token), and silently registering "two words" as "two" would
-	// hide the mistake instead of reporting it.
+	// Validate before normalizing: "two words" should error, not silently
+	// become "two".
 	n := strings.TrimPrefix(strings.TrimSpace(name), "/")
 	if n == "" || strings.ContainsAny(n, " \t") {
 		return fmt.Errorf("%w: %q", ErrInvalidName, name)
@@ -233,45 +162,34 @@ func (p *Palette) RegisterLocal(name, description, hint string) error {
 	return nil
 }
 
-// MustRegisterLocal is RegisterLocal for wiring code, panicking on a
-// collision. Registration happens once at startup from a fixed set of
-// components, so a duplicate is a programming error the process should not
-// survive (item 8's fail-fast rule).
+// MustRegisterLocal is RegisterLocal for startup wiring; it panics on a
+// collision, since a duplicate there is a programming error.
 func (p *Palette) MustRegisterLocal(name, description, hint string) {
 	if err := p.RegisterLocal(name, description, hint); err != nil {
 		panic(err)
 	}
 }
 
-// Open shows the palette filtered by query. The composer calls this when
-// the trigger rule fires — a leading `/` on the trimmed buffer, never
-// stricter than the server's parseCommand (item 1).
-//
-// query may be the raw buffer: a leading `/` is tolerated, the text up to the
-// first space is the command filter, and the text after it is the argument the
-// value mode reads (SetValueDomains). Passing only the command token is
-// equally valid and simply never reaches value mode.
+// Open shows the palette filtered by query when a leading `/` fires the
+// trigger rule on the trimmed buffer. query may be the raw buffer: text up
+// to the first space is the command filter, the rest is the argument value
+// mode reads (SetValueDomains); a bare command token never reaches it.
 func (p *Palette) Open(query string) {
 	p.open = true
 	p.SetQuery(query)
 }
 
-// SetQuery updates the filter and returns the selection to the top, since
-// the row under it changed meaning. It does not open or close the palette:
-// openness follows the trigger rule, which is the composer's to evaluate.
-//
-// Whatever it is handed past the command name is the ARGUMENT half: hand it
-// the raw buffer and a command with a known value domain switches the overlay
-// to that domain (see SetValueDomains); hand it the bare command token — the
-// shape the composer has always passed — and nothing changes.
+// SetQuery updates the filter and resets the selection to the top; it does
+// not open or close the palette. Text past the command name can switch a
+// command with a known value domain into that domain (SetValueDomains).
 func (p *Palette) SetQuery(q string) {
 	p.query = normalize(q)
 	p.arg, p.hasArg = argument(q)
 	p.sel = 0
 }
 
-// Close hides the palette without touching the buffer (item 4: Esc closes,
-// the typed text stays).
+// Close hides the palette without touching the buffer: Esc closes, the
+// typed text stays.
 func (p *Palette) Close() {
 	p.open = false
 	p.query = ""
@@ -280,28 +198,10 @@ func (p *Palette) Close() {
 	p.sel = 0
 }
 
-// SetValueDomains replaces the argument-value domains: the values each command
-// accepts for its first argument, keyed by bare command name ("model", not
-// "/model"). It is the value half of item 2's "never hardcoded" — the app feeds
-// it from the session config options the server advertises (see
-// enginebridge.ValueDomains), so the values offered for `/model ` are the
-// models the runtime actually has, and a session that advertised none offers
-// none.
-//
-// It REPLACES, for the same reason SetRemote does: a rebound or delegated
-// session legitimately has a different set of models, and a merge would keep
-// offering one it no longer runs.
-//
-// A name with no values — absent, empty, or all-blank — has NO value mode: its
-// arguments are ordinary text the palette neither completes nor comments on.
-// This package still exposes no way to reject anything; an argument outside the
-// domain is a perfectly good argument that simply has no row (item 6).
-//
-// Values are sanitized on the way in for the same reason command descriptions
-// are: they come from a peer's payload and land in an overlay drawn over the
-// composer. The selection follows its VALUE by name across the replacement, so
-// an update landing between reading a row and pressing Tab cannot silently move
-// it onto a different model.
+// SetValueDomains replaces the argument-value domains — the values each
+// command accepts for its first argument — keyed by bare command name,
+// replacing rather than merging like SetRemote. A name with no values has no
+// value mode; values are sanitized and the selection follows by name.
 func (p *Palette) SetValueDomains(domains map[string][]string) {
 	selected, hadSelection := p.SelectedValue()
 
@@ -348,9 +248,8 @@ func (p *Palette) SetValueDomains(domains map[string][]string) {
 	p.sel = clampIndex(p.sel, len(values))
 }
 
-// valueDomain reports the domain in play: the values for the typed command
-// name, once the space after it has been typed. Its second result is the
-// value-mode predicate — false means the overlay is the ordinary command menu.
+// valueDomain reports the values for the typed command name once the space
+// after it is typed; false means the ordinary command menu is showing.
 func (p *Palette) valueDomain() ([]string, bool) {
 	if !p.hasArg || len(p.domains) == 0 {
 		return nil, false
@@ -363,13 +262,8 @@ func (p *Palette) valueDomain() ([]string, bool) {
 }
 
 // FilteredValues is the current command's value domain under the partial
-// argument typed so far: case-insensitive PREFIX matches first, then substring
-// matches, each keeping the server's order (which puts the current model first).
-// Prefix-before-substring is what makes typing the start of a name behave like
-// completion while still finding "sonnet" inside "claude-sonnet-4".
-//
-// It returns nil whenever the palette is not in value mode, which is the same
-// as "this argument is free text".
+// argument typed so far: prefix matches first, then substring matches, each
+// in the server's order. Returns nil when not in value mode.
 func (p *Palette) FilteredValues() []string {
 	domain, ok := p.valueDomain()
 	if !ok {
@@ -394,10 +288,8 @@ func (p *Palette) FilteredValues() []string {
 	return append(prefix, contains...)
 }
 
-// SelectedValue is the highlighted domain value. It reports false when the
-// palette is closed, when the command has no domain, or when the partial
-// matched nothing — the states in which there is no value to complete and the
-// typed text must be left exactly as it is.
+// SelectedValue is the highlighted domain value; false when the palette is
+// closed, the command has no domain, or the partial matched nothing.
 func (p *Palette) SelectedValue() (string, bool) {
 	if !p.open {
 		return "", false
@@ -409,14 +301,9 @@ func (p *Palette) SelectedValue() (string, bool) {
 	return values[clampIndex(p.sel, len(values))], true
 }
 
-// CompleteValueText is Tab's payload in value mode: the whole buffer rebuilt as
-// the command plus the selected value.
-//
-// It carries NO trailing space, unlike CompleteText. A value is a complete
-// argument, so the cursor belongs right behind it where Enter sends the line —
-// and, because the buffer is still "name value", a second Tab re-selects the
-// same value instead of falling back to the command completion and wiping the
-// argument that was just chosen.
+// CompleteValueText is Tab's payload in value mode: the buffer rebuilt as
+// the command plus the selected value, with no trailing space, so a second
+// Tab re-selects the same value instead of wiping it.
 func (p *Palette) CompleteValueText() (string, bool) {
 	value, ok := p.SelectedValue()
 	if !ok {
@@ -425,14 +312,9 @@ func (p *Palette) CompleteValueText() (string, bool) {
 	return "/" + p.query + " " + value, true
 }
 
-// argument splits the argument half off a buffer: the text after the first
-// space, and whether that space was typed at all.
-//
-// It reports false once a SECOND space appears, because the value domain
-// belongs to the FIRST argument: "/mission reviewer audit the parser" is past
-// the agent name, and the objective that follows is prose the palette has
-// nothing to say about. That is also the rule that will let /mission's
-// agent-name domain ride this seam unchanged.
+// argument splits the argument half off a buffer: text after the first
+// space, and whether that space was typed. Reports false past a second
+// space — the value domain belongs to the first argument only.
 func argument(s string) (string, bool) {
 	s = strings.TrimLeft(s, " \t")
 	s = strings.TrimPrefix(s, "/")
@@ -447,13 +329,12 @@ func argument(s string) (string, bool) {
 	return rest, true
 }
 
-// IsOpen reports whether the overlay is showing, which is also whether the
-// app should route Up/Down/Tab to the palette instead of the composer.
+// IsOpen reports whether the overlay is showing, i.e. whether the app
+// should route Up/Down/Tab to the palette instead of the composer.
 func (p *Palette) IsOpen() bool { return p.open }
 
 // Move walks the selection by delta rows, clamped to whatever the overlay is
-// currently listing — commands, or a command's values. It does not wrap: a held
-// Down key should come to rest at the last row, not cycle past it.
+// currently listing (commands or values). It does not wrap.
 func (p *Palette) Move(delta int) {
 	n := len(p.Filtered())
 	if values := p.FilteredValues(); values != nil {
@@ -466,9 +347,8 @@ func (p *Palette) Move(delta int) {
 	p.sel = clampIndex(p.sel+delta, n)
 }
 
-// Selected returns the highlighted entry. It reports false when the palette
-// is closed or the filter matched nothing — the states in which Enter must
-// fall through to an ordinary submission.
+// Selected returns the highlighted entry; false when the palette is closed
+// or the filter matched nothing.
 func (p *Palette) Selected() (Entry, bool) {
 	if !p.open {
 		return Entry{}, false
@@ -480,17 +360,10 @@ func (p *Palette) Selected() (Entry, bool) {
 	return ents[clampIndex(p.sel, len(ents))], true
 }
 
-// CompleteText is Tab's payload: the selected command's name plus one
-// trailing space, ready to replace the buffer. Tab completes, it never
-// submits — the space is what leaves the cursor sitting where an argument
-// goes (item 4).
-//
-// In value mode it is CompleteValueText instead, so one key completes the
-// command and then its argument without the caller having to know which half
-// the operator is in. It then reports false rather than falling back when the
-// partial matches nothing: completing "/model " over a "/model zzz" the
-// operator is still typing would delete what they wrote, and Tab may not lose
-// text.
+// CompleteText is Tab's payload: the selected command's name plus a
+// trailing space — completes, never submits. Delegates to CompleteValueText
+// in value mode, and reports false on an unmatched partial rather than fall
+// back, since Tab must never delete text the operator already typed.
 func (p *Palette) CompleteText() (string, bool) {
 	if _, ok := p.valueDomain(); ok {
 		return p.CompleteValueText()
@@ -502,10 +375,9 @@ func (p *Palette) CompleteText() (string, bool) {
 	return "/" + e.Name + " ", true
 }
 
-// Lookup resolves a bare or slash-prefixed name against the merged set,
-// locals shadowing remotes. It is the dispatch split of item 7 in one call:
-// found-and-Local goes to the in-process handler, found-and-remote is sent
-// verbatim, and not-found is prompt text.
+// Lookup resolves a bare or slash-prefixed name, locals shadowing remotes:
+// found-and-Local is in-process, found-and-remote is sent verbatim,
+// not-found is prompt text.
 func (p *Palette) Lookup(name string) (Entry, bool) {
 	n := normalize(name)
 	if n == "" {
@@ -522,21 +394,10 @@ func (p *Palette) Lookup(name string) (Entry, bool) {
 	return Entry{}, false
 }
 
-// ArgHint is the static argument-hint line (item 5): once a name and a
-// space are typed and the name resolves, the AvailableCommandInput.Hint
-// comes back VERBATIM. beam does not paraphrase a hint the agent wrote —
-// the hint is the agent's own documentation of its argument.
-//
-// It reads the buffer directly rather than the selection, because the hint
-// must survive the palette closing once the operator moves on to typing
-// arguments. A command with no hint, or an unknown name, reports false.
-//
-// When the command has a value domain the line also states its SIZE — "(12
-// values)" — because the rows above it are a filtered window and the operator
-// otherwise cannot tell whether the runtime knows twelve models or two. It is
-// the one number that says how much the list is hiding. A command with a domain
-// but no hint gets the count alone; a command with a hint but no domain gets
-// the hint alone, byte-identical to before.
+// ArgHint is the static argument-hint line: once a name and a space are
+// typed and the name resolves, AvailableCommandInput.Hint comes back
+// verbatim, read from the buffer directly so it survives the palette
+// closing. A command with a value domain also gets its size appended.
 func (p *Palette) ArgHint(buffer string) (string, bool) {
 	s := strings.TrimLeft(buffer, " \t")
 	if !strings.HasPrefix(s, "/") {
@@ -565,9 +426,8 @@ func (p *Palette) ArgHint(buffer string) (string, bool) {
 	return "", false
 }
 
-// Filtered is the merged set under the current query: locals shadowing
-// same-named remotes, case-insensitive prefix match, alphabetical. A bare
-// `/` (empty query) is the full set (item 3).
+// Filtered is the merged set under the current query: locals shadow
+// same-named remotes, case-insensitive prefix match, alphabetical order.
 func (p *Palette) Filtered() []Entry {
 	merged := make(map[string]Entry, len(p.remote)+len(p.locals))
 	for _, c := range p.remote {
@@ -594,41 +454,18 @@ func (p *Palette) Filtered() []Entry {
 }
 
 // Render draws the overlay: one row per matching command, bounded to
-// maxRows with a "+N more" footer, or a single explanatory row when nothing
-// matched. A closed palette, a non-positive width, or a non-positive
-// maxRows renders nothing, so the caller can hand through its live-region
-// budget unguarded.
+// maxRows with a "+N more" footer, or one row when nothing matched. Renders
+// nothing when closed, or width/maxRows is non-positive.
 //
-// maxRows is the TOTAL line budget, footer included — the same contract
-// comp/picker has, because both are overlays the app-shell hands a slice of
-// the live region and neither can be allowed to spend one more row than it
-// was given. This used to promise maxRows COMMAND rows and then add the
-// footer on top, so a caller reserving four lines could get five and push the
-// composer off the bottom of the terminal. Two overlays with two different
-// answers to "what does maxRows mean" is a bug waiting for whichever one the
-// caller guessed wrong about.
-//
-// The footer reports BOTH directions — "↑N above" when the window has
-// scrolled past the top, "+N more" when commands remain below it, and both
-// when the window is in the middle of a long set. It used to count only what
-// was below and then hand its line back to a command once the window reached
-// the end, which is precisely the moment the operator most needs to be told
-// the list continues upward: at the bottom of a scrolled menu the rows above
-// are the ONLY hidden ones, and nothing on screen said they existed. So the
-// footer now stands whenever anything at all is hidden, and it is indented to
-// the same column as the command names so it reads as a note about the list
-// rather than as another row of it.
-//
-// No row exceeds width — descriptions are caller data of unbounded length and
-// are truncated rune-safely with an ellipsis.
+// maxRows is the total budget, footer included (comp/picker's contract).
+// The footer reports both directions and shows whenever rows are hidden.
 func (p *Palette) Render(width, maxRows int, ascii bool) []frame.Line {
 	if !p.open || width <= 0 || maxRows <= 0 {
 		return nil
 	}
 
 	// In value mode the rows are the command's values, not the command set:
-	// once `/model ` is typed the useful list is the models, and the command
-	// itself is already spelled out in the buffer above.
+	// the command name is already spelled out in the buffer above.
 	ents := p.Filtered()
 	rowOf := func(i int, selected bool) frame.Line { return row(ents[i], selected, ascii) }
 	n := len(ents)
@@ -649,8 +486,8 @@ func (p *Palette) Render(width, maxRows int, ascii bool) []frame.Line {
 		footer = true
 		rows = maxRows - 1
 		if rows < 1 {
-			// A footer with no rows above it says nothing useful; spend the
-			// single available line on the selected command instead.
+			// A footer with nothing above it says nothing useful; spend the
+			// one available line on the selected command instead.
 			rows = 1
 			footer = false
 		}
@@ -684,9 +521,8 @@ func (p *Palette) Render(width, maxRows int, ascii bool) []frame.Line {
 	return lines
 }
 
-// footerText is the hidden-rows note: what the window has scrolled past, what
-// it has not reached yet, or both. It carries the same indent an unselected
-// row does, so the note lines up under the names it is counting.
+// footerText is the hidden-rows note: what the window scrolled past, what it
+// has not reached yet, or both — indented to line up under the row names.
 func footerText(above, below int, ascii bool) string {
 	up := upMarker(ascii)
 	var parts []string
@@ -725,9 +561,8 @@ func row(e Entry, selected bool, ascii bool) frame.Line {
 	return l
 }
 
-// valueRow is one argument-value line. It carries no slash and no description:
-// the value is what will be typed into the buffer verbatim, and showing it as
-// anything else would misrepresent what Tab is about to write.
+// valueRow is one argument-value line: no slash, no description — the value
+// is exactly what Tab will write into the buffer.
 func valueRow(value string, selected bool, ascii bool) frame.Line {
 	if selected {
 		return frame.Line{
@@ -748,9 +583,7 @@ func remoteEntry(c libacp.AvailableCommand) Entry {
 }
 
 // normalize reduces a name or query to the bare comparison form: no
-// surrounding space, no leading `/`, nothing past the first space. Both
-// halves of the set — wire names like "help" and registered names like
-// "/help" — land on the same key.
+// surrounding space, no leading `/`, nothing past the first space.
 func normalize(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "/")

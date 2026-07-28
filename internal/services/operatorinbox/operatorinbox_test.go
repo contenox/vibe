@@ -26,9 +26,7 @@ func setupInboxDB(t *testing.T) (context.Context, libdb.DBManager) {
 	return ctx, db
 }
 
-// TestUnit_Inbox_AddAndListRoundtrip stores an item and reads it back, asserting
-// the self-contained snapshot (mission attribution + embedded report + reason)
-// survives the roundtrip and that an id/timestamp are assigned when absent.
+// TestUnit_Inbox_AddAndListRoundtrip pins that an item's snapshot survives the roundtrip and an id/timestamp are assigned when absent.
 func TestUnit_Inbox_AddAndListRoundtrip(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	svc := New(db)
@@ -85,8 +83,7 @@ func TestUnit_Inbox_EmptyIsNonNil(t *testing.T) {
 	require.Empty(t, items)
 }
 
-// TestUnit_Inbox_AddValidates rejects the two ways an item is unusable: no
-// mission to attribute it to, and an unknown reason.
+// TestUnit_Inbox_AddValidates pins that a missing MissionID and an unknown Reason are both rejected.
 func TestUnit_Inbox_AddValidates(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	svc := New(db)
@@ -108,11 +105,7 @@ func landedItem(missionID, summary string) *Item {
 	}
 }
 
-// TestUnit_Inbox_AddPublishesTheStoredItem is the live-surface signal: a
-// successful Add announces the item on AddedSubject so a watcher learns of it
-// without polling. Driven over the SQLite bus — the backend the fleet actually
-// runs on, and the one that carries a cross-process event — rather than the
-// in-memory one, so the payload is proven to survive a real round trip.
+// TestUnit_Inbox_AddPublishesTheStoredItem pins that a successful Add announces the item on AddedSubject over the real SQLite bus.
 func TestUnit_Inbox_AddPublishesTheStoredItem(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	bus := libbus.NewSQLiteWithOptions(db.WithoutTransaction(), libbus.SQLiteBusOptions{
@@ -145,8 +138,6 @@ func TestUnit_Inbox_AddPublishesTheStoredItem(t *testing.T) {
 	require.Equal(t, "shipped the board", got.Report.Summary)
 	require.False(t, got.Acked, "a freshly landed item is unacked")
 
-	// The announced payload and the stored row are the same bytes: a subscriber
-	// that renders from the event sees exactly what a reader lists.
 	stored, err := svc.Get(ctx, item.ID)
 	require.NoError(t, err)
 	require.Equal(t, stored.ID, got.ID)
@@ -165,10 +156,7 @@ func (p *failingPublisher) Publish(context.Context, string, []byte) error {
 	return fmt.Errorf("bus down")
 }
 
-// TestUnit_Inbox_PublishFailureNeverFailsAdd holds the best-effort invariant one
-// layer down from the router: the item is the durable fact, the announcement is
-// a nudge on top of it. A report that reached no live supervisor must not be
-// lost a second time because the bus was down.
+// TestUnit_Inbox_PublishFailureNeverFailsAdd pins that a publish failure never fails the Add that produced it.
 func TestUnit_Inbox_PublishFailureNeverFailsAdd(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	pub := &failingPublisher{}
@@ -184,8 +172,7 @@ func TestUnit_Inbox_PublishFailureNeverFailsAdd(t *testing.T) {
 	require.Equal(t, "still durable", items[0].Report.Summary)
 }
 
-// recordingTracker records the (operation, subject, error) of every report so a
-// test can assert what the best-effort publish path said when it shrugged.
+// recordingTracker records the (operation, subject, error) of every report.
 type recordingTracker struct {
 	mu     sync.Mutex
 	events []trackedEvent
@@ -220,10 +207,7 @@ func (r *recordingTracker) errorsFor(op, subject string) []error {
 
 var _ libtracker.ActivityTracker = (*recordingTracker)(nil)
 
-// TestUnit_Inbox_PublishFailureIsReportedToTracker proves the shrug is audible:
-// swallowing the bus error entirely would leave an operator with a live nudge
-// that silently never arrives, so the failure is reported through the tracker
-// even though it never reaches Add's caller.
+// TestUnit_Inbox_PublishFailureIsReportedToTracker pins that a swallowed publish error is still reported through the tracker.
 func TestUnit_Inbox_PublishFailureIsReportedToTracker(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	tracker := &recordingTracker{}
@@ -238,8 +222,7 @@ func TestUnit_Inbox_PublishFailureIsReportedToTracker(t *testing.T) {
 		"the report keeps the consequence: stored, not announced")
 }
 
-// TestUnit_Inbox_PublishSuccessReportsNothing pins the volume: the tracker hears
-// from this path only when the publish fails.
+// TestUnit_Inbox_PublishSuccessReportsNothing pins that the tracker hears from this path only when the publish fails.
 func TestUnit_Inbox_PublishSuccessReportsNothing(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	tracker := &recordingTracker{}
@@ -253,8 +236,7 @@ func TestUnit_Inbox_PublishSuccessReportsNothing(t *testing.T) {
 	require.Empty(t, tracker.errorsFor("publish", "inbox_item_added_event"))
 }
 
-// TestUnit_Inbox_NoPublisherStillAdds proves the seam is optional: an inbox built
-// the way every caller before this existed built it stores and lists unchanged.
+// TestUnit_Inbox_NoPublisherStillAdds pins that an inbox with no publisher wired still stores and lists unchanged.
 func TestUnit_Inbox_NoPublisherStillAdds(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	svc := New(db)
@@ -264,8 +246,7 @@ func TestUnit_Inbox_NoPublisherStillAdds(t *testing.T) {
 	require.Len(t, items, 1)
 }
 
-// TestUnit_Inbox_GetRoundtrip reads one item back by id — the CLI's `inbox show`
-// path — and pins the typed miss for an unknown id.
+// TestUnit_Inbox_GetRoundtrip pins reading one item back by id and the typed miss for an unknown id.
 func TestUnit_Inbox_GetRoundtrip(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	svc := New(db)
@@ -287,9 +268,7 @@ func TestUnit_Inbox_GetRoundtrip(t *testing.T) {
 	require.Error(t, err, "an empty id is a caller bug, not a miss")
 }
 
-// TestUnit_Inbox_AckMarksSeenAndKeepsTheRecord: Ack is a read mark, not a
-// delete. The item stays listed by List (the full record of what reached no live
-// supervisor) and drops out of ListUnacked (the worklist).
+// TestUnit_Inbox_AckMarksSeenAndKeepsTheRecord pins that Ack is a read mark, not a delete: the item stays in List but drops from ListUnacked.
 func TestUnit_Inbox_AckMarksSeenAndKeepsTheRecord(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	svc := New(db)
@@ -316,8 +295,7 @@ func TestUnit_Inbox_AckMarksSeenAndKeepsTheRecord(t *testing.T) {
 	require.Empty(t, unacked, "the worklist is empty once everything is read")
 }
 
-// TestUnit_Inbox_AckIsIdempotentAndTyped: a retried CLI ack is a success, and an
-// unknown id is the same typed miss Get gives.
+// TestUnit_Inbox_AckIsIdempotentAndTyped pins that a repeated Ack is a success and an unknown id is the same typed miss Get gives.
 func TestUnit_Inbox_AckIsIdempotentAndTyped(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	svc := New(db)
@@ -338,8 +316,7 @@ func TestUnit_Inbox_AckIsIdempotentAndTyped(t *testing.T) {
 	require.Error(t, svc.Ack(ctx, ""), "an empty id is a caller bug, not a miss")
 }
 
-// TestUnit_Inbox_ListUnackedKeepsOrderAndFilters is the worklist view an
-// operator works down: newest-first, acked items gone, unacked ones kept.
+// TestUnit_Inbox_ListUnackedKeepsOrderAndFilters pins the worklist view: newest-first, acked items gone, unacked ones kept.
 func TestUnit_Inbox_ListUnackedKeepsOrderAndFilters(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	svc := New(db)
@@ -364,10 +341,7 @@ func TestUnit_Inbox_ListUnackedKeepsOrderAndFilters(t *testing.T) {
 	require.Len(t, all, 3)
 }
 
-// TestUnit_Inbox_ListUnackedFillsItsLimit is the reason ListUnacked pages rather
-// than filtering one page: with a worked-through backlog in front of them, a
-// caller asking for N unacked items must still get N, not "whatever survived the
-// first N rows."
+// TestUnit_Inbox_ListUnackedFillsItsLimit pins that ListUnacked pages past an acked backlog to still return `limit` items.
 func TestUnit_Inbox_ListUnackedFillsItsLimit(t *testing.T) {
 	ctx, db := setupInboxDB(t)
 	svc := New(db)
@@ -376,8 +350,7 @@ func TestUnit_Inbox_ListUnackedFillsItsLimit(t *testing.T) {
 	for i := range 12 {
 		it := landedItem(fmt.Sprintf("m%02d", i), fmt.Sprintf("item %02d", i))
 		require.NoError(t, svc.Add(ctx, it))
-		// Ack everything but the three oldest, so a naive "read `limit` rows then
-		// filter" returns nothing for limit<=9.
+		// Ack all but the three oldest, so a naive "read `limit` rows then filter" returns nothing.
 		if i >= 3 {
 			require.NoError(t, svc.Ack(ctx, it.ID))
 		} else {

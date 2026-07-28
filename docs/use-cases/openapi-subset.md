@@ -5,55 +5,60 @@ description: Why partial OpenAPI registration is a game-changer for agent capabi
 
 # Authoring your tool inventory
 
-Giving an AI agent access to a massive corporate API — like an ERP, Stripe, or a monolithic internal service — is usually a mistake. 
+Cut a large OpenAPI spec down to a hand-curated subset and register only that, so the assistant sees a handful of clear operations instead of an entire API.
 
-If you hand an agent a 200-endpoint Swagger spec, you exhaust its context window with endpoints it will never need, you confuse the planner with ten different ways to search for a customer, and you drastically increase the blast radius if the model hallucinates.
+Handing an agent a 200-endpoint spec exhausts its context window with endpoints it will never use, gives the planner multiple ways to do the same thing, and widens the blast radius if the model hallucinates a call. Registering a narrow subset avoids all three without writing any integration code.
 
-Contenox lets you register any OpenAPI service without writing glue code. But more importantly, it lets you **author the subset**.
+## Prerequisites
 
-## The glue-code tax
+- `contenox` installed.
+- The target API's OpenAPI spec (`openapi.json`/`.yaml`), or the ability to write one by hand.
 
-Normally, restricting an agent to a safe subset of an API means writing an integration layer. You write a tool schema. You write a Python function. You map arguments, inject auth headers, make the HTTP call, and parse the JSON. If you want 5 tools, you write 5 wrapper functions.
+## Steps
 
-In Contenox, you write zero code. You just slice the spec.
+1. Pull the full spec (`GET <url>/openapi.json`, or the vendor's published spec).
 
-## Curating the inventory
+2. Delete every path and operation the assistant shouldn't have. Keep only what a specific task needs — e.g. `GET /invoices/{id}` and `POST /support/escalate` — and save the result as `support-subset.yaml`.
 
-Take an enormous legacy API. Pull down its `openapi.json` and delete the 198 endpoints the agent shouldn't touch. Leave the two it needs: `GET /invoices/{id}` and `POST /support/escalate`.
+3. Register it, pointing traffic at the real API and the spec at your curated file:
 
-Save that as `support-subset.yaml` in your repository. Then register it:
+   ```bash
+   contenox tools add erp_support \
+     --url https://erp.internal.example.com \
+     --spec ./specs/support-subset.yaml \
+     --inject "tenant_id=acme"
+   ```
 
-```bash
-contenox tools add erp_support \
-  --url https://erp.internal.example.com \
-  --spec ./specs/support-subset.yaml \
-  --inject "tenant_id=acme"
-```
+   The model sees a tool named `erp_support` with exactly the operations in the subset — never the other endpoints, and never the injected `tenant_id`.
 
-The model never sees the other 198 endpoints. It never sees the `tenant_id` you injected. It just sees a logical tools named `erp_support` with two clear capabilities.
+4. To split one monolithic API into several narrow tools, register it multiple times under different names, each with its own subset spec:
 
-## Inventories, not monoliths
+   ```bash
+   contenox tools add erp_billing   --url https://erp.internal.example.com --spec ./specs/billing.yaml
+   contenox tools add erp_vacation  --url https://erp.internal.example.com --spec ./specs/hr.yaml
+   contenox tools add erp_inventory --url https://erp.internal.example.com --spec ./specs/warehouse.yaml
+   ```
 
-Because the spec path (`--spec`) is decoupled from where the traffic goes (`--url`), you can take *one* monolithic API and register it as *three different tools* in Contenox, each backed by a different subset spec.
+5. Reference only the tool(s) a chain needs in its `execute_config.tools` allowlist:
 
-```bash
-contenox tools add erp_billing --spec ./specs/billing.yaml
-contenox tools add erp_vacation --spec ./specs/hr.yaml
-contenox tools add erp_inventory --spec ./specs/warehouse.yaml
-```
+   ```json
+   {
+     "execute_config": {
+       "tools": ["erp_vacation", "local_shell"]
+     }
+   }
+   ```
 
-Now, instead of handing a chain the entire `erp` monolith, you hand it exactly what it needs:
+## Expected outcome
 
-```json
-{
-  "execute_config": {
-    "tools": ["erp_vacation", "local_shell"]
-  }
-}
-```
+A chain given `erp_vacation` can call only the operations in `hr.yaml` — nothing from `billing.yaml` or `warehouse.yaml`, and nothing outside the curated subset even though all three point at the same underlying API.
 
-## Why authoring matters
+## Customize
 
-The subset spec is a file in your repo. You version it. You review it in PRs. If the agent needs a new capability, you add an endpoint to the YAML. 
+The spec path (`--spec`) is independent of where traffic goes (`--url`), so adding a capability later is a YAML edit and a `contenox tools update --spec <file>`, not a new integration.
 
-You didn't write an integration function, but you authored the boundary. The agent only has the capabilities you explicitly curated into its inventory.
+## Where to next
+
+- [Any API, a tool you authored](/docs/use-cases/any-api-as-a-tool/) — hiding credentials and injected parameters on top of a curated spec.
+- [The nested permission bomb](/docs/use-cases/nested-permission-bomb/) — why a workflow shouldn't get more surface than it needs.
+- [Remote tools](/docs/integrations/tools/remote/) — the `tools add`/`update`/`show` reference in full.

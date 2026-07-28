@@ -125,9 +125,7 @@ func TestUnit_resolveContenoxDir(t *testing.T) {
 	}
 }
 
-// Bare invocations must route to session-backed chat, not the stateless run
-// pipeline — this dispatch silently regressed to "run" once before (BUG-011),
-// making the documented default-session auto-create a no-op.
+// TestUnit_DispatchSubcommand_BarePromptIsChat asserts bare invocations route to session-backed chat, not the stateless run pipeline.
 func TestUnit_DispatchSubcommand_BarePromptIsChat(t *testing.T) {
 	if got := dispatchSubcommand([]string{"say hello"}, false); got != "chat" {
 		t.Fatalf("bare prompt dispatched to %q, want chat", got)

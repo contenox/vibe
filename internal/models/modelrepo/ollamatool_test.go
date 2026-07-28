@@ -17,13 +17,11 @@ func TestSystem_Ollama_Tools(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping ollama system test: starts a container and pulls multi-GB models")
 	}
-	// Set up shared test environment
 	ctx := t.Context()
 	uri, _, cleanup, err := modelrepo.SetupOllamaLocalInstance(ctx, "latest")
 	require.NoError(t, err)
 	defer cleanup()
 
-	// Create shared Ollama client
 	u, err := url.Parse(uri)
 	require.NoError(t, err)
 	ollamaClient := api.NewClient(u, http.DefaultClient)
@@ -45,7 +43,6 @@ func TestSystem_Ollama_Tools(t *testing.T) {
 		chatClient, err := provider.GetChatConnection(ctx, uri)
 		require.NoError(t, err)
 
-		// Define a simple tool
 		tools := []modelrepo.Tool{
 			{
 				Type: "function",
@@ -70,7 +67,6 @@ func TestSystem_Ollama_Tools(t *testing.T) {
 			},
 		}
 
-		// Test conversation with tools
 		messages := []modelrepo.Message{
 			{
 				Role: "system",
@@ -95,11 +91,9 @@ func TestSystem_Ollama_Tools(t *testing.T) {
 			for i, toolCall := range resp.ToolCalls {
 				t.Logf("Tool call %d: %s with args: %s", i, toolCall.Function.Name, toolCall.Function.Arguments)
 
-				// Verify the tool call structure
 				assert.Equal(t, "function", toolCall.Type)
 				assert.Equal(t, "get_weather", toolCall.Function.Name)
 
-				// Parse the arguments to verify they're valid JSON
 				var args map[string]interface{}
 				err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args)
 				assert.NoError(t, err)
@@ -118,7 +112,6 @@ func TestSystem_Ollama_Tools(t *testing.T) {
 		chatClient, err := provider.GetChatConnection(ctx, uri)
 		require.NoError(t, err)
 
-		// Define a single tool
 		tool := modelrepo.Tool{
 			Type: "function",
 			Function: &modelrepo.FunctionTool{

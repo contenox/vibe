@@ -103,7 +103,7 @@ Then, as the operator:
 **Does not work — denied by design:**
 
 - Shell / command execution (`local_shell`) — entirely.
-- Any file write or edit (`write_file`, `sed`).
+- Any file write or edit (`write_file`, `edit_file`, `sed`).
 - Any network call (`web_get`, `web_post`, and every other web verb).
 - Reads of credential, key, dotfile, and secret paths.
 - Anything not explicitly allowed — `default_action: deny`.

@@ -10,11 +10,10 @@ import (
 	libmodelprovider "github.com/contenox/beam/internal/models/modelrepo"
 )
 
-// TestUnit_ChatModelResolution_PinnedNonVisionRefuses covers the silent
-// pin-override fix: an explicit model pin combined with an image request must
-// refuse with a teaching error when the pinned model lacks vision — never
-// silently resolve to a different vision-capable model — while capability-based
-// routing without a pin keeps auto-selecting.
+// TestUnit_ChatModelResolution_PinnedNonVisionRefuses pins that an explicit
+// model pin combined with an image request refuses with a teaching error
+// when the pinned model lacks vision, rather than silently resolving to a
+// different vision-capable model; unpinned requests keep auto-selecting.
 func TestUnit_ChatModelResolution_PinnedNonVisionRefuses(t *testing.T) {
 	getModels := func(providers []libmodelprovider.Provider) func(context.Context, ...string) ([]libmodelprovider.Provider, error) {
 		return func(context.Context, ...string) ([]libmodelprovider.Provider, error) { return providers, nil }
@@ -51,8 +50,6 @@ func TestUnit_ChatModelResolution_PinnedNonVisionRefuses(t *testing.T) {
 	})
 
 	t.Run("pin plus fallback names never silently skip the pin", func(t *testing.T) {
-		// This is the audit's exact silent-override shape: pin first, a
-		// vision-capable default later in the list.
 		_, _, _, err := llmresolver.Chat(context.Background(),
 			llmresolver.Request{ModelNames: []string{"qwen3-4b", "gemma3-vlm"}, RequiresVision: true},
 			getModels(all),

@@ -17,35 +17,27 @@ const (
 
 	ErrAuthRequired = -32000
 	// ErrRequestTimeout is the wire signal that a peer's handler ran out of
-	// time. It exists because a Go sentinel cannot cross the JSON-RPC boundary:
-	// a remote peer sees only code/message/data, so unless the deadline is
-	// encoded in the code, the receiving side has no way to tell a transient
-	// timeout from a permanent internal failure and a supervisor gives up on a
-	// restartable agent. Matches the number MCP implementations use for the
-	// same condition.
+	// time, since a Go sentinel cannot cross the JSON-RPC boundary. Matches
+	// the code MCP implementations use for the same condition.
 	ErrRequestTimeout   = -32001
 	ErrResourceNotFound = -32002
 )
 
 // Error is a JSON-RPC error object. The exported fields are the entire wire
-// contract; cause is process-local and never serialized, so an Error that has
-// actually travelled over a transport carries only what its code and message
-// can express.
+// contract; cause is process-local and never serialized.
 type Error struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
 
-	// cause is the handler error this Error was built from, kept so that
-	// errors.Is/As still work while the value has not left the process.
+	// cause is the handler error this Error was built from, so errors.Is/As
+	// still work while the value has not left the process.
 	cause error
 }
 
-// Unwrap exposes the originating handler error, but only for an Error still in
-// the process that created it — an Error decoded from the wire has no cause and
-// returns nil. Callers that must classify a remote failure have to read Code
-// (see IsTimeoutError, which accepts ErrRequestTimeout for exactly this
-// reason).
+// Unwrap exposes the originating handler error; an Error decoded from the
+// wire has no cause and returns nil. Classify a remote failure via Code
+// instead (see IsTimeoutError).
 func (e *Error) Unwrap() error {
 	if e == nil {
 		return nil
@@ -77,12 +69,10 @@ func InvalidParams(msg string) *Error { return NewError(ErrInvalidParams, msg) }
 func InternalError(msg string) *Error { return NewError(ErrInternalError, msg) }
 
 // AsError converts a handler error into the JSON-RPC error that goes on the
-// wire. It retains err as the cause so a same-process caller can still match
-// sentinels, and it promotes a deadline to ErrRequestTimeout so that a *remote*
-// caller — for whom the cause is unrecoverable by construction — can still tell
-// "too slow, retry" from "broken, give up". Everything else stays an internal
-// error: guessing a more specific code from an opaque failure would be worse
-// than admitting we do not know.
+// wire. It retains err as cause for same-process sentinel matching, and
+// promotes a deadline to ErrRequestTimeout so a remote caller can tell
+// "too slow, retry" from "broken, give up". Everything else becomes
+// ErrInternalError.
 func AsError(err error) *Error {
 	if err == nil {
 		return nil
@@ -97,16 +87,12 @@ func AsError(err error) *Error {
 	return &Error{Code: code, Message: err.Error(), cause: err}
 }
 
-// HandlerDrainTimeout bounds how long Run waits, after shutdown has cancelled
-// everything, for in-flight handler goroutines to return. It is a backstop for
-// a handler that ignores its cancelled context, not a normal budget: a
-// well-behaved handler returns immediately once cancelled, so this timer
-// should never fire in practice.
+// HandlerDrainTimeout bounds how long Run waits, after shutdown cancels
+// everything, for in-flight handler goroutines to return. A backstop for a
+// handler that ignores its cancelled context; should never fire normally.
 const HandlerDrainTimeout = 10 * time.Second
 
 // ErrHandlerDrainTimeout reports that Run gave up waiting for handler
-// goroutines to return (see HandlerDrainTimeout). It means some handler
-// ignored its cancelled context and MAY STILL BE RUNNING, so a caller must
-// treat its own teardown as unsafe: the state those handlers touch (sessions,
-// drivers, database handles) is not yet free to release.
+// goroutines to return (see HandlerDrainTimeout). Some handler may still be
+// running, so the caller's teardown of shared state is unsafe.
 var ErrHandlerDrainTimeout = errors.New("libacp: timed out waiting for handler goroutines to return")

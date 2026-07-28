@@ -248,10 +248,9 @@ func TestUnit_EstimateHITLApprovalCount(t *testing.T) {
 
 // ─── restart durability at the store layer ─────────────────────────────────
 
-// TestUnit_HITLApprovals_RowSurvivesReopeningTheDatabase is the store-layer
-// half of slice C1's central durability requirement: a pending row written by
-// one DBManager instance is visible, unchanged, to a completely separate
-// DBManager instance opened later against the same on-disk file — simulating
+// TestUnit_HITLApprovals_RowSurvivesReopeningTheDatabase pins durability: a
+// pending row written by one DBManager instance is visible, unchanged, to a
+// separate DBManager instance opened later against the same file, simulating
 // a `contenox serve` restart with no in-memory state carried over.
 func TestUnit_HITLApprovals_RowSurvivesReopeningTheDatabase(t *testing.T) {
 	ctx := context.Background()
@@ -285,11 +284,9 @@ func TestUnit_HITLApprovals_RowSurvivesReopeningTheDatabase(t *testing.T) {
 
 // ─── attribution ───────────────────────────────────────────────────────────
 //
-// The attribution columns are what make an inbox usable past one unit: they
-// name WHO is asking, not just which tool was called. These pin that they
-// round-trip through every read path, and that the nullable one stays nullable
-// — an ask with no mission must be distinguishable from one whose mission is
-// unknown, which an empty string would not be.
+// The attribution columns name who is asking, not just which tool was
+// called. These pin that they round-trip through every read path, and that
+// MissionID stays nullable — no mission must be distinguishable from unknown.
 
 func TestUnit_HITLApprovals_AttributionRoundTrips(t *testing.T) {
 	t.Parallel()

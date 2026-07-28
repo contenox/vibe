@@ -51,12 +51,12 @@ func TestUnit_BrandLadderExactBytes(t *testing.T) {
 		caps   Caps
 		prefix string
 	}{
-		{"truecolor dark", Caps{Profile: ProfileTrueColor, Dark: true}, "\x1b[38;2;251;191;36m"},
-		{"truecolor light", Caps{Profile: ProfileTrueColor, Dark: false}, "\x1b[38;2;180;83;9m"},
-		{"ansi256 dark", Caps{Profile: ProfileANSI256, Dark: true}, "\x1b[38;5;214m"},
-		{"ansi256 light", Caps{Profile: ProfileANSI256, Dark: false}, "\x1b[38;5;214m"},
-		{"ansi16 dark", Caps{Profile: ProfileANSI16, Dark: true}, "\x1b[1m"},
-		{"ansi16 light", Caps{Profile: ProfileANSI16, Dark: false}, "\x1b[1m"},
+		{"truecolor dark", Caps{Profile: ProfileTrueColor, Dark: true}, "\x1b[38;2;52;211;153m"},
+		{"truecolor light", Caps{Profile: ProfileTrueColor, Dark: false}, "\x1b[38;2;5;150;105m"},
+		{"ansi256 dark", Caps{Profile: ProfileANSI256, Dark: true}, "\x1b[38;5;78m"},
+		{"ansi256 light", Caps{Profile: ProfileANSI256, Dark: false}, "\x1b[38;5;78m"},
+		{"ansi16 dark", Caps{Profile: ProfileANSI16, Dark: true}, "\x1b[32m"},
+		{"ansi16 light", Caps{Profile: ProfileANSI16, Dark: false}, "\x1b[32m"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -71,19 +71,18 @@ func TestUnit_BrandLadderExactBytes(t *testing.T) {
 		})
 	}
 
-	// The 16-color tier must degrade to emphasis only: no color escape
-	// at all, never an approximated wrong color.
+	// The 16-color tier must use a real basic color, never an extended
+	// truecolor/256 approximation escaping the tier boundary.
 	s := New(Caps{Profile: ProfileANSI16})
 	prefix, _ := s.SGR(frame.StyleBrand)
 	if strings.Contains(prefix, "38;") {
-		t.Fatalf("ANSI16 brand prefix %q must not carry a color code", prefix)
+		t.Fatalf("ANSI16 brand prefix %q must not carry an extended-color code", prefix)
 	}
 }
 
-// TestUnit_BrandRampLadderExactBytes pins the logo-mark luminance ramp to
-// website/public/favicon.svg byte for byte. The welcome header is the one
-// place beam reproduces the mark, so a drift here is a brand bug that no
-// component golden would catch (goldens compare StyleIDs, not colors).
+// TestUnit_BrandRampLadderExactBytes pins the logo-mark ramp to the
+// terminal's own mint ladder byte for byte, since goldens compare
+// StyleIDs, not colors, and wouldn't catch a drift here.
 func TestUnit_BrandRampLadderExactBytes(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -94,26 +93,26 @@ func TestUnit_BrandRampLadderExactBytes(t *testing.T) {
 	}{
 		{
 			"truecolor dark", Caps{Profile: ProfileTrueColor, Dark: true},
-			"\x1b[38;2;252;211;77m", // #FCD34D
-			"\x1b[38;2;251;191;36m", // #FBBF24
-			"\x1b[38;2;245;158;11m", // #F59E0B
+			"\x1b[38;2;95;255;175m", // #5FFFAF
+			"\x1b[38;2;52;211;153m", // #34D399
+			"\x1b[38;2;5;150;105m",  // #059669
 		},
 		{
 			"truecolor light", Caps{Profile: ProfileTrueColor, Dark: false},
-			"\x1b[38;2;180;83;9m",   // #B45309
-			"\x1b[38;2;217;119;6m",  // #D97706
-			"\x1b[38;2;245;158;11m", // #F59E0B
+			"\x1b[38;2;5;150;105m",  // #059669
+			"\x1b[38;2;52;211;153m", // #34D399
+			"\x1b[38;2;95;255;175m", // #5FFFAF
 		},
 		{
 			"ansi256 dark", Caps{Profile: ProfileANSI256, Dark: true},
-			"\x1b[38;5;221m", "\x1b[38;5;214m", "\x1b[38;5;208m",
+			"\x1b[38;5;85m", "\x1b[38;5;78m", "\x1b[38;5;29m",
 		},
 		{
 			"ansi256 light", Caps{Profile: ProfileANSI256, Dark: false},
-			"\x1b[38;5;221m", "\x1b[38;5;214m", "\x1b[38;5;208m",
+			"\x1b[38;5;85m", "\x1b[38;5;78m", "\x1b[38;5;29m",
 		},
-		{"ansi16 dark", Caps{Profile: ProfileANSI16, Dark: true}, "\x1b[1m", "\x1b[1m", "\x1b[1m"},
-		{"ansi16 light", Caps{Profile: ProfileANSI16, Dark: false}, "\x1b[1m", "\x1b[1m", "\x1b[1m"},
+		{"ansi16 dark", Caps{Profile: ProfileANSI16, Dark: true}, "\x1b[92m", "\x1b[32m", "\x1b[32m"},
+		{"ansi16 light", Caps{Profile: ProfileANSI16, Dark: false}, "\x1b[92m", "\x1b[32m", "\x1b[32m"},
 		{"mono dark", Caps{Profile: ProfileMono, Dark: true}, "", "", ""},
 		{"mono light", Caps{Profile: ProfileMono, Dark: false}, "", "", ""},
 	}
@@ -137,21 +136,22 @@ func TestUnit_BrandRampLadderExactBytes(t *testing.T) {
 		})
 	}
 
-	// The mid dark stop IS beam gold: the mark must sit in the same family
-	// as the spinner, sigil and status identity, not next to it.
+	// The mid dark stop is brand mint: the mark must sit in the same
+	// family as the spinner, sigil and status identity, not next to it.
 	dark := New(Caps{Profile: ProfileTrueColor, Dark: true})
 	mid, _ := dark.SGR(frame.StyleBrandRamp2)
 	brand, _ := dark.SGR(frame.StyleBrand)
-	if mid != "\x1b[38;2;251;191;36m" || mid != brand {
-		t.Fatalf("ramp2 dark = %q, want %q and equal to brand %q", mid, "\x1b[38;2;251;191;36m", brand)
+	if mid != "\x1b[38;2;52;211;153m" || mid != brand {
+		t.Fatalf("ramp2 dark = %q, want %q and equal to brand %q", mid, "\x1b[38;2;52;211;153m", brand)
 	}
 
-	// Same 16-color doctrine as brand: emphasis, never an approximation.
+	// Same 16-color doctrine as brand: a real basic color, never an
+	// extended approximation.
 	a16 := New(Caps{Profile: ProfileANSI16})
 	for _, id := range []frame.StyleID{frame.StyleBrandRamp1, frame.StyleBrandRamp2, frame.StyleBrandRamp3} {
 		prefix, _ := a16.SGR(id)
 		if strings.Contains(prefix, "38;") {
-			t.Fatalf("ANSI16 %s prefix %q must not carry a color code", id, prefix)
+			t.Fatalf("ANSI16 %s prefix %q must not carry an extended-color code", id, prefix)
 		}
 	}
 }
@@ -181,10 +181,9 @@ func sgrCodes(t *testing.T, prefix string) []int {
 
 // hasDisallowedCode walks codes as SGR parameters, treating the extended
 // foreground introducer (38;5;N or 38;2;R;G;B) as one unit so its color
-// components — which can themselves fall in 40-107 — are never mistaken
-// for standalone background/reverse codes. It reports true the moment it
-// finds an actual background color (40-47, 100-107, the 48 extended
-// introducer) or reverse video (7).
+// components aren't mistaken for standalone background/reverse codes. It
+// reports true on an actual background color (40-47, 100-107, the 48
+// extended introducer) or reverse video (7).
 func hasDisallowedCode(codes []int) bool {
 	for i := 0; i < len(codes); i++ {
 		c := codes[i]
@@ -207,11 +206,9 @@ func hasDisallowedCode(codes []int) bool {
 	return false
 }
 
-// TestUnit_ForegroundOnlyAcrossAllRoles enforces the copy-cleanliness
-// hard rule programmatically: no role's prefix — content or chrome,
-// since V1 has no never-copied-chrome exception — may carry a background
-// color (40-47, 100-107, or the 48 extended-color introducer) or reverse
-// video (7).
+// TestUnit_ForegroundOnlyAcrossAllRoles pins that no role's prefix carries
+// a background color (40-47, 100-107, the 48 extended introducer) or
+// reverse video (7).
 func TestUnit_ForegroundOnlyAcrossAllRoles(t *testing.T) {
 	for _, p := range []Profile{ProfileANSI16, ProfileANSI256, ProfileTrueColor} {
 		for _, dark := range []bool{true, false} {

@@ -1,47 +1,9 @@
-// Package missionservice stores mission records — the durable, agent-reportable
-// half of the fleet manager (see
-// docs/development/blueprints/acp/fleet-consolidation.md, "Mission mode"). A
-// mission is not a note: it is the headless interaction model. An operator
-// fires a one-line intent at a declared agent and detaches; the resulting
-// unit runs unattended inside a permission envelope (a named HITL policy
-// bound to the mission) and reports back — or asks for attention — through
-// tools it holds only while on the mission. One mission binds exactly one
-// session and one instance: the work a mission names is a single unit, so the
-// record is too.
-//
-// Storage is runtimetypes KV records keyed by mission id under a shared prefix
-// (pattern of acpsvc's acp:session_* keys, runtime/acpsvc/external.go), listed
-// server-side via the store's prefix scan — zero migration. The validated-CRUD
-// shape mirrors runtime/agentregistryservice so the two registries stay easy to
-// compare.
-//
-// # Reports
-//
-// A mission's reports live under a second, sibling KV prefix keyed by mission
-// id (missionReportKVPrefix; see that constant's comment for why it is a
-// sibling of missionKVPrefix rather than nested under it). A Report's Kind is
-// drawn from a small, closed set — progress, finding, blocker, result —
-// rather than free text, and that closedness is a deliberate prompt-design
-// choice: the set IS the hint to an unattended agent about what is worth
-// reporting at all. A short, named enum tells the agent "these four shapes of
-// thing are worth recording"; free text invites narration, which is the wrong
-// incentive for a unit that should only cost a human's attention when it
-// matters. Reports never carry artifact content — Refs points at it by path
-// or URL only, keeping a report cheap to store and cheap to read from an
-// attention inbox.
-//
-// # Liveness
-//
-// A mission runs unattended, so "is this unit still alive?" cannot be
-// answered by a human watching a transcript — nobody is watching by
-// construction. Without an explicit liveness signal, a mission whose unit
-// crashed sits at StatusOpen forever, indistinguishable from one making slow,
-// silent progress: exactly the failure mission mode must not have.
-// LastHeartbeat and LastError turn liveness and last-failure into queryable
-// facts instead of inferences: Heartbeat stamps LastHeartbeat and records (or
-// clears) LastError on every call, so a caller can tell "working",
-// "erroring", and "gone dark past some staleness threshold" apart without
-// attaching to anything.
+// Package missionservice stores mission records: the durable,
+// agent-reportable half of the fleet manager. An
+// operator fires a one-line intent at a declared agent; the resulting unit
+// runs unattended inside a permission envelope (a named HITL policy bound to
+// the mission) and reports back through tools it holds only while on the
+// mission. One mission binds exactly one session and one instance.
 package missionservice
 
 import (
@@ -58,46 +20,23 @@ import (
 	"github.com/google/uuid"
 )
 
-// EventPublisher is the NARROW slice of the event bus AddReport uses to announce
-// a new report. libbus.Messenger satisfies it. It is declared here, rather than
-// importing libbus, so this package depends only on the one verb it calls and
-// never on the whole bus — and so a missionservice built without a bus (every
-// test today, the mission-only REST wiring) simply does not publish, with no
-// nil-bus plumbing to thread through callers.
+// EventPublisher is the narrow slice of the bus AddReport uses to announce a
+// new report. libbus.Messenger satisfies it; declaring it here means a
+// missionservice built without a bus simply doesn't publish.
 type EventPublisher interface {
 	Publish(ctx context.Context, subject string, data []byte) error
 }
 
-// ReportAddedSubject is the bus subject AddReport publishes a ReportAddedEvent
-// on. It follows this codebase's "<package>.events[.<verb>]" bus-subject
-// convention (see taskengine.TaskEventSubjectAll = "taskengine.events"). A
-// routing service subscribes to it to deliver the report to the mission's
-// supervisor — a live parent session, or the operator inbox when there is none.
-//
-// The seam is the point: missionservice PUBLISHES that a report exists and stays
-// ignorant of sessions and inboxes; a separate service SUBSCRIBES and decides
-// where it goes. That is the libbus idiom CONTRIBUTING.md names ("services
-// publish typed events ... others subscribe without direct package coupling"),
-// and it is what lets report routing work today off a REST-added report and
-// compose automatically with the mission-tools slice when a unit files its own.
+// ReportAddedSubject is the bus subject AddReport publishes a
+// ReportAddedEvent on. A routing service subscribes to deliver the report to
+// the mission's supervisor (a live parent session, or the operator inbox).
 const ReportAddedSubject = "missionservice.events.report_added"
 
-// ReportAddedEvent is the SELF-CONTAINED domain event AddReport publishes after
-// a report is durably stored. Self-contained on purpose (the register of
-// agentinstance.Event and UnattendedPermission): a subscriber routes it without
-// reading anything back, so a routing service needs no missionservice handle to
-// act on it.
-//
-// ParentSessionID is the supervision edge lifted onto the event from the
-// mission: non-empty names the upstream session that fired the mission (route
-// the report there), empty means an operator fired it directly (route it to the
-// operator inbox). It is a fact ABOUT the mission, not a routing instruction —
-// missionservice reports what happened; the subscriber decides what to do.
-//
-// The embedded Report carries the whole stored report, its OPTIONAL typed
-// Handover included, so a subscriber that hands the report on to a next mission
-// has the full hand-off in the event and never reads the report back — the
-// self-contained-payload rule holds even as the report grew a structured half.
+// ReportAddedEvent is the self-contained event AddReport publishes after a
+// report is durably stored; a subscriber routes it without reading anything
+// back. ParentSessionID is the supervision edge: non-empty names the
+// upstream session that fired the mission (route the report there), empty
+// means an operator fired it directly (route to the operator inbox).
 type ReportAddedEvent struct {
 	MissionID       string `json:"missionId"`
 	ParentSessionID string `json:"parentSessionId,omitempty"`
@@ -106,33 +45,18 @@ type ReportAddedEvent struct {
 	Report          Report `json:"report"`
 }
 
-// PlanRevisedSubject and StatusChangedSubject are the two sibling bus subjects
-// this package publishes the plan engine's attention-worthy events on. They
-// follow ReportAddedSubject's convention byte-for-byte (the "<package>.events.
-// <verb>" form) and exist for the same reason: the inbox and board SUBSCRIBE to
-// them the way reportrouter subscribes to ReportAddedSubject, and missionservice
-// stays ignorant of who is listening. A plan revision and a terminal transition
-// are exactly the "surfaced, never prevented" moments the blueprint's design law
-// names (the inbox's "plan revised +2/−1 — <explanation>" line is a rendering of
-// a PlanRevisedEvent), so they ride the bus rather than being polled for.
+// PlanRevisedSubject and StatusChangedSubject are the sibling bus subjects
+// this package publishes plan and terminal-transition events on, so the
+// inbox and board can subscribe without missionservice knowing who listens.
 const (
 	PlanRevisedSubject   = "missionservice.events.plan_revised"
 	StatusChangedSubject = "missionservice.events.status_changed"
 )
 
-// PlanRevisedEvent is the SELF-CONTAINED event SetPlan publishes after a plan
-// snapshot is durably stored. Self-contained in the register of ReportAddedEvent:
-// a subscriber renders "plan revised" without a missionservice handle to read
-// anything back.
-//
-// It carries both the revision's identity (Revision, Explanation) and the shape
-// the inbox and board draw from: EntryCount plus the per-status counts for a
-// progress bar, and Added/Removed — the "+2/−1" delta — computed by diffing the
-// new snapshot's entry ids against the prior revision's. Added/Removed are a
-// PRESENTATION number keyed on entry id (a fresh entry counts as added, an id
-// that vanished from the snapshot counts as removed); they are honest for the
-// single-writer planner that echoes ids and are never load-bearing for anything
-// but the human-facing "what changed" line.
+// PlanRevisedEvent is the self-contained event SetPlan publishes after a plan
+// snapshot is durably stored. Added/Removed are a presentation delta keyed on
+// entry id, computed against the prior revision — meaningful for the
+// human-facing "what changed" line, never load-bearing elsewhere.
 type PlanRevisedEvent struct {
 	MissionID       string `json:"missionId"`
 	ParentSessionID string `json:"parentSessionId,omitempty"`
@@ -148,25 +72,11 @@ type PlanRevisedEvent struct {
 	Completed       int    `json:"completed"`
 }
 
-// PlanRevisionSummary is one durable entry in a mission's bounded revision ring
-// (Mission.PlanRevisions): the "+2/−1 — why" line for a single past SetPlan,
-// kept so the overnight-skim inbox feed can show plan HISTORY, not only the
-// current Plan.{Revision,Explanation}. It is the PlanRevisedEvent's presentation
-// shape (Added/Removed delta plus the per-status counts) minus the routing edge
-// (MissionID/ParentSessionID/AgentName/Intent, which the record already carries
-// or the feed does not need), plus At — the wall-clock the revision was stored.
-//
-// WHY it is persisted on the record and not merely published: the event is a
-// best-effort routing NUDGE that only fires when a bus is wired (see
-// publishPlanRevised); the record is the durable fact. Decision (b) of the
-// component roadmap (Tier 2 item 6) asks for a REAL history feed for the honest
-// overnight-skim answer, which a fire-and-forget event cannot give — a subscriber
-// that was down misses it forever. So the summary write rides INSIDE the durable
-// SetPlan put, next to the plan snapshot itself: it is present whether or not the
-// bus is, and a mission that ran with no publisher still accrues its full history.
-//
-// The `at` field is the same wall-clock stamped on Mission.UpdatedAt for the same
-// revision, so a reader can order the ring chronologically without a second clock.
+// PlanRevisionSummary is one durable entry in a mission's bounded revision
+// ring (Mission.PlanRevisions): the "+2/-1 - why" line for a past SetPlan,
+// kept so the inbox feed can show plan history, not just the current plan.
+// It is written inside the durable SetPlan put (not merely published), so a
+// mission that ran with no bus wired still accrues its full history.
 type PlanRevisionSummary struct {
 	Revision    int       `json:"revision"`
 	Explanation string    `json:"explanation,omitempty"`
@@ -178,12 +88,9 @@ type PlanRevisionSummary struct {
 	At          time.Time `json:"at"`
 }
 
-// StatusChangedEvent is the SELF-CONTAINED event Finish publishes after a
-// mission comes to rest in a terminal state. OldStatus/NewStatus name the
-// transition (always open-or-running → terminal, since Finish rejects every
-// other move) and Reason carries the one line the caller gave for why — the same
-// string persisted as Mission.StatusReason. Same register as ReportAddedEvent:
-// the inbox routes and renders it without reading the mission back.
+// StatusChangedEvent is the self-contained event Finish publishes after a
+// mission reaches a terminal state. OldStatus/NewStatus name the transition;
+// Reason mirrors the persisted Mission.StatusReason.
 type StatusChangedEvent struct {
 	MissionID       string `json:"missionId"`
 	ParentSessionID string `json:"parentSessionId,omitempty"`
@@ -194,18 +101,9 @@ type StatusChangedEvent struct {
 	Reason          string `json:"reason,omitempty"`
 }
 
-// Status is a mission's lifecycle state: one running state (open) and a closed
-// set of TERMINAL states a finished mission comes to rest in. The terminal set
-// is the mission-plan blueprint's "hard facts a planner reasons over" — a landed
-// mission handed real context to the next one; a derailed one failed; a stuck
-// one hit a discrete boundary the caller must judge (see the register on
-// StatusStuck). abandoned predates the blueprint and stays in the set: it is the
-// operator's "I gave up on this" label, distinct from the three the RUNTIME (or
-// a unit, once it can) records on its own.
-//
-// The values are contracted, not incidental: existing KV rows carry these exact
-// strings, so the set only ever GROWS (a new terminal state is added, never a
-// rename), and old rows keep parsing unchanged.
+// Status is a mission's lifecycle state: one running state (open) and a
+// closed set of terminal states. The values are contracted — existing KV
+// rows carry these exact strings, so the set only ever grows, never renames.
 type Status string
 
 const (
@@ -214,26 +112,15 @@ const (
 	StatusDerailed  Status = "derailed"
 	StatusAbandoned Status = "abandoned"
 
-	// StatusStuck is a FIRST-CLASS terminal signal, deliberately distinct from
-	// StatusDerailed rather than folded into it. The blueprint treats
-	// "stuck" as a discrete boundary a mission can
-	// hit — a loop, a wall it cannot get past, a judgement it cannot make alone —
-	// and it is worth a different word than "failed" because it asks for a
-	// different response (attention, a nudge, a replan) than a derailment does
-	// (a post-mortem). DETECTING stuck is the caller's business — a heuristic, a
-	// planner's judgement, an operator's call — never this layer's; the runtime
-	// only owns the discrete STATUS, exactly as it owns the closed report-kind
-	// set without owning what counts as progress.
+	// StatusStuck is a first-class terminal signal, distinct from
+	// StatusDerailed: a discrete boundary (a loop, a judgement call) that
+	// asks for attention rather than a post-mortem. Detecting "stuck" is the
+	// caller's business; the runtime only owns the status.
 	StatusStuck Status = "stuck"
 )
 
-// isTerminalStatus reports whether a mission in this state is FINISHED — at rest
-// in one of the closed terminal states, never to move again through the guarded
-// Finish path. It backs both halves of Finish's guard: the target must be
-// terminal, and a mission already terminal is immutable. abandoned is included
-// because it is an end-state too, so an operator's abandon cannot later be
-// overwritten by a unit's Finish (the operator's manual PATCH/Update remains the
-// one deliberately-unguarded override — see Finish).
+// isTerminalStatus reports whether a mission in this state is finished — at
+// rest in a closed terminal state, never to move again through Finish.
 func isTerminalStatus(status Status) bool {
 	switch status {
 	case StatusLanded, StatusDerailed, StatusStuck, StatusAbandoned:
@@ -247,59 +134,24 @@ func isTerminalStatus(status Status) bool {
 // stored at missionKVPrefix+ID and the set is listed by this prefix.
 const missionKVPrefix = "fleet:mission:"
 
-// missionReportKVPrefix namespaces mission reports; each report is stored at
-// missionReportKVPrefix+missionID+":"+reportID, and a mission's reports are
-// listed by scanning the prefix missionReportKVPrefix+missionID+":".
-//
-// It is deliberately a SIBLING of missionKVPrefix, not a child of it (i.e.
-// NOT "fleet:mission:report:") — missionKVPrefix ("fleet:mission:") is used
-// as a raw LIKE prefix by List() to scan every mission, and nesting reports
-// under it would make every report key match that same scan, corrupting the
-// mission list with report rows decoded as missions. "fleet:mission_report:"
-// does not share "fleet:mission:" as a string prefix (the byte after
-// "fleet:mission" differs: '_' vs ':'), so the two prefix scans can never
-// collide.
+// missionReportKVPrefix namespaces mission reports, stored at
+// missionReportKVPrefix+missionID+":"+reportID. It is deliberately a sibling
+// of missionKVPrefix rather than a child of it: nesting reports under
+// "fleet:mission:" would make List()'s prefix scan match report rows too.
 const missionReportKVPrefix = "fleet:mission_report:"
 
-// Mission is the headless interaction model's durable record: a one-line
-// intent fired at a declared agent, bound to exactly one session and one
-// instance, and bounded by an envelope — a named HITL policy — that governs
-// what the unit may do while unattended. It may outlive its session and
-// instance and remains listed while open.
+// Mission is the durable record: a one-line intent fired at a declared
+// agent, bound to exactly one session and one instance, bounded by an
+// envelope (a named HITL policy). It may outlive its session/instance and
+// stays listed while open.
 //
-// LastHeartbeat and LastError are liveness facts, not status: a mission stays
-// StatusOpen for its whole run, and these two fields are how a caller tells a
-// unit that is quietly working apart from one that has gone dark or is
-// erroring, without attaching to its session. Neither is required on create;
-// both start zero (LastHeartbeat nil, LastError "") until Heartbeat is
-// called.
-//
-// ParentSessionID is the SUPERVISION EDGE: the upstream session that FIRED this
-// mission, which is not the same thing as the session it spawned.
-// SessionID/InstanceID name the unit the mission created; ParentSessionID names
-// who created it. A mission fired from a chat session (the `/mission` slash
-// command) is supervised by THAT session — the fired unit's reports belong to
-// the caller who can act on them, not to an operator inbox nobody is reading. It
-// is empty when an operator fired the mission directly, which is also the "route
-// reports to the operator inbox" case. This layer only RECORDS the edge;
-// runtime/reportrouter consumes it (delivering reports to the parent session or
-// the operator inbox).
-//
-// It is the same missing edge C2 surfaced from the other side (an approval row
-// that cannot name who is asking): one absent relationship, two symptoms.
-//
-// Plan is the mission's living plan (see Plan and SetPlan) — the reviewable
-// record a resident planner owns, never a schedule the runtime executes. A
-// mission that was never planned carries the zero Plan (revision 0, no entries),
-// which is also exactly what a legacy row written before this field existed
-// decodes to. PlanRevisions is the bounded ring of past revision summaries (see
-// PlanRevisionSummary and SetPlan) — the durable "+2/−1 — why" history the inbox
-// feed skims; it is additive and omitempty, so a legacy row (or a mission never
-// planned) decodes to a nil ring exactly as before. StatusReason is the one line Finish attaches to a terminal
-// transition — WHY a mission derailed or got stuck — kept as a durable fact so
-// the reason survives the fire-and-forget status_changed event that also carries
-// it. It is empty for a running mission and (by the register below) for one that
-// landed cleanly.
+// LastHeartbeat/LastError are liveness facts, not status: a mission stays
+// StatusOpen for its whole run: see Heartbeat. ParentSessionID is the
+// supervision edge — the upstream session that fired this mission, empty
+// when an operator fired it directly; this layer only records the edge,
+// reportrouter consumes it. Plan/PlanRevisions default to their zero value
+// for a never-planned or legacy mission. StatusReason is the one line Finish
+// attaches to a terminal transition.
 type Mission struct {
 	ID              string `json:"id"`
 	Intent          string `json:"intent"`
@@ -311,9 +163,8 @@ type Mission struct {
 	Status          Status `json:"status"`
 	StatusReason    string `json:"statusReason,omitempty"`
 	Plan            Plan   `json:"plan"`
-	// PlanRevisions is the last-N revision summaries, oldest-first (newest is the
-	// final element). Bounded by maxPlanRevisions; nil on a never-planned or legacy
-	// mission. Surfaced additively on the mission GET as `planRevisions`.
+	// PlanRevisions is the last-N revision summaries, oldest-first. Bounded by
+	// maxPlanRevisions; nil on a never-planned or legacy mission.
 	PlanRevisions []PlanRevisionSummary `json:"planRevisions,omitempty"`
 	LastHeartbeat *time.Time            `json:"lastHeartbeat,omitempty"`
 	LastError     string                `json:"lastError,omitempty"`
@@ -321,9 +172,9 @@ type Mission struct {
 	UpdatedAt     time.Time             `json:"updatedAt"`
 }
 
-// ReportKind is the closed, small set of things a mission report may be. See
-// the package doc's "Reports" section for why the set is deliberately closed
-// rather than free text.
+// ReportKind is the closed, small set of things a mission report may be
+// (progress, finding, blocker, result) rather than free text — a short enum
+// hints an unattended agent what is worth reporting at all.
 type ReportKind string
 
 const (
@@ -333,18 +184,8 @@ const (
 	ReportKindResult   ReportKind = "result"
 )
 
-// Report is a single dispatch from a unit on a mission, filed under a Kind
-// that hints how much it matters. Refs is by reference only (file paths,
-// URLs, etc.) — a report never carries artifact content.
-//
-// Handover is the OPTIONAL typed hand-off (see Handover). It is a pointer so
-// its ABSENCE is a first-class, wire-visible fact: a nil Handover is a legacy
-// report (or any report the unit chose not to attach a hand-off to), and such a
-// report round-trips through JSON exactly as it did before this field existed —
-// the field is purely additive and every pre-handover row decodes to nil. It is
-// meaningful mostly on a `result` report that a NEXT mission will build on; the
-// Kind set stays unchanged, because the hand-off is extra STRUCTURE on a report,
-// not a new KIND of report.
+// Report is a single dispatch from a unit on a mission. Refs is by
+// reference only (paths, URLs) — a report never carries artifact content.
 type Report struct {
 	ID        string     `json:"id"`
 	MissionID string     `json:"missionId"`
@@ -356,26 +197,15 @@ type Report struct {
 	CreatedAt time.Time  `json:"createdAt"`
 }
 
-// Handover is the structured hand-off a mission attaches to a report so the NEXT
-// mission builds on real context instead of prose (the blueprint's ontology: a
-// landed mission "hands real context to the next one"; the old summarizer's typed
-// `{outcome, artifacts, handover_for_next, caveats}` shape adapted to a report —
-// Summary already lives on the Report, so the hand-off carries the rest). Every
-// field is optional: a report may fill all, some, or none, and a report with an
-// empty Handover is indistinguishable from one with none (both round-trip as a
-// nil pointer once the empties are dropped — see AddReport's normalization).
+// Handover is the structured hand-off a mission attaches to a report so the
+// next mission builds on real context. Every field is optional; an
+// all-empty Handover is normalized to nil (see AddReport).
 //
-//   - Outcome: the one-line verdict of what this mission actually achieved, the
-//     hand-off's headline ("ported the hot loop; benchmarks pending").
-//   - Artifacts: the concrete deliverables this mission produced that the next
-//     one consumes — paths or URLs, by reference only, never inline content (the
-//     same by-reference discipline Report.Refs holds). Distinct from Refs, which
-//     are supporting pointers for THIS report; Artifacts are what the next mission
-//     is handed to work FROM.
-//   - HandoverForNext: the free-text brief to the next mission — what to pick up,
-//     what is already done, what to watch for. The substance the model owns.
-//   - Caveats: the known limitations, unverified assumptions, or risks the next
-//     mission must not take for granted — the honest small print on the hand-off.
+//   - Outcome: one-line verdict of what this mission achieved.
+//   - Artifacts: deliverables the next mission consumes, by reference only —
+//     distinct from Refs, which support this report.
+//   - HandoverForNext: free-text brief — what to pick up, what to watch for.
+//   - Caveats: known limitations or risks the next mission must not assume away.
 type Handover struct {
 	Outcome         string   `json:"outcome,omitempty"`
 	Artifacts       []string `json:"artifacts,omitempty"`
@@ -383,10 +213,8 @@ type Handover struct {
 	Caveats         string   `json:"caveats,omitempty"`
 }
 
-// IsEmpty reports whether a hand-off carries no substance — every field blank.
-// AddReport uses it to drop an all-empty Handover to nil, so "a hand-off with
-// nothing in it" and "no hand-off" are the same durable fact rather than two
-// shapes a reader must tell apart.
+// IsEmpty reports whether a hand-off carries no substance. AddReport uses it
+// to normalize an all-empty Handover to nil.
 func (h *Handover) IsEmpty() bool {
 	if h == nil {
 		return true
@@ -404,15 +232,9 @@ func (h *Handover) IsEmpty() bool {
 	return true
 }
 
-// PlanEntryStatus is a plan entry's lifecycle state. Its VALUES are contracted
-// to be byte-for-byte libacp.PlanEntryStatus (pending|in_progress|completed):
-// the plan record is projected to ACP as full-snapshot plan updates (the next
-// slice), and value-parity turns that projection into a cast rather than a
-// translation table nobody remembers to keep in sync. The type is kept DISTINCT
-// on purpose — missionservice owns a durable record and must not import a
-// transport package to describe it (the same reason ReportKind is local rather
-// than borrowed) — but the strings are a promise the projection slice leans on,
-// and a conformance test there pins them.
+// PlanEntryStatus is a plan entry's lifecycle state. Its values are
+// contracted to be byte-for-byte libacp.PlanEntryStatus (a conformance test
+// there pins them), since a plan record projects to ACP as a full snapshot.
 type PlanEntryStatus string
 
 const (
@@ -421,8 +243,7 @@ const (
 	PlanEntryCompleted  PlanEntryStatus = "completed"
 )
 
-// PlanEntryPriority mirrors libacp.PlanEntryPriority the same way, and for the
-// same reason.
+// PlanEntryPriority mirrors libacp.PlanEntryPriority the same way.
 type PlanEntryPriority string
 
 const (
@@ -431,13 +252,9 @@ const (
 	PlanEntryPriorityLow    PlanEntryPriority = "low"
 )
 
-// PlanEntry is one line of a mission's plan: a short piece of work with a
-// status and a priority. ID is the entry's stable identity ACROSS revisions —
-// it is what lets a full-snapshot replace (see SetPlan) be diffed against the
-// prior snapshot without matching on content, and it is what the completed-work
-// immutability guard keys on. SetPlan assigns an id to any entry that arrives
-// without one, so a planner may carry an entry forward by echoing its id and
-// introduce a new one simply by omitting it.
+// PlanEntry is one line of a mission's plan. ID is the entry's stable
+// identity across revisions — what a full-snapshot replace (SetPlan) diffs
+// against, and what the completed-work immutability guard keys on.
 type PlanEntry struct {
 	ID       string            `json:"id"`
 	Content  string            `json:"content"`
@@ -445,18 +262,13 @@ type PlanEntry struct {
 	Priority PlanEntryPriority `json:"priority"`
 }
 
-// Plan is a mission's LIVING plan — an ordered list of entries owned by exactly
-// one planner, held here as the reviewable record (blueprint's design law: the
-// runtime stores, validates, and publishes the plan; it never compiles it into
-// control flow). It is never a schedule and nothing here reads it back to decide
-// what runs next.
+// Plan is a mission's living plan: an ordered list of entries owned by one
+// planner, held as a reviewable record, never a schedule the runtime reads
+// back to decide what runs next.
 //
-// Revision counts successful SetPlan calls: 0 is "never planned" (the zero Plan
-// every pre-plan mission and every legacy KV row decodes to), 1 is the first
-// snapshot, and it climbs by one per replace. Explanation is the LATEST
-// revision's rationale (blueprint pattern 1, Codex's explanation-per-revision) —
-// the one line the "plan revised" inbox entry carries; only the current
-// revision's is retained, since the record keeps only the current snapshot.
+// Revision counts successful SetPlan calls: 0 is "never planned". Explanation
+// is the latest revision's rationale only; the record keeps just the current
+// snapshot.
 type Plan struct {
 	Entries     []PlanEntry `json:"entries"`
 	Revision    int         `json:"revision"`
@@ -471,69 +283,50 @@ type Service interface {
 	Get(ctx context.Context, id string) (*Mission, error)
 
 	// GetByInstance returns the mission bound to instanceID, or
-	// libdb.ErrNotFound when no mission claims it (a fleet unit brought up
-	// outside a dispatch — an ACP chat session's external agent, for
-	// instance — has none, and that is a normal answer, not a failure).
-	//
-	// It is the lookup the unattended-permission path needs: the kernel knows
-	// only which INSTANCE raised a request, while the envelope that governs it
-	// lives on the MISSION. See the implementation for why this scans rather
-	// than maintaining a secondary index, and what it does with a duplicate
-	// claim.
+	// libdb.ErrNotFound when no mission claims it (a normal answer for a
+	// fleet unit brought up outside a dispatch).
 	GetByInstance(ctx context.Context, instanceID string) (*Mission, error)
 
 	List(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Mission, error)
 	Update(ctx context.Context, m *Mission) error
 	Delete(ctx context.Context, id string) error
 
-	// Bind attaches sessionID and/or instanceID to mission id — the
-	// one-mission, one-unit invariant mission mode requires. Re-binding the
+	// Bind attaches sessionID and/or instanceID to mission id. Re-binding the
 	// id a mission already carries is an idempotent no-op; binding a
-	// DIFFERENT id over one already set is a conflict
-	// (errdefs.ErrConflict) rather than an append. An unknown mission
-	// id surfaces as libdb.ErrNotFound.
+	// different id over one already set is errdefs.ErrConflict. An unknown
+	// mission id surfaces as libdb.ErrNotFound.
 	Bind(ctx context.Context, id string, sessionID, instanceID string) (*Mission, error)
 
-	// Heartbeat records that mission id's unit is still alive: it stamps
-	// LastHeartbeat to now and sets LastError to lastErr (empty clears any
-	// previously recorded error), then bumps UpdatedAt and persists. An
-	// unknown mission id surfaces as libdb.ErrNotFound. Nothing calls this
-	// yet — the caller arrives with the mission-tools slice.
+	// Heartbeat stamps LastHeartbeat to now and sets LastError to lastErr
+	// (empty clears it), then persists. An unknown mission id surfaces as
+	// libdb.ErrNotFound.
 	Heartbeat(ctx context.Context, id string, lastErr string) (*Mission, error)
 
-	// Finish moves mission id into a terminal state (landed | derailed | stuck
-	// | abandoned), records reason as the durable StatusReason, and publishes a
-	// StatusChangedEvent. It is GUARDED — the one transition mission mode makes
-	// hard truth: only a non-terminal mission may be finished, a terminal status
-	// is the only permitted target, and a mission already terminal is immutable.
-	// A second Finish naming the SAME terminal status is an idempotent no-op
-	// (safe to retry); a DIFFERENT terminal status over an already-finished
-	// mission is errdefs.ErrConflict (a landed mission does not later
-	// become derailed). An unknown mission id surfaces as libdb.ErrNotFound.
+	// Finish moves mission id into a terminal state, records reason as
+	// StatusReason, and publishes a StatusChangedEvent. Guarded: only a
+	// non-terminal mission may be finished, only a terminal status is a
+	// valid target. A second Finish naming the same terminal status is an
+	// idempotent no-op; a different terminal status over an already-finished
+	// mission is errdefs.ErrConflict. An unknown mission id surfaces as
+	// libdb.ErrNotFound.
 	Finish(ctx context.Context, id string, status Status, reason string) (*Mission, error)
 
-	// SetPlan replaces mission id's plan with a FULL SNAPSHOT (blueprint pattern
-	// 4: each call replaces the whole list, deletion is omission from the
-	// snapshot), bumps the revision counter, records explanation as the new
-	// revision's rationale, and publishes a PlanRevisedEvent. Entries are
-	// validated for SHAPE (count/size caps, empty/garbage rejection, known
-	// status/priority) but NOT for planning DISCIPLINE (no "exactly one
-	// in_progress" rule — that is the planner prompt's job, blueprint pattern 3).
-	// The one audit-safety guard it does enforce: a snapshot may not rewrite the
-	// content of an entry that was already completed in the prior revision
-	// (matched by id) — completed work is immutable, corrections are appended as
-	// new entries (blueprint pattern 5). An unknown mission id surfaces as
+	// SetPlan replaces mission id's plan with a full snapshot, bumps the
+	// revision counter, and publishes a PlanRevisedEvent. Entries are
+	// validated for shape, not planning discipline. The one audit-safety
+	// guard enforced: a snapshot may not rewrite the content of an entry
+	// already completed in the prior revision (matched by id) — corrections
+	// are appended as new entries. An unknown mission id surfaces as
 	// libdb.ErrNotFound.
 	SetPlan(ctx context.Context, id string, entries []PlanEntry, explanation string) (*Mission, error)
 
-	// AddReport validates report (Kind, Summary), assigns an id and
-	// CreatedAt when absent, binds it to missionID, and persists it.
-	// missionID must name an existing mission — an unknown one surfaces as
-	// libdb.ErrNotFound rather than a silent insert.
+	// AddReport validates report, assigns an id and CreatedAt when absent,
+	// binds it to missionID, and persists it. missionID must name an
+	// existing mission — an unknown one surfaces as libdb.ErrNotFound.
 	AddReport(ctx context.Context, missionID string, report *Report) error
 
 	// ListReports returns missionID's reports newest-first. The slice is
-	// always non-nil, so a mission with no reports yet renders as [].
+	// always non-nil.
 	ListReports(ctx context.Context, missionID string, limit int) ([]*Report, error)
 }
 
@@ -543,25 +336,17 @@ type service struct {
 	tracker libtracker.ActivityTracker
 }
 
-// Option configures a mission service at construction. It exists so the
-// optional dependencies this service has (the event publisher, the tracker) can
-// be wired without changing New's signature for the many callers that pass only
-// a db.
+// Option configures a mission service at construction.
 type Option func(*service)
 
-// WithEventPublisher wires the bus AddReport publishes ReportAddedEvent on. When
-// unset (the default) AddReport stores the report and publishes nothing — the
-// report is still the durable fact; only its live routing nudge is skipped — so
-// a missionservice built without a bus behaves exactly as before this seam
-// existed.
+// WithEventPublisher wires the bus AddReport publishes ReportAddedEvent on.
+// Unset, AddReport stores the report and publishes nothing.
 func WithEventPublisher(pub EventPublisher) Option {
 	return func(s *service) { s.pub = pub }
 }
 
-// WithTracker wires the ActivityTracker the best-effort publish paths report to
-// (see publishReportAdded). Unset — or set to nil — the service tracks nothing:
-// instrumentation is an observer here, never a dependency a mission needs to be
-// stored.
+// WithTracker wires the ActivityTracker the best-effort publish paths report
+// to. Unset or nil, the service tracks nothing.
 func WithTracker(tracker libtracker.ActivityTracker) Option {
 	return func(s *service) {
 		if tracker != nil {
@@ -586,11 +371,9 @@ func (s *service) store() runtimetypes.Store {
 	return runtimetypes.New(s.db.WithoutTransaction())
 }
 
-// Create validates m (intent, envelope, status), assigns an id when absent,
-// forces the status to open, stamps timestamps, and persists it. A mission
-// with no HITLPolicyName is rejected: the envelope is what bounds an
-// unattended unit, so a mission without one is a mission with no bounds,
-// which mission mode must not permit.
+// Create validates m, assigns an id when absent, forces the status to open,
+// stamps timestamps, and persists it. A mission with no HITLPolicyName is
+// rejected: the envelope is what bounds an unattended unit.
 func (s *service) Create(ctx context.Context, m *Mission) error {
 	if m == nil {
 		return fmt.Errorf("mission is required")
@@ -619,45 +402,17 @@ func (s *service) Get(ctx context.Context, id string) (*Mission, error) {
 	return &m, nil
 }
 
-// scanPageSize bounds one page of the mission prefix scan GetByInstance walks.
-// Missions are small records and the scan is off the hot path (once per
-// unattended permission request, not per token), so the page exists to keep one
-// query's result set bounded rather than to make the walk fast.
+// scanPageSize bounds one page of the mission prefix scan GetByInstance
+// walks. The scan is off the hot path (once per unattended permission
+// request), so this bounds one query's result set rather than makes it fast.
 const scanPageSize = 200
 
-// GetByInstance implements Service.GetByInstance by SCANNING the mission
-// records, newest-first, and returning the first whose InstanceID matches.
-//
-// # Why a scan and not a secondary key
-//
-// The alternative is a second KV entry (instance id -> mission id) written at
-// Bind time. It would be O(1) instead of O(n), and it would be a SECOND source
-// of truth for a fact the mission record already owns — one that can be written
-// and then not written (a Bind that half-succeeds), can outlive the mission it
-// points at, and would need its own repair path when the two disagree. That is
-// the shape of defect this subsystem already produced once (an index consumed
-// by a second slice before anything used it end to end), and the blueprint's
-// standing invariant is "no second mechanism".
-//
-// The cost is bounded by what n actually is: missions are dispatches, one per
-// unit of work an operator or an agent fired, on one workstation. A scan of a
-// few hundred small JSON records, performed once per unattended permission
-// request, is not a cost worth buying an index-consistency problem to avoid. If
-// n ever grows past that, the fix is a real indexed column on a real table, not
-// a hand-maintained KV pointer.
-//
-// # Two missions claiming one instance
-//
-// Bind refuses to move a mission from one instance to another, so a mission's
-// claim never changes once made — but nothing makes the claim EXCLUSIVE across
-// missions, and Dispatch creates a fresh instance per mission, so a duplicate
-// can only arise from a hand-written Bind against an already-claimed unit. The
-// scan resolves it deterministically rather than pretending it cannot happen:
-// the prefix scan is newest-first and the FIRST match wins, i.e. the most
-// recently created mission that claims the unit. That is the answer that
-// matches what a duplicate claim means in practice ("this unit was re-purposed
-// for newer work"), and it is stable — the same call returns the same mission
-// every time, so an ask's envelope cannot flip between two evaluations.
+// GetByInstance scans mission records newest-first and returns the first
+// whose InstanceID matches. A scan, not a secondary index, because an index
+// would be a second source of truth for a fact the mission record already
+// owns; the cost is bounded by n (missions are dispatches, one per unit of
+// work). If two missions ever claim the same instance (only possible via a
+// hand-written Bind), the newest match wins, deterministically.
 func (s *service) GetByInstance(ctx context.Context, instanceID string) (*Mission, error) {
 	if instanceID == "" {
 		return nil, fmt.Errorf("instanceId is required")
@@ -676,10 +431,9 @@ func (s *service) GetByInstance(ctx context.Context, instanceID string) (*Missio
 		if len(batch) < scanPageSize || next == nil {
 			return nil, libdb.ErrNotFound
 		}
-		// The strictly-decreasing-cursor guard defends against an
-		// identical-timestamp storm looping forever, at the cost of truncating
-		// such a tie — the same limitation every other prefix-scan pager in this
-		// codebase carries.
+		// Strictly-decreasing-cursor guard: defends against an
+		// identical-timestamp storm looping forever, at the cost of
+		// truncating such a tie.
 		if cursor != nil && !next.Before(*cursor) {
 			return nil, libdb.ErrNotFound
 		}
@@ -687,8 +441,8 @@ func (s *service) GetByInstance(ctx context.Context, instanceID string) (*Missio
 	}
 }
 
-// List returns missions newest-first via the store's prefix scan. The slice is
-// always non-nil so an empty fleet renders as [].
+// List returns missions newest-first via the store's prefix scan. The slice
+// is always non-nil.
 func (s *service) List(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Mission, error) {
 	if limit <= 0 {
 		limit = 100
@@ -697,12 +451,11 @@ func (s *service) List(ctx context.Context, createdAtCursor *time.Time, limit in
 	return missions, err
 }
 
-// listPage is List's implementation plus the cursor for the NEXT page: the
-// STORE-side created_at of the oldest row it returned. Paging on that rather
-// than on Mission.CreatedAt matters — the two are close but not equal (the
-// mission stamps its own CreatedAt just before the row is written), and feeding
-// the record's timestamp back into a scan ordered by the row's would silently
-// skip every mission written in the gap between them.
+// listPage is List's implementation plus the cursor for the next page: the
+// store-side created_at of the oldest row returned, which is not quite
+// Mission.CreatedAt (the mission stamps its own just before the write) —
+// paging on the record's own timestamp would silently skip rows written in
+// that gap.
 func (s *service) listPage(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Mission, *time.Time, error) {
 	kvs, err := s.store().ListKVPrefix(ctx, missionKVPrefix, createdAtCursor, limit)
 	if err != nil {
@@ -724,9 +477,8 @@ func (s *service) listPage(ctx context.Context, createdAtCursor *time.Time, limi
 	return missions, next, nil
 }
 
-// Update validates m and persists intent/status/envelope/reference changes to
-// an existing mission. An unknown id surfaces as libdb.ErrNotFound. The caller
-// owns m's CreatedAt (typically read via Get); UpdatedAt is restamped here.
+// Update validates m and persists changes to an existing mission. An
+// unknown id surfaces as libdb.ErrNotFound. The caller owns m's CreatedAt.
 func (s *service) Update(ctx context.Context, m *Mission) error {
 	if m == nil {
 		return fmt.Errorf("mission is required")
@@ -748,14 +500,11 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	return s.store().DeleteKV(ctx, missionKVPrefix+id)
 }
 
-// Bind attaches sessionID and/or instanceID to mission id. Mission mode binds
-// exactly one session and one instance per mission, so binding is not
-// additive: setting an id the mission does not yet carry succeeds,
-// re-setting the id it already carries is an idempotent no-op, and setting a
-// DIFFERENT id over one already bound is a conflict — a mission does not
-// switch which unit it names mid-flight; a caller that wants a different unit
-// dispatches a new mission instead of rebinding this one. An unknown mission
-// id surfaces as libdb.ErrNotFound.
+// Bind attaches sessionID and/or instanceID to mission id. Binding is not
+// additive: setting an id the mission doesn't yet carry succeeds, re-setting
+// the same id is an idempotent no-op, and setting a different id over one
+// already bound is a conflict — a caller wanting a different unit dispatches
+// a new mission instead. An unknown mission id surfaces as libdb.ErrNotFound.
 func (s *service) Bind(ctx context.Context, id string, sessionID, instanceID string) (*Mission, error) {
 	if sessionID == "" && instanceID == "" {
 		return nil, fmt.Errorf("bind requires a sessionId or instanceId")
@@ -799,11 +548,10 @@ func (s *service) Bind(ctx context.Context, id string, sessionID, instanceID str
 	return m, nil
 }
 
-// Heartbeat records that mission id's unit is still alive: it stamps
-// LastHeartbeat to now, sets LastError to lastErr (empty clears it), bumps
-// UpdatedAt, and persists. See the package doc's "Liveness" section for why
-// this has to be an explicit, agent-reported fact rather than something a
-// human infers. An unknown mission id surfaces as libdb.ErrNotFound.
+// Heartbeat stamps LastHeartbeat to now, sets LastError to lastErr (empty
+// clears it), and persists — an explicit, agent-reported liveness fact since
+// nobody is watching an unattended mission's transcript. An unknown mission
+// id surfaces as libdb.ErrNotFound.
 func (s *service) Heartbeat(ctx context.Context, id string, lastErr string) (*Mission, error) {
 	m, err := s.Get(ctx, id)
 	if err != nil {
@@ -819,9 +567,9 @@ func (s *service) Heartbeat(ctx context.Context, id string, lastErr string) (*Mi
 	return m, nil
 }
 
-// put marshals m and writes it to the KV store. When mustExist is true it uses
-// UpdateKV, whose zero-rows-affected result surfaces as libdb.ErrNotFound so an
-// update to a missing mission is a not-found rather than a silent insert.
+// put marshals m and writes it to the KV store. When mustExist is true it
+// uses UpdateKV, whose zero-rows-affected result surfaces as
+// libdb.ErrNotFound rather than a silent insert.
 func (s *service) put(ctx context.Context, m *Mission, mustExist bool) error {
 	raw, err := json.Marshal(m)
 	if err != nil {
@@ -833,13 +581,10 @@ func (s *service) put(ctx context.Context, m *Mission, mustExist bool) error {
 	return s.store().SetKV(ctx, missionKVPrefix+m.ID, raw)
 }
 
-// AddReport validates report (Kind, Summary), assigns an id and CreatedAt
-// when absent, binds it to missionID — overriding whatever MissionID the
-// caller supplied, since the argument is authoritative — and persists it.
-// missionID is checked against the mission store FIRST, so posting a report
-// against an unknown mission surfaces as libdb.ErrNotFound rather than a
-// silent insert (the report KV namespace carries no foreign key, so nothing
-// else would catch this).
+// AddReport validates report, assigns an id and CreatedAt when absent, binds
+// it to missionID (overriding whatever MissionID the caller supplied), and
+// persists it. missionID is checked against the mission store first, so
+// posting against an unknown mission is libdb.ErrNotFound, not a silent insert.
 func (s *service) AddReport(ctx context.Context, missionID string, report *Report) error {
 	if missionID == "" {
 		return fmt.Errorf("missionId is required")
@@ -847,17 +592,14 @@ func (s *service) AddReport(ctx context.Context, missionID string, report *Repor
 	if report == nil {
 		return fmt.Errorf("report is required")
 	}
-	// Fetch (not just existence-check) the mission: it both proves the mission
-	// exists — the not-found guard — and hands us the supervision edge the
-	// ReportAddedEvent carries, with no second read.
+	// Fetch (not just check) the mission: proves it exists and hands us the
+	// supervision edge the event carries, with no second read.
 	m, err := s.Get(ctx, missionID)
 	if err != nil {
 		return err
 	}
 	report.MissionID = missionID
-	// Collapse an all-empty hand-off to nil BEFORE validation and storage, so a
-	// report the unit tagged with a blank Handover is stored as a legacy report
-	// rather than an empty-object shape a reader must special-case (see Handover).
+	// Collapse an all-empty hand-off to nil before validation/storage.
 	if report.Handover.IsEmpty() {
 		report.Handover = nil
 	}
@@ -873,9 +615,7 @@ func (s *service) AddReport(ctx context.Context, missionID string, report *Repor
 	if err != nil {
 		return fmt.Errorf("marshal report: %w", err)
 	}
-	// Persist the durable fact FIRST, then nudge (the ADOPTED enqueue-then-nudge
-	// order of fleet-consolidation.md): the report is stored before anyone is
-	// told it exists, so a lost or late nudge never loses the report.
+	// Persist first, then nudge: a lost or late publish never loses the report.
 	if err := s.store().SetKV(ctx, missionReportKVPrefix+missionID+":"+report.ID, raw); err != nil {
 		return err
 	}
@@ -883,13 +623,10 @@ func (s *service) AddReport(ctx context.Context, missionID string, report *Repor
 	return nil
 }
 
-// publishReportAdded announces a stored report on ReportAddedSubject. It is
-// BEST EFFORT and never surfaces to AddReport's caller: the report is already
-// the durable fact (persisted above) and remains readable via ListReports and
-// the operator inbox regardless, so a publish failure must not turn a
-// successfully-recorded report into a failed AddReport. Routing is best-effort
-// delivery layered on top of a durable record — that is the invariant, and this
-// is where it is enforced. A no-op when no publisher was wired.
+// publishReportAdded announces a stored report on ReportAddedSubject.
+// Best-effort and never surfaces to AddReport's caller: the report is
+// already durable, so a publish failure must not fail AddReport. A no-op
+// when no publisher was wired.
 func (s *service) publishReportAdded(ctx context.Context, m *Mission, report *Report) {
 	if s.pub == nil {
 		return
@@ -915,9 +652,8 @@ func (s *service) publishReportAdded(ctx context.Context, m *Mission, report *Re
 	}
 }
 
-// ListReports returns missionID's reports newest-first via the store's prefix
-// scan. The slice is always non-nil so a mission with no reports yet (or an
-// unknown missionID) renders as [].
+// ListReports returns missionID's reports newest-first. The slice is always
+// non-nil.
 func (s *service) ListReports(ctx context.Context, missionID string, limit int) ([]*Report, error) {
 	if missionID == "" {
 		return nil, fmt.Errorf("missionId is required")
@@ -940,27 +676,12 @@ func (s *service) ListReports(ctx context.Context, missionID string, limit int) 
 	return reports, nil
 }
 
-// Finish implements Service.Finish. See the interface doc for the guard; this is
-// where it lives.
-//
-// # Why the guard is here and not in Update
-//
-// Update is the low-level, unguarded write — the operator's manual PATCH goes
-// through it, and an operator correcting a mislabeled mission (even un-finishing
-// one) is a legitimate act, so Update stays able to set any valid status. Finish
-// is the AGENT-REPORTABLE, hard-fact path: a unit (or the runtime on its behalf)
-// declaring "this work is over, and here is why". That path is the one that must
-// not let a finished mission be silently re-terminalized, because the terminal
-// status is what downstream planning treats as settled truth. Keeping the guard
-// on Finish and off Update is a decision, not an oversight: it puts immutability
-// exactly where the audit story needs it (the automated writer) and leaves the
-// human override deliberately unguarded (the manual one).
-//
-// Idempotent-same-status is the other deliberate call: a retried Finish that
-// names the state the mission is already in returns it unchanged rather than
-// erroring, so a caller that lost the response to a network blip can safely
-// repeat the call; a Finish naming a DIFFERENT terminal state is the conflict,
-// because that is a genuine contradiction, not a retry.
+// Finish implements Service.Finish. The guard lives here rather than in
+// Update because Update is the unguarded manual-override path (an operator
+// correcting a mislabeled mission), while Finish is the agent-reportable,
+// hard-fact path a finished mission must not be silently re-terminalized
+// through. A retried Finish naming the same terminal status is a no-op; a
+// different terminal status over an already-finished mission is a conflict.
 func (s *service) Finish(ctx context.Context, id string, status Status, reason string) (*Mission, error) {
 	if !isTerminalStatus(status) {
 		return nil, fmt.Errorf("cannot finish mission %q as %q: a terminal status is required (landed|derailed|stuck|abandoned)", id, status)
@@ -971,9 +692,7 @@ func (s *service) Finish(ctx context.Context, id string, status Status, reason s
 	}
 	if isTerminalStatus(m.Status) {
 		if m.Status == status {
-			// Idempotent no-op: a retry of the same terminal transition. Return
-			// the record untouched — no restamp, no second event — so repetition
-			// is genuinely free of side effects.
+			// Idempotent no-op: return the record untouched, no restamp, no event.
 			return m, nil
 		}
 		return nil, errdefs.Conflict(fmt.Sprintf("mission %q already finished as %q; cannot re-finish as %q", id, m.Status, status))
@@ -982,9 +701,7 @@ func (s *service) Finish(ctx context.Context, id string, status Status, reason s
 	m.Status = status
 	m.StatusReason = strings.TrimSpace(reason)
 	m.UpdatedAt = time.Now().UTC()
-	// Persist the durable fact FIRST, then announce it (the same order AddReport
-	// takes): the terminal status is stored before anyone is told, so a lost or
-	// failed publish never loses the outcome.
+	// Persist first, then announce: a lost or failed publish never loses the outcome.
 	if err := s.put(ctx, m, true); err != nil {
 		return nil, err
 	}
@@ -992,16 +709,12 @@ func (s *service) Finish(ctx context.Context, id string, status Status, reason s
 	return m, nil
 }
 
-// SetPlan implements Service.SetPlan. It normalizes the incoming snapshot (trims
-// content, assigns an id to any entry lacking one), validates its shape, enforces
-// the completed-work immutability guard against the prior revision, then replaces
-// the whole plan and bumps the revision.
-//
-// The normalization is why a fresh copy is built rather than mutating the
-// caller's slice: SetPlan hands the caller back the stored entries (with their
-// assigned ids and the new revision number) so the plan-tools slice can project
-// exactly what was persisted, and doing that must not scribble ids into the
-// caller's own PlanEntry values as a side effect.
+// SetPlan implements Service.SetPlan: normalizes the incoming snapshot
+// (trims content, assigns ids to entries lacking one), validates shape,
+// enforces the completed-work immutability guard against the prior
+// revision, then replaces the plan and bumps the revision. A fresh copy is
+// built rather than mutating the caller's slice, since the stored entries
+// (with assigned ids and new revision) are handed back to the caller.
 func (s *service) SetPlan(ctx context.Context, id string, entries []PlanEntry, explanation string) (*Mission, error) {
 	m, err := s.Get(ctx, id)
 	if err != nil {
@@ -1033,9 +746,8 @@ func (s *service) SetPlan(ctx context.Context, id string, entries []PlanEntry, e
 	now := time.Now().UTC()
 	m.UpdatedAt = now
 
-	// Build the revision summary ONCE and thread it into both the durable ring and
-	// the (best-effort) event, so the persisted history and the published nudge
-	// carry byte-identical numbers by construction — no chance of the two drifting.
+	// Built once and threaded into both the durable ring and the event, so
+	// they carry byte-identical numbers by construction.
 	added, removed := planRevisionDelta(prev, m.Plan.Entries)
 	pending, inProgress, completed := planStatusCounts(m.Plan.Entries)
 	summary := PlanRevisionSummary{
@@ -1048,10 +760,8 @@ func (s *service) SetPlan(ctx context.Context, id string, entries []PlanEntry, e
 		Completed:   completed,
 		At:          now,
 	}
-	// The summary append is part of the DURABLE put, not the best-effort publish:
-	// the history feed must survive an absent bus (see PlanRevisionSummary's
-	// register). It is bounded to the last maxPlanRevisions so a long-lived,
-	// heavily-replanned mission cannot grow its KV row without limit.
+	// Part of the durable put, not the best-effort publish: the history feed
+	// must survive an absent bus.
 	m.PlanRevisions = appendPlanRevision(m.PlanRevisions, summary)
 
 	if err := s.put(ctx, m, true); err != nil {
@@ -1061,16 +771,14 @@ func (s *service) SetPlan(ctx context.Context, id string, entries []PlanEntry, e
 	return m, nil
 }
 
-// maxPlanRevisions bounds the durable revision ring: the last N summaries are
-// kept (N=20, decision (b) of the component roadmap), oldest dropped first. It
-// is deliberately small — the ring is a skim feed, not an audit log — and keeps
-// the mission KV row bounded no matter how many times a plan is revised.
+// maxPlanRevisions bounds the durable revision ring: the last N summaries
+// are kept, oldest dropped first, so the mission KV row stays bounded no
+// matter how often a plan is revised.
 const maxPlanRevisions = 20
 
-// appendPlanRevision appends s to the ring and trims it to the last
-// maxPlanRevisions entries, oldest-first. When trimming, it copies into a fresh
-// slice rather than resliced-in-place, so the returned ring never aliases a
-// larger backing array that would keep dropped summaries reachable.
+// appendPlanRevision appends s to the ring and trims to the last
+// maxPlanRevisions entries, copying into a fresh slice so the result never
+// aliases a larger backing array that would keep dropped summaries reachable.
 func appendPlanRevision(ring []PlanRevisionSummary, s PlanRevisionSummary) []PlanRevisionSummary {
 	ring = append(ring, s)
 	if len(ring) <= maxPlanRevisions {
@@ -1081,11 +789,8 @@ func appendPlanRevision(ring []PlanRevisionSummary, s PlanRevisionSummary) []Pla
 	return trimmed
 }
 
-// publishStatusChanged announces a terminal transition on StatusChangedSubject.
-// BEST EFFORT, in the exact register of publishReportAdded: the terminal status
-// is already the durable fact, so a publish failure must never turn a
-// successfully-finished mission into a failed Finish. A no-op when no publisher
-// was wired.
+// publishStatusChanged announces a terminal transition on
+// StatusChangedSubject. Best-effort, same register as publishReportAdded.
 func (s *service) publishStatusChanged(ctx context.Context, m *Mission, old Status) {
 	if s.pub == nil {
 		return
@@ -1114,11 +819,8 @@ func (s *service) publishStatusChanged(ctx context.Context, m *Mission, old Stat
 }
 
 // publishPlanRevised announces a stored plan snapshot on PlanRevisedSubject.
-// BEST EFFORT, same register as publishReportAdded: the snapshot is already the
-// durable fact (the plan AND its revision summary are persisted before this
-// runs), so a publish failure must never fail SetPlan. A no-op when no publisher
-// was wired. summary is the same value SetPlan already appended to the durable
-// ring, so the event and the stored history carry identical numbers.
+// Best-effort, same register as publishReportAdded; summary is the same
+// value already appended to the durable ring, so event and history match.
 func (s *service) publishPlanRevised(ctx context.Context, m *Mission, summary PlanRevisionSummary) {
 	if s.pub == nil {
 		return
@@ -1151,10 +853,9 @@ func (s *service) publishPlanRevised(ctx context.Context, m *Mission, summary Pl
 	}
 }
 
-// planRevisionDelta reports how many entry ids the new snapshot adds and drops
-// relative to prev — the "+added/−removed" the inbox shows. It is keyed on id,
-// so a status/priority/content edit to an entry that keeps its id is neither an
-// add nor a drop; only genuinely new or genuinely gone entries count.
+// planRevisionDelta reports how many entry ids the new snapshot adds and
+// drops relative to prev, keyed on id — a content/status/priority edit that
+// keeps its id is neither an add nor a drop.
 func planRevisionDelta(prev, next []PlanEntry) (added, removed int) {
 	prevIDs := make(map[string]bool, len(prev))
 	for _, e := range prev {
@@ -1181,10 +882,9 @@ func planRevisionDelta(prev, next []PlanEntry) (added, removed int) {
 	return added, removed
 }
 
-// planStatusCounts tallies a snapshot by entry status, for the progress the
-// board and inbox render. Entries with an unrecognized status cannot occur here
-// (validatePlan rejects them before persistence), so the three known buckets
-// account for every stored entry.
+// planStatusCounts tallies a snapshot by entry status. validatePlan rejects
+// unrecognized statuses before persistence, so the three buckets account for
+// every stored entry.
 func planStatusCounts(entries []PlanEntry) (pending, inProgress, completed int) {
 	for _, e := range entries {
 		switch e.Status {
@@ -1199,14 +899,9 @@ func planStatusCounts(entries []PlanEntry) (pending, inProgress, completed int) 
 	return pending, inProgress, completed
 }
 
-// Plan validation limits, ported from the retired planservice.planner_validate
-// (recovered at 0c28a69^). They are DEFENSIVE, not aesthetic: they exist to keep
-// a single hallucinated or stream-corrupted planner turn from writing a
-// multi-megabyte KV row or pasting a build-tool stream into the plan, not to
-// impose a house style on how a plan should read. Per the blueprint, host-side
-// validation is HARD on shape and SOFT on discipline — hence a cap on count and
-// size and a garbage detector, but no rule about how many steps may be
-// in_progress at once.
+// Plan validation limits are defensive, not aesthetic: they keep one
+// hallucinated or stream-corrupted planner turn from writing an oversized KV
+// row, not impose a house style. Hard on shape, soft on discipline.
 const (
 	maxPlanEntries     = 100
 	maxPlanEntryBytes  = 12000
@@ -1214,13 +909,9 @@ const (
 	planEscapeMinLen   = 400 // …but only past this length, so short escaped strings pass
 )
 
-// validatePlan checks a normalized (trimmed, id-assigned) snapshot for shape:
-// non-empty, within the count cap, and every entry non-empty, within the size
-// cap, not obvious garbage, and carrying a known status and priority. An empty
-// snapshot is rejected outright — a plan with no entries is the degenerate case
-// the old validator called "no steps", and full-snapshot-replace does not need
-// an "erase the plan" path (deletion is omission of individual entries, not a
-// wholesale empty write).
+// validatePlan checks a normalized snapshot for shape: non-empty, within the
+// count cap, and every entry non-empty, within the size cap, not obvious
+// garbage, and carrying a known status and priority.
 func validatePlan(entries []PlanEntry) error {
 	if len(entries) == 0 {
 		return fmt.Errorf("a plan must have at least one entry")
@@ -1249,10 +940,9 @@ func validatePlan(entries []PlanEntry) error {
 	return nil
 }
 
-// planContentLooksCorrupted detects accidental inclusion of framework build
-// streams or similar (a Next.js flight stream, an RSC dump) pasted into a step —
-// ported verbatim in spirit from plannerStepLooksCorrupted: the __next_f marker,
-// or an implausible backslash density past a minimum length.
+// planContentLooksCorrupted detects a framework build stream (a Next.js
+// flight stream, an RSC dump) pasted into a step: the __next_f marker, or an
+// implausible backslash density past a minimum length.
 func planContentLooksCorrupted(s string) bool {
 	lower := strings.ToLower(s)
 	if strings.Contains(lower, "__next_f") || strings.Contains(lower, "self.__next_f") {
@@ -1266,20 +956,11 @@ func planContentLooksCorrupted(s string) bool {
 	return false
 }
 
-// validateCompletedImmutable enforces blueprint pattern 5: a revision may not
-// rewrite the content of work that was already completed. It keys on entry id —
-// for every entry the PRIOR snapshot marked completed, if the NEW snapshot still
-// carries that id its content must be identical.
-//
-// The scope of this check is a deliberate, documented decision. It guards the
-// one thing the audit story cannot tolerate — silently changing what a finished
-// step SAID — and nothing more. It does NOT forbid dropping a completed entry
-// (deletion is omission, pattern 4) and does NOT police status transitions
-// (reopening a completed step is discipline, left soft, pattern 3). A planner
-// that wants to correct completed work appends a NEW entry (a fresh id, which
-// this check ignores); it may not mutate the old one's text in place. That keeps
-// the plan a trustworthy record of what was actually done without turning the
-// runtime into a plan-discipline enforcer.
+// validateCompletedImmutable enforces that a revision may not rewrite the
+// content of work already completed in the prior snapshot (matched by id).
+// It does not forbid dropping a completed entry or police status
+// transitions — only silently changing what a finished step said. A
+// correction is a new entry (fresh id), never a mutation of the old one.
 func validateCompletedImmutable(prev, next []PlanEntry) error {
 	if len(prev) == 0 {
 		return nil
@@ -1358,24 +1039,18 @@ func validateReport(report *Report) error {
 	return validateHandover(report.Handover)
 }
 
-// Hand-off validation limits, in the same DEFENSIVE register as the plan caps
-// above (maxPlanEntries etc.): they exist to keep one hallucinated or
-// stream-corrupted report from writing a multi-megabyte KV row or pasting a build
-// stream into a hand-off field — not to impose a house style on what a good
-// hand-off says. Hard on shape (size/count and the same corruption heuristic the
-// plan uses), silent on substance.
+// Hand-off validation limits, in the same defensive register as the plan
+// caps above: hard on shape, silent on substance.
 const (
 	maxHandoverTextBytes     = 8000 // per free-text field (outcome/handoverForNext/caveats)
 	maxHandoverArtifacts     = 50   // artifacts listed on one hand-off
 	maxHandoverArtifactBytes = 2000 // per artifact reference (a path or URL)
 )
 
-// validateHandover checks a report's OPTIONAL hand-off for shape. A nil hand-off
-// is valid (a legacy report, or one with none) and validates to nothing. Present,
-// each free-text field is capped and run through the plan's stream-leak detector,
-// and the artifact list is capped in count and per-entry length. It is deliberately
-// SILENT on whether a hand-off is well-written — that is the planner prompt's job,
-// exactly as SetPlan is soft on plan discipline.
+// validateHandover checks a report's optional hand-off for shape. A nil
+// hand-off is valid. Present, each free-text field is capped and run through
+// the plan's stream-leak detector; the artifact list is capped in count and
+// per-entry length.
 func validateHandover(h *Handover) error {
 	if h == nil {
 		return nil

@@ -3,20 +3,15 @@ package agentinstance
 import "github.com/contenox/beam/libacp"
 
 // defaultJournalSize bounds how many recent session/update notifications a
-// single session's journal retains for replay to a newly-attached viewer. It is
-// the structured-event equivalent of a terminal's bounded
-// scrollback. A viewer that attaches
-// after this many updates have flowed sees the most recent defaultJournalSize
-// events replayed, not the whole history — the ring drops oldest-first.
+// single session's journal retains for replay to a newly-attached viewer. A
+// viewer attaching after this many updates sees only the most recent
+// defaultJournalSize, oldest dropped first.
 const defaultJournalSize = 512
 
 // journal is a bounded ring of libacp.SessionNotification for one downstream
-// session — the structured-event counterpart to a pty's byte scrollback ring. It is
-// NOT safe for concurrent use on its own; the viewerHub serializes every access
-// under the owning session's lock.
-//
-// append is O(1); snapshot is O(count). Dropping is oldest-first once full, so a
-// long-lived session keeps a fixed-size tail rather than growing without bound.
+// session. Not safe for concurrent use on its own; the viewerHub serializes
+// every access under the owning session's lock. append is O(1); snapshot is
+// O(count).
 type journal struct {
 	buf   []libacp.SessionNotification
 	start int // index of the oldest retained element

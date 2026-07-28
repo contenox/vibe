@@ -10,10 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_RedirectBeamLogsToFile is the M7 contract in one place: after the
-// redirect, a WARN goes to the file and NOT to stderr — beam is about to take
-// that terminal, and a raw wrapped log line printed into the transcript's own
-// scrollback is the defect this exists to remove.
+// TestUnit_RedirectBeamLogsToFile asserts a WARN goes to the file and never to stderr, which beam is about to take over as the screen.
 func TestUnit_RedirectBeamLogsToFile(t *testing.T) {
 	restore := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(restore) })
@@ -21,7 +18,7 @@ func TestUnit_RedirectBeamLogsToFile(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "scratch.db")
 
-	logPath, closeLog, err := redirectBeamLogsToFile(dbPath)
+	logPath, _, closeLog, err := redirectBeamLogsToFile(dbPath)
 	require.NoError(t, err)
 	t.Cleanup(closeLog)
 
@@ -40,16 +37,14 @@ func TestUnit_RedirectBeamLogsToFile(t *testing.T) {
 	require.NotContains(t, body, "beam-test-info", "the level is WARN+: this is a log to open when something looked wrong, not a trace")
 }
 
-// TestUnit_RedirectBeamLogsToFile_AppendsAcrossRuns: the file accumulates, so an
-// operator who quits and relaunches to reproduce something still has the first
-// run's warnings when they finally open it.
+// TestUnit_RedirectBeamLogsToFile_AppendsAcrossRuns asserts the log file accumulates warnings across relaunches rather than truncating.
 func TestUnit_RedirectBeamLogsToFile_AppendsAcrossRuns(t *testing.T) {
 	restore := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(restore) })
 
 	dbPath := filepath.Join(t.TempDir(), "scratch.db")
 	for _, msg := range []string{"first-run", "second-run"} {
-		logPath, closeLog, err := redirectBeamLogsToFile(dbPath)
+		logPath, _, closeLog, err := redirectBeamLogsToFile(dbPath)
 		require.NoError(t, err)
 		slog.Warn(msg)
 		closeLog()
@@ -62,15 +57,24 @@ func TestUnit_RedirectBeamLogsToFile_AppendsAcrossRuns(t *testing.T) {
 	require.Contains(t, string(raw), "second-run")
 }
 
-// TestUnit_RedirectBeamLogsToFile_ReportsAnUnwritableTarget: beam degrades to a
-// warning on stderr rather than refusing to start, so this must return the
-// error instead of installing a handler over a file it could not open.
+// TestUnit_BeamCmd_DefaultsToItsOwnPolicyAndChain pins beam's defaults: its
+// own HITL preset (an attended-session envelope, not the shared acp/default
+// ones) and its own chain (not `contenox acp`'s), each independently
+// overridable via its own env var — editors keep using acp_cmd's defaults.
+func TestUnit_BeamCmd_DefaultsToItsOwnPolicyAndChain(t *testing.T) {
+	require.Equal(t, "hitl-policy-beam.json", beamHITLPolicy)
+	require.Equal(t, "default-beam-chain.json", beamChainFile)
+	require.Equal(t, "CONTENOX_BEAM_CHAIN_PATH", beamChainEnv)
+	require.NotEqual(t, beamChainEnv, "CONTENOX_ACP_CHAIN_PATH", "beam must not share acp_cmd's chain override var")
+}
+
+// TestUnit_RedirectBeamLogsToFile_ReportsAnUnwritableTarget asserts an unwritable log target returns an error rather than installing a broken handler.
 func TestUnit_RedirectBeamLogsToFile_ReportsAnUnwritableTarget(t *testing.T) {
 	restore := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(restore) })
 
 	dbPath := filepath.Join(t.TempDir(), "no-such-dir", "scratch.db")
-	logPath, closeLog, err := redirectBeamLogsToFile(dbPath)
+	logPath, _, closeLog, err := redirectBeamLogsToFile(dbPath)
 	require.Error(t, err)
 	require.Empty(t, logPath)
 	require.Nil(t, closeLog)

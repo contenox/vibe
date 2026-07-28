@@ -99,10 +99,7 @@ func TestUnit_DecodeResponse_TextThinkingToolUse(t *testing.T) {
 	}
 }
 
-// TestUnit_StreamDecoder_NamedEventsAndInputJSONDelta drives the decoder's
-// raw-delta parcels (plus the Finish terminal) through the engine-side
-// assembler: the decoder translates the wire only, assembly happens exactly
-// once in modelrepo.StreamAssembler.
+// The decoder only translates the wire; assembly happens once in modelrepo.StreamAssembler.
 func TestUnit_StreamDecoder_NamedEventsAndInputJSONDelta(t *testing.T) {
 	d := NewStreamDecoder(nil)
 	asm := modelrepo.NewStreamAssembler("anthropic", "test-model")
@@ -157,9 +154,7 @@ func TestUnit_StreamDecoder_NamedEventsAndInputJSONDelta(t *testing.T) {
 	}
 }
 
-// TestUnit_StreamDecoder_ErrorEventSurfaces asserts an in-stream `error` SSE
-// event is a hard decode error — the transport turns it into an Error parcel
-// instead of swallowing it.
+// An in-stream `error` SSE event is a hard decode error, not swallowed.
 func TestUnit_StreamDecoder_ErrorEventSurfaces(t *testing.T) {
 	d := NewStreamDecoder(nil)
 	_, err := d.DecodeLine([]byte(`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`))

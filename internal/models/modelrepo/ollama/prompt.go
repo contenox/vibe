@@ -18,9 +18,7 @@ type OllamaPromptClient struct {
 	tracker         libtracker.ActivityTracker
 }
 
-// Prompt implements LLMPromptExecClient interface
 func (o *OllamaPromptClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, *modelrepo.TokenUsage, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := o.tracker.Start(ctx, "prompt", "ollama", "model", o.modelName)
 	defer end()
 
@@ -90,7 +88,7 @@ func (o *OllamaPromptClient) Prompt(ctx context.Context, systemInstruction strin
 		"done_reason":    finalResponse.DoneReason,
 	})
 	// Same accounting as the chat path: prompt_eval_count already includes
-	// KV-cache-reused tokens, so cache fields stay zero.
+	// KV-cache-reused tokens, so the cache fields stay zero.
 	usage := &modelrepo.TokenUsage{
 		PromptTokens:     finalResponse.Metrics.PromptEvalCount,
 		CompletionTokens: finalResponse.Metrics.EvalCount,

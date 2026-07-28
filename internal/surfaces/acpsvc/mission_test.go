@@ -82,7 +82,6 @@ func TestUnit_HandleMission_DefaultAgentForm(t *testing.T) {
 		t.Fatalf("handleMission: %v", err)
 	}
 
-	// The whole line is the intent; the configured default agent fires.
 	if disp.got.AgentName != "reviewer" {
 		t.Fatalf("agent = %q, want reviewer", disp.got.AgentName)
 	}
@@ -92,7 +91,6 @@ func TestUnit_HandleMission_DefaultAgentForm(t *testing.T) {
 	if disp.got.HITLPolicyName != "hitl-policy-strict.json" {
 		t.Fatalf("policy = %q", disp.got.HITLPolicyName)
 	}
-	// THE supervision edge: the firing session becomes the parent.
 	if disp.got.ParentSessionID != "cnx-parent-1" {
 		t.Fatalf("parent session = %q, want cnx-parent-1", disp.got.ParentSessionID)
 	}
@@ -115,8 +113,6 @@ func TestUnit_HandleMission_NamedAgentForm(t *testing.T) {
 		t.Fatalf("handleMission: %v", err)
 	}
 
-	// First token resolves to a declared agent → named form: agent = token,
-	// intent = the rest.
 	if disp.got.AgentName != "planner" {
 		t.Fatalf("agent = %q, want planner", disp.got.AgentName)
 	}
@@ -135,7 +131,6 @@ func TestUnit_HandleMission_UnknownFirstTokenFallsBackToDefault(t *testing.T) {
 	setMissionConfig(t, db, "default-mission-policy", "envelope.json")
 
 	sess := &sessionEntry{InternalSessionID: "cnx-3"}
-	// "summarise" is not a declared agent, so the whole line is the intent.
 	if _, err := tr.handleMission(context.Background(), sess, "summarise today's commits"); err != nil {
 		t.Fatalf("handleMission: %v", err)
 	}
@@ -147,10 +142,7 @@ func TestUnit_HandleMission_UnknownFirstTokenFallsBackToDefault(t *testing.T) {
 	}
 }
 
-// The in-process editor (Fleet+Agents wired) must confirm that reports arrive
-// LIVE in this session — the ontology's supervision edge closing inside the
-// editor — naming the operator inbox only as the ended-session fallback. It
-// must NOT say reports go to the inbox as the primary home.
+// TestUnit_HandleMission_InProcessConfirmationNamesThisSession pins: the confirmation names this session as where reports arrive live, not the inbox.
 func TestUnit_HandleMission_InProcessConfirmationNamesThisSession(t *testing.T) {
 	disp := &fakeDispatcher{result: fleetservice.DispatchResult{InstanceID: "i", SessionID: "s", MissionID: "m"}}
 	tr, db := newMissionTestTransport(t, disp, &fakeResolver{})
@@ -211,10 +203,7 @@ func TestUnit_HandleMission_DispatchErrorSurfaces(t *testing.T) {
 	}
 }
 
-// parseCommand must recognize "/mission" unconditionally — regardless of
-// whether this transport can dispatch it — so a client that sends it anyway
-// (stale menu state, a remembered command) reaches handleMission's teaching
-// error instead of Prompt silently forwarding "/mission ..." as chat text.
+// TestUnit_MissionCommandIsParsedRegardlessOfCapability pins: parseCommand recognizes "/mission" regardless of dispatch capability.
 func TestUnit_MissionCommandIsParsedRegardlessOfCapability(t *testing.T) {
 	name, args, ok := parseCommand("/mission reviewer do the thing")
 	if !ok || name != "mission" || args != "reviewer do the thing" {
@@ -222,9 +211,7 @@ func TestUnit_MissionCommandIsParsedRegardlessOfCapability(t *testing.T) {
 	}
 }
 
-// With the fleet capability wired (Fleet + Agents both set — a serve-hosted
-// session), /mission must be advertised alongside every other command: ACP is
-// advertise-what-works, and here it does.
+// TestUnit_AcpCommands_WithMissionCapability_IncludesMission pins: /mission is advertised whenever the fleet capability is wired.
 func TestUnit_AcpCommands_WithMissionCapability_IncludesMission(t *testing.T) {
 	tr, _ := newMissionTestTransport(t, &fakeDispatcher{}, &fakeResolver{})
 	cmds := tr.acpCommands()
@@ -232,8 +219,6 @@ func TestUnit_AcpCommands_WithMissionCapability_IncludesMission(t *testing.T) {
 	if !containsCommand(cmds, "mission") {
 		t.Fatalf("mission missing from advertised commands with capability wired: %v", commandNames(cmds))
 	}
-	// Every other command must survive untouched — this is a filter, not a
-	// wholesale swap.
 	for _, c := range allACPCommands() {
 		if !containsCommand(cmds, c.Name) {
 			t.Fatalf("advertised commands missing %q: %v", c.Name, commandNames(cmds))
@@ -244,10 +229,7 @@ func TestUnit_AcpCommands_WithMissionCapability_IncludesMission(t *testing.T) {
 	}
 }
 
-// Without the fleet capability (the standalone `contenox acp` path — Fleet and
-// Agents both nil), /mission must be dropped from the advertised menu: it is
-// the one command that cannot work there, so advertising it would be dishonest
-// per ACP. Every other command must still be offered, unchanged.
+// TestUnit_AcpCommands_WithoutMissionCapability_ExcludesMission pins: /mission is dropped from the menu without the fleet capability; every other command stays.
 func TestUnit_AcpCommands_WithoutMissionCapability_ExcludesMission(t *testing.T) {
 	tr, _ := newMissionTestTransport(t, nil, nil)
 	cmds := tr.acpCommands()
@@ -268,11 +250,7 @@ func TestUnit_AcpCommands_WithoutMissionCapability_ExcludesMission(t *testing.T)
 	}
 }
 
-// handleMission's guard must be keyed to the SAME capability bit as the
-// advertisement filter (hasMissionCapability), not merely Fleet==nil: a stale
-// or manually-typed /mission (with no in-process fleet wired) must hit a clear
-// teaching error — never a panic. The error teaches the IN-PROCESS path (a
-// configured model + the editor's embedded fleet); remote forwarding is gone.
+// TestUnit_HandleMission_TeachingErrorWithoutCapability pins: without hasMissionCapability, /mission teaches the in-process fix, never serve.
 func TestUnit_HandleMission_TeachingErrorWithoutCapability(t *testing.T) {
 	tr, _ := newMissionTestTransport(t, nil, nil)
 	_, err := tr.handleMission(context.Background(), &sessionEntry{}, "do something")
@@ -284,7 +262,6 @@ func TestUnit_HandleMission_TeachingErrorWithoutCapability(t *testing.T) {
 			t.Fatalf("teaching error missing %q: %q", want, err.Error())
 		}
 	}
-	// The refit forbids teaching serve as the center on the in-process path.
 	for _, forbidden := range []string{"Beam", "contenox serve", "serve-hosted"} {
 		if strings.Contains(err.Error(), forbidden) {
 			t.Fatalf("in-process teaching error must not teach serve-as-center, but contains %q: %q", forbidden, err.Error())
@@ -292,9 +269,7 @@ func TestUnit_HandleMission_TeachingErrorWithoutCapability(t *testing.T) {
 	}
 }
 
-// DeliverToContenoxSession is the report router's in-process reach into a live
-// editor session: an unknown firing-session id is the ErrSessionNotLive signal
-// (routes the report to the operator inbox), a bound one resolves and delivers.
+// TestUnit_DeliverToContenoxSession_MapsAndErrors pins: an unknown firing-session id yields ErrSessionNotLive; a bound one delivers.
 func TestUnit_DeliverToContenoxSession_MapsAndErrors(t *testing.T) {
 	tr, _ := newMissionTestTransport(t, nil, nil)
 
@@ -304,8 +279,6 @@ func TestUnit_DeliverToContenoxSession_MapsAndErrors(t *testing.T) {
 		t.Fatalf("unknown contenox id must yield ErrSessionNotLive (the inbox-fallback signal), got %v", err)
 	}
 
-	// A bound session id resolves; conn is nil so sendUpdate is a no-op, but the
-	// mapping path must return nil (delivered) rather than the not-live signal.
 	tr.contenoxToACPID = map[string]libacp.SessionID{"cnx-1": "acp-1"}
 	if err := tr.DeliverToContenoxSession(context.Background(), "cnx-1",
 		libacp.SessionNotification{Update: libacp.NewAgentMessageChunk("hi")}); err != nil {

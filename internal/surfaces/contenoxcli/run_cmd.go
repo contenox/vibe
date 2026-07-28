@@ -167,10 +167,7 @@ Examples:
 		execCtx, stop := signal.NotifyContext(timeoutCtx, syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		// Same swap as execChat's: the chain run becomes a tracked operation
-		// instead of a bare slog.Info gated on --trace. engine.Tracker already
-		// encodes that gate (log-backed under --trace, Noop otherwise), so the
-		// visible behavior is unchanged and the completion record is new.
+		// engine.Tracker is log-backed exactly when --trace is on, Noop otherwise.
 		_, _, chainEnd := engine.Tracker.Start(execCtx, "execute", "chain",
 			"chain", chainPathAbs, "input_type", inputTypeName)
 		defer chainEnd()

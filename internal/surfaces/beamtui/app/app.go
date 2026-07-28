@@ -1,38 +1,9 @@
-// Package app is beam's composition loop: the app-shell (blueprint 4.4) that
-// owns the single select over terminal input, the engine-bridge event stream
-// and one deterministic ticker, folds each event into component state, and
-// commits exactly ONE frame per iteration.
-//
-// It is the only place in beam that holds every component at once, and it
-// holds them the way the blueprint's testability doctrine requires: the
-// components stay pure functions of (state, width) -> frame lines, this
-// package sequences them. Nothing here reads a terminal (term.Engine does),
-// calls a service (enginebridge does), or renders a styled cell (the style
-// package does).
-//
-// # The loop
-//
-// One iteration is: receive one event, apply it, build one frame, commit it.
-// The 130ms ticker is armed ONLY while liveness.Ticking() reports open work,
-// so an idle beam schedules zero timers and burns no CPU — the flat-CPU-at-
-// rest half of the liveness acceptance criteria (blueprint 4.7).
-//
-// # Inline rendering
-//
-// Scrollback is append-only and taken from the transcript at commit time
-// (Transcript.TakeAppends), so settled lines are printed once into the
-// terminal's real history and are resize-immune by construction. Only the
-// bounded Live region — overlay, composer, status bar — repaints, which is
-// why a resize touches two rows and a text box rather than the whole screen.
-//
-// # Keys
-//
-// Every binding is declared once at startup with an Owner and a Help string
-// (keymap.Registry), which is what makes the collision test free enforcement
-// and the help overlay a pure projection of the registrations. Keystrokes the
-// registry does not claim fall through to the composer as raw editing input;
-// that fall-through is the ONLY raw-key path in beam and it lands in exactly
-// one function (editKey).
+// Package app is beam's composition loop: the app-shell that owns the single
+// select over terminal input, the engine-bridge event stream, and one
+// deterministic ticker, folding each event into component state and
+// committing exactly one frame per iteration. Components stay pure functions
+// of (state, width) -> frame lines; this package alone sequences them, reads
+// the terminal, or dispatches to the bridge.
 package app
 
 import (
@@ -58,32 +29,27 @@ import (
 )
 
 const (
-	// tickInterval is the app loop's motion granularity. It matches the
-	// liveness package's own spinnerTick, so one tick is exactly one spinner
-	// frame: no tick renders an identical frame twice, and no spinner frame
-	// is skipped.
+	// tickInterval matches liveness's spinnerTick: one tick is one spinner
+	// frame, never more, never fewer.
 	tickInterval = 130 * time.Millisecond
 
 	// minWidth/minHeight are the smallest terminal beam lays out in. Below
-	// either, the live region is one honest sentence instead of a garbled
-	// composite (blueprint 4.4 requirement 2 — the predecessor's relayout
-	// lesson).
+	// either, the live region renders tooSmallText instead of a garbled
+	// composite.
 	minWidth  = 20
 	minHeight = 6
 
-	// tooSmallText is that sentence.
 	tooSmallText = "terminal too small"
 
-	// ctrlCWindow is how long the "press again to quit" offer stands (D3).
+	// ctrlCWindow is how long the "press again to quit" offer stands.
 	ctrlCWindow = 2 * time.Second
 
 	// bellWindow is the completion-notification rate floor: at most one BEL
 	// per window, however many notifiable facts land inside it.
 	bellWindow = 2 * time.Second
 
-	// shutdownBudget bounds every quit path (blueprint 4.4 requirement 8):
-	// quitting can never hang the terminal, so a wedged bridge is abandoned
-	// rather than waited on.
+	// shutdownBudget bounds every quit path: a wedged bridge is abandoned
+	// rather than waited on, so quitting can never hang the terminal.
 	shutdownBudget = 2 * time.Second
 
 	// overlayRows is the row budget one overlay (palette, picker, help) may
@@ -95,27 +61,19 @@ const (
 	turnActivityID     = "turn"
 	toolActivityPrefix = "tool:"
 
-	// turnLabel and toolLabelFallback are what the status line says while
-	// work is open and the activity carries no better title.
 	turnLabel         = "working"
 	toolLabelFallback = "tool call"
 )
 
-// Bridge is exactly the runtime surface this loop consumes — a deliberately
-// narrow view of *enginebridge.Bridge, so the app-shell can be driven headless
-// by testkit.FakeBridge.
+// Bridge is the narrow view of *enginebridge.Bridge this loop consumes, so
+// the app-shell can be driven headless by testkit.FakeBridge. It carries the
+// session-lifecycle calls because switching sessions is an in-session act
+// initiated by an operator already inside beam. Nothing here creates a
+// bridge, database, or transport — those stay the composition root's.
 //
-// It carries the session-lifecycle calls (blueprint 4.8) because SWITCHING is
-// an in-session act: the composition root resolves the FIRST session, but
-// every one after it is chosen by an operator who is already inside beam,
-// and a surface that cannot start or switch a session is one an operator has
-// to quit and relaunch to leave. Nothing here creates a bridge, a database or
-// a transport — those stay the root's (D51).
-//
-// The compile-time assertion below is the contract: every method has a
-// same-named, same-signature method on the real Bridge. testkit's FakeBridge
-// and EngineBridge interface satisfy it too (asserted in this package's
-// tests, which is where a test-only dependency belongs).
+// Every method here must have a same-named, same-signature method on the
+// real Bridge (see the compile-time assertion below); testkit's FakeBridge
+// satisfies it too.
 type Bridge interface {
 	// Events is the single ordered event outlet; it closes when the bridge
 	// is gone.
@@ -145,9 +103,8 @@ type Bridge interface {
 var _ Bridge = (*enginebridge.Bridge)(nil)
 
 // Deps is everything the loop needs from the composition root. Nothing here
-// is constructed by this package: the terminal, the bridge, the session and
-// the capability snapshot are all resolved by beam_cmd (the named composition
-// root, blueprint D51) and handed over whole.
+// is constructed by this package; it is resolved by the composition root and
+// handed over whole.
 type Deps struct {
 	// Term is the terminal engine. Required.
 	Term term.Engine
@@ -156,9 +113,9 @@ type Deps struct {
 	// Caps is the process-lifetime capability snapshot. Its Mono profile is
 	// what selects every component's ASCII fallback.
 	Caps style.Caps
-	// SessionID is the ACP session this loop STARTS on. Required. beam shows
-	// exactly one session at a time (D13), but not always this one: /new and
-	// the session switcher replace it in place (see session.go).
+	// SessionID is the ACP session this loop starts on. Required. beam shows
+	// exactly one session at a time; /new and the session switcher replace it
+	// in place (see session.go).
 	SessionID libacp.SessionID
 	// Cwd is the workspace directory new sessions are created in and the
 	// roster is filtered by. Empty means "no filter, and let the agent
@@ -172,7 +129,8 @@ type Deps struct {
 	Model, Provider, SessionName string
 	// Editor composes a draft in $EDITOR: it receives the current draft as
 	// the seed and returns the edited text. An error (including the editor's
-	// own empty-abort) leaves the draft untouched. Nil disables Ctrl+E.
+	// own empty-abort) leaves the draft untouched. Nil disables the
+	// Ctrl+X, Ctrl+E handoff.
 	Editor func(seed string) (string, error)
 	// FileSource backs the `@` picker. Nil is legal: the picker then shows
 	// fileaddr's fixed no-root empty state.
@@ -216,16 +174,14 @@ type app struct {
 	card *approval.Card
 	live *liveness.Tracker
 
-	// sessions is the session switcher's own picker. It is a SECOND instance
-	// rather than a mode of pick, because the two overlays differ in the one
-	// way that matters to the keyboard: the file picker is driven BY typing
-	// into the composer, and this one owns the keyboard outright.
+	// sessions is the session switcher's own Picker instance (not a mode of
+	// pick): unlike the file picker, it owns the keyboard outright instead of
+	// being driven by composer typing.
 	sessions *picker.Picker
 
-	// The active session's identity, held here rather than read from Deps
-	// because switching replaces it. sessionName is the ACP id's display
-	// form; sessionTitle is the humane label the server derives (or the
-	// operator set with /rename) and wins whenever it is known.
+	// The active session's identity, held here because switching replaces
+	// it. sessionName is the ACP id's display form; sessionTitle is the
+	// server-derived or /rename label, and wins whenever known.
 	sessionID    libacp.SessionID
 	sessionName  string
 	sessionTitle string
@@ -237,19 +193,18 @@ type app struct {
 	sessionsOpen bool
 	helpOpen     bool
 
-	// pickerQuery is the mention query the file list currently HOLDS, so a
+	// pickerQuery is the mention query the file list currently holds, so a
 	// keystroke that did not change it costs no walk (see refreshPicker).
 	pickerQuery string
 
 	// browser is the `@` overlay's position in the workspace tree, alive only
-	// while the file list is open. It is built FRESH on every open (see
-	// openBrowser), so "@" always starts at the workspace root rather than
-	// wherever the last mention was hunted down.
+	// while the file list is open, and rebuilt on every open (see
+	// openBrowser) so "@" always starts at the workspace root.
 	browser *fileaddr.Browser
 
-	// palDismissed is the command token the operator last closed the palette
-	// over with Esc, and hasPalDismissed distinguishes "dismissed a bare /"
-	// from "never dismissed". See (*app).dismissPalette.
+	// palDismissed is the command token last closed with Esc; hasPalDismissed
+	// distinguishes "dismissed a bare /" from "never dismissed". See
+	// (*app).dismissPalette.
 	palDismissed    string
 	hasPalDismissed bool
 
@@ -262,8 +217,8 @@ type app struct {
 	notices []frame.Line
 
 	// openTools tracks tool-call activities so a turn end can close every one
-	// of them; a tool call whose terminal status never arrives would
-	// otherwise keep the ticker armed forever.
+	// of them; otherwise a tool call whose terminal status never arrives
+	// would keep the ticker armed forever.
 	openTools map[string]bool
 
 	inFlight bool
@@ -271,13 +226,21 @@ type app struct {
 	size     int
 	messages int
 
-	// inbox counts operator-inbox arrivals since launch — see
-	// statusbar.State.Inbox for why that is the honest number and not a
-	// backlog. It only ever grows: beam has no dismiss action.
+	// inbox counts operator-inbox arrivals since launch. It only grows: beam
+	// has no dismiss action.
 	inbox int
 
 	history []string
 	echoSeq int
+
+	// lastPrompt is the text of the most recently submitted TURN prompt —
+	// never a `!` shell line, and never a local slash command, both of which
+	// the composer's own last/hasLast already restores on a send failure.
+	// hasLastPrompt is consumed by exactly one restore (see
+	// restoreCancelledPrompt) or overwritten by the next prompt submission,
+	// so it never outlives the turn it names.
+	lastPrompt    string
+	hasLastPrompt bool
 
 	lastCtrlC time.Time
 	lastBell  time.Time
@@ -330,11 +293,10 @@ func newApp(deps Deps) (*app, error) {
 	return a, nil
 }
 
-// run is the select loop. Its shape is the whole app-shell: one event in, one
-// frame out, and a ticker that exists only while something is happening.
+// run is the select loop: one event in, one frame out, and a ticker that
+// exists only while something is happening.
 func (a *app) run(ctx context.Context) (err error) {
-	// Panic recovery restores the terminal before the panic continues
-	// (blueprint 4.4, "Also owns: panic recovery restoring the terminal").
+	// Panic recovery restores the terminal before the panic continues.
 	// Term.Close is idempotent, so the shutdown path below may also have run.
 	defer func() {
 		if r := recover(); r != nil {
@@ -418,14 +380,9 @@ func (a *app) commit() error {
 	return a.deps.Term.Commit(a.buildFrame())
 }
 
-// ticking reports whether the loop needs its 130ms timer.
-//
-// It is liveness's own answer plus the one piece of motion that is beam's
-// rather than the engine's: the Ctrl+C quit offer, which is a hint with a
-// two-second life and no event to end it. Without this the offer would be
-// painted and then sit there until the operator happened to press something
-// else, which is the exact staleness moving it out of scrollback was meant to
-// cure. Everything else here still schedules zero timers at rest.
+// ticking reports whether the loop needs its 130ms timer: liveness's own
+// answer, plus the Ctrl+C quit offer, which has a two-second life and no
+// event of its own to end it.
 func (a *app) ticking() bool { return a.live.Ticking() || a.ctrlCArmed() }
 
 // onTerminal folds one decoded input event into state.
@@ -449,19 +406,14 @@ func (a *app) onTerminal(ctx context.Context, ev input.Event) {
 }
 
 // shutdown is every quit path's tail: bounded bridge teardown, then the
-// terminal, in that order. Past the budget the wait is abandoned — a hung
-// connection must never hold the terminal in raw mode (blueprint 4.4
-// requirement 8), which is the one thing this budget protects.
-//
-// The bridge's own Close verdict is deliberately not consulted here: it is a
-// statement about whether the composition root may go on to close the bus and
-// the database, which is the composition root's business, not the shell's.
-// Close is idempotent, so the root's own Close call collects that verdict.
+// terminal, in that order. Past shutdownBudget the wait is abandoned so a
+// hung connection can never hold the terminal in raw mode. The bridge's own
+// Close verdict is not consulted here — that governs whether the composition
+// root may close the bus and database, and Close is idempotent, so the
+// root's own call collects it.
 func (a *app) shutdown() {
-	// Blank the live region first: without this the composer/status rows'
-	// last paint (the gold gutter included) survives under the shell's next
-	// prompt. An empty frame takes the painter's shrink path, erasing every
-	// owned row and parking on a clean one.
+	// Blank the live region first so the composer/status rows' last paint
+	// does not survive under the shell's next prompt.
 	_ = a.deps.Term.Commit(frame.Frame{})
 	done := make(chan struct{})
 	go func() {
@@ -475,9 +427,8 @@ func (a *app) shutdown() {
 	_ = a.deps.Term.Close()
 }
 
-// notice queues one client-side line for the next commit's scrollback. It is
-// the shared transient-notice primitive (D48) in its simplest honest form:
-// one line, printed into history, never modal, never timed.
+// notice queues one client-side line for the next commit's scrollback: one
+// line, printed into history, never modal, never timed.
 func (a *app) notice(id frame.StyleID, text string) {
 	a.notices = append(a.notices, frame.Styled(id, text))
 }

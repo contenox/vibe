@@ -15,25 +15,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var chatModel = "smollm2:135m" // "tinyllama:1.1b" // "qwen3:4b" //  "tinyllama:1.1b"
+var chatModel = "smollm2:135m"
 
-// TestSystem_Ollama comprehensively tests the Ollama provider with a shared container setup
+// TestSystem_Ollama exercises the Ollama provider against a live container.
 func TestSystem_Ollama(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping ollama system test: starts a container and pulls multi-GB models")
 	}
-	// Set up shared test environment
 	ctx := t.Context()
 	uri, _, cleanup, err := modelrepo.SetupOllamaLocalInstance(ctx, "latest")
 	require.NoError(t, err)
 	defer cleanup()
 
-	// Create shared Ollama client
 	u, err := url.Parse(uri)
 	require.NoError(t, err)
 	ollamaClient := api.NewClient(u, http.DefaultClient)
 
-	// Pull models needed for testing
 	t.Logf("Pulling chat model: %s", chatModel)
 	err = pullModel(t, ollamaClient, chatModel)
 	require.NoError(t, err, "failed to pull chat model %s", chatModel)
@@ -48,7 +45,6 @@ func TestSystem_Ollama(t *testing.T) {
 	err = waitForModelReady(t, ollamaClient, embedModel)
 	require.NoError(t, err)
 	t.Run("Smoke", func(t *testing.T) {
-		// Create provider with all capabilities enabled
 		caps := modelrepo.CapabilityConfig{
 			ContextLength: 2048,
 			CanChat:       true,
@@ -58,7 +54,6 @@ func TestSystem_Ollama(t *testing.T) {
 		}
 		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
-		// Verify provider metadata
 		assert.Equal(t, chatModel, provider.ModelName())
 		assert.Equal(t, "ollama:"+chatModel, provider.GetID())
 		assert.Equal(t, "ollama", provider.GetType())
@@ -68,27 +63,22 @@ func TestSystem_Ollama(t *testing.T) {
 		assert.True(t, provider.CanPrompt())
 		assert.True(t, provider.CanStream())
 
-		// Verify backend configuration
 		backends := provider.GetBackendIDs()
 		assert.Equal(t, []string{uri}, backends)
 	})
 
 	t.Run("CapabilityEnforcement", func(t *testing.T) {
-		// Create provider with only chat capability
 		caps := modelrepo.CapabilityConfig{
 			CanChat: true,
 		}
 		provider := ollama.NewOllamaProvider(chatModel, []string{uri}, http.DefaultClient, caps, "", nil)
 
-		// Verify chat works
 		_, err := provider.GetChatConnection(ctx, uri)
 		require.NoError(t, err)
 
-		// Verify embedding fails
 		_, err = provider.GetEmbedConnection(ctx, uri)
 		assert.ErrorContains(t, err, "does not support embeddings")
 
-		// Verify prompt fails
 		_, err = provider.GetPromptConnection(ctx, uri)
 		assert.ErrorContains(t, err, "does not support prompting")
 	})
@@ -102,7 +92,6 @@ func TestSystem_Ollama(t *testing.T) {
 		chatClient, err := provider.GetChatConnection(ctx, uri)
 		require.NoError(t, err)
 
-		// Test simple conversation
 		messages := []modelrepo.Message{
 			{Role: "system", Content: "You are a helpful, concise assistant."},
 			{Role: "user", Content: "Hello, how are you?"},
@@ -124,7 +113,6 @@ func TestSystem_Ollama(t *testing.T) {
 		chatClient, err := provider.GetChatConnection(ctx, uri)
 		require.NoError(t, err)
 
-		// Test with options
 		messages := []modelrepo.Message{
 			{Role: "system", Content: "You are a task processor talking to other machines. Answer briefly."},
 			{Role: "user", Content: "What is the capital of Italy?"},
@@ -149,7 +137,6 @@ func TestSystem_Ollama(t *testing.T) {
 		embedClient, err := provider.GetEmbedConnection(ctx, uri)
 		require.NoError(t, err)
 
-		// Test embedding generation
 		text := "The quick brown fox jumps over the lazy dog"
 		embedding, err := embedClient.Embed(ctx, text)
 		require.NoError(t, err)
@@ -167,7 +154,6 @@ func TestSystem_Ollama(t *testing.T) {
 		promptClient, err := provider.GetPromptConnection(ctx, uri)
 		require.NoError(t, err)
 
-		// Test basic prompt
 		system := "You are a Task Engine answering other Machines directly without explanation"
 		prompt := "What is the capital of France?"
 		resp, _, err := promptClient.Prompt(ctx, system, 0.7, prompt)
@@ -186,14 +172,12 @@ func TestSystem_Ollama(t *testing.T) {
 		promptClient, err := provider.GetPromptConnection(ctx, uri)
 		require.NoError(t, err)
 
-		// Test with low temperature for deterministic output
 		resp, _, err := promptClient.Prompt(ctx, "You are a calculator", 0.1, "How much is 2 + 2?")
 		require.NoError(t, err)
 		assert.Contains(t, resp, "4")
 	})
 }
 
-// Helper to pull a model into the Ollama instance
 func pullModel(t *testing.T, client *api.Client, model string) error {
 	t.Helper()
 	req := &api.PullRequest{Name: model}

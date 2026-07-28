@@ -9,13 +9,10 @@ import (
 	"testing"
 )
 
-// TestUnit_egressBridge_SSRFGuard is the FIX 3 regression: a carve-out that
-// resolves to a non-public address is REFUSED when AllowPrivateEgress is off, and
-// permitted only when it is on. It drives resolveAndGuard directly with IP-literal
-// carve-outs (LookupIP returns a literal without network I/O, so every case is
-// deterministic and offline) covering each SSRF class the guard must block —
-// loopback, RFC1918 private, the 169.254.169.254 cloud-metadata link-local
-// address, and the unspecified address — plus a public address that must pass.
+// TestUnit_egressBridge_SSRFGuard pins that a carve-out resolving to a
+// non-public address (loopback, RFC1918 private, cloud-metadata link-local,
+// unspecified) is refused unless AllowPrivateEgress is on; a public address
+// always passes.
 func TestUnit_egressBridge_SSRFGuard(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -53,10 +50,8 @@ func TestUnit_egressBridge_SSRFGuard(t *testing.T) {
 	}
 }
 
-// TestUnit_egressBridge_SSRFGuard_CachesResult proves the guard resolves a host
-// only once and reuses that vetted result — the property that closes DNS
-// rebinding. A second call returns the identical cached slice (same backing
-// array), so a later connection cannot smuggle in a freshly-resolved address.
+// TestUnit_egressBridge_SSRFGuard_CachesResult pins that the guard resolves a
+// host only once and reuses the cached result, closing DNS rebinding.
 func TestUnit_egressBridge_SSRFGuard_CachesResult(t *testing.T) {
 	b := &egressBridge{ctx: context.Background(), allowPrivate: false}
 	first, err := b.resolveAndGuard("8.8.8.8")

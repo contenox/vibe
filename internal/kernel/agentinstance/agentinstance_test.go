@@ -19,10 +19,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// buildStubAgent compiles libacp/cmd/acp-stub-agent — the hermetic, in-memory
-// ACP Agent this repo uses to exercise ACP wire dispatch without any LLM backend
-// — into t.TempDir() and returns its path. It gives these tests a real ACP agent
-// subprocess for the Manager to spawn and own, with no network and no model.
+// buildStubAgent compiles the hermetic, in-memory acp-stub-agent fixture into
+// t.TempDir() and returns its path, for tests to spawn as a real ACP agent
+// subprocess with no network and no model.
 func buildStubAgent(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
@@ -73,8 +72,7 @@ func registerExternalEnv(t *testing.T, ctx context.Context, svc agentregistryser
 }
 
 // registerChain declares a chain-kind agent running chainPath, through the
-// normal registry path (the kind is a first-class declared agent now, so
-// nothing has to be smuggled past validate()).
+// normal registry path.
 func registerChain(t *testing.T, ctx context.Context, svc agentregistryservice.Service, name, chainPath string) *runtimetypes.Agent {
 	t.Helper()
 	agent := &runtimetypes.Agent{Name: name, Enabled: true}
@@ -83,9 +81,8 @@ func registerChain(t *testing.T, ctx context.Context, svc agentregistryservice.S
 	return agent
 }
 
-// instanceOf reaches into the Manager's registry (white-box) to fetch the live
-// instance for id, so a test can drive its downstream connection and inspect its
-// handle directly — the strongest available proof of what the subprocess is doing.
+// instanceOf reaches into the Manager's registry (white-box) to fetch the
+// live instance for id.
 func instanceOf(t *testing.T, m Manager, id string) *instance {
 	t.Helper()
 	impl := m.(*manager)
@@ -96,9 +93,8 @@ func instanceOf(t *testing.T, m Manager, id string) *instance {
 	return inst
 }
 
-// currentHandle reads an instance's live handle under its lock (white-box), so a
-// test can close it out-of-band (simulating a crash) or compare identity across a
-// restart.
+// currentHandle reads an instance's live handle under its lock (white-box),
+// so a test can close it out-of-band to simulate a crash.
 func currentHandle(inst *instance) *agenthost.Handle {
 	inst.mu.Lock()
 	defer inst.mu.Unlock()
@@ -114,10 +110,8 @@ func requireConnClosed(t *testing.T, h *agenthost.Handle) {
 	}
 }
 
-// openSession drives a full downstream session through the KERNEL's session-driving API
-// (Manager.OpenSession — initialize-once + session/new + surface capture) and returns the
-// downstream session id, the id viewers Attach to. This is the driving role the kernel now
-// OWNS; the test is a thin consumer of it.
+// openSession drives a session through Manager.OpenSession and returns the
+// downstream session id that viewers Attach to.
 func openSession(t *testing.T, mgr Manager, id string) libacp.SessionID {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -138,10 +132,8 @@ func promptText(t *testing.T, mgr Manager, id string, sid libacp.SessionID, text
 	return reason
 }
 
-// mockViewer is a test Viewer: it records every delivered update and every
-// permission request routed to it, and answers permission with a preset outcome
-// (default: cancelled, which the stub's callbacks scenario treats as a graceful
-// deny that ends the turn without an fs round trip).
+// mockViewer is a test Viewer that records delivered updates and permission
+// requests, answering permission with a preset outcome (default: cancelled).
 type mockViewer struct {
 	id       string
 	permKind libacp.PermissionOutcomeKind
@@ -186,8 +178,8 @@ func (v *mockViewer) permCount() int {
 	return v.permCalls
 }
 
-// viewerReported reports whether any agent_message_chunk delivered to v contains substr —
-// used to read a scenario's textual outcome (e.g. the terminal report) off the fan-out.
+// viewerReported reports whether any agent_message_chunk delivered to v
+// contains substr.
 func viewerReported(v *mockViewer, substr string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -201,10 +193,8 @@ func viewerReported(v *mockViewer, substr string) bool {
 	return false
 }
 
-// mockTerminalViewer is a Viewer that ALSO implements TerminalServer, so the instance's
-// harness routes a downstream terminal/* to it (as the session's controller). It records the
-// create call and returns a distinctive canned output, proving the round trip flowed through
-// this controller rather than a shell.
+// mockTerminalViewer is a Viewer that also implements TerminalServer,
+// recording the create call and returning a canned output.
 type mockTerminalViewer struct {
 	id string
 
@@ -272,9 +262,8 @@ func (v *mockTerminalViewer) lastMessage() string {
 	return last
 }
 
-// blockingViewer is a controller whose RequestPermission BLOCKS until its context is
-// cancelled — the shape needed to prove Cancel unblocks an in-flight turn. It signals on
-// arrived once the downstream's permission request reaches it.
+// blockingViewer is a controller whose RequestPermission blocks until its
+// context is cancelled, signaling on arrived once the request reaches it.
 type blockingViewer struct {
 	id      string
 	arrived chan struct{}
@@ -294,10 +283,6 @@ func (v *blockingViewer) RequestPermission(ctx context.Context, _ libacp.Request
 	<-ctx.Done()
 	return libacp.RequestPermissionResponse{Outcome: libacp.RequestPermissionOutcome{Outcome: libacp.PermissionOutcomeCancelled}}, nil
 }
-
-// -----------------------------------------------------------------------------
-// (a) Start external → running, visible in Get/List, torn down on Stop.
-// -----------------------------------------------------------------------------
 
 func TestManager_External_StartGetStop(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
@@ -330,12 +315,9 @@ func TestManager_External_StartGetStop(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
-// TestManager_Chain_SelfSpawnConfig pins HOW a chain agent becomes a running
-// unit: the kernel builds an ordinary external-ACP spawn whose command is THIS
-// binary, whose argv is its ACP subcommand, and whose only added environment
-// variable names the declared chain file. There is no second connection
-// mechanism and no in-process shim — that is the whole design, so it is asserted
-// on the spawner the kernel actually constructed.
+// TestManager_Chain_SelfSpawnConfig pins that a chain agent spawns as an
+// ordinary external-ACP agent: command is this binary, args is its ACP
+// subcommand, and the only added env var names the declared chain file.
 func TestManager_Chain_SelfSpawnConfig(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -358,12 +340,9 @@ func TestManager_Chain_SelfSpawnConfig(t *testing.T) {
 		"ONLY the chain path is set: the child inherits the environment so it shares the one global state")
 }
 
-// TestManager_Chain_RunsThroughTheSameBringUp proves a chain unit is not a
-// second class of instance: it reaches StateRunning over a real downstream
-// connection, opens a session, and tears down like any other. (That the spawned
-// process really executes the named chain is proven end to end against the real
-// binary in the fleet dispatch e2e; here the point is that the KERNEL treats
-// both kinds identically.)
+// TestManager_Chain_RunsThroughTheSameBringUp pins that a chain unit reaches
+// StateRunning, opens a session, and tears down through the same bringUp
+// path as an external agent.
 func TestManager_Chain_RunsThroughTheSameBringUp(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -393,11 +372,8 @@ func TestManager_Chain_RunsThroughTheSameBringUp(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
-// TestManager_Chain_RejectsUnusableConfig keeps the kind from being a hole in
-// the other direction: declaring "chain" without a usable chain path fails at
-// spawn with a clear error rather than bringing up a unit that cannot answer.
-// (The registry refuses to persist such a record; this is the kernel's own
-// guard for a record handed to it directly.)
+// TestManager_Chain_RejectsUnusableConfig pins that a chain agent with no
+// usable chain path fails at spawn rather than starting unable to answer.
 func TestManager_Chain_RejectsUnusableConfig(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	mgr := New(svc, WithSelfExecutable("/nonexistent/contenox"))
@@ -408,11 +384,8 @@ func TestManager_Chain_RejectsUnusableConfig(t *testing.T) {
 	require.Contains(t, err.Error(), "path is required")
 }
 
-// TestManager_Chain_DefaultsToTheRunningExecutable pins the default half of
-// WithSelfExecutable: with no override the spawn targets os.Executable(). Under
-// `go test` that is the test binary, which is not an ACP agent — so the spawn is
-// expected to fail, and what is asserted is WHICH program the kernel reached
-// for, read off the constructed spawner.
+// TestManager_Chain_DefaultsToTheRunningExecutable pins that with no
+// WithSelfExecutable override, a chain spawn targets os.Executable().
 func TestManager_Chain_DefaultsToTheRunningExecutable(t *testing.T) {
 	_, _, svc := setupRegistry(t)
 	chainPath := filepath.Join(t.TempDir(), "agent-fixture.json")
@@ -462,13 +435,9 @@ func (r *countingRegistry) reads() int {
 	return r.byName
 }
 
-// TestManager_StartResolved_PerformsNoRegistryRead is the kernel half of closing
-// the spawn-path TOCTOU. The service layer above resolves the declared agent to
-// make its Enabled decision; the kernel must then spawn THAT record rather than
-// re-reading the row, or the check is made against one read and the spawn proceeds
-// from another. StartResolved therefore reads nothing at all, and Start — kept as
-// resolve-plus-StartResolved so there is exactly one spawn implementation — reads
-// exactly once, not twice.
+// TestManager_StartResolved_PerformsNoRegistryRead pins that StartResolved
+// performs no registry read of its own (Start resolves once and delegates),
+// closing the spawn-path TOCTOU between a caller's Enabled check and the spawn.
 func TestManager_StartResolved_PerformsNoRegistryRead(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -494,9 +463,8 @@ func TestManager_StartResolved_PerformsNoRegistryRead(t *testing.T) {
 	require.Equal(t, 1, counting.reads(), "Start resolves once and delegates; it is not a second spawn implementation")
 }
 
-// TestManager_StartResolved_RejectsUnusableRecords pins the two ways a handed-over
-// record can be unusable. Neither is a registry lookup failure — an unknown agent
-// is Start's error to report, because only Start does a lookup.
+// TestManager_StartResolved_RejectsUnusableRecords pins the two ways a
+// handed-over record is unusable: nil, or an unsupported kind.
 func TestManager_StartResolved_RejectsUnusableRecords(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	mgr := New(svc)
@@ -560,11 +528,9 @@ func TestManager_Close_StopsAll(t *testing.T) {
 	require.NoError(t, mgr.Close(), "Close is idempotent")
 }
 
-// -----------------------------------------------------------------------------
-// (b) Two viewers on one session both receive live updates; only the controller's
-//     RequestPermission is invoked when the downstream asks permission.
-// -----------------------------------------------------------------------------
-
+// TestManager_Attach_FanoutAndControllerPermission pins that both viewers on
+// a session receive live updates, but only the controller answers a
+// permission request.
 func TestManager_Attach_FanoutAndControllerPermission(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -608,11 +574,8 @@ func TestManager_Attach_FanoutAndControllerPermission(t *testing.T) {
 	require.Equal(t, 0, viewerB.permCount(), "an observer is never asked for permission")
 }
 
-// -----------------------------------------------------------------------------
-// (c) Journal replay: a viewer attached AFTER updates flowed receives the backlog
-//     then joins the live stream (the ReadCache property).
-// -----------------------------------------------------------------------------
-
+// TestManager_Attach_JournalReplayThenLive pins that a viewer attached after
+// updates flowed receives the backlog by replay, then joins the live stream.
 func TestManager_Attach_JournalReplayThenLive(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -634,23 +597,20 @@ func TestManager_Attach_JournalReplayThenLive(t *testing.T) {
 	backlog := viewerA.updateCount()
 	require.Greater(t, backlog, 1, "streaming scenario should emit several updates")
 
-	// Viewer B attaches AFTER the fact → it must receive the whole backlog by replay.
+	// Viewer B attaches after the fact and must receive the whole backlog by replay.
 	viewerB := newMockViewer("B")
 	_, err = mgr.Attach(ctx, id, sid, viewerB)
 	require.NoError(t, err)
 	require.Equal(t, backlog, viewerB.updateCount(), "late viewer replays the full journal")
 
-	// A subsequent live turn reaches BOTH viewers (B is now in the live fan-out).
+	// A subsequent live turn reaches both viewers (B is now in the live fan-out).
 	promptText(t, mgr, id, sid, "plain-ack")
 	require.Greater(t, viewerB.updateCount(), backlog, "late viewer then joins the live stream")
 	require.Equal(t, viewerA.updateCount(), viewerB.updateCount(), "both converge on the same stream")
 }
 
-// -----------------------------------------------------------------------------
-// (d) Controller detach → the next viewer is promoted and answers permission;
-//     with NO controller a permission request hits the documented deny fallback.
-// -----------------------------------------------------------------------------
-
+// TestManager_Detach_PromotesNextController pins that detaching the
+// controller promotes the next viewer, which then answers permission.
 func TestManager_Detach_PromotesNextController(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -679,6 +639,8 @@ func TestManager_Detach_PromotesNextController(t *testing.T) {
 	require.Equal(t, 1, viewerB.permCount(), "promoted viewer answers permission")
 }
 
+// TestManager_NoController_PermissionDenyFallback pins that a permission
+// request with no controller hits the built-in deny fallback.
 func TestManager_NoController_PermissionDenyFallback(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -709,10 +671,9 @@ func TestManager_NoController_PermissionDenyFallback(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
-// The unsupervised-deny judgment the kernel already makes (a permission request
-// with no attached controller) surfaces as a passive EventUnsupervisedDeny — so
-// after-the-fact audit can find that a gated action was refused headless. The
-// deny outcome itself is unchanged; the event only records it.
+// TestUnit_EventSink_UnsupervisedDenyEmitsEvent pins that an unattended
+// permission refusal surfaces as a passive EventUnsupervisedDeny, without
+// changing the deny outcome itself.
 func TestUnit_EventSink_UnsupervisedDenyEmitsEvent(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -757,12 +718,8 @@ func TestUnit_EventSink_UnsupervisedDenyEmitsEvent(t *testing.T) {
 	require.False(t, deny.Time.IsZero(), "the event carries a timestamp")
 }
 
-// -----------------------------------------------------------------------------
-// (e) watchDog restart policy: an out-of-band death restarts (with restart
-//     enabled) up to the limit then parks in Warning; a manual Stop never
-//     restarts; and with restart DISABLED an unexpected death is terminal Error.
-// -----------------------------------------------------------------------------
-
+// TestManager_WatchDog_RestartUpToLimitThenWarning pins that an out-of-band
+// death restarts up to the configured limit, then parks in StateWarning.
 func TestManager_WatchDog_RestartUpToLimitThenWarning(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -778,17 +735,17 @@ func TestManager_WatchDog_RestartUpToLimitThenWarning(t *testing.T) {
 	h0 := currentHandle(inst)
 	require.NotNil(t, h0)
 
-	// Crash #1 (out-of-band close, NOT via Stop → manualStop stays false).
+	// Crash #1: out-of-band close, not via Stop, so manualStop stays false.
 	require.NoError(t, h0.Close())
 
-	// watchDog restarts: state returns to Running on a DIFFERENT connection.
+	// watchDog restarts: state returns to Running on a different connection.
 	require.Eventually(t, func() bool {
 		st, _ := mgr.Get(id)
 		h := currentHandle(inst)
 		return st.State == StateRunning && h != nil && h != h0
 	}, 10*time.Second, 25*time.Millisecond, "instance must restart after an unexpected death")
 
-	// Crash #2: the restart budget (1) is now exhausted → Warning.
+	// Crash #2: the restart budget (1) is now exhausted.
 	h1 := currentHandle(inst)
 	require.NoError(t, h1.Close())
 	require.Eventually(t, func() bool {
@@ -797,12 +754,13 @@ func TestManager_WatchDog_RestartUpToLimitThenWarning(t *testing.T) {
 	}, 10*time.Second, 25*time.Millisecond, "a second death past the limit must park in Warning")
 }
 
+// TestManager_WatchDog_ManualStopNeverRestarts pins that a manual Stop never
+// restarts the instance, even with restart enabled.
 func TestManager_WatchDog_ManualStopNeverRestarts(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
 	registerExternal(t, ctx, svc, "ext-agent", stub)
 
-	// Restart generously enabled, to prove a MANUAL stop still never restarts.
 	mgr := New(svc, WithRestart(5))
 	t.Cleanup(func() { _ = mgr.Close() })
 
@@ -821,11 +779,12 @@ func TestManager_WatchDog_ManualStopNeverRestarts(t *testing.T) {
 	}, 750*time.Millisecond, 50*time.Millisecond, "a manually stopped instance must never restart")
 }
 
+// TestManager_External_UnexpectedExitBecomesError pins that with restart
+// disabled (default), an unexpected death is terminal StateError.
 func TestManager_External_UnexpectedExitBecomesError(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
-	// `sh -c "exit 0"` spawns cleanly (Start succeeds) but exits at once, closing
-	// the connection — an unexpected death from the Manager's view. Restart is
-	// DISABLED (default), so it is terminal Error, not Warning.
+	// `sh -c "exit 0"` spawns cleanly (Start succeeds) but exits at once,
+	// closing the connection — an unexpected death from the Manager's view.
 	registerExternal(t, ctx, svc, "dies-immediately", "sh", "-c", "exit 0")
 
 	mgr := New(svc)
@@ -844,11 +803,9 @@ func TestManager_External_UnexpectedExitBecomesError(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
-// -----------------------------------------------------------------------------
-// (f) List joins declared config + live runtime: a declared-but-idle agent shows
-//     "not running"; a started one shows its running instance.
-// -----------------------------------------------------------------------------
-
+// TestManager_List_JoinsConfigAndRuntime pins that List joins declared
+// config with live runtime: idle agents show not-running, started ones show
+// their running instance.
 func TestManager_List_JoinsConfigAndRuntime(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -886,10 +843,8 @@ func TestManager_List_JoinsConfigAndRuntime(t *testing.T) {
 	require.Equal(t, StateRunning, byName["live-agent"].Instances[0].State)
 }
 
-// -----------------------------------------------------------------------------
-// (g) The event sink fires on start / attach / detach / stop.
-// -----------------------------------------------------------------------------
-
+// TestManager_EventSink_FiresOnLifecycle pins that the event sink fires on
+// start / attach / detach / stop.
 func TestManager_EventSink_FiresOnLifecycle(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -943,12 +898,9 @@ func TestManager_EventSink_FiresOnLifecycle(t *testing.T) {
 	require.True(t, hasStateEvent(StateStopped), "stop fires a Stopped state_change")
 }
 
-// -----------------------------------------------------------------------------
-// (h2) The kernel OWNS driving: OpenSession → Prompt round-trip through the Manager
-//      API, with viewers observing via Attach. Connection-less and unknown
-//      instances cannot open a session.
-// -----------------------------------------------------------------------------
-
+// TestManager_OpenSession_PromptRoundTrip pins the OpenSession → Prompt
+// round trip through the Manager API, with a viewer observing via Attach,
+// and that a connection-less or unknown instance cannot open a session.
 func TestManager_OpenSession_PromptRoundTrip(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -987,11 +939,9 @@ func TestManager_OpenSession_PromptRoundTrip(t *testing.T) {
 	require.GreaterOrEqual(t, viewer.updateCount(), 1, "the viewer observes the turn's stream")
 }
 
-// -----------------------------------------------------------------------------
-// (i) Per-session config-option capture + round-trip: the downstream agent's own
-//     pickers are captured from session/new and a SetConfigOption round-trips.
-// -----------------------------------------------------------------------------
-
+// TestManager_ConfigOptions_RoundTrip pins that the downstream agent's own
+// config-option pickers are captured from session/new and SetConfigOption
+// round-trips a confirmed value.
 func TestManager_ConfigOptions_RoundTrip(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1024,12 +974,9 @@ func TestManager_ConfigOptions_RoundTrip(t *testing.T) {
 	require.Nil(t, none)
 }
 
-// -----------------------------------------------------------------------------
-// (j) The synthetic mode/model config options: the downstream's session Modes and
-//     UNSTABLE model picker are surfaced as reserved-id selects, and a set on either
-//     synthetic id translates to session/set_mode / session/set_model.
-// -----------------------------------------------------------------------------
-
+// TestManager_SyntheticModeModelOptions_RoundTrip pins that the downstream's
+// session Modes and model picker surface as reserved-id synthetic selects,
+// and a set on either id translates to session/set_mode / session/set_model.
 func TestManager_SyntheticModeModelOptions_RoundTrip(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1045,7 +992,7 @@ func TestManager_SyntheticModeModelOptions_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	sid := openSession(t, mgr, id)
 
-	// Synthetic mode select FIRST, synthetic model select SECOND (no downstream own opts).
+	// Synthetic mode select first, synthetic model select second (no downstream own opts).
 	opts, err := mgr.SessionConfigOptions(id, sid)
 	require.NoError(t, err)
 	require.Len(t, opts, 2)
@@ -1066,11 +1013,8 @@ func TestManager_SyntheticModeModelOptions_RoundTrip(t *testing.T) {
 	require.Equal(t, "stub-model-smart", opts[1].CurrentValue, "set_model round-trips onto the synthetic model option")
 }
 
-// -----------------------------------------------------------------------------
-// (k) Available-commands capture: the downstream slash-command menu (advertised via
-//     an AfterResponse update) is captured into per-session state and exposed.
-// -----------------------------------------------------------------------------
-
+// TestManager_AvailableCommands_Captured pins that the downstream
+// slash-command menu is captured into per-session state and exposed.
 func TestManager_AvailableCommands_Captured(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1096,12 +1040,9 @@ func TestManager_AvailableCommands_Captured(t *testing.T) {
 	require.Equal(t, "explain", cmds[1].Name)
 }
 
-// -----------------------------------------------------------------------------
-// (l) Terminal routing: a downstream terminal/* is routed to the session's controller
-//     when it implements TerminalServer; refused with MethodNotFound when it does not;
-//     and never advertised when the SessionSpec withholds the terminal capability.
-// -----------------------------------------------------------------------------
-
+// TestManager_Terminal_RoutesToControllerTerminalServer pins that a
+// downstream terminal/* is routed to the controller when it implements
+// TerminalServer.
 func TestManager_Terminal_RoutesToControllerTerminalServer(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1113,7 +1054,7 @@ func TestManager_Terminal_RoutesToControllerTerminalServer(t *testing.T) {
 	id, err := mgr.Start(ctx, "ext-agent", t.TempDir())
 	require.NoError(t, err)
 
-	// Terminal advertised (spec) AND the controller serves terminals.
+	// Terminal advertised (spec) and the controller serves terminals.
 	ctxOpen, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	sid, err := mgr.OpenSession(ctxOpen, id, SessionSpec{Cwd: t.TempDir(), Terminal: true})
@@ -1134,6 +1075,9 @@ func TestManager_Terminal_RoutesToControllerTerminalServer(t *testing.T) {
 	require.Contains(t, report, "MOCK-TERMINAL-OUTPUT", "the controller's terminal output flowed back to the agent")
 }
 
+// TestManager_Terminal_MethodNotFoundWithoutTerminalServer pins that
+// terminal/* is refused with MethodNotFound when the controller does not
+// implement TerminalServer.
 func TestManager_Terminal_MethodNotFoundWithoutTerminalServer(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1145,7 +1089,7 @@ func TestManager_Terminal_MethodNotFoundWithoutTerminalServer(t *testing.T) {
 	id, err := mgr.Start(ctx, "ext-agent", t.TempDir())
 	require.NoError(t, err)
 
-	// Terminal advertised, but the controller is a PLAIN viewer (no TerminalServer).
+	// Terminal advertised, but the controller is a plain viewer (no TerminalServer).
 	ctxOpen, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	sid, err := mgr.OpenSession(ctxOpen, id, SessionSpec{Cwd: t.TempDir(), Terminal: true})
@@ -1161,6 +1105,9 @@ func TestManager_Terminal_MethodNotFoundWithoutTerminalServer(t *testing.T) {
 	require.True(t, viewerReported(viewer, "create-error"), "a controller without TerminalServer gets MethodNotFound")
 }
 
+// TestManager_Terminal_CapabilityWithheld pins that terminals are never
+// advertised, and terminal/* is never called, when SessionSpec withholds the
+// terminal capability.
 func TestManager_Terminal_CapabilityWithheld(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1172,9 +1119,9 @@ func TestManager_Terminal_CapabilityWithheld(t *testing.T) {
 	id, err := mgr.Start(ctx, "ext-agent", t.TempDir())
 	require.NoError(t, err)
 
-	// SessionSpec withholds the terminal capability (default): the downstream is never told
-	// terminals exist, so the scenario reports termcap=false and skips the round trip — even
-	// though the controller WOULD serve terminals.
+	// SessionSpec withholds the terminal capability (default): the downstream
+	// is never told terminals exist, so the scenario reports termcap=false
+	// and skips the round trip, even though the controller would serve one.
 	sid := openSession(t, mgr, id) // SessionSpec{Terminal: false}
 	term := newMockTerminalViewer("controller")
 	_, err = mgr.Attach(ctx, id, sid, term)
@@ -1186,11 +1133,8 @@ func TestManager_Terminal_CapabilityWithheld(t *testing.T) {
 	require.Contains(t, term.lastMessage(), "termcap=false")
 }
 
-// -----------------------------------------------------------------------------
-// (m) Cancel unblocks an in-flight turn; CloseSession drops the session's viewers
-//     and captured state without stopping the instance.
-// -----------------------------------------------------------------------------
-
+// TestManager_Cancel_UnblocksInFlightTurn pins that Cancel unblocks an
+// in-flight turn.
 func TestManager_Cancel_UnblocksInFlightTurn(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1203,7 +1147,7 @@ func TestManager_Cancel_UnblocksInFlightTurn(t *testing.T) {
 	require.NoError(t, err)
 	sid := openSession(t, mgr, id)
 
-	// A controller that BLOCKS on the permission request until its ctx is cancelled.
+	// A controller that blocks on the permission request until its ctx is cancelled.
 	ctrl := newBlockingViewer("blocker")
 	_, err = mgr.Attach(ctx, id, sid, ctrl)
 	require.NoError(t, err)
@@ -1236,6 +1180,9 @@ func TestManager_Cancel_UnblocksInFlightTurn(t *testing.T) {
 	}
 }
 
+// TestManager_CloseSession_DropsStateNotInstance pins that CloseSession
+// drops the session's viewers and captured state without stopping the
+// instance.
 func TestManager_CloseSession_DropsStateNotInstance(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1280,16 +1227,10 @@ func TestManager_CloseSession_DropsStateNotInstance(t *testing.T) {
 	require.NotEqual(t, sid, sid2)
 }
 
-// TestManager_Status_SessionIDsReflectOpenSessions proves InstanceStatus.SessionIDs
-// surfaces exactly the sessions that are OPEN — sourced from the session driver, not the
-// viewer hub — sorted, and drops an id only when the session is CLOSED. Attachment is
-// explicitly not a condition: an opened session appears immediately, before it has emitted
-// any update and before any viewer attaches, and detaching that viewer does not remove it.
-//
-// This is the substrate a session-scoped Cancel-all fans out over (fleetservice.Cancel)
-// and the set adopt validates against (acpsvc.resolveAdoptTarget). Both must see a session
-// that is open but silent — a cold-loading or long-reasoning agent has emitted nothing yet
-// and is exactly the one an operator most wants to cancel or take control of.
+// TestManager_Status_SessionIDsReflectOpenSessions pins that
+// InstanceStatus.SessionIDs reflects exactly the open sessions (sourced from
+// the driver, not the viewer hub), sorted, independent of attachment, and
+// drops an id only when the session closes.
 func TestManager_Status_SessionIDsReflectOpenSessions(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -1307,9 +1248,8 @@ func TestManager_Status_SessionIDsReflectOpenSessions(t *testing.T) {
 	require.NotNil(t, st.SessionIDs)
 	require.Empty(t, st.SessionIDs)
 
-	// THE REGRESSION: an opened session is reported IMMEDIATELY — no prompt has run, so
-	// it has emitted no update, and no viewer has attached. Both are what used to
-	// materialize the hub state this list was once derived from.
+	// An opened session is reported immediately: no prompt has run and no
+	// viewer has attached, yet it must still be listed.
 	sidA := openSession(t, mgr, id)
 	st, err = mgr.Get(id)
 	require.NoError(t, err)
@@ -1318,7 +1258,7 @@ func TestManager_Status_SessionIDsReflectOpenSessions(t *testing.T) {
 	require.Equal(t, 1, st.Sessions)
 	require.Equal(t, 0, st.Viewers, "nobody is watching it yet")
 
-	// Attaching a viewer changes the VIEWER count and nothing about the session set.
+	// Attaching a viewer changes the viewer count and nothing about the session set.
 	_, err = mgr.Attach(ctx, id, sidA, newMockViewer("A"))
 	require.NoError(t, err)
 
@@ -1341,8 +1281,8 @@ func TestManager_Status_SessionIDsReflectOpenSessions(t *testing.T) {
 	require.Equal(t, 2, st.Sessions)
 	require.Equal(t, 2, st.Viewers)
 
-	// Detaching the only viewer of a session leaves the SESSION open — the session is
-	// still there to be cancelled or re-adopted; only the viewer count drops.
+	// Detaching the only viewer of a session leaves the session open — still
+	// there to be cancelled or re-adopted; only the viewer count drops.
 	require.NoError(t, mgr.Detach(id, sidA, "A"))
 	st, err = mgr.Get(id)
 	require.NoError(t, err)
@@ -1350,7 +1290,7 @@ func TestManager_Status_SessionIDsReflectOpenSessions(t *testing.T) {
 	require.Contains(t, st.SessionIDs, string(sidA))
 	require.Equal(t, 1, st.Viewers, "only the viewer went away")
 
-	// CLOSING it is what removes it.
+	// Closing it is what removes it.
 	require.NoError(t, mgr.CloseSession(id, sidA))
 	st, err = mgr.Get(id)
 	require.NoError(t, err)
@@ -1358,11 +1298,8 @@ func TestManager_Status_SessionIDsReflectOpenSessions(t *testing.T) {
 	require.Equal(t, 1, st.Sessions)
 }
 
-// -----------------------------------------------------------------------------
-// (h) Ownership survives caller-ctx cancel: the instance is bound to the
-//     Manager's root context, not the ctx passed to Start.
-// -----------------------------------------------------------------------------
-
+// TestManager_OwnershipSurvivesCallerCtxCancel pins that the instance is
+// bound to the Manager's root context, not the ctx passed to Start.
 func TestManager_OwnershipSurvivesCallerCtxCancel(t *testing.T) {
 	_, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)

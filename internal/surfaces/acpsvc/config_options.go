@@ -29,46 +29,28 @@ const (
 
 	hitlPolicyDefaultValue = "__contenox_default__"
 
-	// modelConfigDefaultGroup is the group id modelConfigValues files a model
-	// under when its provider is unknown (the seeded default/alt model of a
-	// transport configured without one). It is a placeholder for "no provider",
-	// NOT a provider name, so CommandValueDomains must never offer it to
-	// /provider.
+	// modelConfigDefaultGroup is a placeholder group for "no provider", not a
+	// provider name — CommandValueDomains must never offer it to /provider.
 	modelConfigDefaultGroup = "default"
 
-	// WorkspaceConfigOptionsMetaKey is the initialize-response `_meta` key under
-	// which contenox advertises the workspace-level (session-less) config
-	// options. Sessions are minted lazily (on first prompt — see AcpChatPage's
-	// handleSubmit), so a fresh chat has no session and therefore none of the
-	// per-session config options that normally arrive with session/new. This
-	// extension lets a client render the model/think/HITL/token-limit controls
-	// on the empty chat, stage the user's choices, and re-apply them via
-	// set_config_option right after session/new — crucial when the configured
-	// default model is broken and the user must pick a working one BEFORE the
-	// first (failing) turn. It is a contenox extension living in the spec's
-	// reserved `_meta` namespace: conformant clients that don't recognize the
-	// key ignore it entirely and simply wait for the per-session options.
+	// WorkspaceConfigOptionsMetaKey is the initialize-response `_meta` key
+	// advertising session-less config options, so a client can render
+	// model/think/HITL/token-limit controls before a session is lazily
+	// minted on first prompt. Contenox extension in the reserved `_meta`
+	// namespace; unrecognized keys are ignored per spec.
 	WorkspaceConfigOptionsMetaKey = "contenox.workspaceConfigOptions"
 )
 
 // workspaceConfigOptions builds the session-less config options advertised at
-// initialize time. The values mirror exactly what a freshly-minted session
-// will carry: it seeds a throwaway sessionEntry from the same transport
-// defaults session.go's NewSession/LoadSession seed a real entry with, then
-// reuses the per-session builders so there is a single source of truth for the
-// option shapes. All sessionEntry accessors used downstream are nil-safe, but
-// seeding explicitly keeps the workspace snapshot byte-identical to the first
-// session's initial options (in particular Think, which defaults to
-// thinkDefault() rather than the accessor's bare "high" fallback).
+// initialize time, seeding a throwaway sessionEntry from the transport
+// defaults and reusing the per-session builders so there is one source of
+// truth for the option shapes.
 func (t *Transport) workspaceConfigOptions(ctx context.Context) []libacp.SessionConfigOption {
 	seed := &sessionEntry{
 		Provider: t.provider(),
 		Model:    t.model(),
 		Think:    t.thinkDefault(),
 	}
-	// The workspace snapshot mirrors the first (native) session's options, so seed
-	// a native driver: sessionConfigOptions dispatches through the driver, and a
-	// native driver returns exactly the chain-engine selects this advertises.
 	seed.driver = &nativeDriver{t: t}
 	return t.sessionConfigOptions(ctx, seed)
 }
@@ -81,14 +63,10 @@ func (t *Transport) sessionConfigOptions(ctx context.Context, sess *sessionEntry
 	return sess.driver.ConfigOptions(ctx, sess)
 }
 
-// workspaceRootConfigOption advertises the allowlisted workspace roots a client
-// may choose for a session. Present only when an allowlist is configured
-// (serve); the stdio ACP path (no allowlist) omits it. The chosen root becomes
-// the session's cwd at session/new time and is immutable afterward, so this
-// option is informational for a live session — the picker reads its Options list
-// on the empty chat (via the workspace config options _meta extension) and
-// passes the selection as the new session's cwd. set_config_option for it is
-// refused (see setSessionConfigOption).
+// workspaceRootConfigOption advertises the allowlisted workspace roots a
+// client may choose for a session, present only when an allowlist is
+// configured. The chosen root becomes the session's cwd at session/new and is
+// immutable afterward; set_config_option for it is refused.
 func (t *Transport) workspaceRootConfigOption(sess *sessionEntry) (libacp.SessionConfigOption, bool) {
 	f := t.deps.WorkspaceRoots
 	if f == nil {
@@ -126,9 +104,6 @@ func (t *Transport) workspaceRootConfigOption(sess *sessionEntry) (libacp.Sessio
 }
 
 func workspaceRootDisplayName(root string) string {
-	// A registered project's friendly name (its marker's name), falling back to
-	// the basename — so the session workspace picker lists named projects, matching
-	// the /workspace/roots registry and Beam's project switcher.
 	return project.DisplayName(root)
 }
 
@@ -189,11 +164,8 @@ func (t *Transport) tokenLimitConfigOption(ctx context.Context, sess *sessionEnt
 	if cap > 0 {
 		desc += fmt.Sprintf(" Capped to model max %d if larger.", cap)
 	}
-	// The ACP v1 schema only knows "select" and "boolean" option types (an
-	// earlier revision here invented type:"text", which conformant clients may
-	// drop or mis-render). Offer a ladder of budgets clamped to the model cap;
-	// set_config_option still accepts any non-negative integer, so a custom
-	// current value is folded into the list.
+	// ACP v1 only has "select"/"boolean" option types; offer a ladder of
+	// budgets clamped to the model cap, folding in any custom current value.
 	return libacp.SessionConfigOption{
 		ID:           configIDTokenLimit,
 		Name:         "Token Limit",
@@ -238,8 +210,8 @@ func formatTokenCount(n int) string {
 	return strconv.Itoa(n) + " tokens"
 }
 
-// modelContextCap returns the hard cap for the session's current model (0 if unknown/unreported).
-// Prefers declared/observed ContextLength from runtime pulled models.
+// modelContextCap returns the hard cap for the session's current model, or 0
+// if unknown.
 func (t *Transport) modelContextCap(ctx context.Context, sess *sessionEntry) int {
 	if sess == nil {
 		return 0
@@ -255,7 +227,6 @@ func (t *Transport) modelContextCap(ctx context.Context, sess *sessionEntry) int
 			}
 		}
 	}
-	// Fallback: any matching model name
 	for _, st := range t.runtimeStates(ctx) {
 		for _, pm := range st.PulledModels {
 			if pm.Model == mod || pm.Name == mod {
@@ -410,20 +381,15 @@ func (t *Transport) hitlPolicyConfigValues(sess *sessionEntry) libacp.SessionCon
 	for _, name := range t.deps.KnownPolicies {
 		add(name)
 	}
-	// Fold in the session's current selection so a concrete policy that isn't in
-	// KnownPolicies still validates and renders as the current value. The sentinel
-	// is already seeded above, so hitlPolicy()'s sentinel default is a no-op here.
+	// Fold in the session's current selection so it validates and renders
+	// even if not in KnownPolicies.
 	add(sess.hitlPolicy())
 	return libacp.NewSessionConfigValues(values)
 }
 
-// resolveSessionHITLPolicy returns the concrete HITL policy name to ENFORCE for
-// this session's turn, or "" when the session defers to the runtime's configured
-// default. A concrete session selection resolves to its own name; the sentinel
-// (or unset) resolves to the operator-configured default (HITLDefaultPolicyName),
-// which is "" under serve — so a defaulting session injects no context override
-// and enforcement falls through the existing global-KV/fallback chain, byte-
-// identical to pre-per-session behavior. See prompt.go for the injection.
+// resolveSessionHITLPolicy returns the concrete HITL policy name to enforce
+// for this session, or "" to defer to the runtime's configured default (a
+// no-op injection, falling through the existing global-KV/fallback chain).
 func (t *Transport) resolveSessionHITLPolicy(sess *sessionEntry) string {
 	name := sess.hitlPolicy()
 	if name == "" || name == hitlPolicyDefaultValue {
@@ -436,12 +402,9 @@ func (t *Transport) runtimeStates(ctx context.Context) []runtimestate.BackendRun
 	if t.deps.Engine == nil || t.deps.Engine.State == nil {
 		return nil
 	}
-	// The runtime reconciles backends at startup and on explicit refresh only;
-	// without this, a backend that comes up after startup (most commonly a
-	// (re)started ollama) stays invisible to the ACP model dropdown until some
-	// other read path (e.g. GET /state) happens to trigger a reconcile first.
-	// Debounced (see ReconcileIfStale), so this is cheap even on a hot config
-	// options read. Best-effort: serve the existing snapshot even if it fails.
+	// Without this, a backend restarted after startup stays invisible to the
+	// model dropdown until another read path triggers a reconcile.
+	// Debounced, so cheap on a hot read; best-effort on failure.
 	_ = t.deps.Engine.State.ReconcileIfStale(ctx)
 	states := t.deps.Engine.State.Get(ctx)
 	out := make([]runtimestate.BackendRuntimeState, 0, len(states))
@@ -467,10 +430,8 @@ func (t *Transport) SetSessionConfigOption(ctx context.Context, req libacp.SetSe
 		return libacp.SetSessionConfigOptionResponse{}, err
 	}
 
-	// Dispatch through the session's driver: the native driver mutates the
-	// chain-engine selection (the historical switch below); the external driver
-	// forwards to the downstream agent's session/set_config_option. Routing here
-	// keeps SetSessionConfigOption blind to which backend a session runs.
+	// Dispatched through the driver: native mutates the chain-engine
+	// selection, external forwards to the downstream agent.
 	if err := sess.driver.SetConfigOption(ctx, sess, req.ConfigID, req.Value); err != nil {
 		reportErr(err)
 		return libacp.SetSessionConfigOptionResponse{}, err
@@ -499,11 +460,8 @@ func (t *Transport) setSessionConfigOption(ctx context.Context, sess *sessionEnt
 		if !configOptionHasValue(t.hitlPolicyConfigOption(sess), value) {
 			return libacp.NewErrorf(libacp.ErrInvalidParams, "unknown HITL policy option %q", value)
 		}
-		// Session-scoped, exactly like model/think/token-limit: store the chosen
-		// sentinel-or-name ON THE SESSION and DO NOT write the global
-		// cli.hitl-policy-name KV. Enforcement injects the resolved name into the
-		// prompt context (prompt.go) so two concurrent ACP sessions behind serve's
-		// one shared engine gate under their own policies.
+		// Session-scoped: stored on the session, never the global KV, so
+		// concurrent sessions behind one shared engine gate independently.
 		sess.setHITLPolicy(value)
 		return nil
 
@@ -536,10 +494,7 @@ func (t *Transport) setSessionConfigOption(ctx context.Context, sess *sessionEnt
 		return nil
 
 	case configIDWorkspaceRoot:
-		// The workspace root is the session's cwd, fixed at session/new time and
-		// immutable afterward (changing it would re-root the agent mid-session).
-		// The picker chooses it before the session exists; a live change is
-		// refused rather than silently ignored.
+		// Fixed at session/new; refused rather than silently ignored.
 		return libacp.NewErrorf(libacp.ErrInvalidParams, "the workspace cannot be changed after the session starts")
 
 	default:
@@ -561,9 +516,7 @@ func (t *Transport) sendConfigOptionUpdate(ctx context.Context, sid libacp.Sessi
 }
 
 // Command names whose single argument has a value domain — the keys
-// CommandValueDomains returns. They are the wire names from allACPCommands, so
-// a caller can match them against an AvailableCommand.Name without knowing
-// this package's internal config ids.
+// CommandValueDomains returns, matching the wire names from allACPCommands.
 const (
 	CommandModel    = "model"
 	CommandProvider = "provider"
@@ -571,42 +524,13 @@ const (
 	CommandPolicy   = "policy"
 )
 
-// CommandValueDomains projects the session config options a client was already
-// handed — from session/new, session/load, session/resume, set_config_option's
-// result, or a config_option_update notification — onto the ARGUMENT domains of
-// the four slash commands that take a value: /model, /provider, /think,
-// /policy. Absent keys mean "no domain known"; a caller must treat that as
-// "anything the operator types is fine", never as a gate.
-//
-// This is a projection, not a second source of truth. Every value here is one
-// an ACP editor already sees in its dropdowns, which is the parity criterion:
-// a surface offering completions offers exactly what the server advertises and
-// validates, and a hardcoded list can never drift into it. The mapping is the
-// only part that is not literal, because a command argument and a select value
-// are not always spelled the same:
-//
-//   - /model takes a BARE model name (handleModel persists it as
-//     default-model), while the model select's values are "provider/model"
-//     pairs grouped by provider. The group id is the provider, so stripping the
-//     group prefix recovers exactly the name the command accepts — including
-//     names that themselves contain a slash ("models/gemini-…"), which a naive
-//     split on the first "/" would mangle.
-//   - /provider takes a provider name. The model select's GROUPS are the
-//     providers, which is the advertise-what-works set: a provider is offered
-//     only when it currently has at least one chat- or prompt-capable model, so
-//     completing one can never select a provider with nothing to run. The
-//     "no provider" placeholder group is not a provider and is skipped.
-//   - /think takes a reasoning level, which is the think select verbatim
-//     (setSessionConfigOption validates against the same list after
-//     reasoning.Normalize).
-//   - /policy takes a policy name — the HITL select minus its
-//     "use the configured default" sentinel, which is a UI affordance rather
-//     than a name clikv.SetHITLPolicy should ever be handed.
-//
-// Order is preserved from the wire, so the server's ranking (current model
-// first, then alphabetical within a provider) survives into a completion list.
-// Duplicates — the same model offered by two providers — collapse to their
-// first appearance.
+// CommandValueDomains projects a client's already-handed session config
+// options onto the argument domains of /model, /provider, /think, /policy —
+// a completion aid, not a gate; an absent key means "anything is fine".
+// /model strips the select's "provider/model" group prefix; /provider uses
+// the select's groups (already advertise-what-works filtered); /think is the
+// think select verbatim; /policy is the HITL select minus its
+// use-the-default sentinel. Wire order and first-seen dedup are preserved.
 func CommandValueDomains(options []libacp.SessionConfigOption) map[string][]string {
 	out := map[string][]string{}
 	for _, option := range options {
@@ -643,9 +567,8 @@ func modelCommandDomains(option libacp.SessionConfigOption) (models, providers [
 			models = append(models, modelFromConfigValue(value.Value, provider))
 		}
 	}
-	// A flat (ungrouped) model select is not what modelConfigValues builds, but
-	// an externally delegated session forwards its downstream agent's options
-	// verbatim and may well send one. Fall back to the wire's own encoding.
+	// An external session may forward an ungrouped select verbatim; fall
+	// back to the wire's own encoding.
 	for _, value := range option.Options.Values {
 		provider, model := splitModelConfigValue(value.Value)
 		if provider != "" {

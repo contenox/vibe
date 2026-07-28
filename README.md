@@ -122,9 +122,9 @@ Tool invocations render as interactive cards, approval prompts hook into the
 editor's native permission UI, and session history replays when you reopen a
 project.
 
-*Step-by-step guides:* [Zed](https://contenox.com/docs/integrations/editors/zed/) | [JetBrains](https://contenox.com/docs/integrations/editors/jetbrains/) | [AionUi](https://contenox.com/docs/integrations/editors/aionui/).
+*Step-by-step guides:* [Zed](https://contenox.com/docs/integrations/editors/zed/) | [JetBrains](https://contenox.com/docs/integrations/editors/jetbrains/) | [AionUi](https://contenox.com/docs/integrations/editors/aionui/) | [OpenClaw](https://contenox.com/docs/integrations/editors/openclaw/).
 
-Terminal. Editor. **beam** — soon.
+Terminal. Editor. **beam**.
 
 ---
 

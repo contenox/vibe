@@ -9,10 +9,11 @@ const t: LandingStrings = {
   h1b: 'Come back to done.',
   lede: 'Fire work at an agent under an envelope you wrote. Detach. It interrupts you only when the envelope says so. Or run it headless over a task list, one line at a time, each item in a clean context.',
   ctaRecipe: 'Run a recipe',
-  ctaPackage: 'Package a workflow',
+  copyLabel: 'Copy',
   ctaGithub: 'View on GitHub',
   installNote: 'Installs <code class="font-mono">contenox</code>. Run <code class="font-mono">contenox init</code> to scaffold a workspace.',
-  positioning: 'contenox is an open coding harness built around the envelope: the file that bounds what an agent may do unattended. Missions are what envelopes make safe — fire one, detach, come back to done. Same sessions in your terminal and your editor, any model and any MCP in combination. Built by its first customer — who is hard to convince.',
+  trustChips: ['any model', 'one binary', 'no account', 'SQLite', 'your rules in a file you can read'],
+  positioning: 'Fire one, detach, come back to done. The envelope bounds what the agent may do while you’re gone; the chain is the contract for what it does. Same sessions in your terminal and your editor, any model and any MCP in combination. Built by its first customer — who is hard to convince.',
   tableWorld: 'The old way',
   tableWhy: 'contenox',
   rows: [
@@ -40,7 +41,7 @@ const t: LandingStrings = {
   ],
   capsEyebrow: 'Core capabilities',
   caps: [
-    ['The envelope is the boundary', 'What an agent may do unattended is a file you wrote: tool allowlists, command policy, budgets, approval gates. Envelopes survive restarts — an unanswered approval checkpoints the run and frees the seat; answer it from any terminal, even days later, and the run resumes exactly once.'],
+    ['Close the terminal. It can’t wreck anything while you’re gone.', 'Tool allowlists, command policy, budgets, approval gates — what the agent may do unattended is a file you wrote, not a guess. An unanswered approval checkpoints the run and frees the seat; answer it from any terminal, even days later, and the run resumes exactly once.'],
     ['The chain is the contract', 'Prompts, model routing, and every rule are visible keys in a versioned file — reviewable, diffable, repeatable. One harness behind the CLI, the beam TUI, and any ACP editor.'],
     ['It reads Go like the compiler', 'Describe, definition, references, implementations, symbols, diagnostics — six queries answered in-process by the real type-checker, warm in microseconds. No language server to install or babysit.'],
     ['Ask the repo, get cited lines', 'contenox index builds a hybrid full-text and embedding index in local SQLite; contenox search answers with file:line citations and marks a hit stale the moment its file changes.'],
@@ -80,7 +81,8 @@ const t: LandingStrings = {
 };
 ---
 <Base
-  title="Contenox - An open coding harness for terminal and ACP editors"
+  title="Contenox — Fire the mission. Come back to done."
+  description="Fire coding work at an agent under rules you can read. Detach, answer from any terminal later, and it resumes exactly once — any model, any MCP, no account."
   alternates={{ en: '/', de: '/de/' }}
 >
   <Landing t={t} />

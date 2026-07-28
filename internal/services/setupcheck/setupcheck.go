@@ -26,10 +26,8 @@ type Input struct {
 	DefaultProvider    string
 	DefaultAltModel    string
 	DefaultAltProvider string
-	// DefaultEmbedModel/DefaultEmbedProvider are the embedding model config
-	// (default-embed-model / default-embed-provider). They gate the OPTIONAL
-	// workspace index (contenox index / search), so every issue they produce is
-	// a warning — see addEmbeddingIssues.
+	// DefaultEmbedModel/DefaultEmbedProvider gate the optional workspace
+	// index; every issue they produce is a warning (see addEmbeddingIssues).
 	DefaultEmbedModel    string
 	DefaultEmbedProvider string
 	DefaultChain         string
@@ -66,10 +64,8 @@ type BackendCheck struct {
 	ModelCount      int      `json:"modelCount"`
 	ChatModelCount  int      `json:"chatModelCount"`
 	ChatModels      []string `json:"chatModels,omitempty"`
-	// EmbedModels lists the backend's embedding-capable models. Reported
-	// separately from ChatModels because on most providers the two sets are
-	// disjoint — the assumption that a chat model also embeds is exactly the bug
-	// resolveEmbeddingModel exists to correct.
+	// EmbedModels lists the backend's embedding-capable models, reported
+	// separately since chat and embedding models are usually disjoint sets.
 	EmbedModelCount int      `json:"embedModelCount,omitempty"`
 	EmbedModels     []string `json:"embedModels,omitempty"`
 	Error           string   `json:"error,omitempty"`
@@ -103,11 +99,9 @@ const (
 	backendErrorOther         backendErrorKind = "other"
 )
 
-// Evaluate returns readiness from gathered input (no I/O).
-//
-// Embedding-model issues are appended last and unconditionally: evaluateCore has
-// early returns for the hard failures (no backends at all), and the retrieval
-// warning is true regardless of which of those fired.
+// Evaluate returns readiness from gathered input (no I/O). Embedding-model
+// issues are appended last and unconditionally, regardless of which early
+// return fired in evaluateCore.
 func Evaluate(in Input) Result {
 	r := evaluateCore(in)
 	addEmbeddingIssues(&r)
@@ -151,10 +145,8 @@ func evaluateCore(in Input) Result {
 			Severity: "error",
 			Category: CategoryDefaults,
 			Message:  "No default model is set. Internal chat and chains using {{var:model}} need it.",
-			// The default model/provider fields live on the Settings page
-			// (GlobalSettingsSection), not Backends — a registered backend
-			// alone never sets a default. See default_model_not_available
-			// below for the same distinction once a default IS set.
+			// Defaults live on the Settings page, not Backends — a
+			// registered backend alone never sets a default.
 			FixPath:    "/settings",
 			CLICommand: "contenox config set default-model <name>",
 		})
@@ -207,14 +199,11 @@ func evaluateCore(in Input) Result {
 	return r
 }
 
-// OverlayEffectiveDefaults credits an effective default model/provider that was
-// supplied out-of-band (e.g. the CLI's --model/--provider flags) but never
-// persisted to KV config. For each default the persisted config left empty, a
-// non-empty override fills it and clears the corresponding "missing default"
-// blocking issue, so a single-invocation flag is not rejected by preflight just
-// because it was never written to config. Empty overrides are ignored, and a
-// default already set by persisted config is never overwritten. Model/provider
-// availability against a live backend is still validated later at resolution time.
+// OverlayEffectiveDefaults credits an effective default model/provider
+// supplied out-of-band (e.g. CLI flags) but never persisted to KV config:
+// for each empty persisted default, a non-empty override fills it and
+// clears the corresponding "missing default" issue. Empty overrides are
+// ignored; a persisted default is never overwritten.
 func OverlayEffectiveDefaults(res Result, model, provider string) Result {
 	model = strings.TrimSpace(model)
 	provider = strings.TrimSpace(provider)
@@ -440,23 +429,17 @@ func addDefaultProviderIssues(r *Result) {
 		Severity: "error",
 		Category: CategoryHealth,
 		Message:  fmt.Sprintf("Default model %q is not currently available for provider %q. Available chat models: %s.", r.DefaultModel, r.DefaultProvider, available),
-		// The backend is reachable and serving fine — the misconfiguration is
-		// the *default model choice*, which is picked on the Settings page
-		// (GlobalSettingsSection), not Backends.
+		// The backend is reachable; the misconfiguration is the default
+		// model choice, picked on the Settings page, not Backends.
 		FixPath:    "/settings",
 		CLICommand: cmd,
 	})
 }
 
-// addEmbeddingIssues reports the readiness of the OPTIONAL retrieval path (the
-// workspace index behind `contenox index` / `contenox search`, see
-// docs/development/blueprints/workspace-index.md).
-//
-// Every issue it raises is severity "warning", never "error", and it deliberately
-// adds no code to blockingIssue's list: an agent that will never run a search
-// must stay Ready() with no embedding model at all. The warning exists because
-// the alternative — discovering at index time that the chat model cannot embed —
-// is the failure this whole check was added to prevent.
+// addEmbeddingIssues reports readiness of the optional retrieval path (the
+// workspace index behind `contenox index` / `contenox search`). Every issue
+// is severity "warning" and none blocks Ready(): an agent that never
+// searches must stay ready with no embedding model at all.
 func addEmbeddingIssues(r *Result) {
 	if r.DefaultEmbedModel == "" {
 		addIssue(r, Issue{
@@ -483,8 +466,7 @@ func addEmbeddingIssues(r *Result) {
 	reachable := filterBackendChecks(r.BackendChecks, func(check BackendCheck) bool {
 		return check.Reachable && providerTypeMatches(canonical, check.Type)
 	})
-	// Nothing observed for this provider yet: the provider-level issues already
-	// raised say why, and repeating them in embedding terms is noise.
+	// Nothing observed for this provider yet: the provider-level issues already cover it.
 	if len(reachable) == 0 {
 		return
 	}
@@ -642,9 +624,7 @@ func chatModelNamesOnState(state runtimestate.BackendRuntimeState) []string {
 	return names
 }
 
-// embedModelNamesOnState lists the backend's embedding-capable models, the same
-// shape chatModelNamesOnState produces for chat — deduplicated and sorted so the
-// hint text is stable.
+// embedModelNamesOnState lists embedding-capable models, deduplicated and sorted.
 func embedModelNamesOnState(state runtimestate.BackendRuntimeState) []string {
 	seen := map[string]struct{}{}
 	var names []string

@@ -5,5 +5,5 @@
 [brand]|[/]      [brand-ramp3]`===[/]
 [brand]|[/]
 [brand]|[/]  [muted]model qwen3-coder:30b - ollama   session sess-7f3a[/]
-[brand]|[/]  /[muted] commands[/][muted]   [/]@[muted] files[/][muted]   [/]![muted] shell[/][muted]   [/]Ctrl+E[muted] editor[/][muted]   [/]?[muted] keys[/]
+[brand]|[/]  /[muted] commands[/][muted]   [/]@[muted] files[/][muted]   [/]![muted] shell[/][muted]   [/]Ctrl+X Ctrl+E[muted] editor[/][muted]   [/]?[muted] keys[/]
 

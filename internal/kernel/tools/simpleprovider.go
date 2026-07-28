@@ -47,15 +47,12 @@ func (m *SimpleRepo) Supports(ctx context.Context) ([]string, error) {
 func (m *SimpleRepo) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
 	allSchemas := make(map[string]*openapi3.T)
 
-	// Iterate through each registered tools implementation.
 	for toolsName, toolsImpl := range m.tools {
-		// Get the schemas provided by this specific tools's implementation.
 		implSchemas, err := toolsImpl.GetSchemasForSupportedTools(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("error getting schema for tools '%s': %w", toolsName, err)
 		}
 
-		// Merge the returned schemas into our main map.
 		maps.Copy(allSchemas, implSchemas)
 	}
 	return allSchemas, nil

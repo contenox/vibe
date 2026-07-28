@@ -5,10 +5,7 @@ import (
 	"testing"
 )
 
-// repoCorpus is the realistic path fixture the ranking table runs against: a
-// slice of this repository, because ranking is only ever wrong in a way you
-// can see on real paths. Made-up labels ("aaa/bbb.go") rank perfectly under
-// any scorer and prove nothing.
+// repoCorpus is a slice of real repository paths for the ranking tests.
 func repoCorpus() []Item {
 	paths := []string{
 		"internal/surfaces/beamtui/app/keybindings.go",
@@ -31,9 +28,7 @@ func repoCorpus() []Item {
 }
 
 // TestUnit_PickerFuzzyScore_AgreesWithTheSubsequenceTier: FuzzyScore and Rank
-// must never disagree about WHETHER something matched. Filter uses the first
-// to order what the second admitted, so a scorer that refused a label the
-// tier accepted would silently sort a matched item to an arbitrary place.
+// must never disagree about whether something matched.
 func TestUnit_PickerFuzzyScore_AgreesWithTheSubsequenceTier(t *testing.T) {
 	queries := []string{"", "p", "pick", "comp", "icp", "kbd", "tw", "zzz", "gp", "picker.go"}
 	labels := []string{
@@ -52,8 +47,7 @@ func TestUnit_PickerFuzzyScore_AgreesWithTheSubsequenceTier(t *testing.T) {
 }
 
 // TestUnit_PickerFuzzyScore_Preferences pins the scorer's judgement as
-// ORDERED PAIRS rather than absolute numbers: the constants are free to be
-// retuned, the preferences are not.
+// ordered pairs rather than absolute numbers, so constants stay retunable.
 func TestUnit_PickerFuzzyScore_Preferences(t *testing.T) {
 	cases := []struct{ name, query, better, worse string }{
 		{
@@ -81,9 +75,6 @@ func TestUnit_PickerFuzzyScore_Preferences(t *testing.T) {
 			"tw", "textwidth.go", "TEXTWIDTH.go",
 		},
 		{
-			// The blueprint's own example: the first rune landing at the start
-			// of the basename outweighs the consecutive \"kb\" run and the
-			// underscore boundary the other one collects.
 			"kbd finds keybindings, not workbench_dashboard",
 			"kbd",
 			"internal/surfaces/beamtui/app/keybindings.go",
@@ -109,21 +100,15 @@ func TestUnit_PickerFuzzyScore_Preferences(t *testing.T) {
 	}
 }
 
-// TestUnit_PickerFuzzyScore_ScoresTheBestAlignment: a greedy left-to-right
-// matcher takes the first occurrence of every rune, which for a path is
-// usually the WRONG one — the query's runes almost always appear somewhere in
-// the leading directories. The scorer must find the placement a human meant.
+// TestUnit_PickerFuzzyScore_ScoresTheBestAlignment: the scorer finds the best
+// alignment, not the leftmost one.
 func TestUnit_PickerFuzzyScore_ScoresTheBestAlignment(t *testing.T) {
-	// Leftmost matching would spend "p" on "comp" and "i" on "beamtui",
-	// scattering the match across the directory prefix; the best alignment
-	// puts all six runes contiguously in the basename.
 	const label = "internal/surfaces/beamtui/comp/picker/picker.go"
 	got, ok := FuzzyScore("picker", label)
 	if !ok {
 		t.Fatal("picker did not match its own path")
 	}
-	// The same six contiguous runes at the same kind of boundary, with no
-	// directory prefix at all, must score identically: a leading gap is free.
+	// Must score identically to the bare name: a leading gap is free.
 	bare, ok := FuzzyScore("picker", "picker.go")
 	if !ok {
 		t.Fatal("picker did not match picker.go")
@@ -149,8 +134,6 @@ func TestUnit_PickerFuzzyScore_Edges(t *testing.T) {
 	if _, ok := FuzzyScore("kp", "picker.go"); ok {
 		t.Fatal("out-of-order runes matched")
 	}
-	// Multi-byte runes are runes, not bytes: a byte-wise scorer would find
-	// the query inside the UTF-8 encoding of an unrelated character.
 	if s, ok := FuzzyScore("日本", "docs/日本語/readme.md"); !ok || s <= 0 {
 		t.Fatalf("FuzzyScore over multi-byte runes = (%d, %v), want a match", s, ok)
 	}
@@ -160,9 +143,8 @@ func TestUnit_PickerFuzzyScore_Edges(t *testing.T) {
 }
 
 // TestUnit_PickerFuzzyScore_BoundedOnHugeCandidates: past the DP's cell
-// budget the scorer falls back to a single greedy pass, which must still
-// agree about whether the query matched — the half Filter's correctness
-// depends on — and must return promptly.
+// budget, the greedy fallback must still agree on whether the query matched
+// and must return promptly.
 func TestUnit_PickerFuzzyScore_BoundedOnHugeCandidates(t *testing.T) {
 	huge := strings.Repeat("a/b/", 20000) + "picker.go"
 	if len(huge) <= maxDPCells {
@@ -177,19 +159,15 @@ func TestUnit_PickerFuzzyScore_BoundedOnHugeCandidates(t *testing.T) {
 	}
 }
 
-// TestUnit_PickerFilter_FuzzyTierRanking is the ranking property the rebuild
-// exists for, run end-to-end through Filter over real repository paths.
+// TestUnit_PickerFilter_FuzzyTierRanking runs the fuzzy-tier ranking
+// end-to-end through Filter over real repository paths.
 func TestUnit_PickerFilter_FuzzyTierRanking(t *testing.T) {
 	cases := []struct {
 		name  string
 		query string
-		// want is the expected HEAD of the ranked list; the tail is left
-		// unpinned so adding a file to the corpus does not rewrite the test.
-		want []string
+		want  []string // expected head of the ranked list; tail left unpinned
 	}{
 		{
-			// Both candidates are subsequence matches — the tiers cannot tell
-			// them apart, so this is the fuzzy scorer's decision alone.
 			name:  "kbd",
 			query: "kbd",
 			want: []string{
@@ -214,10 +192,6 @@ func TestUnit_PickerFilter_FuzzyTierRanking(t *testing.T) {
 			},
 		},
 		{
-			// Nothing here is a prefix or a substring, so every survivor is in
-			// the fuzzy tier and the scorer alone produces this order:
-			// composer's runes sit at word boundaries inside the basename,
-			// workbench_dashboard's are scattered across the whole path.
 			name:  "an acronym only the fuzzy tier can resolve",
 			query: "cmpsr",
 			want: []string{
@@ -255,10 +229,8 @@ func TestUnit_PickerFilter_FuzzyTierRanking(t *testing.T) {
 	}
 }
 
-// TestUnit_PickerFilter_FuzzyTierIsStableAndDeterministic: two items that
-// score identically keep their input order, and the same input always
-// produces the same output — a picker whose rows shuffle between identical
-// keystrokes is unusable however good its ranking is.
+// TestUnit_PickerFilter_FuzzyTierIsStableAndDeterministic: items that score
+// identically keep input order, and identical input always sorts the same.
 func TestUnit_PickerFilter_FuzzyTierIsStableAndDeterministic(t *testing.T) {
 	items := []Item{
 		{ID: "first", Label: "a/x/y/z.go"},

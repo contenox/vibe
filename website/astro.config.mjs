@@ -36,8 +36,8 @@ export default defineConfig({
     "/docs/guide/providers/openai": "/docs/integrations/providers/openai/",
     "/docs/guide/providers/openrouter": "/docs/integrations/providers/openrouter/",
     "/docs/guide/providers/vertex": "/docs/integrations/providers/vertex/",
-    "/docs/guide/local-models": "/docs/integrations/providers/local-models/",
-    "/docs/guide/vscode-vscodium": "/docs/integrations/editors/vscode-vscodium/",
+    "/docs/guide/local-models": "/docs/rnd/modeld/",
+    "/docs/guide/vscode-vscodium": "/docs/rnd/vscode-extension/",
     "/docs/guide/zed": "/docs/integrations/editors/zed/",
     "/docs/guide/jetbrains": "/docs/integrations/editors/jetbrains/",
     "/docs/guide/aionui": "/docs/integrations/editors/aionui/",
@@ -71,7 +71,7 @@ export default defineConfig({
     "/docs/tools/remote": "/docs/integrations/tools/remote/",
     // Old marketing/docs aliases the Next config carried.
     "/features": "/docs/guide/quickstart/",
-    "/docs/beam": "/docs/guide/beam/",
+    "/docs/beam": "/docs/rnd/beam-web/",
     "/docs/guide/introduction": "/docs/guide/quickstart/",
     // Retired EE/commerce surfaces.
     "/pricing": "/",

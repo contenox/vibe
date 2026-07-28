@@ -1,9 +1,8 @@
 package taskengine_test
 
-// Prefix-determinism coverage for MacroEnv (provider-kv-cache blueprint
-// E1/E2): system-instruction bytes must not wobble with wall-clock time or
-// tool-registry enumeration order, because every provider prefix cache keys
-// on those exact bytes.
+// Prefix-determinism coverage for MacroEnv: system-instruction bytes must not
+// wobble with wall-clock time or tool-registry enumeration order, because
+// every provider prefix cache keys on those exact bytes.
 
 import (
 	"encoding/json"

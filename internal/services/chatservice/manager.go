@@ -44,8 +44,7 @@ func (m *Manager) AddInstruction(ctx context.Context, tx libdb.Exec, id string, 
 	})
 }
 
-// AppendMessage appends a message to an in-memory slice (no DB write).
-// Call PersistDiff afterwards to persist the result.
+// AppendMessage appends a message to messages in memory; call PersistDiff to persist it.
 func (m *Manager) AppendMessage(_ context.Context, messages []taskengine.Message, sendAt time.Time, message string, role string) ([]taskengine.Message, error) {
 	messages = append(messages, taskengine.Message{
 		Role:      role,
@@ -94,12 +93,7 @@ func (m *Manager) PersistDiff(ctx context.Context, tx libdb.Exec, subjectID stri
 		if msg.ID == "" {
 			msg.ID = generateMessageID(subjectID, &msg)
 		}
-		// Dedup against both DB-stored rows AND messages already queued for
-		// this batch. The synthesizer is documented as free to emit
-		// overlapping prefixes (e.g. system_instruction prepending in
-		// taskexec causes outHist[startIdx:] to re-include the last prior
-		// message); PersistDiff is the boundary that must guarantee
-		// uniqueness before the INSERT batch.
+		// Dedup against DB-stored rows and messages already queued this batch.
 		if existingIDs[msg.ID] {
 			continue
 		}
@@ -135,8 +129,7 @@ func (m *Manager) DeleteSession(ctx context.Context, tx libdb.Exec, sessionID st
 	return nil
 }
 
-// ClearSession removes all messages for a session while keeping the index, so
-// the session keeps its identity and name but starts a fresh conversation.
+// ClearSession removes all messages for a session while keeping the index.
 func (m *Manager) ClearSession(ctx context.Context, tx libdb.Exec, sessionID string) error {
 	if err := messagestore.New(tx, m.workspaceID).DeleteMessages(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to clear session messages: %w", err)

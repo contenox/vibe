@@ -13,11 +13,9 @@ import (
 )
 
 // engineEventTranslationMatrix is the translator side of the engine-events
-// contract (docs/development/engine-events.md §ACP translation): for every
-// TaskEvent kind the engine can emit, a representative event and the exact
-// number of ACP notifications this surface renders for it. Driven by
-// taskengine.AllTaskEventKinds, so adding an event kind without deciding its
-// ACP translation fails here rather than being dropped silently.
+// contract (docs/development/engine-events.md): each TaskEvent kind maps to a
+// representative event and the ACP notification count this surface renders.
+// Driven by taskengine.AllTaskEventKinds, so a new kind fails here until decided.
 var engineEventTranslationMatrix = map[taskengine.TaskEventKind]struct {
 	event         taskengine.TaskEvent
 	notifications int
@@ -26,18 +24,15 @@ var engineEventTranslationMatrix = map[taskengine.TaskEventKind]struct {
 	taskengine.TaskEventChainStarted:   {taskengine.TaskEvent{Kind: taskengine.TaskEventChainStarted, ChainID: "c"}, 0},
 	taskengine.TaskEventChainCompleted: {taskengine.TaskEvent{Kind: taskengine.TaskEventChainCompleted, ChainID: "c"}, 0},
 	taskengine.TaskEventChainFailed:    {taskengine.TaskEvent{Kind: taskengine.TaskEventChainFailed, ChainID: "c", Error: "boom"}, 0},
-	// Suspension (S6) renders nothing: the permission flow's approval card is
-	// already on screen and answering it resumes the checkpointed run.
+	// Suspension renders nothing: the approval card already on screen stands in.
 	taskengine.TaskEventChainSuspended: {taskengine.TaskEvent{Kind: taskengine.TaskEventChainSuspended, ChainID: "c", ApprovalID: "call-1"}, 0},
-	// Step lifecycle renders as a task card unless the handler is tool-bearing
-	// (then the tool events below are the card).
+	// Step lifecycle renders as a task card unless tool-bearing (then the tool events below are the card).
 	taskengine.TaskEventStepStarted:   {taskengine.TaskEvent{Kind: taskengine.TaskEventStepStarted, TaskID: "t1", TaskHandler: "noop"}, 1},
 	taskengine.TaskEventStepCompleted: {taskengine.TaskEvent{Kind: taskengine.TaskEventStepCompleted, TaskID: "t1", TaskHandler: "noop"}, 1},
 	taskengine.TaskEventStepFailed:    {taskengine.TaskEvent{Kind: taskengine.TaskEventStepFailed, TaskID: "t1", TaskHandler: "noop", Error: "boom"}, 1},
 	// Prose chunks split into message + thought notifications.
 	taskengine.TaskEventStepChunk: {taskengine.TaskEvent{Kind: taskengine.TaskEventStepChunk, TaskHandler: "chat_completion", Content: "hi", Thinking: "hm"}, 2},
-	// Stream bracket: consumed, deliberately not rendered (end-of-stream is
-	// implicit in ACP; usage indicators come from token_usage).
+	// Stream bracket: consumed, not rendered (ACP has no end-of-stream frame; usage comes from token_usage).
 	taskengine.TaskEventStepStreamEnd: {taskengine.TaskEvent{Kind: taskengine.TaskEventStepStreamEnd, TaskHandler: "chat_completion", ChunkCount: 3, FinishReason: "stop"}, 0},
 	// Approval/HITL events are rendered by the permission flow, not this translator.
 	taskengine.TaskEventApprovalRequested: {taskengine.TaskEvent{Kind: taskengine.TaskEventApprovalRequested, ApprovalID: "a1", ToolName: "write_file"}, 0},
@@ -48,11 +43,7 @@ var engineEventTranslationMatrix = map[taskengine.TaskEventKind]struct {
 	taskengine.TaskEventTokenUsage:        {taskengine.TaskEvent{Kind: taskengine.TaskEventTokenUsage, TokenUsed: 100, TokenSize: 1000}, 1},
 }
 
-// TestUnit_EngineEventContract_TranslatorConsumesEveryKind drives the native
-// event translator (which mirrors Transport.publishEvent case-for-case) with
-// one representative event per engine kind and asserts the documented
-// translation matrix, including that events with a populated Scope address
-// still translate identically (scope is additive; this surface ignores it).
+// TestUnit_EngineEventContract_TranslatorConsumesEveryKind pins that the native translator renders exactly the documented notification count for every engine event kind, with or without Scope populated.
 func TestUnit_EngineEventContract_TranslatorConsumesEveryKind(t *testing.T) {
 	for _, kind := range taskengine.AllTaskEventKinds() {
 		row, ok := engineEventTranslationMatrix[kind]
@@ -79,9 +70,7 @@ func TestUnit_EngineEventContract_TranslatorConsumesEveryKind(t *testing.T) {
 	}
 }
 
-// TestUnit_EngineEventContract_TransportPublishEventHandlesEveryKind runs the
-// connection-bound translator over every kind (scope fields populated) on a
-// bare Transport: new engine fields must never break this consumer.
+// TestUnit_EngineEventContract_TransportPublishEventHandlesEveryKind pins that a bare Transport's publishEvent never panics on any engine event kind.
 func TestUnit_EngineEventContract_TransportPublishEventHandlesEveryKind(t *testing.T) {
 	tr := &Transport{}
 	for _, kind := range taskengine.AllTaskEventKinds() {
@@ -249,10 +238,7 @@ func TestUnit_NormalizeToolCallNotification_DoesNotDowngradeStatus(t *testing.T)
 	require.JSONEq(t, `{"command":"go","args":["test"]}`, string(pending.Update.RawInput))
 }
 
-// TestUnit_IsToolBearingHandler pins THIS translator's use of the shared
-// predicate. The predicate itself (and the full handler matrix) is owned and
-// exhaustively tested in taskengine, which is the point of moving it there: a new
-// handler is now covered for both translators at once instead of only this one.
+// TestUnit_IsToolBearingHandler pins this translator's use of the shared taskengine.IsToolBearingHandler predicate, which owns the full handler matrix.
 func TestUnit_IsToolBearingHandler(t *testing.T) {
 	require.True(t, taskengine.IsToolBearingHandler(string(taskengine.HandleChatCompletion)))
 	require.True(t, taskengine.IsToolBearingHandler(string(taskengine.HandleExecuteToolCalls)))
@@ -293,10 +279,7 @@ func TestUnit_ReplayToolCall_InvalidArgumentsOmitsRawInput(t *testing.T) {
 	require.Equal(t, libacp.ToolKindExecute, upd.Kind)
 }
 
-// TestUnit_ReplayToolStatus covers the derivation that makes a replayed tool
-// card tell the truth. The two failure shapes are the ones taskengine itself
-// writes; everything else must stay "completed", including the near-miss cases
-// below, which are what keep a successful call from being libeled as a failure.
+// TestUnit_ReplayToolStatus pins that only taskengine's two persisted failure shapes replay as failed; every near-miss case stays "completed".
 func TestUnit_ReplayToolStatus(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -347,10 +330,7 @@ func TestUnit_ReplayToolStatus(t *testing.T) {
 	}
 }
 
-// TestUnit_ReplayToolStatuses_CarryOutcomeBackToTheOpeningCall is M12 in one
-// assertion: the assistant message that OPENED a call is stored before the
-// result that records how it ended, so the opening card can only be honest if
-// the whole transcript is consulted first.
+// TestUnit_ReplayToolStatuses_CarryOutcomeBackToTheOpeningCall pins that a replayed opening card's status reflects its later result, not just the assistant message that opened the call.
 func TestUnit_ReplayToolStatuses_CarryOutcomeBackToTheOpeningCall(t *testing.T) {
 	messages := []taskengine.Message{
 		{Role: "user", Content: "read both files"},
@@ -367,20 +347,16 @@ func TestUnit_ReplayToolStatuses_CarryOutcomeBackToTheOpeningCall(t *testing.T) 
 	require.Equal(t, libacp.ToolCallStatusFailed, replayStatusFor(statuses, "bad-1"),
 		"a call whose result says it failed must not replay as a green check")
 
-	// A call with no recorded result keeps the historical "completed": absence of
-	// an outcome is not evidence of failure.
+	// No recorded result keeps the historical "completed": absence of an outcome
+	// is not evidence of failure.
 	require.Equal(t, libacp.ToolCallStatusCompleted, replayStatusFor(statuses, "never-answered"))
 
-	// And the opening card carries it.
 	failed := toolCallUpdateFromCall(messages[1].CallTools[1], replayStatusFor(statuses, "bad-1"))
 	require.Equal(t, libacp.SessionUpdateToolCall, failed.SessionUpdate)
 	require.Equal(t, libacp.ToolCallStatusFailed, failed.Status)
 }
 
-// TestUnit_ReplayToolStatuses_ExternalUsesThePersistedStatus proves the
-// external path stays EXACT rather than derived: a downstream agent's own
-// status field is read back verbatim, including one this package's native
-// heuristic would never produce from the same content.
+// TestUnit_ReplayToolStatuses_ExternalUsesThePersistedStatus pins that the external path reads a downstream agent's status field back verbatim, not derived.
 func TestUnit_ReplayToolStatuses_ExternalUsesThePersistedStatus(t *testing.T) {
 	rec, err := json.Marshal(externalToolRecord{
 		ToolCallID: "ext-1",
@@ -395,10 +371,7 @@ func TestUnit_ReplayToolStatuses_ExternalUsesThePersistedStatus(t *testing.T) {
 	require.Equal(t, libacp.ToolCallStatusFailed, replayStatusFor(statuses, "ext-1"))
 }
 
-// TestUnit_EstimateHistoryTokens mirrors ollamatokenizer.EstimateTokenizer,
-// which is the tokenizer enginesvc wires unconditionally — so this number is
-// the same arithmetic the engine will run on the next turn over the same
-// history, not an independent guess.
+// TestUnit_EstimateHistoryTokens pins that the estimate mirrors ollamatokenizer.EstimateTokenizer, the tokenizer enginesvc always wires.
 func TestUnit_EstimateHistoryTokens(t *testing.T) {
 	require.Equal(t, 0, estimateHistoryTokens(nil), "an empty session has used nothing")
 	require.Equal(t, 0, estimateHistoryTokens([]taskengine.Message{{Role: "assistant"}}),

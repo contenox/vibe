@@ -13,36 +13,24 @@ import (
 	"testing"
 )
 
-// guardedRoots are the trees the rule covers: every line of this project's own
-// logic. libacp/ is a published protocol library with its own rules and tools/
-// and examples/ are not the product, so they are out of scope here.
+// guardedRoots covers this project's own logic; libacp is a published library
+// with its own rules, and tools/examples aren't the product.
 var guardedRoots = []string{"internal", "cmd"}
 
-// slogSinkAllowlist is the CLOSED set of files permitted to import log/slog,
-// keyed by module-root-relative slash path. A trailing "/" marks a directory
-// prefix; everything else is one exact file.
-//
-// The distinction the allowlist encodes is CONFIGURING A SINK versus CALLING A
-// LOGGER. libtracker's ActivityTracker is this repo's only instrumentation
-// seam, and slog is the sink one implementation of it happens to write through
-// — so pointing the default handler at a file is plumbing the seam, while
-// slog.Warn("...", "args", args) in command or service logic bypasses the seam
-// entirely. That is not a style preference: values reported through the tracker
-// are scrubbed by field name before they are written (redact.go), so a direct
-// slog call is also a credential-redaction bypass, which is why the rule is a
-// test and not a comment.
-//
-// Entries are individual FILES, never packages, outside libtracker itself. A
-// package-wide exemption is how this regrows: one legitimate SetDefault in a
-// composition root would license every future slog.Warn added beside it.
+// slogSinkAllowlist is the closed set of files permitted to import log/slog,
+// keyed by module-root-relative slash path (trailing "/" = directory prefix,
+// else an exact file). The rule distinguishes configuring the sink from
+// calling a logger: libtracker's ActivityTracker is the only instrumentation
+// seam and redacts by field name before writing, so a direct slog call
+// bypasses redaction, not just style. Entries are individual files, never
+// packages, outside libtracker itself — a package-wide exemption would
+// license every future slog call added beside it.
 var slogSinkAllowlist = map[string]string{
-	// The sink adapter itself. slog is this package's OUTPUT FORMAT: it builds
-	// a tracker over an *slog.Logger, stamps request/trace/span IDs onto every
-	// record, and redacts on the way out. It is the one place a package-wide
-	// allowance is correct, because being the slog boundary is the whole job.
+	// The sink adapter itself: builds a tracker over an *slog.Logger, stamps
+	// request/trace/span IDs, and redacts on the way out.
 	"internal/libtracker/": "the tracker's slog sink adapter — slog is its output, not its API",
 
-	// Composition roots that CONFIGURE the sink, named file by file.
+	// Composition roots that configure the sink, named file by file.
 	"internal/surfaces/contenoxcli/cli.go":      "setupTelemetryLogging: tees the default handler to <data-dir>/telemetry.log when the operator sets telemetry-enabled",
 	"internal/surfaces/contenoxcli/beam_cmd.go": "redirectBeamLogsToFile: moves the default handler OFF stderr into beam.log — beam owns the terminal, so a stray record would be drawn over the transcript",
 
@@ -50,26 +38,11 @@ var slogSinkAllowlist = map[string]string{
 	"internal/surfaces/contenoxcli/beam_cmd_test.go": "asserts redirectBeamLogsToFile actually retargets slog.Default() and restores it on failure — it has to call slog to see that",
 }
 
-// TestUnit_NoDirectSlogOutsideSinks is the guard that keeps libtracker the only
-// instrumentation seam in this repo.
-//
-// It walks every .go file under internal/ and cmd/ with go/parser in
-// ImportsOnly mode (fast — function bodies are never parsed) and fails on any
-// import of log/slog from a file that is not on slogSinkAllowlist above, whose
-// doc comment carries each entry's justification.
-//
-// It lives in libtracker rather than in a test-only package because the rule is
-// libtracker's own invariant: the reason direct slog is forbidden is that the
-// tracker redacts and correlates and a bypass does neither, so the guard is
-// findable by the next person reading the seam it protects. The test imports
-// nothing from the tree it walks (it reads files, it does not link them), so
-// there is no dependency cycle and no reason to add a package just to hold it.
-//
-// If this fails on a file you just wrote, the fix is almost never the
-// allowlist: report through an ActivityTracker (see the usage pattern on the
-// interface in activitytracker.go), or, if the thing you are writing is a
-// message an operator must READ AND ACT ON, print it to the command's stderr
-// instead — that was never a log line to begin with.
+// TestUnit_NoDirectSlogOutsideSinks keeps libtracker the only instrumentation
+// seam: it walks internal/ and cmd/, parsing imports only, and fails on any
+// log/slog import from a file not on slogSinkAllowlist. On failure, report
+// through an ActivityTracker instead, or print operator-facing messages to
+// the command's stderr; extend the allowlist only for genuine sink wiring.
 func TestUnit_NoDirectSlogOutsideSinks(t *testing.T) {
 	root := moduleRoot(t)
 	fset := token.NewFileSet()
@@ -164,11 +137,8 @@ func allowed(rel string) bool {
 	return false
 }
 
-// moduleRoot is the nearest ancestor of the working directory holding a go.mod.
-// Go runs a test binary with its working directory set to the package
-// directory, so this always lands in the module under test — which matters for
-// a guard: one that silently walks a different checkout passes for the wrong
-// reason.
+// moduleRoot is the nearest ancestor of the working directory holding a
+// go.mod, so the guard always walks the module under test.
 func moduleRoot(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()

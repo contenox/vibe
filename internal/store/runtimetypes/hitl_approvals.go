@@ -35,25 +35,17 @@ const (
 // package does not import hitlservice — runtimetypes sits below the service
 // layer; hitlservice converts to/from its own Action type at the boundary.
 //
-// Resolution is deliberately opaque JSON, not a bare boolean: today
-// hitlservice only ever writes an approve/deny answer into it, but a
-// permission ask is yes/no while a later mission-mode "ask for attention"
-// ask answers with data ("which of these three?", "what value should I
-// use?"). runtimetypes does not interpret its shape — that is hitlservice's
-// concern (see its approvalResolution type); this column is nil while State
-// is pending and set exactly once when it becomes terminal.
-// # Attribution
+// Resolution is deliberately opaque JSON, not a bare boolean: a permission
+// ask is yes/no, but a later mission-mode ask may answer with data ("which of
+// these three?"). runtimetypes does not interpret its shape — that is
+// hitlservice's concern; this column is nil while State is pending and set
+// exactly once when it becomes terminal.
 //
-// InstanceID, SessionID, AgentName and MissionID name WHO is asking. Without
-// them the row says only which tool was called, which is enough to render an
-// inbox of one and useless for an inbox of many: at the plurality mission mode
-// exists for, identical-looking rows cannot be told apart, and an operator
-// cannot answer the one question an approval must always answer — what gated
-// this action, and on whose behalf. All four are best-effort: an ask raised by
-// a native chain turn with no fleet unit behind it carries none of them, and
-// MissionID is a pointer precisely because not every ask has a mission (a
-// non-mission unattended session, an API caller). Empty/nil means "not
-// applicable", never "unknown but exists".
+// InstanceID, SessionID, AgentName and MissionID name who is asking, needed
+// to tell otherwise-identical rows apart once more than one fleet unit is
+// asking. All four are best-effort — a native chain turn with no fleet unit
+// carries none of them — and MissionID is a pointer because not every ask
+// has one. Empty/nil means "not applicable", never "unknown but exists".
 type HITLApproval struct {
 	ID          string            `json:"id" example:"3f9c6e2a-1b4d-4e8f-9a2c-7d5e6f8a9b0c"`
 	ToolsName   string            `json:"toolsName" example:"local_fs"`
@@ -108,11 +100,8 @@ func (s *store) GetHITLApproval(ctx context.Context, id string) (*HITLApproval, 
 func (s *store) scanHITLApproval(ctx context.Context, query string, arg any) (*HITLApproval, error) {
 	var a HITLApproval
 	var state string
-	// Scan resolution into a plain []byte: NULL (pending) becomes a nil
-	// slice, and both Postgres (JSONB -> []byte) and SQLite (TEXT -> string,
-	// auto-converted to []byte by database/sql) round-trip correctly —
-	// scanning directly into json.RawMessage fails on SQLite (see kv.go's
-	// getKVScoped, which documents the same constraint).
+	// []byte round-trips on both Postgres (JSONB) and SQLite (TEXT); scanning
+	// directly into json.RawMessage fails on SQLite (see kv.go's getKVScoped).
 	var rawResolution []byte
 	err := s.Exec.QueryRowContext(ctx, query, arg).Scan(
 		&a.ID, &a.ToolsName, &a.ToolName, &a.ArgsSummary, &a.Diff, &a.PolicyName, &a.MatchedRule, &a.OnTimeout, &state, &rawResolution,
@@ -131,17 +120,11 @@ func (s *store) scanHITLApproval(ctx context.Context, query string, arg any) (*H
 	return &a, nil
 }
 
-// ResolveHITLApproval atomically transitions id from pending to state (an
-// UPDATE ... WHERE state = 'pending' compare-and-swap). It is the only write
-// path into a terminal state, so a human's Respond racing the sweeper's
-// timeout-expiry can never both "win": whichever UPDATE reaches the database
-// first changes the row, and the other's WHERE clause then matches zero
-// rows. Returns libdb.ErrNotFound when id does not exist OR is no longer
-// pending (already approved/denied/expired); callers that need to tell those
-// apart follow up with GetHITLApproval.
-//
-// resolution is opaque here (see HITLApproval.Resolution's doc); nil/empty
-// stores SQL NULL.
+// ResolveHITLApproval atomically transitions id from pending to state via an
+// UPDATE ... WHERE state = 'pending' compare-and-swap, so a human's Respond
+// racing the sweeper's timeout-expiry can never both win. Returns
+// libdb.ErrNotFound when id does not exist or is no longer pending; callers
+// that need to tell those apart follow up with GetHITLApproval.
 func (s *store) ResolveHITLApproval(ctx context.Context, id string, state HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE hitl_approvals
@@ -185,10 +168,7 @@ func (s *store) ListExpiredHITLApprovals(ctx context.Context, asOf time.Time, li
 	return scanHITLApprovalRows(rows)
 }
 
-// ListHITLApprovals returns approvals in state, newest first — asks are
-// listed and filtered by state, which is the surface a future inbox
-// (docs/development/blueprints/acp/fleet-consolidation.md slice C2) lists
-// from.
+// ListHITLApprovals returns approvals in state, newest first.
 func (s *store) ListHITLApprovals(ctx context.Context, state HITLApprovalState, createdAtCursor *time.Time, limit int) ([]*HITLApproval, error) {
 	cursor := time.Now().UTC()
 	if createdAtCursor != nil {
@@ -214,14 +194,9 @@ func (s *store) ListHITLApprovals(ctx context.Context, state HITLApprovalState, 
 }
 
 // ListHITLApprovalsForMission returns every ask raised by missionID's unit,
-// newest first, in ANY state. It is how a supervisor answers "what has this
-// mission asked me, and what did those asks come to" — the pending ones to
-// answer, the resolved ones to count (see hitlservice's agent-answer cap).
-//
-// Deliberately no state filter and no JSON predicate: a mission raises few asks,
-// so the caller filters in Go rather than pushing a resolution-shape query into
-// SQL that would have to be written twice for the two dialects this store
-// supports.
+// newest first, in any state — deliberately no state filter, since a mission
+// raises few asks and the caller filters in Go rather than pushing a
+// resolution-shape query into SQL written twice for the two dialects supported.
 func (s *store) ListHITLApprovalsForMission(ctx context.Context, missionID string, limit int) ([]*HITLApproval, error) {
 	if limit > MAXLIMIT {
 		return nil, ErrLimitParamExceeded

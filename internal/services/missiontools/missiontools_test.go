@@ -16,10 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setup gives a test a real sqlite-backed mission service plus one open mission
-// to report against, returning the service and the mission id. Exercising the
-// real store (sqlite, no subprocess) is cheap and catches the same validate()
-// drift the store itself would reject.
+// setup gives a test a real sqlite-backed mission service plus one open mission to report against.
 func setup(t *testing.T) (context.Context, missionservice.Service, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -40,10 +37,7 @@ func reportCall(kind, summary string) *taskengine.ToolsCall {
 	}
 }
 
-// TestUnit_MissionTools_ReportFilesAgainstBoundMission proves the core of the
-// slice: a report tool call on a mission-bound context lands in that mission's
-// reports and stamps a heartbeat. This is exactly the seam the e2e proves end to
-// end through a real subprocess.
+// TestUnit_MissionTools_ReportFilesAgainstBoundMission pins that a report call lands in the bound mission's reports and stamps a heartbeat.
 func TestUnit_MissionTools_ReportFilesAgainstBoundMission(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -61,32 +55,26 @@ func TestUnit_MissionTools_ReportFilesAgainstBoundMission(t *testing.T) {
 	require.Equal(t, "found the leak", reports[0].Summary)
 	require.Equal(t, missionID, reports[0].MissionID)
 
-	// The report stamped liveness.
 	m, err := svc.Get(ctx, missionID)
 	require.NoError(t, err)
 	require.NotNil(t, m.LastHeartbeat, "filing a report is proof of life and heartbeats the mission")
 }
 
-// TestUnit_MissionTools_AbsentWithoutMission is the envelope-at-construction
-// invariant: off a mission, the tools are neither listed nor executable. A unit
-// that is not on a mission has nothing to call — it cannot forge a mission id.
+// TestUnit_MissionTools_AbsentWithoutMission pins that off a mission the tools are neither listed nor executable.
 func TestUnit_MissionTools_AbsentWithoutMission(t *testing.T) {
 	ctx, svc, _ := setup(t)
 	tools := missiontools.New(svc, nil)
 
-	// Not exposed to a model.
 	listed, err := tools.GetToolsForToolsByName(ctx, missiontools.ToolsProviderName)
 	require.NoError(t, err)
 	require.Empty(t, listed, "off a mission the tools are absent from the tool list")
 
-	// Not executable via the deterministic path either.
 	_, _, err = tools.Exec(ctx, time.Now(), nil, false, reportCall("progress", "should not run"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "only available to a unit dispatched on a mission")
 }
 
-// TestUnit_MissionTools_ExposedOnMission is the positive half: on a mission ALL
-// four mission tools ARE listed, so a chain that opted them in can drive them.
+// TestUnit_MissionTools_ExposedOnMission pins that on a mission all four mission tools are listed.
 func TestUnit_MissionTools_ExposedOnMission(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -106,9 +94,7 @@ func TestUnit_MissionTools_ExposedOnMission(t *testing.T) {
 	}, names)
 }
 
-// TestUnit_MissionTools_ReportScopedToOwnMission proves a unit reports only
-// against the mission bound into ITS context — the per-mission grant. Two
-// missions, a context bound to the first, a report lands only on the first.
+// TestUnit_MissionTools_ReportScopedToOwnMission pins that a unit reports only against the mission bound into its context.
 func TestUnit_MissionTools_ReportScopedToOwnMission(t *testing.T) {
 	ctx, svc, missionA := setup(t)
 	other := &missionservice.Mission{Intent: "other work", AgentName: "runner", HITLPolicyName: "default"}
@@ -126,8 +112,7 @@ func TestUnit_MissionTools_ReportScopedToOwnMission(t *testing.T) {
 	require.Empty(t, b, "a unit cannot report on a mission that is not its own")
 }
 
-// TestUnit_MissionTools_ReportDefaultsKind proves a summary-only report defaults
-// to progress rather than erroring on the missing enum.
+// TestUnit_MissionTools_ReportDefaultsKind pins that a summary-only report defaults to progress.
 func TestUnit_MissionTools_ReportDefaultsKind(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -146,15 +131,13 @@ func TestUnit_MissionTools_ReportDefaultsKind(t *testing.T) {
 	require.Equal(t, missionservice.ReportKindProgress, reports[0].Kind)
 }
 
-// TestUnit_MissionTools_ReportReadsModelArgs proves the model-driven shape
-// (map[string]any input) is read, including refs as a JSON array.
+// TestUnit_MissionTools_ReportReadsModelArgs pins that the model-driven map[string]any input is read, including refs as a JSON array.
 func TestUnit_MissionTools_ReportReadsModelArgs(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
 
-	// The absolute ref must genuinely exist: this test is about ARG PARSING, and
-	// a result claiming a nonexistent absolute path would (correctly) trip the
-	// conclusion verification gate and land downgraded — verify_test.go's job.
+	// The absolute ref must genuinely exist: this test is about arg parsing, not
+	// the conclusion verification gate (verify_test.go's job).
 	outLog := filepath.Join(t.TempDir(), "out.log")
 	require.NoError(t, os.WriteFile(outLog, []byte("all green"), 0o644))
 
@@ -176,8 +159,7 @@ func TestUnit_MissionTools_ReportReadsModelArgs(t *testing.T) {
 	require.Equal(t, []string{"README.md", outLog}, reports[0].Refs)
 }
 
-// TestUnit_MissionTools_ReportReadsModelHandover proves the model-driven shape
-// carries a nested typed hand-off object through to the stored report.
+// TestUnit_MissionTools_ReportReadsModelHandover pins that the model-driven shape carries a nested typed hand-off through to storage.
 func TestUnit_MissionTools_ReportReadsModelHandover(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -206,10 +188,7 @@ func TestUnit_MissionTools_ReportReadsModelHandover(t *testing.T) {
 	require.Equal(t, "SIMD path untested on aarch64", reports[0].Handover.Caveats)
 }
 
-// TestUnit_MissionTools_ReportReadsDeterministicHandover proves the deterministic
-// `tools` path — whose Args are map[string]string and cannot carry a nested
-// object — reaches the hand-off as a JSON string, the shape a deterministic chain
-// uses.
+// TestUnit_MissionTools_ReportReadsDeterministicHandover pins that the deterministic Args path reaches the hand-off as a JSON string.
 func TestUnit_MissionTools_ReportReadsDeterministicHandover(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -234,8 +213,7 @@ func TestUnit_MissionTools_ReportReadsDeterministicHandover(t *testing.T) {
 	require.Equal(t, "wire the inbox next", reports[0].Handover.HandoverForNext)
 }
 
-// TestUnit_MissionTools_ReportWithoutHandoverIsLegacy proves a report with no
-// hand-off stores with a nil Handover — the absent hand-off is the norm.
+// TestUnit_MissionTools_ReportWithoutHandoverIsLegacy pins that a report with no hand-off stores with a nil Handover.
 func TestUnit_MissionTools_ReportWithoutHandoverIsLegacy(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -249,9 +227,7 @@ func TestUnit_MissionTools_ReportWithoutHandoverIsLegacy(t *testing.T) {
 	require.Nil(t, reports[0].Handover, "a report with no hand-off carries a nil Handover")
 }
 
-// TestUnit_MissionTools_ReportRejectsMalformedHandover proves a syntactically
-// broken hand-off object surfaces a legible error the model can correct, rather
-// than being silently dropped.
+// TestUnit_MissionTools_ReportRejectsMalformedHandover pins that a broken hand-off object surfaces a legible error, not a silent drop.
 func TestUnit_MissionTools_ReportRejectsMalformedHandover(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -266,8 +242,7 @@ func TestUnit_MissionTools_ReportRejectsMalformedHandover(t *testing.T) {
 	require.Contains(t, err.Error(), "handover")
 }
 
-// TestUnit_MissionTools_InvalidKindRejected proves a malformed kind still fails
-// loudly through the store's own validation rather than being silently coerced.
+// TestUnit_MissionTools_InvalidKindRejected pins that a malformed kind fails loudly through the store's validation.
 func TestUnit_MissionTools_InvalidKindRejected(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -277,8 +252,7 @@ func TestUnit_MissionTools_InvalidKindRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid report kind")
 }
 
-// fakeAsker records RaiseAttention calls so the wired attention path can be
-// asserted without pulling in the full hitlservice.
+// fakeAsker records RaiseAttention calls so the wired attention path can be asserted without pulling in hitlservice.
 type fakeAsker struct {
 	missionID string
 	summary   string
@@ -299,8 +273,7 @@ func (f *fakeAsker) RaiseAttention(_ context.Context, ask missiontools.Attention
 	return f.answer, f.err
 }
 
-// TestUnit_MissionTools_AskAttentionUsesAskerWhenWired proves mission_ask_attention
-// routes to the injected durable-ask machinery, scoped to the caller's mission.
+// TestUnit_MissionTools_AskAttentionUsesAskerWhenWired pins that mission_ask_attention routes to the injected asker, scoped to the mission.
 func TestUnit_MissionTools_AskAttentionUsesAskerWhenWired(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	asker := &fakeAsker{answer: "staging, and use the seeded fixtures"}
@@ -313,24 +286,18 @@ func TestUnit_MissionTools_AskAttentionUsesAskerWhenWired(t *testing.T) {
 	}
 	out, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), nil, false, call)
 	require.NoError(t, err)
-	// THE POINT of asking: the operator's words come back as the tool result, so
-	// the unit can act on them in the same turn instead of merely learning that
-	// somebody was notified.
-	require.Equal(t, "staging, and use the seeded fixtures", out)
+	require.Equal(t, "staging, and use the seeded fixtures", out, "the operator's words come back as the tool result")
 	require.Equal(t, 1, asker.calls)
 	require.Equal(t, missionID, asker.missionID)
 	require.Equal(t, "need a decision", asker.summary)
 	require.Equal(t, "prod or staging?", asker.detail)
 
-	// No asker involvement means no report either.
 	reports, err := svc.ListReports(ctx, missionID, 10)
 	require.NoError(t, err)
 	require.Empty(t, reports, "a wired asker does not double-write a blocker report")
 }
 
-// TestUnit_MissionTools_AskAttentionFallsBackToBlocker proves that with no asker
-// wired, an attention request is not dropped — it lands as a durable blocker
-// report (same store, no parallel mechanism).
+// TestUnit_MissionTools_AskAttentionFallsBackToBlocker pins that with no asker wired, the request lands as a durable blocker report.
 func TestUnit_MissionTools_AskAttentionFallsBackToBlocker(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -350,9 +317,7 @@ func TestUnit_MissionTools_AskAttentionFallsBackToBlocker(t *testing.T) {
 	require.Equal(t, "need a decision", reports[0].Summary)
 }
 
-// TestUnit_MissionTools_UnknownMissionSurfacesError proves a report against a
-// context bound to a nonexistent mission surfaces the store's not-found rather
-// than a silent insert — the AddReport contract, exercised through the tool.
+// TestUnit_MissionTools_UnknownMissionSurfacesError pins that a report against a nonexistent mission surfaces not-found, not a silent insert.
 func TestUnit_MissionTools_UnknownMissionSurfacesError(t *testing.T) {
 	ctx, svc, _ := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -362,9 +327,7 @@ func TestUnit_MissionTools_UnknownMissionSurfacesError(t *testing.T) {
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }
 
-// TestUnit_MissionTools_MetaRoundTrip pins the session/new wire contract the
-// dispatcher and the unit agree on: a mission id marshalled into `_meta` parses
-// back out, and unrelated `_meta` reads as "not on a mission".
+// TestUnit_MissionTools_MetaRoundTrip pins that a mission id marshalled into `_meta` parses back out, and unrelated `_meta` does not.
 func TestUnit_MissionTools_MetaRoundTrip(t *testing.T) {
 	raw := missionservice.MarshalMissionMeta("mission-123")
 	require.NotNil(t, raw)
@@ -378,9 +341,7 @@ func TestUnit_MissionTools_MetaRoundTrip(t *testing.T) {
 	require.Nil(t, missionservice.MarshalMissionMeta("  "), "a blank id marshals to no _meta")
 }
 
-// planModelCall builds a mission_plan call in the MODEL-driven shape: the entries
-// arrive as a []any of objects under a map[string]any `input`. It returns the
-// call (with only the names set) and the input the transport hands to Exec.
+// planModelCall builds a mission_plan call in the model-driven shape: entries as a []any under a map[string]any `input`.
 func planModelCall(explanation string, entries ...map[string]any) (*taskengine.ToolsCall, map[string]any) {
 	items := make([]any, len(entries))
 	for i, e := range entries {
@@ -397,11 +358,7 @@ func planEntryArg(content, status, priority string) map[string]any {
 	return map[string]any{"content": content, "status": status, "priority": priority}
 }
 
-// TestUnit_MissionTools_PlanSetsSnapshotAndEchoesIDs is the core of the plan
-// slice: a mission_plan call on a mission-bound context replaces the mission's
-// plan with the snapshot, stamps a heartbeat, and echoes the STORED plan back —
-// with the ids SetPlan assigned to the id-less entries, so the planner can carry
-// them forward.
+// TestUnit_MissionTools_PlanSetsSnapshotAndEchoesIDs pins that mission_plan replaces the plan, stamps a heartbeat, and echoes assigned ids.
 func TestUnit_MissionTools_PlanSetsSnapshotAndEchoesIDs(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -414,7 +371,6 @@ func TestUnit_MissionTools_PlanSetsSnapshotAndEchoesIDs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, taskengine.DataTypeJSON, dt)
 
-	// The result echoes the stored snapshot as a missionservice.Plan, with ids.
 	echoed, ok := out.(missionservice.Plan)
 	require.True(t, ok, "mission_plan echoes the stored Plan so ids carry forward")
 	require.Equal(t, 1, echoed.Revision)
@@ -423,7 +379,6 @@ func TestUnit_MissionTools_PlanSetsSnapshotAndEchoesIDs(t *testing.T) {
 	require.NotEmpty(t, echoed.Entries[1].ID)
 	require.Equal(t, "first cut", echoed.Explanation)
 
-	// The plan is persisted on the mission.
 	m, err := svc.Get(ctx, missionID)
 	require.NoError(t, err)
 	require.Equal(t, 1, m.Plan.Revision)
@@ -431,14 +386,10 @@ func TestUnit_MissionTools_PlanSetsSnapshotAndEchoesIDs(t *testing.T) {
 	require.Equal(t, "survey the codebase", m.Plan.Entries[0].Content)
 	require.Equal(t, missionservice.PlanEntryInProgress, m.Plan.Entries[0].Status)
 	require.Equal(t, missionservice.PlanEntryPriorityHigh, m.Plan.Entries[0].Priority)
-
-	// Revising the plan stamped liveness.
 	require.NotNil(t, m.LastHeartbeat, "revising the plan is proof of life and heartbeats the mission")
 }
 
-// TestUnit_MissionTools_PlanAbsentOffMission is the envelope-at-construction
-// invariant for the plan tool: off a mission it refuses to execute, so a unit not
-// on a mission cannot write a plan against a mission it names.
+// TestUnit_MissionTools_PlanAbsentOffMission pins that off a mission, mission_plan refuses to execute.
 func TestUnit_MissionTools_PlanAbsentOffMission(t *testing.T) {
 	ctx, svc, _ := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -449,8 +400,7 @@ func TestUnit_MissionTools_PlanAbsentOffMission(t *testing.T) {
 	require.Contains(t, err.Error(), "only available to a unit dispatched on a mission")
 }
 
-// TestUnit_MissionTools_PlanScopedToOwnMission proves a unit plans only against
-// the mission bound into ITS context — the per-mission grant.
+// TestUnit_MissionTools_PlanScopedToOwnMission pins that a unit plans only against the mission bound into its context.
 func TestUnit_MissionTools_PlanScopedToOwnMission(t *testing.T) {
 	ctx, svc, missionA := setup(t)
 	other := &missionservice.Mission{Intent: "other work", AgentName: "runner", HITLPolicyName: "default"}
@@ -469,9 +419,7 @@ func TestUnit_MissionTools_PlanScopedToOwnMission(t *testing.T) {
 	require.Equal(t, 0, b.Plan.Revision, "a unit cannot plan on a mission that is not its own")
 }
 
-// TestUnit_MissionTools_PlanReadsDeterministicJSONArgs proves the deterministic
-// `tools` path — whose Args are map[string]string and cannot carry a nested list
-// — reaches the entries as a JSON string. This is the shape the e2e chain uses.
+// TestUnit_MissionTools_PlanReadsDeterministicJSONArgs pins that the deterministic Args path reaches entries as a JSON string.
 func TestUnit_MissionTools_PlanReadsDeterministicJSONArgs(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -484,7 +432,6 @@ func TestUnit_MissionTools_PlanReadsDeterministicJSONArgs(t *testing.T) {
 			"explanation": "seed from a deterministic chain",
 		},
 	}
-	// input is the flowing chain value in this path, not the args; nil is fine.
 	_, _, err := tools.Exec(missiontools.WithMissionID(ctx, missionID), time.Now(), nil, false, call)
 	require.NoError(t, err)
 
@@ -496,10 +443,7 @@ func TestUnit_MissionTools_PlanReadsDeterministicJSONArgs(t *testing.T) {
 	require.Equal(t, "seed from a deterministic chain", m.Plan.Explanation)
 }
 
-// TestUnit_MissionTools_PlanRejectsEmptySnapshot proves an empty snapshot fails
-// loudly through SetPlan's shape validation rather than silently erasing the
-// plan (full-snapshot replace has no "erase" path — deletion is omission of
-// individual entries).
+// TestUnit_MissionTools_PlanRejectsEmptySnapshot pins that an empty snapshot fails loudly rather than silently erasing the plan.
 func TestUnit_MissionTools_PlanRejectsEmptySnapshot(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -511,9 +455,7 @@ func TestUnit_MissionTools_PlanRejectsEmptySnapshot(t *testing.T) {
 	require.Contains(t, err.Error(), "at least one entry")
 }
 
-// TestUnit_MissionTools_PlanRejectsUnknownStatus proves a malformed enum surfaces
-// through the store's validation — the tool stays hard on shape and does not
-// coerce.
+// TestUnit_MissionTools_PlanRejectsUnknownStatus pins that a malformed enum surfaces through the store's validation, never coerced.
 func TestUnit_MissionTools_PlanRejectsUnknownStatus(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -524,8 +466,7 @@ func TestUnit_MissionTools_PlanRejectsUnknownStatus(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid plan entry status")
 }
 
-// TestUnit_MissionTools_PlanMissingEntriesRejected proves a plan call with no
-// entries argument at all is rejected with a clear message, not a nil-plan write.
+// TestUnit_MissionTools_PlanMissingEntriesRejected pins that a plan call with no entries argument is rejected, not a nil-plan write.
 func TestUnit_MissionTools_PlanMissingEntriesRejected(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -536,11 +477,7 @@ func TestUnit_MissionTools_PlanMissingEntriesRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "requires an 'entries' array")
 }
 
-// TestUnit_MissionTools_PlanCarriesIDsForwardAndGuardsCompleted proves the id
-// echo is load-bearing: a second revision that carries an entry's echoed id
-// forward keeps its identity, and once that entry is completed its content is
-// immutable — a later revision rewriting the completed entry's text (same id) is
-// rejected, exactly the audit-safety guard the id carry-forward enables.
+// TestUnit_MissionTools_PlanCarriesIDsForwardAndGuardsCompleted pins that a carried-forward id keeps identity, and completed content is immutable.
 func TestUnit_MissionTools_PlanCarriesIDsForwardAndGuardsCompleted(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -581,9 +518,7 @@ func finishCall(status, reason string) *taskengine.ToolsCall {
 	}
 }
 
-// TestUnit_MissionTools_FinishSetsTerminalStatus proves a mission_finish call
-// moves the mission to the named terminal state, records the reason, and stamps a
-// heartbeat.
+// TestUnit_MissionTools_FinishSetsTerminalStatus pins that mission_finish moves to the named terminal state, records the reason, heartbeats.
 func TestUnit_MissionTools_FinishSetsTerminalStatus(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -600,8 +535,7 @@ func TestUnit_MissionTools_FinishSetsTerminalStatus(t *testing.T) {
 	require.NotNil(t, m.LastHeartbeat, "finishing a mission heartbeats it")
 }
 
-// TestUnit_MissionTools_FinishReadsModelStuck proves the model-driven shape and a
-// stuck verdict both work — stuck is a first-class terminal signal.
+// TestUnit_MissionTools_FinishReadsModelStuck pins that the model-driven shape and a stuck verdict both work.
 func TestUnit_MissionTools_FinishReadsModelStuck(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -616,8 +550,7 @@ func TestUnit_MissionTools_FinishReadsModelStuck(t *testing.T) {
 	require.Equal(t, missionservice.StatusStuck, m.Status)
 }
 
-// TestUnit_MissionTools_FinishRequiresStatus proves a finish call with no status
-// is rejected before it reaches the store.
+// TestUnit_MissionTools_FinishRequiresStatus pins that a finish call with no status is rejected before it reaches the store.
 func TestUnit_MissionTools_FinishRequiresStatus(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -627,8 +560,7 @@ func TestUnit_MissionTools_FinishRequiresStatus(t *testing.T) {
 	require.Contains(t, err.Error(), "requires a status")
 }
 
-// TestUnit_MissionTools_FinishRejectsNonTerminal proves a non-terminal target
-// (open) is refused by Finish's guard, surfaced through the tool.
+// TestUnit_MissionTools_FinishRejectsNonTerminal pins that a non-terminal target (open) is refused by Finish's guard.
 func TestUnit_MissionTools_FinishRejectsNonTerminal(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -638,10 +570,7 @@ func TestUnit_MissionTools_FinishRejectsNonTerminal(t *testing.T) {
 	require.Contains(t, err.Error(), "terminal status is required")
 }
 
-// TestUnit_MissionTools_FinishIdempotentThenConflict proves the guard's two
-// deliberate calls, both surfaced through the tool: a repeat of the SAME terminal
-// status is an idempotent no-op, while a DIFFERENT terminal status over an
-// already-finished mission is a conflict.
+// TestUnit_MissionTools_FinishIdempotentThenConflict pins that a same-status repeat is a no-op and a different-status repeat is a conflict.
 func TestUnit_MissionTools_FinishIdempotentThenConflict(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -650,18 +579,15 @@ func TestUnit_MissionTools_FinishIdempotentThenConflict(t *testing.T) {
 	_, _, err := tools.Exec(mctx, time.Now(), nil, false, finishCall("landed", "done"))
 	require.NoError(t, err)
 
-	// Same status again: idempotent, no error.
 	_, _, err = tools.Exec(mctx, time.Now(), nil, false, finishCall("landed", "done again"))
 	require.NoError(t, err)
 
-	// Different terminal status over a finished mission: conflict.
 	_, _, err = tools.Exec(mctx, time.Now(), nil, false, finishCall("derailed", "reversal"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already finished")
 }
 
-// TestUnit_MissionTools_FinishAbsentOffMission is the envelope-at-construction
-// invariant for the finish tool.
+// TestUnit_MissionTools_FinishAbsentOffMission pins that off a mission, mission_finish refuses to execute.
 func TestUnit_MissionTools_FinishAbsentOffMission(t *testing.T) {
 	ctx, svc, _ := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -671,11 +597,7 @@ func TestUnit_MissionTools_FinishAbsentOffMission(t *testing.T) {
 	require.Contains(t, err.Error(), "only available to a unit dispatched on a mission")
 }
 
-// TestUnit_MissionTools_AskAttentionFallsBackWhenUnanswered pins the degradation
-// that keeps a question from being lost: an asker that reports no answer (nobody
-// replied inside the deadline, or the reply was a refusal) must still leave the
-// question durably recorded as a blocker — and say WHY it is one, so the operator
-// reading it knows an answer was solicited and missed, not never asked for.
+// TestUnit_MissionTools_AskAttentionFallsBackWhenUnanswered pins that an unanswered ask still lands as a durable, annotated blocker.
 func TestUnit_MissionTools_AskAttentionFallsBackWhenUnanswered(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	asker := &fakeAsker{err: errors.New("attention ask went unanswered")}

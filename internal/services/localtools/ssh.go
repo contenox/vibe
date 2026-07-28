@@ -137,7 +137,6 @@ func NewHostKeyVerifier(knownHostsFile string, strict bool) (*HostKeyVerifier, e
 		customKeys: make(map[string]string),
 	}
 
-	// Load known hosts file
 	if err := verifier.loadKnownHosts(knownHostsFile); err != nil && strict {
 		return nil, fmt.Errorf("failed to load known_hosts file: %w", err)
 	}
@@ -150,7 +149,7 @@ func (v *HostKeyVerifier) loadKnownHosts(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// File doesn't exist, that's OK in non-strict mode
+			// Missing file is fine here; NewHostKeyVerifier enforces strict mode.
 			return nil
 		}
 		return err
@@ -200,13 +199,11 @@ func (v *HostKeyVerifier) VerifyHostKey(hostname string, remote net.Addr, key ss
 		host = strings.Split(hostname, ":")[0]
 	}
 
-	// Get the fingerprint of the presented key
 	fingerprint := ssh.FingerprintSHA256(key)
 
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	// Check custom keys first
 	if expectedKey, exists := v.customKeys[host]; exists {
 		if fingerprint == expectedKey || ssh.FingerprintLegacyMD5(key) == expectedKey {
 			return nil
@@ -214,7 +211,6 @@ func (v *HostKeyVerifier) VerifyHostKey(hostname string, remote net.Addr, key ss
 		return fmt.Errorf("host key verification failed for %s: expected %s, got %s", host, expectedKey, fingerprint)
 	}
 
-	// Check known hosts
 	if knownKeys, exists := v.knownHosts[host]; exists {
 		for _, knownKey := range knownKeys {
 			parts := strings.Split(knownKey, " ")
@@ -222,7 +218,6 @@ func (v *HostKeyVerifier) VerifyHostKey(hostname string, remote net.Addr, key ss
 				continue
 			}
 
-			// Parse the known key
 			knownPubKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(knownKey))
 			if err != nil {
 				continue
@@ -234,19 +229,17 @@ func (v *HostKeyVerifier) VerifyHostKey(hostname string, remote net.Addr, key ss
 		}
 	}
 
-	// In strict mode, reject unknown hosts
 	if v.strictMode {
 		return fmt.Errorf("host %s is not in known_hosts and strict mode is enabled", host)
 	}
 
-	// In non-strict mode, we could prompt or log, but for security we'll still reject
-	// You could modify this behavior based on your security requirements
+	// Unknown host and non-strict mode still rejects: there is no safe default
+	// accept for an unverified host key.
 	return fmt.Errorf("host %s not in known_hosts (fingerprint: %s)", host, fingerprint)
 }
 
 // NewSSHTools creates a new SSH tools with secure defaults
 func NewSSHTools(options ...SSHOption) (taskengine.ToolsRepo, error) {
-	// Get user's known_hosts file path
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user home directory: %w", err)
@@ -260,16 +253,14 @@ func NewSSHTools(options ...SSHOption) (taskengine.ToolsRepo, error) {
 		knownHostsFile: defaultKnownHosts,
 	}
 
-	// Apply options
 	for _, opt := range options {
 		if err := opt(tools); err != nil {
 			return nil, fmt.Errorf("failed to apply SSH option: %w", err)
 		}
 	}
 
-	// Initialize host key callback
 	if tools.hostKeyCallback == nil {
-		verifier, err := NewHostKeyVerifier(tools.knownHostsFile, true) // Default to strict mode
+		verifier, err := NewHostKeyVerifier(tools.knownHostsFile, true) // default strict
 		if err != nil {
 			return nil, fmt.Errorf("failed to create host key verifier: %w", err)
 		}
@@ -371,7 +362,6 @@ func (h *SSHTools) parseSSHConfig(tools *taskengine.ToolsCall, input any) (*SSHC
 
 	var command string
 
-	// Handle different input types
 	switch v := input.(type) {
 	case map[string]any:
 		if err := rejectUnknownArgs("ssh.execute_remote_command", v,
@@ -380,7 +370,6 @@ func (h *SSHTools) parseSSHConfig(tools *taskengine.ToolsCall, input any) (*SSHC
 		); err != nil {
 			return nil, "", err
 		}
-		// Tool call with structured parameters
 		if cmd, ok := v["command"].(string); ok {
 			command = cmd
 		}
@@ -414,18 +403,18 @@ func (h *SSHTools) parseSSHConfig(tools *taskengine.ToolsCall, input any) (*SSHC
 			}
 		}
 	case string:
-		// Direct call - input is the command, config from tools args
+		// A bare string input is the command; the rest of config comes from
+		// tools args.
 		command = v
 	default:
 		return nil, "", fmt.Errorf("unsupported input type: %T", input)
 	}
 
-	// Override with static tools arguments (higher priority).
+	// Static tools arguments take priority over the parsed input.
 	if tools != nil && tools.Args != nil {
 		h.applyToolsArgs(config, tools.Args)
 	}
 
-	// Validate required fields
 	if config.Host == "" {
 		return nil, "", errors.New("SSH host is required")
 	}
@@ -509,14 +498,12 @@ func (h *SSHTools) executeCommand(ctx context.Context, config *SSHConfig, comman
 		Host:    config.Host,
 	}
 
-	// Create SSH client config with proper host key verification
 	sshConfig, err := h.createSSHConfig(config)
 	if err != nil {
 		result.Error = err.Error()
 		return result, err
 	}
 
-	// Establish connection
 	var client *ssh.Client
 	if h.clientCache != nil {
 		client, err = h.getCachedClient(config, sshConfig)
@@ -533,7 +520,6 @@ func (h *SSHTools) executeCommand(ctx context.Context, config *SSHConfig, comman
 		defer client.Close()
 	}
 
-	// Create session
 	session, err := client.NewSession()
 	if err != nil {
 		result.Error = err.Error()
@@ -541,8 +527,7 @@ func (h *SSHTools) executeCommand(ctx context.Context, config *SSHConfig, comman
 	}
 	defer session.Close()
 
-	// Capture stdout and stderr
-	limit := int64(2 * 1024 * 1024) // 2MB default fallback if no budget is provided
+	limit := int64(2 * 1024 * 1024) // fallback when no context byte budget is set
 	if val, ok := ctx.Value(taskengine.ContextKeyOutputByteLimit).(int64); ok {
 		limit = val
 	}
@@ -551,29 +536,27 @@ func (h *SSHTools) executeCommand(ctx context.Context, config *SSHConfig, comman
 	session.Stdout = stdout
 	session.Stderr = stderr
 
-	// Execute command with timeout
 	cmdCtx, cancel := context.WithTimeout(ctx, config.Timeout)
 	defer cancel()
 
-	// Run the command in a goroutine to handle timeouts
+	// session.Run blocks, so it runs in a goroutine and races against cmdCtx
+	// to enforce the timeout.
 	cmdDone := make(chan error, 1)
 	go func() {
 		cmdDone <- session.Run(command)
 	}()
 
-	// Wait for command completion or timeout
 	var cmdErr error
 	select {
 	case <-cmdCtx.Done():
 		cmdErr = fmt.Errorf("command timed out after %v", config.Timeout)
-		session.Close() // Force close session on timeout
+		session.Close() // force the still-running command to stop
 	case cmdErr = <-cmdDone:
 	}
 
 	duration := time.Since(start).Seconds()
 	result.Duration = duration
 
-	// Capture output
 	outStr := strings.TrimSpace(stdout.buf.String())
 	errStr := strings.TrimSpace(stderr.buf.String())
 
@@ -586,10 +569,8 @@ func (h *SSHTools) executeCommand(ctx context.Context, config *SSHConfig, comman
 	result.Stdout = outStr
 	result.Stderr = errStr
 
-	// Handle command results
 	if cmdErr != nil {
 		result.Error = cmdErr.Error()
-		// Try to extract exit code
 		if exitErr, ok := cmdErr.(*ssh.ExitError); ok {
 			result.ExitCode = exitErr.ExitStatus()
 		} else {
@@ -608,14 +589,12 @@ func (h *SSHTools) executeCommand(ctx context.Context, config *SSHConfig, comman
 func (h *SSHTools) createSSHConfig(config *SSHConfig) (*ssh.ClientConfig, error) {
 	sshConfig := &ssh.ClientConfig{
 		User:            config.User,
-		HostKeyCallback: h.hostKeyCallback, // Secure host key verification
+		HostKeyCallback: h.hostKeyCallback,
 		Timeout:         config.Timeout,
 	}
 
-	// Authentication methods
 	var authMethods []ssh.AuthMethod
 
-	// Private key authentication
 	if config.PrivateKey != "" {
 		signer, err := ssh.ParsePrivateKey([]byte(config.PrivateKey))
 		if err != nil {
@@ -624,7 +603,6 @@ func (h *SSHTools) createSSHConfig(config *SSHConfig) (*ssh.ClientConfig, error)
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}
 
-	// Private key file authentication
 	if config.PrivateKeyFile != "" {
 		signer, err := h.parsePrivateKeyFile(config.PrivateKeyFile)
 		if err != nil {
@@ -633,7 +611,6 @@ func (h *SSHTools) createSSHConfig(config *SSHConfig) (*ssh.ClientConfig, error)
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}
 
-	// Password authentication
 	if config.Password != "" {
 		authMethods = append(authMethods, ssh.Password(config.Password))
 	}
@@ -648,7 +625,7 @@ func (h *SSHTools) createSSHConfig(config *SSHConfig) (*ssh.ClientConfig, error)
 
 // parsePrivateKeyFile reads and parses a private key from file with proper permissions check
 func (h *SSHTools) parsePrivateKeyFile(path string) (ssh.Signer, error) {
-	// Check file permissions (should be 600 or 400)
+	// Reject key files readable by group/other (must be 600 or 400 equivalent).
 	if info, err := os.Stat(path); err == nil {
 		if mode := info.Mode(); mode.Perm()&0077 != 0 {
 			return nil, fmt.Errorf("private key file %s has overly permissive permissions %04o", path, mode.Perm())
@@ -660,10 +637,8 @@ func (h *SSHTools) parsePrivateKeyFile(path string) (ssh.Signer, error) {
 		return nil, fmt.Errorf("failed to read private key file: %w", err)
 	}
 
-	// Try without passphrase first
 	signer, err := ssh.ParsePrivateKey(keyData)
 	if err != nil {
-		// If it's a passphrase-protected key, we'd need to handle that
 		if strings.Contains(err.Error(), "passphrase") {
 			return nil, fmt.Errorf("passphrase-protected keys not supported in this implementation")
 		}
@@ -687,22 +662,18 @@ func (h *SSHTools) getCachedClient(config *SSHConfig, sshConfig *ssh.ClientConfi
 	authHash := sha256.Sum256([]byte(authMaterial))
 	cacheKey := fmt.Sprintf("%s@%s:%d|%x", config.User, config.Host, config.Port, authHash)
 
-	// Check cache first
 	if client, exists := h.clientCache.Get(cacheKey); exists {
 		if h.clientCache.IsAlive(cacheKey) {
 			return client, nil
 		}
-		// Remove dead connection from cache
 		h.clientCache.Remove(cacheKey)
 	}
 
-	// Create new connection
 	client, err := h.createNewClient(config, sshConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	// Store in cache
 	h.clientCache.Put(cacheKey, client, sshConfig)
 	return client, nil
 }
@@ -713,9 +684,7 @@ func (h *SSHTools) Supports(ctx context.Context) ([]string, error) {
 }
 
 // GetSchemasForSupportedTools returns OpenAPI schemas for supported tools
-// GetSchemasForSupportedTools returns OpenAPI schemas for supported tools
 func (h *SSHTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
-	// Create a complete OpenAPI schema for the SSH tools
 	schema := &openapi3.T{
 		OpenAPI: "3.1.0",
 		Info: &openapi3.Info{
@@ -734,7 +703,6 @@ func (h *SSHTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]
 		},
 	}
 
-	// Define SSHExecuteRequest schema
 	schema.Components.Schemas["SSHExecuteRequest"] = &openapi3.SchemaRef{
 		Value: &openapi3.Schema{
 			Type: &openapi3.Types{openapi3.TypeObject},
@@ -809,7 +777,6 @@ func (h *SSHTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]
 		},
 	}
 
-	// Define SSHExecuteResponse schema
 	schema.Components.Schemas["SSHExecuteResponse"] = &openapi3.SchemaRef{
 		Value: &openapi3.Schema{
 			Type: &openapi3.Types{openapi3.TypeObject},
@@ -873,7 +840,6 @@ func (h *SSHTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]
 		},
 	}
 
-	// Define security schemes
 	schema.Components.SecuritySchemes["SSHKeyAuth"] = &openapi3.SecuritySchemeRef{
 		Value: &openapi3.SecurityScheme{
 			Type:        "apiKey",
@@ -891,7 +857,6 @@ func (h *SSHTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]
 		},
 	}
 
-	// Create error response schema
 	errorSchema := &openapi3.SchemaRef{
 		Value: &openapi3.Schema{
 			Type: &openapi3.Types{openapi3.TypeObject},
@@ -912,7 +877,6 @@ func (h *SSHTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]
 		},
 	}
 
-	// Add the execute_remote_command operation
 	schema.Paths.Set("/execute_remote_command", &openapi3.PathItem{
 		Post: &openapi3.Operation{
 			OperationID: "executeRemoteCommand",
@@ -935,7 +899,6 @@ func (h *SSHTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]
 	})
 	descr200 := "Command executed successfully"
 
-	// Add responses to the operation
 	operation := schema.Paths.Value("/execute_remote_command").Post
 	operation.Responses.Set("200", &openapi3.ResponseRef{
 		Value: &openapi3.Response{
@@ -967,7 +930,6 @@ func (h *SSHTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]
 		},
 	})
 
-	// Add security requirements
 	operation.Security.With(openapi3.SecurityRequirement{
 		"SSHKeyAuth":      {},
 		"SSHPasswordAuth": {},

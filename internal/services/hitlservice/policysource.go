@@ -19,10 +19,9 @@ type PolicySource interface {
 // order. It replaces the layered local-filesystem VFS that previously fed HITL.
 type fsPolicySource struct{ dirs []string }
 
-// NewFSPolicySource returns a PolicySource that looks up "<dir>/<name>" in each
-// dir in order, returning the first hit. tenantID is ignored: the OSS runtime is
-// single-tenant. Empty dirs are skipped. Tenant-scoped builds inject their own
-// PolicySource (e.g. backed by the VFS) instead.
+// NewFSPolicySource returns a PolicySource that looks up "<dir>/<name>" in
+// each dir in order, returning the first hit. tenantID is ignored (the OSS
+// runtime is single-tenant); empty dirs are skipped.
 func NewFSPolicySource(dirs ...string) PolicySource {
 	return &fsPolicySource{dirs: dirs}
 }

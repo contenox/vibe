@@ -59,7 +59,7 @@ func TestUnit_BedrockCachePoints_PlacedOnClaudeSystemAndTools(t *testing.T) {
 	if got := countToolCachePoints(in.ToolConfig); got != 1 {
 		t.Fatalf("expected exactly one tool cachePoint, got %d", got)
 	}
-	// cachePoint must be the LAST entry so it caches the whole tool list.
+	// cachePoint must be the last entry so it caches the whole tool list.
 	if _, ok := in.ToolConfig.Tools[len(in.ToolConfig.Tools)-1].(*types.ToolMemberCachePoint); !ok {
 		t.Fatalf("tool cachePoint must be appended after the last tool spec")
 	}
@@ -89,7 +89,7 @@ func TestUnit_BedrockCachePoints_UnsupportedModelOmitsSilently(t *testing.T) {
 }
 
 func TestUnit_BedrockCachePoints_NeverChangeModelVisibleContent(t *testing.T) {
-	// Hinted vs unhinted requests must differ ONLY by appended cachePoint
+	// Hinted vs unhinted requests must differ only by appended cachePoint
 	// union members: stripping them yields the identical request.
 	plain, _, err := buildConverseInput("anthropic.claude-sonnet-4-5-v1:0",
 		bedrockCacheFixtureMessages(), bedrockCacheFixtureConfig(nil), 0)
@@ -104,7 +104,6 @@ func TestUnit_BedrockCachePoints_NeverChangeModelVisibleContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Strip the cachePoint members from the hinted request.
 	var sys []types.SystemContentBlock
 	for _, b := range hinted.System {
 		if _, ok := b.(*types.SystemContentBlockMemberCachePoint); ok {
@@ -136,8 +135,7 @@ func TestUnit_BedrockCachePoints_NeverChangeModelVisibleContent(t *testing.T) {
 }
 
 func TestUnit_BedrockUsage_NormalizationRule(t *testing.T) {
-	// Bedrock inputTokens EXCLUDES cache reads/writes; PromptTokens must be
-	// the sum of the three.
+	// Bedrock inputTokens excludes cache reads/writes; PromptTokens is the sum of the three.
 	u := usageFromConverse(&types.TokenUsage{
 		InputTokens:           aws.Int32(7),
 		OutputTokens:          aws.Int32(11),

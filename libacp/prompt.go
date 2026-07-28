@@ -19,17 +19,9 @@ type PromptRequest struct {
 }
 
 // PromptResponse is the result of a "session/prompt" request. Per the ACP v1
-// schema it carries only stopReason and _meta — a prior revision added a
-// non-spec "usage" field (per-turn token counts) directly at the type's
-// root, which extensibility.mdx forbids: "Implementations MUST NOT add any
-// custom fields at the root of a type that's part of the specification."
-// It was removed rather than migrated into _meta because nothing in this
-// repo produced or consumed it: acpsvc never populated it, and the beam
-// client only ever destructured stopReason from the call result. Session
-// context/cost reporting already has a sanctioned, fully wired channel — the
-// "usage_update" SessionUpdate (see SessionUpdateUsageUpdate) — which is
-// where that data belongs and is already emitted (see acpsvc's
-// sendInitialUsageUpdate and its translateEvents usage_update path).
+// schema it carries only stopReason and _meta; custom fields must not be
+// added at the root of a spec type. Per-turn usage/cost belongs on the
+// "usage_update" SessionUpdate (see SessionUpdateUsageUpdate) instead.
 type PromptResponse struct {
 	StopReason StopReason      `json:"stopReason"`
 	Meta       json.RawMessage `json:"_meta,omitempty"`
@@ -52,16 +44,9 @@ const (
 )
 
 // AllSessionUpdateKinds returns every SessionUpdateKind the spec defines, in
-// declaration order. It exists so that a consumer's translation table can be
-// tested for COMPLETENESS against the library rather than against a second,
-// hand-maintained copy of this list: a client that maps update kinds to its own
-// vocabulary (see internal/surfaces/beamtui/enginebridge) iterates this and
-// fails when a kind has no arm, instead of silently degrading the new kind to
-// its unknown-update fallback for as long as nobody notices.
-//
-// That makes it part of the contract: ADDING A CONST ABOVE MEANS ADDING IT
-// HERE. The slice is freshly built on every call, so a caller cannot corrupt
-// the answer for the next one.
+// declaration order, so a consumer's translation table can be tested for
+// completeness against the library instead of a hand-maintained copy. Adding
+// a const above requires adding it here too. Freshly built on every call.
 func AllSessionUpdateKinds() []SessionUpdateKind {
 	return []SessionUpdateKind{
 		SessionUpdateUserMessageChunk,
@@ -100,7 +85,7 @@ type SessionUpdate struct {
 
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 
-	// For usage_update (ACP session context indicator)
+	// Used, Size, Cost: usage_update fields (session context indicator).
 	Used int        `json:"used,omitempty"`
 	Size int        `json:"size,omitempty"`
 	Cost *UsageCost `json:"cost,omitempty"`
@@ -131,20 +116,20 @@ type sessionUpdateWire struct {
 
 	Entries []PlanEntry `json:"entries,omitempty"`
 
-	// AvailableCommands is a pointer: the spec REQUIRES it on
-	// available_commands_update (an empty list must still reach the wire as
-	// `[]`, not be omitted — omitempty on a plain slice can't tell "empty" from
-	// "absent"), while every other update kind must omit it entirely.
+	// AvailableCommands is a pointer: required on available_commands_update
+	// (an empty list must reach the wire as `[]`, not be omitted — omitempty
+	// on a plain slice can't distinguish "empty" from "absent"), omitted
+	// entirely on every other update kind.
 	AvailableCommands *[]AvailableCommand `json:"availableCommands,omitempty"`
 
 	CurrentModeID string `json:"currentModeId,omitempty"`
 
-	// ConfigOptions is a pointer for the same reason as AvailableCommands
-	// above, required on config_option_update.
+	// ConfigOptions: same pointer reasoning as AvailableCommands, required on
+	// config_option_update.
 	ConfigOptions *[]SessionConfigOption `json:"configOptions,omitempty"`
 
-	// Pointers: the spec REQUIRES used and size on usage_update (zero values
-	// must reach the wire there), while every other update kind must omit them.
+	// Used/Size: pointers because usage_update requires them on the wire even
+	// when zero; every other update kind omits them.
 	Used *int       `json:"used,omitempty"`
 	Size *int       `json:"size,omitempty"`
 	Cost *UsageCost `json:"cost,omitempty"`

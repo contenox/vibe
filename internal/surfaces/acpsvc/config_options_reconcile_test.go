@@ -16,14 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_RuntimeStatesTriggersDebouncedReconcile guards against the model
-// dropdown going stale (config_options.go's runtimeStates fed Transport.
-// modelConfigValues from a raw State.Get read that never triggered a
-// reconcile). It mirrors runtimestate's own
-// TestUnit_ReconcileIfStale_DiscoversBackendThatAppearsLater, but drives the
-// reconcile through the ACP config-options read path instead of calling
-// ReconcileIfStale directly, proving that path now self-heals the same way
-// GET /state and GET /setup-status do.
+// TestUnit_RuntimeStatesTriggersDebouncedReconcile pins: runtimeStates self-heals a stale backend list, same as GET /state.
 func TestUnit_RuntimeStatesTriggersDebouncedReconcile(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "acp-runtime-states-reconcile.db")
@@ -45,12 +38,8 @@ func TestUnit_RuntimeStatesTriggersDebouncedReconcile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Nothing configured yet: the first config-options read reconciles to an
-	// empty snapshot (proving runtimeStates itself drives the initial reconcile).
 	require.Empty(t, tr.runtimeStates(ctx))
 
-	// The backend comes up after startup, the way modeld restarting after the
-	// runtime would look.
 	store := runtimetypes.New(db.WithoutTransaction())
 	require.NoError(t, store.CreateBackend(ctx, &runtimetypes.Backend{
 		ID:      "openai-backend",
@@ -62,13 +51,9 @@ func TestUnit_RuntimeStatesTriggersDebouncedReconcile(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.SetKV(ctx, runtimestate.OpenaiKey, keyData))
 
-	// Still inside the debounce window: a burst of config-options reads (e.g. the
-	// ACP client repeatedly asking for the model list) must not force a re-scan.
+	// Inside the debounce window: a burst of reads must not force a re-scan.
 	require.Empty(t, tr.runtimeStates(ctx))
 
-	// Once the debounce window elapses, reading config options (as the chat
-	// model dropdown does) must self-heal and discover the new backend without
-	// requiring some unrelated page (GET /state) to have reconciled first.
 	original := runtimestate.ReconcileDebounceInterval
 	runtimestate.ReconcileDebounceInterval = 0
 	t.Cleanup(func() { runtimestate.ReconcileDebounceInterval = original })

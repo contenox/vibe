@@ -1,14 +1,8 @@
 // Package frame is beam's rendering schema: the pure-data contract between
-// components, which produce it, and the terminal engine, which draws it.
-//
-// A component is a pure function of (state, width) -> []Line. Spans carry
-// semantic StyleIDs, never escape codes, so golden tests compare plain data,
-// the style package owns every terminal attribute in one table, and a line's
-// visible cell width is exactly the width of its concatenated text.
-//
-// This package must stay dependency-free: it may import nothing beyond the
-// standard library, and it must never learn about terminals, styles' concrete
-// values, or services.
+// components (pure functions of (state, width) -> []Line) and the terminal
+// engine that draws it. Spans carry semantic StyleIDs, never escape codes,
+// so golden tests compare plain data. The package is dependency-free: no
+// imports beyond the standard library, no knowledge of terminals or styles.
 package frame
 
 // StyleID names a semantic style role. The style package holds the only
@@ -34,18 +28,18 @@ const (
 	StyleFailed    StyleID = "failed"
 	StyleSkipped   StyleID = "skipped"
 	StyleHITL      StyleID = "hitl"    // approval-card chrome
-	StyleBrand     StyleID = "brand"   // beam gold; closed usage list only
+	StyleBrand     StyleID = "brand"   // brand mint; closed usage list only
 	StyleHeading   StyleID = "heading" // markdown headings
 	StyleEmphasis  StyleID = "em"
 	StyleStrong    StyleID = "strong"
 	StyleCode      StyleID = "code" // inline code and code-block text
 
-	// The beam-gold luminance ramp (blueprint amendment 2026-07-27): the
-	// three stops of the website logo-mark, lightest to deepest, so the
-	// mark's three mitered beam strokes keep their depth as block art.
-	// These belong to StyleBrand's closed usage list — today the
-	// fresh-session welcome header and nothing else. Never body text,
-	// never a semantic state, never a background.
+	// The brand-mint luminance ramp: the three stops of the website
+	// logo-mark, lightest to deepest, so the mark's three mitered beam
+	// strokes keep their depth as block art. These belong to StyleBrand's
+	// closed usage list — today the fresh-session welcome header and
+	// nothing else. Never body text, never a semantic state, never a
+	// background.
 	StyleBrandRamp1 StyleID = "brand-ramp1" // lightest stop, top stroke
 	StyleBrandRamp2 StyleID = "brand-ramp2" // mid stop, spine (== brand)
 	StyleBrandRamp3 StyleID = "brand-ramp3" // deepest stop, bottom stroke
@@ -107,10 +101,10 @@ type Cursor struct {
 
 // Frame is one complete render handed to the engine's Commit.
 //
-// Scrollback holds the lines newly appended by THIS commit; the engine
-// prints each exactly once into the terminal's real history, where they are
-// resize-immune and natively selectable, and never repaints them. Live is
-// the complete bounded region (composer, status bar, open overlays)
+// Scrollback holds the lines newly appended by this commit; the engine
+// prints each exactly once into the terminal's real history, where they
+// are resize-immune and natively selectable, and never repaints them. Live
+// is the complete bounded region (composer, status bar, open overlays)
 // repainted in place on every commit; its height is len(Live).
 type Frame struct {
 	Scrollback []Line

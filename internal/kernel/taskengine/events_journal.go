@@ -24,10 +24,11 @@ const (
 // TTL and across restarts.
 //
 // step_chunk events are deliberately not journaled: they are streaming detail
-// whose final text is already persisted with the chat history. step_stream_end
-// IS journaled — it is the durable stream bracket (chunk count, finish reason,
-// usage), so a replayed run can tell streaming happened and how it ended even
-// though the chunks themselves are gone. Every other kind is journaled.
+// whose final text is already persisted with the chat history.
+// step_stream_end is journaled — the durable stream bracket (chunk count,
+// finish reason, usage) — so a replayed run can tell streaming happened and
+// how it ended even though the chunks themselves are gone. Every other kind
+// is journaled.
 type KVJournalTaskEventSink struct {
 	inner   TaskEventSink
 	kv      libkv.KVManager

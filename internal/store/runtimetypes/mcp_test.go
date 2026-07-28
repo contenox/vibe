@@ -47,7 +47,6 @@ func TestUnit_MCPServers_CreateAndGet(t *testing.T) {
 
 	require.NoError(t, s.CreateMCPServer(ctx, srv))
 
-	// Get by ID
 	got, err := s.GetMCPServer(ctx, srv.ID)
 	require.NoError(t, err)
 	require.Equal(t, srv.ID, got.ID)
@@ -60,7 +59,6 @@ func TestUnit_MCPServers_CreateAndGet(t *testing.T) {
 	require.WithinDuration(t, time.Now().UTC(), got.CreatedAt, 2*time.Second)
 	require.WithinDuration(t, time.Now().UTC(), got.UpdatedAt, 2*time.Second)
 
-	// Get by name
 	byName, err := s.GetMCPServerByName(ctx, srv.Name)
 	require.NoError(t, err)
 	require.Equal(t, srv.ID, byName.ID)

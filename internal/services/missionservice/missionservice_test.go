@@ -77,9 +77,7 @@ func TestUnit_MissionService_CreateAssignsIDAndOpenStatus(t *testing.T) {
 	require.Equal(t, m.CreatedAt, m.UpdatedAt)
 }
 
-// Create leaves the single-bind and liveness fields at their zero values: no
-// session/instance is bound yet, and a mission that has never reported has no
-// heartbeat or recorded error.
+// TestUnit_MissionService_CreateLeavesBindAndLivenessFieldsZero pins that a fresh mission has no bind or heartbeat fields set.
 func TestUnit_MissionService_CreateLeavesBindAndLivenessFieldsZero(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -101,8 +99,7 @@ func TestUnit_MissionService_CreateRejectsInvalidIntent(t *testing.T) {
 	require.Error(t, svc.Create(ctx, newMission("two\nlines")))
 }
 
-// A mission without an envelope has no bounds, which mission mode must not
-// permit: Create rejects a missing or blank HITLPolicyName.
+// TestUnit_MissionService_CreateRejectsMissingEnvelope pins that Create rejects a missing or blank HITLPolicyName.
 func TestUnit_MissionService_CreateRejectsMissingEnvelope(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -162,8 +159,7 @@ func TestUnit_MissionService_ListEmptyIsNonNil(t *testing.T) {
 	require.Empty(t, items)
 }
 
-// A mission outlives the session it referenced: it is never deleted on session
-// teardown here, so it remains listed and open.
+// TestUnit_MissionService_MissionOutlivesSessionAndStaysListed pins that a mission stays listed and open past session teardown.
 func TestUnit_MissionService_MissionOutlivesSessionAndStaysListed(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -247,8 +243,7 @@ func TestUnit_MissionService_BindSetsSessionAndInstance(t *testing.T) {
 	require.Equal(t, "instance-1", persisted.InstanceID)
 }
 
-// Binding the same id a mission already carries is idempotent: it succeeds
-// and leaves the mission unchanged rather than erroring or duplicating.
+// TestUnit_MissionService_BindSameIDIsIdempotentNoOp pins that re-binding the same id is a true no-op (no restamp).
 func TestUnit_MissionService_BindSameIDIsIdempotentNoOp(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -267,8 +262,7 @@ func TestUnit_MissionService_BindSameIDIsIdempotentNoOp(t *testing.T) {
 	require.Equal(t, firstUpdatedAt, again.UpdatedAt, "a true no-op must not restamp UpdatedAt")
 }
 
-// Binding a mission is single-shot: rebinding a session id different from the
-// one already carried is a conflict, not an append.
+// TestUnit_MissionService_BindConflictingSessionIsRejected pins that rebinding a different session id is a conflict, not an append.
 func TestUnit_MissionService_BindConflictingSessionIsRejected(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -351,7 +345,7 @@ func TestUnit_MissionService_HeartbeatUpdatesLastHeartbeatAndBumpsUpdatedAt(t *t
 	require.WithinDuration(t, *beat.LastHeartbeat, *persisted.LastHeartbeat, 0)
 }
 
-// Setting and clearing LastError round-trips through the same Heartbeat call.
+// TestUnit_MissionService_HeartbeatSetsAndClearsLastError pins that LastError sets and clears through Heartbeat.
 func TestUnit_MissionService_HeartbeatSetsAndClearsLastError(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -435,8 +429,7 @@ func TestUnit_MissionService_AddReportAssignsIDAndCreatedAt(t *testing.T) {
 	require.False(t, rep.CreatedAt.IsZero())
 }
 
-// AddReport overrides whatever MissionID the caller supplied in the report
-// body: the missionID argument is authoritative.
+// TestUnit_MissionService_AddReportOverridesSuppliedMissionID pins that the missionID argument is authoritative over the report body.
 func TestUnit_MissionService_AddReportOverridesSuppliedMissionID(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -471,9 +464,7 @@ func TestUnit_MissionService_AddReportRejectsMultiLineSummary(t *testing.T) {
 	require.Error(t, err)
 }
 
-// A report against an unknown mission must surface as not-found, never a
-// silent insert — the report KV namespace has no foreign key to catch this
-// otherwise.
+// TestUnit_MissionService_AddReportUnknownMissionReturnsNotFound pins that a report against an unknown mission is not-found, never a silent insert.
 func TestUnit_MissionService_AddReportUnknownMissionReturnsNotFound(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -521,9 +512,7 @@ func TestUnit_MissionService_ListReportsNewestFirst(t *testing.T) {
 	require.Equal(t, "first", items[2].Summary)
 }
 
-// A mission's reports must be scoped to it alone: another mission's reports
-// (stored under a sibling KV key) must never leak into this one's list. This
-// is the load-bearing property of the missionReportKVPrefix key layout.
+// TestUnit_MissionService_ListReportsScopedToOwnMission pins that reports never leak across missions or surface as missions.
 func TestUnit_MissionService_ListReportsScopedToOwnMission(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -553,11 +542,6 @@ func TestUnit_MissionService_ListReportsScopedToOwnMission(t *testing.T) {
 }
 
 // ─── GetByInstance: the mission-from-instance lookup ───────────────────────
-//
-// The unattended-permission path knows only which INSTANCE raised a request,
-// while the envelope that governs it lives on the MISSION. This is that lookup,
-// and it is a scan of the mission records rather than a secondary index — see
-// GetByInstance's own doc for why.
 
 func TestUnit_MissionService_GetByInstanceFindsTheBoundMission(t *testing.T) {
 	ctx, db := setupMissionDB(t)
@@ -588,8 +572,7 @@ func TestUnit_MissionService_GetByInstanceUnknownIsNotFound(t *testing.T) {
 	_, err := svc.Bind(ctx, m.ID, "sess-1", "inst-1")
 	require.NoError(t, err)
 
-	// A unit brought up outside a dispatch has no mission. That is a normal
-	// answer, not a failure — the caller falls back to a default envelope.
+	// No mission claims it: a normal answer, not a failure.
 	_, err = svc.GetByInstance(ctx, "inst-nobody-claimed")
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }
@@ -602,10 +585,7 @@ func TestUnit_MissionService_GetByInstanceRequiresAnID(t *testing.T) {
 	require.Error(t, err)
 }
 
-// A unit claimed by TWO missions cannot arise through Dispatch (each dispatch
-// creates its own instance) but is reachable by hand-binding. The lookup
-// resolves it deterministically — newest claim wins — rather than returning an
-// arbitrary one, so an ask's envelope cannot flip between two evaluations.
+// TestUnit_MissionService_GetByInstanceDuplicateClaimIsDeterministic pins that a duplicate claim resolves to the newest, every time.
 func TestUnit_MissionService_GetByInstanceDuplicateClaimIsDeterministic(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -628,7 +608,7 @@ func TestUnit_MissionService_GetByInstanceDuplicateClaimIsDeterministic(t *testi
 	}
 }
 
-// The scan pages, so a mission past the first page is still found.
+// TestUnit_MissionService_GetByInstanceScansPastOnePage pins that the scan pages: a mission past the first page is still found.
 func TestUnit_MissionService_GetByInstanceScansPastOnePage(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -650,9 +630,7 @@ func TestUnit_MissionService_GetByInstanceScansPastOnePage(t *testing.T) {
 
 // ─── the supervision edge ──────────────────────────────────────────────────
 
-// ParentSessionID names the session that FIRED the mission, which is not the
-// session it spawned. It survives a round trip and stays empty when an operator
-// fired the mission directly.
+// TestUnit_MissionService_ParentSessionIDRoundTrips pins that ParentSessionID (who fired it) survives and differs from SessionID (what it spawned).
 func TestUnit_MissionService_ParentSessionIDRoundTrips(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)

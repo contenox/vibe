@@ -13,8 +13,7 @@ func TestUnit_Diagnostics_VetPassSetIsTheCuratedOne(t *testing.T) {
 	if got, want := strings.Join(VetPasses(), ","), "printf,unusedresult,unreachable,nilfunc,shadow"; got != want {
 		t.Fatalf("VetPasses() = %s, want %s", got, want)
 	}
-	// shadow is deliberately NOT in the default set: swept over this repository
-	// it was 100 findings out of 100, all of them idiomatic err re-declarations.
+	// shadow is deliberately not in the default set.
 	if got, want := strings.Join(DefaultVetPasses(), ","), "printf,unusedresult,unreachable,nilfunc"; got != want {
 		t.Fatalf("DefaultVetPasses() = %s, want %s", got, want)
 	}
@@ -184,7 +183,6 @@ func TestUnit_Diagnostics_ScopeChangedFollowsObservedEdits(t *testing.T) {
 		t.Fatalf("note = %q, want a pointer to the next call", res.Note)
 	}
 
-	// The V1.1 write path: the middleware announces what it wrote.
 	vet := filepath.Join(root, "vetpkg", "vet.go")
 	ix.Invalidate(vet)
 
@@ -212,9 +210,7 @@ func TestUnit_Diagnostics_ScopeChangedSeesAFreshEdit(t *testing.T) {
 		t.Fatalf("warm-up: %v", err)
 	}
 
-	// Fix the printf mistake, announce it, and the finding must be gone — a
-	// stale snapshot would keep reporting a bug the agent already fixed, which is
-	// the failure mode that trains an agent to distrust the tool.
+	// Fix the printf mistake and announce it; the finding must be gone.
 	vet := filepath.Join(root, "vetpkg", "vet.go")
 	fixed := "package vetpkg\n\nimport \"fmt\"\n\n// PrintfMistake is now correct.\nfunc PrintfMistake() string {\n\treturn fmt.Sprintf(\"%d\", 1)\n}\n\n// Unreachable still has dead code.\nfunc Unreachable() int {\n\treturn 1\n\tfmt.Println(\"dead\")\n\treturn 2\n}\n"
 	writeFixtureFile(t, vet, fixed)

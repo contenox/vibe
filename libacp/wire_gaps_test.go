@@ -11,11 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// session/set_mode and logout are stateless from testAgent's (clientconn_test.go)
-// point of view for these tests, so they are added here rather than by adding
-// fields to that type: both echo their request back via the response Meta, and
-// the loopback tests below assert on that echo instead of needing new
-// synchronized state on testAgent.
+// Added here rather than on testAgent (clientconn_test.go): both echo their
+// request back via the response Meta, which the loopback tests assert on.
 func (a *testAgent) SetSessionMode(_ context.Context, req libacp.SetSessionModeRequest) (libacp.SetSessionModeResponse, error) {
 	echo, err := json.Marshal(req)
 	if err != nil {
@@ -71,11 +68,9 @@ func TestUnit_ClientSideConnection_LogoutReachesAgent(t *testing.T) {
 	assert.JSONEq(t, `{"seen":true}`, string(resp.Meta))
 }
 
-// bareAgent implements nothing beyond UnimplementedAgent (agent.go), plus the
-// minimum needed to get a session going. It exercises the MethodNotFound
-// default path for session/set_mode and logout end to end, through the real
-// wire dispatch (conn.go / clientconn.go), not just the in-process
-// UnimplementedAgent unit.
+// bareAgent exercises the MethodNotFound default path for session/set_mode
+// and logout end to end, through the real wire dispatch, not just the
+// in-process UnimplementedAgent unit.
 type bareAgent struct {
 	libacp.UnimplementedAgent
 }
@@ -150,10 +145,8 @@ func TestUnit_LogoutRequestResponse_WireShape(t *testing.T) {
 	assert.JSONEq(t, `{}`, string(raw))
 }
 
-// The spec's SessionConfigBoolean.currentValue is a JSON boolean, not a
-// string — a SessionConfigOption of type "boolean" must put an actual `true`/
-// `false` on the wire (never `"true"`), and must not carry an `options` key at
-// all (SessionConfigBoolean has no such field, unlike SessionConfigSelect).
+// Pins: a "boolean" SessionConfigOption puts a real JSON boolean on the wire
+// (never "true") and carries no options key.
 func TestUnit_SessionConfigOption_BooleanWireShape(t *testing.T) {
 	raw, err := json.Marshal(libacp.SessionConfigOption{
 		ID:           "auto-approve",
@@ -173,9 +166,7 @@ func TestUnit_SessionConfigOption_BooleanWireShape(t *testing.T) {
 	assert.Equal(t, "true", back.CurrentValue, "boolean currentValue round-trips to the Go-side string form")
 }
 
-// The "select" wire shape (the only one this codebase emits today) must be
-// unchanged by the boolean fix above: currentValue stays a string, and
-// options is always present.
+// Pins: "select" currentValue stays a string, and options is always present.
 func TestUnit_SessionConfigOption_SelectWireShape(t *testing.T) {
 	raw, err := json.Marshal(libacp.SessionConfigOption{
 		ID:           "model",
@@ -197,10 +188,9 @@ func TestUnit_SessionConfigOption_SelectWireShape(t *testing.T) {
 	assert.Equal(t, "gpt-5", back.CurrentValue)
 }
 
-// McpServerHttp/McpServerSse require `headers` always present (even `[]`),
-// and McpServerStdio requires `args`/`env` always present — the spec (and the
-// reference implementation's plain, non-Option Vec fields) declare no
-// default, so omitting them can break a strict receiver.
+// Pins: McpServerHttp/Sse always carry `headers` (even `[]`), and
+// McpServerStdio always carries `args`/`env` — omitting them can break a
+// strict receiver.
 func TestUnit_McpServer_RequiredArraysAlwaysPresent(t *testing.T) {
 	stdio, err := json.Marshal(libacp.McpServer{Name: "local", Command: "/bin/mcp"})
 	require.NoError(t, err)
@@ -234,9 +224,8 @@ func TestUnit_McpServer_RequiredArraysAlwaysPresent(t *testing.T) {
 	assert.Empty(t, sseHeaders)
 }
 
-// available_commands_update and config_option_update require their payload
-// array present even when empty — mirroring the used/size treatment usage_update
-// already gets in wire_test.go — while every other update kind must omit it.
+// Pins: available_commands_update/config_option_update always carry their
+// payload array, even empty; every other update kind omits it.
 func TestUnit_SessionUpdate_AvailableCommandsAndConfigOptions_EmitEmptyArrays(t *testing.T) {
 	raw, err := json.Marshal(libacp.SessionUpdate{SessionUpdate: libacp.SessionUpdateAvailableCommands})
 	require.NoError(t, err)
@@ -335,9 +324,8 @@ func TestUnit_Annotations_LastModifiedWireShape(t *testing.T) {
 	assert.Equal(t, "2024-01-01T00:00:00Z", back.LastModified)
 }
 
-// A diff clearing a file's content down to "" is a legitimate diff (not an
-// absent one) — newText and path must still reach the wire for the "diff"
-// tool-call-content variant, which the spec requires them for.
+// Pins: a diff clearing content to "" still puts path/newText on the wire
+// for the "diff" tool-call-content variant.
 func TestUnit_ToolCallContentDiff_EmitsEmptyNewText(t *testing.T) {
 	raw, err := json.Marshal(libacp.ToolCallContent{
 		Type:    libacp.ToolCallContentDiff,

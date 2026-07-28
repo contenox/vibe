@@ -12,13 +12,9 @@ import (
 )
 
 // wireExtConnections wires an AgentSideConnection to a ClientSideConnection
-// over an in-memory pipe (newPipePair, bufReader, bufWriter live in
-// conn_test.go), running each side's Run loop. configureAgent/configureClient
-// — either may be nil — run inside that connection's factory, i.e. before Run
-// starts reading, matching SetExtRequestHandler/SetExtNotificationHandler's
-// documented "call before Run starts reading" contract. Mirrors
-// wireUpTestConnections (clientconn_test.go), generalized to let ext tests
-// install handlers without needing a configurable testAgent/testClient.
+// over an in-memory pipe, running each side's Run loop. configureAgent/
+// configureClient (either may be nil) run inside that connection's factory,
+// before Run starts reading, matching SetExtRequestHandler's contract.
 func wireExtConnections(t *testing.T, ctx context.Context, configureAgent func(*libacp.AgentSideConnection), configureClient func(*libacp.ClientSideConnection)) (*libacp.AgentSideConnection, *libacp.ClientSideConnection, func()) {
 	t.Helper()
 
@@ -58,11 +54,9 @@ func wireExtConnections(t *testing.T, ctx context.Context, configureAgent func(*
 	return agentConn, clientConn, cleanup
 }
 
-// ---------------------------------------------------------------------------
-// Wire-shape: a bare AgentSideConnection driven directly over the pipe, no
-// real ClientSideConnection on the other end — mirrors conn_cancel_test.go's
-// cancelHarness style so the JSON-RPC frames can be inspected byte-for-byte.
-// ---------------------------------------------------------------------------
+// Wire-shape tests below drive a bare AgentSideConnection directly over the
+// pipe (no real ClientSideConnection), so JSON-RPC frames can be inspected
+// byte-for-byte.
 
 func TestUnit_AgentSide_ExtRequest_WireShape(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -151,8 +145,7 @@ func TestUnit_AgentSide_UnknownNonExtensionMethod_StillMethodNotFound(t *testing
 
 	agentSide, clientSide := newPipePair()
 	conn := libacp.NewAgentSideConnection(agentSide, func(c *libacp.AgentSideConnection) libacp.Agent {
-		// A catch-all ext handler that would wrongly answer any method if the
-		// "_" prefix gate were bypassed.
+		// Catch-all handler that would wrongly answer any method if the "_" gate were bypassed.
 		c.SetExtRequestHandler(func(context.Context, string, json.RawMessage) (json.RawMessage, *libacp.Error) {
 			return json.RawMessage(`{}`), nil
 		})
@@ -173,9 +166,7 @@ func TestUnit_AgentSide_UnknownNonExtensionMethod_StillMethodNotFound(t *testing
 	assert.Equal(t, libacp.ErrMethodNotFound, in.Response.Error.Code)
 }
 
-// ---------------------------------------------------------------------------
-// Wire-shape: the same checks mirrored for a bare ClientSideConnection.
-// ---------------------------------------------------------------------------
+// The same wire-shape checks mirrored for a bare ClientSideConnection.
 
 func TestUnit_ClientSide_ExtRequest_WireShape(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -284,10 +275,8 @@ func TestUnit_ClientSide_UnknownNonExtensionMethod_StillMethodNotFound(t *testin
 	assert.Equal(t, libacp.ErrMethodNotFound, in.Response.Error.Code)
 }
 
-// ---------------------------------------------------------------------------
-// Loopback: both connections real and running, driven through the exported
-// CallExtMethod/SendExtNotification API in both directions.
-// ---------------------------------------------------------------------------
+// Loopback tests below run both connections for real, driven through the
+// exported CallExtMethod/SendExtNotification API in both directions.
 
 func TestUnit_ExtRequest_AgentToClient_Loopback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -367,12 +356,8 @@ func TestUnit_ExtNotification_ClientToAgent_Loopback(t *testing.T) {
 	}
 }
 
-// An in-flight extension request must participate in "$/cancel_request"
-// cancellation exactly like a core method's handler: the caller's ctx
-// governs the wait, and cancelling it aborts the wait, sends
-// "$/cancel_request" to the peer, and the peer cancels the request's context
-// (see requestCancels in conn.go/clientconn.go) — which the ext handler
-// observes the same way Agent.Prompt observes its own cancellation.
+// Invariant: an in-flight extension request participates in
+// "$/cancel_request" cancellation exactly like a core method's handler.
 func TestUnit_ExtRequest_CancelRequest_AbortsInFlightHandler(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -58,8 +58,8 @@ type ManifestSegment struct {
 	// CacheClass is the coding-aware retention priority (see contextasm.CacheClass):
 	// "task_pinned" / "repo_map" / "volatile". Drives budget-aware admission/eviction.
 	CacheClass string `json:"cache_class,omitempty"`
-	// Invalidation is an optional hint for when this segment's KV must be dropped
-	// (e.g. "on_edit", "on_turn"); empty until a producer sets it (gated on #7).
+	// Invalidation is an optional hint for when this segment's KV must be
+	// dropped (e.g. "on_edit", "on_turn"); empty until a producer sets it.
 	Invalidation string `json:"invalidation,omitempty"`
 	ByteStart    int    `json:"byte_start"`
 	ByteEnd      int    `json:"byte_end"`

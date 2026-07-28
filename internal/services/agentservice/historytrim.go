@@ -2,45 +2,24 @@ package agentservice
 
 import "github.com/contenox/beam/internal/kernel/taskengine"
 
-// trimHistoryChunked enforces the HistoryTrim message budget the cache-stable
-// way (provider-kv-cache blueprint §4.1(3), E3).
-//
-// The old sliding window ("keep the last N") moved the first history message
-// on every turn once the session exceeded N, which re-cold-started every
-// provider prefix cache each turn — the dominant cost of an agent loop. This
-// version keeps trimming an *event* instead of a drift:
-//
-//   - Within budget nothing changes, so the history prefix grows by appendage
-//     only and stays byte-identical across turns.
-//   - When the budget is exceeded, it trims below budget by one chunk (25% of
-//     the budget), buying roughly budget/4 warm append-only turns per single
-//     cold trim instead of a cold start on every turn.
-//   - Leading system messages (the AGENTS.md project-context message) are
-//     pinned: in contextasm.CacheClass terms they are the task-pinned tier
-//     and chat turns are the volatile tier, so volatile messages are dropped
-//     first (heritage rule). The sliding window used to silently discard the
-//     AGENTS.md message forever — it is only injected while history is empty.
-//   - The cut never leaves an orphaned tool-result at the head of the kept
-//     tail: a "tool" message without its preceding assistant tool-call is a
-//     protocol error on several providers.
-//
-// The budget stays an upper bound exactly as before: the returned history
-// never exceeds budget messages.
+// trimHistoryChunked enforces the HistoryTrim message budget (never
+// exceeded) while keeping the kept prefix byte-identical across turns until
+// it must move, so provider prompt caches stay warm: over budget, it cuts to
+// budget minus one chunk (25%) rather than to the budget exactly. Leading
+// system messages (AGENTS.md project context) are pinned and dropped last;
+// the kept tail never opens on an orphaned "tool" message.
 func trimHistoryChunked(history []taskengine.Message, budget int) []taskengine.Message {
 	if budget <= 0 || len(history) <= budget {
 		return history
 	}
 
-	// Pinned prefix: leading system messages (project context/conventions).
 	pinned := 0
 	for pinned < len(history) && history[pinned].Role == "system" {
 		pinned++
 	}
 	if pinned >= budget {
-		// Degenerate: the pinned prefix alone fills the budget. Honor the
-		// budget over pinning — fall back to the plain window so the newest
-		// turns (including the conversation the user is having right now)
-		// survive.
+		// Degenerate: pinned alone fills the budget; fall back to the plain
+		// window so budget still wins and the newest turns survive.
 		return history[len(history)-budget:]
 	}
 
@@ -54,8 +33,7 @@ func trimHistoryChunked(history []taskengine.Message, budget int) []taskengine.M
 	}
 
 	keepTail := target - pinned
-	// Never start the kept tail on a tool-result whose assistant tool-call
-	// was dropped; shrink the tail until it opens on a safe role.
+	// Shrink until the tail doesn't open on an orphaned tool-result.
 	for keepTail > 1 && history[len(history)-keepTail].Role == "tool" {
 		keepTail--
 	}

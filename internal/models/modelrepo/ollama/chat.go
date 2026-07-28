@@ -35,13 +35,11 @@ func toOllamaImages(images []modelrepo.ImagePart) []api.ImageData {
 }
 
 func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (modelrepo.ChatResult, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "ollama", "model", c.modelName)
 	defer end()
 
-	// Convert messages to Ollama API format (we preserve role, including "tool").
-	// We must also map ToolCalls from assistant messages so Ollama knows what tools
-	// were already called — without this the LLM has no context of its prior tool calls.
+	// Prior ToolCalls must be mapped too, or Ollama has no record of what
+	// tools were already called.
 	apiMessages := make([]api.Message, 0, len(messages))
 	for _, msg := range messages {
 		var apiToolCalls []api.ToolCall
@@ -69,7 +67,6 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		})
 	}
 
-	// Build configuration from arguments
 	config := &modelrepo.ChatConfig{}
 	for _, arg := range args {
 		arg.Apply(config)
@@ -106,9 +103,8 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 
 	var finalResponse api.ChatResponse
 
-	// Handle the API call
+	// Only the final frame is kept; Ollama includes the full message there.
 	err = c.ollamaClient.Chat(ctx, req, func(res api.ChatResponse) error {
-		// We keep only the final frame; Ollama includes the full message there
 		if res.Done {
 			finalResponse = res
 		}
@@ -123,55 +119,38 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		return modelrepo.ChatResult{}, modelrepo.ClassifyProviderError(wrapped, 0, "", err.Error())
 	}
 
-	// Check if we received any response
 	if finalResponse.Message.Role == "" {
 		err := fmt.Errorf("no response received from ollama for model %s", c.modelName)
 		reportErr(err)
 		return modelrepo.ChatResult{}, err
 	}
 
-	// Handle completion reasons
 	switch finalResponse.DoneReason {
 	case "error":
 		err := fmt.Errorf("ollama generation error for model %s: %s", c.modelName, finalResponse.Message.Content)
 		reportErr(err)
 		return modelrepo.ChatResult{}, err
 	case "length":
-		// A truncated SUCCESS, same contract as the streaming assembler: the
-		// partial content is real; the verbatim finish reason below lets the
-		// engine surface the truncation instead of the old behavior of
-		// discarding the content behind an opaque error.
+		// Truncated but successful, same contract as the streaming assembler:
+		// partial content is real and the finish reason surfaces the truncation.
 	case "stop":
-		// Allow empty content if there are tool calls — the model is signalling it wants to call tools.
-		// Also allow empty content with no tool calls — some models (e.g. qwen2.5) emit this as a
-		// "done" signal after completing a tool-use loop. Callers can detect this from content and tool_calls being empty.
+		// Empty content is allowed with tool calls (model wants to call tools)
+		// or without (some models, e.g. qwen2.5, use this as an end-of-tool-loop signal).
 	default:
 		err := fmt.Errorf("unexpected completion reason %q for model %s", finalResponse.DoneReason, c.modelName)
 		reportErr(err)
 		return modelrepo.ChatResult{}, err
 	}
 
-	// Base assistant message
 	message := modelrepo.Message{
 		Role:     finalResponse.Message.Role,
 		Content:  finalResponse.Message.Content,
 		Thinking: finalResponse.Message.Thinking,
 	}
 
-	// Convert Ollama tool calls → modelrepo.ToolCall
-	// Ollama ToolCall:
-	//   type ToolCall struct {
-	//       Function ToolCallFunction `json:"function"`
-	//   }
-	//   type ToolCallFunction struct {
-	//       Index     int                       `json:"index"`
-	//       Name      string                    `json:"name"`
-	//       Arguments ToolCallFunctionArguments `json:"arguments"`
-	//   }
-	//   type ToolCallFunctionArguments map[string]any
-	//   func (t *ToolCallFunctionArguments) String() string { ... }
 	var toolCalls []modelrepo.ToolCall
 	for _, tc := range finalResponse.Message.ToolCalls {
+		// Arguments is a map; String() renders it as the JSON string modelrepo.ToolCall expects.
 		argsJSON := tc.Function.Arguments.String()
 
 		toolCalls = append(toolCalls, modelrepo.ToolCall{
@@ -190,11 +169,9 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	result := modelrepo.ChatResult{
 		Message:   message,
 		ToolCalls: toolCalls,
-		// Ollama reports no cache dimension: prompt_eval_count already
-		// INCLUDES tokens reused from the per-slot KV cache (llama-server's
-		// cache_n is not surfaced through the ollama API), so PromptTokens is
-		// the total and the cache fields stay zero. The local warm signal is
-		// TTFT, not usage.
+		// Ollama reports no cache dimension: prompt_eval_count already includes
+		// tokens reused from the per-slot KV cache, so PromptTokens is the
+		// total and the cache fields stay zero.
 		Usage: &modelrepo.TokenUsage{
 			PromptTokens:     finalResponse.Metrics.PromptEvalCount,
 			CompletionTokens: finalResponse.Metrics.EvalCount,

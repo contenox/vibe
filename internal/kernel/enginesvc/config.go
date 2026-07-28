@@ -23,10 +23,9 @@ type Config struct {
 	AltDefaultProvider string
 
 	// DefaultEmbedModel/DefaultEmbedProvider select the model used for
-	// EMBEDDINGS — a different model from the chat one on most providers. Empty
-	// means "read the default-embed-model / default-embed-provider config keys,
-	// then fall back to the chat model with a warning" (see
-	// resolveEmbeddingModel). Retrieval is optional, so an unset embedding model
+	// embeddings — often different from the chat model. Empty falls back to
+	// the default-embed-model/-provider config keys, then the chat model
+	// with a warning (see resolveEmbeddingModel); an unset embedding model
 	// never fails Build.
 	DefaultEmbedModel    string
 	DefaultEmbedProvider string
@@ -73,23 +72,12 @@ type Config struct {
 	// embedders can inject their own.
 	HITLPolicySource hitlservice.PolicySource
 
-	// OnToolsRepoReady, when set, is called exactly once during Build with the
-	// aggregate tools repo AS A MODEL'S OWN TOOL CALL MEETS IT — HITL wrapper
-	// included, the outer attention/tool-guidance decorator NOT.
-	//
-	// It exists for one unavoidable construction cycle: a tool that itself calls
-	// other tools has to be registered in LocalTools BEFORE the aggregate repo
-	// those tools are assembled into exists, yet it needs that aggregate to do its
-	// job. Late binding through this callback is the smallest honest seam, and it
-	// keeps the knowledge one-directional — the composition root knows who needs
-	// the repo; enginesvc only knows when the repo is ready.
-	//
-	// Both halves of "which repo" are deliberate. HITL-wrapped, because gating is
-	// the boundary a nested caller must not slip past: a tool reaching another
-	// tool must meet the same envelope the model would. NOT guidance-wrapped,
-	// because that decorator counts MODEL-level navigation, and a tool's internal
-	// calls are not that — feeding them in would make the counters measure
-	// something else.
+	// OnToolsRepoReady, when set, is called exactly once during Build with
+	// the aggregate tools repo as a model's own tool call meets it: HITL
+	// wrapper included, the outer tool-guidance decorator not (a tool's
+	// internal calls aren't model-level navigation). It exists so a tool
+	// that itself calls other tools can be registered in LocalTools before
+	// the aggregate repo it needs is assembled.
 	OnToolsRepoReady func(taskengine.ToolsRepo)
 }
 

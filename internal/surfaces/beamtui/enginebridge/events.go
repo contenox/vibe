@@ -9,34 +9,19 @@ import (
 )
 
 // Event is one fact produced by the runtime, already destructured out of the
-// ACP wire types a UI has no business re-parsing. The set is CLOSED: only the
-// types in this file implement it.
+// ACP wire types. The set is closed: only the types in this file implement it.
 //
-// # What "no drops" covers
+// Exactly one Event is produced per inbound notification the active-session
+// filter admits (SetActiveSession discards updates for any other session
+// before translation); no coalescing, no reordering, and a kind this package
+// does not model becomes UnknownUpdate rather than nothing. Out-of-band
+// events (permission, turn and shell results) don't ride the notification
+// stream and aren't filtered.
 //
-// Exactly one Event is produced per inbound libacp.SessionNotification THAT
-// REACHES THE BRIDGE'S CLIENT — which is the set the active-session filter
-// admits, not everything on the wire. SetActiveSession installs a
-// libacp.FilterSessionUpdates wrapper, and updates for any other session are
-// discarded before translation ever runs; that is the point of the filter, and
-// it is a drop by design. Within the admitted set the guarantee is total: no
-// coalescing, no reordering, and a kind this package does not model becomes
-// UnknownUpdate rather than nothing, so the contract survives protocol
-// additions.
-//
-// The out-of-band events — permission, turn and shell results — do not ride the
-// notification stream at all and are not filtered.
-//
-// # Routing
-//
-// Every Event carries the ACP session it belongs to, so a consumer can route
-// without a side table. That does NOT make the Bridge a multiplexer: with a
-// non-empty active session the filter admits one session's updates, so a
-// surface that wants several live transcripts at once either keeps the filter
-// off (SetActiveSession "", every session delivered, tagged) or runs one Bridge
-// per session. SessionOf is for correct attribution — of the unfiltered window,
-// of a late event from a session just switched away from — not a fan-out
-// facility.
+// Every Event carries the session it belongs to (SessionOf) so a consumer can
+// route without a side table; with an active session set, only that
+// session's updates are admitted, so several live transcripts at once need
+// either an unfiltered window or one Bridge per session.
 type Event interface {
 	// SessionOf reports the ACP session this fact belongs to.
 	SessionOf() libacp.SessionID
@@ -44,9 +29,8 @@ type Event interface {
 }
 
 // TextDelta is one streamed chunk of assistant prose (agent_message_chunk).
-// MessageID groups chunks into a message: all chunks of one message share an
-// id, and a changed id marks a new message. It is optional in the spec, so an
-// empty MessageID means "the agent did not group this".
+// MessageID groups chunks sharing one message; empty means the agent did not
+// group this (the field is optional in the spec).
 type TextDelta struct {
 	SessionID libacp.SessionID
 	MessageID string
@@ -62,18 +46,16 @@ type ThoughtDelta struct {
 }
 
 // UserEcho is a user_message_chunk the agent sent back — in practice the
-// transcript replay session/load performs, not an echo of the line the
-// operator just typed (the Bridge never synthesizes one; SubmitPrompt's text
-// is already in the caller's hands).
+// transcript replay session/load performs, not an echo of what the operator
+// just typed (the Bridge never synthesizes one).
 type UserEcho struct {
 	SessionID libacp.SessionID
 	MessageID string
 	Text      string
 }
 
-// ToolCallOpened is the FIRST notification for a tool call (tool_call): the
-// create-shaped one. A later state change for the same ToolCallID arrives as
-// ToolCallUpdated.
+// ToolCallOpened is the first notification for a tool call (tool_call). A
+// later state change for the same ToolCallID arrives as ToolCallUpdated.
 type ToolCallOpened struct {
 	SessionID  libacp.SessionID
 	ToolCallID string
@@ -86,16 +68,10 @@ type ToolCallOpened struct {
 }
 
 // ToolCallUpdated is a state change for an already-opened tool call
-// (tool_call_update). Fields the agent did not restate arrive zero — the
-// contract is patch-shaped, so a renderer merges onto the card it already has
-// rather than replacing it.
-//
-// An empty field ALWAYS means "unchanged", never "cleared". Clear-on-empty is
-// inexpressible on this wire: the update encodes omitted fields with omitempty,
-// so "" and absent are the same bytes, and there is no sentinel for erasure. A
-// renderer that treated an empty Title or a nil Contents as a clear would blank
-// cards on every partial update. Nothing can ever remove content from an open
-// tool call — only add to or replace it with something non-empty.
+// (tool_call_update); fields the agent did not restate arrive zero, and the
+// contract is patch-shaped — a renderer merges onto the existing card. An
+// empty field always means "unchanged", never "cleared": the wire has no
+// erasure sentinel, so nothing can remove content from an open tool call.
 type ToolCallUpdated struct {
 	SessionID  libacp.SessionID
 	ToolCallID string
@@ -115,17 +91,11 @@ type PlanUpdated struct {
 	Entries   []libacp.PlanEntry
 }
 
-// UsageUpdated is the session context indicator (usage_update). It is the ONLY
-// channel for token accounting — PromptResponse carries a stop reason and
-// nothing else.
-//
-// Size == 0 IS A REACHABLE WIRE SHAPE, not a bug and not "no data": the spec
-// requires used and size on every usage_update, and a session running without a
-// configured context budget reports its consumption against a size of zero.
-// Consumers must therefore render Used ABSOLUTELY ("12,481 tokens") and never
-// as a percentage of Size — the obvious Used/Size divides by zero, and clamping
-// it to 100% would report a session with no limit as full. A meter is only
-// honest when Size > 0.
+// UsageUpdated is the session context indicator (usage_update) and the only
+// channel for token accounting. Size == 0 is a reachable wire shape (a
+// session with no configured context budget), not a bug: consumers must
+// render Used absolutely ("12,481 tokens"), never as Used/Size, which
+// divides by zero.
 type UsageUpdated struct {
 	SessionID libacp.SessionID
 	Used      int
@@ -144,29 +114,23 @@ type CommandsUpdated struct {
 
 // ConfigOptionUpdated carries the session's config selects
 // (config_option_update): model, HITL policy, think level, token limit,
-// workspace root. Options replace the previous list.
+// workspace root; Options replaces the previous list.
 //
-// It arrives from two places, and a consumer must not care which. The wire
-// notification is one: acpsvc pushes it after any command that changes a
-// selection (/model, /provider, /think, /policy) and after set_config_option.
-// The other is the session's OPENING options, which ride the session/new,
-// session/load and session/resume RESPONSES rather than a notification —
-// NewSession/LoadSession/ResumeSession replay them as this event so a consumer
-// that only listens on Events() still sees the session's starting state. See
-// (*Bridge).emitInitialConfigOptions.
+// It arrives both as the wire notification (after /model, /provider,
+// /think, /policy or set_config_option) and as a replay of a session's
+// opening options from session/new, session/load or session/resume
+// responses (see (*Bridge).emitInitialConfigOptions) — a consumer must not
+// care which.
 type ConfigOptionUpdated struct {
 	SessionID libacp.SessionID
 	Options   []libacp.SessionConfigOption
 }
 
-// ValueDomains projects config options onto the argument domains of the slash
-// commands that take a value — /model, /provider, /think, /policy — so a
-// completing surface offers exactly what the server advertises and validates.
-// See acpsvc.CommandValueDomains for the mapping and its rules; this is the
-// re-export that keeps the UI layer's imports pointed at the bridge.
-//
-// An absent key means "no domain known", which a caller must treat as "anything
-// the operator types is fine" — never as a gate.
+// ValueDomains projects config options onto the argument domains of the
+// slash commands that take a value (/model, /provider, /think, /policy), so
+// a completing surface matches what the server validates (see
+// acpsvc.CommandValueDomains). An absent key means "no domain known" — treat
+// as "anything the operator types is fine", never as a gate.
 func ValueDomains(options []libacp.SessionConfigOption) map[string][]string {
 	return acpsvc.CommandValueDomains(options)
 }
@@ -177,12 +141,10 @@ type ModeUpdated struct {
 	ModeID    string
 }
 
-// ReplayEnded marks the end of a LoadSession transcript replay. It is a
-// bridge-synthesized event, not a wire fact: the replayed notifications are
-// dispatched before the load RPC's response, so emitting this after the
-// response preserves order — everything the replay produced precedes it.
-// Consumers settle the trailing replayed message on it; a session that was
-// never loaded never sees one.
+// ReplayEnded marks the end of a LoadSession transcript replay. It is
+// bridge-synthesized, emitted after the load RPC's response so it follows
+// every replayed notification; consumers settle the trailing replayed
+// message on it.
 type ReplayEnded struct {
 	SessionID libacp.SessionID
 }
@@ -196,11 +158,10 @@ type SessionInfoUpdated struct {
 	UpdatedAt string
 }
 
-// MissionReport is a report from a dispatched mission unit, delivered into the
-// session that FIRED it. On the wire it is an agent_message_chunk whose
-// MessageID is "mission-report-<reportId>" and whose _meta carries
-// reportrouter's contenox.missionReport envelope; the Bridge recognizes it and
-// emits this INSTEAD OF TextDelta, so one notification stays one event.
+// MissionReport is a report from a dispatched mission, delivered into the
+// session that fired it. On the wire it's an agent_message_chunk carrying a
+// contenox.missionReport _meta envelope; the Bridge emits this instead of
+// TextDelta, so one notification stays one event.
 type MissionReport struct {
 	SessionID libacp.SessionID
 	MissionID string
@@ -211,14 +172,10 @@ type MissionReport struct {
 	Text      string
 }
 
-// MissionAsk is an attention question from a dispatched mission unit: the unit
-// is BLOCKED until it is answered. Same shape as MissionReport — an
-// agent_message_chunk with MessageID "mission-ask-<askId>" and a
-// contenox.missionAsk _meta envelope — and likewise emitted instead of
-// TextDelta. AskID is what an answer is given against.
-//
-// Answering is NOT a Bridge method yet: the answer path is a service seam the
-// blueprint leaves to the approval-cards component (D20).
+// MissionAsk is an attention question from a dispatched mission unit, which
+// blocks until it is answered (AskID is what an answer is given against).
+// Same wire shape as MissionReport (contenox.missionAsk _meta), emitted
+// instead of TextDelta. Answering is not yet a Bridge method.
 type MissionAsk struct {
 	SessionID libacp.SessionID
 	MissionID string
@@ -232,20 +189,13 @@ type MissionAsk struct {
 }
 
 // MissionStatusChanged is a dispatched mission coming to rest — or opening —
-// announced into the session that FIRED it. Same carrier as MissionReport: an
-// agent_message_chunk whose MessageID is "mission-status-<missionId>-<n>" and
-// whose _meta carries the contenox.missionStatus envelope, emitted INSTEAD OF
-// TextDelta so one notification stays one event.
+// announced into the session that fired it. Same carrier as MissionReport
+// (contenox.missionStatus _meta).
 //
-// Old and New are missionservice.Status values as STRINGS, deliberately not a
-// typed enum: this package models the wire, and the wire carries whatever the
-// service published. The vocabulary is one running state ("open") and four
-// terminal ones ("landed", "derailed", "stuck", "abandoned"); a consumer that
-// switches on New must have a default arm, because a status this build does not
-// know is a service that grew one, not a fact to drop.
-//
-// Reason is the one line the finisher gave — why it derailed, what wedged it —
-// and is empty for a clean landing.
+// Old and New are missionservice.Status values as strings, not a typed enum,
+// since this package models the wire; a consumer switching on New must have
+// a default arm for a status this build does not recognize. Reason is the
+// one line the finisher gave, empty for a clean landing.
 type MissionStatusChanged struct {
 	SessionID libacp.SessionID
 	MissionID string
@@ -257,19 +207,13 @@ type MissionStatusChanged struct {
 }
 
 // MissionPlanRevised is a dispatched mission's planner replacing its plan,
-// announced into the firing session. Carrier and rules are MissionStatusChanged's
-// — an agent_message_chunk with MessageID "mission-plan-<missionId>-<revision>"
-// and a contenox.missionPlan envelope.
+// announced into the firing session. Same carrier and rules as
+// MissionStatusChanged (contenox.missionPlan _meta).
 //
-// Revision is the plan's monotonic number and Explanation the planner's one-line
-// "why". EntryCount is the whole plan's size; Pending, InProgress and Completed
-// break it down. The three counts DO NOT have to sum to EntryCount — the plan's
-// status vocabulary may grow — so a renderer shows them as the three it knows
-// and never derives a fourth by subtraction.
-//
-// A plan revision is NOT an attention event: it is a unit reorganizing its own
-// work, which is exactly the thing the operator delegated. See the app-shell's
-// bell rules.
+// Revision is the plan's monotonic number, Explanation the planner's
+// one-line "why". Pending/InProgress/Completed need not sum to EntryCount —
+// the status vocabulary may grow — so a renderer shows only what it knows.
+// A plan revision is not an attention event.
 type MissionPlanRevised struct {
 	SessionID   libacp.SessionID
 	MissionID   string
@@ -284,13 +228,9 @@ type MissionPlanRevised struct {
 }
 
 // The mission lifecycle vocabulary MissionStatusChanged.Old and .New carry,
-// mirroring missionservice.Status (internal/services/missionservice: StatusOpen
-// and the four terminal constants). Duplicated here rather than imported for the
-// same reason the `_meta` keys are: this package models the WIRE, and a surface
-// that switches on a status should not have to reach past the bridge to name it.
-//
-// The set is closed BY CONVENTION, not by a Go type — see MissionStatusChanged
-// on why every consumer needs a default arm.
+// mirroring missionservice.Status. Duplicated here (rather than imported)
+// because this package models the wire; the set is closed by convention, not
+// by a Go type — see MissionStatusChanged on why consumers need a default arm.
 const (
 	MissionStatusOpen      = "open"
 	MissionStatusLanded    = "landed"
@@ -299,14 +239,10 @@ const (
 	MissionStatusAbandoned = "abandoned"
 )
 
-// MissionStatusTerminal reports whether status is one a mission comes to REST
-// in: the work is over, one way or another, and nothing further will arrive from
-// that unit. "open" is not terminal, and neither is a status this build does not
-// know — an unrecognized value is treated as still-running, which is the answer
-// that cannot invent a completion that did not happen.
-//
-// It is the closed set the completion bell rings on (blueprint 4.20): a mission
-// reaching rest is precisely the moment detached work has something to hand back.
+// MissionStatusTerminal reports whether status is one a mission comes to
+// rest in — the work is over and nothing further will arrive from that
+// unit. "open" is not terminal, and neither is a status this build does not
+// recognize, which is treated as still-running.
 func MissionStatusTerminal(status string) bool {
 	switch status {
 	case MissionStatusLanded, MissionStatusDerailed, MissionStatusStuck, MissionStatusAbandoned:
@@ -315,40 +251,34 @@ func MissionStatusTerminal(status string) bool {
 	return false
 }
 
-// InboxItemAdded is a mission report that reached NO live supervising session
-// and was written to the durable operator inbox instead
-// (internal/services/operatorinbox). It is the ONE event in this vocabulary that
-// does not come off the ACP wire: it arrives on the process bus, because by
-// definition there was no session to deliver it into.
+// InboxItemAdded is a mission report that reached no live supervising
+// session and was written to the durable operator inbox instead
+// (internal/services/operatorinbox). It is the one event that does not come
+// off the ACP wire — it arrives on the process bus, since there was no
+// session to deliver it into.
 //
-// # It belongs to no session
+// SessionOf always returns the empty SessionID: nobody was watching, so a
+// consumer must not route it by session or let a session filter drop it.
 //
-// SessionOf therefore returns the EMPTY SessionID, always. That is not a missing
-// value to be filled in later — it is the fact the event carries: nobody was
-// watching. A consumer must not route it by session (there is nothing to route
-// to) and must not let a session filter drop it; it is a surface-level notice,
-// the same way a connection warning is.
-//
-// Fields are the inbox Item's own, flattened: ID identifies the durable row,
-// Reason is why it landed here ("operator_fired" — nobody was ever supervising;
-// "parent_gone" — the supervisor ended before the report arrived), and the rest
-// is the attribution a one-line notice needs without a second read.
+// Reason is why it landed here ("operator_fired": nobody was ever
+// supervising; "parent_gone": the supervisor ended before the report
+// arrived).
 type InboxItemAdded struct {
 	ID        string
 	MissionID string
 	AgentName string
 	Intent    string
 	Reason    string
-	// Kind and Summary are the embedded report's own: the report kind
-	// ("progress", "finding", "blocker", "result") and its one-line summary.
+	// Kind and Summary are the embedded report's own: kind ("progress",
+	// "finding", "blocker", "result") and its one-line summary.
 	Kind    string
 	Summary string
 }
 
-// TerminalChunk is live output from the session's persistent shell, carried by
-// acpsvc's extension update kind. Reset marks the scrollback snapshot
-// delivered on (re)subscribe: the consumer must REPLACE its buffer, not append
-// to it. Offset is the byte offset of Chunk within that scrollback.
+// TerminalChunk is live output from the session's persistent shell, carried
+// by acpsvc's extension update kind. Reset marks the scrollback snapshot
+// delivered on (re)subscribe: the consumer must replace its buffer, not
+// append. Offset is Chunk's byte offset within that scrollback.
 type TerminalChunk struct {
 	SessionID libacp.SessionID
 	Offset    int64
@@ -365,19 +295,14 @@ type UnknownUpdate struct {
 	Update    libacp.SessionUpdate
 }
 
-// PermissionRequested is a HITL gate: the tool call named here is BLOCKED
-// until Resolve is called. It blocks only that call — the rest of the turn's
-// stream keeps flowing, and other sessions are untouched.
+// PermissionRequested is a HITL gate: the tool call named here blocks until
+// Resolve is called, blocking only that call — the rest of the turn's stream
+// and other sessions are unaffected.
 //
-// Resolve is idempotent and safe to call from any goroutine; the first call
-// wins and later ones are no-ops. allow=true answers with the "allow" option,
-// false with "deny" — the only two options approvalflow ever offers. A request
-// left unresolved when the Bridge closes (or when the turn is cancelled)
-// resolves itself as cancelled, which acpsvc maps to context.Canceled: no
-// goroutine survives teardown waiting for a keystroke.
-//
-// However it ends, the end is announced: see PermissionResolved, which is what
-// a card should retire on.
+// Resolve is idempotent and safe from any goroutine; the first call wins.
+// allow=true answers "allow", false "deny". A request left unresolved when
+// the Bridge closes or the turn is cancelled resolves itself as cancelled.
+// See PermissionResolved, which is what a card should retire on.
 type PermissionRequested struct {
 	SessionID  libacp.SessionID
 	ToolCallID string
@@ -390,29 +315,21 @@ type PermissionRequested struct {
 	Contents  []libacp.ToolCallContent
 	Locations []libacp.ToolCallLocation
 	RawInput  json.RawMessage
-	// Options is what the agent offered, verbatim. approvalflow always sends
-	// exactly [allow(allow_once), deny(reject_once)]; it is carried so a card
-	// can label its keys from the wire instead of hardcoding them.
+	// Options is what the agent offered, verbatim (always
+	// [allow(allow_once), deny(reject_once)]) so a card can label its keys.
 	Options []libacp.PermissionOption
 	Resolve func(allow bool)
 }
 
-// PermissionResolved is emitted when a pending permission request reaches ANY
-// terminal state — the operator answered, the turn was cancelled and libacp
-// force-resolved the request, or the bridge tore down — so an approval card can
-// retire DETERMINISTICALLY instead of being garbage-collected by inference.
-// Exactly one PermissionResolved follows each PermissionRequested, matched on
-// ToolCallID.
+// PermissionResolved is emitted when a pending permission request reaches
+// any terminal state (operator answered, turn cancelled, or bridge torn
+// down), so a card retires deterministically. Exactly one follows each
+// PermissionRequested, matched on ToolCallID.
 //
-// Outcome is the answer that went back on the wire: PermissionOutcomeSelected
-// when the operator chose (the choice itself — allow or deny — is the tool
-// call's business and surfaces as its status, not here), PermissionOutcomeCancelled
-// for both non-answers.
-//
-// The one case where it does NOT arrive is teardown: the queue is already
-// stopped when the bridge's done channel closes, so that emit is dropped. The
-// consumer learns the same fact more strongly — Events() closes in the same
-// instant, retiring every open card at once.
+// Outcome is PermissionOutcomeSelected when the operator chose (the choice
+// itself surfaces as the tool call's status, not here), or
+// PermissionOutcomeCancelled otherwise. It does not arrive on teardown: the
+// consumer learns the same fact when Events() closes, retiring every card.
 type PermissionResolved struct {
 	SessionID  libacp.SessionID
 	ToolCallID string
@@ -420,7 +337,7 @@ type PermissionResolved struct {
 }
 
 // TurnEnded reports that a submitted prompt finished. A genuine cancel lands
-// here with StopReason "cancelled" and is NOT an error; TurnFailed means the
+// here with StopReason "cancelled" and is not an error; TurnFailed means the
 // turn never produced a stop reason at all.
 type TurnEnded struct {
 	SessionID  libacp.SessionID
@@ -435,8 +352,8 @@ type TurnFailed struct {
 	Err       error
 }
 
-// ShellRunStarted reports that a `$`-style passthrough line was handed to the
-// session's shell. Its output does NOT arrive here — it streams as
+// ShellRunStarted reports that a `$`-style passthrough line was handed to
+// the session's shell. Its output does not arrive here — it streams as
 // TerminalChunk events.
 type ShellRunStarted struct {
 	SessionID libacp.SessionID
@@ -515,24 +432,15 @@ func (ShellRunStarted) isBridgeEvent()      {}
 func (ShellRunResult) isBridgeEvent()       {}
 
 const (
-	// missionReportMetaKey and missionAskMetaKey are the `_meta` keys the
-	// report router stamps onto the agent_message_chunk it delivers into a
-	// mission's firing session (internal/services/reportrouter/reportrouter.go:
-	// reportUpdateMeta / askUpdateMeta). They are unexported there, so the
-	// literals are duplicated here — the wire is the contract, and the
-	// round-trip tests in this package pin it.
+	// missionReportMetaKey and missionAskMetaKey are the `_meta` keys
+	// reportrouter stamps onto the agent_message_chunk it delivers into a
+	// mission's firing session; duplicated here because they're unexported
+	// there, and this package's round-trip tests pin the wire contract.
 	missionReportMetaKey = "contenox.missionReport"
 	missionAskMetaKey    = "contenox.missionAsk"
 
-	// missionStatusMetaKey and missionPlanMetaKey are the same device for the
-	// mission LIFECYCLE half: the report router stamps them onto the
-	// agent_message_chunk it delivers when a mission changes status
-	// (missionservice.StatusChangedEvent, published on
-	// missionservice.StatusChangedSubject) or replaces its plan
-	// (missionservice.PlanRevisedEvent, on PlanRevisedSubject). Same duplication
-	// rule as the two keys above, for the same reason: the producer's constants
-	// are unexported, the WIRE is the contract, and the translate table in this
-	// package's tests is what pins it.
+	// missionStatusMetaKey and missionPlanMetaKey are the same device for
+	// the mission lifecycle half: status changes and plan revisions.
 	missionStatusMetaKey = "contenox.missionStatus"
 	missionPlanMetaKey   = "contenox.missionPlan"
 )
@@ -556,10 +464,8 @@ type missionAskMeta struct {
 }
 
 // missionStatusMeta mirrors the routed projection of
-// missionservice.StatusChangedEvent. Intent rides the wire (it is what the
-// mission was FOR) and is decoded so the shape stays honest, but no beam surface
-// renders it on a status line yet: the card names the unit, and the intent is
-// already in the transcript above it, in the /mission line that fired the work.
+// missionservice.StatusChangedEvent. Intent is decoded but not yet rendered
+// by any surface — it's already visible in the /mission line above it.
 type missionStatusMeta struct {
 	MissionID string `json:"missionId"`
 	AgentName string `json:"agentName,omitempty"`
@@ -570,10 +476,8 @@ type missionStatusMeta struct {
 }
 
 // missionPlanMeta mirrors the routed projection of
-// missionservice.PlanRevisedEvent. The event's Added/Removed delta is
-// deliberately NOT part of this envelope — the counts below are the plan's
-// current shape, which is what a one-line card can render honestly at any
-// width.
+// missionservice.PlanRevisedEvent. Added/Removed is deliberately not part of
+// this envelope — the counts below are the plan's current shape.
 type missionPlanMeta struct {
 	MissionID   string `json:"missionId"`
 	AgentName   string `json:"agentName,omitempty"`
@@ -593,11 +497,9 @@ type terminalOutputMeta struct {
 	Reset     bool   `json:"reset,omitempty"`
 }
 
-// metaEnvelope decodes an ACP `_meta` object into its top-level namespaced
-// keys without committing to any one of them. Malformed or absent `_meta`
-// yields an empty map, never an error: a namespace a producer did not stamp is
-// indistinguishable from one this build does not know about, and neither is a
-// reason to lose the update.
+// metaEnvelope decodes an ACP `_meta` object into its namespaced keys.
+// Malformed or absent `_meta` yields an empty map, never an error — an
+// unrecognized namespace is not a reason to lose the update.
 func metaEnvelope(raw json.RawMessage) map[string]json.RawMessage {
 	if len(raw) == 0 {
 		return nil
@@ -621,17 +523,11 @@ func translate(n libacp.SessionNotification) Event {
 		return UserEcho{SessionID: sid, MessageID: u.MessageID, Text: contentText(u.Content)}
 
 	case libacp.SessionUpdateAgentMessageChunk:
-		// Mission traffic rides this kind with a namespaced _meta envelope.
-		// Recognizing it here — rather than emitting TextDelta AND a second
-		// mission event — is what keeps "one notification, one event" true.
-		// A namespace the producer STAMPED but whose payload will not decode is
-		// a broken producer, not prose. Falling back to TextDelta there would
-		// launder a mission report into an ordinary assistant message —
-		// unattributed, unanswerable, and indistinguishable from something the
-		// model said. UnknownUpdate hands the raw update through instead, which
-		// is the same policy the terminal-extension arm below applies to the
-		// same failure. An ABSENT namespace stays plain text: that is a chunk
-		// nobody claimed, which is exactly what a TextDelta is.
+		// Mission traffic rides this kind with a namespaced _meta envelope;
+		// recognizing it here keeps "one notification, one event" true instead
+		// of emitting TextDelta plus a second mission event. A stamped
+		// namespace that fails to decode becomes UnknownUpdate rather than a
+		// laundered TextDelta; an absent namespace stays plain text.
 		env := metaEnvelope(u.Meta)
 		if raw, ok := env[missionReportMetaKey]; ok {
 			var m missionReportMeta

@@ -17,27 +17,16 @@ import (
 	"github.com/contenox/beam/libacp"
 )
 
-// This file is the acpsvc half of the native-turn survival layer (see the
-// runtime/nativeturn package doc). The nativeturn.Registry owns the in-flight turn
-// on a serve-rooted context; the pieces here connect it to one ACP connection:
-//
-//   - nativeTurnViewer bridges a turn's fan-out to this connection's WebSocket (the
-//     Transport-as-thin-viewer role), applying the per-connection permission-card
-//     suppression at delivery.
-//   - nativeEventTranslator turns the engine's bus events into session/update
-//     notifications the turn emits into its journal + viewers. It is the
-//     turn-scoped counterpart of Transport.publishEvent: identical vocabulary, but
-//     it runs OFF the connection (so a drop cannot stop it) with turn-local
-//     tool-call sequencing state and no per-connection normalization (each viewer
-//     normalizes on delivery).
-//
-// The turn body itself (the chain execution) lives in prompt.go's nativeDriver.
+// This file is the acpsvc half of the native-turn survival layer: the
+// nativeturn.Registry owns the in-flight turn on a serve-rooted context (see
+// prompt.go's nativeDriver for the turn body); nativeTurnViewer bridges its
+// fan-out to one connection's WebSocket, and nativeEventTranslator converts
+// engine bus events to session/update notifications, running off the
+// connection so a drop cannot stop it.
 
-// nativeTurnViewer is one connection's view onto a native turn: it receives the
-// turn's replayed backlog and live session/update stream and writes each onto this
-// connection's WebSocket. It is created per prompt / per reattach with a unique id,
-// so a reconnecting Transport is a DISTINCT viewer and Detach names exactly it —
-// mirroring the external path's per-attachment externalBridge viewer id.
+// nativeTurnViewer is one connection's view onto a native turn, writing its
+// replayed backlog and live stream to this connection's WebSocket. Created
+// per prompt/reattach with a unique id, so a reconnect is a distinct viewer.
 type nativeTurnViewer struct {
 	t   *Transport
 	id  string
@@ -52,14 +41,10 @@ func newNativeTurnViewer(t *Transport, sid libacp.SessionID) *nativeTurnViewer {
 // ID is the nativeturn.Viewer id: this viewer's per-attachment identity.
 func (v *nativeTurnViewer) ID() string { return v.id }
 
-// Deliver relays one turn event onto this connection's WebSocket. A tool-call card
-// whose approval is currently pending on THIS connection is suppressed — the open
-// permission dialog stands in for it — reproducing sendToolCallUpdateGuarded at the
-// delivery boundary (see Transport.isPermissionPending). The write itself goes
-// through sendUpdate, which applies this connection's own tool-call normalization,
-// so a freshly-attached viewer replaying the journal rebuilds its display state
-// correctly. Never blocks the turn beyond the WebSocket write, matching the external
-// bridge's inline-relay behavior.
+// Deliver relays one turn event onto this connection's WebSocket. A tool-call
+// card whose approval is pending on this connection is suppressed (see
+// Transport.isPermissionPending); the open dialog stands in for it. Never
+// blocks the turn beyond the WebSocket write.
 func (v *nativeTurnViewer) Deliver(ctx context.Context, ev nativeturn.Event) error {
 	n := ev.Update
 	if id := n.Update.ToolCallID; id != "" &&
@@ -71,29 +56,19 @@ func (v *nativeTurnViewer) Deliver(ctx context.Context, ev nativeturn.Event) err
 	return nil
 }
 
-// nativeEventTranslator converts the task engine's per-request bus events into ACP
-// session/update notifications for one turn, emitting each into the turn's journal
-// and viewer fan-out. It is the survival-path counterpart of Transport.publishEvent
-// and keeps that method's exact vocabulary and gating; the two differences are
-// structural, both required by survival:
-//
-//   - it emits through the turn (journal + all viewers) rather than one connection,
-//     so the stream survives a drop and replays on reattach, and
-//   - its tool-call invocation-sequencing state is TURN-LOCAL (a fresh turn starts a
-//     fresh sequence) rather than living on a Transport that can die mid-turn.
-//
-// It runs on a single goroutine draining one bus subscription, so its seq/open maps
-// need no lock. The permission-pending suppression that publishEvent applies inline
-// is deferred to each viewer (nativeTurnViewer.Deliver), because it is per-connection
-// state and the translation is now connection-independent.
+// nativeEventTranslator converts the task engine's bus events into ACP
+// session/update notifications for one turn, mirroring Transport.publishEvent
+// but emitting through the turn (journal + all viewers, surviving a drop)
+// with turn-local tool-call sequencing state instead of connection state.
+// Runs on a single goroutine draining one bus subscription, so seq/open need
+// no lock. Permission-pending suppression is deferred to each viewer.
 type nativeEventTranslator struct {
 	emit func(ctx context.Context, n libacp.SessionNotification)
-	// tokenSizeFallback supplies the session's effective token budget when a
-	// token-usage event carries no size of its own — the same fallback publishEvent
-	// reads from the live sessionEntry.
+	// tokenSizeFallback mirrors the fallback publishEvent reads from the live
+	// sessionEntry, for a token-usage event with no size of its own.
 	tokenSizeFallback func() int
-	// seq/open carry the tool-call invocation counters for this turn (see
-	// resolveToolCallWireID). Turn-local and single-goroutine, so unlocked.
+	// seq/open are turn-local tool-call invocation counters (see
+	// resolveToolCallWireID); single-goroutine, so unlocked.
 	seq  map[string]int
 	open map[string]int
 }
@@ -110,8 +85,8 @@ func newNativeEventTranslator(emit func(ctx context.Context, n libacp.SessionNot
 }
 
 // publish translates one raw bus payload for sid and emits the resulting
-// notification(s). It mirrors Transport.publishEvent case-for-case; an unparseable
-// payload is dropped exactly as there.
+// notification(s), mirroring Transport.publishEvent case-for-case; an
+// unparseable payload is dropped.
 func (tr *nativeEventTranslator) publish(ctx context.Context, sid libacp.SessionID, payload []byte) {
 	var ev taskengine.TaskEvent
 	if err := json.Unmarshal(payload, &ev); err != nil {
@@ -119,8 +94,7 @@ func (tr *nativeEventTranslator) publish(ctx context.Context, sid libacp.Session
 	}
 	switch ev.Kind {
 	case taskengine.TaskEventStepChunk:
-		// Only a handler whose streamed output IS assistant narration reaches the
-		// transcript (see publishEvent for the rationale).
+		// Only assistant-prose handlers reach the transcript.
 		if !taskengine.IsAssistantProseHandler(ev.TaskHandler) {
 			return
 		}
@@ -131,12 +105,11 @@ func (tr *nativeEventTranslator) publish(ctx context.Context, sid libacp.Session
 			tr.emit(ctx, libacp.SessionNotification{SessionID: sid, Update: libacp.NewAgentThoughtChunk(ev.Thinking)})
 		}
 	case taskengine.TaskEventStepStreamEnd:
-		// Consumed without a wire notification, mirroring Transport.publishEvent:
-		// ACP end-of-stream is implicit and usage comes from token_usage.
+		// ACP end-of-stream is implicit; usage comes from token_usage.
 	case taskengine.TaskEventChainSuspended:
 		// Consumed without a wire notification: the approval card the
 		// permission flow already rendered IS the suspension UI — the run is
-		// checkpointed (S6) and the verdict on that card resumes it. A second
+		// checkpointed and the verdict on that card resumes it. A second
 		// frame here would double-render one pending decision.
 	case taskengine.TaskEventStepStarted:
 		if taskengine.IsToolBearingHandler(ev.TaskHandler) {
@@ -163,8 +136,7 @@ func (tr *nativeEventTranslator) publish(ctx context.Context, sid libacp.Session
 	case taskengine.TaskEventToolCall:
 		id := resolveToolCallWireID(tr.seq, tr.open, sid, ev, true)
 		tr.emit(ctx, toolCallUpdateNotification(sid, ev, id))
-		// A mission_plan call also projects the stored plan snapshot as a full-
-		// snapshot ACP plan update (see publishEvent); a no-op for every other event.
+		// A mission_plan call also projects a full-snapshot ACP plan update.
 		if note, ok := planUpdateNotification(sid, ev); ok {
 			tr.emit(ctx, note)
 		}
@@ -189,20 +161,17 @@ func (tr *nativeEventTranslator) publish(ctx context.Context, sid libacp.Session
 	}
 }
 
-// promptViaRegistry runs (or joins) sess's turn on the native-turn Registry and
-// relays it to this connection as a viewer. It is the survival counterpart of the
-// connection-bound turn in nativeDriver.Prompt: the turn's chain executes on the
-// Registry's serve-rooted, hard-deadline-bounded context, and this method only
-// WATCHES it — awaiting completion to resolve the client's prompt RPC, or, on a
-// connection drop, detaching the viewer WITHOUT cancelling the turn (its completion
-// is journaled for the reattaching client). session/cancel is the only real cancel;
-// it reaches the turn through Transport.Cancel -> Registry.Cancel, independent of
-// this connection's context, which is exactly why the wait below keys the drop case
-// on connCtx (a bare socket close) rather than the request context (which a
-// session/cancel also cancels).
+// promptViaRegistry runs (or joins) sess's turn on the native-turn Registry
+// and relays it to this connection as a viewer. The turn executes on the
+// Registry's own serve-rooted context; this method only watches it, detaching
+// without cancelling on a connection drop (the turn's completion is
+// journaled for the reattaching client). session/cancel is the only real
+// cancel, reaching the turn through Transport.Cancel -> Registry.Cancel
+// independent of this connection — hence keying the drop case on connCtx
+// rather than the request context.
 func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, images []taskengine.ImagePart, droppedContentKinds []string) (libacp.PromptResponse, error) {
 	t := d.t
-	_ = ctx // the turn owns its own serve-rooted context; ctx governed the prompt preamble only.
+	_ = ctx // the turn owns its own serve-rooted context
 
 	viewer := newNativeTurnViewer(t, req.SessionID)
 	turnFn := func(turnCtx context.Context, emit func(context.Context, libacp.SessionNotification)) nativeturn.Result {
@@ -211,8 +180,7 @@ func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptR
 
 	turn, _, err := t.deps.NativeTurns.Start(req.SessionID, turnFn, viewer)
 	if err != nil {
-		// The Registry is closed (serve is shutting down). Resolve cleanly as a
-		// cancel rather than faulting the client — nothing durable was lost.
+		// Registry closed (serve shutting down): resolve as a clean cancel.
 		return libacp.PromptResponse{StopReason: libacp.StopReasonCancelled}, nil
 	}
 
@@ -221,19 +189,16 @@ func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptR
 		turn.Detach(viewer.ID())
 		return nativeResultToResponse(turn.Result())
 	case <-t.connCtx.Done():
-		// The connection dropped. Detach this viewer; the turn keeps running on the
-		// Registry and its result is journaled for the reattaching client. The
-		// response returned here is lost with the socket.
+		// Connection dropped; the turn keeps running and its result is
+		// journaled for the reattaching client.
 		turn.Detach(viewer.ID())
 		return libacp.PromptResponse{StopReason: libacp.StopReasonCancelled}, nil
 	}
 }
 
 // nativeResultToResponse maps a completed turn's Result onto the ACP prompt
-// response, mirroring the connection-bound path's outcome handling: a clean end / a
-// cancellation resolves with the stop reason and no error, while a genuine failure
-// resolves with an InternalError (carrying the stop reason when the engine handed
-// one back).
+// response: clean end/cancellation resolve with the stop reason and no
+// error; a genuine failure resolves as an InternalError.
 func nativeResultToResponse(res nativeturn.Result) (libacp.PromptResponse, error) {
 	if res.Err != nil {
 		return libacp.PromptResponse{StopReason: res.StopReason}, libacp.InternalError(res.Err.Error())
@@ -241,14 +206,14 @@ func nativeResultToResponse(res nativeturn.Result) (libacp.PromptResponse, error
 	return libacp.PromptResponse{StopReason: res.StopReason}, nil
 }
 
-// runNativeTurn is the survival-path turn body: the exact chain-execution flow the
-// connection-bound nativeDriver.Prompt runs, lifted onto the serve-rooted turnCtx.
-// It differs from that path only where survival requires it — the bus subscription
-// and event translation emit into the turn's journal + viewers (not one
-// connection); cancellation is keyed on the TURN context (a connection drop never
-// reaches here); the post-turn SessionInfo is journaled rather than sent
-// AfterResponse; and it owns its own turn-scoped tracker span, because the turn
-// outlives the connection whose Prompt started it.
+// runNativeTurn is the survival-path turn body: the same chain-execution flow
+// as nativeDriver.Prompt, lifted onto the serve-rooted turnCtx. It differs
+// only where survival requires it: events emit into the turn's journal +
+// viewers (not one connection); cancellation is keyed on the turn context (a
+// connection drop never reaches here); the post-turn SessionInfo is
+// journaled rather than sent via AfterResponse; and it owns its own
+// turn-scoped tracker span, since the turn outlives the connection that
+// started it.
 func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, images []taskengine.ImagePart, droppedContentKinds []string, emit func(context.Context, libacp.SessionNotification)) nativeturn.Result {
 	t := d.t
 
@@ -259,42 +224,29 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 		"session_id", string(req.SessionID), "prompt_blocks", len(req.Prompt))
 	defer end()
 
-	// Gate this turn's tool calls under THIS session's chosen HITL policy, and bind a
-	// dispatched unit's mission id, onto the serve-rooted turn context — the same
-	// per-session injection the connection path does (see prompt.go), riding the turn
-	// ctx instead of the request ctx.
+	// Same per-session HITL/mission context injection as prompt.go, riding
+	// turnCtx instead of the request ctx.
 	if policyName := t.resolveSessionHITLPolicy(sess); policyName != "" {
 		turnCtx = hitlservice.WithPolicyName(turnCtx, policyName)
 	}
 	if sess.MissionID != "" {
 		turnCtx = missiontools.WithMissionID(turnCtx, sess.MissionID)
-		// Mirrors prompt.go: workdir in ctx lets the verification gate stat
-		// relative artifact refs claimed by result reports.
 		turnCtx = missiontools.WithWorkdir(turnCtx, sess.Cwd)
-		// Mirrors prompt.go: the envelope's model/backend allowlist must bound the
-		// serve-rooted turn exactly as it bounds the connection-rooted one, or a
-		// unit would escape its compute envelope simply by running under serve.
 		turnCtx = llmrepo.WithResolutionBounds(turnCtx, sess.resolutionBounds())
 	}
-	// The other end of the same relationship: a session that FIRED missions carries
-	// its own id in, unlocking the supervisor tools (see missiontools.WithParentSessionID)
-	// so this turn can look at what it dispatched and answer what a unit asks. A
-	// session that fired nothing injects nothing and is offered no mission tools.
 	if sess.FiredMissions && sess.InternalSessionID != "" {
 		turnCtx = missiontools.WithParentSessionID(turnCtx, sess.InternalSessionID)
 	}
 
-	// Subscribe to the engine's per-request event stream and translate each event
-	// into a session/update emitted through the turn (journal + viewers). Unlike the
-	// connection path this runs OFF the connection, so a drop cannot stop it.
+	// Translates each event into a session/update emitted through the turn
+	// (journal + viewers); runs off the connection, so a drop can't stop it.
 	translator := newNativeEventTranslator(emit, sess.effectiveTokenLimit)
 	rawCh := make(chan []byte, 64)
 	var drainEvents func()
 	if bus := t.deps.Engine.Bus; bus != nil && reqID != "" {
 		sub, err := bus.Stream(turnCtx, taskengine.TaskEventRequestSubject(reqID), rawCh)
 		if err != nil {
-			// The turn still runs, but the client gets no incremental updates.
-			// Surface why instead of silently degrading (mirrors prompt.go).
+			// The turn still runs without incremental updates; report why.
 			subErr, _, subEnd := t.tracker().Start(turnCtx, "subscribe", "acp_event_stream",
 				"session_id", string(req.SessionID), "request_id", reqID)
 			subErr(err)
@@ -330,9 +282,7 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 		}
 	}
 
-	// Use the session's effective token budget as the context window, clamped to the
-	// model cap when known — identical to prompt.go so indicators and engine shifting
-	// stay consistent with the value the user sees.
+	// Same context-window resolution as prompt.go.
 	contextLen := sess.effectiveTokenLimit()
 	if contextLen == 0 {
 		currentModel := sess.modelOrDefault(t.model())
@@ -372,22 +322,17 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 		ContextLength:  contextLen,
 	})
 
-	// Drain every translated session/update into the journal BEFORE computing the
-	// outcome and emitting the final SessionInfo, so the terminal update is ordered
-	// strictly last (mirrors prompt.go's deferred unsubscribe running before the
-	// AfterResponse SessionInfo push).
+	// Drain every translated update into the journal before computing the
+	// outcome, so the terminal SessionInfo update is ordered strictly last.
 	if drainEvents != nil {
 		drainEvents()
 	}
 
 	if err != nil {
-		// Distinguish a genuine cancellation from an execution failure, keyed on the
-		// TURN context only (see prompt.go's rationale). A connection drop does NOT
-		// reach here — it never cancels the turn — so the ctx.Err() branch the
-		// connection path also checked is deliberately absent. context.Canceled =
-		// session/cancel or grace-expiry (a clean stop resolving as cancelled);
-		// context.DeadlineExceeded = the hard turn deadline (Belt 2), a FAILURE the
-		// reattaching client must see rather than a silent clean stop.
+		// Keyed on the turn context only: a connection drop never cancels the
+		// turn, so the connection path's ctx.Err() branch doesn't apply here.
+		// context.Canceled = session/cancel or grace-expiry; DeadlineExceeded
+		// = the hard turn deadline, a failure the client must see.
 		cancelled := errors.Is(err, context.Canceled) || errors.Is(turnCtx.Err(), context.Canceled)
 		if cancelled {
 			reportChange(string(req.SessionID), map[string]any{
@@ -405,17 +350,12 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 	}
 
 	stopReason := mapStopReason(resp.StopReason)
-	// A cancelled turn resolves cancelled even when the engine salvaged a partial
-	// result (see prompt.go). Keyed on context.Canceled specifically: a deadline that
-	// fired against a salvaged result is a timeout, not a user cancel.
 	if errors.Is(turnCtx.Err(), context.Canceled) {
 		stopReason = libacp.StopReasonCancelled
 	}
 
-	// Push the post-turn SessionInfo (updatedAt + derived title) as the LAST journaled
-	// event, so live viewers and a reattaching client both render the freshened
-	// tab/sidebar label. The connection path sent this via AfterResponse; on the
-	// survival path it belongs in the journal, where a reconnecting client finds it.
+	// Journaled as the last event, so a reattaching client finds the
+	// freshened tab/sidebar label too.
 	d.emitSessionInfo(turnCtx, req.SessionID, sess, emit)
 
 	reportChange(string(req.SessionID), map[string]any{
@@ -423,19 +363,17 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 		"request_id":            reqID,
 		"dropped_content_kinds": droppedContentKinds,
 	})
-	// A suspended chain (S6) ends this turn's goroutine BY DESIGN: the run is
-	// checkpointed, and answering the approval resumes it — same process as a
-	// fresh turn re-entering through agentservice, or any other process via
-	// the resume hook. The Registry surfaces it as StateSuspended until reaped.
+	// A suspended chain ends this goroutine by design: the run is
+	// checkpointed, and answering the approval resumes it. The Registry
+	// surfaces it as StateSuspended until reaped.
 	return nativeturn.Result{
 		StopReason: stopReason,
 		Suspended:  resp != nil && resp.StopReason == agentservice.StopSuspended,
 	}
 }
 
-// emitSessionInfo journals the post-turn session_info update (freshened updatedAt +
-// the title derived from the first user message), the survival-path equivalent of
-// the AfterResponse push in the connection-bound Prompt.
+// emitSessionInfo journals the post-turn session_info update: the survival
+// counterpart of the AfterResponse push in the connection-bound Prompt.
 func (d *nativeDriver) emitSessionInfo(ctx context.Context, sid libacp.SessionID, sess *sessionEntry, emit func(context.Context, libacp.SessionNotification)) {
 	update := libacp.SessionUpdate{
 		SessionUpdate: libacp.SessionUpdateSessionInfo,
@@ -447,16 +385,12 @@ func (d *nativeDriver) emitSessionInfo(ctx context.Context, sid libacp.SessionID
 	emit(ctx, libacp.SessionNotification{SessionID: sid, Update: update})
 }
 
-// reattachNativeTurn joins this connection to sid's IN-FLIGHT native turn, if one is
-// running on the survival Registry — the reconnect path. It is called from
-// session/load and session/resume AFTER the durable transcript is (re)established:
-// the transcript covers already-persisted turns, the turn journal covers the one
-// still in flight (not yet persisted), so the two never overlap and the reconnecting
-// client sees the live turn resume without a double-render. The reattached viewer has
-// no prompt RPC awaiting it, so it self-detaches when the turn ends or this
-// connection drops — which is what arms the anti-zombie belts for the next detach.
-// A no-op on the nil-Registry path, for external sessions, and when no turn is in
-// flight for sid (AttachIfRunning reports not-running).
+// reattachNativeTurn joins this connection to sid's in-flight native turn, if
+// any, on reconnect. Called after the durable transcript is re-established —
+// the transcript covers persisted turns, the journal covers the one still in
+// flight, so they never overlap. The reattached viewer has no prompt RPC
+// awaiting it, so it self-detaches when the turn ends or the connection
+// drops. No-op with no Registry, for external sessions, or no turn in flight.
 func (t *Transport) reattachNativeTurn(ctx context.Context, sid libacp.SessionID) {
 	if t.deps.NativeTurns == nil {
 		return

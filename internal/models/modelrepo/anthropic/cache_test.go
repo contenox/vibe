@@ -14,11 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_AnthropicCache_WirePlacementAndUsage exercises the whole transport:
-// the hinted request must carry cache_control exactly where the hints say
-// (last tool definition + system block) and nowhere else, and the response's
-// usage must land on the ChatResult normalized (input_tokens excludes cache
-// reads/writes → PromptTokens is the sum).
+// cache_control must land exactly on the last tool definition and the system block, nowhere else; usage normalizes to PromptTokens = input + cache reads/writes.
 func TestUnit_AnthropicCache_WirePlacementAndUsage(t *testing.T) {
 	var captured []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,10 +59,8 @@ func TestUnit_AnthropicCache_WirePlacementAndUsage(t *testing.T) {
 	_, ok = sysBlock["cache_control"].(map[string]any)
 	require.True(t, ok, "system block must carry cache_control")
 
-	// Nowhere else: exactly two markers in the whole request.
 	require.Equal(t, 2, strings.Count(string(captured), `"cache_control"`))
 
-	// Usage normalization through the transport.
 	require.NotNil(t, res.Usage)
 	require.Equal(t, 1000, res.Usage.PromptTokens)
 	require.Equal(t, 900, res.Usage.CacheReadTokens)
@@ -74,9 +68,7 @@ func TestUnit_AnthropicCache_WirePlacementAndUsage(t *testing.T) {
 	require.Equal(t, 4, res.Usage.CompletionTokens)
 }
 
-// TestUnit_AnthropicCache_HintlessRequestUnchanged pins the pre-change wire
-// shape: without hints the request has no cache metadata and keeps the plain
-// string system field.
+// Without hints the request has no cache metadata and keeps the plain string system field.
 func TestUnit_AnthropicCache_HintlessRequestUnchanged(t *testing.T) {
 	var captured []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

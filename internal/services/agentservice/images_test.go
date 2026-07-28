@@ -22,8 +22,7 @@ func TestUnit_BuildChatInput_UserMessageCarriesImages(t *testing.T) {
 	require.True(t, ok)
 	require.NotEmpty(t, history.Messages)
 
-	// The attachment rides the user message of THIS turn — the shape every
-	// provider codec consumes and llmresolver routes on (CanVision).
+	// The attachment rides the user message of this turn (CanVision routing).
 	userMsg := history.Messages[len(history.Messages)-1]
 	require.Equal(t, "user", userMsg.Role)
 	require.Equal(t, []taskengine.ImagePart{img}, userMsg.Images)

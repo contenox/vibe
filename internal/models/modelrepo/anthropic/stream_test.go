@@ -25,11 +25,7 @@ func newStreamTestClient(srv *httptest.Server) *anthropicStreamClient {
 	}
 }
 
-// TestUnit_AnthropicStreamClient_GoldenFixture_ToolUseFragments drives a
-// recorded Messages SSE transcript — thinking deltas, split text, a tool_use
-// block whose input arrives as input_json_delta fragments, usage across
-// message_start/message_delta, and the stop reason — through the real adapter
-// and the engine-side assembler, proving the raw-delta contract end to end.
+// Drives a recorded Messages SSE transcript with thinking, split text, and tool_use input_json_delta fragments through the real adapter and assembler end to end.
 func TestUnit_AnthropicStreamClient_GoldenFixture_ToolUseFragments(t *testing.T) {
 	t.Parallel()
 
@@ -81,9 +77,7 @@ func TestUnit_AnthropicStreamClient_GoldenFixture_ToolUseFragments(t *testing.T)
 	assert.Equal(t, 17, res.Usage.CompletionTokens)
 }
 
-// TestUnit_AnthropicStreamClient_ErrorEventSurfaces: an in-stream SSE `error`
-// event (previously swallowed) ends the stream with an Error parcel and the
-// assembler refuses to produce a result.
+// An in-stream SSE `error` event ends the stream with an Error parcel, and the assembler refuses to produce a result.
 func TestUnit_AnthropicStreamClient_ErrorEventSurfaces(t *testing.T) {
 	t.Parallel()
 

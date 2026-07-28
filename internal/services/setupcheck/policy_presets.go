@@ -9,10 +9,8 @@ import (
 // files behind hitl-policy-name), as distinct from model/backend readiness.
 const CategoryPolicy = "policy"
 
-// StalePolicyPresetsCode is the issue code for a policy file that predates the
-// toolsets this build ships. It is deliberately absent from blockingIssue's
-// list: an envelope that asks for approval too often is annoying, never a
-// reason to refuse to run.
+// StalePolicyPresetsCode is the issue code for a policy file that predates
+// the toolsets this build ships. Deliberately absent from blockingIssue's list.
 const StalePolicyPresetsCode = "hitl_policy_presets_stale"
 
 // StalePolicyPreset names one policy file on disk together with the shipped
@@ -28,14 +26,10 @@ type StalePolicyPreset struct {
 	Effect string `json:"effect,omitempty"`
 }
 
-// AddStalePolicyPresetIssue appends a WARNING for policy files that predate this
-// build's toolsets, and returns the updated Result. With nothing stale it
-// returns the Result unchanged.
-//
-// Warning, never error, and never a blocking code: the runtime is perfectly
-// usable with a stale envelope — every affected call just stops to ask. The
-// operator's file is theirs, so the only correct move is to name the toolsets
-// and the verb that refreshes the shipped presets, then get out of the way.
+// AddStalePolicyPresetIssue appends a warning for policy files that predate
+// this build's toolsets, returning the Result unchanged when nothing is
+// stale. Never a blocking code: a stale envelope just asks for approval
+// more often, never a reason to refuse to run.
 func AddStalePolicyPresetIssue(r Result, stale []StalePolicyPreset, refreshCommand string) Result {
 	if len(stale) == 0 {
 		return r
@@ -55,9 +49,7 @@ func AddStalePolicyPresetIssue(r Result, stale []StalePolicyPreset, refreshComma
 		return r
 	}
 
-	// Fresh slice: callers hold the Result by value, and appending in place
-	// would write into their backing array (same reason OverlayEffectiveDefaults
-	// rebuilds).
+	// Fresh slice, since callers hold the Result by value.
 	issues := make([]Issue, 0, len(r.Issues)+1)
 	issues = append(issues, r.Issues...)
 	issues = append(issues, Issue{

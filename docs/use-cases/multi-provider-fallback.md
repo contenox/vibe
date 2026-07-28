@@ -5,56 +5,60 @@ description: The vendor doesn't choose your failure mode. You do.
 
 # Multi-provider fallback as authored resilience
 
-When a model call fails — rate limit, timeout, provider outage — something has to happen. Most tools pick a behavior for you: retry, error, fallback to a default. Contenox makes you pick.
+Chain a candidate list of models and providers with a retry policy, so a rate limit or outage on one provider falls through to the next instead of failing the task.
 
-## The shape
+## Prerequisites
 
-```json
-{
-  "id": "summarise",
-  "handler": "chat_completion",
-  "system_instruction": "Summarise the input in two sentences.",
-  "execute_config": {
-    "models": ["qwen2.5:7b", "gpt-4o-mini", "gemini-2.0-flash"],
-    "providers": ["ollama", "openai", "gemini"],
-    "retry_policy": {
-      "max_attempts": 3,
-      "initial_backoff": "1s",
-      "max_backoff": "10s",
-      "jitter": 0.25,
-      "rate_limit_min_wait": "10s"
-    }
-  },
-  "transition": {
-    "on_failure": "summarise_locally",
-    "branches": [{ "operator": "default", "goto": "end" }]
-  }
-}
-```
+- `contenox init` has run in this project.
+- A backend registered for each provider in the candidate list (e.g. `ollama`, `openai`, `gemini`) — see [Quickstart](/docs/guide/quickstart/) and the provider integration pages.
 
-That single task encodes a four-level resilience policy:
+## Steps
 
-1. Try `qwen2.5:7b` on Ollama. If it transient-fails, retry with backoff and jitter (3 attempts).
-2. If retries exhaust on Ollama, fall over to `gpt-4o-mini` on OpenAI. Retry there.
+1. Add `models`, `providers`, and `retry_policy` to a task's `execute_config`:
+
+   ```json
+   {
+     "id": "summarise",
+     "handler": "chat_completion",
+     "system_instruction": "Summarise the input in two sentences.",
+     "execute_config": {
+       "models": ["qwen2.5:7b", "gpt-4o-mini", "gemini-2.0-flash"],
+       "providers": ["ollama", "openai", "gemini"],
+       "retry_policy": {
+         "max_attempts": 3,
+         "initial_backoff": "1s",
+         "max_backoff": "10s",
+         "jitter": 0.25,
+         "rate_limit_min_wait": "10s"
+       }
+     },
+     "transition": {
+       "on_failure": "summarise_locally",
+       "branches": [{ "operator": "default", "goto": "end" }]
+     }
+   }
+   ```
+
+2. Add the `on_failure` target task (`summarise_locally` above) — what runs when every candidate in the list is exhausted. It can call a smaller local model, truncate the input, or return a fixed message.
+
+3. Run the chain as usual. If the primary model/provider fails transiently, the engine retries with backoff before falling through to the next candidate — no separate flag needed.
+
+## Expected outcome
+
+One task now encodes a four-level resilience policy:
+
+1. Try `qwen2.5:7b` on Ollama. On a transient failure, retry with backoff and jitter (3 attempts).
+2. If Ollama's retries exhaust, fall over to `gpt-4o-mini` on OpenAI and retry there.
 3. If OpenAI also exhausts, try `gemini-2.0-flash` on Gemini.
-4. If all three fail, route to the `summarise_locally` task — which might use a smaller embedded model, or just truncate the input. Whatever you wrote.
+4. If all three fail, `transition.on_failure` routes to `summarise_locally`.
 
-## Why authoring this matters
+## Customize
 
-A vendor-supplied "fallback" forces a single shape. Maybe it always retries the same model. Maybe it falls back to a hardcoded default. Maybe it doesn't fall back at all and just throws. You don't get to look at the code, so you don't know which.
+- **Provider order** — the `providers` array order is the fallback order; put your primary provider first.
+- **Retry shape** — `max_attempts`, `initial_backoff`, `max_backoff`, `jitter`, and `rate_limit_min_wait` are all yours to tune. Tighter for a CI step with a hard deadline; looser for an overnight batch job.
+- **Terminal behavior** — `on_failure` names the task that runs when the whole candidate list is exhausted; write whatever degradation makes sense (local fallback, truncation, a "try later" message).
 
-Here you wrote the policy. If your CI step has to finish in 30 seconds, you write tighter backoff and fewer attempts. If your overnight batch job can wait, you write longer backoff and more providers. The same engine runs both because the policy is in the chain file, not in the engine.
+## Where to next
 
-## The on_failure escape hatch
-
-`on_failure` is the part most people miss. The retry/fallback policy handles transient errors *within* a task. `on_failure` handles the case where the task itself is unrecoverable — and routes to a different task, not just a re-attempt. That gives you authored degradation: when the network is down, fall back to something local. When the local thing fails too, write a polite "sorry, try later" message. The whole chain is the safety net.
-
-## What's on your side
-
-Three choices, all yours:
-
-- **The order of providers.** You picked which one is primary. The vendor didn't.
-- **The retry shape.** Number of attempts, backoff curve, jitter, the special rate-limit pause.
-- **The terminal behavior.** What happens when everything's exhausted? You wrote that task.
-
-This is what authored resilience looks like. Three keys, your decisions.
+- [The moderation gate](/docs/use-cases/moderation-gate/) — routing on model output rather than on failure.
+- [HITL policies](/docs/guide/hitl/) — the same authored-policy pattern applied to tool approval instead of retries.

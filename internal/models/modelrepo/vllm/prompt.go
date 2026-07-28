@@ -9,7 +9,6 @@ import (
 	"github.com/contenox/beam/internal/models/modelrepo"
 )
 
-// NewVLLMPromptClient creates a new prompt client
 func NewVLLMPromptClient(ctx context.Context, baseURL, modelName string, contextLength, maxOutputTokens int, httpClient *http.Client, apiKey string, canThink bool, tracker libtracker.ActivityTracker) (modelrepo.LLMPromptExecClient, error) {
 	if httpClient == nil {
 		httpClient = modelrepo.SharedHTTPClient
@@ -35,9 +34,7 @@ func NewVLLMPromptClient(ctx context.Context, baseURL, modelName string, context
 	return client, nil
 }
 
-// Prompt implements LLMPromptExecClient interface
 func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, temperature float32, prompt string) (string, *modelrepo.TokenUsage, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "prompt", "vllm", "model", c.modelName)
 	defer end()
 
@@ -52,14 +49,12 @@ func (c *vLLMClient) Prompt(ctx context.Context, systemInstruction string, tempe
 	})
 	c.clampChatRequest(&request)
 
-	// Send request to the chat completions endpoint
 	var response chatResponse
 	if err := c.sendRequest(ctx, "/v1/chat/completions", request, &response); err != nil {
 		reportErr(err)
 		return "", nil, err
 	}
 
-	// Handle response
 	if len(response.Choices) == 0 {
 		err := fmt.Errorf("no completion choices returned from vLLM for model %s", c.modelName)
 		reportErr(err)

@@ -53,24 +53,20 @@ func TestUnit_Evaluate_ArrayArgIsCheckedElementwise(t *testing.T) {
 
 func TestUnit_Evaluate_MalformedBraceGlobFailsClosed(t *testing.T) {
 	t.Parallel()
-	// Unbalanced brace: the policy must be rejected at load, so evaluation
-	// falls back to the hardened built-in default rather than running with a
-	// deny rule that path.Match would silently never fire.
+	// Unbalanced brace: the policy must be rejected at load, falling back to
+	// the built-in default rather than running with a deny rule that
+	// path.Match would silently never fire.
 	svc := seedAndService(t, `{"default_action":"allow","rules":[
 		{"tools":"local_fs","tool":"*","when":[{"key":"path","op":"glob","value":"**/{.ssh,.gnupg/**"}],"action":"deny"}]}`)
 	r, err := svc.Evaluate(context.Background(), "local_fs", "read_file", map[string]any{"path": "/home/u/.ssh/id_rsa"})
 	require.NoError(t, err)
-	assert.Equal(t, hitlservice.ActionDeny, r.Action, "rejected policy must fall back to the secret-denying default, not its own default_action:allow")
+	assert.Equal(t, hitlservice.ActionApprove, r.Action, "rejected policy must fall back to ask-everything, not its own default_action:allow")
 }
 
 func TestUnit_RequestApproval_FailsFastWhenEventSinkErrors(t *testing.T) {
 	t.Parallel()
-	// A durable store is required (see durable_approval_test.go's
-	// newDurableService): RequestApproval persists the pending row before it
-	// ever reaches the publish call this test means to exercise, so a bare
-	// KVReader fake (nopKVReader, used by this package's Evaluate()-only
-	// tests) would fail one step earlier, on "durable approval store not
-	// configured", never reaching erroringSink at all.
+	// A durable store is required: RequestApproval persists the pending row
+	// before it reaches the publish call this test means to exercise.
 	_, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
 
@@ -114,16 +110,17 @@ func TestUnit_Evaluate_BraceGlobConditionMatchesAlternatives(t *testing.T) {
 	assert.Equal(t, hitlservice.ActionAllow, r.Action, "a non-secret path must not match the brace pattern")
 }
 
-func TestUnit_Evaluate_BuiltinFallbackDeniesSecretReads(t *testing.T) {
+func TestUnit_Evaluate_BuiltinFallbackFailsClosed(t *testing.T) {
 	t.Parallel()
 	svc := hitlservice.New(hitlservice.NewFSPolicySource(t.TempDir()), testTenant, nopKVReader{}, libtracker.NoopTracker{})
 	ctx := context.Background()
 
+	// The fallback is the absence of an envelope, not a second one: no rules, everything asks.
 	r, err := svc.Evaluate(ctx, "local_fs", "read_file", map[string]any{"path": "/home/u/.ssh/id_rsa"})
 	require.NoError(t, err)
-	assert.Equal(t, hitlservice.ActionDeny, r.Action, "built-in fallback must not allow reading SSH keys when the policy file is missing")
+	assert.Equal(t, hitlservice.ActionApprove, r.Action, "with no loadable policy file a secret read asks a human — it must never sail through")
 
 	r, err = svc.Evaluate(ctx, "local_fs", "read_file", map[string]any{"path": "src/main.go"})
 	require.NoError(t, err)
-	assert.Equal(t, hitlservice.ActionAllow, r.Action, "built-in fallback must still allow ordinary source reads")
+	assert.Equal(t, hitlservice.ActionApprove, r.Action, "ordinary reads ask too: the allow tier lives in the seeded policy files, not in the binary")
 }

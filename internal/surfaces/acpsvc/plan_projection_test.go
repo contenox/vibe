@@ -16,11 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// planSnapshotJSON marshals a missionservice.Plan the way taskengine serializes a
-// DataTypeJSON tool result into a task event's Content (serializeToolResultContent
-// == json.Marshal for JSON results). Using the real type here means the
-// projection is tested against the EXACT bytes the mission_plan tool emits, not a
-// hand-written stand-in that could drift from it.
+// planSnapshotJSON marshals a Plan the way taskengine serializes a DataTypeJSON
+// tool result, so tests exercise the exact bytes the mission_plan tool emits.
 func planSnapshotJSON(t *testing.T, plan missionservice.Plan) string {
 	t.Helper()
 	raw, err := json.Marshal(plan)
@@ -28,10 +25,7 @@ func planSnapshotJSON(t *testing.T, plan missionservice.Plan) string {
 	return string(raw)
 }
 
-// TestUnit_PlanProjection_FullSnapshotCast is the core of the projection: a
-// successful mission_plan tool event becomes a full-snapshot `plan` session
-// update whose entries are cast 1:1 onto libacp.PlanEntry — every entry, in
-// order, with content/status/priority carried across.
+// TestUnit_PlanProjection_FullSnapshotCast pins that a successful mission_plan event casts to a full-snapshot `plan` update with every entry, in order.
 func TestUnit_PlanProjection_FullSnapshotCast(t *testing.T) {
 	plan := missionservice.Plan{
 		Revision: 2,
@@ -66,9 +60,7 @@ func TestUnit_PlanProjection_FullSnapshotCast(t *testing.T) {
 	require.Contains(t, generic, "entries")
 }
 
-// TestUnit_PlanProjection_IgnoresNonPlanAndFailedEvents proves the projection
-// no-ops for everything that is not a successful mission_plan snapshot, so it
-// never emits a spurious or corrupt `plan` update.
+// TestUnit_PlanProjection_IgnoresNonPlanAndFailedEvents pins that the projection no-ops for anything that isn't a successful mission_plan snapshot.
 func TestUnit_PlanProjection_IgnoresNonPlanAndFailedEvents(t *testing.T) {
 	goodContent := planSnapshotJSON(t, missionservice.Plan{
 		Revision: 1,
@@ -94,12 +86,7 @@ func TestUnit_PlanProjection_IgnoresNonPlanAndFailedEvents(t *testing.T) {
 	}
 }
 
-// TestUnit_PlanProjection_EnumParity is the parity test Slice 1's missionservice
-// comments promise lives in the projection slice: the plan status/priority enums
-// are contracted byte-for-byte equal between missionservice (the durable record)
-// and libacp (the wire), which is the whole reason the projection can cast rather
-// than translate. If either set ever drifts, this goes red before a silently
-// mistranslated plan reaches an editor.
+// TestUnit_PlanProjection_EnumParity pins that the plan status/priority enums stay byte-for-byte equal between missionservice and libacp, which is why the projection can cast rather than translate.
 func TestUnit_PlanProjection_EnumParity(t *testing.T) {
 	require.Equal(t, string(libacp.PlanStatusPending), string(missionservice.PlanEntryPending))
 	require.Equal(t, string(libacp.PlanStatusInProgress), string(missionservice.PlanEntryInProgress))
@@ -110,30 +97,10 @@ func TestUnit_PlanProjection_EnumParity(t *testing.T) {
 	require.Equal(t, string(libacp.PlanPriorityLow), string(missionservice.PlanEntryPriorityLow))
 }
 
-// TestUnit_PlanProjection_ReachesAttachedViewer is the composed acceptance for
-// the projection: the REAL mission_plan tool writes a plan through the REAL
-// mission service, its echoed snapshot rides a tool event through the REAL
-// transport's event translation, and a REAL ACP client attached over the
-// loopback wire receives a full-snapshot `plan` session update matching the
-// persisted plan. It is hermetic and fast (in-process pipes + sqlite, no
-// subprocess), so it runs in the TestUnit_ gate.
-//
-// Why this composed shape rather than a subprocess e2e (the e2e_mission_report
-// idiom named in the brief): the projection seam is the transport's event
-// translation, and what it must prove is "a mission_plan call's snapshot reaches
-// an attached viewer as a `plan` update, and the plan is persisted." A dispatched
-// `contenox acp` subprocess would additionally need a viewer ATTACHED to the
-// unit's own session to observe its stream — machinery no existing e2e stands up
-// (e2e_mission_report reads the durable store, never attaches to the unit) — for
-// no added coverage of THIS seam: the subprocess boundary is already proven by
-// the mission-tools e2e, and the projection is pure transport-side translation.
-// This test exercises every real component the projection touches (tool → store →
-// engine-faithful JSON serialization → transport translation → wire → client),
-// stubbing only the subprocess the seam does not depend on.
+// TestUnit_PlanProjection_ReachesAttachedViewer pins the composed acceptance: a real mission_plan tool call, through the real mission service and transport event translation, reaches an attached ACP client as a full-snapshot `plan` update matching the persisted plan.
 func TestUnit_PlanProjection_ReachesAttachedViewer(t *testing.T) {
 	ctx := context.Background()
 
-	// The real mission store, and a mission to plan against.
 	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "plan-projection.db"), runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
@@ -141,8 +108,8 @@ func TestUnit_PlanProjection_ReachesAttachedViewer(t *testing.T) {
 	mission := &missionservice.Mission{Intent: "migrate the loop", AgentName: "planner", HITLPolicyName: "default"}
 	require.NoError(t, missions.Create(ctx, mission))
 
-	// The real mission_plan tool writes a full snapshot and echoes it back — the
-	// exact result the engine turns into the tool event's Content.
+	// The mission_plan tool's echoed result is the exact value the engine turns
+	// into the tool event's Content.
 	tools := missiontools.New(missions, nil)
 	planCall := &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
@@ -156,14 +123,12 @@ func TestUnit_PlanProjection_ReachesAttachedViewer(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, taskengine.DataTypeJSON, resultType)
 
-	// The plan is persisted on the mission (the durable half of the acceptance).
 	stored, err := missions.Get(ctx, mission.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, stored.Plan.Revision)
 	require.Len(t, stored.Plan.Entries, 2)
 
-	// Build the tool event the engine would publish from that result, serialized
-	// exactly as taskengine serializes a DataTypeJSON result.
+	// Serialize the tool event the way taskengine would publish it.
 	echoed := result.(missionservice.Plan)
 	ev := taskengine.TaskEvent{
 		Kind:       taskengine.TaskEventToolCall,
@@ -174,13 +139,12 @@ func TestUnit_PlanProjection_ReachesAttachedViewer(t *testing.T) {
 	payload, err := json.Marshal(ev)
 	require.NoError(t, err)
 
-	// Drive it through the REAL transport's translation to a REAL attached client.
 	h := newLoopbackHarness(t)
 	sid := libacp.SessionID("unit-session")
 	h.tr.publishEvent(ctx, sid, payload)
 
-	// The plan event yields two updates on the wire: the tool-call card and the
-	// plan snapshot. Find the plan update and assert its entries.
+	// The event yields two updates: the tool-call card and the plan snapshot.
+	// Find the plan update and assert its entries.
 	var planNote *libacp.SessionNotification
 	for _, n := range h.lc.drain(t, 2) {
 		if n.Update.SessionUpdate == libacp.SessionUpdatePlan {

@@ -91,8 +91,7 @@ func countCacheControls(v any) int {
 }
 
 func TestUnit_CacheHints_AbsentIsByteIdenticalPreChangeShape(t *testing.T) {
-	// No hints: the request must keep the pre-cache wire shape exactly —
-	// system as a plain string and zero cache_control keys anywhere.
+	// No hints: request keeps the pre-cache wire shape — plain-string system, zero cache_control keys.
 	req, _ := Build(cacheFixtureMessages(), cacheFixtureConfig(nil))
 	raw, err := json.Marshal(req)
 	if err != nil {
@@ -115,7 +114,7 @@ func TestUnit_CacheHints_PlacementToolsSystemHistory(t *testing.T) {
 	}
 	req, _ := Build(cacheFixtureMessages(), cacheFixtureConfig(hints))
 
-	// Breakpoint 1: the LAST tool definition, and only it.
+	// Breakpoint 1: the last tool definition, and only it.
 	if req.Tools[0].CacheControl != nil {
 		t.Fatalf("cache_control must sit on the last tool only")
 	}
@@ -124,8 +123,7 @@ func TestUnit_CacheHints_PlacementToolsSystemHistory(t *testing.T) {
 		t.Fatalf("last tool must carry {type:ephemeral} without TTL, got %+v", last.CacheControl)
 	}
 
-	// Breakpoint 2: system rendered as one text block with cache_control,
-	// same text as the string form.
+	// Breakpoint 2: system rendered as one text block with cache_control, same text as the string form.
 	blocks, ok := req.System.([]wireBlock)
 	if !ok || len(blocks) != 1 {
 		t.Fatalf("hinted system must be a single text block, got %#v", req.System)
@@ -135,9 +133,8 @@ func TestUnit_CacheHints_PlacementToolsSystemHistory(t *testing.T) {
 	}
 
 	// Breakpoint 3: StableHistoryLen=4 covers neutral messages 0..3; the last
-	// wire message from that prefix is the tool_result user message (wire
-	// index 2 — the system message is hoisted). Its last block carries the
-	// breakpoint; the trailing user turn stays unmarked.
+	// wire message from that prefix is the tool_result message (wire index 2,
+	// since system is hoisted). The trailing user turn stays unmarked.
 	if got := req.Messages[2].Content[len(req.Messages[2].Content)-1].CacheControl; got == nil {
 		t.Fatalf("stable-history breakpoint missing on wire message 2")
 	}
@@ -161,8 +158,7 @@ func TestUnit_CacheHints_PlacementToolsSystemHistory(t *testing.T) {
 }
 
 func TestUnit_CacheHints_NeverChangeModelVisibleContent(t *testing.T) {
-	// The hinted and unhinted requests must be identical modulo cache
-	// metadata (cache_control keys and the system string/block equivalence).
+	// Hinted and unhinted requests must be identical modulo cache metadata.
 	plain, _ := Build(cacheFixtureMessages(), cacheFixtureConfig(nil))
 	hinted, _ := Build(cacheFixtureMessages(), cacheFixtureConfig(&modelrepo.CacheHints{
 		StableSystem:     true,
@@ -221,8 +217,7 @@ func TestUnit_CacheHints_NoContentNoBreakpoint(t *testing.T) {
 }
 
 func TestUnit_CacheUsage_NormalizationRule(t *testing.T) {
-	// Anthropic input_tokens EXCLUDES cache reads/writes; PromptTokens must
-	// be the sum of the three.
+	// Anthropic input_tokens excludes cache reads/writes; PromptTokens is the sum of the three.
 	body := `{"role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",
 		"usage":{"input_tokens":7,"output_tokens":11,"cache_read_input_tokens":100,"cache_creation_input_tokens":30}}`
 	res, err := DecodeResponse([]byte(body), nil)

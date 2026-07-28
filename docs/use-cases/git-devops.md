@@ -1,3 +1,7 @@
+---
+description: Pipe your diff or log into contenox run and get commit messages, PR summaries, and reviews back — no setup, no sessions.
+---
+
 # Git & DevOps Recipes
 
 `contenox run` shines as a composable shell tool. Pipe in data from your terminal, get AI-powered output back — no setup, no sessions.

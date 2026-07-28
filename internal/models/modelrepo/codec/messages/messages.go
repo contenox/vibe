@@ -1,11 +1,8 @@
 // Package messages is a transport-agnostic codec for Anthropic's Messages API
-// wire format (request, content-block response, and named-SSE-event streaming).
-// It maps between contenox's neutral modelrepo types and Anthropic's JSON shape.
-//
-// It does NO I/O. The transport (api.anthropic.com) supplies the envelope:
-// model in the body, version via the `anthropic-version` header, auth via
-// `x-api-key`. This lets the direct Anthropic provider stay a thin transport
-// wrapper around the shared codec.
+// wire format (request, content-block response, and named-SSE-event
+// streaming). It maps between neutral modelrepo types and Anthropic's JSON
+// shape, and does no I/O — the transport supplies the envelope (model in
+// body, version via the anthropic-version header, auth via x-api-key).
 package messages
 
 import (
@@ -116,7 +113,7 @@ type wireTool struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	InputSchema any    `json:"input_schema,omitempty"`
-	// CacheControl on the LAST tool definition caches the whole tool list
+	// CacheControl on the last tool definition caches the whole tool list
 	// (tools render first, so this is the deepest stable breakpoint).
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
@@ -261,8 +258,6 @@ func applyCacheHints(req *Request, hints *modelrepo.CacheHints, srcIdx []int) {
 	}
 	placed := 0
 	if hints.StableTools && len(req.Tools) > 0 && placed < MaxCacheBreakpoints {
-		// Tools render first; a breakpoint on the last definition caches the
-		// whole tool list.
 		req.Tools[len(req.Tools)-1].CacheControl = cc()
 		placed++
 	}
@@ -372,8 +367,8 @@ type Response struct {
 	Usage      *wireUsage      `json:"usage"`
 }
 
-// wireUsage is Anthropic's usage report. input_tokens counts ONLY the
-// uncached remainder; the cache read/write counts are reported separately and
+// wireUsage is Anthropic's usage report. input_tokens counts only the
+// uncached remainder; cache read/write counts are reported separately, and
 // the true prompt total is the sum of all three (normalization rule,
 // modelrepo.TokenUsage).
 type wireUsage struct {
@@ -383,8 +378,8 @@ type wireUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
-// normalizeUsage maps the Anthropic usage report onto the neutral TokenUsage
-// per the normalization rule: PromptTokens = input + cache_read + cache_write.
+// normalizeUsage maps wireUsage onto the neutral TokenUsage per the
+// normalization rule above.
 func normalizeUsage(u wireUsage) modelrepo.TokenUsage {
 	prompt := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
 	return modelrepo.TokenUsage{
@@ -446,9 +441,9 @@ func DecodeResponse(raw []byte, nameMap map[string]string) (modelrepo.ChatResult
 		}
 	}
 	// Thinking blocks must survive into the next turn's history when the model
-	// also called tools (Anthropic requires them replayed before tool_use).
-	// Tool-call ProviderMeta is the one field the engine persists, so the
-	// blocks ride on the first call — Build restores them for the whole turn.
+	// also called tools (Anthropic requires them replayed before tool_use);
+	// they ride on the first tool call's ProviderMeta, and Build restores them
+	// for the whole turn.
 	attachThinkingBlocks(toolCalls, thinkingBlocks)
 	role := resp.Role
 	if role == "" {
@@ -536,30 +531,26 @@ type streamUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
-// StreamDecoder translates streamed Messages SSE events into raw-delta parcels
-// (per the modelrepo.StreamParcel contract). It does NOT assemble: tool_use
-// blocks surface as ToolCallDelta parcels — id/name from content_block_start,
-// argument fragments from input_json_delta — and assembly is left to the
-// engine-side modelrepo.StreamAssembler. Anthropic in-stream `error` events
-// are decoding errors here so the transport surfaces them as Error parcels
-// instead of swallowing them. The stop reason and usage accumulate across
-// message_start/message_delta and are surfaced by Finish as the typed
-// terminal parcel.
+// StreamDecoder translates streamed Messages SSE events into raw-delta
+// parcels (per the modelrepo.StreamParcel contract); it does not assemble —
+// tool_use blocks surface as ToolCallDelta parcels (id/name from
+// content_block_start, argument fragments from input_json_delta) and
+// assembly is left to the engine-side modelrepo.StreamAssembler. In-stream
+// `error` events decode as Go errors so the transport surfaces them as Error
+// parcels instead of swallowing them. Stop reason and usage accumulate across
+// message_start/message_delta and are surfaced by Finish.
 type StreamDecoder struct {
 	nameMap    map[string]string
 	stopReason string
-	// usage accumulates the RAW wire fields across message_start /
-	// message_delta (input tokens arrive at start, output tokens at the end);
-	// Finish normalizes them per the modelrepo.TokenUsage rule.
+	// usage accumulates the raw wire fields across message_start/message_delta
+	// (input tokens arrive at start, output tokens at the end).
 	usage    wireUsage
 	sawUsage bool
 
-	// Thinking-block round-trip state: thinking/redacted_thinking blocks are
-	// accumulated per index and, once complete, ride the FIRST tool_use
+	// Thinking-block round-trip state: thinking/redacted_thinking blocks
+	// accumulate per index and, once complete, ride the first tool_use
 	// content_block_start's ToolCallDelta.ProviderMeta (Anthropic streams all
-	// thinking blocks before tool_use blocks). The engine-side assembler
-	// carries ProviderMeta onto the assembled tool call, which is the one
-	// field persisted into history.
+	// thinking blocks before tool_use).
 	openThinking     *wireBlock
 	thinkingBlocks   []wireBlock
 	thinkingAttached bool
@@ -687,9 +678,8 @@ func (d *StreamDecoder) recordUsage(u streamUsage) {
 	}
 }
 
-// Finish returns the typed terminal parcel: the stop reason from message_delta
-// plus the usage accumulated across message_start/message_delta, normalized so
-// PromptTokens is the total prompt count (input + cache read + cache write).
+// Finish returns the typed terminal parcel: the stop reason from
+// message_delta plus the accumulated usage, normalized per normalizeUsage.
 // Callers emit it after the SSE stream ends cleanly.
 func (d *StreamDecoder) Finish() *modelrepo.StreamParcel {
 	term := &modelrepo.StreamTerminal{FinishReason: d.stopReason}

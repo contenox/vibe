@@ -9,10 +9,8 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
 )
 
-// TestUnit_PickerHeader_Goldens: the header is the overlay's first row, muted,
-// inside the row budget. The scenarios are the ones the @-mention browser
-// produces — a short breadcrumb, one long enough to be clipped at 60 cells,
-// and a header over an empty list.
+// TestUnit_PickerHeader_Goldens: the header is the overlay's first row,
+// muted, inside the row budget.
 func TestUnit_PickerHeader_Goldens(t *testing.T) {
 	scenarios := []struct {
 		name    string
@@ -53,8 +51,7 @@ func TestUnit_PickerHeader_Goldens(t *testing.T) {
 }
 
 // TestUnit_PickerHeader_CostsARowFromTheBudget: the header is inside maxRows,
-// not on top of it — the same contract the "+N more" footer has. A caller
-// that reserved four lines of the live region gets four.
+// not on top of it, same as the "+N more" footer.
 func TestUnit_PickerHeader_CostsARowFromTheBudget(t *testing.T) {
 	bare := New()
 	bare.SetItems(sampleItems())
@@ -70,8 +67,6 @@ func TestUnit_PickerHeader_CostsARowFromTheBudget(t *testing.T) {
 		if got[0].Text() != "/src" {
 			t.Fatalf("maxRows=%d: first line = %q, want the header", rows, got[0].Text())
 		}
-		// The rows under the header are exactly what the same picker would
-		// have drawn with one row less budget and no header.
 		want := bare.Render(80, rows-1, false)
 		if len(got)-1 != len(want) {
 			t.Fatalf("maxRows=%d: %d rows under the header, want %d", rows, len(got)-1, len(want))
@@ -84,10 +79,8 @@ func TestUnit_PickerHeader_CostsARowFromTheBudget(t *testing.T) {
 	}
 }
 
-// TestUnit_PickerHeader_DroppedWhenItWouldBeTheOnlyRow: a header with nothing
-// under it names a list the caller cannot see. The single available line goes
-// to the content, exactly as the footer yields its row when there is nothing
-// above it.
+// TestUnit_PickerHeader_DroppedWhenItWouldBeTheOnlyRow: a single available
+// line goes to the content, not to a header naming a list the caller can't see.
 func TestUnit_PickerHeader_DroppedWhenItWouldBeTheOnlyRow(t *testing.T) {
 	p := New()
 	p.SetItems(sampleItems())
@@ -103,16 +96,14 @@ func TestUnit_PickerHeader_DroppedWhenItWouldBeTheOnlyRow(t *testing.T) {
 		t.Fatalf("maxRows=1 line = %q, want the selected item", one[0].Text())
 	}
 
-	// The same rule with nothing matching: the empty state is the content.
 	p.SetQuery("zzzzzz")
 	if got := p.Render(80, 1, false); len(got) != 1 || got[0].Text() != defaultEmptyText {
 		t.Fatalf("maxRows=1 empty state = %v, want the empty text alone", got)
 	}
 }
 
-// TestUnit_PickerHeader_EmptyIsTheOldBehaviourExactly: an unset (or cleared)
-// header must leave every existing caller's render byte-identical, which is
-// what makes this addition safe to land under the two live consumers.
+// TestUnit_PickerHeader_EmptyIsTheOldBehaviourExactly: an unset or cleared
+// header leaves every render byte-identical to before headers existed.
 func TestUnit_PickerHeader_EmptyIsTheOldBehaviourExactly(t *testing.T) {
 	for _, rows := range []int{1, 2, 4, 9} {
 		for _, w := range []int{20, 60, 80} {
@@ -134,9 +125,8 @@ func TestUnit_PickerHeader_EmptyIsTheOldBehaviourExactly(t *testing.T) {
 	}
 }
 
-// TestUnit_PickerHeader_NeverExceedsWidthOrRows walks the degenerate sizes the
-// live region actually hands an overlay, with a header that is far too wide
-// and carries a wide rune, in both glyph modes.
+// TestUnit_PickerHeader_NeverExceedsWidthOrRows walks degenerate sizes with an
+// oversized, wide-rune header, in both glyph modes.
 func TestUnit_PickerHeader_NeverExceedsWidthOrRows(t *testing.T) {
 	headers := []string{
 		"/src",
@@ -170,8 +160,8 @@ func TestUnit_PickerHeader_NeverExceedsWidthOrRows(t *testing.T) {
 	}
 }
 
-// TestUnit_PickerHeader_IsSanitized: a header's natural source is a
-// filesystem path, and a directory name may contain very nearly anything.
+// TestUnit_PickerHeader_IsSanitized: a header's source may be a directory
+// name carrying nearly anything.
 func TestUnit_PickerHeader_IsSanitized(t *testing.T) {
 	p := New()
 	p.SetItems(sampleItems())

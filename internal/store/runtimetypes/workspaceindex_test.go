@@ -79,11 +79,9 @@ func TestUnit_WorkspaceIndexConfig_CreateGetActive(t *testing.T) {
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }
 
-// A config is CREATE-ONCE: re-creating the same id is refused, there is no
-// Update method to call at all (the compile-time half of the discipline), and
-// the live config cannot be deleted out from under a workspace. Changing the
-// embed model means a NEW config that becomes active by being newest — the
-// cutover, not a mutation.
+// A config is create-once: re-creating the same id is refused, and the live
+// config cannot be deleted; changing the embed model means a new config that
+// becomes active by being newest — cutover, not mutation.
 func TestUnit_WorkspaceIndexConfig_CreateOnceAndCutover(t *testing.T) {
 	ctx, store, _ := setupWorkspaceIndexStore(t)
 
@@ -181,9 +179,8 @@ func TestUnit_WorkspaceChunks_RoundTripAndDeletes(t *testing.T) {
 	require.Zero(t, n)
 }
 
-// FTS5 is a hard prerequisite of the search design (lexical prefilter, bm25
-// ordering). This proves it works in the driver the product actually ships
-// (modernc.org/sqlite) rather than assuming it from a mining report.
+// FTS5 is a hard prerequisite of the search design; this proves it works in
+// the driver the product actually ships (modernc.org/sqlite).
 func TestUnit_WorkspaceIndex_FTS5IsAvailable(t *testing.T) {
 	ctx, store, _ := setupWorkspaceIndexStore(t)
 	require.NoError(t, store.CreateWorkspaceIndexConfig(ctx, newIndexConfig("cfg-1", "ws-1")))
@@ -225,10 +222,8 @@ func TestUnit_WorkspaceIndex_FTS5IsAvailable(t *testing.T) {
 	require.Empty(t, hits)
 }
 
-// The dimension pinned on the config is enforced on BOTH sides: a vector of the
-// wrong width is refused at write, and a row that somehow carries one (a
-// hand-edited database, a future bug) fails to load rather than being scored as
-// if it meant something.
+// The dimension pinned on the config is enforced on both sides: refused at
+// write, and a row that somehow carries one fails to load rather than score.
 func TestUnit_WorkspaceChunks_DimensionMismatchIsRefused(t *testing.T) {
 	ctx, store, exec := setupWorkspaceIndexStore(t)
 	require.NoError(t, store.CreateWorkspaceIndexConfig(ctx, newIndexConfig("cfg-1", "ws-1")))

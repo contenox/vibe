@@ -7,33 +7,22 @@ import (
 	"strings"
 )
 
-// vet.go is the authoring-time validator for hitl-policy (envelope) documents.
-//
-// It is deliberately STRICTER than loadPolicy: the runtime load path stays lax
-// about unknown fields outside "compute" so existing policies keep loading, but
-// `contenox vet` exists to teach the author, and an unknown field at authoring
-// time is almost always a typo that silently disarms the rule the operator
-// thought they wrote (a "timeout" that is not "timeout_s" waits forever; a
-// "tool_s" never matches). The one sanctioned escape hatch is the repo's own
-// comment convention: any key starting with "//" is an annotation, not config,
-// and is accepted everywhere (the shipped presets use "//compute").
-//
-// All defects are collected and joined so one vet run teaches everything at
-// once; the result wraps ErrEnvelopeVet.
+// vet.go is the authoring-time validator for hitl-policy documents. It is
+// deliberately stricter than loadPolicy: an unknown field is almost always a
+// typo that silently disarms a rule (e.g. "timeout" vs "timeout_s"). Keys
+// starting with "//" are annotations and accepted everywhere. All defects
+// are collected and joined; the result wraps ErrEnvelopeVet.
 
 // ErrEnvelopeVet marks every defect the envelope vet reports.
 var ErrEnvelopeVet = errors.New("hitl policy failed validation")
 
-// maxRuleTimeoutS caps a rule's approval timeout at 7 days. Like the compute
-// caps it is defensive, not aesthetic: a timeout past a week is a fat-fingered
-// value, not an intent, and it must fail where it is written rather than hold
-// an approval goroutine to a date.
+// maxRuleTimeoutS caps a rule's approval timeout at 7 days; a longer wait is
+// a typo, not an intent.
 const maxRuleTimeoutS = 7 * 24 * 60 * 60
 
-// VetPolicy validates a hitl-policy document for authoring: JSON shape,
-// unknown fields, rule shapes, tool patterns, and timeout values — then the
-// same semantic validation the runtime load path applies (validatePolicy), so
-// vet can never pass a policy the runtime would refuse.
+// VetPolicy validates a hitl-policy document for authoring — JSON shape,
+// unknown fields, rule shapes — then applies validatePolicy, so vet can
+// never pass a policy the runtime would refuse.
 func VetPolicy(data []byte) error {
 	var errs []error
 
@@ -51,9 +40,7 @@ func VetPolicy(data []byte) error {
 		errs = append(errs, fmt.Errorf("policy does not parse: %v", err))
 		return fmt.Errorf("%w:\n%w", ErrEnvelopeVet, errors.Join(errs...))
 	}
-	// The runtime's own semantic checks: actions, on_timeout, glob validity,
-	// compute and attention bounds. Reused, not reimplemented, so vet and the
-	// load path can never disagree on semantics.
+	// Reused, not reimplemented, so vet and the load path can't disagree.
 	if err := validatePolicy(&p); err != nil {
 		errs = append(errs, err)
 	}
@@ -142,9 +129,8 @@ func vetSubObjectShape(name string, raw json.RawMessage, known []string) []error
 func vetRuleSemantics(p *Policy) []error {
 	var errs []error
 	for i, r := range p.Rules {
-		// ruleMatches compares tools/tool names EXACTLY, with "*" (and empty)
-		// as the only wildcard. A pattern like "local_*" is therefore a rule
-		// that silently never fires — the deny the operator believes they have.
+		// ruleMatches compares tools/tool names exactly, with "*" as the only
+		// wildcard, so a pattern like "local_*" would silently never fire.
 		for _, pat := range []struct{ field, value string }{{"tools", r.Tools}, {"tool", r.Tool}} {
 			if pat.value == "*" || pat.value == "" {
 				continue
@@ -160,9 +146,7 @@ func vetRuleSemantics(p *Policy) []error {
 		if r.TimeoutS > maxRuleTimeoutS {
 			errs = append(errs, fmt.Errorf("rule %d: timeout_s %d is out of range (max %d, seven days) — a longer wait is a typo, not an intent", i, r.TimeoutS, maxRuleTimeoutS))
 		}
-		// timeout_s / on_timeout only take effect while an approval is pending;
-		// on any other action they are dead config the operator likely meant
-		// differently (e.g. believing a deny would wait).
+		// timeout_s/on_timeout only take effect while an approval is pending.
 		if r.Action != ActionApprove && (r.TimeoutS != 0 || r.OnTimeout != "") {
 			errs = append(errs, fmt.Errorf("rule %d: timeout_s/on_timeout only apply when action is %q — this rule's action %q never waits, so they would silently do nothing",
 				i, ActionApprove, r.Action))

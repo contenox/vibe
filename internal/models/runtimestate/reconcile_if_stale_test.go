@@ -47,10 +47,8 @@ func newReconcileStateTest(t *testing.T, opts ...Option) (context.Context, *Stat
 	return ctx, state, db
 }
 
-// When a backend comes up after the runtime already reconciled to an empty state
-// (the modeld-restarted-after-serve case), a read-path ReconcileIfStale must
-// re-scan and discover it — but only once the debounce window has elapsed, so a
-// burst of UI polls does not stampede a full re-scan.
+// A read-path ReconcileIfStale must discover a backend that comes up after an
+// empty reconcile, but only once the debounce window has elapsed.
 func TestUnit_ReconcileIfStale_DiscoversBackendThatAppearsLater(t *testing.T) {
 	ctx, state, db := newReconcileStateTest(t, WithAutoDiscoverModels())
 
@@ -62,11 +60,9 @@ func TestUnit_ReconcileIfStale_DiscoversBackendThatAppearsLater(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Nothing configured yet: the first read reconciles to an empty snapshot.
 	require.NoError(t, state.ReconcileIfStale(ctx))
 	require.Empty(t, state.Get(ctx))
 
-	// The backend comes up after startup.
 	store := runtimetypes.New(db.WithoutTransaction())
 	require.NoError(t, store.CreateBackend(ctx, &runtimetypes.Backend{
 		ID:      "openai-backend",
@@ -78,12 +74,10 @@ func TestUnit_ReconcileIfStale_DiscoversBackendThatAppearsLater(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.SetKV(ctx, OpenaiKey, keyData))
 
-	// A second read inside the debounce window is a no-op: the new backend is not
-	// scanned yet, so it stays invisible (this is what makes the burst cheap).
+	// A read inside the debounce window is a no-op; the new backend stays invisible.
 	require.NoError(t, state.ReconcileIfStale(ctx))
 	require.NotContains(t, state.Get(ctx), "openai-backend")
 
-	// Once the window has elapsed the read self-heals and discovers the backend.
 	original := ReconcileDebounceInterval
 	ReconcileDebounceInterval = 0
 	t.Cleanup(func() { ReconcileDebounceInterval = original })

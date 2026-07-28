@@ -262,9 +262,8 @@ func TestRunTerminal_CancellationIsNotTimeout(t *testing.T) {
 	}
 }
 
-// The release must survive a request context that is already dead by the time
-// the deferred cleanup runs, otherwise the peer leaks terminals on every
-// cancelled turn.
+// TestRunTerminal_ReleasesOnDeadContext pins that release still runs when the
+// request context is already dead, so cancelled turns don't leak terminals.
 func TestRunTerminal_ReleasesOnDeadContext(t *testing.T) {
 	f := newFake()
 	f.waitBlocks = true

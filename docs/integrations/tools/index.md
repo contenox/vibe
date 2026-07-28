@@ -1,3 +1,7 @@
+---
+description: How contenox turns files, commands, and APIs into schemas a model can call — and how the allowlist decides what's on the table.
+---
+
 # What are Tools?
 
 Tools are the mechanism by which Contenox gives a model access to real-world actions. Instead of generating text, the model calls a tools to read files, run commands, query APIs, or fire HTTP requests — and gets the result back as context for its next reply.
@@ -61,7 +65,12 @@ Contenox ships with built-in local tools and supports unlimited remote tools:
 
 | Tools name | Type | Always available | What it does |
 |---|---|---|---|
-| `local_fs` | Local | ✅ | Read, write, and search files within a configured directory (9 verb-specific tools, read-before-write contract for mutations) |
+| `local_fs` | Local | ✅ | Read, write, and search files within a configured directory (10 verb-specific tools, read-before-write contract for mutations) |
+| `git` | Local | `contenox chat`/`run`/`beam`, ACP sessions | Read and mutate the workspace's own Git repository in-process — status, diff, log, show, branches, blame, add, commit, checkout, restore |
+| `gointel` | Local | `contenox chat`/`run`/`beam`, ACP sessions | Six read-only Go code-intelligence tools (`go_describe`, `go_definition`, `go_references`, `go_implementations`, `go_symbols`, `go_diagnostics`) backed by a real type checker |
+| `jq` | Local | `contenox chat`/`run`/`beam`, ACP sessions | `jq_query` — run a jq program over a JSON or YAML document, read-only |
+| `workspace` | Local | `contenox chat`/`run`/`beam`, ACP sessions | `workspace_search` — semantic search over the index built by `contenox index` |
+| `goja` | Local | `contenox chat`/`run`/`beam`, ACP sessions | `goja_eval` — a JavaScript (ES2023) sandbox with no ambient I/O, plus one tool per operator-authored script under `$CONTENOX_DIR/tools/*.js` |
 | `webtools` | Local | ✅ | Call HTTP endpoints — `web_get`, `web_head`, `web_post`, `web_put`, `web_patch`, `web_delete`. SSRF guarding is opt-in (`_denied_hosts` is empty by default — see [local tools](/docs/integrations/tools/local/)); mutating verbs HITL-approve by default. |
 | `local_shell` | Local | CLI opt-in | Run shell commands. `contenox run` and `contenox chat` require `--shell`; editor clients route shell execution through their own approval surface where supported. |
 | `print` | Local | ✅ | Append a message to the chat history or return it as a string |
@@ -71,8 +80,13 @@ Contenox ships with built-in local tools and supports unlimited remote tools:
 ## Choosing the right tools
 
 - **`local_fs`** — best for code analysis, file editing, report generation. Prefer over `local_shell` for file ops; the read-before-write contract and sandbox guard against confabulated edits.
+- **`git`** — prefer over `local_shell` for repository operations (status, diff, log, commit, branch, restore); each operation is a separate tool the HITL policy can gate individually, rather than one decision for all of `git`.
+- **`gointel`** — exact questions about Go code (type, signature, references, implementers). Prefer over `grep`/`local_shell` — it answers from a type checker, not text search.
+- **`jq`** — pull one field or projection out of a JSON/YAML file instead of reading the whole thing.
+- **`workspace`** — semantic, meaning-based search over an already-built `contenox index`; approximately right, not exact — use `gointel` when you need an exact Go-symbol answer.
+- **`goja`** — imperative logic or multi-tool composition over data you already have, via `host.tool(...)`; reach for `jq` instead for simple declarative shape-work.
 - **`webtools`** — when the model needs to call HTTP. Use `web_get` / `web_head` for retrieval; mutating verbs trigger HITL approval by default.
-- **`local_shell`** — full power; use only in trusted, sandboxed environments. Reach for it for build / test / git, not for cat / grep / sed against project files.
+- **`local_shell`** — full power; use only in trusted, sandboxed environments. Reach for it for build / test scripts, not for cat / grep / sed / git against project files — those have dedicated tools.
 - **`print`** / **`echo`** — inject messages or inspect task output during development
 - **Remote tools** — turn any OpenAPI service into an agent tool; ideal for internal APIs, SaaS integrations, and team-shared tools
 

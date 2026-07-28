@@ -11,8 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// collectFind runs Find and returns the emitted entries' paths (in emission order)
-// plus the result.
+// collectFind runs Find and returns the emitted paths in emission order, plus the result.
 func collectFind(t *testing.T, svc localfileservice.Service, opts localfileservice.FindOptions) ([]string, localfileservice.FindResult) {
 	t.Helper()
 	var paths []string
@@ -121,11 +120,7 @@ func TestUnit_Find_BadGlobErrors(t *testing.T) {
 	require.Error(t, ferr, "a malformed filepath.Match pattern is a request error, not a silent no-match")
 }
 
-// TestUnit_Find_SkipsControlPlaneSubtree is the safety-critical case: the walk
-// descends into children the single-path guard never saw, so Find MUST re-resolve
-// each node through the vfs view. A control-plane directory sitting UNDER a granted
-// workspace root must be pruned (never emitted), even though the walk root itself
-// is legitimately contained — the recursive analogue of the /files boundary.
+// TestUnit_Find_SkipsControlPlaneSubtree pins that a denied subtree under a legitimately contained root is pruned, never emitted.
 func TestUnit_Find_SkipsControlPlaneSubtree(t *testing.T) {
 	root := t.TempDir()
 	cpDir := filepath.Join(root, "cp")

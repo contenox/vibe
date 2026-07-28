@@ -14,43 +14,33 @@ import (
 )
 
 // beamtuiModule is the import-path prefix every package under
-// internal/surfaces/beamtui carries. Rules (b) and (c) below test against
-// it rather than a relative path, because Go import specs are always
-// fully-qualified.
+// internal/surfaces/beamtui carries; rules (b) and (c) test against it
+// since Go import specs are always fully-qualified.
 const beamtuiModule = "github.com/contenox/beam/internal/surfaces/beamtui/"
 
-// termOnlyImports is the set of packages blueprint section 5 restricts to
-// beamtui/term (and its subpackages): the two real terminal-control
-// dependencies (raw mode, PTYs) and the one stdlib package that exists to
-// react to a real terminal (SIGWINCH). Nothing under beamtui/ needs any of
-// these except the package whose entire job is talking to a real terminal.
+// termOnlyImports is the set of packages restricted to beamtui/term (and
+// its subpackages): the real terminal-control dependencies (raw mode,
+// PTYs) and the stdlib package for reacting to a real terminal (SIGWINCH).
 var termOnlyImports = map[string]bool{
 	"golang.org/x/term":     true,
 	"github.com/creack/pty": true,
 	"os/signal":             true,
 }
 
-// TestUnit_ImportBoundaries is beam's import-boundary gate (blueprint 4.21):
-// it walks every .go file under internal/surfaces/beamtui and asserts, via
-// go/parser's ImportsOnly mode (fast — it does not parse function bodies),
-// the four seams the blueprint's cross-component contracts (section 5) and
-// component catalog (section 4) name as structural, not conventions any
-// component is trusted to keep on its own:
+// TestUnit_ImportBoundaries walks every .go file under internal/surfaces/
+// beamtui and enforces four structural import-boundary rules via
+// go/parser's ImportsOnly mode:
 //
-//	(a) only beamtui/term (or a term subpackage) imports golang.org/x/term,
+//	(a) only beamtui/term (or a subpackage) may import golang.org/x/term,
 //	    github.com/creack/pty, or os/signal;
-//	(b) enginebridge imports nothing under internal/surfaces/beamtui/ — it
-//	    is a runtime client, not a renderer (see enginebridge's package doc);
-//	(c) packages under beamtui/comp/ import neither beamtui/term nor
-//	    beamtui/input nor beamtui/style — components are pure renderers of
-//	    (state, width) -> frame.Line, never terminal-state readers, raw-key
-//	    consumers, or SGR-table owners;
-//	(d) beamtui/frame imports only the standard library — it is the
-//	    dependency-free rendering schema every other package builds on.
+//	(b) enginebridge imports nothing under beamtui/ — it is a runtime
+//	    client, not a renderer;
+//	(c) beamtui/comp/ packages import none of beamtui/term, beamtui/input,
+//	    or beamtui/style — components are pure (state, width) -> frame.Line
+//	    renderers;
+//	(d) beamtui/frame imports only the standard library.
 //
-// A violation is reported with the offending file and import path so an
-// agent can self-correct from `go test` output alone, per the blueprint's
-// acceptance criterion for this whole package.
+// A violation reports the offending file and import path.
 func TestUnit_ImportBoundaries(t *testing.T) {
 	root := beamtuiDir(t)
 	fset := token.NewFileSet()
@@ -155,13 +145,10 @@ func checkFrameBoundary(t *testing.T, file, relDir, importPath string) {
 	t.Errorf("import boundary: %s (frame) imports %q — frame may depend only on the standard library", file, importPath)
 }
 
-// isStdlib approximates "is a standard-library import path" the way every
-// Go import-linter does: a standard-library path's first component never
-// contains a dot (no domain), while every module path — this repo's own
-// packages included — does. It is a heuristic, not a lookup against go/build
-// (which would need build context and network-free module resolution to be
-// robust); it is exact for every import this repo or the Go standard library
-// actually uses.
+// isStdlib reports whether importPath looks like a standard-library path:
+// its first component contains no dot, unlike every module path. It is a
+// heuristic, not a go/build lookup, but exact for every import this repo or
+// the standard library actually uses.
 func isStdlib(importPath string) bool {
 	first := importPath
 	if i := strings.Index(importPath, "/"); i >= 0 {
@@ -170,20 +157,14 @@ func isStdlib(importPath string) bool {
 	return !strings.Contains(first, ".")
 }
 
-// beamtuiDir locates internal/surfaces/beamtui on disk so the walk in
-// TestUnit_ImportBoundaries works identically whether the test runs as part
-// of `go test ./...` from the repo root or as `go test .` from inside this
-// package's own directory.
+// beamtuiDir locates internal/surfaces/beamtui on disk, so the walk in
+// TestUnit_ImportBoundaries works whether the test runs from the repo root
+// or from this package's own directory.
 //
-// The MODULE ROOT is the authority, found by walking up from the working
-// directory for the go.mod: Go execs a test binary with its working directory
-// set to the package directory, so that walk always lands in the module under
-// test. runtime.Caller(0) is only a shortcut on top of it, and one that has to
-// be checked rather than trusted — it reports the path this file was COMPILED
-// from, which in a module cache, a vendored copy, or a build whose sources
-// moved is a different tree than the one being tested. A boundary test that
-// silently walks somebody else's checkout passes for the wrong reason, which
-// is worse than not running.
+// The module root (found by walking up for go.mod) is the authority;
+// runtime.Caller(0) is only a shortcut checked against it, since it reports
+// where this file was compiled from, which can be a different tree (module
+// cache, vendored copy) than the one under test.
 func beamtuiDir(t *testing.T) string {
 	t.Helper()
 

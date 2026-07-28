@@ -86,10 +86,8 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		return libacp.PromptResponse{}, err
 	}
 
-	// Image blocks are pulled out FIRST: FlattenContent is a lossy text
-	// projection that drops them, and vision rides the user Message's Images —
-	// see extractImageParts. An image-only prompt (empty text, ≥1 image) is a
-	// valid turn: "what is this?" asked by attachment alone.
+	// Images are extracted first (see extractImageParts): FlattenContent's
+	// lossy text projection would drop them. An image-only prompt is valid.
 	images, textBlocks := extractImageParts(req.Prompt)
 	input, droppedContentKinds := libacp.FlattenContent(textBlocks)
 	if input == "" && len(images) == 0 {
@@ -99,8 +97,8 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	}
 
 	if name, args, ok := parseCommand(input); ok {
-		// Slash commands are text verbs; an image attached to one has no
-		// meaning. Record it as dropped rather than silently discarding.
+		// A slash command is a text verb; an attached image has no meaning
+		// here, so it's recorded as dropped rather than silently discarded.
 		if len(images) > 0 {
 			droppedContentKinds = append(droppedContentKinds, string(libacp.ContentKindImage))
 		}
@@ -108,17 +106,11 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		return t.dispatchCommand(cmdCtx, req.SessionID, sess, name, args)
 	}
 
-	// The other half of the same decision: an input SHAPED like a command whose
-	// name this server does not know is answered here, locally, instead of being
-	// forwarded as prompt text. A mistyped command is a question with an exact
-	// answer; letting the model improvise one spent a real turn to produce a
-	// different wrong-ish error every time. Only the native driver does this —
-	// an external session's slash commands belong to its downstream agent, which
-	// owns its own menu and its own refusals. See unknownCommandName for the
-	// shape test that keeps pasted paths and prose reaching the model.
+	// An input shaped like a command whose name is unknown is answered here
+	// rather than forwarded to the model — a mistyped command has one exact
+	// answer. Native driver only: an external session's commands belong to
+	// its downstream agent.
 	if name, ok := unknownCommandName(input); ok {
-		// Same reasoning as the recognized-command path above: a slash command is
-		// a text verb, so an attached image is recorded as dropped.
 		if len(images) > 0 {
 			droppedContentKinds = append(droppedContentKinds, string(libacp.ContentKindImage))
 		}
@@ -130,11 +122,10 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		return t.answerUnknownCommand(ctx, req.SessionID, name), nil
 	}
 
-	// Survival path: when serve wires a native-turn Registry, the turn runs OFF this
-	// connection (on the Registry's serve-rooted context) so a client drop no longer
-	// cancels it — this Transport is a thin viewer. See runtime/nativeturn and
-	// native_turn.go. The stdio `contenox acp` path leaves NativeTurns nil and keeps
-	// the connection-bound turn below, byte-for-byte the historical behavior.
+	// When serve wires a native-turn Registry, the turn runs off this
+	// connection (see native_turn.go) so a client drop doesn't cancel it.
+	// stdio `contenox acp` leaves NativeTurns nil and uses the connection-
+	// bound turn below.
 	if t.deps.NativeTurns != nil {
 		return d.promptViaRegistry(ctx, req, sess, input, images, droppedContentKinds)
 	}
@@ -142,12 +133,9 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	promptCtx := libtracker.WithNewRequestID(ctx)
 	reqID, _ := promptCtx.Value(libtracker.ContextKeyRequestID).(string)
 
-	// Make this turn cancellable and register it so session/cancel (Transport.Cancel),
-	// a session Close/Delete, or a connection drop can abort the running chain.
-	// promptCtx already inherits libacp's connection-level prompt context, but the
-	// server owns cancellation here rather than relying solely on that. The
-	// deferred unregister+cancel cleans up on turn end; cancelling produces
-	// context.Canceled, which the error path below resolves as StopReasonCancelled.
+	// Registered so session/cancel, a session Close/Delete, or a connection
+	// drop can abort the running chain; cancelling yields context.Canceled,
+	// resolved below as StopReasonCancelled.
 	promptCtx, cancelPrompt := context.WithCancel(promptCtx)
 	promptReg := t.registerPromptCancel(req.SessionID, cancelPrompt)
 	defer func() {
@@ -155,43 +143,23 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		cancelPrompt()
 	}()
 
-	// Gate this turn's tool calls under THIS session's chosen HITL policy. serve
-	// runs one shared engine (one hitlservice) behind every ACP session, so a
-	// concrete per-session selection must ride the request context: WithPolicyName
-	// makes hitlservice.Evaluate prefer it over the process-global
-	// cli.hitl-policy-name KV, letting two concurrent sessions gate independently.
-	// A defaulting session resolves to "" and injects nothing, leaving the global-
-	// KV/fallback chain intact (byte-identical to pre-per-session behavior). The
-	// context threads synchronously prompt -> agentservice -> taskengine tool
-	// gating -> HITLWrapper.Exec -> hitlservice.Evaluate.
+	// Per-session HITL policy rides the request context (serve runs one
+	// shared hitlservice behind every session) so two concurrent sessions can
+	// gate independently; a defaulting session injects nothing.
 	if policyName := t.resolveSessionHITLPolicy(sess); policyName != "" {
 		promptCtx = hitlservice.WithPolicyName(promptCtx, policyName)
 	}
 
-	// If this session is a dispatched unit on a mission, bind its mission id onto
-	// the turn context so this turn's mission_report / mission_ask_attention tools
-	// report against THIS mission — the per-mission grant, enforced at
-	// construction rather than asserted by the agent. The same synchronous
-	// prompt -> agentservice -> taskengine tool path WithPolicyName rides carries
-	// it. Empty for a chat-mode session, which injects nothing and whose mission
-	// tools therefore resolve to nothing.
+	// A dispatched unit's mission id, workdir, and compute-resolution bounds
+	// ride the same context so its mission tools and model resolution are
+	// scoped to this mission. Empty for a chat-mode session.
 	if sess.MissionID != "" {
 		promptCtx = missiontools.WithMissionID(promptCtx, sess.MissionID)
-		// Bind the unit's workdir so the conclusion verification gate can stat
-		// relative artifact refs a result report claims (absolute refs verify
-		// without it).
 		promptCtx = missiontools.WithWorkdir(promptCtx, sess.Cwd)
-		// Bind the envelope's COMPUTE allowlist onto the same context, so this
-		// turn's model/backend resolution is refused if it steps outside what the
-		// mission was dispatched under. It rides the identical prompt ->
-		// agentservice -> taskengine path WithPolicyName rides, ending at
-		// llmrepo's resolver seam. An unbounded mission binds nothing.
 		promptCtx = llmrepo.WithResolutionBounds(promptCtx, sess.resolutionBounds())
 	}
-	// The other end of the same relationship: a session that FIRED missions carries
-	// its own id in, unlocking the supervisor tools (see missiontools.WithParentSessionID)
-	// so this turn can look at what it dispatched and answer what a unit asks. A
-	// session that fired nothing injects nothing and is offered no mission tools.
+	// A session that fired missions carries its own id in, unlocking the
+	// supervisor tools so this turn can answer what a unit asks.
 	if sess.FiredMissions && sess.InternalSessionID != "" {
 		promptCtx = missiontools.WithParentSessionID(promptCtx, sess.InternalSessionID)
 	}
@@ -201,8 +169,7 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	if bus != nil && reqID != "" {
 		sub, err := bus.Stream(promptCtx, taskengine.TaskEventRequestSubject(reqID), rawCh)
 		if err != nil {
-			// The prompt still runs, but the client gets no incremental
-			// updates. Surface why instead of silently degrading.
+			// The prompt still runs without incremental updates; report why.
 			subErr, _, subEnd := t.tracker().Start(promptCtx, "subscribe", "acp_event_stream", "session_id", string(req.SessionID), "request_id", reqID)
 			subErr(err)
 			subEnd()
@@ -232,13 +199,10 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		}
 	}
 
-	// Use the session's effective token budget (chain token_limit or override set via config)
-	// as the context window for this prompt. This is clamped to model cap (if known).
-	// This makes indicators (which now use the session budget as "size") and engine shifting
-	// consistent with the value the user sees and switches.
+	// The session's effective token budget is the context window; fall back
+	// to the model's cap so indicators and engine shifting agree.
 	contextLen := sess.effectiveTokenLimit()
 	if contextLen == 0 {
-		// fallback to model cap (for indicator size) if no explicit session budget
 		currentModel := sess.modelOrDefault(t.model())
 		for _, state := range t.runtimeStates(promptCtx) {
 			for _, pulled := range state.PulledModels {
@@ -276,17 +240,10 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		ContextLength:  contextLen,
 	})
 	if err != nil {
-		// Distinguish a genuine user cancellation from an execution failure that
-		// merely SURFACED as a timeout. Only context.Canceled is a cancellation
-		// (the client sent session/cancel, or the connection/parent context was
-		// torn down). context.DeadlineExceeded — e.g. a local backend refusing to
-		// load a model, or waiting on a busy single GPU slot until an inner LLM call
-		// deadlines — is a FAILURE the client must SEE, not a silent clean stop.
-		// agentservice.InferStopReason maps BOTH to StopCancelled, so trusting
-		// resp.StopReason (or a bare promptCtx.Err()) here would let a hard
-		// failure masquerade as a cancel and vanish from the UI: the client
-		// resolves the prompt with no error, drops its "prompting" state, and
-		// shows nothing. Key the silent-cancel path on context.Canceled only.
+		// Only context.Canceled is a real cancellation. DeadlineExceeded is a
+		// failure the client must see: agentservice.InferStopReason maps both
+		// to StopCancelled, so trusting resp.StopReason here would let a hard
+		// failure masquerade as a silent cancel.
 		cancelled := errors.Is(err, context.Canceled) ||
 			errors.Is(promptCtx.Err(), context.Canceled) ||
 			errors.Is(ctx.Err(), context.Canceled)
@@ -305,23 +262,13 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		return libacp.PromptResponse{}, libacp.InternalError(err.Error())
 	}
 	stopReason := mapStopReason(resp.StopReason)
-	// A cancelled turn MUST resolve with the cancelled stop reason even when
-	// the engine absorbed the cancellation and handed back a "successful"
-	// partial result (e.g. via a recovery task) — the client sent
-	// session/cancel or $/cancel_request and judges conformance by this field.
-	// Keyed on context.Canceled specifically (not any ctx error): a deadline
-	// that fired against a salvaged result is a timeout, not a user cancel.
+	// A cancelled turn must resolve as cancelled even if the engine absorbed
+	// it via a recovery task and returned a "successful" partial result.
 	if errors.Is(promptCtx.Err(), context.Canceled) {
 		stopReason = libacp.StopReasonCancelled
 	}
-	// Session pickers key freshness off updatedAt; push it after the turn so
-	// clients don't need to re-list to notice activity. Push the derived title
-	// alongside it: a session created this connection carried NO title in its
-	// session/new SessionInfo, so without this the client's tab/sidebar label
-	// is stuck on the raw-id fallback ("Sitzung acp-XXXX") until a full
-	// session/list re-list (only on reconnect). Deriving from the first user
-	// message here mirrors session/list's sessionListTitle, so the live push
-	// and the re-list agree.
+	// Push updatedAt (and the derived title, mirroring session/list's
+	// sessionListTitle) so clients notice activity without a re-list.
 	libacp.AfterResponse(ctx, func() {
 		update := libacp.SessionUpdate{
 			SessionUpdate: libacp.SessionUpdateSessionInfo,
@@ -354,11 +301,8 @@ func mapStopReason(r agentservice.StopReason) libacp.StopReason {
 	case agentservice.StopCancelled:
 		return libacp.StopReasonCancelled
 	case agentservice.StopSuspended:
-		// ACP has no "suspended" stop reason: from the client's view the turn
-		// ended cleanly, with the still-open permission card telling the user
-		// what the run is waiting for. Answering the approval resumes the run
-		// server-side (S6) and the continuation reaches the client as a fresh
-		// turn's updates.
+		// ACP has no "suspended" reason; the client sees a clean end turn,
+		// with the open permission card signaling what it's waiting on.
 		return libacp.StopReasonEndTurn
 	}
 	return libacp.StopReasonEndTurn

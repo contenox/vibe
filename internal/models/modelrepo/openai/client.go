@@ -34,18 +34,15 @@ type openAIChatRequest struct {
 	TopP                *float64         `json:"top_p,omitempty"`
 	Seed                *int             `json:"seed,omitempty"`
 	Stream              bool             `json:"stream,omitempty"`
-	// StreamOptions requests the trailing usage chunk on streamed responses
-	// (stream_options.include_usage); only set when Stream is true.
+	// StreamOptions requests the trailing usage chunk; only set when Stream is true.
 	StreamOptions *openAIStreamOptions `json:"stream_options,omitempty"`
 	Tools         []openAITool         `json:"tools,omitempty"`
-	// ReasoningEffort maps the existing modelrepo.WithThink values onto OpenAI's
-	// chat-completions `reasoning_effort` parameter without widening the public
-	// package API. Supported values are model-dependent.
+	// ReasoningEffort maps modelrepo.WithThink onto OpenAI's chat-completions
+	// `reasoning_effort` parameter; supported values are model-dependent.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	// PromptCacheKey routes requests with the same key to the same cache
-	// shard (per-session keys are OpenAI's documented best practice; the
-	// `user` field is deprecated for this purpose). Cache metadata only —
-	// never model-visible.
+	// PromptCacheKey routes requests with the same key to the same cache shard
+	// (OpenAI's documented alternative to the deprecated `user` field). Cache
+	// metadata only, never model-visible.
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
@@ -93,16 +90,16 @@ type openAITool struct {
 }
 
 type openAIFunction struct {
-	Name        string `json:"name"`                  // ^[a-zA-Z0-9_-]+$
-	Description string `json:"description,omitempty"` // optional
-	Parameters  any    `json:"parameters,omitempty"`  // JSON Schema
+	Name        string `json:"name"` // ^[a-zA-Z0-9_-]+$
+	Description string `json:"description,omitempty"`
+	Parameters  any    `json:"parameters,omitempty"` // JSON Schema
 }
 
 func (c *openAIClient) sendRequest(ctx context.Context, endpoint string, request any, response any) error {
 	url := c.baseURL + endpoint
 
 	tracker := c.tracker
-	// Never log API key material (even a prefix) in activity telemetry — trace logs are not secret-safe.
+	// Never log API key material in activity telemetry; trace logs are not secret-safe.
 	auth := "none"
 	if c.apiKey != "" {
 		auth = "bearer_set"
@@ -129,8 +126,7 @@ func (c *openAIClient) sendRequest(ctx context.Context, endpoint string, request
 		}
 	}
 
-	// Non-streaming call: bounded end-to-end, retried on 429/529/5xx with
-	// Retry-After honored (modelrepo.DoWithRetry).
+	// Bounded end-to-end; retried on 429/529/5xx with Retry-After honored.
 	ctx, cancel := modelrepo.NonStreamingContext(ctx)
 	defer cancel()
 
@@ -196,15 +192,11 @@ func (c *openAIClient) sendRequest(ctx context.Context, endpoint string, request
 	return nil
 }
 
-// buildOpenAIRequest builds a compliant request and sanitizes tool names per
-// OpenAI's pattern (^[a-zA-Z0-9_-]+$). It ALSO returns a map from
-// sanitized->original so callers can translate tool-call names back.
-//
-// Critically, it also sanitizes tool_calls[].function.name in the message
-// history: the taskengine qualifies tool names as "toolsName.toolName"
-// (e.g. "filesystem.list_directory"). The dot violates OpenAI's pattern,
-// so any prior-turn assistant messages must have their tool call names
-// sanitized before being forwarded to the API.
+// buildOpenAIRequest builds a compliant request and sanitizes tool names to
+// OpenAI's pattern (^[a-zA-Z0-9_-]+$), returning a sanitized->original map so
+// callers can translate names back. It also sanitizes tool_calls[].function.name
+// in message history, since taskengine's "toolsName.toolName" qualified names
+// contain a dot that violates OpenAI's pattern.
 func buildOpenAIRequest(modelName string, messages []modelrepo.Message, args []modelrepo.ChatArgument) (openAIChatRequest, map[string]string) {
 	return buildOpenAIRequestWithCapabilities(modelName, messages, args, true)
 }
@@ -228,7 +220,6 @@ func buildOpenAIRequestWithCapabilities(modelName string, messages []modelrepo.M
 		Model: modelName,
 	}
 
-	// Apply chat args
 	cfg := &modelrepo.ChatConfig{}
 	for _, a := range args {
 		a.Apply(cfg)
@@ -248,9 +239,7 @@ func buildOpenAIRequestWithCapabilities(modelName string, messages []modelrepo.M
 		req.PromptCacheKey = cfg.CacheHints.SessionKey
 	}
 
-	// OpenAI's sampling parameter support depends on both model family and
-	// reasoning mode. Keep this logic internal and driven by the existing Think
-	// abstraction so callers do not need provider-specific branches.
+	// Sampling parameter support depends on both model family and reasoning mode.
 	if openAIShouldOmitSamplingParams(modelName, req.ReasoningEffort) {
 		req.Temperature = nil
 		req.TopP = nil
@@ -286,16 +275,12 @@ func buildOpenAIRequestWithCapabilities(modelName string, messages []modelrepo.M
 		}
 	}
 
-	// Build reverse map: original tool name -> sanitized name, for rewriting history.
+	// Reverse map: original tool name -> sanitized name, for rewriting history.
 	origToSanitized := make(map[string]string, len(nameMap))
 	for san, orig := range nameMap {
 		origToSanitized[orig] = san
 	}
 
-	// Convert messages to the explicit wire format.
-	// • Content is *string so assistant messages with tool_calls can have a null body.
-	// • ToolCalls in assistant messages have their names sanitized via origToSanitized.
-	// • tool_call_id is preserved on tool-role messages.
 	apiMsgs := make([]apiChatMessage, 0, len(messages))
 	for _, msg := range messages {
 		apiMsg := apiChatMessage{
@@ -339,9 +324,9 @@ func buildOpenAIRequestWithCapabilities(modelName string, messages []modelrepo.M
 	return req, nameMap
 }
 
-// openAIImageContent renders a message's text plus its image attachments as the
-// chat/completions content-parts array: a leading text part (when present) then
-// one image_url part per image, each an inline base64 data URI.
+// openAIImageContent renders a message as the chat/completions content-parts
+// array: a leading text part (when present), then one image_url part per
+// image as an inline base64 data URI.
 func openAIImageContent(msg modelrepo.Message) []apiContentPart {
 	parts := make([]apiContentPart, 0, len(msg.Images)+1)
 	if msg.Content != "" {
@@ -375,12 +360,9 @@ func openAIAPIBaseModelID(model string) string {
 	return m
 }
 
-// openAIUsesResponsesEndpoint indicates whether this model requires
-// the OpenAI Responses API (POST /v1/responses).
-//
-// OpenAI chat-completions is the older API surface, while the newer
-// reasoning-capable models now reject it for request routing. In practice,
-// this repo routes GPT-5 family models to /responses.
+// openAIUsesResponsesEndpoint reports whether this model requires the OpenAI
+// Responses API (POST /v1/responses) rather than /chat/completions. GPT-5
+// family models are routed to /responses.
 func openAIUsesResponsesEndpoint(model string) bool {
 	base := openAIAPIBaseModelID(model)
 	return strings.HasPrefix(base, "gpt-5")
@@ -496,18 +478,16 @@ func sanitizeToolName(in string) string {
 		}
 	}
 	s := b.String()
-	// avoid leading/trailing separators
 	s = strings.Trim(s, "_-")
 	return s
 }
 
-// uniquifyToolName ensures we don't send duplicate names (OpenAI recommends unique names)
+// uniquifyToolName ensures we don't send duplicate names (OpenAI recommends unique names).
 func uniquifyToolName(seen map[string]int, name string) string {
 	if _, ok := seen[name]; !ok {
 		seen[name] = 1
 		return name
 	}
-	// append an incrementing suffix until unique
 	i := seen[name]
 	for {
 		candidate := fmt.Sprintf("%s_%d", name, i)

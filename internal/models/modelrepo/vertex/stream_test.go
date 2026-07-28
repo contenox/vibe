@@ -81,10 +81,7 @@ func TestUnit_VertexStreamClient_Stream(t *testing.T) {
 	require.Equal(t, []string{"hello ", "world"}, texts)
 }
 
-// TestUnit_VertexStreamClient_GoldenFixture_ToolCallsUsageTerminal drives a
-// recorded streamGenerateContent SSE transcript — thinking parts, split text,
-// two functionCall parts with a thought signature, usageMetadata, and a
-// finishReason — through the real adapter and the engine-side assembler,
+// Drives a recorded SSE transcript through the real adapter and assembler,
 // proving the raw-delta contract end to end.
 func TestUnit_VertexStreamClient_GoldenFixture_ToolCallsUsageTerminal(t *testing.T) {
 	t.Parallel()

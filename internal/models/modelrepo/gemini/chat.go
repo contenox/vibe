@@ -15,11 +15,9 @@ type GeminiChatClient struct {
 
 // Chat implements modelrepo.LLMChatClient
 func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (modelrepo.ChatResult, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "gemini", "model", c.modelName)
 	defer end()
 
-	// buildGeminiRequest hoists system messages into systemInstruction.
 	req, err := buildGeminiRequest(c.modelName, messages, args, c.canThink)
 	if err != nil {
 		reportErr(err)
@@ -71,7 +69,6 @@ func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		case p.Text != "":
 			outText += p.Text
 		case p.FunctionCall != nil:
-			// Convert args (map[string]any) -> JSON string
 			argsJSON, err := json.Marshal(p.FunctionCall.Args)
 			if err != nil {
 				continue
@@ -96,7 +93,7 @@ func (c *GeminiChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 				sig = p.FunctionCall.ThoughtSignature // fallback: older API placement
 			}
 			if sig == "" {
-				sig = lastSignature // propagate to parallel calls in same turn
+				sig = lastSignature
 			}
 			if sig != "" {
 				lastSignature = sig

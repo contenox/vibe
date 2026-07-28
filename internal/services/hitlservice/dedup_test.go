@@ -1,11 +1,7 @@
 package hitlservice_test
 
-// The dual-inbox regression: a fleet-unit's gated call used to file TWO rows —
-// the child wrapper's (ID = engine tool-call ID, wired to the checkpoint) and
-// a parent-side twin RequestApproval minted when the ask crossed the ACP wire.
-// Answering the child's worked; the twin sat pending until the sweeper expired
-// it. These tests pin the fix: a caller-supplied ToolCallID is the ask's
-// durable identity, adopted rather than duplicated.
+// Regression tests for the dual-inbox wart: a caller-supplied ToolCallID is
+// the ask's durable identity, adopted rather than duplicated.
 
 import (
 	"context"
@@ -17,10 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The wire ordering that produced the wart: the child files the row first,
-// then the parent's answerer calls RequestApproval with the same ToolCallID.
-// Exactly ONE row must exist, and the child-side resolve (another process,
-// another service instance — no shared channel) must end the parent's wait.
+// TestUnit_RequestApproval_AdoptsPreFiledToolCallRow pins that RequestApproval
+// adopts an existing row for the same ToolCallID instead of filing a twin.
 func TestUnit_RequestApproval_AdoptsPreFiledToolCallRow(t *testing.T) {
 	ctx, storeA, dbPath := setupHITLDB(t)
 	svcA := newDurableService(t, storeA)
@@ -33,7 +27,6 @@ func TestUnit_RequestApproval_AdoptsPreFiledToolCallRow(t *testing.T) {
 		ToolName:  "exec",
 	}))
 
-	// The parent process: a fresh instance over the same file, empty pending map.
 	ctxB, storeB := reopenHITLDB(t, dbPath)
 	svcB := newDurableService(t, storeB)
 
@@ -57,15 +50,11 @@ func TestUnit_RequestApproval_AdoptsPreFiledToolCallRow(t *testing.T) {
 		t.Fatal("RequestApproval never published its event")
 	}
 
-	// One row, not two — the wart itself.
 	rows, err := storeA.ListHITLApprovals(ctx, runtimetypes.HITLApprovalPending, nil, 100)
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "adopting must not file a twin row")
 	require.Equal(t, callID, rows[0].ID)
 
-	// The CHILD resolves its own row (ResolveApprovalInline is the fast-path
-	// the wrapper runs when its attached session answers) — svcB's poll on the
-	// durable row must deliver that verdict to the parked parent.
 	require.NoError(t, recorderA.ResolveApprovalInline(ctx, callID, true))
 
 	select {
@@ -77,8 +66,8 @@ func TestUnit_RequestApproval_AdoptsPreFiledToolCallRow(t *testing.T) {
 	}
 }
 
-// A row already terminal when the parent's request arrives (the operator was
-// faster than the wire): the verdict returns immediately, no wait, no twin.
+// TestUnit_RequestApproval_TerminalToolCallRowReturnsVerdictImmediately pins
+// that an already-terminal row returns its verdict without waiting or a twin.
 func TestUnit_RequestApproval_TerminalToolCallRowReturnsVerdictImmediately(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
@@ -112,8 +101,8 @@ func TestUnit_RequestApproval_TerminalToolCallRowReturnsVerdictImmediately(t *te
 	require.Empty(t, rows, "no twin row may appear for an answered ask")
 }
 
-// Without a ToolCallID nothing changes: a fresh uuid row per request, exactly
-// the pre-dedup behavior every existing caller relies on.
+// TestUnit_RequestApproval_NoToolCallIDStillMintsFreshRow pins that an empty
+// ToolCallID still mints a fresh uuid row, unchanged from before dedup.
 func TestUnit_RequestApproval_NoToolCallIDStillMintsFreshRow(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)

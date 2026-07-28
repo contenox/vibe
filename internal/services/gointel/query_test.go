@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// The ground truth below is fixed by testdata/fixture (module
-// example.com/fixture, packages shapes and report). If a fixture line moves,
-// these numbers move with it — that is the point: they are assertions about a
-// known module, not about whatever the loader happened to return.
+// Ground truth below is fixed by testdata/fixture (example.com/fixture,
+// packages shapes and report); a fixture edit moves these numbers with it.
 
 func TestUnit_Definition_KnownGroundTruth(t *testing.T) {
 	ix := newTestIndex(t, newFixture(t, "fixture"))
@@ -121,8 +119,7 @@ func TestUnit_Describe_MethodCarriesTheSourceSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("describe: %v", err)
 	}
-	// The SOURCE form, receiver name included — what an agent would type — not
-	// go/types' canonical rendering.
+	// The source form, receiver name included, not go/types' canonical rendering.
 	if res.Signature != "func (r Rect) Area() float64" {
 		t.Errorf("signature = %q", res.Signature)
 	}
@@ -400,10 +397,6 @@ func TestUnit_Symbols_CapAndUnknownTarget(t *testing.T) {
 		t.Fatalf("error = %v, want ErrNotFound", err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Resolution failures — refuse and teach, never guess
-// ---------------------------------------------------------------------------
 
 func TestUnit_Resolve_AmbiguousNameListsQualifiedCandidates(t *testing.T) {
 	ix := newTestIndex(t, newFixture(t, "fixture"))

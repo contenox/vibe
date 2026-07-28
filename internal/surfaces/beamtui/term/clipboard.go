@@ -10,24 +10,21 @@ import (
 )
 
 const (
-	// clipboardPayloadCap is the largest base64 payload that survives the
-	// common multiplexer limits (tmux's 74994-byte ceiling is the binding
-	// one). Beyond it terminals silently drop the whole sequence, so beam
-	// truncates and says so instead.
+	// clipboardPayloadCap is the largest base64 payload that survives tmux's
+	// 74994-byte ceiling; beyond it terminals silently drop the sequence, so
+	// beam truncates and reports it instead.
 	clipboardPayloadCap = 74994
 
 	// clipboardSourceCap is the matching source-byte budget: base64 expands
 	// three bytes into four.
 	clipboardSourceCap = clipboardPayloadCap / 4 * 3
 
-	// screenChunkSize is GNU screen's per-DCS passthrough limit, measured
-	// where screen measures it: on the wire, over the WHOLE sequence.
+	// screenChunkSize is GNU screen's per-DCS passthrough limit, measured on
+	// the wire over the whole sequence.
 	screenChunkSize = 768
 
-	// screenChunkBody is what is left for the payload once the DCS introducer
-	// and string terminator are paid for. Budgeting the full 768 for the body
-	// puts four bytes of every chunk past the limit, which is exactly the size
-	// at which screen starts dropping sequences silently.
+	// screenChunkBody is what is left for the payload after the DCS
+	// introducer and terminator.
 	screenChunkBody = screenChunkSize - len("\x1bP") - len("\x1b\\")
 )
 
@@ -77,9 +74,9 @@ func clipboardPayload(text string) (string, bool) {
 }
 
 // screenPassthrough splits a sequence into DCS chunks screen will forward,
-// each one whole — introducer, body and terminator — inside the limit. The
-// body's only ESC is the OSC introducer at the very start, so no chunk
-// boundary can land inside an escape sequence screen would misread.
+// each one whole inside the limit. The body's only ESC is the OSC
+// introducer at the start, so no chunk boundary can split an escape
+// sequence.
 func screenPassthrough(osc string) string {
 	var b strings.Builder
 	for len(osc) > 0 {

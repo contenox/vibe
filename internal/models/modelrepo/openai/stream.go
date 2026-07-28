@@ -23,9 +23,8 @@ type OpenAIStreamClient struct {
 // terminal parcel (finish reason + usage). Assembly belongs to the engine-side
 // modelrepo.StreamAssembler, never to this client.
 func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "openai", "model", c.modelName)
-	// Note: We don't defer end() here because the stream is asynchronous
+	// end() is not deferred here; ownership passes to the goroutine below since the stream is asynchronous.
 
 	streamCh := make(chan *modelrepo.StreamParcel)
 	usesResponses := openAIUsesResponsesEndpoint(c.modelName)
@@ -70,7 +69,6 @@ func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		return nil, err
 	}
 
-	// Check response status
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
@@ -85,7 +83,7 @@ func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 	go func() {
 		defer close(streamCh)
 		defer resp.Body.Close()
-		defer end() // End tracking when the stream completes
+		defer end()
 
 		if usesResponses {
 			streamResponsesSSE(ctx, resp.Body, nameMap, streamCh, reportErr, reportChange)
@@ -201,11 +199,10 @@ func (ev responsesSSEEvent) errorText(rawPayload string) string {
 }
 
 // streamResponsesSSE reads a Responses API SSE stream and forwards raw-delta
-// parcels to out: output text and reasoning-summary deltas as they arrive,
-// tool-call fragments as ToolCallDelta parcels keyed by output_index (id/name
-// from response.output_item.added, argument fragments from
-// response.function_call_arguments.delta), and a typed terminal parcel from
-// response.completed. Assembly belongs to the engine-side assembler.
+// parcels to out: text/reasoning deltas as they arrive, tool-call fragments as
+// ToolCallDelta parcels keyed by output_index (id/name from
+// response.output_item.added, args from response.function_call_arguments.delta),
+// and a typed terminal parcel from response.completed.
 func streamResponsesSSE(
 	ctx context.Context,
 	body io.ReadCloser,
@@ -297,10 +294,7 @@ func streamResponsesSSE(
 			}
 
 		case "response.completed":
-			// Reasoning summary fallback for gateways that never emitted
-			// summary deltas; skipped when deltas already streamed it. Read
-			// from the "reasoning" output items — the top-level reasoning
-			// field is a request-config echo, not content.
+			// Fallback for gateways that never emitted reasoning-summary deltas.
 			if !emittedReasoning {
 				if summary := responsesReasoningSummaryText(ev.Response); summary != "" {
 					if !send(&modelrepo.StreamParcel{Thinking: summary}) {
@@ -328,8 +322,7 @@ func streamResponsesSSE(
 			return
 
 		case "response.failed", "response.incomplete":
-			// Terminal non-success events: without this the stream would end
-			// silently and the caller would see an empty completion.
+			// Without this, the stream would end silently as an empty completion.
 			err := fmt.Errorf("responses stream %s %s", ev.Type, ev.errorText(payload))
 			reportErr(err)
 			send(&modelrepo.StreamParcel{Error: err})

@@ -1,6 +1,6 @@
 {
-  "//compute": "PRESENT AND REAL, and tighter than the default preset's — a policy whose default_action is \"deny\" is chosen by an operator who wants the narrow envelope, and its compute half should match its action half. A mission is fire-and-detach, so unbounded would mean a runaway spends real money with nobody watching. Bounds only ever RESTRICT, they are per-MISSION (an attached chat under this policy is bounded by the rules below, not by these), and a mission that crosses one is finished at status \"stuck\" with a reason naming the bound.",
-  "//compute-fields": "maxToolCalls counts envelope-gated tool dispatches and is exact. maxTokens is BEST-EFFORT: it bounds a mission from the usage its unit reports, and is inert for a unit whose provider reports none. maxTurns is deliberately OMITTED, not forgotten: the dispatcher issues at most two prompt turns per mission, so any ceiling above 1 could never fire and shipping one would claim a bound that does not exist. modelAllowlist/backendAllowlist ARE enforced when set, but no shipped preset can guess your model names — set them on a per-mission envelope. \"finish_stuck\" is the only implemented onExhausted behavior. See docs/development/blueprints/acp/envelope-compute-bounds.md.",
+  "//compute": "Tighter than the default preset's, matching this policy's default_action \"deny\": a mission is fire-and-detach, so these bounds guard against an unwatched runaway spend.",
+  "//compute-fields": "maxToolCalls is exact; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted because the dispatcher never issues more than two prompt turns per mission. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
   "compute": {
     "maxToolCalls": 150,
     "maxTokens": 1000000,
@@ -142,6 +142,18 @@
     },
     {
       "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/{.ssh,.gnupg}/**"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
       "tool": "write_file",
       "action": "deny",
       "when": [
@@ -155,6 +167,18 @@
     {
       "tools": "local_fs",
       "tool": "sed",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/{.config/autostart,.config/systemd/user,Library/LaunchAgents,Library/LaunchDaemons}/**"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "edit_file",
       "action": "deny",
       "when": [
         {
@@ -190,6 +214,18 @@
     },
     {
       "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/{.bashrc,.zshrc,.profile,.bash_profile,.zprofile,.bash_login,.zshenv,.kshrc,crontab,.crontab}"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
       "tool": "write_file",
       "action": "deny",
       "when": [
@@ -203,6 +239,18 @@
     {
       "tools": "local_fs",
       "tool": "sed",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/.config/fish/config.fish"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "edit_file",
       "action": "deny",
       "when": [
         {
@@ -238,6 +286,18 @@
     },
     {
       "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "/{etc,usr,bin,sbin,boot,lib,lib64,opt,System}/**"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
       "tool": "write_file",
       "action": "deny",
       "when": [
@@ -257,6 +317,55 @@
           "key": "path",
           "op": "glob",
           "value": "**/hitl-policy*.json"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "**/hitl-policy*.json"
+        }
+      ]
+    },
+    {
+      "//": "Config keys and hooks under .git are commands, not project files, so writes are denied; the typed git toolset is unaffected since it never goes through local_fs.",
+      "tools": "local_fs",
+      "tool": "write_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "{**/.git/**,.git/**}"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "sed",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "{**/.git/**,.git/**}"
+        }
+      ]
+    },
+    {
+      "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny",
+      "when": [
+        {
+          "key": "path",
+          "op": "glob",
+          "value": "{**/.git/**,.git/**}"
         }
       ]
     },
@@ -313,6 +422,11 @@
     },
     {
       "tools": "local_fs",
+      "tool": "find_files",
+      "action": "allow"
+    },
+    {
+      "tools": "local_fs",
       "tool": "grep",
       "action": "allow"
     },
@@ -334,6 +448,11 @@
     {
       "tools": "local_fs",
       "tool": "sed",
+      "action": "approve"
+    },
+    {
+      "tools": "local_fs",
+      "tool": "edit_file",
       "action": "approve"
     },
     {

@@ -1,3 +1,7 @@
+---
+description: Point at any HTTP service's OpenAPI spec and every operation becomes a callable, allowlistable tool — no client code required.
+---
+
 # Remote Tools
 
 Remote tools turn any external HTTP service into a set of callable tools for your AI agent. Contenox fetches the service's OpenAPI v3 spec, discovers every operation, and makes them available to the model as named tools — no client code required.

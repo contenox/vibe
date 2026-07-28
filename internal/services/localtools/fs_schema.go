@@ -50,12 +50,24 @@ var fsToolDocs = map[string]fsToolDoc{
 			"Errors carry a severity marker: '(recoverable: adjust parameters and retry)' when a corrected call fixes it, '(fatal: <reason>)' only for a broken environment.",
 	},
 	"write_file": {
-		terse: "Overwrite a file, or create it if absent. Creates parent directories. Returns JSON metadata, not the file bodies. Overwriting an existing file requires a prior full read_file of its current version in this session.",
+		terse: "Overwrite a file, or create it if absent. Creates parent directories. Returns JSON metadata, not the file bodies. Overwriting an existing file requires a prior full read_file of its current version in this session. Prefer edit_file for a targeted change to an existing file.",
 		verbose: "Overwrite a file with new content, or create it if it does not exist. Creates intermediate directories automatically. " +
 			"Writes are atomic: a failure partway through leaves the original file intact. " +
 			"Returns compact JSON with {path, written, old_bytes, new_bytes, old_sha256, new_sha256}; full old/new file bodies are not returned to the model. " +
 			"Modifying an existing file requires a prior read_file call against the same current version in this session; read_file_range is not sufficient for a full-file overwrite. " +
-			"Creating a brand-new file requires no prior read. If the file changes between your read and this write, the write is refused rather than clobbering the newer version.",
+			"Creating a brand-new file requires no prior read. If the file changes between your read and this write, the write is refused rather than clobbering the newer version. " +
+			"Prefer edit_file when the change is a targeted replacement within an existing file — it is cheaper and safer than resending the whole file.",
+	},
+	"edit_file": {
+		terse: "Replace old_string with new_string in a file — prefer this over write_file for a targeted modification. old_string must match the current file byte-for-byte (whitespace-exact) and occur exactly once, unless replace_all=true (e.g. renaming an identifier everywhere). Requires a prior read of the current version; never applies a fuzzy match.",
+		verbose: "Replace an exact occurrence of old_string with new_string in an existing file, without resending the whole file. " +
+			"old_string must match the current on-disk text exactly, whitespace included, and by default must occur exactly once in the file — an ambiguous old_string is refused rather than guessed at, so give it enough surrounding context (a few lines) to be unique. " +
+			"Set replace_all=true to replace every occurrence instead, e.g. renaming an identifier across the file. " +
+			"old_string and new_string must differ, and old_string must not be empty. " +
+			"Requires a prior read_file or read_file_range call against the current file version in this session, and re-verifies the file's hash immediately before writing; if the file changed since your read, the edit is refused rather than clobbering the newer version. " +
+			"If old_string is not found, the file is left unchanged and the error says to re-read and retry with the exact current text. " +
+			"Returns compact JSON with {path, written, replacements, old_bytes, new_bytes, old_sha256, new_sha256}; full file bodies are not returned. " +
+			"Prefer this over write_file whenever the change is a targeted replacement rather than a full rewrite.",
 	},
 	"list_dir": {
 		terse: "List a directory. Set recursive=true for a depth-limited tree. Entries: dirs end with '/', '*' marks executables, files over 1 MiB show a size. Gitignored and high-noise directories are omitted. Long listings are truncated with a resume offset.",
@@ -68,15 +80,18 @@ var fsToolDocs = map[string]fsToolDoc{
 			"A missing path returns a 'Did you mean:' suggestion of similar sibling names.",
 	},
 	"grep": {
-		terse: "Search one file for a pattern. Literal substring by default; set regex=true for RE2. Optional start_line/end_line limit the range. Returns matching lines as 'N: text', truncated with a notice if there are too many.",
-		verbose: "Search a single file for a pattern. Default: literal substring match. Set regex true for a Go RE2 regular expression matched per line. " +
-			"Optional start_line and end_line (1-based, inclusive) limit the search to a line range. " +
-			"Output: matching lines as 'N: text'. When there are more matches than the cap allows, the matches found so far are returned with a notice naming the last line searched, so you can narrow the pattern or resume from a later start_line. Refuses binary files.",
+		terse: "Search for a pattern. Literal substring by default; set regex=true for RE2. path may be a file or directory; directories search recursively (skipping binaries, .gitignore'd and high-noise paths), capped at 100 matches and the usual output-byte cap. Single-file matches print as 'N: text'; directory matches as 'path:N: text'. start_line/end_line only apply to a single file.",
+		verbose: "Search for a pattern. Default: literal substring match. Set regex true for a Go RE2 regular expression matched per line. " +
+			"path may be a file or a directory: a directory searches every text file beneath it recursively, applying the same .gitignore and high-noise-directory filtering as list_dir, and silently skipping binaries and unreadable files rather than aborting the search. " +
+			"Optional start_line and end_line (1-based, inclusive) limit a single-file search to a line range; they are ignored in directory mode. " +
+			"Output: matching lines as 'N: text' for a single file, or 'relative/path:N: text' when searching a directory. " +
+			"Directory mode is capped at 100 matches (regardless of _max_grep_matches, which is sized for one file) and the same output-byte cap as everything else in this toolset; when either cap is hit, the matches found so far are returned with a notice to narrow the pattern or search a subdirectory. Refuses binary files.",
 	},
 	"find_files": {
-		terse: "Find files by glob under the project root. filepath.Match syntax ('*.go'); no '**' support. Pattern matches the basename unless it contains a slash. Returns JSON {matches, count, truncated}. Gitignored paths are skipped.",
-		verbose: "Find files by name pattern under the project root. Uses Go filepath.Match glob syntax: * matches any sequence of non-separator characters, ? matches one character, [range] matches a character class. Note: ** (double-star cross-directory wildcard) is NOT supported. " +
-			"Without a slash in the pattern, the pattern is matched against the file basename only (e.g. \"*.go\" finds all Go files anywhere in the tree). With a slash, the pattern is matched against the relative path. " +
+		terse: "Find files by glob under the project root. filepath.Match syntax ('*.go'), plus '**' to span any number of directories (e.g. 'src/**/*.ts'). Pattern matches the basename unless it contains a slash. Returns JSON {matches, count, truncated}. Gitignored paths are skipped.",
+		verbose: "Find files by name pattern under the project root. Uses Go filepath.Match glob syntax: * matches any sequence of non-separator characters, ? matches one character, [range] matches a character class. " +
+			"** additionally matches zero or more whole path segments, crossing directory boundaries — e.g. \"src/**/*.ts\" finds every .ts file under src at any depth, including directly in src itself. " +
+			"Without a slash in the pattern, the pattern is matched against the file basename only (e.g. \"*.go\" finds all Go files anywhere in the tree). With a slash (including \"**\"), the pattern is matched against the relative path. " +
 			"Returns JSON: {matches: [...], count: N, truncated: true|false}. Results are capped at 200 by default (policy: _max_find_results) and depth is bounded. " +
 			"Gitignored paths, high-noise directories, and paths excluded by policy are skipped.",
 	},
@@ -113,7 +128,7 @@ var fsToolDocs = map[string]fsToolDoc{
 func (h *LocalFSTools) Supports(ctx context.Context) ([]string, error) {
 	return []string{
 		h.name,
-		"read_file", "write_file", "list_dir", "grep", "find_files",
+		"read_file", "write_file", "edit_file", "list_dir", "grep", "find_files",
 		"sed", "count_stats", "read_file_range", "stat_file",
 	}, nil
 }
@@ -161,6 +176,13 @@ func (h *LocalFSTools) GetToolsForToolsByName(ctx context.Context, name string) 
 			"content": fsProp("string", "New content for the file"),
 		}, "path", "content"),
 
+		fsTool("edit_file", doc("edit_file"), map[string]any{
+			"path":        fsProp("string", "Path to the file"),
+			"old_string":  fsProp("string", "Exact, whitespace-sensitive text to replace; must be unique in the file unless replace_all is set"),
+			"new_string":  fsProp("string", "Replacement text"),
+			"replace_all": fsProp("boolean", "Replace every occurrence of old_string instead of requiring exactly one"),
+		}, "path", "old_string", "new_string"),
+
 		fsTool("list_dir", doc("list_dir"), map[string]any{
 			"path":      fsProp("string", "Directory path relative to the project root (default: .)"),
 			"recursive": fsProp("boolean", "List subdirectories up to max_depth"),
@@ -169,15 +191,15 @@ func (h *LocalFSTools) GetToolsForToolsByName(ctx context.Context, name string) 
 		}),
 
 		fsTool("grep", doc("grep"), map[string]any{
-			"path":       fsProp("string", "Path to the file, relative to the project root"),
+			"path":       fsProp("string", "Path to a file or a directory, relative to the project root. A directory searches recursively."),
 			"pattern":    fsProp("string", "Substring to find, or a regex when regex is true"),
 			"regex":      fsProp("boolean", "Treat pattern as a Go RE2 regular expression"),
-			"start_line": fsProp("integer", "First line to search (1-based, default 1)"),
-			"end_line":   fsProp("integer", "Last line to search, inclusive (default: end of file)"),
+			"start_line": fsProp("integer", "First line to search (1-based, default 1); single-file search only"),
+			"end_line":   fsProp("integer", "Last line to search, inclusive (default: end of file); single-file search only"),
 		}, "path", "pattern"),
 
 		fsTool("find_files", doc("find_files"), map[string]any{
-			"pattern": fsProp("string", "Glob matched against the basename (e.g. \"*.go\"), or against the relative path when it contains a slash"),
+			"pattern": fsProp("string", "Glob matched against the basename (e.g. \"*.go\"), or against the relative path when it contains a slash or \"**\" (e.g. \"src/**/*.ts\")"),
 			"path":    fsProp("string", "Directory to search from, relative to the project root (default: project root)"),
 		}, "pattern"),
 

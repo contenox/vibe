@@ -2,7 +2,6 @@
 # install.sh — Contenox installer
 # Usage:
 #   curl -fsSL https://contenox.com/install.sh | sh
-#   curl -fsSL https://contenox.com/install.sh | CONTENOX_WITH_MODELD=1 sh   # also preinstall the local inference daemon
 set -e
 
 REPO="contenox/beam"
@@ -97,15 +96,6 @@ fi
 
 echo ""
 echo "✓ contenox ${TAG} installed to ${INSTALL_DIR}/${BIN}"
-
-# ── Optional: preinstall the local inference daemon (modeld) ──────────────────
-# Local GGUF/OpenVINO inference needs the modeld daemon (~600 MB download).
-# It also installs on demand when `contenox setup` selects a local provider.
-if [ -n "${CONTENOX_WITH_MODELD}" ]; then
-  echo ""
-  echo "Installing the local modeld inference daemon (CONTENOX_WITH_MODELD set)..."
-  "${INSTALL_DIR}/${BIN}" modeld install --backend "${CONTENOX_MODELD_BACKEND:-llama}"
-fi
 
 echo ""
 echo "Get started:"

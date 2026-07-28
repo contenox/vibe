@@ -52,7 +52,6 @@ func NewTestPubSub() (Messenger, func(), error) {
 	if err != nil {
 		return nil, func() {}, err
 	}
-	// Optionally log container status if needed.
 	log.Printf("NATS container running: %v", container)
 
 	cfg := &Config{
@@ -74,7 +73,6 @@ func NewTestPubSub() (Messenger, func(), error) {
 		cleanup()
 		return nil, func() {}, err
 	}
-	// Return a cleanup function that closes PubSub and terminates the container.
 	return ps, func() {
 		_ = ps.Close()
 		cleanup()

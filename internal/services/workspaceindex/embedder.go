@@ -8,8 +8,7 @@ import (
 )
 
 // EmbedSeam is the one method the index needs from llmrepo's model manager.
-// *llmrepo.modelManager (via llmrepo.ModelRepo) satisfies it, and so does any
-// test double — the index never sees the concrete manager.
+// *llmrepo.modelManager satisfies it via llmrepo.ModelRepo.
 type EmbedSeam interface {
 	Embed(ctx context.Context, embedReq llmrepo.EmbedRequest, prompt string) ([]float64, llmrepo.Meta, error)
 }
@@ -21,18 +20,12 @@ type llmRepoEmbedder struct {
 	provider string
 }
 
-// NewLLMRepoEmbedder wires the index to the runtime's real embedding path: the
-// provider-agnostic Embed that already resolves through the model router.
-//
-// model/provider are passed EXPLICITLY rather than left to llmrepo's own
-// defaults so the model recorded on an index config is provably the one that
-// produced its vectors. Pass enginesvc.Engine.EmbeddingModel's Name/Provider,
-// which is the resolved embedding model (config keys, then the chat-model
-// fallback) that the engine's model manager was built with.
-//
-// float64 to float32 is deliberate and lossless enough to be uninteresting:
-// no embedding model has meaningful precision past float32, and halving the
-// stored blob halves the index.
+// NewLLMRepoEmbedder wires the index to the runtime's real embedding path:
+// the provider-agnostic Embed that already resolves through the model
+// router. model/provider are passed explicitly so the model recorded on an
+// index config is provably the one that produced its vectors. The
+// float64-to-float32 conversion is deliberate: no embedding model has
+// meaningful precision past float32, and it halves the stored blob.
 func NewLLMRepoEmbedder(seam EmbedSeam, model, provider string) Embedder {
 	return &llmRepoEmbedder{seam: seam, model: model, provider: provider}
 }

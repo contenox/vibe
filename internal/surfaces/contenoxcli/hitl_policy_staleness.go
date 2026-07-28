@@ -12,13 +12,9 @@ import (
 	"github.com/contenox/beam/internal/services/setupcheck"
 )
 
-// RefreshPoliciesCommand is the ONE verb that rewrites the shipped HITL policy
-// presets and nothing else.
-//
-// `contenox init --force` also refreshes them, but it overwrites every chain
-// file in ~/.contenox on the way — far too much collateral to put in front of
-// someone whose only problem is a policy envelope that predates a toolset. So
-// the notice names this narrower verb instead.
+// RefreshPoliciesCommand rewrites the shipped HITL policy presets and nothing
+// else — unlike `contenox init --force`, which also overwrites every chain
+// file in ~/.contenox.
 const RefreshPoliciesCommand = "contenox init --refresh-policies"
 
 // catchAllToolset is the value a rule uses to match every toolset. The
@@ -26,14 +22,11 @@ const RefreshPoliciesCommand = "contenox init --refresh-policies"
 // || r.Tools == "*"`), so both map onto this marker here.
 const catchAllToolset = "*"
 
-// stalePolicyPreset is one policy file on disk that carries no rule AT ALL for
-// toolsets the preset of the same name in THIS build rules on.
-//
-// It is not "the operator is wrong": it is "this envelope was written before
-// those toolsets existed". The file stays exactly as it is — see
-// upgradeEmbeddedHITLPolicies for why an unprovable file is never rewritten —
-// and this record exists so a surface can SAY so instead of letting the
-// operator discover it one approval card at a time.
+// stalePolicyPreset is a policy file on disk that carries no rule for a
+// toolset the same-named preset in this build rules on — i.e. the envelope
+// predates that toolset. The file itself is never rewritten; this record lets
+// a surface say so instead of the operator discovering it one approval card
+// at a time.
 type stalePolicyPreset struct {
 	Name string
 	Path string
@@ -46,14 +39,11 @@ type stalePolicyPreset struct {
 }
 
 // policyToolsets returns the set of toolset names a policy document's rules
-// mention, and whether the document could be read at all.
-//
-// Deliberately tolerant: an operator's file is parsed with a minimal shape and
-// per-rule error skipping rather than the strict loader, because the question
-// asked here ("does this file know about gointel?") must not turn into a second
-// validator with its own opinions about the operator's envelope. A file that
-// cannot be parsed reports ok=false, and every caller then says nothing — a
-// wrong warning about someone's security boundary is worse than no warning.
+// mention, and whether the document could be read at all. Parsing is
+// deliberately tolerant (minimal shape, per-rule error skipping) rather than
+// the strict loader's: a file that fails to parse reports ok=false, so every
+// caller stays silent rather than risk a wrong warning about someone's
+// security boundary.
 func policyToolsets(raw []byte) (map[string]bool, bool) {
 	var doc struct {
 		Rules []map[string]json.RawMessage `json:"rules"`
@@ -61,9 +51,8 @@ func policyToolsets(raw []byte) (map[string]bool, bool) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, false
 	}
-	// A field of an unexpected shape (a list where a string belongs, say) means
-	// this rule is not something we understand, and a rule we cannot read might
-	// be the very rule that covers the toolset in question — so the whole
+	// An unexpected field shape means this rule isn't understood, and it might
+	// be the very rule covering the toolset in question — so the whole
 	// document reports "no claim" rather than guessing.
 	field := func(rule map[string]json.RawMessage, key string) (string, bool) {
 		v, present := rule[key]
@@ -83,10 +72,8 @@ func policyToolsets(raw []byte) (map[string]bool, bool) {
 			return nil, false
 		}
 		if tools == "" || tools == catchAllToolset {
-			// A wildcard on BOTH axes covers every call, so nothing can fall
-			// through to default_action and nothing is missing. A wildcard
-			// toolset pinned to one tool name (tools:"*", tool:"read_file")
-			// covers only that name, so it is not evidence of anything.
+			// A wildcard on both axes covers every call; one pinned to a
+			// single tool name covers only that name.
 			tool, ok := field(rule, "tool")
 			if !ok {
 				return nil, false
@@ -113,22 +100,10 @@ func policyDefaultAction(raw []byte) string {
 	return strings.TrimSpace(doc.DefaultAction)
 }
 
-// missingPolicyToolsets is THE DETECTOR: the toolsets `shipped` writes rules for
-// that `onDisk` does not mention at all.
-//
-// The rule, stated as the confidence claim it makes: an operator who
-// deliberately DELETED the gointel rule from their envelope is vanishingly
-// rarer than an operator whose envelope was written before gointel existed —
-// and the two are distinguishable from nothing else on disk. Everything weaker
-// than "the toolset appears nowhere in this file's rules" is deliberately NOT a
-// signal:
-//   - a reordered or reworded rule mentions the toolset → not missing;
-//   - a rule that DENIES the toolset mentions it → not missing (a deny is a
-//     decision, and re-suggesting the shipped preset over it would be telling
-//     an operator to loosen their own envelope);
-//   - a catch-all rule matches every toolset → nothing falls through, so
-//     nothing is missing;
-//   - an unparseable file → no claim at all.
+// missingPolicyToolsets returns the toolsets `shipped` writes rules for that
+// `onDisk` mentions nowhere at all — a rule that denies a toolset, or a
+// catch-all rule, still counts as mentioning it. An unparseable file reports
+// no claim.
 func missingPolicyToolsets(shipped, onDisk []byte) []string {
 	want, ok := policyToolsets(shipped)
 	if !ok {
@@ -279,12 +254,9 @@ func stalePolicyPresetIssues(dirs []string) []setupcheck.StalePolicyPreset {
 	return out
 }
 
-// runRefreshPolicies rewrites the HITL policy presets in ~/.contenox from this
-// build and touches NOTHING else — no chains, no config, no database.
-//
-// This is the only path that replaces a policy file we cannot prove is
-// untouched, and it exists precisely so that the automatic path never has to:
-// the operator types the verb, so the operator made the decision.
+// runRefreshPolicies rewrites the HITL policy presets in ~/.contenox and
+// touches nothing else — no chains, no config, no database. It is the only
+// path that replaces a policy file that cannot be proven untouched.
 func runRefreshPolicies(out io.Writer) error {
 	dir, err := globalContenoxDir()
 	if err != nil {

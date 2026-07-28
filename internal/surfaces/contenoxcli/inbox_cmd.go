@@ -1,15 +1,7 @@
 // inbox_cmd.go holds the `contenox inbox` verbs: a thin read/ack surface over
-// internal/services/operatorinbox — the durable reports (and, via a mission's
-// unattended blocker path, questions) that reached NO live session to answer
-// them. It is deliberately NOT the same surface as `contenox approvals`:
-// approvals is the LIVE ask queue (permission gates and attention questions
-// still waiting on a verdict); the operator inbox is what a mission left
-// behind for a human to READ once nobody was watching. See
-// internal/services/operatorinbox's package doc for why the two stay
-// separate stores rather than one overloaded table.
-//
-// Self-registering (own init(), like beam_cmd.go), so this file is the whole
-// wiring for the command: flags, rendering, and the rootCmd.AddCommand call.
+// internal/services/operatorinbox — durable reports (and blocker questions)
+// that reached no live session to answer them. Distinct from `contenox
+// approvals`, the live ask queue still waiting on a verdict.
 package contenoxcli
 
 import (
@@ -78,8 +70,7 @@ func init() {
 	rootCmd.AddCommand(inboxCmd)
 }
 
-// openInboxService opens the shared database the way the mission and
-// approvals read verbs do (OpenDBAt over resolveDBPath) and returns an
+// openInboxService opens the shared database and returns an
 // operatorinbox.Service over it.
 func openInboxService(cmd *cobra.Command) (io.Closer, operatorinbox.Service, error) {
 	dbPath, err := resolveDBPath(cmd)
@@ -229,9 +220,7 @@ func renderInboxItem(w io.Writer, it *operatorinbox.Item, now time.Time) {
 	fmt.Fprintf(w, "\nFull mission record: contenox mission show %s\n", it.MissionID)
 }
 
-// inboxReasonLabel renders operatorinbox.Reason in plain words — the closed
-// two-value set (see operatorinbox.Reason's doc) read as a fact about what
-// happened, not a wire enum.
+// inboxReasonLabel renders operatorinbox.Reason in plain words.
 func inboxReasonLabel(r operatorinbox.Reason) string {
 	switch r {
 	case operatorinbox.ReasonOperatorFired:

@@ -12,9 +12,7 @@ import (
 )
 
 // cmdStubAgent advertises an available-commands update while handling
-// session/new, the way the real ACP transport does for its slash-command menu.
-// It schedules the notification via AfterResponse so libacp can guarantee the
-// update is written AFTER the session/new result.
+// session/new, scheduled via AfterResponse so it is written after the result.
 type cmdStubAgent struct {
 	libacp.UnimplementedAgent
 	conn *libacp.AgentSideConnection
@@ -40,13 +38,10 @@ func (a *cmdStubAgent) NewSession(ctx context.Context, _ libacp.NewSessionReques
 	return libacp.NewSessionResponse{SessionID: libacp.SessionID("sess-1")}, nil
 }
 
-// TestUnit_AgentSideConnection_AvailableCommandsAfterNewSessionResult is the
-// regression for the dropped slash-command menu in Zed. A client learns a
-// new session's id ONLY from the session/new result; any session/update that
-// arrives before that result references an id the client has never seen and is
-// dropped as "unknown session". So an available_commands_update emitted while
-// handling session/new must be written to the wire AFTER the result, never
-// before. AfterResponse provides that ordering; this test pins it at the wire.
+// Invariant: an available_commands_update emitted while handling session/new
+// reaches the wire after the result, never before — a client learns a new
+// session's id only from that result and drops an earlier update as
+// referencing an unknown session.
 func TestUnit_AgentSideConnection_AvailableCommandsAfterNewSessionResult(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -85,8 +80,7 @@ func TestUnit_AgentSideConnection_AvailableCommandsAfterNewSessionResult(t *test
 
 	send(libacp.MethodSessionNew, 2, libacp.NewSessionRequest{Cwd: "/tmp", McpServers: []libacp.McpServer{}})
 
-	// The FIRST message after session/new must be the result that carries the
-	// new session id — not the available_commands_update.
+	// First message must be the result carrying the new session id.
 	first := nextMessage()
 	require.Equal(t, libacp.IncomingKindResponse, first.Kind,
 		"session/new result must reach the client before any session/update for that session, "+

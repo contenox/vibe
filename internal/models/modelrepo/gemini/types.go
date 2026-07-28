@@ -29,10 +29,9 @@ type geminiPart struct {
 }
 
 // geminiInlineData is an inline binary blob part (e.g. an image) sent in a
-// content part. The Gemini v1beta REST JSON is proto3-JSON and accepts the
-// lowerCamelCase field names, matching the casing this package already uses for
-// functionCall / functionResponse / thoughtSignature. encoding/json base64
-// (StdEncoding) encodes the Data []byte on the wire.
+// content part. The Gemini v1beta REST JSON is proto3-JSON, hence the
+// lowerCamelCase field names. encoding/json base64 (StdEncoding) encodes
+// Data []byte on the wire.
 type geminiInlineData struct {
 	MimeType string `json:"mimeType"`
 	Data     []byte `json:"data"`
@@ -62,7 +61,7 @@ type geminiGenerateContentResponse struct {
 
 // geminiUsageMetadata is the API's token accounting, attached to (the last
 // chunk of) a generateContent / streamGenerateContent response.
-// promptTokenCount is already the TOTAL prompt count (cached included);
+// promptTokenCount is already the total prompt count (cached included);
 // cachedContentTokenCount breaks out the tokens served from Gemini's implicit
 // (or explicit) cache.
 type geminiUsageMetadata struct {
@@ -73,12 +72,10 @@ type geminiUsageMetadata struct {
 }
 
 // neutralUsage maps usageMetadata onto the neutral TokenUsage. Prompt caching
-// on Gemini is IMPLICIT (enabled by default on 2.5+ models, ~90% discount on
-// cached tokens, best-effort): nothing is sent on the wire to activate it —
-// the client-side contract is byte-stable prefixes plus session affinity, and
-// this counter is where hits become visible. Explicit cachedContents
-// (guaranteed discount, storage billed per token-hour) is a recorded
-// follow-up (blueprint S1b.6) gated on measured implicit hit rates.
+// on Gemini is implicit (enabled by default on 2.5+ models, best-effort):
+// nothing is sent on the wire to activate it — the client-side contract is
+// byte-stable prefixes plus session affinity, and this counter is where hits
+// become visible.
 func (u *geminiUsageMetadata) neutralUsage() *modelrepo.TokenUsage {
 	if u == nil {
 		return nil
@@ -95,16 +92,15 @@ func (u *geminiUsageMetadata) neutralUsage() *modelrepo.TokenUsage {
 	}
 }
 
-// geminiFunctionDeclaration matches Gemini API's FunctionDeclaration exactly
-// https://ai.google.dev/gemini-api/docs/function-calling [[15]]
+// geminiFunctionDeclaration matches Gemini API's FunctionDeclaration exactly.
 type geminiFunctionDeclaration struct {
 	Name        string        `json:"name"`
 	Description string        `json:"description,omitempty"`
 	Parameters  *geminiSchema `json:"parameters,omitempty"`
 }
 
-// geminiSchema matches Gemini API's Schema object exactly
-// Only these fields are valid - anything else gets dropped on marshal [[15]]
+// geminiSchema matches Gemini API's Schema object exactly; only these fields
+// are valid, anything else gets dropped on marshal.
 type geminiSchema struct {
 	Type        string         `json:"type"`
 	Description string         `json:"description,omitempty"`

@@ -1,15 +1,13 @@
 package localtools_test
 
-// End-to-end tests for the tool-hardening recs implemented in this slice
-// (docs/development/blueprints/tool-hardening.md), driven through the real
-// LocalFSTools.Exec pipeline:
+// End-to-end tests, driven through the real LocalFSTools.Exec pipeline:
 //
-//   - Rec 4 (never truncate silently): read_file returns a bounded head plus a
+//   - read_file never truncates silently: it returns a bounded head plus a
 //     concrete "start_line: N" next step; paging from that number continues.
-//   - Rec 5 (fatal-vs-recoverable severity): the recoverable marker rides on the
-//     matrix of correctable error paths.
-//   - Rec 7 (did-you-mean): missing paths suggest siblings; sed no-match suggests
-//     the nearest lines and NEVER mutates (the fuzzy law).
+//   - the recoverable/fatal severity marker rides on the matrix of
+//     correctable error paths.
+//   - missing paths suggest siblings; a sed no-match suggests the nearest
+//     lines and never mutates.
 
 import (
 	"context"
@@ -27,9 +25,7 @@ import (
 
 var startLineRe = regexp.MustCompile(`start_line:\s*(\d+)`)
 
-// Rec 4: a read over the output cap returns a head + a notice that names the
-// exact next line, and paging from that line continues without repeating or
-// dropping content.
+// TestUnit_ReadFile_TruncateNamesExactNextLineAndPages pins that a truncated read names the exact next line, and paging continues cleanly.
 func TestUnit_ReadFile_TruncateNamesExactNextLineAndPages(t *testing.T) {
 	dir := t.TempDir()
 	// Six 6-char lines, no trailing newline.
@@ -65,8 +61,7 @@ func TestUnit_ReadFile_TruncateNamesExactNextLineAndPages(t *testing.T) {
 	require.NotContains(t, page2, "line01", "page 2 must not repeat page 1")
 }
 
-// Rec 4: a file over the read cap is not dumped partially — it is refused with a
-// message naming the exact next step (read a range / raise the cap).
+// TestUnit_ReadFile_OverReadCapNamesNextStep pins that a file over the read cap is refused, naming the range-read next step.
 func TestUnit_ReadFile_OverReadCapNamesNextStep(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "huge.txt", strings.Repeat("abcdefgh\n", 300)) // ~2.6 KiB
@@ -87,8 +82,7 @@ func TestUnit_ReadFile_OverReadCapNamesNextStep(t *testing.T) {
 	require.Equal(t, "abcdefgh\nabcdefgh", res.(string))
 }
 
-// Rec 5: the recoverable marker rides on the matrix of correctable error paths;
-// none of them are marked fatal.
+// TestUnit_Severity_RecoverableMatrix pins that every correctable error path is marked recoverable, never fatal.
 func TestUnit_Severity_RecoverableMatrix(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "text.txt", "hello\n")
@@ -122,8 +116,7 @@ func TestUnit_Severity_RecoverableMatrix(t *testing.T) {
 	}
 }
 
-// Rec 5: a read-before-write denial is a soft result carrying the recoverable
-// marker (not a fatal, not a hard error).
+// TestUnit_Severity_DenialIsRecoverable pins that a read-before-write denial is a soft, recoverable result, not a fatal error.
 func TestUnit_Severity_DenialIsRecoverable(t *testing.T) {
 	ctx, tools, dir := setupFSReadGuard(t)
 	writeFile(t, dir, "a.txt", "original\n")
@@ -135,7 +128,7 @@ func TestUnit_Severity_DenialIsRecoverable(t *testing.T) {
 	require.Contains(t, msg, "(recoverable:")
 }
 
-// Rec 7: a missing path suggests similar sibling names.
+// TestUnit_DidYouMean_SuggestsSiblings pins that a missing path suggests similar sibling names.
 func TestUnit_DidYouMean_SuggestsSiblings(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "README.md", "docs\n")
@@ -159,8 +152,7 @@ func TestUnit_DidYouMean_SuggestsSiblings(t *testing.T) {
 	require.Contains(t, err.Error(), "internal")
 }
 
-// Rec 7 + the fuzzy law: sed on a pattern that is not present suggests the
-// nearest actual lines and leaves the file untouched.
+// TestUnit_Sed_NoMatchSuggestsAndDoesNotMutate pins that a no-match sed suggests the nearest lines and never mutates the file.
 func TestUnit_Sed_NoMatchSuggestsAndDoesNotMutate(t *testing.T) {
 	ctx, tools, dir := setupFSReadGuard(t)
 	original := "func Alpha() {}\nfunc Bravo() {}\nfunc Charlie() {}\n"

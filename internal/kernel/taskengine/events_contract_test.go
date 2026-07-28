@@ -1,10 +1,7 @@
 package taskengine_test
 
-// Contract assertions for the engine event stream. The normative contract is
-// docs/development/engine-events.md — the per-kind field matrix, ordering
-// guarantees, and addressing rules asserted here. When these tests disagree
-// with the document, one of the two is wrong and the slice is not done: fix
-// the drift, never loosen the assertion.
+// Contract assertions for the engine event stream: the per-kind field
+// matrix, ordering guarantees, and addressing rules.
 
 import (
 	"context"

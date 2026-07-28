@@ -1,15 +1,11 @@
 package jqtool
 
-// input.go turns an argument into the value gojq runs against: containment and
-// the file read for `path`, decoding and normalization for both sources.
+// input.go turns an argument into the value gojq runs against: containment
+// and the file read for `path`, decoding and normalization for both sources.
 //
-// CONTAINMENT IS local_fs's, NOT A SECOND IMPLEMENTATION. baseDir, checkPath and
-// displayPath below mirror internal/services/localtools/fs.go one for one,
-// including the `_allowed_dir` policy override, and every one of them delegates
-// the actual boundary decision to internal/services/vfs — the single
-// symlink-escape guard in this process. A path outside the workspace is refused
-// with the containment sentinel BEFORE any I/O happens, so an escaping symlink
-// is never opened, only rejected.
+// Containment mirrors internal/services/localtools/fs.go and delegates the
+// boundary decision to internal/services/vfs, so a path outside the
+// workspace is refused before any I/O happens.
 
 import (
 	"bytes"
@@ -39,23 +35,15 @@ const (
 // `input` argument rather than from a file.
 const inlineSource = "(inline input)"
 
-// --- Path handling (mirrors localtools.LocalFSTools) -------------------------
-
 func (h *tools) policyArgs(ctx context.Context) map[string]string {
 	return taskengine.ToolsArgsFromContext(ctx, h.name)
 }
 
 // baseDir returns the directory `path` arguments are resolved against:
-// tools_policies.jq._allowed_dir when the chain declared one, else the directory
-// the toolset was constructed with, else the per-call cwd resolver. Identical
-// precedence to LocalFSTools.baseDir.
-//
-// There is deliberately NO fallback to the process working directory. git's
-// toolset takes one because it can distinguish "declared boundary" from "found a
-// repo"; this tool reads an arbitrary named file, so it follows local_fs and
-// gointel instead: with nothing declared, there is no boundary to enforce and
-// the read is refused rather than silently scoped to wherever the process
-// happens to be.
+// tools_policies.jq._allowed_dir when declared, else the toolset's configured
+// directory, else the per-call cwd resolver. With nothing declared there is
+// no boundary to enforce, so the read is refused rather than silently scoped
+// to the process's working directory.
 func (h *tools) baseDir(ctx context.Context) (string, error) {
 	if args := h.policyArgs(ctx); len(args) > 0 {
 		if policyDir := strings.TrimSpace(args["_allowed_dir"]); policyDir != "" {
@@ -78,11 +66,6 @@ func (h *tools) baseDir(ctx context.Context) (string, error) {
 		}
 	}
 	if base == "" {
-		// FATAL, and it names the two ways a root is supplied. gointel learned
-		// this the expensive way: a bare "no allowed directory configured" sends
-		// the model hunting for a better path spelling forever, when nothing it
-		// can type will help. The `input` argument is named too, because unlike
-		// gointel this tool has a source that still works.
 		return "", fmt.Errorf("%w: no workspace root is configured for this session, so no file path can be resolved; "+
 			"the root comes from the runtime's allowed directory (--local-exec-allowed-dir on the CLI) or from the "+
 			"session cwd resolver the composition root supplies. Pass the document inline via the `input` argument "+
@@ -104,10 +87,8 @@ func (h *tools) absAllowedDir(ctx context.Context) (string, error) {
 	return resolved, nil
 }
 
-// checkPath verifies that a path is within the allowed directory. Containment —
-// normalization plus symlink-escape guarding — is vfs's, so there is exactly one
-// implementation of it shared with local_fs and the /files browse API. A symlink
-// inside the sandbox pointing outside it is caught before any I/O.
+// checkPath verifies that a path is within the allowed directory via vfs, the
+// same containment shared with local_fs and the /files browse API.
 func (h *tools) checkPath(ctx context.Context, path string) (string, error) {
 	base, err := h.baseDir(ctx)
 	if err != nil {
@@ -116,9 +97,6 @@ func (h *tools) checkPath(ctx context.Context, path string) (string, error) {
 	resolved, err := vfs.Contain(base, path)
 	if err != nil {
 		if errors.Is(err, vfs.ErrEscape) {
-			// ONE typed boundary: a "../..", an absolute path elsewhere and a
-			// symlink pointing at /etc are the same refusal, so a caller
-			// branching on errors.Is(err, ErrEscapesWorkspace) sees all three.
 			return "", wrapRecoverable(ErrEscapesWorkspace,
 				"path %s escapes allowed directory %s", echoArg(path), base)
 		}
@@ -127,10 +105,8 @@ func (h *tools) checkPath(ctx context.Context, path string) (string, error) {
 	return resolved, nil
 }
 
-// displayPath renders an absolute path the way the model is expected to address
-// it: relative to the workspace root, forward-slashed. Every model-facing
-// message uses it, so a path in an error is a path the model can paste straight
-// back into the next call.
+// displayPath renders an absolute path relative to the workspace root,
+// forward-slashed, so it can be pasted straight back into the next call.
 func (h *tools) displayPath(ctx context.Context, absPath string) string {
 	base, err := h.absAllowedDir(ctx)
 	if err != nil {
@@ -143,10 +119,8 @@ func (h *tools) displayPath(ctx context.Context, absPath string) string {
 	return filepath.ToSlash(rel)
 }
 
-// --- Loading -----------------------------------------------------------------
-
-// loaded is a decoded input: the documents to run the filter over, plus what the
-// result should say about where they came from.
+// loaded is a decoded input: the documents to run the filter over, plus what
+// the result should say about where they came from.
 type loaded struct {
 	docs   []any
 	source string
@@ -172,8 +146,8 @@ func (h *tools) loadPath(ctx context.Context, path, format string) (*loaded, err
 	if info.IsDir() {
 		return nil, recoverablef("jq: %s is a directory, not a document; jq_query reads ONE JSON or YAML file", echoArg(display))
 	}
-	// Size is checked from the stat, before the read: an 800 MB file costs one
-	// syscall to refuse rather than 800 MB of I/O that is then discarded.
+	// Checked from the stat, before the read, so an oversized file costs one
+	// syscall to refuse rather than a full discarded read.
 	if info.Size() > MaxInputBytes {
 		return nil, recoverablef(
 			"jq: %s is %d bytes, over the %d-byte input cap; jq_query loads the whole document to query it. "+
@@ -185,8 +159,7 @@ func (h *tools) loadPath(ctx context.Context, path, format string) (*loaded, err
 	if err != nil {
 		return nil, recoverablef("jq: cannot read %s: %s", echoArg(display), echoErr(err))
 	}
-	// Re-check after the read: the file may have grown between the stat and the
-	// read (a log being appended to is the ordinary case, not an attack).
+	// Re-checked after the read: the file may have grown between stat and read.
 	if int64(len(data)) > MaxInputBytes {
 		return nil, recoverablef("jq: %s grew past the %d-byte input cap while being read", echoArg(display), MaxInputBytes)
 	}
@@ -221,10 +194,7 @@ func loadInline(text, format string) (*loaded, error) {
 	return out, nil
 }
 
-// loadValue wraps an `input` that arrived as an already-decoded JSON value — a
-// model that passes an object or an array rather than a string is being helpful,
-// not wrong, and refusing it would cost a turn to teach a distinction that does
-// not matter.
+// loadValue wraps an `input` that arrived as an already-decoded JSON value.
 func loadValue(v any) (*loaded, error) {
 	norm, err := normalize(v, 0)
 	if err != nil {
@@ -233,11 +203,8 @@ func loadValue(v any) (*loaded, error) {
 	return &loaded{docs: []any{norm}, source: inlineSource, format: FormatJSON}, nil
 }
 
-// --- Format selection --------------------------------------------------------
-
 // formatFromExt maps a filename to a format, or "" when the extension says
-// nothing. .jsonl/.ndjson are JSON: the stream decoder below reads them without
-// a special mode.
+// nothing. .jsonl/.ndjson are JSON: the stream decoder reads them as-is.
 func formatFromExt(name string) string {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".json", ".jsonl", ".ndjson":
@@ -248,20 +215,9 @@ func formatFromExt(name string) string {
 	return ""
 }
 
-// candidates returns the parsers to try, in order.
-//
-// The rule is three-tiered and deterministic, because "guess the format" is
-// exactly the kind of cleverness that produces a silent wrong answer:
-//
-//  1. An explicit `format` argument wins and is the ONLY parser tried, so a
-//     failure is reported against the parser the caller asked for.
-//  2. Otherwise the file extension decides, and again only that parser is tried.
-//     A .json file that does not parse as JSON is a broken .json file, and
-//     silently succeeding as YAML would hide that.
-//  3. Otherwise — no extension, or an inline string — the first non-space byte
-//     picks the first candidate and the other is the fallback. Both are tried
-//     because YAML is very nearly a superset of JSON and neither guess is
-//     reliable alone; the error names both attempts when both fail.
+// candidates returns the parsers to try, in order: an explicit `format` or a
+// file extension is tried alone; otherwise both JSON and YAML are tried,
+// leading-byte-sniffed order first, since neither guess is reliable alone.
 func candidates(explicit, byExt string) []string {
 	if explicit != "" {
 		return []string{explicit}
@@ -283,7 +239,6 @@ func sniff(data []byte) string {
 		return FormatJSON
 	}
 	if trimmed[0] == '-' || trimmed[0] == '#' || trimmed[0] == '%' {
-		// "- item", a comment, or a %YAML directive: none of them are JSON.
 		return FormatYAML
 	}
 	if trimmed[0] >= '0' && trimmed[0] <= '9' {
@@ -292,8 +247,7 @@ func sniff(data []byte) string {
 	return FormatYAML
 }
 
-// decodeError carries both attempts so the caller can render a message that
-// names what was actually tried.
+// decodeError carries both attempts so the caller can name what was tried.
 type decodeError struct {
 	tried []string
 	err   error
@@ -314,8 +268,8 @@ func decorateDecodeError(err error, what string) error {
 		what, tried, echoErr(de.err))
 }
 
-// decode parses data into one or more documents, returning the format actually
-// used and whether the document stream was cut at maxInputDocs.
+// decode parses data into one or more documents, returning the format
+// actually used and whether the document stream was cut at maxInputDocs.
 func decode(data []byte, explicit, byExt string) (docs []any, format string, truncated bool, err error) {
 	order := candidates(explicit, byExt)
 	if len(order) > 1 {
@@ -348,9 +302,8 @@ func decode(data []byte, explicit, byExt string) (docs []any, format string, tru
 	return nil, "", false, &decodeError{tried: order, err: firstErr}
 }
 
-// docsTruncatedNote is the explicit marker for a document stream cut at the cap.
-// Never silent: without it a `.kind` over a 5000-document manifest bundle would
-// answer about the first 1000 and read exactly like a complete answer.
+// docsTruncatedNote is the explicit marker for a document stream cut at the
+// cap; never silent, so a partial answer never reads as a complete one.
 func docsTruncatedNote() string {
 	return fmt.Sprintf(
 		"TRUNCATED: only the first %d documents of the input stream were read; the filter did not see the rest. "+
@@ -358,9 +311,8 @@ func docsTruncatedNote() string {
 }
 
 // decodeJSON reads a JSON stream: one value, or several concatenated /
-// newline-delimited ones (JSON Lines). UseNumber keeps integer precision that a
-// float64 would silently lose — gojq accepts json.Number natively, so a 64-bit
-// id in a config file survives the round trip.
+// newline-delimited ones (JSON Lines). UseNumber preserves integer precision
+// a float64 would lose.
 func decodeJSON(data []byte) ([]any, bool, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
@@ -379,9 +331,8 @@ func decodeJSON(data []byte) ([]any, bool, error) {
 		}
 		docs = append(docs, norm)
 		if len(docs) >= maxInputDocs {
-			// Peek for one more: the cap only gets REPORTED when something was
-			// actually left behind, so an input of exactly maxInputDocs is a
-			// complete answer and says so.
+			// The cap is only reported when something was actually left
+			// behind: peek for one more document first.
 			var extra any
 			if dec.Decode(&extra) == nil {
 				return docs, true, nil
@@ -396,11 +347,6 @@ func decodeJSON(data []byte) ([]any, bool, error) {
 }
 
 // decodeYAML reads a YAML stream, one entry per "---" document.
-//
-// gopkg.in/yaml.v3 is used rather than the go-yaml gojq's own CLI reaches for:
-// it is ALREADY a direct dependency of this module (taskengine parses the chain
-// DSL with it), so YAML support here adds no dependency at all, and a chain file
-// read by jq_query is parsed by exactly the parser that runs it.
 func decodeYAML(data []byte) ([]any, bool, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var docs []any
@@ -431,19 +377,12 @@ func decodeYAML(data []byte) ([]any, bool, error) {
 	return docs, false, nil
 }
 
-// --- Normalization -----------------------------------------------------------
-
 // normalize converts a decoded value into the types gojq accepts (nil, bool,
-// int, float64, *big.Int, json.Number, string, []any, map[string]any).
-//
-// It exists for YAML, which produces shapes JSON never does: a mapping with
-// non-string keys decodes to map[any]any, a timestamp to time.Time, a !!binary
-// to []byte, and an integer to int rather than a number token. Handing any of
-// those to gojq unconverted produces "invalid type" deep inside a filter, which
-// reads like a bug in the filter rather than in the document.
-//
-// Depth is capped: a hand-built deeply nested document must be a refusal, not a
-// stack overflow that takes the process with it.
+// int, float64, *big.Int, json.Number, string, []any, map[string]any). YAML
+// produces shapes JSON never does (non-string map keys, time.Time, !!binary),
+// which this maps into gojq-safe values instead of a downstream "invalid
+// type". Depth is capped so a deeply nested document is a refusal, not a
+// stack overflow.
 func normalize(v any, depth int) (any, error) {
 	if depth > maxValueDepth {
 		return nil, recoverablef("jq: the document nests deeper than %d levels, which jq_query will not load", maxValueDepth)
@@ -477,13 +416,10 @@ func normalize(v any, depth int) (any, error) {
 	case float32:
 		return float64(x), nil
 	case []byte:
-		// YAML !!binary. Rendered as the source text rather than as a byte
-		// array: jq has no byte type and an array of 4000 integers is not what
-		// anybody asked for.
+		// YAML !!binary, rendered as source text: jq has no byte type.
 		return string(x), nil
 	case time.Time:
-		// YAML timestamps. RFC3339 is the form every jq date builtin
-		// (fromdate, dateadd) accepts, so the value stays usable.
+		// YAML timestamps, in the RFC3339 form jq's date builtins accept.
 		return x.UTC().Format(time.RFC3339Nano), nil
 	case []any:
 		out := make([]any, len(x))
@@ -516,14 +452,12 @@ func normalize(v any, depth int) (any, error) {
 		}
 		return out, nil
 	}
-	// Anything else a decoder can produce is rendered rather than dropped: a
-	// value the filter can see and reject beats a value that silently vanished.
+	// Anything else a decoder can produce is rendered rather than dropped.
 	return fmt.Sprintf("%v", v), nil
 }
 
-// keyString renders a non-string YAML mapping key. JSON object keys are strings,
-// so a `1: value` or `true: value` mapping becomes "1" / "true" — the same thing
-// every YAML-to-JSON converter does, and the only shape a jq filter can address.
+// keyString renders a non-string YAML mapping key the way any YAML-to-JSON
+// converter would (`1: value` becomes "1"), the only shape jq can address.
 func keyString(k any) string {
 	switch key := k.(type) {
 	case string:

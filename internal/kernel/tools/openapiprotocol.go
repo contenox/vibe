@@ -26,7 +26,6 @@ type OpenAPIToolProtocol struct {
 }
 
 func (p *OpenAPIToolProtocol) FetchSchema(ctx context.Context, endpointURL string, httpClient *http.Client) (*openapi3.T, error) {
-	// Use SpecSource override when set; otherwise derive from endpointURL.
 	specURL := endpointURL + "/openapi.json"
 	if p.SpecSource != "" {
 		specURL = p.SpecSource
@@ -41,7 +40,6 @@ func (p *OpenAPIToolProtocol) FetchSchema(ctx context.Context, endpointURL strin
 	loader.Context = ctx
 	loader.IsExternalRefsAllowed = true
 
-	// ReadFromURIFunc handles both HTTP and file:// URIs.
 	loader.ReadFromURIFunc = func(loader *openapi3.Loader, url *url.URL) ([]byte, error) {
 		if url.Scheme == "file" {
 			return os.ReadFile(url.Path)
@@ -138,7 +136,6 @@ func (p *OpenAPIToolProtocol) ExecuteTool(
 		return nil, taskengine.DataTypeAny, err
 	}
 
-	// Consolidate arguments, with injectParams taking priority.
 	finalArgs := make(map[string]interface{})
 	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &finalArgs); err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("failed to parse tool arguments: %w", err)
@@ -151,7 +148,6 @@ func (p *OpenAPIToolProtocol) ExecuteTool(
 	queryParams := url.Values{}
 	headers := http.Header{}
 
-	// Process parameters that are defined in the OpenAPI spec.
 	allParams := append(openapi3.Parameters{}, details.PathItem.Parameters...)
 	allParams = append(allParams, details.Operation.Parameters...)
 	for _, paramRef := range allParams {
@@ -168,7 +164,7 @@ func (p *OpenAPIToolProtocol) ExecuteTool(
 		}
 	}
 
-	// Apply all injectParams based on their specified location, regardless of the spec.
+	// injectParams apply regardless of what the spec declares.
 	for _, injectedParam := range injectParams {
 		valStr := fmt.Sprintf("%v", finalArgs[injectedParam.Name])
 		switch injectedParam.In {
@@ -232,7 +228,6 @@ func (p *OpenAPIToolProtocol) ExecuteTool(
 		return nil, taskengine.DataTypeNil, nil
 	}
 
-	// Return structured JSON if possible, otherwise fall back to a raw string.
 	if strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
 		var result interface{}
 		if err := json.Unmarshal(responseBody, &result); err != nil {
@@ -259,18 +254,14 @@ func (p *OpenAPIToolProtocol) FetchTools(ctx context.Context, endpointURL string
 			continue
 		}
 
-		// Exclude health check endpoints from being exposed as tools.
+		// Health/readiness/metrics endpoints are never exposed as tools.
 		lowerPath := strings.ToLower(strings.TrimSpace(path))
 		if lowerPath == "/health" || lowerPath == "/healthz" {
 			continue
 		}
-
-		// Exclude readiness check endpoints from being exposed as tools.
 		if lowerPath == "/ready" || lowerPath == "/readyz" {
 			continue
 		}
-
-		// Exclude prometheus endpoints from being exposed as tools.
 		if lowerPath == "/metrics" {
 			continue
 		}
@@ -279,27 +270,22 @@ func (p *OpenAPIToolProtocol) FetchTools(ctx context.Context, endpointURL string
 		for method, operation := range operations {
 			switch strings.ToUpper(method) {
 			case "GET", "POST", "PUT", "PATCH", "DELETE":
-				// supported
 			default:
 				continue
 			}
 
-			// --- 🎯 STEP 1: Extract tool name from spec ---
 			name := p.extractToolName(path, method, operation)
 			if name == "" {
-				continue // skip if no valid name
+				continue
 			}
 
-			// --- 📝 STEP 2: Extract description ---
 			description := operation.Description
 			if description == "" {
 				description = operation.Summary
 			} else {
 				description += "/n" + operation.Summary
-
 			}
 
-			// --- 🧩 STEP 3: Build parameters schema ---
 			parameters, err := p.buildParametersSchema(pathItem, operation, method, injectParams)
 			if err != nil {
 				continue
@@ -322,20 +308,17 @@ func (p *OpenAPIToolProtocol) FetchTools(ctx context.Context, endpointURL string
 
 // extractToolName extracts the tool name using operationId, x-tool-name, or fallback.
 func (p *OpenAPIToolProtocol) extractToolName(path, method string, operation *openapi3.Operation) string {
-	// 1. Try operationId (standard OpenAPI)
 	if operation.OperationID != "" {
 		return operation.OperationID
 	}
 
-	// 2. Try x-tool-name (custom extension)
 	if toolName, ok := operation.Extensions["x-tool-name"].(string); ok && toolName != "" {
 		if !isValidToolName(toolName) {
-			return "" // skip invalid names
+			return ""
 		}
 		return toolName
 	}
 
-	// 3. Fallback: derive from path + method
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	baseName := parts[len(parts)-1]
 	if baseName == "" && len(parts) > 1 {
@@ -353,7 +336,6 @@ func (p *OpenAPIToolProtocol) buildParametersSchema(
 	properties := make(map[string]interface{})
 	required := make([]string, 0)
 
-	// Helper to map an OpenAPI 'in' string to our ArgLocation enum.
 	mapOA3LocationToArgLocation := func(in string) ArgLocation {
 		switch in {
 		case "query":
@@ -363,12 +345,10 @@ func (p *OpenAPIToolProtocol) buildParametersSchema(
 		case "header":
 			return ArgLocationHeader
 		default:
-			return -1 // Represents an unsupported or unknown location.
+			return -1
 		}
 	}
 
-	// 1. Process Path and Query Parameters
-	// Consolidate all parameters defined at the path and operation level.
 	allParams := append(openapi3.Parameters{}, pathItem.Parameters...)
 	allParams = append(allParams, operation.Parameters...)
 
@@ -378,24 +358,22 @@ func (p *OpenAPIToolProtocol) buildParametersSchema(
 		}
 		param := paramRef.Value
 
-		// Check if the parameter should be hidden because it will be injected.
+		// Hide a parameter the system will inject.
 		if injectedParam, ok := injectParams[param.Name]; ok {
 			paramLocation := mapOA3LocationToArgLocation(param.In)
 			if injectedParam.In == paramLocation {
-				continue // Skip: This parameter is injected by the system.
+				continue
 			}
 		}
 
-		// Only expose 'path' and 'query' parameters to the LLM.
+		// Only 'path' and 'query' parameters are exposed to the LLM.
 		if param.In != "path" && param.In != "query" {
 			continue
 		}
 
-		// Add the parameter's schema to the properties map.
 		if param.Schema != nil && param.Schema.Value != nil {
 			schemaJSON, err := param.Schema.Value.MarshalJSON()
 			if err != nil {
-				// Optionally log the error for debugging.
 				continue
 			}
 			var propSchema map[string]interface{}
@@ -408,18 +386,16 @@ func (p *OpenAPIToolProtocol) buildParametersSchema(
 		}
 	}
 
-	// 2. Process Request Body for methods that support it.
+	// A single-object request body has its properties lifted to the top level.
 	if operation.RequestBody != nil && slices.Contains([]string{"POST", "PUT", "PATCH"}, strings.ToUpper(method)) {
 		if content := operation.RequestBody.Value.Content; content != nil {
 			if jsonContent, ok := content["application/json"]; ok && jsonContent.Schema != nil {
 				schema := jsonContent.Schema.Value
 
-				// If the body is a single object, lift its properties to the top level.
 				if schema.Type.Is("object") {
 					for propName, propSchemaRef := range schema.Properties {
-						// Check if this body property should be hidden.
 						if injectedParam, ok := injectParams[propName]; ok && injectedParam.In == ArgLocationBody {
-							continue // Skip: This property is injected by the system.
+							continue
 						}
 
 						if propSchemaRef != nil && propSchemaRef.Value != nil {
@@ -433,26 +409,22 @@ func (p *OpenAPIToolProtocol) buildParametersSchema(
 							}
 						}
 					}
-					// Add any required properties from the body schema.
 					required = append(required, schema.Required...)
 				}
 			}
 		}
 	}
 
-	// If no parameters are exposed to the LLM, return nil.
 	if len(properties) == 0 {
 		return nil, nil
 	}
 
-	// 3. Construct the Final JSON Schema for the LLM
 	finalSchema := map[string]interface{}{
 		"type":       "object",
 		"properties": properties,
 	}
 
 	if len(required) > 0 {
-		// Remove duplicates from the required list before adding it to the schema.
 		slices.Sort(required)
 		finalSchema["required"] = slices.Compact(required)
 	}

@@ -1,8 +1,7 @@
 package setupcheck
 
-// The embedding model gates the OPTIONAL workspace index. Every issue it raises
-// must be a warning that leaves Ready() true — an agent that never runs a search
-// is not broken by having no embedding model. See addEmbeddingIssues.
+// The embedding model gates the optional workspace index; every issue it
+// raises is a warning that leaves Ready() true (see addEmbeddingIssues).
 
 import (
 	"strings"
@@ -94,8 +93,7 @@ func TestUnit_Evaluate_UnembeddableModelWarnsWithAlternatives(t *testing.T) {
 	}
 }
 
-// A provider whose reachable backend exposes no embedding-capable model at all
-// is a different message from "you picked the wrong name", and still a warning.
+// TestUnit_Evaluate_NoEmbedCapableModelsWarns pins that "no embedding-capable models at all" is a distinct warning from "wrong name".
 func TestUnit_Evaluate_NoEmbedCapableModelsWarns(t *testing.T) {
 	in := embedReadyInput()
 	in.DefaultEmbedModel = "nomic-embed-text"
@@ -114,9 +112,7 @@ func TestUnit_Evaluate_NoEmbedCapableModelsWarns(t *testing.T) {
 	}
 }
 
-// With no backends at all, evaluateCore returns early — the embedding warning
-// must still be appended (it is true regardless) and must still not block beyond
-// the pre-existing no_backends blocker.
+// TestUnit_Evaluate_EmbedWarningSurvivesEarlyReturn pins that the embedding warning still appends even when evaluateCore returns early.
 func TestUnit_Evaluate_EmbedWarningSurvivesEarlyReturn(t *testing.T) {
 	res := Evaluate(Input{DefaultModel: "m", DefaultProvider: "ollama"})
 	if findIssue(res.Issues, "embed_model_unset") == nil {

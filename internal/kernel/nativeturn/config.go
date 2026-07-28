@@ -1,34 +1,9 @@
-// Package nativeturn is the serve-level survival layer for NATIVE ACP chain
-// turns. A native turn (the contenox task-chain engine driving one session/prompt)
-// historically ran inside the per-connection acpsvc.Transport, on a context that
-// descended from the client's WebSocket request — so a dropped connection cancelled
-// the running chain and wiped the work. This package relocates ownership of the
-// in-flight turn OFF any single connection onto a serve-rooted Registry, exactly as
-// agentinstance.Manager already does for EXTERNAL agents: the turn runs on a
-// serve-rooted context, its events are captured in a bounded per-session journal,
-// and per-connection Transports attach as thin VIEWERS that replay the journal on
-// (re)attach and join the live fan-out. A viewer leaving (a connection drop) detaches
-// but never cancels the turn.
-//
-// Anti-zombie is a hard requirement, enforced by four belts:
-//
-//   - Belt 1 (grace): when the LAST viewer detaches, a grace timer starts; a
-//     reattach within the window cancels it, expiry cancels the turn and tears it
-//     down (see turnSession.detach / attach).
-//   - Belt 2 (hard deadline): every turn runs under a WithDeadline context bounded
-//     by Config.TurnDeadline, so a runaway turn is always terminated (see
-//     Registry.newTurnSession).
-//   - Belt 3 (bounded journal): the replay journal is a fixed-size ring, so a
-//     long-running turn's event history never grows without bound (see journal).
-//   - Belt 4 (reaper): a periodic sweep tears down sessions past their grace or
-//     hard deadline, and cleans up finished-and-unwatched turns, as a backstop for
-//     the timer-driven paths (see Registry.ReapIdle).
-//
-// Everything here is safe for concurrent use. The Registry is generic over the
-// turn's WORK: acpsvc supplies a TurnFunc that runs the chain and emits
-// session/update notifications, so this package depends only on libacp and never
-// on taskengine — the same policy-free split agentinstance keeps between its kernel
-// and the service layer above it.
+// Package nativeturn is the serve-level survival layer for native ACP chain
+// turns: it runs an in-flight turn on a serve-rooted Registry, off any single
+// connection, so a dropped connection detaches a viewer without cancelling
+// the turn. Anti-zombie guarantees are enforced by four belts: a last-viewer
+// grace timer, a hard per-turn deadline, a bounded replay journal, and a
+// periodic reaper backstop. Every exported type is safe for concurrent use.
 package nativeturn
 
 import (
@@ -38,45 +13,36 @@ import (
 )
 
 // Config holds the survival-layer tunables. TurnDeadline and GraceWindow are
-// operator-facing (env-backed, see ParseEnv); JournalSize is a fixed structural
-// bound overridable only in-process (tests), mirroring how terminalservice keeps
-// scrollback size out of its env surface.
+// operator-facing (env-backed, see ParseEnv); JournalSize is overridable only
+// in-process (tests).
 type Config struct {
-	// TurnDeadline is the hard wall-clock ceiling on a single turn (Belt 2). A turn
-	// still running when it elapses is terminated with a context deadline, which the
-	// chain engine surfaces as a failure the reattaching client can see. Must be > 0.
+	// TurnDeadline is the hard wall-clock ceiling on a single turn (belt 2).
+	// A turn still running when it elapses is terminated with a context
+	// deadline. Must be > 0.
 	TurnDeadline time.Duration
-	// GraceWindow is how long an in-flight turn survives with NO viewer attached
-	// before it is cancelled and torn down (Belt 1). A reattach inside the window
-	// keeps it alive. It also bounds how long a finished-but-still-watched turn and
-	// a past-deadline turn linger before the reaper reclaims them. Must be > 0.
+	// GraceWindow is how long an in-flight turn survives with no viewer
+	// attached before it is cancelled and torn down (belt 1); a reattach
+	// inside the window keeps it alive. Must be > 0.
 	GraceWindow time.Duration
-	// JournalSize bounds the per-session replay journal (Belt 3): the most recent
-	// JournalSize session/update events are retained for replay to a newly-attached
-	// viewer, dropped oldest-first. Zero or negative resolves to DefaultJournalSize
-	// in New.
+	// JournalSize bounds the per-session replay journal (belt 3): the most
+	// recent JournalSize events are retained, dropped oldest-first. Zero or
+	// negative resolves to DefaultJournalSize in New.
 	JournalSize int
 }
 
 const (
-	// DefaultTurnDeadline is the fallback hard turn ceiling (Belt 2). Fifteen
-	// minutes comfortably covers a long agentic chain while still bounding a runaway.
+	// DefaultTurnDeadline is the fallback hard turn ceiling (belt 2).
 	DefaultTurnDeadline = 15 * time.Minute
-	// DefaultGraceWindow is the fallback last-viewer-detach survival window (Belt 1).
-	// A browser reload/reconnect completes well inside a minute.
+	// DefaultGraceWindow is the fallback last-viewer-detach survival window (belt 1).
 	DefaultGraceWindow = 60 * time.Second
-	// DefaultJournalSize bounds the per-session replay journal (Belt 3) — the
-	// structured-event equivalent of a terminal's bounded scrollback. It mirrors
-	// agentinstance's journal bound so both survival layers retain the same tail.
+	// DefaultJournalSize bounds the per-session replay journal (belt 3).
 	DefaultJournalSize = 512
 )
 
 // ParseEnv builds a Config from the raw CONTENOX_TURN_MAX (hard deadline) and
-// CONTENOX_TURN_GRACE (last-viewer grace) env strings. An empty field takes the
-// corresponding default; a value must be a positive Go duration (e.g. "15m",
-// "90s"). It mirrors terminalservice.ParseEnv's validation style so serve's config
-// surface stays uniform. JournalSize is not env-configurable and is left at zero
-// here (New defaults it).
+// CONTENOX_TURN_GRACE (last-viewer grace) env strings. An empty field takes
+// the corresponding default; a value must be a positive Go duration (e.g.
+// "15m", "90s"). JournalSize is not env-configurable.
 func ParseEnv(turnMax, turnGrace string) (Config, error) {
 	cfg := Config{TurnDeadline: DefaultTurnDeadline, GraceWindow: DefaultGraceWindow}
 

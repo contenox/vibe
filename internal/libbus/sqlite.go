@@ -33,10 +33,9 @@ type SQLiteBus struct {
 	db     sqlExec
 	mu     sync.Mutex
 	closed bool
-	// ctx bounds the lifetime of every background goroutine this bus owns; it is
-	// cancelled by Close. Subscriptions take the caller's context AND this one,
-	// so Close (which waits on wg) can never be held hostage by a subscription
-	// whose caller context outlives the bus.
+	// ctx bounds every background goroutine this bus owns and is cancelled by
+	// Close. Subscriptions bind to it too, so Close can't be held hostage by a
+	// subscription whose caller context outlives the bus.
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -129,14 +128,10 @@ func (b *SQLiteBus) Stream(ctx context.Context, subject string, ch chan<- []byte
 	}
 	b.mu.Unlock()
 
-	// Snapshot max(id) before returning so a caller Publish cannot be counted as
-	// "historical" (race: Publish before this query ran inside the goroutine used to
-	// set cursor == new row id and skip the event forever).
-	//
-	// This must fail the whole call rather than fall back to a sentinel: a cursor
-	// below the smallest live row id makes the first poll match every historical
-	// row on the subject, replaying the entire backlog to a subscriber that asked
-	// only for new messages.
+	// Snapshot max(id) before returning, not inside the polling goroutine, so a
+	// racing Publish can't be skipped as "historical". Must fail the whole call
+	// on error rather than fall back to a sentinel: a cursor below the smallest
+	// live row id would replay the entire backlog to a subscriber.
 	var cursor int64
 	rows, err := b.db.QueryContext(ctx,
 		`SELECT COALESCE(MAX(id), 0) FROM bus_events WHERE subject = ?`, subject)
@@ -187,9 +182,8 @@ func (b *SQLiteBus) Stream(ctx context.Context, subject string, ch chan<- []byte
 				}
 				select {
 				case ch <- payload:
-					// Advance only on a successful hand-off, so an event abandoned
-					// because the context ended is retried on the next pass instead
-					// of being skipped forever.
+					// Advance only on a successful hand-off, so a send abandoned
+					// because the context ended is retried, not skipped forever.
 					cursor = id
 				case <-qCtx.Done():
 					return false
@@ -212,9 +206,8 @@ func (b *SQLiteBus) Stream(ctx context.Context, subject string, ch chan<- []byte
 		for {
 			select {
 			case <-subCtx.Done():
-				// Unsubscribe cancels subCtx to interrupt a delivery that is
-				// blocked on a full consumer channel, so a pending drain request
-				// may be racing this branch — honour it before leaving.
+				// A pending drain request may race this branch (Unsubscribe cancels
+				// subCtx to interrupt a blocked send) — honour it before leaving.
 				select {
 				case <-sub.drain:
 					finalDrain()
@@ -336,11 +329,8 @@ func (b *SQLiteBus) Request(ctx context.Context, subject string, data []byte) ([
 	if closed {
 		return nil, ErrConnectionClosed
 	}
-	// A deadline that has already passed is a request timeout, the same verdict
-	// the wait loop below reaches — the classification must not depend on WHERE
-	// inside Request the deadline happens to fire (under load it can expire
-	// before or during the INSERT). Cancellation stays cancellation: a caller
-	// that aborted on purpose must not be told the peer was too slow.
+	// An already-passed deadline is a timeout regardless of where in Request it
+	// fires; an explicit cancellation stays a cancellation, not a timeout.
 	if err := ctx.Err(); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("%w: %v", ErrRequestTimeout, err)
@@ -363,7 +353,6 @@ func (b *SQLiteBus) Request(ctx context.Context, subject string, data []byte) ([
 		return nil, fmt.Errorf("sqlite request insert: %w", err)
 	}
 
-	// Determine timeout: use ctx deadline if set, otherwise default.
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		deadline = time.Now().Add(defaultTimeout)
@@ -375,9 +364,7 @@ func (b *SQLiteBus) Request(ctx context.Context, subject string, data []byte) ([
 		select {
 		case <-ctx.Done():
 			_, _ = b.db.ExecContext(context.Background(), `DELETE FROM bus_requests WHERE id = ?`, id)
-			// Distinguish "the deadline passed" from "the caller cancelled":
-			// NATS already reports cancellation as context.Canceled, and a caller
-			// that aborted on purpose must not be told the peer was too slow.
+			// Distinguish cancellation from timeout, matching NATS's reporting.
 			if errors.Is(ctx.Err(), context.Canceled) {
 				return nil, ctx.Err()
 			}

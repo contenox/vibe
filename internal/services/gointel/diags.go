@@ -21,55 +21,21 @@ import (
 
 // Diagnostic scopes.
 const (
-	// ScopeChanged reports on the packages whose files this index has OBSERVED
-	// change — via Invalidate from the write path, or via the mtime sweep —
-	// since the process started. It is the scope the V1.1 post-edit loop uses.
+	// ScopeChanged reports on the packages whose files this index has observed change — via Invalidate or the mtime sweep — since the process started.
 	ScopeChanged = "changed"
-	// ScopePackage reports on one package, named by import path, package name,
-	// or a workspace-relative file.
+	// ScopePackage reports on one package, named by import path, package name, or a workspace-relative file.
 	ScopePackage = "package"
 	// ScopeAll reports on every package of the module.
 	ScopeAll = "all"
 )
 
-// The curated go/analysis set.
+// The curated go/analysis set. A pass earns a place only if it catches a bug class the compiler accepts, fires rarely enough that a finding is worth reading, and needs no cross-package fact propagation.
 //
-// Selection rule: a pass earns a place only if it catches a real bug class the
-// COMPILER accepts, fires rarely enough that a finding is worth reading, and
-// needs no cross-package fact propagation to be right about the common case.
-// Diagnostics are advisory; a noisy advisory is worse than none, because an
-// agent that learns to ignore this tool's output has lost the tool.
+// Default (defaultVetPasses): printf, unusedresult, unreachable, nilfunc.
 //
-// DEFAULT (defaultVetPasses) — quiet enough to run on every post-edit check:
+// Optional (optionalVetPasses): shadow — real signal (a re-declared err in an inner scope), but noisy enough on idiomatic `if err := f(); err != nil` to drown a clean result; request it via passes=["shadow"] or ["all"].
 //
-//   - printf     — format/verb/argument mismatches. The highest-yield vet check
-//     there is, and the compiler never sees it.
-//   - unusedresult — a discarded fmt.Sprintf/errors.New result is almost always
-//     a dropped assignment, and it compiles cleanly.
-//   - unreachable — statements after return/panic. Overwhelmingly an editing
-//     accident, which is exactly the failure mode of an agent rewriting a
-//     function.
-//   - nilfunc     — comparing a func VALUE to nil where a CALL was meant
-//     (f == nil vs f() == nil). Silent, always wrong.
-//
-// OPT-IN (optionalVetPasses) — real signal, too loud for a default:
-//
-//   - shadow      — a re-declared err in an inner scope, the classic
-//     silently-swallowed error.
-//
-// shadow is opt-in on measurement, not taste. Swept across this repository
-// (102 packages, zero type errors) the four default passes reported ZERO
-// findings and shadow reported 100 — every one of them the idiomatic
-// `if err := f(); err != nil` re-declaration. A diagnostics result that is 100%
-// one style pass on a healthy repo trains the reader to skip the whole result,
-// which costs more than the bug class it catches. Ask for it by name when
-// hunting a swallowed error: passes=["shadow"] or passes=["all"].
-//
-// Deliberately excluded entirely: fieldalignment and composites (high
-// false-positive rate without project configuration), anything the compiler
-// already rejects, and anything whose accuracy depends on facts imported from
-// dependencies, since this driver runs single-package and factless (see
-// passRunner).
+// Excluded: fieldalignment and composites (high false-positive rate without project config), and anything needing cross-package facts, since this driver runs single-package and factless (see passRunner).
 var (
 	defaultVetPasses = []*analysis.Analyzer{
 		printf.Analyzer,
@@ -86,8 +52,7 @@ var (
 // VetPasses returns the names of every curated analysis pass, defaults first.
 func VetPasses() []string { return analyzerNames(allVetPasses) }
 
-// DefaultVetPasses returns the names of the passes a diagnostics call runs when
-// none are requested.
+// DefaultVetPasses returns the names of the passes a diagnostics call runs when none are requested.
 func DefaultVetPasses() []string { return analyzerNames(defaultVetPasses) }
 
 func analyzerNames(list []*analysis.Analyzer) []string {
@@ -98,9 +63,7 @@ func analyzerNames(list []*analysis.Analyzer) []string {
 	return out
 }
 
-// resolvePasses turns the requested pass names into analyzers. Empty means the
-// default set; "all" means every curated pass; an unknown name is refused with
-// the available names listed rather than silently dropped.
+// resolvePasses turns the requested pass names into analyzers. Empty means the default set; "all" means every curated pass; an unknown name is refused with the available names listed rather than silently dropped.
 func resolvePasses(requested []string) ([]*analysis.Analyzer, error) {
 	if len(requested) == 0 {
 		return defaultVetPasses, nil
@@ -109,10 +72,7 @@ func resolvePasses(requested []string) ([]*analysis.Analyzer, error) {
 	for _, a := range allVetPasses {
 		byName[a.Name] = a
 	}
-	// EVERY name is validated before "all" is honoured. Refusing only the names
-	// that happen to precede an "all" in the list would make ["all","typo"] pass
-	// silently while ["typo","all"] failed — the same request, two answers, and
-	// the silent one teaches the model that its typo was a real pass name.
+	// Every name is validated before "all" is honoured, so request order cannot change whether a typo is caught.
 	var out []*analysis.Analyzer
 	seen := map[string]struct{}{}
 	wantsAll := false
@@ -148,9 +108,7 @@ func resolvePasses(requested []string) ([]*analysis.Analyzer, error) {
 // Diagnostic is one finding.
 type Diagnostic struct {
 	Location string `json:"location"`
-	// Severity is "type-error" (the load's own parse/type errors) or "vet" (a
-	// curated analysis pass). A type error is nearly always real; a vet finding
-	// is advice.
+	// Severity is "type-error" (the load's own parse/type errors) or "vet" (a curated analysis pass). A type error is nearly always real; a vet finding is advice.
 	Severity string `json:"severity"`
 	// Category is the analyzer name, or "type" for a load error.
 	Category string `json:"category"`
@@ -161,8 +119,7 @@ type Diagnostic struct {
 // DiagnosticsResult is a scoped diagnostics sweep.
 type DiagnosticsResult struct {
 	Scope string `json:"scope"`
-	// Passes names the analysis passes that actually ran, so a clean result
-	// cannot be mistaken for "everything was checked".
+	// Passes names the analysis passes that actually ran, so a clean result cannot be mistaken for "everything was checked".
 	Passes      []string     `json:"passes"`
 	Packages    []string     `json:"packages"`
 	TypeErrors  int          `json:"type_errors"`
@@ -171,10 +128,7 @@ type DiagnosticsResult struct {
 	Shown       int          `json:"shown"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 	Note        string       `json:"note,omitempty"`
-	// Toolchain names the build context these findings were produced under. It is
-	// mandatory on this result, not decoration: x/tools tracks Go releases, so a
-	// repo on a newer toolchain can be told about errors its own compiler would
-	// not raise. `go build` is the arbiter.
+	// Toolchain names the build context these findings were produced under; a repo on a newer toolchain can see errors its own compiler would not raise. `go build` is the arbiter.
 	Toolchain string `json:"toolchain"`
 }
 
@@ -232,9 +186,7 @@ func (ix *index) Diagnostics(ctx context.Context, req Request) (*DiagnosticsResu
 		all = append(all, typeErrs...)
 		res.TypeErrors += len(typeErrs)
 		if len(typeErrs) > 0 {
-			// A package that does not type-check gives the analyzers garbage to
-			// reason about; running them there manufactures noise on top of a real
-			// error the model must fix first.
+			// A package that does not type-check gives the analyzers garbage to reason about; running them there manufactures noise on top of a real error.
 			continue
 		}
 		vet := snap.vet(p, passes)
@@ -322,15 +274,7 @@ func (ix *index) diagnosticTargets(e *entry, snap *Snapshot, scope string, req R
 	}
 }
 
-// typeErrors converts the load's own parse and type errors.
-//
-// go/packages reports a broken package TWICE: once as a positioned TypeError or
-// ParseError, and once as an unpositioned ListError carrying the `go list`
-// stderr block that repeats the same text. The ListError is dropped whenever a
-// positioned error exists for the package, because a duplicate with no file:line
-// is the worst of both — it costs tokens and cannot be acted on. When it is the
-// only error (no Go files, a broken go.mod) it is kept, because then it is the
-// whole message.
+// typeErrors converts the load's own parse and type errors. go/packages reports a broken package twice: a positioned TypeError/ParseError, and an unpositioned ListError repeating the same text. The ListError is dropped whenever a positioned error exists for the package; kept only when it is the sole error.
 func (s *Snapshot) typeErrors(p *packages.Package) []Diagnostic {
 	if len(p.Errors) == 0 {
 		return nil
@@ -359,22 +303,10 @@ func (s *Snapshot) typeErrors(p *packages.Package) []Diagnostic {
 	return out
 }
 
-// importErrorPrefix is how go/types opens the one type error whose real cause is
-// never in the file it points at.
+// importErrorPrefix is how go/types opens the one type error whose real cause is never in the file it points at.
 const importErrorPrefix = "could not import "
 
-// enrichTypeError adds the single hint go/types cannot.
-//
-// A module with a dependency in go.mod that was never downloaded — the shape a
-// repository is in the moment an agent edits go.mod, or any offline run — fails
-// with `could not import example.com/x (invalid package name: "")`, anchored at
-// the IMPORT LINE. That anchor is a trap: the import line is correct, and an
-// agent that trusts the position will rewrite working source. When the
-// unimportable path is not one of this module's own packages, the cause is
-// module resolution, and the file to look at is go.mod.
-//
-// Deliberately additive and advisory: the toolchain's own text is preserved
-// verbatim in front, because `go build` is still the arbiter.
+// enrichTypeError adds a hint go/types cannot: an undownloaded dependency in go.mod fails with `could not import example.com/x (invalid package name: "")` anchored at the import line, which is a trap since that line is correct — the real cause is go.mod. The toolchain's own text is preserved verbatim in front.
 func (s *Snapshot) enrichTypeError(msg string) string {
 	if !strings.HasPrefix(msg, importErrorPrefix) {
 		return msg
@@ -389,16 +321,13 @@ func (s *Snapshot) enrichTypeError(msg string) string {
 		return msg
 	}
 	if _, own := s.byPath[path]; own {
-		// A package of THIS module that failed to build: the position is honest
-		// and the sibling package's own diagnostics say why.
+		// A package of this module that failed to build: the position is honest and the sibling package's own diagnostics say why.
 		return msg
 	}
 	return msg + " — " + path + " is a dependency, not a package of this module, so this is a module-resolution failure rather than a problem with the import line; check that go.mod requires it and that it has been downloaded (`go mod download`)"
 }
 
-// positionFromString renders a packages.Error position ("/abs/file.go:12:5")
-// the way every other gointel anchor is rendered: workspace-relative, with the
-// offending source line quoted.
+// positionFromString renders a packages.Error position ("/abs/file.go:12:5") the way every other gointel anchor is rendered: workspace-relative, with the offending source line quoted.
 func (s *Snapshot) positionFromString(pos string) (string, string) {
 	if pos == "" || pos == "-" {
 		return displayPath(s.Base, s.Root), ""
@@ -457,21 +386,7 @@ func (s *Snapshot) vet(p *packages.Package, passes []*analysis.Analyzer) []Diagn
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// A minimal, single-package, factless go/analysis driver.
-//
-// The full driver (unitchecker/checker) exists to propagate facts ACROSS
-// packages and to cache results between builds. gointel needs neither: it
-// already holds the whole module type-checked in memory, and it re-runs a
-// handful of passes over one package at tool-call cadence.
-//
-// FACTLESS is the honest limitation: printf's wrapper detection (learning that
-// your own logf(format, args...) forwards to fmt) needs facts exported by the
-// packages that declare the wrapper. Direct fmt.* calls — the overwhelming
-// majority of real findings — are unaffected. Facts exported during a run are
-// kept for the rest of that package's run, so a wrapper declared and used in the
-// same package still resolves.
-// ---------------------------------------------------------------------------
+// A minimal, single-package, factless go/analysis driver: gointel already holds the whole module type-checked in memory and re-runs a handful of passes per package at tool-call cadence, so it skips the full unitchecker/checker's cross-package fact propagation and result caching. Limitation: printf's wrapper detection (a local logf forwarding to fmt) needs facts from the declaring package; direct fmt.* calls are unaffected. Facts exported during a run are kept for the rest of that package's run.
 
 type objFactKey struct {
 	obj  types.Object
@@ -528,9 +443,7 @@ func (r *passRunner) run(a *analysis.Analyzer) (result any, ok bool) {
 		AllPackageFacts:   r.allPackageFacts,
 	}
 
-	// A panicking analyzer must degrade this one pass, never the tool call: a
-	// diagnostics result missing one advisory pass is still useful, and a panic
-	// escaping into the engine is not.
+	// A panicking analyzer must degrade this one pass, never the tool call.
 	res, err := func() (res any, err error) {
 		defer func() {
 			if p := recover(); p != nil {
@@ -547,8 +460,7 @@ func (r *passRunner) run(a *analysis.Analyzer) (result any, ok bool) {
 	return res, true
 }
 
-// copyFact copies the stored fact into the caller's *T, the contract
-// ImportObjectFact/ImportPackageFact are defined by.
+// copyFact copies the stored fact into the caller's *T, the contract ImportObjectFact/ImportPackageFact are defined by.
 func copyFact(stored, ptr analysis.Fact) bool {
 	src := reflect.ValueOf(stored)
 	dst := reflect.ValueOf(ptr)

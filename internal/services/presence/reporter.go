@@ -11,22 +11,18 @@ import (
 	"github.com/google/uuid"
 )
 
-// ReporterStore is the write side a Reporter drives — the narrow slice of Store a
-// heartbeat needs. Kept an interface so a test can substitute a store that fails,
-// which is exactly how the best-effort guard is proven.
+// ReporterStore is the narrow slice of Store a Reporter's heartbeat needs.
+// Kept an interface so a test can substitute a store that fails.
 type ReporterStore interface {
 	Register(ctx context.Context, rec Record) error
 	Deregister(ctx context.Context, kind Kind, instanceID string) error
 }
 
-// Reporter owns one process's presence record and keeps it alive: it writes the
-// record on start, renews it on a modest interval AND whenever a caller signals a
-// change (a session opened/closed), and best-effort deregisters on shutdown.
-//
-// It is best-effort to its core: StartReporter never blocks or fails the process
-// it observes, and every store error is a shrug reported to the tracker. An
-// editor whose presence store is wedged still serves its user — it is merely
-// absent from the board until its next successful heartbeat.
+// Reporter owns one process's presence record and keeps it alive: it writes
+// the record on start, renews it on a modest interval and whenever a caller
+// signals a change, and best-effort deregisters on shutdown. Every store
+// error is a shrug reported to the tracker; StartReporter never blocks or
+// fails the process it observes.
 type Reporter struct {
 	store    ReporterStore
 	tracker  libtracker.ActivityTracker
@@ -58,11 +54,8 @@ func WithInterval(d time.Duration) ReporterOption {
 }
 
 // WithTracker sets the ActivityTracker heartbeat failures are shrugged to.
-// Defaults to libtracker.NoopTracker — a presence hiccup is not the process's
-// problem to shout about, so a caller that wires nothing sees nothing, and a
-// caller that wires a tracker decides at ITS sink how loud a failed heartbeat is.
-// The report itself never reaches the caller of StartReporter: presence stays
-// best-effort whether or not anyone is watching.
+// Defaults to libtracker.NoopTracker; the report never reaches
+// StartReporter's caller — presence stays best-effort regardless.
 func WithTracker(tracker libtracker.ActivityTracker) ReporterOption {
 	return func(r *Reporter) {
 		if tracker != nil {
@@ -71,15 +64,11 @@ func WithTracker(tracker libtracker.ActivityTracker) ReporterOption {
 	}
 }
 
-// StartReporter registers rec and starts renewing it in the background until ctx
-// is cancelled (or Stop is called), then best-effort deregisters. It fills in the
-// obvious identity fields the caller left blank (InstanceID, PID, Host,
-// StartedAt) so a caller supplies only Kind and the facts it knows (Cwd,
-// ClientName, ...).
-//
-// It NEVER blocks: even the first write happens on the background goroutine, so a
-// slow or wedged store cannot delay the process's real startup. It always returns
-// a usable *Reporter.
+// StartReporter registers rec and starts renewing it in the background
+// until ctx is cancelled (or Stop is called), then best-effort
+// deregisters. It fills in blank identity fields (InstanceID, PID, Host,
+// StartedAt); the caller supplies only Kind and what it knows. Never
+// blocks — even the first write happens on the background goroutine.
 func StartReporter(ctx context.Context, store ReporterStore, rec Record, opts ...ReporterOption) *Reporter {
 	rctx, cancel := context.WithCancel(ctx)
 	r := &Reporter{
@@ -124,11 +113,9 @@ func (r *Reporter) InstanceID() string {
 	return r.rec.InstanceID
 }
 
-// Update mutates the record under lock and prompts an immediate heartbeat, so a
-// session-open/close event is reflected on the board without waiting for the next
-// interval — the "renew on session events" trigger. The prompt is coalesced (a
-// non-blocking send onto a depth-1 channel), so a burst of events collapses to
-// one extra write and Update never blocks the caller (an ACP handler goroutine).
+// Update mutates the record under lock and prompts an immediate heartbeat,
+// coalesced onto a depth-1 channel so a burst of events collapses to one
+// extra write and Update never blocks its caller.
 func (r *Reporter) Update(mutate func(rec *Record)) {
 	if mutate == nil {
 		return
@@ -154,14 +141,11 @@ func (r *Reporter) run(ctx context.Context) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
-	// The initial registration is DEFERRED past the boot-critical window: at
-	// process start the same SQLite file is being written by schema/preset
-	// embedding, and an eager presence write here intermittently starved that
-	// init into "database is locked" (observed on fresh `contenox serve` boots
-	// the day presence landed). Presence is best-effort liveness — arriving on
-	// the board a second late is free; failing another subsystem's boot is not.
-	// A session-event kick still writes immediately (by then boot is past the
-	// embed phase), and ctx cancellation during the delay deregisters cleanly.
+	// The initial registration is deferred past the boot-critical window
+	// where schema/preset embedding writes the same SQLite file, so an eager
+	// write cannot starve that init into "database is locked". A
+	// session-event kick still writes immediately; ctx cancellation during
+	// the delay deregisters cleanly.
 	select {
 	case <-ctx.Done():
 		return

@@ -12,13 +12,10 @@ import (
 	"github.com/contenox/beam/internal/services/presence"
 )
 
-// errStoreBoom is the failure a primed recordingStore returns, kept a sentinel
-// so a test can assert the tracker report carries the store's own error rather
-// than a rephrasing of it.
+// errStoreBoom is the failure a primed recordingStore returns.
 var errStoreBoom = errors.New("boom")
 
-// recordingStore is a ReporterStore test double that counts writes and can be
-// made to fail, so the best-effort guard is provable without a real db.
+// recordingStore is a ReporterStore test double that counts writes and can be made to fail.
 type recordingStore struct {
 	mu           sync.Mutex
 	registers    []presence.Record
@@ -101,10 +98,7 @@ func TestUnit_Reporter_WritesOnStartAndFillsIdentity(t *testing.T) {
 	}
 }
 
-// TestUnit_Reporter_BestEffort_StoreFailureNeverBreaksStartup proves the guard:
-// a store that fails every write must NOT block StartReporter, must NOT panic,
-// and the reporter keeps trying (swallowing errors) — the process it observes is
-// entirely unaffected.
+// TestUnit_Reporter_BestEffort_StoreFailureNeverBreaksStartup pins that a store failing every write never blocks or panics StartReporter.
 func TestUnit_Reporter_BestEffort_StoreFailureNeverBreaksStartup(t *testing.T) {
 	store := &recordingStore{fail: true}
 
@@ -128,9 +122,8 @@ func TestUnit_Reporter_BestEffort_StoreFailureNeverBreaksStartup(t *testing.T) {
 	waitFor(t, func() bool { return store.writeCount() >= 2 })
 }
 
-// recordingTracker records the (operation, subject, error) of every report. It
-// must be concurrency-safe: the heartbeat reports from the reporter's own
-// goroutine while the test reads.
+// recordingTracker records the (operation, subject, error) of every report;
+// concurrency-safe since the reporter's own goroutine writes while the test reads.
 type recordingTracker struct {
 	mu     sync.Mutex
 	events []trackedEvent
@@ -176,11 +169,7 @@ func (r *recordingTracker) firstFor(op, subject string) (trackedEvent, bool) {
 
 var _ libtracker.ActivityTracker = (*recordingTracker)(nil)
 
-// TestUnit_Reporter_StoreFailureIsReportedToTracker proves the shrug is not
-// silence: a heartbeat that cannot be written, and a deregister that cannot be
-// removed, are both reported through the tracker. Nothing reaches the caller —
-// presence stays best-effort — but an operator wiring a tracker can see that
-// this process is absent from the board because its writes are failing.
+// TestUnit_Reporter_StoreFailureIsReportedToTracker pins that a failed heartbeat write and a failed deregister are both reported to the tracker.
 func TestUnit_Reporter_StoreFailureIsReportedToTracker(t *testing.T) {
 	store := &recordingStore{fail: true}
 	tracker := &recordingTracker{}
@@ -208,8 +197,7 @@ func TestUnit_Reporter_StoreFailureIsReportedToTracker(t *testing.T) {
 	}
 }
 
-// TestUnit_Reporter_HealthyStoreReportsNoFailure pins the volume: the tracker
-// hears from the reporter only when a write fails.
+// TestUnit_Reporter_HealthyStoreReportsNoFailure pins that the tracker hears from the reporter only when a write fails.
 func TestUnit_Reporter_HealthyStoreReportsNoFailure(t *testing.T) {
 	store := &recordingStore{}
 	tracker := &recordingTracker{}

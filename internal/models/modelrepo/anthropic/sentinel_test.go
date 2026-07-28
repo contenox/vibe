@@ -21,9 +21,6 @@ func newSentinelChatClient(url string, client *http.Client) *anthropicChatClient
 	}}
 }
 
-// TestUnit_Anthropic_TypedSentinels maps Anthropic's documented error shapes:
-// a 400 invalid_request_error with "prompt is too long" phrasing, and 429/529
-// (overloaded_error) as rate/capacity limits.
 func TestUnit_Anthropic_TypedSentinels(t *testing.T) {
 	t.Run("prompt too long", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

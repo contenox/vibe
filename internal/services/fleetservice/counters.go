@@ -1,27 +1,9 @@
 package fleetservice
 
-// counters.go is the fleet's minimal telemetry ledger: three process-lifetime
-// tallies of what the envelope-enforcement seams actually DID — units admitted
-// (dispatches), units refused at the width cap (capRefusals), and result reports
-// the conclusion gate downgraded (verificationDowngrades). One optional line for
-// doctor / the mission panel to render, per the pando mining report's pairing
-// rule ("pair with nil-safe atomic counters … surfaced as one optional line"):
-// an enforced bound the operator cannot SEE working is indistinguishable from an
-// unenforced one, which is exactly the anti-pattern the cap exists to avoid.
-//
-// They are PACKAGE-LEVEL atomics, deliberately — not fields on the service:
-//
-//   - Nil-safe by construction: there is no receiver to be nil, so any path may
-//     bump or read them — a panic-recovery handler included — without a guard.
-//   - Process-lifetime by construction: they survive any service value and count
-//     across every fleetservice instance in the process (the in-process editor
-//     builds exactly one; if a process ever built two, one fleet-wide ledger is
-//     still the honest total).
-//   - Reachable without wiring: doctor or a panel calls fleetservice.Counters()
-//     with no handle on the service at all.
-//
-// They are NOT durable and reset on restart — telemetry, not record. Anything
-// that must survive a restart belongs on the mission store, not here.
+// counters.go is the fleet's telemetry ledger: process-lifetime tallies of
+// units admitted, units refused at the width cap, and result reports the
+// conclusion gate downgraded. Package-level atomics (nil-safe, reachable
+// without a service handle), not durable, and reset on restart.
 
 import "sync/atomic"
 
@@ -33,26 +15,22 @@ var fleetCounters struct {
 	verificationDowngrades atomic.Uint64
 }
 
-// CountersSnapshot is one consistent-enough read of the fleet counters (each
-// field is read atomically; the trio is not a transaction, which is fine for a
-// telemetry line). JSON tags so a doctor/panel surface can render it verbatim.
+// CountersSnapshot is one consistent-enough read of the fleet counters: each
+// field is read atomically, but the trio is not a transaction.
 type CountersSnapshot struct {
-	// Dispatches counts units this process ADMITTED — Dispatch calls that passed
-	// the admission gate and allocated a unit end to end.
+	// Dispatches counts units this process admitted end to end.
 	Dispatches uint64 `json:"dispatches"`
-	// CapRefusals counts dispatches REFUSED at the fleet-width admission cap
-	// (see admission.go). A nonzero value is the cap visibly working.
+	// CapRefusals counts dispatches refused at the fleet-width admission cap
+	// (see admission.go).
 	CapRefusals uint64 `json:"capRefusals"`
 	// VerificationDowngrades counts result reports the conclusion verification
 	// gate downgraded to progress because a claimed artifact was positively
-	// missing (see missiontools' verification gate, which reports here through
-	// RecordVerificationDowngrade).
+	// missing.
 	VerificationDowngrades uint64 `json:"verificationDowngrades"`
 }
 
-// Counters returns the current fleet counter snapshot. This is the one surface
-// a doctor line or the mission panel reads; it requires no service handle and
-// never fails.
+// Counters returns the current fleet counter snapshot. Requires no service
+// handle and never fails.
 func Counters() CountersSnapshot {
 	return CountersSnapshot{
 		Dispatches:             fleetCounters.dispatches.Load(),
@@ -61,12 +39,9 @@ func Counters() CountersSnapshot {
 	}
 }
 
-// RecordVerificationDowngrade bumps the verification-downgrade tally. It is
-// EXPORTED because the gate that observes downgrades lives in missiontools,
-// which fleetservice imports (for the tool-name constants) — so missiontools
-// cannot import this package back. The composition point closes the loop
-// instead: missiontools.WithDowngradeRecorder(fleetservice.RecordVerificationDowngrade).
-// Safe from any goroutine, at any time, wired or not.
+// RecordVerificationDowngrade bumps the verification-downgrade tally. Exported
+// because the gate that observes downgrades lives in missiontools, which
+// fleetservice imports, so missiontools cannot import this package back.
 func RecordVerificationDowngrade() { fleetCounters.verificationDowngrades.Add(1) }
 
 func recordDispatch() { fleetCounters.dispatches.Add(1) }

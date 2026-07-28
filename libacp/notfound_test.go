@@ -58,8 +58,7 @@ func TestIsNotFound(t *testing.T) {
 			want: false,
 		},
 		{
-			// The raw-string fallback of the acpsvc original is deliberately
-			// NOT promoted: this is a lifecycle failure, not a missing file.
+			// A raw error's text is never classified, even when suggestive.
 			name: "raw error whose text contains not found is not classified",
 			err:  errors.New("agent not found: contenox-acp"),
 			want: false,
@@ -85,8 +84,7 @@ func TestIsNotFound(t *testing.T) {
 			want: false,
 		},
 		{
-			// Protocol-level codes describe the request, not its subject: the
-			// message check must not fire for them.
+			// Protocol-level codes must not trigger the message check.
 			name: "invalid params saying not found is not a missing resource",
 			err:  libacp.InvalidParams("session not found"),
 			want: false,
@@ -147,8 +145,8 @@ func TestAsNotExist(t *testing.T) {
 	}
 }
 
-// The mapped error must stay inspectable: a caller branching on os.ErrNotExist
-// should still be able to recover the protocol error underneath.
+// TestAsNotExistPreservesDetail pins that the original protocol error detail
+// is still recoverable after mapping to os.ErrNotExist.
 func TestAsNotExistPreservesDetail(t *testing.T) {
 	orig := libacp.NewError(libacp.ErrResourceNotFound, "no such resource")
 	got := libacp.AsNotExist(orig)

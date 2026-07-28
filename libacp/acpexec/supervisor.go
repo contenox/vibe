@@ -11,18 +11,13 @@ import (
 
 // Supervisor keeps an agent subprocess alive across transient crashes by
 // respawning it with backoff and re-running a caller-supplied session. It is
-// the opt-in restart policy acpexec deliberately leaves out of Spawn (which is
-// pure transport). A
-// driver that wants that resilience constructs a Supervisor; one that wants a
-// single process keeps calling Spawn directly.
-//
-// The hard-won lesson it encodes: a startup error (IsStartupError) — a missing
-// binary or an agent that cannot initialize — is never retried, because looping
-// on it only hides the misconfiguration. Serve surfaces such an error to the
-// caller instead of restarting forever.
+// the opt-in restart policy Spawn deliberately leaves out (Spawn is pure
+// transport). A startup error (IsStartupError) — a missing binary or an agent
+// that cannot initialize — is never retried, since looping on it only hides
+// the misconfiguration; Serve surfaces it to the caller instead.
 type Supervisor struct {
-	// Command builds a fresh *exec.Cmd for each (re)start. Required. A new Cmd
-	// is needed per attempt because an exec.Cmd cannot be reused once started.
+	// Command builds a fresh *exec.Cmd for each (re)start; required, since an
+	// exec.Cmd cannot be reused once started.
 	Command func(ctx context.Context) *exec.Cmd
 
 	// MaxRestarts caps how many times Serve respawns after the first attempt.
@@ -33,11 +28,10 @@ type Supervisor struct {
 	// no delay. Serve honors ctx cancellation while waiting.
 	Backoff func(attempt int) time.Duration
 
-	// OnRestart, if set, is called just before each restart with the 1-based
-	// restart number and the error that triggered it. It fires only for genuine
-	// restarts — a startup or non-retryable error ends Serve without invoking
-	// it, so its absence together with a returned error is itself a signal that
-	// the failure was fatal (check libacp.IsStartupError on Serve's result).
+	// OnRestart, if set, is called just before each genuine restart with the
+	// 1-based restart number and the triggering error. Not called for a
+	// startup or non-retryable error, so its absence alongside a returned
+	// error signals a fatal failure (check libacp.IsStartupError).
 	OnRestart func(attempt int, cause error)
 
 	// SpawnOptions are forwarded to Spawn on every attempt (e.g. WithStderr).
@@ -47,10 +41,8 @@ type Supervisor struct {
 // Serve spawns the agent and runs session against each live Process until the
 // session succeeds (returns nil), ctx is cancelled, or a failure that is not
 // worth retrying occurs. session receives a zero-based attempt counter (0 on
-// the first spawn), so a restart (attempt > 0) can try session/resume before
-// falling back to session/new — any resume-candidate memory a driver keeps
-// across reconnects lives in the caller's own closure state rather
-// than baked into transport-only acpexec.
+// the first spawn) so a restart can try session/resume before falling back to
+// session/new.
 //
 // A spawn/start failure is wrapped as libacp.ErrAgentStartFailed and returned
 // immediately (never retried). A session error is retried, up to MaxRestarts,
@@ -67,8 +59,8 @@ func (s *Supervisor) Serve(ctx context.Context, session func(ctx context.Context
 
 		proc, err := Spawn(ctx, s.Command(ctx), s.SpawnOptions...)
 		if err != nil {
-			// A start failure is a startup error by definition; a retry cannot
-			// cure a bad binary, so surface it rather than loop.
+			// A start failure is a startup error by definition; surface it
+			// rather than loop, since a retry cannot cure a bad binary.
 			return fmt.Errorf("%w: %w", libacp.ErrAgentStartFailed, err)
 		}
 

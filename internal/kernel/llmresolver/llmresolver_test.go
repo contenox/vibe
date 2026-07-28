@@ -167,12 +167,10 @@ func TestUnit_ChatModelResolution(t *testing.T) {
 
 			_, provider, _, err := llmresolver.Chat(context.Background(), tt.req, getModels, llmresolver.Randomly)
 
-			// Check error condition
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("got error %v, want %v", err, tt.wantErr)
 			}
 
-			// Check provider ID if expected
 			if tt.wantModelID != "" {
 				if provider == nil {
 					t.Errorf("expected provider with ID %s, got nil", tt.wantModelID)
@@ -184,10 +182,10 @@ func TestUnit_ChatModelResolution(t *testing.T) {
 	}
 }
 
-// TestUnit_ChatModelResolution_ContextShortfallMessage covers B-004: a tool turn
-// whose context requirement exceeds every capable model's window must fail with an
-// actionable message (required vs largest-available context + remedy), not the
-// opaque generic listing. The error still wraps ErrNoSatisfactoryModel.
+// TestUnit_ChatModelResolution_ContextShortfallMessage pins that a request
+// whose context requirement exceeds every capable model's window fails with
+// an actionable message (required vs largest-available context + remedy),
+// wrapping ErrNoSatisfactoryModel, not the opaque generic listing.
 func TestUnit_ChatModelResolution_ContextShortfallMessage(t *testing.T) {
 	getModels := func(providers []libmodelprovider.Provider) func(context.Context, ...string) ([]libmodelprovider.Provider, error) {
 		return func(context.Context, ...string) ([]libmodelprovider.Provider, error) { return providers, nil }
@@ -212,8 +210,6 @@ func TestUnit_ChatModelResolution_ContextShortfallMessage(t *testing.T) {
 	})
 
 	t.Run("name mismatch falls through to the generic listing", func(t *testing.T) {
-		// A capable model with ample context but a name mismatch is not a context
-		// shortfall, so the generic diagnostic is returned, not the context message.
 		providers := []libmodelprovider.Provider{
 			&libmodelprovider.MockProvider{ID: "big", Name: "qwen3-4b", ContextLength: 8192, CanChatFlag: true, Backends: []string{"b1"}},
 		}
@@ -231,7 +227,6 @@ func TestUnit_ChatModelResolution_ContextShortfallMessage(t *testing.T) {
 }
 
 func TestUnit_EmbedModelResolution(t *testing.T) {
-	// Define common providers used in tests
 	providerEmbedOK := &libmodelprovider.MockProvider{
 		ID:           "p1",
 		Name:         "text-embed-model",
@@ -300,8 +295,7 @@ func TestUnit_EmbedModelResolution(t *testing.T) {
 			embedReq:  llmresolver.EmbedRequest{ModelName: "text-embed-model"},
 			providers: []libmodelprovider.Provider{providerEmbedNoBackends},
 			resolver:  llmresolver.Randomly,
-			// Error comes from selectRandomBackend called by ResolveRandomly
-			wantErr: llmresolver.ErrNoSatisfactoryModel,
+			wantErr:   llmresolver.ErrNoSatisfactoryModel,
 		},
 		{
 			name:      "multiple candidates - resolver selects one",
@@ -371,7 +365,6 @@ func TestUnit_EmbedModelResolution(t *testing.T) {
 
 			client, _, _, err := llmresolver.Embed(context.Background(), tt.embedReq, getModels, tt.resolver)
 
-			// Assertions
 			if tt.wantErr != nil {
 				if tt.wantMsg != "" {
 					if err == nil {
@@ -388,7 +381,6 @@ func TestUnit_EmbedModelResolution(t *testing.T) {
 					t.Errorf("ResolveEmbed() client = %v, want nil when error expected", client)
 				}
 			} else {
-				// No error expected
 				if err != nil {
 					t.Errorf("ResolveEmbed() unexpected error = %v", err)
 				}
@@ -425,7 +417,6 @@ func TestUnitNormalizeModelName(t *testing.T) {
 	}
 }
 
-// Additional tests for the new return values
 func TestUnit_ChatReturnsProviderAndBackend(t *testing.T) {
 	mockProvider := &libmodelprovider.MockProvider{
 		ID:            "test-provider",

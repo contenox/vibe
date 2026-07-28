@@ -12,14 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestFleetE2E_AgentAnswerBounds is the acceptance for the AUTONOMOUS edge of the
-// ask channel — the part that lets a supervising agent answer its own subagent —
-// exercised where the decision actually lives: the envelope and the durable count.
-//
-// It is deliberately about the REFUSALS. Letting a model answer a question a unit
-// escalated to a human deletes that escalation, so the interesting behaviour is
-// not that it can happen but that it happens only when an operator said so, and
-// only so many times.
+// TestFleetE2E_AgentAnswerBounds is the acceptance for the autonomous edge of
+// the ask channel: a supervising agent may answer its own subagent's
+// question only when the envelope opts in, and only up to its cap, enforced
+// durably and actor-aware.
 func TestFleetE2E_AgentAnswerBounds(t *testing.T) {
 	ctx := context.Background()
 	policyDir := t.TempDir()
@@ -63,7 +59,7 @@ func TestFleetE2E_AgentAnswerBounds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, hitlservice.DefaultMaxAgentAnswers, bounds.EffectiveMaxAgentAnswers())
 
-	// And the count the cap is enforced against is DURABLE and actor-aware: two
+	// The count the cap is enforced against is durable and actor-aware: two
 	// agent answers and one human answer on the same mission read as two.
 	const missionID = "m-cap"
 	for i := 0; i < 2; i++ {

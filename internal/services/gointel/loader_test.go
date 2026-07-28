@@ -13,21 +13,7 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
-// Fixture plumbing
-//
-// The fixture modules live under testdata/ WITHOUT a go.mod (they carry
-// go.mod.txt instead), and each test copies one into its own t.TempDir with the
-// go.mod materialised. Two reasons, both load-bearing:
-//
-//   - the go tool ignores testdata/, so a module living there is invisible to
-//     `go list ./...` and to `go vet` on this repo; and
-//   - the invalidation tests EDIT the fixture, and a test that mutates its own
-//     checked-in testdata is a test that passes once.
-//
-// Both fixtures are stdlib-only on purpose, so `go list` never needs the network
-// or a module download.
-// ---------------------------------------------------------------------------
+// Fixture plumbing: fixture modules live under testdata/ without a go.mod (go.mod.txt instead, so `go list`/`go vet` on this repo ignore them), and each test copies one into its own t.TempDir with go.mod materialised so edits never touch checked-in testdata. Stdlib-only, so no network needed.
 
 func copyFixtureInto(t *testing.T, name, dst string) string {
 	t.Helper()
@@ -88,10 +74,7 @@ func (ix *index) testEntry(t *testing.T, root string) *entry {
 	return e
 }
 
-// writeFixtureFile rewrites a fixture file and pushes its modification time
-// forward. The mtime bump is not cosmetic: a filesystem with coarse timestamps
-// can hand two writes in the same test the SAME mtime, and a sweep that silently
-// passed because of clock granularity is a sweep that proves nothing.
+// writeFixtureFile rewrites a fixture file and pushes its mtime forward, so a coarse filesystem clock cannot hand two writes the same timestamp.
 func writeFixtureFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -102,10 +85,6 @@ func writeFixtureFile(t *testing.T, path, content string) {
 		t.Fatalf("chtimes %s: %v", path, err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Load and cache
-// ---------------------------------------------------------------------------
 
 func TestUnit_Loader_BuildsOnceAndServesFromCache(t *testing.T) {
 	root := newFixture(t, "fixture")
@@ -198,10 +177,6 @@ func TestUnit_Loader_LRUEvictsBeyondTwoRoots(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Containment — the same boundary local_fs enforces, in the same voice
-// ---------------------------------------------------------------------------
-
 func TestUnit_ModuleRoot_RefusesDirEscapingAllowedDir(t *testing.T) {
 	root := newFixture(t, "fixture")
 	ix := newTestIndex(t, root)
@@ -217,8 +192,7 @@ func TestUnit_ModuleRoot_RefusesDirEscapingAllowedDir(t *testing.T) {
 
 func TestUnit_ModuleRoot_RefusesModuleRootAboveAllowedDir(t *testing.T) {
 	module := newFixture(t, "fixture")
-	// The workspace is a SUBDIRECTORY of the module, so the go.mod walk-up leaves
-	// the allowed directory. That is a boundary refusal, not "there is no Go here".
+	// The workspace is a subdirectory of the module, so the go.mod walk-up leaves the allowed directory.
 	ix := newTestIndex(t, filepath.Join(module, "shapes"))
 
 	_, err := ix.Definition(context.Background(), Request{Symbol: "shapes.Rect"})
@@ -267,14 +241,7 @@ func TestUnit_ModuleRoot_ResolvesFromAFilePath(t *testing.T) {
 	}
 }
 
-// TestUnit_Config_RequiresAnAllowedDir pins the refusal AND its voice.
-//
-// The voice matters more than usual here. A composition root that registers
-// gointel without supplying a workspace root produces six advertised tools that
-// refuse every call — the shipped feature is inert, and every symptom points at
-// the tool rather than at the wiring. So the refusal must be marked FATAL (no
-// argument the model changes can fix it) and must name both ways the root is
-// supplied, so whoever reads it first can act on it.
+// TestUnit_Config_RequiresAnAllowedDir pins: a missing workspace root refuses with a fatal marker naming both ways the root can be supplied.
 func TestUnit_Config_RequiresAnAllowedDir(t *testing.T) {
 	ix := NewIndex(Config{})
 	t.Cleanup(ix.Shutdown)
@@ -306,10 +273,6 @@ func TestUnit_Config_CwdResolverSuppliesTheWorkspaceRoot(t *testing.T) {
 		t.Fatalf("definition via CwdResolver: %v", err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Invalidation — the one way this design can lie, so it gets the most tests
-// ---------------------------------------------------------------------------
 
 const addedSymbol = `
 // Added is a symbol that did not exist when the snapshot was built.
@@ -363,8 +326,7 @@ func TestUnit_Invalidate_MtimeSweepCatchesAnUnannouncedEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// NO Invalidate call: this is the human-in-an-editor / git-checkout path the
-	// sweep exists to cover.
+	// No Invalidate call: this is the human-in-an-editor / git-checkout path the sweep exists to cover.
 	writeFixtureFile(t, file, string(original)+addedSymbol)
 
 	if _, err := ix.Definition(ctx, Request{Symbol: "shapes.Added"}); err != nil {
@@ -384,8 +346,7 @@ func TestUnit_Invalidate_MtimeSweepCatchesANewFileInAnExistingPackage(t *testing
 		t.Fatalf("warm-up: %v", err)
 	}
 
-	// A brand-new file is invisible to every per-file stat: only the package
-	// DIRECTORY's mtime moves. No Invalidate call.
+	// A brand-new file is invisible to every per-file stat: only the package directory's mtime moves. No Invalidate call.
 	writeFixtureFile(t, filepath.Join(root, "shapes", "extra.go"),
 		"package shapes\n\n// Extra was added after the snapshot was built.\nfunc Extra() float64 { return Unit }\n")
 
@@ -412,8 +373,7 @@ func TestUnit_Invalidate_RemovedSymbolStopsResolving(t *testing.T) {
 	writeFixtureFile(t, file, trimmed)
 	ix.Invalidate(file)
 
-	// The dangerous direction: a deletion must not keep answering from the old
-	// snapshot, because a confident wrong file:line is worse than a refusal.
+	// A deletion must not keep answering from the old snapshot.
 	if _, err := ix.Definition(ctx, Request{Symbol: "report.Doubled"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("post-delete lookup = %v, want ErrNotFound", err)
 	}
@@ -522,8 +482,7 @@ func TestUnit_Invalidate_GoModRewriteForcesARebuild(t *testing.T) {
 	e := ix.testEntry(t, root)
 	base := e.builds.Load()
 
-	// go.mod is swept on EVERY query, not only after a resolution, because it
-	// invalidates the entire graph rather than one package.
+	// go.mod is swept on every query, since it invalidates the whole graph.
 	writeFixtureFile(t, filepath.Join(root, "go.mod"), "module example.com/fixture\n\ngo 1.21\n\n// touched\n")
 
 	if _, err := ix.Definition(ctx, Request{Symbol: "shapes.Rect"}); err != nil {
@@ -550,10 +509,6 @@ func TestUnit_Invalidate_ChangedSetIsBounded(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Reaper and shutdown
-// ---------------------------------------------------------------------------
-
 func TestUnit_Reaper_DropsAnIdleSnapshot(t *testing.T) {
 	root := newFixture(t, "fixture")
 	ix := NewIndex(Config{AllowedDir: root, IdleTimeout: time.Millisecond}).(*index)
@@ -562,8 +517,7 @@ func TestUnit_Reaper_DropsAnIdleSnapshot(t *testing.T) {
 	if _, err := ix.Definition(context.Background(), Request{Symbol: "shapes.Rect"}); err != nil {
 		t.Fatalf("warm-up: %v", err)
 	}
-	// The reap interval is clamped to a minimum of one second (shellsession's
-	// discipline), so this waits past one tick rather than past IdleTimeout.
+	// The reap interval is clamped to a minimum of one second, so this waits past one tick rather than past IdleTimeout.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		ix.mu.Lock()

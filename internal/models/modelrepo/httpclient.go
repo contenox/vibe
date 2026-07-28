@@ -9,10 +9,8 @@ import (
 )
 
 // SharedHTTPClient is the process-wide HTTP client for provider and catalog
-// calls. It deliberately carries NO overall Timeout: streaming responses run
-// for many minutes and an http.Client.Timeout would cut them mid-stream.
-// Cancellation is the request context's job; non-streaming calls bound
-// themselves with NonStreamingContext.
+// calls. It carries no overall Timeout, since streaming responses run for
+// minutes; non-streaming calls bound themselves with NonStreamingContext.
 var SharedHTTPClient = &http.Client{}
 
 // DefaultCallTimeout bounds one non-streaming provider call end-to-end
@@ -25,13 +23,11 @@ func NonStreamingContext(ctx context.Context) (context.Context, context.CancelFu
 	return context.WithTimeout(ctx, DefaultCallTimeout)
 }
 
-// httpRetryMaxAttempts keeps the retry helper a helper, not a resilience
-// framework: at most two retries after the initial attempt.
+// httpRetryMaxAttempts caps retries at two after the initial attempt.
 const httpRetryMaxAttempts = 3
 
-// retryableStatus: rate limits (429), Anthropic overload (529), and transient
-// server faults (5xx). Never used mid-stream — retrying applies only to calls
-// whose response has not been consumed.
+// retryableStatus covers rate limits (429), Anthropic overload (529), and
+// transient server faults (5xx); never used mid-stream.
 func retryableStatus(code int) bool {
 	return code == http.StatusTooManyRequests || code == 529 || code >= 500
 }
@@ -52,12 +48,11 @@ func RetryAfterDelay(h http.Header, fallback time.Duration) time.Duration {
 	return fallback
 }
 
-// DoWithRetry issues a NON-streaming request built by build, retrying
-// 429/529/5xx responses with backoff that honors Retry-After. build is called
-// once per attempt so the request body is fresh each time. The final response
-// (success or not) is returned unconsumed; transport errors are returned
-// as-is without retry (the failure mode there is ambiguous re-execution).
-// Streaming calls must never go through this helper.
+// DoWithRetry issues a non-streaming request built by build, retrying
+// 429/529/5xx responses with backoff honoring Retry-After. build is called
+// once per attempt so the request body is fresh each time; the final
+// response is returned unconsumed, and transport errors return as-is
+// without retry. Streaming calls must never go through this helper.
 func DoWithRetry(ctx context.Context, client *http.Client, build func() (*http.Request, error)) (*http.Response, error) {
 	if client == nil {
 		client = SharedHTTPClient

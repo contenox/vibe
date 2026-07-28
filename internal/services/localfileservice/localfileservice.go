@@ -44,19 +44,17 @@ type Service interface {
 
 // FindOptions configures a recursive filename walk under the workspace root.
 type FindOptions struct {
-	// Path is the subtree to search, relative to the root; "" or "." is the whole
-	// workspace. It is normalized and contained exactly like every other rel path.
+	// Path is the subtree to search, relative to the root; "" or "." is the
+	// whole workspace.
 	Path string
-	// Globs are filepath.Match patterns; a FILE matches if ANY of them matches. A
-	// pattern containing '/' is matched against the root-relative path, otherwise
-	// against the basename (mirrors local_fs.find_files). No pattern (or an empty
-	// slice) matches nothing.
+	// Globs are filepath.Match patterns; a file matches if any matches. A
+	// pattern containing '/' matches the root-relative path, otherwise the
+	// basename. No pattern matches nothing.
 	Globs []string
-	// Limit caps emitted matches; on reaching it the walk stops and FindResult.Truncated
-	// is set. Limit <= 0 means unbounded (the caller is expected to clamp).
+	// Limit caps emitted matches; reaching it sets FindResult.Truncated and
+	// stops the walk. <= 0 means unbounded.
 	Limit int
-	// SkipDirs prunes directories by basename (noise dirs: .git, node_modules, …);
-	// nil prunes nothing.
+	// SkipDirs prunes directories by basename; nil prunes nothing.
 	SkipDirs map[string]bool
 }
 
@@ -66,16 +64,15 @@ type FindResult struct {
 	Truncated bool
 }
 
-// Find recursively walks opts.Path and streams, via emit, every FILE whose name
-// (or root-relative path, for a pattern containing '/') matches any of opts.Globs.
+// Find recursively walks opts.Path and streams, via emit, every file whose
+// name (or root-relative path, for a '/'-containing pattern) matches any of
+// opts.Globs.
 //
-// Safety: the walk root is contained once up front, but filepath.WalkDir descends
-// into children the single-path guard has never seen — an interior symlink could
-// point out of the root or straight into the control plane (~/.contenox). So EVERY
-// visited node is re-resolved through the same non-privileged vfs view the flat
-// methods use (s.view.Resolve): a node that escapes or is denied is skipped (a
-// directory via SkipDir, pruning its whole subtree), never emitted or descended.
-// This is the recursive analogue of the per-path boundary List/Stat/… enforce.
+// Every visited node is re-resolved through s.view.Resolve, not just the walk
+// root: filepath.WalkDir descends into children an interior symlink could
+// point out of the root (or into the control plane), so a node that escapes
+// or is denied is skipped — pruning its subtree if it's a directory — never
+// emitted or descended.
 func (s *localService) Find(ctx context.Context, opts FindOptions, emit func(Entry) error) (FindResult, error) {
 	var res FindResult
 	startAbs, _, err := s.resolveExisting(opts.Path, true)
@@ -174,9 +171,7 @@ func New(root string) (Service, error) {
 	if err := os.MkdirAll(abs, 0750); err != nil {
 		return nil, fmt.Errorf("create root: %w", err)
 	}
-	// Containment (path normalization + symlink-escape guarding) is delegated to
-	// the vfs package — the single implementation shared with the local_fs agent
-	// tool.
+	// Containment is delegated to vfs, shared with the local_fs agent tool.
 	view, err := vfs.OpenView(abs)
 	if err != nil {
 		return nil, fmt.Errorf("resolve root: %w", err)
@@ -184,11 +179,9 @@ func New(root string) (Service, error) {
 	return &localService{root: abs, view: view}, nil
 }
 
-// NewPrivileged is New over a vfs.OpenPrivilegedView: the runtime reading its
-// OWN control plane (chain-agent discovery, serve's chain wiring, the
-// operator's chain-editor API — all deliberately rooted at ~/.contenox). See
-// OpenPrivilegedView's doc for the invariant boundary; agent-facing consumers
-// must keep using New.
+// NewPrivileged is New over a vfs.OpenPrivilegedView, for the runtime reading
+// its own control plane (rooted at ~/.contenox). Agent-facing consumers must
+// keep using New.
 func NewPrivileged(root string) (Service, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, fmt.Errorf("%w: root is required", ErrInvalidPath)

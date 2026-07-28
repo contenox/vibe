@@ -4,9 +4,7 @@ import "testing"
 
 var sampleHistory = []string{"first prompt", "second prompt", "third prompt"}
 
-// TestUnit_HistoryRecallSequence walks the standard shell semantics: Up
-// stashes the draft and walks back, Down walks forward, and stepping past
-// the newest entry restores the draft with its caret.
+// TestUnit_HistoryRecallSequence pins Up/Down walking history and restoring the stashed draft with its caret.
 func TestUnit_HistoryRecallSequence(t *testing.T) {
 	c := New()
 	c.SetHistory(sampleHistory)
@@ -41,8 +39,7 @@ func TestUnit_HistoryRecallSequence(t *testing.T) {
 	}
 }
 
-// TestUnit_HistoryEdges pins the two ends and the empty case, where the
-// shell convention is to stay put rather than wrap around.
+// TestUnit_HistoryEdges pins the empty case and the oldest entry: stay put rather than wrap around.
 func TestUnit_HistoryEdges(t *testing.T) {
 	c := New()
 	if c.ShouldRecallUp() {
@@ -79,10 +76,7 @@ func TestUnit_HistoryEdges(t *testing.T) {
 	}
 }
 
-// TestUnit_HistoryEditDetaches is standard readline behavior: once a
-// recalled entry is edited it is the user's own draft again, so Down no
-// longer walks history and the next Up starts a fresh walk that stashes the
-// edited text.
+// TestUnit_HistoryEditDetaches pins that editing a recalled entry detaches it, so Down no longer walks history.
 func TestUnit_HistoryEditDetaches(t *testing.T) {
 	c := New()
 	c.SetHistory(sampleHistory)
@@ -112,8 +106,7 @@ func TestUnit_HistoryEditDetaches(t *testing.T) {
 	}
 }
 
-// TestUnit_HistoryOnlyAtBufferEdges: with a multiline draft, Up and Down are
-// caret movement until the caret reaches the first or last line.
+// TestUnit_HistoryOnlyAtBufferEdges pins Up/Down as caret movement until the caret reaches the first or last line.
 func TestUnit_HistoryOnlyAtBufferEdges(t *testing.T) {
 	c := New()
 	c.SetHistory(sampleHistory)
@@ -150,9 +143,7 @@ func TestUnit_HistoryOnlyAtBufferEdges(t *testing.T) {
 	}
 }
 
-// TestUnit_HistoryResetOnSubmitAndReseed: the composer keeps no store of its
-// own. Submit ends any recall, and the app re-seeds the list from the
-// session's persisted user turns.
+// TestUnit_HistoryResetOnSubmitAndReseed pins that Submit ends any recall and the app re-seeds the list after.
 func TestUnit_HistoryResetOnSubmitAndReseed(t *testing.T) {
 	c := New()
 	c.SetHistory(sampleHistory)
@@ -167,8 +158,7 @@ func TestUnit_HistoryResetOnSubmitAndReseed(t *testing.T) {
 		t.Fatalf("buffer = %q after Submit, want cleared", c.Draft())
 	}
 
-	// SetHistory during a recall ends the WALK and leaves the buffer alone:
-	// the app re-seeds after every turn, and that must never yank text away.
+	// SetHistory during a recall ends the walk and leaves the buffer alone.
 	c.CursorUp()
 	if got := c.Draft(); got != "third prompt" {
 		t.Fatalf("draft = %q, want the newest entry", got)
@@ -183,15 +173,7 @@ func TestUnit_HistoryResetOnSubmitAndReseed(t *testing.T) {
 	}
 }
 
-// TestUnit_SetHistoryKeepsTheStashRecoverable is the data-loss case the
-// re-seed used to cause.
-//
-// The app re-seeds the recall list on its own schedule, after every turn. It
-// can land while the user is mid-recall: they have pressed Up a few times and
-// are reading an old prompt, and the only copy of the draft they were typing
-// is the stash. Dropping it there deletes typed text on a timer the user
-// cannot see. So SetHistory ends the walk — the next Up starts fresh from the
-// newest entry — but Down still steps back to the draft.
+// TestUnit_SetHistoryKeepsTheStashRecoverable pins that a mid-recall re-seed ends the walk but keeps the stash reachable via Down.
 func TestUnit_SetHistoryKeepsTheStashRecoverable(t *testing.T) {
 	c := New()
 	c.SetHistory(sampleHistory)
@@ -217,8 +199,8 @@ func TestUnit_SetHistoryKeepsTheStashRecoverable(t *testing.T) {
 		t.Fatal("ShouldRecallDown() = true after the stash was restored")
 	}
 
-	// A fresh Up after the re-seed walks the NEW list from its newest entry
-	// and stashes what is on screen now.
+	// A fresh Up after the re-seed walks the new list and stashes what is
+	// on screen now.
 	c.CursorUp()
 	if got := c.Draft(); got != "a newer turn" {
 		t.Fatalf("draft = %q, want the newest entry of the re-seeded list", got)
@@ -229,10 +211,7 @@ func TestUnit_SetHistoryKeepsTheStashRecoverable(t *testing.T) {
 	}
 }
 
-// TestUnit_SetHistoryMidRecallDoesNotStashARecalledEntryOverTheDraft: after a
-// re-seed the buffer holds a history entry, and a subsequent Up must not
-// stash THAT over the user's real draft — the entry is already in the list,
-// the draft exists nowhere else.
+// TestUnit_SetHistoryMidRecallPreservesTheOriginalStash pins that an Up after a re-seed never stashes a history entry over the real draft.
 func TestUnit_SetHistoryMidRecallPreservesTheOriginalStash(t *testing.T) {
 	c := New()
 	c.SetHistory(sampleHistory)
@@ -249,9 +228,7 @@ func TestUnit_SetHistoryMidRecallPreservesTheOriginalStash(t *testing.T) {
 	}
 }
 
-// TestUnit_EditStillDropsTheStash: SetHistory is the only thing that spares
-// it. An edit means the text on screen is the user's own now, so the draft it
-// displaced is gone with the recall it belonged to — standard readline.
+// TestUnit_EditStillDropsTheStash pins that (unlike SetHistory) an edit still drops the stash.
 func TestUnit_EditStillDropsTheStash(t *testing.T) {
 	c := New()
 	c.SetHistory(sampleHistory)
@@ -269,8 +246,7 @@ func TestUnit_EditStillDropsTheStash(t *testing.T) {
 	}
 }
 
-// TestUnit_MentionSpan covers the trigger rule file-addressing depends on:
-// an `@` token at the buffer start or after whitespace, never inside a word.
+// TestUnit_MentionSpan pins the trigger rule: an `@` token at the buffer start or after whitespace, never inside a word.
 func TestUnit_MentionSpan(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -324,8 +300,7 @@ func TestUnit_MentionSpan(t *testing.T) {
 	}
 }
 
-// TestUnit_SpliceMention: the replacement lands over the span with one
-// trailing space and the caret after it, ready for the next word.
+// TestUnit_SpliceMention pins that the replacement lands over the span with one trailing space and the caret after it.
 func TestUnit_SpliceMention(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -381,8 +356,7 @@ func TestUnit_SpliceMention(t *testing.T) {
 	}
 }
 
-// TestUnit_SpliceMentionOutOfRange: the completion that produced a span is
-// asynchronous, so a stale span must be ignored rather than panic.
+// TestUnit_SpliceMentionOutOfRange pins that a stale (out-of-range) span is ignored rather than panicking.
 func TestUnit_SpliceMentionOutOfRange(t *testing.T) {
 	for _, span := range [][2]int{{-1, 2}, {0, -1}, {4, 20}, {99, 1}} {
 		c := New()

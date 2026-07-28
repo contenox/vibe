@@ -13,15 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_SeededPolicies_StateWhoMayAnswer pins the governance stance every
-// shipped preset takes on a unit's question — including, deliberately, the two
-// that refuse.
-//
-// It exists because this is the one setting where a silent edit changes who is
-// allowed to decide: flipping `allowAgentAnswers` on in `strict` or `acpx` would
-// let a model answer an escalation those presets exist to route to a person, and
-// nothing else in the test suite would notice. The values are asserted through
-// the REAL policy loader, so a preset that stops parsing fails here too.
+// TestUnit_SeededPolicies_StateWhoMayAnswer asserts each preset's stance on who may answer a unit's question, including the two that refuse.
 func TestUnit_SeededPolicies_StateWhoMayAnswer(t *testing.T) {
 	dir := t.TempDir()
 	for _, p := range HITLPolicyPresets {
@@ -36,6 +28,7 @@ func TestUnit_SeededPolicies_StateWhoMayAnswer(t *testing.T) {
 		why       string
 	}{
 		{"hitl-policy-acp.json", true, 3, "an editor session's agent holds the conversation the mission came from"},
+		{"hitl-policy-beam.json", true, 3, "beam's default envelope mirrors acp's: an attended session's agent holds the conversation the mission came from"},
 		{"hitl-policy-default.json", true, 2, "routine questions, with whatever the unit then does still gated"},
 		{"hitl-policy-dev.json", true, 5, "the permissive local-development posture"},
 		{"hitl-policy-strict.json", false, 0, "a policy whose character is 'a human decides' must not delegate deciding"},
@@ -50,9 +43,7 @@ func TestUnit_SeededPolicies_StateWhoMayAnswer(t *testing.T) {
 	}
 }
 
-// TestUnit_SeededPolicies_DeclareAttentionExplicitly guards the legibility half:
-// every preset SAYS its stance rather than inheriting the default, so an operator
-// reading one file knows the knob exists.
+// TestUnit_SeededPolicies_DeclareAttentionExplicitly asserts every preset states its attention stance explicitly rather than inheriting the default.
 func TestUnit_SeededPolicies_DeclareAttentionExplicitly(t *testing.T) {
 	for _, p := range HITLPolicyPresets {
 		var doc map[string]any

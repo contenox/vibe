@@ -5,60 +5,63 @@ description: HITL isn't a checkbox. It's a policy file you wrote.
 
 # The pause is yours to define
 
-A lot of AI tools advertise "human-in-the-loop." Usually it's a checkbox: turn it on, the tool pauses before every tool call. Turn it off, it doesn't.
+Write a HITL (human-in-the-loop) policy that pauses only on the tool calls you name, then activate it.
 
-That's not how Contenox does it, and the difference is exactly the difference this site is about.
+## Prerequisites
 
-## The pause as a policy you authored
+- `contenox` installed and initialized in a project (`contenox init`).
+- A chain that calls tools — the default chain qualifies.
 
-In Contenox, HITL is on by default. But *what* pauses is determined by a policy file — a JSON document you write, version in git, and review in PRs alongside the chains it governs.
+## Steps
 
-The default policy (`~/.contenox/hitl-policy-default.json`) pauses on destructive actions — filesystem writes, `sed`, shell commands, mutating HTTP verbs — allows reads and the safe HTTP verbs, and fail-closes to an approval prompt for anything else (`default_action: "approve"`). But you can author your own:
+1. Note the active default policy at `~/.contenox/hitl-policy-default.json`. It pauses on filesystem writes, `sed`, shell commands, and mutating HTTP verbs; allows reads and safe HTTP verbs; and fails closed to an approval prompt for anything else (`default_action: "approve"`).
 
-```json
-{
-  "default_action": "deny",
-  "rules": [
-    { "tools": "local_fs",    "tool": "read_file",   "action": "allow" },
-    { "tools": "local_fs",    "tool": "list_dir",    "action": "allow" },
-    { "tools": "local_fs",    "tool": "write_file",  "action": "approve" },
-    { "tools": "local_fs",    "tool": "sed",         "action": "approve" },
-    { "tools": "local_shell", "tool": "local_shell", "action": "approve" },
-    { "tools": "zendesk",     "tool": "send_reply",  "action": "approve" }
-  ]
-}
-```
+2. Write your own policy as a JSON document — rules are evaluated top to bottom, first match wins:
 
-Reading files passes silently. Writing files pauses. Shell commands pause. Sending a Zendesk reply pauses. Everything else is denied. You wrote that.
+   ```json
+   {
+     "default_action": "deny",
+     "rules": [
+       { "tools": "local_fs",    "tool": "read_file",   "action": "allow" },
+       { "tools": "local_fs",    "tool": "list_dir",    "action": "allow" },
+       { "tools": "local_fs",    "tool": "write_file",  "action": "approve" },
+       { "tools": "local_fs",    "tool": "sed",         "action": "approve" },
+       { "tools": "local_shell", "tool": "local_shell", "action": "approve" },
+       { "tools": "zendesk",     "tool": "send_reply",  "action": "approve" }
+     ]
+   }
+   ```
 
-## Why this matters
+   Reading files passes silently, writing files pauses, shell commands pause, sending a Zendesk reply pauses, and everything else is denied.
 
-The "approve everything" model breaks under load. If a chain reads ten files and runs one shell command, you don't want ten approval prompts. You want one — at the side-effect.
+3. Save it as `~/.contenox/hitl-policy-<name>.json`.
 
-The "approve nothing" model breaks under stakes. If a chain might delete a database row, you don't want it to just *try*.
+4. Activate it:
 
-Authored policies are the in-between. The pause goes where the operator who wrote the policy decided it should go. Inside loops where it's safe to read, the agent flows. At the boundary where something irreversible happens, the agent stops and asks.
+   ```bash
+   contenox config set hitl-policy-name hitl-policy-<name>.json
+   ```
 
-## Three policies, three postures
+5. Run a chain that calls a gated tool and confirm the approval prompt appears only where your policy said it should.
 
-Contenox ships five presets (all under `~/.contenox/`). Two are transport-specific — `hitl-policy-acp.json` for editor (ACP) sessions and `hitl-policy-acpx.json` for headless/untrusted-driver sessions. The three general-purpose postures are:
+## Expected outcome
 
-**Default** (`hitl-policy-default.json`). Prompts on writes, `sed`, shell commands, and mutating HTTP verbs. Allows reads and safe HTTP methods. Anything else fail-closes to an approval prompt (`default_action: "approve"`). This is what runs out of the box.
+Reads and other `allow` rules run without interruption. Every `approve` rule pauses for a terminal (or editor) approval prompt showing the actual call. Anything not matched by a rule falls through to `default_action`.
 
-**Strict** (`hitl-policy-strict.json`). Deny-by-default. Only explicitly listed tools can run, and those get an approval prompt. For production or compliance-sensitive environments.
+## Built-in presets
 
-**Dev** (`hitl-policy-dev.json`). Allow-all — silent pass-through. For local development when you trust the chain and don't want interruptions.
+Contenox ships six policy presets under `~/.contenox/`. Switch between them with `contenox config set hitl-policy-name <file>`.
 
-Switch between them in one command:
+| Preset | File | Behavior |
+|---|---|---|
+| Default | `hitl-policy-default.json` | Prompts on writes, `edit_file`, `sed`, shell commands, and mutating HTTP verbs; allows reads and safe HTTP methods; fails closed to approval otherwise. Runs out of the box. |
+| Strict | `hitl-policy-strict.json` | Deny-by-default. Plain reads (`read_file`, `list_dir`, `grep`, `web_get`, …) pass silently; every other explicitly listed tool still prompts for approval; anything not listed is denied. For production or compliance-sensitive environments. |
+| Dev | `hitl-policy-dev.json` | Allow-all by default — most tool calls pass silently. `local_shell` itself still prompts for approval (with a handful of destructive commands denied outright even here). For local development when you trust the chain and don't want interruptions outside the shell. |
+| ACP | `hitl-policy-acp.json` | Transport-specific: editor (ACP) sessions — Zed, JetBrains, AionUi. |
+| ACPX | `hitl-policy-acpx.json` | Transport-specific: headless/untrusted-driver sessions (OpenClaw). Deny-by-default with no approval tier. |
+| Beam | `hitl-policy-beam.json` | Transport-specific: `contenox beam`'s attended terminal session — a copy of the ACP preset tuned for the TUI's own approval card. |
 
-```bash
-contenox config set hitl-policy-name hitl-policy-strict.json
-```
+## Where to next
 
-## You own the boundary
-
-The most important thing about authored policies is that the boundary lives in your file. If a security review changes what should pause, you change the policy — not the engine, not a setting screen, not a vendor's roadmap. The gate moved because you moved a JSON key.
-
-That's also why this scales to a team. A reviewer reading your policy file in a PR can see exactly where the pauses are. They don't have to read the engine source or trust a vendor claim. The policy is right there in the artifact, next to the chains it governs.
-
-The chain is the contract. The policy is part of the contract you wrote.
+- [HITL policies](/docs/guide/hitl/) — the full policy schema and condition operators.
+- [The nested permission bomb](/docs/use-cases/nested-permission-bomb/) — authoring the same boundary for tool credentials, not just approvals.

@@ -156,7 +156,7 @@ func (c *HTTPClient) CountTokens(ctx context.Context, modelName string, prompt s
 // OptimalModel returns the optimal model for tokenization based on the given model.
 // This is a client-side implementation mirroring the server's logic.
 func (c *HTTPClient) OptimalModel(ctx context.Context, baseModel string) (string, error) {
-	// Hardcoded model mappings (matching what the server uses with USE_DEFAULT_URLS=true)
+	// Mirrors the server's mappings with USE_DEFAULT_URLS=true.
 	modelURLs := map[string]string{
 		"tiny":                  "https://huggingface.co/Hjgugugjhuhjggg/FastThink-0.5B-Tiny-Q2_K-GGUF/resolve/main/fastthink-0.5b-tiny-q2_k.gguf",
 		"llama-3.1":             "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-IQ2_M.gguf",
@@ -165,7 +165,6 @@ func (c *HTTPClient) OptimalModel(ctx context.Context, baseModel string) (string
 		"phi-3":                 "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf",
 	}
 
-	// Hardcoded family mappings (matching the server's logic)
 	familyMappings := []struct {
 		CanonicalName string
 		Substrings    []string

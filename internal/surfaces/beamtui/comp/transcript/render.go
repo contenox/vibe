@@ -11,40 +11,30 @@ import (
 	libacp "github.com/contenox/beam/libacp"
 )
 
-// quoteMarker is a blockquote's literal source prefix. It is not a glyph and
-// has no ASCII variant: it is what the agent wrote, kept so a copied quote
-// round-trips as markdown.
+// quoteMarker is a blockquote's literal source prefix, kept verbatim so a
+// copied quote round-trips as markdown.
 const quoteMarker = "> "
 
 // The ASCII glyphs this component draws, exported so testkit's parity test
-// can pin them against the style package's GlyphSet. Components may not
-// import style (blueprint rule c) and style may not import components, so the
-// two ASCII vocabularies can only be held together from outside — by a test
-// that sees both. Three characters have to agree across every surface a Mono
-// terminal shows, because a "+" that means "done" here and something else in
-// the status bar is a legibility bug that color would normally have covered.
+// can pin them against the style package's GlyphSet: components may not
+// import style, so the two ASCII vocabularies are held together only by a
+// test that sees both.
 const (
 	ASCIIDone   = "+" // completed — style.GlyphSet.Check
 	ASCIIFailed = "x" // failed — style.GlyphSet.Cross
 	ASCIIUser   = ">" // the user-turn sigil — style.GlyphSet.Collapsed
 )
 
-// unit is one settled piece of transcript content, held UNRENDERED until a
-// TakeAppends supplies the width. Every glyph choice happens in render, so the
-// unicode/ASCII decision is the caller's at take time, not the event's at
-// arrival time.
-//
-// render is the SETTLED shape, and settled prose is emitted unwrapped: one
-// source line, one output line, at any width (see [Transcript.TakeAppends]).
+// unit is one settled piece of transcript content, held unrendered until a
+// TakeAppends supplies the width. Settled prose is emitted unwrapped: one
+// source line, one output line, at any width.
 type unit interface {
 	render(width int, g glyphs) []frame.Line
 }
 
-// liveRenderer is implemented by the units whose LIVE shape differs from their
-// settled one — the two prose units, which wrap in the live region and nowhere
-// else. Everything else renders identically on both paths: a card is one line
-// by construction, and code and shell output are unwrapped by the same
-// copy-fidelity rule that now covers prose.
+// liveRenderer is implemented by units whose live shape differs from their
+// settled one — the two prose units, which wrap only in the live region.
+// Everything else renders identically on both paths.
 type liveRenderer interface {
 	renderLive(width int, g glyphs) []frame.Line
 }
@@ -57,9 +47,8 @@ func renderLive(u unit, width int, g glyphs) []frame.Line {
 	return u.render(width, g)
 }
 
-// glyphs is the component's character set in both variants. It deliberately
-// does not import the style package's GlyphSet — components may not depend on
-// style — so the ASCII column is spelled out here and pinned by a test.
+// glyphs is the component's character set in both variants, spelled out here
+// (rather than importing style.GlyphSet) and pinned by a test.
 type glyphs struct {
 	quote      string // blockquote / card body gutter
 	user       string // user-turn sigil
@@ -90,12 +79,8 @@ var unicodeGlyphs = glyphs{
 	indentUser: "  ",
 }
 
-// asciiGlyphs is the legacy-console fallback. Nothing here is width-critical,
-// because a card truncates its title against whatever the marker actually
-// costs — but the status markers are single cells anyway, which is why "done"
-// is "+" and not the "ok" it used to be: two cells put the title of every
-// completed card one column right of every failed one, and the ragged edge
-// read as a layout bug rather than as a status.
+// asciiGlyphs is the legacy-console fallback. Status markers are single
+// cells so a completed and a failed card's titles stay column-aligned.
 var asciiGlyphs = glyphs{
 	quote:      "| ",
 	user:       ASCIIUser + " ",
@@ -135,10 +120,8 @@ func (u proseUnit) renderLive(width int, g glyphs) []frame.Line {
 	return parseProse(u.text, g).wrap(width)
 }
 
-// thoughtUnit is one source line of reasoning. Thoughts render as plain
-// dimmed text with no markdown decoration: D57 puts them in the MVP as the
-// quieter counterpart to answer text, and a dimmed heading that outshouts the
-// answer above it would defeat that.
+// thoughtUnit is one source line of reasoning, rendered as plain dimmed text
+// with no markdown decoration, so it never outshouts the answer above it.
 type thoughtUnit struct{ text string }
 
 func (u thoughtUnit) render(int, glyphs) []frame.Line {
@@ -149,16 +132,9 @@ func (u thoughtUnit) renderLive(width int, g glyphs) []frame.Line {
 	return wrapSpans([]frame.Span{frame.S(frame.StyleThought, u.text)}, width)
 }
 
-// tableUnit is one row of a markdown table: a single span, emitted UNWRAPPED
-// and UNSTYLED at any width.
-//
-// A table is column-aligned data whose alignment lives entirely in its spacing
-// and its pipes. Running it through the inline-markdown pass turned an
-// asterisk in a cell into emphasis and ate its delimiters, and wrapping it
-// shredded the columns into rows of pipe fragments — which is what the first
-// dogfooding hunt saw. It takes the same treatment as a fenced code line, for
-// the same reason: the source IS the layout, so it ships verbatim and the
-// terminal decides what to do when it does not fit.
+// tableUnit is one row of a markdown table: a single span, emitted unwrapped
+// and unstyled at any width, since the source's spacing and pipes are the
+// layout — inline markdown or wrapping would shred the columns.
 type tableUnit struct{ text string }
 
 func (u tableUnit) render(int, glyphs) []frame.Line {
@@ -166,9 +142,7 @@ func (u tableUnit) render(int, glyphs) []frame.Line {
 }
 
 // codeUnit is one line inside a fenced code block: a single span, emitted
-// UNWRAPPED at any width. Copy fidelity is constitutional — a code line the
-// component split would paste back as two lines — so the engine owns the
-// overflow and the terminal's own wrap does what it always does.
+// unwrapped at any width so a copied code line never pastes back split.
 type codeUnit struct{ text string }
 
 func (u codeUnit) render(int, glyphs) []frame.Line {
@@ -211,9 +185,9 @@ func (shellResetUnit) render(width int, g glyphs) []frame.Line {
 }
 
 // userUnit is a user turn: one output line per line the operator typed. The
-// sigil carries the whole styling and the text stays unstyled — selecting the
-// answer to a question should paste the words, not a color decision — and the
-// lines after the first are indented to sit under the sigil.
+// sigil alone carries the styling; text stays unstyled so a copied answer
+// pastes as words, not a color decision. Lines after the first indent under
+// the sigil.
 type userUnit struct{ text string }
 
 func (u userUnit) render(_ int, g glyphs) []frame.Line {
@@ -229,9 +203,8 @@ func (u userUnit) render(_ int, g glyphs) []frame.Line {
 	return out
 }
 
-// missionUnit is a mission report or ask: the header names the unit that
-// spoke, because a report rendered as plain assistant prose is a defect —
-// reports are how detached work talks back into a session nobody is watching.
+// missionUnit is a mission report or ask; the header names the unit that
+// spoke, since it must never render as plain assistant prose.
 type missionUnit struct {
 	agent string
 	kind  string
@@ -256,10 +229,8 @@ func (u missionUnit) render(_ int, g glyphs) []frame.Line {
 	if u.text == "" {
 		return out
 	}
-	// One report line in, one out. The gutter marks every line of the body
-	// because the body is a quotation — it is somebody else's message, carried
-	// into a session that was not watching — and a line that lost the gutter
-	// would read as this session's own prose.
+	// The gutter marks every body line as a quotation, not this session's own
+	// prose.
 	gutter := frame.S(frame.StyleBorder, g.quote)
 	for _, src := range splitSourceLines(u.text) {
 		out = append(out, buildLine(gutter, frame.S(frame.StyleNone, src)))
@@ -267,9 +238,8 @@ func (u missionUnit) render(_ int, g glyphs) []frame.Line {
 	return out
 }
 
-// missionSpeaker names the unit a mission card is about. A mission that never
-// carried an agent name still gets a card — the attribution is what the card
-// exists for, and "mission unit" is a truer answer than a blank.
+// missionSpeaker names the unit a mission card is about, falling back to a
+// generic label when no agent name was carried.
 func missionSpeaker(agent string) string {
 	if agent == "" {
 		return "mission unit"
@@ -278,15 +248,9 @@ func missionSpeaker(agent string) string {
 }
 
 // missionStatusUnit is a mission reaching a lifecycle state: one line, one
-// status word, styled by the state itself.
-//
-// The STYLE is the whole point of a separate unit. A landed mission and a
-// derailed one are the same sentence with one word changed, and an operator
-// skimming a long transcript reads the color before the word — so the four
-// terminal states take the four roles that already mean those things everywhere
-// else in beam (done / failed / warn / muted for a mission nobody finished),
-// and anything else — "open", or a status a later service grew — renders strong
-// and unremarkable rather than claiming an outcome it does not know.
+// status word, styled by the state itself so an operator skimming a long
+// transcript reads the color before the word. An unknown status renders
+// strong and unremarkable rather than claiming an outcome it does not know.
 type missionStatusUnit struct {
 	agent  string
 	status string
@@ -300,18 +264,14 @@ func (u missionStatusUnit) render(_ int, g glyphs) []frame.Line {
 	}
 	spans := []frame.Span{frame.S(missionStatusStyle(u.status), head)}
 	if u.reason != "" {
-		// Muted, and behind a dash: the reason is context for the status, not a
-		// second status. Styling it like the state would make "derailed" and
-		// "the branch was gone" read as equally load-bearing.
+		// Muted: context for the status, not a second status.
 		spans = append(spans, frame.S(frame.StyleMuted, " "+g.dash+" "+u.reason))
 	}
 	return []frame.Line{buildLine(spans...)}
 }
 
 // missionStatusStyle maps the lifecycle vocabulary onto beam's style roles.
-// StyleMuted for abandoned is deliberate: an abandoned mission is not a failure,
-// it is work nobody carried on with, and dressing it as an error would put a red
-// line in the transcript for a decision the operator made.
+// Abandoned is muted, not an error: it is a decision, not a failure.
 func missionStatusStyle(status string) frame.StyleID {
 	switch status {
 	case enginebridge.MissionStatusLanded:
@@ -326,14 +286,9 @@ func missionStatusStyle(status string) frame.StyleID {
 	return frame.StyleStrong
 }
 
-// missionPlanUnit is a mission's planner replacing its plan: the revision line
-// and the shape of the plan underneath it.
-//
-// It renders ENTIRELY muted, both lines, and that is the design rather than an
-// oversight. A unit reorganizing its own work is the thing the operator
-// delegated; it belongs in the record so the transcript can answer "what was it
-// doing at 3am", and it must not compete for attention with the answer the
-// operator is reading. The bell rules agree — a plan revision never rings.
+// missionPlanUnit is a mission's planner replacing its plan: the revision
+// line and the shape of the plan underneath it, rendered entirely muted so
+// it never competes with the answer the operator is reading.
 type missionPlanUnit struct {
 	agent       string
 	revision    int
@@ -348,10 +303,8 @@ func (u missionPlanUnit) render(_ int, g glyphs) []frame.Line {
 	if u.explanation != "" {
 		head += " " + g.dash + " " + u.explanation
 	}
-	// The counts hang under the header on their own row, indented like a user
-	// turn's continuation: three numbers spliced onto the explanation would be
-	// the first thing truncated on a narrow terminal, and they are the half an
-	// operator actually skims.
+	// Counts hang under the header on their own row rather than being spliced
+	// onto the explanation, where a narrow terminal would truncate them first.
 	sep := " " + g.dot + " "
 	counts := fmt.Sprintf("%d done%s%d running%s%d pending", u.completed, sep, u.inProgress, sep, u.pending)
 	return []frame.Line{
@@ -360,10 +313,9 @@ func (u missionPlanUnit) render(_ int, g glyphs) []frame.Line {
 	}
 }
 
-// splitSourceLines cuts multi-line unit text into the rows that will become
-// spans, expanding each line's tabs against its own column origin. Tab stops
-// are per-line, so this cannot be done before the split — which is exactly
-// why sanitize.Lines leaves tabs alone and hands the decision here.
+// splitSourceLines cuts multi-line unit text into rows, expanding each
+// line's tabs against its own column origin (tab stops are per-line, so
+// sanitize.Lines leaves this to the caller).
 func splitSourceLines(text string) []string {
 	out := strings.Split(text, "\n")
 	for i, l := range out {
@@ -405,14 +357,10 @@ func (u failUnit) render(width int, g glyphs) []frame.Line {
 	return wrapSpans([]frame.Span{frame.S(frame.StyleError, text)}, width)
 }
 
-// cardLine renders one collapsed tool-call line — the only shape a card has
-// in the MVP (blueprint D44: collapsed by default, uniform, no expansion).
-//
-// spinner is the animation frame for a running call; an empty spinner falls
-// back to the static pending glyph so a settled card and a golden test both
-// render without motion. The title is TRUNCATED, never wrapped: a card is one
-// line by definition, and a two-line card would break the "updated in place"
-// contract the moment it settled at a different width.
+// cardLine renders one collapsed tool-call line, the only shape a card has.
+// spinner is the animation frame for a running call; empty falls back to
+// the static pending glyph. The title is truncated, never wrapped, since a
+// card is one line by definition.
 func cardLine(title string, status libacp.ToolCallStatus, abandoned bool, spinner string, width int, g glyphs) frame.Line {
 	mark, style := g.pending, frame.StylePending
 	switch {
@@ -435,10 +383,8 @@ func cardLine(title string, status libacp.ToolCallStatus, abandoned bool, spinne
 		return line
 	}
 	if width > 0 && textwidth.Width(title) > budget {
-		// The ellipsis has to FIT before it can mark anything. ASCII spends
-		// three cells on "...", and runewidth.Truncate handed a tail wider
-		// than the budget returns the bare tail — a card that overflowed the
-		// terminal to say the title was cut.
+		// The ellipsis must fit the budget itself, or dropping it entirely
+		// is safer than a truncated title that still overflows.
 		tail := g.ellipsis
 		if textwidth.Width(tail) > budget {
 			tail = ""
@@ -448,39 +394,32 @@ func cardLine(title string, status libacp.ToolCallStatus, abandoned bool, spinne
 	return append(line, frame.S(frame.StyleNone, " "), frame.S(frame.StyleTool, title))
 }
 
-// proseLine is one source line of markdown, decided but not yet laid out: the
-// prefix that carries the line's structure, the indent a wrapped continuation
-// of it would hang under, and the styled body.
-//
-// The split exists because the two render paths recombine the same decision
-// differently — settled prose is one unwrapped line, the live tail wraps — and
-// the markdown vocabulary must not be interpreted twice.
+// proseLine is one source line of markdown, decided but not yet laid out:
+// the structural prefix, the indent a wrapped continuation hangs under, and
+// the styled body. The split lets the two render paths (settled: one
+// unwrapped line; live: soft-wrapped) reuse one markdown decision.
 type proseLine struct {
 	prefix frame.Span
 	cont   frame.Span
 	body   []frame.Span
 }
 
-// line is the SETTLED shape: prefix and body on one logical line, however wide.
+// line is the settled shape: prefix and body on one logical line, however wide.
 func (p proseLine) line() frame.Line {
 	return buildLine(append([]frame.Span{p.prefix}, p.body...)...)
 }
 
-// wrap is the LIVE shape: soft-wrapped to width, continuations hanging under
+// wrap is the live shape: soft-wrapped to width, continuations hanging under
 // the prefix.
 func (p proseLine) wrap(width int) []frame.Line {
 	return wrapWithPrefix(p.body, width, p.prefix, p.cont)
 }
 
-// parseProse interprets ONE source line of markdown. The vocabulary is
-// deliberately line-based — headings, blockquotes, list markers, and inline
-// code/strong/emphasis — because a streaming renderer settles a line the
-// instant its newline arrives and can never revisit it. Anything ambiguous
-// degrades to the literal source text: garbling a line is worse than not
-// styling it.
-//
-// Every prefix it produces is SOURCE the agent wrote, never a substituted
-// glyph, so a copied line pastes back as the markdown it came from.
+// parseProse interprets one source line of markdown: headings, blockquotes,
+// list markers, and inline code/strong/emphasis. Anything ambiguous degrades
+// to literal source text — garbling is worse than not styling. Every prefix
+// produced is source the agent wrote, never a substituted glyph, so a copied
+// line pastes back as the markdown it came from.
 func parseProse(src string, g glyphs) proseLine {
 	if src == "" {
 		return proseLine{}
@@ -488,19 +427,13 @@ func parseProse(src string, g glyphs) proseLine {
 	indent, rest := splitIndent(src)
 
 	if headingLevel(rest) > 0 {
-		// The "#" markers stay: they are the source, they round-trip on a
-		// copy, and StyleHeading already carries the emphasis.
+		// The "#" markers stay: source, round-trips on copy.
 		return proseLine{body: []frame.Span{frame.S(frame.StyleHeading, src)}}
 	}
 
 	if body, ok := quoteBody(rest); ok {
-		// The "> " is the SOURCE, and it stays the source. Substituting the
-		// prettier "▎ " gutter styled the line at the cost of the one thing
-		// this renderer promises: selecting a quoted passage out of the
-		// terminal has to paste back as markdown the agent would recognise,
-		// and "▎ quoted" is not that. The style carries the decoration; the
-		// text carries the meaning, exactly like the "#" markers a heading
-		// keeps a dozen lines up.
+		// "> " stays the source rather than a substituted gutter glyph, so a
+		// copied quote pastes back as markdown.
 		gutter := frame.S(frame.StyleBorder, indent+quoteMarker)
 		return proseLine{prefix: gutter, cont: gutter, body: []frame.Span{frame.S(frame.StyleMuted, body)}}
 	}
@@ -516,10 +449,9 @@ func parseProse(src string, g glyphs) proseLine {
 	return proseLine{body: parseInline(src)}
 }
 
-// buildLine assembles one output line from spans, dropping the empty ones (a
-// prefix nobody set, a body that was all markers) and merging neighbours that
-// share a style. An empty result is a genuinely blank line, not a styled
-// nothing.
+// buildLine assembles one output line from spans, dropping empty ones and
+// merging neighbours that share a style. An empty result is a genuinely
+// blank line, not a styled nothing.
 func buildLine(spans ...frame.Span) frame.Line {
 	out := make(frame.Line, 0, len(spans))
 	for _, s := range spans {
@@ -534,9 +466,8 @@ func buildLine(spans ...frame.Span) frame.Line {
 	return merge(out)
 }
 
-// splitIndent separates a line's leading spaces from its content, so a nested
-// list or quote keeps its indentation in the prefix rather than in the wrapped
-// body.
+// splitIndent separates a line's leading spaces from its content, so nested
+// indentation stays in the prefix rather than the wrapped body.
 func splitIndent(s string) (indent, rest string) {
 	i := 0
 	for i < len(s) && s[i] == ' ' {
@@ -595,13 +526,9 @@ func isFence(src string) bool {
 	return strings.HasPrefix(rest, "```")
 }
 
-// isTableRow reports whether a source line is a row of a markdown table.
-//
-// A leading pipe is the whole test for a body row, which is what every table
-// generator emits. The second arm catches the one row shape that legitimately
-// starts without one — a header separator written as ":--- | ---:" — and only
-// that: it demands a pipe (so a "---" horizontal rule stays prose) and a dash
-// (so a lone "|" does not qualify), and rejects any other rune.
+// isTableRow reports whether a source line is a row of a markdown table: a
+// leading pipe, or a header separator (":--- | ---:") that has both a pipe
+// and a dash and no other rune.
 func isTableRow(src string) bool {
 	_, rest := splitIndent(src)
 	if strings.HasPrefix(rest, "|") {
@@ -632,11 +559,9 @@ func advanceFence(src string, in bool) bool {
 }
 
 // parseInline renders one line's inline markdown into spans: `code`,
-// **strong**, *emphasis*. Everything else — including "_" (snake_case is
-// identifiers, not emphasis, in a coding harness), nested markers, and any
-// unterminated delimiter — stays literal text. Spans are NOT nested: scanning
-// left to right, the first marker run that closes cleanly wins and its body is
-// one flat run.
+// **strong**, *emphasis*. Everything else — "_", nested markers, unterminated
+// delimiters — stays literal text. Spans are not nested: the first marker run
+// that closes cleanly wins and its body is one flat run.
 func parseInline(s string) []frame.Span {
 	var out []frame.Span
 	var lit strings.Builder
@@ -655,9 +580,8 @@ func parseInline(s string) []frame.Span {
 			continue
 		}
 
-		// A marker run is matched or rejected as a WHOLE run: rescanning the
-		// tail of a rejected "**" as a single "*" is how a renderer turns
-		// "**a*b**" into garbage instead of into itself.
+		// A marker run is matched or rejected as a whole run, never rescanned
+		// as a shorter one.
 		n := runLen(s, i, c)
 		if style, end, ok := inlineSpan(s, i, c, n); ok {
 			flush()
@@ -680,8 +604,7 @@ func parseInline(s string) []frame.Span {
 // commit to.
 func inlineSpan(s string, i int, c byte, n int) (frame.StyleID, int, bool) {
 	if c == '*' && n > 2 {
-		// Three or more markers in a row is ambiguous (bold+italic, a
-		// literal separator, a typo). Degrade to literal.
+		// Three or more markers in a row is ambiguous; degrade to literal.
 		return frame.StyleNone, 0, false
 	}
 	end := indexRun(s, i+n, c, n)
@@ -701,9 +624,9 @@ func inlineSpan(s string, i int, c byte, n int) (frame.StyleID, int, bool) {
 	return frame.StyleEmphasis, end, true
 }
 
-// emphasizable rejects the shapes markdown itself rejects — a body that opens
-// or closes on whitespace ("2 * 3 * 4" is arithmetic) — and any body carrying
-// another marker, which would need nesting this renderer does not do.
+// emphasizable rejects a body that opens or closes on whitespace (arithmetic
+// like "2 * 3") and any body carrying another marker, which would need
+// nesting this renderer does not do.
 func emphasizable(body string) bool {
 	if body == "" {
 		return false
@@ -723,7 +646,7 @@ func runLen(s string, i int, ch byte) int {
 	return n
 }
 
-// indexRun finds the next run of EXACTLY n ch bytes at or after from, so a
+// indexRun finds the next run of exactly n ch bytes at or after from, so a
 // single backtick never closes on the first tick of a double run.
 func indexRun(s string, from int, ch byte, n int) int {
 	for i := from; i < len(s); {
@@ -740,38 +663,23 @@ func indexRun(s string, from int, ch byte, n int) int {
 	return -1
 }
 
-// wrapSpans soft-wraps a styled run to width.
-//
-// Wrapping is NOT the general case in this component — settled prose ships one
-// source line per output line and lets the terminal wrap it, because a break
-// this component inserts is a real newline in whatever the operator copies.
-// The two callers left are the ones where that reasoning does not apply: the
-// live region, which the engine truncates rather than wraps (see
-// [Transcript.Live]), and beam's own notice chrome, which is not transcript
-// content anybody copies.
+// wrapSpans soft-wraps a styled run to width. Settled prose ships one source
+// line per output line and lets the terminal wrap it instead; the callers
+// here are the live region (truncated, not wrapped, by the engine) and
+// beam's own notice chrome, neither of which is copied transcript content.
 func wrapSpans(spans []frame.Span, width int) []frame.Line {
 	return wrapWithPrefix(spans, width, frame.Span{}, frame.Span{})
 }
 
-// wrapWithPrefix soft-wraps a styled run to width, prefixing the first output
-// line with first and every continuation line with cont. Both prefixes count
-// against the width.
+// wrapWithPrefix soft-wraps a styled run to width, prefixing the first
+// output line with first and every continuation line with cont; both count
+// against the width. textwidth.Wrap owns the break decisions so every
+// component reflows identically; this function only re-hangs styled spans
+// over those breaks.
 //
-// textwidth.Wrap owns the break decisions — one wrapper for the whole TUI, so
-// every component reflows identically. Re-hanging the styled spans over its
-// breaks is this function's job.
-//
-// The rows carry the source EXACTLY: Wrap only ever inserts breaks, so the
-// chunks concatenate back to the input, and this function emits each chunk
-// unchanged. It used to trim the whitespace sitting on a break, on the theory
-// that a space at a row's edge is invisible. It is not invisible to a
-// selection, and the theory was wrong in a way arithmetic makes obvious: a
-// run of spaces longer than the wrap width becomes a chunk that is ENTIRELY
-// whitespace, and trimming both of its ends deleted it. A key-value line
-// padded to a column ("name" + 45 spaces + "value") lost the whole gap at
-// width 40 and pasted back as "namevalue". Copy fidelity is the one thing
-// this renderer is not allowed to trade, so nothing is trimmed and the row
-// structure the wrapper produced is what ships.
+// Nothing is trimmed at a break: a chunk that is entirely whitespace (a
+// column-padding run wider than the wrap width) must survive intact, or
+// copying a key-value line back loses the gap between them.
 func wrapWithPrefix(spans []frame.Span, width int, first, cont frame.Span) []frame.Line {
 	pad := textwidth.Width(first.Text)
 	if w := textwidth.Width(cont.Text); w > pad {
@@ -779,11 +687,9 @@ func wrapWithPrefix(spans []frame.Span, width int, first, cont frame.Span) []fra
 	}
 	text := spansText(spans)
 
-	// A prefix at least as wide as the terminal leaves nothing to wrap into.
-	// Wrapping at one cell still beats not wrapping at all: the row overflows
-	// by the prefix either way, but the BODY stays bounded instead of running
-	// the whole source line off the edge. Below the supported minimum width
-	// this is damage control, not layout.
+	// A prefix at least as wide as the terminal leaves nothing to wrap into;
+	// wrapping at one cell still bounds the body instead of running the
+	// whole source line off the edge.
 	avail := width - pad
 	if width > 0 && avail < 1 {
 		avail = 1
@@ -797,9 +703,6 @@ func wrapWithPrefix(spans []frame.Span, width int, first, cont frame.Span) []fra
 		if i > 0 {
 			p = cont
 		}
-		// A no-op against today's Wrap, kept as the seam a word-consuming
-		// wrapper would need: it advances the cursor over whitespace the
-		// wrapper swallowed rather than assuming a length identity.
 		c.skipSpacesBefore(chunk)
 
 		line := frame.Line{}
@@ -846,9 +749,8 @@ func (c *spanCursor) take(n int) []frame.Span {
 	return out
 }
 
-// skipSpacesBefore discards whitespace the wrapper consumed at a break. Only
-// whitespace is ever skipped, and only while the upcoming chunk does not
-// already match — a wrapper that drops nothing leaves the cursor untouched.
+// skipSpacesBefore discards whitespace the wrapper consumed at a break; a
+// wrapper that drops nothing leaves the cursor untouched.
 func (c *spanCursor) skipSpacesBefore(chunk string) {
 	for c.pos < len(c.text) && !strings.HasPrefix(c.text[c.pos:], chunk) {
 		if b := c.text[c.pos]; b != ' ' && b != '\t' {
@@ -858,9 +760,8 @@ func (c *spanCursor) skipSpacesBefore(chunk string) {
 	}
 }
 
-// merge joins adjacent spans that share a style. Two spans under one style are
-// indistinguishable once drawn, so this is purely a simplification — it keeps
-// a list marker from arriving as its own span and keeps goldens readable.
+// merge joins adjacent spans that share a style: indistinguishable once
+// drawn, so this keeps goldens readable.
 func merge(l frame.Line) frame.Line {
 	out := l[:0]
 	for _, s := range l {

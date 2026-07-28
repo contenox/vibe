@@ -13,8 +13,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// stubRepo is a minimal ToolsRepo whose Exec returns a fixed result. It lets the
-// tests drive the decorator deterministically without a real provider.
+// stubRepo is a minimal ToolsRepo whose Exec returns a fixed result.
 type stubRepo struct {
 	result any
 	dt     taskengine.DataType
@@ -34,8 +33,7 @@ func (s *stubRepo) GetToolsForToolsByName(context.Context, string) ([]taskengine
 
 func stringRepo(s string) *stubRepo { return &stubRepo{result: s, dt: taskengine.DataTypeString} }
 
-// exec is a call helper: it runs the wrapped repo once and returns the result as
-// a string (tests here drive string results unless they assert otherwise).
+// execStr runs the wrapped repo once and returns the result as a string.
 func execStr(t *testing.T, r taskengine.ToolsRepo, ctx context.Context, input any, call *taskengine.ToolsCall) string {
 	t.Helper()
 	res, _, err := r.Exec(ctx, time.Now(), input, false, call)
@@ -55,23 +53,20 @@ func fsCall(tool string) *taskengine.ToolsCall {
 	return &taskengine.ToolsCall{Name: "local_fs", ToolName: tool}
 }
 
+// TestUnit_ToolGuidance_RepeatMarker_And_FingerprintStability pins the repeat-marker threshold and fingerprint stability across arg shapes and policy keys.
 func TestUnit_ToolGuidance_RepeatMarker_And_FingerprintStability(t *testing.T) {
 	r := toolguidance.WrapWith(stringRepo("OK"), toolguidance.Options{RepeatThreshold: 3, ScopeEvery: 1000, RevisitThreshold: 1000})
 	ctx := toolguidance.WithSession(context.Background(), "s")
 
-	// Two identical calls: below the threshold, no marker.
 	if got := execStr(t, r, ctx, map[string]any{"path": "."}, fsCall("list_dir")); countHarness(got) != 0 {
 		t.Fatalf("call 1: expected no marker, got %q", got)
 	}
 	if got := execStr(t, r, ctx, map[string]any{"path": "."}, fsCall("list_dir")); countHarness(got) != 0 {
 		t.Fatalf("call 2: expected no marker, got %q", got)
 	}
-	// A DIFFERENT arg is a different fingerprint — it must not advance the "." count.
 	if got := execStr(t, r, ctx, map[string]any{"path": "x"}, fsCall("list_dir")); countHarness(got) != 0 {
 		t.Fatalf("different-path call: expected no marker, got %q", got)
 	}
-	// Third identical "." call — via the deterministic Args shape this time, which
-	// must fingerprint the same as the map shape (stability across call shapes).
 	got := execStr(t, r, ctx, nil, &taskengine.ToolsCall{Name: "local_fs", ToolName: "list_dir", Args: map[string]string{"path": "."}})
 	want := "[harness] 3rd identical list_dir call this session."
 	if !strings.Contains(got, want) {
@@ -81,36 +76,29 @@ func TestUnit_ToolGuidance_RepeatMarker_And_FingerprintStability(t *testing.T) {
 		t.Fatalf("guidance must be appended after the tool's own output, got %q", got)
 	}
 
-	// Policy-injected (leading-underscore) args must not split the fingerprint.
 	got = execStr(t, r, ctx, map[string]any{"path": ".", "_allowed_dir": "/tmp"}, fsCall("list_dir"))
 	if !strings.Contains(got, "[harness] 4th identical list_dir call this session.") {
 		t.Fatalf("underscore-prefixed policy arg should be excluded from fingerprint, got %q", got)
 	}
 }
 
+// TestUnit_ToolGuidance_ScopeCadence_And_PathHeuristic pins the scope line's cadence and its dir-vs-file path heuristic.
 func TestUnit_ToolGuidance_ScopeCadence_And_PathHeuristic(t *testing.T) {
 	r := toolguidance.WrapWith(stringRepo("OK"), toolguidance.Options{RepeatThreshold: 1000, ScopeEvery: 5, RevisitThreshold: 1000})
 	ctx := toolguidance.WithSession(context.Background(), "s")
 
-	// Four distinct file reads under one dir, then one dir listing. On the 5th
-	// call the scope line fires: 4 files (the reads) across dirs {"src", "src/a"}.
 	paths := []string{"src/f0.go", "src/f1.go", "src/f2.go", "src/a/f3.go"}
 	for i, p := range paths {
 		if got := execStr(t, r, ctx, map[string]any{"path": p}, fsCall("read_file")); countHarness(got) != 0 {
 			t.Fatalf("call %d: expected no scope line yet, got %q", i, got)
 		}
 	}
-	// 5th call is a dir tool; its path is credited as a directory, not a file.
 	got := execStr(t, r, ctx, map[string]any{"path": "src"}, fsCall("list_dir"))
-	// files: f0,f1,f2 (dir src) + f3 (dir src/a) = 4 files.
-	// dirs: src (parent of f0..f2), src/a (parent of f3), src (the listed dir) = {src, src/a} = 2.
 	want := "[harness] scope so far: 4 files across 2 directories."
 	if !strings.Contains(got, want) {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 
-	// A path-less call (deterministic Args carrying only a shell command) must not
-	// change the scope: extraction reads declared path args only.
 	r2 := toolguidance.WrapWith(stringRepo("OK"), toolguidance.Options{RepeatThreshold: 1000, ScopeEvery: 1, RevisitThreshold: 1000})
 	ctx2 := toolguidance.WithSession(context.Background(), "s2")
 	got = execStr(t, r2, ctx2, map[string]any{"command": "ls -la"}, &taskengine.ToolsCall{Name: "local_shell", ToolName: "run"})
@@ -119,12 +107,11 @@ func TestUnit_ToolGuidance_ScopeCadence_And_PathHeuristic(t *testing.T) {
 	}
 }
 
+// TestUnit_ToolGuidance_RevisitHint pins that a write does not count as a read and the Nth read fires the hint.
 func TestUnit_ToolGuidance_RevisitHint(t *testing.T) {
-	// Repeat threshold high so ONLY the revisit rule can fire, isolating it.
 	r := toolguidance.WrapWith(stringRepo("contents"), toolguidance.Options{RepeatThreshold: 1000, ScopeEvery: 1000, RevisitThreshold: 4})
 	ctx := toolguidance.WithSession(context.Background(), "s")
 
-	// A write to the same path must NOT count as a read.
 	execStr(t, r, ctx, map[string]any{"path": "a.go", "content": "x"}, fsCall("write_file"))
 	for i := 0; i < 3; i++ {
 		if got := execStr(t, r, ctx, map[string]any{"path": "a.go"}, fsCall("read_file")); countHarness(got) != 0 {
@@ -138,8 +125,8 @@ func TestUnit_ToolGuidance_RevisitHint(t *testing.T) {
 	}
 }
 
+// TestUnit_ToolGuidance_TwoLineCap pins that at most two lines are emitted, with the scope line dropped first.
 func TestUnit_ToolGuidance_TwoLineCap(t *testing.T) {
-	// All three thresholds at 1 so repeat + revisit + scope all fire on one read.
 	r := toolguidance.WrapWith(stringRepo("OK"), toolguidance.Options{RepeatThreshold: 1, ScopeEvery: 1, RevisitThreshold: 1})
 	ctx := toolguidance.WithSession(context.Background(), "s")
 
@@ -147,7 +134,6 @@ func TestUnit_ToolGuidance_TwoLineCap(t *testing.T) {
 	if n := countHarness(got); n != 2 {
 		t.Fatalf("expected exactly 2 guidance lines (cap), got %d in %q", n, got)
 	}
-	// The periodic scope line is the one dropped when all three collide.
 	if strings.Contains(got, "scope so far") {
 		t.Fatalf("scope line should be dropped under the two-line cap, got %q", got)
 	}
@@ -156,15 +142,13 @@ func TestUnit_ToolGuidance_TwoLineCap(t *testing.T) {
 	}
 }
 
+// TestUnit_ToolGuidance_ErrorResultsUntouched pins that an errored call passes through verbatim and is never counted.
 func TestUnit_ToolGuidance_ErrorResultsUntouched(t *testing.T) {
 	sentinel := errString("boom")
 	inner := &togglingRepo{}
-	// One decorator, one session: the SAME fingerprint counter sees an error call
-	// then two successes, proving the error is neither surfaced nor counted.
 	r := toolguidance.WrapWith(inner, toolguidance.Options{RepeatThreshold: 2, ScopeEvery: 1000, RevisitThreshold: 1000})
 	ctx := toolguidance.WithSession(context.Background(), "s")
 
-	// An errored call returns the error verbatim and leaves its result untouched.
 	inner.err = sentinel
 	res, _, err := r.Exec(ctx, time.Now(), map[string]any{"path": "."}, false, fsCall("list_dir"))
 	if err != sentinel {
@@ -174,9 +158,6 @@ func TestUnit_ToolGuidance_ErrorResultsUntouched(t *testing.T) {
 		t.Fatalf("errored result must be untouched (nil), got %v", res)
 	}
 
-	// Because the error did NOT count, the threshold-2 marker fires on the SECOND
-	// success (call totals 1 then 2), not the first — had the error counted, the
-	// marker would have appeared one call earlier.
 	inner.err = nil
 	if got := execStr(t, r, ctx, map[string]any{"path": "."}, fsCall("list_dir")); countHarness(got) != 0 {
 		t.Fatalf("success 1: expected no marker (error must not have counted), got %q", got)
@@ -186,6 +167,7 @@ func TestUnit_ToolGuidance_ErrorResultsUntouched(t *testing.T) {
 	}
 }
 
+// TestUnit_ToolGuidance_JSONResultsUntouched pins that a JSON result is returned byte-for-byte, never turned into a string.
 func TestUnit_ToolGuidance_JSONResultsUntouched(t *testing.T) {
 	type payload struct {
 		Written bool `json:"written"`
@@ -194,7 +176,6 @@ func TestUnit_ToolGuidance_JSONResultsUntouched(t *testing.T) {
 	r := toolguidance.WrapWith(jsonRepo, toolguidance.Options{RepeatThreshold: 2, ScopeEvery: 1, RevisitThreshold: 1000})
 	ctx := toolguidance.WithSession(context.Background(), "s")
 
-	// JSON result comes back byte-for-byte (same typed value), never a string.
 	res, dt, err := r.Exec(ctx, time.Now(), map[string]any{"path": "a.go", "content": "x"}, false, fsCall("write_file"))
 	if err != nil {
 		t.Fatal(err)
@@ -205,19 +186,14 @@ func TestUnit_ToolGuidance_JSONResultsUntouched(t *testing.T) {
 	if got, ok := res.(payload); !ok || !got.Written {
 		t.Fatalf("JSON result shape corrupted: %#v", res)
 	}
-	// (That the JSON call still COUNTS toward the rules is asserted separately in
-	// TestUnit_ToolGuidance_JSONCountedButNotSurfaced.)
 }
 
+// TestUnit_ToolGuidance_JSONCountedButNotSurfaced pins that a JSON call still advances the shared counters.
 func TestUnit_ToolGuidance_JSONCountedButNotSurfaced(t *testing.T) {
-	// One decorator, one session: a JSON call and a string call share the counter.
-	// Inner alternates result shape by tool name.
 	inner := &shapeRepo{}
 	r := toolguidance.WrapWith(inner, toolguidance.Options{RepeatThreshold: 2, ScopeEvery: 1000, RevisitThreshold: 1000})
 	ctx := toolguidance.WithSession(context.Background(), "s")
 
-	// First call returns JSON (counts, no surface). Second call, same fingerprint,
-	// returns a string -> the 2nd-identical marker appears, proving the JSON call counted.
 	inner.json = true
 	if _, dt, _ := r.Exec(ctx, time.Now(), map[string]any{"path": "p"}, false, fsCall("thing")); dt != taskengine.DataTypeJSON {
 		t.Fatalf("expected JSON on first call")
@@ -229,26 +205,23 @@ func TestUnit_ToolGuidance_JSONCountedButNotSurfaced(t *testing.T) {
 	}
 }
 
+// TestUnit_ToolGuidance_PerSessionIsolationAndReset pins that distinct sessions, and distinct per-turn request ids, never share counters.
 func TestUnit_ToolGuidance_PerSessionIsolationAndReset(t *testing.T) {
 	r := toolguidance.WrapWith(stringRepo("OK"), toolguidance.Options{RepeatThreshold: 3, ScopeEvery: 1000, RevisitThreshold: 1000})
 
 	s1 := toolguidance.WithSession(context.Background(), "s1")
 	s2 := toolguidance.WithSession(context.Background(), "s2")
 
-	// Drive s1 to the repeat threshold.
 	execStr(t, r, s1, map[string]any{"path": "."}, fsCall("list_dir"))
 	execStr(t, r, s1, map[string]any{"path": "."}, fsCall("list_dir"))
 	if got := execStr(t, r, s1, map[string]any{"path": "."}, fsCall("list_dir")); !strings.Contains(got, "3rd identical") {
 		t.Fatalf("s1 should hit threshold, got %q", got)
 	}
-	// s2 with identical calls is untouched by s1's counts (isolation == reset).
 	execStr(t, r, s2, map[string]any{"path": "."}, fsCall("list_dir"))
 	if got := execStr(t, r, s2, map[string]any{"path": "."}, fsCall("list_dir")); countHarness(got) != 0 {
 		t.Fatalf("s2 must be isolated from s1, got %q", got)
 	}
 
-	// The per-turn fallback: two DIFFERENT request ids (no WithSession) are two
-	// sessions and do not share counts either.
 	turnA := libtracker.WithNewRequestID(context.Background())
 	turnB := libtracker.WithNewRequestID(context.Background())
 	execStr(t, r, turnA, map[string]any{"path": "z"}, fsCall("list_dir"))
@@ -258,6 +231,7 @@ func TestUnit_ToolGuidance_PerSessionIsolationAndReset(t *testing.T) {
 	}
 }
 
+// TestUnit_ToolGuidance_Concurrency pins that concurrent calls on one session never lose an increment.
 func TestUnit_ToolGuidance_Concurrency(t *testing.T) {
 	r := toolguidance.WrapWith(stringRepo("OK"), toolguidance.Options{RepeatThreshold: 1, ScopeEvery: 7, RevisitThreshold: 1})
 	ctx := toolguidance.WithSession(context.Background(), "race")
@@ -271,8 +245,6 @@ func TestUnit_ToolGuidance_Concurrency(t *testing.T) {
 			_, _, _ = r.Exec(ctx, time.Now(), map[string]any{"path": "a.go"}, false, fsCall("read_file"))
 		}()
 	}
-	// Concurrently, a second session hammers a different path to exercise the
-	// registry map under contention.
 	other := toolguidance.WithSession(context.Background(), "race2")
 	wg.Add(n)
 	for i := 0; i < n; i++ {
@@ -283,8 +255,6 @@ func TestUnit_ToolGuidance_Concurrency(t *testing.T) {
 	}
 	wg.Wait()
 
-	// No lost updates: the very next identical call in "race" must report ordinal n+1,
-	// proving all n concurrent increments landed on the same fingerprint counter.
 	got := execStr(t, r, ctx, map[string]any{"path": "a.go"}, fsCall("read_file"))
 	wantOrd := ordinalStr(n + 1)
 	if !strings.Contains(got, wantOrd+" identical read_file call this session.") {
@@ -292,10 +262,10 @@ func TestUnit_ToolGuidance_Concurrency(t *testing.T) {
 	}
 }
 
+// TestUnit_ToolGuidance_OffSwitch pins that an off-ish env value returns the inner repo untouched (identity).
 func TestUnit_ToolGuidance_OffSwitch(t *testing.T) {
 	inner := stringRepo("OK")
 
-	// Default (unset): wrapping produces a real decorator that appends guidance.
 	t.Setenv("CONTENOX_TOOL_GUIDANCE", "")
 	if !toolguidance.Enabled() {
 		t.Fatal("expected enabled by default")
@@ -305,7 +275,6 @@ func TestUnit_ToolGuidance_OffSwitch(t *testing.T) {
 		t.Fatal("expected a real wrapper when enabled")
 	}
 
-	// Off: WrapFromEnv returns the inner repo UNTOUCHED (identity), zero-cost.
 	for _, v := range []string{"off", "false", "0", "no", "disabled"} {
 		t.Setenv("CONTENOX_TOOL_GUIDANCE", v)
 		if toolguidance.Enabled() {
@@ -324,8 +293,7 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-// shapeRepo returns JSON or string based on its json flag, so one decorator can
-// see both result shapes on the same fingerprint.
+// shapeRepo returns JSON or string based on its json flag.
 type shapeRepo struct{ json bool }
 
 func (s *shapeRepo) Exec(_ context.Context, _ time.Time, _ any, _ bool, _ *taskengine.ToolsCall) (any, taskengine.DataType, error) {
@@ -342,8 +310,7 @@ func (s *shapeRepo) GetToolsForToolsByName(context.Context, string) ([]taskengin
 	return nil, nil
 }
 
-// togglingRepo returns a settable error (and otherwise a string result) so one
-// decorator can observe an error call and success calls on the same counter.
+// togglingRepo returns a settable error and otherwise a string result.
 type togglingRepo struct{ err error }
 
 func (s *togglingRepo) Exec(_ context.Context, _ time.Time, _ any, _ bool, _ *taskengine.ToolsCall) (any, taskengine.DataType, error) {
@@ -399,9 +366,7 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// carrierResult is a typed tool result that RENDERS as text — the shape
-// localtools' git results have, so a program reading them gets fields while the
-// model reads prose.
+// carrierResult is a typed tool result that renders as text.
 type carrierResult struct {
 	Field string `json:"field"`
 	text  string
@@ -414,18 +379,13 @@ func (c carrierResult) AppendGuidance(text string) any {
 	return c
 }
 
-// TestUnit_ToolGuidance_TypedResultThatRendersAsTextKeepsItsGuidance is the
-// regression test for a silent loss: typing a tool's result so a PROGRAM can
-// read it must not remove the guidance the MODEL was getting. A struct that says
-// it can carry the lines carries them; its structure is untouched.
+// TestUnit_ToolGuidance_TypedResultThatRendersAsTextKeepsItsGuidance pins that a typed AppendGuidance carrier keeps its guidance and its shape.
 func TestUnit_ToolGuidance_TypedResultThatRendersAsTextKeepsItsGuidance(t *testing.T) {
 	repo := &stubRepo{result: carrierResult{Field: "v", text: "branch main\n"}, dt: taskengine.DataTypeString}
 	r := toolguidance.WrapWith(repo, toolguidance.Options{RepeatThreshold: 2, ScopeEvery: 1000, RevisitThreshold: 1000})
 	ctx := toolguidance.WithSession(context.Background(), "s")
 	call := &taskengine.ToolsCall{Name: "git", ToolName: "git_status"}
 
-	// First call: below the repeat threshold, so nothing is appended and the
-	// value is returned untouched.
 	res, _, err := r.Exec(ctx, time.Now(), map[string]any{}, false, call)
 	if err != nil {
 		t.Fatalf("exec: %v", err)
@@ -434,8 +394,6 @@ func TestUnit_ToolGuidance_TypedResultThatRendersAsTextKeepsItsGuidance(t *testi
 		t.Fatalf("an unmarked result was altered: %#v", res)
 	}
 
-	// Second call trips the repeat marker: the lines ride the result's own
-	// rendering, and the struct is still a struct.
 	res, _, err = r.Exec(ctx, time.Now(), map[string]any{}, false, call)
 	if err != nil {
 		t.Fatalf("exec: %v", err)
@@ -455,8 +413,7 @@ func TestUnit_ToolGuidance_TypedResultThatRendersAsTextKeepsItsGuidance(t *testi
 	}
 }
 
-// A typed result that CANNOT carry text is still returned byte-for-byte, which
-// is the older half of the same law: advice never changes a result's shape.
+// TestUnit_ToolGuidance_TypedResultWithoutACarrierIsUntouched pins that a non-carrier typed result is returned byte-for-byte.
 func TestUnit_ToolGuidance_TypedResultWithoutACarrierIsUntouched(t *testing.T) {
 	type plain struct{ A int }
 	repo := &stubRepo{result: plain{A: 1}, dt: taskengine.DataTypeJSON}

@@ -1,52 +1,8 @@
-// Package missionchanges is the attention layer's first two stages made
-// concrete: it reads a mission's already-journaled work and answers two
-// questions an operator's oversight cockpit asks — "what did this unit change?"
-// and "where did its attention go, and did it wander?" It is a pure CONSUMER of
-// recordings the runtime already keeps (the kernel's per-session replay
-// journal), never a new recording duty; that is the layer's blind-spot
-// doctrine (see
-// docs/development/blueprints/beam/attention-layer.md): every artifact of
-// orientation must be an automatic by-product of work, computed, never asked
-// for.
-//
-// # What it computes
-//
-// Given a mission id, the service resolves the mission's one session/instance
-// (missionservice binds exactly one of each), folds that session's kernel
-// journal, and returns:
-//
-//   - Changes: the changed-files list — per path, the FIRST OldText and LAST
-//     NewText seen across the mission's diff events, with a git-shaped status
-//     derived from them. The list and the per-path diff form a deliberate
-//     two-endpoint contract
-//     (ide-workflows.md Arc 1); the raw material is acpsvc's
-//     diffContentFromResult, which already turns every file-write tool result
-//     into a libacp.ToolCallContent{Type: Diff, Path, OldText, NewText} flowing
-//     through the session stream.
-//
-//   - Attention (Stage 1 — Degree-of-Interest): a per-path interest score from
-//     ALL of the unit's tool interactions touching that path — edits weighted
-//     above reads weighted above the rest — so the changed-files list is ordered
-//     by where the unit's attention CONCENTRATED, not alphabetically. Review
-//     starts at the hot spot.
-//
-//   - Scope (Stage 2 — scope-anomaly detection): the touched-path set summarized
-//     as distinct files and distinct top-level directories, plus a scopeAnomaly
-//     flag raised when any touched path falls OUTSIDE the mission's workspace
-//     root (its cwd). This converts a core design premise — that SCOPE,
-//     not step count, is the real efficiency signal, and that derailment is a
-//     scope anomaly before it is anything else (the $HOME-wanderer detectable
-//     from its first two tool calls) — into the fleet's cheapest alarm: set
-//     arithmetic over the same fold.
-//
-// # The advice-not-gate law (binding)
-//
-// Nothing here gates anything. The scores RANK and the anomaly FLAGS; envelopes
-// gate. Rank is advice; the operator's eyes stay the judge — the attention layer
-// is an exoskeleton, not an autopilot. A high score never blocks a file, a
-// scopeAnomaly never stops a unit, and both are computed after the fact from a
-// record that was written whether or not anyone was watching. This law is why
-// the service has no verb that mutates a mission and no dependency that could.
+// Package missionchanges answers two oversight questions from a mission's
+// already-journaled work: what did the unit change, and did its attention
+// wander outside its workspace. It is a pure consumer of the kernel's replay
+// journal — it never records anything and no method mutates a mission
+// (advice-not-gate: scores rank and anomalies flag, they never gate).
 package missionchanges
 
 import (
@@ -61,28 +17,12 @@ import (
 	"github.com/contenox/beam/libacp"
 )
 
-// The DOI weight table (Stage 1). These weights
-// are TUNABLE HYPOTHESES, not constants of nature.
-// The ordering edit > read > other is the load-bearing claim ("a mutation is a
-// stronger attention signal than an inspection"); the exact integers are a first
-// guess meant to be measured against rank-vs-flat review, never trusted as
-// truth.
-//
-// The wire granularity is coarser than the ideal (edit > read > stat/list):
-// acpsvc's toolKindFor folds read_file, stat_file, list_dir and grep all into
-// libacp.ToolKindRead before the event is journaled, so this layer cannot
-// separate a read from a stat at the point it consumes them. That collapse is a
-// known limit of the current recording, documented here rather than papered
-// over; if it ever matters, the finer signal is added upstream at the recording,
-// not guessed at here.
-//
-// Two further mechanics — DECAY per round (recent attention outweighs
-// stale) and MASKING (one anchor per neighborhood) — are deliberately NOT yet
-// applied: additive accumulation is the honest Stage-1 stub the blueprint calls
-// for ("order-by-interest is one fold away from order-by-path"), and layering
-// decay/masking on top is a later, separately-measurable refinement. Naming them
-// here is the register the blueprint requires: they are known, deferred, and
-// tunable.
+// DOI (Degree-of-Interest) weights for Stage 1 scoring. These are tunable
+// hypotheses, not fixed constants; only the ordering edit > read > other is
+// load-bearing. The wire granularity is coarser than ideal: acpsvc folds
+// read_file/stat_file/list_dir/grep into one ToolKindRead before journaling,
+// so this layer cannot separate them. Decay and masking are deliberately not
+// applied yet — this is the additive Stage-1 stub.
 const (
 	weightEdit    = 4 // a write/sed mutation — the strongest attention signal
 	weightDelete  = 4 // a deletion is a mutation too
@@ -93,41 +33,31 @@ const (
 	weightOther   = 1
 )
 
-// maxChangedFiles caps the changed-files list the way review UIs cap a diff view: a
-// review surface must stay legible, and a mission that touched thousands of
-// files is exactly when the cap matters most. The cap is applied AFTER scoring
-// and sorting, so the files that survive it are the highest-attention ones — the
-// cap never hides the hot spot, only the long cold tail. When it bites, Changes
-// sets Incomplete so the frontend can say "showing the top N of more".
+// maxChangedFiles caps the changed-files list, applied after scoring and
+// sorting so the surviving entries are the highest-attention ones. When it
+// bites, Changes.Incomplete is set.
 const maxChangedFiles = 100
 
-// diffDisplayCap bounds the bytes of original/modified text the diff endpoint
-// returns for one file. A single pathological
-// generated file must not turn a diff fetch into a multi-megabyte response; past
-// this size the text is truncated and Diff.Truncated is set so the frontend
-// renders a "diff too large" affordance instead of choking Monaco. The kernel
-// journal already caps each diff field upstream (taskengine's journalTextFieldCap
-// is 16KiB), so this is a second, generous backstop, not the primary bound.
+// diffDisplayCap bounds the bytes of original/modified text one Diff
+// response returns; past this, Diff.Truncated is set. The kernel journal
+// already caps each diff field upstream (16KiB); this is a generous backstop.
 const diffDisplayCap = 128 * 1024
 
 // maxOutsidePaths bounds the sample of out-of-root paths reported on a scope
-// anomaly. The anomaly is a boolean alarm; the sample is a courtesy for the
-// operator ("it wandered HERE"), not an exhaustive audit, so a handful is enough
-// and an unbounded list would just be noise from a badly-derailed unit.
+// anomaly — a courtesy sample, not an exhaustive audit.
 const maxOutsidePaths = 20
 
-// ChangedFile is one file the mission's unit wrote, as it appears in the ordered
-// changed-files list. Score is its Stage-1 Degree-of-Interest (advice for review
-// order, never a gate); Status is the git-shaped verdict derived from the first
-// and last diff seen for the path.
+// ChangedFile is one file the mission's unit wrote. Score is its Stage-1
+// DOI (advice for review order, never a gate); Status is derived from the
+// first and last diff seen for the path.
 type ChangedFile struct {
 	Path   string `json:"path"`
 	Status string `json:"status"` // "added" | "modified" | "deleted"
 	Score  int    `json:"score"`
 }
 
-// The three status strings ChangedFile.Status draws from. Contracted values —
-// the Beam diff viewer keys its badges on them.
+// The three status strings ChangedFile.Status draws from. Contracted values
+// — the Beam diff viewer keys its badges on them.
 const (
 	StatusAdded    = "added"
 	StatusModified = "modified"
@@ -135,9 +65,7 @@ const (
 )
 
 // ScopeStats is the Stage-2 scope summary: how broadly the unit ranged and
-// whether it left its lane. Files and Dirs are the breadth signal — the
-// REAL efficiency metric (a landed unit works in few files);
-// Anomaly plus OutsidePaths are the derailment early-warning. All advisory.
+// whether it left its lane. All fields are advisory.
 type ScopeStats struct {
 	Files        int      `json:"files"`
 	Dirs         int      `json:"dirs"`
@@ -145,68 +73,51 @@ type ScopeStats struct {
 	OutsidePaths []string `json:"outsidePaths,omitempty"`
 }
 
-// Changes is the GET /missions/{id}/changes response: the ordered changed-files
-// list, the cap flag, and the scope summary. Files is always non-nil so an
-// empty result renders as [] rather than null. Incomplete is true when the
-// changed-files list was capped (see maxChangedFiles) — the frontend must treat
-// a true Incomplete as "there are more changed files than shown".
+// Changes is the GET /missions/{id}/changes response. Files is always
+// non-nil. Incomplete is true when the list was capped (maxChangedFiles).
 type Changes struct {
 	Files      []ChangedFile `json:"files"`
 	Incomplete bool          `json:"incomplete"`
 	Scope      ScopeStats    `json:"scope"`
 }
 
-// Diff is the GET /missions/{id}/changes/diff?path= response: an {original,
-// modified} pair fed straight to Monaco's
-// DiffEditor. Truncated is set when either side was clipped to diffDisplayCap —
-// the frontend then shows a "diff too large" state instead of a partial diff
-// pretending to be whole.
+// Diff is the GET /missions/{id}/changes/diff?path= response, fed straight
+// to Monaco's DiffEditor. Truncated is set when either side was clipped to
+// diffDisplayCap.
 type Diff struct {
 	Original  string `json:"original"`
 	Modified  string `json:"modified"`
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
-// missionGetter is the NARROW slice of missionservice this package needs: resolve
-// a mission id to its record (for the bound session/instance). Declared here,
-// not imported wholesale, so the dependency is one verb and a unit test can
-// satisfy it with a stub. missionservice.Service satisfies it.
+// missionGetter is the narrow slice of missionservice this package needs, so
+// a unit test can satisfy it with a stub. missionservice.Service implements it.
 type missionGetter interface {
 	Get(ctx context.Context, id string) (*missionservice.Mission, error)
 }
 
-// SessionJournalReader is the OPTIONAL kernel capability this layer reads through
-// — the exact register of fleetservice's sessionTextReader / the kernel's
-// SessionAgentText precedent. The concrete agentinstance.Manager provides
-// SessionJournal (the raw per-session replay journal plus the session's cwd,
-// recoverable WITHOUT attaching a viewer); it is reached by type assertion and
-// is deliberately NOT on the Manager lifecycle interface, so a Manager double
-// need not grow a method and sibling mocks stay untouched. The kernel returns
-// the journal UNINTERPRETED — all of the attention/scope judgement lives here,
-// keeping the kernel policy-free.
+// SessionJournalReader is the optional kernel capability this layer reads
+// through (reached by type assertion, since it's not on the Manager
+// lifecycle interface). The kernel returns the journal uninterpreted; all
+// attention/scope judgement lives here.
 //
-// ok is false for an unknown instance or a session the instance does not own (a
-// unit that already stopped, or a mission never dispatched); the service then
-// returns an EMPTY Changes, not an error — "nothing recorded" is an honest,
-// non-exceptional answer for a mission whose unit is gone.
+// ok is false for an unknown instance or a session the instance does not
+// own; the service then returns an empty Changes, not an error.
 type SessionJournalReader interface {
 	SessionJournal(instanceID string, sessionID libacp.SessionID) ([]libacp.SessionNotification, string, bool)
 }
 
-// Service answers the two attention-layer endpoints. It is read-only by
-// construction (the advice-not-gate law): no method here mutates a mission.
+// Service answers the two attention-layer endpoints. Read-only by
+// construction: no method here mutates a mission.
 type Service interface {
-	// Changes folds mission id's session journal into the ordered changed-files
-	// list plus the scope summary. An unknown mission id surfaces as the
-	// resolver's not-found error; a known mission whose unit left no recoverable
-	// journal yields an empty, non-error Changes.
+	// Changes folds mission id's session journal into the ordered
+	// changed-files list plus the scope summary. A known mission whose unit
+	// left no recoverable journal yields an empty, non-error Changes.
 	Changes(ctx context.Context, missionID string) (*Changes, error)
 
-	// Diff returns the {original, modified} pair for one changed path in mission
-	// id — first OldText, last NewText across the mission's diff events for that
-	// path — truncating to diffDisplayCap. A path that the mission never wrote
-	// yields a not-found error so the frontend can tell "no such changed file"
-	// from "an empty diff".
+	// Diff returns the {original, modified} pair for one changed path in
+	// mission id, truncated to diffDisplayCap. A path the mission never
+	// wrote yields a not-found error.
 	Diff(ctx context.Context, missionID, filePath string) (*Diff, error)
 }
 
@@ -215,10 +126,9 @@ type service struct {
 	journal  SessionJournalReader
 }
 
-// New builds the service over a mission resolver and the kernel journal reader.
-// journal may be nil (a deployment without a live kernel), in which case every
-// mission reads as having no recorded work — the endpoints still answer, with
-// empty changes, rather than failing.
+// New builds the service over a mission resolver and the kernel journal
+// reader. journal may be nil, in which case every mission reads as having no
+// recorded work rather than failing.
 func New(missions missionGetter, journal SessionJournalReader) Service {
 	return &service{missions: missions, journal: journal}
 }
@@ -246,10 +156,9 @@ func (s *service) Diff(ctx context.Context, missionID, filePath string) (*Diff, 
 	return &Diff{Original: original, Modified: modified, Truncated: truncated}, nil
 }
 
-// load resolves the mission and returns its session journal plus workspace cwd.
-// A mission with no bound session/instance, or one whose unit is no longer live
-// in the kernel, returns (nil, "", nil): an empty-but-valid input the folds
-// render as empty results.
+// load resolves the mission and returns its session journal plus workspace
+// cwd. A mission with no bound session/instance, or a unit no longer live in
+// the kernel, returns (nil, "", nil) — an empty-but-valid input.
 func (s *service) load(ctx context.Context, missionID string) ([]libacp.SessionNotification, string, error) {
 	m, err := s.missions.Get(ctx, missionID)
 	if err != nil {
@@ -265,11 +174,9 @@ func (s *service) load(ctx context.Context, missionID string) ([]libacp.SessionN
 	return updates, cwd, nil
 }
 
-// fileFold is the accumulated diff state for one written path: the FIRST OldText
-// (the file's content as the mission first found it) and the LAST NewText (its
-// content as the mission left it). first-old/last-new is the whole aggregation
-// the diff-review arc names — it collapses an arbitrary sequence of edits to one
-// before/after pair, which is exactly the {original, modified} Monaco renders.
+// fileFold is the accumulated diff state for one written path: the first
+// OldText and the last NewText, collapsing an arbitrary edit sequence to one
+// before/after pair.
 type fileFold struct {
 	firstOld    string
 	lastNew     string
@@ -278,8 +185,7 @@ type fileFold struct {
 }
 
 // folded is the whole-journal fold: per-path diff state, per-path attention
-// score, and the full touched-path set (edits AND reads AND every other located
-// tool touch) for the scope summary.
+// score, and the full touched-path set for the scope summary.
 type folded struct {
 	files      map[string]*fileFold
 	scores     map[string]int
@@ -287,33 +193,14 @@ type folded struct {
 	touchOrder []string // first-touch order, for deterministic output on score ties
 }
 
-// fold walks the session journal ONCE and accumulates everything the two
-// endpoints need. It reads every tool-call notification and interprets each the
-// way acpsvc emitted it: a diff content is an edit of its path (with old/new
-// text), a location is a touch of its path weighted by the tool's kind.
-//
-// # Why scoring is deduped by tool-call id
-//
-// One tool INVOCATION can be journaled as more than one notification, and acpsvc
-// spreads its evidence across them. The interactive approval flow emits a
-// create/pending notification (SessionUpdateToolCall — a location, no diff yet)
-// and then a terminal update (SessionUpdateToolCallUpdate — the diff); the
-// unattended deterministic flow emits a single notification that acpsvc's
-// normalizeToolCallNotification PROMOTES to a create (SessionUpdateToolCall)
-// because it is the first for its id — carrying the diff on that create. So
-// neither "score only updates" nor "score every notification" is right: the
-// first would drop every deterministic write (its diff rides a create), the
-// second would double-count every interactive one (create location + update
-// diff).
-//
-// The correct unit is the INVOCATION, keyed by ToolCallID: each invocation
-// contributes each path it touched ONCE, at that path's strongest weight across
-// all of the invocation's notifications (a diff makes the path an edit, which
-// dominates any read/stat location for the same path). Two separate writes of one
-// file are two invocations (distinct ids — acpsvc's toolCallWireID gives repeated
-// runs distinct ids) and so score twice: genuinely repeated attention. An id-less
-// notification (should not occur for a real tool call) is treated as its own
-// invocation so it still scores once.
+// fold walks the session journal once. Scoring is deduped by tool-call id:
+// one invocation can be journaled as more than one notification (an
+// interactive approval flow emits a create-location then an update-diff; a
+// deterministic flow emits a single notification promoted to a create
+// carrying the diff), so each invocation contributes each path it touched
+// once, at that path's strongest weight across its own notifications. Two
+// separate writes of one file are two invocations (distinct ToolCallIDs) and
+// score twice.
 func fold(updates []libacp.SessionNotification) *folded {
 	f := &folded{
 		files:   make(map[string]*fileFold),
@@ -388,9 +275,8 @@ func (f *folded) markTouched(p string) {
 	f.touchOrder = append(f.touchOrder, p)
 }
 
-// weightForKind maps a journaled libacp.ToolKind to its DOI weight. The kinds
-// that never carry a path in practice (think/switch_mode) fall through to
-// weightOther harmlessly, since they only reach here with a non-empty location.
+// weightForKind maps a journaled libacp.ToolKind to its DOI weight. Kinds
+// that never carry a path in practice fall through to weightOther harmlessly.
 func weightForKind(k libacp.ToolKind) int {
 	switch k {
 	case libacp.ToolKindEdit:
@@ -410,9 +296,9 @@ func weightForKind(k libacp.ToolKind) int {
 	}
 }
 
-// changes renders the fold into the endpoint response, ordering the changed
-// files by DOI (Stage 1) and summarizing the touched set (Stage 2) against the
-// workspace root.
+// changes renders the fold into the endpoint response: files ordered by DOI
+// (Stage 1), ties broken by earliest first-diff then path for a stable
+// render; touched set summarized against the workspace root (Stage 2).
 func (f *folded) changes(cwd string) *Changes {
 	files := make([]ChangedFile, 0, len(f.files))
 	for p, ff := range f.files {
@@ -422,9 +308,6 @@ func (f *folded) changes(cwd string) *Changes {
 			Score:  f.scores[p],
 		})
 	}
-	// Order-by-interest, not order-by-path: highest DOI first so review starts
-	// where the unit's attention concentrated. Ties break by earliest first-diff
-	// then by path, purely for a deterministic, stable render.
 	sort.Slice(files, func(a, b int) bool {
 		if files[a].Score != files[b].Score {
 			return files[a].Score > files[b].Score
@@ -449,12 +332,10 @@ func (f *folded) changes(cwd string) *Changes {
 	}
 }
 
-// statusFor derives the git-shaped status from a path's first/last diff, in the
-// precedence the contract fixes: added when the first OldText was empty (the
-// file did not exist when the mission first touched it), else deleted when the
-// last NewText is empty (it was emptied/removed), else modified. Checking added
-// FIRST means a file created and later emptied still reads as "added" — it is
-// new to the mission regardless of where it ended up.
+// statusFor derives the git-shaped status from a path's first/last diff:
+// added if the first OldText was empty, else deleted if the last NewText is
+// empty, else modified. Checking added first means a file created and later
+// emptied still reads as added.
 func statusFor(ff *fileFold) string {
 	switch {
 	case ff.firstOld == "":
@@ -466,10 +347,8 @@ func statusFor(ff *fileFold) string {
 	}
 }
 
-// scope summarizes the touched-path set against the workspace root: distinct
-// files, distinct top-level directories, and the anomaly flag. An empty root
-// (the kernel did not record a cwd for the session) disables the anomaly check —
-// there is no lane to have left — rather than guessing one, since a false
+// scope summarizes the touched-path set against the workspace root. An empty
+// root disables the anomaly check rather than guessing one, since a false
 // derailment alarm is worse than a missing one for an advisory signal.
 func (f *folded) scope(root string) ScopeStats {
 	root = filepath.Clean(root)
@@ -492,13 +371,9 @@ func (f *folded) scope(root string) ScopeStats {
 	}
 }
 
-// isOutside reports whether p falls outside the workspace root. A RELATIVE p is
-// always inside by construction (it is named relative to the cwd the tool ran
-// in, so it cannot escape it without a ".." the tool layer already refuses);
-// only an ABSOLUTE path that does not sit under root trips the alarm — which is
-// exactly the shape of the derailment this detects (the $HOME-wanderer naming an
-// absolute path in another tree). This is set arithmetic, and it is ADVICE: it
-// raises an eyebrow, it never stops the unit.
+// isOutside reports whether p falls outside the workspace root. A relative p
+// is always inside by construction; only an absolute path outside root trips
+// the alarm.
 func isOutside(root, p string) bool {
 	if !filepath.IsAbs(p) {
 		return false
@@ -510,14 +385,10 @@ func isOutside(root, p string) bool {
 	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// topLevelDir names the "top-level directory" a path counts toward for the
-// breadth signal. Under the root, it is the FIRST path segment of the
-// root-relative path — "." for a file directly in the root, "src" for
-// src/foo/bar.go — so breadth measures how many top-level areas of the workspace
-// the unit ranged across, not how deep it dug. Outside the root (or with no
-// root), it falls back to the path's own leading segment, so a wanderer's
-// out-of-tree touches still register as distinct breadth rather than collapsing
-// into one bucket.
+// topLevelDir names the top-level directory a path counts toward for the
+// breadth signal: under root, the first segment of the root-relative path
+// ("." for a file directly in root); outside root (or with no root), the
+// path's own leading segment.
 func topLevelDir(root, p string) string {
 	cp := filepath.Clean(p)
 	if root != "" && root != "." && filepath.IsAbs(cp) {
@@ -534,10 +405,8 @@ func topLevelDir(root, p string) string {
 	return firstSegment(filepath.ToSlash(cp))
 }
 
-// firstSegment returns the first slash-separated element of a relative path, or
-// "." when the path is a bare filename (no directory part) — the root-itself
-// bucket. A bare filename lives directly in its base directory, so it counts
-// toward "." rather than toward a directory named after the file.
+// firstSegment returns the first slash-separated element of a relative path,
+// or "." for a bare filename (the root-itself bucket).
 func firstSegment(rel string) string {
 	rel = strings.TrimPrefix(rel, "./")
 	if i := strings.IndexByte(rel, '/'); i >= 0 {
@@ -546,10 +415,9 @@ func firstSegment(rel string) string {
 	return "."
 }
 
-// capDiff clips original/modified to diffDisplayCap, reporting whether either
-// side was clipped. Clipping is on bytes, not runes, and may split a multi-byte
-// rune at the boundary; that is acceptable for a "diff too large" fallback the
-// frontend renders as a warning rather than trusting as exact.
+// capDiff clips original/modified to diffDisplayCap, reporting whether
+// either side was clipped. Clipping is on bytes and may split a multi-byte
+// rune at the boundary, acceptable for a "diff too large" fallback.
 func capDiff(original, modified string) (string, string, bool) {
 	truncated := false
 	if len(original) > diffDisplayCap {

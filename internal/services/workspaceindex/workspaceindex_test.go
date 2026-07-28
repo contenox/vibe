@@ -1,9 +1,7 @@
 package workspaceindex
 
-// Indexer tests. Every one of them runs against a t.TempDir fixture workspace
-// and a DETERMINISTIC FAKE EMBEDDER: no model, no network, no ollama. The store
-// is the real SQLite one (runtimetypes.SetupStore), so the schema, the FTS5
-// mirror and the dimension checks are all exercised for real.
+// Indexer tests run against a t.TempDir fixture and a deterministic fake
+// embedder (no model, no network) over the real SQLite store.
 
 import (
 	"context"
@@ -25,9 +23,8 @@ import (
 
 const fakeDimension = 32
 
-// fakeEmbedder is a hash-derived bag-of-words embedding: deterministic, offline,
-// and — crucially for the ranking tests — SIMILAR for texts sharing vocabulary,
-// so a planted near-duplicate really does win on cosine rather than by accident.
+// fakeEmbedder is a hash-derived bag-of-words embedding: deterministic and
+// similar for texts sharing vocabulary, so ranking tests are meaningful.
 type fakeEmbedder struct {
 	dim    int
 	calls  atomic.Int64
@@ -136,8 +133,7 @@ func (h *harness) build(t *testing.T, force bool) *BuildReport {
 	return rep
 }
 
-// fixture is a small workspace with enough shape to exercise selection, chunking
-// and ranking.
+// fixture is a small workspace exercising selection, chunking, and ranking.
 func (h *harness) fixture(t *testing.T) {
 	t.Helper()
 	h.write(t, "docs/retry.md", "# Retry\n\nRetry backoff is exponential with jitter.\nThe backoff doubles until the ceiling.\n")
@@ -171,7 +167,6 @@ func TestUnit_Build_FullBuildIndexesTheSelectedTree(t *testing.T) {
 	require.Equal(t, fakeDimension, st.Dimension, "the dimension is discovered from the model, not declared")
 	require.Equal(t, "fake-embed", st.EmbedModel)
 
-	// The gitignored file is absent from the index, not merely unranked.
 	files, err := h.store.ListWorkspaceIndexedFiles(h.ctx, rep.ConfigID)
 	require.NoError(t, err)
 	var paths []string
@@ -223,8 +218,6 @@ func TestUnit_Build_IncrementalReembedsOnlyTheEditedFile(t *testing.T) {
 	require.Equal(t, plan.EmbedCalls, rep.ChunksWritten)
 	require.Equal(t, plan.EmbedCalls, h.embedder.Calls()-before, "only the changed file's chunks are re-embedded")
 
-	// The old text is gone and the new text is present — a stale chunk left
-	// behind would be a lie with a valid-looking sha.
 	chunks, err := h.store.ScanWorkspaceChunks(h.ctx, rep.ConfigID, 1000)
 	require.NoError(t, err)
 	var joined string
@@ -280,9 +273,7 @@ func TestUnit_Build_ForceRebuildsEverythingInPlace(t *testing.T) {
 	require.EqualValues(t, first.ChunksWritten, count, "a rebuild must not double the index")
 }
 
-// Changing the embedding model must NOT extend the existing index — vectors from
-// two models in one table is the silent corruption create-once immutability
-// exists to prevent. A new generation is created and becomes active.
+// TestUnit_Build_ModelChangeCutsOverToANewGeneration pins that a model change never extends the existing index; a new generation is created and becomes active.
 func TestUnit_Build_ModelChangeCutsOverToANewGeneration(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.fixture(t)
@@ -307,8 +298,7 @@ func TestUnit_Build_ModelChangeCutsOverToANewGeneration(t *testing.T) {
 	require.Equal(t, rep.ConfigID, st.ConfigID, "the new generation is active")
 	require.Equal(t, "a-different-embed-model", st.EmbedModel)
 
-	// The old generation's chunks are untouched: a cutover is additive, so a
-	// rollback is possible until they are explicitly reaped.
+	// Old generation's chunks are untouched — a cutover is additive.
 	oldCount, err := h.store.CountWorkspaceChunks(h.ctx, first.ConfigID)
 	require.NoError(t, err)
 	require.EqualValues(t, first.ChunksWritten, oldCount)
@@ -334,9 +324,8 @@ func TestUnit_Build_CancellationMidBuildStopsAndLeavesNoPartialFile(t *testing.T
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled, "a cancelled build reports cancellation, not a mystery failure")
 
-	// Whatever survived, every indexed file must be WHOLE: a file recorded with
-	// a sha that matches disk but missing chunks would be skipped by every later
-	// incremental build, silently and permanently.
+	// Every indexed file must be whole; a partial record would be silently
+	// skipped by later incremental builds.
 	cfg, err := h.store.GetActiveWorkspaceIndexConfig(h.ctx, h.ws)
 	require.NoError(t, err)
 	indexed, err := h.store.ListWorkspaceIndexedFiles(h.ctx, cfg.ID)

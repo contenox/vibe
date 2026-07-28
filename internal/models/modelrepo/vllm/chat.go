@@ -31,7 +31,6 @@ func NewVLLMChatClient(ctx context.Context, baseURL, modelName string, contextLe
 }
 
 func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (modelrepo.ChatResult, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "vllm", "model", c.modelName)
 	defer end()
 
@@ -53,23 +52,20 @@ func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message,
 
 	choice := response.Choices[0]
 
-	// Convert to our format
 	message := modelrepo.Message{
 		Role:     choice.Message.Role,
 		Content:  choice.Message.Content,
 		Thinking: choice.Message.Thinking(),
 	}
 
-	// Convert tool calls
 	toolCalls := convertChatToolCalls(choice.Message.ToolCalls, nameMap)
 
 	result := modelrepo.ChatResult{
 		Message:   message,
 		ToolCalls: toolCalls,
 		// vLLM reports no usable cache dimension per request (the V1 engine's
-		// cached_tokens detail is broken/null — vllm#44961), so the cache
-		// fields stay zero; Automatic Prefix Caching hits are measured
-		// server-side (vllm:prefix_cache_* counters) and show up as TTFT.
+		// cached_tokens detail is broken/null, vllm#44961), so the cache
+		// fields stay zero; Automatic Prefix Caching hits show up as TTFT instead.
 		Usage: &modelrepo.TokenUsage{
 			PromptTokens:     response.Usage.PromptTokens,
 			CompletionTokens: response.Usage.CompletionTokens,
@@ -80,10 +76,9 @@ func (c *VLLMChatClient) Chat(ctx context.Context, messages []modelrepo.Message,
 	result.FinishReason = choice.FinishReason
 	switch choice.FinishReason {
 	case "stop", "tool_calls", "length":
-		// "length" is a truncated SUCCESS, same contract as the streaming
-		// assembler: the partial content is real, and the verbatim finish
-		// reason lets the engine surface the truncation instead of the old
-		// behavior of discarding the content behind an opaque error.
+		// "length" is a truncated success, same contract as the streaming
+		// assembler: the partial content is real and the finish reason
+		// surfaces the truncation.
 		reportChange("chat_completed", map[string]any{
 			"finish_reason":    choice.FinishReason,
 			"content_length":   len(message.Content),

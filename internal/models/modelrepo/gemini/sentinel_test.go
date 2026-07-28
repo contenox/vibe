@@ -11,9 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_Gemini_TypedSentinels maps Gemini's documented error shapes:
-// 400 INVALID_ARGUMENT with token phrasing → context overflow, and 429
-// RESOURCE_EXHAUSTED → rate limited.
+// Maps Gemini's error shapes: 400 INVALID_ARGUMENT w/ token phrasing →
+// context overflow; 429 RESOURCE_EXHAUSTED → rate limited.
 func TestUnit_Gemini_TypedSentinels(t *testing.T) {
 	newClient := func(url string, hc *http.Client) *GeminiChatClient {
 		return &GeminiChatClient{geminiClient: geminiClient{

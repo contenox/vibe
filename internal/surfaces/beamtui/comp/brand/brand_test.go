@@ -10,8 +10,7 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
 )
 
-// goldenWidths is the blueprint's resize matrix: narrow (compact layout),
-// the default terminal, and wide. 60 sits below CompactWidth on purpose.
+// goldenWidths is the resize matrix: narrow (compact layout, 60 sits below CompactWidth on purpose), default, and wide.
 var goldenWidths = []int{60, 80, 120}
 
 func sampleInfo(ascii bool) Info {
@@ -23,9 +22,7 @@ func sampleInfo(ascii bool) Info {
 	}
 }
 
-// TestUnit_WelcomeGoldens pins the header at every width and variant. The
-// header is printed once into scrollback and can never be corrected after
-// the fact, so its exact shape is the contract.
+// TestUnit_WelcomeGoldens pins the header's exact shape at every width and variant.
 func TestUnit_WelcomeGoldens(t *testing.T) {
 	variants := []struct {
 		name string
@@ -47,9 +44,7 @@ func TestUnit_WelcomeGoldens(t *testing.T) {
 	}
 }
 
-// TestUnit_WelcomeNeverExceedsWidth is the resize property the goldens can
-// only sample: at every width in the supported range, and with caller data
-// long enough to overflow on its own, no line may spill a cell.
+// TestUnit_WelcomeNeverExceedsWidth pins that no line spills a cell, even with overlong caller data.
 func TestUnit_WelcomeNeverExceedsWidth(t *testing.T) {
 	infos := []struct {
 		name string
@@ -85,8 +80,7 @@ func TestUnit_WelcomeNeverExceedsWidth(t *testing.T) {
 	}
 }
 
-// TestUnit_WelcomeEndsWithSeparator locks the caller contract: append the
-// header, then append transcript, and the spacing is already right.
+// TestUnit_WelcomeEndsWithSeparator pins that the header's last line is always an empty separator.
 func TestUnit_WelcomeEndsWithSeparator(t *testing.T) {
 	for _, ascii := range []bool{false, true} {
 		for w := 20; w <= 140; w++ {
@@ -102,9 +96,7 @@ func TestUnit_WelcomeEndsWithSeparator(t *testing.T) {
 	}
 }
 
-// TestUnit_WordmarkCopyIsExact guards the fixed brand copy: lowercase
-// contenox, em-dash in unicode, plain hyphen in ASCII. A component test is
-// the only place this is enforceable — the strings are unexported.
+// TestUnit_WordmarkCopyIsExact pins the fixed brand copy: lowercase contenox, em-dash in unicode, hyphen in ASCII.
 func TestUnit_WordmarkCopyIsExact(t *testing.T) {
 	cases := []struct {
 		ascii bool
@@ -127,9 +119,7 @@ func TestUnit_WordmarkCopyIsExact(t *testing.T) {
 	}
 }
 
-// TestUnit_WelcomeUsesOnlyClosedStyleIDs enforces frame's closed set: a
-// component may not invent a role, and the ramp roles must be the ones the
-// style table actually learned.
+// TestUnit_WelcomeUsesOnlyClosedStyleIDs enforces frame's closed StyleID set, ramp roles included.
 func TestUnit_WelcomeUsesOnlyClosedStyleIDs(t *testing.T) {
 	known := map[frame.StyleID]bool{}
 	for _, id := range frame.All() {
@@ -152,8 +142,7 @@ func TestUnit_WelcomeUsesOnlyClosedStyleIDs(t *testing.T) {
 		}
 	}
 
-	// The header is the ramp's only sanctioned use, so it must in fact
-	// use all three stops — otherwise the roles are dead weight.
+	// The header must use all three ramp stops, or the roles are dead weight.
 	used := map[frame.StyleID]bool{}
 	for _, l := range Welcome(80, Info{}) {
 		for _, s := range l {
@@ -167,8 +156,7 @@ func TestUnit_WelcomeUsesOnlyClosedStyleIDs(t *testing.T) {
 	}
 }
 
-// TestUnit_StatusSegment pins the persistent identity exactly: it sits in
-// the status bar forever, so both its spans and its width are contract.
+// TestUnit_StatusSegment pins the persistent identity's spans and width exactly.
 func TestUnit_StatusSegment(t *testing.T) {
 	cases := []struct {
 		ascii bool
@@ -218,8 +206,7 @@ func TestUnit_StatusSegment(t *testing.T) {
 	}
 }
 
-// TestUnit_StatusSegmentGolden keeps the identity's encoding reviewable
-// next to the header's.
+// TestUnit_StatusSegmentGolden keeps the identity's encoding reviewable next to the header's.
 func TestUnit_StatusSegmentGolden(t *testing.T) {
 	testkit.Golden(t, "status_segment", testkit.EncodeLines([]frame.Line{
 		StatusSegment(false),
@@ -227,8 +214,7 @@ func TestUnit_StatusSegmentGolden(t *testing.T) {
 	}))
 }
 
-// TestUnit_CompactBoundary checks the layout actually switches at
-// CompactWidth and not one column either side of it.
+// TestUnit_CompactBoundary pins that the layout switches exactly at CompactWidth, not one column either side.
 func TestUnit_CompactBoundary(t *testing.T) {
 	if n := len(Welcome(CompactWidth-1, Info{})); n != 3 {
 		t.Fatalf("width %d: %d lines, want 2 compact rows + separator", CompactWidth-1, n)

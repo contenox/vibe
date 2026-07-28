@@ -1,8 +1,8 @@
 package localtools_test
 
-// S6 wrapper tests: the third HITL outcome. Timing is injected by shrinking
-// the park window (SetParkWindow) — the park is a plain context deadline, so
-// a short window exercises exactly the production code path.
+// Wrapper tests for the third HITL outcome (park-then-release). Timing is
+// injected by shrinking the park window (SetParkWindow), a plain context
+// deadline, so a short window exercises the production code path exactly.
 
 import (
 	"context"
@@ -76,10 +76,7 @@ func execGatedCall(t *testing.T, w *localtools.HITLWrapper, callID string) (any,
 		&taskengine.ToolsCall{Name: "local_shell", ToolName: "run_command"})
 }
 
-// TestUnit_HITLWrapper_ParkThenRelease: no verdict inside the (shrunk) park
-// window → the typed third outcome, with the durable row recorded BEFORE the
-// release (row first) and the row LEFT PENDING (the verdict arrives later,
-// through Respond).
+// TestUnit_HITLWrapper_ParkThenRelease pins that no verdict within the park window yields the typed pending outcome, row recorded first and left pending.
 func TestUnit_HITLWrapper_ParkThenRelease(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
@@ -100,8 +97,7 @@ func TestUnit_HITLWrapper_ParkThenRelease(t *testing.T) {
 	require.GreaterOrEqual(t, elapsed, 25*time.Millisecond, "the fast-path park must actually wait its window")
 }
 
-// TestUnit_HITLWrapper_FastPathVerdictInsideWindow: an in-session verdict
-// keeps today's behavior — and now also closes the durable row inline.
+// TestUnit_HITLWrapper_FastPathVerdictInsideWindow pins that an in-session verdict resolves normally and closes the durable row inline.
 func TestUnit_HITLWrapper_FastPathVerdictInsideWindow(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
@@ -125,9 +121,7 @@ func TestUnit_HITLWrapper_FastPathVerdictInsideWindow(t *testing.T) {
 	require.Equal(t, map[string]bool{"call-2": false}, policy2.resolved)
 }
 
-// TestUnit_HITLWrapper_InjectedVerdict: a resumed run's pre-loaded verdict
-// short-circuits the gate — no ask, no new row; approved executes, denied
-// takes the standard deny semantics.
+// TestUnit_HITLWrapper_InjectedVerdict pins that a resumed run's pre-loaded verdict short-circuits the gate: no ask, no new row.
 func TestUnit_HITLWrapper_InjectedVerdict(t *testing.T) {
 	askCalled := false
 	ask := func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
@@ -169,10 +163,7 @@ func TestUnit_HITLWrapper_InjectedVerdict(t *testing.T) {
 	require.True(t, askCalled)
 }
 
-// TestUnit_HITLWrapper_RuleTimeoutBeatsPark: a matched rule with its own
-// TimeoutS shorter than the park window keeps the pre-S6 OnTimeout
-// semantics (deny by default) instead of suspending — such a rule opted out
-// of long waits — and the row is closed with that outcome.
+// TestUnit_HITLWrapper_RuleTimeoutBeatsPark pins that a rule TimeoutS shorter than the park window resolves via OnTimeout instead of suspending.
 func TestUnit_HITLWrapper_RuleTimeoutBeatsPark(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
@@ -189,9 +180,7 @@ func TestUnit_HITLWrapper_RuleTimeoutBeatsPark(t *testing.T) {
 	require.Equal(t, map[string]bool{"call-t": false}, policy.resolved)
 }
 
-// TestUnit_HITLWrapper_RecorderFailureFallsBackToBlocking: a broken durable
-// store never drops the gate — the wrapper degrades to the pre-S6 blocking
-// ask.
+// TestUnit_HITLWrapper_RecorderFailureFallsBackToBlocking pins that a broken durable store degrades to the blocking ask, never drops the gate.
 func TestUnit_HITLWrapper_RecorderFailureFallsBackToBlocking(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
@@ -205,9 +194,7 @@ func TestUnit_HITLWrapper_RecorderFailureFallsBackToBlocking(t *testing.T) {
 	require.Equal(t, []string{"run_command"}, inner.calls, "the human still gated the call, just not durably")
 }
 
-// TestUnit_HITLWrapper_NoRecorderKeepsBlockingBehavior: an evaluator-only
-// policy (no ApprovalRecorder) preserves the pre-S6 path even past the park
-// window — no typed suspension without a durable row to resume from.
+// TestUnit_HITLWrapper_NoRecorderKeepsBlockingBehavior pins that an evaluator-only policy blocks past the park window: no row, no suspension.
 func TestUnit_HITLWrapper_NoRecorderKeepsBlockingBehavior(t *testing.T) {
 	inner := &mockInnerTools{}
 	slowApprove := func(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {

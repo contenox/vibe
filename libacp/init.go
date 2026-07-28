@@ -72,9 +72,8 @@ type SessionCapabilities struct {
 	Meta                  json.RawMessage `json:"_meta,omitempty"`
 }
 
-// AgentAuthCapabilities describes authentication-related capabilities
-// supported by the agent — currently just whether it supports the `logout`
-// method.
+// AgentAuthCapabilities describes agent auth capabilities — currently just
+// whether it supports the `logout` method.
 type AgentAuthCapabilities struct {
 	Logout *LogoutCapabilities `json:"logout,omitempty"`
 	Meta   json.RawMessage     `json:"_meta,omitempty"`
@@ -95,11 +94,9 @@ type AgentCapabilities struct {
 	Meta                json.RawMessage       `json:"_meta,omitempty"`
 }
 
-// AuthMethod covers the spec's auth method union in one struct. Type
-// discriminates on the wire: "" (agent, the stable default), "terminal"
-// (unstable; Args/Env describe how to launch the agent binary for a TUI), or
-// "env_var" (unstable; Vars lists the environment variables the client should
-// collect and set when launching the agent).
+// AuthMethod covers the spec's auth method union. Type discriminates on the
+// wire: "" (stable default), "terminal" (unstable; Args/Env launch the agent
+// binary for a TUI), or "env_var" (unstable; Vars lists env vars to collect).
 type AuthMethod struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`

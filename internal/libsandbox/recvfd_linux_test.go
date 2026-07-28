@@ -10,13 +10,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// TestUnit_recvOneFD_ReceivedFDIsCloexec is the regression for the cross-agent fd
-// leak (FIX 2): an fd received over SCM_RIGHTS must come back close-on-exec, so
-// the long-lived parent cannot leak one agent's live TUN / seccomp-notify fd into
-// a later-spawned sibling. It sends a real fd across a socketpair and asserts the
-// received copy has FD_CLOEXEC — which holds ONLY because recvOneFD receives with
-// MSG_CMSG_CLOEXEC (SCM_RIGHTS fds are NOT close-on-exec by default, so a plain
-// ReadMsgUnix would fail this test).
+// TestUnit_recvOneFD_ReceivedFDIsCloexec pins that an fd received over
+// SCM_RIGHTS comes back close-on-exec (via recvOneFD's MSG_CMSG_CLOEXEC), so
+// the long-lived parent cannot leak one agent's fd into a later-spawned
+// sibling; SCM_RIGHTS fds are not cloexec by default, so a plain ReadMsgUnix
+// would fail this test.
 func TestUnit_recvOneFD_ReceivedFDIsCloexec(t *testing.T) {
 	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
@@ -25,7 +23,6 @@ func TestUnit_recvOneFD_ReceivedFDIsCloexec(t *testing.T) {
 	sendFD, recvFD := pair[0], pair[1]
 	defer unix.Close(sendFD)
 
-	// Wrap the receive end in a *net.UnixConn exactly as the bridge/supervisor do.
 	recvFile := os.NewFile(uintptr(recvFD), "recv")
 	conn, err := net.FileConn(recvFile)
 	recvFile.Close() // net.FileConn dups; drop the original
@@ -38,8 +35,6 @@ func TestUnit_recvOneFD_ReceivedFDIsCloexec(t *testing.T) {
 		t.Fatalf("conn is not *net.UnixConn: %T", conn)
 	}
 
-	// The fd to pass. A pipe read-end is a convenient distinct fd; its cloexec
-	// state on the SEND side is irrelevant — the test is about the RECEIVED copy.
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)

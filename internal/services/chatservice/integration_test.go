@@ -1,13 +1,7 @@
-// Integration tests for the persistence pipeline: ExecEnv → SynthesizeHistory
-// → PersistDiff → ListMessages. Each function in this pipeline is unit-tested
-// in isolation, but the bugs we hit today (success-path execution-history drop;
-// PersistDiff within-batch dedup gap) lived at the *joins* between units. The
-// tests here run a real chain through the real env, hand its output to the
-// real synthesizer, persist via the real PersistDiff to a real SQLite DB, and
-// verify the rows that land match what the user expects.
-//
-// Adding a new shape of bug? Add a test case here. The cost of one round-trip
-// test is much lower than another forensic-debugging session.
+// Integration tests for the persistence pipeline: ExecEnv -> SynthesizeHistory
+// -> PersistDiff -> ListMessages. These run a real chain through the real
+// env and persist via a real SQLite DB, exercising the joins between units
+// that isolated unit tests miss.
 package chatservice_test
 
 import (
@@ -28,8 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ── test scaffolding ────────────────────────────────────────────────────────
-
 func setupDB(t *testing.T) (context.Context, libdb.DBManager) {
 	t.Helper()
 	ctx := context.Background()
@@ -40,24 +32,15 @@ func setupDB(t *testing.T) (context.Context, libdb.DBManager) {
 	return ctx, db
 }
 
-// chatExecutor mimics the real chat_completion handler's wire shape: it
-// prepends a system_instruction message at index 0, copies the input messages,
-// and appends an assistant message. This is the *real* shape SynthesizeHistory
-// must handle — and the shape that exposed the within-batch-dedup bug because
-// outHist[startIdx:] re-includes the last prior message.
-//
-// All timestamps come from a monotonic counter rather than time.Now() so tests
-// have deterministic chronological ordering (ListMessages orders by added_at)
-// and replay-idempotency tests get stable hashes.
+// chatExecutor mimics the real chat_completion handler's wire shape:
+// prepend system, copy input, append assistant. Timestamps are fixed.
 type chatExecutor struct {
 	systemInstruction string
 	assistantContent  string
 	assistantToolCall *taskengine.ToolCall
 	err               error
 
-	// Fixed timestamps for deterministic outputs. systemTime is used for the
-	// prepended system message; assistantTime for the appended assistant
-	// message. Both must be set or both unset.
+	// Fixed timestamps for deterministic output; both must be set or both unset.
 	systemTime    time.Time
 	assistantTime time.Time
 }
@@ -95,8 +78,7 @@ func (c *chatExecutor) TaskExec(_ context.Context, _ time.Time, _ int, _ *tasken
 	return taskengine.ChatHistory{Messages: msgs}, taskengine.DataTypeChatHistory, transition, nil
 }
 
-// fixedClock returns successive Unix-second timestamps starting at base, so
-// every loadContents/loadRoles call sees a strict chronological order.
+// fixedClock returns successive Unix-second timestamps for deterministic ordering.
 type fixedClock struct {
 	base    time.Time
 	stepIdx int
@@ -134,19 +116,11 @@ func roundTrip(t *testing.T, ctx context.Context, db libdb.DBManager, sessionID 
 	require.NoError(t, err)
 
 	_, _, units, runErr := env.ExecEnv(ctx, chatChain(), chainInput, taskengine.DataTypeChatHistory)
-
-	// Regression: execution history must be returned on the success path.
-	// taskenv.go:509 previously returned nil, silently dropping the assistant
-	// message from the persisted transcript even when the chain succeeded.
 	require.NotNil(t, units, "ExecEnv must return execution history (success or error)")
 
 	synthesized := taskengine.SynthesizeHistory(chainInput.Messages, units, runErr)
 
 	mgr := chatservice.NewManager("")
-	// Regression: PersistDiff must succeed even when synthesized output
-	// contains overlapping prefixes (the synthesizer's documented contract).
-	// Earlier it tripped a UNIQUE constraint because dedup only checked
-	// against DB-stored rows, not within the new batch.
 	require.NoError(t, mgr.PersistDiff(ctx, db.WithoutTransaction(), sessionID, synthesized))
 }
 
@@ -178,10 +152,7 @@ func loadContents(t *testing.T, ctx context.Context, db libdb.DBManager, session
 	return contents
 }
 
-// ── tests ───────────────────────────────────────────────────────────────────
-
-// Round-trip a single chat turn against an empty session. This is the
-// canonical regression for the two bugs we hit today.
+// TestIntegration_ChatRoundTrip_FreshSession pins that a fresh session persists only user+assistant.
 func TestIntegration_ChatRoundTrip_FreshSession(t *testing.T) {
 	ctx, db := setupDB(t)
 	store := messagestore.New(db.WithoutTransaction(), "")
@@ -195,24 +166,17 @@ func TestIntegration_ChatRoundTrip_FreshSession(t *testing.T) {
 	exec := &chatExecutor{systemInstruction: "you are helpful", assistantContent: "hi there"}
 	roundTrip(t, ctx, db, "s-fresh", exec, chainInput)
 
-	// User + assistant. The system_instruction message is intentionally not
-	// persisted (it's a chain artefact, re-prepended on every turn). The
-	// duplicate user message produced by the synthesizer's overlapping
-	// prefix is deduped within the PersistDiff batch.
 	roles := loadRoles(t, ctx, db, "s-fresh")
 	require.Equal(t, []string{"user", "assistant"}, roles)
 }
 
-// Subsequent turn: history non-empty when the chain runs. Verifies that prior
-// messages are not re-inserted (PersistDiff dedups against existing DB rows)
-// and only the new turn's user + assistant land.
+// TestIntegration_ChatRoundTrip_SubsequentTurn pins that PersistDiff dedups against existing DB rows.
 func TestIntegration_ChatRoundTrip_SubsequentTurn(t *testing.T) {
 	ctx, db := setupDB(t)
 	store := messagestore.New(db.WithoutTransaction(), "")
 	require.NoError(t, store.CreateMessageIndex(ctx, "s-cont", "alice"))
 	clock := newFixedClock()
 
-	// Turn 1.
 	exec := &chatExecutor{
 		systemInstruction: "sysprompt",
 		assistantContent:  "answer 1",
@@ -224,7 +188,6 @@ func TestIntegration_ChatRoundTrip_SubsequentTurn(t *testing.T) {
 	exec.assistantTime = clock.Next()
 	roundTrip(t, ctx, db, "s-cont", exec, chainInput1)
 
-	// Turn 2 — prior history loaded from DB, plus the new user msg.
 	mgr := chatservice.NewManager("")
 	prior, err := mgr.ListMessages(ctx, db.WithoutTransaction(), "s-cont")
 	require.NoError(t, err)
@@ -243,9 +206,7 @@ func TestIntegration_ChatRoundTrip_SubsequentTurn(t *testing.T) {
 	require.Equal(t, []string{"first", "answer 1", "second", "answer 2"}, contents, "messages must persist in chronological order with no duplicates")
 }
 
-// Chain failure: the model errors hard. Verify the transcript still persists
-// what was attempted (the user message + the failure annotation), and that
-// PersistDiff doesn't choke on the failure path.
+// TestIntegration_ChatRoundTrip_FailurePath pins that a hard chain failure still persists the transcript.
 func TestIntegration_ChatRoundTrip_FailurePath(t *testing.T) {
 	ctx, db := setupDB(t)
 	store := messagestore.New(db.WithoutTransaction(), "")
@@ -270,15 +231,10 @@ func TestIntegration_ChatRoundTrip_FailurePath(t *testing.T) {
 	roles := loadRoles(t, ctx, db, "s-fail")
 	require.GreaterOrEqual(t, len(roles), 2, "expected at least the user message + a failure annotation")
 	require.Equal(t, "user", roles[0])
-	// The synthesizer emits a failure annotation as an assistant message.
 	require.Equal(t, "assistant", roles[len(roles)-1])
 }
 
-// Re-running the same turn should be idempotent: PersistDiff sees the prior
-// rows in the DB, dedups against them, and adds nothing. Requires a
-// deterministic executor (fixed timestamps) — under real time.Now() each
-// replay produces a new assistant timestamp and therefore a new row, which is
-// correct but doesn't test the cross-run dedup contract.
+// TestIntegration_ChatRoundTrip_IdempotentReplay pins that replaying identical input does not duplicate rows.
 func TestIntegration_ChatRoundTrip_IdempotentReplay(t *testing.T) {
 	ctx, db := setupDB(t)
 	store := messagestore.New(db.WithoutTransaction(), "")
@@ -301,8 +257,6 @@ func TestIntegration_ChatRoundTrip_IdempotentReplay(t *testing.T) {
 	roundTrip(t, ctx, db, "s-replay", exec, chainInput)
 	contentsAfterFirst := loadContents(t, ctx, db, "s-replay")
 
-	// Replay with the SAME timestamps so the message hashes match the
-	// already-persisted rows. PersistDiff must dedupe across runs.
 	roundTrip(t, ctx, db, "s-replay", exec, chainInput)
 	contentsAfterSecond := loadContents(t, ctx, db, "s-replay")
 
@@ -310,11 +264,7 @@ func TestIntegration_ChatRoundTrip_IdempotentReplay(t *testing.T) {
 	require.Equal(t, []string{"stable input", "stable output"}, contentsAfterSecond)
 }
 
-// Tool-call shape: assistant emits a tool call, then a (mock) downstream tool
-// turn happens. Ensures the tool-call path round-trips cleanly. We use a
-// single chain task here; the real two-task workflow loop is exercised via
-// the contenox CLI integration but the within-batch dedup contract for
-// PersistDiff applies the same way.
+// TestIntegration_ChatRoundTrip_AssistantWithToolCall pins that a tool call persists with a pairing stub result.
 func TestIntegration_ChatRoundTrip_AssistantWithToolCall(t *testing.T) {
 	ctx, db := setupDB(t)
 	store := messagestore.New(db.WithoutTransaction(), "")
@@ -337,9 +287,6 @@ func TestIntegration_ChatRoundTrip_AssistantWithToolCall(t *testing.T) {
 	}
 	roundTrip(t, ctx, db, "s-tool", exec, chainInput)
 
-	// The chain ends without executing the call, so synthesis pairs it with a
-	// stub tool result: strict providers (OpenAI Responses, Bedrock) reject a
-	// transcript containing an unanswered tool call on every later turn.
 	roles := loadRoles(t, ctx, db, "s-tool")
 	require.Equal(t, []string{"user", "assistant", "tool"}, roles, "assistant tool call persists with a pairing stub result")
 }

@@ -12,20 +12,17 @@ import (
 )
 
 // ChainCheckpoint is one suspended chain run, keyed by the approval ID whose
-// verdict resumes it (table chain_checkpoints). The payload is the engine's
-// versioned JSON envelope (taskengine.Checkpoint) and is OPAQUE here —
-// runtimetypes sits below the kernel and never interprets engine state; it
-// only stores, claims, deletes, and annotates. SchemaVersion is mirrored out
-// of the payload as a queryable column so an operator can spot stranded
-// old-version checkpoints without parsing payloads.
+// verdict resumes it (table chain_checkpoints). Payload is the engine's
+// versioned JSON envelope (taskengine.Checkpoint) and is opaque here;
+// runtimetypes only stores, claims, deletes, and annotates it. SchemaVersion
+// is mirrored out as a queryable column so stranded old-version checkpoints
+// are spottable without parsing payloads.
 //
-// Lifecycle: created when a run suspends (after its approval row, before its
-// goroutine releases); CLAIMED by exactly one resumer (compare-and-swap on
-// claimed_at, so a hook-triggered resume and an inline post-suspend resume
-// racing each other cannot both run the chain); DELETED on a successful
-// terminal; RETAINED with a failure annotation when the resume errored — a
-// run is never silently lost. A claim older than the staleness bound passed
-// to ClaimChainCheckpoint is reclaimable, covering a resumer killed mid-run.
+// Lifecycle: created when a run suspends; claimed by exactly one resumer via
+// compare-and-swap on claimed_at, so a racing hook-triggered and inline
+// post-suspend resume cannot both run the chain; deleted on success, or
+// retained with a failure annotation so a run is never silently lost. A claim
+// older than the staleness bound passed to ClaimChainCheckpoint is reclaimable.
 type ChainCheckpoint struct {
 	ID            string          `json:"id"`
 	SchemaVersion int             `json:"schemaVersion"`
@@ -132,8 +129,8 @@ func (s *store) DeleteChainCheckpoint(ctx context.Context, id string) error {
 	return checkRowsAffected(result)
 }
 
-// ListChainCheckpoints returns suspended runs newest first — the substrate a
-// post-S6 `approvals list` can join against, and the operator's view of
+// ListChainCheckpoints returns suspended runs newest first — the substrate
+// `approvals list` can join against, and the operator's view of
 // stranded runs (non-nil Failure) awaiting a retry.
 func (s *store) ListChainCheckpoints(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*ChainCheckpoint, error) {
 	cursor := time.Now().UTC()

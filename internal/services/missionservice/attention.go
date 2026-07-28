@@ -1,24 +1,17 @@
 package missionservice
 
-// AttentionAskedSubject is the bus subject a raised ATTENTION ASK is published
-// on — a unit's QUESTION for a human, the mirror of ReportAddedSubject's "a unit
-// said something" for "a unit needs something back".
-//
-// It exists for the same reason and follows the same seam: the ask itself is
-// durable in the approval store the moment it is raised (hitlservice), and this
-// event only says it EXISTS so a subscriber can decide where a human should be
-// told. Reports already travel this way to whoever fired the mission; a question
-// that only reached the operator inbox — while the session that fired the
-// mission sat there unaware — was the asymmetry this closes.
+// AttentionAskedSubject is the bus subject published when a unit raises a
+// question for a human — the mirror of ReportAddedSubject for "a unit needs
+// something back" rather than "a unit said something". The ask itself is
+// already durable in the approval store (hitlservice) the moment it is
+// raised; this event only says it exists, so a subscriber can route it to
+// the session that fired the mission rather than only the operator inbox.
 const AttentionAskedSubject = "missionservice.events.attention_asked"
 
-// AttentionAskedEvent is the SELF-CONTAINED domain event published when a unit
-// raises a question. Self-contained like ReportAddedEvent: a subscriber routes it
-// without reading anything back.
-//
-// AskID is the durable ask's id — the handle an answer is given against
-// (hitlservice.Answer, POST /api/approvals/{id}) — so a surface that renders this
-// event can answer it without a second lookup.
+// AttentionAskedEvent is the self-contained event published when a unit
+// raises a question. AskID is the durable ask's id (hitlservice.Answer,
+// POST /api/approvals/{id}), so a subscriber can answer it without a second
+// lookup.
 type AttentionAskedEvent struct {
 	MissionID       string `json:"missionId"`
 	AskID           string `json:"askId"`

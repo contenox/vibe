@@ -1,15 +1,8 @@
 package agentservice_test
 
-// THE S6 GATE: a chain reaches a gated tool call, suspends past the fast
-// window, the approval OUTLIVES the engine instance that raised it, and a
-// verdict delivered to a COMPLETELY FRESH instance (new engine, new
-// hitlservice, new DB handles — same on-disk database, i.e. the restart
-// shape) completes the chain end to end: real tool execution, terminal
-// events, session history persisted exactly once.
-//
-// Instance A is torn down before instance B exists; nothing but the SQLite
-// file connects them. This is the documented "two fresh engine instances in
-// one test process" shape of the kill-9 gate.
+// A chain suspends past the fast window on a gated call, and a verdict
+// delivered to a completely fresh instance (same on-disk database) completes
+// it end to end, exactly once.
 
 import (
 	"context"
@@ -36,10 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ── doubles ─────────────────────────────────────────────────────────────────
-
-// stubModelRepo satisfies llmrepo.ModelRepo for chains that never reach a
-// model (the e2e chain starts at execute_tool_calls).
+// stubModelRepo satisfies llmrepo.ModelRepo for chains that never reach a model.
 type stubModelRepo struct{}
 
 func (stubModelRepo) Tokenize(context.Context, string, string) ([]int, error) { return []int{1}, nil }
@@ -83,15 +73,24 @@ func (e *e2eInnerTools) GetToolsForToolsByName(_ context.Context, name string) (
 	return []taskengine.Tool{{Type: "function", Function: taskengine.FunctionTool{Name: "write"}}}, nil
 }
 
-// approveAllPolicy gates every call behind human approval and delegates the
-// durable half to the REAL hitlservice — the composition the production
-// wrapper sees, minus policy-file loading.
+// approveAllPolicy gates every call and delegates the durable recorder half
+// (RecordPendingApproval/ResolveApprovalInline, via the embedded
+// ApprovalRecorder) and the late-answer half (Respond, via Service) to the
+// same real hitlservice instance.
 type approveAllPolicy struct {
 	hitlservice.ApprovalRecorder
+	Service hitlservice.Service
 }
 
 func (approveAllPolicy) Evaluate(context.Context, string, string, map[string]any) (hitlservice.EvaluationResult, error) {
 	return hitlservice.EvaluationResult{Action: hitlservice.ActionApprove}, nil
+}
+
+// Respond satisfies localtools' approvalResponder so a verdict delivered
+// after the park window (through the SAME ask() callback, not a separate
+// out-of-process call) still resumes the checkpointed run.
+func (p approveAllPolicy) Respond(ctx context.Context, approvalID string, approved bool) error {
+	return p.Service.Respond(ctx, approvalID, approved)
 }
 
 type recordingSink struct {
@@ -117,8 +116,7 @@ func (s *recordingSink) kinds() []taskengine.TaskEventKind {
 	return out
 }
 
-// ── one "process": engine + hitlservice + agent over the shared DB file ─────
-
+// e2eInstance is one "process": engine + hitlservice + agent over a shared DB file.
 type e2eInstance struct {
 	db    libdb.DBManager
 	store runtimetypes.Store
@@ -129,7 +127,17 @@ type e2eInstance struct {
 	sink  *recordingSink
 }
 
-func newE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration) *e2eInstance {
+// awayAsk simulates a human who never answers within this process's
+// lifetime: the ask blocks only until its context ends, then reports that
+// context error. It forces every verdict through Respond, as if delivered by
+// a restarted process or a separate `contenox approvals answer` invocation —
+// the shape newE2EInstance's original callers exercise.
+func awayAsk(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+func newE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration, ask localtools.AskApproval) *e2eInstance {
 	t.Helper()
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
@@ -142,12 +150,7 @@ func newE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration) *e2eI
 
 	sink := &recordingSink{}
 	inner := &e2eInnerTools{}
-	// The ask never answers within the window — the human is away; that is
-	// the whole scenario.
-	wrapper := localtools.NewHITLWrapper(inner, func(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
-		<-ctx.Done()
-		return false, ctx.Err()
-	}, approveAllPolicy{ApprovalRecorder: recorder}, libtracker.NoopTracker{}, sink)
+	wrapper := localtools.NewHITLWrapper(inner, ask, approveAllPolicy{ApprovalRecorder: recorder, Service: hitl}, libtracker.NoopTracker{}, sink)
 	wrapper.SetParkWindow(parkWindow)
 
 	cctx := taskengine.WithTaskEventSink(ctx, sink)
@@ -171,8 +174,7 @@ func newE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration) *e2eI
 		inner: inner,
 		sink:  sink,
 	}
-	// The wire-in under test: a verdict landing with no waiter resumes the
-	// suspended run in THIS instance.
+	// A verdict landing with no waiter resumes the suspended run here.
 	hitlservice.SetResumeHook(hitl, agentservice.ResumeHook(deps))
 	return inst
 }
@@ -181,10 +183,8 @@ func (i *e2eInstance) close() { _ = i.db.Close() }
 
 func e2eChain() *taskengine.TaskChainDefinition {
 	return &taskengine.TaskChainDefinition{
-		ID: "chain.e2e",
-		// A real chain always budgets its context; a zero budget would cap
-		// every tool result to the too-large stub.
-		TokenLimit: 4096,
+		ID:         "chain.e2e",
+		TokenLimit: 4096, // a zero budget would cap every tool result to the too-large stub
 		Tasks: []taskengine.TaskDefinition{
 			{
 				ID:            "exec",
@@ -207,8 +207,7 @@ func e2eInput() taskengine.ChatHistory {
 	}}
 }
 
-// createSession registers the session's message index, as sessionservice's
-// SessionNew does in production — PersistDiff appends against it.
+// createSession registers the session's message index, as sessionservice's SessionNew does.
 func createSession(t *testing.T, db libdb.DBManager, sessionID string) {
 	t.Helper()
 	require.NoError(t, messagestore.New(db.WithoutTransaction(), "").CreateMessageIndex(context.Background(), sessionID, "e2e"))
@@ -226,8 +225,7 @@ func TestSystem_S6Gate_ApprovalOutlivesEngine_VerdictAfterRestartCompletesChain(
 	ctx := context.Background()
 	const sessionID = "sess-e2e"
 
-	// ── Instance A: reach the gate, suspend, die ──────────────────────────
-	a := newE2EInstance(t, dbPath, 20*time.Millisecond)
+	a := newE2EInstance(t, dbPath, 20*time.Millisecond, awayAsk)
 	createSession(t, a.db, sessionID)
 	resp, err := a.agent.Prompt(ctx, agentservice.PromptRequest{
 		SessionID:  sessionID,
@@ -241,7 +239,6 @@ func TestSystem_S6Gate_ApprovalOutlivesEngine_VerdictAfterRestartCompletesChain(
 	require.Equal(t, "call-w1", resp.SuspendedApprovalID)
 	require.Empty(t, a.inner.execs, "the gated tool must not have run")
 
-	// Durable state the instance leaves behind: pending approval + checkpoint.
 	row, err := a.store.GetHITLApproval(ctx, "call-w1")
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalPending, row.State)
@@ -249,40 +246,31 @@ func TestSystem_S6Gate_ApprovalOutlivesEngine_VerdictAfterRestartCompletesChain(
 	require.NoError(t, err)
 	require.Equal(t, sessionID, cpRow.SessionID)
 
-	// Nothing persisted to the session yet — the checkpoint IS the in-flight
-	// turn's durable transcript.
 	require.Empty(t, loadSessionMessages(t, a.db, sessionID))
 
-	// The suspended segment's terminal event.
 	kindsA := a.sink.kinds()
 	require.Equal(t, taskengine.TaskEventChainSuspended, kindsA[len(kindsA)-1])
 
-	// Tear instance A down COMPLETELY. Only the SQLite file survives.
 	a.close()
 
-	// ── Instance B: fresh process shape, receives the verdict ─────────────
-	b := newE2EInstance(t, dbPath, 20*time.Millisecond)
+	b := newE2EInstance(t, dbPath, 20*time.Millisecond, awayAsk)
 	defer b.close()
 
 	require.NoError(t, b.hitl.Respond(ctx, "call-w1", true),
 		"Respond runs the resume synchronously via the registered hook")
 
-	// The chain completed: the gated tool ran exactly once, in instance B.
 	require.Equal(t, []string{"write"}, b.inner.execs)
 
-	// Terminal events of the resumed segment.
 	kindsB := b.sink.kinds()
 	require.Equal(t, taskengine.TaskEventChainCompleted, kindsB[len(kindsB)-1])
 
-	// The checkpoint is consumed; the approval row is terminal.
 	_, err = b.store.GetChainCheckpoint(ctx, "call-w1")
 	require.ErrorIs(t, err, libdb.ErrNotFound, "a successful terminal deletes the checkpoint")
 	row, err = b.store.GetHITLApproval(ctx, "call-w1")
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalApproved, row.State)
 
-	// Final history persisted once: user, assistant tool call, real result —
-	// no stubs, no duplicates (the duplicate-persistence guard).
+	// History must persist once: no stubs, no duplicates.
 	msgs := loadSessionMessages(t, b.db, sessionID)
 	var roles []string
 	resultCount := map[string]int{}
@@ -301,7 +289,6 @@ func TestSystem_S6Gate_ApprovalOutlivesEngine_VerdictAfterRestartCompletesChain(
 		require.Equal(t, 1, n, "message %s persisted more than once", id)
 	}
 
-	// A second verdict cannot double-run anything.
 	require.ErrorIs(t, b.hitl.Respond(ctx, "call-w1", true), hitlservice.ErrApprovalAlreadyResolved)
 	_, err = agentservice.ResumeFromCheckpoint(ctx, b.deps, "call-w1")
 	require.ErrorIs(t, err, agentservice.ErrNoCheckpoint)
@@ -312,7 +299,7 @@ func TestSystem_S6Gate_DenyAfterRestart_CompletesWithDenySemantics(t *testing.T)
 	ctx := context.Background()
 	const sessionID = "sess-deny"
 
-	a := newE2EInstance(t, dbPath, 20*time.Millisecond)
+	a := newE2EInstance(t, dbPath, 20*time.Millisecond, awayAsk)
 	createSession(t, a.db, sessionID)
 	resp, err := a.agent.Prompt(ctx, agentservice.PromptRequest{
 		SessionID:  sessionID,
@@ -324,12 +311,11 @@ func TestSystem_S6Gate_DenyAfterRestart_CompletesWithDenySemantics(t *testing.T)
 	require.Equal(t, agentservice.StopSuspended, resp.StopReason)
 	a.close()
 
-	b := newE2EInstance(t, dbPath, 20*time.Millisecond)
+	b := newE2EInstance(t, dbPath, 20*time.Millisecond, awayAsk)
 	defer b.close()
 	require.NoError(t, b.hitl.Respond(ctx, "call-w1", false))
 
-	// Deny: the tool never ran, the chain still COMPLETED with the standard
-	// deny message as the call's result — the model can react next turn.
+	// Deny completes the chain with the standard deny message as the result.
 	require.Empty(t, b.inner.execs, "a denied call must never execute")
 	msgs := loadSessionMessages(t, b.db, sessionID)
 	var toolResults []string

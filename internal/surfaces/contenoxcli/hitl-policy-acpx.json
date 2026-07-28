@@ -1,6 +1,6 @@
 {
-  "//compute": "PRESENT AND REAL, and tighter than hitl-policy-acp's — a default_action of \"deny\" says the operator wants the narrow envelope, and its compute half should match its action half. Compute bounds are per-MISSION, so they do nothing for the attached editor session this preset usually serves; they exist for the case where this policy is named as a mission envelope, because a mission is fire-and-detach and an unbounded runaway spends real money with nobody watching. A mission that crosses a bound is finished at status \"stuck\" with a reason naming it.",
-  "//compute-fields": "maxToolCalls counts envelope-gated tool dispatches and is exact. maxTokens is BEST-EFFORT: it bounds a mission from the usage its unit reports, and is inert for a unit whose provider reports none. maxTurns is deliberately OMITTED, not forgotten: the dispatcher issues at most two prompt turns per mission, so any ceiling above 1 could never fire. modelAllowlist/backendAllowlist ARE enforced when set, but no shipped preset can guess your model names. \"finish_stuck\" is the only implemented onExhausted behavior. See docs/development/blueprints/acp/envelope-compute-bounds.md.",
+  "//compute": "Tighter than the acp preset's, matching its default_action \"deny\". These bounds take effect only when this policy is used as a mission envelope; an attached driver session is otherwise unaffected.",
+  "//compute-fields": "maxToolCalls is exact; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted because the dispatcher never issues more than two prompt turns per mission. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
   "compute": {
     "maxToolCalls": 150,
     "maxTokens": 1000000,
@@ -245,6 +245,11 @@
     },
     {
       "tools": "local_fs",
+      "tool": "edit_file",
+      "action": "deny"
+    },
+    {
+      "tools": "local_fs",
       "tool": "read_file",
       "action": "allow"
     },
@@ -256,6 +261,11 @@
     {
       "tools": "local_fs",
       "tool": "list_dir",
+      "action": "allow"
+    },
+    {
+      "tools": "local_fs",
+      "tool": "find_files",
       "action": "allow"
     },
     {

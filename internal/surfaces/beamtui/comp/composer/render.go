@@ -8,30 +8,27 @@ import (
 )
 
 // ASCIISigil is the composer's beam-bar in a Mono terminal, without its
-// separating space. It is exported so testkit's glyph-parity test can hold
-// every surface's ASCII marker against the style package's GlyphSet in one
-// place; components may not import style, so the agreement can only be
-// checked from outside.
+// separating space — exported so testkit's glyph-parity test can check it
+// against style's GlyphSet without this package importing style.
 const ASCIISigil = "|"
 
 const (
-	// sigil is the gold beam-bar that marks the composer — the same brand
-	// device as the welcome header and the status segment — plus its
+	// sigil is the mint beam-bar marking the composer, the same brand
+	// device as the welcome header and status segment, plus its
 	// separating space. Continuation rows keep the two cells so wrapped
 	// text stays in one column.
 	sigilUnicode = "▌ "
 	sigilASCII   = ASCIISigil + " "
 	continuation = "  "
 
-	// upUnicode/upASCII head the scrolled-draft marker (see prefixSpan). The
-	// same caret comp/palette's footer uses, so one glyph means "there is
-	// more above" wherever the live region scrolls something.
+	// upUnicode/upASCII head the scrolled-draft marker (see prefixSpan), the
+	// same glyph comp/palette's footer uses for "more above".
 	upUnicode = "↑"
 	upASCII   = "^"
 
-	// placeholder is the empty-and-unfocused hint: the three affordances a
-	// user cannot discover by typing. The ASCII variant swaps the middot
-	// for a hyphen — a non-ASCII rune must never reach a Mono terminal.
+	// placeholder is the empty-and-unfocused hint listing the three
+	// affordances a user cannot discover by typing; ASCII swaps the middot
+	// for a hyphen.
 	placeholderUnicode = "type / for commands · ! for shell · @ to attach"
 	placeholderASCII   = "type / for commands - ! for shell - @ to attach"
 
@@ -39,35 +36,25 @@ const (
 	ellipsisASCII   = "..."
 )
 
-// MinWidth is the narrowest terminal the composer's layout guarantees are
-// stated for: two cells of sigil column plus two of content, which is the
-// least that can hold one wide rune beside the device.
-//
-// Below it the composer still renders and still never panics, but one
-// guarantee is deliberately dropped: a rune wider than the remaining content
-// column is emitted ANYWAY, so a line can overflow by a cell (see fit). The
-// alternative is deleting characters out of the user's own draft, and a
-// three-column terminal is not a reason to do that. Above MinWidth the width
-// invariant is exact.
+// MinWidth is the narrowest terminal the composer's layout is guaranteed
+// for: two cells of sigil plus two of content, the least that fits one wide
+// rune beside the device. Below it a rune wider than the remaining content
+// column still renders and may overflow by a cell (see fit) rather than
+// deleting from the user's draft; at or above it the width invariant is
+// exact.
 const MinWidth = 4
 
-// Render projects the buffer into terminal rows for width.
-//
-// Rows are the buffer soft-wrapped to width-2, each hung off the two-cell
-// sigil column: the first RENDERED row carries the beam-bar — gold when
-// focused, muted when not — and every other row carries two muted spaces, so
-// the device marks the region wherever a scrolled draft happens to start.
-// The height is the rows needed, at least one and at most MaxRows; a taller
-// draft scrolls so the caret's row stays visible, and the first continuation
-// row's gutter then counts what scrolled off the top (see prefixSpan). At or
-// above MinWidth no returned line is ever wider than width.
+// Render projects the buffer into terminal rows for width. Rows are the
+// buffer soft-wrapped to width-2, hung off the two-cell sigil column: the
+// first row carries the beam-bar (mint if focused, muted otherwise), other
+// rows two muted spaces. Height is 1..MaxRows; a taller draft scrolls to
+// keep the caret's row visible, and the first continuation row's gutter
+// then counts what scrolled off the top (see prefixSpan). At or above
+// MinWidth no returned line exceeds width.
 //
 // Empty and unfocused renders the placeholder hint; empty and focused
-// renders just the sigil, so a user who has come to type sees a clean caret
-// instead of advice.
-//
-// Render also computes the caret CursorPos reports, so call it before
-// reading the caret for a frame.
+// renders just the sigil. Render also computes the caret CursorPos reports,
+// so call it before reading the caret for a frame.
 func (c *Composer) Render(width int, focused, ascii bool) []frame.Line {
 	c.curRow, c.curCol = 0, prefixWidth
 
@@ -78,8 +65,8 @@ func (c *Composer) Render(width int, focused, ascii bool) []frame.Line {
 
 	contentW := width - prefixWidth
 	if contentW < 1 {
-		// Degenerate width: the sigil column is all there is, and the caret
-		// has nowhere of its own to go.
+		// Degenerate width: the sigil column is all there is; the caret has
+		// nowhere of its own to go.
 		c.curCol = width - 1
 		return []frame.Line{{frame.S(sigilStyle(focused), fit(sigil(ascii), width))}}
 	}
@@ -97,8 +84,7 @@ func (c *Composer) Render(width int, focused, ascii bool) []frame.Line {
 	rows, curRow, curCol := c.layout(contentW)
 
 	// The caret can land one row past the text when the last row is exactly
-	// full — the next rune typed starts a new row, so the caret needs one to
-	// sit in. Only a focused composer has a caret to accommodate.
+	// full; only a focused composer has a caret to accommodate.
 	if curRow >= len(rows) {
 		if focused {
 			rows = append(rows, "")
@@ -142,21 +128,16 @@ func (c *Composer) Render(width int, focused, ascii bool) []frame.Line {
 }
 
 // CursorPos is the caret in the coordinates of the lines the most recent
-// Render returned: a row index into those lines and a cell column that
-// already includes the two-cell sigil prefix. Before the first Render it is
-// the caret of an empty composer.
-//
-// The app-shell offsets it by the composer region's origin and hides it when
-// the composer is not focused.
+// Render returned: a row index and a cell column that already includes the
+// two-cell sigil prefix. Before the first Render it is an empty composer's
+// caret. The app-shell offsets it by the region's origin and hides it when
+// unfocused.
 func (c *Composer) CursorPos() (row, col int) { return c.curRow, c.curCol }
 
 // layout wraps every buffer line to contentW and returns the flat row list
-// plus the caret's row and cell column (the column already offset by the
-// sigil prefix).
-//
-// Wrapping goes through textwidth.Wrap, which only ever INSERTS breaks — no
-// rune is dropped or moved — so the caret maps onto the wrapped rows by
-// counting runes, and the map cannot drift from what is drawn.
+// plus the caret's row and cell column (offset by the sigil prefix).
+// Wrapping goes through textwidth.Wrap, which only inserts breaks, so the
+// caret maps onto wrapped rows by counting runes without drift.
 func (c *Composer) layout(contentW int) (rows []string, curRow, curCol int) {
 	for i, l := range c.lines {
 		wrapped := textwidth.Wrap(string(l), contentW)
@@ -170,11 +151,11 @@ func (c *Composer) layout(contentW int) (rows []string, curRow, curCol int) {
 	return rows, curRow, curCol
 }
 
-// locate maps a rune offset within one wrapped buffer line onto a row index
-// and a cell column. An offset that sits exactly on a wrap boundary belongs
-// to the following row — that is where the next typed rune will appear — so
-// an offset at the end of a full line returns row len(wrapped), one past the
-// line's own rows, and the caller decides what row that is.
+// locate maps a rune offset within one wrapped line onto a row index and
+// cell column. An offset exactly on a wrap boundary belongs to the
+// following row, since that is where the next typed rune appears; at the
+// end of a full line it returns row len(wrapped), one past the line's own
+// rows.
 func locate(wrapped []string, off, contentW int) (row, col int) {
 	cum := 0
 	for i, r := range wrapped {
@@ -193,20 +174,13 @@ func locate(wrapped []string, off, contentW int) (row, col int) {
 }
 
 // prefixSpan is a row's sigil column: the beam-bar on the first row, two
-// spaces on continuations. Gold marks focus; muted is the resting state.
+// spaces on continuations; mint marks focus, muted the resting state.
 //
-// When the draft is taller than MaxRows the buffer scrolls, and the FIRST
-// continuation row spends its two muted cells on a scroll marker instead —
-// "↑3" for three rows hidden above the window. A draft that scrolled was
-// otherwise indistinguishable from one that happened to start where the
-// window does: the text above simply vanished with nothing on screen saying
-// it existed. The marker rides inside the two cells the sigil column already
-// costs, so nothing shifts and no content row is spent on chrome; past nine
-// hidden rows the count degrades to "↑+", because two cells is two cells.
-//
-// Row 0 keeps the beam-bar unconditionally. It is the brand device marking
-// the input region, and a region that stops identifying itself the moment it
-// gets tall is worse than an unlabelled scroll count.
+// When the draft is taller than MaxRows, the first continuation row spends
+// its two muted cells on a scroll marker ("↑3") instead, so a scrolled
+// draft stays distinguishable from one that starts at the window; past nine
+// hidden rows the count degrades to "↑+". Row 0 always keeps the beam-bar,
+// since the device should keep identifying the region even once it scrolls.
 func prefixSpan(row, top int, focused, ascii bool) frame.Span {
 	switch {
 	case row == 0:
@@ -269,18 +243,14 @@ func clip(s string, w int, ascii bool) string {
 	return textwidth.Truncate(s, w, tail)
 }
 
-// fit is clip without the ellipsis: the guard that keeps the width invariant
-// true. At every SUPPORTED width (see MinWidth) the wrap has already done the
-// work and this returns s unchanged.
+// fit is clip without the ellipsis, keeping the width invariant true; at
+// every supported width (see MinWidth) the wrap already did the work and
+// this returns s unchanged.
 //
-// Below the minimum it declines to help. contentW can fall to one cell there,
-// and textwidth.Wrap cannot break a two-cell rune across two one-cell rows —
-// it emits the rune and overflows, which is the only thing it can do. Cutting
-// it here would turn that overflow into a DELETION: the composer would render
-// a buffer with the user's character silently missing while CursorPos still
-// counted it, so the caret would sit a cell off and backspace would appear to
-// do nothing. Overflowing a 3-column terminal by one cell is a cosmetic
-// problem. Eating what somebody typed is not.
+// Below MinWidth it declines to help: textwidth.Wrap cannot break a
+// two-cell rune across two one-cell rows, so it overflows by one cell
+// rather than cutting — truncating here would delete a character from the
+// user's draft while CursorPos still counted it, desyncing the caret.
 func fit(s string, w int) string {
 	if textwidth.Width(s) <= w {
 		return s

@@ -9,15 +9,15 @@ import (
 	"github.com/contenox/beam/internal/services/missiontools"
 )
 
-// missionSupervision is the composition-root adapter that gives a session which
-// FIRED missions the two things it needs to actually supervise them: a read of
-// its own units, and a way to answer what they ask.
-//
-// It sits here, at the composition root, because it is the one place that holds
-// both halves — missions live in missionservice, questions live in the durable
-// ask store (hitlservice), and the tool package deliberately depends on neither.
-// Both `contenox serve` and the in-process editor wire the same value, so a
-// supervising session behaves identically wherever it is hosted.
+// missionSupervision adapts missionservice and hitlservice so a session that
+// fired missions can read its own units and answer what they ask. Wired only
+// for the in-process ACP host (`contenox acp` / `contenox acpx`, via
+// acpToolset in acp_toolset.go): a firing session's agent may need to check
+// on or answer its own units. `contenox beam` gets its mission tools from
+// engine.go's plain toolset instead, with no supervisor wired, so a beam
+// session can fire missions but its agent gets no supervision tools for
+// them — reports still arrive live via the report router, independent of
+// this type.
 type missionSupervision struct {
 	missions missionservice.Service
 	hitl     hitlservice.Service
@@ -33,12 +33,9 @@ var (
 // this in one session has a different problem than a missing row in a list.
 const supervisorScanPage = 200
 
-// MissionsFiredBy returns the missions this session fired, newest first.
-//
-// It filters a bounded page rather than querying by parent, because the mission
-// store is a KV prefix scan with no secondary index — a "list by parent" would be
-// this same scan wearing a different name, and pretending otherwise would hide
-// the bound from the caller.
+// MissionsFiredBy returns the missions this session fired, newest first,
+// filtering a bounded page rather than querying by parent (the store has no
+// secondary index for it).
 func (s missionSupervision) MissionsFiredBy(ctx context.Context, parentSessionID string, limit int) ([]*missionservice.Mission, error) {
 	if parentSessionID == "" {
 		return nil, nil

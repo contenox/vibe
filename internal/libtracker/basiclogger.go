@@ -69,11 +69,9 @@ func NewLogActivityTracker(logger *slog.Logger, opts ...LogOption) ActivityTrack
 	return t
 }
 
-// opSeq disambiguates operations that start within the same millisecond. The
-// timestamp alone collides under any concurrency at all, which silently merges
-// two unrelated operations' log lines under a single op_id and destroys the
-// correlation the field exists for. The counter is process-local; across
-// processes request_id/trace_id remain the correlation keys.
+// opSeq disambiguates operations starting within the same millisecond; the
+// timestamp alone collides under concurrency and merges unrelated op_ids.
+// Process-local only — across processes, request_id/trace_id correlate.
 var opSeq atomic.Uint64
 
 // Start implements the ActivityTracker interface.
@@ -85,7 +83,7 @@ func (t *logActivityTracker) Start(
 ) (reportErr func(error), reportChange func(string, any), end func()) {
 	startTime := time.Now()
 
-	// Generate an operation ID: timestamp for readability, counter for uniqueness.
+	// op_id: timestamp for readability, counter for uniqueness.
 	opID := "op-" + formatTimestamp(startTime) + "-" + strconv.FormatUint(opSeq.Add(1), 36)
 	attrs := []slog.Attr{
 		slog.String("operation", operation),
@@ -114,12 +112,9 @@ func (t *logActivityTracker) Start(
 		attrs = append(attrs, slog.String("span_id", spanID))
 	}
 	arrs := append(attrs, toSlogAttrs(t.redactor, kvArgs...)...)
-	// Initial log entry: start of the operation
 	t.logger.LogAttrs(ctx, slog.LevelInfo, "Operation started",
 		arrs...,
 	)
-
-	// Return functions to be used by caller
 
 	reportErrFunc := func(err error) {
 		if err != nil {
@@ -185,13 +180,9 @@ func (t *logActivityTracker) Start(
 	return reportErrFunc, reportChangeFunc, endFunc
 }
 
-// boundedLogValue prepares an arbitrary payload for logging: it scrubs
-// credential-looking fields, then caps the result so one oversized change never
-// floods the log.
-//
-// Redaction happens BEFORE the size cap so the truncated summary — preview and
-// sha256 alike — is derived from already-scrubbed bytes; otherwise a secret
-// could survive in the preview of a payload that was too big to log in full.
+// boundedLogValue scrubs credential-looking fields, then caps the result so
+// one oversized change never floods the log. Redaction happens before the
+// size cap so the preview/sha256 are derived from already-scrubbed bytes.
 func boundedLogValue(v any, red *fieldRedactor) any {
 	if v == nil {
 		return nil
@@ -248,11 +239,8 @@ func logTypeName(v any) string {
 	return t.String()
 }
 
-// Helper: Convert key-value pairs into slog attributes.
-//
-// kvArgs is the same leak path as change_data — callers pass "api_key", value
-// just as readily — so it gets the same scrubbing, keyed on the attribute name
-// as well as on any nested field names inside the value.
+// toSlogAttrs converts key-value pairs into slog attributes, scrubbing
+// sensitive keys and values the same way change_data is scrubbed.
 func toSlogAttrs(red *fieldRedactor, kvArgs ...any) []slog.Attr {
 	var attrs []slog.Attr
 	for i := 0; i < len(kvArgs); i += 2 {
@@ -270,7 +258,6 @@ func toSlogAttrs(red *fieldRedactor, kvArgs ...any) []slog.Attr {
 	return attrs
 }
 
-// Helper: Format timestamp for op_id
 func formatTimestamp(t time.Time) string {
 	return t.Format("20060102-150405.000")
 }

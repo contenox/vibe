@@ -9,7 +9,7 @@ The codebase is primarily developed on Linux. Windows support exists for the pur
 | Path | Best for | Limitations |
 |------|----------|-------------|
 | **WSL2 (Ubuntu/Debian recommended)** | Day-to-day Go development, CLI work, running tests | Windows-specific runtime behavior (shells, paths) is not exercised. |
-| **Native Windows (PowerShell/cmd + Git Bash)** | Verifying Windows-specific behavior: paths, `local_shell`, PowerShell/cmd.exe execution, terminal behavior of the Beam TUI | `task` may be unavailable; invoke `go build`/`go test` directly. |
+| **Native Windows (PowerShell/cmd + Git Bash)** | Verifying Windows-specific behavior: paths, `local_shell`, PowerShell/cmd.exe execution, terminal behavior of the beam TUI | `task` may be unavailable; invoke `go build`/`go test` directly. |
 | **Remote SSH** | Offloading heavy work (gopls, builds) to a Linux box while editing on Windows | — |
 
 For most contributors: install WSL2 and do the normal Linux flow inside it (see [CONTRIBUTING.md](../../CONTRIBUTING.md)). Drop to a native Windows checkout when you need Windows-specific verification.
@@ -60,31 +60,15 @@ task build-windows
 
 On Windows, Contenox is the same terminal-first product as everywhere else:
 the `contenox` CLI, the beam TUI, and ACP editor integrations. There is no GUI
-app and no Store package — the terminal is the product. (Store/MSIX packaging
-and a GUI-first launcher were explored and retired with the web UI; see
-[retired R&D](blueprints/retired/README.md).)
+app and no Store package — the terminal is the product.
 
-Current state: the CLI is pure Go (`CGO_ENABLED=0`) and cross-compiles cleanly
+The CLI is pure Go (`CGO_ENABLED=0`) and cross-compiles cleanly
 (`task build-windows` and the release workflow produce
 `contenox-windows-amd64.exe`); `contenox update` has Windows-specific
 replacement logic; `local_shell` detects `pwsh` / PowerShell / `cmd.exe` and
 uses the correct invocation flags; local inference means Ollama on Windows or
 a reachable vLLM endpoint; distribution is GitHub Releases (raw `.exe`,
 `install.sh` covers Linux/macOS only).
-
-Direction:
-
-1. **PowerShell install path**: publish `https://contenox.com/install.ps1`
-   (`iwr -useb https://contenox.com/install.ps1 | iex`) that downloads the
-   release binary, puts it on PATH, and points the user at `contenox setup`;
-   surface it on the website next to the Unix one-liner.
-2. **Terminal experience**: beam must behave well in Windows Terminal and the
-   legacy console — raw mode, resize, colors, clean teardown.
-3. **First run**: `contenox setup` on Windows should offer Ollama detection
-   and cloud providers, exactly like Unix.
-4. **Signing**: a code-signing certificate for the release `.exe` is worth
-   considering once SmartScreen friction becomes a reported problem; not
-   required on day one.
 
 ## See also
 

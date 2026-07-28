@@ -8,10 +8,8 @@ import (
 	"github.com/contenox/beam/internal/models/modelrepo"
 )
 
-// TestUnit_Build_SerializesImageAsContentParts asserts an image attachment
-// becomes the OpenAI content-parts array (text part + image_url part with the
-// inline base64 data URI), while a text-only message keeps a plain-string
-// content — the shape OpenAI-compatible endpoints consume.
+// An image attachment becomes an OpenAI content-parts array; a text-only
+// message keeps a plain-string content.
 func TestUnit_Build_SerializesImageAsContentParts(t *testing.T) {
 	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47}
 	msgs := []modelrepo.Message{
@@ -147,10 +145,7 @@ func TestUnit_DecodeResponse_TextAndToolCalls(t *testing.T) {
 	}
 }
 
-// TestUnit_StreamDecoder_EmitsRawDeltasForAssembler drives the decoder's
-// delta parcels (plus the Finish terminal) through the engine-side assembler:
-// the decoder translates the wire only, assembly happens exactly once in
-// modelrepo.StreamAssembler.
+// The decoder only translates the wire; assembly happens once in modelrepo.StreamAssembler.
 func TestUnit_StreamDecoder_EmitsRawDeltasForAssembler(t *testing.T) {
 	nameMap := map[string]string{"fs_list": "fs.list"}
 	d := NewStreamDecoder(nameMap)

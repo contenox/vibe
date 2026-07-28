@@ -5,25 +5,18 @@ import (
 	"strings"
 )
 
-// redactedPlaceholder replaces a sensitive value. The field NAME is deliberately
-// kept: the shape of the log entry stays readable and greppable ("a token was
-// set here"), while the thing that must never reach a log file — the value — is
-// gone.
+// redactedPlaceholder replaces a sensitive value while keeping the field name,
+// so the log entry stays greppable without the secret ever appearing in it.
 const redactedPlaceholder = "[REDACTED]"
 
-// maxRedactDepth bounds the walk over a decoded payload. A log payload nested
-// this deeply is pathological, so anything below the limit is collapsed rather
-// than passed through: a credential must not escape merely by being buried deep
-// enough to outrun the scrubber.
+// maxRedactDepth bounds the walk over a decoded payload; anything deeper is
+// collapsed rather than passed through unchecked.
 const maxRedactDepth = 64
 
-// defaultRedactedFields are matched as case-insensitive SUBSTRINGS of a
-// normalized field name, so "user_password", "X-Api-Key" and "AuthorizationHeader"
-// are all caught without enumerating every spelling a caller might invent.
-//
-// The list errs on the side of over-redaction: a wrongly scrubbed debugging
-// field costs one confused developer, a leaked credential costs a rotation.
-// Callers that need a different trade-off can replace it via WithRedactedFields.
+// defaultRedactedFields are matched as case-insensitive substrings of a
+// normalized field name, so "user_password", "X-Api-Key" and
+// "AuthorizationHeader" are all caught. Errs toward over-redaction — replace
+// via WithRedactedFields for a different trade-off.
 var defaultRedactedFields = []string{
 	"password",
 	"passwd",
@@ -53,11 +46,9 @@ var defaultRedactedFields = []string{
 	"token",
 }
 
-// tokenAccountingFields exempts the bare "token" rule. This repo instruments
-// LLM work, so "max_tokens", "prompt_tokens" and "token_count" are ordinary,
-// useful telemetry — redacting them would make the tracker useless for the
-// workload it mostly observes. Only the bare "token" rule consults this list,
-// so "auth_tokens" still matches the explicit "auth_token" entry above.
+// tokenAccountingFields exempts the bare "token" rule so LLM telemetry like
+// "max_tokens" isn't redacted. Only the bare "token" rule consults this list;
+// "auth_tokens" still matches the explicit "auth_token" entry above.
 var tokenAccountingFields = []string{
 	"tokens",
 	"token_count",
@@ -131,16 +122,9 @@ func isTokenAccountingField(normalized string) bool {
 }
 
 // redactValue returns v with sensitive fields scrubbed, plus whether anything
-// was actually changed.
-//
-// It works on the JSON projection of v rather than on v itself: that is the
-// same view the log handler will render, it applies uniformly to structs, maps
-// and slices, and the decoded tree is acyclic by construction — so a struct
-// graph with cycles fails at Marshal (handled by the caller) instead of hanging
-// the scrubber.
-//
-// When nothing matched it returns the ORIGINAL value, so payloads without
-// secrets are logged byte-for-byte as they were before redaction existed.
+// changed. It works on the JSON projection of v, not v itself, so a struct
+// graph with cycles fails at Marshal rather than hanging the scrubber. When
+// nothing matched it returns the original value unchanged.
 func (r *fieldRedactor) redactValue(v any) (any, bool) {
 	if r == nil || v == nil {
 		return v, false

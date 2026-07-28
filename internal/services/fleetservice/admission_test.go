@@ -1,13 +1,8 @@
 package fleetservice
 
 // Tests for the fleet-width admission gate (admission.go) and the process
-// counters (counters.go). They drive Dispatch through the fakeManager, whose
-// List is the board the gate counts over, against the real sqlite-backed
-// registries — the same shape as the rest of this package's policy tests.
-//
-// The counters are process-lifetime package atomics shared across every test in
-// the binary, so every counter assertion here reads DELTAS around the action
-// under test, never absolute values.
+// counters (counters.go). Counters are shared package atomics, so assertions
+// read deltas, never absolute values.
 
 import (
 	"context"
@@ -21,9 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestFleetService_Dispatch_RefusedAtWidthCap is the gate's core: with the cap
-// reached, Dispatch refuses BEFORE bringing anything up, and the refusal
-// teaches — it names the cap's config key, its value, and both remedies.
+// TestFleetService_Dispatch_RefusedAtWidthCap: at the cap, Dispatch refuses
+// before bringing anything up, with a teaching message.
 func TestFleetService_Dispatch_RefusedAtWidthCap(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -40,8 +34,6 @@ func TestFleetService_Dispatch_RefusedAtWidthCap(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, errdefs.ErrConflict, "a cap refusal is a 409: fleet state, not request shape")
 
-	// The teaching message: the greppable lead, the count it saw, the cap's
-	// config key and value, and both remedies.
 	require.Contains(t, err.Error(), admissionRefusalLead)
 	require.Contains(t, err.Error(), "2 units are already open")
 	require.Contains(t, err.Error(), "fleet-max-parallel=2", "the refusal names the knob and its value")
@@ -56,9 +48,8 @@ func TestFleetService_Dispatch_RefusedAtWidthCap(t *testing.T) {
 	require.Equal(t, before.Dispatches, after.Dispatches, "a refused dispatch is not a dispatch")
 }
 
-// TestFleetService_Dispatch_DefaultCapEnforcedWithoutWiring is the pando lesson
-// made a regression test: a fleetservice constructed with NO cap option still
-// enforces DefaultMaxParallel. The knob cannot exist un-enforced.
+// TestFleetService_Dispatch_DefaultCapEnforcedWithoutWiring: a fleetservice
+// built with no cap option still enforces DefaultMaxParallel.
 func TestFleetService_Dispatch_DefaultCapEnforcedWithoutWiring(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -82,8 +73,8 @@ func TestFleetService_Dispatch_DefaultCapEnforcedWithoutWiring(t *testing.T) {
 	require.Empty(t, man.starts())
 }
 
-// TestFleetService_Dispatch_CapZeroIsUnlimited pins the documented opt-out:
-// fleet-max-parallel=0 admits regardless of how wide the fleet already is.
+// TestFleetService_Dispatch_CapZeroIsUnlimited: fleet-max-parallel=0 admits
+// regardless of fleet width.
 func TestFleetService_Dispatch_CapZeroIsUnlimited(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -106,10 +97,8 @@ func TestFleetService_Dispatch_CapZeroIsUnlimited(t *testing.T) {
 	waitMissionSettled(t, missions, res.MissionID)
 }
 
-// TestFleetService_Dispatch_CapClearsAsUnitsConclude is the decrement half of
-// the gate: the same service that refused at the cap admits again once a unit
-// concludes, because the count is read live off the kernel's board rather than
-// from any ledger of its own.
+// TestFleetService_Dispatch_CapClearsAsUnitsConclude: a service that refused
+// at the cap admits again once a unit concludes.
 func TestFleetService_Dispatch_CapClearsAsUnitsConclude(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -126,8 +115,7 @@ func TestFleetService_Dispatch_CapClearsAsUnitsConclude(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, errdefs.ErrConflict)
 
-	// The open unit concludes (the kernel drops it from its board); the SAME
-	// dispatch now passes the SAME gate.
+	// The open unit concludes; the same gate now admits.
 	man.setListStates()
 	res, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName: "runner", Intent: "admitted after the wall cleared", HITLPolicyName: "default",
@@ -137,9 +125,8 @@ func TestFleetService_Dispatch_CapClearsAsUnitsConclude(t *testing.T) {
 	waitMissionSettled(t, missions, res.MissionID)
 }
 
-// TestFleetService_Dispatch_CapCountsOnlyLiveStates pins the liveness
-// predicate: starting and running hold a slot; error/warning wreckage does not
-// (dead subprocesses must never permanently wall off new dispatches).
+// TestFleetService_Dispatch_CapCountsOnlyLiveStates: starting/running hold a
+// slot; error/warning wreckage does not.
 func TestFleetService_Dispatch_CapCountsOnlyLiveStates(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -157,7 +144,7 @@ func TestFleetService_Dispatch_CapCountsOnlyLiveStates(t *testing.T) {
 	require.NoError(t, err, "error/warning instances are wreckage, not open units")
 	waitMissionSettled(t, missions, res.MissionID)
 
-	// A unit still mid-spawn DOES hold a slot: spend is committed at starting.
+	// A unit still mid-spawn holds a slot: spend is committed at starting.
 	man2 := &fakeManager{startID: "inst-starting", openID: "sess-starting"}
 	man2.setListStates(agentinstance.StateStarting)
 	svc2 := New(man2, agents, missions, nil, "/project/root", libtracker.NoopTracker{}, WithMaxParallel(1))
@@ -170,9 +157,8 @@ func TestFleetService_Dispatch_CapCountsOnlyLiveStates(t *testing.T) {
 	require.Empty(t, man2.starts())
 }
 
-// TestFleetService_Dispatch_CapFailsClosedOnUnreadableBoard: a gate that cannot
-// count must refuse, not wave through — and the failure surfaces as itself, not
-// as a cap refusal.
+// TestFleetService_Dispatch_CapFailsClosedOnUnreadableBoard: an unreadable
+// board refuses (fail-closed), surfacing as itself, not a cap refusal.
 func TestFleetService_Dispatch_CapFailsClosedOnUnreadableBoard(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -192,10 +178,8 @@ func TestFleetService_Dispatch_CapFailsClosedOnUnreadableBoard(t *testing.T) {
 	require.Equal(t, before.CapRefusals, Counters().CapRefusals, "a board failure is not a cap refusal")
 }
 
-// TestFleetService_Counters pins the ledger's three tallies end to end:
-// a successful dispatch counts, a cap refusal counts, and the exported
-// verification-downgrade hook counts — each independently, all nil-safe
-// package-level calls needing no service handle.
+// TestFleetService_Counters: dispatches, cap refusals, and verification
+// downgrades each tally independently.
 func TestFleetService_Counters(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)

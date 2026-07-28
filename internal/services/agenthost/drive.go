@@ -13,16 +13,10 @@ import (
 	"github.com/contenox/beam/libacp"
 )
 
-// RecordingHarness is the minimal libacp.Client harness for driving an agent
-// whose turn only needs to be observed, not interacted with: it records every
-// session/update notification and, via the embedded UnimplementedClient,
-// rejects the request-shaped callbacks (permission, fs/*, terminal/*). A turn
-// that needs a permission answered needs a scripted harness instead (see
-// DenyingHarness for the deny-everything one) — this one exists so a caller
-// can read an agent's streamed reply after the fact.
-//
-// Safe for concurrent use: updates arrive on the connection's read-loop
-// goroutine while callers read snapshots from their own.
+// RecordingHarness is the minimal libacp.Client harness for observing a
+// turn: it records every session/update and rejects request-shaped
+// callbacks (permission, fs/*, terminal/*). Use DenyingHarness when a
+// permission ask must be answered. Safe for concurrent use.
 type RecordingHarness struct {
 	libacp.UnimplementedClient
 
@@ -39,20 +33,15 @@ func (h *RecordingHarness) SessionUpdate(_ context.Context, n libacp.SessionNoti
 	return nil
 }
 
-// Updates returns a snapshot of every recorded session/update, in arrival
-// order.
+// Updates returns a snapshot of every recorded session/update, in arrival order.
 func (h *RecordingHarness) Updates() []libacp.SessionNotification {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]libacp.SessionNotification(nil), h.updates...)
 }
 
-// AvailableCommands returns the agent's advertised slash-command set — the
-// most recent available_commands_update recorded, since each update is a full
-// replacement list per the spec. Nil means the agent never advertised any.
-// This surfaces the hosted agent's command menu to callers (`agent check`
-// prints it); merging it with contenox's own acpsvc command set is the
-// re-exposure layer's concern, not this package's.
+// AvailableCommands returns the most recent available_commands_update
+// recorded; nil means the agent never advertised any.
 func (h *RecordingHarness) AvailableCommands() []libacp.AvailableCommand {
 	var latest []libacp.AvailableCommand
 	seen := false
@@ -67,8 +56,7 @@ func (h *RecordingHarness) AvailableCommands() []libacp.AvailableCommand {
 	return append([]libacp.AvailableCommand(nil), latest...)
 }
 
-// MessageText concatenates the text of every agent_message_chunk recorded so
-// far: the agent's streamed reply as one string.
+// MessageText concatenates every agent_message_chunk's text recorded so far.
 func (h *RecordingHarness) MessageText() string {
 	var sb strings.Builder
 	for _, n := range h.Updates() {
@@ -83,16 +71,8 @@ func (h *RecordingHarness) MessageText() string {
 }
 
 // DenyingHarness is RecordingHarness plus one scripted answer: every
-// session/request_permission ask is DENIED, by selecting the agent's own
-// reject_once option (reject_always as the fallback; outcome "cancelled" when
-// the agent offered no reject option at all). It exists for observe-only
-// drivers that must still be interactable enough for a spec-correct agent to
-// finish its turn gracefully: the bare RecordingHarness answers a permission
-// ask with MethodNotFound, which agents surface as a BROKEN CLIENT and derail
-// their reply into an error narrative (`contenox agent check` hit exactly
-// this), while a clean denial lets the agent report the denial and end the
-// turn on its own terms. Denied() names each ask so a caller can surface what
-// the agent tried.
+// permission ask is denied, preferring reject_once, then reject_always,
+// then outcome "cancelled" if neither was offered.
 type DenyingHarness struct {
 	RecordingHarness
 
@@ -124,8 +104,8 @@ func (h *DenyingHarness) RequestPermission(_ context.Context, req libacp.Request
 	}}, nil
 }
 
-// Denied returns a snapshot of the permission asks denied so far, in arrival
-// order, each named by its tool-call title (id when untitled).
+// Denied returns the permission asks denied so far, named by tool-call title
+// (id when untitled).
 func (h *DenyingHarness) Denied() []string {
 	h.denyMu.Lock()
 	defer h.denyMu.Unlock()
@@ -134,72 +114,50 @@ func (h *DenyingHarness) Denied() []string {
 
 // TurnRequest describes the one prompt turn DriveTurn drives.
 type TurnRequest struct {
-	// Cwd is the session working directory. Required: ACP's session/new
-	// requires one, and spec-correct agents expect it to be absolute.
+	// Cwd is the session working directory. Required, and expected absolute.
 	Cwd string
 
 	// Prompt is the user prompt for the driven turn. Required.
 	Prompt []libacp.ContentBlock
 
-	// ClientInfo identifies this host to the agent. Defaults to a
-	// "contenox-agenthost" identity when nil. The ACP spec requires both
-	// name and version, and real-world agents (the claude-code-acp adapter)
-	// hard-reject an initialize without a version — so DriveTurn fills an
-	// empty Version with the runtime's own before sending.
+	// ClientInfo identifies this host to the agent. Defaults to
+	// "contenox-agenthost"; an empty Version is filled with the runtime's own.
 	ClientInfo *libacp.Implementation
 
-	// ClientCapabilities advertises what the supplied harness can actually
-	// serve. The zero value (nothing advertised) is the honest match for
-	// RecordingHarness.
+	// ClientCapabilities advertises what harness can serve; the zero value
+	// is the honest match for RecordingHarness.
 	ClientCapabilities libacp.ClientCapabilities
 
-	// McpServers are MCP servers passed down to the agent in session/new —
-	// typically the resolved form of the agent's mcp_servers allowlist (see
-	// ResolveForwardedMcpServers). DriveTurn filters them against the
-	// agent's initialize-advertised mcpCapabilities before sending; what was
-	// kept and dropped is reported on TurnResult.
+	// McpServers are MCP servers passed to the agent in session/new.
+	// DriveTurn filters them against the agent's mcpCapabilities;
+	// kept/dropped are reported on TurnResult.
 	McpServers []libacp.McpServer
 
-	// Stderr, if set, receives the spawned agent's stderr as it is written —
-	// pass a buffer so a failing turn is diagnosable without rerunning.
+	// Stderr, if set, receives the spawned agent's stderr as it is written.
 	Stderr io.Writer
 
-	// KillGrace, if positive, bounds how long teardown waits for the agent
-	// to exit on stdin-close before killing it (see
-	// ExternalACPAgent.KillGrace). Set it short for persistent agents that
-	// never exit on their own.
+	// KillGrace, if positive, bounds teardown's wait after stdin-close
+	// before killing the agent (see ExternalACPAgent.KillGrace).
 	KillGrace time.Duration
 }
 
-// TurnResult is what one driven turn produced on the request/response plane.
-// The notification plane (streamed chunks, tool calls) lives on the harness —
-// see RecordingHarness.
+// TurnResult is what one driven turn produced on the request/response plane;
+// the notification plane (streamed chunks) lives on the harness.
 type TurnResult struct {
 	Initialize libacp.InitializeResponse
 	SessionID  libacp.SessionID
 	StopReason libacp.StopReason
 
-	// ForwardedMcpServers and DroppedMcpServers name which of
-	// TurnRequest.McpServers actually reached the agent in session/new and
-	// which were withheld because the agent's mcpCapabilities can't consume
-	// their transport. Callers surface these so a user who allowlisted a
-	// server learns when the agent never saw it.
+	// ForwardedMcpServers and DroppedMcpServers name which McpServers
+	// reached the agent and which were withheld for unsupported capabilities.
 	ForwardedMcpServers []string
 	DroppedMcpServers   []string
 }
 
-// DriveTurn composes a resolved agents row with the host: it connects to the
-// external ACP agent the row describes and drives one full
-// initialize → session/new → session/prompt turn against it with harness,
-// tearing the connection down before returning. Resolving the row (by name,
-// via the registry service) stays with the caller — this package remains
-// registry-agnostic; it only consumes the resolved *runtimetypes.Agent.
-//
-// A nil error means the whole loop closed: the agent answered the prompt with
-// a terminal stopReason and the spawned process tore down cleanly (Close
-// errors are returned, not swallowed). Everything the agent streamed during
-// the turn is on the harness, which DriveTurn passes through untouched per
-// this package's harness seam.
+// DriveTurn connects to the external ACP agent agent describes and drives
+// one initialize → session/new → session/prompt turn with harness, tearing
+// the connection down before returning. A nil error means the agent reached
+// a terminal stopReason and teardown closed cleanly.
 func DriveTurn(ctx context.Context, agent *runtimetypes.Agent, harness libacp.Client, req TurnRequest) (*TurnResult, error) {
 	if req.Cwd == "" {
 		return nil, fmt.Errorf("agenthost: TurnRequest.Cwd is required (ACP session/new needs a working directory)")
@@ -212,13 +170,8 @@ func DriveTurn(ctx context.Context, agent *runtimetypes.Agent, harness libacp.Cl
 		return nil, fmt.Errorf("agenthost: resolve agent %q: %w", agent.Name, err)
 	}
 
-	// The agent is spawned inside the sandbox, whose workspace is Config.Cwd (see
-	// buildAgentCmd). An agent is usually registered by command alone, with no
-	// Cwd — its working directory is chosen per turn — so default the sandbox
-	// workspace to this turn's session cwd (already validated non-empty above).
-	// That both satisfies the wall's non-empty-workspace requirement and pins the
-	// spawned process to the very directory the ACP session works in. An explicit
-	// registered Cwd, if set, still wins.
+	// Default the sandbox workspace (Config.Cwd) to this turn's session cwd
+	// when the agent has none registered; an explicit registered Cwd wins.
 	if cfg.Cwd == "" {
 		cfg.Cwd = req.Cwd
 	}

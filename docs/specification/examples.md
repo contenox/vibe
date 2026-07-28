@@ -1,6 +1,11 @@
+---
+title: Annotated Examples
+description: Full working task chains with commentary, from tool use to error handling.
+---
+
 # Annotated Examples
 
-Learning by example is the fastest way to understand task chains.
+These chains show the handlers and transition patterns from the [specification](/docs/specification/) applied end to end.
 
 ## 1. The Default Chain (Tool Use)
 
@@ -134,9 +139,7 @@ This chain calls an external API via `webtools`. `retry_policy` retries up to th
 
 ## 4. Self-paced agent with dynamic budget
 
-A common pitfall in long agentic loops is letting the model drift: it keeps calling tools long past the point of usefulness because it doesn't know how much budget it has left. The old workaround was to split the loop in two — a main agent with a 10-round cap and a "recovery" agent that took over at round 10 with a fixed *"you've used 10 of 20"* warning. The warning was a lie after the first transition, the handoff blew context continuity, and tool calls hanging across the boundary needed a guard to survive.
-
-A single chat task with the `{{edge_count:from->to}}` macro replaces the whole split. The model sees the live counter on every turn and self-paces. When the hard ceiling fires, the chain routes to a tool-less terminal that produces a clean "here's what I tried, here's what's stuck" summary.
+A single chat task with the `{{edge_count:from->to}}` macro lets the model see its own remaining tool-call budget on every turn, instead of splitting the loop into a main agent and a fixed-round "recovery" agent. The model reads the live counter and paces itself. When the hard ceiling fires, the chain routes to a tool-less terminal task that produces a summary of what was attempted and where it got stuck.
 
 ```jsonc
 {

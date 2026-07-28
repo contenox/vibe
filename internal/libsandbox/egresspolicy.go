@@ -11,49 +11,38 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-// errSynthExhausted marks that the synthetic-address range (egressSynthBase /16)
-// is full: the spec declared more distinct egress hosts than the range holds. It
-// is a bounded, clear failure — logged and answered SERVFAIL — rather than a
-// silent overflow past the /16.
+// errSynthExhausted marks the synthetic-address range (egressSynthBase /16)
+// as full: more distinct egress hosts were declared than the range holds.
+// Answered as a bounded SERVFAIL rather than overflowing past the /16.
 var errSynthExhausted = errors.New("libsandbox: egress synthetic-address range exhausted")
 
-// egresspolicy.go is the OS-portable core of the egress wall: the allow-list
-// decision, the synthetic-address bookkeeping, and the DNS wire logic. It holds
-// no Linux syscalls, no userspace-stack types, and no I/O — it maps a hostname or
-// a destination address to an allow/deny decision and produces a DNS answer.
-// The Linux bridge (netbridge_linux.go) wires it to a real TUN and netstack; the
-// same core could later drive an advisory HTTPS_PROXY path off Linux without
-// change. Keeping it pure is also what makes it unit-testable on any platform.
+// egresspolicy.go is the OS-portable core of the egress wall — allow-list
+// decision, synthetic-address bookkeeping, DNS wire logic — with no Linux
+// syscalls, no I/O, so it is unit-testable on any platform. The Linux bridge
+// (netbridge_linux.go) wires it to a real TUN and netstack.
 //
-// The enforcement model is allow-by-hostname, connect-by-resolved-address:
-//   - DNS resolves ONLY carve-out hostnames, and only to a private synthetic
-//     address minted here (never a real one). A name not on the list fails to
-//     resolve — the churn of CDN IPs is irrelevant because the agent never learns
-//     a real address, only a synthetic token that maps back to the allowed name.
-//   - A TCP connection is authorized only if its destination is a synthetic
-//     address this policy handed out; the Linux layer then dials the real host the
-//     token stands for. A literal-IP connection the agent invents was never handed
-//     out, so it maps to nothing and is refused.
+// Enforcement is allow-by-hostname, connect-by-resolved-address: DNS resolves
+// only carve-out hostnames, and only to a private synthetic address minted
+// here, never a real one — a name off the list fails to resolve. A TCP
+// connection is authorized only if its destination is a synthetic address
+// this policy handed out; a literal-IP connection the agent invents was
+// never handed out and maps to nothing.
 
-// egressSynthBase is the /16 the DNS server draws synthetic per-host addresses
-// from. It is disjoint from the device subnet (egressAgentIP/egressGatewayIP) so a
-// synthetic token can never alias the agent or the gateway, and it exists only
-// inside the agent's namespace, so the range is free to choose.
+// egressSynthBase is the /16 the DNS server draws synthetic per-host
+// addresses from, disjoint from the device subnet so a synthetic token can
+// never alias the agent or gateway.
 const egressSynthBase = "10.192.0.0"
 
-// egressSynthPrefix is the prefix length of egressSynthBase, and egressSynthMax is
-// the number of distinct hosts the range can mint a synthetic address for:
-// base+1 .. base+65535 (the network address base+0 is skipped). synthFor refuses
-// past this rather than letting base+counter overflow the /16 into an aliasing
-// address in a neighbouring block.
+// egressSynthMax is the number of distinct hosts the range can mint an
+// address for (base+1..base+65535); synthFor refuses past this rather than
+// overflowing the /16 into an aliasing address.
 const (
 	egressSynthPrefix = 16
 	egressSynthMax    = (1 << (32 - egressSynthPrefix)) - 1 // 65535
 )
 
-// egressPolicy is the allow-list and its synthetic-address ledger. It is safe for
-// concurrent use: the DNS server and the TCP forwarder consult it from different
-// goroutines.
+// egressPolicy is the allow-list and its synthetic-address ledger, safe for
+// concurrent use by the DNS server and TCP forwarder goroutines.
 type egressPolicy struct {
 	allow map[string]bool  // lower-cased carve-out hostnames
 	ports map[string][]int // host -> allowed dest ports; absent/empty == all ports
@@ -64,11 +53,9 @@ type egressPolicy struct {
 	ip2host map[[4]byte]string // synthetic address -> the host it stands for
 }
 
-// newEgressPolicy builds the allow-list from the spec's network carve-outs. An
-// empty carve-out host is skipped (validation rejects it upstream, so this is
-// belt-and-braces); hosts are lower-cased so the match is case-insensitive, as
-// DNS is. A carve-out that names Ports narrows the host to those ports; one that
-// names none leaves it reachable on every port (the default).
+// newEgressPolicy builds the allow-list from the spec's network carve-outs.
+// Hosts are lower-cased (DNS is case-insensitive). A carve-out naming Ports
+// narrows the host to those ports; naming none leaves every port reachable.
 func newEgressPolicy(carveouts []NetCarveout) *egressPolicy {
 	allow := make(map[string]bool, len(carveouts))
 	ports := make(map[string][]int, len(carveouts))
@@ -90,11 +77,9 @@ func newEgressPolicy(carveouts []NetCarveout) *egressPolicy {
 	}
 }
 
-// portAllowed reports whether a connection to host on port is authorized by the
-// carve-out's port list. A host with no declared ports is reachable on every port
-// (host-only, the default and the pre-port behaviour); a host with declared ports
-// is reachable only on those. host is expected already normalized (lower-cased),
-// as hostForSynth returns it.
+// portAllowed reports whether a connection to host on port is authorized. A
+// host with no declared ports is reachable on every port (the default); host
+// is expected already normalized (lower-cased).
 func (p *egressPolicy) portAllowed(host string, port int) bool {
 	ps, ok := p.ports[host]
 	if !ok || len(ps) == 0 {
@@ -108,13 +93,11 @@ func (p *egressPolicy) portAllowed(host string, port int) bool {
 	return false
 }
 
-// isPublicEgressIP reports whether ip is a safe *public* egress target — i.e. NOT
-// one of the address classes an SSRF pivot aims at. It refuses loopback (127/8,
-// ::1), link-local (169.254/16 — which includes the 169.254.169.254 cloud
-// metadata endpoint — and fe80::/10), RFC1918 / ULA private (10/8, 172.16/12,
-// 192.168/16, fc00::/7), the unspecified address (0.0.0.0, ::), and multicast.
-// It is a pure predicate (no I/O), so the Linux egress bridge can gate a resolved
-// carve-out on it and it stays unit-testable on any platform.
+// isPublicEgressIP reports whether ip is a safe public egress target, i.e.
+// not one of the address classes an SSRF pivot aims at: loopback, link-local
+// (incl. 169.254.169.254 cloud metadata), RFC1918/ULA private, unspecified,
+// or multicast. Pure predicate, so the Linux egress bridge can gate a
+// resolved carve-out on it.
 func isPublicEgressIP(ip net.IP) bool {
 	if ip == nil {
 		return false
@@ -127,11 +110,9 @@ func isPublicEgressIP(ip net.IP) bool {
 }
 
 // synthFor returns the stable synthetic address for an allow-listed host,
-// minting one on first use. The mapping is bidirectional so a later connection to
-// the address can be traced back to the host it stands for. It refuses with
-// errSynthExhausted once the /16 is full (more distinct hosts than egressSynthMax)
-// rather than letting base+counter overflow past the range into an aliasing
-// address; an already-minted host keeps working regardless.
+// minting one on first use (bidirectionally, so a later connection traces
+// back to the host). Refuses with errSynthExhausted once the /16 is full
+// rather than overflowing into an aliasing address.
 func (p *egressPolicy) synthFor(host string) ([4]byte, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -151,9 +132,9 @@ func (p *egressPolicy) synthFor(host string) ([4]byte, error) {
 	return a, nil
 }
 
-// hostForSynth reports the allow-listed host a destination address stands for,
-// or ("", false) if the address was never handed out — the deny-by-default case
-// for a literal-IP or otherwise unresolved connection.
+// hostForSynth reports the allow-listed host a destination address stands
+// for, or ("", false) if never handed out (a literal-IP or unresolved
+// connection — deny by default).
 func (p *egressPolicy) hostForSynth(a [4]byte) (string, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -161,28 +142,26 @@ func (p *egressPolicy) hostForSynth(a [4]byte) (string, bool) {
 	return h, ok
 }
 
-// dnsDecision is the outcome of a DNS query, surfaced to the caller so it can log
-// the attempt (allow or deny) against the queried name before the answer is sent.
+// dnsDecision is the outcome of a DNS query, surfaced so the caller can log
+// the allow/deny decision before the answer is sent.
 type dnsDecision struct {
-	Host    string  // the queried name, normalized (lower-case, no trailing dot)
-	Type    string  // the query type, for telemetry
+	Host    string  // queried name, normalized (lower-case, no trailing dot)
+	Type    string  // query type, for telemetry
 	Allowed bool    // whether the name is an egress carve-out
-	IP      [4]byte // the synthetic address handed out (valid when Allowed && A query)
+	IP      [4]byte // synthetic address handed out (valid when Allowed && A query)
 	HasIP   bool
-	// Err is non-nil when the name IS an allow-listed carve-out but no synthetic
-	// address could be minted for it (the range is exhausted). The caller logs it
-	// and the query is answered SERVFAIL; it is distinct from the deny-by-default
-	// case (Allowed==false), which is a plain NXDOMAIN.
+	// Err is non-nil when Host is allow-listed but no synthetic address could
+	// be minted (range exhausted) — answered SERVFAIL, distinct from the
+	// plain NXDOMAIN of Allowed==false.
 	Err error
 }
 
 // answerDNS parses a single DNS query, decides it against the allow-list, and
-// returns the wire-format response plus the decision. Deny-by-default: a name not
-// on the list is answered NXDOMAIN. An allow-listed A query is answered with the
-// host's synthetic address; any other allow-listed query type is answered
-// NOERROR with no records (so a resolver doing A+AAAA in parallel does not treat
-// the AAAA as a hard failure and still uses the A). ok is false only when the
-// query cannot be parsed, in which case there is nothing to answer.
+// returns the wire-format response plus the decision. Deny-by-default: a name
+// not on the list is answered NXDOMAIN. An allow-listed A query gets the
+// host's synthetic address; any other allow-listed query type gets NOERROR
+// with no records (so a parallel A+AAAA resolver doesn't hard-fail on the
+// AAAA). ok is false only when the query cannot be parsed.
 func (p *egressPolicy) answerDNS(query []byte) (resp []byte, d dnsDecision, ok bool) {
 	var parser dnsmessage.Parser
 	hdr, err := parser.Start(query)
@@ -214,8 +193,7 @@ func (p *egressPolicy) answerDNS(query []byte) (resp []byte, d dnsDecision, ok b
 	if q.Type == dnsmessage.TypeA {
 		a, serr := p.synthFor(name)
 		if serr != nil {
-			// Allow-listed but no address left to mint: answer SERVFAIL and surface
-			// the error for logging, rather than overflow the synthetic range.
+			// Allow-listed but no address left to mint: SERVFAIL, not overflow.
 			d.Err = serr
 			rh.RCode = dnsmessage.RCodeServerFailure
 			return buildDNSResponse(rh, q, nil), d, true
@@ -234,9 +212,9 @@ func (p *egressPolicy) answerDNS(query []byte) (resp []byte, d dnsDecision, ok b
 	return buildDNSResponse(rh, q, answers), d, true
 }
 
-// buildDNSResponse serializes a response echoing the question and carrying the
-// (possibly empty) answers. A serialization slip yields nil rather than a partial
-// message, so the server simply drops the reply and the resolver retries.
+// buildDNSResponse serializes a response echoing the question plus answers.
+// A serialization failure yields nil (rather than a partial message), so the
+// server drops the reply and the resolver retries.
 func buildDNSResponse(h dnsmessage.Header, q dnsmessage.Question, answers []dnsmessage.Resource) []byte {
 	b := dnsmessage.NewBuilder(nil, h)
 	b.EnableCompression()
@@ -265,9 +243,9 @@ func buildDNSResponse(h dnsmessage.Header, q dnsmessage.Question, answers []dnsm
 	return msg
 }
 
-// mustIP4 parses a dotted-quad known at build time (a package constant) into its
-// four bytes. A miss is a programmer error in a constant, not a runtime input, so
-// it yields zeros; the constants are covered by test.
+// mustIP4 parses a dotted-quad known at build time (a package constant) into
+// its four bytes. A malformed input is a programmer error, not a runtime one,
+// so it yields zeros.
 func mustIP4(s string) []byte {
 	parts := strings.Split(s, ".")
 	out := make([]byte, 4)

@@ -47,9 +47,7 @@ func TestUnit_OllamaStreamClient_StreamsThinkingDeltas(t *testing.T) {
 	assert.Equal(t, "stop", res.FinishReason)
 }
 
-// TestUnit_OllamaStreamClient_GoldenFixture_ToolCallsUsageTerminal drives a
-// recorded NDJSON transcript — thinking, split content, whole tool calls, and
-// the done frame with eval counts — through the real adapter and the
+// Drives a recorded NDJSON transcript through the real adapter and the
 // engine-side assembler, proving the raw-delta contract end to end.
 func TestUnit_OllamaStreamClient_GoldenFixture_ToolCallsUsageTerminal(t *testing.T) {
 	t.Parallel()
@@ -97,8 +95,7 @@ func TestUnit_OllamaStreamClient_GoldenFixture_ToolCallsUsageTerminal(t *testing
 	assert.Equal(t, 34, res.Usage.CompletionTokens)
 }
 
-// TestUnit_OllamaStreamClient_TruncatedStreamIsNotSuccess: a connection that
-// ends without done=true must surface as an error, never as a complete reply.
+// A connection that ends without done=true must surface as an error.
 func TestUnit_OllamaStreamClient_TruncatedStreamIsNotSuccess(t *testing.T) {
 	t.Parallel()
 

@@ -15,10 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_PrintLiveModels_ShowsVisionAndThinkCapabilities pins the model-list
-// capability surface: the table carries THINK and VISION columns and a
-// vision-capable model (gpt-4o via the maintained OpenAI vision list) shows
-// the marker while a text-only model shows none.
+// TestUnit_PrintLiveModels_ShowsVisionAndThinkCapabilities asserts the model-list table carries THINK/VISION columns and marks only vision-capable models.
 func TestUnit_PrintLiveModels_ShowsVisionAndThinkCapabilities(t *testing.T) {
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -54,7 +54,7 @@ The spec is open — any markdown — but useful sections include:
 
 ## Project conventions
 - Mutating local_fs operations require a prior `read_file` (read-before-write contract)
-- HITL is on by default for write_file, sed, local_shell, and mutating web verbs
+- HITL is on by default for write_file, edit_file, sed, local_shell, and mutating web verbs
 
 ## Don't do
 - Never run `git push --force` unprompted

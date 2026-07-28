@@ -1,11 +1,9 @@
 package localtools
 
-// Internal tests for the before-side of an approval diff.
-//
-// They live in-package on purpose: the things that must NEVER reach a human as
-// the current contents of a file are named here by their own identifiers
-// (fileUnchangedStub, severityRecoverable), so if either is reworded these
-// tests keep testing the real thing instead of a stale copy of it.
+// Internal tests for the before-side of an approval diff. They live
+// in-package so the things that must never reach a human as a file's current
+// contents (fileUnchangedStub, severityRecoverable) are named by their own
+// identifiers, not a stale copy.
 
 import (
 	"context"
@@ -278,5 +276,25 @@ func TestUnit_DiffBaseSedUsesTheFileToo(t *testing.T) {
 	}
 	if oldContent != "foo bar baz\n" || newContent != "foo qux baz\n" {
 		t.Fatalf("sed diff sides = %q → %q", oldContent, newContent)
+	}
+}
+
+// TestUnit_DiffBaseEditFileUsesTheFileToo: edit_file's before-side comes from
+// the same read, and its after-side is computed from it — same contract as sed.
+func TestUnit_DiffBaseEditFileUsesTheFileToo(t *testing.T) {
+	fs := &fsFake{content: "foo bar baz\n", warm: true}
+	h := &HITLWrapper{inner: fs}
+
+	oldContent, newContent, err := h.buildDiff(
+		sessionCtx("sess-1"),
+		&taskengine.ToolsCall{Name: "local_fs", ToolName: "edit_file"},
+		"edit_file",
+		map[string]any{"path": "f.txt", "old_string": "bar", "new_string": "qux"},
+	)
+	if err != nil {
+		t.Fatalf("buildDiff: %v", err)
+	}
+	if oldContent != "foo bar baz\n" || newContent != "foo qux baz\n" {
+		t.Fatalf("edit_file diff sides = %q → %q", oldContent, newContent)
 	}
 }

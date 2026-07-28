@@ -14,20 +14,16 @@ import (
 	"github.com/dop251/goja"
 )
 
-// script.go is the script-tool loader: `*.js` files in a configured directory
-// become ordinary tools at engine build.
+// script.go is the script-tool loader: *.js files in a configured directory
+// become ordinary tools at engine build time.
 //
-// # The file convention
+// File convention:
 //
 //	const tool = {
-//	  name: "changelog_entry",              // the tool name the model sees, unprefixed
+//	  name: "changelog_entry",              // unprefixed tool name
 //	  description: "One line telling the model when to use this.",
-//	  schema: {                             // the same terse OpenAPI shape the
-//	    type: "object",                     // built-in toolsets use
-//	    properties: { version: { type: "string", description: "…" } },
-//	    required: ["version"],
-//	  },
-//	  tools: ["local_fs.read_file"],        // optional, but declare it: see below
+//	  schema: { type: "object", properties: { version: { type: "string" } }, required: ["version"] },
+//	  tools: ["local_fs.read_file"],        // optional declared reach
 //	  deadline_ms: 5000,                    // optional, capped at MaxDeadline
 //	};
 //
@@ -36,45 +32,17 @@ import (
 //	  return { version: args.version, lines: notes.text.split("\n").length };
 //	}
 //
-// # The declared reach
-//
-// `tools` lists every address this script may pass to host.tool. It is optional
-// — a script without it may call anything the envelope allows, so nothing that
-// already worked stops working — and the loader says once, at startup, which
-// scripts are in that state. Declaring it buys two things: a call to an
-// undeclared tool is refused with an error naming the line to add, and an
-// approval card can tell an operator what the script will touch BEFORE they
-// approve it, which is the one question the envelope alone cannot answer
-// (it evaluates each call as it happens, one at a time, after the yes).
-//
-// `tools: []` is a declaration, not an omission: it says the script reaches
-// nothing, and host.tool refuses every call.
-//
-// # Reading a tool's answer
-//
-// host.tool hands back DATA (a plain object) from tools that return structured
-// results, and a ToolText wrapper — `.text` — from tools that answer in prose.
-// The wrapper exists because prose is written for a reader and parsing it is a
-// guess; see hostresult.go for the whole argument.
-//
-// # Fail-fast, never silent
-//
-// Every validation failure below is a startup error naming the FILE. That is the
-// blueprint's rule and it is the whole reliability story for this feature: a
-// silently skipped script is a tool the operator believes exists, that the model
-// never sees, and that nothing ever complains about. A syntax error is a load
-// failure carrying the parse error, not a skip.
-//
-// The one thing that is NOT an error is an absent directory: an operator who has
-// never written a script tool has no $CONTENOX_DIR/tools, and refusing to start
-// over its absence would make the feature's non-use a failure.
+// `tools: []` declares that the script reaches nothing; omitting `tools`
+// leaves it unrestricted. Every validation failure is a startup error naming
+// the file — nothing is silently skipped — except an absent script
+// directory, which is not an error.
 
 // Script is one loaded script tool.
 type Script struct {
 	// File is the path the script was loaded from — the identity every error
 	// message uses.
 	File string
-	// Name is the declared tool name, registered UNPREFIXED: the provider
+	// Name is the declared tool name, registered unprefixed: the provider
 	// ("goja") is the namespace, so the model addresses it as goja.<Name>.
 	Name string
 	// Description is the model-facing description.
@@ -82,23 +50,20 @@ type Script struct {
 	// Schema is the declared JSON Schema object, normalised so `type` and
 	// `properties` are always present.
 	Schema map[string]any
-	// Deadline is the effective per-execution budget (the declared deadline_ms
-	// clamped to MaxDeadline, or the sandbox default when undeclared).
+	// Deadline is the effective per-execution budget (the declared
+	// deadline_ms clamped to MaxDeadline, or the sandbox default).
 	Deadline time.Duration
 
-	// Tools is the script's DECLARED REACH: every "<provider>.<tool>" address it
-	// may pass to host.tool, in declaration order. It is the answer to the one
-	// question an approval card for a script has to answer — "what will this
-	// touch?" — and a card renderer should print it verbatim.
+	// Tools is the script's declared reach: every "<provider>.<tool>"
+	// address it may pass to host.tool, in declaration order.
 	//
-	// Read it together with ToolsDeclared: an empty Tools with ToolsDeclared
-	// true means the script declared that it reaches NOTHING (host.tool refuses
-	// every call), while ToolsDeclared false means it declared no list at all
-	// and may reach anything the envelope allows. A card must not render those
-	// two the same way — they are opposite ends of the range.
+	// Read together with ToolsDeclared: an empty Tools with ToolsDeclared
+	// true means the script declared it reaches nothing (host.tool refuses
+	// every call); ToolsDeclared false means no list was declared and the
+	// script may reach anything the envelope allows.
 	Tools []string
-	// ToolsDeclared reports whether the script's descriptor carried a `tools`
-	// field. See Tools.
+	// ToolsDeclared reports whether the script's descriptor carried a
+	// `tools` field. See Tools.
 	ToolsDeclared bool
 
 	prog       *goja.Program
@@ -114,20 +79,17 @@ type Script struct {
 var toolNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,63}$`)
 
 const (
-	// maxDescriptionBytes bounds a script's description. Descriptions are paid on
-	// EVERY turn (see localtools/fs_schema.go on why terse is the default), so an
-	// essay in a script file is a permanent tax on the context window.
+	// maxDescriptionBytes bounds a script's description; descriptions are
+	// paid on every turn.
 	maxDescriptionBytes = 4 << 10
 	// maxSchemaBytes bounds the marshaled schema, for the same reason.
 	maxSchemaBytes = 16 << 10
 )
 
-// toolDescriptor is the JSON projection of a script's `tool` export.
-//
-// Tools is a RawMessage rather than a []string so an ABSENT declaration and an
-// EMPTY one stay distinguishable: `tools: []` says "reaches nothing" and is
-// enforced; no `tools` key at all is the backward-compatible unrestricted case.
-// Decoding straight into []string would collapse both to nil.
+// toolDescriptor is the JSON projection of a script's `tool` export. Tools is
+// a RawMessage rather than a []string so an absent declaration and an empty
+// one stay distinguishable — decoding straight into []string would collapse
+// both to nil.
 type toolDescriptor struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -136,16 +98,13 @@ type toolDescriptor struct {
 	DeadlineMS  json.RawMessage `json:"deadline_ms"`
 }
 
-// maxDeclaredTools bounds the declared reach. A tool that needs to address more
-// than this many other tools is a chain wearing a script's clothes, and the list
-// stops being something an operator can read on a card — which is the entire
-// point of declaring it.
+// maxDeclaredTools bounds the declared reach.
 const maxDeclaredTools = 64
 
-// loadScripts reads dir and returns its script tools in a deterministic order.
-// reserved holds names the caller has already committed to (this provider's
-// built-ins plus anything the registration site declares), so a collision is
-// caught here rather than discovered as a shadowed tool at runtime.
+// loadScripts reads dir and returns its script tools in a deterministic
+// order. reserved holds names the caller has already committed to, so a
+// collision is caught here rather than discovered as a shadowed tool at
+// runtime.
 func (s *sandbox) loadScripts(ctx context.Context, dir string, reserved []string) ([]*Script, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, nil
@@ -204,15 +163,14 @@ func (s *sandbox) loadScript(ctx context.Context, file string) (*Script, error) 
 	}
 	prog, err := s.cache.compile(file, string(src))
 	if err != nil {
-		// The parse error, verbatim, with its line and column. Never a skip.
 		return nil, wrapRecoverable(ErrScriptLoad, "%s did not parse: %v", file, err)
 	}
 
 	label := "load " + filepath.Base(file)
-	// The file's top level runs here — under the same deadline, the same stack
-	// cap and the same panic recovery as a real execution, because a script that
-	// loops at load time must fail the build rather than hang it. host.tool is
-	// refused during load (see installHost).
+	// The file's top level runs here under the same deadline, stack cap and
+	// panic recovery as a real execution, so a script that loops at load
+	// time fails the build rather than hanging it. host.tool is refused
+	// during load (see installHost).
 	res, err := s.run(ctx, execSpec{
 		label:       label,
 		deadline:    s.deadline,
@@ -284,8 +242,8 @@ func (s *sandbox) validateDescriptor(file string, prog *goja.Program, desc toolD
 		if err := json.Unmarshal(desc.DeadlineMS, &ms); err != nil || ms <= 0 {
 			return nil, wrapRecoverable(ErrScriptLoad, "%s: tool.deadline_ms must be a positive number of milliseconds (ceiling %d), got %s", file, MaxDeadline.Milliseconds(), clampText(string(desc.DeadlineMS), 64))
 		}
-		// Clamped, not refused: the ceiling is a property of the sandbox, and a
-		// script asking for more gets the most the sandbox has.
+		// Clamped, not refused: a script asking for more gets the most the
+		// sandbox has.
 		deadline = s.clampDeadline(time.Duration(ms) * time.Millisecond)
 	}
 
@@ -309,9 +267,7 @@ func (s *sandbox) validateDescriptor(file string, prog *goja.Program, desc toolD
 }
 
 // normaliseDeclaredTools validates the optional `tools` declaration. Every
-// failure is a load-time error naming the file, like every other descriptor
-// check: a declaration that is wrong at startup is a refusal the operator would
-// otherwise meet mid-run, in a script they believed they had already vetted.
+// failure is a load-time error naming the file.
 func normaliseDeclaredTools(file string, raw json.RawMessage) (names []string, declared bool, err error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, false, nil
@@ -338,9 +294,8 @@ func normaliseDeclaredTools(file string, raw json.RawMessage) (names []string, d
 				file, echoArg(entry))
 		}
 		if provider == ToolsProviderName {
-			// Refused at LOAD rather than at the call: the recursion guard would
-			// refuse it anyway, and a declaration that can never be honoured is
-			// better found while the operator is editing the file.
+			// Refused at load rather than at the call: the recursion guard
+			// would refuse it anyway.
 			return nil, false, wrapRecoverable(ErrScriptLoad,
 				"%s: tool.tools declares %s, but scripts may not invoke %q-provider tools — sandbox depth is exactly one. Inline the computation instead",
 				file, echoArg(addr), ToolsProviderName)

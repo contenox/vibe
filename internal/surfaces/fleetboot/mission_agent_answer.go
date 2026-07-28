@@ -12,40 +12,26 @@ import (
 	"github.com/contenox/beam/internal/surfaces/acpsvc"
 )
 
-// The tool the supervisor is told to call, named from the tool package's own
-// constants so the instruction cannot drift from what the model is actually
-// offered — the same drift that once left units calling functions that did not
-// exist.
+// Mirrors missiontools' own constants so the instruction given to the model
+// cannot drift from the tool actually offered.
 var (
 	missionToolsProviderName = missiontools.ToolsProviderName
 	missionAnswerToolName    = missiontools.ToolNameAnswer
 )
 
-// sessionPrompter is the narrow capability this needs from the ACP layer: run one
-// out-of-band turn on a live session. Both shapes of that surface satisfy it —
-// the editor's lone *acpsvc.Transport and serve's *acpsvc.SessionRouter, which
-// finds the right one of its many connections.
+// sessionPrompter runs one out-of-band turn on a live session; satisfied by
+// both *acpsvc.Transport and *acpsvc.SessionRouter.
 type sessionPrompter interface {
 	PromptContenoxSession(ctx context.Context, contenoxSessionID, text string) error
 }
 
-// agentAnswerOffer decides whether a unit's question should be put to the AGENT
+// agentAnswerOffer decides whether a unit's question should go to the agent
 // driving the session that fired it, and does it.
 //
-// This is the autonomous edge of mission mode, so what it refuses matters more
-// than what it does. A unit calls mission_ask_attention precisely because it hit
-// something it must not decide alone; answering that with another model is only
-// legitimate when the operator declared it so. Hence, in order:
-//
-//   - the mission's ENVELOPE must permit agent answers (default: it does not);
-//   - the per-mission CAP must not be spent — counted on the durable rows, so a
-//     restart cannot reset a runaway loop's budget;
-//   - the parent session must be LIVE and IDLE (an agent-to-agent exchange never
-//     interleaves with something the operator is in the middle of).
-//
-// Any refusal is silent and normal: the question is already in the operator's
-// queue and in their session, so declining costs a human a reply, never the
-// question itself.
+// Requires, in order: the mission's envelope permits agent answers (default:
+// it does not), the per-mission answer cap is not spent (counted on durable
+// rows, survives restarts), and the parent session is live and idle. Any
+// refusal is silent — the question stays queued for the human either way.
 type agentAnswerOffer struct {
 	hitl     hitlservice.Service
 	missions missionservice.Service
@@ -64,8 +50,7 @@ func (a agentAnswerOffer) OfferToSupervisingAgent(ctx context.Context, ev missio
 
 	m, err := a.missions.Get(ctx, ev.MissionID)
 	if err != nil || m == nil {
-		// Without the mission there is no envelope, and without an envelope there is
-		// no permission. Human-only.
+		// No mission means no envelope means no permission: human-only.
 		reportChange("declined", "mission_unreadable")
 		return nil
 	}
@@ -84,9 +69,8 @@ func (a agentAnswerOffer) OfferToSupervisingAgent(ctx context.Context, ev missio
 		return nil
 	}
 	if cap := bounds.EffectiveMaxAgentAnswers(); used >= cap {
-		// The loop bound: a supervisor that has already answered this unit `cap`
-		// times has not unstuck it, and the next question is the one a human should
-		// see.
+		// cap reached: a supervisor that hasn't unstuck the unit by now should
+		// yield to a human.
 		reportChange("declined", fmt.Sprintf("cap_reached(%d/%d)", used, cap))
 		return nil
 	}
@@ -106,11 +90,9 @@ func (a agentAnswerOffer) OfferToSupervisingAgent(ctx context.Context, ev missio
 	return nil
 }
 
-// agentAnswerPrompt frames the unit's question for its supervisor. It names the
-// tool and the ask id explicitly, because the model cannot see the `_meta` the
-// client renders the question card from — and it says plainly what NOT knowing
-// looks like, since a supervisor inventing an answer is worse for the mission
-// than one that admits it must ask the human.
+// agentAnswerPrompt frames the unit's question for its supervisor, naming the
+// tool and ask id explicitly since the model cannot see the client's `_meta`
+// question card.
 func agentAnswerPrompt(ev missionservice.AttentionAskedEvent) string {
 	unit := ev.AgentName
 	if unit == "" {

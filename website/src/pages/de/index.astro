@@ -9,10 +9,11 @@ const t: LandingStrings = {
   h1b: 'Fertig vorfinden.',
   lede: 'Feuere Arbeit auf einen Agenten ab — unter einem Envelope, den du geschrieben hast. Häng dich aus. Unterbrochen wirst du nur, wenn der Envelope es sagt. Oder lass es headless über eine Aufgabenliste laufen, Zeile für Zeile, jede in sauberem Kontext.',
   ctaRecipe: 'Rezept ausführen',
-  ctaPackage: 'Workflow verpacken',
+  copyLabel: 'Kopieren',
   ctaGithub: 'Auf GitHub ansehen',
   installNote: 'Installiert <code class="font-mono">contenox</code>. Mit <code class="font-mono">contenox init</code> richtest du einen Workspace ein.',
-  positioning: 'contenox ist ein offenes Coding-Harness, gebaut um den Envelope: die Datei, die begrenzt, was ein Agent unbeaufsichtigt tun darf. Missionen sind das, was Envelopes sicher machen — abfeuern, aushängen, zurückkommen, wenn es fertig ist. Dieselben Sessions im Terminal und im Editor, jedes Modell und jeder MCP in Kombination. Gebaut von seinem ersten Kunden — und der ist schwer zu überzeugen.',
+  trustChips: ['jedes Modell', 'eine Binärdatei', 'kein Konto', 'SQLite', 'deine Regeln in einer Datei, die du lesen kannst'],
+  positioning: 'Einmal abfeuern, aushängen, fertig vorfinden. Der Envelope begrenzt, was der Agent tun darf, während du weg bist; die Chain ist der Vertrag für das, was er tut. Dieselben Sessions im Terminal und im Editor, jedes Modell und jeder MCP in Kombination. Gebaut von seinem ersten Kunden — und der ist schwer zu überzeugen.',
   tableWorld: 'Der alte Weg',
   tableWhy: 'contenox',
   rows: [
@@ -40,7 +41,7 @@ const t: LandingStrings = {
   ],
   capsEyebrow: 'Kernfähigkeiten',
   caps: [
-    ['Der Envelope ist die Grenze', 'Was ein Agent unbeaufsichtigt tun darf, ist eine Datei, die du geschrieben hast: Tool-Allowlists, Kommando-Policies, Budgets, Freigabe-Gates. Envelopes überleben Neustarts — eine unbeantwortete Freigabe checkpointet den Run und gibt den Platz frei; beantworte sie aus jedem Terminal, auch Tage später, und der Run läuft genau einmal weiter.'],
+    ['Terminal zu. Es kann in der Zwischenzeit nichts anrichten.', 'Tool-Allowlists, Kommando-Policy, Budgets, Freigabe-Gates — was der Agent unbeaufsichtigt tun darf, ist eine Datei, die du geschrieben hast, keine Vermutung. Eine unbeantwortete Freigabe checkpointet den Run und gibt den Platz frei; beantworte sie aus jedem Terminal, auch Tage später, und der Run läuft genau einmal weiter.'],
     ['Die Chain ist der Vertrag', 'Prompts, Modell-Routing und jede Regel sind sichtbare Schlüssel in einer versionierten Datei — prüfbar, diffbar, wiederholbar. Ein Harness hinter dem CLI, der beam-TUI und jedem ACP-Editor.'],
     ['Es liest Go wie der Compiler', 'Describe, Definition, References, Implementations, Symbols, Diagnostics — sechs Abfragen, beantwortet in-process vom echten Type-Checker, warm in Mikrosekunden. Kein Language-Server zu installieren oder zu pflegen.'],
     ['Frag das Repo, bekomm zitierte Zeilen', 'contenox index baut einen hybriden Volltext-plus-Embedding-Index in lokalem SQLite; contenox search antwortet mit file:line-Zitaten und markiert einen Treffer als veraltet, sobald sich seine Datei ändert.'],
@@ -80,8 +81,8 @@ const t: LandingStrings = {
 };
 ---
 <Base
-  title="Contenox - Ein offenes Coding-Harness für Terminal und ACP-Editoren"
-  description="Contenox — ein offenes Coding-Harness. Chat, Missionen und Tools im Terminal, in der beam-TUI oder jedem ACP-Editor, mit den Modellen deiner Wahl."
+  title="Contenox — Mission abfeuern. Fertig vorfinden."
+  description="Feuere Arbeit auf einen Agenten ab — unter Regeln, die du lesen kannst. Häng dich aus, beantworte später aus jedem Terminal, und er läuft genau einmal weiter — jedes Modell, jeder MCP, kein Konto."
   lang="de"
   alternates={{ en: '/', de: '/de/' }}
 >

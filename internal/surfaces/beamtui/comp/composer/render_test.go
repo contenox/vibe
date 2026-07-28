@@ -10,13 +10,10 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/textwidth"
 )
 
-// goldenWidths is the blueprint's resize matrix: narrow, the default
-// terminal, and wide.
+// goldenWidths is the resize matrix: narrow, the default terminal, and wide.
 var goldenWidths = []int{60, 80, 120}
 
-// encode renders and packages the result as a frame so the golden pins the
-// caret next to the rows it belongs to — the caret IS the contract for a
-// scrolled composer.
+// encode renders and packages the result as a frame so the golden pins the caret next to the rows it belongs to.
 func encode(c *Composer, width int, focused, ascii bool) string {
 	lines := c.Render(width, focused, ascii)
 	row, col := c.CursorPos()
@@ -26,8 +23,7 @@ func encode(c *Composer, width int, focused, ascii bool) string {
 	})
 }
 
-// draft3 is a three-line draft with the caret mid-line on the wide-rune
-// line, so the golden pins cell columns and not just rune counts.
+// draft3 is a three-line draft with the caret mid-line on the wide-rune line, pinning cell columns not just rune counts.
 func draft3() *Composer {
 	c := New()
 	c.SetDraft("summarize the failing test\nthen 日本語 explain the fix\nand stop")
@@ -39,8 +35,7 @@ func draft3() *Composer {
 	return c
 }
 
-// draft8 is taller than MaxRows with the caret on the last line: the
-// composer must scroll and keep the caret visible.
+// draft8 is taller than MaxRows with the caret on the last line, forcing a scroll that keeps the caret visible.
 func draft8() *Composer {
 	c := New()
 	var b strings.Builder
@@ -54,8 +49,7 @@ func draft8() *Composer {
 	return c
 }
 
-// TestUnit_RenderGoldens pins the composer's shape in every state the
-// app-shell can put it in.
+// TestUnit_RenderGoldens pins the composer's shape in every state the app-shell can put it in.
 func TestUnit_RenderGoldens(t *testing.T) {
 	states := []struct {
 		name    string
@@ -83,8 +77,7 @@ func TestUnit_RenderGoldens(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderNarrowGolden is the width-20 case: wrapping does the work,
-// the sigil column survives, and the placeholder gets an ellipsis.
+// TestUnit_RenderNarrowGolden pins width 20: wrapping does the work, the sigil column survives, the placeholder ellipsizes.
 func TestUnit_RenderNarrowGolden(t *testing.T) {
 	long := New()
 	long.SetDraft("wrap this prompt over several narrow rows 日本語 included")
@@ -131,17 +124,7 @@ func renderStates() []struct {
 	}
 }
 
-// TestUnit_RenderNeverExceedsWidth is the resize property the goldens can
-// only sample: at every supported width, in either focus state and either
-// character set, no rendered line may spill a cell and the composer may
-// never exceed MaxRows.
-//
-// It runs from 6 rather than 20 — two cells of sigil plus four of content —
-// because that is where the arithmetic is actually interesting: at 20 the
-// content column is 18 cells and nothing is ever tight. MinWidth itself (4)
-// is excluded from the SPILL half only because a two-cell rune in a two-cell
-// column is exact and one cell narrower is not; the no-text-loss test below
-// covers what happens beneath it.
+// TestUnit_RenderNeverExceedsWidth pins that no rendered line spills a cell and height never exceeds MaxRows, across widths 6-140.
 func TestUnit_RenderNeverExceedsWidth(t *testing.T) {
 	for _, s := range renderStates() {
 		t.Run(s.name, func(t *testing.T) {
@@ -164,9 +147,7 @@ func TestUnit_RenderNeverExceedsWidth(t *testing.T) {
 	}
 }
 
-// TestUnit_CursorAlwaysVisible: the caret must land inside the rows Render
-// just returned, at or after the sigil column — that is what "scroll keeps
-// the cursor row visible" means operationally.
+// TestUnit_CursorAlwaysVisible pins that the caret always lands inside the rows Render just returned, at or after the sigil column.
 func TestUnit_CursorAlwaysVisible(t *testing.T) {
 	for _, s := range renderStates() {
 		t.Run(s.name, func(t *testing.T) {
@@ -189,8 +170,7 @@ func TestUnit_CursorAlwaysVisible(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderEmptyStates pins the two empty renderings: focused shows a
-// clean caret behind the sigil, unfocused teaches the three triggers.
+// TestUnit_RenderEmptyStates pins the two empty renderings: focused shows a clean caret, unfocused shows the hint.
 func TestUnit_RenderEmptyStates(t *testing.T) {
 	c := New()
 
@@ -228,8 +208,7 @@ func TestUnit_RenderEmptyStates(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderASCIIStaysASCII: a Mono terminal must never receive the
-// beam-bar or the middot.
+// TestUnit_RenderASCIIStaysASCII pins that a Mono terminal never receives the beam-bar or the middot.
 func TestUnit_RenderASCIIStaysASCII(t *testing.T) {
 	for _, s := range renderStates() {
 		for _, focused := range []bool{true, false} {
@@ -246,9 +225,7 @@ func TestUnit_RenderASCIIStaysASCII(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderSigilColumn: the first row carries the beam-bar, every
-// continuation carries the two-cell gutter, and focus is the only thing that
-// changes the sigil's style.
+// TestUnit_RenderSigilColumn pins that only the first row carries the beam-bar, and focus is the only thing that changes its style.
 func TestUnit_RenderSigilColumn(t *testing.T) {
 	c := draft3()
 	for _, tc := range []struct {
@@ -270,11 +247,7 @@ func TestUnit_RenderSigilColumn(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderScrollMarkerCountsHiddenRows: a draft taller than MaxRows
-// scrolls, and used to do it silently — the rows above the window vanished
-// with nothing on screen saying they had ever been typed. The first
-// continuation row's gutter now counts them, inside the two cells the sigil
-// column already costs, so no content row is spent on the news.
+// TestUnit_RenderScrollMarkerCountsHiddenRows pins that the first continuation row's gutter counts the rows scrolled off above.
 func TestUnit_RenderScrollMarkerCountsHiddenRows(t *testing.T) {
 	c := draft8() // eight rows, caret on the last: two are hidden above
 	lines := c.Render(60, true, false)
@@ -293,8 +266,7 @@ func TestUnit_RenderScrollMarkerCountsHiddenRows(t *testing.T) {
 		t.Fatalf("ascii scroll marker = %+v, want %+v", got, want)
 	}
 
-	// Scrolled back to the top there is nothing above, and the gutter is a
-	// plain gutter again.
+	// Scrolled back to the top, the gutter is a plain gutter again.
 	for i := 0; i < 7; i++ {
 		c.CursorUp()
 	}
@@ -303,8 +275,7 @@ func TestUnit_RenderScrollMarkerCountsHiddenRows(t *testing.T) {
 		t.Fatalf("unscrolled composer drew a scroll marker: %+v", got)
 	}
 
-	// Past nine hidden rows the count degrades rather than stealing a cell
-	// from the content column.
+	// Past nine hidden rows the count degrades rather than stealing a cell.
 	tall := New()
 	tall.SetDraft(strings.Repeat("a line of draft\n", 20) + "end")
 	lines = tall.Render(60, true, false)
@@ -313,8 +284,7 @@ func TestUnit_RenderScrollMarkerCountsHiddenRows(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderScrollsToTheCaret: a draft taller than MaxRows shows the
-// window the caret is in, and moving the caret up moves the window.
+// TestUnit_RenderScrollsToTheCaret pins that a tall draft shows the window the caret is in, and moving the caret moves the window.
 func TestUnit_RenderScrollsToTheCaret(t *testing.T) {
 	c := draft8()
 
@@ -361,15 +331,7 @@ func TestUnit_RenderUsesOnlyClosedStyleIDs(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderWrapPreservesText: soft wrap is presentation only — the
-// rendered rows concatenate back to the buffer line they came from, so
-// nothing typed is ever lost on screen.
-//
-// The floor is 20 on purpose and is not the supported minimum: narrower than
-// that, this particular text needs more than MaxRows rows and the composer
-// SCROLLS, which drops rows from the render by design. Text loss below
-// MaxRows is what TestUnit_NarrowWidthNeverDeletesText covers, with drafts
-// short enough that scrolling cannot be the explanation.
+// TestUnit_RenderWrapPreservesText pins that soft wrap is presentation only: rendered rows concatenate back to the original buffer line.
 func TestUnit_RenderWrapPreservesText(t *testing.T) {
 	const text = "the quick brown fox jumps over the lazy dog 日本語テキストの行"
 	c := New()
@@ -388,19 +350,7 @@ func TestUnit_RenderWrapPreservesText(t *testing.T) {
 	}
 }
 
-// TestUnit_NarrowWidthNeverDeletesText is the rule below MinWidth. At three
-// columns the content column is one cell, and a two-cell rune cannot be
-// broken across two one-cell rows — the wrapper emits it and the row
-// overflows, which is the only thing it can do.
-//
-// The composer must not "fix" that by cutting. A truncation there would
-// delete a character out of the user's own draft while CursorPos went on
-// counting it, so the caret would sit a cell off and backspace would look
-// broken. Overflowing a three-column terminal is cosmetic; eating what
-// somebody typed is not.
-//
-// Drafts here are short enough to fit inside MaxRows at one cell per row, so
-// a missing rune is a deletion and not the documented scroll.
+// TestUnit_NarrowWidthNeverDeletesText pins that below MinWidth the composer overflows rather than deleting a character to fit.
 func TestUnit_NarrowWidthNeverDeletesText(t *testing.T) {
 	drafts := []string{"abc", "日本語", "🙂x", "a日", "  "}
 	for _, draft := range drafts {
@@ -423,9 +373,7 @@ func TestUnit_NarrowWidthNeverDeletesText(t *testing.T) {
 	}
 }
 
-// TestUnit_MinWidthIsExact: at and above MinWidth the width invariant holds
-// with no exceptions, which is what makes MinWidth a supported width rather
-// than a number in a comment.
+// TestUnit_MinWidthIsExact pins that at and above MinWidth the width invariant holds with no exceptions.
 func TestUnit_MinWidthIsExact(t *testing.T) {
 	for _, s := range renderStates() {
 		for _, focused := range []bool{true, false} {
@@ -441,9 +389,7 @@ func TestUnit_MinWidthIsExact(t *testing.T) {
 	}
 }
 
-// TestUnit_PasteIsSanitized: the clipboard is an ingest point like any other,
-// and its contents are whatever was last copied — including out of a terminal
-// showing somebody else's output.
+// TestUnit_PasteIsSanitized pins that pasted control and bidi characters never reach the buffer or a rendered span.
 func TestUnit_PasteIsSanitized(t *testing.T) {
 	c := New()
 	c.InsertString("ev\x1b[2Jil\x1b]0;t\x07\ttab\x7f‮flip\nsecond\x1bline")

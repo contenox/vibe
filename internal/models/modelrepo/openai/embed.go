@@ -32,7 +32,6 @@ type openAIEmbedResponse struct {
 }
 
 func (c *OpenAIEmbedClient) Embed(ctx context.Context, prompt string) ([]float64, error) {
-	// Start tracking the operation
 	reportErr, reportChange, end := c.tracker.Start(ctx, "embed", "openai", "model", c.modelName)
 	defer end()
 

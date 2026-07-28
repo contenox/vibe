@@ -20,6 +20,7 @@ func TestUnit_BuiltinChains_SetThinkOnlyOnUserFacingChatTasks(t *testing.T) {
 		{name: "run", raw: initRunChain, wantThink: []string{"contenox_run", "recovery_run", "summarise_failure"}, wantNoThink: []string{"run_tools", "recovery_run_tools"}},
 		{name: "acp", raw: initACPChain, wantThink: []string{"coding_chat", "coding_recovery", "acp_chat", "recovery_chat", "summarise_failure"}, wantNoThink: []string{"classify_request", "coding_tools", "coding_recovery_tools", "run_tools", "recovery_tools"}},
 		{name: "acpx", raw: initACPXChain, wantThink: []string{"acp_chat", "recovery_chat", "summarise_failure"}, wantNoThink: []string{"run_tools", "recovery_tools"}},
+		{name: "beam", raw: initBeamChain, wantThink: []string{"coding_chat", "coding_recovery", "acp_chat", "recovery_chat", "summarise_failure"}, wantNoThink: []string{"classify_request", "coding_tools", "coding_recovery_tools", "run_tools", "recovery_tools"}},
 		{name: "compact", raw: initCompactChain, wantNoThink: []string{"compact_history"}},
 	}
 
@@ -186,6 +187,7 @@ func TestUnit_BuiltinRecoveryTasksUseConfiguredDefaultFallback(t *testing.T) {
 		{name: "run", raw: initRunChain, ids: []string{"recovery_run", "summarise_failure"}},
 		{name: "acp", raw: initACPChain, ids: []string{"coding_recovery", "recovery_chat", "summarise_failure"}},
 		{name: "acpx", raw: initACPXChain, ids: []string{"recovery_chat", "summarise_failure"}},
+		{name: "beam", raw: initBeamChain, ids: []string{"coding_recovery", "recovery_chat", "summarise_failure"}},
 	}
 
 	for _, tc := range cases {
@@ -216,6 +218,7 @@ func TestUnit_BuiltinInteractiveChains_UseConservativeToolOutputCaps(t *testing.
 		{name: "run", raw: initRunChain},
 		{name: "acp", raw: initACPChain},
 		{name: "acpx", raw: initACPXChain},
+		{name: "beam", raw: initBeamChain},
 	}
 
 	for _, tc := range cases {
@@ -250,6 +253,7 @@ func TestUnit_BuiltinInteractiveChains_ScopeToolExecutionNodes(t *testing.T) {
 		{name: "run", raw: initRunChain},
 		{name: "acp", raw: initACPChain},
 		{name: "acpx", raw: initACPXChain},
+		{name: "beam", raw: initBeamChain},
 	}
 
 	for _, tc := range cases {
@@ -279,6 +283,7 @@ func TestUnit_BuiltinChains_LLMTasksIncludeDateMacro(t *testing.T) {
 		{name: "compact", raw: initCompactChain},
 		{name: "acp", raw: initACPChain},
 		{name: "acpx", raw: initACPXChain},
+		{name: "beam", raw: initBeamChain},
 		{name: "fim", raw: initFIMChain},
 	}
 
@@ -296,14 +301,7 @@ func TestUnit_BuiltinChains_LLMTasksIncludeDateMacro(t *testing.T) {
 	}
 }
 
-// TestUnit_PlannerChain_ProfileShape pins the resident-planner profile
-// (agent-planner.json, mission-plans.md slice 4): it parses, it is named by the
-// agent-* convention so discovery declares it, EVERY tool-bearing task grants
-// ONLY the mission tools and NO execution tools (the envelope the blueprint's
-// capability profile requires — grant plan/report/finish, withhold execution),
-// and its system prompt carries the Codex-derived discipline the planner must
-// keep. The discipline is prompt text, not host enforcement, so its PRESENCE in
-// the shipped prompt is exactly what this guards against a silent edit dropping.
+// TestUnit_PlannerChain_ProfileShape asserts the planner chain grants only mission tools, never execution tools, and its prompt retains the required discipline markers.
 func TestUnit_PlannerChain_ProfileShape(t *testing.T) {
 	var chain taskengine.TaskChainDefinition
 	require.NoError(t, json.Unmarshal([]byte(initPlannerChain), &chain))
@@ -311,7 +309,6 @@ func TestUnit_PlannerChain_ProfileShape(t *testing.T) {
 	require.Equal(t, "agent-planner", chain.ID, "the chain id is the discovered agent name")
 	require.NotEmpty(t, chain.Tasks)
 
-	// The envelope: only the mission tools, and nothing that executes.
 	forbidden := map[string]bool{"*": true, "local_shell": true, "local_fs": true, "webtools": true}
 	sawMissionGrant := false
 	for _, task := range chain.Tasks {
@@ -326,9 +323,7 @@ func TestUnit_PlannerChain_ProfileShape(t *testing.T) {
 	}
 	require.True(t, sawMissionGrant, "the planner must grant the mission tools somewhere")
 
-	// The discipline lives in the prompt (blueprint pattern 3). These markers are
-	// the Codex-derived rules adapted to the mission tools — their presence is the
-	// contract, since the runtime does not enforce them.
+	// These markers are the discipline the planner's prompt must keep; the runtime does not enforce them.
 	var prompt string
 	for _, task := range chain.Tasks {
 		if task.ID == "plan_loop" {
@@ -364,11 +359,7 @@ func branchGoto(t *testing.T, task taskengine.TaskDefinition, operator taskengin
 	return taskengine.TransitionBranch{}
 }
 
-// Every model macro in the seeded chains must bottom out in a var that both
-// execution paths (CLI buildTemplateVars, ACP chainTemplateVars) always seed
-// when a model is known. A final fallback outside this set fails at runtime
-// with "template fallback var not set" (BUG-014: ACP did not seed
-// default_model, so every recovery task died before model resolution).
+// TestUnit_BuiltinChains_ModelMacroFallbacksAlwaysSeeded asserts every model macro's fallback var is always seeded by both the CLI and ACP execution paths.
 func TestUnit_BuiltinChains_ModelMacroFallbacksAlwaysSeeded(t *testing.T) {
 	alwaysSeeded := map[string]bool{
 		"model": true, "provider": true,
@@ -379,6 +370,7 @@ func TestUnit_BuiltinChains_ModelMacroFallbacksAlwaysSeeded(t *testing.T) {
 		"run":      initRunChain,
 		"acp":      initACPChain,
 		"acpx":     initACPXChain,
+		"beam":     initBeamChain,
 		"compact":  initCompactChain,
 	}
 	macroRe := regexp.MustCompile(`^\{\{var:([a-z_]+)(\|var:([a-z_]+))?\}\}$`)

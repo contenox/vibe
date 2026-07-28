@@ -16,33 +16,15 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// THE PROGRAM-FACING CONTRACT, on the engine path.
-//
-// goja_e2e_test.go proves the one boundary rule — a script meets the envelope a
-// model would. This file proves the caveat that outlived it, which live use
-// found (2026-07-27) and no unit test could have:
-//
-//	a script that calls a tool inherits that tool's MODEL-FACING output
-//	conventions, and mis-parses them CONFIDENTLY WRONG with nothing to catch it.
-//
-// Two cases were caught in the wild, and both are regression tests here:
-//
-//	(a) a script assumed git.git_status answered in porcelain. It answers in
-//	    prose. The script reported "4 staged, 2 other, no untracked" for a tree
-//	    with one modified and one untracked file, and returned successfully.
-//	(b) local_fs.read_file answered with its session-dedup stub ("File unchanged
-//	    since last read …") and the script treated that sentence as the file's
-//	    content.
-//
-// The fixtures below are written the way the WRONG script was written — the
-// mistake, not the repair — because a regression test for a silent failure has
-// to make the silence audible. Each one must now either come back with
-// structured data it cannot mis-read, or fail loudly at the line that guessed.
+// The program-facing contract, on the engine path: a script that calls a
+// tool inherits that tool's model-facing output conventions and can
+// mis-parse them confidently wrong with nothing to catch it. Fixtures below
+// are written the way the wrong scripts were written, so each one must now
+// either get back data it cannot mis-read, or fail loudly at the guess.
 // ---------------------------------------------------------------------------
 
-// scriptStatusCount is case (a), preserved: a script that treats git_status as a
-// record it can count. Written against the STRUCTURED result, which is what the
-// tool now hands a program.
+// scriptStatusCount treats git_status as a record it can count, written
+// against the structured result the tool now hands a program.
 const scriptStatusCount = `const tool = {
   name: "status_count",
   description: "Count what git_status reports: staged, unstaged, untracked.",
@@ -64,8 +46,8 @@ function run() {
 }
 `
 
-// scriptStatusSurgery is case (a) EXACTLY as it was written when it was wrong:
-// string surgery on git_status. It must not be able to answer at all.
+// scriptStatusSurgery does string surgery on git_status; it must not be able
+// to answer at all.
 const scriptStatusSurgery = `const tool = {
   name: "status_surgery",
   description: "Test-only: the confidently-wrong script, preserved.",
@@ -80,8 +62,8 @@ function run() {
 }
 `
 
-// scriptReadTwice is case (b): the second read of the same file in one session
-// is the one that used to hand back the stub sentence.
+// scriptReadTwice reads the same file twice; the second read is the one that
+// used to hand back the dedup stub sentence instead of content.
 const scriptReadTwice = `const tool = {
   name: "read_twice",
   description: "Test-only: reads the same file twice and reports both answers.",
@@ -132,10 +114,8 @@ function run() {
 }
 `
 
-// scriptRawEscape is the escape hatch used deliberately: an author who means to
-// parse prose says so at the call site, in a line anyone reviewing the script
-// can see. git_diff is genuinely text — a diff IS a text artifact — so it is the
-// honest place to show the door.
+// scriptRawEscape uses the {raw: true} escape hatch deliberately, so an
+// author who means to parse prose says so at the call site.
 const scriptRawEscape = `const tool = {
   name: "raw_escape",
   description: "Test-only: asks for the bare string on purpose.",
@@ -156,8 +136,8 @@ function run() {
 }
 `
 
-// scriptDiffSurgery is the TEXT half of the guard: git_diff answers in prose,
-// and a script that splits it is guessing at a format nobody promised.
+// scriptDiffSurgery splits git_diff's prose result, guessing at a format
+// nobody promised.
 const scriptDiffSurgery = `const tool = {
   name: "diff_surgery",
   description: "Test-only: string surgery on a prose result.",
@@ -182,12 +162,9 @@ func contractScripts() map[string]string {
 	}
 }
 
-// initRepo turns the harness workspace into a git repository with one commit, a
-// modified tracked file and an untracked one — the exact tree shape that
-// produced the wrong answer in the wild: 1 modified, 1 untracked, 0 staged.
-//
-// Built with go-git, the same library the tools use, so the test needs no git
-// binary on PATH and no commit identity from the machine running it.
+// initRepo turns the harness workspace into a git repository with one
+// commit, a modified tracked file, and an untracked one (1 modified, 1
+// untracked, 0 staged). Built with go-git, so no git binary is required.
 func initRepo(t *testing.T, root string) {
 	t.Helper()
 	repo, err := git.PlainInitWithOptions(root, &git.PlainInitOptions{
@@ -211,10 +188,7 @@ func initRepo(t *testing.T, root string) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "brand_new.txt"), []byte("new\n"), 0o644))
 }
 
-// TestSystem_Goja_AProseResultCannotBeMisparsedSilently is the regression test
-// for case (a). Both halves are asserted from the same tree, because the point
-// is not that one script works — it is that the WRONG script can no longer
-// produce an answer.
+// TestSystem_Goja_AProseResultCannotBeMisparsedSilently asserts a script parsing git_status's prose result as structured data now gets structured data, and a script that string-surgeries it can no longer produce an answer.
 func TestSystem_Goja_AProseResultCannotBeMisparsedSilently(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -232,8 +206,7 @@ func TestSystem_Goja_AProseResultCannotBeMisparsedSilently(t *testing.T) {
 		m, ok := value.(map[string]any)
 		require.Truef(t, ok, "value is %T: %#v", value, value)
 
-		// The numbers the wild failure got wrong. One modified tracked file, one
-		// untracked file, nothing staged.
+		// One modified tracked file, one untracked file, nothing staged.
 		require.Equal(t, float64(0), m["staged"], "nothing is staged in this tree")
 		require.Equal(t, float64(1), m["unstaged"], "tracked.txt is modified")
 		require.Equal(t, float64(2), m["untracked"], "brand_new.txt and the harness's README.md are untracked")
@@ -243,8 +216,7 @@ func TestSystem_Goja_AProseResultCannotBeMisparsedSilently(t *testing.T) {
 		require.Equal(t, "main", m["branch"])
 		require.Equal(t, false, m["clean"])
 
-		// The inner call was still evaluated by the envelope: structure is not a
-		// bypass. git_status is an allow-tier read, so it must not raise a card.
+		// Structure is not a policy bypass: the inner call is still evaluated.
 		require.Contains(t, h.sink.decisions(), "git.git_status=allow")
 	})
 
@@ -260,8 +232,6 @@ func TestSystem_Goja_AProseResultCannotBeMisparsedSilently(t *testing.T) {
 	})
 
 	t.Run("a prose tool refuses string surgery by name", func(t *testing.T) {
-		// git_diff still answers in text — a diff IS text — so it is the tool
-		// that shows the TEXT half of the guard.
 		h.sink.drain()
 		out, err := h.call(ctx, "diff_surgery", nil)
 		require.Errorf(t, err, "string surgery on a prose result answered anyway: %#v", out)
@@ -288,14 +258,7 @@ func TestSystem_Goja_AProseResultCannotBeMisparsedSilently(t *testing.T) {
 	})
 }
 
-// TestSystem_Goja_TheUnchangedStubNeverReachesAScript is the regression test for
-// case (b).
-//
-// read_file's session dedup answers a REPEAT read with "File unchanged since
-// last read — the content from your earlier read_file call in this conversation
-// is still current." That is true of a model, whose earlier read is still in its
-// context, and false of a script, which has no conversation and no earlier read.
-// The script that met it treated the sentence as the file.
+// TestSystem_Goja_TheUnchangedStubNeverReachesAScript asserts a script's repeated read_file call never sees the session-dedup stub sentence, since a script has no conversation for that sentence to be true about.
 func TestSystem_Goja_TheUnchangedStubNeverReachesAScript(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -318,13 +281,7 @@ func TestSystem_Goja_TheUnchangedStubNeverReachesAScript(t *testing.T) {
 	require.NotContains(t, fmt.Sprint(m["second_head"]), "File unchanged")
 }
 
-// TestSystem_Goja_DeclaredReachIsEnforced is the matrix for the second half of
-// the fix: a script says what it reaches, and the sandbox holds it to that.
-//
-// This is defence in depth, not the policy boundary — the envelope still
-// evaluates every call that gets through. What the declaration adds is the one
-// thing the envelope cannot give: a statement of reach that exists BEFORE the
-// script runs, which is what an approval card for a script tool can show.
+// TestSystem_Goja_DeclaredReachIsEnforced asserts a script's declared `tools` list is enforced by the sandbox: undeclared calls are refused, an empty list means no reach, and a script with no declaration at all keeps working.
 func TestSystem_Goja_DeclaredReachIsEnforced(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping goja engine e2e: builds a real engine")
@@ -350,8 +307,7 @@ func TestSystem_Goja_DeclaredReachIsEnforced(t *testing.T) {
 		require.Containsf(t, msg, "undeclared_reach.js", "the refusal does not name the file to edit: %s", msg)
 		require.Contains(t, msg, "recoverable")
 
-		// And the refused call never reached the envelope at all: an undeclared
-		// tool is stopped before the trip, not after it.
+		// An undeclared tool is stopped before the trip, not after it.
 		require.NotContains(t, h.sink.decisions(), "git.git_status=allow")
 	})
 
@@ -363,19 +319,14 @@ func TestSystem_Goja_DeclaredReachIsEnforced(t *testing.T) {
 	})
 
 	t.Run("a script with no declaration keeps working", func(t *testing.T) {
-		// The backward-compatible case, proved with the ORIGINAL example set:
-		// stats_summary and file_outline predate the field.
+		// Backward compatibility: these two predate the `tools` field.
 		h2 := newGojaHarness(t, map[string]string{"file_outline.js": scriptFileOutline, "stats_summary.js": scriptStatsSummary}, nil)
 		_, err := h2.call(context.Background(), "stats_summary", map[string]string{"numbers": "1,2,3"})
 		require.NoError(t, err)
 	})
 }
 
-// TestUnit_Goja_TheDeclaredReachIsVisibleToAnApprovalSurface pins what a card
-// renderer reads. It is the whole reason the declaration is metadata and not
-// just a runtime check: an approval card for a script tool has to answer "what
-// will this touch?" BEFORE the script runs, and Toolset.Scripts() is where that
-// answer lives.
+// TestUnit_Goja_TheDeclaredReachIsVisibleToAnApprovalSurface asserts Toolset.Scripts() exposes each script's declared reach (and whether it declared at all) for an approval card to render before the script runs.
 func TestUnit_Goja_TheDeclaredReachIsVisibleToAnApprovalSurface(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{

@@ -28,28 +28,30 @@ export async function getStaticPaths() {
     add(`${retired}.html`, '/');
   }
 
-  // Docs retired with the terminal-first V1 (Beam web UI, VS Code extension,
-  // modeld local inference). Their pages are gone; the old URLs land on the
-  // retired-blueprints index that records where each surface went.
-  const retiredDocs = [
-    'guide/beam',
-    'integrations/editors/vscode-vscodium',
-    'integrations/providers/modeld',
-    'integrations/providers/modeld-architecture',
-    'integrations/providers/local-models',
-    'development/api_spec_generation',
-    'development/beam-serve-auth',
-    'development/modeld-llama-backend',
-    'development/modeld-local-inference-landscape',
-    'development/modeld-release-runbook',
-    'development/modeld-source-build',
-  ];
-  for (const id of retiredDocs) {
-    add(`docs/${id}.html`, '/docs/development/blueprints/retired/readme/');
+  // Earlier research surfaces (Beam web UI, VS Code extension,
+  // modeld local inference, the HTTP API layer). Their old doc URLs land on the
+  // contenox lab pages that cover the same ground instead of
+  // the bare docs index — better SEO continuity for links that already point
+  // at them.
+  const retiredDocs: Record<string, string> = {
+    'guide/beam': 'rnd/beam-web',
+    'development/beam-serve-auth': 'rnd/beam-web',
+    'integrations/editors/vscode-vscodium': 'rnd/vscode-extension',
+    'integrations/providers/modeld': 'rnd/modeld',
+    'integrations/providers/modeld-architecture': 'rnd/modeld',
+    'integrations/providers/local-models': 'rnd/modeld',
+    'development/modeld-llama-backend': 'rnd/modeld',
+    'development/modeld-local-inference-landscape': 'rnd/modeld',
+    'development/modeld-release-runbook': 'rnd/modeld',
+    'development/modeld-source-build': 'rnd/modeld',
+    'development/api_spec_generation': 'rnd/api-layer',
+  };
+  for (const [id, target] of Object.entries(retiredDocs)) {
+    add(`docs/${id}.html`, `/docs/${target}/`);
   }
 
   const skip = (id: string) =>
-    id === 'index' || id.endsWith('/index') || retiredDocs.includes(id);
+    id === 'index' || id.endsWith('/index') || id in retiredDocs;
   for (const entry of await getCollection('docs')) {
     if (!skip(entry.id)) add(`docs/${entry.id}.html`, `/docs/${entry.id}/`);
   }

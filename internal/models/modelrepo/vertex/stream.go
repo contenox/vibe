@@ -19,12 +19,11 @@ type vertexStreamClient struct {
 }
 
 // Stream implements modelrepo.LLMStreamClient against the Gemini
-// streamGenerateContent wire format (vertex-google). It emits raw deltas per
-// the modelrepo.StreamParcel contract: text / thinking deltas as they arrive,
-// each streamed functionCall part as one whole-call ToolCallDelta (the wire
-// delivers calls complete, so each gets the next sequential index), then one
-// typed terminal parcel with the candidate's finishReason and usageMetadata.
-// Assembly belongs to the engine-side modelrepo.StreamAssembler.
+// streamGenerateContent wire format (vertex-google): text/thinking deltas as
+// they arrive, each functionCall part as one whole-call ToolCallDelta (the
+// wire delivers calls complete, so each gets the next sequential index), then
+// one terminal parcel with finishReason and usage. Assembly belongs to the
+// engine-side modelrepo.StreamAssembler.
 func (c *vertexStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	parcels := make(chan *modelrepo.StreamParcel)
 

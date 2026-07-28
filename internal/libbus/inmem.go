@@ -8,21 +8,15 @@ import (
 	"sync/atomic"
 )
 
-// inmemStreamBuffer mirrors the 1024-slot NATS ChanSubscribe buffer in nats.go.
-// InMem is primarily used as the test/single-process stand-in for the NATS
-// backend, so it deliberately copies the NATS backpressure policy: a subscriber
-// that cannot keep up loses messages rather than stalling the publisher.
-// Making the test double *more* forgiving than production would hide exactly
-// the class of bug it is supposed to surface.
+// inmemStreamBuffer mirrors the 1024-slot NATS ChanSubscribe buffer, so this
+// test/single-process stand-in reproduces NATS's drop-under-backpressure
+// policy rather than hiding the bugs that policy is meant to surface.
 const inmemStreamBuffer = 1024
 
-// InMem is an in-memory implementation of Messenger for single-process use.
-// It does not use NATS or any network. Publish delivers to local Stream subscribers;
-// Request/Serve work as same-process request-reply.
-//
-// It intentionally reproduces the NATS backend's observable contract: at-most-once
-// delivery with drops under backpressure, and Request failing immediately when no
-// handler is registered. See the Messenger interface docs for the full matrix.
+// InMem is an in-memory Messenger for single-process use: no NATS, no
+// network. It intentionally reproduces the NATS backend's observable
+// contract (at-most-once delivery, Request failing immediately with no
+// handler registered) — see the Messenger interface docs for the full matrix.
 type InMem struct {
 	mu       sync.RWMutex
 	closed   bool
@@ -30,11 +24,9 @@ type InMem struct {
 	handlers map[string]Handler
 }
 
-// inmemSubscription owns a per-subscriber queue plus the goroutine that drains it
-// into the caller's channel. The queue is what decouples Publish from a slow
-// consumer: without it, Publish blocked in-line on every subscriber, so one stuck
-// consumer stalled the publisher and every later subscriber — and a consumer that
-// published back onto the same bus could deadlock itself.
+// inmemSubscription owns a per-subscriber queue and the goroutine draining it
+// into the caller's channel, decoupling Publish from a slow consumer — without
+// it, Publish would block in-line and a stuck consumer could deadlock itself.
 type inmemSubscription struct {
 	subject string
 	ch      chan<- []byte
@@ -175,19 +167,15 @@ func (p *InMem) Request(ctx context.Context, subject string, data []byte) ([]byt
 		return nil, ErrRequestTimeout
 	}
 
-	// Run handler with context so it can be cancelled.
 	reply, err := handler(ctx, data)
-	// A caller that gave up must not be told the request succeeded, whatever the
-	// handler decided to return after its context ended. The other backends
-	// surface cancellation from the transport; here the handler is in-process,
-	// so the check has to be explicit.
+	// A cancelled caller must not see success regardless of what the handler
+	// returned; other backends surface this from the transport, but the
+	// handler runs in-process here, so the check must be explicit.
 	if cerr := ctx.Err(); cerr != nil {
 		return nil, cerr
 	}
 	if err != nil {
-		// A handler error is a reply, not a transport failure — same as the NATS
-		// and SQLite backends. Returning it as a Go error here would mean the same
-		// caller code took a different branch depending on the backend.
+		// A handler error is a reply, not a transport failure, matching NATS/SQLite.
 		return fmt.Appendf(nil, "error: %s", err.Error()), nil
 	}
 	return reply, nil
@@ -243,13 +231,9 @@ func (s *inmemSubscription) Unsubscribe() error {
 	}
 	s.inmem.mu.Unlock()
 	s.stop()
-	// Block until the delivery goroutine has actually returned. Callers
-	// overwhelmingly follow Unsubscribe with close(ch) — that is the documented
-	// shape of every consumer in this repo — so returning while deliver could
-	// still be mid-send would turn a routine teardown into a send-on-closed-
-	// channel panic. Signalling done is not enough; the goroutine has to be
-	// gone. This matches the SQLite backend's Stream subscription, which also
-	// waits, and is why Unsubscribe cannot simply be fire-and-forget.
+	// Wait for deliver to actually exit, not just be signalled: callers
+	// routinely close(ch) right after Unsubscribe, and a still-sending deliver
+	// would panic on a closed channel. The SQLite backend's Stream waits too.
 	<-s.exited
 	return nil
 }

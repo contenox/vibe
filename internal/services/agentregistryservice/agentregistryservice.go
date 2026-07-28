@@ -1,20 +1,6 @@
-// Package agentregistryservice stores declared agent configurations — the
-// "bots table" concept (see the mvp core/serverops/store/schema.sql `bots`
-// table this generalizes) reborn as a polymorphic, kind-dispatched resource.
-// Two kinds are implemented: "external_acp" (an agent the runtime
-// spawns/drives as an external ACP peer via runtime/agenthost) and "chain"
-// (one of the runtime's own task chains, addressable as an agent — the same
-// spawn, pointed at this binary's own ACP server; see
-// runtimetypes.ChainConfig).
-//
-// It stays the SINGLE source of truth for "what can I fire". Chain agents are
-// SEEDED into it by convention-based discovery (runtime/chainagents) rather
-// than resolved through a second lookup at spawn time, so ResolveForSpawn
-// keeps one implementation for both kinds.
-//
-// This package intentionally mirrors runtime/mcpserverservice's shape
-// (validated CRUD over a runtimetypes store, no HTTP routes) so the two
-// declared-resource registries stay easy to compare.
+// Package agentregistryservice stores declared agent configurations
+// ("external_acp" or "chain") as the single source of truth for what can
+// be spawned.
 package agentregistryservice
 
 import (
@@ -28,8 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Service exposes validated CRUD operations for persisted agent
-// configurations.
+// Service exposes validated CRUD operations for persisted agent configurations.
 type Service interface {
 	Create(ctx context.Context, agent *runtimetypes.Agent) error
 	Get(ctx context.Context, id string) (*runtimetypes.Agent, error)
@@ -43,8 +28,7 @@ type service struct {
 	db libdb.DBManager
 }
 
-// New creates a new agent registry service backed by the given database
-// manager.
+// New creates an agent registry service backed by db.
 func New(db libdb.DBManager) Service {
 	return &service{db: db}
 }
@@ -53,12 +37,8 @@ func (s *service) store() runtimetypes.Store {
 	return runtimetypes.New(s.db.WithoutTransaction())
 }
 
-// Create validates agent (name/kind/per-kind config) and its name against
-// existing agents, then persists it. A colliding name surfaces as
-// libdb.ErrUniqueViolation (checked via errors.Is), the same sentinel a raw
-// DB unique-constraint violation would translate to elsewhere in this
-// codebase — checked here up front so the conflict is reported clearly
-// instead of relying solely on the storage layer's constraint error.
+// Create validates agent and persists it. A colliding name surfaces as
+// libdb.ErrUniqueViolation (checked via errors.Is).
 func (s *service) Create(ctx context.Context, agent *runtimetypes.Agent) error {
 	if err := validate(agent); err != nil {
 		return err
@@ -86,10 +66,8 @@ func (s *service) GetByName(ctx context.Context, name string) (*runtimetypes.Age
 	return s.store().GetAgentByName(ctx, name)
 }
 
-// Update validates agent the same way Create does, additionally requiring an
-// ID, and re-checks name uniqueness against every other agent (excluding
-// agent's own ID, so renaming an agent to its own current name is a no-op,
-// not a conflict).
+// Update validates agent like Create, requires an ID, and re-checks name
+// uniqueness excluding agent's own ID.
 func (s *service) Update(ctx context.Context, agent *runtimetypes.Agent) error {
 	if agent.ID == "" {
 		return fmt.Errorf("id is required for update")
@@ -114,19 +92,11 @@ func (s *service) List(ctx context.Context, createdAtCursor *time.Time, limit in
 	return s.store().ListAgents(ctx, createdAtCursor, limit)
 }
 
-// ErrAgentDisabled is the sentinel identifying a ResolveForSpawn refusal
-// caused by a declared agent that exists but is administratively disabled
-// (Enabled == false). Callers branch on it via errors.Is to apply their own
-// transport's "refused" mapping (apiframework.Conflict for a REST caller, a
-// libacp ACP-level error for an ACP caller) while reusing the wrapping
-// error's message, which already names the remedy — see ResolveForSpawn.
+// ErrAgentDisabled is the sentinel for a ResolveForSpawn refusal caused by a
+// disabled agent; callers branch on it via errors.Is.
 var ErrAgentDisabled = errors.New("agentregistryservice: agent is disabled")
 
-// disabledAgentError pairs ErrAgentDisabled with a ready-to-display message
-// that already names the remedy, so every caller shows the same wording
-// instead of each reconstructing it — which is how the fleet-dispatch message
-// and the acpsvc chat-path message drifted apart before ResolveForSpawn
-// existed (docs/development/blueprints/acp/fleet-consolidation.md, slice C5).
+// disabledAgentError pairs ErrAgentDisabled with a message naming the remedy.
 type disabledAgentError struct{ name string }
 
 func (e *disabledAgentError) Error() string {
@@ -135,19 +105,8 @@ func (e *disabledAgentError) Error() string {
 
 func (e *disabledAgentError) Unwrap() error { return ErrAgentDisabled }
 
-// ResolveForSpawn resolves the declared agent named agentName via svc and
-// refuses to hand it back when it is administratively disabled. It is the
-// ONE judgment every agent-spawn path makes before bringing an instance up —
-// fleetservice.Dispatch and acpsvc's external bring-up (bringUpExternal, via
-// resolveExternalAgent) both call it, so "disabled" cannot drift into two
-// different checks or two different messages between them again.
-// agentinstance.Manager.Start deliberately stays unaware of Enabled (see its
-// doc comment): this is the service-layer policy the kernel is not allowed
-// to hold (fleet-consolidation.md's "kernel stays policy-free" invariant).
-//
-// A not-found or other resolution failure from svc.GetByName is returned
-// wrapped (fmt.Errorf %w), so a sentinel check like errors.Is(err,
-// libdb.ErrNotFound) still works through it.
+// ResolveForSpawn resolves agentName via svc, refusing disabled agents.
+// Resolution failures are returned wrapped (%w) so errors.Is still works.
 func ResolveForSpawn(ctx context.Context, svc Service, agentName string) (*runtimetypes.Agent, error) {
 	agent, err := svc.GetByName(ctx, agentName)
 	if err != nil {
@@ -159,8 +118,7 @@ func ResolveForSpawn(ctx context.Context, svc Service, agentName string) (*runti
 	return agent, nil
 }
 
-// checkNameAvailable returns a libdb.ErrUniqueViolation-wrapping error if an
-// agent with name already exists under a different ID than excludeID.
+// checkNameAvailable errors with libdb.ErrUniqueViolation if name is taken by another ID.
 func (s *service) checkNameAvailable(ctx context.Context, name, excludeID string) error {
 	existing, err := s.store().GetAgentByName(ctx, name)
 	if err != nil {
@@ -175,8 +133,7 @@ func (s *service) checkNameAvailable(ctx context.Context, name, excludeID string
 	return fmt.Errorf("agent: name %q already exists: %w", name, libdb.ErrUniqueViolation)
 }
 
-// validate checks the agent-level fields (name, kind) and, for kinds this
-// registry currently implements, the per-kind config's own Validate().
+// validate checks agent-level fields and the per-kind config's own Validate().
 func validate(agent *runtimetypes.Agent) error {
 	if agent.Name == "" {
 		return fmt.Errorf("name is required")

@@ -58,9 +58,8 @@ func (c *wireClient) call(method string, params any) (libacp.Response, []libacp.
 	_, err = c.rw.Write(append(line, '\n'))
 	require.NoError(c.t, err)
 
-	// Collect notifications until the response for this id arrives; they are
-	// returned so callers can assert on ordering (everything before the
-	// response was written before it).
+	// Collect notifications until the response for this id arrives, so callers
+	// can assert ordering (everything before was written before the response).
 	var notes []libacp.Notification
 	for {
 		in := c.read()
@@ -80,8 +79,8 @@ func (c *wireClient) call(method string, params any) (libacp.Response, []libacp.
 // (AfterResponse ordering) until `want` have been seen or the deadline hits.
 func (c *wireClient) drainNotifications(want int) []libacp.Notification {
 	c.t.Helper()
-	// Generous deadline: the notifications come from a spawned subprocess, and
-	// under full-suite load spawn + roundtrip can far exceed an isolated run.
+	// Generous deadline: notifications come from a spawned subprocess, and
+	// full-suite load can far exceed an isolated run's roundtrip time.
 	var notes []libacp.Notification
 	deadline := time.After(30 * time.Second)
 	done := make(chan libacp.Incoming, want)
@@ -123,11 +122,7 @@ func (c *wireClient) read() libacp.Incoming {
 	}
 }
 
-// TestE2E_Wire_SessionNewListLoadRoundTrip drives the real Transport through a
-// real libacp.AgentSideConnection over NDJSON: initialize → session/new →
-// session/list → session/load. It pins the contract that broke in production:
-// every id returned by session/list must be loadable by session/load, and list
-// must report the session's cwd.
+// TestE2E_Wire_SessionNewListLoadRoundTrip pins that every id session/list returns is loadable by session/load, and list reports the session's cwd.
 func TestE2E_Wire_SessionNewListLoadRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -142,8 +137,8 @@ func TestE2E_Wire_SessionNewListLoadRoundTrip(t *testing.T) {
 	clientSide := &wirePipe{r: clientR, w: clientW}
 
 	factory := New(Deps{
-		// A bare engine is enough for the session lifecycle (its services are
-		// nil-checked); prompting is not exercised here.
+		// A bare engine is enough for the session lifecycle; prompting isn't
+		// exercised here.
 		Engine:      &enginesvc.Engine{},
 		DB:          db,
 		WorkspaceID: "wire-test-ws",
@@ -193,8 +188,6 @@ func TestE2E_Wire_SessionNewListLoadRoundTrip(t *testing.T) {
 	assert.Equal(t, libacp.SessionUpdateAvailableCommands, cmdNote.Update.SessionUpdate)
 	assert.Equal(t, newResp.SessionID, cmdNote.SessionID)
 
-	// session/list must return the id session/load resolves — the name, not
-	// the internal UUID — and the persisted cwd.
 	resp, _ = client.call(libacp.MethodSessionList, libacp.ListSessionsRequest{})
 	require.Nil(t, resp.Error)
 	var listResp libacp.ListSessionsResponse
@@ -206,12 +199,8 @@ func TestE2E_Wire_SessionNewListLoadRoundTrip(t *testing.T) {
 	assert.Equal(t, string(newResp.SessionID), listResp.Sessions[0].Title,
 		"title falls back to the session name when there is no first user message yet")
 
-	// Stage 6.5: once the session has a first user message, session/list must
-	// title it with that message (truncated), not the session name — mirroring
-	// the "subject" internalchatapi's chat listing derived before it was
-	// retired in favor of ACP. Insert directly through chatservice against the
-	// session's internal id (mi.id), which is distinct from the ACP-level
-	// session id (mi.name) that session/new returned.
+	// Insert through chatservice against the internal id (mi.id), distinct
+	// from the ACP-level session id (mi.name) session/new returned.
 	var internalSessionID string
 	require.NoError(t, db.WithoutTransaction().QueryRowContext(ctx,
 		`SELECT id FROM message_indices WHERE name = $1 AND workspace_id = $2 AND identity = 'acp-client'`,
@@ -232,13 +221,11 @@ func TestE2E_Wire_SessionNewListLoadRoundTrip(t *testing.T) {
 		"title must be the first user message, whitespace-collapsed and truncated to 60 runes, not the last (assistant) message")
 	assert.LessOrEqual(t, len([]rune(listResp.Sessions[0].Title)), 60, "title must not exceed the 60-rune budget")
 
-	// cwd filter: a different cwd excludes the session, the matching one keeps it.
 	resp, _ = client.call(libacp.MethodSessionList, libacp.ListSessionsRequest{Cwd: "/somewhere/else"})
 	require.Nil(t, resp.Error)
 	require.NoError(t, json.Unmarshal(resp.Result, &listResp))
 	assert.Empty(t, listResp.Sessions)
 
-	// The round trip: load what list returned.
 	resp, notes = client.call(libacp.MethodSessionLoad, libacp.LoadSessionRequest{
 		SessionID:  newResp.SessionID,
 		Cwd:        cwd,
@@ -250,7 +237,6 @@ func TestE2E_Wire_SessionNewListLoadRoundTrip(t *testing.T) {
 	}
 	client.drainNotifications(1) // deferred available_commands_update after load
 
-	// resume: same binding, NO replay before the response.
 	require.NotNil(t, initResp.AgentCapabilities.SessionCapabilities.Resume, "resume capability must be advertised")
 	resp, notes = client.call(libacp.MethodSessionResume, libacp.ResumeSessionRequest{
 		SessionID: newResp.SessionID,
@@ -258,19 +244,16 @@ func TestE2E_Wire_SessionNewListLoadRoundTrip(t *testing.T) {
 	})
 	require.Nil(t, resp.Error)
 	assert.Empty(t, notes, "session/resume must not replay history")
-	// Deferred after the resume result: the available_commands_update, then the
-	// usage_update that re-seeds the reconnecting client's context gauge (which
-	// resume does NOT hand back with the transcript the client kept).
+	// Deferred after resume: available_commands_update, then usage_update
+	// re-seeding the context gauge (resume doesn't hand that back with history).
 	client.drainNotifications(2)
 
-	// close: releases connection-local state; idempotent.
 	require.NotNil(t, initResp.AgentCapabilities.SessionCapabilities.Close, "close capability must be advertised")
 	resp, _ = client.call(libacp.MethodSessionClose, libacp.CloseSessionRequest{SessionID: newResp.SessionID})
 	require.Nil(t, resp.Error)
 	resp, _ = client.call(libacp.MethodSessionClose, libacp.CloseSessionRequest{SessionID: newResp.SessionID})
 	require.Nil(t, resp.Error, "closing an already-closed session succeeds")
 
-	// delete: the session disappears from list; deleting again succeeds silently.
 	require.NotNil(t, initResp.AgentCapabilities.SessionCapabilities.Delete, "delete capability must be advertised")
 	resp, _ = client.call(libacp.MethodSessionDelete, libacp.DeleteSessionRequest{SessionID: newResp.SessionID})
 	require.Nil(t, resp.Error)
@@ -282,9 +265,7 @@ func TestE2E_Wire_SessionNewListLoadRoundTrip(t *testing.T) {
 	require.Nil(t, resp.Error, "spec: deleting a nonexistent session SHOULD succeed silently")
 }
 
-// TestE2E_Wire_SessionListPagination pins the cursor contract: pages are
-// bounded, nextCursor resumes exactly where the previous page ended, no
-// session is duplicated or skipped, and the last page carries no cursor.
+// TestE2E_Wire_SessionListPagination pins the cursor contract: pages are bounded, nextCursor resumes exactly where the previous page ended, and no session is duplicated, skipped, or missing.
 func TestE2E_Wire_SessionListPagination(t *testing.T) {
 	prev := listSessionsPageSize
 	listSessionsPageSize = 2
@@ -347,9 +328,7 @@ func TestE2E_Wire_SessionListPagination(t *testing.T) {
 	}
 }
 
-// TestUnit_Initialize_AdvertisesEnvVarAuth_InSetupOnlyMode pins the env-based
-// setup route: with no engine and an EnvSetup spec, initialize must offer the
-// env_var auth method with its variable contract.
+// TestUnit_Initialize_AdvertisesEnvVarAuth_InSetupOnlyMode pins that with no engine and an EnvSetup spec, initialize offers the env_var auth method with its variable contract.
 func TestUnit_Initialize_AdvertisesEnvVarAuth_InSetupOnlyMode(t *testing.T) {
 	tr := &Transport{
 		deps: Deps{EnvSetup: &EnvSetupSpec{
@@ -373,10 +352,8 @@ func TestUnit_Initialize_AdvertisesEnvVarAuth_InSetupOnlyMode(t *testing.T) {
 	assert.Equal(t, "CONTENOX_DEFAULT_PROVIDER", envMethod.Vars[0].Name)
 }
 
-// TestUnit_Initialize_AdvertisesBrowserSetup pins the browser setup route:
-// terminal-auth-capable clients get BOTH the terminal wizard and the Beam
-// browser variant (`acp --setup-web`), and authenticate accepts either id.
-func TestUnit_Initialize_AdvertisesBrowserSetup(t *testing.T) {
+// TestUnit_Initialize_AdvertisesTerminalSetup pins that terminal-auth-capable clients are offered the terminal setup method (`acp --setup`), while the retired browser method is deliberately not advertised.
+func TestUnit_Initialize_AdvertisesTerminalSetup(t *testing.T) {
 	tr := transportWithMeta(`{"terminal-auth":true}`)
 	resp, err := tr.Initialize(context.Background(), libacp.InitializeRequest{
 		ProtocolVersion:    libacp.ProtocolVersion,
@@ -388,20 +365,19 @@ func TestUnit_Initialize_AdvertisesBrowserSetup(t *testing.T) {
 	for _, m := range resp.AuthMethods {
 		byID[m.ID] = m
 	}
-	browser, ok := byID["browser"]
-	require.True(t, ok, "browser setup method must be advertised alongside the terminal wizard")
-	assert.Equal(t, libacp.AuthMethodTypeTerminal, browser.Type)
-	assert.Contains(t, browser.Args, "--setup-web")
+	terminal, ok := byID["terminal"]
+	require.True(t, ok, "terminal setup method must be advertised")
+	assert.Equal(t, libacp.AuthMethodTypeTerminal, terminal.Type)
+	assert.Contains(t, terminal.Args, "--setup")
 
-	_, err = tr.Authenticate(context.Background(), libacp.AuthenticateRequest{MethodID: "browser"})
-	require.NoError(t, err, "authenticate must accept the advertised browser method")
+	_, ok = byID["browser"]
+	assert.False(t, ok, "browser setup method was retired and must not be advertised")
+
+	_, err = tr.Authenticate(context.Background(), libacp.AuthenticateRequest{MethodID: "terminal"})
+	require.NoError(t, err, "authenticate must accept the advertised terminal method")
 }
 
-// TestUnit_Initialize_AdvertisesWorkspaceConfigOptions pins the session-less
-// config surface: a configured agent (engine present) must advertise the
-// workspace-level model/think/HITL/token-limit options in the initialize
-// response's _meta, so a client can render the empty-chat controls before any
-// session exists (sessions are minted lazily on first prompt).
+// TestUnit_Initialize_AdvertisesWorkspaceConfigOptions pins that a configured agent advertises workspace-level model/think/HITL/token-limit options in initialize's _meta, before any session is minted.
 func TestUnit_Initialize_AdvertisesWorkspaceConfigOptions(t *testing.T) {
 	tr := &Transport{
 		deps:            Deps{Engine: &enginesvc.Engine{}},
@@ -427,9 +403,7 @@ func TestUnit_Initialize_AdvertisesWorkspaceConfigOptions(t *testing.T) {
 	require.Equal(t, "medium", optionByID(t, options, configIDThink).CurrentValue)
 }
 
-// TestUnit_Initialize_OmitsWorkspaceConfigOptions_InSetupOnlyMode pins the
-// degrade path: an unconfigured agent (no engine) advertises no workspace
-// config options — it has no models to list and drives the client to setup.
+// TestUnit_Initialize_OmitsWorkspaceConfigOptions_InSetupOnlyMode pins that an unconfigured agent (no engine) advertises no workspace config options.
 func TestUnit_Initialize_OmitsWorkspaceConfigOptions_InSetupOnlyMode(t *testing.T) {
 	tr := transportWithMeta("")
 	resp, err := tr.Initialize(context.Background(), libacp.InitializeRequest{ProtocolVersion: libacp.ProtocolVersion})
@@ -455,8 +429,8 @@ func TestUnit_Authenticate_EnvMethod(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, completed)
 
-	// Failure surfaces as auth_required with the reason, so the client can
-	// show what is missing.
+	// Failure surfaces as auth_required with the reason, so the client can show
+	// what is missing.
 	tr.deps.EnvSetup.Complete = func(context.Context) error {
 		return assert.AnError
 	}
@@ -466,7 +440,7 @@ func TestUnit_Authenticate_EnvMethod(t *testing.T) {
 	require.ErrorAs(t, err, &e)
 	assert.Equal(t, libacp.ErrAuthRequired, e.Code)
 
-	// Once configured (engine present) the method is no longer advertised and
+	// Once configured (engine present), the method is no longer advertised and
 	// must be rejected.
 	tr.deps.Engine = &enginesvc.Engine{}
 	_, err = tr.Authenticate(context.Background(), libacp.AuthenticateRequest{MethodID: "env"})
@@ -475,14 +449,7 @@ func TestUnit_Authenticate_EnvMethod(t *testing.T) {
 	assert.Equal(t, libacp.ErrInvalidParams, e.Code)
 }
 
-// TestE2E_Wire_SessionListOrder pins freshest-first ordering through the real
-// sqlite storage path: session/list must sort by last message activity
-// descending — NOT by internal id, which is a random UUID — with
-// never-messaged sessions after all sessions that have activity, and each
-// listed session must carry a parseable UpdatedAt. This broke silently once:
-// the sqlite driver stores time.Time in Go's String() format, which the
-// list's timestamp parser did not handle, so every row lost its UpdatedAt and
-// the order collapsed to UUID shuffle.
+// TestE2E_Wire_SessionListOrder pins that session/list sorts by last message activity descending (never by internal UUID), never-messaged sessions last, each with a parseable UpdatedAt.
 func TestE2E_Wire_SessionListOrder(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -514,10 +481,8 @@ func TestE2E_Wire_SessionListOrder(t *testing.T) {
 		client.drainNotifications(1) // available_commands_update
 	}
 
-	// Backdate message activity deliberately out of creation order; the last
-	// session stays empty and must sort behind every messaged one. Writing
-	// through messagestore binds time.Time via the sqlite driver — the exact
-	// production path whose stored format the list must parse back.
+	// Backdate activity out of creation order via messagestore, the exact
+	// production path whose stored time format the list must parse back.
 	store := messagestore.New(db.WithoutTransaction(), "order-ws")
 	base := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	activity := map[int]time.Time{
@@ -554,10 +519,7 @@ func TestE2E_Wire_SessionListOrder(t *testing.T) {
 	}
 }
 
-// TestUnit_ToolCallWireID_DisambiguatesRepeatedInvocations pins the fix for
-// tool-call card collisions: without an ApprovalID, repeated runs of one tool
-// must get distinct wire ids, while a pending/result pair of one invocation
-// shares its id.
+// TestUnit_ToolCallWireID_DisambiguatesRepeatedInvocations pins that, without an ApprovalID, repeated runs of one tool get distinct wire ids while a pending/result pair of one invocation shares its id.
 func TestUnit_ToolCallWireID_DisambiguatesRepeatedInvocations(t *testing.T) {
 	tr := &Transport{}
 	sid := libacp.SessionID("s1")
@@ -590,12 +552,7 @@ func TestUnit_ToolCallWireID_DisambiguatesRepeatedInvocations(t *testing.T) {
 	assert.Equal(t, "web_search", tr.toolCallWireID(sid, ev, false))
 }
 
-// TestE2E_Wire_SessionWorkspaceCwd drives session/new over the real wire with a
-// workspace-root allowlist configured and pins the Session Workspaces contract:
-// a non-allowlisted cwd is refused, the "/" sentinel resolves to the default
-// root, an allowlisted root is accepted and reported by session/list, and the
-// serve local_fs cwd resolver roots the agent tool at the session's chosen
-// workspace (files under it are visible; files under the default root are not).
+// TestE2E_Wire_SessionWorkspaceCwd pins the Session Workspaces contract: a non-allowlisted cwd is refused, "/" resolves to the default root, an allowlisted root is accepted and reported, and the serve cwd resolver roots agent tools at the session's chosen workspace.
 func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -724,18 +681,13 @@ func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 	// A session without a workspace in scope falls back to the default root.
 	assert.Equal(t, factory.Default(), resolver(context.Background()))
 
-	// Neither resolution above was a refusal, so nothing may have been reported:
-	// the degradation report has to stay rare enough that its presence means
-	// something.
+	// Neither resolution above was a refusal, so nothing should have been reported.
 	assert.Nil(t, resolverTracker.findSubject("resolve", "session_workspace"),
 		"an in-allowlist resolution must not report a workspace degradation")
 
-	// 4b. A persisted cwd is re-checked against the CURRENT allowlist, not
-	// trusted because it was allowlisted when it was written. The record outlives
-	// the process that wrote it: the same database is read by a serve started
-	// with narrower roots (an operator dropping a --workspace-root, or a second
-	// instance serving only rootA). rootB is still named by the stored session,
-	// and must NOT be handed to the agent's filesystem tools or its PTY.
+	// 4b. A persisted cwd is re-checked against the current allowlist, not
+	// trusted because it was allowlisted when written: a serve started with
+	// narrower roots must not hand rootB to the agent's tools or PTY.
 	narrowed, err := vfs.NewFactory(rootA)
 	require.NoError(t, err)
 	narrowedTracker := &recTracker{}
@@ -743,11 +695,8 @@ func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 	assert.Equal(t, resolvedA, narrowedResolver(toolCtx),
 		"a stored cwd outside the current allowlist must fall back to the default root, not be adopted verbatim")
 
-	// The fallback is silent to the AGENT by construction — the resolver has no
-	// error channel to one — so the operator's only sight of it is this report.
-	// Assert the whole span, not just that it fired: an out-of-allowlist session
-	// is unreadable without knowing which cwd was rejected and which root
-	// replaced it.
+	// The fallback is silent to the agent (the resolver has no error channel),
+	// so the operator's only sight of it is this report; assert the whole span.
 	degraded := narrowedTracker.findSubject("resolve", "session_workspace")
 	require.NotNil(t, degraded, "a rejected stored cwd must be reported through the tracker")
 	require.Equal(t, 1, degraded.errs, "the refusal must be reported exactly once")
@@ -757,8 +706,8 @@ func TestE2E_Wire_SessionWorkspaceCwd(t *testing.T) {
 	assert.Equal(t, resolvedB, degraded.kvStr("stored_cwd"), "the report must name the refused cwd")
 	assert.Equal(t, narrowed.Default(), degraded.kvStr("default_root"), "the report must name the root used instead")
 
-	// 5. Reloading the rootB session with the "/" sentinel (what beam sends)
-	// must PRESERVE its workspace, not clobber it back to the default root.
+	// 5. Reloading with "/" (what beam sends) must preserve the session's
+	// workspace, not reset it to the default root.
 	resp, _ = client.call(libacp.MethodSessionLoad, libacp.LoadSessionRequest{
 		SessionID:  bResp.SessionID,
 		Cwd:        "/",

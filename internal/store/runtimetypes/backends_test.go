@@ -22,12 +22,10 @@ func TestUnit_Backend_CreatesAndFetchesByID(t *testing.T) {
 		Type:    "ollama",
 	}
 
-	// Create the backend.
 	err := s.CreateBackend(ctx, backend)
 	require.NoError(t, err)
 	require.NotEmpty(t, backend.ID)
 
-	// Retrieve the backend by ID.
 	got, err := s.GetBackend(ctx, backend.ID)
 	require.NoError(t, err)
 	require.Equal(t, backend.Name, got.Name)
@@ -47,20 +45,16 @@ func TestUnit_Backend_UpdatesFieldsCorrectly(t *testing.T) {
 		Type:    "ollama",
 	}
 
-	// Create the backend.
 	err := s.CreateBackend(ctx, backend)
 	require.NoError(t, err)
 
-	// Modify some fields.
 	backend.Name = "UpdatedBackend"
 	backend.BaseURL = "http://updated.url"
 	backend.Type = "OpenAI"
 
-	// Update the backend.
 	err = s.UpdateBackend(ctx, backend)
 	require.NoError(t, err)
 
-	// Retrieve and verify the update.
 	got, err := s.GetBackend(ctx, backend.ID)
 	require.NoError(t, err)
 	require.Equal(t, "UpdatedBackend", got.Name)
@@ -79,15 +73,12 @@ func TestUnit_Backend_DeletesSuccessfully(t *testing.T) {
 		Type:    "ollama",
 	}
 
-	// Create the backend.
 	err := s.CreateBackend(ctx, backend)
 	require.NoError(t, err)
 
-	// Delete the backend.
 	err = s.DeleteBackend(ctx, backend.ID)
 	require.NoError(t, err)
 
-	// Attempt to retrieve the deleted backend; expect an error.
 	_, err = s.GetBackend(ctx, backend.ID)
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }
@@ -95,7 +86,6 @@ func TestUnit_Backend_DeletesSuccessfully(t *testing.T) {
 func TestUnit_Backend_ListHandlesPagination(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	// Create 5 backends with a small delay to ensure distinct creation times.
 	var backends []*runtimetypes.Backend
 	for i := range 5 {
 		backend := &runtimetypes.Backend{
@@ -109,21 +99,17 @@ func TestUnit_Backend_ListHandlesPagination(t *testing.T) {
 		backends = append(backends, backend)
 	}
 
-	// Paginate through the results with a limit of 2.
 	var receivedBackends []*runtimetypes.Backend
 	var lastCursor *time.Time
 	limit := 2
 
-	// Fetch first page
 	page1, err := s.ListBackends(ctx, lastCursor, limit)
 	require.NoError(t, err)
 	require.Len(t, page1, 2)
 	receivedBackends = append(receivedBackends, page1...)
 
-	// The cursor for the next page is the creation time of the last item
 	lastCursor = &page1[len(page1)-1].CreatedAt
 
-	// Fetch second page
 	page2, err := s.ListBackends(ctx, lastCursor, limit)
 	require.NoError(t, err)
 	require.Len(t, page2, 2)
@@ -131,21 +117,17 @@ func TestUnit_Backend_ListHandlesPagination(t *testing.T) {
 
 	lastCursor = &page2[len(page2)-1].CreatedAt
 
-	// Fetch third page (the last one)
 	page3, err := s.ListBackends(ctx, lastCursor, limit)
 	require.NoError(t, err)
 	require.Len(t, page3, 1)
 	receivedBackends = append(receivedBackends, page3...)
 
-	// Fetch a fourth page, which should be empty
 	page4, err := s.ListBackends(ctx, &page3[0].CreatedAt, limit)
 	require.NoError(t, err)
 	require.Empty(t, page4)
 
-	// Verify all backends were retrieved in the correct order.
 	require.Len(t, receivedBackends, 5)
 
-	// The order is newest to oldest, so the last created backend should be first.
 	require.Equal(t, backends[4].ID, receivedBackends[0].ID)
 	require.Equal(t, backends[3].ID, receivedBackends[1].ID)
 	require.Equal(t, backends[2].ID, receivedBackends[2].ID)
@@ -163,11 +145,9 @@ func TestUnit_Backend_FetchesByName(t *testing.T) {
 		Type:    "ollama",
 	}
 
-	// Create the backend.
 	err := s.CreateBackend(ctx, backend)
 	require.NoError(t, err)
 
-	// Retrieve the backend by name.
 	got, err := s.GetBackendByName(ctx, "UniqueBackend")
 	require.NoError(t, err)
 	require.Equal(t, backend.ID, got.ID)
@@ -176,11 +156,9 @@ func TestUnit_Backend_FetchesByName(t *testing.T) {
 func TestUnit_Backend_GetNonexistentReturnsNotFound(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	// Test retrieval by a non-existent ID.
 	_, err := s.GetBackend(ctx, uuid.NewString())
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 
-	// Test retrieval by a non-existent name.
 	_, err = s.GetBackendByName(ctx, "non-existent-name")
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }

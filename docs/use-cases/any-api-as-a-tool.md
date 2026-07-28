@@ -5,37 +5,45 @@ description: Contenox turns any HTTP API into a scoped, credential-hidden, polic
 
 # Any API, a tool you authored
 
-An assistant is only as safe as the tools you hand it, and most setups hand it broad ones: a shell, a whole vendor SDK, an API key sitting in the prompt. Contenox takes the opposite position. You take an API and author a *narrow, governed* tool out of it. That authored boundary is the artifact — and it's the reason to put Contenox between a chat assistant and your systems, beyond containment.
+Register an HTTP API as a tool with the credential hidden from the model, the endpoint surface narrowed to a hand-curated subset, and — for untrusted drivers — an explicit approval rule.
 
-## The mechanism
+## Prerequisites
 
-One command turns an HTTP API into a tool:
+- `contenox` installed and a backend configured with a tool-calling model — see [Quickstart](/docs/guide/quickstart/).
+- An HTTP API to expose, a credential for it, and (optionally) a hand-curated OpenAPI subset spec.
 
-```bash
-contenox tools add crm \
-  --url https://api.vendor.com \
-  --header "Authorization: Bearer $CRM_TOKEN" \
-  --inject "caller_id=assistant-01" \
-  --spec ./crm-readonly.json
-```
+## Steps
 
-- `--header` / `--inject` — the credential and fixed parameters are bound at the engine, server-side. The model never sees them; it can't exfiltrate or tamper with what it can't read.
-- `--spec` — a hand-curated OpenAPI subset. If the vendor offers `delete_contact` and you didn't put it in the spec, it does not exist for the assistant. Capability is narrowed at the schema, not by asking nicely in a system prompt.
+1. Curate an OpenAPI subset spec listing only the operations the assistant needs. Skip this step to register the vendor's full spec instead — see [Authoring your tool inventory](/docs/use-cases/openapi-subset/).
 
-You didn't grant the assistant "the CRM." You authored "read these three endpoints, as this caller, with a token it can't see."
+2. Register the API as a tool, injecting the credential and any fixed parameters so the model never sees them:
 
-## The mechanism is the same; the approval differs by trust
+   ```bash
+   contenox tools add crm \
+     --url https://api.vendor.com \
+     --header "Authorization: Bearer $CRM_TOKEN" \
+     --inject "caller_id=assistant-01" \
+     --spec ./crm-readonly.json
+   ```
 
-This is what makes a chat-driven assistant genuinely useful *without* the nested-permission-bomb — but Contenox is explicit that *how a call is permitted* depends on who's driving, instead of pretending one model fits both:
+   `--header` and `--inject` are bound server-side — the model can't read or tamper with the token or the injected parameter. `--spec` limits what the assistant can call to exactly the operations in that file, regardless of what the vendor's full API exposes.
 
-- **Device owner (`acp`, Zed/JetBrains):** a human is in the loop. Calls route through interactive HITL — allow, deny, or approve per call.
-- **Untrusted driver (`acpx`, OpenClaw/Telegram):** there is no one on that channel to approve anything, so there is no approval prompt. The operator authors which API tools are `allow` in `hitl-policy-acpx.json`; everything else is denied.
+3. Reference the tool from a chain's `execute_config.tools` allowlist, or rely on `"tools": ["*"]` in the default chain so it's picked up automatically.
 
-## The rule you cannot skip
+4. For an interactive, device-owner session (`contenox chat`, `contenox acp` — Zed, JetBrains), calls route through HITL: allow, deny, or approve per call, per your active policy.
 
-`acpx` is `default_action: deny`. Registering an API as a tool does **not** make it callable. Until you add an explicit `allow` rule for that exact tool to `hitl-policy-acpx.json`, the assistant is silently refused it — no prompt, no error. That is the boundary working as designed: an untrusted driver reaches only the specific, vetted tools you deliberately allowed, never something merely registered.
+5. For an untrusted, non-interactive driver (`contenox acpx` — see [Use from OpenClaw](/docs/integrations/editors/openclaw/)), add an explicit `allow` rule for the tool to `hitl-policy-acpx.json`:
 
-That is the whole thesis in one operational fact: capability is opt-in, per tool, by you — version-controlled in a policy file you review like code. Not inherited, not prompted-around, not default-on.
+   ```json
+   { "tools": "crm", "tool": "read_contacts", "action": "allow" }
+   ```
+
+   `hitl-policy-acpx.json` defaults to `default_action: deny`. Registering a tool does not make it callable under `acpx` — until a rule allows it explicitly, the assistant is refused with no prompt and no error.
+
+## Expected outcome
+
+- A device-owner session can call the tool and, for any call your policy gates, is prompted to approve or deny it.
+- An `acpx` session can call only the tools you explicitly allowed in its policy file — everything else is silently refused.
 
 ## Where to next
 

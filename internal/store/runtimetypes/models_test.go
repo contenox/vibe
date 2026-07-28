@@ -19,7 +19,6 @@ func TestUnit_Models_AppendAndGetAllModels(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, models)
 
-	// Append a new model with capability fields
 	model := &runtimetypes.Model{
 		ID:            uuid.New().String(),
 		Model:         "test-model",
@@ -138,7 +137,6 @@ func TestUnit_Models_AppendDuplicateModel(t *testing.T) {
 	err := s.AppendModel(ctx, model)
 	require.NoError(t, err)
 
-	// Attempt to append duplicate model with same capabilities
 	duplicate := &runtimetypes.Model{
 		Model:         "duplicate-model",
 		ContextLength: 4096, // Same capabilities
@@ -182,7 +180,6 @@ func TestUnit_Models_GetModelByName(t *testing.T) {
 func TestUnit_Models_ListHandlesPagination(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	// Create 5 models with capability fields
 	var createdModels []*runtimetypes.Model
 	for i := range 5 {
 		model := &runtimetypes.Model{
@@ -202,12 +199,10 @@ func TestUnit_Models_ListHandlesPagination(t *testing.T) {
 		createdModels = append(createdModels, model)
 	}
 
-	// Paginate through the results with a limit of 2
 	var receivedModels []*runtimetypes.Model
 	var lastCursor *time.Time
 	limit := 2
 
-	// Fetch first page
 	page1, err := s.ListModels(ctx, lastCursor, limit)
 	require.NoError(t, err)
 	require.Len(t, page1, 2)
@@ -215,7 +210,6 @@ func TestUnit_Models_ListHandlesPagination(t *testing.T) {
 
 	lastCursor = &page1[len(page1)-1].CreatedAt
 
-	// Fetch second page
 	page2, err := s.ListModels(ctx, lastCursor, limit)
 	require.NoError(t, err)
 	require.Len(t, page2, 2)
@@ -223,21 +217,17 @@ func TestUnit_Models_ListHandlesPagination(t *testing.T) {
 
 	lastCursor = &page2[len(page2)-1].CreatedAt
 
-	// Fetch third page (the last one)
 	page3, err := s.ListModels(ctx, lastCursor, limit)
 	require.NoError(t, err)
 	require.Len(t, page3, 1)
 	receivedModels = append(receivedModels, page3...)
 
-	// Fetch a fourth page, which should be empty
 	page4, err := s.ListModels(ctx, &page3[0].CreatedAt, limit)
 	require.NoError(t, err)
 	require.Empty(t, page4)
 
-	// Verify all models were retrieved in the correct order
 	require.Len(t, receivedModels, 5)
 
-	// Check capability fields for each retrieved model
 	for i, received := range receivedModels {
 		expected := createdModels[4-i] // Reverse order (newest first)
 		require.Equal(t, expected.Model, received.Model)

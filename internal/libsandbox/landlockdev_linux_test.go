@@ -10,18 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestIntegration_DeviceFloor proves the /dev character-device floor has teeth: a
-// confined process can WRITE /dev/null and READ the stateless read-only nodes
-// (/dev/zero, /dev/urandom) — exactly the devices every POSIX toolchain assumes
-// exist merely to run. Before the floor nothing under /dev was granted, so a
-// confined Bash broke the moment it redirected to /dev/null.
-//
-// The complementary guarantee — that granting WRITE on /dev/null does NOT reopen
-// device-node creation — is asserted at the bitmask level by
-// TestUnit_llWrite_NoDeviceNodeCreation, which is the ATTRIBUTABLE way to prove it:
-// a behavioural mknod probe would be refused by the user-namespace device policy
-// (or by lacking CAP_MKNOD) rather than by Landlock, so its denial could not be
-// pinned on the wall. This suite therefore asserts only the positive grants.
+// TestIntegration_DeviceFloor proves the /dev character-device floor grants a
+// confined process write to /dev/null and read to /dev/zero/urandom — the
+// nodes every POSIX toolchain assumes exist. The complementary guarantee (that
+// this grant does not reopen device-node creation) is asserted separately at
+// the bitmask level by TestUnit_llWrite_NoDeviceNodeCreation.
 func TestIntegration_DeviceFloor(t *testing.T) {
 	if !landlockSupported() {
 		t.Skip("landlock filesystem ABI unavailable on this kernel")

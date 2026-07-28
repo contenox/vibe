@@ -24,29 +24,19 @@ var ErrApprovalAborted = errors.New("run aborted at approval prompt")
 
 const (
 	// maxArgValueDisplay bounds how much of a single argument value is echoed
-	// above the prompt.
-	//
-	// Printing a 100-line `replacement` argument in full pushes the diff — the
-	// thing the decision should actually be based on — off the top of the
-	// screen. The diff is rendered last, closest to the prompt, and the raw
-	// argument is summarised rather than dumped.
+	// above the prompt, so a long argument does not push the diff off screen.
 	maxArgValueDisplay = 240
 
-	// maxDiffLinesDisplay bounds the rendered diff. When it truncates, the
-	// notice appears immediately above the prompt where it cannot be scrolled
-	// past unnoticed.
+	// maxDiffLinesDisplay bounds the rendered diff; the truncation notice
+	// appears directly above the prompt so it cannot be missed.
 	maxDiffLinesDisplay = 120
 
-	// maxArgBlockLines bounds a multi-line argument printed as a block, and
-	// matches comp/approval's cap so the two surfaces show a human the same
-	// amount of the same thing. Forty is enough for the whole of a script
-	// somebody would actually read before approving it.
+	// maxArgBlockLines bounds a multi-line argument block, matching
+	// comp/approval's cap so both surfaces show the same amount.
 	maxArgBlockLines = 40
 
-	// argBlockTabStop is what a tab inside such a block is worth. Eight, like
-	// every diff tool and pager, so the code lines up in the columns its author
-	// wrote it in — folding a tab to one space would silently re-indent the
-	// very lines being approved.
+	// argBlockTabStop is the tab width used in argument/diff blocks, matching
+	// standard diff tools so code stays aligned as written.
 	argBlockTabStop = 8
 
 	// inputFlushWindow is how long to spend draining stray keystrokes typed
@@ -56,34 +46,19 @@ const (
 
 // CLIApprovalOptions configures the interactive approval prompt.
 //
-// Deliberately absent: any form of "always allow this for the rest of the
-// session". A cached grant would let this callback answer approve-actions
-// without a human, which is precisely what validatePolicy already forbids
-// policies themselves from doing (see the on_timeout=allow rejection in
-// hitlservice/policy.go). The only legitimate way to stop being asked about a
-// tool is an allow RULE in the policy document, where it is versioned,
-// validated, and visible to every transport rather than cached in one client.
+// Deliberately has no "always allow for the rest of the session" option: the
+// only legitimate way to stop being asked about a tool is an allow rule in
+// the policy document, not a grant cached in one client.
 type CLIApprovalOptions struct {
-	// AuditLog, when non-nil, receives one line per decision. Approvals are
-	// security-relevant events and should be recoverable after the fact,
-	// independent of whatever scrolled off the terminal.
+	// AuditLog, when non-nil, receives one line per decision, so approvals
+	// remain recoverable after the fact.
 	AuditLog func(req hitlservice.ApprovalRequest, decision string)
 }
 
 // NewCLIAskApproval returns an AskApproval callback suitable for interactive
-// CLI use. It opens /dev/tty directly so it works even when stdin is piped.
-//
-// Unlike a naive prompt, this one:
-//   - refuses to read approvals from a non-terminal stdin (a piped "y" must
-//     never approve a mutation),
-//   - drains buffered input before prompting, so a keystroke typed during the
-//     previous prompt cannot silently answer this one,
-//   - renders arguments in a stable order and bounded length, with the diff
-//     last so it is adjacent to the decision,
-//   - offers an explicit abort alongside approve/deny.
-//
-// Every call reaches a human. This callback has no memory between prompts and
-// no way to answer one on its own.
+// CLI use. It opens /dev/tty directly so it works even when stdin is piped,
+// refuses to read approvals from a non-terminal stdin, drains buffered input
+// before each prompt, and offers an explicit abort alongside approve/deny.
 func NewCLIAskApproval(w io.Writer) localtools.AskApproval {
 	return NewCLIAskApprovalWithOptions(w, CLIApprovalOptions{})
 }
@@ -107,10 +82,7 @@ func NewCLIAskApprovalWithOptions(w io.Writer, opts CLIApprovalOptions) localtoo
 		// Let the task engine's asynchronous event bus flush 'step_started' to
 		// stderr before drawing the prompt.
 		//
-		// TODO: this is a race workaround, not a fix. The engine should signal
-		// that its log for this step has been emitted; sleeping means a slow
-		// bus still interleaves and a fast one wastes a quarter second on every
-		// approval.
+		// TODO: race workaround, not a fix — the engine should signal instead.
 		time.Sleep(250 * time.Millisecond)
 
 		tty, isTerm, err := openControllingTerminal()
@@ -125,9 +97,8 @@ func NewCLIAskApprovalWithOptions(w io.Writer, opts CLIApprovalOptions) localtoo
 		}
 		defer tty.Close()
 
-		// Drop anything typed before the prompt was drawn. Without this, typing
-		// "yy" at one prompt approves the next one before the operator has seen
-		// it — the exact failure mode a per-call gate exists to prevent.
+		// Drop anything typed before the prompt was drawn, or "yy" at one
+		// prompt would approve the next before the operator has seen it.
 		flushInput(tty)
 
 		renderApprovalRequest(w, req)
@@ -197,10 +168,8 @@ func renderApprovalRequest(w io.Writer, req hitlservice.ApprovalRequest) {
 			shown = lines[:maxDiffLinesDisplay]
 		}
 		for _, line := range shown {
-			// Sanitized for the same reason the argument block is: this is
-			// content out of a repository, printed straight to a terminal,
-			// directly above the prompt it would erase. Unwrapped and
-			// un-elided, though — the change under review copies out whole.
+			// Sanitized so an escape sequence in the repo content can't erase
+			// the prompt, but never wrapped or elided.
 			fmt.Fprintf(w, "    %s\n", sanitize.ExpandTabs(sanitize.Lines(line), argBlockTabStop))
 		}
 		if len(lines) > maxDiffLinesDisplay {
@@ -213,23 +182,10 @@ func renderApprovalRequest(w io.Writer, req hitlservice.ApprovalRequest) {
 
 // writeArg prints one argument for review.
 //
-// A value with newlines in it — a script body, a heredoc, a patch — is printed
-// as an indented BLOCK, one source line per line, because summariseArg's
-// one-liner writes those newlines out as literal "\n" and then cuts the result
-// at 240 bytes. That renders the one argument most in need of reading as the
-// least readable thing above the prompt, which is the exact failure this gate
-// exists to prevent (found dogfooding a goja_eval call).
-//
-// hasDiff suppresses the block: when a diff was rendered, the summary's "see
-// diff" is TRUE and the diff below is the better, unduplicated rendering of the
-// same bytes. With no diff — a script tool, a shell heredoc, or a write whose
-// current contents could not be read — nothing else here shows the content, and
-// the block is the only honest place to read it.
-//
-// Body lines are sanitized (the same treatment comp/approval gives a diff line:
-// no escape sequence reaches the terminal, tabs expand rather than fold) but
-// never wrapped or elided: a line this function split would copy out of the
-// terminal as something that is not what will run.
+// A value containing newlines (a script body, heredoc, patch) is printed as
+// an indented block instead of a truncated one-liner, since that is the
+// argument most in need of full reading. hasDiff suppresses the block when
+// the diff below already renders the same bytes.
 func writeArg(w io.Writer, key string, v any, hasDiff bool) {
 	s, isString := v.(string)
 	if !isString || hasDiff || !strings.Contains(s, "\n") {
@@ -248,20 +204,14 @@ func writeArg(w io.Writer, key string, v any, hasDiff bool) {
 		fmt.Fprintf(w, "      %s\n", sanitize.ExpandTabs(sanitize.Lines(l), argBlockTabStop))
 	}
 	if hidden := len(lines) - len(shown); hidden > 0 {
-		// The consequence, not just the arithmetic — the same sentence the diff
-		// cap uses a few lines below.
 		fmt.Fprintf(w, "      ⚠ +%d more lines — approving accepts content you have not seen\n", hidden)
 	}
 }
 
 // summariseArg renders an argument value for review: whitespace made visible,
-// long values elided with their true size, so a 4 KB replacement reads as one
-// line rather than scrolling the diff away.
-//
-// The result is sanitized, because an argument is somebody else's text on its
-// way to a terminal: an escape sequence in one erases the prompt printed
-// beneath it, which is a defect with the whole gate as its blast radius. Values
-// that are source text take writeArg's block instead, and keep their lines.
+// long values elided with their true size so they read as one line rather
+// than scrolling the diff away. The result is sanitized, since an escape
+// sequence in the argument could otherwise erase the prompt beneath it.
 func summariseArg(v any) string {
 	s := fmt.Sprintf("%v", v)
 	total := len(s)
@@ -280,11 +230,9 @@ func summariseArg(v any) string {
 	return fmt.Sprintf("%s… [%d bytes, %d lines — see diff]", head, total, lines)
 }
 
-// readLine reads one line, respecting ctx cancellation.
-//
-// The read runs inline rather than in a goroutine that outlives the call: a
-// leaked reader stays blocked on the same tty and consumes the *next* prompt's
-// keystroke. Cancellation closes the file to unblock the read.
+// readLine reads one line, respecting ctx cancellation. Cancellation closes
+// the file to unblock the read rather than leaving a goroutine that would
+// consume the next prompt's keystroke.
 func readLine(ctx context.Context, tty *os.File, w io.Writer) (string, bool, error) {
 	type result struct {
 		line string

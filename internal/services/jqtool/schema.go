@@ -1,32 +1,12 @@
 package jqtool
 
-// ---------------------------------------------------------------------------
-// Tool schema
-//
-// Terse by default, for the reason localtools/fs_schema.go documents at length:
-// a description is paid on EVERY turn, while everything a long description
-// pre-teaches is re-taught by the error message at the moment it fires, with the
-// concrete value filled in. The deadline, the caps, the containment boundary and
-// the exactly-one-source rule all have errors that state them precisely when
-// they bite, so none of them are spelled out here.
-//
-// Four things ARE in the description anyway, because no error would ever teach
-// them — they are the cases where a model does the WRONG thing successfully, or
-// never calls the tool at all:
-//
-//   - IT NEVER WRITES. A model that believes `.version = "2"` edits the file
-//     will call this tool and then report the file as changed. Nothing fails, so
-//     nothing can teach it.
-//   - IT IS NOT goja_eval. Both take a program and return a value, and a model
-//     with both available needs one line to pick. Choosing wrongly costs a turn
-//     and never errors.
-//   - ITS INPUT IS ONE FILE OR ONE STRING. Without this stated, the failure mode
-//     is a model pasting a megabyte of previous tool output into `input` —
-//     spending exactly the tokens the tool exists to save. The cap does fire,
-//     but only after the tokens are spent.
-//   - YAML IS ACCEPTED. A model that assumes "jq means JSON" reads the YAML file
-//     into context instead of querying it, and nothing about that is an error.
-// ---------------------------------------------------------------------------
+// Tool schema. Kept terse: the deadline, caps, containment boundary and
+// exactly-one-source rule all have errors that state them precisely when they
+// bite, so they aren't spelled out here. The description does state the
+// things no error would ever teach: that the tool never writes, that it isn't
+// goja_eval, that its input is one file or one string, and that YAML is
+// accepted — each a case where a model would otherwise succeed at the wrong
+// thing rather than get a correcting error.
 
 import (
 	"context"

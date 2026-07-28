@@ -18,6 +18,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// hitlLog reports one approval-lifecycle step through the wrapper's tracker,
+// so fields are redacted and the sink is composition-chosen (beam wires a
+// beam.log-backed tracker; a stuck approval must be diagnosable from it).
+func (h *HITLWrapper) hitlLog(ctx context.Context, msg string, kv ...any) {
+	_, _, end := h.tracker.Start(ctx, "hitl", msg, kv...)
+	end()
+}
+
 // approvalPending counts in-flight HITL approval prompts. Set by HITLWrapper.Exec
 // before invoking the ask callback and cleared after it returns. Read by UI
 // renderers (e.g. the CLI idle-hint suppressor) so they don't print noise while
@@ -36,13 +44,12 @@ func IsApprovalPending() bool {
 type AskApproval func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error)
 
 // ApprovalParkWindow is the fast-path park: how long an ActionApprove call
-// keeps its goroutine (and the interactive prompt) waiting for a verdict
-// before the run SUSPENDS instead — durable approval row + checkpoint, no
-// parked goroutine (S6). A verdict inside the window behaves exactly as the
-// pre-S6 blocking path did, so interactive latency is untouched; only slow
-// approvals pay the checkpoint cost. 30s is deliberate: long enough that a
-// human already looking at the card answers in-session, short enough that an
-// unattended run releases its resources promptly.
+// keeps its goroutine waiting for a verdict before the run suspends instead —
+// durable approval row + checkpoint, no parked goroutine. A verdict inside the
+// window behaves exactly like a blocking wait, so interactive latency is
+// unaffected; only slow approvals pay the checkpoint cost. 30s balances an
+// attended human answering in-session against an unattended run releasing its
+// resources promptly.
 const ApprovalParkWindow = 30 * time.Second
 
 // HITLWrapper is a decorator around any ToolsRepo that intercepts configured tool
@@ -54,8 +61,7 @@ const ApprovalParkWindow = 30 * time.Second
 // implements hitlservice.ApprovalRecorder — the production hitlservice does),
 // the ask is bounded by ApprovalParkWindow and a silent window ends in a typed
 // taskengine.ApprovalPendingError, which the engine turns into a checkpointed
-// suspension; without one (evaluator-only fakes) the pre-S6 blocking behavior
-// is preserved.
+// suspension; without one (evaluator-only fakes) the wrapper blocks instead.
 type HITLWrapper struct {
 	inner     taskengine.ToolsRepo
 	ask       AskApproval
@@ -65,8 +71,30 @@ type HITLWrapper struct {
 	// recorder is the durable half of the suspend path; nil when the policy
 	// evaluator cannot record asks (then the legacy blocking path applies).
 	recorder hitlservice.ApprovalRecorder
+	// responder is the late-answer half of the suspend path: Respond
+	// persists a verdict and, when nobody is parked on it (the fast-path
+	// window already elapsed), runs the registered resume hook. nil when the
+	// policy evaluator doesn't expose it (then a late ask() outcome is
+	// dropped, same as before this existed).
+	responder approvalResponder
 	// parkWindow is ApprovalParkWindow unless overridden via SetParkWindow.
 	parkWindow time.Duration
+}
+
+// approvalResponder is the subset of hitlservice.Service that askDurable
+// needs to deliver a verdict that arrives after its own local wait already
+// gave up: Respond persists the answer and, since the waiter is gone (the
+// run checkpointed), runs the registered resume hook. Distinct from
+// hitlservice.ApprovalRecorder's ResolveApprovalInline, which deliberately
+// never triggers the hook because that path's waiter is still present.
+//
+// Without this, a human answering the still-open approval card after the
+// park window elapsed has nowhere for that answer to go: the local channel
+// askDurable was waiting on has already been abandoned, and nothing else
+// records the verdict, so the checkpointed run stays suspended forever. See
+// deliverLateVerdict.
+type approvalResponder interface {
+	Respond(ctx context.Context, approvalID string, approved bool) error
 }
 
 func NewHITLWrapper(inner taskengine.ToolsRepo, ask AskApproval, policy hitlservice.PolicyEvaluator, tracker libtracker.ActivityTracker, eventSinks ...taskengine.TaskEventSink) *HITLWrapper {
@@ -78,6 +106,7 @@ func NewHITLWrapper(inner taskengine.ToolsRepo, ask AskApproval, policy hitlserv
 		eventSink = eventSinks[0]
 	}
 	recorder, _ := policy.(hitlservice.ApprovalRecorder)
+	responder, _ := policy.(approvalResponder)
 	return &HITLWrapper{
 		inner:      inner,
 		ask:        ask,
@@ -85,6 +114,7 @@ func NewHITLWrapper(inner taskengine.ToolsRepo, ask AskApproval, policy hitlserv
 		tracker:    tracker,
 		eventSink:  eventSink,
 		recorder:   recorder,
+		responder:  responder,
 		parkWindow: ApprovalParkWindow,
 	}
 }
@@ -100,6 +130,15 @@ func (h *HITLWrapper) SetParkWindow(d time.Duration) {
 }
 
 const DenyMessage = "User denied the operation. Please ask for clarification or try a different, less destructive approach."
+
+// askOutcome is the ask() callback's result, carried over a channel between
+// askDurable's launching goroutine and whichever code eventually reads it —
+// the function's own select on the fast path, or deliverLateVerdict when
+// that select already gave up and moved on.
+type askOutcome struct {
+	approved bool
+	err      error
+}
 
 // Exec implements taskengine.ToolsRepo.
 func (h *HITLWrapper) Exec(
@@ -148,11 +187,12 @@ func (h *HITLWrapper) Exec(
 	case hitlservice.ActionApprove:
 		toolCallID, _ := ctx.Value(taskengine.ContextKeyToolCallID).(string)
 
-		// Resume-injected verdict (S6): the human already answered THIS exact
+		// Resume-injected verdict: the human already answered this exact
 		// invocation — the approval ID equals the engine-minted call ID — so
 		// asking again would gate one action twice. Approved executes; denied
 		// takes the standard deny semantics the model already knows.
 		if verdictApproved, ok := taskengine.ApprovalVerdictFromContext(ctx, toolCallID); ok {
+			h.hitlLog(ctx, "tool resumed via verdict", "tool", toolName, "approval_id", toolCallID, "approved", verdictApproved)
 			if !verdictApproved {
 				reportChange("denied", DenyMessage)
 				return DenyMessage, taskengine.DataTypeString, nil
@@ -186,6 +226,7 @@ func (h *HITLWrapper) Exec(
 			OnTimeout:   result.OnTimeout,
 		}
 		h.publishDecision(ctx, tools.Name, toolName, args, result, true)
+		h.hitlLog(ctx, "ask raised", "tool", toolName, "approval_id", toolCallID, "rule", result.MatchedRule, "policy", result.PolicyName)
 
 		if h.recorder != nil {
 			return h.askDurable(ctx, startTime, input, debug, tools, req, result, toolCallID, reportErr, reportChange)
@@ -198,10 +239,10 @@ func (h *HITLWrapper) Exec(
 	}
 }
 
-// askBlocking is the pre-S6 approval path, kept verbatim for wrappers whose
-// policy evaluator cannot record durable asks (no ApprovalRecorder): ask the
-// human and BLOCK — bounded only by the matched rule's own TimeoutS, applying
-// its OnTimeout when that deadline fires.
+// askBlocking is the approval path for wrappers whose policy evaluator cannot
+// record durable asks (no ApprovalRecorder): ask the human and block, bounded
+// only by the matched rule's own TimeoutS, applying its OnTimeout when that
+// deadline fires.
 func (h *HITLWrapper) askBlocking(
 	ctx context.Context,
 	startTime time.Time,
@@ -220,6 +261,7 @@ func (h *HITLWrapper) askBlocking(
 		defer askCancel()
 	}
 
+	h.hitlLog(ctx, "card shown", "tool", req.ToolName, "approval_id", req.ToolCallID)
 	approvalPending.Add(1)
 	approved, err := h.ask(askCtx, req)
 	approvalPending.Add(-1)
@@ -234,15 +276,19 @@ func (h *HITLWrapper) askBlocking(
 				onTimeout = hitlservice.ActionDeny
 			}
 			if onTimeout == hitlservice.ActionAllow {
+				h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", req.ToolCallID, "approved", true, "reason", "on_timeout")
 				return h.inner.Exec(ctx, startTime, input, debug, tools)
 			}
+			h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", req.ToolCallID, "reason", "approval_timed_out")
 			reportErr(fmt.Errorf("hitl: approval timed out: %w", err))
 			return "Approval timed out. The operation was automatically denied.", taskengine.DataTypeString, nil
 		}
+		h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", req.ToolCallID, "reason", "ask_error", "error", err.Error())
 		err = fmt.Errorf("hitl: approval error: %w", err)
 		reportErr(err)
 		return nil, taskengine.DataTypeAny, err
 	}
+	h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", req.ToolCallID, "approved", approved)
 	if !approved {
 		reportChange("denied", DenyMessage)
 		return DenyMessage, taskengine.DataTypeString, nil
@@ -250,23 +296,25 @@ func (h *HITLWrapper) askBlocking(
 	return h.inner.Exec(ctx, startTime, input, debug, tools)
 }
 
-// askDurable is the S6 approval path: durable row FIRST, then a fast-path
-// park bounded by min(parkWindow, rule TimeoutS). Outcomes:
+// askDurable persists the approval as a durable row first, then parks on a
+// fast path bounded by min(parkWindow, rule TimeoutS). Outcomes:
 //
 //   - verdict inside the window → the row is closed inline and the call
-//     proceeds exactly as the blocking path would (zero interactive
-//     regression);
-//   - the rule's own TimeoutS fires first → the rule's OnTimeout applies as
-//     before, and the row is closed with that outcome;
-//   - the park window elapses silently → taskengine.ApprovalPendingError:
-//     the engine checkpoints the run and releases the goroutine, and the
-//     still-pending row is answerable from any process (checkpoint second,
-//     release third).
+//     proceeds exactly as the blocking path would;
+//   - the rule's own TimeoutS fires first → its OnTimeout applies as before,
+//     and the row is closed with that outcome;
+//   - the park window elapses silently → taskengine.ApprovalPendingError: the
+//     engine checkpoints the run and releases the goroutine; the still-pending
+//     row is answerable from any process — including this one, if the human
+//     is still looking at the very card that opened the ask() call: the
+//     abandoned goroutine is still live, and deliverLateVerdict forwards its
+//     eventual outcome through Respond so that answer resumes the run too,
+//     not only an external hitlservice.Respond from a restarted process.
 //
-// Known race, accepted and bounded: a Respond landing between the row write
-// and the engine's checkpoint write finds no checkpoint; agentservice.Prompt
-// closes it by checking the row again after the checkpoint is durable and
-// resuming inline when the verdict already landed.
+// Known race: a Respond landing between the row write and the checkpoint
+// write finds no checkpoint; agentservice.Prompt closes it by re-checking the
+// row after the checkpoint is durable and resuming inline if the verdict
+// already landed.
 func (h *HITLWrapper) askDurable(
 	ctx context.Context,
 	startTime time.Time,
@@ -312,12 +360,9 @@ func (h *HITLWrapper) askDurable(
 	askCtx, askCancel := context.WithTimeout(ctx, window)
 	defer askCancel()
 
-	type askOutcome struct {
-		approved bool
-		err      error
-	}
 	outcomeCh := make(chan askOutcome, 1)
 	approvalPending.Add(1)
+	h.hitlLog(ctx, "card shown", "tool", req.ToolName, "approval_id", approvalID)
 	go func() {
 		approved, err := h.ask(askCtx, req)
 		outcomeCh <- askOutcome{approved: approved, err: err}
@@ -344,18 +389,33 @@ func (h *HITLWrapper) askDurable(
 					onTimeout = hitlservice.ActionDeny
 				}
 				allow := onTimeout == hitlservice.ActionAllow
+				h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", approvalID, "approved", allow, "reason", "on_timeout")
 				if err := h.recorder.ResolveApprovalInline(ctx, approvalID, allow); err != nil && !errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
 					reportErr(fmt.Errorf("hitl: closing timed-out approval row %s: %w", approvalID, err))
+				} else {
+					h.hitlLog(ctx, "verdict recorded", "tool", req.ToolName, "approval_id", approvalID, "approved", allow)
 				}
 				if allow {
 					return h.inner.Exec(ctx, startTime, input, debug, tools)
 				}
+				h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "approval_timed_out")
 				reportErr(fmt.Errorf("hitl: approval timed out: %w", out.err))
 				return "Approval timed out. The operation was automatically denied.", taskengine.DataTypeString, nil
 			}
 			// Fast-path park elapsed with no verdict: the third outcome. The
 			// row stays pending; the engine checkpoints and releases.
+			h.hitlLog(ctx, "checkpoint parked", "tool", req.ToolName, "approval_id", approvalID)
 			reportChange("approval_parked", approvalID)
+			// The abandoned ask() goroutine is still live — its outcome lands
+			// in outcomeCh whenever it finally returns, which for an
+			// interactive card is exactly when the human answers, however
+			// late. Without this, that answer had nowhere to go: the row
+			// stayed pending and the checkpointed run stayed suspended
+			// forever, since nothing else closes the row or fires the resume
+			// hook (see approvalResponder's doc).
+			if h.responder != nil {
+				go h.deliverLateVerdict(approvalID, req.ToolName, outcomeCh)
+			}
 			return nil, taskengine.DataTypeAny, &taskengine.ApprovalPendingError{
 				ApprovalID: approvalID,
 				ToolName:   req.ToolName,
@@ -364,6 +424,7 @@ func (h *HITLWrapper) askDurable(
 		// Parent context ended or the ask itself failed: as before. The row is
 		// left pending; SweepExpired closes it (and resumes nothing — no
 		// checkpoint exists on this path).
+		h.hitlLog(ctx, "turn failed", "tool", req.ToolName, "approval_id", approvalID, "reason", "ask_error", "error", out.err.Error())
 		err := fmt.Errorf("hitl: approval error: %w", out.err)
 		reportErr(err)
 		return nil, taskengine.DataTypeAny, err
@@ -372,14 +433,54 @@ func (h *HITLWrapper) askDurable(
 	// In-session verdict inside the window — the fast path. Close the row so
 	// the inbox never shows an already-decided ask; inline (never the resume
 	// hook: the waiter is right here).
+	h.hitlLog(ctx, "verdict entered", "tool", req.ToolName, "approval_id", approvalID, "approved", out.approved)
 	if err := h.recorder.ResolveApprovalInline(ctx, approvalID, out.approved); err != nil && !errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
 		reportErr(fmt.Errorf("hitl: closing answered approval row %s: %w", approvalID, err))
+	} else {
+		h.hitlLog(ctx, "verdict recorded", "tool", req.ToolName, "approval_id", approvalID, "approved", out.approved)
 	}
 	if !out.approved {
 		reportChange("denied", DenyMessage)
 		return DenyMessage, taskengine.DataTypeString, nil
 	}
 	return h.inner.Exec(ctx, startTime, input, debug, tools)
+}
+
+// deliverLateVerdict waits for an ask() call abandoned past the park window
+// to finally return, then forwards its verdict through Respond — the same
+// seam an out-of-process `contenox approvals answer` uses — so a human who
+// answers the still-open approval card late still resumes the checkpointed
+// run. Runs detached from the original request's context (already gone by
+// the time this matters) and reports through a fresh tracker span rather
+// than the caller's, whose span has already ended.
+func (h *HITLWrapper) deliverLateVerdict(approvalID, toolName string, outcomeCh <-chan askOutcome) {
+	out, ok := <-outcomeCh
+	if !ok {
+		return
+	}
+	bg := context.Background()
+	reportErr, _, end := h.tracker.Start(bg, "hitl", "late_verdict", "tool_name", toolName, "approval_id", approvalID)
+	defer end()
+
+	if out.err != nil {
+		h.hitlLog(bg, "turn failed", "tool", toolName, "approval_id", approvalID, "reason", "late_ask_error", "error", out.err.Error())
+		return
+	}
+	h.hitlLog(bg, "verdict entered", "tool", toolName, "approval_id", approvalID, "approved", out.approved, "late", true)
+	if err := h.responder.Respond(bg, approvalID, out.approved); err != nil {
+		if errors.Is(err, hitlservice.ErrApprovalAlreadyResolved) {
+			// A racing SweepExpired or an explicit external Respond already
+			// closed this row (e.g. the timeout outcome landed first); the
+			// late answer is moot, not an error.
+			h.hitlLog(bg, "verdict entered", "tool", toolName, "approval_id", approvalID, "approved", out.approved, "late", true, "outcome", "already_resolved")
+			return
+		}
+		h.hitlLog(bg, "turn failed", "tool", toolName, "approval_id", approvalID, "reason", "late_respond_failed", "error", err.Error())
+		reportErr(fmt.Errorf("hitl: delivering late verdict for approval %s: %w", approvalID, err))
+		return
+	}
+	h.hitlLog(bg, "verdict recorded", "tool", toolName, "approval_id", approvalID, "approved", out.approved, "late", true)
+	h.hitlLog(bg, "tool resumed", "tool", toolName, "approval_id", approvalID, "approved", out.approved)
 }
 
 func (h *HITLWrapper) publishDecision(ctx context.Context, toolsName, toolName string, args map[string]any, result hitlservice.EvaluationResult, approvalRequested bool) {
@@ -471,41 +572,43 @@ func (h *HITLWrapper) buildDiff(ctx context.Context, tools *taskengine.ToolsCall
 		}
 		newContent := strings.ReplaceAll(oldContent, pattern, replacement)
 		return oldContent, newContent, nil
+
+	case tools.Name == "local_fs" && toolName == "edit_file":
+		path, _ := args["path"].(string)
+		oldString, _ := args["old_string"].(string)
+		newString, _ := args["new_string"].(string)
+		if path == "" || oldString == "" {
+			return "", "", nil
+		}
+		oldContent, err := h.readCurrentContent(ctx, tools, path)
+		if err != nil {
+			return "", "", err
+		}
+		newContent := strings.ReplaceAll(oldContent, oldString, newString)
+		return oldContent, newContent, nil
 	}
 	return "", "", nil
 }
 
 // errDiffBaseUnavailable is returned when the current contents of the file
-// cannot be established at approval time. The caller shows the ask WITHOUT a
-// diff, which is the only safe direction: a diff computed against anything
-// other than the file is a diff of a change that is not the one being approved.
+// cannot be established at approval time. The caller shows the ask without a
+// diff — the only safe option, since a diff against anything but the file
+// itself would describe a change that is not the one being approved.
 var errDiffBaseUnavailable = errors.New("hitl: current file contents unavailable for the diff")
 
-// readCurrentContent returns the file's CURRENT contents — the before-side of
-// the diff the operator is about to approve.
+// readCurrentContent returns the file's current contents — the before-side of
+// the diff the operator is about to approve. It goes through the toolset's own
+// read_file so path resolution and containment match the write this is
+// gating, and refuses anything but the literal bytes on disk:
 //
-// It goes through the toolset's own read_file so that path resolution, symlink
-// containment and the sandbox root are the same ones the write itself will be
-// subject to; a read this function resolved differently would describe a
-// different file than the one about to change. What it will NOT accept is a
-// rendered or remembered answer in place of those bytes:
-//
-//   - force: true defeats read_file's session dedup. Warm-cache reads answer
-//     with fileUnchangedStub — a sentence for the model, meaning "you already
-//     have this" — and that sentence reached the diff builder as the prior
-//     content, so an operator was shown a status message as the before-side of
-//     a write and approved it (found by dogfooding). The approval gate is a
-//     security boundary, not a performance path: it re-reads, every time.
-//   - the read runs with the session identity stripped, so read_file neither
-//     consults nor records this session's read markers. Recording one would be
-//     worse than wasteful: the gate's own read would satisfy the read-before-
-//     write rule (and clear a stale-read denial) for the very write it is
-//     gating, i.e. the approval would grant the model a precondition it never
-//     met.
-//   - any answer still carrying a severity marker is a NOTICE, not a file: the
-//     over-the-output-cap path returns a head plus "read_file truncated …",
-//     whose head would render the file's tail as deleted. Refused rather than
-//     diffed.
+//   - force: true bypasses read_file's session dedup stub — a warm-cache read
+//     must never stand in for the file shown to a human approver.
+//   - the read runs with the session identity stripped, so it neither
+//     consults nor records this session's read markers; recording one would
+//     let the gate's own read satisfy the read-before-write rule for the very
+//     write it is gating.
+//   - any answer carrying a severity marker is a truncation notice, not the
+//     file, and is refused rather than diffed.
 //
 // Returns ("", nil) when the file does not yet exist — a new file legitimately
 // has an empty before-side.
@@ -521,13 +624,9 @@ func (h *HITLWrapper) readCurrentContent(ctx context.Context, tools *taskengine.
 	}
 
 	if _, cached := result.(FsUnchangedResult); cached {
-		// Defence in depth: force already prevents this, and a stripped session
-		// prevents it again. If it ever arrives anyway, it is a status message,
-		// and a status message must never be shown to a human as the file they
-		// are about to overwrite. (The stub carries the real content for program
-		// callers now — see FsUnchangedResult — but the gate deliberately does
-		// not take that door: it re-reads, every time, so what the operator
-		// approves is what is on disk at approval time.)
+		// Defence in depth: force and the stripped session should already
+		// prevent this. A status message must never stand in for the file the
+		// operator is about to overwrite.
 		return "", fmt.Errorf("%w: read_file answered from its session cache", errDiffBaseUnavailable)
 	}
 	s, ok := result.(string)
@@ -541,9 +640,9 @@ func (h *HITLWrapper) readCurrentContent(ctx context.Context, tools *taskengine.
 }
 
 // severityTailWindow is how much of a tool answer is examined for the severity
-// marker that identifies it as a notice. Only the tail is examined because a
-// notice is APPENDED: scanning the whole answer would refuse to diff any file
-// that merely quotes the marker — such as the file that defines it.
+// marker that identifies it as a notice. Only the tail is checked because a
+// notice is appended — scanning the whole answer would refuse to diff any file
+// that merely quotes the marker.
 const severityTailWindow = 512
 
 func tailOf(s string, n int) string {
@@ -617,6 +716,99 @@ func splitLines(s string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
+}
+
+// ─── diff readability annotations ────────────────────────────────────────────
+//
+// A rendered diff is what a human actually reads before approving; when two
+// adjacent lines render identically (a duplicate insertion, or a change that
+// is only tabs vs spaces) the operator has no way to tell what changed short
+// of diffing the diff themselves. annotatedDiffLine adds a terse, inline note
+// for both shapes, plus makes the offending whitespace visible in the line
+// itself — directly in the shared diff text, so every surface that renders
+// unifiedDiff's output verbatim (CLI, beam, ACP) gains it with no renderer
+// changes.
+
+// annotatedDiffLine returns ops[i]'s text for display, plus a trailing note
+// when it needs one. Priority: an exact duplicate of an adjacent line is the
+// more actionable finding (nothing at all changed about the bytes; the model
+// just repeated a line), checked before a same-but-for-whitespace difference.
+func annotatedDiffLine(ops []editOp, i int) (line, note string) {
+	line = ops[i].text
+	if dupAnnotation(ops, i) {
+		return line, "  (inserts duplicate of adjacent line)"
+	}
+	if whitespaceOnlyAnnotation(ops, i) {
+		return visibleWhitespace(line), "  (whitespace-only change)"
+	}
+	return line, ""
+}
+
+// dupAnnotation reports whether an added line (ops[i]) is byte-identical to
+// an immediately adjacent line of a different kind — the shape a model
+// re-inserting an existing line produces, and the one the diff's own LCS
+// already renders as unchanged when both sides are context, so this only
+// fires for a genuine '+' beside a ' ' or '-' with the same text.
+func dupAnnotation(ops []editOp, i int) bool {
+	if ops[i].kind != '+' {
+		return false
+	}
+	for _, j := range [2]int{i - 1, i + 1} {
+		if j >= 0 && j < len(ops) && ops[j].kind != '+' && ops[j].text == ops[i].text {
+			return true
+		}
+	}
+	return false
+}
+
+// whitespaceOnlyAnnotation reports whether a changed line (ops[i], '+' or
+// '-') differs from an immediately adjacent line only in spaces and tabs —
+// e.g. a re-indent that a terminal renders identically to the line it
+// replaced. Skipped when dupAnnotation already fired: an exact match is a
+// stronger, mutually exclusive finding.
+func whitespaceOnlyAnnotation(ops []editOp, i int) bool {
+	if ops[i].kind != '+' && ops[i].kind != '-' {
+		return false
+	}
+	for _, j := range [2]int{i - 1, i + 1} {
+		if j >= 0 && j < len(ops) && differsOnlyInWhitespace(ops[i].text, ops[j].text) {
+			return true
+		}
+	}
+	return false
+}
+
+// differsOnlyInWhitespace reports whether a and b are unequal but become
+// equal once spaces and tabs are stripped.
+func differsOnlyInWhitespace(a, b string) bool {
+	if a == b {
+		return false
+	}
+	return stripSpacesAndTabs(a) == stripSpacesAndTabs(b)
+}
+
+func stripSpacesAndTabs(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// visibleWhitespace makes a line's tabs and trailing spaces render as
+// distinct glyphs instead of blank space, so a whitespace-only change is
+// visible on the line itself, not just in the trailing note. Leading and
+// interior spaces are left alone — only tabs (ambiguous width) and trailing
+// spaces (invisible at end of line) are the shapes that read as "identical"
+// when they aren't.
+func visibleWhitespace(s string) string {
+	s = strings.ReplaceAll(s, "\t", "→")
+	trimmed := strings.TrimRight(s, " ")
+	if trimmed == s {
+		return s
+	}
+	return trimmed + strings.Repeat("·", len(s)-len(trimmed))
 }
 
 // unifiedDiff returns a unified-diff style summary of oldStr→newStr with ±3
@@ -698,11 +890,13 @@ func unifiedDiff(filename, oldStr, newStr string) string {
 			oldN++
 			newN++
 		case '-':
-			hunkBuf = append(hunkBuf, fmt.Sprintf("-%s\n", op.text))
+			line, note := annotatedDiffLine(ops, i)
+			hunkBuf = append(hunkBuf, fmt.Sprintf("-%s%s\n", line, note))
 			hunkOldCount++
 			oldN++
 		case '+':
-			hunkBuf = append(hunkBuf, fmt.Sprintf("+%s\n", op.text))
+			line, note := annotatedDiffLine(ops, i)
+			hunkBuf = append(hunkBuf, fmt.Sprintf("+%s%s\n", line, note))
 			hunkNewCount++
 			newN++
 		}

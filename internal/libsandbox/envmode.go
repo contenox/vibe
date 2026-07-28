@@ -1,40 +1,27 @@
 package libsandbox
 
-// Scrub postures for a shell contenox spawns. They select how much of the parent
-// environment survives, and are what an operator names in configuration (e.g.
-// SANDBOX_SHELL_SCRUB); EnvPolicyForMode turns the name plus the operator's extra
+// Scrub postures for a shell contenox spawns, named in operator configuration
+// (e.g. SANDBOX_SHELL_SCRUB); EnvPolicyForMode turns a name plus extra
 // allow/deny lists into a concrete EnvPolicy.
 const (
-	// ScrubOff inherits the full parent environment — the legacy behavior, no
-	// scrubbing. EnvPolicyForMode reports it as inactive so the caller leaves the
-	// environment untouched.
+	// ScrubOff inherits the full parent environment unscrubbed.
 	ScrubOff = "off"
-	// ScrubDenySecrets passes everything EXCEPT the control plane and the common
-	// credential shapes (DefaultEnvDeny). Lowest-breakage: a toolchain keeps the
-	// environment it expects while known secrets are stripped. This is the sane
-	// default for an agent-reachable shell.
+	// ScrubDenySecrets passes everything except the control plane and common
+	// credential shapes (DefaultEnvDeny) — lowest breakage, the sane default.
 	ScrubDenySecrets = "deny-secrets"
-	// ScrubStrict passes only the safe base set (DefaultEnvAllow) plus whatever the
-	// operator explicitly allows; everything else is absent. Its deny is only the
-	// control plane, so — unlike deny-secrets — an operator can hand the shell one
-	// trusted credential by naming it in the allow list.
+	// ScrubStrict passes only DefaultEnvAllow plus operator additions; deny
+	// is just the control plane, so unlike deny-secrets an operator can
+	// re-permit one trusted credential via the allow list.
 	ScrubStrict = "strict"
 )
 
-// EnvPolicyForMode builds the EnvPolicy for a named scrub posture, extended with
-// the operator's extra allow/deny entries (names or globs). It returns
-// active=false for ScrubOff and for any UNRECOGNIZED mode — a caller that treats
-// "unknown" as "off" would fail open, so callers that care about failing closed
-// should validate the mode against the constants above BEFORE calling and pick a
-// safe default; this function does not guess a posture it was not given.
+// EnvPolicyForMode builds the EnvPolicy for a named scrub posture, extended
+// with extra allow/deny entries. Returns active=false for ScrubOff and any
+// unrecognized mode — it does not guess a posture; callers that must fail
+// closed should validate mode against the constants above first.
 //
-// The two active postures differ only in their starting allow/deny:
 //   - strict:       allow = DefaultEnvAllow + extra, deny = ControlPlane + extra.
 //   - deny-secrets: allow = "*" + extra,            deny = DefaultEnvDeny + extra.
-//
-// so strict is an allowlist an operator curates (and can re-permit a secret in),
-// while deny-secrets is a denylist that strips known credentials from an
-// otherwise-inherited environment.
 func EnvPolicyForMode(mode string, extraAllow, extraDeny []string) (policy EnvPolicy, active bool) {
 	switch mode {
 	case ScrubStrict:
@@ -52,10 +39,8 @@ func EnvPolicyForMode(mode string, extraAllow, extraDeny []string) (policy EnvPo
 	}
 }
 
-// EnvScrub returns the scrub hook for a posture — a function mapping a parent
-// environment ("KEY=VALUE" entries) to the confined one — or nil when the posture
-// is inactive (ScrubOff / unrecognized), so a caller can wire the result straight
-// into an exec site: `if scrub != nil { cmd.Env = scrub(os.Environ()) }`.
+// EnvScrub returns the scrub function for a posture, or nil when inactive
+// (ScrubOff / unrecognized): `if scrub != nil { cmd.Env = scrub(os.Environ()) }`.
 func EnvScrub(mode string, extraAllow, extraDeny []string) func(parent []string) []string {
 	policy, active := EnvPolicyForMode(mode, extraAllow, extraDeny)
 	if !active {
@@ -64,9 +49,9 @@ func EnvScrub(mode string, extraAllow, extraDeny []string) func(parent []string)
 	return policy.Apply
 }
 
-// ScrubModeValid reports whether mode is one of the recognized postures. Callers
-// resolving operator configuration use it to reject a typo and fall back to a
-// safe default rather than silently disabling the scrub.
+// ScrubModeValid reports whether mode is a recognized posture, so callers can
+// reject a typo and fall back to a safe default instead of silently
+// disabling the scrub.
 func ScrubModeValid(mode string) bool {
 	switch mode {
 	case ScrubOff, ScrubDenySecrets, ScrubStrict:

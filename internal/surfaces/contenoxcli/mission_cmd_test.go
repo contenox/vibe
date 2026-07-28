@@ -21,9 +21,7 @@ import (
 
 // ─── fire: the --wait requirement ───────────────────────────────────────────
 
-// TestUnit_MissionFireRequiresWait pins the honest constraint the help text
-// documents: a fired unit is a child of this process, so fire-and-detach from
-// a one-shot CLI is refused with a teaching error BEFORE anything is opened.
+// TestUnit_MissionFireRequiresWait asserts fire-and-detach from a one-shot CLI is refused with a teaching error before anything is opened.
 func TestUnit_MissionFireRequiresWait(t *testing.T) {
 	require.NoError(t, missionFireCmd.Flags().Set("wait", "false"))
 	err := runMissionFire(missionFireCmd, []string{"some-agent", "do", "the", "thing"})
@@ -86,8 +84,7 @@ func TestUnit_WaitForTerminalMission_HonorsCancel(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
-// TestUnit_WaitForTerminalMission_AlreadyTerminal pins that a mission that
-// finished before the wait started returns immediately, not after a tick.
+// TestUnit_WaitForTerminalMission_AlreadyTerminal asserts a mission that finished before the wait started returns immediately, not after a tick.
 func TestUnit_WaitForTerminalMission_AlreadyTerminal(t *testing.T) {
 	ctx, missions := setupMissionStore(t)
 	m := createOpenMission(t, ctx, missions)
@@ -156,10 +153,7 @@ func TestUnit_RenderMissionShow_SurfacesVerificationWarning(t *testing.T) {
 	require.NotContains(t, out, "did the work", "show prints summaries, not full detail")
 }
 
-// TestUnit_RenderMissionShow_SurfacesPendingAsks pins the discoverability
-// cross-reference show grew instead of a second answer surface: a pending ask
-// prints inline and points at how to answer it, rather than silently sitting
-// invisible unless an operator thinks to run 'mission asks' or 'approvals list'.
+// TestUnit_RenderMissionShow_SurfacesPendingAsks asserts a pending ask prints inline on mission show and points at how to answer it.
 func TestUnit_RenderMissionShow_SurfacesPendingAsks(t *testing.T) {
 	now := time.Now().UTC()
 	m := &missionservice.Mission{
@@ -318,10 +312,7 @@ func TestUnit_MissionAsksCmd_ScopedToOneMission(t *testing.T) {
 	require.Contains(t, got, "approvals respond")
 }
 
-// TestUnit_MissionAsksCmd_NoIDScansOnlyOpenMissions proves the no-argument
-// form iterates open missions only: a terminal mission's ask (left over from
-// before it finished) must not clutter the "what needs a human right now"
-// view.
+// TestUnit_MissionAsksCmd_NoIDScansOnlyOpenMissions asserts the no-argument form iterates open missions only, so a terminal mission's leftover ask does not appear.
 func TestUnit_MissionAsksCmd_NoIDScansOnlyOpenMissions(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "mission-asks-all-cli.db")
 	cmd := testCobraCmd()
@@ -380,10 +371,9 @@ func TestUnit_FormatMissionAge(t *testing.T) {
 
 // ─── fire --wait end to end, against the in-process fleet ───────────────────
 
-// fireFinisherChain is the deterministic, model-free chain the dispatched unit
-// runs: file a result report through its granted mission tool, then bring the
-// mission to rest with mission_finish — the terminal status `mission fire
-// --wait` blocks on. No model, no network.
+// fireFinisherChain is the deterministic, model-free chain the dispatched
+// unit runs: file a result report, then mission_finish to the terminal
+// status `mission fire --wait` blocks on.
 const fireFinisherChain = `{
   "id": "fire-finisher-chain",
   "description": "mission fire e2e: file a result report, then finish landed.",
@@ -405,13 +395,7 @@ const fireFinisherChain = `{
 
 const fireAgentName = "fire-finisher"
 
-// TestSystem_MissionFireWaitLandsInProcess is the acceptance for the CLI's
-// blocking dispatch: `contenox mission fire <agent> <intent> --wait` embeds the
-// fleet in THIS process, dispatches a real child subprocess bound to a
-// deterministic finisher chain, waits for the terminal status, prints the
-// outcome, and exits 0 — with the mission and its report durable in the shared
-// db. Hermetic like the acp in-process e2e (isolated HOME, no serve, no model
-// resolution, no network); see acp_mission_inproc_e2e_test.go for the shape.
+// TestSystem_MissionFireWaitLandsInProcess asserts `contenox mission fire <agent> <intent> --wait` dispatches a real child, waits for the terminal status, prints the outcome, exits 0, and leaves the mission and its report durable in the shared db.
 func TestSystem_MissionFireWaitLandsInProcess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping mission fire system e2e: builds contenox and spawns a real child subprocess")
@@ -429,8 +413,8 @@ func TestSystem_MissionFireWaitLandsInProcess(t *testing.T) {
 
 	baseEnv := append(os.Environ(),
 		"HOME="+homeDir,
-		// The CHILD unit builds an engine; a fake model keeps any accidental
-		// resolution failing loudly while the model-free chain never touches it.
+		// A fake model keeps any accidental resolution failing loudly, since
+		// the model-free chain never touches it.
 		"CONTENOX_DEFAULT_MODEL=fire-e2e-fake-model",
 		"CONTENOX_DEFAULT_PROVIDER=ollama",
 		"CONTENOX_SERVER_URL=",
@@ -447,8 +431,7 @@ func TestSystem_MissionFireWaitLandsInProcess(t *testing.T) {
 	require.NoError(t, os.WriteFile(chainPath, []byte(fireFinisherChain), 0o644))
 
 	// Declare the fired agent: an external `contenox acp --auto` unit bound to
-	// the finisher chain (the chain env also marks it a dispatched unit, so it
-	// hosts no fleet of its own).
+	// the finisher chain.
 	ctx := context.Background()
 	seedDB, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
 	require.NoError(t, err)

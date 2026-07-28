@@ -11,9 +11,7 @@ import (
 type PromptRequest struct {
 	SessionID string
 	Input     string
-	// Images are attachments riding this turn's user message (vision). They
-	// travel on taskengine.Message.Images, persist with the session history,
-	// and route the request to CanVision providers via llmresolver.
+	// Images are attachments riding this turn's user message (vision).
 	Images         []taskengine.ImagePart
 	InputType      taskengine.DataType
 	InputValue     any
@@ -26,12 +24,10 @@ type PromptRequest struct {
 	AgentsMD       string
 	AgentsMDSource string
 
-	// Per-turn context artifacts from Beam ({artifacts: []ChatContextArtifact-like}),
-	// injected into the model-visible user message by ComposeUserInput.
+	// Context carries per-turn artifacts, injected by ComposeUserInput.
 	Context map[string]any
 
-	// ChainRef is the chain path used for this turn (e.g. "default-chain.json").
-	// Stamped onto persisted messages as turn provenance; not used for execution.
+	// ChainRef is the chain path for this turn; stamped as provenance, not used for execution.
 	ChainRef string
 }
 
@@ -40,10 +36,7 @@ type PromptResponse struct {
 	OutputType taskengine.DataType
 	Steps      []taskengine.CapturedStateUnit
 	StopReason StopReason
-	// SuspendedApprovalID is set when StopReason is StopSuspended: the
-	// approval whose verdict resumes the run (== the checkpoint key —
-	// hitlservice.Respond on it triggers ResumeFromCheckpoint via the
-	// registered hook).
+	// SuspendedApprovalID is set when StopReason is StopSuspended (also the checkpoint key).
 	SuspendedApprovalID string
 }
 
@@ -54,9 +47,7 @@ const (
 	StopMaxTokens       StopReason = "max_tokens"
 	StopMaxTurnRequests StopReason = "max_turn_requests"
 	StopCancelled       StopReason = "cancelled"
-	// StopSuspended: the run parked on a human approval past the fast window
-	// and was checkpointed (S6). Not a failure — the run continues once the
-	// approval is answered, in whichever process answers it.
+	// StopSuspended: parked on approval and checkpointed; not a failure.
 	StopSuspended StopReason = "suspended"
 )
 
@@ -98,11 +89,7 @@ func InferStopReason(err error, steps []taskengine.CapturedStateUnit) StopReason
 		return StopMaxTurnRequests
 	}
 
-	// A SUCCESSFUL turn whose last model step was truncated by the output cap
-	// is a max-tokens stop, not end_turn — the provider's verbatim finish
-	// reason surfaces on the captured step (openai/vllm/ollama "length",
-	// anthropic/bedrock "max_tokens", gemini/vertex "MAX_TOKENS", openai
-	// Responses "max_output_tokens").
+	// A truncated last model step is a max-tokens stop, not end_turn.
 	for i := len(steps) - 1; i >= 0; i-- {
 		fr := steps[i].FinishReason
 		if fr == "" {

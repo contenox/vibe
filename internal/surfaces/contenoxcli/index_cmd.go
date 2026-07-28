@@ -1,17 +1,9 @@
-// index_cmd.go holds the two operator verbs over the workspace semantic index —
-// `contenox index` (build/refresh) and `contenox search` (read) — plus the
-// composition-root wiring that hands the same read to the AGENT as the
-// `workspace_search` tool.
-//
-// Self-registering (own init(), like beam_cmd.go and inbox_cmd.go), so this file
-// is the whole wiring for both commands: flags, rendering, confirmation, and the
-// rootCmd.AddCommand calls.
-//
-// The verbs are THIN, per the build-on-services rule. Every decision that costs
-// anything or could be wrong — what to walk, what to chunk, what to re-embed,
-// how to rank, what counts as stale — belongs to internal/services/workspaceindex.
-// What lives here is what a surface owns: resolving the directory, showing the
-// price before it is paid, asking, drawing progress, and rendering citations.
+// index_cmd.go holds the two operator verbs over the workspace semantic
+// index — `contenox index` (build/refresh) and `contenox search` (read) —
+// plus the wiring that hands the same read to the agent as the
+// `workspace_search` tool. Every decision that costs anything or could be
+// wrong belongs to internal/services/workspaceindex; this file only resolves
+// the directory, shows the price before it is paid, asks, and renders.
 package contenoxcli
 
 import (
@@ -37,10 +29,7 @@ import (
 	xterm "golang.org/x/term"
 )
 
-// searchSnippetLines caps how many lines of a hit's chunk `contenox search`
-// prints. A chunk is a paragraph-sized passage; the point of the terminal
-// rendering is to tell you whether the CITATION is the one you want, and the
-// citation is a file:line-range you can open. Six lines does that.
+// searchSnippetLines caps how many lines of a hit's chunk `contenox search` prints.
 const searchSnippetLines = 6
 
 var indexCmd = &cobra.Command{
@@ -109,30 +98,20 @@ func init() {
 
 // ─── wiring ─────────────────────────────────────────────────────────────────
 
-// indexDeps is everything either verb needs after the runtime is up. It exists
-// so the verbs' BEHAVIOUR (plan, confirm, build, render) is testable against a
-// service built over a temp SQLite file and a fake embedder, with no engine, no
-// model and no network.
+// indexDeps is everything either verb needs after the runtime is up, so the
+// verbs are testable against a service with no engine, model or network.
 type indexDeps struct {
 	Svc         workspaceindex.Service
 	WorkspaceID string
 	Model       string
 	Provider    string
-	// EmbedFallback reports that no embedding model was configured and the chat
-	// model is standing in — resolveEmbeddingModel's documented, loud
-	// degradation. The verbs say so once rather than letting the operator
-	// discover it from a provider error N calls later.
+	// EmbedFallback: no embedding model was configured, so the chat model
+	// stands in.
 	EmbedFallback bool
 }
 
-// openWorkspaceIndex is the composition step both verbs share: open the same
-// SQLite everything else uses, build the engine the way chat/doctor build it,
-// and compose the index service over the engine's ONE resolved model route.
-//
-// The engine is what supplies the embedding seam. It is not built for a chain
-// here — nothing prompts — but it is the only thing that knows how to reach a
-// provider, and standing up a second model manager beside it is exactly what
-// enginesvc.Engine.Models exists to prevent.
+// openWorkspaceIndex opens the shared SQLite, builds the engine, and composes
+// the index service over its resolved model route.
 func openWorkspaceIndex(ctx context.Context, cmd *cobra.Command, dir string) (io.Closer, *indexDeps, error) {
 	contenoxDir, err := contenoxDirForWorkspace(cmd, dir)
 	if err != nil {
@@ -172,11 +151,9 @@ func openWorkspaceIndex(ctx context.Context, cmd *cobra.Command, dir string) (io
 
 	store := runtimetypes.New(db.WithoutTransaction())
 	deps := &indexDeps{
-		WorkspaceID: ResolveWorkspaceID(contenoxDir),
-		Model:       model,
-		Provider:    engine.EmbeddingModel.Provider,
-		// The fallback is detected by asking the same question
-		// resolveEmbeddingModel asked: was default-embed-model actually set?
+		WorkspaceID:   ResolveWorkspaceID(contenoxDir),
+		Model:         model,
+		Provider:      engine.EmbeddingModel.Provider,
 		EmbedFallback: strings.TrimSpace(getConfigValue(ctx, store, "default-embed-model")) == "",
 		Svc: workspaceindex.New(
 			store,
@@ -191,26 +168,18 @@ func openWorkspaceIndex(ctx context.Context, cmd *cobra.Command, dir string) (io
 	}), deps, nil
 }
 
-// closerFunc adapts a teardown closure to io.Closer so the verbs can `defer
-// closer.Close()` over a two-step teardown (engine, then database) in the order
-// beam_cmd.go establishes: the engine goes down before the database it reads.
+// closerFunc adapts a teardown closure to io.Closer: engine down, then database.
 type closerFunc func() error
 
 func (f closerFunc) Close() error { return f() }
 
-// getConfigValue reads one `contenox config` key, tolerating a missing one.
-// Thin wrapper so this file states its intent at the call site instead of
-// repeating clikv's signature.
 func getConfigValue(ctx context.Context, store runtimetypes.Store, key string) string {
 	v, _ := getConfigKV(ctx, store, key)
 	return v
 }
 
-// contenoxDirForWorkspace resolves the .contenox directory that IDENTIFIES the
-// workspace rooted at dir. It is ResolveContenoxDir's walk with an explicit
-// starting point instead of the process's cwd, which is what lets `contenox
-// index ~/src/other` and `contenox search q --dir ~/src/other` agree on which
-// workspace they are talking about. --data-dir still wins, as everywhere else.
+// contenoxDirForWorkspace resolves the .contenox dir identifying the
+// workspace rooted at dir, so `index <dir>` and `search --dir <dir>` agree.
 func contenoxDirForWorkspace(cmd *cobra.Command, dir string) (string, error) {
 	if cmd != nil {
 		if dataDir, _ := cmd.Root().PersistentFlags().GetString("data-dir"); dataDir != "" {
@@ -225,9 +194,7 @@ func contenoxDirForWorkspace(cmd *cobra.Command, dir string) (string, error) {
 	for {
 		candidate := filepath.Join(cur, ".contenox")
 		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-			// A .contenox/ without workspace.id is not a workspace (a backup, a
-			// pre-init directory): keep walking up, same rule as
-			// ResolveContenoxDir.
+			// A .contenox/ without workspace.id isn't a workspace; keep walking.
 			if _, werr := os.Stat(filepath.Join(candidate, "workspace.id")); werr == nil {
 				return candidate, nil
 			}
@@ -241,8 +208,7 @@ func contenoxDirForWorkspace(cmd *cobra.Command, dir string) (string, error) {
 }
 
 // resolveWorkspaceDir turns an optional directory argument into an absolute
-// directory, mirroring `beam [dir]` exactly — including its refusal, so a typo
-// that names a FILE is answered the same way by both verbs.
+// directory, mirroring `beam [dir]`'s refusal of a non-directory path.
 func resolveWorkspaceDir(arg string) (string, error) {
 	if strings.TrimSpace(arg) == "" {
 		cwd, err := os.Getwd()
@@ -291,15 +257,13 @@ func runIndexCmd(cmd *cobra.Command, args []string) error {
 	return runIndexWith(ctx, cmd, deps, dir, force, yes)
 }
 
-// runIndexWith is the verb's whole behaviour, over an injected service: plan,
-// price, ask, build, report. Separated from runIndexCmd so the flow — above all
-// the "never spend without asking" part — is tested rather than asserted.
+// runIndexWith is the verb's whole behavior over an injected service: plan,
+// price, ask, build, report.
 func runIndexWith(ctx context.Context, cmd *cobra.Command, deps *indexDeps, dir string, force, yes bool) error {
 	out := cmd.OutOrStdout()
 	errW := cmd.ErrOrStderr()
 
-	// Plan first, ALWAYS. It walks and chunks the tree without making a single
-	// embedding call, which is the only way the number below can be honest.
+	// Plans without a single embedding call, so the number below is honest.
 	plan, err := deps.Svc.Plan(ctx, dir, workspaceindex.BuildOptions{
 		WorkspaceID: deps.WorkspaceID,
 		Force:       force,
@@ -318,8 +282,6 @@ func runIndexWith(ctx context.Context, cmd *cobra.Command, deps *indexDeps, dir 
 		fmt.Fprintln(out, "\nAlready current: nothing changed since the last index.")
 		return nil
 	case plan.EmbedCalls == 0:
-		// Deleted files still have chunks to drop. That costs nothing, so it is
-		// not a spend and nobody is asked.
 		fmt.Fprintf(out, "\nNothing to embed; dropping the chunks of %d removed file(s).\n", plan.FilesDeleted)
 	default:
 		if !yes {
@@ -348,10 +310,7 @@ func runIndexWith(ctx context.Context, cmd *cobra.Command, deps *indexDeps, dir 
 	return nil
 }
 
-// renderIndexPlan prints the cost BEFORE it is spent — the blueprint's
-// cost-honesty rule. Files/chunks describe the whole selected tree; embed calls
-// describe the WORK, and on an incremental refresh those are different numbers,
-// so both are shown rather than one being passed off as the other.
+// renderIndexPlan prints the cost before it is spent.
 func renderIndexPlan(w io.Writer, plan *workspaceindex.BuildPlan, model, provider string) {
 	fmt.Fprintf(w, "Workspace  %s\n", plan.WorkspaceID)
 	fmt.Fprintf(w, "Root       %s\n", plan.Root)
@@ -365,7 +324,6 @@ func renderIndexPlan(w io.Writer, plan *workspaceindex.BuildPlan, model, provide
 		fmt.Fprintf(w, "Dropping the chunks of %s file(s) that no longer exist.\n", commafy(plan.FilesDeleted))
 	}
 	if plan.SkippedBinary > 0 || plan.SkippedOversize > 0 || plan.SkippedGenerated > 0 {
-		// Said out loud so "N files indexed" is never read as "the whole tree".
 		fmt.Fprintf(w, "Skipped %s binary, %s oversized and %s generated file(s).\n",
 			commafy(plan.SkippedBinary), commafy(plan.SkippedOversize), commafy(plan.SkippedGenerated))
 	}
@@ -374,9 +332,8 @@ func renderIndexPlan(w io.Writer, plan *workspaceindex.BuildPlan, model, provide
 	}
 }
 
-// embedTarget names the model the calls go to. The provider is often unset (one
-// backend serving everything), and "qwen2.5:7b · " with a dangling separator
-// reads as a bug in the line an operator is about to approve a spend on.
+// embedTarget names the model the calls go to, omitting a dangling separator
+// when provider is unset.
 func embedTarget(model, provider string) string {
 	if strings.TrimSpace(provider) == "" {
 		return model
@@ -391,14 +348,8 @@ func renderBuildReport(w io.Writer, report *workspaceindex.BuildReport) {
 	fmt.Fprintln(w, "Ask it something: contenox search \"your question\"")
 }
 
-// indexProgress draws build progress as ONE rewritten line on stderr, and only
+// indexProgress draws build progress as one rewritten line on stderr, only
 // when stderr is a terminal.
-//
-// Both halves are deliberate. A line per file would put thousands of lines into
-// the operator's scrollback for a command whose useful output is three lines;
-// and a carriage return written into a pipe or a CI log is noise nobody can
-// read, so a non-terminal gets nothing during the build and the report at the
-// end — which is the whole answer anyway.
 type indexProgress struct {
 	w        io.Writer
 	enabled  bool
@@ -407,8 +358,6 @@ type indexProgress struct {
 }
 
 func newIndexProgress(w io.Writer) *indexProgress {
-	// The check is on the real stderr rather than on w: w may be a test buffer
-	// or a redirect, and neither is a terminal an operator is watching.
 	return &indexProgress{w: w, enabled: xterm.IsTerminal(int(os.Stderr.Fd()))}
 }
 
@@ -438,8 +387,6 @@ func (p *indexProgress) done() {
 	}
 }
 
-// renderProgressLine is the single status line's text. Pure, so what an
-// operator sees mid-build is testable without a terminal.
 func renderProgressLine(ev workspaceindex.Progress) string {
 	switch ev.Phase {
 	case workspaceindex.PhaseEmbedding:
@@ -448,15 +395,12 @@ func renderProgressLine(ev workspaceindex.Progress) string {
 			commafy(ev.Chunks), commafy(ev.ChunksTotal),
 			truncateMiddle(ev.Path, 48))
 	default:
-		// Planning is already on stdout as the cost line, and done is followed
-		// immediately by the report: neither needs a status line of its own.
 		return ""
 	}
 }
 
-// truncateMiddle shortens a path from the MIDDLE, keeping the leading directory
-// and the filename — the two halves that identify a file. Truncating the end
-// would show a column of identical directory prefixes.
+// truncateMiddle shortens a path from the middle, keeping the leading
+// directory and filename that identify it.
 func truncateMiddle(s string, width int) string {
 	r := []rune(s)
 	if len(r) <= width || width < 5 {
@@ -468,9 +412,7 @@ func truncateMiddle(s string, width int) string {
 	return string(r[:head]) + "…" + string(r[len(r)-tail:])
 }
 
-// confirmSpend asks before money is spent. It reads from the command's own
-// stdin so a test can answer it, and it refuses to assume "yes" from a closed
-// stdin: an accidental pipe must never start thousands of billed calls.
+// confirmSpend asks before money is spent; a closed stdin is never "yes".
 func confirmSpend(cmd *cobra.Command, question string) (bool, error) {
 	fmt.Fprintf(cmd.OutOrStdout(), "\n%s [y/N] ", question)
 	sc := bufio.NewScanner(cmd.InOrStdin())
@@ -482,9 +424,7 @@ func confirmSpend(cmd *cobra.Command, question string) (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
-// commafy groups an integer with thousands separators. The counts this command
-// prints are the ones an operator decides on, and 7065 reads as a different
-// order of magnitude than 7,065 at a glance.
+// commafy groups an integer with thousands separators.
 func commafy(n int) string {
 	s := fmt.Sprintf("%d", n)
 	neg := strings.HasPrefix(s, "-")
@@ -543,9 +483,7 @@ func runSearchWith(ctx context.Context, cmd *cobra.Command, deps *indexDeps, que
 		}
 	}
 	if asJSON {
-		// The Hit slice verbatim, so `| jq` sees the same fields the tool and
-		// the service do. An empty result is `[]`, never `null`: a script that
-		// iterates must not have to special-case the empty case.
+		// Empty is `[]`, never `null`, so a script never special-cases it.
 		if hits == nil {
 			hits = []workspaceindex.Hit{}
 		}
@@ -557,10 +495,8 @@ func runSearchWith(ctx context.Context, cmd *cobra.Command, deps *indexDeps, que
 	return nil
 }
 
-// renderSearchHits prints one citation per hit — `path:start-end  score` — with
-// an indented, capped snippet under it. Stale hits are labelled where they are
-// read, not in a footnote: a hit whose file moved underneath is a lie unless it
-// says so on the same line.
+// renderSearchHits prints one citation per hit with an indented, capped
+// snippet; stale hits are labelled inline, not in a footnote.
 func renderSearchHits(w io.Writer, question string, hits []workspaceindex.Hit) {
 	if len(hits) == 0 {
 		fmt.Fprintf(w, "No match for %q.\n", question)
@@ -585,9 +521,8 @@ func renderSearchHits(w io.Writer, question string, hits []workspaceindex.Hit) {
 	}
 }
 
-// writeSnippet prints a chunk indented under its citation, capped in lines and
-// saying how many it withheld. Never silently truncate — the whole feature's
-// credibility is that what it shows is what is there.
+// writeSnippet prints a chunk indented under its citation, capped in lines
+// and saying how many it withheld rather than truncating silently.
 func writeSnippet(w io.Writer, text string) {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	shown := lines
@@ -604,33 +539,24 @@ func writeSnippet(w io.Writer, text string) {
 
 // ─── the agent's half: workspace_search ─────────────────────────────────────
 
-// workspaceSearchRepo is the toolset registered in localToolset, carrying the
-// deferred querier so the composition root can bind it later.
-//
-// It exists because of an ORDERING fact, not a design preference: the local
-// toolset is an INPUT to enginesvc.Build, while the embedding seam the index
-// needs (engine.Models) is an OUTPUT of it. The tool must therefore be
-// constructed before the thing it depends on exists. Rather than stand up a
-// second model manager beside the engine's one — the exact thing
-// enginesvc.Engine.Models was exposed to prevent — the querier is a hole that
-// BuildEngine fills in the same function, four lines later.
+// workspaceSearchRepo carries a deferred querier: the local toolset is an
+// input to enginesvc.Build, but its embedding seam is an output of it, so
+// BuildEngine fills this hole once the engine exists.
 type workspaceSearchRepo struct {
 	taskengine.ToolsRepo
 	querier *deferredQuerier
 }
 
-// newWorkspaceSearchTools builds the unbound toolset. Until bindWorkspaceSearch
-// runs, a call reports plainly that retrieval is not wired up rather than
-// panicking or, worse, answering from nothing.
+// newWorkspaceSearchTools builds the unbound toolset; until bindWorkspaceSearch
+// runs, a call reports that retrieval isn't wired up rather than panicking.
 func newWorkspaceSearchTools(workspaceID string) *workspaceSearchRepo {
 	q := &deferredQuerier{}
 	return &workspaceSearchRepo{ToolsRepo: searchtool.NewTools(q, workspaceID), querier: q}
 }
 
 // bindWorkspaceSearch hands the registered workspace_search toolset the index
-// service, once the engine that supplies its embedding seam exists. A toolset
-// map without the provider (a surface that did not register it) is not an
-// error: nothing is bound and the tool is simply absent.
+// service once the engine's embedding seam exists. A toolset map without the
+// provider is not an error: nothing is bound and the tool is simply absent.
 func bindWorkspaceSearch(tools map[string]taskengine.ToolsRepo, db libdb.DBManager, engine *Engine) {
 	repo, ok := tools[searchtool.ToolsProviderName].(*workspaceSearchRepo)
 	if !ok || engine == nil {
@@ -638,9 +564,8 @@ func bindWorkspaceSearch(tools map[string]taskengine.ToolsRepo, db libdb.DBManag
 	}
 	model := strings.TrimSpace(engine.EmbeddingModel.Name)
 	if model == "" {
-		// No embedding model resolved at all. Leaving the querier unbound is the
-		// honest outcome: the tool then tells the model retrieval is
-		// unavailable, instead of failing inside a provider call every turn.
+		// Leaving the querier unbound: the tool then tells the model retrieval
+		// is unavailable instead of failing inside a provider call.
 		return
 	}
 	repo.querier.bind(workspaceindex.New(
@@ -652,8 +577,8 @@ func bindWorkspaceSearch(tools map[string]taskengine.ToolsRepo, db libdb.DBManag
 }
 
 // deferredQuerier is a searchtool.Querier whose backing service arrives after
-// construction. The mutex is not decoration: binding happens on the goroutine
-// building the engine, and calls arrive on task-engine goroutines.
+// construction; the mutex guards bind (engine goroutine) against concurrent
+// Query calls (task-engine goroutines).
 type deferredQuerier struct {
 	mu  sync.RWMutex
 	svc workspaceindex.Service
@@ -670,10 +595,8 @@ func (d *deferredQuerier) Query(ctx context.Context, workspaceID, question strin
 	svc := d.svc
 	d.mu.RUnlock()
 	if svc == nil {
-		// Reported as ErrNoIndex on purpose: from the model's side "there is
-		// nothing to search here, ask the human to run contenox index" is
-		// exactly true, and it is the one degradation the tool already renders
-		// as a runnable instruction rather than a fault.
+		// ErrNoIndex: from the model's side, "nothing to search, run contenox
+		// index" is exactly true, and it's rendered as a runnable instruction.
 		return nil, fmt.Errorf("%w: no embedding model is configured (contenox config set default-embed-model <name>)", workspaceindex.ErrNoIndex)
 	}
 	return svc.Query(ctx, workspaceID, question, topK)

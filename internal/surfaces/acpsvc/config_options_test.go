@@ -30,8 +30,7 @@ func setupConfigOptionsDB(t *testing.T) (context.Context, libdb.DBManager) {
 
 func TestUnit_SessionConfigOptionsExposeModelPolicyAndThink(t *testing.T) {
 	ctx, db := setupConfigOptionsDB(t)
-	// A decoy global value: per-session display must ignore the global KV entirely
-	// (the HITL policy is session-scoped, like model/think/token-limit).
+	// Decoy global value: per-session display must ignore the global KV.
 	require.NoError(t, clikv.SetHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction()), "strict"))
 
 	tr := &Transport{
@@ -159,13 +158,7 @@ func TestUnit_SetSessionConfigOptionUpdatesSessionAndPolicyConfig(t *testing.T) 
 	require.Equal(t, "xhigh", optionByID(t, resp.ConfigOptions, configIDThink).CurrentValue)
 }
 
-// TestUnit_HITLPolicyIsPerSessionIndependent proves the fix's core invariant:
-// two live sessions on ONE transport carry independent HITL policy selections,
-// each drives its own config-option CurrentValue and its own enforcement policy
-// name (resolveSessionHITLPolicy — what prompt.go injects into the turn context),
-// and NEITHER write touches the global cli.hitl-policy-name KV. Together with the
-// hitlservice ctx-override tests this is the end-to-end guarantee that two
-// concurrent ACP sessions gate independently through the shared engine.
+// TestUnit_HITLPolicyIsPerSessionIndependent pins: two sessions on one transport carry independent HITL policies and never touch the global KV.
 func TestUnit_HITLPolicyIsPerSessionIndependent(t *testing.T) {
 	ctx, db := setupConfigOptionsDB(t)
 
@@ -187,8 +180,6 @@ func TestUnit_HITLPolicyIsPerSessionIndependent(t *testing.T) {
 	sessA.driver = &nativeDriver{t: tr}
 	sessB.driver = &nativeDriver{t: tr}
 
-	// Session A picks the permissive-in-name "dev" policy; session B stays on the
-	// configured default (sentinel).
 	_, err := tr.SetSessionConfigOption(ctx, libacp.SetSessionConfigOptionRequest{
 		SessionID: sidA, ConfigID: configIDHITLPolicy, Value: libacp.StringConfigValue("dev"),
 	})
@@ -198,19 +189,15 @@ func TestUnit_HITLPolicyIsPerSessionIndependent(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Independent per-session state.
 	require.Equal(t, "dev", sessA.hitlPolicy())
 	require.Equal(t, "strict", sessB.hitlPolicy())
 
-	// Independent enforcement policy names (what prompt.go injects per turn).
 	require.Equal(t, "dev", tr.resolveSessionHITLPolicy(sessA))
 	require.Equal(t, "strict", tr.resolveSessionHITLPolicy(sessB))
 
-	// Independent config-option display.
 	require.Equal(t, "dev", optionByID(t, tr.sessionConfigOptions(ctx, sessA), configIDHITLPolicy).CurrentValue)
 	require.Equal(t, "strict", optionByID(t, tr.sessionConfigOptions(ctx, sessB), configIDHITLPolicy).CurrentValue)
 
-	// The global KV was never written by either session.
 	require.Empty(t, clikv.ReadHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction())),
 		"per-session HITL selection must never write the global cli.hitl-policy-name KV")
 }
@@ -281,18 +268,12 @@ func TestUnit_WorkspaceConfigOptionsMirrorFreshSession(t *testing.T) {
 	limit := optionByID(t, options, configIDTokenLimit)
 	require.Equal(t, "0", limit.CurrentValue)
 
-	// Byte-identical to what the first session (seeded from the same defaults)
-	// carries — the single source of truth for the option shapes.
+	// Byte-identical to a first session seeded from the same defaults.
 	sess := &sessionEntry{Provider: tr.provider(), Model: tr.model(), Think: tr.thinkDefault(), driver: &nativeDriver{t: tr}}
 	require.Equal(t, tr.sessionConfigOptions(ctx, sess), options)
 }
 
-// TestUnit_CommandValueDomainsProjectTheAdvertisedOptions pins the wire shape a
-// value-completing surface reads: the four slash commands that take a value get
-// their domain from the SAME options an ACP editor renders as dropdowns, never
-// from a list beam holds. It runs the projection over the real advertised
-// options rather than a handcrafted fixture, so a change to what the selects
-// carry shows up here.
+// TestUnit_CommandValueDomainsProjectTheAdvertisedOptions pins: the four value-taking commands' domains come from the same options an editor renders as dropdowns.
 func TestUnit_CommandValueDomainsProjectTheAdvertisedOptions(t *testing.T) {
 	ctx, db := setupConfigOptionsDB(t)
 
@@ -312,16 +293,10 @@ func TestUnit_CommandValueDomainsProjectTheAdvertisedOptions(t *testing.T) {
 	options := tr.sessionConfigOptions(ctx, sess)
 	domains := CommandValueDomains(options)
 
-	// /model completes BARE model names — what handleModel persists — not the
-	// "provider/model" pairs the select carries.
 	require.Equal(t, []string{"gpt-5-mini", "claude-sonnet-4"}, domains[CommandModel])
 
-	// /provider completes the providers that actually have a model to run: the
-	// model select's groups, current provider first.
 	require.Equal(t, []string{"openai", "anthropic"}, domains[CommandProvider])
 
-	// /think completes the reasoning levels verbatim, and every one of them is a
-	// level the command itself accepts.
 	require.Equal(t, []string{"auto", "off", "minimal", "low", "medium", "high", "xhigh"}, domains[CommandThink])
 	for _, level := range domains[CommandThink] {
 		normalized, err := reasoning.Normalize(level)
@@ -329,29 +304,18 @@ func TestUnit_CommandValueDomainsProjectTheAdvertisedOptions(t *testing.T) {
 		require.Equal(t, level, normalized)
 	}
 
-	// /policy completes the preset names, WITHOUT the "use the configured
-	// default" sentinel — that is a dropdown affordance, not a name
-	// clikv.SetHITLPolicy should ever be handed.
 	require.Equal(t, []string{"strict", "dev"}, domains[CommandPolicy])
 	require.NotContains(t, domains[CommandPolicy], hitlPolicyDefaultValue)
 
-	// Every completed model recombines into a value set_config_option accepts,
-	// which is the round-trip that keeps the two surfaces on one truth.
 	model := optionByID(t, options, configIDModel)
 	require.True(t, configOptionHasValue(model, modelConfigValue("openai", domains[CommandModel][0])))
 	require.True(t, configOptionHasValue(model, modelConfigValue("anthropic", domains[CommandModel][1])))
 
-	// The commands that take no value get no domain, so a surface completing
-	// arguments leaves them alone.
 	require.NotContains(t, domains, "compact")
 	require.NotContains(t, domains, "mission")
 }
 
-// TestUnit_CommandValueDomainsKeepSlashedModelNamesWhole guards the one place
-// the projection could mangle a name: Gemini reports models as
-// "models/gemini-…", so the select value is "gemini/models/gemini-…" and only
-// stripping the GROUP prefix (not splitting on the first "/") recovers the name
-// the provider actually answers to.
+// TestUnit_CommandValueDomainsKeepSlashedModelNamesWhole pins: stripping the group prefix (not splitting on first "/") preserves slash-bearing model names like "models/gemini-…".
 func TestUnit_CommandValueDomainsKeepSlashedModelNamesWhole(t *testing.T) {
 	ctx, db := setupConfigOptionsDB(t)
 
@@ -367,10 +331,7 @@ func TestUnit_CommandValueDomainsKeepSlashedModelNamesWhole(t *testing.T) {
 	require.Equal(t, []string{"gemini"}, domains[CommandProvider])
 }
 
-// TestUnit_CommandValueDomainsCarryRegisteredModels is the maintainer's case in
-// one test: the models a surface offers for /model are the models the RUNTIME
-// has, discovered through the same reconcile the ACP model dropdown reads — a
-// backend that came up after startup included.
+// TestUnit_CommandValueDomainsCarryRegisteredModels pins: /model's domain is the runtime's discovered models, not a hardcoded list.
 func TestUnit_CommandValueDomainsCarryRegisteredModels(t *testing.T) {
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "acp-value-domains.db"), runtimetypes.SchemaSQLite)
@@ -414,10 +375,7 @@ func TestUnit_CommandValueDomainsCarryRegisteredModels(t *testing.T) {
 	require.Equal(t, []string{"openai"}, domains[CommandProvider])
 }
 
-// TestUnit_CommandValueDomainsAreEmptyWithoutOptions pins the "never a gate"
-// half: no options (an externally delegated session forwards a downstream
-// agent's set, which carries none of beam's chain selects) means no domains,
-// and a surface must then let anything the operator types through.
+// TestUnit_CommandValueDomainsAreEmptyWithoutOptions pins: no options means no domains, never a gate on what the operator types.
 func TestUnit_CommandValueDomainsAreEmptyWithoutOptions(t *testing.T) {
 	require.Empty(t, CommandValueDomains(nil))
 	require.Empty(t, CommandValueDomains([]libacp.SessionConfigOption{

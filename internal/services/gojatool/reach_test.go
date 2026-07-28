@@ -11,19 +11,8 @@ import (
 	"github.com/contenox/beam/internal/libtracker"
 )
 
-// ---------------------------------------------------------------------------
-// THE DECLARED REACH: a script says what it touches, and is held to it.
-//
-// This is defence in depth, not the policy boundary — the envelope still
-// evaluates every call that gets through. What the declaration adds is the one
-// thing the envelope structurally cannot give: a statement of reach that exists
-// BEFORE the script runs, so an approval card for a script tool can answer "what
-// will this touch?" with something other than "unknown".
-//
-// The field is optional, because every script written before it existed must go
-// on working — and the loader says once, at startup, which scripts are in that
-// state (reportUndeclaredReach), so unrestricted is never the invisible default.
-// ---------------------------------------------------------------------------
+// The declared reach: a script says what it touches via `tools: [...]`, and
+// is held to it. The field is optional; when absent, reach is unrestricted.
 
 // reachScript builds a one-tool script with the given `tools` declaration
 // literal (pass "" for no declaration at all) that calls each of `calls`.
@@ -68,7 +57,8 @@ func runScript(t *testing.T, ts *Toolset, name string) (*Result, error) {
 	return ts.sb.execScript(context.Background(), sc, map[string]any{})
 }
 
-// TestUnit_Reach_EnforcementMatrix is the whole rule in one table.
+// A declared call is permitted, an undeclared one is refused before it
+// reaches the host, and no declaration means unrestricted.
 func TestUnit_Reach_EnforcementMatrix(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -92,9 +82,7 @@ func TestUnit_Reach_EnforcementMatrix(t *testing.T) {
 			declaration: `["local_fs.read_file"]`,
 			calls:       []string{"git.git_status"},
 			wantErr:     true,
-			// The refusal names the address, what was declared, and the file to
-			// edit: the operator must not have to guess any of the three.
-			teaches: []string{"git.git_status", "does not declare", "local_fs.read_file", ".js"},
+			teaches:     []string{"git.git_status", "does not declare", "local_fs.read_file", ".js"},
 		},
 		{
 			name:        "a near miss is still a miss",
@@ -143,8 +131,6 @@ func TestUnit_Reach_EnforcementMatrix(t *testing.T) {
 					t.Errorf("the refusal does not teach %q: %v", want, err)
 				}
 			}
-			// Refused BEFORE the trip: the point of declaring reach is that the
-			// call never happens, not that it is undone afterwards.
 			if calls := host.recorded(); len(calls) != 0 {
 				t.Errorf("a refused call still reached the host: %+v", calls)
 			}
@@ -152,9 +138,8 @@ func TestUnit_Reach_EnforcementMatrix(t *testing.T) {
 	}
 }
 
-// TestUnit_Reach_GojaEvalIsUnrestricted keeps the model's own sandbox tool on the
-// old terms: goja_eval has no descriptor and therefore no declaration, and its
-// reach is bounded by the envelope alone, exactly as before.
+// goja_eval has no descriptor and therefore no declaration; its reach is
+// bounded by the envelope alone.
 func TestUnit_Reach_GojaEvalIsUnrestricted(t *testing.T) {
 	sb := textHost(t, "ok")
 	if _, err := eval(t, sb, `host.tool("local_fs.read_file", {path: "x"}).text`, 0); err != nil {
@@ -162,8 +147,7 @@ func TestUnit_Reach_GojaEvalIsUnrestricted(t *testing.T) {
 	}
 }
 
-// TestUnit_Reach_LoaderValidatesTheDeclaration: a declaration that can never be
-// honoured is found while the operator is editing the file, not mid-run.
+// A declaration that can never be honoured is refused at load, not mid-run.
 func TestUnit_Reach_LoaderValidatesTheDeclaration(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -203,11 +187,8 @@ func TestUnit_Reach_LoaderValidatesTheDeclaration(t *testing.T) {
 	}
 }
 
-// TestUnit_Reach_IsExposedForAnApprovalCard pins the metadata an approval
-// surface reads. The two states that both present as an empty list must stay
-// distinguishable: "declares it reaches nothing" and "declares nothing" are
-// opposite answers, and a card that renders them the same way tells an operator
-// the safest possible thing about the least safe case.
+// Script.Tools/ToolsDeclared distinguish "declares it reaches nothing" from
+// "declares nothing", in declaration order, for an approval surface.
 func TestUnit_Reach_IsExposedForAnApprovalCard(t *testing.T) {
 	ts, _ := reachToolset(t, map[string]string{
 		"declared.js":   reachScript("declared", `["git.git_status", "local_fs.read_file"]`),
@@ -224,8 +205,6 @@ func TestUnit_Reach_IsExposedForAnApprovalCard(t *testing.T) {
 	if !declared.ToolsDeclared {
 		t.Error("a declaring script must report ToolsDeclared")
 	}
-	// Declaration ORDER is preserved: a card shows the operator what the author
-	// wrote, not what a map iteration produced.
 	if strings.Join(declared.Tools, ",") != "git.git_status,local_fs.read_file" {
 		t.Errorf("Tools = %v", declared.Tools)
 	}
@@ -238,8 +217,7 @@ func TestUnit_Reach_IsExposedForAnApprovalCard(t *testing.T) {
 	}
 }
 
-// recordingTracker records the (operation, subject, error) of every report so a
-// test can assert the load-time diagnostic actually fired.
+// recordingTracker records the (operation, subject, error) of every report.
 type recordingTracker struct {
 	mu     sync.Mutex
 	events []trackedEvent
@@ -276,11 +254,8 @@ func (r *recordingTracker) errorsFor(op, subject string) []trackedEvent {
 
 var _ libtracker.ActivityTracker = (*recordingTracker)(nil)
 
-// TestUnit_Reach_UndeclaredScriptsAreReportedOnce proves the load-time
-// diagnostic survives: unrestricted reach must never be the INVISIBLE default,
-// so the loader says once, naming every script in that state, that these tools
-// may call anything the envelope allows. The report goes to the tracker — this
-// repo's single instrumentation seam — not to a log call of its own.
+// The loader reports every undeclared-reach script once, via the tracker,
+// naming the undeclared scripts and omitting the declared ones.
 func TestUnit_Reach_UndeclaredScriptsAreReportedOnce(t *testing.T) {
 	tracker := &recordingTracker{}
 	ts, err := New(Config{
@@ -326,8 +301,7 @@ func TestUnit_Reach_UndeclaredScriptsAreReportedOnce(t *testing.T) {
 	}
 }
 
-// TestUnit_Reach_FullyDeclaredLoadReportsNothing pins the volume: a directory in
-// which every script declares its reach is silent.
+// A directory in which every script declares its reach reports nothing.
 func TestUnit_Reach_FullyDeclaredLoadReportsNothing(t *testing.T) {
 	tracker := &recordingTracker{}
 	ts, err := New(Config{
@@ -347,8 +321,7 @@ func TestUnit_Reach_FullyDeclaredLoadReportsNothing(t *testing.T) {
 	}
 }
 
-// TestUnit_Reach_DuplicatesCollapse: a repeated address is a typo, not an error
-// worth failing a build over.
+// A repeated declared address collapses to one, without breaking the call.
 func TestUnit_Reach_DuplicatesCollapse(t *testing.T) {
 	ts, _ := reachToolset(t, map[string]string{
 		"dup.js": reachScript("dup", `["git.git_status", "git.git_status"]`, "git.git_status"),

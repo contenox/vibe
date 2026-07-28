@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/contenox/beam/internal/libsandbox"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/spf13/cobra"
 )
 
@@ -14,13 +15,15 @@ var sandboxCmd = &cobra.Command{
 	Short: "Inspect the sandbox that confines the shells contenox spawns.",
 	Long: `Inspect the confinement contenox applies to the shells it spawns.
 
-Today this covers the environment scrub: which of serve's own environment
+Today this covers the environment scrub: which of the process's own environment
 variables an agent-reachable shell (the local_shell tool and the shell_session
-PTY) or the interactive terminal is allowed to inherit, so credentials in serve's
-environment do not leak into a shell an agent can drive.
+PTY) is allowed to inherit, so credentials in that environment do not leak into
+a shell an agent can drive.
 
-Configure it with the SANDBOX_SHELL_SCRUB / SANDBOX_TERMINAL_SCRUB modes and the
-SANDBOX_ENV_ALLOW / SANDBOX_ENV_DENY lists (see 'contenox serve --help').`,
+Configure it with the SANDBOX_SHELL_SCRUB / SANDBOX_TERMINAL_SCRUB modes ("off",
+"deny-secrets", "strict") and the SANDBOX_ENV_ALLOW / SANDBOX_ENV_DENY lists
+(comma/whitespace-separated names or single-wildcard globs like "LC_*"). Operator-
+injected variables layer on top regardless of mode — see 'contenox shell-env'.`,
 }
 
 var sandboxEnvCmd = &cobra.Command{
@@ -48,14 +51,21 @@ func runSandboxEnv(cmd *cobra.Command, _ []string) error {
 	if err := loadEnvConfig(config); err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	// nil injector: this preview reports the SCRUB only (what serve's own
-	// environment keeps/strips). The operator-injected variables layered on top are
-	// listed separately by `contenox shell-env list`.
-	shellScrub, terminalScrub := resolveSandboxScrubs(config, nil, cmd.ErrOrStderr())
 
-	// nil warnW on the two re-resolutions below: they ask the same question of
-	// the same values resolveSandboxScrubs just answered, purely to label the
-	// output. The typo warning is the call above's to make, once per bad value.
+	db, _, err := openConfigDB(cmd)
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer db.Close()
+
+	// Same composition every spawn root applies (resolvedSandboxEnv): this
+	// preview can never drift from what a spawned shell actually receives.
+	shellScrub, terminalScrub, err := resolvedSandboxEnv(db, libtracker.NoopTracker{}, cmd.ErrOrStderr())
+	if err != nil {
+		return fmt.Errorf("resolve sandbox env: %w", err)
+	}
+
+	// nil warnW below: purely relabeling values the call above already resolved.
 	terminal, _ := cmd.Flags().GetBool("terminal")
 	surface := "agent shells (local_shell, shell_session)"
 	mode := resolveScrubMode(config.SandboxShellScrub, libsandbox.ScrubDenySecrets, nil)

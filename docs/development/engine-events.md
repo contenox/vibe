@@ -2,7 +2,7 @@
 
 Status: normative. This document is THE contract between the task engine's
 event stream and its consumers — the ACP translators today, the beam TUI's
-engine-bridge next, and the S6 checkpoint machinery. The matrix below is
+engine-bridge next, and the checkpoint machinery. The matrix below is
 asserted in CI:
 
 - `internal/kernel/taskengine/events_contract_test.go` drives representative
@@ -15,8 +15,8 @@ asserted in CI:
 
 Every kind the engine can emit is enumerated by
 `taskengine.AllTaskEventKinds()`; adding a kind without updating this document
-and those tests fails CI. When code and this document disagree, the slice is
-not done — fix the drift, never loosen the assertion.
+and those tests fails CI. When code and this document disagree, fix the
+drift — never loosen the assertion.
 
 ## 1. The event type
 
@@ -39,7 +39,7 @@ Fields present on (almost) every event:
 ## 2. Hierarchical addresses (`scope`)
 
 `EventScope{chain, task, tool_call}` is the structured address of an event —
-the same address `CapturedStateUnit.Scope` carries and the address S6
+the same address `CapturedStateUnit.Scope` carries and the address
 checkpoints name resume positions with. Population invariants:
 
 - **`scope.chain`** is set on *every* event emitted during an `ExecEnv` run
@@ -59,7 +59,7 @@ checkpoints name resume positions with. Population invariants:
   IDs across turns. For `tools`-handler tasks it is a synthetic per-invocation
   ID derived from the task ID.
 
-**What S6 checkpointing can rely on:** `(scope.chain, scope.task, retry)`
+**What checkpointing can rely on:** `(scope.chain, scope.task, retry)`
 uniquely names a task attempt within a run; `(scope.chain, scope.task,
 scope.tool_call)` uniquely names one tool invocation; `tool_call.approval_id`
 equals `scope.tool_call` on the execute_tool_calls paths, so a checkpoint
@@ -83,7 +83,7 @@ representative event (see §6).
 | `step_failed` | a task attempt fails | `error` (`output_type` empty) | last event of a failed attempt; a retrying task emits a fresh `step_started` after it | yes | 1 unless tool-bearing handler |
 | `chain_completed` | the run ends successfully | `output_type` | final event of the run | yes | 0 |
 | `chain_failed` | the run ends in error | `error` | final event of the run | yes | 0 |
-| `chain_suspended` | the run parks on a pending human approval past the fast window and checkpoints (S6) | `approval_id` (= the checkpoint key = `scope.tool_call`), `scope.{chain,task,tool_call}` — the full S5 address of the interrupt point | final event of the run **segment**; published only after the checkpoint is durably persisted, so a consumer reacting to it can already resume | yes | 0 (the permission flow's approval card is the suspension UI) |
+| `chain_suspended` | the run parks on a pending human approval past the fast window and checkpoints | `approval_id` (= the checkpoint key = `scope.tool_call`), `scope.{chain,task,tool_call}` — the full address of the interrupt point | final event of the run **segment**; published only after the checkpoint is durably persisted, so a consumer reacting to it can already resume | yes | 0 (the permission flow's approval card is the suspension UI) |
 | `approval_requested` | HITL machinery (hitlservice/localtools) needs a human verdict for a tool call | `approval_id`, `tool_name`, `approval_args`, `approval_diff`, `hook_name`, `hitl_*` | between the affected call's `tool_call_pending` and `tool_call` | yes | 0 (rendered by the permission flow, not the event translator) |
 | `hitl_decision` | a HITL policy resolves | `hitl_action`, `hitl_reason`, `hitl_policy_*`, `hitl_matched_rule`, `hitl_timeout_s` | after its `approval_requested` | yes | 0 |
 | `tool_call_pending` | execute_tool_calls is about to run one resolvable model-requested call | `tool_name`, `approval_id` = `scope.tool_call`, `approval_args` | before the matching `tool_call` (same `approval_id`) | yes | 1 |

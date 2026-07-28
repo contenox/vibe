@@ -9,26 +9,15 @@ import (
 
 // ErrSessionBusy reports that a session already has a turn in flight, so an
 // out-of-band prompt was not started. It is a "not now", not a failure: the
-// caller's fallback (a human answering the same question) is always still there.
+// caller's human-in-the-loop fallback still applies.
 var ErrSessionBusy = fmt.Errorf("acpsvc: the session already has a turn in flight")
 
-// PromptContenoxSession runs an out-of-band TURN on a live session, addressed by
-// its contenox (internal) id — the runtime speaking to a session's agent the way
-// its operator would.
-//
-// It exists for exactly one caller today: a mission unit asked its supervisor a
-// question, and the envelope permits the supervising AGENT to answer instead of
-// waiting for a human. The question is put to that agent as a turn; it answers by
-// calling its mission_answer tool, which resolves the unit's ask and unblocks it.
-//
-// Two properties make this safe to do behind the operator's back:
-//
-//   - It REFUSES a session with a turn already running (ErrSessionBusy). One turn
-//     per session is this transport's invariant, and quietly interleaving an
-//     agent-to-agent exchange with something the operator typed would corrupt both.
-//   - It runs the ordinary Prompt path, so the operator SEES it: the turn streams
-//     into their transcript like any other, tools and all. An answer given on
-//     their behalf must not be invisible to them.
+// PromptContenoxSession runs an out-of-band turn on a live session, addressed
+// by its contenox (internal) id, as if the operator had typed it themselves —
+// used when a mission unit's supervisor agent answers on the operator's
+// behalf. It refuses a session with a turn already in flight (ErrSessionBusy,
+// one turn per session is the invariant) and runs through the ordinary Prompt
+// path, so the turn streams into the operator's transcript like any other.
 func (t *Transport) PromptContenoxSession(ctx context.Context, contenoxSessionID, text string) error {
 	sid, ok := t.acpSessionForContenoxID(contenoxSessionID)
 	if !ok {

@@ -13,9 +13,8 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// recordingHost is the five-line fake the one-method HostToolCaller interface
-// buys: no engine, no HITL wrapper, no database, and the bridge is still tested
-// against exactly the contract the real path satisfies.
+// recordingHost is a fake HostToolCaller for testing the bridge without an
+// engine.
 type recordingHost struct {
 	mu    sync.Mutex
 	calls []hostCall
@@ -56,6 +55,8 @@ func sandboxWithHost(t *testing.T, host HostToolCaller) *sandbox {
 	return ts.sb
 }
 
+// A text result arrives as ToolText, a structured result as a plain object, a
+// nil result as null, and arguments cross by value only.
 func TestUnit_Bridge_HostToolRoundTrip(t *testing.T) {
 	host := &recordingHost{
 		reply: func(provider, tool string, args map[string]any) (any, error) {
@@ -72,16 +73,11 @@ func TestUnit_Bridge_HostToolRoundTrip(t *testing.T) {
 	}
 	sb := sandboxWithHost(t, host)
 
-	// A TEXT result arrives wrapped: .text is the deliberate way to parse it,
-	// and the wrapper is what makes the mis-parse impossible to do by accident
-	// (see TestUnit_Bridge_TextResultsCannotBeMisparsedSilently).
 	res := mustEval(t, sb, `host.tool("local_fs.read_file", {path: "README.md"}).text.split("\n").length`)
 	if string(res.Value) != "2" {
 		t.Fatalf("a text tool result did not arrive as ToolText: %s", res.Value)
 	}
 
-	// The address split is what the engine's ToolsCall needs: provider and tool,
-	// separately, exactly as spelled by the script.
 	calls := host.recorded()
 	if len(calls) != 1 || calls[0].provider != "local_fs" || calls[0].tool != "read_file" {
 		t.Fatalf("host saw %+v", calls)
@@ -100,8 +96,6 @@ func TestUnit_Bridge_HostToolRoundTrip(t *testing.T) {
 		t.Fatalf("a nil tool result = %s, want null (and no arguments object is legal)", res.Value)
 	}
 
-	// Arguments are plain data on both sides: a script mutating what it passed
-	// cannot reach back into engine memory, because JSON is the only crossing.
 	mustEval(t, sb, `const a = {path: "p"}; host.tool("local_fs.read_file", a); a.path = "mutated"; 1`)
 	calls = host.recorded()
 	if got := calls[len(calls)-1].args["path"]; got != "p" {
@@ -109,15 +103,14 @@ func TestUnit_Bridge_HostToolRoundTrip(t *testing.T) {
 	}
 }
 
+// The host's error message is preserved verbatim, whether uncaught (ends the
+// run) or caught by the script's own try/catch.
 func TestUnit_Bridge_HostErrorSurfacesAsAThrownException(t *testing.T) {
-	// The host's message is a teaching error written for exactly this moment;
-	// paraphrasing it would throw that away.
 	const hostMsg = "local_fs: cannot read /etc/shadow: outside the allowed directory (recoverable: adjust parameters and retry)"
 	sb := sandboxWithHost(t, HostFunc(func(_ context.Context, _, _ string, _ map[string]any) (any, error) {
 		return nil, errors.New(hostMsg)
 	}))
 
-	// Uncaught: it ends the run, message intact.
 	_, err := eval(t, sb, `host.tool("local_fs.read_file", {path: "/etc/shadow"})`, 0)
 	if err == nil {
 		t.Fatal("a failing host call returned successfully")
@@ -126,7 +119,6 @@ func TestUnit_Bridge_HostErrorSurfacesAsAThrownException(t *testing.T) {
 		t.Fatalf("the host message was not preserved: %q", err)
 	}
 
-	// Caught: an ordinary JS exception, so a script can react to it.
 	res := mustEval(t, sb, `
 		try { host.tool("local_fs.read_file", {path: "/etc/shadow"}); "no throw" }
 		catch (e) { e instanceof Error ? e.message : "wrong type" }`)
@@ -135,9 +127,8 @@ func TestUnit_Bridge_HostErrorSurfacesAsAThrownException(t *testing.T) {
 	}
 }
 
-// A Go panic raised by the host tool path must become an error, not a crash.
-// Without the recover() at the exec boundary this test takes the test binary
-// down: goja re-panics anything that is not one of its own exception types.
+// A Go panic raised by the host tool path becomes an error, not a crash, and
+// the sandbox stays usable afterwards.
 func TestUnit_Bridge_HostPanicBecomesAnError(t *testing.T) {
 	sb := sandboxWithHost(t, HostFunc(func(_ context.Context, _, _ string, _ map[string]any) (any, error) {
 		panic("a tool with a bug dereferenced nil")
@@ -154,14 +145,12 @@ func TestUnit_Bridge_HostPanicBecomesAnError(t *testing.T) {
 		t.Errorf("no severity marker: %q", err)
 	}
 
-	// The sandbox is still usable afterwards — one bad tool does not poison it.
 	if res := mustEval(t, sb, `1+1`); string(res.Value) != "2" {
 		t.Fatalf("the sandbox did not survive the panic: %s", res.Value)
 	}
 }
 
-// Depth is exactly one. This is the rule that keeps the sandbox from being a
-// trampoline back into itself.
+// A script may not call back into a goja-provider tool; depth is exactly one.
 func TestUnit_Bridge_RecursionIntoGojaIsRefused(t *testing.T) {
 	host := &recordingHost{}
 	sb := sandboxWithHost(t, host)
@@ -169,8 +158,6 @@ func TestUnit_Bridge_RecursionIntoGojaIsRefused(t *testing.T) {
 	for _, name := range []string{
 		ToolsProviderName + "." + ToolEval,
 		ToolsProviderName + ".some_script_tool",
-		// Unqualified attempts at this provider's own tools get the real reason
-		// rather than a lecture about the address form.
 		ToolEval,
 		ToolsProviderName,
 	} {
@@ -188,19 +175,18 @@ func TestUnit_Bridge_RecursionIntoGojaIsRefused(t *testing.T) {
 		})
 	}
 
-	// The guard fires BEFORE the host is consulted: it is a structural rule, not
-	// a consequence of what the host happens to answer.
 	if calls := host.recorded(); len(calls) != 0 {
 		t.Fatalf("the host was reached by a refused call: %+v", calls)
 	}
 
-	// Every other provider still goes through.
 	mustEval(t, sb, `host.tool("gointel.go_describe", {symbol: "x"})`)
 	if len(host.recorded()) != 1 {
 		t.Fatal("a legitimate call was refused")
 	}
 }
 
+// Malformed host.tool calls are refused before the host is reached, each with
+// a teaching error naming the working call form.
 func TestUnit_Bridge_MalformedCallsTeach(t *testing.T) {
 	host := &recordingHost{}
 	sb := sandboxWithHost(t, host)
@@ -227,7 +213,6 @@ func TestUnit_Bridge_MalformedCallsTeach(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error %q does not teach %q", err, tc.want)
 			}
-			// Every refusal shows the working form.
 			if !strings.Contains(err.Error(), "host.tool(") {
 				t.Errorf("refusal does not show the call form: %q", err)
 			}
@@ -238,15 +223,16 @@ func TestUnit_Bridge_MalformedCallsTeach(t *testing.T) {
 	}
 }
 
+// With no Host wired, host.tool fails typed; SetHost makes the same toolset
+// work afterwards.
 func TestUnit_Bridge_NoHostWiredIsTyped(t *testing.T) {
-	sb := newTestSandbox(t) // Config{} — no Host
+	sb := newTestSandbox(t)
 
 	_, err := eval(t, sb, `host.tool("local_fs.read_file", {path: "x"})`, 0)
 	if !errors.Is(err, ErrHostUnavailable) {
 		t.Fatalf("error = %v, want ErrHostUnavailable", err)
 	}
 
-	// SetHost closes the construction cycle: the same toolset works afterwards.
 	ts, err := New(Config{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -261,8 +247,8 @@ func TestUnit_Bridge_NoHostWiredIsTyped(t *testing.T) {
 	}
 }
 
-// stubRepo is a minimal taskengine.ToolsRepo, standing in for the engine's
-// aggregate repo so the adapter's ToolsCall shape is asserted without an engine.
+// stubRepo is a minimal taskengine.ToolsRepo standing in for the engine's
+// aggregate repo.
 type stubRepo struct {
 	got *taskengine.ToolsCall
 	in  any
@@ -282,8 +268,8 @@ func (r *stubRepo) GetToolsForToolsByName(context.Context, string) ([]taskengine
 	return nil, nil
 }
 
-// The registration site's one-liner. The ToolsCall it builds is the same shape
-// PersistentRepo.Exec dispatches on: Name is the PROVIDER, ToolName is the tool.
+// HostFromRepo builds a ToolsCall with Name as the provider and ToolName as
+// the tool, and stays nil for a nil repo.
 func TestUnit_Bridge_HostFromRepoBuildsTheEngineCall(t *testing.T) {
 	repo := &stubRepo{out: map[string]any{"ok": true}}
 	ts, err := New(Config{Host: HostFromRepo(repo)})
@@ -309,12 +295,8 @@ func TestUnit_Bridge_HostFromRepoBuildsTheEngineCall(t *testing.T) {
 	}
 }
 
-// A script cannot spin forever through host.tool. This used to be the deadline's
-// job and is now maxHostCalls', because the deadline learned to stop while a host
-// call is in flight (hostState.stopClock — the thing on the other side may be a
-// human reading an approval card, and a 2s budget cannot outlast a person). The
-// PROPERTY under test is unchanged and is the one that matters: the loop ends,
-// promptly, with a refusal that says why.
+// A host.tool loop is bounded by maxHostCalls, not the deadline, and ends
+// promptly with a refusal that says why.
 func TestUnit_Bridge_HostCallLoopIsBounded(t *testing.T) {
 	var calls int64
 	var mu sync.Mutex
@@ -349,16 +331,11 @@ func TestUnit_Bridge_HostCallLoopIsBounded(t *testing.T) {
 	t.Logf("%d host calls in %s before the budget refused the next one", made, elapsed.Round(time.Millisecond))
 }
 
-// TestUnit_Bridge_ADeadlineDoesNotRunWhileAHumanIsReadingACard is the
-// regression test for the bug that live use found: an approve-tier tool means an
-// operator in front of an approval card, no operator answers in 2 seconds, and a
-// deadline that ran through the wait killed every script that reached a gated
-// tool — the headline capability, dead on arrival, and invisible to every unit
-// test in the tree because none of them has a human in it.
+// The deadline pauses while a script is parked inside one host.tool call, and
+// resumes to bound compute afterward, so a slow (e.g. human-gated) call does
+// not exhaust it.
 func TestUnit_Bridge_ADeadlineDoesNotRunWhileAHumanIsReadingACard(t *testing.T) {
 	const deadline = 150 * time.Millisecond
-	// Five times the budget, spent the way a person spends it: parked inside one
-	// host call, not computing.
 	const humanTime = 750 * time.Millisecond
 
 	sb := sandboxWithHost(t, HostFunc(func(_ context.Context, _, _ string, _ map[string]any) (any, error) {
@@ -374,12 +351,10 @@ func TestUnit_Bridge_ADeadlineDoesNotRunWhileAHumanIsReadingACard(t *testing.T) 
 		t.Fatalf("value = %s, want the length of the host's answer", got)
 	}
 
-	// And the budget still bounds COMPUTE after the wait: the clock resumes.
 	_, err = eval(t, sb, `host.tool("local_fs.read_file", {path: "x"}); while(true){}`, deadline)
 	if !errors.Is(err, ErrDeadline) {
 		t.Fatalf("error = %v, want ErrDeadline — the clock did not restart after the host call", err)
 	}
-	// The message reports COMPUTE time, not the wall time a human spent.
 	if strings.Contains(err.Error(), "spent 7") || strings.Contains(err.Error(), "spent 8") {
 		t.Errorf("the deadline error is charging the script for the human's time: %v", err)
 	}

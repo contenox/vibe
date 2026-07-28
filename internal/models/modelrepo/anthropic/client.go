@@ -63,8 +63,7 @@ func (c *anthropicClient) post(ctx context.Context, path string, request any) ([
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: marshal request: %w", err)
 	}
-	// Non-streaming call: bounded end-to-end, retried on 429/529 (Anthropic
-	// overloaded)/5xx with Retry-After honored.
+	// Bounded end-to-end; retried on 429/529 (overloaded)/5xx with Retry-After honored.
 	ctx, cancel := modelrepo.NonStreamingContext(ctx)
 	defer cancel()
 	resp, err := modelrepo.DoWithRetry(ctx, c.httpClient, func() (*http.Request, error) {
@@ -81,10 +80,9 @@ func (c *anthropicClient) post(ctx context.Context, path string, request any) ([
 	return body, nil
 }
 
-// anthropicAPIError builds the API error and wraps it with the typed sentinel
-// matching Anthropic's documented shapes: 429 and 529 (overloaded_error) are
-// rate/capacity limits; a 400 invalid_request_error whose message says the
-// prompt exceeds the context window is a context-length overflow.
+// anthropicAPIError classifies the response into a typed sentinel: 429 and 529
+// (overloaded_error) are rate/capacity limits; a 400 invalid_request_error
+// mentioning the context window is a context-length overflow.
 func anthropicAPIError(status int, body []byte, modelName string) error {
 	err := fmt.Errorf("anthropic API error: %d - %s (model=%s)", status, strings.TrimSpace(string(body)), modelName)
 	var payload struct {

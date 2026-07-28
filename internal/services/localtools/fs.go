@@ -21,55 +21,25 @@ import (
 
 const LocalFSToolsName = "local_fs"
 
-// readBeforeWriteDenial is the LLM-facing message returned when the model tries
-// to mutate an existing file it has not read in this session. The model treats
-// it as a normal tool result and is expected to call read_file then retry. It
-// carries the Rec 5 recoverable-by-correction severity marker like every other
-// correctable local-tools condition.
-//
-// The path substituted here is the project-relative path, not the host
-// absolute path: the schema tells the model paths are relative to the project
-// root, so instructing it to call read_file("/abs/host/path") is an
-// instruction it may not be able to follow.
+// readBeforeWriteDenial is the tool-result message when a mutation is blocked
+// because the model has not read the file this session. The substituted path
+// is project-relative (matching the schema), not the host absolute path.
 const readBeforeWriteDenial = "local_fs: cannot modify existing file %s without reading it first. Call local_fs.read_file(%q) to confirm the current contents, then retry. " + severityRecoverable
 
-// fileUnchangedStub is the tool-result text returned when the model re-reads a
-// file whose content hash is already recorded in this session. The earlier
-// read_file result is still in the conversation context, so re-sending the full
-// content wastes tokens without providing new information.
-//
-// This holds only while that earlier result is still in context. Call
-// InvalidateSessionReads after compaction, or pass force=true.
+// fileUnchangedStub is returned when a re-read matches the hash already
+// recorded for this session, so the content is not resent. Holds only until
+// InvalidateSessionReads or force=true.
 const fileUnchangedStub = "File unchanged since last read — the content from your earlier read_file call in this conversation is still current. Pass force=true if you need the content re-sent."
 
 const readBeforeWriteFullReadDenial = "local_fs: cannot overwrite existing file %s after only reading a line range. Call local_fs.read_file(%q) to read the full current contents, then retry. " + severityRecoverable
 
 const readBeforeWriteStaleReadDenial = "local_fs: cannot modify existing file %s because it changed since you read it. Call local_fs.read_file(%q) to refresh the current contents, then retry. " + severityRecoverable
 
-// ---------------------------------------------------------------------------
-// Results a PROGRAM can trust
-//
-// Two of this toolset's answers are sentences that mean something to a READER
-// and something else — or nothing — to a program:
-//
-//   - fileUnchangedStub is not the file. It means "you already have this", which
-//     is true of a model whose earlier read is still in its context and FALSE of
-//     any caller that never made that read. A goja script that got it treated the
-//     sentence as the file's content (found by live use, 2026-07-27).
-//   - a read-before-write denial is not a receipt. It means "I did nothing", and
-//     a script that reads it as a write result reports a success that never
-//     happened.
-//
-// Both now return a TYPED value whose String() is byte-for-byte the sentence
-// they returned before, so the model-facing result is unchanged (the engine
-// renders a DataTypeString result with fmt.Sprintf("%v", …)). What changes is
-// what a program gets: the unchanged-stub hands over the actual content it was
-// standing in for, and the denial declares itself unusable so the caller throws
-// instead of parsing an apology.
-//
-// The two method names are the whole contract, asserted structurally by whoever
-// consumes them (gojatool/hostresult.go) so neither package imports the other.
-// ---------------------------------------------------------------------------
+// FsUnchangedResult and FsRefusalResult carry a model-facing sentence in
+// String() that a non-model caller must not mistake for real output.
+// ProgramText / ProgramUnusable give such a caller the actual content or an
+// explicit "no result" signal instead; the two method names are the contract,
+// asserted structurally by gojatool/hostresult.go.
 
 // FsUnchangedResult is read_file's session-dedup answer. See fileUnchangedStub.
 type FsUnchangedResult struct {
@@ -78,26 +48,19 @@ type FsUnchangedResult struct {
 	Bytes     int    `json:"bytes"`
 	Unchanged bool   `json:"unchanged"`
 
-	// content is what the stub stands in for. It is unexported because it must
-	// not travel back into the model's context by any route — the entire point
-	// of the stub is that those tokens are already there — and ProgramText is
-	// the one door it leaves by.
+	// content is unexported so it cannot reach the model's context by any
+	// route; ProgramText is the only accessor.
 	content string
 }
 
 func (r FsUnchangedResult) String() string { return fileUnchangedStub }
 
-// ProgramText hands a program the content the stub stood in for.
-//
-// This is the fix for the caveat, not a convenience: "the content from your
-// earlier read_file call in this conversation is still current" is a true
-// sentence about a CONVERSATION, and a program is not in one. Answering a script
-// with the file it asked for keeps the dedup (the model's context is untouched)
-// while removing the only way the optimisation could produce a wrong answer.
+// ProgramText returns the content the stub stood in for, so a non-model
+// caller never mistakes the dedup notice for the file itself.
 func (r FsUnchangedResult) ProgramText() (string, bool) { return r.content, true }
 
-// FsRefusalResult is a soft refusal: a mutation that did NOT happen, reported to
-// the model as an ordinary tool result so it can correct itself and retry.
+// FsRefusalResult is a soft refusal: a mutation that did not happen, reported
+// to the model as an ordinary tool result so it can correct itself and retry.
 type FsRefusalResult struct {
 	Refused bool   `json:"refused"`
 	Reason  string `json:"reason"`
@@ -116,7 +79,7 @@ func fsRefusal(reason string) FsRefusalResult {
 type readRequirement int
 
 const (
-	// requireAnyFileRead is enough for targeted mutators such as sed.
+	// requireAnyFileRead is enough for targeted mutators such as sed and edit_file.
 	requireAnyFileRead readRequirement = iota
 	// requireFullFileRead is required for full-file overwrite via write_file.
 	requireFullFileRead
@@ -124,10 +87,6 @@ const (
 
 // StatFileIO is an optional interface a FileIO implementation may satisfy to
 // serve metadata lookups. Without it, this package falls back to os.Stat.
-//
-// Previously every stat went straight to os.Stat while reads went through
-// FileIO, so a test injecting a mock FileIO still hit the real filesystem for
-// metadata — the abstraction was only half applied.
 type StatFileIO interface {
 	Stat(ctx context.Context, path string) (os.FileInfo, error)
 }
@@ -139,13 +98,14 @@ type StatFileIO interface {
 // file has been read first this session. State ownership lives entirely with
 // this tool — the engine never sees the rule.
 type LocalFSTools struct {
-	allowedDir  string
-	db          libdb.DBManager
-	fileIO      FileIO
-	name        string
-	cwdResolver func(context.Context) string
-	dialect     SQLDialect
-	fileIOIsOS  bool
+	allowedDir    string
+	db            libdb.DBManager
+	fileIO        FileIO
+	name          string
+	cwdResolver   func(context.Context) string
+	dialect       SQLDialect
+	fileIOIsOS    bool
+	onFileMutated func(absPath string)
 }
 
 // Option customises a LocalFSTools instance.
@@ -155,6 +115,23 @@ type FSOption func(*LocalFSTools)
 // Defaults to DialectSQLite.
 func WithSQLDialect(d SQLDialect) FSOption {
 	return func(h *LocalFSTools) { h.dialect = d }
+}
+
+// WithOnFileMutated registers a callback fired with the absolute path after
+// every successful write_file, sed, or edit_file. Nil by default. Kept as a
+// plain func(string) rather than an interface so this package never imports a
+// consumer such as gointel — the composition root wires the two together.
+func WithOnFileMutated(fn func(absPath string)) FSOption {
+	return func(h *LocalFSTools) { h.onFileMutated = fn }
+}
+
+// notifyFileMutated fires the registered onFileMutated callback, if any. Best
+// effort and synchronous: a slow or panicking callback is the composition
+// root's bug, not this package's to guard against.
+func (h *LocalFSTools) notifyFileMutated(absPath string) {
+	if h.onFileMutated != nil {
+		h.onFileMutated(absPath)
+	}
 }
 
 // NewLocalFSTools creates a new instance of LocalFSTools. db may be nil; when
@@ -191,13 +168,11 @@ func NewLocalFSToolsWith(allowedDir string, db libdb.DBManager, io FileIO, name 
 	return h
 }
 
-// Exec handles filesystem tool execution. It is a thin wrapper over
-// execDispatch that stamps every returned error with a fatal-vs-recoverable
-// severity marker (Rec 5, tool-hardening.md): callers can key on
-// "(recoverable: ...)" vs "(fatal: ...)" to decide whether a corrected retry is
-// worthwhile. Soft tool-result strings (read-before-write denials, sed no-match
-// suggestions) carry their own recoverable marker inline and flow through the
-// nil-error path untouched here.
+// Exec wraps execDispatch and stamps every returned error with a
+// fatal-vs-recoverable marker so callers can decide whether a corrected retry
+// is worthwhile. Soft tool-result strings (read-before-write denials, sed
+// no-match suggestions) already carry their own marker inline and pass
+// through the nil-error path unchanged.
 func (h *LocalFSTools) Exec(ctx context.Context, startTime time.Time, input any, debug bool, toolsCall *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	res, dt, err := h.execDispatch(ctx, startTime, input, debug, toolsCall)
 	return res, dt, markSeverity(err)
@@ -239,6 +214,11 @@ func (h *LocalFSTools) execDispatch(ctx context.Context, startTime time.Time, in
 			return nil, taskengine.DataTypeAny, err
 		}
 		return h.writeFile(ctx, args)
+	case "edit_file":
+		if err := rejectUnknownArgs("local_fs.edit_file", args, "path", "old_string", "new_string", "replace_all"); err != nil {
+			return nil, taskengine.DataTypeAny, err
+		}
+		return h.editFile(ctx, args)
 	case "list_dir":
 		if err := rejectUnknownArgs("local_fs.list_dir", args, "path", "recursive", "max_depth", "offset"); err != nil {
 			return nil, taskengine.DataTypeAny, err
@@ -441,8 +421,8 @@ func (h *LocalFSTools) checkToolOutputLimit(ctx context.Context, tool string, pa
 }
 
 // notFound builds a recoverable not-found error with a fuzzy "Did you mean:"
-// clause over the parent directory's entries (Rec 7). Suggestion only — the tool
-// never acts on a fuzzy match (the fuzzy law).
+// clause over the parent directory's entries. Suggestion only — the tool never
+// acts on a fuzzy match.
 func (h *LocalFSTools) notFound(tool, userPath, absPath string) error {
 	msg := fmt.Sprintf("local_fs: %s: %s does not exist", tool, userPath)
 	if hint := didYouMean(filepath.Dir(absPath), filepath.Base(absPath)); hint != "" {
@@ -491,9 +471,8 @@ func (h *LocalFSTools) readFile(ctx context.Context, args map[string]any) (any, 
 			"local_fs: read_file: %s is a directory (%s); use list_dir", display, describePathForError(absPath, info))
 	}
 
-	// Rec 4: read_file gained optional start_line/end_line, so a truncated read
-	// can name "use start_line: N" actionable on the SAME tool. When either is
-	// present this is a ranged (paging) read, delegated to the shared reader.
+	// start_line/end_line, when present, make this a ranged (paging) read,
+	// delegated to the shared reader.
 	if _, hasStart := argFloat(args, "start_line"); hasStart {
 		return h.readFileRange(ctx, args)
 	}
@@ -501,8 +480,8 @@ func (h *LocalFSTools) readFile(ctx context.Context, args map[string]any) (any, 
 		return h.readFileRange(ctx, args)
 	}
 
-	// Sniff before loading: a 512-byte read settles this, whereas sniffing the
-	// already-loaded buffer saves the context but not the I/O.
+	// Sniff before loading: a 512-byte read settles this without the I/O cost
+	// of loading the whole file first.
 	if err := h.refuseBinary(ctx, "read_file", display, absPath); err != nil {
 		return nil, taskengine.DataTypeAny, err
 	}
@@ -510,8 +489,8 @@ func (h *LocalFSTools) readFile(ctx context.Context, args map[string]any) (any, 
 	outLimit, unlimitedOut := h.maxOutputBytesFromPolicy(ctx)
 	readLimit, unlimitedRead := h.maxReadBytesFromPolicy(ctx)
 
-	// A file larger than the read cap cannot be loaded whole. Rec 4: don't dump
-	// a partial; name the exact next step.
+	// A file larger than the read cap cannot be loaded whole; name the exact
+	// next step rather than dumping a partial.
 	if !unlimitedRead && info.Size() > readLimit {
 		return nil, taskengine.DataTypeAny, recoverablef(
 			"local_fs: read_file: %s is %s (%d bytes), over the %d-byte read cap; read a portion with read_file start_line/end_line (e.g. start_line: 1), or raise _max_read_bytes in tools_policies.local_fs to load the whole file",
@@ -546,11 +525,11 @@ func (h *LocalFSTools) readFile(ctx context.Context, args map[string]any) (any, 
 
 	out := string(content)
 	if !unlimitedOut && int64(len(out)) > outLimit {
-		// Rec 4: never truncate silently. Return a line-based head that fits the
-		// output cap and name the exact next step. The file on disk is its own
-		// durable copy, so read_file does not spool — the model pages forward
-		// with start_line. Records a RANGE read only: a truncated read has not
-		// seen the whole file, so it must not authorize a blind overwrite.
+		// Never truncate silently: return a line-based head that fits the
+		// output cap and name the next start_line. The file itself is the
+		// durable copy, so read_file does not spool. Records a range read only
+		// — a truncated read has not seen the whole file and must not
+		// authorize a blind overwrite.
 		head, lastLine, nextLine, _ := streamRange(bytes.NewReader(content), 1, math.MaxInt, outLimit)
 		total := countTextLines(out)
 		h.recordRangeRead(ctx, absPath, content)
@@ -602,23 +581,22 @@ func (h *LocalFSTools) readFileRange(ctx context.Context, args map[string]any) (
 	}
 
 	// Over the read cap: stream the requested range without loading the whole
-	// file (Rec 4). No read marker recorded — an over-cap file cannot be loaded
-	// for mutation, so the read-before-write gate is moot for it.
+	// file. No read marker recorded — an over-cap file cannot be loaded for
+	// mutation, so the read-before-write gate is moot for it.
 	if !unlimitedRead && info.Size() > readLimit {
 		f, err := os.Open(absPath)
 		if err != nil {
 			return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: read_file_range open: %w", err)
 		}
 		defer f.Close()
-		// streamRange reports lastLine/nextLine as ABSOLUTE file line numbers
+		// streamRange reports lastLine/nextLine as absolute file line numbers
 		// when fed the file from its start with a start offset.
 		out, lastLine, nextLine, sErr := streamRange(f, start, end, budget)
 		if sErr != nil {
 			return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: read_file_range stream: %w", sErr)
 		}
-		// Only a BUDGET-driven early stop is a truncation: reaching the
-		// requested end_line returned exactly what was asked for, even though
-		// the file continues past it.
+		// Only a budget-driven early stop is a truncation: reaching the
+		// requested end_line returned exactly what was asked for.
 		if nextLine != 0 && lastLine < end {
 			out += fmt.Sprintf(
 				"\n\nlocal_fs: read_file_range truncated — showed lines %d-%d; output capped at %d bytes. To read the next page call read_file with start_line: %d. %s",
@@ -645,10 +623,10 @@ func (h *LocalFSTools) readFileRange(ctx context.Context, args map[string]any) (
 	out := strings.Join(lines[start-1:e], "\n")
 	h.recordRangeRead(ctx, absPath, content)
 
-	// Rec 4: truncate-and-continue on the output cap rather than erroring.
+	// Truncate-and-continue on the output cap rather than erroring.
 	if budget > 0 && int64(len(out)) > budget {
 		// Here streamRange is fed the extracted range starting at line 1, so
-		// its line numbers are RELATIVE to `start` and must be rebased.
+		// its line numbers are relative to `start` and must be rebased.
 		head, lastLine, nextLine, _ := streamRange(bytes.NewReader([]byte(out)), 1, math.MaxInt, budget)
 		absNext := start + nextLine - 1
 		notice := fmt.Sprintf(
@@ -735,11 +713,10 @@ func (h *LocalFSTools) writeFile(ctx context.Context, args map[string]any) (any,
 		return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: failed to create directories: %w", err)
 	}
 
-	// Close the validate-then-overwrite window as far as a single process can:
-	// re-hash immediately before replacing the bytes. Skipped when read
-	// tracking is off (no DB or no session, e.g. one-shot `contenox run`),
-	// where there is no read-before-write contract to enforce and a blind
-	// write is the expected behaviour.
+	// Re-hash immediately before overwriting to close the validate-then-write
+	// race as far as a single process can. Skipped when read tracking is off
+	// (no DB or session, e.g. one-shot `contenox run`), where a blind write is
+	// expected behaviour.
 	if gate.exists && gate.verified && !h.readTrackingDisabled(ctx) {
 		if unchanged, _ := h.confirmUnchanged(ctx, absPath, gate.hash); !unchanged {
 			h.invalidateReads(ctx, absPath)
@@ -754,6 +731,7 @@ func (h *LocalFSTools) writeFile(ctx context.Context, args map[string]any) (any,
 		return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: failed to write file: %w", err)
 	}
 	h.invalidateReads(ctx, absPath)
+	h.notifyFileMutated(absPath)
 
 	return FsWriteResult{
 		Path:      absPath,
@@ -764,6 +742,119 @@ func (h *LocalFSTools) writeFile(ctx context.Context, args map[string]any) (any,
 		NewSHA256: contentHash([]byte(content)),
 		OldText:   string(oldBytes),
 		NewText:   content,
+	}, taskengine.DataTypeJSON, nil
+}
+
+// FsEditResult is edit_file's success result: exact-string replacement, unlike
+// write_file's full overwrite or sed's regexless-but-scoped substitution.
+type FsEditResult struct {
+	Path         string `json:"path"`
+	Written      bool   `json:"written"`
+	Replacements int    `json:"replacements"`
+	OldBytes     int    `json:"old_bytes"`
+	NewBytes     int    `json:"new_bytes"`
+	OldSHA256    string `json:"old_sha256"`
+	NewSHA256    string `json:"new_sha256"`
+	OldText      string `json:"-"`
+	NewText      string `json:"-"`
+}
+
+func (r FsEditResult) ToolDiff() (string, string, string, bool) {
+	if r.Path == "" || !r.Written || r.OldText == r.NewText {
+		return "", "", "", false
+	}
+	return r.Path, r.OldText, r.NewText, true
+}
+
+// editFile implements edit_file: an exact byte-string replacement, unlike
+// sed's literal-but-implicit pattern or write_file's full overwrite. old_string
+// must be unique in the file unless replace_all is set — an ambiguous match is
+// refused rather than guessed at, same law as sed's fuzzy-match refusal.
+func (h *LocalFSTools) editFile(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
+	path, ok := argString(args, "path")
+	if !ok {
+		return nil, taskengine.DataTypeAny, errors.New("local_fs: path required for edit_file")
+	}
+	oldString, ok := argString(args, "old_string")
+	if !ok {
+		return nil, taskengine.DataTypeAny, errors.New("local_fs: old_string required for edit_file")
+	}
+	if oldString == "" {
+		return nil, taskengine.DataTypeAny, recoverablef("local_fs: edit_file: old_string must not be empty")
+	}
+	newString, ok := argString(args, "new_string")
+	if !ok {
+		return nil, taskengine.DataTypeAny, errors.New("local_fs: new_string required for edit_file")
+	}
+	if oldString == newString {
+		return nil, taskengine.DataTypeAny, recoverablef("local_fs: edit_file: old_string and new_string are identical; nothing to change")
+	}
+	replaceAll, _ := argBool(args, "replace_all")
+
+	absPath, display, info, err := h.resolveTarget(ctx, "edit_file", path)
+	if err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
+	if info.IsDir() {
+		return nil, taskengine.DataTypeAny, recoverablef("local_fs: edit_file: %s is a directory", display)
+	}
+	if err := h.checkFileSizeLimit(ctx, absPath); err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
+	if err := h.refuseBinary(ctx, "edit_file", display, absPath); err != nil {
+		return nil, taskengine.DataTypeAny, err
+	}
+
+	gate := h.requireReadBeforeMutation(ctx, absPath, display, requireAnyFileRead)
+	if gate.denied {
+		return fsRefusal(gate.denial), taskengine.DataTypeString, nil
+	}
+	if !gate.verified {
+		return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: edit_file: could not read %s", display)
+	}
+	oldText := string(gate.content)
+
+	count := strings.Count(oldText, oldString)
+	if count == 0 {
+		return recoverablef(
+			"local_fs: edit_file: old_string not found in %s — the file may differ from what you expect; call read_file and retry with the exact current text",
+			display).Error(), taskengine.DataTypeString, nil
+	}
+	if !replaceAll && count > 1 {
+		return recoverablef(
+			"local_fs: edit_file: old_string occurs %d times in %s; add more surrounding context to make it unique, or set replace_all=true to replace every occurrence",
+			count, display).Error(), taskengine.DataTypeString, nil
+	}
+
+	newText := strings.ReplaceAll(oldText, oldString, newString)
+
+	if !h.readTrackingDisabled(ctx) {
+		if unchanged, _ := h.confirmUnchanged(ctx, absPath, gate.hash); !unchanged {
+			h.invalidateReads(ctx, absPath)
+			return fsRefusal(fmt.Sprintf(readBeforeWriteStaleReadDenial, display, display)), taskengine.DataTypeString, nil
+		}
+	}
+
+	if err := h.writeFileDurable(ctx, absPath, []byte(newText)); err != nil {
+		if isDiskFull(err) {
+			return nil, taskengine.DataTypeAny, fatalf("disk full", "local_fs: failed to write file %s", display)
+		}
+		return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: failed to write file: %w", err)
+	}
+	h.invalidateReads(ctx, absPath)
+	h.notifyFileMutated(absPath)
+
+	newBytes := []byte(newText)
+	return FsEditResult{
+		Path:         absPath,
+		Written:      true,
+		Replacements: count,
+		OldBytes:     len(gate.content),
+		NewBytes:     len(newBytes),
+		OldSHA256:    gate.hash,
+		NewSHA256:    contentHash(newBytes),
+		OldText:      oldText,
+		NewText:      newText,
 	}, taskengine.DataTypeJSON, nil
 }
 
@@ -850,9 +941,9 @@ func (h *LocalFSTools) sed(ctx context.Context, args map[string]any) (any, taske
 	count := strings.Count(window, pattern)
 
 	if count == 0 {
-		// Rec 7 + the fuzzy law: the pattern was not found. SUGGEST the nearest
-		// actual lines and DO NOT mutate — a fuzzy match must never be applied
-		// silently, because a misplaced edit is corruption.
+		// Pattern not found: suggest the nearest lines and leave the file
+		// unchanged. A fuzzy match is never applied — a misplaced edit is
+		// corruption.
 		msg := fmt.Sprintf(
 			"local_fs: sed: pattern %q not found in %s — file left unchanged; correct the pattern and retry. %s",
 			pattern, display, severityRecoverable)
@@ -862,14 +953,9 @@ func (h *LocalFSTools) sed(ctx context.Context, args map[string]any) (any, taske
 		return msg, taskengine.DataTypeString, nil
 	}
 
-	// Ambiguity is refused rather than resolved.
-	//
-	// Unconditional ReplaceAll is the single most dangerous behaviour a
-	// string-replace edit tool can have: replacing a common identifier silently
-	// rewrites every call site and reports the damage only afterwards, in a
-	// count the model has no baseline to judge. Requiring an explicit
-	// all=true or expect_replacements=N makes a wide edit a decision rather
-	// than an accident.
+	// Ambiguous matches are refused rather than guessed at: replacing a common
+	// identifier without confirmation could silently rewrite every call site.
+	// An explicit all=true or expect_replacements=N is required for a wide edit.
 	switch {
 	case hasExpected && count != expected:
 		at := occurrenceLines(window, pattern, scopeStart-1, 5)
@@ -909,6 +995,7 @@ func (h *LocalFSTools) sed(ctx context.Context, args map[string]any) (any, taske
 		return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: failed to write file: %w", err)
 	}
 	h.invalidateReads(ctx, absPath)
+	h.notifyFileMutated(absPath)
 
 	newBytes := []byte(newContent)
 	return FsSedResult{
@@ -1075,8 +1162,7 @@ func (h *LocalFSTools) listOneLevel(ctx context.Context, absRoot, baseRoot strin
 //
 // Symlinks are never followed: os.ReadDir reports a symlinked directory with
 // IsDir() == false, so the walk cannot leave the tree it started in and no
-// per-entry containment re-check is needed. Hoisting that check out of the loop
-// removes several syscalls per file from every listing.
+// per-entry containment re-check is needed.
 func (h *LocalFSTools) walkListDir(
 	ctx context.Context,
 	listRootArg, curAbs, baseRoot, relFromListRoot string,
@@ -1208,8 +1294,11 @@ func (h *LocalFSTools) grep(ctx context.Context, args map[string]any) (any, task
 		return nil, taskengine.DataTypeAny, err
 	}
 	if info.IsDir() {
-		return nil, taskengine.DataTypeAny, recoverablef(
-			"local_fs: grep: %s is a directory; grep searches a single file — use find_files to locate candidates first", display)
+		out, err := h.grepDir(ctx, absPath, display, pattern, useRegex, re)
+		if err != nil {
+			return nil, taskengine.DataTypeAny, err
+		}
+		return out, taskengine.DataTypeString, nil
 	}
 	if err := h.checkFileSizeLimit(ctx, absPath); err != nil {
 		return nil, taskengine.DataTypeAny, err
@@ -1256,11 +1345,8 @@ func (h *LocalFSTools) grep(ctx context.Context, args map[string]any) (any, task
 			continue
 		}
 		entry := fmt.Sprintf("%d: %s", lineNo, line)
-		// Truncate rather than discard.
-		//
-		// Hitting the cap used to return an error, throwing away every match
-		// already found — the model paid for the search and got nothing back,
-		// not even the knowledge of where the matches started.
+		// Truncate rather than discard: a capped result still returns the
+		// matches found so far instead of erroring.
 		if budget > 0 && size+int64(len(entry)+1) > budget {
 			truncated = true
 			lastLine = lineNo - 1
@@ -1285,9 +1371,8 @@ func (h *LocalFSTools) grep(ctx context.Context, args map[string]any) (any, task
 		if len(matches) == 1 {
 			noun = "match"
 		}
-		// Name the policy key that caused the stop, not just the resume line:
-		// an operator reading this needs to know which knob to turn, and that
-		// pointer is the one thing the previous hard-error version got right.
+		// Name the policy key that caused the stop, not just the resume line,
+		// so an operator knows which knob to turn.
 		reason := fmt.Sprintf("output capped at %d bytes (raise _max_output_bytes or _model_context_tokens in tools_policies.local_fs)", budget)
 		if hitCap {
 			reason = fmt.Sprintf("hit the %d-match cap (raise _max_grep_matches in tools_policies.local_fs)", maxMatches)
@@ -1299,10 +1384,197 @@ func (h *LocalFSTools) grep(ctx context.Context, args map[string]any) (any, task
 	return out, taskengine.DataTypeString, nil
 }
 
+// dirGrepMaxMatches hard-caps a directory grep regardless of _max_grep_matches:
+// that policy key is sized for one file, and scanning a whole tree can produce
+// far more hits than a single file ever would.
+const dirGrepMaxMatches = 100
+
+// grepDir implements grep's directory mode: a recursive search across every
+// text file under absRoot, reusing the same filter (skip-dirs, .gitignore,
+// denied substrings) as list_dir and find_files so grep cannot see paths those
+// tools would hide. Binary files, files over the read cap, and unreadable
+// entries are skipped rather than aborting the whole search. Matches are
+// rendered as "relpath:N: text" so hits across files stay distinguishable.
+func (h *LocalFSTools) grepDir(ctx context.Context, absRoot, display, pattern string, useRegex bool, re *regexp.Regexp) (string, error) {
+	filter := h.entryFilterFor(ctx, absRoot)
+	baseRoot, baseErr := h.absAllowedDir(ctx)
+	if baseErr != nil {
+		baseRoot = absRoot
+	}
+	maxDepth := h.maxFindDepthFromPolicy(ctx)
+	maxScan := h.maxListEntriesScannedFromPolicy(ctx)
+	readLimit, unlimitedRead := h.maxReadBytesFromPolicy(ctx)
+
+	maxMatches := h.maxGrepMatchesFromPolicy(ctx)
+	if maxMatches > dirGrepMaxMatches {
+		maxMatches = dirGrepMaxMatches
+	}
+	budget, unlimitedOut := h.maxOutputBytesFromPolicy(ctx)
+	if unlimitedOut {
+		budget = 0
+	}
+	if budget > 1024 {
+		budget -= 512
+	}
+
+	var (
+		matches   []string
+		size      int64
+		scanned   int
+		truncated bool
+		hitCap    bool
+	)
+
+	walkErr := filepath.WalkDir(absRoot, func(walkPath string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // an unreadable entry does not abort an otherwise useful search
+		}
+		if truncated {
+			return filepath.SkipAll
+		}
+		rel, relErr := filepath.Rel(absRoot, walkPath)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		relFromBase := rel
+		if r, e := filepath.Rel(baseRoot, walkPath); e == nil {
+			relFromBase = filepath.ToSlash(r)
+		}
+
+		if d.IsDir() {
+			if filter.skip(relFromBase, d.Name(), true) {
+				return filepath.SkipDir
+			}
+			if strings.Count(rel, "/")+1 > maxDepth {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		scanned++
+		if maxScan > 0 && scanned > maxScan {
+			truncated = true
+			return filepath.SkipAll
+		}
+		if filter.skip(relFromBase, d.Name(), false) {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		if !unlimitedRead && info.Size() > readLimit {
+			return nil
+		}
+		if binary, sniffErr := sniffBinaryFile(walkPath); sniffErr != nil || binary {
+			return nil
+		}
+		content, readErr := h.fileIO.ReadFile(ctx, walkPath)
+		if readErr != nil {
+			return nil
+		}
+
+		for lineNo, line := range strings.Split(string(content), "\n") {
+			var matched bool
+			if useRegex {
+				matched = re.MatchString(line)
+			} else {
+				matched = strings.Contains(line, pattern)
+			}
+			if !matched {
+				continue
+			}
+			entry := fmt.Sprintf("%s:%d: %s", rel, lineNo+1, line)
+			if budget > 0 && size+int64(len(entry)+1) > budget {
+				truncated = true
+				return filepath.SkipAll
+			}
+			matches = append(matches, entry)
+			size += int64(len(entry) + 1)
+			if len(matches) >= maxMatches {
+				truncated = true
+				hitCap = true
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return "", fmt.Errorf("local_fs: grep: %w", walkErr)
+	}
+
+	out := strings.Join(matches, "\n")
+	if truncated {
+		if out != "" {
+			out += "\n"
+		}
+		noun := "matches"
+		if len(matches) == 1 {
+			noun = "match"
+		}
+		reason := fmt.Sprintf("output capped at %d bytes (raise _max_output_bytes or _model_context_tokens in tools_policies.local_fs)", budget)
+		if hitCap {
+			reason = fmt.Sprintf("hit the %d-match directory-search cap", maxMatches)
+		}
+		out += fmt.Sprintf(
+			"local_fs: grep truncated — %d %s shown under %s; %s. Narrow the pattern or search a subdirectory. %s",
+			len(matches), noun, display, reason, severityRecoverable)
+	}
+	return out, nil
+}
+
+// doubleStarGlobMatch reports whether s (a "/"-separated relative path)
+// matches pattern, where "**" matches zero or more whole path segments —
+// something filepath.Match's "*" cannot express, since it never crosses "/".
+// This mirrors the "**" semantics independently implemented for HITL policy
+// globs in internal/services/hitlservice/policy.go's matchDoubleGlob; it is a
+// separate, brace-free copy rather than an import, so localtools keeps no
+// dependency on hitlservice.
+func doubleStarGlobMatch(pattern, s string) bool {
+	if !strings.Contains(pattern, "**") {
+		matched, _ := filepath.Match(pattern, s)
+		return matched
+	}
+	idx := strings.Index(pattern, "**")
+	prefix := strings.TrimSuffix(pattern[:idx], "/")
+	after := strings.TrimPrefix(pattern[idx+2:], "/")
+
+	if prefix != "" {
+		if s == prefix {
+			return after == ""
+		}
+		if !strings.HasPrefix(s, prefix+"/") {
+			return false
+		}
+		s = s[len(prefix)+1:]
+	}
+	if after == "" {
+		return true
+	}
+	// Try "after" against every path suffix of s, so "**" can absorb any
+	// number of intervening segments, including zero.
+	for {
+		if doubleStarGlobMatch(after, s) {
+			return true
+		}
+		slash := strings.Index(s, "/")
+		if slash < 0 {
+			break
+		}
+		s = s[slash+1:]
+	}
+	return false
+}
+
 // findFiles implements find_files: glob-pattern path discovery under the
-// project root. The pattern is matched against the file basename (e.g. "*.go")
-// or, when it contains a path separator, against the path relative to the
-// search root.
+// project root. The pattern is matched against the file basename (e.g. "*.go"),
+// against the path relative to the search root when it contains a slash, or —
+// when it contains "**" — against the relative path with "**" allowed to
+// absorb any number of path segments (e.g. "src/**/*.ts").
 func (h *LocalFSTools) findFiles(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	pattern, ok := argString(args, "pattern")
 	if !ok || pattern == "" {
@@ -1322,6 +1594,7 @@ func (h *LocalFSTools) findFiles(ctx context.Context, args map[string]any) (any,
 	}
 
 	patternHasSlash := strings.ContainsRune(pattern, '/')
+	hasDoubleStar := strings.Contains(pattern, "**")
 	filter := h.entryFilterFor(ctx, absRoot)
 	maxResults := h.maxFindResultsFromPolicy(ctx)
 	maxDepth := h.maxFindDepthFromPolicy(ctx)
@@ -1356,9 +1629,8 @@ func (h *LocalFSTools) findFiles(ctx context.Context, args map[string]any) (any,
 		}
 
 		if d.IsDir() {
-			// find_files previously ignored _denied_path_substrings entirely
-			// and had no depth bound, so it could enumerate paths that
-			// read_file would refuse to open.
+			// Apply the same substring and depth limits as read_file, so
+			// find_files cannot enumerate paths that read_file would refuse.
 			if filter.skip(relFromBase, d.Name(), true) {
 				return filepath.SkipDir
 			}
@@ -1372,9 +1644,14 @@ func (h *LocalFSTools) findFiles(ctx context.Context, args map[string]any) (any,
 		}
 
 		var matched bool
-		if patternHasSlash {
+		switch {
+		case hasDoubleStar:
+			// "**" crosses "/" boundaries, so it always applies to the whole
+			// relative path, never just the basename.
+			matched = doubleStarGlobMatch(pattern, rel)
+		case patternHasSlash:
 			matched, _ = filepath.Match(pattern, rel)
-		} else {
+		default:
 			matched, _ = filepath.Match(pattern, d.Name())
 		}
 		if matched {

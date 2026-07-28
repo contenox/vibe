@@ -202,7 +202,6 @@ func (e *modelManager) PromptExecute(
 
 	runtimeStateResolution := e.GetRuntime(ctx)
 
-	// Apply defaults if not provided
 	if len(req.ModelNames) == 0 {
 		req.ModelNames = []string{e.config.DefaultPromptModel.Name}
 	}
@@ -211,9 +210,9 @@ func (e *modelManager) PromptExecute(
 	}
 
 	resolverReq := e.convertToResolverRequest(req, nil)
-	// Session-sticky resolution (blueprint §4.1.5): with a session key the
-	// same session lands on the same provider/backend so its prefix cache
-	// stays warm; without one this is exactly the old Randomly policy.
+	// Session-sticky resolution: with a session key the same session lands on
+	// the same provider/backend so its prefix cache stays warm; without one
+	// this is exactly the old Randomly policy.
 	policy := llmresolver.StickyOrRandom(effectiveSessionKey(ctx, req))
 	client, provider, backend, err := llmresolver.PromptExecute(ctx,
 		resolverReq,
@@ -272,7 +271,6 @@ func (e *modelManager) Chat(
 
 	runtimeStateResolution := e.GetRuntime(ctx)
 
-	// Apply defaults if not provided
 	if len(req.ModelNames) == 0 {
 		req.ModelNames = []string{e.config.DefaultChatModel.Name}
 	}
@@ -281,7 +279,7 @@ func (e *modelManager) Chat(
 	}
 
 	resolverReq := e.convertToResolverRequest(req, messages)
-	// Session-sticky resolution (blueprint §4.1.5); empty key == Randomly.
+	// Session-sticky resolution; empty key == Randomly.
 	sessionKey := effectiveSessionKey(ctx, req)
 	policy := llmresolver.StickyOrRandom(sessionKey)
 	client, provider, backend, err := llmresolver.Chat(ctx,
@@ -336,7 +334,6 @@ func (e *modelManager) Embed(
 
 	runtimeStateResolution := e.GetRuntime(ctx)
 
-	// Apply defaults if not provided
 	if embedReq.ModelName == "" {
 		embedReq.ModelName = e.config.DefaultEmbeddingModel.Name
 	}
@@ -401,7 +398,6 @@ func (e *modelManager) Stream(
 
 	runtimeStateResolution := e.GetRuntime(ctx)
 
-	// Apply defaults if not provided
 	if len(req.ModelNames) == 0 && e.config.DefaultChatModel.Name != "" {
 		req.ModelNames = []string{e.config.DefaultChatModel.Name}
 	}
@@ -410,7 +406,7 @@ func (e *modelManager) Stream(
 	}
 
 	resolverReq := e.convertToResolverRequest(req, messages)
-	// Session-sticky resolution (blueprint §4.1.5); empty key == Randomly.
+	// Session-sticky resolution; empty key == Randomly.
 	sessionKey := effectiveSessionKey(ctx, req)
 	policy := llmresolver.StickyOrRandom(sessionKey)
 	client, provider, backend, err := llmresolver.Stream(ctx,
@@ -512,10 +508,10 @@ func mergeTokenUsage(dst *libmodelprovider.TokenUsage, src *libmodelprovider.Tok
 }
 
 // reportTokenUsage records one request's provider-reported token accounting
-// in the tracker. This is the measurement seam for cache utilization
-// (blueprint §4.4): once modelrepo.TokenUsage grows cache-read/cache-write
-// counters, they ride this same event and warm/cold hit rates become
-// observable without touching any caller.
+// in the tracker. This is the measurement seam for cache utilization: once
+// modelrepo.TokenUsage grows cache-read/cache-write counters, they ride this
+// same event and warm/cold hit rates become observable without touching any
+// caller.
 func (e *modelManager) reportTokenUsage(ctx context.Context, req Request, meta Meta, usage libmodelprovider.TokenUsage) {
 	tracker := req.Tracker
 	if tracker == nil {
@@ -537,8 +533,8 @@ func (e *modelManager) reportTokenUsage(ctx context.Context, req Request, meta M
 		"prompt_tokens":     usage.PromptTokens,
 		"completion_tokens": usage.CompletionTokens,
 		"total_tokens":      usage.TotalTokens,
-		// Cache accounting (blueprint §4.4): prompt_tokens is the TOTAL prompt
-		// count on every provider, so the warm hit rate of a request is
+		// Cache accounting: prompt_tokens is the TOTAL prompt count on every
+		// provider, so the warm hit rate of a request is
 		// cache_read / (prompt_tokens - cache_write).
 		"cache_read":  usage.CacheReadTokens,
 		"cache_write": usage.CacheWriteTokens,
@@ -555,13 +551,11 @@ func (e *modelManager) GetTokenizer(ctx context.Context, modelName string) (Toke
 		return nil, errors.New("tokenizer not initialized")
 	}
 
-	// Get the optimal model for tokenization
 	modelForTokenization, err := e.tokenizer.OptimalModel(ctx, modelName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get optimal tokenizer model: %w", err)
 	}
 
-	// Return an adapter that uses the optimal model
 	return &tokenizerAdapter{
 		tokenizer: e.tokenizer,
 		modelName: modelForTokenization,
@@ -601,7 +595,6 @@ func safeClose(closer interface{}) {
 		return
 	}
 
-	// Type switch for different client types that might have Close methods
 	switch c := closer.(type) {
 	case interface{ Close() error }:
 		_ = c.Close()

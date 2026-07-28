@@ -21,36 +21,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This is the acceptance for the report-routing slice — the supervision edge's
-// delivery half — end to end, with the SAME real components serve wires and
-// nothing mocked between them:
-//
-//	missionservice.AddReport → ReportAddedEvent on a real bus → reportrouter →
-//	  either agentinstance.Manager.DeliverToSession (into a live parent session's
-//	  transcript) or operatorinbox (the durable attention surface).
-//
-// The PARENT is a genuine dispatched chain unit (the fixture reused from
-// e2e_chain_dispatch_test.go: a built binary, discovered-by-convention, no LLM /
-// GPU / network), so its session is a real live session on the kernel and
-// DeliverToSession has a real fan-out to reach.
-//
-// The sub-mission and the operator mission are mission RECORDS, not second
-// dispatched subprocesses. That is deliberate: a fleet unit is a full contenox
-// runtime, and running a second one against the same HOME-isolated SQLite state
-// as the parent contends on startup seeding and makes the test flaky — while the
-// unit's OWN execution is irrelevant to what is under test here, which is where a
-// report goes. What routing needs from a mission is only its supervision edge
-// (ParentSessionID present or absent), so the missions are created through the
-// real mission API carrying/omitting that edge, and AddReport drives the real
-// publish → route path. fleetservice.Dispatch's recording of ParentSessionID onto
-// the mission is covered by this package's own dispatch tests; here we prove the
-// routing that consumes it.
-//
-//   - Case 1 (edge SET): a mission whose ParentSessionID points at the live
-//     observed parent session; a report added to it lands in that session's
-//     stream, and the attached viewer sees it.
-//   - Case 2 (edge EMPTY): a mission an operator fired directly; its report lands
-//     in the operator inbox.
+// TestFleetE2E_ReportRouting_ParentSessionAndInbox: a report added to a
+// mission whose ParentSessionID points at a live parent session lands in
+// that session's stream; an operator-fired mission's report lands in the
+// operator inbox instead.
 func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping report-routing e2e: builds and boots the full contenox binary")
@@ -114,9 +88,8 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 	workDir := t.TempDir()
 	svc := New(instances, agents, missions, nil, workDir, libtracker.NoopTracker{})
 
-	// The PARENT: a real live unit whose session supervises the sub-mission.
-	// Observe its stream with a viewer, exactly as a coordinating agent or an
-	// operator at beam would.
+	// The parent: a real live unit whose session supervises the sub-mission,
+	// observed with a viewer.
 	parent, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName:      "agent-fleet-fixture",
 		Intent:         "be the supervising session",
@@ -128,11 +101,10 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 	_, err = instances.Attach(ctx, parent.InstanceID, libacp.SessionID(parent.SessionID), viewer)
 	require.NoError(t, err)
 
-	// ── Case 1: edge SET — the report reaches the supervising session ──────────
+	// ── Case 1: edge set — the report reaches the supervising session ──────────
 
-	// The sub-mission carries the supervision edge pointing at the live parent
-	// session — the same edge fleetservice.Dispatch records and AddReport
-	// publishes.
+	// The sub-mission carries the supervision edge pointing at the live
+	// parent session.
 	childMission := &missionservice.Mission{
 		Intent:          "be the sub-unit that reports back",
 		AgentName:       "agent-fleet-fixture",
@@ -147,13 +119,13 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 		Summary: deliveredSummary,
 	}))
 
-	// The report surfaces in the PARENT session's transcript (async talk-back).
+	// The report surfaces in the parent session's transcript (async talk-back).
 	require.Eventually(t, func() bool {
 		return strings.Contains(viewer.messageText(), deliveredSummary)
 	}, 30*time.Second, 50*time.Millisecond,
 		"the report never reached the supervising session; transcript=%q\nstderr:\n%s", viewer.messageText(), stderr.String())
 
-	// It did NOT also land in the operator inbox — a supervised report has a home.
+	// It did not also land in the operator inbox: a supervised report has a home.
 	inboxItems, err := inbox.List(ctx, 100)
 	require.NoError(t, err)
 	for _, it := range inboxItems {
@@ -161,7 +133,7 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 			"a report delivered to its supervisor must not also fall into the operator inbox")
 	}
 
-	// ── Case 2: edge EMPTY — the report lands in the operator inbox ─────────────
+	// ── Case 2: edge empty — the report lands in the operator inbox ────────────
 
 	operatorMission := &missionservice.Mission{
 		Intent:         "operator fired this directly",

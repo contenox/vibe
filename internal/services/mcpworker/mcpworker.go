@@ -333,8 +333,8 @@ func (m *Manager) StopWorker(ctx context.Context, name string) {
 	}
 }
 
-// StopAll stops all active workers and releases all MCP sessions and subprocesses.
-// Must be called when the process is about to exit to ensure stdio child processes
+// StopAll stops all active workers and releases all MCP sessions and
+// subprocesses. Must be called on process exit so stdio child processes
 // (e.g. npx-spawned MCP servers) are terminated.
 func (m *Manager) StopAll() {
 	ctx := m.rootCtx
@@ -361,9 +361,8 @@ func (m *Manager) ActiveWorkers() []string {
 	return names
 }
 
-// WatchEvents subscribes to mcp.servers.created and mcp.servers.deleted.
-// When a new server is created via the API on any node, every node picks up
-// the event and starts its own worker (NATS queue groups balance calls across them).
+// WatchEvents subscribes to mcp.servers.created and mcp.servers.deleted so
+// every node starts or stops its own worker when a server changes elsewhere.
 func (m *Manager) WatchEvents(ctx context.Context) error {
 	_, _, end := m.tracker.Start(ctx, "watch_events", "mcp_manager")
 	defer end()

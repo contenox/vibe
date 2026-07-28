@@ -1,3 +1,7 @@
+---
+description: Copy-paste chains for real work — commit messages, release notes, CRM writes, codebase docs, and browser automation.
+---
+
 # Cookbook
 
 Production-ready, copy-paste patterns for automating real work with `contenox run` and friends.

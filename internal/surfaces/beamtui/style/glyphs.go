@@ -33,15 +33,15 @@ var unicodeGlyphs = GlyphSet{
 	GaugeEmpty:    "░",
 }
 
-// asciiGlyphs is the D41 fallback for terminals that cannot be trusted
-// with unicode (legacy consoles, plain mode, CI).
+// asciiGlyphs is the fallback for terminals that cannot be trusted with
+// unicode (legacy consoles, plain mode, CI).
 //
-// This column is not free to drift. Components may not import this package
-// (blueprint rule c) and this package may not import components, so each side
-// spells its own ASCII vocabulary out — and a character that means one thing
-// here and another there is a legibility bug in exactly the terminals that
-// have no color to fall back on. testkit's glyph-parity test is what holds
-// the two together; the pairs it pins are noted per field.
+// This column is not free to drift: components may not import this package
+// and this package may not import components, so each side spells its own
+// ASCII vocabulary out, and a character meaning one thing here and another
+// there is a legibility bug in exactly the terminals with no color to fall
+// back on. testkit's glyph-parity test holds the two together; the pairs
+// it pins are noted per field.
 var asciiGlyphs = GlyphSet{
 	SpinnerFrames: []string{"-", "\\", "|", "/"},
 	Bullet:        "*",
@@ -50,20 +50,19 @@ var asciiGlyphs = GlyphSet{
 	Ellipsis:      "...",
 	Collapsed:     ">", // == transcript.ASCIIUser — the "points at" marker
 	Expanded:      "v",
-	// The beam-bar, not a chevron. ">" was doubling as both the prompt
-	// device and the collapsed marker, so the one character that is supposed
-	// to identify beam's input line was also the character meaning "there is
-	// more under this". Every surface that draws the bar — composer sigil,
-	// picker and palette selection, brand gutter — already degrades to "|".
+	// The beam-bar, not a chevron: ">" doubled as both the prompt device and
+	// the collapsed marker, so the character identifying beam's input line
+	// also meant "there is more under this". Every surface drawing the bar
+	// already degrades to "|".
 	PromptSigil: "|",
 	GaugeFull:   "#",
 	GaugeEmpty:  "-",
 }
 
 // Glyphs returns the glyph set for caps: the unicode baseline for every
-// color-capable profile, and the ASCII fallback for ProfileMono (D41
-// default — glyph decoration tracks the same detection as color rather
-// than a separate probe).
+// color-capable profile, and the ASCII fallback for ProfileMono — glyph
+// decoration tracks the same detection as color rather than a separate
+// probe.
 func Glyphs(caps Caps) GlyphSet {
 	if caps.Profile == ProfileMono {
 		return asciiGlyphs

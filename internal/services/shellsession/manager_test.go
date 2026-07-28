@@ -19,9 +19,8 @@ func newTestManager(t *testing.T, idle time.Duration) *manager {
 	return newTestManagerWith(t, Config{IdleTimeout: idle})
 }
 
-// newTestManagerWith builds a manager from a partial Config, filling in the
-// workspace envelope (a real one-root allowlist rooted at a temp dir, which is
-// what production hands it) unless the caller supplied one.
+// newTestManagerWith builds a manager from a partial Config, filling in a
+// real one-root workspace allowlist unless the caller supplied one.
 func newTestManagerWith(t *testing.T, cfg Config) *manager {
 	t.Helper()
 	if cfg.CwdResolver == nil || cfg.Workspace == nil {
@@ -42,13 +41,7 @@ func newTestManagerWith(t *testing.T, cfg Config) *manager {
 	return m
 }
 
-// TestManager_RefusesCwdOutsideWorkspaceAllowlist pins the envelope at the PTY
-// boundary. CwdResolver is a pluggable func(ctx) string, so the manager cannot
-// assume its answer was checked by whoever supplied it; a shell is a live
-// interactive foothold, and rooting one outside the operator's configured
-// workspace roots is exactly the escape the allowlist exists to prevent. The
-// judgement is vfs.ResolveSessionCwd — the same one the ACP session paths and
-// fleet dispatch use — so it cannot drift from them.
+// TestManager_RefusesCwdOutsideWorkspaceAllowlist pins that a CwdResolver answer outside the workspace allowlist is refused, not trusted.
 func TestManager_RefusesCwdOutsideWorkspaceAllowlist(t *testing.T) {
 	allowed := t.TempDir()
 	outside := t.TempDir()

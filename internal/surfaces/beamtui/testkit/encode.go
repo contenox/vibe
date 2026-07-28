@@ -1,11 +1,9 @@
 // Package testkit is beam's shared test infrastructure: the reference
 // encoding that turns frame data into reviewable golden files, the golden
-// compare/update helper, and (as the suites grow) the fixture corpus,
-// FakeEngineBridge, and liveness frame-diff harness.
-//
-// Goldens are Frame data through Encode — readable style tags, no escape
-// codes — so a diff is reviewable by a human AND catches style regressions
-// (decision D54 in the beam blueprint).
+// compare/update helper, the fixture corpus, FakeEngineBridge, and the
+// liveness frame-diff harness. Goldens use readable style tags instead of
+// escape codes, so a diff is human-reviewable and still catches style
+// regressions.
 package testkit
 
 import (
@@ -15,16 +13,13 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/frame"
 )
 
-// EncodeLines renders lines in the reference golden encoding: spans under a
-// style are wrapped `[style]text[/]`; unstyled spans are bare text. One
-// terminal row per output line.
+// EncodeLines renders lines in the reference golden encoding: a styled span
+// is wrapped `[style]text[/]`, an unstyled span is bare text, one output
+// line per terminal row.
 //
-// It also ENFORCES [frame.Span]'s text contract, panicking when a span
-// carries a C0 control or DEL (see checkSpan). Every component's golden test
-// runs through here, so the golden layer doubles as the backstop for the one
-// span invariant a reviewer cannot see in a diff: a tab or an escape encodes
-// into a golden file as something that looks fine and draws as something
-// else. Producing such a span is a component bug, not a test failure to
+// It enforces [frame.Span]'s text contract, panicking when a span carries a
+// C0 control or DEL: such a span would encode unremarkably but draw as
+// something else, so producing one is a component bug, not a reason to
 // re-baseline with -update.
 func EncodeLines(lines []frame.Line) string {
 	var b strings.Builder
@@ -37,11 +32,8 @@ func EncodeLines(lines []frame.Line) string {
 }
 
 // checkLine panics on the first span that breaks the literal-cells contract.
-//
-// It panics rather than taking a *testing.T because EncodeLines is called
-// from render helpers all over the suite (and from EncodeFrame), and threading
-// a T through every one of them would buy nothing: the panic names the line,
-// the span and the offending rune, which is exactly what the fix needs.
+// It takes no *testing.T since EncodeLines is called from render helpers
+// throughout the suite; the panic names the line, span, and offending rune.
 func checkLine(l frame.Line) {
 	for i, s := range l {
 		for _, r := range s.Text {
@@ -51,7 +43,7 @@ func checkLine(l frame.Line) {
 			what := "control rune"
 			switch r {
 			case '\n':
-				what = "newline (frame.Line holds ONE terminal row; wrap in the component)"
+				what = "newline (frame.Line holds one terminal row; wrap in the component)"
 			case '\t':
 				what = "tab (expand it with sanitize.ExpandTabs before it becomes a span)"
 			case 0x1b:
@@ -64,9 +56,8 @@ func checkLine(l frame.Line) {
 	}
 }
 
-// EncodeFrame renders a full frame: the scrollback section, the live
-// section, and the cursor position, each explicitly labeled so goldens for
-// commit-shaped tests stay unambiguous.
+// EncodeFrame renders a full frame: scrollback, live section, and cursor
+// position, each explicitly labeled so goldens stay unambiguous.
 func EncodeFrame(f frame.Frame) string {
 	var b strings.Builder
 	b.WriteString("── scrollback ──\n")

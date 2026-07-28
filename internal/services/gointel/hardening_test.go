@@ -16,24 +16,7 @@ import (
 	"github.com/contenox/beam/internal/kernel/taskengine"
 )
 
-// ---------------------------------------------------------------------------
-// E2E hardening: everything the unit suite cannot see.
-//
-// The unit suite proves the ANSWERS are right on two hand-built fixtures. This
-// file proves the SURFACE holds: that arguments written by a model — which is
-// to say arguments written by an adversary with a plausible deniability defence
-// — cannot panic it, cannot walk out of the workspace, and cannot turn one tool
-// call into an unbounded amount of output; that concurrent queries, edits and
-// teardown do not race, deadlock, or resurrect a cache nothing will ever reap;
-// and that the real-world module shapes a repository actually has (one broken
-// package, a missing dependency, a nested module, no Go at all) produce an
-// honest answer rather than a hang.
-//
-// Everything that must load THIS repository — 100+ packages, seconds and
-// hundreds of megabytes — is gated on -short. Everything that runs against a
-// throwaway module is not, because those are the tests that must run on every
-// commit.
-// ---------------------------------------------------------------------------
+// E2E hardening: hostile arguments cannot panic or escape the workspace, concurrent queries/edits/teardown do not race, and real-world module shapes answer rather than hang. Tests loading this repository are gated on -short.
 
 // repoRootDir walks up to the module root of this repository.
 func repoRootDir(t *testing.T) string {
@@ -54,8 +37,7 @@ func repoRootDir(t *testing.T) string {
 	}
 }
 
-// repoIndex returns an index over THIS repository — the only workspace big
-// enough for the budget and cross-package claims to mean anything.
+// repoIndex returns an index over this repository, the only workspace big enough for the budget and cross-package claims to mean anything.
 func repoIndex(t *testing.T) *index {
 	t.Helper()
 	if testing.Short() {
@@ -64,9 +46,7 @@ func repoIndex(t *testing.T) *index {
 	return newTestIndex(t, repoRootDir(t))
 }
 
-// writeModule materialises a throwaway Go module: go.mod plus the named files,
-// paths relative to the module root. Stdlib-only content keeps `go list` off the
-// network.
+// writeModule materialises a throwaway Go module: go.mod plus the named files, paths relative to the module root. Stdlib-only content keeps `go list` off the network.
 func writeModule(t *testing.T, dir, modulePath string, files map[string]string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -88,8 +68,7 @@ func writeModule(t *testing.T, dir, modulePath string, files map[string]string) 
 	return dir
 }
 
-// exec runs one tool through the real ToolsRepo dispatch — the same entry point
-// the engine calls, argument coercion and all.
+// exec runs one tool through the real ToolsRepo dispatch — the same entry point the engine calls, argument coercion and all.
 func execTool(t *testing.T, repo taskengine.ToolsRepo, tool string, args map[string]any) (out any, err error) {
 	t.Helper()
 	defer func() {
@@ -102,9 +81,7 @@ func execTool(t *testing.T, repo taskengine.ToolsRepo, tool string, args map[str
 	return out, err
 }
 
-// assertTeachingError holds every refusal on this surface to the localtools
-// contract: it names a severity, it is bounded, and it never leaks a raw
-// control character into the model's context.
+// assertTeachingError checks a refusal names a severity, is bounded, and never leaks a raw control character.
 func assertTeachingError(t *testing.T, label string, err error) {
 	t.Helper()
 	if err == nil {
@@ -125,14 +102,10 @@ func assertTeachingError(t *testing.T, label string, err error) {
 	}
 }
 
-// maxErrorBytes is what a single teaching error may cost. Generous — the
-// ambiguity refusal lists up to eight qualified names, and the diagnostics
-// refusals list every pass — but far below the 10 KB an unclamped echo of a
-// hostile argument would produce.
+// maxErrorBytes is what a single teaching error may cost: generous enough for the ambiguity and diagnostics refusals, far below an unclamped echo.
 const maxErrorBytes = 4096
 
-// hostileStrings are the argument values a model can be talked into emitting.
-// Every one of them is passed to every string argument of every tool.
+// hostileStrings are the argument values a model can be talked into emitting; each is passed to every string argument of every tool.
 var hostileStrings = map[string]string{
 	"empty":            "",
 	"blank":            "   ",
@@ -156,14 +129,7 @@ var hostileStrings = map[string]string{
 	"nul_only":         "\x00",
 }
 
-// ---------------------------------------------------------------------------
-// Row 2 — hostile arguments through the real tool dispatch
-// ---------------------------------------------------------------------------
-
-// TestSystem_GoIntel_HostileSymbolArgumentsAreRefusedNotObeyed fires every
-// hostile string at every symbol-taking tool. The contract is narrow and
-// absolute: no panic, a bounded teaching error OR a clean result, and never a
-// result about a file outside the workspace.
+// TestSystem_GoIntel_HostileSymbolArgumentsAreRefusedNotObeyed pins: no panic, a bounded teaching error or a clean result, never a result outside the workspace.
 func TestSystem_GoIntel_HostileSymbolArgumentsAreRefusedNotObeyed(t *testing.T) {
 	root := newFixture(t, "fixture")
 	repo := NewTools(newTestIndex(t, root))
@@ -173,8 +139,7 @@ func TestSystem_GoIntel_HostileSymbolArgumentsAreRefusedNotObeyed(t *testing.T) 
 			label := tool + "/" + name
 			out, err := execTool(t, repo, tool, map[string]any{"symbol": value})
 			if err == nil {
-				// A hostile symbol that RESOLVES is only acceptable if it resolved
-				// to something inside the fixture module.
+				// A hostile symbol that resolves must resolve inside the fixture.
 				assertResultStaysInWorkspace(t, label, root, out)
 				continue
 			}
@@ -183,10 +148,7 @@ func TestSystem_GoIntel_HostileSymbolArgumentsAreRefusedNotObeyed(t *testing.T) 
 	}
 }
 
-// TestSystem_GoIntel_HostileDirArgumentsCannotEscapeTheWorkspace is the
-// containment claim. A dir that leaves the allowed directory — by traversal, by
-// absolute path, or through a symlink — must be refused with the ONE typed
-// boundary error, never answered.
+// TestSystem_GoIntel_HostileDirArgumentsCannotEscapeTheWorkspace pins: a dir escaping the allowed directory is always refused with ErrOutsideAllowedDir.
 func TestSystem_GoIntel_HostileDirArgumentsCannotEscapeTheWorkspace(t *testing.T) {
 	outside := t.TempDir()
 	writeModule(t, outside, "example.com/outside", map[string]string{
@@ -223,7 +185,7 @@ func TestSystem_GoIntel_HostileDirArgumentsCannotEscapeTheWorkspace(t *testing.T
 		assertTeachingError(t, label, err)
 	}
 
-	// The symbol that only exists OUTSIDE must not be reachable by any spelling.
+	// The symbol that only exists outside must not be reachable by any spelling.
 	for _, symbol := range []string{"secret.Secret", "Secret", "example.com/outside/secret.Secret"} {
 		if _, err := execTool(t, repo, ToolDefinition, map[string]any{"symbol": symbol}); err == nil {
 			t.Errorf("symbol %q resolved into a module outside the workspace", symbol)
@@ -231,11 +193,7 @@ func TestSystem_GoIntel_HostileDirArgumentsCannotEscapeTheWorkspace(t *testing.T
 	}
 }
 
-// TestSystem_GoIntel_HostileDirArgumentsThatStayInsideAnswerCleanly is the other
-// half: a nonexistent directory, a FILE where a directory was meant, and the
-// workspace root itself are all inside the boundary, so they must produce an
-// answer rather than a refusal — the walk-up owns "which module", not "does this
-// path exist".
+// TestSystem_GoIntel_HostileDirArgumentsThatStayInsideAnswerCleanly pins: a dir inside the boundary always answers, even if nonexistent or a file.
 func TestSystem_GoIntel_HostileDirArgumentsThatStayInsideAnswerCleanly(t *testing.T) {
 	root := newFixture(t, "fixture")
 	repo := NewTools(newTestIndex(t, root))
@@ -265,10 +223,7 @@ func TestSystem_GoIntel_HostileDirArgumentsThatStayInsideAnswerCleanly(t *testin
 	}
 }
 
-// TestSystem_GoIntel_HostileCapsAreClampedNotObeyed pins the output bound: a
-// model that asks for a billion results gets the ceiling, and one that asks for
-// a negative or absurd number gets the documented default. The cap is what keeps
-// one tool call from becoming the whole context window.
+// TestSystem_GoIntel_HostileCapsAreClampedNotObeyed pins: an out-of-range max clamps to the ceiling or falls back to the default, never obeyed verbatim.
 func TestSystem_GoIntel_HostileCapsAreClampedNotObeyed(t *testing.T) {
 	root := newFixture(t, "fixture")
 	repo := NewTools(newTestIndex(t, root))
@@ -308,15 +263,11 @@ func TestSystem_GoIntel_HostileCapsAreClampedNotObeyed(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_HostilePassesAndScopesAreRefusedByName pins the two
-// enumerated arguments. An unknown value must be refused with the valid ones
-// listed — including when it is mixed with a valid one, in either order, which
-// is the case a naive loop gets wrong.
+// TestSystem_GoIntel_HostilePassesAndScopesAreRefusedByName pins: an unknown scope or pass is refused regardless of ordering relative to valid values.
 func TestSystem_GoIntel_HostilePassesAndScopesAreRefusedByName(t *testing.T) {
 	root := newFixture(t, "fixture")
 	repo := NewTools(newTestIndex(t, root))
 
-	// Scopes.
 	for name, scope := range map[string]string{
 		"garbage":   "everything",
 		"traversal": "../../etc",
@@ -337,9 +288,7 @@ func TestSystem_GoIntel_HostilePassesAndScopesAreRefusedByName(t *testing.T) {
 		assertTeachingError(t, label, err)
 	}
 
-	// Pass sets that must be refused — including "all" MIXED with an unknown
-	// name, in both orders. Honouring "all" the moment it is seen would let
-	// ["all","typo"] through while ["typo","all"] failed.
+	// Pass sets that must be refused, including "all" mixed with an unknown name in both orders.
 	for name, passes := range map[string]string{
 		"unknown":         "notapass",
 		"unknown_first":   "notapass,all",
@@ -360,7 +309,7 @@ func TestSystem_GoIntel_HostilePassesAndScopesAreRefusedByName(t *testing.T) {
 		assertTeachingError(t, label, err)
 	}
 
-	// And the ones that must WORK, so the refusal above is not just strictness.
+	// And the ones that must work, so the refusal above is not just strictness.
 	for name, passes := range map[string]string{
 		"all":        "all",
 		"all_spaced": " all ",
@@ -376,8 +325,7 @@ func TestSystem_GoIntel_HostilePassesAndScopesAreRefusedByName(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_UnknownArgumentNamesAreBounded closes the last
-// model-controlled channel: the argument NAME itself.
+// TestSystem_GoIntel_UnknownArgumentNamesAreBounded pins: a hostile argument name is refused and clamped, not just its value.
 func TestSystem_GoIntel_UnknownArgumentNamesAreBounded(t *testing.T) {
 	root := newFixture(t, "fixture")
 	repo := NewTools(newTestIndex(t, root))
@@ -396,9 +344,7 @@ func TestSystem_GoIntel_UnknownArgumentNamesAreBounded(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_HostileTargetsAreRefusedNotObeyed sweeps the remaining
-// string argument — go_symbols' target and go_diagnostics' target, both of which
-// accept a PATH and so are the arguments a traversal attempt would aim at.
+// TestSystem_GoIntel_HostileTargetsAreRefusedNotObeyed pins the same contract as symbol arguments for go_symbols' and go_diagnostics' target.
 func TestSystem_GoIntel_HostileTargetsAreRefusedNotObeyed(t *testing.T) {
 	root := newFixture(t, "fixture")
 	repo := NewTools(newTestIndex(t, root))
@@ -436,9 +382,7 @@ func shownOf(t *testing.T, out any) int {
 	return 0
 }
 
-// assertResultStaysInWorkspace fails when any location in a result points
-// outside the workspace root. Every anchor gointel emits is workspace-relative,
-// so an absolute path — or one starting with ".." — means containment leaked.
+// assertResultStaysInWorkspace fails when any location in a result is absolute or starts with "..", since every gointel anchor is workspace-relative.
 func assertResultStaysInWorkspace(t *testing.T, label, root string, out any) {
 	t.Helper()
 	var locations []string
@@ -481,23 +425,14 @@ func assertResultStaysInWorkspace(t *testing.T, label, root string, out any) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Row 3 — concurrency and teardown
-// ---------------------------------------------------------------------------
-
-// TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace hammers the
-// real ToolsRepo from many goroutines while another invalidates and another
-// rewrites source, then tears the index down mid-flight. Run under -race this is
-// the only test that can see a torn snapshot pointer, a map written without its
-// lock, or a Shutdown that does not return.
+// TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace pins: concurrent queries, invalidation, source rewrites and Shutdown never race (run under -race) or deadlock.
 func TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace(t *testing.T) {
 	root := newFixture(t, "fixture")
 	ix := newTestIndex(t, root)
 	repo := NewTools(ix)
 	ctx := context.Background()
 
-	// One warm snapshot before the storm, so the queries exercise the cached
-	// path and the rebuild path both.
+	// Warm one snapshot so queries exercise both the cached and rebuild paths.
 	if _, err := ix.Definition(ctx, Request{Symbol: "shapes.Rect"}); err != nil {
 		t.Fatalf("warm-up: %v", err)
 	}
@@ -519,7 +454,6 @@ func TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace(t *testi
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 
-	// Readers.
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func(seed int) {
@@ -542,7 +476,6 @@ func TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace(t *testi
 		}(i)
 	}
 
-	// Invalidator.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -557,9 +490,7 @@ func TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace(t *testi
 		}
 	}()
 
-	// Writer. Rename rather than truncate-and-write, so a concurrent `go list`
-	// never reads a half-written file and the test measures concurrency instead
-	// of torn reads.
+	// Writer: rename rather than truncate-and-write so `go list` never reads a half-written file.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -582,8 +513,7 @@ func TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace(t *testi
 
 	time.Sleep(750 * time.Millisecond)
 
-	// Teardown MID-QUERY: Shutdown must return promptly even with eight readers
-	// in flight and a rebuild possibly running.
+	// Teardown mid-query: Shutdown must return promptly even with readers in flight and a rebuild possibly running.
 	done := make(chan struct{})
 	shutdownStart := time.Now()
 	go func() {
@@ -607,10 +537,7 @@ func TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace(t *testi
 	}
 }
 
-// isExpectedConcurrentError accepts the refusals the storm legitimately
-// produces: the deliberate not-found and containment calls, the typed
-// post-Shutdown refusal, and a transient load failure from a source file that
-// was mid-rewrite when `go list` read it.
+// isExpectedConcurrentError accepts the refusals the storm legitimately produces, including a transient load failure from a mid-rewrite source file.
 func isExpectedConcurrentError(err error) bool {
 	switch {
 	case errors.Is(err, ErrNotFound),
@@ -635,10 +562,7 @@ func atomicWrite(t *testing.T, path, body string) {
 	}
 }
 
-// TestSystem_GoIntel_QueriesAfterShutdownFailTypedRatherThanRebuild is the
-// lifecycle contract engine.Stop depends on. A late query must be REFUSED, not
-// served: serving it would rebuild a ~110 MB snapshot into a cache whose reaper
-// has already exited, so nothing would ever drop it again.
+// TestSystem_GoIntel_QueriesAfterShutdownFailTypedRatherThanRebuild pins: a query after Shutdown returns ErrShutdown rather than rebuilding.
 func TestSystem_GoIntel_QueriesAfterShutdownFailTypedRatherThanRebuild(t *testing.T) {
 	root := newFixture(t, "fixture")
 	ix := NewIndex(Config{AllowedDir: root}).(*index)
@@ -690,22 +614,12 @@ func TestSystem_GoIntel_QueriesAfterShutdownFailTypedRatherThanRebuild(t *testin
 	ix.Shutdown()
 }
 
-// ---------------------------------------------------------------------------
-// Row 4 — freshness through the real tool path
-// ---------------------------------------------------------------------------
-
-// TestSystem_GoIntel_FreshnessThroughTheToolPath is the no-stale-answers promise
-// at tool granularity, with NO Invalidate call anywhere: the V1.1 write
-// middleware does not exist yet, so today every edit an agent makes reaches the
-// index only through the mtime sweep. Three shapes, all of them things a
-// write_file lands: an edit to an existing file, a brand-new file in an existing
-// package (invisible to every per-file stat), and a deletion.
+// TestSystem_GoIntel_FreshnessThroughTheToolPath pins: with no Invalidate call, the mtime sweep alone catches an edit, a brand-new file, and a deletion.
 func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 	root := newFixture(t, "fixture")
 	ix := newTestIndex(t, root)
 	repo := NewTools(ix)
 
-	// Warm.
 	if _, err := execTool(t, repo, ToolDefinition, map[string]any{"symbol": "shapes.Rect"}); err != nil {
 		t.Fatalf("warm-up: %v", err)
 	}
@@ -716,9 +630,7 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// (1) An edit to an existing file. NO chtimes bump: a real write_file lands
-	// with whatever mtime the filesystem gives it, and the sweep must catch that
-	// one, not a helpfully back-dated test fixture.
+	// (1) An edit to an existing file, no chtimes bump.
 	if err := os.WriteFile(shapesFile, append(original, []byte(
 		"\n// Added lands via a plain write, the way write_file lands one.\nfunc Added() float64 { return Unit }\n")...), 0o644); err != nil {
 		t.Fatal(err)
@@ -755,7 +667,7 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 		t.Errorf("uses = %d, want %d — a stale snapshot would still say %d", got, baseline+2, baseline)
 	}
 
-	// (2) A brand-new file in an existing package.
+	// (2) A brand-new file in an existing package, invisible to per-file stat.
 	newFile := filepath.Join(root, "shapes", "brandnew.go")
 	if err := os.WriteFile(newFile, []byte(
 		"package shapes\n\n// BrandNew arrived in a file that did not exist.\nfunc BrandNew() float64 { return Unit }\n"), 0o644); err != nil {
@@ -765,8 +677,7 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 		t.Fatalf("go_definition after a NEW file appeared: %v", err)
 	}
 
-	// go_diagnostics must report on the package it just watched change, without
-	// being told which one.
+	// go_diagnostics must report the changed package without being told which.
 	diag, err := execTool(t, repo, ToolDiagnostics, map[string]any{"scope": "changed"})
 	if err != nil {
 		t.Fatalf("go_diagnostics scope=changed: %v", err)
@@ -775,8 +686,7 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 		t.Errorf("scope=changed saw no packages after three writes; note = %q", diag.(*DiagnosticsResult).Note)
 	}
 
-	// (3) A deletion. The dangerous direction: a confident file:line for a symbol
-	// that no longer exists is worse than a refusal.
+	// (3) A deletion.
 	if err := os.Remove(newFile); err != nil {
 		t.Fatal(err)
 	}
@@ -785,9 +695,7 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_DiagnosticsSeeAFreshlyBrokenPackage is the same promise for
-// the tool an agent runs right after an edit: break a file, ask immediately, and
-// the breakage must be in the answer.
+// TestSystem_GoIntel_DiagnosticsSeeAFreshlyBrokenPackage pins: breaking a file and querying immediately surfaces the new type error.
 func TestSystem_GoIntel_DiagnosticsSeeAFreshlyBrokenPackage(t *testing.T) {
 	root := newFixture(t, "fixture")
 	repo := NewTools(newTestIndex(t, root))
@@ -824,15 +732,7 @@ func TestSystem_GoIntel_DiagnosticsSeeAFreshlyBrokenPackage(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Row 5 — real-world repository shapes
-// ---------------------------------------------------------------------------
-
-// TestSystem_GoIntel_BrokenPackageDoesNotBlindTheHealthyOnes is the shape a
-// repository is in for most of an editing session: one package does not compile.
-// Every query about the packages that DO must still answer — a code-intelligence
-// tool that goes dark the moment the tree is mid-edit is dark exactly when it was
-// needed.
+// TestSystem_GoIntel_BrokenPackageDoesNotBlindTheHealthyOnes pins: one non-compiling package does not stop queries about healthy siblings.
 func TestSystem_GoIntel_BrokenPackageDoesNotBlindTheHealthyOnes(t *testing.T) {
 	root := writeModule(t, t.TempDir(), "example.com/mixed", map[string]string{
 		"healthy/healthy.go": "package healthy\n\n// Good is fine.\ntype Good struct{ N int }\n\n// Use returns N.\nfunc Use(g Good) int { return g.N }\n",
@@ -870,21 +770,7 @@ func TestSystem_GoIntel_BrokenPackageDoesNotBlindTheHealthyOnes(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_MissingDependencyAnswersPromptlyAndNamesTheRealCause covers
-// the go.mod an agent breaks by hand, and pins what ACTUALLY happens rather than
-// what one might assume.
-//
-// go/packages does not fail the load: it returns the module's own package, typed
-// as far as it can be, with the unresolvable import recorded as a positioned type
-// error. So the honest contract is not "a load error" — it is:
-//
-//   - PROMPT. No network wait, no hang. (GOPROXY=off is what a sandboxed or
-//     offline run gives anyway, and it makes the failure immediate here.)
-//   - Queries about what DID resolve still answer, exactly as they do for a
-//     broken sibling package.
-//   - go_diagnostics NAMES it, and names the real cause: go/types anchors the
-//     error at the import LINE, which is a trap — the line is correct and the
-//     problem is in go.mod.
+// TestSystem_GoIntel_MissingDependencyAnswersPromptlyAndNamesTheRealCause pins: an unresolvable import answers promptly, resolvable symbols still answer, and go_diagnostics names go.mod as the cause rather than the import line.
 func TestSystem_GoIntel_MissingDependencyAnswersPromptlyAndNamesTheRealCause(t *testing.T) {
 	t.Setenv("GOFLAGS", "-mod=mod")
 	t.Setenv("GOPROXY", "off")
@@ -950,9 +836,7 @@ func TestSystem_GoIntel_MissingDependencyAnswersPromptlyAndNamesTheRealCause(t *
 	}
 }
 
-// TestSystem_GoIntel_EmptyModuleAndNonGoDirectoryAreTeachingErrors covers the two
-// workspaces that are not a Go project: a go.mod with nothing in it, and a
-// directory with no go.mod at all.
+// TestSystem_GoIntel_EmptyModuleAndNonGoDirectoryAreTeachingErrors pins: an empty module and a directory with no go.mod both return ErrNoModule.
 func TestSystem_GoIntel_EmptyModuleAndNonGoDirectoryAreTeachingErrors(t *testing.T) {
 	t.Run("empty module", func(t *testing.T) {
 		root := t.TempDir()
@@ -990,10 +874,7 @@ func TestSystem_GoIntel_EmptyModuleAndNonGoDirectoryAreTeachingErrors(t *testing
 	})
 }
 
-// TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot pins the documented
-// rule for a go.mod inside a go.mod: the walk-up stops at the FIRST one, so the
-// module that actually CONTAINS the query directory wins — the same module `go
-// build` would use standing there.
+// TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot pins: a go.mod inside a go.mod resolves to the innermost module containing the query dir.
 func TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot(t *testing.T) {
 	root := writeModule(t, t.TempDir(), "example.com/outer", map[string]string{
 		"outerpkg/outer.go": "package outerpkg\n\n// OuterOnly lives in the outer module.\nconst OuterOnly = 1\n",
@@ -1006,7 +887,7 @@ func TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot(t *testing.T) {
 	ix := newTestIndex(t, root)
 	repo := NewTools(ix)
 
-	// From the workspace root: the OUTER module.
+	// From the workspace root: the outer module.
 	out, err := execTool(t, repo, ToolDefinition, map[string]any{"symbol": "outerpkg.OuterOnly"})
 	if err != nil {
 		t.Fatalf("outer symbol from the workspace root: %v", err)
@@ -1018,7 +899,7 @@ func TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot(t *testing.T) {
 		t.Errorf("the inner module's symbol resolved from the outer root: %v", err)
 	}
 
-	// From inside the nested module: the INNER one, innermost-wins.
+	// From inside the nested module: the inner one, innermost-wins.
 	out, err = execTool(t, repo, ToolDefinition, map[string]any{"symbol": "innerpkg.InnerOnly", "dir": "tools/innerpkg"})
 	if err != nil {
 		t.Fatalf("inner symbol with dir inside the nested module: %v", err)
@@ -1030,7 +911,7 @@ func TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot(t *testing.T) {
 		t.Errorf("the outer module's symbol resolved from inside the nested one: %v", err)
 	}
 
-	// Both roots are cached independently, and the LRU still bounds them.
+	// Both roots are cached independently, and the LRU bound still holds.
 	ix.mu.Lock()
 	n := len(ix.entries)
 	ix.mu.Unlock()
@@ -1039,11 +920,7 @@ func TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_ThisRepoExcludesTestFiles pins the documented build-context
-// default against the real repository: with Tests:false a _test.go declaration
-// does not exist as far as any query is concerned. It is stated in every tool
-// description precisely because a correct-LOOKING answer produced under a
-// different build context is a silent wrong answer, not an error.
+// TestSystem_GoIntel_ThisRepoExcludesTestFiles pins: with Tests:false, a _test.go declaration does not exist to any query against this repository.
 func TestSystem_GoIntel_ThisRepoExcludesTestFiles(t *testing.T) {
 	ix := repoIndex(t)
 	repo := NewTools(ix)
@@ -1059,8 +936,7 @@ func TestSystem_GoIntel_ThisRepoExcludesTestFiles(t *testing.T) {
 		}
 	}
 
-	// The non-test declaration right next to them still resolves, so the
-	// exclusion is about test FILES and not about the package.
+	// The non-test declaration right next to them still resolves: the exclusion is about test files, not the package.
 	if _, err := execTool(t, repo, ToolDefinition, map[string]any{"symbol": "gointel.NewTools"}); err != nil {
 		t.Errorf("a non-test symbol in the same package did not resolve: %v", err)
 	}
@@ -1077,20 +953,7 @@ func TestSystem_GoIntel_ThisRepoExcludesTestFiles(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Row 6 — budgets
-// ---------------------------------------------------------------------------
-
-// TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo is a regression fence, not a
-// benchmark.
-//
-// Measured on this repository (101 packages) at the time of writing: cold load
-// 0.68s, warm definition 95µs, warm describe 69µs, references across the whole
-// module 3.7ms, diagnostics scope=all 94ms. The budgets below sit orders of
-// magnitude above those, so a slow or loaded CI box cannot fail them. What they
-// CAN catch is the one regression that matters and is easy to introduce: a
-// change that makes some query miss the cache and reload the module, which costs
-// hundreds of milliseconds at minimum and would blow every bound at once.
+// TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo is a regression fence, not a benchmark: budgets sit orders of magnitude above measured warm-query cost, so only a cache-missing regression can blow them.
 func TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo(t *testing.T) {
 	ix := repoIndex(t)
 	repo := NewTools(ix)
@@ -1124,11 +987,7 @@ func TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_OneSnapshotPerRootAcrossManyQueries is the memory claim
-// stated as something a test can see: fifty queries against an unchanged module
-// must produce exactly ONE packages.Load and leave exactly ONE cache entry. A
-// snapshot of this repository retains around 110 MB, so a per-query rebuild is
-// not a slow path, it is an out-of-memory.
+// TestSystem_GoIntel_OneSnapshotPerRootAcrossManyQueries pins: fifty queries against an unchanged module produce exactly one packages.Load and one entry.
 func TestSystem_GoIntel_OneSnapshotPerRootAcrossManyQueries(t *testing.T) {
 	ix := repoIndex(t)
 	repo := NewTools(ix)
@@ -1180,8 +1039,7 @@ func TestSystem_GoIntel_OneSnapshotPerRootAcrossManyQueries(t *testing.T) {
 	runtime.ReadMemStats(&after)
 	growth := int64(after.HeapAlloc) - int64(before.HeapAlloc)
 	t.Logf("heap growth across 50 warm queries: %.1f MB", float64(growth)/(1<<20))
-	// One retained snapshot of this repo is ~110 MB. Even one extra would blow
-	// this; the bound is deliberately far above per-query allocation noise.
+	// Bound is far above per-query allocation noise; an extra retained snapshot would blow it.
 	if growth > 64<<20 {
 		t.Errorf("heap grew %.1f MB across 50 warm queries — a snapshot is being retained per query", float64(growth)/(1<<20))
 	}

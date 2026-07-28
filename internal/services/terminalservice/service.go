@@ -58,11 +58,8 @@ type Option func(*service)
 
 // WithTracker wires the ActivityTracker the pty plumbing reports to: the
 // stream pumps behind an attachment and the local resize, none of which can
-// return an error to a caller (they run on goroutines the caller never sees, or
-// after the durable geometry write already succeeded). It is distinct from
-// WithActivityTracker, which instruments the Service API from outside; this one
-// reaches the events that never cross that boundary. Nil degrades to
-// libtracker.NoopTracker.
+// return an error to a caller. Distinct from WithActivityTracker, which
+// instruments the Service API from outside. Nil degrades to a Noop tracker.
 func WithTracker(tracker libtracker.ActivityTracker) Option {
 	return func(s *service) {
 		if tracker != nil {

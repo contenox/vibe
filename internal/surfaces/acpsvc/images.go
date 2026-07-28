@@ -7,17 +7,11 @@ import (
 	"github.com/contenox/beam/libacp"
 )
 
-// extractImageParts splits a prompt's content blocks into the image attachments
-// and everything else. Image blocks become taskengine.ImagePart (the shape the
-// chain's user Message and every provider codec consume); the remaining blocks
-// go on to libacp.FlattenContent, whose documented lossy text projection would
-// otherwise DROP images silently — this extraction is what makes vision reach
-// the model instead of the telemetry log.
-//
-// An image block whose Data is not valid base64 (the ACP wire encoding) is not
-// an attachment we can send; it is returned in rest so FlattenContent counts it
-// among the dropped kinds and the degradation stays visible, exactly like an
-// unsupported block type.
+// extractImageParts splits content blocks into image attachments (as
+// taskengine.ImagePart, for CanVision providers) and the rest, which still go
+// through libacp.FlattenContent — otherwise its lossy text projection would
+// drop images silently. A block with invalid base64 data is returned in rest
+// instead, so it surfaces as a dropped kind rather than a silent loss.
 func extractImageParts(blocks []libacp.ContentBlock) (images []taskengine.ImagePart, rest []libacp.ContentBlock) {
 	for _, block := range blocks {
 		if block.Type != string(libacp.ContentKindImage) {

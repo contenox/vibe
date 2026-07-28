@@ -432,6 +432,37 @@ func TestUnit_HITLWrapper_DiffSed(t *testing.T) {
 	}
 }
 
+func TestUnit_HITLWrapper_DiffEditFile(t *testing.T) {
+	oldContent := "foo bar baz\n"
+
+	var capturedReq hitlservice.ApprovalRequest
+	ask := func(_ context.Context, req hitlservice.ApprovalRequest) (bool, error) {
+		capturedReq = req
+		return true, nil
+	}
+
+	inner := &mockInnerTools{
+		fn: func(_ context.Context, _ time.Time, _ any, _ bool, tools *taskengine.ToolsCall) (any, taskengine.DataType, error) {
+			if tools.ToolName == "read_file" {
+				return oldContent, taskengine.DataTypeString, nil
+			}
+			return "ok", taskengine.DataTypeString, nil
+		},
+	}
+	w := localtools.NewHITLWrapper(inner, ask, approvePolicy(), nil)
+
+	_, _, err := w.Exec(context.Background(), time.Now(),
+		map[string]any{"path": "f.txt", "old_string": "bar", "new_string": "qux"}, false,
+		&taskengine.ToolsCall{Name: "local_fs", ToolName: "edit_file"})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedReq.Diff, "-foo bar baz") || !strings.Contains(capturedReq.Diff, "+foo qux baz") {
+		t.Errorf("unexpected edit_file diff:\n%s", capturedReq.Diff)
+	}
+}
+
 func TestUnit_HITLWrapper_DiffReadError_ApprovalStillShown(t *testing.T) {
 	var capturedReq hitlservice.ApprovalRequest
 	ask := func(_ context.Context, req hitlservice.ApprovalRequest) (bool, error) {

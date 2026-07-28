@@ -27,15 +27,12 @@ func filterCandidates(
 		return nil, ErrNoAvailableModels
 	}
 
-	// Use a map to track seen providers by ID to prevent duplicates
 	seenProviders := make(map[string]bool)
 	var candidates []libmodelprovider.Provider
 
-	// Handle model name preferences
 	if len(req.ModelNames) > 0 {
-		// Check preferred models in order of priority
+		// Preferred models are matched in priority order.
 		for _, preferredModel := range req.ModelNames {
-			// Use normalized model names for matching
 			normalizedPreferred := NormalizeModelName(preferredModel)
 
 			for _, p := range providers {
@@ -43,11 +40,8 @@ func filterCandidates(
 					continue
 				}
 
-				// Normalize provider's model name for comparison
 				currentNormalized := NormalizeModelName(p.ModelName())
 				currentFull := p.ModelName()
-
-				// Match either normalized or full name
 				if currentNormalized != normalizedPreferred && currentFull != preferredModel {
 					continue
 				}
@@ -59,7 +53,6 @@ func filterCandidates(
 			}
 		}
 	} else {
-		// Consider all providers when no model names specified
 		for _, p := range providers {
 			if validateProvider(p, req.ContextLength, capCheck) {
 				candidates = append(candidates, p)
@@ -68,12 +61,9 @@ func filterCandidates(
 	}
 
 	if len(candidates) == 0 {
-		// Distinguish a context-only shortfall — capable, name-matched models exist
-		// but every one advertises less context than the request needs (e.g. tool
-		// schemas pushed the requirement past a small model's window) — from a plain
-		// no-match, so the caller gets an actionable message instead of an opaque
-		// failure. A capable model whose context is 0 (unknown) is never rejected on
-		// context, so reaching here with capable models means they are all too small.
+		// Distinguish a context-only shortfall (capable, name-matched models
+		// exist but all advertise less context than needed) from a plain
+		// no-match, so the caller gets an actionable message.
 		if req.ContextLength > 0 {
 			largest := 0
 			var largestName string
@@ -133,9 +123,9 @@ func providerMatchesAnyName(p libmodelprovider.Provider, names []string) bool {
 	return false
 }
 
-// validateProvider checks if a provider meets requirements.
-// A provider whose context length is 0 (unknown) is never rejected on context
-// grounds — we only filter out models that are *known* to be insufficient.
+// validateProvider reports whether a provider meets requirements. A provider
+// whose context length is 0 (unknown) is never rejected on context grounds —
+// only models known to be insufficient are filtered out.
 func validateProvider(p libmodelprovider.Provider, minContext int, capCheck func(libmodelprovider.Provider) bool) bool {
 	cl := p.GetContextLength()
 	if minContext > 0 && cl > 0 && cl < minContext {
@@ -144,29 +134,26 @@ func validateProvider(p libmodelprovider.Provider, minContext int, capCheck func
 	return capCheck(p)
 }
 
-// NormalizeModelName standardizes model names for comparison
+// NormalizeModelName standardizes model names for comparison: lowercased,
+// separators and organization prefix stripped, quantization suffixes and any
+// trailing ":version" removed.
 func NormalizeModelName(modelName string) string {
-	// Convert to lowercase for case-insensitive comparison
 	normalized := strings.ToLower(modelName)
 
-	// Remove common prefixes and suffixes
 	normalized = strings.ReplaceAll(normalized, " ", "")
 	normalized = strings.ReplaceAll(normalized, "-", "")
 	normalized = strings.ReplaceAll(normalized, "_", "")
 	normalized = strings.ReplaceAll(normalized, ".", "")
 
-	// Remove organization prefix if present
 	if parts := strings.Split(normalized, "/"); len(parts) > 1 {
 		normalized = parts[1]
 	}
 
-	// Remove quantization suffixes
 	normalized = strings.ReplaceAll(normalized, "awq", "")
 	normalized = strings.ReplaceAll(normalized, "gptq", "")
 	normalized = strings.ReplaceAll(normalized, "4bit", "")
 	normalized = strings.ReplaceAll(normalized, "fp16", "")
 
-	// Remove version numbers
 	if idx := strings.LastIndex(normalized, ":"); idx != -1 {
 		normalized = normalized[:idx]
 	}
@@ -516,9 +503,7 @@ func rendezvousScore(sessionKey, providerID, backendID string) uint64 {
 	return h.Sum64()
 }
 
-// Randomly is a policy that selects a random provider and random backend.
-//
-// This provides basic load balancing across available resources.
+// Randomly is a Policy that selects a random provider and random backend.
 func Randomly(candidates []libmodelprovider.Provider) (libmodelprovider.Provider, string, error) {
 	provider, err := selectRandomProvider(candidates)
 	if err != nil {

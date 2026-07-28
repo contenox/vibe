@@ -23,12 +23,9 @@ const (
 
 const volatileFrom = KindDiff
 
-// CacheClass is the coding-aware retention priority of a segment, coarser than
-// SegmentKind. It is the seam a budget-aware admission/eviction policy uses to
-// decide what to keep warm when context exceeds the window: drop higher
-// (more-evictable) classes first, pin lower ones. Wiring a producer of rich
-// segments + the drop policy is gated on the T3 context planner (#7); this type
-// is the foundation it builds on.
+// CacheClass is the coding-aware retention priority of a segment, coarser
+// than SegmentKind: a budget-aware admission/eviction policy drops higher
+// (more-evictable) classes first and pins lower ones.
 type CacheClass int
 
 const (

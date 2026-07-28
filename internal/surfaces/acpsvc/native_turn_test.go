@@ -14,10 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_NativeEventTranslator_EmitsExpected verifies the survival-path
-// translator produces the same session/update vocabulary Transport.publishEvent
-// does, with turn-local tool-call invocation sequencing and the token-size
-// fallback.
+// TestUnit_NativeEventTranslator_EmitsExpected pins: the translator matches Transport.publishEvent's vocabulary, with turn-local tool-call sequencing.
 func TestUnit_NativeEventTranslator_EmitsExpected(t *testing.T) {
 	var got []libacp.SessionNotification
 	tr := newNativeEventTranslator(
@@ -59,8 +56,7 @@ func TestUnit_NativeEventTranslator_EmitsExpected(t *testing.T) {
 	require.Equal(t, "grep#2", got[4].Update.ToolCallID, "a second invocation is a distinct card")
 }
 
-// TestUnit_PermissionPendingGuard verifies the per-connection suppression flag the
-// native-turn viewer consults on delivery.
+// TestUnit_PermissionPendingGuard pins the per-connection suppression flag the native-turn viewer consults on delivery.
 func TestUnit_PermissionPendingGuard(t *testing.T) {
 	tr := &Transport{}
 	const sid = libacp.SessionID("s")
@@ -96,13 +92,12 @@ func (b *blockingAgent) Prompt(ctx context.Context, req agentservice.PromptReque
 }
 
 // transportWithRegistry wires the fakeAgent harness with a live native-turn
-// Registry and a connection context, so the survival path (promptViaRegistry) runs.
+// Registry so the survival path (promptViaRegistry) runs.
 func transportWithRegistry(a agentservice.Agent) (*Transport, libacp.SessionID, *nativeturn.Registry) {
 	tr, sid, _ := transportWithFakeAgent(a)
 	reg := nativeturn.New(nativeturn.Config{TurnDeadline: 5 * time.Second, GraceWindow: 5 * time.Second})
 	tr.deps.NativeTurns = reg
 	tr.connCtx, tr.connCancel = context.WithCancel(context.Background())
-	// Skip the runtime-state token-budget fallback (no State in this harness).
 	tr.sessions[sid].EffectiveTokenLimit = 1000
 	return tr, sid, reg
 }
@@ -112,9 +107,7 @@ type promptOutcome struct {
 	err  error
 }
 
-// TestSurvival_PromptSurvivesConnectionDrop is the acpsvc end of the bug fix: a
-// connection drop makes the connected Prompt return WITHOUT cancelling the turn,
-// which keeps running on the Registry and completes on its own.
+// TestSurvival_PromptSurvivesConnectionDrop pins: a connection drop returns Prompt without cancelling the turn, which keeps running.
 func TestSurvival_PromptSurvivesConnectionDrop(t *testing.T) {
 	agent := newBlockingAgent()
 	tr, sid, reg := transportWithRegistry(agent)
@@ -129,13 +122,12 @@ func TestSurvival_PromptSurvivesConnectionDrop(t *testing.T) {
 		out <- promptOutcome{resp, err}
 	}()
 
-	<-agent.started // the turn is running agent.Prompt on the Registry
+	<-agent.started
 	st, ok := reg.Get(sid)
 	require.True(t, ok)
 	require.Equal(t, nativeturn.StateRunning, st.State)
 	require.Equal(t, 1, st.Viewers)
 
-	// Drop the connection. The connected Prompt must return promptly.
 	tr.connCancel()
 	select {
 	case res := <-out:
@@ -144,21 +136,17 @@ func TestSurvival_PromptSurvivesConnectionDrop(t *testing.T) {
 		t.Fatal("Prompt did not return after connection drop")
 	}
 
-	// The turn was NOT cancelled: it is still present (now unwatched, in grace) and
-	// the agent is still blocked, not released or ctx-cancelled.
 	st, ok = reg.Get(sid)
 	require.True(t, ok, "turn must survive the connection drop")
 	require.Equal(t, nativeturn.StateGrace, st.State)
 	require.Equal(t, 0, st.Viewers)
 
-	// Let it finish on its own; it then tears down.
 	close(agent.release)
 	require.Eventually(t, func() bool { _, ok := reg.Get(sid); return !ok }, 2*time.Second, 5*time.Millisecond,
 		"the surviving turn should complete and be reclaimed")
 }
 
-// TestSurvival_PromptCompletesWhileConnected verifies the happy path: the connected
-// Prompt resolves with the turn's stop reason when it finishes.
+// TestSurvival_PromptCompletesWhileConnected pins: Prompt resolves with the turn's stop reason on the happy path.
 func TestSurvival_PromptCompletesWhileConnected(t *testing.T) {
 	agent := newBlockingAgent()
 	tr, sid, reg := transportWithRegistry(agent)
@@ -174,7 +162,7 @@ func TestSurvival_PromptCompletesWhileConnected(t *testing.T) {
 	}()
 
 	<-agent.started
-	close(agent.release) // let the turn complete
+	close(agent.release)
 
 	select {
 	case res := <-out:
@@ -186,9 +174,7 @@ func TestSurvival_PromptCompletesWhileConnected(t *testing.T) {
 	require.Eventually(t, func() bool { _, ok := reg.Get(sid); return !ok }, 2*time.Second, 5*time.Millisecond)
 }
 
-// TestSurvival_SessionCancelEndsTurn verifies session/cancel (Transport.Cancel)
-// reaches the Registry turn — the only real user cancel — and resolves the prompt
-// as cancelled.
+// TestSurvival_SessionCancelEndsTurn pins: session/cancel reaches the Registry turn and resolves the prompt as cancelled.
 func TestSurvival_SessionCancelEndsTurn(t *testing.T) {
 	agent := newBlockingAgent()
 	tr, sid, reg := transportWithRegistry(agent)

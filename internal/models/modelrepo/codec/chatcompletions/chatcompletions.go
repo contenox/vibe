@@ -1,13 +1,9 @@
-// Package chatcompletions is a transport-agnostic codec for the OpenAI
-// Chat Completions wire format (`/chat/completions`-style request/response and
-// SSE streaming). It maps between contenox's neutral modelrepo types and the
-// OpenAI-compatible JSON shape, performing tool-name sanitization and
-// round-tripping.
-//
-// It does NO I/O: callers build a Request, marshal and POST it through their
-// own transport (API-key header for direct OpenAI, bearer token for vLLM), then
-// hand the raw response bytes back here to decode. This is what lets each
-// OpenAI-compatible provider stay a thin transport wrapper around the shared codec.
+// Package chatcompletions is a transport-agnostic codec for the OpenAI Chat
+// Completions wire format (request/response and SSE streaming). It maps
+// between neutral modelrepo types and the OpenAI-compatible JSON shape,
+// handling tool-name sanitization and round-tripping. It does no I/O:
+// callers build a Request, POST it through their own transport, and hand the
+// raw response back here to decode.
 package chatcompletions
 
 import (
@@ -198,7 +194,7 @@ type Response struct {
 }
 
 // wireUsage is the chat-completions usage report. prompt_tokens already
-// INCLUDES cached tokens on OpenAI (no normalization needed); the cached
+// includes cached tokens on OpenAI (no normalization needed); the cached
 // count is broken out under prompt_tokens_details.cached_tokens. vLLM's V1
 // engine reports the details object as null (vllm#44961), which decodes to
 // zero — its warm signal is server-side metrics, not per-request usage.
@@ -308,12 +304,11 @@ type streamChunk struct {
 }
 
 // StreamDecoder translates streamed chat/completions chunks into raw-delta
-// parcels (per the modelrepo.StreamParcel contract). It does NOT assemble:
-// tool-call fragments are emitted as ToolCallDelta parcels (names translated
-// through nameMap as they appear) and assembly is left to the engine-side
-// modelrepo.StreamAssembler. The finish reason and usage report are held back
-// and surfaced by Finish as the typed terminal parcel, because the wire can
-// deliver a trailing usage-only chunk after the finish_reason chunk.
+// parcels (per the modelrepo.StreamParcel contract); it does not assemble —
+// tool-call fragments are emitted as ToolCallDelta parcels and assembly is
+// left to the engine-side modelrepo.StreamAssembler. The finish reason and
+// usage are held back and surfaced by Finish, since the wire can deliver a
+// trailing usage-only chunk after the finish_reason chunk.
 type StreamDecoder struct {
 	nameMap      map[string]string
 	finishReason string

@@ -1,54 +1,8 @@
 // Package gointel is the agent's in-process Go code intelligence: a warm,
 // type-checked view of the Go module under the workspace root, exposed as
-// allow-tier read tools (go_describe, go_definition, go_references,
-// go_implementations, go_symbols, go_diagnostics).
-//
-// See docs/development/blueprints/gointel.md for the ratified design. The three
-// decisions that shape every file in this package:
-//
-//   - NAMES-FIRST. LSP is position-oriented because editors have cursors; an
-//     agent has names. Every query takes a qualified symbol ("pkg.Ident",
-//     "pkg.Type.Method", or a bare "Ident" resolved across the module), never a
-//     byte offset. file:line only ever appears in ANSWERS.
-//
-//   - SNAPSHOT MODEL, HONESTLY COARSE. One immutable Snapshot per module root
-//     (packages.Load "./..." with full syntax and types); queries read it
-//     lock-free. There is NO package-granular incrementality — that is gopls's
-//     eighty percent, and an agent that edits whole files at tool-call cadence
-//     does not need it. A snapshot is replaced wholesale, never patched.
-//
-//   - ADVISORY, NEVER BLOCKING. The type checker compiled into this binary is
-//     not necessarily the one the repo builds with, so a repo on a newer
-//     toolchain can see phantom errors. Every result names the toolchain view it
-//     was produced under and `go build` stays the arbiter.
-//
-// # The one way this design can lie
-//
-// A stale snapshot. Everything else this package returns is a fact derived from
-// a real type-check; a stale snapshot returns a fact about source that no longer
-// exists. Two mechanisms defend that boundary, and they are deliberately
-// belt-and-braces:
-//
-//  1. Invalidate(paths...) — the PRIMARY path. The write-class tools know
-//     exactly what they changed; the V1.1 engine middleware calls Invalidate
-//     with those paths on every successful write to a .go/go.mod/go.sum file.
-//     Marking is O(1) and never blocks the writer.
-//
-//  2. An mtime sweep at query time — the BACKSTOP, for edits nobody announced
-//     (a human in an editor, a git checkout, a build script). go.mod/go.sum are
-//     swept on every query; the files of the package a query actually landed on
-//     are swept after resolution, and the query is re-run against a rebuilt
-//     snapshot when they moved.
-//
-// Both mark the entry dirty rather than rebuilding inline, so an edit BURST
-// coalesces into exactly one rebuild on the next query (see entry.rebuild).
-//
-// # Bounded like shellsession
-//
-// Lazy build, LRU of 2 module roots, 15-minute idle reaper, Shutdown joins its
-// goroutines. The loop/clamp discipline mirrors shellsession.manager.reap
-// deliberately: one more package with a background timer in this process should
-// not mean one more shape of background timer to reason about.
+// read-only tools (go_describe, go_definition, go_references,
+// go_implementations, go_symbols, go_diagnostics). Queries resolve against an
+// immutable per-module Snapshot.
 package gointel
 
 import (
@@ -68,81 +22,49 @@ import (
 	"github.com/contenox/beam/internal/services/vfs"
 )
 
-// ToolsProviderName is the tools-provider key this package registers under (the
-// `name` a chain's `tools` task or a runtime allowlist refers to). Every tool it
-// exposes is a pure read and is expected to sit at allow tier.
+// ToolsProviderName is the tools-provider key this package registers under. Every tool it exposes is a pure read at allow tier.
 const ToolsProviderName = "gointel"
 
 const (
-	// defaultMaxRoots is the LRU bound on cached snapshots. Two is the blueprint's
-	// number: a session works in one module and occasionally reaches into a
-	// sibling one, and a warm snapshot of this repo retains ~110 MB.
+	// defaultMaxRoots is the LRU bound on cached module-root snapshots.
 	defaultMaxRoots = 2
 
-	// defaultIdleTimeout drops a snapshot nothing has queried for this long. Same
-	// value and same reason as shellsession's shell reaper.
+	// defaultIdleTimeout drops a snapshot nothing has queried for this long.
 	defaultIdleTimeout = 15 * time.Minute
 
-	// maxChangedPaths bounds the per-root set of files observed to have changed,
-	// which go_diagnostics scope=changed reports over. It is a diagnostic aid, not
-	// a ledger: past the bound the oldest entries are dropped and the result says
-	// so rather than growing without limit.
+	// maxChangedPaths bounds the per-root changed-file set go_diagnostics scope=changed reports over; oldest entries are dropped past the bound.
 	maxChangedPaths = 512
 )
 
-// --- Errors -----------------------------------------------------------------
-//
-// Voice follows local_fs (internal/services/localtools/fs.go): a "gointel: "
-// prefix, the concrete value that failed, and the next call that would work.
-// The severity marker is localtools' fatal-vs-recoverable convention
-// (internal/services/localtools/hardening.go) — every gointel failure is
-// recoverable by a corrected call EXCEPT a missing Go toolchain, which no
-// argument change can fix.
+// Errors carry a "gointel: " prefix, the value that failed, and a severity marker: every failure is recoverable by a corrected call except a missing Go toolchain.
 
 const (
 	severityRecoverable = "(recoverable: adjust parameters and retry)"
 	severityFatalToken  = "(fatal:"
 )
 
-// Sentinel errors, for errors.Is by callers that need to branch (the V1.1
-// middleware treats ErrNoModule as "this workspace is not Go, stop asking").
+// Sentinel errors, for errors.Is by callers that need to branch.
 var (
-	// ErrNoModule means no go.mod was found at or above the query directory,
-	// within the allowed directory.
+	// ErrNoModule means no go.mod was found at or above the query directory, within the allowed directory.
 	ErrNoModule = errors.New("gointel: no Go module")
-	// ErrOutsideAllowedDir means the module root that owns the query directory
-	// lies outside the allowed directory. Same boundary, same voice as local_fs.
+	// ErrOutsideAllowedDir means the module root that owns the query directory lies outside the allowed directory.
 	ErrOutsideAllowedDir = errors.New("gointel: module root outside allowed directory")
-	// ErrNoGoToolchain means the `go` binary is not on PATH. gointel drives
-	// `go list` through go/packages, so nothing can be answered without it.
+	// ErrNoGoToolchain means the `go` binary is not on PATH.
 	ErrNoGoToolchain = errors.New("gointel: no go toolchain")
 	// ErrLoad means the module could not be loaded at all (driver failure).
 	ErrLoad = errors.New("gointel: module load failed")
 	// ErrNotFound means a named symbol resolved to nothing in this module.
 	ErrNotFound = errors.New("gointel: symbol not found")
-	// ErrAmbiguous means a name matched more than one declaration. The error text
-	// lists the qualified candidates; re-ask with one of them.
+	// ErrAmbiguous means a name matched more than one declaration; the error text lists the qualified candidates.
 	ErrAmbiguous = errors.New("gointel: ambiguous symbol")
-	// ErrShutdown means the index has been shut down (engine.Stop ran) and will
-	// answer nothing further. It is the typed answer to a query that raced the
-	// engine's teardown: without it a late query would quietly rebuild a snapshot
-	// — spawning `go list` and retaining ~110 MB — into a cache whose reaper has
-	// already exited, so nothing would ever drop it again.
+	// ErrShutdown means the index has been shut down and answers nothing further, rather than silently rebuilding a snapshot no reaper will drop.
 	ErrShutdown = errors.New("gointel: index shut down")
 )
 
-// maxEchoRunes bounds how much of a MODEL-SUPPLIED string a teaching error
-// quotes back. Every argument on this surface is written by the model, so an
-// error that echoes one verbatim is an output channel the model controls the
-// length of: a 10 KB symbol name would come back as a 10 KB error, and a burst
-// of them is a context window spent on nothing. The quoted form is always %q,
-// so control characters, NULs and bidi overrides are escaped rather than
-// embedded in the result.
+// maxEchoRunes bounds how much of a model-supplied string a teaching error quotes back, since the argument length is otherwise attacker-controlled.
 const maxEchoRunes = 120
 
-// echoArg renders a model-supplied argument for an error message: clamped, then
-// Go-quoted. Use it EVERYWHERE an argument is quoted back — the cap is only
-// worth anything if there is no path around it.
+// echoArg renders a model-supplied argument for an error message: clamped, then Go-quoted. Use it everywhere an argument is quoted back.
 func echoArg(s string) string {
 	r := []rune(s)
 	if len(r) > maxEchoRunes {
@@ -151,13 +73,7 @@ func echoArg(s string) string {
 	return strconv.Quote(s)
 }
 
-// echoErr renders a WRAPPED lower-level error inside a teaching message.
-//
-// It is clamped for the same reason echoArg is, and the reason is easy to miss:
-// the wrapped text routinely embeds the very argument that failed. A 10 KB dir
-// comes back from the filesystem as "…: file name too long" with all 10 KB of
-// the name in it, so clamping the argument and then interpolating %v puts the
-// argument straight back into the result through the side door.
+// echoErr renders a wrapped lower-level error inside a teaching message, clamped because the wrapped text often embeds the failed argument itself.
 func echoErr(err error) string {
 	if err == nil {
 		return ""
@@ -169,10 +85,7 @@ func echoErr(err error) string {
 	return string(r)
 }
 
-// echoName renders a model-supplied IDENTIFIER — an argument NAME — for an
-// error message. Same clamp as echoArg, and non-printable runes (a NUL, a bidi
-// override) are replaced rather than embedded, but no quotes: the
-// unknown-argument voice is local_fs's and reads as a bare comma-separated list.
+// echoName renders a model-supplied identifier for an error message: same clamp as echoArg, non-printable runes replaced, but unquoted.
 func echoName(s string) string {
 	var b strings.Builder
 	for i, r := range []rune(s) {
@@ -194,8 +107,7 @@ func recoverablef(format string, a ...any) error {
 	return errors.New(fmt.Sprintf(format, a...) + " " + severityRecoverable)
 }
 
-// wrapRecoverable tags a sentinel-wrapping error recoverable unless it already
-// carries a severity marker.
+// wrapRecoverable tags a sentinel-wrapping error recoverable unless it already carries a severity marker.
 func wrapRecoverable(sentinel error, format string, a ...any) error {
 	msg := fmt.Sprintf(format, a...)
 	if strings.Contains(msg, severityRecoverable) || strings.Contains(msg, severityFatalToken) {
@@ -204,38 +116,26 @@ func wrapRecoverable(sentinel error, format string, a ...any) error {
 	return fmt.Errorf("%w: %s %s", sentinel, msg, severityRecoverable)
 }
 
-// --- Configuration ----------------------------------------------------------
-
 // Config configures an Index. Zero values fall back to the documented defaults.
 type Config struct {
-	// AllowedDir is the workspace root. Every query directory, and the module
-	// root resolved from it, must lie within this directory — the same
-	// dir-scoping local_fs applies to every path it touches.
+	// AllowedDir is the workspace root. Every query directory, and the module root resolved from it, must lie within this directory.
 	AllowedDir string
-	// CwdResolver supplies the workspace root per call context when AllowedDir is
-	// empty, matching localtools.NewLocalFSToolsWith's resolver seam so both
-	// toolsets agree on what "the project root" is for a given session.
+	// CwdResolver supplies the workspace root per call context when AllowedDir is empty.
 	CwdResolver func(context.Context) string
 	// MaxRoots bounds how many module-root snapshots are cached (default 2).
 	MaxRoots int
-	// IdleTimeout drops a snapshot untouched for this long (default 15m; <=0
-	// disables reaping).
+	// IdleTimeout drops a snapshot untouched for this long (default 15m; <=0 disables reaping).
 	IdleTimeout time.Duration
 }
 
 // Request is the argument bundle every query takes. Fields are per-query:
 //
-//	Dir     — directory to resolve the module root from, relative to the
-//	          workspace root. Empty means the workspace root itself.
-//	Symbol  — the qualified symbol for describe/definition/references/
-//	          implementations.
-//	Target  — the package or file for symbols, and the package for
-//	          diagnostics scope=package.
+//	Dir     — directory to resolve the module root from; empty means the workspace root.
+//	Symbol  — the qualified symbol for describe/definition/references/implementations.
+//	Target  — the package or file for symbols, and the package for diagnostics scope=package.
 //	Scope   — diagnostics only: "changed", "package", or "all".
-//	Passes  — diagnostics only: vet passes to run; empty takes
-//	          DefaultVetPasses(), ["all"] takes VetPasses().
-//	Max     — result cap for references, symbols and diagnostics; 0 takes the
-//	          default.
+//	Passes  — diagnostics only: vet passes to run; empty takes DefaultVetPasses(), ["all"] takes VetPasses().
+//	Max     — result cap for references, symbols and diagnostics; 0 takes the default.
 type Request struct {
 	Dir    string
 	Symbol string
@@ -245,38 +145,22 @@ type Request struct {
 	Max    int
 }
 
-// Index owns the per-module-root snapshot cache and answers every query. It is
-// safe for concurrent use.
-//
-// The interface is what the tools repo holds and what the V1.1 post-edit
-// middleware will hold: queries plus Invalidate. Nothing here exposes the
-// snapshot itself, so no caller can hold one past the point where it stops
-// being true.
+// Index owns the per-module-root snapshot cache and answers every query. It is safe for concurrent use. Nothing here exposes the snapshot itself, so no caller can hold one past the point where it stops being true.
 type Index interface {
-	// Describe returns kind, type, signature, doc and — for named types —
-	// fields and methods.
+	// Describe returns kind, type, signature, doc and — for named types — fields and methods.
 	Describe(ctx context.Context, req Request) (*DescribeResult, error)
 	// Definition returns the declaration site and the declaring source line.
 	Definition(ctx context.Context, req Request) (*DefinitionResult, error)
 	// References returns uses of the symbol across this module, grouped by file.
 	References(ctx context.Context, req Request) (*ReferencesResult, error)
-	// Implementations answers in both directions: implementers of an interface,
-	// or the module interfaces a concrete type satisfies.
+	// Implementations answers in both directions: implementers of an interface, or the module interfaces a concrete type satisfies.
 	Implementations(ctx context.Context, req Request) (*ImplementationsResult, error)
 	// Symbols outlines a package or a file.
 	Symbols(ctx context.Context, req Request) (*SymbolsResult, error)
 	// Diagnostics returns type/parse errors plus a curated vet pass set.
 	Diagnostics(ctx context.Context, req Request) (*DiagnosticsResult, error)
 
-	// Invalidate marks the snapshots owning these paths dirty so the next query
-	// rebuilds. It is the PRIMARY freshness mechanism: the V1.1 engine middleware
-	// calls it with the paths of every successful write-class tool result on a
-	// .go/go.mod/go.sum file, before the tool result is handed back to the model.
-	// It never blocks and never rebuilds inline — a burst of edits collapses into
-	// one rebuild at the next query.
-	//
-	// Paths may be absolute or relative to the process working directory, and may
-	// name a file or a directory. Paths under no cached root are ignored.
+	// Invalidate marks the snapshots owning these paths dirty so the next query rebuilds; it never blocks and never rebuilds inline. Paths may be absolute or relative to the process working directory, and may name a file or a directory; paths under no cached root are ignored.
 	Invalidate(paths ...string)
 
 	// Shutdown drops every snapshot and stops the reaper, joining its goroutine.
@@ -321,15 +205,7 @@ func NewIndex(cfg Config) Index {
 	return ix
 }
 
-// Shutdown drops every snapshot, stops the reaper and joins it, and closes the
-// index to further queries.
-//
-// The closed flag is not bookkeeping. Shutdown runs on engine.Stop, and a chain
-// goroutine can still be mid-turn when it does: without the flag, that late
-// query would find an empty cache, rebuild a snapshot (a `go list` subprocess
-// and ~110 MB retained) and file it under a reaper that has already exited —
-// a leak that outlives the engine it belonged to. Refusing with a typed error
-// is the honest answer: the tool the model called no longer exists.
+// Shutdown drops every snapshot, stops the reaper and joins it, and closes the index to further queries. A query racing teardown gets ErrShutdown rather than silently rebuilding into a cache no reaper will ever drop.
 func (ix *index) Shutdown() {
 	ix.closed.Store(true)
 	ix.stopOnce.Do(func() { close(ix.stop) })
@@ -348,10 +224,7 @@ func (ix *index) checkOpen() error {
 	return nil
 }
 
-// reap drops snapshots nothing has queried for IdleTimeout. The interval clamp
-// (idle/2, floored at a second, ceilinged at a minute) and the
-// collect-under-lock / act-outside-lock shape are shellsession.manager.reap's,
-// on purpose.
+// reap drops snapshots nothing has queried for IdleTimeout. The tick interval is idle/2, clamped to [1s, 1m].
 func (ix *index) reap() {
 	defer ix.wg.Done()
 	interval := ix.idle / 2
@@ -381,29 +254,14 @@ func (ix *index) reap() {
 	}
 }
 
-// --- Module-root resolution -------------------------------------------------
-
-// allowedDir resolves the workspace root for this call. Mirrors
-// LocalFSTools.baseDir/absAllowedDir: an explicit AllowedDir wins, otherwise the
-// context resolver supplies it, and an unset root is a configuration error
-// rather than an implicit "anywhere".
+// allowedDir resolves the workspace root for this call: an explicit AllowedDir wins, otherwise the context resolver supplies it, and an unset root is a configuration error rather than an implicit "anywhere".
 func (ix *index) allowedDir(ctx context.Context) (string, error) {
 	base := ix.cfg.AllowedDir
 	if strings.TrimSpace(base) == "" && ix.cfg.CwdResolver != nil {
 		base = ix.cfg.CwdResolver(ctx)
 	}
 	if strings.TrimSpace(base) == "" {
-		// FATAL, and it says so, because no argument the model can change will fix
-		// it: the workspace root is a WIRING decision made above this package.
-		//
-		// This is the failure mode that looks like a broken tool and is not one.
-		// gointel is registered unconditionally, so it appears in the tool list of
-		// every session; a session whose composition root left both AllowedDir and
-		// CwdResolver empty therefore advertises six tools that refuse every call.
-		// A bare "no allowed directory configured" sends the model hunting for a
-		// better symbol spelling forever. Naming the two ways to supply the root —
-		// the flag an operator passes and the resolver a composition root wires —
-		// is what turns that into something the first reader can act on.
+		// Fatal: the workspace root is a wiring decision made above this package, so no query argument can fix it.
 		return "", errors.New("gointel: no workspace root is configured for this session, so there is nothing to index; " +
 			"the root comes from the runtime's allowed directory (--local-exec-allowed-dir on the CLI) or from the " +
 			"session cwd resolver the composition root supplies — no symbol or dir argument can substitute for it " +
@@ -416,24 +274,7 @@ func (ix *index) allowedDir(ctx context.Context) (string, error) {
 	return resolved, nil
 }
 
-// moduleRoot resolves dir (relative to the workspace root) to the module root
-// that owns it.
-//
-// Containment first, exactly as local_fs does it — vfs.Contain is the single
-// symlink-escape guard in the process, so a link inside the workspace pointing
-// at /etc is refused here before any I/O. Then a go.mod walk-up bounded BY the
-// workspace root: a module whose root sits above the allowed directory is
-// refused rather than silently indexed, and it is refused with the containment
-// voice, because that is what actually happened.
-//
-// NESTED MODULES: the walk stops at the FIRST go.mod at or above dir, so the
-// INNERMOST module owning the query directory wins. A repository with a nested
-// module (a tools/ or examples/ module inside the main one) therefore indexes
-// whichever of the two actually contains dir — which is the same module `go
-// build` would use standing in that directory, and the only reading under which
-// a file:line answer is about the code the caller is looking at. Querying the
-// outer module's symbols from inside the inner one is a genuine miss, answered
-// by passing dir explicitly.
+// moduleRoot resolves dir (relative to the workspace root) to the module root that owns it: vfs.Contain guards symlink escapes first, then a go.mod walk-up bounded by the workspace root. The walk stops at the first go.mod at or above dir, so the innermost module owning dir wins — the same module `go build` would use standing there. Querying an outer module's symbols from inside a nested one requires passing dir explicitly.
 func (ix *index) moduleRoot(ctx context.Context, dir string) (root, base string, err error) {
 	base, err = ix.allowedDir(ctx)
 	if err != nil {
@@ -445,17 +286,10 @@ func (ix *index) moduleRoot(ctx context.Context, dir string) (root, base string,
 	start, err := vfs.Contain(base, dir)
 	if err != nil {
 		if errors.Is(err, vfs.ErrEscape) {
-			// ONE typed boundary. A "../.." and a symlink pointing at /etc are the
-			// same refusal as a module root sitting above the workspace, so a
-			// caller branching on errors.Is(err, ErrOutsideAllowedDir) sees all
-			// three — otherwise the two most obvious escape attempts would be the
-			// two the sentinel misses.
+			// Same sentinel as a module root sitting above the workspace, so callers branching on errors.Is(err, ErrOutsideAllowedDir) see both.
 			return "", "", wrapRecoverable(ErrOutsideAllowedDir,
 				"path %s escapes allowed directory %s", echoArg(dir), base)
 		}
-		// Anything else vfs refused (a NUL byte in the path, an unreadable
-		// component) is still a caller-correctable argument, so it carries the
-		// recoverable marker like every other refusal on this surface.
 		return "", "", recoverablef("gointel: cannot resolve dir %s: %s", echoArg(dir), echoErr(err))
 	}
 	if info, statErr := os.Stat(start); statErr == nil && !info.IsDir() {
@@ -476,8 +310,7 @@ func (ix *index) moduleRoot(ctx context.Context, dir string) (root, base string,
 		cur = parent
 	}
 
-	// Nothing inside the workspace. If a go.mod exists ABOVE it, the module is
-	// real and the refusal is a boundary refusal, not a "there is no Go here".
+	// Nothing inside the workspace. If a go.mod exists above it, the module is real and the refusal is a boundary refusal, not "there is no Go here".
 	for cur := filepath.Dir(base); ; {
 		if hasGoMod(cur) {
 			return "", "", wrapRecoverable(ErrOutsideAllowedDir,
@@ -500,10 +333,7 @@ func hasGoMod(dir string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// displayPath renders an absolute path the way the model addresses files
-// everywhere else: relative to the workspace root, forward-slashed, so a
-// file:line anchor from gointel can be pasted straight into
-// local_fs.read_file. Copied in shape from LocalFSTools.displayPath.
+// displayPath renders an absolute path relative to the workspace root, forward-slashed, so a file:line anchor can be pasted into local_fs.read_file.
 func displayPath(base, abs string) string {
 	if base == "" || abs == "" {
 		return abs
@@ -515,29 +345,19 @@ func displayPath(base, abs string) string {
 	return filepath.ToSlash(rel)
 }
 
-// --- Cache ------------------------------------------------------------------
-
-// entry is one module root's cache slot: at most one Snapshot, a generation
-// counter that dirty-marking bumps, and the set of files observed to have
-// changed under it.
+// entry is one module root's cache slot: at most one Snapshot, a generation counter that dirty-marking bumps, and the set of files observed to have changed under it.
 type entry struct {
 	root string
 	base string
 
-	// buildMu serializes rebuilds for this root. It is the coalescing point: N
-	// queries arriving during one edit burst produce one packages.Load.
+	// buildMu serializes rebuilds for this root: concurrent queries during one edit burst produce a single packages.Load.
 	buildMu sync.Mutex
 	snap    atomic.Pointer[Snapshot]
 
-	// gen counts dirty marks; builtGen records the gen the live snapshot was
-	// built at. gen != builtGen means "something changed since this snapshot".
-	// Keeping them as counters rather than a bool closes the window where an
-	// Invalidate lands DURING a build: the build stamps the gen it started from,
-	// so the mark is not swallowed.
+	// gen counts dirty marks; builtGen records the gen the live snapshot was built at. gen != builtGen means "something changed since this snapshot". Counters rather than a bool so an Invalidate landing during a build is not swallowed: the build stamps the gen it started from.
 	gen      atomic.Uint64
 	builtGen atomic.Uint64
-	// builds counts completed packages.Load calls for this root. It is the
-	// coalescing evidence: an edit burst plus a query burst must move it by one.
+	// builds counts completed packages.Load calls for this root.
 	builds atomic.Uint64
 
 	lastNs atomic.Int64
@@ -572,19 +392,14 @@ func (e *entry) markDirty(path string) {
 	}
 }
 
-// changedPaths returns the files observed to have changed under this root since
-// the process started, oldest first.
+// changedPaths returns the files observed to have changed under this root since the process started, oldest first.
 func (e *entry) changedPaths() []string {
 	e.changedMu.Lock()
 	defer e.changedMu.Unlock()
 	return append([]string(nil), e.changed...)
 }
 
-// entryFor returns the cache slot for root, creating it and evicting the
-// least-recently-used slot when the LRU is full. It returns ErrShutdown rather
-// than a slot once the index is closed — the check is INSIDE the same lock
-// Shutdown clears the map under, so a query that raced teardown cannot resurrect
-// an entry the reaper is no longer alive to drop.
+// entryFor returns the cache slot for root, creating it and evicting the least-recently-used slot when the LRU is full. Returns ErrShutdown, under the same lock Shutdown clears the map under, once the index is closed.
 func (ix *index) entryFor(root, base string) (*entry, error) {
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
@@ -616,13 +431,7 @@ func (ix *index) dropOrderLocked(root string) {
 	}
 }
 
-// get returns a snapshot for this entry, building or rebuilding when the live
-// one is superseded by a dirty mark or by a moved go.mod/go.sum.
-//
-// The go.mod/go.sum sweep runs on EVERY query because it is two stat calls and
-// it is the one change that invalidates the whole graph. Per-package file
-// sweeps are deferred to withSnapshot, after resolution has named the package a
-// query actually landed on.
+// get returns a snapshot for this entry, building or rebuilding when the live one is superseded by a dirty mark or a moved go.mod/go.sum. The go.mod/go.sum sweep runs on every query; per-package file sweeps are deferred to withSnapshot, after resolution names the package a query landed on.
 func (e *entry) get(ctx context.Context) (*Snapshot, error) {
 	e.touch()
 	if s := e.snap.Load(); s != nil && e.builtGen.Load() == e.gen.Load() && !e.sweepModuleFiles(s) {
@@ -631,14 +440,7 @@ func (e *entry) get(ctx context.Context) (*Snapshot, error) {
 	return e.rebuild(ctx)
 }
 
-// rebuild replaces the snapshot under buildMu.
-//
-// COALESCING: every caller that finds the snapshot stale queues here, and the
-// first one through does the work; the rest re-check on entry and return the
-// snapshot it just built. So an edit burst of ten files followed by a query
-// burst of five tools costs exactly one packages.Load, not fifteen. An
-// Invalidate landing mid-build bumps gen past the builtGen this build stamps,
-// so it is not swallowed — it simply rebuilds again at the next query.
+// rebuild replaces the snapshot under buildMu. Every caller that finds the snapshot stale queues here; the first through does the work and the rest re-check on entry and return the snapshot it just built, so one packages.Load serves the whole burst. An Invalidate landing mid-build bumps gen past the builtGen this build stamps, so it rebuilds again at the next query.
 func (e *entry) rebuild(ctx context.Context) (*Snapshot, error) {
 	e.buildMu.Lock()
 	defer e.buildMu.Unlock()
@@ -667,15 +469,7 @@ func (e *entry) sweepModuleFiles(s *Snapshot) bool {
 	return false
 }
 
-// sweepPackages reports whether any file of the named packages moved since the
-// snapshot was built. A nil pkgPaths sweeps EVERY file in the snapshot — the
-// deliberately paranoid default for answers whose correctness depends on the
-// whole module (references, implementations) and for "not found" answers, where
-// the file that would have changed the answer is by definition not one the
-// query named.
-//
-// Directory stamps are swept alongside file stamps so a brand-new .go file in
-// an existing package — which no per-file stat can see — is caught too.
+// sweepPackages reports whether any file of the named packages moved since the snapshot was built. A nil pkgPaths sweeps every file in the snapshot, for answers whose correctness depends on the whole module (references, implementations) and for "not found" answers. Directory stamps are swept alongside file stamps so a brand-new .go file in an existing package is caught too.
 func (e *entry) sweepPackages(s *Snapshot, pkgPaths []string) bool {
 	files, dirs := s.sweepSet(pkgPaths)
 	for path, want := range files {
@@ -723,13 +517,7 @@ func (ix *index) Invalidate(paths ...string) {
 	}
 }
 
-// invalidatingPath reports whether a written path can change a snapshot.
-//
-// Deliberately generous at the edges: .go, go.mod and go.sum are the load-bearing
-// cases, and an extension-less path is treated as a directory (a rename or a
-// delete of a package directory) because a needless rebuild costs a second while
-// a missed one costs a wrong answer. Everything else — .md, .json, .yaml — is
-// ignored, because a docs edit must not evict a warm snapshot.
+// invalidatingPath reports whether a written path can change a snapshot: .go, go.mod/go.sum/go.work(.sum), and extension-less paths (treated as a directory rename/delete). Everything else, e.g. .md/.json/.yaml, is ignored.
 func invalidatingPath(abs string) bool {
 	switch base := filepath.Base(abs); base {
 	case "go.mod", "go.sum", "go.work", "go.work.sum":
@@ -747,20 +535,7 @@ func underRoot(root, abs string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// --- Query plumbing ---------------------------------------------------------
-
-// withSnapshot runs fn against a fresh snapshot for req.Dir.
-//
-// fn returns the import paths whose source its answer depends on; a nil slice
-// means "every file in the module". After fn returns, those files are swept: if
-// any moved, the entry is marked dirty, the snapshot is rebuilt and fn runs
-// ONCE more against the new one. That second run is the whole point — it is what
-// makes "the file changed between the load and the query" impossible to observe
-// as a stale answer, rather than merely unlikely.
-//
-// The sweep runs even when fn failed, because a failure is an answer too: "no
-// such symbol" is exactly what a stale snapshot says about a symbol that was
-// just added.
+// withSnapshot runs fn against a fresh snapshot for req.Dir. fn returns the import paths its answer depends on; nil means every file in the module. After fn returns, those files are swept; if any moved, the entry is marked dirty, the snapshot rebuilt, and fn runs once more against the new one, so a file changing between load and query cannot surface as a stale answer. The sweep runs even when fn failed, since "no such symbol" is exactly what a stale snapshot says about a symbol just added.
 func (ix *index) withSnapshot(ctx context.Context, req Request, fn func(*Snapshot) ([]string, error)) error {
 	if err := ix.checkOpen(); err != nil {
 		return err
@@ -789,8 +564,7 @@ func (ix *index) withSnapshot(ctx context.Context, req Request, fn func(*Snapsho
 	return fnErr
 }
 
-// entryAndSnapshot is withSnapshot's single-shot cousin for diagnostics, which
-// needs the entry itself (scope=changed reads the observed-change set).
+// entryAndSnapshot is withSnapshot's single-shot cousin for diagnostics, which needs the entry itself (scope=changed reads the observed-change set).
 func (ix *index) entryAndSnapshot(ctx context.Context, req Request) (*entry, *Snapshot, error) {
 	if err := ix.checkOpen(); err != nil {
 		return nil, nil, err
@@ -816,9 +590,7 @@ func (ix *index) entryAndSnapshot(ctx context.Context, req Request) (*entry, *Sn
 	return e, snap, nil
 }
 
-// lookPathGo is exec.LookPath("go"), hoisted so the missing-toolchain error is
-// raised as a teaching error before go/packages produces a driver error nobody
-// can act on.
+// lookPathGo is exec.LookPath("go"), hoisted so the missing-toolchain error is raised as a teaching error before go/packages produces a driver error nobody can act on.
 func lookPathGo() error {
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf("%w: the go binary is not on PATH; gointel drives `go list` to read the module graph, so Go must be installed for any gointel tool to answer (fatal: no go toolchain)", ErrNoGoToolchain)

@@ -6,17 +6,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The headline: the default policy, resolved against a realistic parent
-// environment, keeps the handful of safe operational variables and drops every
-// credential — the whole point of the whitelist, with no per-consumer list to
-// author.
+// DefaultEnvPolicy resolves to only the safe operational variables; every credential is dropped.
 func TestUnit_DefaultEnvPolicy_ResolveKeepsSafeBaseDropsSecrets(t *testing.T) {
 	parent := []string{
 		"PATH=/usr/bin",
 		"LANG=en_US.UTF-8",
 		"LC_ALL=C",
 		"USER=agent",
-		"HOME=/home/real", // present but never in the allow list — scrubEnv forces HOME
+		"HOME=/home/real",
 		"AWS_SECRET_ACCESS_KEY=shhh",
 		"ANTHROPIC_API_KEY=sk-ant-xxx",
 		"CONTENOX_TOKEN=leak",
@@ -28,16 +25,13 @@ func TestUnit_DefaultEnvPolicy_ResolveKeepsSafeBaseDropsSecrets(t *testing.T) {
 	require.Equal(t, []string{"LANG", "LC_ALL", "PATH", "USER"}, got)
 }
 
-// Resolve returns only names that are actually set: an allowed name absent from
-// the parent cannot be "passed through", so it never appears.
+// Resolve never returns an allowed name that is absent from the parent environment.
 func TestUnit_EnvPolicy_ResolveOnlyReturnsNamesPresentInParent(t *testing.T) {
 	got := DefaultEnvPolicy().Resolve([]string{"PATH=/usr/bin"})
 	require.Equal(t, []string{"PATH"}, got)
 }
 
-// Deny wins over Allow: widening Allow to "AWS_*" to get the benign AWS_REGION
-// must still not leak AWS_SECRET_ACCESS_KEY (default deny "*_KEY") or
-// AWS_SESSION_TOKEN (default deny "*_TOKEN").
+// Deny always wins over Allow, even a widened one (e.g. "AWS_*" still can't leak AWS_SECRET_ACCESS_KEY).
 func TestUnit_EnvPolicy_DenyWinsOverAllow(t *testing.T) {
 	parent := []string{
 		"AWS_REGION=eu-west-1",
@@ -50,8 +44,7 @@ func TestUnit_EnvPolicy_DenyWinsOverAllow(t *testing.T) {
 	require.Equal(t, []string{"AWS_REGION"}, got)
 }
 
-// Glob rules: a trailing "*" is a prefix match (LC_*), a leading "*" a suffix
-// match (*_PROXY). Both resolve to the concrete names present in the parent.
+// A trailing "*" is a prefix match, a leading "*" a suffix match.
 func TestUnit_EnvPolicy_GlobPrefixAndSuffix(t *testing.T) {
 	parent := []string{
 		"LC_ALL=C",
@@ -67,8 +60,7 @@ func TestUnit_EnvPolicy_GlobPrefixAndSuffix(t *testing.T) {
 	require.Equal(t, []string{"HTTPS_PROXY", "HTTP_PROXY", "LC_ALL", "LC_CTYPE", "NO_PROXY"}, got)
 }
 
-// The resolved list is de-duplicated and sorted, so the same environment always
-// yields the same EnvAllow — a duplicate name in the parent collapses to one.
+// Resolve is sorted and de-duplicated by name.
 func TestUnit_EnvPolicy_ResolveSortedAndDeduped(t *testing.T) {
 	parent := []string{"TERM=xterm", "PATH=/a", "PATH=/b"}
 
@@ -77,16 +69,13 @@ func TestUnit_EnvPolicy_ResolveSortedAndDeduped(t *testing.T) {
 	require.Equal(t, []string{"PATH", "TERM"}, got)
 }
 
-// A parent entry with no "=" is not a KEY=VALUE variable; there is no name to
-// match, so it is skipped rather than mishandled.
+// A parent entry with no "=" is skipped rather than mishandled.
 func TestUnit_EnvPolicy_ResolveSkipsMalformedParentEntry(t *testing.T) {
 	got := DefaultEnvPolicy().Resolve([]string{"NOEQUALS", "PATH=/usr/bin"})
 	require.Equal(t, []string{"PATH"}, got)
 }
 
-// A bare "*" is the explicit "trust this environment, just strip known secrets"
-// mode: everything passes EXCEPT what Deny vetoes, which still removes the
-// control plane and credential shapes.
+// A bare "*" allows everything except what Deny vetoes.
 func TestUnit_EnvPolicy_BareStarAllowsAllButDenyStillWins(t *testing.T) {
 	parent := []string{
 		"PATH=/usr/bin",
@@ -100,8 +89,7 @@ func TestUnit_EnvPolicy_BareStarAllowsAllButDenyStillWins(t *testing.T) {
 	require.Equal(t, []string{"PATH", "RANDOM_VAR"}, got)
 }
 
-// Allowing / Denying return copies: a caller's additions must never mutate the
-// receiver or the slices DefaultEnvPolicy hands out (which are shared literals).
+// Allowing / Denying return copies; the receiver and DefaultEnvPolicy's shared slices are never mutated.
 func TestUnit_EnvPolicy_AllowingDenyingReturnCopies(t *testing.T) {
 	base := DefaultEnvPolicy()
 	baseAllowLen := len(base.Allow)
@@ -114,27 +102,21 @@ func TestUnit_EnvPolicy_AllowingDenyingReturnCopies(t *testing.T) {
 	require.Contains(t, extended.Allow, "HTTP_PROXY")
 	require.Contains(t, extended.Deny, "DANGER_*")
 	require.NotContains(t, base.Allow, "HTTP_PROXY")
-
-	// A second DefaultEnvPolicy must not have been aliased/tainted.
 	require.NotContains(t, DefaultEnvPolicy().Allow, "HTTP_PROXY")
 }
 
-// HOME is never a default passthrough: scrubEnv forces the scoped HOME, and
-// inheriting the real one would defeat the mechanism that keeps ~/.ssh, ~/.aws,
-// and ~/.contenox out of reach.
+// HOME is never in the default passthrough — scrubEnv always forces the scoped HOME.
 func TestUnit_DefaultEnvAllow_ExcludesHome(t *testing.T) {
 	require.NotContains(t, DefaultEnvAllow(), "HOME")
 }
 
-// The control plane's own variables are always vetoed — this is the one thing
-// that must never leak, regardless of how Allow is widened.
+// The control plane's own variables are always vetoed, regardless of how Allow is widened.
 func TestUnit_DefaultEnvDeny_VetoesControlPlane(t *testing.T) {
 	require.True(t, matchesAny(DefaultEnvDeny(), "CONTENOX_DB"))
 	require.True(t, matchesAny(DefaultEnvDeny(), "CONTENOX_TOKEN"))
 }
 
-// The glob grammar in one table: exact, prefix ("X*"), suffix ("*X"), bare "*",
-// the empty pattern (inert), non-matches, and case sensitivity.
+// The glob grammar: exact, prefix, suffix, bare "*", empty (inert), and case sensitivity.
 func TestUnit_envNameMatches(t *testing.T) {
 	cases := []struct {
 		pattern, name string
@@ -157,8 +139,7 @@ func TestUnit_envNameMatches(t *testing.T) {
 	}
 }
 
-// Operator input is split on commas, semicolons, and any whitespace, trimmed,
-// with blanks dropped; empty input yields nil so "unset" is not "allow ”".
+// Input is split on commas/semicolons/whitespace, trimmed, blanks dropped; empty input yields nil.
 func TestUnit_ParseEnvList(t *testing.T) {
 	require.Equal(t, []string{"PATH", "LC_*", "HTTP_PROXY", "GOCACHE"},
 		ParseEnvList("PATH, LC_*  HTTP_PROXY;GOCACHE"))
@@ -167,11 +148,7 @@ func TestUnit_ParseEnvList(t *testing.T) {
 	require.Nil(t, ParseEnvList("   ,; \n "))
 }
 
-// End-to-end proof that the policy layer plugs into the existing mechanism: a
-// resolved EnvPolicy fed to scrubEnv yields a confined environment with only the
-// safe variables, the forced scoped HOME, and the emulated canonical PATH — no
-// secret, no real home, and NOT the operator's /usr/bin PATH (that value is
-// allow-copied by the policy but neutralized by scrubEnv's PATH emulation).
+// A resolved EnvPolicy fed to scrubEnv yields the forced scoped HOME and emulated canonical PATH, never the operator's real PATH/HOME.
 func TestUnit_EnvPolicy_ResolveFeedsScrubEnv(t *testing.T) {
 	parent := []string{
 		"PATH=/usr/bin",
@@ -191,9 +168,7 @@ func TestUnit_EnvPolicy_ResolveFeedsScrubEnv(t *testing.T) {
 	}, got)
 }
 
-// Apply returns the surviving KEY=VALUE entries (not names) for a native shell,
-// and does NOT force a scoped HOME: the operator's real HOME passes through the
-// policy like any other allowed variable, while credentials are still stripped.
+// Apply returns surviving KEY=VALUE pairs and does not force a scoped HOME — unlike scrubEnv.
 func TestUnit_EnvPolicy_ApplyReturnsPairsAndDoesNotForceHome(t *testing.T) {
 	parent := []string{
 		"PATH=/usr/bin",
@@ -202,14 +177,12 @@ func TestUnit_EnvPolicy_ApplyReturnsPairsAndDoesNotForceHome(t *testing.T) {
 		"CONTENOX_DB=/x",
 	}
 
-	// deny-secrets posture: pass everything except the control plane and secrets.
 	got := EnvPolicy{Allow: []string{"*"}, Deny: DefaultEnvDeny()}.Apply(parent)
 
 	require.Equal(t, []string{"HOME=/home/real", "PATH=/usr/bin"}, got)
 }
 
-// DefaultEnvDeny is exactly the union of the two component vetoes, and each holds
-// what its name promises — the split is what lets the two postures differ.
+// DefaultEnvDeny is exactly the union of ControlPlaneEnvDeny and SecretEnvDeny.
 func TestUnit_EnvDeny_ControlPlaneAndSecretSplit(t *testing.T) {
 	require.Equal(t, []string{"CONTENOX_*"}, ControlPlaneEnvDeny())
 	require.Contains(t, SecretEnvDeny(), "*_TOKEN")
@@ -217,9 +190,7 @@ func TestUnit_EnvDeny_ControlPlaneAndSecretSplit(t *testing.T) {
 	require.Equal(t, append(ControlPlaneEnvDeny(), SecretEnvDeny()...), DefaultEnvDeny())
 }
 
-// The re-permit design: a strict allowlist denies only the control plane (not the
-// credential shapes), so an operator can hand a shell one trusted secret by
-// naming it in Allow — while CONTENOX_* stays absent no matter what.
+// A strict policy (deny = control plane only) lets an operator re-permit one named credential; CONTENOX_* stays absent regardless.
 func TestUnit_EnvPolicy_StrictCanRepermitOneCredential(t *testing.T) {
 	strict := EnvPolicy{Allow: DefaultEnvAllow(), Deny: ControlPlaneEnvDeny()}
 	parent := []string{
@@ -231,7 +202,5 @@ func TestUnit_EnvPolicy_StrictCanRepermitOneCredential(t *testing.T) {
 
 	got := strict.Allowing("NPM_TOKEN").Apply(parent)
 
-	// NPM_TOKEN is re-permitted; PATH is in the base; the un-named AWS secret and
-	// the control-plane token are absent.
 	require.Equal(t, []string{"NPM_TOKEN=npm_trusted", "PATH=/usr/bin"}, got)
 }

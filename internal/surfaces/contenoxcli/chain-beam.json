@@ -1,0 +1,536 @@
+{
+  "id": "chain-beam",
+  "description": "Default chain for beam, the terminal UI. Routes coding-change prompts and general prompts into simple bounded tool-using loops with recovery, tuned for an attended coding session.",
+  "tasks": [
+    {
+      "id": "classify_request",
+      "description": "Route the latest beam prompt to the coding loop or the general assistant loop.",
+      "handler": "route",
+      "system_instruction": "Current date: {{date}}.\n\nClassify the user's latest message. Use 'coding_change' for ANY work on the repository: creating, editing, refactoring, fixing, testing, or building code — and equally for investigating, auditing, reviewing, or explaining code in this repo (anything that needs repo navigation gets the coding loop and its tools). Use 'general' only for questions unrelated to this repository's code: setup help, configuration, brainstorming, conversation.",
+      "execute_config": {
+        "model": "{{var:alt_model|var:model}}",
+        "provider": "{{var:alt_provider|var:provider}}",
+        "shift": true,
+        "tools": [],
+        "retry_policy": {
+          "max_attempts": 3,
+          "initial_backoff": "1s",
+          "max_backoff": "10s",
+          "jitter": 0.25
+        }
+      },
+      "transition": {
+        "on_failure": "acp_chat",
+        "branches": [
+          {
+            "operator": "equals",
+            "when": "coding_change",
+            "goto": "coding_chat"
+          },
+          {
+            "operator": "equals",
+            "when": "general",
+            "goto": "acp_chat"
+          },
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "acp_chat"
+          }
+        ]
+      }
+    },
+    {
+      "id": "coding_chat",
+      "description": "Simple coding-agent loop. The model may call tools repeatedly or finish directly.",
+      "handler": "chat_completion",
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox running in beam, the terminal UI, as a coding assistant. The operator is watching this transcript live in their terminal, so gated actions surface as a one-keypress approval card rather than a chat message.\n\nOwn the whole coding turn in this loop: inspect the repo when needed, make the requested changes, run the relevant checks, and then answer with what changed and what verification ran. Do not wait for a separate planning, patching, verification, or audit task to take over.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nWORKING RULES: Read before editing existing files. Keep changes small and consistent with the repo. Do not destructively move, delete, or overwrite user content unless explicitly requested. Prefer direct progress over repeatedly re-reading the same context.\n\nEDITING FILES: Prefer edit_file for every change to an existing file — old_string must be byte-exact and unique in the file, or the call is rejected; pass replace_all when the same string appears more than once, such as a rename. Use write_file only to create a file that does not exist yet, never to overwrite an existing one wholesale.\n\nNAVIGATION: grep searches file contents and recurses when pointed at a directory, so search the narrowest directory that could hold the answer. find_files locates files by name or path using ** globs. workspace_search answers semantic questions about the codebase (\"where is X handled\", \"what calls Y\") instead of guessing at grep patterns. For Go symbol truth — a definition, its call sites, or an implementation — use go_definition and go_references rather than trusting a text match; a grep hit is a location, not a proof.\n\nSHELL VERBS RUN FREE: go build, go test, go vet, go list, gofmt -l, gofmt -d, ls, cat, head, tail, wc, pwd, grep, rg, npm test, vitest run, jest, pytest, tsc --noEmit, eslint, ruff check, mypy, and their close siblings run without asking for approval — use them freely to look and verify. Issue them as bare argv commands: a program and its arguments, never a pipe, redirect, or command substitution. A single line chaining more than one of these verbs is also fine as long as every verb on it is one of these; an unlisted verb, a shell metacharacter, or a substitution pauses for approval instead, so keep verification commands to this vocabulary.\n\nNARRATE AS YOU WORK: the operator is watching a live transcript, and a wall of silent tool calls tells them nothing. After every four or five tool calls without saying anything — and always before switching to a new line of investigation — emit one short line: what you just learned and what you will do next. Never re-read a file you already read this turn unless a tool result says it changed; if a previous turn was cancelled or interrupted, state in one line what you still know from it instead of re-deriving it with fresh tool calls.\n\nVERIFY AFTER EVERY EDIT: once a change lands, immediately re-run the narrowest build or test that covers it — the one package or test name the edit touches, not the whole tree — before moving on or declaring the turn done.\n\nVERSION CONTROL: You have git as tools. git_status, git_diff, git_log, git_show, git_blame and git_branch_list read the repository and run without interrupting the user; git_add, git_commit, git_checkout_branch and git_restore change it and pause for approval first. Use them rather than saying you cannot run git.\n\nWHEN A CALL IS DENIED OR ASKS: read the tool's message — it names what was refused and why — and adjust the call to fit (a narrower path, a different verb, a corrected old_string) rather than abandoning the tool or working around it with a less precise one.\n\nARTIFACT REGISTER: when the user asks how something works, for an explanation, a comparison, or documentation, write the answer as a self-contained document — impersonal, structured, no addressing the reader, no references to this conversation, no closing offers — so it can be pasted into a wiki, a ticket, or Slack without edits. That document IS the deliverable; do not append anything after it.\n\nENDINGS FOR WORK TURNS: when the turn performed work (edits, fixes, commands run), finish with the conclusion first, then — only when natural — ONE short final line offering up to three concrete next actions grounded in what was actually done. \"Nothing further needed\" is a valid, complete ending; never invent follow-up work, add flattery, or manufacture caveats to appear thorough.\n\nGROUND YOUR CLAIMS: State facts about files, code, or command results only from tool output in this turn. If a tool errors, returns nothing, or cannot read something, say so plainly instead of substituting a guess.",
+      "execute_config": {
+        "model": "{{var:model}}",
+        "provider": "{{var:provider}}",
+        "think": "{{var:think}}",
+        "shift": true,
+        "pass_clients_tools": false,
+        "tools": [
+          "*"
+        ],
+        "tools_policies": {
+          "local_shell": {
+            "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
+            "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
+          },
+          "local_fs": {
+            "_allowed_dir": ".",
+            "_max_read_bytes": "262144",
+            "_max_output_bytes": "131072",
+            "_max_list_depth": "5",
+            "_max_grep_matches": "1000",
+            "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json",
+            "_skip_dir_names": ".git,node_modules,.venv,__pycache__,.next,dist,.cache,vendor,target,.idea,.vscode,out"
+          },
+          "webtools": {
+            "_max_response_bytes": "262144",
+            "_max_request_body_bytes": "262144",
+            "_request_timeout_seconds": "30",
+            "_max_attempts": "3"
+          }
+        },
+        "max_tokens": "{{var:max_tokens|16384}}",
+        "retry_policy": {
+          "max_attempts": 4,
+          "initial_backoff": "1s",
+          "max_backoff": "30s",
+          "jitter": 0.25,
+          "rate_limit_min_wait": "10s"
+        }
+      },
+      "transition": {
+        "on_failure": "coding_recovery",
+        "branches": [
+          {
+            "operator": "edge_traversed_at_least",
+            "edge": "coding_chat->coding_tools",
+            "when": "16",
+            "goto": "coding_recovery"
+          },
+          {
+            "operator": "equals",
+            "when": "tool_call",
+            "goto": "coding_tools"
+          },
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "coding_tools",
+      "description": "Execute coding-loop tool calls and append results to chat history.",
+      "handler": "execute_tool_calls",
+      "input_var": "coding_chat",
+      "execute_config": {
+        "tools": [
+          "*"
+        ],
+        "tools_policies": {
+          "local_shell": {
+            "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
+            "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
+          },
+          "local_fs": {
+            "_allowed_dir": ".",
+            "_max_read_bytes": "262144",
+            "_max_output_bytes": "131072",
+            "_max_list_depth": "5",
+            "_max_grep_matches": "1000",
+            "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json",
+            "_skip_dir_names": ".git,node_modules,.venv,__pycache__,.next,dist,.cache,vendor,target,.idea,.vscode,out"
+          },
+          "webtools": {
+            "_max_response_bytes": "262144",
+            "_max_request_body_bytes": "262144",
+            "_request_timeout_seconds": "30",
+            "_max_attempts": "3"
+          }
+        }
+      },
+      "transition": {
+        "on_failure": "",
+        "branches": [
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "coding_chat"
+          }
+        ]
+      }
+    },
+    {
+      "id": "coding_recovery",
+      "description": "Recovery loop for coding tasks after the main loop fails or spends its tool budget.",
+      "handler": "chat_completion",
+      "input_var": "coding_chat",
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox running in beam, the terminal UI, as a coding assistant.\n\nThe main coding loop got stuck or exhausted its tool-call budget. Continue from the actual chat history above. Do not restart from scratch. Pick the most direct remaining path: fix the concrete blocker, run the smallest useful check, or tell the user exactly what blocks completion.\n\nBUDGET: You have already used {{edge_count:coding_chat->coding_tools}} of 12 main and {{edge_count:coding_recovery->coding_recovery_tools}} of 8 recovery tool-call rounds this turn.\n\nTOOL DISCIPLINE HOLDS HERE TOO: edit_file (byte-exact, unique old_string; replace_all for renames) over write_file on an existing file; grep/find_files/workspace_search/go_definition/go_references to navigate; the safe shell verbs (go build/test/vet/list, gofmt -l/-d, ls, cat, head, tail, wc, pwd, grep, rg, npm test, vitest run, jest, pytest, tsc --noEmit, eslint, ruff check, mypy) as bare argv commands need no approval — use them to verify before answering. If a call was denied or asked, that may be why you are here recovering: read the message and adjust rather than repeating it.\n\nGROUND YOUR CLAIMS: State facts only from visible tool output in this turn. Do not claim completion over failed or unavailable checks.",
+      "execute_config": {
+        "model": "{{var:alt_model|var:default_model}}",
+        "provider": "{{var:alt_provider|var:default_provider}}",
+        "think": "{{var:think}}",
+        "shift": true,
+        "pass_clients_tools": false,
+        "tools": [
+          "*"
+        ],
+        "tools_policies": {
+          "local_shell": {
+            "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
+            "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
+          },
+          "local_fs": {
+            "_allowed_dir": ".",
+            "_max_read_bytes": "262144",
+            "_max_output_bytes": "131072",
+            "_max_list_depth": "5",
+            "_max_grep_matches": "1000",
+            "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json",
+            "_skip_dir_names": ".git,node_modules,.venv,__pycache__,.next,dist,.cache,vendor,target,.idea,.vscode,out"
+          },
+          "webtools": {
+            "_max_response_bytes": "262144",
+            "_max_request_body_bytes": "262144",
+            "_request_timeout_seconds": "30",
+            "_max_attempts": "3"
+          }
+        },
+        "max_tokens": "{{var:max_tokens|16384}}",
+        "retry_policy": {
+          "max_attempts": 4,
+          "initial_backoff": "1s",
+          "max_backoff": "30s",
+          "jitter": 0.25,
+          "rate_limit_min_wait": "10s"
+        }
+      },
+      "transition": {
+        "on_failure": "summarise_failure",
+        "branches": [
+          {
+            "operator": "edge_traversed_at_least",
+            "edge": "coding_recovery->coding_recovery_tools",
+            "when": "8",
+            "goto": "summarise_failure"
+          },
+          {
+            "operator": "equals",
+            "when": "tool_call",
+            "goto": "coding_recovery_tools"
+          },
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "coding_recovery_tools",
+      "description": "Execute recovery-loop coding tool calls and append results to chat history.",
+      "handler": "execute_tool_calls",
+      "input_var": "coding_recovery",
+      "execute_config": {
+        "tools": [
+          "*"
+        ],
+        "tools_policies": {
+          "local_shell": {
+            "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
+            "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
+          },
+          "local_fs": {
+            "_allowed_dir": ".",
+            "_max_read_bytes": "262144",
+            "_max_output_bytes": "131072",
+            "_max_list_depth": "5",
+            "_max_grep_matches": "1000",
+            "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json",
+            "_skip_dir_names": ".git,node_modules,.venv,__pycache__,.next,dist,.cache,vendor,target,.idea,.vscode,out"
+          },
+          "webtools": {
+            "_max_response_bytes": "262144",
+            "_max_request_body_bytes": "262144",
+            "_request_timeout_seconds": "30",
+            "_max_attempts": "3"
+          }
+        }
+      },
+      "transition": {
+        "on_failure": "",
+        "branches": [
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "coding_recovery"
+          }
+        ]
+      }
+    },
+    {
+      "id": "acp_chat",
+      "description": "General ACP assistant loop. The model may call tools repeatedly or finish directly.",
+      "handler": "chat_completion",
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox running in beam, the terminal UI.\n\nAnswer the user directly. Use tools when they help, but do not gather context for its own sake. If the user asks for a code or file change, this should normally have been routed to the coding loop; if you are here and a change is still clearly requested, handle it directly with the same care: read before editing, prefer edit_file (byte-exact, unique old_string; replace_all for renames) over write_file on an existing file, verify when practical, and summarize the result.\n\nNAVIGATION: grep (recurses into a directory), find_files (** globs), workspace_search (semantic questions), and go_definition/go_references (Go symbol truth) answer most questions about the repo without asking the user.\n\nVERSION CONTROL: Questions about the repository have tools that answer them — git_status, git_diff, git_log, git_show, git_blame, git_branch_list. Call the tool rather than saying you cannot run git.\n\nNARRATE AS YOU WORK: after every four or five tool calls without saying anything, emit one short line stating what you learned and what you will do next; never re-read a file you already read this turn unless a tool result says it changed.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nARTIFACT REGISTER: when the user asks how something works, for an explanation, a comparison, or documentation, write the answer as a self-contained document — impersonal, structured, no addressing the reader, no references to this conversation, no closing offers — so it can be pasted into a wiki, a ticket, or Slack without edits. That document IS the deliverable; do not append anything after it.\n\nENDINGS FOR WORK TURNS: when the turn performed work (edits, fixes, commands run), finish with the conclusion first, then — only when natural — ONE short final line offering up to three concrete next actions grounded in what was actually done. \"Nothing further needed\" is a valid, complete ending; never invent follow-up work, add flattery, or manufacture caveats to appear thorough.\n\nGROUND YOUR CLAIMS: State facts about files, code, or command results only from tool output in this turn. If a tool errors, returns nothing, or cannot read something, say so plainly instead of substituting a guess.",
+      "execute_config": {
+        "model": "{{var:model}}",
+        "provider": "{{var:provider}}",
+        "think": "{{var:think}}",
+        "shift": true,
+        "pass_clients_tools": false,
+        "tools": [
+          "*"
+        ],
+        "tools_policies": {
+          "local_shell": {
+            "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
+            "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
+          },
+          "local_fs": {
+            "_allowed_dir": ".",
+            "_max_read_bytes": "262144",
+            "_max_output_bytes": "131072",
+            "_max_list_depth": "5",
+            "_max_grep_matches": "1000",
+            "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json",
+            "_skip_dir_names": ".git,node_modules,.venv,__pycache__,.next,dist,.cache,vendor,target,.idea,.vscode,out"
+          },
+          "webtools": {
+            "_max_response_bytes": "262144",
+            "_max_request_body_bytes": "262144",
+            "_request_timeout_seconds": "30",
+            "_max_attempts": "3"
+          }
+        },
+        "max_tokens": "{{var:max_tokens|16384}}",
+        "retry_policy": {
+          "max_attempts": 4,
+          "initial_backoff": "1s",
+          "max_backoff": "30s",
+          "jitter": 0.25,
+          "rate_limit_min_wait": "10s"
+        }
+      },
+      "transition": {
+        "on_failure": "recovery_chat",
+        "branches": [
+          {
+            "operator": "edge_traversed_at_least",
+            "edge": "acp_chat->run_tools",
+            "when": "10",
+            "goto": "recovery_chat"
+          },
+          {
+            "operator": "equals",
+            "when": "tool_call",
+            "goto": "run_tools"
+          },
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "run_tools",
+      "description": "Execute general-loop tool calls and append results to chat history.",
+      "handler": "execute_tool_calls",
+      "input_var": "acp_chat",
+      "execute_config": {
+        "tools": [
+          "*"
+        ],
+        "tools_policies": {
+          "local_shell": {
+            "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
+            "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
+          },
+          "local_fs": {
+            "_allowed_dir": ".",
+            "_max_read_bytes": "262144",
+            "_max_output_bytes": "131072",
+            "_max_list_depth": "5",
+            "_max_grep_matches": "1000",
+            "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json",
+            "_skip_dir_names": ".git,node_modules,.venv,__pycache__,.next,dist,.cache,vendor,target,.idea,.vscode,out"
+          },
+          "webtools": {
+            "_max_response_bytes": "262144",
+            "_max_request_body_bytes": "262144",
+            "_request_timeout_seconds": "30",
+            "_max_attempts": "3"
+          }
+        }
+      },
+      "transition": {
+        "on_failure": "",
+        "branches": [
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "acp_chat"
+          }
+        ]
+      }
+    },
+    {
+      "id": "recovery_chat",
+      "description": "Recovery loop for general ACP prompts after the main loop fails or spends its tool budget.",
+      "handler": "chat_completion",
+      "input_var": "acp_chat",
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox running in beam, the terminal UI.\n\nThe main assistant loop got stuck or exhausted its tool-call budget. Continue from the actual chat history above. Do not restart from scratch. Pick the most direct remaining path, prefer producing a useful answer over gathering more information, and address the concrete blocker instead of retrying the same action.\n\nBUDGET: You have already used {{edge_count:acp_chat->run_tools}} of 10 main and {{edge_count:recovery_chat->recovery_tools}} of 8 recovery tool-call rounds this turn.\n\nGROUND YOUR CLAIMS: State facts only from visible tool output in this turn. Do not claim completion over failed or unavailable checks.",
+      "execute_config": {
+        "model": "{{var:alt_model|var:default_model}}",
+        "provider": "{{var:alt_provider|var:default_provider}}",
+        "think": "{{var:think}}",
+        "shift": true,
+        "pass_clients_tools": false,
+        "tools": [
+          "*"
+        ],
+        "tools_policies": {
+          "local_shell": {
+            "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
+            "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
+          },
+          "local_fs": {
+            "_allowed_dir": ".",
+            "_max_read_bytes": "262144",
+            "_max_output_bytes": "131072",
+            "_max_list_depth": "5",
+            "_max_grep_matches": "1000",
+            "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json",
+            "_skip_dir_names": ".git,node_modules,.venv,__pycache__,.next,dist,.cache,vendor,target,.idea,.vscode,out"
+          },
+          "webtools": {
+            "_max_response_bytes": "262144",
+            "_max_request_body_bytes": "262144",
+            "_request_timeout_seconds": "30",
+            "_max_attempts": "3"
+          }
+        },
+        "max_tokens": "{{var:max_tokens|16384}}",
+        "retry_policy": {
+          "max_attempts": 4,
+          "initial_backoff": "1s",
+          "max_backoff": "30s",
+          "jitter": 0.25,
+          "rate_limit_min_wait": "10s"
+        }
+      },
+      "transition": {
+        "on_failure": "summarise_failure",
+        "branches": [
+          {
+            "operator": "edge_traversed_at_least",
+            "edge": "recovery_chat->recovery_tools",
+            "when": "8",
+            "goto": "summarise_failure"
+          },
+          {
+            "operator": "equals",
+            "when": "tool_call",
+            "goto": "recovery_tools"
+          },
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "end"
+          }
+        ]
+      }
+    },
+    {
+      "id": "recovery_tools",
+      "description": "Execute recovery-loop general tool calls and append results to chat history.",
+      "handler": "execute_tool_calls",
+      "input_var": "recovery_chat",
+      "execute_config": {
+        "tools": [
+          "*"
+        ],
+        "tools_policies": {
+          "local_shell": {
+            "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
+            "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
+          },
+          "jq": {
+            "_allowed_dir": "."
+          },
+          "local_fs": {
+            "_allowed_dir": ".",
+            "_max_read_bytes": "262144",
+            "_max_output_bytes": "131072",
+            "_max_list_depth": "5",
+            "_max_grep_matches": "1000",
+            "_denied_path_substrings": "node_modules,.git/,dist/,/.next/,/out/,package-lock.json",
+            "_skip_dir_names": ".git,node_modules,.venv,__pycache__,.next,dist,.cache,vendor,target,.idea,.vscode,out"
+          },
+          "webtools": {
+            "_max_response_bytes": "262144",
+            "_max_request_body_bytes": "262144",
+            "_request_timeout_seconds": "30",
+            "_max_attempts": "3"
+          }
+        }
+      },
+      "transition": {
+        "on_failure": "",
+        "branches": [
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "recovery_chat"
+          }
+        ]
+      }
+    },
+    {
+      "id": "summarise_failure",
+      "description": "Final safety net reached when the selected loop and its recovery loop both fail or spend their budgets.",
+      "handler": "chat_completion",
+      "input_var": "previous_output",
+      "input_max_bytes": 8192,
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox running in beam, the terminal UI.\n\nThe turn used up its tool-call budget before finishing. Do not call tools. In one concise answer, deliver what was LEARNED as the result so far: the concrete findings, then what remains open. Close with one practical line telling the user how to proceed, e.g. \"say 'continue' to resume with a fresh tool budget\" or suggest narrowing the request. Never describe tool permissions or budgets as the blocker — the budget resets on the next message — and do not pretend the work is complete.\n\nGround this strictly in the actual chat history above. Describe only steps that were really taken and results that actually occurred.",
+      "execute_config": {
+        "model": "{{var:alt_model|var:default_model}}",
+        "provider": "{{var:alt_provider|var:default_provider}}",
+        "think": "{{var:think}}",
+        "shift": true,
+        "pass_clients_tools": false,
+        "tools": [],
+        "max_tokens": "{{var:max_tokens|16384}}",
+        "retry_policy": {
+          "max_attempts": 3,
+          "initial_backoff": "1s",
+          "max_backoff": "10s",
+          "jitter": 0.25
+        }
+      },
+      "transition": {
+        "on_failure": "",
+        "branches": [
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "end"
+          }
+        ]
+      }
+    }
+  ],
+  "token_limit": 131072
+}

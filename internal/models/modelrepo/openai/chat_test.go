@@ -14,8 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// captureRequestBody returns an httptest.Server that decodes the request body
-// into dest and writes the provided responseJSON.
+// captureRequestBody decodes the request body into dest and replies with responseJSON.
 func captureRequestBody(t *testing.T, dest *map[string]any, responseJSON string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,9 +41,7 @@ func newGPT5ChatClient(t *testing.T, serverURL string) *OpenAIChatClient {
 
 const responsesOKBody = `{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"reasoning":{}}`
 
-// TestUnit_GPT5Chat_SerializesImageInput asserts an image attachment reaches
-// the Responses API as an input_image content part carrying the inline base64
-// data URI, alongside the input_text part — the format the vision docs specify.
+// An image attachment must reach the Responses API as an input_image part with an inline base64 data URI, alongside input_text.
 func TestUnit_GPT5Chat_SerializesImageInput(t *testing.T) {
 	t.Parallel()
 	var got map[string]any
@@ -91,7 +88,6 @@ func TestUnit_GPT5Chat_SystemHoistedToInstructions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "you are terse", got["instructions"], "system message must be hoisted to instructions")
 
-	// system message must not appear in input[]
 	inputs := got["input"].([]any)
 	for _, item := range inputs {
 		m := item.(map[string]any)

@@ -142,11 +142,7 @@ func TestUnit_ChatService_PersistDiff(t *testing.T) {
 	})
 }
 
-// Regression: SynthesizeHistory may emit overlapping prefixes (the same
-// message twice in one batch — e.g. when system_instruction prepending in
-// taskexec causes outHist[startIdx:] to re-include the last prior message).
-// PersistDiff must dedup within the batch; otherwise the SQLite UNIQUE
-// constraint on (id, idx_id) trips and the whole append fails.
+// TestUnit_ChatService_PersistDiff_WithinBatchDedup pins that PersistDiff dedups a batch containing the same message twice.
 func TestUnit_ChatService_PersistDiff_WithinBatchDedup(t *testing.T) {
 	ctx, db := setupDB(t)
 	store := messagestore.New(db.WithoutTransaction(), "")
@@ -169,8 +165,7 @@ func TestUnit_ChatService_PersistDiff_WithinBatchDedup(t *testing.T) {
 	require.Len(t, msgs, 2, "duplicate user message must be deduped within the batch; only 2 distinct rows expected")
 }
 
-// Image attachments ride inside the opaque JSON payload, so persistence needs
-// no schema change — this guards the base64 []byte round-trip end to end.
+// TestUnit_ChatService_PersistDiff_RoundTripsImages pins the base64 []byte image round-trip through the opaque JSON payload.
 func TestUnit_ChatService_PersistDiff_RoundTripsImages(t *testing.T) {
 	ctx, db := setupDB(t)
 	store := messagestore.New(db.WithoutTransaction(), "")

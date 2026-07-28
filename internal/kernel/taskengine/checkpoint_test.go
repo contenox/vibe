@@ -1,11 +1,9 @@
 package taskengine
 
-// Checkpoint wire-format tests. The per-field round-trip discipline here is
-// non-negotiable (eino precedent: their serializer silently dropped a
-// pointer-typed field and corrupted resumed runs): fullyPopulatedCheckpoint
-// sets EVERY field of every struct the envelope carries, a reflection guard
-// fails the moment a new field is added without being covered, and equality
-// is asserted field-for-field after a marshal/unmarshal round trip.
+// Checkpoint wire-format tests. fullyPopulatedCheckpoint sets every field of
+// every struct the envelope carries; a reflection guard fails the moment a
+// new field is added without being covered, and equality is asserted
+// field-for-field after a marshal/unmarshal round trip.
 
 import (
 	"encoding/json"
@@ -136,10 +134,9 @@ func TestUnit_Checkpoint_FixtureCoversEveryMessageField(t *testing.T) {
 }
 
 // TestUnit_Checkpoint_RoundTrip_EveryField marshals the fully populated
-// checkpoint and asserts the decoded result is IDENTICAL — vars re-typed
+// checkpoint and asserts the decoded result is identical: vars re-typed
 // through the closed DataType enum, history messages field-for-field
-// (ProviderMeta and Images included: the pointer/meta fields are exactly what
-// the eino serializer silently dropped).
+// including ProviderMeta and Images.
 func TestUnit_Checkpoint_RoundTrip_EveryField(t *testing.T) {
 	cp := fullyPopulatedCheckpoint(t)
 	raw, err := MarshalCheckpoint(cp)

@@ -64,9 +64,7 @@ func TestUnit_TaskChainService_RejectsInvalidPath(t *testing.T) {
 	require.Error(t, err)
 }
 
-// invalidChain fails the load-time linter (unknown handler) while still
-// parsing and carrying an id and tasks — the kind of file that used to slip
-// through and explode mid-run.
+// invalidChain fails the load-time linter (unknown handler) while still parsing and carrying an id and tasks.
 func invalidChain(id string) *taskengine.TaskChainDefinition {
 	return &taskengine.TaskChainDefinition{
 		ID: id,
@@ -76,8 +74,7 @@ func invalidChain(id string) *taskengine.TaskChainDefinition {
 	}
 }
 
-// TestUnit_TaskChainService_WriteRefusesLintFailingChain: validation gates
-// the write side, so a broken chain never reaches disk through the service.
+// TestUnit_TaskChainService_WriteRefusesLintFailingChain pins that a broken chain never reaches disk through the service.
 func TestUnit_TaskChainService_WriteRefusesLintFailingChain(t *testing.T) {
 	ctx := context.Background()
 	files, err := localfileservice.New(t.TempDir())
@@ -88,17 +85,13 @@ func TestUnit_TaskChainService_WriteRefusesLintFailingChain(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, taskengine.ErrChainLint)
 
-	// Same gate on update: first write a good chain, then try to break it.
 	require.NoError(t, svc.CreateAtPath(ctx, "good.json", testChain("good")))
 	err = svc.UpdateAtPath(ctx, "good.json", invalidChain("good"))
 	require.Error(t, err)
 	require.ErrorIs(t, err, taskengine.ErrChainLint)
 }
 
-// TestUnit_TaskChainService_ReadStickyDisablesLintFailingChain: a broken chain
-// written to disk BEHIND the service (hand edit, old version) is refused on
-// every read — by path and by id — with the linter's reason, until fixed.
-// Fixing the file re-enables it with no further ceremony.
+// TestUnit_TaskChainService_ReadStickyDisablesLintFailingChain pins that a broken chain written behind the service is refused on every read until fixed.
 func TestUnit_TaskChainService_ReadStickyDisablesLintFailingChain(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -120,8 +113,7 @@ func TestUnit_TaskChainService_ReadStickyDisablesLintFailingChain(t *testing.T) 
 	require.ErrorIs(t, err, taskengine.ErrChainLint,
 		"lookup by id must refuse with the reason, not report NotFound")
 
-	// Repairing the file lifts the refusal: the disable is exactly as sticky
-	// as the defect.
+	// Repairing the file lifts the refusal.
 	fixed, err := json.Marshal(testChain("sneaky"))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sneaky.json"), fixed, 0o600))

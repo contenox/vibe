@@ -21,8 +21,6 @@ func newSentinelChatClient(url string, client *http.Client) *OpenAIChatClient {
 	}}
 }
 
-// TestUnit_OpenAI_TypedSentinels maps OpenAI's documented error shapes onto
-// the modelrepo sentinels: code=context_length_exceeded on a 400 and HTTP 429.
 func TestUnit_OpenAI_TypedSentinels(t *testing.T) {
 	t.Run("context_length_exceeded", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

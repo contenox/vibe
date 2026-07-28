@@ -1,27 +1,11 @@
-// git.go is the git toolset: the repository operations a coding agent needs,
-// exposed as first-class tools instead of shell strings.
-//
-// WHY A TOOLSET AND NOT `local_shell git ...`:
-// The HITL envelope gates a tool CALL, not a command line. As one blob of shell
-// the whole of git is a single policy decision — either every `git` invocation
-// nags, or `git reset --hard` rides in on the same rule that let `git status`
-// through. Split into one tool per operation, the envelope says exactly what it
-// means: the read operations are `allow` and never interrupt anyone; the four
-// that change the repository are `approve` and show up as an approval card.
-//
-// WHY go-git AND NOT A SUBPROCESS:
-// The tools run in-process against the repository (github.com/go-git/go-git/v5),
-// so they work identically wherever the runtime does — no git binary on PATH, no
-// shell quoting, no PATH-shadowing of the `git` name, and arguments that cannot
-// turn into a command line.
-//
-// WHAT IS DELIBERATELY MISSING (V1):
-// No network operations — no push, pull, fetch, clone. Subprocess-free
-// credential handling (SSH agents, keychains, credential helpers, 2FA tokens) is
-// a swamp, and a half-working `git_push` that silently authenticates as the wrong
-// identity is worse than no push at all. Network git is reachable through
-// local_shell under its OWN policy rules, where an operator's approval is
-// explicit; the seeded envelopes do not auto-allow it.
+// git.go exposes repository operations as individual tools rather than
+// local_shell git commands, so the HITL envelope can gate each operation
+// separately (reads are `allow`, mutations are `approve`) instead of one
+// policy decision for all of git. It runs in-process against go-git — no git
+// binary, no shell quoting. Network operations (push/pull/fetch/clone) are
+// deliberately out of scope; reach them through local_shell under its own
+// policy.
+
 package localtools
 
 import (
@@ -46,10 +30,8 @@ import (
 const GitToolsName = "git"
 
 const (
-	// gitMaxOutputBytes caps any single git tool result, for the same reason
-	// local_fs caps its own (fs_policy.go): one tool result must not be able to
-	// dominate a small model's context window. Results are truncated with a
-	// notice naming what to narrow, never silently.
+	// gitMaxOutputBytes caps any single git tool result, same reasoning as
+	// local_fs (fs_policy.go). Truncation always names what to narrow.
 	gitMaxOutputBytes = 32 * 1024
 
 	// gitDefaultLogCount / gitMaxLogCount bound git_log.
@@ -63,14 +45,10 @@ const (
 
 // GitTools provides read and write access to the workspace git repository.
 //
-// Directory scoping matches local_fs (see LocalFSTools.baseDir): the repository
-// is located from the allowed directory — `_allowed_dir` in the chain's
-// tools_policies.git when set, else the directory the toolset was constructed
-// with, else the process working directory. When a boundary was actually
-// DECLARED (either of the first two), the repository root must lie inside it or
-// the call is refused; when nobody declared one, there is no boundary to
-// enforce and the enclosing repository is found by walking up, exactly as git
-// itself does.
+// Directory scoping matches local_fs (LocalFSTools.baseDir): the repository
+// root must lie inside the allowed directory when one is declared (policy
+// `_allowed_dir`, or the constructor's allowedDir); otherwise it is found by
+// walking up from the process working directory, as git itself does.
 type GitTools struct {
 	allowedDir  string
 	name        string
@@ -208,9 +186,9 @@ func (h *GitTools) cwd(ctx context.Context) string {
 	return wd
 }
 
-// baseDir returns the directory the repository search starts from, and whether
-// that directory is a DECLARED boundary (a policy `_allowed_dir` or a
-// constructor allowedDir) rather than just "wherever the process happens to be".
+// baseDir returns the directory the repository search starts from, and
+// whether that directory is a declared boundary (a policy `_allowed_dir` or a
+// constructor allowedDir) rather than wherever the process happens to be.
 func (h *GitTools) baseDir(ctx context.Context) (dir string, bounded bool, err error) {
 	if args := h.policyArgs(ctx); len(args) > 0 {
 		if policyDir := strings.TrimSpace(args["_allowed_dir"]); policyDir != "" {
@@ -384,44 +362,21 @@ func currentBranch(repo *git.Repository) string {
 }
 
 // ---------------------------------------------------------------------------
-// Results that are readable AND parseable
+// Results that are readable and parseable
 //
-// WHY THESE TYPES EXIST:
-// A tool result is written for a READER. `git_status` answers with prose — a
-// branch line, then indented sections — because that is what a model reads best,
-// and the whole toolset is built around that (see fs_schema.go on terseness).
-// But live use (2026-07-27) found what happens when a PROGRAM consumes the same
-// answer: a goja script assumed git_status returned porcelain, and reported "4
-// staged, 2 other, no untracked" for a tree with one modified and one untracked
-// file. It returned successfully. Nothing in the stack could have caught it.
-//
-// So the read tools whose answers have an obvious record shape return a TYPED
-// value instead of a bare string, and that type's String() is the exact prose
-// they returned before. The engine renders a DataTypeString result with
-// fmt.Sprintf("%v", …) (taskengine/taskexec.go, serializeToolResultContent), so
-// the model-facing bytes are UNCHANGED — asserted by the golden test in
-// git_test.go — while a program (the goja bridge, which JSON-marshals anything
-// that is not a string) gets fields it cannot mis-read.
-//
-// STABILITY: these shapes are not a public API. They are program-facing, they
-// live beside the tool that produces them, and they change when the tool does.
-// A script that depends on one should pin the field it reads, not the whole
-// object.
+// GitStatusResult, GitLogResult and GitBranchListResult carry the prose a
+// model reads in String() (byte-for-byte what the plain-string tool result
+// used to return) alongside typed fields a program can read without
+// misinterpreting a sentence written for a reader. These shapes are not a
+// public API — they live beside the tool that produces them and change when
+// it does; pin the field you read, not the whole object.
 // ---------------------------------------------------------------------------
 
-// AppendGuidance lets a typed result carry text appended by a decorator without
-// losing its structure.
-//
-// It exists because of one concrete consequence of typing these results: the
-// tool-guidance decorator (services/toolguidance) appends navigation lines to
-// STRING results and returns anything else byte-for-byte, so typing git_status
-// would silently have dropped those lines from the model's view. That is a
-// model-facing change, and typing these results was supposed to be invisible to
-// the model. So the results carry the text instead — the structure is untouched
-// and the rendering is identical to what a plain string would have produced.
-//
-// The method name is the whole contract; the decorator asserts it structurally,
-// so neither package imports the other.
+// AppendGuidance lets a typed result carry text appended by a decorator
+// (services/toolguidance) without losing its structure — the decorator
+// otherwise only appends to string results and returns anything else
+// byte-for-byte. The method name is the whole contract, asserted
+// structurally so neither package imports the other.
 func (r GitStatusResult) AppendGuidance(text string) any {
 	r.text += text
 	return r
@@ -454,9 +409,9 @@ type GitStatusEntry struct {
 // answers the prose sections spell out; Clean is the whole answer when there is
 // nothing in any of them.
 //
-// The lists are always COMPLETE even when the rendered text was truncated at
-// gitMaxOutputBytes: truncation is a bound on the model's context window, not on
-// the repository, and a program that asked for the status wants the status.
+// The lists are always complete even when the rendered text was truncated at
+// gitMaxOutputBytes: truncation bounds the model's context window, not the
+// repository.
 type GitStatusResult struct {
 	Branch    string           `json:"branch"`
 	Head      *GitCommitRef    `json:"head,omitempty"`

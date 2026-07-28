@@ -12,20 +12,17 @@ import (
 	"time"
 )
 
-// These tests validate libacp's agent-side wire dispatch (conn.go, agent.go)
-// against real, independently-implemented ACP clients from the Rust
-// reference SDK, rather than the in-process fakes the rest of this package
-// uses. They are opt-in: the reference binaries are not vendored into this
-// repo, so both tests skip with a clear message unless the caller points at
-// a local build via environment variable (see `make acp-conformance`).
+// These tests validate libacp's agent-side wire dispatch against real,
+// independently-implemented ACP clients from the Rust reference SDK. Opt-in:
+// both tests skip unless the caller points at a local build of the reference
+// binary via environment variable (see `make acp-conformance`).
 const (
 	acpValidatorBinEnv = "ACP_VALIDATOR_BIN"
 	acpYopoBinEnv      = "ACP_YOPO_BIN"
 )
 
-// buildStubAgent compiles libacp/cmd/acp-stub-agent — the hermetic, in-memory
-// Agent implementation used to exercise libacp's dispatch without any LLM
-// backend — into t.TempDir() and returns its path.
+// buildStubAgent compiles the hermetic libacp/cmd/acp-stub-agent (no LLM
+// backend needed) into t.TempDir() and returns its path.
 func buildStubAgent(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
@@ -50,11 +47,9 @@ func (r acpCheckResult) String() string {
 }
 
 // TestConformance_StubAgentPassesACPValidator runs the Rust acp-validator
-// conformance checker (initialize, version negotiation, session lifecycle,
-// streaming, permissions, fs callbacks, cancellation, set_mode, auth, update
-// ordering, unknown-method handling) against the hermetic Go stub agent. It
-// is the harness this repo's ACP Slice 6 exists for: a wire-level conformance
-// gate on libacp's AgentSideConnection dispatch that needs no model backend.
+// conformance checker (initialize, session lifecycle, streaming, permissions,
+// fs callbacks, cancellation, set_mode, auth, update ordering, ...) against
+// the hermetic Go stub agent.
 func TestConformance_StubAgentPassesACPValidator(t *testing.T) {
 	validatorBin := os.Getenv(acpValidatorBinEnv)
 	if validatorBin == "" {
@@ -99,11 +94,9 @@ func TestConformance_StubAgentPassesACPValidator(t *testing.T) {
 	}
 }
 
-// TestConformance_StubAgentYopoSmoke drives the hermetic stub agent with
-// yopo, the Rust SDK's one-shot reference client, as a smoke test that the
-// stub (and, transitively, libacp's dispatch) can complete an ordinary
-// end-to-end turn against a second, independent client implementation — not
-// just the conformance checker.
+// TestConformance_StubAgentYopoSmoke drives the stub agent with yopo, the
+// Rust SDK's one-shot reference client, as a smoke test against a second,
+// independent client implementation.
 func TestConformance_StubAgentYopoSmoke(t *testing.T) {
 	yopoBin := os.Getenv(acpYopoBinEnv)
 	if yopoBin == "" {

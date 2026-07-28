@@ -49,12 +49,9 @@ func TestUnit_GeminiStreamClient_StreamsThinkingDeltas(t *testing.T) {
 	assert.Equal(t, "hello", res.Content)
 }
 
-// TestUnit_GeminiStreamClient_GoldenFixture_ToolCallsSystemAndUsage drives a
-// recorded streamGenerateContent SSE transcript — thinking parts, split text,
-// two functionCall parts with a thought signature, usageMetadata, and a
-// finishReason — through the real adapter and the engine-side assembler. It
-// also locks in the C2 fix: the STREAM request must carry the hoisted
-// systemInstruction exactly like chat.
+// Drives a recorded SSE transcript through the real adapter and assembler,
+// and pins that the stream request carries the hoisted systemInstruction
+// exactly like chat.
 func TestUnit_GeminiStreamClient_GoldenFixture_ToolCallsSystemAndUsage(t *testing.T) {
 	t.Parallel()
 
@@ -97,7 +94,6 @@ func TestUnit_GeminiStreamClient_GoldenFixture_ToolCallsSystemAndUsage(t *testin
 	res, err := asm.Result()
 	require.NoError(t, err)
 
-	// C2: the stream request body carries the hoisted system instruction.
 	si, ok := gotBody["system_instruction"].(map[string]any)
 	require.True(t, ok, "stream request must carry systemInstruction (C2), body: %v", gotBody)
 	parts := si["parts"].([]any)

@@ -1,9 +1,8 @@
 package localtools_test
 
-// Rec 4 (tool-hardening.md) for shell output, driven through LocalExecTools.Exec:
-// when a command's output exceeds the context budget, the FULL stream is spooled
-// to a durable file and the inline result carries a 20%-head/80%-tail split that
-// names the spool concretely — nothing is dropped silently.
+// Tests, driven through LocalExecTools.Exec, that when a command's output
+// exceeds the context budget, the full stream is spooled to a durable file
+// and the inline result carries a head/tail split naming the spool.
 
 import (
 	"context"

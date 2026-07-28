@@ -60,6 +60,7 @@ func newTestToolset(t *testing.T) (*Toolset, *recordingHost) {
 	return ts, host
 }
 
+// Pins the provider and tool names, which are the HITL policy key.
 func TestUnit_Tools_SupportsNamesTheProviderAndItsTools(t *testing.T) {
 	ts, _ := newTestToolset(t)
 
@@ -72,9 +73,6 @@ func TestUnit_Tools_SupportsNamesTheProviderAndItsTools(t *testing.T) {
 		t.Fatalf("Supports() = %v, want %v", got, want)
 	}
 
-	// The names are the HITL policy key. Pinning them here means a rename cannot
-	// land without the policy question being asked — and the blueprint's naming
-	// rule (goja, never js) cannot be quietly reversed.
 	if ToolsProviderName != "goja" {
 		t.Fatalf("provider name = %q, want \"goja\" (never \"js\")", ToolsProviderName)
 	}
@@ -83,6 +81,9 @@ func TestUnit_Tools_SupportsNamesTheProviderAndItsTools(t *testing.T) {
 	}
 }
 
+// goja_eval's schema states what no error would teach; a script tool's
+// schema is exactly what its file declares, and every tool is individually
+// addressable.
 func TestUnit_Tools_SchemaShape(t *testing.T) {
 	ts, _ := newTestToolset(t)
 	ctx := context.Background()
@@ -103,7 +104,6 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 		byName[tool.Function.Name] = tool
 	}
 
-	// goja_eval must state the three things no error would ever teach.
 	desc := byName[ToolEval].Function.Description
 	for _, want := range []string{"last expression", "host.tool(", "NO network"} {
 		if !strings.Contains(desc, want) {
@@ -125,8 +125,6 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 		t.Errorf("goja_eval required = %v, want [code]", params["required"])
 	}
 
-	// A script tool carries the description and schema ITS FILE declares: the
-	// operator who wrote it owns what the model is told.
 	echo := byName["echo_upper"]
 	if echo.Function.Description != "Upper-cases a string through the host." {
 		t.Errorf("script description = %q", echo.Function.Description)
@@ -138,12 +136,10 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 	if _, ok := schema["properties"].(map[string]any)["text"]; !ok {
 		t.Error("the declared property did not reach the schema")
 	}
-	// Serialisable as-is: the engine hands this straight to a provider.
 	if _, err := json.Marshal(echo.Function.Parameters); err != nil {
 		t.Fatalf("script schema does not marshal: %v", err)
 	}
 
-	// Individually addressable, exactly like local_fs and gointel.
 	for name := range byName {
 		one, err := ts.GetToolsForToolsByName(ctx, name)
 		if err != nil || len(one) != 1 || one[0].Function.Name != name {
@@ -155,6 +151,8 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 	}
 }
 
+// This provider offers no OpenAPI documents, only hand-written function
+// schemas.
 func TestUnit_Tools_NoOpenAPISchemas(t *testing.T) {
 	ts, _ := newTestToolset(t)
 
@@ -167,6 +165,9 @@ func TestUnit_Tools_NoOpenAPISchemas(t *testing.T) {
 	}
 }
 
+// Exec dispatches goja_eval and script tools alike, accepts arguments from
+// either the chain input or ToolsCall.Args, coerces a string-encoded scalar,
+// and falls back to Name when ToolName is empty.
 func TestUnit_Tools_ExecDispatch(t *testing.T) {
 	ts, host := newTestToolset(t)
 	ctx := context.Background()
@@ -203,8 +204,6 @@ func TestUnit_Tools_ExecDispatch(t *testing.T) {
 	})
 
 	t.Run("args from the ToolsCall", func(t *testing.T) {
-		// A declarative `tools` task carries its arguments on the call, not the
-		// chain input — the same fallback local_fs and gointel implement.
 		out, _, err := ts.Exec(ctx, time.Now(), "chat history, not an args map", false,
 			&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: ToolEval, Args: map[string]string{"code": `"from args"`}})
 		if err != nil {
@@ -216,8 +215,6 @@ func TestUnit_Tools_ExecDispatch(t *testing.T) {
 	})
 
 	t.Run("a string-encoded deadline", func(t *testing.T) {
-		// Small models emit JSON scalars as strings; a dropped override would
-		// silently answer a different question than the one asked.
 		out, _, err := ts.Exec(ctx, time.Now(), map[string]any{"code": `1`, "deadline_ms": "250"}, false,
 			&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: ToolEval})
 		if err != nil {
@@ -237,6 +234,8 @@ func TestUnit_Tools_ExecDispatch(t *testing.T) {
 	})
 }
 
+// Every dispatch-time failure (nil call, unknown tool, unknown or missing
+// argument, malformed deadline) is refused with a teaching error.
 func TestUnit_Tools_ExecRefusals(t *testing.T) {
 	ts, _ := newTestToolset(t)
 	ctx := context.Background()
@@ -254,14 +253,12 @@ func TestUnit_Tools_ExecRefusals(t *testing.T) {
 	if dt != taskengine.DataTypeAny {
 		t.Fatalf("data type on error = %v", dt)
 	}
-	// The refusal must list what IS available, including the operator's scripts.
 	for _, name := range []string{ToolEval, "leaker", "echo_upper"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("refusal %q does not offer %s", err, name)
 		}
 	}
 
-	// Argument NAMES are strict, on eval and on script tools alike.
 	_, _, err = ts.Exec(ctx, time.Now(), map[string]any{"code": `1`, "timeout": 5}, false,
 		&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: ToolEval})
 	if err == nil || !strings.Contains(err.Error(), "unknown argument(s): timeout") {
@@ -277,21 +274,18 @@ func TestUnit_Tools_ExecRefusals(t *testing.T) {
 		t.Fatalf("a script's declared schema was not enforced: %v", err)
 	}
 
-	// A declared-required argument that is missing is named.
 	_, _, err = ts.Exec(ctx, time.Now(), map[string]any{}, false,
 		&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: "echo_upper"})
 	if err == nil || !strings.Contains(err.Error(), "missing required argument(s): text") {
 		t.Fatalf("missing-required error = %v", err)
 	}
 
-	// goja_eval without code.
 	_, _, err = ts.Exec(ctx, time.Now(), map[string]any{}, false,
 		&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: ToolEval})
 	if err == nil || !strings.Contains(err.Error(), "needs `code`") {
 		t.Fatalf("missing-code error = %v", err)
 	}
 
-	// A nonsense deadline is refused rather than silently ignored.
 	_, _, err = ts.Exec(ctx, time.Now(), map[string]any{"code": `1`, "deadline_ms": "soon"}, false,
 		&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: ToolEval})
 	if err == nil || !strings.Contains(err.Error(), "deadline_ms must be a positive number") {
@@ -299,10 +293,10 @@ func TestUnit_Tools_ExecRefusals(t *testing.T) {
 	}
 }
 
-// Rec 5 of tool-hardening.md: EVERY error leaving Exec carries a severity
-// marker, so a model can decide whether a corrected retry is worth attempting.
-// Asserted over the whole refusal surface rather than case by case, because the
-// value of the convention is that it has no holes.
+// EVERY error leaving Exec carries a severity marker, so a model can decide
+// whether a corrected retry is worth attempting. Asserted over the whole
+// refusal surface rather than case by case, because the value of the
+// convention is that it has no holes.
 func TestUnit_Tools_EveryExecErrorCarriesASeverityMarker(t *testing.T) {
 	ts, _ := newTestToolset(t)
 	ctx := context.Background()
@@ -343,10 +337,8 @@ func TestUnit_Tools_EveryExecErrorCarriesASeverityMarker(t *testing.T) {
 	}
 }
 
-// Isolation is the property the whole safety story rests on, and the only way to
-// prove it is adversarially: one script deliberately stashes state on globalThis
-// and everything else looks for it. Under -race this also proves there is no
-// shared VM to race on.
+// Concurrent executions never share a runtime: one script stashes state on
+// globalThis, and no other execution ever observes it.
 func TestUnit_Tools_ConcurrentExecutionsAreIsolated(t *testing.T) {
 	ts, _ := newTestToolset(t)
 	ctx := context.Background()
@@ -362,9 +354,6 @@ func TestUnit_Tools_ConcurrentExecutionsAreIsolated(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			for r := 0; r < rounds; r++ {
-				// 1. The leaker. Every execution gets a FRESH runtime, so its
-				//    counter must be 1 every single time — a 2 here means one
-				//    script observed another's globalThis.
 				out, _, err := ts.Exec(ctx, time.Now(), map[string]any{"tag": fmt.Sprintf("%d-%d", w, r)}, false,
 					&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: "leaker"})
 				if err != nil {
@@ -386,8 +375,6 @@ func TestUnit_Tools_ConcurrentExecutionsAreIsolated(t *testing.T) {
 					errs <- fmt.Errorf("crossed arguments: tag = %q, want %d-%d", got.Tag, w, r)
 				}
 
-				// 2. An observer, in the same provider, at the same time: it must
-				//    never see the leaker's global.
 				out, _, err = ts.Exec(ctx, time.Now(), map[string]any{"code": `typeof globalThis.__leak`}, false,
 					&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: ToolEval})
 				if err != nil {
@@ -398,7 +385,6 @@ func TestUnit_Tools_ConcurrentExecutionsAreIsolated(t *testing.T) {
 					errs <- fmt.Errorf("observed another execution's global: typeof __leak = %s", v)
 				}
 
-				// 3. A host-calling script, so the bridge is exercised concurrently.
 				out, _, err = ts.Exec(ctx, time.Now(), map[string]any{"text": fmt.Sprintf("w%d", w)}, false,
 					&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: "echo_upper"})
 				if err != nil {
@@ -427,6 +413,7 @@ func TestUnit_Tools_ConcurrentExecutionsAreIsolated(t *testing.T) {
 	}
 }
 
+// After Shutdown, Exec is refused but Supports still answers.
 func TestUnit_Tools_ShutdownStopsTheProvider(t *testing.T) {
 	ts, _ := newTestToolset(t)
 	ctx := context.Background()
@@ -444,8 +431,6 @@ func TestUnit_Tools_ShutdownStopsTheProvider(t *testing.T) {
 		t.Fatalf("post-shutdown Exec error = %v, want a shutdown refusal", err)
 	}
 
-	// Listing still works after shutdown: the registry may be read during
-	// teardown, and answering "unknown tool" would be a lie.
 	if names, err := ts.Supports(ctx); err != nil || len(names) == 0 {
 		t.Fatalf("Supports after shutdown = %v, %v", names, err)
 	}

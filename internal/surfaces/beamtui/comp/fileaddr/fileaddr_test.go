@@ -45,9 +45,8 @@ func contains(labels []string, want string) bool {
 	return false
 }
 
-// newSource builds a Factory allowlisting root and a Source over it — the
-// same two calls the app makes, so the tests exercise the real resolution
-// path rather than a hand-built View.
+// newSource builds a Factory allowlisting root and a Source over it, the
+// same two calls the app makes.
 func newSource(t *testing.T, root string) *fileaddr.Source {
 	t.Helper()
 	f, err := vfs.NewFactory(root)
@@ -64,14 +63,13 @@ func newSource(t *testing.T, root string) *fileaddr.Source {
 	return s
 }
 
-// buildWorkspace lays out the fixture tree: real files, gitignored noise,
-// skip-dir noise, an in-root symlink, and a symlink whose target is outside
-// the root entirely. It returns the workspace root and the outside file's
-// basename.
+// buildWorkspace lays out the fixture tree: real files, gitignored and
+// skip-dir noise, an in-root symlink, and an escaping one. Returns the root
+// and the outside file's basename.
 func buildWorkspace(t *testing.T) (root, outsideName string) {
 	t.Helper()
 	root = t.TempDir()
-	outside := t.TempDir() // a SIBLING of root, so it is genuinely out of root
+	outside := t.TempDir() // a sibling of root, genuinely out of root
 
 	writeFile(t, root, ".gitignore", strings.Join([]string{
 		"# noise",
@@ -81,8 +79,6 @@ func buildWorkspace(t *testing.T) (root, outsideName string) {
 		"/rooted-only.txt",
 		"generated/",
 		// Last match wins: this re-includes one file the *.log rule excluded.
-		// (A negation UNDER an excluded directory would be unreachable, in
-		// this matcher and in git alike, so it is not what we test here.)
 		"!important.log",
 	}, "\n")+"\n")
 
@@ -92,7 +88,6 @@ func buildWorkspace(t *testing.T) (root, outsideName string) {
 	writeFile(t, root, "src/util.go", "package src")
 	writeFile(t, root, "src/nested/deep.go", "package nested")
 
-	// gitignored, by three different rule shapes
 	writeFile(t, root, "secret.txt", "shh")
 	writeFile(t, root, "debug.log", "noise")
 	writeFile(t, root, "src/trace.log", "noise")
@@ -102,22 +97,19 @@ func buildWorkspace(t *testing.T) (root, outsideName string) {
 	writeFile(t, root, "node_modules/pkg/index.js", "noise")
 	writeFile(t, root, "generated/gen.go", "noise")
 
-	// skip-dir noise that .gitignore says nothing about
 	writeFile(t, root, ".git/config", "[core]")
 	writeFile(t, root, "vendor/lib/lib.go", "package lib")
 	writeFile(t, root, "dist/bundle.js", "noise")
 
-	// A symlink to an in-root regular file: a legitimate candidate.
+	// In-root symlink (legitimate) vs. two escaping ones (must never surface).
 	if err := os.Symlink(filepath.Join(root, "keep.go"), filepath.Join(root, "inside-link.go")); err != nil {
 		t.Skipf("symlinks unsupported here: %v", err)
 	}
-	// A symlink whose target is outside the root: must never surface.
 	outsideName = "outside-secret.txt"
 	writeFile(t, outside, outsideName, "off limits")
 	if err := os.Symlink(filepath.Join(outside, outsideName), filepath.Join(root, "escape.txt")); err != nil {
 		t.Fatalf("symlink escape.txt: %v", err)
 	}
-	// A symlink to the outside DIRECTORY: the whole subtree must stay out.
 	if err := os.Symlink(outside, filepath.Join(root, "escape-dir")); err != nil {
 		t.Fatalf("symlink escape-dir: %v", err)
 	}
@@ -151,7 +143,6 @@ func TestUnit_FileAddrCandidates_ExcludesNoiseAndOutOfRootTargets(t *testing.T) 
 		}
 	}
 
-	// Every exclusion, named individually so a regression says which rule broke.
 	forbidden := map[string]string{
 		"secret.txt":                "gitignore literal",
 		"debug.log":                 "gitignore glob",
@@ -170,14 +161,12 @@ func TestUnit_FileAddrCandidates_ExcludesNoiseAndOutOfRootTargets(t *testing.T) 
 		}
 	}
 
-	// Nothing reached through the escaping directory link, under any label.
 	for _, l := range labels {
 		if strings.HasPrefix(l, "escape-dir") || strings.Contains(l, outsideName) {
 			t.Errorf("out-of-root path leaked as candidate %q", l)
 		}
 	}
 
-	// Labels are root-relative slash paths; IDs are absolute and in-root.
 	for _, it := range items {
 		if filepath.IsAbs(it.Label) || strings.Contains(it.Label, "\\") {
 			t.Errorf("label %q is not a root-relative slash path", it.Label)
@@ -190,7 +179,6 @@ func TestUnit_FileAddrCandidates_ExcludesNoiseAndOutOfRootTargets(t *testing.T) 
 		}
 	}
 
-	// Detail is the parent directory, empty at the root.
 	details := map[string]string{}
 	for _, it := range items {
 		details[it.Label] = it.Detail
@@ -221,7 +209,6 @@ func TestUnit_FileAddrCandidates_RanksAndCaps(t *testing.T) {
 		t.Fatalf("best match tier = %d, want %d", items[0].Rank, picker.RankBasenamePrefix)
 	}
 
-	// The limit is honoured, and a non-positive limit means the default.
 	capped, err := s.Candidates(context.Background(), "", 3)
 	if err != nil {
 		t.Fatalf("Candidates: %v", err)
@@ -237,8 +224,6 @@ func TestUnit_FileAddrCandidates_RanksAndCaps(t *testing.T) {
 		t.Fatalf("limit 0 returned %d candidates, want <= %d", len(defaulted), fileaddr.DefaultLimit)
 	}
 
-	// A query nothing matches is an empty list, not an error — the caller
-	// renders the picker's empty state.
 	none, err := s.Candidates(context.Background(), "zzz-no-such-thing-zzz", 10)
 	if err != nil {
 		t.Fatalf("Candidates: %v", err)
@@ -253,8 +238,7 @@ func TestUnit_FileAddrCandidates_RanksAndCaps(t *testing.T) {
 
 func TestUnit_FileAddrCandidates_BudgetRespectedAndDeterministic(t *testing.T) {
 	root := t.TempDir()
-	// Comfortably more files than the budget, zero-padded so lexical order
-	// (the documented walk order) is also numeric order.
+	// Zero-padded so lexical order is also numeric order.
 	const total = fileaddr.WalkBudget + 1000
 	for i := 1; i <= total; i++ {
 		p := filepath.Join(root, fmt.Sprintf("f%05d.txt", i))
@@ -278,7 +262,6 @@ func TestUnit_FileAddrCandidates_BudgetRespectedAndDeterministic(t *testing.T) {
 		t.Fatalf("got %d candidates, want exactly the budget %d", len(items), fileaddr.WalkBudget)
 	}
 	labels := labelsOf(items)
-	// The budget cuts at a KNOWN point because the order is lexical.
 	if labels[0] != "f00001.txt" {
 		t.Fatalf("first candidate = %q, want f00001.txt (lexical order)", labels[0])
 	}
@@ -289,15 +272,10 @@ func TestUnit_FileAddrCandidates_BudgetRespectedAndDeterministic(t *testing.T) {
 		t.Fatal("a file past the walk budget was returned")
 	}
 
-	// The budget must be REPORTABLE. Without this the walk stopping is
-	// indistinguishable from the tree ending, so a monorepo shows an ordinary
-	// "no matching files" and the user concludes their file is not there.
 	if !s.Truncated() {
 		t.Fatal("Truncated() = false after the walk stopped at the budget")
 	}
 
-	// Same tree, same answer: the truncation point is reproducible, not a
-	// race against directory-entry iteration order.
 	again, err := s.Candidates(context.Background(), "", total*2)
 	if err != nil {
 		t.Fatalf("Candidates (second run): %v", err)
@@ -308,9 +286,8 @@ func TestUnit_FileAddrCandidates_BudgetRespectedAndDeterministic(t *testing.T) {
 }
 
 // TestUnit_FileAddrTruncated_FalseWhenTheWalkFinished: the flag reports the
-// BUDGET, not "there were files". A tree the walk saw all of has nothing
-// hidden behind it, and saying otherwise would teach the operator to ignore
-// the notice on the one repository where it matters.
+// budget, not "there were files" — a tree the walk saw all of has nothing
+// hidden behind it.
 func TestUnit_FileAddrTruncated_FalseWhenTheWalkFinished(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"a.go", "b.go", "c.go"} {
@@ -330,7 +307,6 @@ func TestUnit_FileAddrTruncated_FalseWhenTheWalkFinished(t *testing.T) {
 		t.Fatal("Truncated() = true after a walk that reached the end of the tree")
 	}
 
-	// A rootless Source never walks, so it never truncates.
 	rootless, err := fileaddr.NewSource(nil, "")
 	if err != nil {
 		t.Fatalf("NewSource: %v", err)
@@ -360,7 +336,7 @@ func TestUnit_FileAddrSource_NoRootIsTheFixedEmptyState(t *testing.T) {
 		}},
 		{"cwd outside every allowlisted root", func(t *testing.T) *fileaddr.Source {
 			allowed := t.TempDir()
-			denied := t.TempDir() // a sibling, under no configured root
+			denied := t.TempDir()
 			f, err := vfs.NewFactory(allowed)
 			if err != nil {
 				t.Fatalf("NewFactory: %v", err)
@@ -415,8 +391,7 @@ func TestUnit_FileAddrSource_ResolvesRootLikeTheRuntime(t *testing.T) {
 		t.Fatalf("NewFactory: %v", err)
 	}
 
-	// The "/" sentinel and the empty cwd both mean "the default root" — the
-	// compat story ResolveSessionCwd owns and beam sends today.
+	// "/" and "" both mean the default root.
 	for _, cwd := range []string{"", "/"} {
 		s, err := fileaddr.NewSource(f, cwd)
 		if err != nil {
@@ -430,8 +405,6 @@ func TestUnit_FileAddrSource_ResolvesRootLikeTheRuntime(t *testing.T) {
 		}
 	}
 
-	// A subdirectory of a granted root is itself a legal session cwd, and
-	// candidates are then relative to THAT directory.
 	sub := filepath.Join(allowed, "sub")
 	s, err := fileaddr.NewSource(f, sub)
 	if err != nil {
@@ -445,8 +418,6 @@ func TestUnit_FileAddrSource_ResolvesRootLikeTheRuntime(t *testing.T) {
 		t.Fatalf("candidates under the subdirectory = %v, want [child.go]", got)
 	}
 
-	// With no allowlist (the stdio/editor path) an absolute cwd is adopted
-	// as-is, which is exactly ResolveSessionCwd's rule 4.
 	stdio, err := fileaddr.NewSource(nil, allowed)
 	if err != nil {
 		t.Fatalf("NewSource(nil, abs): %v", err)
@@ -474,7 +445,6 @@ func TestUnit_FileAddrSessionItems(t *testing.T) {
 	if len(items) != 3 {
 		t.Fatalf("got %d items, want 3", len(items))
 	}
-	// Caller order survives — the roster's own ordering is authoritative.
 	for i, want := range []string{"zeta", "alpha", "mid"} {
 		if items[i].Label != want || items[i].ID != want {
 			t.Fatalf("item %d = {%q,%q}, want %q", i, items[i].ID, items[i].Label, want)
@@ -486,7 +456,6 @@ func TestUnit_FileAddrSessionItems(t *testing.T) {
 	if items[0].Detail != "" || items[2].Detail != "" {
 		t.Fatal("a non-active session was marked active")
 	}
-	// An empty active name marks nothing.
 	for _, it := range fileaddr.SessionItems([]string{"a", ""}, "") {
 		if it.Detail != "" {
 			t.Fatalf("empty active name marked %q", it.Label)

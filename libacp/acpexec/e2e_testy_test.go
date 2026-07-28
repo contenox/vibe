@@ -19,28 +19,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests validate libacp's client-side wire dispatch (client.go,
-// clientconn.go) against testy, the Rust reference SDK's deterministic ACP
-// test agent, spoken to over a real subprocess (acpexec.Spawn) rather than
-// the in-memory pipes libacp's own unit tests use. They are opt-in: the
-// reference binaries are not vendored into this repo, so every test skips
-// with a clear message unless the caller points at a local build via
-// environment variable (see `make acp-client-e2e`).
+// These tests validate libacp's client-side wire dispatch against testy, the
+// Rust reference SDK's deterministic ACP test agent, over a real subprocess
+// (acpexec.Spawn). Opt-in: every test skips unless the caller points at a
+// local testy build via env var (see `make acp-client-e2e`).
 //
 // testy has one known bug relevant here: initialize echoes back whatever
-// protocolVersion it is sent instead of negotiating. These tests always send
-// libacp.ProtocolVersion (1) and never attempt to exercise version
-// negotiation against it.
+// protocolVersion it is sent instead of negotiating, so these tests always
+// send libacp.ProtocolVersion and never exercise negotiation against it.
 const (
 	acpTestyBinEnv   = "ACP_TESTY_BIN"
 	acpMcpEchoBinEnv = "ACP_MCP_ECHO_BIN"
 )
 
 // fakeTerminal is one CreateTerminal call's real, running child process: the
-// e2e Client actually executes the requested command (testy's callback
-// scenarios ask for "printf ...", a genuinely runnable command) rather than
-// faking output, so TerminalOutput/WaitForTerminalExit/KillTerminal have real
-// process state to report.
+// e2e Client actually executes the requested command rather than faking
+// output, so the terminal/* family has real process state to report.
 type fakeTerminal struct {
 	cmd *exec.Cmd
 
@@ -60,12 +54,10 @@ func (w termWriter) Write(p []byte) (int, error) {
 }
 
 // e2eClient is the libacp.Client this file's tests wire a real
-// ClientSideConnection to: it records every agent-initiated call it serves so
-// tests can assert on their shape, serves fs/read_text_file and
-// fs/write_text_file from an in-memory map, serves session/request_permission
-// by selecting the first offered option (recording the call first, in case a
-// test wants to hold it open instead — see permissionEntered), and serves the
-// terminal/* family against real child processes.
+// ClientSideConnection to: it records every agent-initiated call, serves
+// fs/read_text_file and fs/write_text_file from an in-memory map, answers
+// session/request_permission with the first offered option (unless held open,
+// see permissionEntered), and serves terminal/* against real child processes.
 type e2eClient struct {
 	libacp.UnimplementedClient
 
@@ -85,9 +77,8 @@ type e2eClient struct {
 	termSeq   int
 
 	// permissionEntered, when set before a call begins, is closed the moment
-	// RequestPermission is invoked and the call then blocks on ctx until the
-	// caller (a test exercising CancelPrompt) cancels it — instead of
-	// answering right away like every other call below.
+	// RequestPermission is invoked; the call then blocks on ctx instead of
+	// answering, so a test can exercise CancelPrompt while it is pending.
 	permissionEntered chan struct{}
 }
 
@@ -344,10 +335,9 @@ func newTestyHarness(t *testing.T) *testyHarness {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 
-	// Interop note: testy does not exit on stdin EOF/close -- it is a
-	// persistent agent process that only stops on a process signal -- so
-	// every cleanup here always takes acpexec.Close's kill path. A short
-	// grace keeps that from adding acpexec's default 5s to every single test.
+	// testy is a persistent process that never exits on stdin EOF, so every
+	// cleanup takes acpexec.Close's kill path; a short grace avoids paying
+	// the default 5s on every test.
 	var stderr acpexec.LockedBuffer
 	proc, err := acpexec.Spawn(ctx, exec.Command(testyBin), acpexec.WithStderr(&stderr), acpexec.WithKillGrace(500*time.Millisecond))
 	if err != nil {
@@ -397,10 +387,9 @@ func (h *testyHarness) initialize(t *testing.T) libacp.InitializeResponse {
 	return resp
 }
 
-// newSession creates a session rooted at a fresh temp dir, with one
-// additional directory activated — testy advertises
-// sessionCapabilities.additionalDirectories, so exercising it here is part of
-// what this harness is meant to validate.
+// newSession creates a session rooted at a fresh temp dir with one additional
+// directory activated, exercising testy's advertised
+// sessionCapabilities.additionalDirectories.
 func (h *testyHarness) newSession(t *testing.T, mcpServers []libacp.McpServer) (sessionID libacp.SessionID, cwd string, extraDir string) {
 	t.Helper()
 	cwd = t.TempDir()
@@ -420,9 +409,8 @@ func (h *testyHarness) newSession(t *testing.T, mcpServers []libacp.McpServer) (
 	return resp.SessionID, cwd, extraDir
 }
 
-// testyPrompt JSON-serializes v (a TestyCommand-shaped value) as this
-// package's prompts always do: testy's prompt text IS a JSON command, per
-// testy.rs's TestyCommand.
+// testyPrompt JSON-serializes v (a TestyCommand-shaped value): testy's
+// prompt text is a JSON command, per testy.rs's TestyCommand.
 func testyPrompt(v any) []libacp.ContentBlock {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -436,12 +424,7 @@ func TestTesty_InitializeHandshake(t *testing.T) {
 	resp := h.initialize(t)
 
 	assert.Equal(t, libacp.ProtocolVersion, resp.ProtocolVersion)
-	// Interop note: testy's handle_initialize never calls
-	// InitializeResponse.agent_info(...), so agentInfo is always absent on
-	// the wire here even though the agent internally names itself
-	// "test-agent" (that name is only a connect_to/builder label, unrelated
-	// to the wire response) -- agentInfo is optional per spec, so this is not
-	// a bug, just this reference agent choosing not to send it.
+	// testy never sends agentInfo on the wire (optional per spec).
 	assert.Nil(t, resp.AgentInfo)
 
 	caps := resp.AgentCapabilities
@@ -513,14 +496,10 @@ func TestTesty_EchoRoundTrip(t *testing.T) {
 	assert.Equal(t, message, updates[0].Update.Content.Text)
 }
 
-// TestTesty_RunScenarioSessionUpdates is the highest-value test in this
-// package: it drives testy's session_updates scenario, which emits every
-// stable session/update variant in one deterministic turn, and asserts each
-// one arrived — unmarshalled without error — before the Prompt response.
-// ClientSideConnection.handleNotification silently drops any session/update
-// notification it fails to unmarshal (a malformed notification has no
-// response to fail on the wire), so an exact expected count per kind is what
-// would actually catch a parse regression here, not just "no error returned".
+// TestTesty_RunScenarioSessionUpdates pins that every stable session/update
+// variant testy's session_updates scenario emits arrives and unmarshals
+// correctly, by exact count per kind — a malformed notification is silently
+// dropped on the wire, so "no error" alone would not catch a parse regression.
 func TestTesty_RunScenarioSessionUpdates(t *testing.T) {
 	h := newTestyHarness(t)
 	h.initialize(t)
@@ -626,12 +605,8 @@ func TestTesty_RunScenarioSessionUpdates(t *testing.T) {
 	assert.True(t, sawFinalReport, "the scenario's own final report chunk must be among the agent_message_chunk updates")
 
 	for _, tc := range byKind[libacp.SessionUpdateToolCall] {
-		// Interop note: testy omits "status" entirely on a freshly created
-		// tool_call (its ToolCall::new(...) leaves status at the type's
-		// default and the field is skipped when default), relying on the
-		// spec's implicit "pending" default for an absent status rather than
-		// sending it explicitly -- so the parsed Status here is "", not
-		// libacp.ToolCallStatusPending.
+		// testy omits "status" on a freshly created tool_call (relying on the
+		// spec's implicit "pending" default), so the parsed Status is "".
 		assert.Equal(t, libacp.ToolCallStatus(""), tc.Status)
 		assert.NotEmpty(t, tc.ToolCallID)
 	}
@@ -685,20 +660,12 @@ func TestTesty_RunScenarioToolCalls(t *testing.T) {
 	assert.Equal(t, 1, plans)
 }
 
-// TestTesty_RunScenarioCallbacks drives testy's callbacks scenario, which
-// exercises every stable agent-to-client request this Client serves:
-// session/request_permission, fs/write_text_file, fs/read_text_file, and the
-// full terminal/* family.
-//
-// Interop surprise: the prebuilt testy binary is built with its crate's
-// default "unstable" feature enabled, so once the stable callbacks below
-// succeed, the scenario goes on to attempt elicitation/create — a capability
-// this client's ClientCapabilities never advertises support for (libacp has
-// no unstable elicitation surface). testy then fails the whole turn with an
-// InvalidParams error instead of ending it normally. That failure is
-// expected and orthogonal to what this test checks — it is judged the way
-// the acp-validator judges callbacks-adjacent checks: by what was actually
-// observed, not by whether the turn happened to end cleanly.
+// TestTesty_RunScenarioCallbacks pins that testy's callbacks scenario drives
+// every stable agent-to-client request this Client serves (permission, fs
+// read/write, terminal/*). The prebuilt binary's "unstable" feature then goes
+// on to attempt elicitation/create, which this client never advertises, so
+// the turn ends in an expected InvalidParams error rather than cleanly; the
+// test judges the calls actually observed, not the turn's outcome.
 func TestTesty_RunScenarioCallbacks(t *testing.T) {
 	h := newTestyHarness(t)
 	h.initialize(t)
@@ -750,12 +717,9 @@ func TestTesty_RunScenarioCallbacks(t *testing.T) {
 	assert.Len(t, h.client.snapshotReleaseCalls(), 1)
 }
 
-// TestTesty_CancelPromptMidScenario holds the callbacks scenario's very first
-// callback (session/request_permission) open by never answering it, calls
-// CancelPrompt while it is genuinely pending, and asserts the turn resolves
-// with stopReason "cancelled" — proving CancelPrompt's cross-process
-// behavior against a real, independent agent implementation, not just the
-// in-memory harness clientconn_cancel_test.go already covers.
+// TestTesty_CancelPromptMidScenario pins that CancelPrompt against a real,
+// independent agent process resolves the turn with stopReason "cancelled"
+// while a callback (session/request_permission) is genuinely pending.
 func TestTesty_CancelPromptMidScenario(t *testing.T) {
 	h := newTestyHarness(t)
 	h.initialize(t)
@@ -796,10 +760,9 @@ func TestTesty_CancelPromptMidScenario(t *testing.T) {
 	}
 }
 
-// TestTesty_McpPassDown wires session/new with a real stdio MCP server
-// (mcp-echo-server) and drives testy's list_tools/call_tool commands, which
-// spawn their own short-lived MCP client against that server per testy.rs's
-// with_mcp_client. It is additionally gated on ACP_MCP_ECHO_BIN.
+// TestTesty_McpPassDown pins session/new's MCP server pass-through: testy's
+// list_tools/call_tool commands spawn their own short-lived MCP client
+// against the real stdio server this test wires in. Gated on ACP_MCP_ECHO_BIN.
 func TestTesty_McpPassDown(t *testing.T) {
 	mcpBin := os.Getenv(acpMcpEchoBinEnv)
 	if mcpBin == "" {

@@ -8,11 +8,7 @@ import (
 	"github.com/contenox/beam/internal/services/project"
 )
 
-// TestUnit_InitProject_ForcesLocalMarker verifies the `init --project` contract:
-// a child directory nested under a parent that already carries a project marker
-// must get its OWN local .contenox/workspace.id with a FRESH id (a distinct
-// project), instead of reusing the ancestor's marker that the git-style walk-up
-// would otherwise return.
+// TestUnit_InitProject_ForcesLocalMarker asserts `init --project` gives a nested child directory its own local marker and workspace id, rather than reusing an ancestor's.
 func TestUnit_InitProject_ForcesLocalMarker(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "contenox-init-project-*")
 	if err != nil {
@@ -90,8 +86,7 @@ func TestUnit_InitProject_ForcesLocalMarker(t *testing.T) {
 	}
 }
 
-// TestUnit_ResolveProjectInit_ExplicitNameWins verifies an explicit --name is
-// used verbatim rather than being replaced by the directory basename.
+// TestUnit_ResolveProjectInit_ExplicitNameWins asserts an explicit --name is used verbatim rather than replaced by the directory basename.
 func TestUnit_ResolveProjectInit_ExplicitNameWins(t *testing.T) {
 	cwd := filepath.Join(string(filepath.Separator), "tmp", "some-dir")
 	contenoxDir, projectName := resolveProjectInit(cwd, "My Project")

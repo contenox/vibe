@@ -45,7 +45,6 @@ func (m *VKManager) Close() error {
 	return nil
 }
 
-// VKExecutor implements KVExecutor for Valkey
 type VKExecutor struct {
 	client valkey.Client
 	ttl    time.Duration
@@ -234,7 +233,6 @@ func (r *VKExecutor) SetRemove(ctx context.Context, key Key, member json.RawMess
 	return nil
 }
 
-// Utility function
 func max(a, b int64) int64 {
 	if a > b {
 		return a

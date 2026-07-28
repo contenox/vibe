@@ -103,17 +103,18 @@
     --pagefind-ui-tag: var(--color-neutral-900);
   }
 
-  /* Subtle grid backdrop for the landing hero (matches contenox.com). */
+  /* Subtle grid backdrop for the landing hero. Light mode gets a faint wash of
+     the brand mint (primary-600 light / primary-500 dark). */
   .hero-grid {
     background-image:
-      radial-gradient(ellipse at top, rgba(79, 70, 229, 0.1) 0%, transparent 60%),
+      radial-gradient(ellipse at top, rgba(5, 150, 105, 0.1) 0%, transparent 60%),
       linear-gradient(rgb(10 10 10 / 0.045) 1px, transparent 1px),
       linear-gradient(90deg, rgb(10 10 10 / 0.045) 1px, transparent 1px);
     background-size: 100% 100%, 48px 48px, 48px 48px;
   }
   .dark .hero-grid {
     background-image:
-      radial-gradient(ellipse at top, rgba(99, 102, 241, 0.1) 0%, transparent 60%),
+      radial-gradient(ellipse at top, rgba(16, 185, 129, 0.1) 0%, transparent 60%),
       linear-gradient(rgb(237 237 237 / 0.04) 1px, transparent 1px),
       linear-gradient(90deg, rgb(237 237 237 / 0.04) 1px, transparent 1px);
     background-size: 100% 100%, 48px 48px, 48px 48px;

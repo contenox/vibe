@@ -1,7 +1,7 @@
-// stop.go — the operator's mission kill switch. StopMission is the durable
-// half (status, asks, checkpoints — any process may run it over the shared
-// store); the live half is the StatusChanged subscriber BuildInProcess wires,
-// which reaps the unit subprocess in whichever process hosts it.
+// stop.go is the operator's mission kill switch. StopMission is the durable
+// half (status, asks, checkpoints, over the shared store); the live half is
+// the StatusChanged subscriber BuildInProcess wires, which reaps the unit
+// subprocess in whichever process hosts it.
 package fleetservice
 
 import (
@@ -18,13 +18,10 @@ import (
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
-// StopMission abandons a running mission: the guarded terminal transition
-// first (so a finished mission returns a teaching conflict instead of being
-// re-finished), then every pending ask the mission filed closes WITHOUT the
-// resume hook, and every checkpoint suspended under those asks is deleted —
-// nothing of a stopped mission may resume. The unit subprocess itself is torn
-// down by the host's StatusChanged subscriber (see BuildInProcess), which the
-// publisher-wired missionservice reaches cross-process over the SQLite bus.
+// StopMission abandons a running mission: finishes it (a terminal mission
+// returns a conflict instead), then closes every pending ask it filed and
+// deletes their checkpoints. The subprocess itself is reaped by the host's
+// StatusChanged subscriber (see BuildInProcess).
 func StopMission(ctx context.Context, missions missionservice.Service, hitl hitlservice.Service, store runtimetypes.Store, missionID, reason string) error {
 	if reason == "" {
 		reason = "stopped by operator"
@@ -44,11 +41,10 @@ func StopMission(ctx context.Context, missions missionservice.Service, hitl hitl
 	return nil
 }
 
-// runStatusTeardown subscribes kernel teardown to mission terminal events: when
-// a mission this kernel hosts reaches a terminal status, its unit subprocess is
-// stopped. Cross-process by construction — the SQLite bus broadcasts every
-// event to every subscriber, and a kernel that does not host the instance gets
-// a not-found from Stop and moves on. Returns an unsubscribe func.
+// runStatusTeardown stops a hosted unit's subprocess when its mission
+// reaches a terminal status. Cross-process: the bus broadcasts to every
+// subscriber, and a kernel not hosting the instance gets a harmless
+// not-found from Stop. Returns an unsubscribe func.
 func runStatusTeardown(ctx context.Context, bus libbus.Messenger, missions missionservice.Service, kernel agentinstance.Manager) (func(), error) {
 	ch := make(chan []byte, 16)
 	sub, err := bus.Stream(ctx, missionservice.StatusChangedSubject, ch)

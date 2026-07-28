@@ -13,10 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_ResolveInvocableModelID pins the inference-profile resolution rule:
 // ON_DEMAND models keep their base id; profile-only models resolve to the
-// geo-prefixed system profile (preferring geographic over global); models with
-// neither are excluded from the catalog.
+// geo-prefixed system profile (preferring geographic over global); models
+// with neither are excluded from the catalog.
 func TestUnit_ResolveInvocableModelID(t *testing.T) {
 	profiles := []string{
 		"us.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -58,9 +57,8 @@ func TestUnit_BedrockBaseModelID(t *testing.T) {
 	require.Equal(t, "meta.llama3-70b-instruct-v1:0", bedrockBaseModelID("meta.llama3-70b-instruct-v1:0"))
 }
 
-// TestUnit_ApplyBedrockThinking pins the Think mapping: Claude models get the
-// documented additionalModelRequestFields thinking config; non-Claude models
-// refuse loudly instead of silently dropping the request; adaptive Claude
+// Claude models get the documented thinking config; non-Claude models refuse
+// loudly instead of silently dropping the request; adaptive Claude
 // generations accept levels (already reasoning) but refuse think=off.
 func TestUnit_ApplyBedrockThinking(t *testing.T) {
 	think := func(level string) *modelrepo.ChatConfig {
@@ -120,9 +118,7 @@ func TestUnit_ApplyBedrockThinking(t *testing.T) {
 	})
 }
 
-// TestUnit_DecodeConverse_ReasoningContent asserts the non-streaming decode of
-// reasoningContent blocks into Message.Thinking (matching what S1's stream
-// side already carries as Thinking parcels).
+// Non-streaming decode of reasoningContent blocks into Message.Thinking.
 func TestUnit_DecodeConverse_ReasoningContent(t *testing.T) {
 	out := &bedrockruntime.ConverseOutput{
 		Output: &runtimetypes.ConverseOutputMemberMessage{Value: runtimetypes.Message{
@@ -146,8 +142,6 @@ func TestUnit_DecodeConverse_ReasoningContent(t *testing.T) {
 	require.Equal(t, "thinking it through", res.Message.Thinking)
 }
 
-// TestUnit_ClassifyBedrockError maps the SDK's typed errors to the modelrepo
-// sentinels.
 func TestUnit_ClassifyBedrockError(t *testing.T) {
 	throttle := fmt.Errorf("op failed: %w", &runtimetypes.ThrottlingException{Message: aws.String("Too many requests")})
 	require.ErrorIs(t, classifyBedrockError(throttle), modelrepo.ErrRateLimited)

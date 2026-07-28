@@ -12,8 +12,7 @@ import (
 	"github.com/contenox/beam/internal/surfaces/beamtui/keymap"
 )
 
-// Binding ids. They are stable identities (a later user-remap file keys off
-// them) and they are what the dispatch switch below reads — never a raw
+// Binding ids are stable identities the dispatch switch reads — never a raw
 // chord.
 const (
 	bindQuit    = "app.interrupt"
@@ -46,9 +45,9 @@ const (
 	bindHelpClose = "help.close"
 )
 
-// Binding owners, named in a collision error so a human fixing one never has
-// to hunt for the other claimant. "app-shell" and "help" are the two reserved
-// owners the keymap package itself knows about (ctrl+c and ?).
+// Binding owners are named in a collision error so a human fixing one never
+// has to hunt for the other claimant. "app-shell" and "help" are reserved by
+// the keymap package itself (ctrl+c and ?).
 const (
 	ownerShell    = "app-shell"
 	ownerHelp     = "help"
@@ -59,14 +58,10 @@ const (
 	ownerSessions = "session-manager"
 )
 
-// The client-side slash commands. They are registered as palette locals so
-// they appear in the same menu as the agent's own commands, in /help and in
-// the `?` overlay, and shadow a same-named remote.
-//
-// localRename is the one that still goes to the agent: the TITLE is
-// server-side truth (session/list reads it back, session_info_update pushes
-// it), so beam forwards the line verbatim and only adopts the label locally
-// so the status bar does not lag the keystroke by a whole turn. See
+// The client-side slash commands, registered as palette locals so they
+// appear in the same menu as the agent's own commands and shadow a
+// same-named remote. localRename still forwards its line to the agent (the
+// title is server-side truth) and adopts the label locally; see
 // (*app).renameSession.
 const (
 	localHelp     = "help"
@@ -76,9 +71,8 @@ const (
 	localRename   = "rename"
 )
 
-// registerBindings declares every chord beam answers, once, at startup. The
-// registry's collision check runs here — MustRegister panics in development
-// and fails the package's test in CI, naming both owners.
+// registerBindings declares every chord beam answers, once, at startup.
+// MustRegister panics on a collision, naming both owners.
 func registerBindings(r *keymap.Registry) {
 	// Global. Reserved chords (ctrl+c, ?) must carry their reserved owner.
 	r.MustRegister(keymap.Binding{
@@ -91,9 +85,15 @@ func registerBindings(r *keymap.Registry) {
 		Keys: []keymap.Chord{"?"},
 		Help: "show the keys (on an empty composer)",
 	})
+	// The readline/bash double-press convention, not a single Ctrl+E: VS
+	// Code's integrated terminal (and some other editor terminals) steals a
+	// bare Ctrl+E for its own Quick Open before beam ever sees it, but passes
+	// Ctrl+X and Ctrl+E through untouched when they arrive as this two-key
+	// chord, exactly as every terminal already does for bash's own
+	// edit-and-execute-command binding.
 	r.MustRegister(keymap.Binding{
 		ID: bindEditor, Owner: ownerShell, Scope: keymap.ScopeGlobal,
-		Keys: []keymap.Chord{"ctrl+e"},
+		Keys: []keymap.Chord{"ctrl+x ctrl+e"},
 		Help: "compose the draft in $EDITOR",
 	})
 	r.MustRegister(keymap.Binding{
@@ -101,11 +101,8 @@ func registerBindings(r *keymap.Registry) {
 		Keys: []keymap.Chord{"esc"},
 		Help: "cancel the running turn",
 	})
-	// Ctrl+S is safe here specifically because beam owns the terminal: the
-	// engine's MakeRaw clears IXON, so 0x13 arrives as a keystroke instead of
-	// being eaten as XOFF and freezing the output — the folklore reason this
-	// chord is usually avoided does not apply to a raw-mode TUI. It is
-	// otherwise unclaimed (see the collision test) and reads as "sessions".
+	// Ctrl+S is safe here because the engine's MakeRaw clears IXON, so 0x13
+	// arrives as a keystroke instead of being eaten as XOFF.
 	r.MustRegister(keymap.Binding{
 		ID: bindSessions, Owner: ownerSessions, Scope: keymap.ScopeGlobal,
 		Keys: []keymap.Chord{"ctrl+s"},
@@ -172,23 +169,18 @@ func registerBindings(r *keymap.Registry) {
 		Keys: []keymap.Chord{"esc"},
 		Help: "close the file list",
 	})
-	// Backspace is the browser's "up one directory", and it is the one binding
-	// beam declares that spends most of its life DECLINING: it means the parent
-	// directory only with the file list open and nothing typed after the "@".
-	// Every other reading of the key — editing a query, the session switcher,
-	// the root's own parent — falls through to the composer, where a backspace
-	// is a backspace (see pickerAscend).
+	// Backspace means "up one directory" only with the file list open and
+	// nothing typed after the "@"; every other reading declines and falls
+	// through to the composer (see pickerAscend).
 	r.MustRegister(keymap.Binding{
 		ID: bindPickerAscend, Owner: ownerPicker, Scope: keymap.ScopePicker,
 		Keys: []keymap.Chord{"backspace"},
 		Help: "up one directory (with nothing typed after the @)",
 	})
 
-	// The session switcher shares ScopePicker — it IS a picker, and both
-	// overlays want the same enter/esc/arrows. Only j/k are its own, and only
-	// while it is the picker on screen: with the FILE list open the operator
-	// is still typing a query into the composer, so dispatch DECLINES these
-	// two there and the letters land in the buffer where they were aimed.
+	// The session switcher shares ScopePicker with the file list. Only j/k
+	// are its own; with the file list open dispatch declines them so the
+	// letters land in the composer buffer instead.
 	r.MustRegister(keymap.Binding{
 		ID: bindSessionsNext, Owner: ownerSessions, Scope: keymap.ScopePicker,
 		Keys: []keymap.Chord{"j"},
@@ -200,8 +192,8 @@ func registerBindings(r *keymap.Registry) {
 		Help: "previous session (in the session list)",
 	})
 
-	// Approval card. y/N mirrors the CLI prompt (D6); Esc cancels the turn
-	// rather than offering a whole-run abort key.
+	// Approval card. y/N mirrors the CLI prompt; Esc cancels the turn rather
+	// than offering a whole-run abort key.
 	r.MustRegister(keymap.Binding{
 		ID: bindApprovalAllow, Owner: ownerApproval, Scope: keymap.ScopeApproval,
 		Keys: []keymap.Chord{"y"},
@@ -228,16 +220,8 @@ func registerBindings(r *keymap.Registry) {
 
 // registerLocalCommands declares the slash commands beam answers itself.
 // Everything else — /mission included — is the agent's, dispatched verbatim
-// through SubmitPrompt so command parity with an ACP editor is structural.
-//
-// The session verbs are flat (/new, /sessions, /rename) rather than one
-// `/session <verb>`: the palette filters on a command's first token, so three
-// names are three visible, completable rows, while one name would complete to
-// a prefix and then offer no help at all with the verb that follows it.
-// Descriptions are sentence case with a full stop. The five locals were
-// written by five different hands and read as five different registers next
-// to each other in one menu; the agent's own descriptions arrive however the
-// agent wrote them, so beam's half is the only half it can keep consistent.
+// through SubmitPrompt. Descriptions are sentence case with a full stop,
+// which is the one register beam's own half of the menu can keep consistent.
 func registerLocalCommands(p *palette.Palette) {
 	p.MustRegisterLocal(localHelp, "Keys and commands, printed here.", "")
 	p.MustRegisterLocal(localQuit, "Leave beam.", "")
@@ -246,9 +230,8 @@ func registerLocalCommands(p *palette.Palette) {
 	p.MustRegisterLocal(localRename, "Name this session.", "<title>")
 }
 
-// helpScopes is every scope the help overlay and /help list. It is the whole
-// registry: with one focusable pane there is no "unreachable" half worth
-// hiding, and a user asking what the keys are wants the modal keys too.
+// helpScopes is every scope the help overlay and /help list — the whole
+// registry, modal keys included.
 var helpScopes = []keymap.Scope{
 	keymap.ScopeGlobal,
 	keymap.ScopeComposer,
@@ -338,9 +321,8 @@ func (a *app) dispatch(ctx context.Context, act keymap.Action) bool {
 	case bindSessions:
 		a.openSessions(ctx)
 
-	// The four shared picker chords route by WHICH picker is on screen; the
-	// two session-only ones decline when it is the file list, which sends
-	// them to the composer as the letters they are.
+	// The four shared picker chords route by which picker is on screen; the
+	// two session-only ones decline when it is the file list.
 	case bindPickerAccept:
 		if a.sessionsOpen {
 			a.sessionsAccept(ctx)
@@ -384,8 +366,7 @@ func (a *app) dispatch(ctx context.Context, act keymap.Action) bool {
 		a.resolveCard(false)
 	case bindApprovalCancel:
 		// The card stays pending until the cancel comes back as a cancelled
-		// turn: answering here would put a decision on the wire the operator
-		// never gave (approval.Card.MarkCancelled's own rule).
+		// turn (see approval.Card.MarkCancelled).
 		if err := a.deps.Bridge.Cancel(a.sessionID); err != nil {
 			a.noticef(frame.StyleError, "cancel failed: %v", err)
 		}
@@ -460,17 +441,11 @@ func (a *app) editKey(ctx context.Context, k input.KeyEvent) {
 	a.syncOverlays(ctx)
 }
 
-// onCtrlC is D3's three-way policy in one place: the composer clears first,
-// an in-flight turn is interrupted second, and only a second press inside
-// ctrlCWindow quits.
-//
-// The "press again" offer is LIVE, not history. It used to be a notice —
-// immutable scrollback — so a terminal an operator walked away from kept a
-// two-second offer on screen forever, and every stray Ctrl+C left another
-// permanent copy of an instruction that had already expired. It is now a
-// status-bar hint that stands exactly as long as the window does (see
-// (*app).status and ctrlCArmed); the ticker stays armed for the window so the
-// hint clears itself rather than waiting for the next keystroke.
+// onCtrlC is the three-way Ctrl+C policy: the composer clears first, an
+// in-flight turn is interrupted second, and only a second press inside
+// ctrlCWindow quits. The "press again" offer is a status-bar hint (see
+// ctrlCArmed) that clears itself when the window lapses, not a scrollback
+// notice that would otherwise outlive its own expiry.
 func (a *app) onCtrlC() {
 	if a.comp.ClearOrPass() {
 		a.hasCtrlC = false
@@ -480,6 +455,7 @@ func (a *app) onCtrlC() {
 		if err := a.deps.Bridge.Cancel(a.sessionID); err != nil {
 			a.noticef(frame.StyleError, "cancel failed: %v", err)
 		}
+		a.restoreCancelledPrompt()
 		a.hasCtrlC = false
 		return
 	}
@@ -492,15 +468,13 @@ func (a *app) onCtrlC() {
 	a.lastCtrlC = now
 }
 
-// ctrlCArmed reports whether the "press again to quit" offer still stands. It
-// is read by the status bar (the hint) and by the loop's ticker arming (so the
-// hint disappears on its own when the window lapses).
+// ctrlCArmed reports whether the "press again to quit" offer still stands.
 func (a *app) ctrlCArmed() bool {
 	return a.hasCtrlC && a.now().Sub(a.lastCtrlC) <= ctrlCWindow
 }
 
 // onCancelKey is Esc with no modal open: it interrupts an in-flight turn
-// exactly once and never quits (blueprint 4.5).
+// exactly once and never quits.
 func (a *app) onCancelKey() {
 	if !a.inFlight {
 		return
@@ -508,6 +482,24 @@ func (a *app) onCancelKey() {
 	if err := a.deps.Bridge.Cancel(a.sessionID); err != nil {
 		a.noticef(frame.StyleError, "cancel failed: %v", err)
 	}
+	a.restoreCancelledPrompt()
+}
+
+// restoreCancelledPrompt puts the just-cancelled turn's prompt back into the
+// composer so the operator can edit and resubmit it — the whole point of
+// cancelling rather than waiting the turn out. It never touches scrollback:
+// the cancelled line already stands there, appended and unrewritten, exactly
+// as the operator sent it. It restores only into an EMPTY composer, so an
+// Esc cancel never clobbers a draft already in progress (Ctrl+C's own
+// composer-clear arm runs first and would already have consumed a non-empty
+// buffer before this is ever reached). One restore, or the next submitted
+// prompt, consumes it either way.
+func (a *app) restoreCancelledPrompt() {
+	if !a.hasLastPrompt || !a.comp.Empty() {
+		return
+	}
+	a.comp.SetDraft(a.lastPrompt)
+	a.lastPrompt, a.hasLastPrompt = "", false
 }
 
 // resolveCard answers the pending approval and drops the modal.
@@ -519,23 +511,12 @@ func (a *app) resolveCard(allow bool) {
 	a.card = nil
 }
 
-// openEditor is the Ctrl+E round trip (`chat -e`'s superpower, promoted to
-// composer MVP). The two prior-art regressions it exists to prevent are both
-// visible here: the draft is carried IN as the seed, and the result is
-// carried BACK into the buffer.
-//
-// It hands the terminal over EMPTY. Suspend gives the screen to another
-// program and, on the way back, the engine disowns the live region entirely —
-// it cannot know what the child did, so the next commit paints fresh wherever
-// the cursor now is and reclaims nothing above it. Whatever the region held
-// when the child took over therefore stops being a repaintable region and
-// becomes literal, permanent output: the transcript's live tail, and the
-// composer under it, frozen mid-draft. It looked like the last block had been
-// appended a second time, and a third after the next Ctrl+E.
-//
-// So the region is blanked before the handover and repainted after it, which
-// is the same shrink-to-nothing path shutdown uses and the same reason: the
-// only rows beam may leave behind are rows it deliberately printed as history.
+// openEditor is the Ctrl+X, Ctrl+E round trip: the draft is carried in as the seed,
+// and the result is carried back into the buffer. The live region is blanked
+// before the handover and repainted after, the same shrink-to-nothing path
+// shutdown uses — otherwise Suspend's screen handover leaves the live
+// region's last paint as permanent, un-repaintable output once control
+// returns and the engine repaints only from the cursor down.
 func (a *app) openEditor() {
 	if a.deps.Editor == nil {
 		a.notice(frame.StyleWarn, "no editor configured")
@@ -556,7 +537,7 @@ func (a *app) openEditor() {
 		return
 	}
 	if editErr != nil {
-		// Includes the editor's own empty-abort: the draft simply stands.
+		// Includes the editor's own empty-abort; the draft stands unchanged.
 		a.noticef(frame.StyleMuted, "editor: %v", editErr)
 		return
 	}
@@ -564,16 +545,14 @@ func (a *app) openEditor() {
 }
 
 // submit is Enter on the composer: classify, then hand the line to whoever
-// owns it. The composer classifies and packages; this decides the consumer
-// (blueprint 4.11's ownership ruling).
+// owns it. The composer classifies and packages; this decides the consumer.
 func (a *app) submit(ctx context.Context) {
 	draft := a.comp.Draft()
 	if strings.TrimSpace(draft) == "" {
 		return
 	}
-	// The in-flight check happens BEFORE Submit so a refused submission keeps
-	// the operator's text instead of clearing it. A `!` line needs no turn and
-	// is HITL-exempt, so it is allowed alongside one.
+	// Checked before Submit so a refused submission keeps the operator's
+	// text. A `!` line needs no turn, so it is allowed alongside one.
 	if a.inFlight && composer.Classify(draft).Kind != composer.KindShell {
 		a.notice(frame.StyleWarn, "a turn is already running — ctrl+c interrupts it")
 		return
@@ -604,14 +583,14 @@ func (a *app) submit(ctx context.Context) {
 	}
 
 	// Everything else is a turn. The bridge never echoes the operator's own
-	// line back (only session/load replay produces UserEcho), so the echo is
-	// fed to the transcript here, as the same event a replay would deliver.
+	// line back, so the echo is fed to the transcript here.
 	a.echo(sub.Text)
 	if err := a.deps.Bridge.SubmitPrompt(a.sessionID, sub.Text); err != nil {
 		a.noticef(frame.StyleError, "send failed: %v", err)
 		a.comp.RestoreLast()
 		return
 	}
+	a.lastPrompt, a.hasLastPrompt = sub.Text, true
 	a.startTurn()
 }
 
@@ -632,8 +611,7 @@ func (a *app) runLocal(ctx context.Context, name, args string) {
 }
 
 // paletteAccept is Enter with the command menu open: complete the selection
-// when the buffer does not already name it, otherwise send the line (so a
-// completed command with arguments submits rather than losing them).
+// when the buffer does not already name it, otherwise send the line.
 func (a *app) paletteAccept(ctx context.Context) {
 	e, ok := a.pal.Selected()
 	if !ok {
@@ -641,8 +619,8 @@ func (a *app) paletteAccept(ctx context.Context) {
 		a.submit(ctx)
 		return
 	}
-	// Value mode first: Enter completes the selected VALUE into the buffer
-	// (a second Enter then submits the completed line).
+	// Value mode first: Enter completes the selected value (a second Enter
+	// then submits the completed line).
 	if v, ok := a.pal.CompleteValueText(); ok && a.comp.Draft() != v {
 		a.comp.SetDraft(v)
 		a.syncOverlays(ctx)
@@ -657,21 +635,11 @@ func (a *app) paletteAccept(ctx context.Context) {
 	a.syncOverlays(ctx)
 }
 
-// pickerAccept is Enter on the file list: a directory row OPENS, a file row
-// SPLICES. fileaddr.IsDir is the branch, and it reads the same trailing slash
-// the row itself shows, so what the key does is never a secret the caller
-// keeps from the screen.
-//
-// The splice carries the "@" back. MentionSpan's span INCLUDES the sigil, and
-// fileaddr's Item.Label is documented as "exactly the text the composer
-// splices after the @" — so handing the bare label to SpliceMention replaced
-// "@ret" with "retry.go" and silently un-mentioned the file the operator had
-// just picked. What went to the agent was a prompt with a filename in it, not
-// an attachment.
-//
-// A file row's Label is the FULL root-relative path however deep the browsing
-// went (fileaddr.Browser's second rule), so a selection means the same file
-// whether it was typed at the root or walked to.
+// pickerAccept is Enter on the file list: a directory row opens (fileaddr.IsDir),
+// a file row splices. The splice text carries the "@" sigil back since
+// MentionSpan's span includes it. Item.Label is the full root-relative path
+// however deep the browsing went, so a selection means the same file whether
+// typed at the root or walked to.
 func (a *app) pickerAccept(ctx context.Context) {
 	if it, ok := a.pick.Selected(); ok {
 		if fileaddr.IsDir(it) {
@@ -687,14 +655,10 @@ func (a *app) pickerAccept(ctx context.Context) {
 }
 
 // descend walks into a directory row and re-points the overlay at it: new
-// rows, new breadcrumb, and no query — a query is scoped to the directory it
-// was typed in, so carrying it down would silently re-run somebody's old
-// search against a tree they have just left.
-//
-// A refused name leaves the browser exactly where it was and says so. It is
-// reachable in practice, not just in theory: the listing is read fresh on
-// every keystroke, so a directory the operator selected can be gone by the
-// time they press Enter on it.
+// rows, new breadcrumb, no query (a query is scoped to the directory it was
+// typed in). A refused name leaves the browser where it was — the listing is
+// read fresh on every keystroke, so a selected directory can be gone by the
+// time Enter is pressed.
 func (a *app) descend(ctx context.Context, name string) {
 	if err := a.browser.Descend(name); err != nil {
 		// The error already names the directory it refused.
@@ -705,18 +669,10 @@ func (a *app) descend(ctx context.Context, name string) {
 	a.loadPicker(ctx, "")
 }
 
-// pickerAscend is Backspace with the file list open, and it reports whether it
-// claimed the key.
-//
-// It DECLINES in every case that is not a move up the tree, which is what lets
-// one chord do two jobs without either of them surprising anyone. With a query
-// typed, backspace edits the query — navigation never eats a keystroke aimed at
-// text. At the root, Ascend has no parent to offer and returns false, so the
-// key reaches the composer and deletes back over the "@", closing the overlay:
-// backspacing out of the browser is the same gesture as backspacing out of any
-// other token. And with the SESSION list on screen it is not this overlay's key
-// at all — the same decline-to-raw shape the j/k bindings use, inverted, since
-// those two belong to the switcher and this one belongs to the file list.
+// pickerAscend is Backspace with the file list open, and reports whether it
+// claimed the key. It declines whenever the key is not a move up the tree —
+// a query typed, the session list on screen, or the browser already at the
+// root — so the composer sees an ordinary backspace instead.
 func (a *app) pickerAscend(ctx context.Context) bool {
 	if a.sessionsOpen || !a.pickerOpen || a.pickerQuery != "" {
 		return false
@@ -729,15 +685,9 @@ func (a *app) pickerAscend(ctx context.Context) bool {
 }
 
 // resetMention truncates the mention token the caret sits in back to a bare
-// "@" and parks the caret on it, so the overlay stays open with an empty query.
-//
-// SpliceMention is the only edit that addresses a mention span, and it always
-// lands one trailing space after the replacement — which would end the token
-// and close the very overlay this is refreshing. One Backspace takes that
-// space straight back off. Going through the pair rather than rebuilding the
-// draft by hand keeps the sanitize gate and the caret arithmetic in the
-// composer, where a multiline draft and a mention with text after it are
-// already somebody's problem.
+// "@", so the overlay stays open with an empty query. SpliceMention always
+// lands a trailing space, which would close the token; one Backspace takes
+// it back off, keeping the caret arithmetic in the composer.
 func (a *app) resetMention() {
 	start, length, query, ok := a.comp.MentionSpan()
 	if !ok || query == "" {
@@ -747,13 +697,12 @@ func (a *app) resetMention() {
 	a.comp.Backspace()
 }
 
-// mentionSigil is the "@" a mention token starts with — the one MentionSpan
-// counts into its span and the one pickerAccept has to put back.
+// mentionSigil is the "@" a mention token starts with.
 const mentionSigil = "@"
 
 // syncOverlays re-derives the two typing-driven overlays from the buffer
-// after every edit. Both triggers are the blueprint's: `@` wherever the caret
-// is inside a mention token, `/` on a slash-led buffer.
+// after every edit: `@` wherever the caret is inside a mention token, `/` on
+// a slash-led buffer.
 func (a *app) syncOverlays(ctx context.Context) {
 	if a.composerBlocked() {
 		return
@@ -773,14 +722,13 @@ func (a *app) syncOverlays(ctx context.Context) {
 		return
 	}
 	if a.pal.IsOpen() {
-		// The raw draft, not just the command token: past the first space the
-		// palette switches to VALUE completion (the /model roster and
-		// friends), and it needs the argument text to filter by.
+		// The raw draft: past the first space the palette switches to value
+		// completion and needs the argument text to filter by.
 		a.pal.SetQuery(draft)
 		return
 	}
-	// Closed on a command-shaped buffer: reopen unless the operator dismissed
-	// THIS command with Esc and has not retyped it since (see dismissPalette).
+	// Reopen unless the operator dismissed this command with Esc and has not
+	// retyped it since (see dismissPalette).
 	if a.hasPalDismissed && a.palDismissed == commandToken(draft) {
 		return
 	}
@@ -788,57 +736,28 @@ func (a *app) syncOverlays(ctx context.Context) {
 	a.pal.Open(draft)
 }
 
-// dismissPalette is Esc on the command menu: close it AND remember which
-// command token was on screen, so the very next keystroke does not put it
-// straight back.
-//
-// The latch keys off the TOKEN rather than on a plain "stay closed" flag,
-// which is the difference between two behaviours that both look reasonable
-// written down. A flag makes Esc permanent: an operator who dismissed the
-// menu over "/mis", then kept typing "sion", never saw it again on that line
-// and had no way to ask for it back. Reopening on any keystroke is the other
-// extreme — pressing Left to fix a typo would resurrect the menu they had
-// just dismissed. Keying on the token means Esc holds for exactly as long as
-// the operator is still talking about the same command: navigation, deletion
-// inside the argument, and a second look at the line all leave it closed;
-// typing another letter of the NAME is a new question and gets a new answer.
+// dismissPalette is Esc on the command menu: close it and remember which
+// command token was on screen, so the next keystroke does not reopen it. The
+// latch keys off the token rather than a flag, so it holds only as long as
+// the operator is still typing the same command name; a new name gets a new
+// answer.
 func (a *app) dismissPalette() {
 	a.palDismissed, a.hasPalDismissed = commandToken(a.comp.Draft()), true
 	a.pal.Close()
 }
 
 // commandShaped reports whether the buffer is a slash command as far as the
-// menu is concerned. It is deliberately the same predicate on the way in as
-// on the way out — the palette used to OPEN only on a buffer of exactly "/"
-// while closing on anything not slash-led, so a pasted "/qu" never opened a
-// menu that a typed "/qu" always did.
+// menu is concerned, using the same predicate to open and to close so a
+// pasted command and a typed one behave alike.
 func commandShaped(buffer string) bool {
 	return strings.HasPrefix(strings.TrimLeft(buffer, " \t"), "/")
 }
 
-// refreshPicker points the `@` overlay at query, asking the BROWSER for the
-// rows rather than filtering a cached page locally.
-//
-// The cache was the bug. One open fetched Candidates(ctx, "", 500) and every
-// keystroke after that filtered those 500 in memory — but the source caps
-// AFTER ranking, so an unfiltered fetch caps alphabetically: in any workspace
-// with more than 500 files, everything past the 500th name did not exist as
-// far as the picker was concerned, and typing its exact path produced "no
-// matching files" for a file plainly on disk.
-//
-// So the query goes to the source, which ranks the whole walk and caps the
-// MATCHES. That is one walk per changed query. It is affordable at repo scale
-// — the walk is budgeted (fileaddr.WalkBudget) and beam is one process on one
-// machine — and it is only spent when the query actually CHANGED, so cursor
-// movement, selection and re-renders inside a mention cost nothing. If a
-// pathological tree ever makes the keystroke visible, the debounce belongs
-// here, at the one call site, and not in a cache that answers wrongly.
-//
-// The browser is what makes an EMPTY query useful. It used to be the whole
-// walk, alphabetically capped — the one list a user who does not yet know the
-// filename has no way to read. Now it is the workspace root's own directory
-// listing, and typing narrows the subtree the operator has navigated to rather
-// than the repository.
+// refreshPicker points the `@` overlay at query, asking the browser for rows
+// rather than filtering a cached page locally: the source ranks the whole
+// walk and caps the matches, so a query is re-walked only when it actually
+// changes (fileaddr.WalkBudget bounds the cost). An empty query is the
+// workspace root's own directory listing, not an alphabetically capped walk.
 func (a *app) refreshPicker(ctx context.Context, query string) {
 	if a.pickerOpen && a.pickerQuery == query {
 		return
@@ -851,35 +770,26 @@ func (a *app) refreshPicker(ctx context.Context, query string) {
 }
 
 // openBrowser starts a browse at the workspace root. Every `@` gets a fresh
-// one: a browser that remembered where the last mention was found would open
-// the next one in a directory the operator has no memory of choosing.
+// one, so a browser never opens where a previous mention happened to end.
 func (a *app) openBrowser() {
 	a.browser = fileaddr.NewBrowser(a.deps.FileSource)
 	a.browser.SetASCII(a.ascii)
 	a.pick.SetEmptyText(a.deps.FileSource.EmptyText())
 }
 
-// loadPicker fills the overlay from the browser's CURRENT directory: rows from
-// Query (this directory's listing when query is empty, a recursive search of
-// its subtree otherwise) and the breadcrumb header, which is the only thing on
-// screen that says where those rows came from once the file rows are full
-// root-relative paths.
+// loadPicker fills the overlay from the browser's current directory: rows
+// from Query and the breadcrumb header.
 func (a *app) loadPicker(ctx context.Context, query string) {
 	a.pickerQuery = query
 	items, err := a.browser.Query(ctx, query, pickerCandidateCap)
 	if err != nil {
 		a.noticef(frame.StyleWarn, "file list: %v", err)
 	}
-	// The source already ranked and capped these, so the picker's own query
-	// stays empty: an empty query is picker.Filter's documented "keep the
-	// caller's order" case, and re-ranking here would be a second opinion
-	// about an order that is not this component's to hold — and in browse mode
-	// it would break the dirs-first order outright.
+	// The source already ranked and capped these; an empty picker query
+	// keeps its order (picker.Filter's documented pass-through case).
 	a.pick.SetItems(items)
 	a.pick.SetQuery("")
-	// A rootless source has no directory to name. Its breadcrumb is a bare
-	// "/", which over "no workspace root" would be a crumb for a tree that is
-	// not there — the no-root state is a fixed one line, and stays that.
+	// A rootless source has no directory to name — its breadcrumb stays "".
 	header := ""
 	if a.deps.FileSource.HasRoot() {
 		header = a.browser.Breadcrumb(a.width, a.ascii)

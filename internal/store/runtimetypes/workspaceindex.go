@@ -1,10 +1,9 @@
 package runtimetypes
 
-// Workspace semantic-index storage: the index CONFIG (one immutable generation
-// of an index) and the CHUNKS that belong to it, plus the FTS5 lexical mirror
+// Workspace semantic-index storage: the index config (one immutable
+// generation) and the chunks that belong to it, plus an FTS5 lexical mirror
 // that narrows a search before vectors rank it. Same store-interface style as
-// jobqueue.go / kv.go / checkpoints.go — scalar arguments, libdb.ErrNotFound on
-// a miss, checkRowsAffected on mutations, one column projection spelled once.
+// jobqueue.go/kv.go/checkpoints.go.
 
 import (
 	"context"
@@ -25,10 +24,8 @@ import (
 var ErrWorkspaceIndexConfigLive = errors.New("workspace index config is live; create a new config and cut over instead")
 
 // ErrVectorDimensionMismatch is returned when a vector's length disagrees with
-// the dimension recorded on its index config. It is deliberately a hard error on
-// BOTH write and read: a vector produced by a different embedding model is not a
-// slightly-worse answer, it is a wrong one, and the whole point of pinning the
-// dimension on the config is that the mismatch can never be scored silently.
+// the dimension recorded on its index config. Enforced on both write and read:
+// a vector from a different embedding model must never be scored silently.
 var ErrVectorDimensionMismatch = errors.New("vector dimension does not match the index config")
 
 // ErrWorkspaceChunkConfigMixed refuses a batch whose chunks do not all belong to
@@ -41,21 +38,14 @@ var ErrWorkspaceChunkConfigMixed = errors.New("workspace chunk batch spans multi
 // vectors, how wide those vectors are, how the files were chunked, and which
 // resolved root was walked.
 //
-// CREATE-ONCE IMMUTABILITY. There is deliberately no Update method and no way to
-// delete the live config. Changing the embedding model does not mutate an index;
-// it creates a NEW config, indexes into it, and cuts over (the newest config for
-// a workspace is the active one — see GetActiveWorkspaceIndexConfig). This is the
-// one idea banked from the EE embed-pipeline mining report (ee-mining.md's
-// `indexconfig`): it prevents the silent-corruption failure where vectors from
-// two different models share one table and cosine happily scores across them.
-// Everything else about that pipeline — the Postgres full-table scan, the
-// tenant-scoped document-sync connectors — was buried, see
-// docs/development/blueprints/workspace-index.md.
+// Create-once: there is no Update method and no way to delete the live config.
+// Changing the embedding model creates a new config and cuts over (the newest
+// config for a workspace is the active one — see GetActiveWorkspaceIndexConfig),
+// which prevents vectors from two different models silently sharing one table.
 //
-// Root is recorded because an index is an index OF A SPECIFIC TREE: search needs
-// it to resolve a hit's path back to a file for the staleness check, and it makes
-// "you indexed a different directory under this workspace id" a visible fact
-// rather than a mystery.
+// Root is recorded because an index is an index of a specific tree: search
+// needs it to resolve a hit's path back to a file for the staleness check, and
+// it makes "you indexed a different directory under this workspace id" visible.
 type WorkspaceIndexConfig struct {
 	ID            string    `json:"id"`
 	WorkspaceID   string    `json:"workspaceId"`
@@ -70,11 +60,9 @@ type WorkspaceIndexConfig struct {
 
 // WorkspaceChunk is one indexed span of one file (table workspace_chunks).
 //
-// ContentSHA is the digest of the WHOLE FILE the chunk came from, not of the
-// chunk text. One column then answers both questions the index has to ask: "did
-// this file change since I indexed it" (incremental re-index) and "is this hit
-// still true" (staleness marking at query time). A per-chunk digest would answer
-// neither without re-chunking the file first.
+// ContentSHA digests the whole file, not the chunk text, so one column answers
+// both "did this file change since indexing" and "is this hit still valid" — a
+// per-chunk digest would answer neither without re-chunking the file first.
 //
 // Vector is a little-endian float32 blob; its length must match the owning
 // config's Dimension (see ErrVectorDimensionMismatch).
@@ -186,11 +174,9 @@ func (s *store) GetWorkspaceIndexConfig(ctx context.Context, id string) (*Worksp
 	return &cfg, nil
 }
 
-// GetActiveWorkspaceIndexConfig returns the workspace's NEWEST config — the one
-// searches run against. "Newest wins" is the whole cutover mechanism: a rebuild
-// under a different embedding model writes a new config and becomes active the
-// moment it is created, while the previous generation's chunks stay readable
-// until they are reaped.
+// GetActiveWorkspaceIndexConfig returns the workspace's newest config, the one
+// searches run against: a rebuild under a different embedding model becomes
+// active the moment it's created, while prior generations stay readable until reaped.
 func (s *store) GetActiveWorkspaceIndexConfig(ctx context.Context, workspaceID string) (*WorkspaceIndexConfig, error) {
 	var cfg WorkspaceIndexConfig
 	err := s.Exec.QueryRowContext(ctx, `
@@ -250,10 +236,8 @@ func (s *store) ListWorkspaceIndexConfigs(ctx context.Context, workspaceID strin
 	return out, nil
 }
 
-// DeleteWorkspaceIndexConfig reaps a SUPERSEDED index generation and its chunks.
-// It refuses the workspace's live config with ErrWorkspaceIndexConfigLive: an
-// index config is create-once, and the only sanctioned way to stop using one is
-// to create its successor and cut over.
+// DeleteWorkspaceIndexConfig reaps a superseded index generation and its
+// chunks, refusing the workspace's live config with ErrWorkspaceIndexConfigLive.
 func (s *store) DeleteWorkspaceIndexConfig(ctx context.Context, id string) error {
 	cfg, err := s.GetWorkspaceIndexConfig(ctx, id)
 	if err != nil {
@@ -278,11 +262,8 @@ func (s *store) DeleteWorkspaceIndexConfig(ctx context.Context, id string) error
 
 // AppendWorkspaceChunks inserts a batch of chunks and mirrors their text into
 // the FTS5 table in the same call, so the lexical index cannot drift from the
-// vector index — nothing writes one without the other.
-//
-// Every vector is checked against the owning config's dimension BEFORE insert
-// (one config read per batch): a vector from the wrong model is refused at the
-// store boundary rather than scored later as if it meant something.
+// vector index. Every vector is checked against the owning config's dimension
+// before insert, refusing a vector from the wrong model at the store boundary.
 func (s *store) AppendWorkspaceChunks(ctx context.Context, chunks ...*WorkspaceChunk) error {
 	if len(chunks) == 0 {
 		return nil
@@ -415,15 +396,14 @@ func (s *store) DeleteWorkspaceChunksForConfig(ctx context.Context, configID str
 	return nil
 }
 
-// SearchWorkspaceChunks is the LEXICAL prefilter: FTS5 MATCH ordered by bm25,
+// SearchWorkspaceChunks is the lexical prefilter: FTS5 MATCH ordered by bm25,
 // capped at limit, so cosine ranking never has to scan the whole index. match
-// must be a valid FTS5 expression — callers build it from user input with every
-// term quoted (see workspaceindex.ftsMatchQuery), so nothing a user types is
-// ever interpreted as query syntax.
+// must be a valid FTS5 expression; callers quote every term from user input
+// (see workspaceindex.ftsMatchQuery) so nothing typed is query syntax.
 //
-// bm25() in SQLite returns a NEGATIVE relevance (more negative = better), so
-// ascending order is best-first. The returned Score carries it through
-// unchanged; the vector stage re-ranks and this is kept only for diagnostics.
+// bm25() in SQLite returns a negative relevance (more negative = better), so
+// ascending order is best-first; Score carries it through unchanged for
+// diagnostics only — the vector stage does the real re-ranking.
 func (s *store) SearchWorkspaceChunks(ctx context.Context, configID string, match string, limit int) ([]*WorkspaceChunk, error) {
 	if strings.TrimSpace(match) == "" {
 		return []*WorkspaceChunk{}, nil
@@ -452,11 +432,9 @@ func (s *store) SearchWorkspaceChunks(ctx context.Context, configID string, matc
 	return scanWorkspaceChunks(rows, cfg.Dimension, true)
 }
 
-// ScanWorkspaceChunks reads chunks in insertion order, capped at limit. It backs
-// the degraded path where the lexical prefilter matched nothing at all (a
-// question sharing no term with the corpus — precisely the case semantic search
-// exists for). Bounded by construction: the caller passes a documented cap, so
-// this is never an unbounded table scan.
+// ScanWorkspaceChunks reads chunks in insertion order, capped at limit. It
+// backs the degraded path where the lexical prefilter matched nothing at all —
+// precisely the case semantic search exists for.
 func (s *store) ScanWorkspaceChunks(ctx context.Context, configID string, limit int) ([]*WorkspaceChunk, error) {
 	if limit > MAXLIMIT {
 		return nil, ErrLimitParamExceeded

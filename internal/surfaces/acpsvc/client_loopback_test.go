@@ -24,43 +24,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file drives the REAL production acpsvc Agent (Transport) through a
-// REAL libacp.ClientSideConnection over an in-memory duplex pipe — both
-// Run loops live, exactly as an editor and `contenox acp` would talk to each
-// other, except the transport is io.Pipe instead of stdio. It replaces the
-// raw-frame wireClient assertions in wire_e2e_test.go with the production
-// client stack (client.go/clientconn.go) on the other end: the point is
-// proving the two finished halves of libacp interoperate, not re-testing
-// either one in isolation (that's what clientconn_test.go and this package's
-// existing unit tests already do).
-//
-// Deps are mocked the same way the rest of this package's tests mock them:
-// sessionEntry.Agent is swapped for a scripted agentservice.Agent double
-// after a real session/new call (mirroring prompt_test.go's fakeAgent).
-// There is no real LLM backend and no real chain execution engine anywhere
-// in this file.
-//
-// The event bus, however, is NOT mocked with libbus.NewInMem() the way the
-// rest of the package's tests mock it — it is the SQLite backend serve wires
-// (contenoxcli/serve_cmd.go), on this harness's own SQLite database. That is
-// load-bearing, not incidental. prompt.go tears a turn's event subscription
-// down the instant the agent returns:
-//
-//	sub.Unsubscribe(); close(rawCh); <-translateDone
-//
-// which delivers the turn's trailing events only on a backend that hands over
-// what was published before Unsubscribe. libbus's conformance suite records
-// that as a per-backend divergence — drainsOnUnsubscribe is SQLite-only, and
-// it says in as many words that "callers that need the last event must not
-// assume the SQLite behaviour". On InMem the queued events race the teardown:
-// the delivery goroutine selects between a closed done channel and a
-// non-empty queue, so under parallel load (this package is subprocess-heavy)
-// it can exit having forwarded none of them. The events are then GONE, not
-// late — which is why this presented as a flake no timeout could fix.
-//
-// So an InMem harness would have been asserting that a turn's events reach the
-// client while running on a backend whose contract does not promise it. Using
-// the backend production uses makes the assertion mean what it says.
+// This file drives the real production acpsvc Transport through a real
+// libacp.ClientSideConnection over an in-memory duplex pipe, both Run loops
+// live — proving the two libacp halves interoperate, not re-testing either
+// in isolation. Deps are mocked (sessionEntry.Agent swapped for a scripted
+// double after a real session/new), but the event bus uses the SQLite
+// backend serve wires, not libbus.NewInMem(): prompt.go's post-turn
+// `sub.Unsubscribe(); close(rawCh); <-translateDone` only reliably drains
+// trailing events on a backend that hands over what was published before
+// Unsubscribe (a libbus conformance property that is SQLite-only); on InMem
+// the queued events race the teardown and can be lost under load.
 
 // loopbackClient is a minimal libacp.Client that answers the agent's reverse
 // calls (session/request_permission, fs/*) deterministically instead of
@@ -141,8 +114,6 @@ func (c *loopbackClient) WriteTextFile(_ context.Context, req libacp.WriteTextFi
 // the test if they don't arrive within the deadline.
 func (c *loopbackClient) drain(t *testing.T, n int) []libacp.SessionNotification {
 	t.Helper()
-	// Generous deadline: some callers wait on a spawned subprocess, and under
-	// full-suite load spawn + roundtrip can far exceed an isolated run.
 	got := make([]libacp.SessionNotification, 0, n)
 	deadline := time.After(30 * time.Second)
 	for len(got) < n {
@@ -156,13 +127,9 @@ func (c *loopbackClient) drain(t *testing.T, n int) []libacp.SessionNotification
 	return got
 }
 
-// loopbackAgent is an agentservice.Agent double whose Prompt behavior each
-// test script directly — streaming events onto the bus, calling back into
-// the Transport's client-facing seams (AskApproval, ACPFileIO), or blocking
-// on ctx cancellation. Every other method is a no-op: session lifecycle
-// itself is exercised through the real agentservice.Agent that NewSession
-// already wired up (agentservice.New, DB-backed); only Prompt is swapped
-// in afterward, mirroring prompt_test.go's fakeAgent one level up the stack.
+// loopbackAgent is an agentservice.Agent double whose Prompt each test
+// scripts directly; every other method is a no-op since session lifecycle
+// runs through the real agentservice.Agent NewSession already wired up.
 type loopbackAgent struct {
 	promptFunc func(ctx context.Context, req agentservice.PromptRequest) (*agentservice.PromptResponse, error)
 }
@@ -186,11 +153,9 @@ func (a *loopbackAgent) Prompt(ctx context.Context, req agentservice.PromptReque
 
 var _ agentservice.Agent = (*loopbackAgent)(nil)
 
-// loopbackHarness wires the real production Transport (acpsvc's Agent
-// implementation, New(Deps)) to a real libacp.ClientSideConnection over an
-// in-memory duplex pipe, both Run loops live — the agent-side half of this
-// is exactly wire_e2e_test.go's setup; the client-side half is what this
-// slice adds.
+// loopbackHarness wires the real production Transport (New(Deps)) to a real
+// libacp.ClientSideConnection over an in-memory duplex pipe, both Run loops
+// live.
 type loopbackHarness struct {
 	t      *testing.T
 	tr     *Transport
@@ -212,19 +177,15 @@ func newLoopbackHarness(t *testing.T) *loopbackHarness {
 	agentSide := &wirePipe{r: agentR, w: agentW}
 	clientSide := &wirePipe{r: clientR, w: clientW}
 
-	// Same backend serve wires, on the schema this DB was already created with
-	// (runtimetypes.SchemaSQLite owns bus_events/bus_requests/bus_replies). The
-	// poll interval is shortened only so a turn's events surface promptly; the
-	// delivery GUARANTEE this harness relies on is Unsubscribe's final drain,
-	// which does not depend on the tick at all. See the file header.
+	// Poll interval shortened only so events surface promptly; the delivery
+	// guarantee this harness relies on (Unsubscribe's final drain) doesn't
+	// depend on the tick. See the file header.
 	bus := libbus.NewSQLiteWithOptions(db.WithoutTransaction(), libbus.SQLiteBusOptions{
 		EventPoll:   5 * time.Millisecond,
 		RequestPoll: 5 * time.Millisecond,
 	})
-	// serve wires a shared SessionRouter so a single engine can route HITL
-	// approvals to the owning WS connection; the harness mirrors that so the
-	// router path is exercised exactly as production does. It is inert for tests
-	// that never consult it.
+	// Mirrors serve's shared SessionRouter for HITL approval routing; inert
+	// for tests that never consult it.
 	router := NewSessionRouter()
 	factory := New(Deps{
 		Engine:        &enginesvc.Engine{Bus: bus},
@@ -263,7 +224,7 @@ func newLoopbackHarness(t *testing.T) *loopbackHarness {
 		case <-time.After(2 * time.Second):
 			t.Error("client connection did not shut down")
 		}
-		// Before the DB: the bus owns a cleanup goroutine that queries it.
+		// Before the DB: the bus's cleanup goroutine queries it.
 		require.NoError(t, bus.Close())
 		require.NoError(t, db.Close())
 	})
@@ -272,21 +233,14 @@ func newLoopbackHarness(t *testing.T) *loopbackHarness {
 }
 
 // swapAgent installs a into sid's live sessionEntry, replacing the real
-// agentservice.Agent that NewSession created for the duration of the test's
-// Prompt calls — the same white-box seam prompt_test.go uses one layer down.
-// NewSession backs a native session with a nativeDriver, so the swap reaches
-// into it.
+// agentservice.Agent NewSession created, for the test's Prompt calls.
 func (h *loopbackHarness) swapAgent(sid libacp.SessionID, a agentservice.Agent) {
 	h.tr.sessionMu.Lock()
 	h.tr.sessions[sid].driver.(*nativeDriver).agent = a
 	h.tr.sessionMu.Unlock()
 }
 
-// TestLoopback_InitializeAdvertisesSpecCapabilities proves the real client
-// stack can complete "initialize" against the real Transport and pins the
-// capability-honesty contract: session lifecycle capabilities the Transport
-// actually implements are advertised, and additionalDirectories — which
-// NewSession/LoadSession/ResumeSession never read — is not.
+// TestLoopback_InitializeAdvertisesSpecCapabilities pins: implemented session capabilities are advertised; unimplemented additionalDirectories is not.
 func TestLoopback_InitializeAdvertisesSpecCapabilities(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -315,25 +269,12 @@ func TestUnit_Initialize_DoesNotAdvertiseAdditionalDirectories(t *testing.T) {
 	require.Nil(t, resp.AgentCapabilities.SessionCapabilities.AdditionalDirectories)
 }
 
-// TestLoopback_Prompt_StreamsUpdatesThroughRealClient drives initialize ->
-// session/new -> session/prompt end to end and proves a streamed turn — an
-// assistant chunk, a tool call's pending/completed pair, and a token usage
-// update — arrives at the real Client.SessionUpdate handler, alongside the
-// session_info_update session/prompt always appends.
+// TestLoopback_Prompt_StreamsUpdatesThroughRealClient pins: a streamed turn's chunk, tool-call pending/completed pair, and usage update all reach the real client, alongside session_info_update.
 //
-// Note on ordering: session_info_update is NOT last on the wire, even though
-// prompt.go schedules it via libacp.AfterResponse "so it runs after the
-// turn". For session/prompt specifically, the cancelable per-turn context
-// conn.go's callMethod substitutes (promptCtx = pc.ctx, registered by
-// registerPromptCancel before handleRequest ever attaches its
-// after-response sink) does not carry that sink, so AfterResponse falls
-// back to its synchronous "no sink in ctx" branch (conn.go's AfterResponse
-// doc comment) and runs immediately — before the turn's own streamed
-// events, which are flushed later, when Prompt's deferred bus-drain runs.
-// That is existing, already-shipped behavior this test simply documents
-// rather than assumes away; it is orthogonal to this slice's scope (libacp
-// connection internals are out of bounds here) and asserted by kind, not
-// position, below.
+// Ordering note: session_info_update is not last on the wire — session/prompt's
+// per-turn context doesn't carry an after-response sink, so AfterResponse
+// runs synchronously before the turn's own streamed events flush. Existing,
+// already-shipped behavior; asserted by kind below, not position.
 func TestLoopback_Prompt_StreamsUpdatesThroughRealClient(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -400,14 +341,7 @@ func TestLoopback_Prompt_StreamsUpdatesThroughRealClient(t *testing.T) {
 	require.Equal(t, 4096, usage.Size)
 }
 
-// TestLoopback_Prompt_PushesDerivedTitleInSessionInfo pins the beam/ACP
-// regression fix: the post-turn session_info_update must carry a Title derived
-// from the session's first user message. A session created THIS connection
-// received no title in its session/new SessionInfo, so without the pushed title
-// the client's tab/sidebar label is stuck on the raw-id fallback ("Sitzung
-// acp-XXXX") until a full session/list re-list (only on reconnect). The push
-// reuses session/list's first-user-message heuristic, so the live label and a
-// later re-list agree.
+// TestLoopback_Prompt_PushesDerivedTitleInSessionInfo pins: the post-turn session_info_update carries a title derived from the session's first user message.
 func TestLoopback_Prompt_PushesDerivedTitleInSessionInfo(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -419,9 +353,7 @@ func TestLoopback_Prompt_PushesDerivedTitleInSessionInfo(t *testing.T) {
 	require.NoError(t, err)
 	h.lc.drain(t, 1) // deferred available_commands_update
 
-	// Persist the session's first user message against its internal id (mi.id),
-	// which is distinct from the ACP-level session id (mi.name) session/new
-	// returned — exactly what a real turn's persistHistory would have stored.
+	// Persisted against the internal id, distinct from the ACP session id.
 	h.tr.sessionMu.Lock()
 	internalID := h.tr.sessions[newResp.SessionID].InternalSessionID
 	h.tr.sessionMu.Unlock()
@@ -454,10 +386,7 @@ func TestLoopback_Prompt_PushesDerivedTitleInSessionInfo(t *testing.T) {
 		"the derived title must not echo the session id, or the client treats it as absent")
 }
 
-// TestLoopback_CancelPrompt_ResolvesStopReasonCancelled cancels a prompt
-// turn mid-flight through the real client's CancelPrompt and proves the
-// production agent side resolves it with stopReason "cancelled" and no
-// JSON-RPC error, per the spec's cancellation contract.
+// TestLoopback_CancelPrompt_ResolvesStopReasonCancelled pins: CancelPrompt mid-flight resolves with stopReason cancelled and no JSON-RPC error.
 func TestLoopback_CancelPrompt_ResolvesStopReasonCancelled(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -474,8 +403,6 @@ func TestLoopback_CancelPrompt_ResolvesStopReasonCancelled(t *testing.T) {
 		startOnce.Do(func() { close(started) })
 		select {
 		case <-ctx.Done():
-			// Mirrors the real agentservice.Agent's own cancellation behavior
-			// (see TestUnit_Prompt_CancelledStopReasonReturnsNilError).
 			return &agentservice.PromptResponse{StopReason: agentservice.StopCancelled}, ctx.Err()
 		case <-time.After(5 * time.Second):
 			return &agentservice.PromptResponse{StopReason: agentservice.StopEndTurn}, nil
@@ -513,14 +440,7 @@ func TestLoopback_CancelPrompt_ResolvesStopReasonCancelled(t *testing.T) {
 	}
 }
 
-// TestLoopback_ServerCancel_AbortsEngineCtxAndResolvesCancelled drives the
-// SERVER-owned cancellation path added to Transport.Cancel: a session/cancel
-// notification (what beam's Stopp button and any editor send) must abort the
-// in-flight turn's engine context and resolve the prompt with stopReason
-// "cancelled". Unlike the CancelPrompt test above — which also exercises
-// libacp's connection-level promptCtx substitution — this asserts the engine's
-// own ctx was cancelled (proving cancellation reached the chain/provider layer,
-// not just the wire) and drives the raw session/cancel notification directly.
+// TestLoopback_ServerCancel_AbortsEngineCtxAndResolvesCancelled pins: a session/cancel notification aborts the in-flight turn's engine context (not just the wire) and resolves stopReason cancelled.
 func TestLoopback_ServerCancel_AbortsEngineCtxAndResolvesCancelled(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -538,8 +458,6 @@ func TestLoopback_ServerCancel_AbortsEngineCtxAndResolvesCancelled(t *testing.T)
 		startOnce.Do(func() { close(started) })
 		select {
 		case <-ctx.Done():
-			// The engine's own context observed the cancellation — the whole point:
-			// cancellation reached the chain-execution layer, not just the wire.
 			close(engineCtxCancelled)
 			return &agentservice.PromptResponse{StopReason: agentservice.StopCancelled}, ctx.Err()
 		case <-time.After(5 * time.Second):
@@ -567,8 +485,6 @@ func TestLoopback_ServerCancel_AbortsEngineCtxAndResolvesCancelled(t *testing.T)
 		t.Fatal("prompt did not reach the fake agent")
 	}
 
-	// Send the raw session/cancel notification, exactly as beam/an editor does,
-	// so the server's Transport.Cancel owns the abort.
 	require.NoError(t, h.client.CancelSession(libacp.CancelNotification{SessionID: newResp.SessionID}))
 
 	select {
@@ -586,10 +502,7 @@ func TestLoopback_ServerCancel_AbortsEngineCtxAndResolvesCancelled(t *testing.T)
 	}
 }
 
-// TestUnit_Cancel_NoInflightTurnIsCleanNoOp pins the invariant that a
-// session/cancel with no running turn (a client cancelling after the turn
-// already finished, or before any prompt) is a clean no-op: Cancel returns nil
-// and cancelInflightPrompt reports it cancelled nothing.
+// TestUnit_Cancel_NoInflightTurnIsCleanNoOp pins: session/cancel with no running turn is a clean no-op, never an error.
 func TestUnit_Cancel_NoInflightTurnIsCleanNoOp(t *testing.T) {
 	tr := &Transport{promptCancels: make(map[libacp.SessionID]*inflightPrompt)}
 	require.False(t, tr.cancelInflightPrompt("no-such-session"),
@@ -598,10 +511,7 @@ func TestUnit_Cancel_NoInflightTurnIsCleanNoOp(t *testing.T) {
 		"session/cancel with no in-flight turn is a clean no-op, never an error")
 }
 
-// TestUnit_PromptCancel_RegisterSupersedeUnregister pins the per-session
-// registry's lifecycle: a second registration supersedes and cancels the first
-// (one turn per session; nothing outlives its turn), and a stale unregister
-// never removes a newer turn's registration.
+// TestUnit_PromptCancel_RegisterSupersedeUnregister pins: a second registration supersedes and cancels the first; a stale unregister never evicts a newer turn's registration.
 func TestUnit_PromptCancel_RegisterSupersedeUnregister(t *testing.T) {
 	tr := &Transport{promptCancels: make(map[libacp.SessionID]*inflightPrompt)}
 	const sid = libacp.SessionID("sess-x")
@@ -613,7 +523,6 @@ func TestUnit_PromptCancel_RegisterSupersedeUnregister(t *testing.T) {
 	reg2 := tr.registerPromptCancel(sid, func() { secondCancelled = true })
 	require.True(t, firstCancelled, "a superseding registration must cancel the stale turn")
 
-	// The first turn's deferred unregister must not evict the second turn.
 	tr.unregisterPromptCancel(sid, reg1)
 	require.True(t, tr.cancelInflightPrompt(sid), "the current (second) turn must still be registered")
 	require.True(t, secondCancelled)
@@ -622,14 +531,7 @@ func TestUnit_PromptCancel_RegisterSupersedeUnregister(t *testing.T) {
 	require.False(t, tr.cancelInflightPrompt(sid), "after the current turn unregisters, nothing remains")
 }
 
-// TestLoopback_Prompt_PermissionRoundTripThroughRealClient exercises the
-// permission client-callback flow reachable with mocked deps: the fake
-// agent calls Transport.AskApproval directly — standing in for the real
-// engine's HITL wrapper (localtools.NewHITLWrapper, wired in
-// runtime/enginesvc/engine.go, which calls exactly this method when a gated
-// tool call is hit mid-chain execution) — to prove the session/
-// request_permission round trip works end to end against a real
-// ClientSideConnection, for both the allow and the deny outcome.
+// TestLoopback_Prompt_PermissionRoundTripThroughRealClient pins: session/request_permission round-trips end to end against a real client, for both allow and deny.
 func TestLoopback_Prompt_PermissionRoundTripThroughRealClient(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -653,7 +555,6 @@ func TestLoopback_Prompt_PermissionRoundTripThroughRealClient(t *testing.T) {
 	}}
 	h.swapAgent(newResp.SessionID, fake)
 
-	// The client answers "allow".
 	h.lc.setPermissionResponse(libacp.RequestPermissionResponse{
 		Outcome: libacp.RequestPermissionOutcome{Outcome: libacp.PermissionOutcomeSelected, OptionID: approvalflow.OptionAllow},
 	})
@@ -671,7 +572,6 @@ func TestLoopback_Prompt_PermissionRoundTripThroughRealClient(t *testing.T) {
 	require.Equal(t, newResp.SessionID, req.SessionID)
 	require.Equal(t, "call-perm-1", req.ToolCall.ToolCallID)
 
-	// The client rejects the next request.
 	h.lc.setPermissionResponse(libacp.RequestPermissionResponse{
 		Outcome: libacp.RequestPermissionOutcome{Outcome: libacp.PermissionOutcomeSelected, OptionID: approvalflow.OptionDeny},
 	})
@@ -684,17 +584,7 @@ func TestLoopback_Prompt_PermissionRoundTripThroughRealClient(t *testing.T) {
 	require.False(t, allowed, "client answered reject; AskApproval must resolve false")
 }
 
-// TestLoopback_SessionRouter_RoutesToOwningTransport pins the serve HITL
-// bridge: serve runs many ACP WS connections behind ONE engine, so its single
-// AskApproval callback dispatches through a shared SessionRouter keyed by the
-// contenox session id in ctx (exactly what the engine's HITL wrapper carries).
-// This proves (a) a gated tool call for a live session routes to the owning
-// transport's session/request_permission — reaching the real client — and
-// resolves the client's outcome; (b) an unknown session yields
-// ErrNoBoundSession so serve falls back to its approval-API path; and (c) after
-// the session is closed the router no longer routes it. Without the fix, serve
-// wired AskApproval straight to the approval-API path, so a beam gated tool call
-// hung forever as "Ausstehend" with no permission prompt.
+// TestLoopback_SessionRouter_RoutesToOwningTransport pins the shared SessionRouter, keyed by internal session id: (a) a live session routes to its owning transport, (b) an unknown session yields ErrNoBoundSession, (c) a closed session stops routing.
 func TestLoopback_SessionRouter_RoutesToOwningTransport(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -705,14 +595,11 @@ func TestLoopback_SessionRouter_RoutesToOwningTransport(t *testing.T) {
 	require.NoError(t, err)
 	h.lc.drain(t, 1)
 
-	// The engine's HITL wrapper carries the INTERNAL contenox session id in ctx
-	// (agentservice stamps SessionIDContextKey from it) — the router's key.
 	h.tr.sessionMu.Lock()
 	internalID := h.tr.sessions[newResp.SessionID].InternalSessionID
 	h.tr.sessionMu.Unlock()
 	require.NotEmpty(t, internalID)
 
-	// (a) A live session routes to the owning transport; the client answers allow.
 	h.lc.setPermissionResponse(libacp.RequestPermissionResponse{
 		Outcome: libacp.RequestPermissionOutcome{Outcome: libacp.PermissionOutcomeSelected, OptionID: approvalflow.OptionAllow},
 	})
@@ -729,25 +616,19 @@ func TestLoopback_SessionRouter_RoutesToOwningTransport(t *testing.T) {
 	require.Equal(t, newResp.SessionID, req.SessionID)
 	require.Equal(t, "router-call-1", req.ToolCall.ToolCallID)
 
-	// (b) An unknown session is not routable: the caller must fall back.
 	_, err = h.router.AskApproval(
 		context.WithValue(ctx, runtimetypes.SessionIDContextKey, "no-such-session"),
 		hitlservice.ApprovalRequest{ToolCallID: "router-call-2", ToolName: "local_fs.write_file"},
 	)
 	require.ErrorIs(t, err, ErrNoBoundSession)
 
-	// (c) Closing the session deregisters it from the router.
 	_, err = h.client.CloseSession(ctx, libacp.CloseSessionRequest{SessionID: newResp.SessionID})
 	require.NoError(t, err)
 	_, err = h.router.AskApproval(approveCtx, hitlservice.ApprovalRequest{ToolCallID: "router-call-3", ToolName: "local_fs.write_file"})
 	require.ErrorIs(t, err, ErrNoBoundSession, "a closed session must no longer route")
 }
 
-// TestLoopback_Prompt_FSReadWriteThroughRealClient exercises the other
-// mocked-deps-reachable client-callback flow: fs/read_text_file and
-// fs/write_text_file through acpsvc's ACPFileIO (fileio.go), which routes
-// through Transport.conn exactly like AskApproval routes through it for
-// permissions.
+// TestLoopback_Prompt_FSReadWriteThroughRealClient pins: fs/read_text_file and fs/write_text_file round-trip through ACPFileIO against a real client.
 func TestLoopback_Prompt_FSReadWriteThroughRealClient(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -793,10 +674,7 @@ func TestLoopback_Prompt_FSReadWriteThroughRealClient(t *testing.T) {
 	require.Equal(t, "hello from the agent", written)
 }
 
-// TestLoopback_SetSessionConfigOption_RoundTripThroughRealClient drives
-// session/set_config_option through the real client and proves the change
-// (here, the "think" level) is both reflected in the response and durably
-// applied to the session's live state.
+// TestLoopback_SetSessionConfigOption_RoundTripThroughRealClient pins: set_config_option's change (think level) reflects in the response and durably applies to the session.
 func TestLoopback_SetSessionConfigOption_RoundTripThroughRealClient(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -833,11 +711,7 @@ func TestLoopback_SetSessionConfigOption_RoundTripThroughRealClient(t *testing.T
 	require.Equal(t, "xhigh", sess.think(), "the change must durably apply to the session's live state")
 }
 
-// TestLoopback_UnknownSlashCommand_AnsweredLocally is M6 over the real wire: a
-// mistyped slash command must be answered by the SERVER — one teaching chunk,
-// end_turn — and must never reach the model. Before this, "/totallyfakecommand"
-// fell through as ordinary prompt text and bought a real turn whose only output
-// was an improvised, differently-worded error every time.
+// TestLoopback_UnknownSlashCommand_AnsweredLocally pins: a mistyped slash command is answered locally by the server (one teaching chunk, end_turn) and never reaches the model.
 func TestLoopback_UnknownSlashCommand_AnsweredLocally(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -870,16 +744,12 @@ func TestLoopback_UnknownSlashCommand_AnsweredLocally(t *testing.T) {
 	require.Contains(t, updates[0].Update.Content.Text, "/totallyfakecommand")
 	require.Contains(t, updates[0].Update.Content.Text, "/help")
 
-	// Exactly one update: no usage_update (nothing was spent, so the gauge must
-	// not move) and no session_info_update (nothing happened to the session).
 	select {
 	case extra := <-h.lc.updates:
 		t.Fatalf("unknown command produced a second update: %+v", extra)
 	case <-time.After(300 * time.Millisecond):
 	}
 
-	// And nothing was written to the durable transcript: a typo must not become
-	// the session's first user message, and therefore its title, forever.
 	h.tr.sessionMu.Lock()
 	internalID := h.tr.sessions[newResp.SessionID].InternalSessionID
 	h.tr.sessionMu.Unlock()
@@ -888,10 +758,7 @@ func TestLoopback_UnknownSlashCommand_AnsweredLocally(t *testing.T) {
 	require.Empty(t, msgs, "an unknown command is not an act worth recording")
 }
 
-// TestLoopback_PastedPathStillReachesTheModel is the other side of the same
-// decision, and the one a regression would be silent about: an absolute path
-// pasted as a prompt still buys a real turn. If this ever fails, the shape test
-// in unknownCommandName has grown teeth it must not have.
+// TestLoopback_PastedPathStillReachesTheModel pins: an absolute path pasted as a prompt still reaches the model, never answered as a command.
 func TestLoopback_PastedPathStillReachesTheModel(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -925,10 +792,7 @@ func TestLoopback_PastedPathStillReachesTheModel(t *testing.T) {
 	}
 }
 
-// TestLoopback_LoadSession_ReplaysFailedToolsAndRealUsage is M12 and M11 in one
-// reload: a session whose history contains a failed tool call must come back
-// showing that failure, and its gauge must come back carrying what the history
-// actually costs instead of a flat zero.
+// TestLoopback_LoadSession_ReplaysFailedToolsAndRealUsage pins: a reloaded session with a failed tool call replays that failure, and its usage gauge reflects real history cost.
 func TestLoopback_LoadSession_ReplaysFailedToolsAndRealUsage(t *testing.T) {
 	h := newLoopbackHarness(t)
 	ctx := context.Background()
@@ -944,9 +808,8 @@ func TestLoopback_LoadSession_ReplaysFailedToolsAndRealUsage(t *testing.T) {
 	internalID := h.tr.sessions[newResp.SessionID].InternalSessionID
 	h.tr.sessionMu.Unlock()
 
-	// A transcript exactly as the engine persists one: the assistant opens two
-	// calls, and the results — written LATER — are the only record of how each
-	// ended. The failure text is verbatim taskexec's substitution.
+	// The assistant opens two calls; the results, written later, are the
+	// only record of how each ended.
 	now := time.Now().UTC()
 	history := []taskengine.Message{
 		{ID: "m1", Role: "user", Content: "read both files", Timestamp: now},
@@ -963,8 +826,6 @@ func TestLoopback_LoadSession_ReplaysFailedToolsAndRealUsage(t *testing.T) {
 	_, err = h.client.LoadSession(ctx, libacp.LoadSessionRequest{SessionID: newResp.SessionID, Cwd: cwd})
 	require.NoError(t, err)
 
-	// user + assistant text + 2 tool_call + 2 tool_call_update + usage_update,
-	// then the deferred available_commands_update.
 	updates := h.lc.drain(t, 8)
 
 	byToolCall := map[string][]libacp.SessionUpdate{}
@@ -994,12 +855,7 @@ func TestLoopback_LoadSession_ReplaysFailedToolsAndRealUsage(t *testing.T) {
 	require.Positive(t, usage.Used, "the gauge must not come back claiming a full history cost nothing")
 }
 
-// TestUnit_SessionTokenSize_MirrorsTheEnginesOwnBudgetArithmetic pins the
-// denominator under the gauge to the number the very next turn will report.
-// taskenv resolves a turn's ctxLength as the chain's token_limit, with a
-// requested (per-session) budget winning only when it is SMALLER; a
-// pre-turn gauge that disagreed would visibly jump the first time the model
-// spoke, for no reason an operator can see.
+// TestUnit_SessionTokenSize_MirrorsTheEnginesOwnBudgetArithmetic pins: the pre-turn gauge denominator matches taskenv's ctxLength resolution (chain token_limit, narrowed by a smaller session override).
 func TestUnit_SessionTokenSize_MirrorsTheEnginesOwnBudgetArithmetic(t *testing.T) {
 	const sid = libacp.SessionID("s")
 	newTransport := func(chainLimit int64, sessionLimit int) *Transport {

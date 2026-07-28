@@ -38,11 +38,9 @@ func pendingAskRow(t *testing.T, ctx context.Context, store runtimetypes.Store, 
 	}))
 }
 
-// The durable half of `mission stop`, end to end over a real store: the
-// mission comes to rest as abandoned, every pending ask it filed (permission
-// AND question) closes as denied, resolved asks stay untouched, and the
-// checkpoints suspended under the closed asks are gone — nothing of a stopped
-// mission may resume.
+// TestUnit_StopMission_AbandonsAsksAndDeletesCheckpoints: the mission lands
+// abandoned, every pending ask it filed closes denied, and their checkpoints
+// are deleted.
 func TestUnit_StopMission_AbandonsAsksAndDeletesCheckpoints(t *testing.T) {
 	ctx, missions, hitl, store := stopTestDeps(t)
 
@@ -78,8 +76,8 @@ func TestUnit_StopMission_AbandonsAsksAndDeletesCheckpoints(t *testing.T) {
 	require.Error(t, err, "the stopped mission's checkpoint must be deleted")
 }
 
-// A second stop (or stopping an already-landed mission) must return the
-// guarded transition's teaching conflict, not silently re-finish.
+// TestUnit_StopMission_AlreadyTerminalIsAConflict: stopping an already-landed
+// mission returns a conflict, not a silent re-finish.
 func TestUnit_StopMission_AlreadyTerminalIsAConflict(t *testing.T) {
 	ctx, missions, hitl, store := stopTestDeps(t)
 
@@ -93,8 +91,8 @@ func TestUnit_StopMission_AlreadyTerminalIsAConflict(t *testing.T) {
 	require.Contains(t, err.Error(), "already finished")
 }
 
-// An ask that resolves concurrently (an operator answered while the stop was
-// in flight) is skipped, not an error — the CAS decides.
+// TestUnit_StopMission_SkipsConcurrentlyResolvedAsk: an ask resolved while
+// the stop was in flight is skipped, not an error.
 func TestUnit_StopMission_SkipsConcurrentlyResolvedAsk(t *testing.T) {
 	ctx, missions, hitl, store := stopTestDeps(t)
 

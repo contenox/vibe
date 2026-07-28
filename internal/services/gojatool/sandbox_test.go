@@ -11,9 +11,8 @@ import (
 	"time"
 )
 
-// The adversarial set. Everything here is a hostile input that a model or an
-// operator can supply, and the assertion in each case is the same: the process
-// survives, the caller gets a typed error, and the error says what to do next.
+// The adversarial set: hostile inputs a model or operator can supply, each
+// asserting the process survives and the caller gets a typed, actionable error.
 
 func newTestSandbox(t *testing.T) *sandbox {
 	t.Helper()
@@ -41,8 +40,7 @@ func mustEval(t *testing.T, sb *sandbox, code string) *Result {
 
 // --- The limits themselves --------------------------------------------------
 
-// The blueprint fixes these numbers and the seeded HITL policy is written
-// against them. Pinning them here means a change cannot land silently.
+// Pins the documented default/ceiling constants and their clamping behavior.
 func TestUnit_Sandbox_DocumentedLimits(t *testing.T) {
 	if DefaultDeadline != 2*time.Second {
 		t.Errorf("DefaultDeadline = %s, want 2s (blueprint)", DefaultDeadline)
@@ -59,7 +57,6 @@ func TestUnit_Sandbox_DocumentedLimits(t *testing.T) {
 		t.Fatalf("Config{} defaults = %s/%d/%d", sb.deadline, sb.outputCap, sb.maxStack)
 	}
 
-	// Overrides are clamped, never trusted: the ceiling belongs to the sandbox.
 	if got := sb.clampDeadline(time.Hour); got != MaxDeadline {
 		t.Errorf("clampDeadline(1h) = %s, want the %s ceiling", got, MaxDeadline)
 	}
@@ -70,7 +67,6 @@ func TestUnit_Sandbox_DocumentedLimits(t *testing.T) {
 		t.Errorf("clampDeadline(0) = %s, want the default", got)
 	}
 
-	// A configured ceiling above the hard maximum is refused by construction.
 	over := newSandbox(time.Hour, 5*time.Hour, 1<<30, 0)
 	if over.maxDeadline != MaxDeadline || over.deadline > MaxDeadline || over.outputCap != maxOutputCap {
 		t.Fatalf("out-of-range config not clamped: %s/%s/%d", over.deadline, over.maxDeadline, over.outputCap)
@@ -79,6 +75,7 @@ func TestUnit_Sandbox_DocumentedLimits(t *testing.T) {
 
 // --- Bomb 1: the infinite loop ----------------------------------------------
 
+// An infinite loop is interrupted at its deadline, not eventually.
 func TestUnit_Sandbox_InfiniteLoopKilledAtDeadline(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -93,9 +90,6 @@ func TestUnit_Sandbox_InfiniteLoopKilledAtDeadline(t *testing.T) {
 	if !errors.Is(err, ErrDeadline) {
 		t.Fatalf("error = %v, want ErrDeadline", err)
 	}
-	// The timing bound is the point: the interrupt fires AT the deadline, not
-	// eventually. Generous upper slack so a loaded CI box does not flake, tight
-	// enough that a broken watchdog (never firing) fails.
 	if elapsed < deadline {
 		t.Errorf("killed after %s, before its own %s deadline", elapsed, deadline)
 	}
@@ -109,20 +103,10 @@ func TestUnit_Sandbox_InfiniteLoopKilledAtDeadline(t *testing.T) {
 
 // --- Bomb 2: the allocation bomb --------------------------------------------
 
-// The honest one. goja has NO memory cap, so this asserts only what is true:
-// the execution RETURNS, at its deadline, and the heap it grabbed on the way is
-// transient.
-//
-// MEASURED (2026-07-27, this machine, 150ms deadline, three runs): the bomb
-// below grew HeapAlloc by 22, 29 and 29 MB before the interrupt landed — a rate
-// of roughly 150-200 MB/s, matching the blueprint's spike number of 64 MB in
-// 300ms. At the 2s default deadline that implies a transient ceiling in the low
-// hundreds of MB, then GC. Memory here is DEADLINE-BOUNDED, NOT CAPPED; the
-// named escalation if that ever matters is a subprocess+rlimit tier.
-//
-// The number is logged rather than asserted on purpose: asserting a memory
-// ceiling this package does not enforce would be exactly the dishonesty the
-// blueprint's honesty rule forbids.
+// goja has no memory cap: an allocation bomb is bounded only by the deadline,
+// not by heap size, so this asserts the execution returns and the heap it
+// grabbed is transient. The growth is logged, not asserted, since this
+// package enforces no memory ceiling.
 func TestUnit_Sandbox_AllocationBombIsStoppedButNotCapped(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -152,6 +136,8 @@ func TestUnit_Sandbox_AllocationBombIsStoppedButNotCapped(t *testing.T) {
 
 // --- Bomb 3: recursion ------------------------------------------------------
 
+// Unbounded and mutual recursion are contained by the call-stack cap, fast,
+// while legitimate recursion still works.
 func TestUnit_Sandbox_DeepRecursionIsContained(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -160,7 +146,6 @@ func TestUnit_Sandbox_DeepRecursionIsContained(t *testing.T) {
 	if err == nil {
 		t.Fatal("unbounded recursion returned successfully")
 	}
-	// Contained by the stack cap, not by the deadline: it must fail fast.
 	if time.Since(start) > 500*time.Millisecond {
 		t.Errorf("recursion took %s to be contained; the call-stack cap is not doing the work", time.Since(start))
 	}
@@ -168,12 +153,10 @@ func TestUnit_Sandbox_DeepRecursionIsContained(t *testing.T) {
 		t.Errorf("error does not name the %d-frame cap: %q", defaultMaxCallStack, err)
 	}
 
-	// Mutual recursion is the same bomb with two names.
 	if _, err := eval(t, sb, `function a(){return b()}; function b(){return a()}; a()`, time.Second); err == nil {
 		t.Fatal("mutual recursion returned successfully")
 	}
 
-	// And legitimate recursion still works.
 	res := mustEval(t, sb, `function d(n){ return n === 0 ? 0 : 1 + d(n-1) }; d(200)`)
 	if string(res.Value) != "200" {
 		t.Errorf("legitimate 200-deep recursion = %s, want 200", res.Value)
@@ -182,6 +165,8 @@ func TestUnit_Sandbox_DeepRecursionIsContained(t *testing.T) {
 
 // --- The JSON-only boundary -------------------------------------------------
 
+// Pins how values cross the JSON-only boundary in both directions, including
+// what is refused with ErrNotJSON.
 func TestUnit_Sandbox_MarshalingEdgeCases(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -193,7 +178,6 @@ func TestUnit_Sandbox_MarshalingEdgeCases(t *testing.T) {
 		{"undefined becomes null", `undefined`, `null`},
 		{"a statement program returns null", `let x = 1;`, `null`},
 		{"null stays null", `null`, `null`},
-		// JSON has no spelling for these. The loss is documented, not hidden.
 		{"NaN and Infinity become null", `({n: NaN, p: Infinity, m: -Infinity})`, `{"n":null,"p":null,"m":null}`},
 		{"negative zero", `-0`, `0`},
 		{"null bytes are escaped, not dropped", `"a\u0000b"`, `"a\u0000b"`},
@@ -227,8 +211,6 @@ func TestUnit_Sandbox_MarshalingEdgeCases(t *testing.T) {
 		{"a symbol", `Symbol("s")`, "returned a symbol"},
 		{"a BigInt", `1n`, "BigInt"},
 		{"a cycle through an array", `const a=[]; a.push(a); a`, "circular"},
-		// The V1 exclusion a model is most likely to trip over. JSON.stringify
-		// would answer "{}" — a silent wrong answer.
 		{"a Promise", `(async function(){ return 1 })()`, "no event loop"},
 		{"an explicit Promise", `Promise.resolve(1)`, "no event loop"},
 	} {
@@ -252,6 +234,8 @@ func TestUnit_Sandbox_MarshalingEdgeCases(t *testing.T) {
 
 // --- The output cap ---------------------------------------------------------
 
+// An over-cap result is truncated with a marker and stays valid JSON,
+// including at a multibyte rune boundary; under-cap results are untouched.
 func TestUnit_Sandbox_OutputCapWithTruncationMarker(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -262,7 +246,6 @@ func TestUnit_Sandbox_OutputCapWithTruncationMarker(t *testing.T) {
 	if res.Notice == "" || !strings.Contains(res.Notice, "truncated") {
 		t.Fatalf("notice = %q, want an explicit truncation marker", res.Notice)
 	}
-	// The envelope must stay valid JSON even when the payload was cut mid-value.
 	if !json.Valid(res.Value) {
 		t.Fatalf("truncated result is not valid JSON: %.80s", res.Value)
 	}
@@ -277,7 +260,6 @@ func TestUnit_Sandbox_OutputCapWithTruncationMarker(t *testing.T) {
 		t.Errorf("truncated result is %d bytes, over the %d-byte cap", len(res.Value), DefaultOutputCap)
 	}
 
-	// A huge string built from multibyte runes must not be cut mid-rune.
 	res = mustEval(t, sb, fmt.Sprintf(`"→".repeat(%d)`, DefaultOutputCap))
 	if !res.Truncated {
 		t.Fatal("an over-cap multibyte result was not marked truncated")
@@ -286,7 +268,6 @@ func TestUnit_Sandbox_OutputCapWithTruncationMarker(t *testing.T) {
 		t.Fatalf("multibyte truncation produced invalid JSON: %.80s", res.Value)
 	}
 
-	// Exactly-at-cap results are not touched.
 	res = mustEval(t, sb, `"under the cap"`)
 	if res.Truncated || res.Notice != "" {
 		t.Error("a small result was marked truncated")
@@ -295,6 +276,7 @@ func TestUnit_Sandbox_OutputCapWithTruncationMarker(t *testing.T) {
 
 // --- The program cache ------------------------------------------------------
 
+// The program cache is keyed by exact source and bounded by an LRU eviction.
 func TestUnit_Sandbox_ProgramCacheHitsAndMisses(t *testing.T) {
 	sb := newTestSandbox(t)
 	const src = `1 + 1`
@@ -313,14 +295,12 @@ func TestUnit_Sandbox_ProgramCacheHitsAndMisses(t *testing.T) {
 		t.Fatalf("repeat compiles: hits %d->%d misses %d->%d, want two hits", h1, h2, m1, m2)
 	}
 
-	// Keyed by source, so whitespace is a different program.
 	mustEval(t, sb, `1 +  1`)
 	_, m3, _ := sb.cache.stats()
 	if m3 != m2+1 {
 		t.Fatalf("a different source did not miss: misses %d->%d", m2, m3)
 	}
 
-	// Bounded: the LRU evicts rather than growing without limit.
 	for i := 0; i < programCacheEntries*2; i++ {
 		mustEval(t, sb, fmt.Sprintf(`%d`, i))
 	}
@@ -331,6 +311,7 @@ func TestUnit_Sandbox_ProgramCacheHitsAndMisses(t *testing.T) {
 
 // --- Compilation and source limits ------------------------------------------
 
+// A syntax error is a load failure carrying the parse error, tagged recoverable.
 func TestUnit_Sandbox_SyntaxErrorTeaches(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -346,6 +327,7 @@ func TestUnit_Sandbox_SyntaxErrorTeaches(t *testing.T) {
 	}
 }
 
+// Source over maxSourceBytes is refused, naming the limit.
 func TestUnit_Sandbox_SourceSizeIsCapped(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -360,6 +342,7 @@ func TestUnit_Sandbox_SourceSizeIsCapped(t *testing.T) {
 
 // --- Cancellation and shutdown ----------------------------------------------
 
+// A cancelled caller context interrupts a running execution promptly.
 func TestUnit_Sandbox_CallerCancellationInterrupts(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -382,6 +365,8 @@ func TestUnit_Sandbox_CallerCancellationInterrupts(t *testing.T) {
 	}
 }
 
+// Shutdown interrupts an in-flight execution within shutdownGrace and refuses
+// every execution started after it, both idempotently.
 func TestUnit_Sandbox_ShutdownRefusesAndInterrupts(t *testing.T) {
 	ts, err := New(Config{})
 	if err != nil {
@@ -393,7 +378,6 @@ func TestUnit_Sandbox_ShutdownRefusesAndInterrupts(t *testing.T) {
 		_, err := ts.sb.runSource(context.Background(), ToolEval, `while(true){}`, 20*time.Second)
 		done <- err
 	}()
-	// Give the execution time to actually enter the VM.
 	time.Sleep(50 * time.Millisecond)
 
 	start := time.Now()
@@ -411,7 +395,6 @@ func TestUnit_Sandbox_ShutdownRefusesAndInterrupts(t *testing.T) {
 		t.Fatal("the in-flight execution was never interrupted by Shutdown")
 	}
 
-	// Nothing runs afterwards, and the refusal is typed.
 	if _, err := ts.sb.runSource(context.Background(), ToolEval, `1`, time.Second); !errors.Is(err, ErrShutdown) {
 		t.Fatalf("post-shutdown execution error = %v, want ErrShutdown", err)
 	}
@@ -420,6 +403,8 @@ func TestUnit_Sandbox_ShutdownRefusesAndInterrupts(t *testing.T) {
 
 // --- console ----------------------------------------------------------------
 
+// console output is captured in the result and bounded by line count and byte
+// size; a cyclic object logs rather than failing the call.
 func TestUnit_Sandbox_ConsoleIsCapturedAndBounded(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -434,7 +419,6 @@ func TestUnit_Sandbox_ConsoleIsCapturedAndBounded(t *testing.T) {
 		t.Errorf("warn line = %q", res.Logs[1])
 	}
 
-	// A logging loop cannot spend the context window through the back door.
 	res = mustEval(t, sb, `for (let i=0;i<10000;i++) console.log("line "+i); 1`)
 	if !res.LogsTruncated {
 		t.Fatal("an unbounded logging loop was not truncated")
@@ -453,7 +437,6 @@ func TestUnit_Sandbox_ConsoleIsCapturedAndBounded(t *testing.T) {
 		t.Fatalf("logs total %d bytes, over the %d cap", total, maxLogBytes)
 	}
 
-	// A cyclic object logs rather than failing the call.
 	res = mustEval(t, sb, `const a={}; a.self=a; console.log(a); 1`)
 	if len(res.Logs) != 1 {
 		t.Fatalf("logging a cyclic object produced %v", res.Logs)
@@ -462,8 +445,7 @@ func TestUnit_Sandbox_ConsoleIsCapturedAndBounded(t *testing.T) {
 
 // --- V1 exclusions ----------------------------------------------------------
 
-// The blueprint excludes the event loop, and an exclusion nobody asserts is a
-// feature that creeps back in. These are the observable consequences.
+// No ambient I/O globals exist, and using one is a plain ReferenceError.
 func TestUnit_Sandbox_V1ExclusionsHold(t *testing.T) {
 	sb := newTestSandbox(t)
 
@@ -474,8 +456,6 @@ func TestUnit_Sandbox_V1ExclusionsHold(t *testing.T) {
 		}
 	}
 
-	// No filesystem, no network, no module system: the failure is a plain
-	// ReferenceError at the line that tried, not a silent no-op.
 	if _, err := eval(t, sb, `require("fs")`, 0); err == nil {
 		t.Fatal("require resolved")
 	}

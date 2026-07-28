@@ -10,15 +10,10 @@ import (
 	"github.com/contenox/beam/internal/libsandbox"
 )
 
-// TestMain makes this test binary a valid sandbox-shim host. Spawning an agent
-// goes through agenthost.buildAgentCmd → libsandbox.Command, which re-exec's
-// /proc/self/exe as the sandbox shim to build the wall (Landlock, and — in the
-// opt-in NetworkWall mode — the netns) before exec'ing the confined agent. Under
-// `go test` /proc/self/exe is THIS binary, so without ShimMain at the top of main
-// the re-exec would just re-run the suite instead of confining the agent, and
-// every spawning test would see the downstream connection close. This mirrors
-// cmd/contenox/main.go and agenthost's own sandbox_shim_linux_test.go — it is the
-// entire wiring contract (see libsandbox.ShimMain).
+// TestMain makes this test binary a valid sandbox-shim host: spawning an
+// agent re-execs /proc/self/exe as the sandbox shim (libsandbox.Command),
+// which under `go test` is this binary. Without ShimMain here, the re-exec
+// would just re-run the suite instead of confining the agent.
 func TestMain(m *testing.M) {
 	if handled, err := libsandbox.ShimMain(); handled {
 		if err != nil {

@@ -14,69 +14,46 @@ import (
 	"github.com/google/uuid"
 )
 
-// The two fields that mark a durable ask as an ATTENTION ask rather than a
-// permission one. They are the tool identity the asking unit actually called, so
-// the discriminator is a fact about the row rather than a flag invented for it —
-// which is what lets every existing surface (the approvals API, `contenox
-// approvals`, beam's inbox) list both kinds without knowing there are two.
+// AttentionToolsName/AttentionToolName mark a durable ask as an attention
+// ask rather than a permission one — a fact about the row, not a flag.
 const (
 	AttentionToolsName = "mission"
 	AttentionToolName  = "mission_ask_attention"
 )
 
-// ErrAttentionUnanswered reports that an attention ask reached its deadline with
-// nobody answering, or was answered with a refusal. It is the signal the caller
-// turns into its own fallback — for a mission unit, filing the question as a
-// durable blocker report so it is not lost — never a crash.
+// ErrAttentionUnanswered reports an attention ask reached its deadline
+// unanswered, or was answered with a refusal.
 var ErrAttentionUnanswered = errors.New("hitlservice: attention ask went unanswered")
 
-// AttentionRequest is one unit's question for a human. It is deliberately much
-// narrower than ApprovalRequest: there is no policy verdict to carry (an
-// attention ask is not gated by a rule — the unit decided it needs a person),
-// no diff, and no args. What it has is a question and the attribution that says
-// whose question it is.
+// AttentionRequest is one unit's question for a human — narrower than
+// ApprovalRequest: no policy verdict, diff, or args.
 type AttentionRequest struct {
 	// Summary is the one-line question. Required.
 	Summary string
 	// Detail is the optional longer form — context the operator needs to answer.
 	Detail string
-	// MissionID, InstanceID, SessionID and AgentName attribute the ask, exactly
-	// as they do on a permission ask, so an inbox can say which unit is waiting
-	// and an operator can reach it.
+	// MissionID, InstanceID, SessionID, and AgentName attribute the ask.
 	MissionID  string
 	InstanceID string
 	SessionID  string
 	AgentName  string
 
-	// OnRaised, when set, is called with the durable ask's id the moment the row
-	// exists and BEFORE the wait begins. It is the seam a caller uses to announce
-	// the question somewhere else — publishing it onto the bus so the session that
-	// fired the mission learns about it — which cannot be done from the return
-	// value, since that only arrives once the question has been answered.
-	//
-	// It runs inline: keep it cheap and non-blocking (a publish), because the unit
-	// is not yet parked while it runs. Panicking is the caller's own bug; errors
-	// are the caller's to swallow, since a question that was recorded but not
-	// announced is still answerable from the ask queue.
+	// OnRaised, when set, is called with the ask's id once the row exists and
+	// before the wait begins, so a caller can announce the question
+	// elsewhere. Runs inline: keep it cheap and non-blocking.
 	OnRaised func(askID string)
 
-	// AskID, when set, is the durable row's ID — the caller's identity for the
-	// ask (the engine tool-call ID, mirroring the approval invariant "row ID ==
-	// tool-call ID == checkpoint key"). Empty keeps today's behavior: a fresh
-	// uuid per ask.
+	// AskID, when set, is the durable row's ID (mirrors the approval
+	// invariant row ID == tool-call ID). Empty generates a fresh uuid.
 	AskID string
 
-	// ParkWindow, when > 0, bounds how long RequestAttention BLOCKS before
-	// returning a typed *AttentionPendingError with the row left pending — the
-	// checkpoint-and-release seam. Zero keeps today's behavior: block until the
-	// ceiling.
+	// ParkWindow, when > 0, bounds how long RequestAttention blocks before
+	// returning *AttentionPendingError with the row left pending.
 	ParkWindow time.Duration
 }
 
-// AttentionPendingError reports that an attention ask's park window elapsed
-// with nobody answering: the row is still pending and answerable; the caller's
-// job is now to checkpoint and release its process. The typed-error twin of
-// the approval path's parked-timeout return.
+// AttentionPendingError reports an attention ask's park window elapsed
+// unanswered; the row is still pending, and the caller should checkpoint.
 type AttentionPendingError struct {
 	AskID string
 }
@@ -85,16 +62,14 @@ func (e *AttentionPendingError) Error() string {
 	return fmt.Sprintf("hitlservice: attention ask %s is pending past its park window; suspend and resume on answer", e.AskID)
 }
 
-// IsAttentionAsk reports whether a durable ask row is an attention ask — a
-// question expecting DATA — rather than a permission ask expecting yes/no. Every
-// surface that renders or answers asks branches on this: answering an attention
-// ask with a bare approve leaves the asking unit with no answer at all.
+// IsAttentionAsk reports whether row is an attention ask (expects data)
+// rather than a permission ask (expects yes/no).
 func IsAttentionAsk(row *runtimetypes.HITLApproval) bool {
 	return row != nil && row.ToolsName == AttentionToolsName && row.ToolName == AttentionToolName
 }
 
-// AnswerOf returns the operator's text answer from a resolved attention ask, or
-// "" when the row carries none (still pending, expired, or a permission ask).
+// AnswerOf returns the operator's text answer from a resolved attention ask,
+// or "" when none (still pending, expired, or a permission ask).
 func AnswerOf(row *runtimetypes.HITLApproval) string {
 	if row == nil || len(row.Resolution) == 0 {
 		return ""
@@ -106,21 +81,11 @@ func AnswerOf(row *runtimetypes.HITLApproval) string {
 	return *res.Answer
 }
 
-// RequestAttention records a unit's question as a durable ask and BLOCKS until
-// an operator answers it, the serve-level ceiling expires it, or ctx ends —
-// returning the operator's own words.
-//
-// It is the other half of a promise the runtime already made to the model: the
-// mission tool is described to it as "ask a question, or flag a blocker you must
-// not decide alone", and until this existed every such question was silently
-// downgraded to a blocker report that no surface could answer. A unit could ask;
-// nobody could reply.
-//
-// It deliberately reuses the permission ask's machinery — same durable row, same
-// pending-waiter map, same expiry sweep — because an attention ask differs from a
-// permission ask in exactly one way that matters here: its answer is text. Two
-// stores for two kinds of "a human owes this unit something" would be the second
-// mechanism this codebase keeps refusing to grow.
+// RequestAttention records a unit's question as a durable ask and blocks
+// until an operator answers it, the serve-level ceiling expires it, or ctx
+// ends — returning the operator's own words. It reuses the permission ask's
+// machinery (same durable row, pending-waiter map, expiry sweep); the only
+// difference is that its answer is text.
 func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, sink taskengine.TaskEventSink) (string, error) {
 	if s.approvals == nil {
 		return "", fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
@@ -135,9 +100,7 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		askID = uuid.NewString()
 	}
 	now := time.Now().UTC()
-	// No matched rule sets a deadline for an attention ask (no rule produced it),
-	// so it is bounded by the serve-level ceiling like any unbounded permission
-	// ask — an operator who never answers must not park a unit forever.
+	// No rule produced this ask, so it is bounded by the serve-level ceiling.
 	timeout := s.ceiling()
 
 	row := &runtimetypes.HITLApproval{
@@ -145,9 +108,8 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		ToolsName:   AttentionToolsName,
 		ToolName:    AttentionToolName,
 		ArgsSummary: summary,
-		// OnTimeout is "deny" in the shared vocabulary: nobody answered. The
-		// caller's fallback (a blocker report) is what actually preserves the
-		// question, so this only decides how the row comes to rest.
+		// OnTimeout is "deny": nobody answered. The caller's own fallback
+		// (a blocker report) preserves the question.
 		OnTimeout:  string(ActionDeny),
 		State:      runtimetypes.HITLApprovalPending,
 		InstanceID: req.InstanceID,
@@ -157,16 +119,14 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		ExpiresAt:  now.Add(timeout),
 	}
 	if detail := strings.TrimSpace(req.Detail); detail != "" {
-		// The long form rides the Diff column — the row's one free-text field,
-		// which the inbox already renders beneath the summary.
+		// The long form rides the Diff column, the row's one free-text field.
 		row.Diff = &detail
 	}
 	if req.MissionID != "" {
 		missionID := req.MissionID
 		row.MissionID = &missionID
 	}
-	// Durable FIRST, exactly as RequestApproval does: a restart between here and
-	// the answer must still show the question pending rather than lose it.
+	// Durable first, as RequestApproval does, so a restart still shows it pending.
 	if err := s.approvals.CreateHITLApproval(ctx, row); err != nil {
 		return "", fmt.Errorf("hitlservice: persist attention ask: %w", err)
 	}
@@ -185,9 +145,7 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		s.mu.Unlock()
 	}()
 
-	// The same event a permission ask publishes, so a live client's approval
-	// surface shows the question the moment it is raised rather than on its next
-	// poll. Best-effort: an unpublished event costs immediacy, not the ask.
+	// Same event a permission ask publishes, so a live client sees it immediately.
 	if sink != nil {
 		ev := taskengine.NewTaskEvent(ctx, taskengine.TaskEventApprovalRequested)
 		ev.ApprovalID = askID
@@ -200,23 +158,16 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// The wait watches the DURABLE ROW as well as the in-process channel, and
-	// that is load-bearing rather than belt-and-braces: an attention ask is
-	// raised by the dispatched UNIT's own process, while the operator answers it
-	// in the process that owns the API — `contenox serve`. Two processes, one
-	// shared SQLite state, and a Go channel that cannot cross between them. The
-	// unit already reaches its operator this way for reports (missionservice
-	// writes to the same shared store), so the answer comes back the same way.
-	//
-	// The channel is still first: when raiser and answerer ARE the same process
-	// (an in-process editor firing its own mission), the wake-up is immediate and
-	// the poll never fires.
+	// The wait watches the durable row as well as the in-process channel: the
+	// unit runs in a different process than the operator's API server,
+	// sharing only the store. The channel still wins when raiser and
+	// answerer are the same process.
 	poll := time.NewTicker(attentionPollInterval)
 	defer poll.Stop()
 
-	// The park window: after it elapses unanswered, the caller gets the typed
-	// pending error and checkpoints instead of holding a goroutine for the
-	// whole ceiling. A nil channel arm never fires (ParkWindow unset).
+	// After ParkWindow elapses unanswered, the caller gets the typed pending
+	// error instead of holding a goroutine for the whole ceiling. A nil
+	// channel arm never fires (ParkWindow unset).
 	var park <-chan time.Time
 	if req.ParkWindow > 0 {
 		park = time.After(req.ParkWindow)
@@ -225,8 +176,7 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	for {
 		select {
 		case <-park:
-			// One last read: an answer that landed durably during the window
-			// must win over parking.
+			// One last read: an answer landed durably during the window wins over parking.
 			if row, err := s.approvals.GetHITLApproval(ctx, askID); err == nil && row.State != runtimetypes.HITLApprovalPending {
 				if text := AnswerOf(row); strings.TrimSpace(text) != "" {
 					return text, nil
@@ -236,8 +186,7 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 			return "", &AttentionPendingError{AskID: askID}
 		case ans := <-ch:
 			if !ans.approved || strings.TrimSpace(ans.text) == "" {
-				// Answered with a refusal, or with nothing to say: the unit gets no
-				// guidance, which its fallback must treat as "still blocked".
+				// Refusal or empty text: the fallback must treat this as still blocked.
 				return "", ErrAttentionUnanswered
 			}
 			return ans.text, nil
@@ -249,8 +198,7 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 			if text := AnswerOf(row); strings.TrimSpace(text) != "" {
 				return text, nil
 			}
-			// Terminal without an answer: denied, expired, or resolved by the
-			// boolean path. Nothing to act on.
+			// Terminal without an answer: denied, expired, or resolved by the boolean path.
 			return "", ErrAttentionUnanswered
 		case <-waitCtx.Done():
 			if ctx.Err() != nil {
@@ -262,24 +210,18 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	}
 }
 
-// attentionPollInterval is how often a parked unit re-reads its own ask row for
-// an answer written by another process. A human takes seconds at best, so this
-// is a cheap single-row read on a cadence nobody notices — deliberately not
-// tuned down to feel "instant", because the same-process case already is (the
-// channel).
+// attentionPollInterval is how often a parked unit re-reads its ask row for
+// an answer written by another process.
 const attentionPollInterval = time.Second
 
-// Answer resolves an ATTENTION ask with the operator's text, waking the unit
-// parked on it. It is the text-carrying sibling of Respond, and it refuses a
-// permission ask by design: answering "write_file?" with prose would resolve the
-// gate with no verdict at all.
+// Answer resolves an attention ask with the operator's text, waking the unit
+// parked on it. It refuses a permission ask by design.
 func (s *service) Answer(ctx context.Context, askID, text string) error {
 	return s.answerAttention(ctx, askID, text, "")
 }
 
-// answerAttention is the shared body of Answer (a human) and AnswerAsAgent (a
-// supervising model): identical resolution and wake-up, differing only in the
-// actor recorded on the durable row.
+// answerAttention is the shared body of Answer and AnswerAsAgent, differing
+// only in the actor recorded on the durable row.
 func (s *service) answerAttention(ctx context.Context, askID, text, by string) error {
 	if s.approvals == nil {
 		return fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
@@ -304,8 +246,7 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string) e
 		if !errors.Is(err, libdb.ErrNotFound) {
 			return fmt.Errorf("hitlservice: resolve ask %s: %w", askID, err)
 		}
-		// Lost the compare-and-swap: tell expired from already-answered, the same
-		// way Respond does.
+		// Lost the CAS: tell expired from already-answered, same as Respond.
 		current, getErr := s.approvals.GetHITLApproval(ctx, askID)
 		if getErr != nil {
 			return fmt.Errorf("hitlservice: look up ask %s: %w", askID, getErr)
@@ -328,11 +269,8 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string) e
 		return nil
 	}
 
-	// Waiter GONE — the asking run parked past its window, checkpointed, and
-	// released its process. Run the resume hook with exactly resolve()'s
-	// contract: the answer IS durably recorded either way; ErrNoCheckpoint is
-	// the clean "nothing was suspended" (the asker is still parked in its OWN
-	// process and will see the row on its next poll).
+	// Waiter gone: the asking run parked past its window and released its
+	// process. Run the resume hook with resolve()'s same contract.
 	if hook != nil {
 		if err := hook(ctx, askID); err != nil && !errors.Is(err, ErrNoCheckpoint) {
 			return fmt.Errorf("hitlservice: answer for ask %s recorded, but resuming its suspended run failed: %w", askID, err)
@@ -341,27 +279,17 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string) e
 	return nil
 }
 
-// answeredByAgent marks a resolution written by a supervising AGENT rather than
-// by a human. It is what the envelope's agent-answer cap is counted on, and what
-// an audit reads to tell "a person decided this" from "another model did".
+// answeredByAgent marks a resolution written by a supervising agent rather than a human.
 const answeredByAgent = "agent"
 
-// AnswerAsAgent resolves an attention ask exactly as Answer does, but records
-// that an AGENT answered it — the supervising session's model replying to its own
-// subagent rather than a human replying to either.
-//
-// The distinction is not cosmetic. A unit escalates to a human on purpose; letting
-// a model answer in the human's place is a governance choice the mission's
-// envelope makes (see AgentAnswerCount, and the caller that consults it), and a
-// bound nobody can count is not a bound. Recording the actor on the durable row is
-// what makes the count possible after a restart, and what lets an operator see,
-// later, that no human ever looked at this question.
+// AnswerAsAgent resolves an attention ask exactly as Answer does, but
+// records that an agent answered — the actor AgentAnswerCount counts
+// against the envelope's cap.
 func (s *service) AnswerAsAgent(ctx context.Context, askID, text string) error {
 	return s.answerAttention(ctx, askID, text, answeredByAgent)
 }
 
-// PendingAttentionAsks returns missionID's unanswered questions, newest first —
-// what that mission is currently blocked on.
+// PendingAttentionAsks returns missionID's unanswered questions, newest first.
 func (s *service) PendingAttentionAsks(ctx context.Context, missionID string) ([]*runtimetypes.HITLApproval, error) {
 	if s.approvals == nil {
 		return nil, fmt.Errorf("hitlservice: durable approval store not configured")
@@ -379,11 +307,8 @@ func (s *service) PendingAttentionAsks(ctx context.Context, missionID string) ([
 	return out, nil
 }
 
-// AgentAnswerCount reports how many of missionID's questions were answered by a
-// supervising AGENT rather than a human. It is the durable counter an envelope's
-// cap is enforced against: a runaway question loop between a unit and its
-// supervisor is bounded by a number that survives a restart, not by an in-memory
-// tally that a redeploy would reset to zero.
+// AgentAnswerCount reports how many of missionID's questions were answered
+// by a supervising agent, a durable counter that survives a restart.
 func (s *service) AgentAnswerCount(ctx context.Context, missionID string) (int, error) {
 	if s.approvals == nil {
 		return 0, fmt.Errorf("hitlservice: durable approval store not configured")
@@ -408,6 +333,5 @@ func (s *service) AgentAnswerCount(ctx context.Context, missionID string) (int, 
 	return count, nil
 }
 
-// missionAskScanLimit bounds the per-mission ask scan. A mission that has asked
-// more than this many questions has a bigger problem than an off-by-a-few count.
+// missionAskScanLimit bounds the per-mission ask scan.
 const missionAskScanLimit = 200

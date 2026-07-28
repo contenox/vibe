@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// Predefined errors for key-value operations
 var (
 	ErrNotFound         = errors.New("key not found")
 	ErrInvalidValue     = errors.New("invalid value for operation")
@@ -20,23 +19,21 @@ var (
 
 type Key = string
 
-// KeyValue is used for backward compatibility with the old interface
+// KeyValue exists for backward compatibility with the old interface.
 type KeyValue struct {
 	Key   string
 	Value json.RawMessage
 	TTL   time.Time
 }
 
-// KVManager defines the interface for obtaining executors
+// KVManager obtains non-transactional KVExecutors.
 type KVManager interface {
-	// Executor returns a non-transactional executor
 	Executor(ctx context.Context) (KVExecutor, error)
 	Close() error
 }
 
-// KVExecutor represents operations
+// KVExecutor is a non-transactional key-value backend.
 type KVExecutor interface {
-	// Basic operations
 	Get(ctx context.Context, key Key) (json.RawMessage, error)
 	Set(ctx context.Context, key Key, value json.RawMessage) error
 	SetWithTTL(ctx context.Context, key Key, value json.RawMessage, ttl time.Duration) error

@@ -20,10 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// externalTerminalWire wires a real production Transport (with a shell manager
-// rooted at root) to a wireClient over an NDJSON pipe, plus a registered stub
-// agent opted into the terminal scenario via the given env. It returns the client
-// and the registered agent name; teardown is via t.Cleanup.
+// externalTerminalWire wires a real production Transport to a wireClient over
+// an NDJSON pipe, plus a stub agent opted into the terminal scenario via env.
 func externalTerminalWire(t *testing.T, ctx context.Context, db libdb.DBManager, shells shellsession.Manager, env map[string]string) (*wireClient, string) {
 	t.Helper()
 	agentName := registerStubAgentInDB(t, db, "claude-stub-terminal", env)
@@ -58,9 +56,8 @@ func externalTerminalWire(t *testing.T, ctx context.Context, db libdb.DBManager,
 func newTerminalShellManager(t *testing.T) shellsession.Manager {
 	t.Helper()
 	root := t.TempDir()
-	// Give the manager a real one-root allowlist rather than a bare default
-	// root: shellsession enforces the workspace envelope through
-	// vfs.ResolveSessionCwd, so a Factory is what production hands it.
+	// A Factory, not a bare root: shellsession enforces the workspace envelope
+	// through vfs.ResolveSessionCwd.
 	roots, err := vfs.NewFactory(root)
 	require.NoError(t, err)
 	mgr := shellsession.NewManager(shellsession.Config{
@@ -72,9 +69,8 @@ func newTerminalShellManager(t *testing.T) shellsession.Manager {
 	return mgr
 }
 
-// collectAgentChunk accumulates agent_message_chunk text for sid from the seed
-// notifications and any further ones until a chunk whose text contains want is
-// seen (returned) or the deadline elapses.
+// collectAgentChunk accumulates agent_message_chunk text for sid until a chunk
+// containing want is seen (returned) or the deadline elapses.
 func collectAgentChunk(t *testing.T, c *wireClient, sid libacp.SessionID, seed []libacp.Notification, want string, timeout time.Duration) string {
 	t.Helper()
 	scan := func(n libacp.Notification) (string, bool) {
@@ -121,13 +117,8 @@ func collectAgentChunk(t *testing.T, c *wireClient, sid libacp.SessionID, seed [
 	}
 }
 
-// TestE2E_Wire_ExternalAgent_TerminalRoundTrip is the keystone: a downstream
-// external agent (the hermetic stub, opted into the terminal scenario) runs a
-// shell command through the RUNTIME's terminals — CreateTerminal + WaitForTerminalExit
-// + TerminalOutput + ReleaseTerminal — and (a) receives the command's real output
-// back, with a clean exit code, while (b) that output ALSO streams to the upstream
-// client as contenox.terminalOutput panel updates. Both are asserted over the raw
-// wire against the real Transport.
+// TestE2E_Wire_ExternalAgent_TerminalRoundTrip pins: a shell command's real
+// output both returns downstream and streams to the upstream terminal panel.
 func TestE2E_Wire_ExternalAgent_TerminalRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -162,8 +153,6 @@ func TestE2E_Wire_ExternalAgent_TerminalRoundTrip(t *testing.T) {
 	})
 	require.Nil(t, resp.Error, "the external terminal prompt turn must complete")
 
-	// (a) The downstream agent's report proves it received the runtime shell's
-	// output with a clean exit — no lifecycle call errored.
 	report := collectAgentChunk(t, client, sid, notes, "terminal-scenario", 8*time.Second)
 	require.Contains(t, report, "termcap=true",
 		"the downstream initialize must have advertised the terminal client capability")
@@ -173,21 +162,13 @@ func TestE2E_Wire_ExternalAgent_TerminalRoundTrip(t *testing.T) {
 	require.Contains(t, report, "stub-terminal-42",
 		"TerminalOutput must return the command's real output back to the downstream agent: "+report)
 
-	// (b) That same output also reached the upstream client's terminal panel path.
 	got := collectTerminalOutput(t, client, sid, notes, "stub-terminal-42", 8*time.Second)
 	assert.Contains(t, got, "stub-terminal-42",
 		"the runtime shell's output must ALSO stream to the upstream terminal panel (contenox.terminalOutput)")
 }
 
-// TestE2E_Wire_ExternalAgent_TerminalPanelFiltered pins the fix for the live
-// defect: when a downstream agent runs a shell command, beam's terminal panel used
-// to show the bridge's INTERNAL scaffolding as raw text — the wrapped command line
-// (`env … bash -c …`) and the CTXS/CTXE framing markers with their `\033[2K\r`
-// erase sequences — because the panel is an append-only log view that does not
-// process cursor controls, so the erase-wrapped markers were never hidden. The
-// panel-bound stream (contenox.terminalOutput) must now carry ONLY the command's
-// real output, preceded by a clean `$ <command>` header in the AGENT's requested
-// form — never the wrapper, the markers, or the erase bytes.
+// TestE2E_Wire_ExternalAgent_TerminalPanelFiltered pins: the panel stream
+// carries only the real output and a clean header, never the bridge's framing.
 func TestE2E_Wire_ExternalAgent_TerminalPanelFiltered(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -221,25 +202,17 @@ func TestE2E_Wire_ExternalAgent_TerminalPanelFiltered(t *testing.T) {
 	})
 	require.Nil(t, resp.Error, "the external terminal prompt turn must complete")
 
-	// The panel forwarding is synchronous with the turn: the bridge writes each
-	// terminal-output chunk to the wire before WaitForTerminalExit resolves, hence
-	// before the prompt response — so the whole panel-bound stream for this command
-	// is already in the notifications collected during the call. Wait for the marker
-	// (drains if a chunk trails), then assert the FULL panel stream from the seed so
-	// even a trailing END-marker leak would be caught.
+	// Panel forwarding is synchronous with the turn, so the whole panel stream
+	// for this command is already in notes.
 	require.Contains(t,
 		collectTerminalOutput(t, client, sid, notes, "stub-terminal-42", 8*time.Second),
 		"stub-terminal-42", "the command's real output must reach the terminal panel")
 	panel := collectTerminalPanel(sid, notes)
 
-	// (1) The real command output reached the panel — proof output still streams.
 	require.Contains(t, panel, "stub-terminal-42",
 		"the command's real output must reach the terminal panel")
-	// (2) A clean `$ <command>` header, in the AGENT's requested form — the raw
-	// command line the agent asked for, NOT the bridge's bash -c wrapper.
 	require.Contains(t, panel, "$ echo stub-terminal-$((6*7)) | cat",
 		"the panel shows a clean command header using the agent's requested command")
-	// (3) NONE of the bridge's internal framing leaks to the panel.
 	require.NotContains(t, panel, "CTXS", "the START marker token must never reach the panel")
 	require.NotContains(t, panel, "CTXE", "the END marker token must never reach the panel")
 	require.NotContains(t, panel, "bash -c", "the bridge's bash -c wrapper must never reach the panel")
@@ -247,9 +220,7 @@ func TestE2E_Wire_ExternalAgent_TerminalPanelFiltered(t *testing.T) {
 }
 
 // collectTerminalPanel accumulates, in order, every contenox.terminalOutput chunk
-// for sid found in the given notifications — the panel-bound stream as the upstream
-// client received it — so a test can assert on both the presence of real output and
-// the ABSENCE of the bridge's internal framing.
+// for sid — the panel-bound stream as the upstream client received it.
 func collectTerminalPanel(sid libacp.SessionID, notes []libacp.Notification) string {
 	var acc strings.Builder
 	for _, n := range notes {
@@ -276,10 +247,8 @@ func collectTerminalPanel(sid libacp.SessionID, notes []libacp.Notification) str
 	return acc.String()
 }
 
-// TestE2E_Wire_ExternalAgent_TerminalKillReleaseLifecycle drives the kill path: a
-// long-running command is started, killed, and WaitForTerminalExit resolves
-// promptly with a signal (rather than blocking for the command's full duration),
-// then released cleanly.
+// TestE2E_Wire_ExternalAgent_TerminalKillReleaseLifecycle pins: killing a
+// running command resolves WaitForTerminalExit promptly, not by blocking.
 func TestE2E_Wire_ExternalAgent_TerminalKillReleaseLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -307,9 +276,7 @@ func TestE2E_Wire_ExternalAgent_TerminalKillReleaseLifecycle(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Result, &newResp))
 	sid := newResp.SessionID
 
-	// A 30s sleep is started and immediately killed; the whole turn must finish far
-	// under that, proving the kill (Ctrl-C) actually interrupted the command and
-	// WaitForTerminalExit resolved.
+	// A 30s sleep is killed immediately; the turn finishing far under that.
 	start := time.Now()
 	resp, notes := client.call(libacp.MethodSessionPrompt, libacp.PromptRequest{
 		SessionID: sid,
@@ -327,11 +294,8 @@ func TestE2E_Wire_ExternalAgent_TerminalKillReleaseLifecycle(t *testing.T) {
 		"the killed command's post-sleep output must never have run")
 }
 
-// TestE2E_Wire_ExternalAgent_TerminalCapabilityWithheldWhenNoShellManager pins the
-// declined/absent-capability path: with NO shell manager on the server, the
-// downstream initialize advertises no terminal capability, so a terminal-using
-// agent observes termcap=false and skips the round trip — the turn still completes
-// normally, unaffected.
+// TestE2E_Wire_ExternalAgent_TerminalCapabilityWithheldWhenNoShellManager pins:
+// with no shell manager, initialize advertises no terminal capability.
 func TestE2E_Wire_ExternalAgent_TerminalCapabilityWithheldWhenNoShellManager(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -340,8 +304,7 @@ func TestE2E_Wire_ExternalAgent_TerminalCapabilityWithheldWhenNoShellManager(t *
 	require.NoError(t, err)
 	defer db.Close()
 
-	// No ShellSessions manager: the runtime must NOT advertise Terminal to the
-	// downstream, and the terminal-using stub must degrade gracefully.
+	// No ShellSessions manager: the runtime must not advertise Terminal downstream.
 	client, agentName := externalTerminalWire(t, ctx, db, nil, map[string]string{"ACP_STUB_USE_TERMINAL": "1"})
 
 	resp, _ := client.call(libacp.MethodInitialize, libacp.InitializeRequest{
@@ -371,11 +334,8 @@ func TestE2E_Wire_ExternalAgent_TerminalCapabilityWithheldWhenNoShellManager(t *
 		"without a shell manager the runtime must not advertise the terminal capability, and the agent must not attempt terminal/*")
 }
 
-// TestUnit_ComposeTerminalCommand_ShapeAndQuoting pins the wrapped shell line the
-// bridge submits: START/END markers wrapping the command in a subshell with the
-// exit code captured, and safe quoting of command/args/env/cwd. The markers embed
-// a `%d` so the format string as it appears in the echoed input line never matches
-// the OUTPUT regex — only the printed marker (a literal digit) does.
+// TestUnit_ComposeTerminalCommand_ShapeAndQuoting pins: safe quoting of
+// command/args/env/cwd, and the END regex matching only the printed marker.
 func TestUnit_ComposeTerminalCommand_ShapeAndQuoting(t *testing.T) {
 	line := composeTerminalCommand(libacp.CreateTerminalRequest{
 		Command: "echo",
@@ -390,8 +350,6 @@ func TestUnit_ComposeTerminalCommand_ShapeAndQuoting(t *testing.T) {
 	require.Contains(t, line, `printf 'CTXSnonce%d`, "the START marker format embeds %d, not a literal digit")
 	require.Contains(t, line, `printf '\nCTXEnonce %d`, "the END marker format embeds %d, not a literal digit")
 
-	// The OUTPUT regex the bridge uses to find the printed END marker must NOT match
-	// the format string in the echoed input line (which carries %d, not a digit).
 	bt := &bridgeTerminal{
 		startRe: startMarkerRegexp("CTXSnonce"),
 		endRe:   endMarkerRegexp("CTXEnonce"),
@@ -399,27 +357,18 @@ func TestUnit_ComposeTerminalCommand_ShapeAndQuoting(t *testing.T) {
 	require.Nil(t, bt.endRe.FindStringIndex(line),
 		"the END regex must not match the echoed format string, only the printed marker")
 
-	// A synthesized scrollback with the PRINTED markers must slice cleanly to the
-	// command output and recover the exit code.
 	raw := "CTXSnonce0" + terminalEraseSeq + "hello\n" + "\nCTXEnonce 7" + terminalEraseSeq
 	out, sawStart, sawEnd, code := bt.locate(raw)
 	require.True(t, sawStart)
 	require.True(t, sawEnd)
-	// The command's own trailing newline is preserved; only the newline the END
-	// printf injects ahead of its marker is stripped.
 	require.Equal(t, "hello\n", out)
 	require.NotNil(t, code)
 	require.Equal(t, 7, *code)
 }
 
-// TestUnit_ComposeTerminalCommand_ShellLineVsExecvp pins the two request shapes:
-// an EMPTY-args command is a full shell command line run via `bash -c` (so a pipe
-// survives and env applies to the whole line), while a NON-empty-args command is
-// execvp-style with each atom quoted separately and NO shell. This is the fix for
-// the live bug where claude-code-acp's `command:"echo hello"` (no args) was quoted
-// as the single atom `'echo hello'` and failed with exit 127.
+// TestUnit_ComposeTerminalCommand_ShellLineVsExecvp pins: empty Args runs as a
+// shell line via `bash -c`; non-empty Args is execvp-style, quoted per atom.
 func TestUnit_ComposeTerminalCommand_ShellLineVsExecvp(t *testing.T) {
-	// No args, with a pipe and env: the full line goes to bash -c, env in front.
 	shellLine := composeTerminalCommand(libacp.CreateTerminalRequest{
 		Command: "git status -s | head",
 		Env:     []libacp.EnvVariable{{Name: "CLAUDECODE", Value: "1"}},
@@ -429,13 +378,11 @@ func TestUnit_ComposeTerminalCommand_ShellLineVsExecvp(t *testing.T) {
 	require.Contains(t, shellLine, "__ce=$?",
 		"the subshell wraps the bash -c invocation, so $? is the shell line's exit")
 
-	// No args, no env: bare bash -c.
 	require.Contains(t,
 		composeTerminalCommand(libacp.CreateTerminalRequest{Command: "echo hello"}, "CTXSnonce", "CTXEnonce"),
 		"( bash -c 'echo hello' )",
 		"a no-args command must never be quoted as a single execvp atom ('echo hello')")
 
-	// Args present: execvp-style, quoted per atom, no shell.
 	execvp := composeTerminalCommand(libacp.CreateTerminalRequest{
 		Command: "echo", Args: []string{"hello"},
 	}, "CTXSnonce", "CTXEnonce")

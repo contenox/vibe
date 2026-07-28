@@ -26,11 +26,7 @@ func readyInput() Input {
 	}
 }
 
-// TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks is the whole
-// contract of this issue: it tells the operator which toolsets are about to nag
-// and how to stop it, and it NEVER makes the runtime "not ready". An envelope
-// that asks too often is annoying; refusing to run over it would be worse than
-// the bug it reports.
+// TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks pins that the stale-preset issue names the toolsets and never makes the runtime not ready.
 func TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks(t *testing.T) {
 	base := Evaluate(readyInput())
 	if !base.Ready() {
@@ -78,9 +74,7 @@ func TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks(t *testing.T) {
 	}
 }
 
-// TestUnit_AddStalePolicyPresetIssue_SaysNothingWhenNothingIsStale keeps the
-// notice from becoming noise: no stale presets (or no named toolsets) means no
-// issue at all, and the caller's Result is untouched.
+// TestUnit_AddStalePolicyPresetIssue_SaysNothingWhenNothingIsStale pins that no stale presets (or no named toolsets) adds no issue.
 func TestUnit_AddStalePolicyPresetIssue_SaysNothingWhenNothingIsStale(t *testing.T) {
 	base := Evaluate(readyInput())
 	before := len(base.Issues)
@@ -102,9 +96,7 @@ func TestUnit_AddStalePolicyPresetIssue_SaysNothingWhenNothingIsStale(t *testing
 	}
 }
 
-// TestUnit_AddStalePolicyPresetIssue_DoesNotMutateTheCallersIssues pins the
-// copy-on-append: doctor holds its Result by value and a shared backing array
-// would let one enrichment overwrite another's issue.
+// TestUnit_AddStalePolicyPresetIssue_DoesNotMutateTheCallersIssues pins the copy-on-append: the caller's Issues slice is never written into.
 func TestUnit_AddStalePolicyPresetIssue_DoesNotMutateTheCallersIssues(t *testing.T) {
 	base := Evaluate(readyInput())
 	baseIssues := append([]Issue(nil), base.Issues...)

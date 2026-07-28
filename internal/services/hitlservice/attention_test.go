@@ -10,11 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_RequestAttention_ReturnsTheOperatorsWords is the keystone of the ask
-// channel: a unit's question parks until a human answers it, and what comes back
-// is the human's TEXT — not a boolean, not "someone was notified". A unit that
-// learns only that it was heard still cannot proceed; a unit handed the answer
-// finishes on its next turn.
+// TestUnit_RequestAttention_ReturnsTheOperatorsWords pins that RequestAttention
+// returns the operator's own text, not a boolean.
 func TestUnit_RequestAttention_ReturnsTheOperatorsWords(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
@@ -31,7 +28,6 @@ func TestUnit_RequestAttention_ReturnsTheOperatorsWords(t *testing.T) {
 		answered <- text
 	}()
 
-	// The question is durably pending and identifiable as one that needs data.
 	var ask *runtimetypes.HITLApproval
 	require.Eventually(t, func() bool {
 		rows, err := svc.ListPending(ctx, 10)
@@ -58,16 +54,13 @@ func TestUnit_RequestAttention_ReturnsTheOperatorsWords(t *testing.T) {
 		t.Fatal("the asking unit was never woken with the answer")
 	}
 
-	// And the answer is durable: a restart still shows what was told to the unit.
 	resolved, err := store.GetHITLApproval(ctx, ask.ID)
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalApproved, resolved.State)
 	require.Equal(t, "the contenox runtime repo at /home/x/src/contenox", hitlservice.AnswerOf(resolved))
 }
 
-// TestUnit_Answer_RefusesAPermissionAsk guards the one confusion the two ask
-// kinds could cause: a permission ask is a yes/no gate, so resolving it with
-// prose would close it with no verdict at all.
+// TestUnit_Answer_RefusesAPermissionAsk pins that Answer rejects a permission ask.
 func TestUnit_Answer_RefusesAPermissionAsk(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
@@ -97,27 +90,21 @@ func TestUnit_Answer_RefusesAPermissionAsk(t *testing.T) {
 	require.Contains(t, err.Error(), "approve/deny")
 }
 
-// TestUnit_Answer_RejectsEmptyText keeps the channel honest in the other
-// direction: an empty answer is not an answer, and would wake the unit with
-// nothing to act on.
+// TestUnit_Answer_RejectsEmptyText pins that an empty answer is rejected, not a no-op success.
 func TestUnit_Answer_RejectsEmptyText(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
 	require.Error(t, svc.Answer(ctx, "any-id", "   "))
 }
 
-// TestUnit_Answer_UnknownIDReturnsNotFound mirrors Respond's contract: an ask
-// that cannot be answered says so rather than silently doing nothing.
+// TestUnit_Answer_UnknownIDReturnsNotFound mirrors Respond's contract for an unanswerable ask.
 func TestUnit_Answer_UnknownIDReturnsNotFound(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
 	require.ErrorIs(t, svc.Answer(ctx, "no-such-ask", "text"), hitlservice.ErrApprovalNotFound)
 }
 
-// TestUnit_RequestAttention_CeilingEndsTheWait pins the bound: an operator who
-// never answers must not park a unit forever. The caller gets
-// ErrAttentionUnanswered, which is its cue to fall back (missiontools files the
-// question as a durable blocker) rather than hang.
+// TestUnit_RequestAttention_CeilingEndsTheWait pins that an unanswered ask is bounded by the ceiling, not left to hang.
 func TestUnit_RequestAttention_CeilingEndsTheWait(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
@@ -133,8 +120,7 @@ func TestUnit_RequestAttention_CeilingEndsTheWait(t *testing.T) {
 	require.Less(t, time.Since(start), 5*time.Second, "the wait must be bounded by the ceiling")
 }
 
-// TestUnit_RequestAttention_RequiresASummary refuses a question with nothing in
-// it — the row's summary is the only thing an operator sees in a list.
+// TestUnit_RequestAttention_RequiresASummary pins that a blank summary is rejected.
 func TestUnit_RequestAttention_RequiresASummary(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
@@ -142,15 +128,8 @@ func TestUnit_RequestAttention_RequiresASummary(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestUnit_RequestAttention_AnswerFromAnotherProcessWakesTheUnit is the case the
-// whole polling half exists for, and the one a channel alone cannot serve: the
-// dispatched UNIT raises its question in its own process, while the operator
-// answers it in the process that owns the API (`contenox serve`). Two processes,
-// one shared SQLite file, no shared memory.
-//
-// It is simulated exactly as the durable-restart tests do it — a second service
-// over the SAME on-disk database, whose `pending` map knows nothing about the
-// waiter parked in the first.
+// TestUnit_RequestAttention_AnswerFromAnotherProcessWakesTheUnit pins that an
+// answer from a second service instance over the same store wakes the waiter.
 func TestUnit_RequestAttention_AnswerFromAnotherProcessWakesTheUnit(t *testing.T) {
 	ctx, store, dbPath := setupHITLDB(t)
 	unitSvc := newDurableService(t, store)
@@ -165,7 +144,6 @@ func TestUnit_RequestAttention_AnswerFromAnotherProcessWakesTheUnit(t *testing.T
 		answered <- text
 	}()
 
-	// The operator's process: a different service instance over the same file.
 	operatorCtx, operatorStore := reopenHITLDB(t, dbPath)
 	operatorSvc := newDurableService(t, operatorStore)
 
@@ -190,8 +168,8 @@ func TestUnit_RequestAttention_AnswerFromAnotherProcessWakesTheUnit(t *testing.T
 	}
 }
 
-// The park window: elapsing unanswered returns the typed pending error with
-// the row STILL pending and answerable — the checkpoint-and-release seam.
+// TestUnit_RequestAttention_ParkWindowReturnsTypedPending pins that an elapsed
+// park window returns a typed pending error with the row still answerable.
 func TestUnit_RequestAttention_ParkWindowReturnsTypedPending(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
@@ -211,8 +189,7 @@ func TestUnit_RequestAttention_ParkWindowReturnsTypedPending(t *testing.T) {
 	require.Equal(t, runtimetypes.HITLApprovalPending, row.State, "parking must leave the question answerable")
 }
 
-// A caller-chosen AskID becomes the durable row's identity — the "ask ID ==
-// tool-call ID == checkpoint key" invariant for questions.
+// TestUnit_RequestAttention_CallerChosenAskIDIsTheRowID pins that a caller-chosen AskID becomes the durable row's ID.
 func TestUnit_RequestAttention_CallerChosenAskIDIsTheRowID(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)

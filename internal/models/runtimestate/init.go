@@ -164,10 +164,9 @@ func initOrUpdateModel(ctx context.Context, tx libdb.Exec, tenantID, modelName s
 	modelID := uuid.NewSHA1(parsedTenantID, []byte(modelName))
 	storeInstance := runtimetypes.New(tx)
 
-	// Attempt to retrieve the model by its unique name
 	model, err := storeInstance.GetModelByName(ctx, modelName)
 
-	// Case 1: Model does not exist, so we create it.
+	// Case 1: model does not exist, so we create it.
 	if errors.Is(err, libdb.ErrNotFound) {
 		newModel := &runtimetypes.Model{
 			Model:         modelName,
@@ -188,12 +187,12 @@ func initOrUpdateModel(ctx context.Context, tx libdb.Exec, tenantID, modelName s
 		return newModel, nil
 	}
 
-	// Case 2: An unexpected database error occurred.
+	// Case 2: an unexpected database error occurred.
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model '%s': %w", modelName, err)
 	}
 
-	// Case 3: Model exists. Update capabilities only — never overwrite context_length.
+	// Case 3: model exists. Update capabilities only — never overwrite context_length.
 	// Context length is set once at creation, then owned by the backend cycle or
 	// by an explicit user action ('contenox model set-context').
 	needsUpdate := false

@@ -1,18 +1,9 @@
 // Package liveness owns "does the user believe something is happening
-// right now": the shared activity-pulse primitive (spinner cadence,
-// elapsed timers, stall detection) every activity-bearing view in beam
-// renders from instead of tracking its own clock.
-//
-// This is root-caused from the predecessor TUI, whose `waiting bool`
-// swapped one static glyph at the start and end of a turn — no spinner, no
-// tick, no clock — and measured at 82-87% frozen rendered frames, with one
-// 48.6s still frame. Tracker's contract exists specifically to make that
-// failure mode structurally impossible: every render-time value it
-// produces (spinner index, elapsed string, stalled flag) is a pure
-// function of stored timestamps and an injected "now", so an app loop that
-// ticks every 120-150ms while any activity is open — and stops ticking the
-// instant none is — always yields visibly distinct frames, and the whole
-// story is golden-testable without a terminal, a goroutine, or a channel.
+// right now": the shared activity-pulse primitive (spinner cadence, elapsed
+// timers, stall detection) every activity-bearing view in beam renders from
+// instead of tracking its own clock. Every render-time value Tracker
+// produces is a pure function of stored timestamps and an injected "now",
+// so it is golden-testable without a terminal, a goroutine, or a channel.
 package liveness
 
 import (
@@ -31,14 +22,13 @@ const (
 )
 
 // defaultStallAfter is the "no update in this long" threshold NewTracker
-// uses when given zero (blueprint 4.7, D52's uniform default).
+// uses when given zero.
 const defaultStallAfter = 8 * time.Second
 
 // spinnerTick is the motion granularity Snapshot's SpinnerIndex advances
-// on. It is a constant, not a Tracker field, because it defines what
-// "one distinct spinner frame" means — the same definition the blueprint's
-// acceptance metrics (micro-motion, no freeze exceeding 1s) are measured
-// against — and must not vary between callers comparing frames.
+// on. It is a constant, not a Tracker field, since it defines what "one
+// distinct spinner frame" means and must not vary between callers
+// comparing frames.
 const spinnerTick = 130 * time.Millisecond
 
 // activity is one tracked unit of ongoing work, keyed by its caller-chosen
@@ -57,18 +47,17 @@ type activity struct {
 }
 
 // Tracker is beam's single source of truth for "is something happening
-// right now". It holds zero goroutines and no clock of its own: every
-// method takes the caller's current time explicitly, so the whole
-// liveness story — spinner motion, stall detection, elapsed formatting —
-// tests as pure data transformations. A Tracker is not safe for
-// concurrent use; beam drives it from one single-threaded event loop.
+// right now". It holds zero goroutines and no clock of its own — every
+// method takes the caller's current time explicitly, so the whole liveness
+// story tests as pure data transformations. Not safe for concurrent use;
+// beam drives it from one single-threaded event loop.
 type Tracker struct {
 	stallAfter time.Duration
 	activities map[string]*activity
 }
 
 // NewTracker returns a Tracker whose stall threshold is stallAfter, or the
-// default 8s (blueprint 4.7, D52) when stallAfter is zero or negative.
+// default 8s when stallAfter is zero or negative.
 func NewTracker(stallAfter time.Duration) *Tracker {
 	if stallAfter <= 0 {
 		stallAfter = defaultStallAfter
@@ -91,9 +80,8 @@ func (t *Tracker) Open(kind Kind, id, label string, now time.Time) {
 
 // Bump records that id had an event at now (any progress worth resetting
 // the stall clock for — a token, a tool-call update, a mission report).
-// Bump on an id that was never Open'd, or has since been Close'd, is a
-// no-op: liveness events can race teardown, and a stray late event must
-// never resurrect a frozen activity or panic.
+// It is a no-op on an id that was never Open'd or has since Close'd, since
+// a stray late event must never resurrect a frozen activity or panic.
 func (t *Tracker) Bump(id string, now time.Time) {
 	a, ok := t.activities[id]
 	if !ok || !a.open {
@@ -127,9 +115,8 @@ func (t *Tracker) OpenCount() int {
 }
 
 // Ticking reports whether the app loop's tick should be running at all:
-// exactly OpenCount() > 0. Callers arm their 120-150ms ticker only while
-// this is true and disarm it the instant it goes false, which is what
-// gives beam flat CPU at idle instead of a perpetual timer.
+// exactly OpenCount() > 0. Callers arm their ticker only while this is true
+// and disarm it the instant it goes false, keeping beam flat at idle.
 func (t *Tracker) Ticking() bool { return t.OpenCount() > 0 }
 
 // Snapshot is the render-time state one activity-bearing view pulls for
@@ -137,9 +124,8 @@ func (t *Tracker) Ticking() bool { return t.OpenCount() > 0 }
 // fresh from stored timestamps and the caller's now — never accumulated
 // or cached.
 type Snapshot struct {
-	// SpinnerIndex is which frame of a spinnerFrames-long cycle to draw.
-	// It advances deterministically with elapsed time (see Tracker.
-	// Snapshot), so a sequence of snapshots at increasing now values is
+	// SpinnerIndex is which frame of a spinnerFrames-long cycle to draw,
+	// deterministic in elapsed time so a snapshot sequence is
 	// golden-testable motion, not an impression.
 	SpinnerIndex int
 	// Elapsed is real wall-clock time since the activity opened,
@@ -158,9 +144,8 @@ type Snapshot struct {
 }
 
 // Snapshot returns the render-time state of activity id at now, or false
-// if id is not tracked (never opened, or evicted by the caller). spinnerFrames
-// is the number of frames the caller's spinner glyph cycle has; Snapshot
-// never needs to know the glyphs themselves, only how many there are.
+// if id is not tracked. spinnerFrames is the caller's spinner cycle length;
+// Snapshot never needs the glyphs themselves, only the count.
 func (t *Tracker) Snapshot(id string, now time.Time, spinnerFrames int) (Snapshot, bool) {
 	a, ok := t.activities[id]
 	if !ok {
@@ -169,11 +154,9 @@ func (t *Tracker) Snapshot(id string, now time.Time, spinnerFrames int) (Snapsho
 	return snapshotOf(a, t.stallAfter, now, spinnerFrames), true
 }
 
-// Aggregate is the status line's single line: the count of currently open
-// activities and the Snapshot of the oldest of them (by StartedAt, ties
-// broken by id for determinism) — app-shell composites the rest of the
-// line's layout, this just answers "which activity, and how many total".
-// ok is false when nothing is open.
+// Aggregate returns the status line's single line: the count of currently
+// open activities and the Snapshot of the oldest (by StartedAt, ties broken
+// by id for determinism). ok is false when nothing is open.
 func (t *Tracker) Aggregate(now time.Time, spinnerFrames int) (Snapshot, int, bool) {
 	var oldest *activity
 	var oldestID string

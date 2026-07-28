@@ -80,10 +80,7 @@ func TestUnit_WorkspaceCLI_AddListRemoveRoundTrip(t *testing.T) {
 	done()
 }
 
-// TestUnit_WorkspaceCLI_AddStampsProjectMarker verifies CLI/serve parity for the
-// project registry: `workspace add --name` stamps the same .contenox marker the
-// serve-side REST mutator writes, `list` shows the friendly name, re-adding with
-// a new --name renames, and a bad name is refused before anything persists.
+// TestUnit_WorkspaceCLI_AddStampsProjectMarker asserts `workspace add --name` stamps the same project marker serve writes, renames on re-add, and refuses a bad name before persisting.
 func TestUnit_WorkspaceCLI_AddStampsProjectMarker(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "workspace-cli.db")
 	grant := t.TempDir()

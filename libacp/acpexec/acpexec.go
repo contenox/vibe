@@ -1,9 +1,8 @@
 // Package acpexec spawns a subprocess and wires its stdin/stdout together as
-// a single io.ReadWriteCloser, the transport shape libacp.NewAgentSideConnection
-// and libacp.NewClientSideConnection both expect. It exists so an ACP peer
-// (an editor driving a real agent binary, or a test driving the Rust
-// reference agent/client binaries) can be reached over stdio without any
-// caller having to hand-roll pipe plumbing and shutdown bookkeeping.
+// a single io.ReadWriteCloser — the transport shape
+// libacp.NewAgentSideConnection and libacp.NewClientSideConnection expect —
+// so an ACP peer (an editor, or a test driving a reference binary) can be
+// reached over stdio without hand-rolled pipe/shutdown bookkeeping.
 package acpexec
 
 import (
@@ -29,9 +28,8 @@ type config struct {
 }
 
 // WithStderr forwards the subprocess's stderr to w as it's written, instead
-// of the default (io.Discard). Passing a *LockedBuffer lets a caller recover
-// the subprocess's stderr for a failure message even though it is written
-// from a different goroutine than the one that later reads it.
+// of the default (io.Discard). Use a *LockedBuffer if the caller reads w's
+// contents from a different goroutine than the one writing it.
 func WithStderr(w io.Writer) Option {
 	return func(c *config) { c.stderr = w }
 }
@@ -44,10 +42,9 @@ func WithKillGrace(d time.Duration) Option {
 }
 
 // Process is a spawned subprocess wired up as an io.ReadWriteCloser: Read
-// pulls from its stdout, Write pushes to its stdin, and Close begins its
-// shutdown sequence (see Close). It is the concrete type Spawn returns,
-// rather than a bare io.ReadWriteCloser, so callers that need it (tests,
-// mainly) can still reach Wait's exit error without a type assertion.
+// pulls from its stdout, Write pushes to its stdin, Close begins shutdown
+// (see Close). Spawn returns this concrete type, not a bare
+// io.ReadWriteCloser, so callers can still reach Wait's exit error.
 type Process struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
@@ -64,15 +61,11 @@ type Process struct {
 var _ io.ReadWriteCloser = (*Process)(nil)
 
 // Spawn starts cmd and returns it as a Process. cmd's Stdin/Stdout are
-// claimed via exec.Cmd.StdinPipe/StdoutPipe — callers must not have set them
-// already. Stderr is discarded unless WithStderr overrides it.
-//
-// If ctx is cancelled before the subprocess exits on its own, Spawn closes
-// it down exactly as Close would (grace period, then kill) rather than
-// leaking a running process past the caller's context.
-//
-// Spawn's own error (a pipe-setup or Start failure) always means no process
-// was left running; the caller has nothing to clean up in that case.
+// claimed via exec.Cmd.StdinPipe/StdoutPipe — callers must not set them
+// already. Stderr is discarded unless WithStderr overrides it. If ctx is
+// cancelled before the subprocess exits, Spawn closes it down exactly as
+// Close would (grace period, then kill). A non-nil error means no process
+// was left running.
 func Spawn(ctx context.Context, cmd *exec.Cmd, opts ...Option) (*Process, error) {
 	cfg := config{stderr: io.Discard, killGrace: defaultKillGrace}
 	for _, opt := range opts {
@@ -89,11 +82,9 @@ func Spawn(ctx context.Context, cmd *exec.Cmd, opts ...Option) (*Process, error)
 	}
 	cmd.Stderr = cfg.stderr
 
-	// Own process group (unix), so Close's kill escalation can take down not
-	// just the direct child but any children it forked — npx/uvx-style
-	// wrapper commands, a first-class registration method for external
-	// agents, put the real agent a fork or two down, and a surviving
-	// grandchild would both leak and hold our pipes open (blocking Wait).
+	// Own process group (unix) so Close's kill escalation takes down forked
+	// children too (e.g. npx/uvx wrapper commands) — a surviving grandchild
+	// would leak and hold our pipes open, blocking Wait.
 	setProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
@@ -108,13 +99,9 @@ func Spawn(ctx context.Context, cmd *exec.Cmd, opts ...Option) (*Process, error)
 		waitDone: make(chan struct{}),
 	}
 
-	// Reap the process as soon as it exits, whoever causes that (it exiting
-	// on its own, or Close/ctx cancellation killing it). This goroutine, not
-	// Close, owns the only call to cmd.Wait: per exec.Cmd's contract, Wait
-	// closes the pipes once the process exits, so calling it is only safe
-	// once nothing further will read from them without also observing that
-	// close — a single, always-running Wait satisfies that for every caller
-	// (Read draining stdout, Close waiting on waitDone) at once.
+	// This goroutine owns the only call to cmd.Wait: exec.Cmd.Wait closes the
+	// pipes on exit, so a single always-running Wait must serve every caller
+	// (Read draining stdout, Close waiting on waitDone) to stay safe.
 	go func() {
 		p.waitErr = cmd.Wait()
 		close(p.waitDone)
@@ -141,21 +128,14 @@ func (p *Process) Read(b []byte) (int, error) { return p.stdout.Read(b) }
 // Write writes to the subprocess's stdin.
 func (p *Process) Write(b []byte) (int, error) { return p.stdin.Write(b) }
 
-// Close begins graceful shutdown: it closes the subprocess's stdin (many
-// well-behaved stdio agents/clients treat that as "no more requests" and
-// exit on their own), waits up to the configured grace period (default 5s,
-// see WithKillGrace) for it to do so, and kills it if it hasn't. Close
-// always waits for the process to actually be reaped before returning.
-//
-// Close is idempotent: it runs this sequence exactly once (via sync.Once)
-// and every call, including ones after the process already exited on its
-// own, returns the same result — the subprocess's exit error, or nil for a
-// clean exit.
+// Close begins graceful shutdown: closes the subprocess's stdin, waits up to
+// the configured grace period (default 5s, see WithKillGrace) for it to exit
+// on its own, and kills it if it hasn't. Always waits for the process to be
+// reaped before returning. Idempotent (sync.Once): every call returns the
+// same result — the subprocess's exit error, or nil for a clean exit.
 // killReapTimeout bounds how long Close waits, after killing the process
-// group, for the Wait reaper to come back. Wait can outlive the kill when
-// something outside the group still holds the subprocess's stderr pipe (a
-// double-forked daemon); better to return a loud error than block a caller
-// forever on a process we cannot reach.
+// group, for the Wait reaper to return — Wait can outlive the kill if
+// something outside the group still holds the subprocess's stderr pipe.
 const killReapTimeout = 5 * time.Second
 
 func (p *Process) Close() error {
@@ -180,13 +160,9 @@ func (p *Process) Close() error {
 		_ = p.stdout.Close()
 		p.closeErr = p.waitErr
 
-		// A persistent agent that ignores stdin-close (testy, most editor
-		// adapters) and had to be killed took the escalation tail of this
-		// method's own documented shutdown sequence — the kill-induced exit
-		// status is not a failure of Close. Only a death this method's own
-		// kill can have caused is suppressed (see exitFromKill): a process
-		// that died with a bad exit status on its own still surfaces that
-		// error, even if the kill branch happened to run.
+		// Only an exit status caused by this method's own kill is suppressed
+		// (see exitFromKill); a process that died with a bad status on its
+		// own still surfaces that error even if the kill branch also ran.
 		if killed && exitFromKill(p.waitErr) {
 			p.closeErr = nil
 		}
@@ -194,11 +170,9 @@ func (p *Process) Close() error {
 	return p.closeErr
 }
 
-// LockedBuffer is a concurrency-safe io.Writer around a bytes.Buffer, meant
-// for WithStderr: a subprocess writes to it from its own reader goroutine
-// (installed by Spawn) while the caller reads String() later, typically only
-// once something has already gone wrong and the process's stderr is wanted
-// for a failure message.
+// LockedBuffer is a concurrency-safe io.Writer around a bytes.Buffer, for use
+// with WithStderr when a caller's String() read races the subprocess reader
+// goroutine's writes.
 type LockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer

@@ -1,21 +1,10 @@
 // Package fleetboot builds the in-process mission fleet a surface embeds so
-// `/mission` (or its beam-TUI equivalent) is dispatched as a subagent of THIS
-// process, with the fired unit's report delivered back into the very session
-// that fired it.
+// `/mission` is dispatched as a subagent of the host process, with reports
+// delivered back to the session that fired them.
 //
-// This composition — agentregistry + agentinstance kernel + operatorinbox +
-// reportrouter + fleetservice, plus the surface-specific adapters around it
-// (live-session report delivery, the autonomous agent-answer offer) — used to
-// live unexported inside contenoxcli/acp_cmd.go as buildInProcessFleet. It is
-// extracted here per beam-tui.md section 3 item 5 so that `contenox acp` and
-// the beam TUI's engine-bridge call the SAME exported constructor instead of
-// maintaining two copies of the wiring.
-//
-// fleetboot must not import internal/surfaces/contenoxcli — contenoxcli
-// imports fleetboot, not the other way around, or the two surfaces could not
-// share this package. Anything a caller alone knows (which directories back
-// its HITL policy source, which roots chain-agent discovery should walk)
-// arrives already resolved, through Deps.
+// fleetboot must not import internal/surfaces/contenoxcli (contenoxcli
+// imports fleetboot). Caller-specific knowledge — HITL policy source,
+// chain-agent discovery roots — arrives pre-resolved through Deps.
 package fleetboot
 
 import (
@@ -36,58 +25,32 @@ import (
 )
 
 // Deps are the collaborators BuildInProcessFleet wires the embedded fleet
-// from — all over the SAME shared db handle and bus the host process already
-// opened. This was inProcessFleetDeps, unexported inside
-// contenoxcli/acp_cmd.go, until beam-tui.md section 3 item 5 required one
-// exported constructor both `contenox acp` and the beam TUI call.
+// from, sharing the host process's db handle and bus.
 type Deps struct {
 	DB       libdb.DBManager
 	Bus      libbus.Messenger
 	Missions missionservice.Service
 	Tracker  libtracker.ActivityTracker
-	// Transport late-binds this connection's live acpsvc.Transport (nil until the
-	// conn factory runs), so the report deliverer can reach the firing editor
-	// session a mission was fired from.
+	// Transport late-binds the connection's live acpsvc.Transport; nil until
+	// the conn factory runs.
 	Transport func() *acpsvc.Transport
-	// HITL is the durable ask store this process raises and answers questions
-	// through — the same instance the mission tools use, so the supervisor's
-	// answer and the unit's question meet in one place.
+	// HITL is shared with the mission tools, so the supervisor's answer and
+	// the unit's question meet in one store.
 	HITL hitlservice.Service
-	// PolicySource backs fleetservice.InProcessDeps.PolicySource (the
-	// creation-time envelope existence check). Resolved by the caller: which
-	// directories back it (a workspace .contenox/ vs $HOME/.contenox) is the
-	// caller's own knowledge, and this package must not import contenoxcli to
-	// compute it itself.
-	PolicySource hitlservice.PolicySource
-	// DiscoverAgents backs fleetservice.InProcessDeps.DiscoverAgents (the
-	// chain-agent discovery pass that seeds the registry before the kernel is
-	// built). Supplied pre-built by the caller for the same reason as
-	// PolicySource above.
+	// PolicySource and DiscoverAgents are resolved by the caller (fleetboot
+	// must not import contenoxcli to compute them itself).
+	PolicySource   hitlservice.PolicySource
 	DiscoverAgents func(ctx context.Context, agents agentregistryservice.Service)
 }
 
 // BuildInProcessFleet embeds the fleet a host process dispatches `/mission`
-// through — the ontology's in-process subagent kernel (a mission is a
-// subagent of THIS process). The composition itself lives in the service
-// layer (fleetservice.BuildInProcess — the build-on-services rule); this
-// adapter contributes only what the CALLING surface knows:
-//
-//   - live-parent delivery through this connection's late-bound transport
-//     (missionReportDeliverer: the live session first, the kernel second);
-//   - the autonomous answer edge serve has too — a unit's question may be
-//     offered to the agent driving the session that fired it, when that
-//     mission's envelope allows. Without this a fired mission could ask, and
-//     be answered by a human, but never by the very agent holding the
-//     conversation the mission came from — the case this is most useful in,
-//     since Zed and other ACP clients render no answer box of their own;
-//   - chain-agent discovery over the caller's own .contenox dirs, and the
-//     same envelope-existence guard the serve path enforces over its policy
-//     files — both arrive pre-built through Deps.DiscoverAgents/PolicySource
-//     so this package need not know how a caller resolves them.
+// through. The composition lives in fleetservice.BuildInProcess; this adapter
+// contributes only what the calling surface knows: live-parent delivery
+// through the late-bound transport, the autonomous answer offer to the
+// firing agent, and discovery roots/policy source pre-built via Deps.
 func BuildInProcessFleet(ctx context.Context, deps Deps) (fleetservice.Service, agentregistryservice.Service, func(), error) {
-	// A dispatched mission's cwd defaults to the host process's working
-	// directory (the project the editor/TUI was launched in) when the request
-	// names none.
+	// Defaults a dispatched mission's cwd to the host process's own, when the
+	// request names none.
 	projectRoot, _ := os.Getwd()
 	return fleetservice.BuildInProcess(ctx, fleetservice.InProcessDeps{
 		DB:             deps.DB,
@@ -114,40 +77,25 @@ func BuildInProcessFleet(ctx context.Context, deps Deps) (fleetservice.Service, 
 }
 
 // missionReportDeliverer is the report router's SessionDeliverer for the
-// IN-PROCESS topology. Per the governing ontology, a mission is a subagent of
-// the process that fired it, and its
-// report must reach THAT parent — which, for a `/mission` fired from a live
-// session, is one of the host's own native stdio sessions, NOT a kernel-owned
-// unit. So the live transport is tried FIRST (Transport.DeliverToContenoxSession
-// maps the firing session's contenox id onto the ACP connection and pushes the
-// update); the kernel is tried second, for the rarer case of a mission fired by
-// an in-process kernel unit's own session. When neither owns the firing session —
-// it has ended, or was never here — both miss and the report router inboxes the
-// report (the true no-live-parent fallback). This is exactly the live delivery
-// the serve-forwarded topology could not make: there the firing session lived in
-// a different process, so the report fell to the inbox as parent-gone.
+// in-process topology: the live transport is tried first, the kernel second,
+// and the report router inboxes the report when neither owns the firing
+// session.
 type missionReportDeliverer struct {
-	// chat resolves the ACP surface that may own the firing session, late-bound
-	// because the host's lone transport does not exist yet when the router is
-	// built. It returns nil when there is none to ask. Both shapes of that surface
-	// implement the same one method: the editor's single *acpsvc.Transport, and
-	// serve's *acpsvc.SessionRouter, which finds the right one of its many
-	// connections by the same contenox session id.
+	// chat is late-bound (the transport doesn't exist yet when the router is
+	// built) and may return nil.
 	chat   func() contenoxSessionDeliverer
 	kernel agentinstance.Manager
 }
 
 // contenoxSessionDeliverer injects an out-of-band update into a chat session
-// addressed by its CONTENOX (internal) session id — the id a mission carries as
-// its ParentSessionID. Declared here, where both implementations are consumed.
+// addressed by its internal session id (a mission's ParentSessionID).
 type contenoxSessionDeliverer interface {
 	DeliverToContenoxSession(ctx context.Context, contenoxSessionID string, n libacp.SessionNotification) error
 }
 
 // chatDeliverer adapts a possibly-nil *acpsvc.Transport to the interface. The
-// explicit nil check is load-bearing: returning a nil *Transport as an interface
-// value yields a NON-nil interface holding a nil pointer, which would sail past
-// the caller's nil guard and panic on the first delivery.
+// nil check is load-bearing: a nil *Transport boxed as an interface is a
+// non-nil interface holding a nil pointer, which would bypass a nil guard.
 func chatDeliverer(t *acpsvc.Transport) contenoxSessionDeliverer {
 	if t == nil {
 		return nil
@@ -172,9 +120,7 @@ func (d missionReportDeliverer) DeliverToSession(ctx context.Context, sessionID 
 }
 
 // transportPrompter adapts the host's late-bound transport to the
-// session-prompting capability the agent-answer offer needs. Late-bound for the
-// same reason the deliverer is: the connection does not exist when the fleet is
-// composed.
+// session-prompting capability the agent-answer offer needs.
 type transportPrompter struct {
 	transport func() *acpsvc.Transport
 }

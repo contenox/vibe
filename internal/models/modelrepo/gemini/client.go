@@ -52,7 +52,7 @@ type geminiThinkingConfig struct {
 	ThinkingLevel  string `json:"thinkingLevel,omitempty"`
 }
 
-// sendRequest: shared HTTP helper for Gemini clients
+// sendRequest is the shared HTTP helper for Gemini clients.
 func (c *geminiClient) sendRequest(ctx context.Context, endpoint string, request interface{}, response interface{}) error {
 	fullURL := fmt.Sprintf("%s%s", c.baseURL, endpoint)
 
@@ -102,7 +102,6 @@ func (c *geminiClient) sendRequest(ctx context.Context, endpoint string, request
 	}
 	defer resp.Body.Close()
 
-	// Log headers via tracker
 	reportChange("http_response", map[string]any{
 		"status_code": resp.StatusCode,
 		"headers":     resp.Header,
@@ -118,9 +117,8 @@ func (c *geminiClient) sendRequest(ctx context.Context, endpoint string, request
 		}
 		respBody, _ := io.ReadAll(resp.Body)
 		if jsonErr := json.Unmarshal(respBody, &eresp); jsonErr == nil && eresp.Error.Message != "" {
-			// Typed sentinel mapping per Gemini's documented shapes:
-			// RESOURCE_EXHAUSTED → rate limit, INVALID_ARGUMENT with token
-			// phrasing → context overflow.
+			// Gemini's documented error shapes: RESOURCE_EXHAUSTED → rate
+			// limit, INVALID_ARGUMENT with token phrasing → context overflow.
 			err = fmt.Errorf("gemini API error: %d %s - %s (model=%s url=%s)",
 				resp.StatusCode, eresp.Error.Status, eresp.Error.Message, c.modelName, fullURL)
 			err = modelrepo.ClassifyProviderError(err, resp.StatusCode, eresp.Error.Status, eresp.Error.Message)
@@ -145,13 +143,11 @@ func (c *geminiClient) sendRequest(ctx context.Context, endpoint string, request
 	return nil
 }
 
-// buildGeminiRequest builds a proper Gemini generateContent request using modelrepo args & tools
-// buildGeminiRequest owns system-prompt extraction (like vertex's
-// buildVertexRequest): system messages are hoisted into systemInstruction here
-// so every caller — chat AND stream — sends them; a caller cannot forget and
+// buildGeminiRequest builds a Gemini generateContent request from modelrepo
+// messages and args. System messages are hoisted into systemInstruction here
+// so every caller (chat and stream) sends them; a caller cannot forget and
 // silently drop the system prompt.
 func buildGeminiRequest(modelName string, messages []modelrepo.Message, args []modelrepo.ChatArgument, canThink ...bool) (geminiGenerateContentRequest, error) {
-	// Collect chat args
 	cfg := &modelrepo.ChatConfig{}
 	for _, a := range args {
 		a.Apply(cfg)
@@ -172,7 +168,6 @@ func buildGeminiRequest(modelName string, messages []modelrepo.Message, args []m
 	}
 	messages = filtered
 
-	// Convert tools -> Gemini tool declarations
 	var tools []geminiToolRequest
 	if len(cfg.Tools) > 0 {
 		decls := make([]geminiFunctionDeclaration, 0, len(cfg.Tools))
@@ -215,7 +210,6 @@ func buildGeminiRequest(modelName string, messages []modelrepo.Message, args []m
 	}
 	req.GenerationConfig.Seed = cfg.Seed
 
-	// Omitting ThinkingConfig means the model uses its default.
 	if thinkingAllowed(canThink) {
 		req.GenerationConfig.ThinkingConfig = geminiThinkingConfigForModel(modelName, cfg.Think)
 	}
@@ -305,34 +299,29 @@ func geminiThinkingBudget(level string) (int, bool) {
 func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 	out := make([]geminiContent, 0, len(messages))
 
-	// Map OpenAI-style tool_call_id -> function name so we can
+	// toolCallNameByID maps tool_call_id -> function name, needed to
 	// populate FunctionResponse.Name for tool responses.
 	toolCallNameByID := make(map[string]string)
 
 	for _, m := range messages {
-		// System messages are handled via SystemInstruction
+		// System messages are handled via SystemInstruction.
 		if m.Role == "system" {
 			continue
 		}
 
-		// Map internal roles to Gemini roles ("user" | "model").
-		// Gemini does NOT accept "tool", so we treat tool responses
-		// as coming from the "user" side.
+		// Gemini roles are "user" | "model"; it does not accept "tool", so
+		// tool responses are sent from the "user" side.
 		var role string
 		switch m.Role {
 		case "assistant", "model":
-			// provider-agnostic "assistant" -> Gemini "model"
 			role = "model"
 		default:
-			// "user", "tool", or anything else -> "user"
 			role = "user"
 		}
 
 		parts := make([]geminiPart, 0)
 
-		// Add text part FIRST if it's not a tool role ---
-		// Handle text content for user/assistant messages.
-		// This ensures text is included even if tool calls/responses follow.
+		// Text goes first, so it's present even if tool calls/responses follow.
 		if m.Content != "" && m.Role != "tool" {
 			parts = append(parts, geminiPart{Text: m.Content})
 		}
@@ -349,10 +338,9 @@ func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 			})
 		}
 
-		// Assistant tool calls: encode as functionCall parts
+		// Assistant tool calls: encode as functionCall parts.
 		if len(m.ToolCalls) > 0 {
 			for _, tc := range m.ToolCalls {
-				// Remember mapping from tool_call_id -> function name
 				if tc.ID != "" && tc.Function.Name != "" {
 					toolCallNameByID[tc.ID] = tc.Function.Name
 				}
@@ -375,11 +363,11 @@ func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 					Args: args,
 				}
 
-				// Gemini 3 requires thoughtSignature at the Part level.
-				// Use the preserved signature from ProviderMeta when available.
-				// For tool calls without a signature (first turn, parallel calls, legacy history)
-				// use the official Google bypass value so the strict validator never rejects the turn.
-				// See: https://ai.google.dev/gemini-api/docs/thought-signatures
+				// Gemini 3 requires thoughtSignature at the Part level: use the
+				// preserved signature from ProviderMeta when available, else
+				// the official Google bypass value so the strict validator
+				// never rejects turns without one (first turn, parallel
+				// calls, legacy history).
 				part := geminiPart{FunctionCall: fc}
 				if sig, ok := tc.ProviderMeta["thought_signature"]; ok && sig != "" {
 					part.ThoughtSignature = sig
@@ -391,10 +379,8 @@ func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 			}
 		}
 
-		// Properly handle tool responses
-		// Tool responses: encode as functionResponse parts if we can
+		// Tool responses: encode as functionResponse parts.
 		if m.Role == "tool" {
-			// Try to find the function name associated with this tool_call_id
 			fnName := ""
 			if m.ToolCallID != "" {
 				if n, ok := toolCallNameByID[m.ToolCallID]; ok {
@@ -412,8 +398,6 @@ func convertToGeminiMessages(messages []modelrepo.Message) []geminiContent {
 			})
 		}
 
-		// 3) Normal text content (user/assistant/system-like)
-		// If we somehow ended up with no parts at all, skip this message
 		if len(parts) == 0 {
 			continue
 		}
@@ -498,13 +482,13 @@ func sanitizeGeminiSchema(schema map[string]any) map[string]any {
 
 	result := make(map[string]any)
 
-	// Handle "type" field specially
 	if typeVal, ok := schema["type"]; ok {
 		switch v := typeVal.(type) {
 		case string:
 			result["type"] = v
 		case []interface{}:
-			// Convert array to string, and optionally set nullable
+			// JSON Schema allows a type array (e.g. for nullable); Gemini
+			// wants a single type string plus a separate nullable flag.
 			var typeStr string
 			nullable := false
 			for _, elem := range v {
@@ -513,14 +497,14 @@ func sanitizeGeminiSchema(schema map[string]any) map[string]any {
 						nullable = true
 						continue
 					}
-					// Take first non-null type as the primary type
+					// First non-null type wins as the primary type.
 					if typeStr == "" {
 						typeStr = s
 					}
 				}
 			}
 			if typeStr == "" {
-				typeStr = "string" // fallback
+				typeStr = "string"
 			}
 			result["type"] = typeStr
 			if nullable {
@@ -529,21 +513,18 @@ func sanitizeGeminiSchema(schema map[string]any) map[string]any {
 		}
 	}
 
-	// Handle other allowed fields
 	for _, field := range []string{"description", "enum", "required"} {
 		if val, ok := schema[field]; ok {
 			result[field] = val
 		}
 	}
 
-	// Recursively handle "items"
 	if items, ok := schema["items"]; ok {
 		if itemsMap, ok := items.(map[string]any); ok {
 			result["items"] = sanitizeGeminiSchema(itemsMap)
 		}
 	}
 
-	// Recursively handle "properties"
 	if props, ok := schema["properties"]; ok {
 		if propsMap, ok := props.(map[string]any); ok {
 			cleanProps := make(map[string]any)
@@ -551,16 +532,14 @@ func sanitizeGeminiSchema(schema map[string]any) map[string]any {
 				if subSchema, ok := v.(map[string]any); ok {
 					cleanProps[k] = sanitizeGeminiSchema(subSchema)
 				} else {
-					// If not a map, keep as is (unlikely)
-					cleanProps[k] = v
+					cleanProps[k] = v // not a map (unlikely); keep as-is
 				}
 			}
 			result["properties"] = cleanProps
 		}
 	}
 
-	// "nullable" may already be set, but if it wasn't, we don't add it.
-	// If it was set originally and not overwritten, preserve it.
+	// Preserve a pre-existing nullable if sanitization didn't set one.
 	if nullable, ok := schema["nullable"]; ok && nullable != nil {
 		if _, exists := result["nullable"]; !exists {
 			result["nullable"] = nullable
@@ -576,23 +555,19 @@ func geminiSanitiseSchema(params any) (*geminiSchema, error) {
 		return nil, nil
 	}
 
-	// Step 1: Marshal to JSON to get a clean representation.
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
 	}
 
-	// Step 2: Unmarshal into a map to manipulate.
 	var schemaMap map[string]any
 	if err := json.Unmarshal(raw, &schemaMap); err != nil {
-		// If it's not an object (e.g., a primitive), we can't do much; treat as empty.
+		// Not an object (e.g. a primitive): treat as empty rather than erroring.
 		schemaMap = make(map[string]any)
 	}
 
-	// Step 3: Recursively sanitize.
 	cleanedMap := sanitizeGeminiSchema(schemaMap)
 
-	// Step 4: Marshal back to JSON and then unmarshal into the strict struct.
 	cleanedRaw, err := json.Marshal(cleanedMap)
 	if err != nil {
 		return nil, err

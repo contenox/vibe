@@ -10,13 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The model/backend allowlist is the ONE compute bound this process cannot
-// enforce by watching: a dispatched unit resolves its own models in its own
-// process, and no ACP session update carries a model identity. So the bound has
-// to travel INTO the unit at session construction, and this test pins that hop —
-// if the allowlist does not reach session/new `_meta`, the envelope's model
-// restriction silently does nothing, which is the exact failure it exists to
-// prevent.
+// TestFleetService_Dispatch_CarriesEnvelopeAllowlistsIntoTheUnitSession: the
+// envelope's model/backend allowlist must reach the unit's session/new `_meta`.
 func TestFleetService_Dispatch_CarriesEnvelopeAllowlistsIntoTheUnitSession(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -47,9 +42,9 @@ func TestFleetService_Dispatch_CarriesEnvelopeAllowlistsIntoTheUnitSession(t *te
 	require.Equal(t, []string{"my-ollama"}, meta.BackendAllowlist)
 }
 
-// An envelope with no allowlist must produce exactly the `_meta` it produced
-// before bounds existed. Every shipped preset is in this case, so a regression
-// here would change the wire for every mission.
+// TestFleetService_Dispatch_UnboundedEnvelopeSendsNoAllowlist: an envelope
+// with no allowlist produces exactly the `_meta` it produced before bounds
+// existed.
 func TestFleetService_Dispatch_UnboundedEnvelopeSendsNoAllowlist(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -74,9 +69,8 @@ func TestFleetService_Dispatch_UnboundedEnvelopeSendsNoAllowlist(t *testing.T) {
 	require.Nil(t, meta.BackendAllowlist)
 }
 
-// Fail-to-unbounded on a bounds-read failure, matching computeBoundsFor's stance:
-// a policy hiccup must not block a dispatch the validator already accepted. The
-// unit still comes up, and still gets its mission id.
+// TestFleetService_Dispatch_BoundsReadFailureStillDispatches: fail-to-unbounded
+// on a bounds-read failure; the unit still comes up.
 func TestFleetService_Dispatch_BoundsReadFailureStillDispatches(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -101,8 +95,8 @@ func TestFleetService_Dispatch_BoundsReadFailureStillDispatches(t *testing.T) {
 	require.Nil(t, meta.ModelAllowlist)
 }
 
-// A fleet built without a bounds reader at all behaves exactly as it did before
-// compute bounds existed.
+// TestFleetService_Dispatch_NoBoundsReaderIsUnbounded: a fleet built without
+// a bounds reader behaves exactly as before compute bounds existed.
 func TestFleetService_Dispatch_NoBoundsReaderIsUnbounded(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)

@@ -21,8 +21,7 @@ func setupAgentRegistryDB(t *testing.T) (context.Context, libdb.DBManager) {
 	return ctx, db
 }
 
-// newChainAgent builds a chain-kind agent declaring chainPath, the sibling of
-// newExternalACPAgent for the second kind.
+// newChainAgent builds a chain-kind agent declaring chainPath.
 func newChainAgent(t *testing.T, name, chainPath string) *runtimetypes.Agent {
 	t.Helper()
 	agent := &runtimetypes.Agent{Name: name, Enabled: true}
@@ -40,8 +39,6 @@ func newExternalACPAgent(name string) *runtimetypes.Agent {
 	}
 	return agent
 }
-
-// ─── validate() table test ─────────────────────────────────────────────────
 
 func TestUnit_Validate(t *testing.T) {
 	tests := []struct {
@@ -119,8 +116,6 @@ func TestUnit_Validate(t *testing.T) {
 	}
 }
 
-// ─── Service CRUD ───────────────────────────────────────────────────────────
-
 func TestUnit_AgentRegistryService_CreateGetUpdateDelete(t *testing.T) {
 	ctx, db := setupAgentRegistryDB(t)
 	svc := New(db)
@@ -164,8 +159,6 @@ func TestUnit_AgentRegistryService_List(t *testing.T) {
 	require.Len(t, items, 3)
 }
 
-// ─── Conflict surfacing ─────────────────────────────────────────────────────
-
 func TestUnit_AgentRegistryService_CreateDuplicateNameConflict(t *testing.T) {
 	ctx, db := setupAgentRegistryDB(t)
 	svc := New(db)
@@ -206,11 +199,7 @@ func TestUnit_AgentRegistryService_UpdateKeepingOwnNameIsNotConflict(t *testing.
 	require.NoError(t, svc.Update(ctx, agent), "updating other fields while keeping the same name must not be a conflict")
 }
 
-// TestUnit_AgentRegistryService_ChainKindRoundTrips pins that the chain kind is
-// a first-class declared agent now: it persists through the same validated CRUD
-// as an external one and reads back through its typed accessor. The registry is
-// the single source of truth for what can be fired, so a chain that cannot be
-// stored here cannot be fired at all.
+// TestUnit_AgentRegistryService_ChainKindRoundTrips pins that a chain agent round-trips through validated CRUD.
 func TestUnit_AgentRegistryService_ChainKindRoundTrips(t *testing.T) {
 	ctx, db := setupAgentRegistryDB(t)
 	svc := New(db)
@@ -229,15 +218,12 @@ func TestUnit_AgentRegistryService_ChainKindRoundTrips(t *testing.T) {
 	require.Equal(t, chainPath, cfg.Path)
 	require.Equal(t, "agent-reviewer", cfg.ChainID)
 
-	// And it resolves through the ONE spawn-path judgement, exactly like an
-	// external agent — no second lookup for the chain kind.
 	resolved, err := ResolveForSpawn(ctx, svc, "reviewer")
 	require.NoError(t, err)
 	require.Equal(t, got.ID, resolved.ID)
 }
 
-// TestUnit_AgentRegistryService_CreateRejectsChainWithoutPath keeps the kind
-// from being a hole: accepting "chain" is not accepting an unconfigured chain.
+// TestUnit_AgentRegistryService_CreateRejectsChainWithoutPath pins that a chain agent without a path is rejected.
 func TestUnit_AgentRegistryService_CreateRejectsChainWithoutPath(t *testing.T) {
 	ctx, db := setupAgentRegistryDB(t)
 	svc := New(db)
@@ -246,15 +232,6 @@ func TestUnit_AgentRegistryService_CreateRejectsChainWithoutPath(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "path is required")
 }
-
-// ─── ResolveForSpawn ────────────────────────────────────────────────────────
-//
-// fleetservice.Dispatch and acpsvc's external bring-up both resolve their
-// agent through this one function (see its doc comment) instead of each
-// re-deriving the Enabled check — these tests pin the contract both callers
-// rely on: an enabled agent resolves, a disabled one is refused with a
-// message naming the remedy and a sentinel callers can branch on, and a
-// resolution failure (unknown agent) passes through un-mangled.
 
 func TestUnit_ResolveForSpawn_EnabledAgentResolves(t *testing.T) {
 	ctx, db := setupAgentRegistryDB(t)

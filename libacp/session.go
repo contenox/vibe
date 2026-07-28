@@ -10,8 +10,8 @@ type SessionID string
 
 type NewSessionRequest struct {
 	Cwd string `json:"cwd"`
-	// AdditionalDirectories are extra workspace roots for this session, on top
-	// of Cwd. Each path must be absolute. Omitted or empty means none.
+	// AdditionalDirectories are extra workspace roots on top of Cwd; each path
+	// must be absolute.
 	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
 	McpServers            []McpServer     `json:"mcpServers"`
 	Meta                  json.RawMessage `json:"_meta,omitempty"`
@@ -20,10 +20,8 @@ type NewSessionRequest struct {
 type NewSessionResponse struct {
 	SessionID SessionID         `json:"sessionId"`
 	Modes     *SessionModeState `json:"modes,omitempty"`
-	// Models is the UNSTABLE Zed model-picker surface (session/set_model + the
-	// `models` state, see SessionModelState) an agent MAY advertise in its
-	// session/new response. Omitted (nil) means the agent exposes no selectable
-	// model, the byte-identical spec-conformant default.
+	// Models is the UNSTABLE model-picker surface (see SessionModelState); nil
+	// means the agent exposes no selectable model.
 	Models        *SessionModelState    `json:"models,omitempty"`
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	Meta          json.RawMessage       `json:"_meta,omitempty"`
@@ -32,9 +30,8 @@ type NewSessionResponse struct {
 type LoadSessionRequest struct {
 	SessionID SessionID `json:"sessionId"`
 	Cwd       string    `json:"cwd"`
-	// AdditionalDirectories are extra workspace roots to activate for this
-	// session, on top of Cwd. Each path must be absolute. Omitted or empty
-	// means none.
+	// AdditionalDirectories are extra workspace roots on top of Cwd; each path
+	// must be absolute.
 	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
 	McpServers            []McpServer     `json:"mcpServers"`
 	Meta                  json.RawMessage `json:"_meta,omitempty"`
@@ -47,9 +44,8 @@ type LoadSessionResponse struct {
 	Meta          json.RawMessage       `json:"_meta,omitempty"`
 }
 
-// SessionModeState is the spec's wire shape for `modes` in session/new and
-// session/load responses: an object carrying the current mode id plus the
-// available modes, not a bare array.
+// SessionModeState is the wire shape for `modes` in session/new and
+// session/load responses: an object, not a bare array.
 type SessionModeState struct {
 	CurrentModeID  string          `json:"currentModeId"`
 	AvailableModes []SessionMode   `json:"availableModes"`
@@ -63,9 +59,8 @@ type SessionMode struct {
 	Meta        json.RawMessage `json:"_meta,omitempty"`
 }
 
-// SetSessionModeRequest is session/set_mode's params: switch a session to a
-// different SessionMode.ID, one of the ids SessionModeState.AvailableModes
-// advertised.
+// SetSessionModeRequest is session/set_mode's params: switch a session to one
+// of the ids SessionModeState.AvailableModes advertised.
 type SetSessionModeRequest struct {
 	SessionID SessionID       `json:"sessionId"`
 	ModeID    string          `json:"modeId"`
@@ -76,25 +71,20 @@ type SetSessionModeResponse struct {
 	Meta json.RawMessage `json:"_meta,omitempty"`
 }
 
-// SessionModelState is the UNSTABLE Zed model-picker surface: the wire shape of
-// the optional `models` field in session/new, session/load, and session/resume
-// responses. It carries the current model id plus the set of selectable models,
-// mirroring SessionModeState for modes. This is an experimental extension (the
-// client-side driver invokes it as `unstable_setSessionModel` and it is dispatched
-// over the `session/set_model` method — see MethodSessionSetModel); it is not part
-// of the stable ACP spec and MAY change.
+// SessionModelState is the UNSTABLE model-picker surface: the wire shape of
+// the optional `models` field in session/new, session/load, and
+// session/resume responses, mirroring SessionModeState for modes. Not part of
+// the stable ACP spec and may change; dispatched over session/set_model (see
+// MethodSessionSetModel).
 type SessionModelState struct {
 	CurrentModelID  string          `json:"currentModelId"`
 	AvailableModels []ModelInfo     `json:"availableModels"`
 	Meta            json.RawMessage `json:"_meta,omitempty"`
 }
 
-// ModelInfo describes a single selectable model in a SessionModelState. ID is the
-// stable identifier passed back in SetSessionModelRequest; Name is the
-// human-readable label. Part of the UNSTABLE Zed model-picker surface. Note that
-// this surface carries no effort/fast-mode facet — a model entry is id + name +
-// optional description only; reasoning-effort controls (if any) live elsewhere,
-// not in this state.
+// ModelInfo describes one selectable model in a SessionModelState. ID is the
+// stable identifier passed back in SetSessionModelRequest. Part of the
+// UNSTABLE model-picker surface; carries no effort/fast-mode facet.
 type ModelInfo struct {
 	ID          string          `json:"modelId"`
 	Name        string          `json:"name"`
@@ -102,19 +92,18 @@ type ModelInfo struct {
 	Meta        json.RawMessage `json:"_meta,omitempty"`
 }
 
-// SetSessionModelRequest is session/set_model's params: switch a session to a
-// different ModelInfo.ID, one of the ids SessionModelState.AvailableModels
-// advertised. Part of the UNSTABLE Zed model-picker surface (see
-// MethodSessionSetModel); the client-side driver names it `unstable_setSessionModel`.
+// SetSessionModelRequest is session/set_model's params: switch a session to
+// one of the ids SessionModelState.AvailableModels advertised. Part of the
+// UNSTABLE model-picker surface (see MethodSessionSetModel).
 type SetSessionModelRequest struct {
 	SessionID SessionID       `json:"sessionId"`
 	ModelID   string          `json:"modelId"`
 	Meta      json.RawMessage `json:"_meta,omitempty"`
 }
 
-// SetSessionModelResponse is session/set_model's result: an empty object (the
-// UNSTABLE surface carries no state back — the requested modelId is authoritative
-// on success, and no session/update notification kind exists to reconfirm it).
+// SetSessionModelResponse is session/set_model's result: always empty — the
+// requested modelId is authoritative on success, and no session/update kind
+// exists to reconfirm it.
 type SetSessionModelResponse struct {
 	Meta json.RawMessage `json:"_meta,omitempty"`
 }
@@ -131,21 +120,18 @@ type SessionConfigOption struct {
 	Description string `json:"description,omitempty"`
 	Category    string `json:"category,omitempty"`
 	Type        string `json:"type"`
-	// CurrentValue is always the Go-side string form: for
-	// SessionConfigOptionTypeSelect it is the selected SessionConfigValue.Value
-	// id; for SessionConfigOptionTypeBoolean it is "true"/"false" (mirroring
-	// SessionConfigOptionValue.AsString). MarshalJSON renders it as a JSON
-	// boolean on the wire for the boolean type, as SessionConfigBoolean
-	// requires; UnmarshalJSON accepts either wire shape back into this string.
+	// CurrentValue is always the Go-side string form: the selected
+	// SessionConfigValue.Value id for Select, "true"/"false" for Boolean.
+	// MarshalJSON renders Boolean as a JSON boolean on the wire; UnmarshalJSON
+	// accepts either wire shape back into this string.
 	CurrentValue string              `json:"currentValue"`
 	Options      SessionConfigValues `json:"options"`
 	Meta         json.RawMessage     `json:"_meta,omitempty"`
 }
 
 // sessionConfigOptionWire is SessionConfigOption's wire shape: CurrentValue is
-// deferred as raw JSON (string for "select", boolean for "boolean"), and
-// Options is a pointer so the "boolean" variant — which the spec's
-// SessionConfigBoolean has no options field for — can omit it entirely.
+// deferred as raw JSON, and Options is a pointer so the "boolean" variant
+// (which has no options field) can omit it entirely.
 type sessionConfigOptionWire struct {
 	ID           string               `json:"id"`
 	Name         string               `json:"name"`
@@ -360,15 +346,14 @@ type SetSessionConfigOptionResponse struct {
 	Meta          json.RawMessage       `json:"_meta,omitempty"`
 }
 
-// ResumeSessionRequest reconnects to an existing session WITHOUT history
+// ResumeSessionRequest reconnects to an existing session without history
 // replay (the client kept its transcript). McpServers is optional here,
 // unlike session/new and session/load.
 type ResumeSessionRequest struct {
 	SessionID SessionID `json:"sessionId"`
 	Cwd       string    `json:"cwd"`
-	// AdditionalDirectories are extra workspace roots to activate for this
-	// session, on top of Cwd. Each path must be absolute. Omitted or empty
-	// means none.
+	// AdditionalDirectories are extra workspace roots on top of Cwd; each path
+	// must be absolute.
 	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
 	McpServers            []McpServer     `json:"mcpServers,omitempty"`
 	Meta                  json.RawMessage `json:"_meta,omitempty"`
@@ -420,8 +405,7 @@ type ListSessionsRequest struct {
 type SessionInfo struct {
 	SessionID SessionID `json:"sessionId"`
 	Cwd       string    `json:"cwd,omitempty"`
-	// AdditionalDirectories is the complete ordered additional-root list
-	// associated with this session, when the agent tracks and reports it.
+	// AdditionalDirectories is the ordered additional-root list, when tracked.
 	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
 	Title                 string          `json:"title,omitempty"`
 	UpdatedAt             string          `json:"updatedAt,omitempty"`

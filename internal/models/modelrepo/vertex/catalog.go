@@ -114,7 +114,6 @@ func vertexRegionalPublisherListURL(vertexLocationBaseURL, publisher string) (st
 	return fmt.Sprintf("%s://%s/v1beta1/publishers/%s/models", scheme, u.Host, publisher), nil
 }
 
-// vertexPublisherModel is one entry from the Vertex Model Garden publisher list.
 // listVertexPublisherModelNames returns model IDs from the Vertex AI publisher
 // list using the regional hostname from the backend URL (same host used for
 // generateContent).

@@ -103,9 +103,9 @@ func TestNew_DefaultsFloor(t *testing.T) {
 	}
 }
 
-// TestTurnSurvivesViewerDetach is the core bug fix: a viewer detaching (a dropped
-// connection) must NOT cancel the turn — it keeps running, keeps emitting, and
-// completes, with its events captured for a still-attached viewer.
+// TestTurnSurvivesViewerDetach pins that a viewer detaching (a dropped
+// connection) does not cancel the turn: it keeps running and completes,
+// with its events captured for a still-attached viewer.
 func TestTurnSurvivesViewerDetach(t *testing.T) {
 	const sid = libacp.SessionID("s1")
 	reg := New(Config{TurnDeadline: 5 * time.Second, GraceWindow: 5 * time.Second, JournalSize: 16})
@@ -146,8 +146,8 @@ func TestTurnSurvivesViewerDetach(t *testing.T) {
 	if got := turn.Result().StopReason; got != libacp.StopReasonEndTurn {
 		t.Fatalf("Result.StopReason = %q, want end_turn", got)
 	}
-	// The survivor saw BOTH events — the turn kept running and journaling after the
-	// drop.
+	// The survivor saw both events: the turn kept running and journaling
+	// after the drop.
 	if got := survivor.texts(); len(got) != 2 || got[0] != "e1" || got[1] != "e2" {
 		t.Fatalf("survivor events = %v, want [e1 e2]", got)
 	}

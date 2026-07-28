@@ -17,8 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// recordingTracker records the (operation, subject, error) of every report so a
-// test can assert WHAT discovery said, not merely that it logged something.
+// recordingTracker records the (operation, subject, error) of every report.
 type recordingTracker struct {
 	mu     sync.Mutex
 	events []trackedEvent
@@ -65,8 +64,7 @@ func setupRegistry(t *testing.T) (context.Context, agentregistryservice.Service)
 	return ctx, agentregistryservice.New(db)
 }
 
-// writeChain writes a minimal VALID chain (an id plus one task — what the shared
-// chain walker requires before it will list a file at all) into dir under name.
+// writeChain writes a minimal valid chain (id plus one task) into dir under name.
 func writeChain(t *testing.T, dir, name, chainID string) string {
 	t.Helper()
 	chain := taskengine.TaskChainDefinition{
@@ -87,10 +85,6 @@ func mustGet(t *testing.T, ctx context.Context, agents agentregistryservice.Serv
 	return agent
 }
 
-// TestUnit_Discover_FilenameConventionDeclaresAnAgent is the core of "naming the
-// file IS the declaration": a chain called agent-*.json becomes a dispatchable
-// agent with no registration step, and a chain that is not named that way — even
-// a perfectly good one sitting beside it — does not.
 func TestUnit_Discover_FilenameConventionDeclaresAnAgent(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
@@ -116,19 +110,13 @@ func TestUnit_Discover_FilenameConventionDeclaresAnAgent(t *testing.T) {
 	require.ErrorIs(t, err, libdb.ErrNotFound, "an undeclared chain is not an agent")
 }
 
-// TestUnit_Discover_ShippedAgenticChainsAreEligibleByID pins the second
-// convention: the agent-shaped chains the runtime ships are eligible under
-// whatever filename they were installed as, and the utility chains shipped
-// alongside them are not — a chain the runtime calls on data the runtime built
-// is a subroutine, not a unit.
+// Shipped agent-shaped chains are eligible by id; shipped utility chains are not.
 func TestUnit_Discover_ShippedAgenticChainsAreEligibleByID(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	// Shipped under their real installed filenames, which differ from their ids.
 	writeChain(t, dir, "default-chain.json", "chain-contenox")
 	writeChain(t, dir, "default-acp-chain.json", "chain-acp")
 	writeChain(t, dir, "headless-acp-chain.json", "chain-acpx")
-	// Utility chains shipped in the same directory.
 	writeChain(t, dir, "chain-compact.json", "chain-compact")
 	writeChain(t, dir, "default-fim-chain.json", "chain-fim")
 	writeChain(t, dir, "default-run-chain.json", "chain-run")
@@ -143,11 +131,7 @@ func TestUnit_Discover_ShippedAgenticChainsAreEligibleByID(t *testing.T) {
 	}
 }
 
-// TestUnit_Discover_IsIdempotent is the acceptance for "running twice changes
-// nothing". It is asserted on the stored row rather than on the return value,
-// because the failure mode worth catching is a blind Update that rewrites
-// updated_at on every startup — which would look like a no-op from the outside
-// while churning the table forever.
+// A repeat pass must not even touch updated_at.
 func TestUnit_Discover_IsIdempotent(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
@@ -177,15 +161,12 @@ func TestUnit_Discover_IsIdempotent(t *testing.T) {
 		require.JSONEq(t, string(was.ConfigJSON), string(now.ConfigJSON))
 	}
 
-	// And a third pass over the same tree is still a no-op.
 	third, err := chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
 	require.Empty(t, third.Created)
 	require.Empty(t, third.Updated)
 }
 
-// TestUnit_Discover_MovedChainIsRewritten covers the other half of idempotency:
-// when the fact on disk really did change, the row follows it.
 func TestUnit_Discover_MovedChainIsRewritten(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	first := t.TempDir()
@@ -204,11 +185,6 @@ func TestUnit_Discover_MovedChainIsRewritten(t *testing.T) {
 	require.Equal(t, moved, cfg.Path)
 }
 
-// TestUnit_Discover_VanishedChainIsDisabledNotDeleted documents what happens to
-// an agent whose chain file went away: the row survives (mission records and
-// telemetry still point at it) but is disabled, so the ONE shared spawn-path
-// judgement refuses it with a message that names the remedy. It is never left as
-// a phantom that would spawn and then fail.
 func TestUnit_Discover_VanishedChainIsDisabledNotDeleted(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
@@ -230,15 +206,11 @@ func TestUnit_Discover_VanishedChainIsDisabledNotDeleted(t *testing.T) {
 	require.ErrorIs(t, err, agentregistryservice.ErrAgentDisabled,
 		"a vanished chain must be refused by the same judgement every other disabled agent is")
 
-	// Still idempotent afterwards: a second pass reports nothing new to disable.
 	again, err := chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
 	require.Empty(t, again.Disabled)
 }
 
-// TestUnit_Discover_NeverReEnablesAnExistingRow pins the deliberate asymmetry:
-// discovery brings a row into existence enabled, but never moves Enabled upward
-// afterwards, so an operator's `contenox agent disable` survives every restart.
 func TestUnit_Discover_NeverReEnablesAnExistingRow(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
@@ -257,8 +229,6 @@ func TestUnit_Discover_NeverReEnablesAnExistingRow(t *testing.T) {
 		"discovery must not undo an operator's decision on the next startup")
 }
 
-// TestUnit_Discover_LeavesForeignRowsAlone: a name already held by an agent this
-// package does not own is not clobbered, whatever is on disk.
 func TestUnit_Discover_LeavesForeignRowsAlone(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
@@ -282,9 +252,7 @@ func TestUnit_Discover_LeavesForeignRowsAlone(t *testing.T) {
 	require.Equal(t, manual.UpdatedAt, got.UpdatedAt)
 }
 
-// TestUnit_Discover_WorkspaceShadowsHome pins root precedence: the same chain id
-// present in two roots resolves to the first one listed, the way every other
-// contenox config file resolves workspace-before-home.
+// The same chain id present in two roots resolves to the first one listed.
 func TestUnit_Discover_WorkspaceShadowsHome(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	workspace, home := t.TempDir(), t.TempDir()
@@ -300,10 +268,7 @@ func TestUnit_Discover_WorkspaceShadowsHome(t *testing.T) {
 	require.Equal(t, winner, cfg.Path)
 }
 
-// TestUnit_Discover_ToleratesMissingAndBrokenInput: a root that does not exist is
-// skipped without being created, and an unparseable file in a real root is
-// skipped without failing the pass — the same fail-soft the shared chain walker
-// already applies everywhere else.
+// A missing root is skipped, not created; an unparseable file skips the pass, not fails it.
 func TestUnit_Discover_ToleratesMissingAndBrokenInput(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
@@ -323,11 +288,6 @@ func TestUnit_Discover_RequiresARegistry(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestUnit_Discover_LintFailingChainIsSkippedAndDisabled: discovery vets every
-// chain before seeding (via taskchainservice.Get's linter), so a chain the
-// linter refuses (1) never seeds the registry and (2) gets its existing
-// discovered row DISABLED through the same path a vanished file takes — sticky:
-// even after the file is fixed, re-enabling is the operator's explicit verb.
 func TestUnit_Discover_LintFailingChainIsSkippedAndDisabled(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
@@ -338,8 +298,6 @@ func TestUnit_Discover_LintFailingChainIsSkippedAndDisabled(t *testing.T) {
 	require.Equal(t, []string{"worker"}, res.Created)
 	require.True(t, mustGet(t, ctx, agents, "worker").Enabled)
 
-	// Break the chain in place: still parseable, still has an id and tasks
-	// (so the walker lists it), but the linter refuses it (unknown handler).
 	broken := taskengine.TaskChainDefinition{
 		ID:    "worker",
 		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
@@ -356,27 +314,17 @@ func TestUnit_Discover_LintFailingChainIsSkippedAndDisabled(t *testing.T) {
 		"a chain the linter refuses must be disabled like a vanished file")
 	require.False(t, mustGet(t, ctx, agents, "worker").Enabled)
 
-	// Fixing the file does NOT auto re-enable: Discover never moves Enabled
-	// upward, so the operator's `contenox agent enable` stays the one verb.
 	writeChain(t, dir, "agent-worker.json", "worker")
 	_, err = chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
 	require.False(t, mustGet(t, ctx, agents, "worker").Enabled)
 }
 
-// TestUnit_Discover_RepeatedRootIsWalkedOnce pins the dedupe. roots is a
-// PRECEDENCE list, so the same directory listed twice can add nothing — the
-// first pass claims every agent it provides and the second would lose all of
-// them to itself. What the duplication DID produce was duplicated diagnostics:
-// every surface whose workspace directory is also ~/.contenox (beam, and
-// `contenox acp` outside a project) passed the same path as both roots, and an
-// operator with one lint-failing chain saw its warning twice on every single
-// startup — which reads as two broken files, not one.
+// The same directory listed twice as roots must not double the diagnostics.
 func TestUnit_Discover_RepeatedRootIsWalkedOnce(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
 	writeChain(t, dir, "agent-good.json", "good")
-	// Parseable and listable, but the linter refuses it — the shape that warns.
 	broken, err := json.Marshal(taskengine.TaskChainDefinition{
 		ID:    "brokenagent",
 		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
@@ -396,11 +344,6 @@ func TestUnit_Discover_RepeatedRootIsWalkedOnce(t *testing.T) {
 	require.Contains(t, reported[0].Error(), "chain file fails validation")
 }
 
-// TestUnit_Discover_ReportsRefusedChainAndDisabledAgent proves both diagnostics
-// this pass produces reach the tracker — the ONLY instrumentation seam here, so
-// an operator's view of "why is my agent missing" lives or dies by these two
-// reports. A chain the linter refuses is reported as it is skipped, and the
-// agent it had already seeded is reported again as it is disabled.
 func TestUnit_Discover_ReportsRefusedChainAndDisabledAgent(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
@@ -412,8 +355,6 @@ func TestUnit_Discover_ReportsRefusedChainAndDisabledAgent(t *testing.T) {
 	require.Empty(t, tracker.errorsFor("discover", "chain_agent"), "a clean pass reports nothing")
 	require.Empty(t, tracker.errorsFor("disable", "chain_agent"))
 
-	// Break the file the agent points at: parseable and listable, refused by the
-	// linter — the shape that reports twice, once per diagnostic.
 	broken, err := json.Marshal(taskengine.TaskChainDefinition{
 		ID:    "worker",
 		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
@@ -435,9 +376,6 @@ func TestUnit_Discover_ReportsRefusedChainAndDisabledAgent(t *testing.T) {
 	require.Contains(t, disabled[0].Error(), "chain agent disabled")
 }
 
-// TestUnit_Discover_WithoutTrackerStillRuns pins the nil-degrades-to-noop
-// contract: instrumentation is an observer here, never a dependency the pass
-// needs to reconcile the registry.
 func TestUnit_Discover_WithoutTrackerStillRuns(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()

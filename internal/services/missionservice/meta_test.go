@@ -8,9 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The compute allowlists must survive the session/new `_meta` hop intact — that
-// hop IS the enforcement path for them (the dispatching process cannot see which
-// model a unit picks, so it hands the bound down instead).
+// TestUnit_MissionMeta_CarriesComputeAllowlistsAcrossTheWire pins that compute allowlists survive the `_meta` hop, trimmed.
 func TestUnit_MissionMeta_CarriesComputeAllowlistsAcrossTheWire(t *testing.T) {
 	raw := missionservice.MarshalMissionMetaBounded(
 		"mission-123",
@@ -26,9 +24,7 @@ func TestUnit_MissionMeta_CarriesComputeAllowlistsAcrossTheWire(t *testing.T) {
 	require.Equal(t, []string{"my-ollama"}, got.BackendAllowlist)
 }
 
-// An unbounded mission must produce byte-for-byte the `_meta` it produced before
-// compute allowlists existed, so nothing changes for every envelope that declares
-// none (which is every shipped preset).
+// TestUnit_MissionMeta_UnboundedMissionIsWireIdentical pins that an unbounded mission's `_meta` is unchanged from before allowlists existed.
 func TestUnit_MissionMeta_UnboundedMissionIsWireIdentical(t *testing.T) {
 	require.JSONEq(t,
 		`{"contenox.mission":{"missionId":"m-1"}}`,
@@ -45,9 +41,7 @@ func TestUnit_MissionMeta_UnboundedMissionIsWireIdentical(t *testing.T) {
 	)
 }
 
-// Fail-soft, exactly as ParseMissionMeta already promised: unrelated or malformed
-// `_meta` reads as "not on a mission" rather than an error, and a mission id with
-// no allowlist reads as unbounded.
+// TestUnit_MissionMeta_FailsSoftAndDefaultsToUnbounded pins that unrelated/malformed `_meta` reads as "not on a mission".
 func TestUnit_MissionMeta_FailsSoftAndDefaultsToUnbounded(t *testing.T) {
 	for _, raw := range []json.RawMessage{
 		nil,
@@ -69,7 +63,7 @@ func TestUnit_MissionMeta_FailsSoftAndDefaultsToUnbounded(t *testing.T) {
 	require.Nil(t, got.BackendAllowlist)
 }
 
-// ParseMissionMeta keeps its existing contract now that it delegates.
+// TestUnit_MissionMeta_LegacyParserStillReportsTheID pins that ParseMissionMeta keeps its contract now that it delegates.
 func TestUnit_MissionMeta_LegacyParserStillReportsTheID(t *testing.T) {
 	id, ok := missionservice.ParseMissionMeta(
 		missionservice.MarshalMissionMetaBounded("m-7", []string{"only-model"}, nil),

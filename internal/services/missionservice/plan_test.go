@@ -10,8 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// planRevisedEvents decodes every PlanRevisedEvent this publisher captured,
-// asserting each rode PlanRevisedSubject.
+// planRevisedEvents decodes every PlanRevisedEvent this publisher captured.
 func (p *fakePublisher) planRevisedEvents(t *testing.T) []PlanRevisedEvent {
 	t.Helper()
 	p.mu.Lock()
@@ -79,8 +78,7 @@ func tooManyEntries(n int) []PlanEntry {
 	return out
 }
 
-// planContentLooksCorrupted flags a heavy backslash density only past the
-// minimum length, so a short escaped string is fine.
+// TestUnit_PlanContentCorruptionHeuristic pins that heavy backslash density flags only past the minimum length.
 func TestUnit_PlanContentCorruptionHeuristic(t *testing.T) {
 	require.False(t, planContentLooksCorrupted(`a\b\c`), "a short escaped string is not corruption")
 	heavy := strings.Repeat(`\`, planEscapeMinLen)
@@ -89,9 +87,7 @@ func TestUnit_PlanContentCorruptionHeuristic(t *testing.T) {
 
 // ─── SetPlan: full-snapshot replace ─────────────────────────────────────────
 
-// The first SetPlan assigns ids to entries lacking one, sets revision 1, stores
-// the explanation, and persists — and returns the stored snapshot so a caller
-// projects exactly what was written.
+// TestUnit_MissionService_SetPlanFirstRevisionAssignsIDsAndPersists pins that the first SetPlan assigns ids, sets revision 1, and persists.
 func TestUnit_MissionService_SetPlanFirstRevisionAssignsIDsAndPersists(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -117,8 +113,7 @@ func TestUnit_MissionService_SetPlanFirstRevisionAssignsIDsAndPersists(t *testin
 	require.Equal(t, "scope the work", persisted.Plan.Entries[0].Content)
 }
 
-// SetPlan is full-snapshot replace: the second call's list wholly replaces the
-// first, deletion is omission, and the revision counter climbs by one.
+// TestUnit_MissionService_SetPlanReplacesWholeSnapshotAndBumpsRevision pins full-snapshot replace: deletion is omission, revision bumps by one.
 func TestUnit_MissionService_SetPlanReplacesWholeSnapshotAndBumpsRevision(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -151,8 +146,7 @@ func TestUnit_MissionService_SetPlanReplacesWholeSnapshotAndBumpsRevision(t *tes
 	require.False(t, ids["drop"], "an omitted entry is deleted from the snapshot")
 }
 
-// The audit-safety guard (blueprint pattern 5): a snapshot may not rewrite the
-// content of an entry that was completed in the prior revision.
+// TestUnit_MissionService_SetPlanRejectsRewritingCompletedEntry pins the audit-safety guard against rewriting completed work.
 func TestUnit_MissionService_SetPlanRejectsRewritingCompletedEntry(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -166,7 +160,6 @@ func TestUnit_MissionService_SetPlanRejectsRewritingCompletedEntry(t *testing.T)
 	}, "rev 1")
 	require.NoError(t, err)
 
-	// Rewriting the completed entry's content (same id) is rejected.
 	_, err = svc.SetPlan(ctx, m.ID, []PlanEntry{
 		entry("done", "shipped the parser AND the lexer", PlanEntryCompleted, PlanEntryPriorityHigh),
 		entry("next", "write the tests", PlanEntryInProgress, PlanEntryPriorityMedium),
@@ -174,15 +167,13 @@ func TestUnit_MissionService_SetPlanRejectsRewritingCompletedEntry(t *testing.T)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already-completed")
 
-	// The prior revision survives the rejected write.
 	persisted, err := svc.Get(ctx, m.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, persisted.Plan.Revision)
 	require.Equal(t, "shipped the parser", persisted.Plan.Entries[0].Content)
 }
 
-// A correction to completed work is allowed as a NEW entry (a new id), and the
-// completed entry may keep its exact content while everything else changes.
+// TestUnit_MissionService_SetPlanAllowsAppendingCorrectionOfCompletedWork pins that a correction may be appended as a new entry.
 func TestUnit_MissionService_SetPlanAllowsAppendingCorrectionOfCompletedWork(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -204,8 +195,7 @@ func TestUnit_MissionService_SetPlanAllowsAppendingCorrectionOfCompletedWork(t *
 	require.Len(t, r2.Plan.Entries, 2)
 }
 
-// Discipline is NOT host-enforced (blueprint pattern 3): a snapshot with more
-// than one in_progress entry is accepted — that rule lives in the planner prompt.
+// TestUnit_MissionService_SetPlanDoesNotEnforceOneInProgress pins that discipline is not host-enforced: multiple in_progress entries are accepted.
 func TestUnit_MissionService_SetPlanDoesNotEnforceOneInProgress(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -233,7 +223,6 @@ func TestUnit_MissionService_SetPlanRejectsInvalidSnapshot(t *testing.T) {
 	_, err = svc.SetPlan(ctx, m.ID, []PlanEntry{entry("e", "   ", PlanEntryPending, PlanEntryPriorityLow)}, "x")
 	require.Error(t, err, "whitespace-only content is rejected")
 
-	// A rejected SetPlan leaves the mission unplanned.
 	persisted, err := svc.Get(ctx, m.ID)
 	require.NoError(t, err)
 	require.Equal(t, 0, persisted.Plan.Revision)
@@ -248,8 +237,7 @@ func TestUnit_MissionService_SetPlanUnknownMissionReturnsNotFound(t *testing.T) 
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }
 
-// A pristine mission carries the zero Plan: revision 0, no entries. This is also
-// exactly what a legacy row written before the plan field existed decodes to.
+// TestUnit_MissionService_FreshMissionHasZeroPlan pins that a pristine mission carries the zero Plan (revision 0, no entries).
 func TestUnit_MissionService_FreshMissionHasZeroPlan(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -265,8 +253,7 @@ func TestUnit_MissionService_FreshMissionHasZeroPlan(t *testing.T) {
 
 // ─── plan_revised events ────────────────────────────────────────────────────
 
-// A successful SetPlan publishes a self-contained PlanRevisedEvent carrying the
-// supervision edge, the revision/explanation, and the counts the inbox renders.
+// TestUnit_MissionService_SetPlanPublishesPlanRevisedEvent pins that SetPlan publishes a self-contained PlanRevisedEvent.
 func TestUnit_MissionService_SetPlanPublishesPlanRevisedEvent(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{}
@@ -317,7 +304,7 @@ func TestUnit_MissionService_SetPlanPublishesPlanRevisedEvent(t *testing.T) {
 	require.Equal(t, 1, second.Pending)
 }
 
-// The removed delta counts an id that vanished from the snapshot.
+// TestUnit_MissionService_PlanRevisedEventCountsRemoved pins that Removed counts an id that vanished from the snapshot.
 func TestUnit_MissionService_PlanRevisedEventCountsRemoved(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{}
@@ -342,8 +329,7 @@ func TestUnit_MissionService_PlanRevisedEventCountsRemoved(t *testing.T) {
 	require.Equal(t, 0, evs[1].Added)
 }
 
-// The best-effort invariant: a publish failure never turns a durably-stored plan
-// revision into a failed SetPlan.
+// TestUnit_MissionService_SetPlanPublishFailureDoesNotFailSetPlan pins that a publish failure never fails an already-durable SetPlan.
 func TestUnit_MissionService_SetPlanPublishFailureDoesNotFailSetPlan(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{err: fmt.Errorf("bus is down")}
@@ -360,8 +346,7 @@ func TestUnit_MissionService_SetPlanPublishFailureDoesNotFailSetPlan(t *testing.
 	require.Equal(t, 1, persisted.Plan.Revision, "the plan is durable regardless of the routing nudge")
 }
 
-// The publisher is optional: a service built without one stores plans and simply
-// publishes nothing.
+// TestUnit_MissionService_SetPlanNoPublisherStillStores pins that a service built without a publisher stores plans and publishes nothing.
 func TestUnit_MissionService_SetPlanNoPublisherStillStores(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db) // no publisher
@@ -379,9 +364,7 @@ func TestUnit_MissionService_SetPlanNoPublisherStillStores(t *testing.T) {
 
 // ─── plan-revision history ring (Mission.PlanRevisions) ─────────────────────
 
-// Every successful SetPlan appends one summary to the durable ring, in
-// chronological (oldest-first) order, and the ring is present on the mission GET
-// even with NO bus wired — the history is a durable fact, not a routing nudge.
+// TestUnit_MissionService_PlanRevisionsAccrueOnGet pins that each SetPlan appends one oldest-first summary, durable without a bus.
 func TestUnit_MissionService_PlanRevisionsAccrueOnGet(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db) // deliberately no publisher: the ring must not depend on the bus
@@ -416,9 +399,7 @@ func TestUnit_MissionService_PlanRevisionsAccrueOnGet(t *testing.T) {
 	require.Equal(t, 1, got.PlanRevisions[1].Pending)
 }
 
-// The ring is bounded at maxPlanRevisions: past that, the oldest summaries drop
-// and only the last N survive, so a heavily-replanned mission cannot grow its KV
-// row without limit.
+// TestUnit_MissionService_PlanRevisionsRingIsBounded pins that the ring keeps only the last maxPlanRevisions summaries.
 func TestUnit_MissionService_PlanRevisionsRingIsBounded(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -437,15 +418,12 @@ func TestUnit_MissionService_PlanRevisionsRingIsBounded(t *testing.T) {
 	got, err := svc.Get(ctx, m.ID)
 	require.NoError(t, err)
 	require.Len(t, got.PlanRevisions, maxPlanRevisions, "the ring is capped at the last N")
-	// The oldest kept is revision total-N+1; the newest is total. Ordering holds.
 	require.Equal(t, total-maxPlanRevisions+1, got.PlanRevisions[0].Revision, "the oldest kept summary")
 	require.Equal(t, total, got.PlanRevisions[maxPlanRevisions-1].Revision, "the newest summary is last")
 	require.Equal(t, total, got.Plan.Revision, "the live revision counter keeps climbing past the ring")
 }
 
-// The stored summaries carry the SAME numbers as the published PlanRevisedEvent
-// for the same revision — they are built from one value in SetPlan, so history
-// and nudge can never drift.
+// TestUnit_MissionService_PlanRevisionsMatchPublishedEvents pins that the stored summary and published event carry identical numbers.
 func TestUnit_MissionService_PlanRevisionsMatchPublishedEvents(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	pub := &fakePublisher{}
@@ -484,10 +462,7 @@ func TestUnit_MissionService_PlanRevisionsMatchPublishedEvents(t *testing.T) {
 	}
 }
 
-// A legacy mission row written before the PlanRevisions field existed carries no
-// `planRevisions` key; it must decode to a nil ring with everything else intact,
-// exactly like the zero-Plan legacy story. omitempty guarantees the field is
-// absent (not `null`) on any never-revised mission written today, too.
+// TestUnit_MissionService_LegacyMissionDecodesToNilRing pins that a row with no planRevisions key decodes to a nil ring.
 func TestUnit_MissionService_LegacyMissionDecodesToNilRing(t *testing.T) {
 	legacy := `{
 		"id": "legacy-1",
@@ -505,8 +480,7 @@ func TestUnit_MissionService_LegacyMissionDecodesToNilRing(t *testing.T) {
 	require.Equal(t, 3, m.Plan.Revision, "the rest of the record still parses")
 	require.Len(t, m.Plan.Entries, 1)
 
-	// And a freshly-planned mission never revised through SetPlan still marshals
-	// without a planRevisions key (omitempty), so it round-trips as a legacy row.
+	// A never-revised mission also marshals without the key (omitempty).
 	fresh := Mission{ID: "fresh", Intent: "x"}
 	raw, err := json.Marshal(fresh)
 	require.NoError(t, err)

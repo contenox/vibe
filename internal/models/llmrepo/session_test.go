@@ -39,7 +39,6 @@ func TestUnit_SessionKeyContext_RoundTripAndPrecedence(t *testing.T) {
 		t.Fatalf("round trip failed, got %q", got)
 	}
 
-	// Explicit Request.SessionKey wins over the context bridge.
 	if got := effectiveSessionKey(ctx, Request{SessionKey: "req-key"}); got != "req-key" {
 		t.Fatalf("explicit request key must win, got %q", got)
 	}
@@ -60,9 +59,8 @@ func applyAll(opts []libmodelprovider.ChatArgument) libmodelprovider.ChatConfig 
 	return cfg
 }
 
+// Same registry contents advertised in two different enumeration orders must serialize byte-identically after canonicalization.
 func TestUnit_CanonicalToolOrder_ByteIdenticalAcrossInputOrder(t *testing.T) {
-	// Same registry contents advertised in two different enumeration orders
-	// must serialize byte-identically after llmrepo's canonicalization pass.
 	hints := providerCacheHints(nil, "")
 	orderA := withCanonicalRequestShape([]libmodelprovider.ChatArgument{
 		libmodelprovider.WithTools(fnTool("function", "local_fs.read"), fnTool("function", "local_shell.exec")),
@@ -119,10 +117,8 @@ func TestUnit_WithCanonicalRequestShape_DoesNotMutateCaller(t *testing.T) {
 	}
 }
 
+// With no caller hints, llmrepo synthesizes StableSystem+StableTools with no history assertion, keyed by the resolved session key.
 func TestUnit_ProviderCacheHints_DefaultsAreConservativeProducer(t *testing.T) {
-	// No caller hints: llmrepo synthesizes StableSystem+StableTools (both are
-	// byte-stable post-canonicalization) with no history assertion, keyed by
-	// the resolved session key — caching activates with zero caller changes.
 	h := providerCacheHints(nil, "session-key-hash")
 	if !h.StableSystem || !h.StableTools {
 		t.Fatalf("defaults must assert system+tools stability, got %+v", h)
@@ -154,7 +150,6 @@ func TestUnit_ProviderCacheHints_ExplicitHintsTranslate(t *testing.T) {
 	if h.TTL.Hours() != 1 {
 		t.Fatalf("TTL must parse, got %v", h.TTL)
 	}
-	// Unparseable TTLs degrade to the provider default, never fail.
 	if got := providerCacheHints(&CacheHints{TTL: "soon"}, ""); got.TTL != 0 {
 		t.Fatalf("invalid TTL must degrade to zero, got %v", got.TTL)
 	}
@@ -187,7 +182,6 @@ func TestUnit_MergeTokenUsage_ZeroMeansNotReported(t *testing.T) {
 	if dst.PromptTokens != 100 || dst.CompletionTokens != 7 || dst.TotalTokens != 107 {
 		t.Fatalf("split reports must accumulate, got %+v", dst)
 	}
-	// A later report never zeroes an earlier field.
 	mergeTokenUsage(&dst, &libmodelprovider.TokenUsage{CompletionTokens: 9})
 	if dst.PromptTokens != 100 || dst.CompletionTokens != 9 {
 		t.Fatalf("later nonzero fields override, zero fields keep prior values, got %+v", dst)

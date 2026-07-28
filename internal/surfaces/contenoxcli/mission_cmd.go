@@ -1,10 +1,7 @@
 // mission_cmd.go holds the `contenox mission` verbs: durable reads over the
-// mission store (list/show/reports) and the blocking in-process fire
-// (`mission fire --wait`). The verbs are THIN — reads go straight through
-// missionservice over the same SQLite the editor writes, and fire composes the
-// fleet through fleetservice.BuildInProcess (the same service constructor the
-// ACP editor embeds) — per the build-on-services rule: no orchestration lives
-// here, only flags, rendering, and exit codes.
+// mission store (list/show/reports) and the blocking in-process fire (`mission
+// fire --wait`). Reads go straight through missionservice; fire composes the
+// fleet through fleetservice.BuildInProcess. No orchestration lives here.
 package contenoxcli
 
 import (
@@ -214,9 +211,8 @@ See declared agents with 'contenox agent list'.`,
 }
 
 // missionWaitPollInterval is how often `mission fire --wait` re-reads the
-// mission record while waiting for a terminal status. Polling (not the bus) is
-// deliberate for a one-shot verb: the terminal status is a durable fact, and a
-// couple of seconds of read latency is invisible next to a mission's runtime.
+// mission record. Polling, not the bus: a durable fact, and read latency is
+// invisible next to a mission's runtime.
 const missionWaitPollInterval = 2 * time.Second
 
 // missionReportsReadLimit bounds how many reports the read verbs fetch — ample
@@ -255,11 +251,8 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// Seed the embedded HITL policy presets into ~/.contenox (best-effort, never
-	// overwriting) so the default envelopes exist on a box that has not run
-	// `contenox acp` yet. A failure is not fatal: the policy validator below
-	// refuses a dispatch whose envelope genuinely cannot be loaded, with a
-	// message naming the fix.
+	// Best-effort, never overwriting: seeds default envelopes on a box that
+	// has not run `contenox acp` yet.
 	if home, herr := globalContenoxDir(); herr == nil {
 		_ = writeEmbeddedHITLPolicies(home, false)
 	}
@@ -279,10 +272,9 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		tracker = libtracker.NewTextActivityTracker(os.Stderr)
 	}
 
-	// The ONE bus this process owns, shared between the mission store's publisher
-	// and the fleet's report router (built inside BuildInProcess), so a unit's
-	// cross-process ReportAddedEvent reaches the router and falls through to the
-	// operator inbox — this operator-fired mission has no parent session.
+	// Shared between the mission store's publisher and the fleet's report
+	// router, so a unit's report falls through to the operator inbox — this
+	// operator-fired mission has no parent session.
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
 	missions := missionservice.New(db, missionservice.WithEventPublisher(bus))
@@ -301,15 +293,13 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 			discoverChainAgents(dctx, agents, contenoxDir, tracker)
 		},
 		// No SessionDeliverer or AgentSupervisor: this process hosts no chat
-		// sessions, so kernel-only delivery is right and every report of this
-		// parentless mission lands in the operator inbox / durable store.
+		// sessions, so every report lands in the operator inbox / durable store.
 		Stderr: os.Stderr,
 	})
 	if err != nil {
 		return err
 	}
-	// Children die with the parent: the teardown Closes the kernel, reaping the
-	// dispatched unit, on every exit path — landed, failed, timed out, or Ctrl-C.
+	// Children die with the parent, on every exit path.
 	defer stopFleet()
 
 	timeout, _ := cmd.Flags().GetDuration("timeout")
@@ -353,16 +343,13 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// errMissionWaitTimeout reports that a mission was still open when the wait
-// budget ran out — a branchable sentinel so the caller can render the honest
-// teardown message and choose the exit code.
+// errMissionWaitTimeout is a branchable sentinel for the wait budget running
+// out while the mission is still open.
 var errMissionWaitTimeout = errors.New("mission wait timed out")
 
-// waitForTerminalMission polls the mission store every interval until mission
-// id reaches a terminal status (anything but open), the timeout elapses
-// (errMissionWaitTimeout), or ctx is cancelled. A transient read error does not
-// abort the wait — the next tick retries — but an immediately-unreadable
-// mission would surface on the first read the caller performed before waiting.
+// waitForTerminalMission polls the mission store until id reaches a terminal
+// status, the timeout elapses, or ctx is cancelled. A transient read error
+// does not abort the wait; the next tick retries.
 func waitForTerminalMission(ctx context.Context, missions missionservice.Service, id string, interval, timeout time.Duration) (*missionservice.Mission, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
@@ -658,9 +645,8 @@ func runMissionStop(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// Publisher-wired on purpose: the terminal-status event is what reaches the
-	// LIVE host of the unit (an editor process, a --wait fire in another
-	// terminal) over the shared SQLite bus and makes it reap the subprocess.
+	// Publisher-wired: the terminal-status event reaches the unit's live host
+	// over the shared bus and makes it reap the subprocess.
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
 	missions := missionservice.New(db, missionservice.WithEventPublisher(bus))
@@ -713,11 +699,8 @@ func runMissionAsks(cmd *cobra.Command, args []string) error {
 		return renderMissionAsksTable(cmd.OutOrStdout(), map[string]*missionservice.Mission{m.ID: m}, asks, now)
 	}
 
-	// No mission id: every OPEN mission's pending asks. hitlservice has no
-	// cross-mission "every pending attention ask" read — PendingAttentionAsks
-	// is scoped to one mission — so this iterates the open missions and asks
-	// each in turn, exactly as a supervisor without a single mission in mind
-	// would have to.
+	// No mission id: hitlservice has no cross-mission read, so iterate every
+	// open mission and ask each in turn.
 	limit, _ := cmd.Flags().GetInt("limit")
 	ms, err := missions.List(ctx, nil, limit)
 	if err != nil {
@@ -761,13 +744,10 @@ func openMissionService(cmd *cobra.Command) (io.Closer, missionservice.Service, 
 	return db, missionservice.New(db), nil
 }
 
-// openMissionAndHitlServices opens the shared database and builds both a
-// missionservice and a hitlservice.Service over it — the same hitlservice
-// construction openApprovalsService uses (NewWithDefaultPolicy over the same
-// policy source and store), so a mission-side read of what is pending agrees
-// byte-for-byte with what 'contenox approvals' considers pending. Used by
-// verbs that READ asks in mission scope ('mission show', 'mission asks')
-// without owning answering them — that stays 'contenox approvals respond'.
+// openMissionAndHitlServices opens the shared database and builds a
+// missionservice and hitlservice over it, matching openApprovalsService's
+// construction so a mission-side read of pending asks agrees byte-for-byte
+// with 'contenox approvals'.
 func openMissionAndHitlServices(cmd *cobra.Command) (io.Closer, missionservice.Service, hitlservice.Service, error) {
 	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {

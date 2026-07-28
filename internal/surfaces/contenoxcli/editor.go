@@ -51,13 +51,8 @@ func captureFromEditor(seed []byte, modelHint string) (string, error) {
 	finalHash := sha256.Sum256(final)
 	if bytes.Equal(initialHash[:], finalHash[:]) {
 		if len(seed) > 0 {
-			// Exiting without touching the buffer is not "empty" when a seed
-			// was provided — it means "keep the seed as-is". beam: Ctrl+E
-			// then :q must not destroy the draft under a false empty-prompt
-			// message. chat -e: an unedited piped-stdin seed means "send the
-			// piped content". Echo the original seed back verbatim; do not
-			// re-derive it from the template, or a stripping bug could
-			// reintroduce scaffolding on every round trip.
+			// Unedited buffer with a seed means "keep the seed as-is"; echo it
+			// back verbatim rather than re-deriving it from the template.
 			return string(seed), nil
 		}
 		// No seed and nothing written: there is genuinely nothing to send.
@@ -75,23 +70,10 @@ func captureFromEditor(seed []byte, modelHint string) (string, error) {
 // instructional banner, top and bottom.
 const templateBannerRule = "# ---------------------------------------------------------"
 
-// buildEditorTemplate lays out the scratch file handed to $EDITOR.
-//
-// With a seed (beam's Ctrl+E carrying the current draft, or chat -e's piped
-// stdin), the seed is the first thing in the file — above the banner — so
-// the editor's cursor (which opens at the top of the file) lands on it and
-// the "write your prompt above" instruction is literally true. A single
-// blank line separates the seed from the banner below it.
-//
-// With no seed, the shape is unchanged from before: a blank line above the
-// banner is where the cursor lands, ready for the operator to type into.
-//
-// stripCommentLines() is this function's exact inverse for the scaffolding
-// it inserts: the banner block plus the one blank line that sits against it.
-// Keep the two in sync — anything added here that isn't a '#'-prefixed line
-// or that single boundary blank will leak into the returned prompt and, on
-// a repeated round trip (seed in, edited draft out, fed back in as the next
-// seed), accumulate.
+// buildEditorTemplate lays out the scratch file handed to $EDITOR. A seed is
+// placed above the banner so the cursor lands on it; with no seed, a blank
+// line above the banner is where typing starts. stripCommentLines is this
+// function's exact inverse for the scaffolding it inserts, so keep them in sync.
 func buildEditorTemplate(seed []byte, modelHint string) []byte {
 	var b strings.Builder
 	if len(seed) > 0 {
@@ -112,22 +94,10 @@ func buildEditorTemplate(seed []byte, modelHint string) []byte {
 	return []byte(b.String())
 }
 
-// stripCommentLines drops the template's own scaffolding from an edited
-// buffer: every '#'-prefixed banner line, plus exactly the one blank line
-// that sits directly against a comment block (the boundary blank
-// buildEditorTemplate inserts immediately before the banner, whether that
-// puts it at the very top of the file with no seed, or between the seed and
-// the banner with one).
-//
-// The trim is bounded to that single adjacent line on purpose: only a blank
-// line immediately followed by a comment line is scaffolding. Any other
-// blank line — a leading blank the operator typed on purpose, a paragraph
-// break in the middle of their prompt — is indistinguishable from real
-// content and must survive untouched. Without this bound, a draft that
-// legitimately starts with a blank line would get eaten, and conversely a
-// looser trim (e.g. TrimLeft of all leading whitespace) would still leave
-// the boundary blank free to accumulate one extra newline per round trip
-// when the seed is re-fed through this same template.
+// stripCommentLines drops the template's scaffolding from an edited buffer:
+// every '#'-prefixed banner line, plus exactly the one blank line directly
+// adjacent to a comment block. Any other blank line is indistinguishable
+// from real content and must survive untouched.
 func stripCommentLines(s string) string {
 	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))

@@ -7,9 +7,9 @@ import (
 	"github.com/contenox/beam/internal/models/modelrepo"
 )
 
-// LocalProviderAdapter creates providers for self-hosted backends (Ollama, vLLM)
+// LocalProviderAdapter creates providers for self-hosted backends (Ollama, vLLM).
 func LocalProviderAdapter(ctx context.Context, tracker libtracker.ActivityTracker, runtime map[string]BackendRuntimeState) ProviderFromRuntimeState {
-	// Create a flat list of providers (one per model per backend)
+	// One flat list of providers, one per model per backend.
 	providersByType := make(map[string][]modelrepo.Provider)
 
 	for _, state := range runtime {
@@ -43,8 +43,8 @@ func LocalProviderAdapter(ctx context.Context, tracker libtracker.ActivityTracke
 	}
 
 	return func(ctx context.Context, backendTypes ...string) ([]modelrepo.Provider, error) {
-		// If no specific backend types requested (or only empty strings from an
-		// unconfigured default-provider), return providers from ALL backend types.
+		// No specific backend types requested (or only empty strings from an
+		// unconfigured default provider): return providers from every backend type.
 		hasNonEmpty := false
 		for _, bt := range backendTypes {
 			if bt != "" {

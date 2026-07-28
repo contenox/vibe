@@ -7,27 +7,10 @@ import (
 	"github.com/contenox/beam/libacp"
 )
 
-// presenceAgent decorates the ACP transport to feed the fleet-presence reporter
-// two facts it cannot see from outside the connection: WHO the client is (from
-// the initialize handshake — Zed identifies itself, and all editors share the
-// `contenox acp` subcommand, so the client name is the only thing that tells them
-// apart on the board) and HOW MANY sessions are open (the session-lifecycle
-// methods).
-//
-// It works by EMBEDDING the libacp.Agent interface: every method it does not
-// override is promoted to the real transport unchanged, so this decorator adds
-// presence bookkeeping without reimplementing — or even knowing — the transport's
-// behavior. That is deliberately why presence stays out of acpsvc entirely: the
-// runtime's ACP transport is under active change, and a read-only observer at the
-// CLI seam has no business editing it. Every Update is best-effort and
-// non-blocking (the reporter coalesces), so decorating never slows a real ACP
-// call.
-//
-// The session count is an APPROXIMATION maintained by counting opens against
-// closes — accurate for the common editor case (a handful of tabs opened and
-// closed explicitly), and self-correcting on the next real open/close; a session
-// that vanishes only when the whole connection drops is captured by the process
-// exiting and its presence row aging out, not by this counter.
+// presenceAgent decorates the ACP transport to feed the fleet-presence
+// reporter the attached client name and open session count; other methods
+// promote to the real transport unchanged. The session count is an
+// approximation from counting opens/closes, self-correcting over time.
 type presenceAgent struct {
 	libacp.Agent
 	reporter *presence.Reporter
@@ -39,8 +22,7 @@ func newPresenceAgent(agent libacp.Agent, reporter *presence.Reporter) libacp.Ag
 
 func (p *presenceAgent) Initialize(ctx context.Context, req libacp.InitializeRequest) (libacp.InitializeResponse, error) {
 	resp, err := p.Agent.Initialize(ctx, req)
-	// Capture the client identity regardless of the transport's own outcome: even
-	// a setup-only initialize tells us which editor is attached.
+	// Capture the client identity regardless of the transport's own outcome.
 	if req.ClientInfo != nil && req.ClientInfo.Name != "" {
 		name := req.ClientInfo.Name
 		p.reporter.Update(func(rec *presence.Record) { rec.ClientName = name })

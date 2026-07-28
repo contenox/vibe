@@ -92,10 +92,7 @@ func TestUnit_CatalogProvider_ListModels(t *testing.T) {
 	require.True(t, provider.CanVision(), "gpt-5 vision flows through to the provider")
 }
 
-// TestUnit_CatalogProvider_VisionLandmines verifies the maintained OpenAI vision
-// list flows through ListModels for the tricky splits: base gpt-4 and the *-mini
-// reasoning models are text-only, gpt-4o/o4-mini have vision, and audio models
-// (which are not chat) never claim it.
+// Base gpt-4 and *-mini reasoning models are text-only; gpt-4o/o4-mini have vision; audio models never claim it.
 func TestUnit_CatalogProvider_VisionLandmines(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -11,40 +11,32 @@ import (
 	"github.com/contenox/beam/internal/services/missionservice"
 )
 
-// The SUPERVISOR half of this package's tool surface: what a session that FIRED
-// missions may see and do about them. It is deliberately a different set from the
-// unit's own (report/ask/plan/finish) and gated on a different fact — the unit
-// tools unlock for the session that IS a mission, these unlock for a session that
-// HAS missions.
-//
-// It exists because a firing session was blind by construction. `/mission` is a
-// slash command the transport handles, so the agent driving that session never saw
-// the dispatch happen; the only trace it got was the confirmation text in its
-// history, and it had no way to ask what became of the unit or to answer a
-// question the unit escalated. A supervisor that can only be told things, never
-// look or reply, is not supervising.
+// The supervisor half of this package's tool surface: what a session that
+// fired missions may see and do about them. Distinct from the unit's own
+// tools (report/ask/plan/finish) and gated on a different fact — unit tools
+// unlock for a session that IS a mission, these unlock for a session that
+// HAS missions. It exists because `/mission` dispatches without the firing
+// session seeing it happen, leaving it unable to check status or answer a
+// unit's question without these tools.
 const (
-	// ToolNameListMissions lists the missions THIS session fired.
+	// ToolNameListMissions lists the missions this session fired.
 	ToolNameListMissions = "mission_list"
-	// ToolNameAnswer answers a question raised by one of THIS session's missions.
+	// ToolNameAnswer answers a question raised by one of this session's missions.
 	ToolNameAnswer = "mission_answer"
 )
 
-// SupervisorStore is what a firing session is allowed to read: its OWN missions,
-// nothing else. Narrow on purpose — a supervisor has no business listing another
-// session's work, so the lookup is by parent session id rather than a general
-// list with a filter the caller could widen.
+// SupervisorStore is what a firing session may read: its own missions only,
+// looked up by parent session id rather than a general list a caller could widen.
 type SupervisorStore interface {
 	// MissionsFiredBy returns the missions whose ParentSessionID is
 	// parentSessionID, newest first.
 	MissionsFiredBy(ctx context.Context, parentSessionID string, limit int) ([]*missionservice.Mission, error)
-	// ListReports returns a mission's reports, newest first — what the unit has
-	// said so far, which is most of what "how is it going" means.
+	// ListReports returns a mission's reports, newest first.
 	ListReports(ctx context.Context, missionID string, limit int) ([]*missionservice.Report, error)
 }
 
-// PendingAsk is one unanswered question from a unit, as a supervisor sees it: the
-// question, and the handle to answer it with.
+// PendingAsk is one unanswered question from a unit: the question, and the
+// handle to answer it with.
 type PendingAsk struct {
 	AskID     string `json:"askId"`
 	MissionID string `json:"missionId"`
@@ -53,23 +45,20 @@ type PendingAsk struct {
 	AskedAt   string `json:"askedAt,omitempty"`
 }
 
-// AttentionResolver is the answering half of the supervisor surface: find what a
-// mission is waiting on, and answer it. Kept separate from SupervisorStore
-// because the two live in different services (missions vs the durable ask store),
-// and this package refuses to know that.
+// AttentionResolver is the answering half of the supervisor surface: find
+// what a mission is waiting on, and answer it. Kept separate from
+// SupervisorStore since the two live in different services.
 type AttentionResolver interface {
 	// PendingAsks returns the unanswered questions for missionID.
 	PendingAsks(ctx context.Context, missionID string) ([]PendingAsk, error)
-	// AnswerAsAgent resolves askID with text, recorded as answered by an AGENT
-	// rather than by a human — the distinction the envelope's cap is counted on.
+	// AnswerAsAgent resolves askID with text, recorded as answered by an
+	// agent rather than a human — a distinction the envelope's cap counts on.
 	AnswerAsAgent(ctx context.Context, askID, text string) error
 }
 
-// WithParentSessionID marks ctx as belonging to a session that may supervise its
-// own missions, unlocking the supervisor tools for it. It is the mirror of
-// WithMissionID: that one says "you ARE a mission", this one says "you HAVE
-// missions", and a session is never both (a dispatched unit does not fire its own
-// subagents today).
+// WithParentSessionID marks ctx as belonging to a session that may supervise
+// its own missions. The mirror of WithMissionID: that says "you ARE a
+// mission", this says "you HAVE missions" — a session is never both.
 func WithParentSessionID(ctx context.Context, contenoxSessionID string) context.Context {
 	if strings.TrimSpace(contenoxSessionID) == "" {
 		return ctx
@@ -131,10 +120,9 @@ func answerToolSchema() taskengine.Tool {
 	}
 }
 
-// execListMissions answers "what did I dispatch, and does anything need me?" for
-// the calling session. The pending questions are folded in rather than left to a
-// second call: a supervisor that has to discover it must ask again usually does
-// not.
+// execListMissions answers "what did I dispatch, and does anything need me?"
+// for the calling session, folding in pending questions rather than
+// requiring a second call.
 func (p *provider) execListMissions(ctx context.Context, parentSessionID string) (any, taskengine.DataType, error) {
 	if p.supervisor == nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: mission supervision is not wired in this process")
@@ -183,12 +171,9 @@ const (
 	supervisorReportLimit  = 5
 )
 
-// execAnswer resolves one of the caller's own units' questions.
-//
-// Ownership is checked, not assumed: the ask must belong to a mission THIS session
-// fired. Without that check a session could answer another session's unit by
-// guessing an id — and an answer is not a read, it is an instruction the unit acts
-// on immediately.
+// execAnswer resolves one of the caller's own units' questions. Ownership is
+// checked, not assumed: the ask must belong to a mission this session fired,
+// since an answer is an instruction the unit acts on immediately, not a read.
 func (p *provider) execAnswer(ctx context.Context, parentSessionID string, input any, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	if p.resolver == nil || p.supervisor == nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: mission supervision is not wired in this process")
@@ -218,9 +203,7 @@ func (p *provider) execAnswer(ctx context.Context, parentSessionID string, input
 			return fmt.Sprintf("answered %s — unit %q has your reply and continues", askID, m.AgentName), taskengine.DataTypeString, nil
 		}
 	}
-	// Not found among the caller's own pending asks: either it is not theirs to
-	// answer, or it was already answered (by a human in the inbox, or by its own
-	// timeout). Both are the same instruction to the model — stop trying — so they
-	// get one honest message rather than a probe that distinguishes them.
+	// Not found among the caller's own pending asks: not theirs, or already
+	// resolved. Both get one honest message — stop trying.
 	return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: %q is not a question your missions are currently waiting on (already answered, expired, or not yours)", askID)
 }

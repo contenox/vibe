@@ -9,9 +9,7 @@ import (
 	"github.com/contenox/beam/internal/services/hitlservice"
 )
 
-// The CLI prompt and comp/approval's card are two renderings of one gate, and
-// an argument that reads as a lie on one reads as a lie on the other. These
-// tests pin the CLI half of that shared contract.
+// These tests pin the CLI half of the rendering contract shared with comp/approval's card.
 
 const cliScriptCode = `const notes = host.tool("local_fs.read_file", { path: "CHANGELOG.md" });
 if (!notes) {
@@ -25,10 +23,7 @@ func renderToString(req hitlservice.ApprovalRequest) string {
 	return b.String()
 }
 
-// TestUnit_MultiLineArgPrintsAsABlock is defect 1 on this surface: a code
-// argument was printed with its newlines written out as literal "\n" and cut at
-// 240 bytes, so the one argument that had to be read was the least readable
-// thing above the prompt.
+// TestUnit_MultiLineArgPrintsAsABlock asserts a multi-line code argument renders as a readable block, not an escaped one-liner truncated at 240 bytes.
 func TestUnit_MultiLineArgPrintsAsABlock(t *testing.T) {
 	out := renderToString(hitlservice.ApprovalRequest{
 		ToolsName: "goja",
@@ -43,7 +38,7 @@ func TestUnit_MultiLineArgPrintsAsABlock(t *testing.T) {
 	if !strings.Contains(out, "    code =\n") {
 		t.Fatalf("no block header for the code argument:\n%s", out)
 	}
-	// And a backslash-n that is part of the SOURCE stays one: the block neither
+	// A backslash-n that is part of the source stays one: the block neither
 	// escapes newlines nor un-escapes what the author wrote.
 	if !strings.Contains(out, `      return { lines: notes.split("\n").length };`) {
 		t.Fatalf("the source's own escape was rewritten:\n%s", out)
@@ -60,10 +55,7 @@ func TestUnit_MultiLineArgPrintsAsABlock(t *testing.T) {
 	}
 }
 
-// TestUnit_MultiLineArgYieldsToTheDiff: with a diff rendered below, the scalar
-// summary's "see diff" is TRUE and the diff is the better rendering of the same
-// bytes — printing both would push the diff away from the prompt, which is the
-// reason the summary exists.
+// TestUnit_MultiLineArgYieldsToTheDiff asserts a diff-bearing arg collapses to a "see diff" summary rather than also printing its own block.
 func TestUnit_MultiLineArgYieldsToTheDiff(t *testing.T) {
 	body := strings.Repeat("a line of replacement content\n", 40)
 	out := renderToString(hitlservice.ApprovalRequest{
@@ -81,8 +73,7 @@ func TestUnit_MultiLineArgYieldsToTheDiff(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgBlockCapIsVisible: the cap says what approving would mean, in the
-// same words the diff cap a few lines below it uses.
+// TestUnit_ArgBlockCapIsVisible asserts a block over the line cap is truncated with a visible notice of what approving would accept unseen.
 func TestUnit_ArgBlockCapIsVisible(t *testing.T) {
 	lines := make([]string, 140)
 	for i := range lines {
@@ -114,9 +105,7 @@ func TestUnit_ArgBlockCapIsVisible(t *testing.T) {
 	}
 }
 
-// TestUnit_ArgBlockIsSanitized: the block is peer-supplied text going to a
-// terminal, and this one is printed directly rather than through a frame. An
-// escape in it would erase the prompt it sits above.
+// TestUnit_ArgBlockIsSanitized asserts terminal escape sequences in a block argument never reach the terminal.
 func TestUnit_ArgBlockIsSanitized(t *testing.T) {
 	out := renderToString(hitlservice.ApprovalRequest{
 		Args: map[string]any{"code": "run()\x1b[2Jcleared\n\x1b]0;pwned\x07gone\n\tindented\n‮drawkcab"},
@@ -137,10 +126,7 @@ func TestUnit_ArgBlockIsSanitized(t *testing.T) {
 	}
 }
 
-// TestUnit_ScalarArgsAndDiffAreSanitizedToo: the block is not the only
-// peer-supplied text on this prompt. A scalar argument and a diff body are
-// printed straight to the terminal directly above the question, so an escape in
-// either erases the very thing the operator is reading.
+// TestUnit_ScalarArgsAndDiffAreSanitizedToo asserts escape sequences in scalar arguments and diff bodies are also stripped before reaching the terminal.
 func TestUnit_ScalarArgsAndDiffAreSanitizedToo(t *testing.T) {
 	out := renderToString(hitlservice.ApprovalRequest{
 		ToolsName: "local_fs",
@@ -155,16 +141,14 @@ func TestUnit_ScalarArgsAndDiffAreSanitizedToo(t *testing.T) {
 	if !strings.Contains(out, "    path = abc\n") {
 		t.Fatalf("scalar argument not sanitized:\n%s", out)
 	}
-	// The diff keeps its content and its indentation; only the escape goes.
-	// The tab expands from the diff line's own column 0, where its +/- sits, so
-	// the body lands on the column stop its author saw.
+	// The diff keeps its content and indentation; only the escape goes, and the
+	// tab expands from the line's own +/- column.
 	if !strings.Contains(out, "    -       old\n") || !strings.Contains(out, "    +       new\n") {
 		t.Fatalf("diff body lost content or indentation:\n%s", out)
 	}
 }
 
-// TestUnit_NonStringArgsKeepTheirSummary: only strings can be source text, and
-// the block must not swallow the shapes that were already fine.
+// TestUnit_NonStringArgsKeepTheirSummary asserts non-string arguments keep their scalar summary rendering instead of being treated as a block.
 func TestUnit_NonStringArgsKeepTheirSummary(t *testing.T) {
 	out := renderToString(hitlservice.ApprovalRequest{
 		Args: map[string]any{

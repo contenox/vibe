@@ -9,10 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_ParseDBTime_SQLiteDriverFormat pins the layout the sqlite driver
-// actually stores for a bound time.Time (Go's time.Time.String() output).
-// Before this layout was handled, every session/list row lost its updatedAt
-// and the sidebar sort silently collapsed to random-UUID order.
+// TestUnit_ParseDBTime_SQLiteDriverFormat pins every time layout the sqlite
+// and postgres drivers hand back for a bound time.Time.
 func TestUnit_ParseDBTime_SQLiteDriverFormat(t *testing.T) {
 	for _, tc := range []struct {
 		in   string
@@ -45,9 +43,8 @@ func listRow(id string, at string) sessionListRow {
 	return r
 }
 
-// TestUnit_SessionListOrder_FreshestFirst pins the roster order: most recent
-// activity first, never-messaged sessions after all sessions with activity,
-// ties broken deterministically.
+// TestUnit_SessionListOrder_FreshestFirst pins the roster order: freshest
+// activity first, never-messaged sessions last, ties broken by id.
 func TestUnit_SessionListOrder_FreshestFirst(t *testing.T) {
 	rows := []sessionListRow{
 		listRow("aaa", ""),
@@ -63,14 +60,12 @@ func TestUnit_SessionListOrder_FreshestFirst(t *testing.T) {
 	for _, r := range rows {
 		order = append(order, r.internalID)
 	}
-	// eee before ccc on the id tie-break (descending); no-time rows last,
-	// also id-descending.
+	// eee before ccc: same timestamp, tie-break falls to id descending.
 	assert.Equal(t, []string{"eee", "ccc", "bbb", "ddd", "fff", "aaa"}, order)
 }
 
-// TestUnit_SessionListCursor_ResumesWithoutSkipOrDup walks a sorted roster
-// page by page through the cursor codec and requires every row to appear
-// exactly once, including when the boundary row vanished between pages.
+// TestUnit_SessionListCursor_ResumesWithoutSkipOrDup pins that paging through
+// the cursor codec visits every row exactly once, even across a deletion.
 func TestUnit_SessionListCursor_ResumesWithoutSkipOrDup(t *testing.T) {
 	rows := []sessionListRow{
 		listRow("eee", "2026-07-16T12:00:00Z"),

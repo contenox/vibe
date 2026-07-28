@@ -6,21 +6,13 @@ import (
 	"strings"
 )
 
-// StreamAssembler is the ONE place streamed deltas become a completed
-// response. It is engine policy: taskexec (and the fixture harnesses that
-// prove providers honor the raw-delta contract) consume it — providers must
-// never assemble their own streams. It lives in this package only so that
-// providers' tests can drive "real adapter → assembler" without an import
-// cycle through the runtime-state catalog imports.
-//
-// Invariants enforced:
-//   - tool-call fragments are grouped by ToolCallDelta.Index;
-//   - the atomic fields (ID, Type, Name) of one index are set at most once —
-//     a conflicting second value is a hard error carrying provider + model;
-//   - ArgsFragment pieces are concatenated in arrival order;
-//   - the finished calls are ordered by index;
-//   - a successful stream carries exactly one Terminal parcel and nothing
-//     after it; a stream that ends without Terminal or Error is an error.
+// StreamAssembler is the one place streamed deltas become a completed
+// response; providers must never assemble their own streams. Invariants:
+// tool-call fragments group by ToolCallDelta.Index; the atomic fields (ID,
+// Type, Name) of one index are set at most once, a conflicting second value
+// is a hard error; ArgsFragment pieces concatenate in arrival order; finished
+// calls are ordered by index; a successful stream carries exactly one
+// Terminal parcel and nothing after it.
 type StreamAssembler struct {
 	providerType string
 	modelName    string
@@ -48,11 +40,10 @@ type StreamResult struct {
 	Thinking  string
 	ToolCalls []ToolCall
 	// FinishReason is the provider's verbatim finish reason from the Terminal
-	// parcel — length/content_filter class values included, so callers can no
-	// longer mistake a truncated or filtered response for a complete one.
+	// parcel, including length/content_filter class values.
 	FinishReason string
-	// Usage merges mid-stream Usage parcels with the Terminal usage; nil when
-	// the provider reported none.
+	// Usage merges mid-stream Usage parcels with the Terminal usage; nil
+	// when the provider reported none.
 	Usage *TokenUsage
 }
 

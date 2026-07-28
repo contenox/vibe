@@ -1,7 +1,6 @@
-// This file is FakeBridge: a scripted double for *enginebridge.Bridge, so a
-// component's tests drive engine-bridge's event contract (fixtures.go) and
-// assert on the calls a surface made without a real acpsvc.Transport, a real
-// ACP loopback, or a database anywhere in the picture.
+// FakeBridge is a scripted double for *enginebridge.Bridge: component tests
+// drive its event contract and assert on calls without a real transport,
+// ACP loopback, or database.
 package testkit
 
 import (
@@ -14,18 +13,12 @@ import (
 )
 
 // EngineBridge is the subset of *enginebridge.Bridge's API a beam surface
-// (app-shell and everything under it) actually drives: the event outlet,
-// prompt submission and cancellation, shell passthrough, and the active-
-// session/session-lifecycle calls. It exists so a surface can depend on an
-// interface instead of the concrete Bridge, and so this package can satisfy
-// it with FakeBridge in tests.
-//
-// The shape is deliberately a mirror of bridge.go, not an invention: every
-// method here has a same-named, same-signature method on *enginebridge.Bridge
-// (see the compile-time assertion below), and there is nothing extra —
-// Transport() stays off this interface because it exists for exactly one
-// caller (the in-process mission fleet), which holds a concrete *Bridge, not
-// this interface.
+// drives: event outlet, prompt submit/cancel, shell passthrough, and
+// session lifecycle. It lets a surface depend on an interface (FakeBridge
+// satisfies it in tests) instead of the concrete Bridge; every method
+// mirrors one on *enginebridge.Bridge (see the compile-time assertion
+// below). Transport() is excluded since it has exactly one caller, which
+// holds a concrete *Bridge.
 type EngineBridge interface {
 	// Events returns the single ordered outlet. See enginebridge.Bridge.Events.
 	Events() <-chan enginebridge.Event
@@ -57,12 +50,10 @@ type EngineBridge interface {
 	Close() error
 }
 
-// fakeBridgeChanBuffer bounds FakeBridge's internal event channel. It is
-// sized generously past anything a single fixture (or a small hand-rolled
-// test script) would ever queue, so Play can send inline without a pump
-// goroutine: a test that scripts more events than this in one Play call will
-// block on the send, which is the trade FakeBridge makes for "no goroutine
-// leaks, ever" over "arbitrarily large scripts."
+// fakeBridgeChanBuffer bounds FakeBridge's internal event channel, sized
+// past anything a fixture or hand-rolled script would queue so Play can
+// send inline without a pump goroutine. A script exceeding this in one Play
+// call blocks on the send — the trade for never leaking a goroutine.
 const fakeBridgeChanBuffer = 4096
 
 // FakeBridge is a scripted, call-recording double for *enginebridge.Bridge.
@@ -97,22 +88,14 @@ func (f *FakeBridge) Script(events ...enginebridge.Event) {
 	f.queued = append(f.queued, events...)
 }
 
-// Play delivers every event queued by Script so far onto Events(), in order,
-// and clears the queue. It sends inline (no goroutine): the channel's
-// buffer (fakeBridgeChanBuffer) absorbs the send, so a test may call Play
-// and then range over Events() afterward — the two are not required to run
-// concurrently, which is what "synchronously drainable" means here.
+// Play delivers every event queued by Script so far onto Events(), in
+// order, and clears the queue. It sends inline, relying on the channel
+// buffer to absorb it, so Play and a later range over Events() need not run
+// concurrently.
 //
-// Play on a closed FakeBridge delivers nothing instead of panicking, and a
-// Close racing a Play cannot make it panic either: the lock is held for the
-// whole delivery, so Close either wins outright (Play drops the remaining
-// events) or waits (Play finishes first). A double is not worth a test
-// failure that reads as a data race in the code under test.
-//
-// The lock being held across the sends is why the channel buffer is sized
-// past any plausible script: a Play that blocked on a full channel would
-// block Close with it. Script more than fakeBridgeChanBuffer events in one
-// Play and that is the deadlock you get.
+// The lock is held for the whole delivery: a racing Close wins outright
+// (Play drops the rest) or waits, never panics. Scripting more than
+// fakeBridgeChanBuffer events in one Play call deadlocks the send.
 func (f *FakeBridge) Play() {
 	f.mu.Lock()
 	defer f.mu.Unlock()

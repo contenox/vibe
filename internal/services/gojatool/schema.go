@@ -8,31 +8,12 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// ---------------------------------------------------------------------------
-// Tool schemas
-//
-// Terse by default, for the reason localtools/fs_schema.go documents at length:
-// a description is paid on EVERY turn, while everything a long description
-// pre-teaches is re-taught by the error message at the moment it fires, with the
-// concrete value filled in. The deadline, the output cap, the call-depth cap and
-// the JSON-only rule all have errors that state them precisely when they bite,
-// so none of them are spelled out here.
-//
-// Three things are in the schema anyway, because no error would ever teach them:
-//
-//   - THE COMPLETION VALUE. A program whose last statement is not an expression
-//     returns null, successfully. Nothing fails, so nothing can teach it.
-//   - host.tool AND ITS ADDRESS FORM. A model that does not know the bridge
-//     exists never calls it, and never sees an error about it.
-//   - WHAT host.tool HANDS BACK. A tool that answers in prose comes back as
-//     {text: "…"}, not as a bare string, because prose written for a reader is
-//     not a contract for a program (hostresult.go). This one IS taught by an
-//     error when it bites — but it bites on the FIRST call of every script that
-//     reads a file, and one clause here is cheaper than that turn.
-//   - THE ABSENCE OF AMBIENT I/O. "js" makes models reach for fetch and require;
-//     saying plainly that there is no network, no filesystem and no module
-//     system converts a wasted turn into a correct first call.
-// ---------------------------------------------------------------------------
+// --- Tool schemas ------------------------------------------------------------
+// Descriptions are terse by default: most limits (deadline, output cap,
+// call-depth, JSON-only) are taught by their error at the moment they bite.
+// The completion value, host.tool's existence and address form, and the
+// absence of ambient I/O are stated up front instead, since nothing would
+// ever teach those.
 
 const evalDescription = "Run JavaScript (ES2023) in a sandbox and get its value back as JSON. " +
 	"The result is the last expression evaluated — end with the value you want, or an explicit `x` on its own line; a program that ends on a statement returns null. " +

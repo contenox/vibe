@@ -13,10 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fixedTokenizer charges one token per line, so chunk boundaries in these tests
-// are exact line counts rather than estimates. The production wiring uses
-// ollamatokenizer.NewEstimateTokenizer(), exercised in
-// TestUnit_ChunkFile_UsesTheRealEstimator below.
+// fixedTokenizer charges one token per line, so chunk boundaries in these
+// tests are exact line counts rather than estimates.
 type fixedTokenizer struct{ perLine int }
 
 func (f fixedTokenizer) CountTokens(ctx context.Context, model, prompt string) (int, error) {
@@ -53,9 +51,7 @@ func TestUnit_ChunkFile_LineRangesAreExactAndOverlap(t *testing.T) {
 		require.Greater(t, cur.StartLine, prev.StartLine, "chunking must always make progress")
 	}
 
-	// Every line of the file appears in some chunk, and every chunk's text is
-	// exactly the lines its range names — a citation that does not name its own
-	// content is worse than no citation.
+	// Every line must appear in some chunk, and each chunk's text must equal its named range.
 	all := splitLines(f.Content)
 	covered := map[int]bool{}
 	for _, c := range chunks {
@@ -83,16 +79,14 @@ func TestUnit_ChunkFile_ShaIsStableAndPerFile(t *testing.T) {
 		require.Equal(t, f.SHA, c.SHA, "every chunk carries the WHOLE FILE's sha, not its own")
 	}
 
-	// A one-character edit changes the sha for every chunk — that is what makes
-	// both incremental re-index and staleness marking work.
+	// A one-character edit changes the sha for every chunk.
 	edited := f
 	edited.Content = strings.Replace(f.Content, "line 7", "line seven", 1)
 	edited.SHA = fileSHA([]byte(edited.Content))
 	require.NotEqual(t, f.SHA, edited.SHA)
 }
 
-// A single line over the whole budget must still be indexed, never split
-// mid-line and never dropped.
+// TestUnit_ChunkFile_OversizedLineSurvivesWhole pins that a line over budget is still indexed, never split mid-line or dropped.
 func TestUnit_ChunkFile_OversizedLineSurvivesWhole(t *testing.T) {
 	ctx := context.Background()
 	long := strings.Repeat("x", 4000)
@@ -125,8 +119,7 @@ func TestUnit_ChunkFile_EmptyAndBlankFiles(t *testing.T) {
 	require.Empty(t, chunks, "whitespace-only content produces nothing worth embedding")
 }
 
-// Overlap larger than the chunk size must not loop forever; progress is
-// guaranteed structurally.
+// TestUnit_ChunkFile_OverlapLargerThanChunkTerminates pins that overlap larger than the chunk size still terminates.
 func TestUnit_ChunkFile_OverlapLargerThanChunkTerminates(t *testing.T) {
 	ctx := context.Background()
 	f := numberedFile(t, 10)
@@ -153,9 +146,7 @@ func TestUnit_ChunkTokensForContext(t *testing.T) {
 	require.Equal(t, 64, ChunkTokensForContext(8), "a tiny limit still yields a usable floor")
 }
 
-// ---------------------------------------------------------------------------
-// File selection
-// ---------------------------------------------------------------------------
+// --- File selection ---
 
 func writeFile(t *testing.T, root, rel, content string) {
 	t.Helper()
@@ -175,9 +166,7 @@ func collectWalk(t *testing.T, root string, maxBytes int64) ([]string, walkStats
 	return paths, stats
 }
 
-// Selection must honour the SAME noise filter find_files and @-completion use,
-// or the human's list, the agent's list and the index disagree about which files
-// exist.
+// TestUnit_WalkWorkspace_HonoursTheNoiseFilter pins that selection uses the same noise filter as find_files and @-completion.
 func TestUnit_WalkWorkspace_HonoursTheNoiseFilter(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "keep.md", "kept content\n")
@@ -207,16 +196,7 @@ func TestUnit_WalkWorkspace_SkipsBinaryAndOversize(t *testing.T) {
 	require.EqualValues(t, len("readable prose\n"), stats.Bytes)
 }
 
-// TestUnit_WalkWorkspace_SkipsDependencyLockfiles closes the gap between
-// maxFileBytesDefault's stated intent and what a size cap can actually do. Its
-// comment names "lockfiles" among the generated artefacts that must not
-// "dominate an index with text no human wrote and no question is about" — but a
-// lockfile UNDER the cap was indexed like source. Measured on this repository
-// before the fix: package-lock.json 132 chunks, go.sum 34 — 166 embed calls
-// spent on resolved version strings.
-//
-// The refusal is COUNTED, like the binary and oversize refusals, so the plan
-// never passes "N files indexed" off as "the whole tree".
+// TestUnit_WalkWorkspace_SkipsDependencyLockfiles pins that a lockfile under the size cap is refused by name and the refusal is counted.
 func TestUnit_WalkWorkspace_SkipsDependencyLockfiles(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "README.md", "prose a human wrote\n")
@@ -234,8 +214,7 @@ func TestUnit_WalkWorkspace_SkipsDependencyLockfiles(t *testing.T) {
 	require.Zero(t, stats.SkippedOversize)
 }
 
-// Containment is vfs's job, not the noise filter's: a symlink pointing outside
-// the tree must never be read, however innocent its name.
+// TestUnit_WalkWorkspace_RefusesEscapingSymlink pins that a symlink pointing outside the tree is never read.
 func TestUnit_WalkWorkspace_RefusesEscapingSymlink(t *testing.T) {
 	outside := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("not yours\n"), 0o644))

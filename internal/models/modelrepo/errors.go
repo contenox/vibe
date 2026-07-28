@@ -7,28 +7,21 @@ import (
 )
 
 // Typed provider-error sentinels. Providers translate their documented error
-// shapes into these via ClassifyProviderError (or provider-local mapping for
-// SDK-typed errors), so callers can errors.Is on the failure class instead of
-// grepping message strings. Context-recovery work depends on
-// ErrContextLengthExceeded being distinguishable.
+// shapes into these via ClassifyProviderError, so callers can errors.Is on
+// the failure class instead of grepping message strings.
 var (
-	// ErrContextLengthExceeded means the request (prompt + requested output)
-	// does not fit the model's context window. Retrying unchanged cannot
-	// succeed; the caller must shrink the request or pick a larger model.
+	// ErrContextLengthExceeded means the request does not fit the model's
+	// context window. Retrying unchanged cannot succeed.
 	ErrContextLengthExceeded = errors.New("request exceeds the model's context window")
-	// ErrRateLimited means the provider refused the request due to rate or
-	// capacity limits (HTTP 429, Anthropic 529 overloaded, Bedrock throttling,
-	// Gemini RESOURCE_EXHAUSTED). Retrying after a backoff can succeed.
+	// ErrRateLimited means the provider refused the request for rate or
+	// capacity reasons. Retrying after a backoff can succeed.
 	ErrRateLimited = errors.New("provider rate limit or capacity limit hit")
 )
 
-// contextLimitMarkers are the documented provider phrasings/codes for a
-// context-window overflow, lowercased. Sources: OpenAI error code
-// context_length_exceeded and "maximum context length" message; Anthropic
-// invalid_request_error "prompt is too long" / "input length and max_tokens
-// exceed context limit"; Gemini INVALID_ARGUMENT "token count" / "exceeds the
-// maximum number of tokens"; Bedrock ValidationException "input is too long";
-// ollama/vllm token-limit strings ("context length", "kv cache").
+// contextLimitMarkers are documented provider phrasings/codes for a
+// context-window overflow, lowercased (OpenAI context_length_exceeded,
+// Anthropic "prompt is too long", Gemini "exceeds the maximum number of
+// tokens", Bedrock "input is too long", ollama/vllm "context length"/"kv cache").
 var contextLimitMarkers = []string{
 	"context_length_exceeded",
 	"maximum context length",
@@ -61,9 +54,9 @@ func IsContextLimitMessage(s string) bool {
 	return false
 }
 
-// rateLimitMarkers are documented rate/capacity error codes that can arrive
-// without a matching HTTP status: Gemini's RESOURCE_EXHAUSTED gRPC status,
-// Anthropic's rate_limit_error/overloaded_error types, AWS throttling.
+// rateLimitMarkers are rate/capacity error codes that can arrive without a
+// matching HTTP status (Gemini RESOURCE_EXHAUSTED, Anthropic
+// rate_limit_error/overloaded_error, AWS throttling).
 var rateLimitMarkers = []string{
 	"resource_exhausted",
 	"rate_limit_error",
@@ -84,12 +77,10 @@ func isRateLimitCode(s string) bool {
 	return false
 }
 
-// ClassifyProviderError wraps err with the matching typed sentinel based on
-// what the provider reported: HTTP 429/529 → ErrRateLimited; an error code or
-// message matching a documented context-overflow phrasing (only trusted on a
-// 4xx/unknown status — a 5xx is a provider fault, not an overflow) →
-// ErrContextLengthExceeded. Anything else returns err unchanged, so callers
-// never lose the original detail.
+// ClassifyProviderError wraps err with the matching typed sentinel: HTTP
+// 429/529 -> ErrRateLimited; a context-overflow phrasing on a 4xx/unknown
+// status (a 5xx is a provider fault, not an overflow) -> ErrContextLengthExceeded.
+// Anything else returns err unchanged.
 func ClassifyProviderError(err error, httpStatus int, code, message string) error {
 	if err == nil {
 		return nil

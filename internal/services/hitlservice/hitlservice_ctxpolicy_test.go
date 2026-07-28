@@ -11,9 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// permissive allows write_file outright; strict pauses it for approval. The two
-// policies give write_file opposite verdicts so a test can prove which one a
-// given Evaluate call resolved.
+// permissive allows write_file outright; strict pauses it for approval, so a
+// test can prove which policy a given Evaluate call resolved.
 const (
 	permissivePolicyName = "hitl-policy-permissive.json"
 	strictPolicyName     = "hitl-policy-strict.json"
@@ -29,31 +28,25 @@ func twoPolicySource(t *testing.T) hitlservice.PolicySource {
 	return hitlservice.NewFSPolicySource(dir)
 }
 
-// TestUnit_Evaluate_ContextPolicyOverridesGlobalKV pins the load-bearing rule of
-// the per-session HITL change: an explicit per-request policy (what an ACP prompt
-// turn injects for its session) wins over the process-global cli.hitl-policy-name
-// KV, and with NO override Evaluate still reads the global KV (CLI/stdio path is
-// unchanged).
+// TestUnit_Evaluate_ContextPolicyOverridesGlobalKV pins that an explicit
+// per-request policy wins over the process-global KV, and with no override
+// Evaluate still reads the global KV.
 func TestUnit_Evaluate_ContextPolicyOverridesGlobalKV(t *testing.T) {
 	t.Parallel()
 	src := twoPolicySource(t)
-	// The global KV points at the strict policy — the single-session fallback.
 	svc := hitlservice.New(src, testTenant, fixedKVReader{strictPolicyName}, libtracker.NoopTracker{})
 
-	// No override: falls through to the global KV (strict) -> write_file approves.
 	base, err := svc.Evaluate(context.Background(), "local_fs", "write_file", nil)
 	require.NoError(t, err)
 	assert.Equal(t, hitlservice.ActionApprove, base.Action)
 	assert.Equal(t, strictPolicyName, base.PolicyName)
 
-	// Context override to the permissive policy wins over the global KV.
 	permCtx := hitlservice.WithPolicyName(context.Background(), permissivePolicyName)
 	perm, err := svc.Evaluate(permCtx, "local_fs", "write_file", nil)
 	require.NoError(t, err)
 	assert.Equal(t, hitlservice.ActionAllow, perm.Action)
 	assert.Equal(t, permissivePolicyName, perm.PolicyName)
 
-	// Context override to the strict policy is honored too (explicit).
 	strictCtx := hitlservice.WithPolicyName(context.Background(), strictPolicyName)
 	strict, err := svc.Evaluate(strictCtx, "local_fs", "write_file", nil)
 	require.NoError(t, err)
@@ -61,9 +54,8 @@ func TestUnit_Evaluate_ContextPolicyOverridesGlobalKV(t *testing.T) {
 	assert.Equal(t, strictPolicyName, strict.PolicyName)
 }
 
-// TestUnit_Evaluate_EmptyContextPolicyLeavesGlobalKVIntact proves WithPolicyName
-// with an empty name is a no-op: a defaulting ACP session injects nothing and the
-// shared service keeps reading the global KV.
+// TestUnit_Evaluate_EmptyContextPolicyLeavesGlobalKVIntact pins that
+// WithPolicyName with a blank name is a no-op: the service keeps reading the global KV.
 func TestUnit_Evaluate_EmptyContextPolicyLeavesGlobalKVIntact(t *testing.T) {
 	t.Parallel()
 	src := twoPolicySource(t)
@@ -76,16 +68,12 @@ func TestUnit_Evaluate_EmptyContextPolicyLeavesGlobalKVIntact(t *testing.T) {
 	assert.Equal(t, permissivePolicyName, res.PolicyName)
 }
 
-// TestUnit_Evaluate_ConcurrentSessionsGateIndependently is the acp-shaped case:
-// ONE shared hitlservice (as serve builds behind every ACP WebSocket session)
-// evaluating the SAME tool call under different per-request policies concurrently
-// must return each caller its own verdict. Run under -race to catch any shared
-// mutable state that would let one session's policy leak into another's decision.
+// TestUnit_Evaluate_ConcurrentSessionsGateIndependently pins that one shared
+// service evaluating the same call under different per-request policies
+// concurrently returns each caller its own verdict (run under -race).
 func TestUnit_Evaluate_ConcurrentSessionsGateIndependently(t *testing.T) {
 	t.Parallel()
 	src := twoPolicySource(t)
-	// Global KV points at strict; the "session B" cohort uses NO override and so
-	// resolves to it, while "session A" overrides to permissive per request.
 	svc := hitlservice.New(src, testTenant, fixedKVReader{strictPolicyName}, libtracker.NoopTracker{})
 
 	const iterations = 200

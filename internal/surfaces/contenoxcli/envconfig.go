@@ -7,27 +7,22 @@ import (
 	"strings"
 )
 
-// sandboxEnvConfig is the SANDBOX_* environment configuration for the shells
-// contenox spawns. Formerly part of serve's Config; the scrub outlived the
-// server because it guards every spawned shell, not an HTTP surface.
+// sandboxEnvConfig is the SANDBOX_* environment configuration for shells
+// contenox spawns.
 type sandboxEnvConfig struct {
-	// SandboxShellScrub selects how the environment handed to an agent-reachable
-	// shell (the local_shell tool and the ACP "!"/shell_session PTY) is scrubbed
-	// of the parent process's own credentials: "deny-secrets" (the default — pass
-	// everything except the control plane and known credential shapes), "strict"
-	// (pass only a safe base set plus SandboxEnvAllow), or "off" (inherit
-	// everything, the legacy behavior). See libsandbox.EnvPolicyForMode.
+	// SandboxShellScrub selects how an agent-reachable shell's environment is
+	// scrubbed of the parent process's credentials: "deny-secrets" (default),
+	// "strict" (safe base set plus SandboxEnvAllow), or "off" (inherit
+	// everything). See libsandbox.EnvPolicyForMode.
 	SandboxShellScrub string `json:"sandbox_shell_scrub"`
-	// SandboxTerminalScrub is the same posture for an interactive terminal — a
-	// trusted operator shell, so it defaults to "off".
+	// SandboxTerminalScrub is the same posture for an interactive terminal,
+	// defaulting to "off" since it's a trusted operator shell.
 	SandboxTerminalScrub string `json:"sandbox_terminal_scrub"`
-	// SandboxEnvAllow adds variable names or globs (comma/whitespace-separated,
-	// e.g. "GOCACHE,CARGO_HOME,HTTP_PROXY") to whichever scrub is active — the
-	// toolchain and deployment variables a shell needs that are not in the safe
-	// base set.
+	// SandboxEnvAllow adds variable names or globs to whichever scrub is
+	// active (comma/whitespace-separated).
 	SandboxEnvAllow string `json:"sandbox_env_allow"`
-	// SandboxEnvDeny adds variable names or globs always dropped by an active
-	// scrub, on top of the built-in denies.
+	// SandboxEnvDeny adds variable names or globs always dropped, on top of
+	// the built-in denies.
 	SandboxEnvDeny string `json:"sandbox_env_deny"`
 }
 

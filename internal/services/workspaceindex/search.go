@@ -13,25 +13,11 @@ import (
 	"github.com/contenox/beam/internal/store/runtimetypes"
 )
 
-// Query answers a natural-language question about the workspace with ranked
-// citations.
-//
-// Hybrid retrieval, exactly as the blueprint specifies: FTS5 NARROWS (bm25 over
-// the chunk text, capped at CandidateLimit) and vectors RANK (cosine over just
-// those candidates). Scoring therefore never scans the whole index, and the
-// lexical stage costs nothing extra — it is the same rows, already stored.
-//
-// Two degradations, both deliberate and both visible:
-//
-//   - No index for the workspace returns ErrNoIndex, which the caller renders as
-//     "run contenox index". Retrieval is optional; its absence is never a hard
-//     failure.
-//   - A question that shares no term with the corpus matches nothing lexically —
-//     the exact case semantic search exists for — so ranking falls back to a
-//     bounded scan of the first fullScanLimit chunks rather than returning
-//     nothing. Bounded, not unbounded: an index bigger than that answers such
-//     questions from a prefix, and that ceiling is the measured pain that would
-//     justify ANN.
+// Query answers a natural-language question with ranked citations. FTS5
+// narrows (bm25 over chunk text, capped at CandidateLimit) and vectors rank
+// (cosine over just those candidates), so scoring never scans the whole
+// index. Returns ErrNoIndex when the workspace has none; a question sharing
+// no term with the corpus falls back to a bounded scan instead of nothing.
 func (s *service) Query(ctx context.Context, workspaceID string, question string, topK int) ([]Hit, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
@@ -107,15 +93,10 @@ func clampTopK(topK int) int {
 	return topK
 }
 
-// markStale re-derives each returned hit's file sha and flags the hit when the
-// content moved since indexing — the blueprint's "a hit whose file changed
-// underneath is a lie" rule. A file that no longer exists is stale too.
-//
-// Only the paths actually being RETURNED are hashed (at most topK distinct
-// files), which is why no mtime/size fast path is stored alongside the sha:
-// hashing a handful of files costs less than the columns and the invalidation
-// rules a fast path would add. Candidates that lost the ranking are never
-// touched.
+// markStale re-derives each returned hit's file sha and flags the hit when
+// the content moved since indexing, or the file no longer exists. Only the
+// returned paths are hashed (at most topK distinct files); candidates that
+// lost the ranking are never touched.
 func markStale(root string, candidates []*runtimetypes.WorkspaceChunk, hits []Hit) {
 	indexedSHA := make(map[string]string, len(candidates))
 	for _, c := range candidates {
@@ -136,13 +117,10 @@ func markStale(root string, candidates []*runtimetypes.WorkspaceChunk, hits []Hi
 	}
 }
 
-// ftsMatchQuery turns a natural-language question into an FTS5 MATCH expression.
-//
-// Every term is extracted as a run of letters/digits and then double-quoted, so
-// nothing a user types is ever interpreted as FTS5 syntax — a question
-// containing NOT, OR, *, or a stray quote is a set of search terms, not a query
-// language. Terms are OR-ed because this stage is a NARROWING, not the answer:
-// recall matters here and precision is the vector stage's job.
+// ftsMatchQuery turns a natural-language question into an FTS5 MATCH
+// expression. Every term is extracted as a run of letters/digits and
+// double-quoted, so nothing typed is interpreted as FTS5 syntax. Terms are
+// OR-ed: this stage narrows, precision is the vector stage's job.
 func ftsMatchQuery(question string) string {
 	fields := strings.FieldsFunc(question, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
@@ -151,8 +129,7 @@ func ftsMatchQuery(question string) string {
 	terms := make([]string, 0, len(fields))
 	for _, f := range fields {
 		f = strings.ToLower(f)
-		// One-character terms match almost everything and cost the prefilter its
-		// only job.
+		// One-character terms match almost everything and defeat the prefilter.
 		if len([]rune(f)) < 2 {
 			continue
 		}

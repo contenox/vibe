@@ -65,9 +65,7 @@ func TestUnit_Tools_SupportsNamesTheProviderAndOneTool(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("Supports() = %v, want %v", got, want)
 	}
-	// These two names are the HITL policy keys (hitl-policy-default.json,
-	// hitl-policy-acp.json, hitlservice.defaultPolicy). Pinning them means a
-	// rename cannot land without the envelope question being asked.
+	// These two names are HITL policy keys; pinning them forces a rename to ask the envelope question.
 	if ToolsProviderName != "workspace" {
 		t.Fatalf("provider name = %q, want workspace", ToolsProviderName)
 	}
@@ -201,8 +199,7 @@ func TestUnit_Tools_QuestionCoercionAndWorkspaceScoping(t *testing.T) {
 	if q.gotQuestion != "spaced out" {
 		t.Errorf("question = %q, want it trimmed", q.gotQuestion)
 	}
-	// The workspace is a property of the process, never of the call: there is no
-	// argument that could point this at another project's index.
+	// The workspace is a property of the process, never of the call.
 	if q.gotWorkspace != testWorkspaceID {
 		t.Errorf("workspace = %q, want %q", q.gotWorkspace, testWorkspaceID)
 	}
@@ -217,8 +214,7 @@ func TestUnit_Tools_EmptyQuestionIsRefusedWithoutQuerying(t *testing.T) {
 		}
 		_, _, err := exec(t, newTools(q), args)
 		if arg == 12.5 {
-			// A number coerces to a non-empty string, so it IS a question — a
-			// bad one, which the index answers, not this layer.
+			// A number coerces to a non-empty question, answered by the index, not this layer.
 			if err != nil {
 				t.Fatalf("numeric question: %v", err)
 			}
@@ -293,8 +289,7 @@ func TestUnit_Tools_ArgsMayArriveOnTheCallInsteadOfTheInput(t *testing.T) {
 	q := &fakeQuerier{hits: []workspaceindex.Hit{hit("a.md", 1, 2, "x")}}
 	out, _, err := newTools(q).Exec(context.Background(), time.Now(), nil, false, &taskengine.ToolsCall{
 		ToolName: ToolSearch,
-		// Declarative args are STRINGS on the wire, which is exactly why the
-		// value coercion above has to be lenient.
+		// Declarative args are strings on the wire, hence the lenient coercion above.
 		Args: map[string]string{"question": "declarative", "top_k": "2"},
 	})
 	if err != nil {
@@ -418,8 +413,7 @@ func TestUnit_Tools_StaleHitsAreFlaggedAndCounted(t *testing.T) {
 	if res.Stale != 1 {
 		t.Errorf("stale count = %d, want 1", res.Stale)
 	}
-	// A stale hit is still RETURNED — the text may be the right passage — but
-	// never as if it were current.
+	// A stale hit is still returned, never as if it were current.
 	if res.Hits[1].Text == "" {
 		t.Error("a stale hit must still carry its text")
 	}

@@ -1,11 +1,9 @@
-// Package term owns the terminal. It is the only beam package allowed to
-// read terminal state or write to the tty; everything else exchanges pure
-// data through the Engine interface — frame.Frame out, input.Event in.
-//
-// The inline rendering model (constitutional, blueprint D1): transcript
-// content is appended once to the terminal's real scrollback and never
-// repainted; only the bounded Live region at the bottom is managed. The
-// engine never enables the alternate screen and never captures the mouse.
+// Package term owns the terminal: the only beam package allowed to read
+// terminal state or write to the tty. Everything else exchanges pure data
+// through the Engine interface — frame.Frame out, input.Event in. Content
+// is appended once to real scrollback and never repainted; only the bounded
+// Live region at the bottom is managed. The engine never enables the
+// alternate screen or captures the mouse.
 package term
 
 import (

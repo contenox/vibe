@@ -42,11 +42,9 @@ type CLIConfigPatch struct {
 	HITLPolicyName              *string
 	TelemetryEnabled            *string
 	UpdateCheck                 *string
-	// DefaultMissionAgent and DefaultMissionPolicy are the two halves of a fireable
-	// `/mission <intent>`: which declared agent runs it, and the HITL policy that
-	// bounds it. Both are GLOBAL keys (a mission is not a per-workspace notion), and
-	// both must be set before /mission works at all — the dispatch refuses an
-	// unnamed agent or an unnamed envelope rather than choosing one.
+	// DefaultMissionAgent and DefaultMissionPolicy are the two halves of a
+	// fireable `/mission <intent>`: which agent runs it, and the policy that
+	// bounds it. Both are global keys; both must be set before /mission works.
 	DefaultMissionAgent  *string
 	DefaultMissionPolicy *string
 }
@@ -79,11 +77,9 @@ type service struct {
 
 // Get implements Service.
 func (s *service) Get(ctx context.Context) ([]runtimestate.BackendRuntimeState, error) {
-	// The runtime reconciles backends at startup and on explicit refresh only;
-	// without this a backend that comes up after startup (most commonly a
-	// (re)started modeld) stays invisible to /state and /setup-status until the
-	// server is restarted. A debounced reconcile lets these read views self-heal.
-	// Best-effort: serve the existing snapshot even if the reconcile fails.
+	// serve reconciles at startup and on explicit refresh only; this debounced
+	// reconcile lets /state and /setup-status self-heal a backend that came up
+	// later. Best-effort: serve the existing snapshot if it fails.
 	_ = s.state.ReconcileIfStale(ctx)
 	m := s.state.Get(ctx)
 	l := make([]runtimestate.BackendRuntimeState, 0, len(m))
@@ -207,11 +203,9 @@ func (s *service) SetCLIConfig(ctx context.Context, patch CLIConfigPatch) (CLICo
 			return CLIConfigSnapshot{}, fmt.Errorf("set update-check: %w", err)
 		}
 	}
-	// Global, like the model defaults and unlike default-chain/hitl-policy-name: a
-	// mission is fired at the fleet, not at a project, so the same pair answers from
-	// every workspace. Written verbatim (trimmed) — the names are validated where
-	// they are USED (the dispatch resolves the agent and the policy), so a value set
-	// before its agent exists is a stale pointer, not a corrupt config.
+	// Global, like the model defaults: a mission fires at the fleet, not a
+	// project. Written verbatim; names are validated where used (dispatch),
+	// so setting one before its agent exists is a stale pointer, not corruption.
 	if patch.DefaultMissionAgent != nil {
 		if err := clikv.SetString(ctx, store, "default-mission-agent", strings.TrimSpace(*patch.DefaultMissionAgent)); err != nil {
 			return CLIConfigSnapshot{}, fmt.Errorf("set default-mission-agent: %w", err)

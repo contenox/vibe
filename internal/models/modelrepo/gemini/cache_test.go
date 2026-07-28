@@ -6,9 +6,7 @@ import (
 )
 
 func TestUnit_GeminiUsage_CachedContentTokenCount(t *testing.T) {
-	// Gemini's promptTokenCount is already the TOTAL prompt count;
-	// cachedContentTokenCount only breaks out the implicit-cache hits and
-	// must NOT be added on top.
+	// cachedContentTokenCount must not be added on top of promptTokenCount.
 	body := `{"promptTokenCount":2100,"candidatesTokenCount":40,"totalTokenCount":2140,"cachedContentTokenCount":2048}`
 	var meta geminiUsageMetadata
 	if err := json.Unmarshal([]byte(body), &meta); err != nil {

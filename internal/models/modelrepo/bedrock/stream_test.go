@@ -12,12 +12,9 @@ import (
 	"github.com/contenox/beam/internal/models/modelrepo"
 )
 
-// TestUnit_Bedrock_RelayConverseEvents_GoldenFixture drives a recorded
-// ConverseStream event sequence — text deltas, reasoning deltas, a toolUse
-// block whose input arrives fragmented, messageStop and the metadata usage
-// event — through the real translation layer and the engine-side assembler.
-// (The SDK's binary eventstream transport is not exercised; relayConverseEvents
-// is the adapter seam right after the SDK's typed decoding.)
+// Drives a recorded ConverseStream event sequence through relayConverseEvents
+// and the engine-side assembler; the SDK's binary eventstream transport
+// itself is not exercised.
 func TestUnit_Bedrock_RelayConverseEvents_GoldenFixture(t *testing.T) {
 	t.Parallel()
 
@@ -58,8 +55,6 @@ func TestUnit_Bedrock_RelayConverseEvents_GoldenFixture(t *testing.T) {
 	close(events)
 
 	parcels := make(chan *modelrepo.StreamParcel, 32)
-	// toOriginal maps the sanitized wire name back to the caller's tool name,
-	// exactly as buildConverseInput produced it.
 	go func() {
 		defer close(parcels)
 		relayConverseEvents(context.Background(), events, map[string]string{"fs_list": "fs.list"}, parcels)
@@ -85,9 +80,8 @@ func TestUnit_Bedrock_RelayConverseEvents_GoldenFixture(t *testing.T) {
 	assert.Equal(t, 44, res.Usage.TotalTokens)
 }
 
-// TestUnit_Bedrock_RelayConverseEvents_TruncatedStreamHasNoTerminal: a stream
-// that ends without messageStop yields no terminal parcel, so the assembler
-// refuses to call it success.
+// A stream that ends without messageStop yields no terminal parcel, so the
+// assembler refuses to call it success.
 func TestUnit_Bedrock_RelayConverseEvents_TruncatedStreamHasNoTerminal(t *testing.T) {
 	t.Parallel()
 

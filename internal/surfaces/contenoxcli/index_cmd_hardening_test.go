@@ -16,24 +16,12 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// `contenox index` / `contenox search` — the paths index_cmd_test.go leaves open.
-//
-// That file pins the happy flow, the rendering and the confirmation. What is
-// still unpinned is every way the flow can be WRONG about money or truth:
-// --force silently not re-embedding, an edit costing the whole tree, a model
-// that cannot embed being discovered on call seven thousand, a build report
-// claiming it dropped nothing when it dropped plenty, and progress filling an
-// operator's scrollback.
-//
-// Same rig (fakeEmbedder / newIndexTestDeps / newIndexTestTree / indexTestCmd),
-// so these are the same production flow with different pressure on it.
+// `contenox index` / `contenox search`: hardening cases index_cmd_test.go
+// leaves open — --force correctness, incremental cost, embed-failure
+// recovery, and progress-output discipline. Same rig as index_cmd_test.go.
 // ---------------------------------------------------------------------------
 
-// TestUnit_IndexCmd_ForceReEmbedsTheWholeTreeInPlace pins --force. The danger is
-// symmetrical and both halves are silent: a --force that reuses chunks has not
-// rebuilt anything (the operator ran it precisely because they believed the
-// index was wrong), and one that empties the table without refilling it leaves
-// the workspace worse than unindexed.
+// TestUnit_IndexCmd_ForceReEmbedsTheWholeTreeInPlace asserts --force re-embeds every chunk exactly once and refills what it drops, rather than silently reusing chunks or emptying the table without refilling it.
 func TestUnit_IndexCmd_ForceReEmbedsTheWholeTreeInPlace(t *testing.T) {
 	ctx := context.Background()
 	deps, emb := newIndexTestDeps(t)
@@ -71,9 +59,7 @@ func TestUnit_IndexCmd_ForceReEmbedsTheWholeTreeInPlace(t *testing.T) {
 		"a forced rebuild dropped the whole generation but reported dropping none: %q", out2.String())
 }
 
-// TestUnit_IndexCmd_EditingOneFileCostsOnlyThatFile is the incremental promise
-// where an operator actually feels it. A one-file edit that re-embeds the tree
-// is the difference between a refresh nobody thinks about and one nobody runs.
+// TestUnit_IndexCmd_EditingOneFileCostsOnlyThatFile asserts editing one small file costs only that file's embed calls, not a re-embed of the whole tree.
 func TestUnit_IndexCmd_EditingOneFileCostsOnlyThatFile(t *testing.T) {
 	ctx := context.Background()
 	deps, emb := newIndexTestDeps(t)
@@ -94,10 +80,7 @@ func TestUnit_IndexCmd_EditingOneFileCostsOnlyThatFile(t *testing.T) {
 	require.LessOrEqualf(t, spent, 2, "editing one small file cost %d embed call(s); the incremental diff is not narrowing", spent)
 	require.Contains(t, out2.String(), "Reusing ", "the plan does not say what the refresh reused")
 
-	// REGRESSION: the incremental path dropped the edited file's old chunks and
-	// reported "0 dropped", because only the --force branch recorded the count.
-	// A refresh that understates what it CHANGED is the same class of dishonesty
-	// as one that understates what it spent.
+	// The refresh must report the chunks it dropped, not just the ones it wrote.
 	require.Regexpf(t, `[1-9][0-9,]* dropped`, out2.String(),
 		"the refresh replaced the edited file's chunks but reported dropping none: %q", out2.String())
 	// The new content is what the index now answers with.
@@ -114,10 +97,7 @@ func TestUnit_IndexCmd_EditingOneFileCostsOnlyThatFile(t *testing.T) {
 	require.True(t, sawNew, "the refreshed content is not in the index")
 }
 
-// TestUnit_IndexCmd_DeletedFileDropsItsChunksWithoutSpending covers the cleanup
-// half: removing a file must drop its chunks, must cost NOTHING (there is
-// nothing to embed), and must say so instead of printing a build report that
-// implies work happened.
+// TestUnit_IndexCmd_DeletedFileDropsItsChunksWithoutSpending asserts removing a file drops its chunks, costs zero embed calls, and is reported as such.
 func TestUnit_IndexCmd_DeletedFileDropsItsChunksWithoutSpending(t *testing.T) {
 	ctx := context.Background()
 	deps, emb := newIndexTestDeps(t)
@@ -134,9 +114,8 @@ func TestUnit_IndexCmd_DeletedFileDropsItsChunksWithoutSpending(t *testing.T) {
 
 	require.Equalf(t, baseline, emb.calls(), "dropping a deleted file's chunks made %d embed call(s)", emb.calls()-baseline)
 	require.Contains(t, out2.String(), "Dropping the chunks of 1 file(s)")
-	// The plan promised a drop; the REPORT must account for it. (This path
-	// returns before embedding anything, so the report is the only place the
-	// number can appear at all.)
+	// This path returns before embedding anything, so the report is the only
+	// place the dropped count can appear.
 	require.Regexpf(t, `[1-9][0-9,]* dropped|Nothing to embed; dropping the chunks of 1 removed file`, out2.String(),
 		"a deletion-only refresh did not account for what it dropped: %q", out2.String())
 
@@ -149,11 +128,7 @@ func TestUnit_IndexCmd_DeletedFileDropsItsChunksWithoutSpending(t *testing.T) {
 	}
 }
 
-// TestUnit_IndexCmd_EmptyWorkspaceSpendsNothingAndCreatesNothing covers a
-// workspace with nothing indexable in it. The rule that matters is the second
-// one: nothing is CREATED, so a later search still degrades to the runnable
-// instruction rather than answering "no matches" from an index that does not
-// exist — two very different things for the operator reading the output.
+// TestUnit_IndexCmd_EmptyWorkspaceSpendsNothingAndCreatesNothing asserts an empty workspace spends no embed calls and creates no index, so a later search still degrades to the runnable instruction rather than "no matches".
 func TestUnit_IndexCmd_EmptyWorkspaceSpendsNothingAndCreatesNothing(t *testing.T) {
 	ctx := context.Background()
 	deps, emb := newIndexTestDeps(t)
@@ -170,11 +145,7 @@ func TestUnit_IndexCmd_EmptyWorkspaceSpendsNothingAndCreatesNothing(t *testing.T
 		"an empty build created an index generation; a workspace with nothing in it has no index")
 }
 
-// TestUnit_IndexCmd_UnusableEmbeddingModelIsCaughtByTheProbe is the dimension
-// probe's actual justification. A chat model asked to embed — the exact failure
-// the default-embed-model keys exist to prevent — must cost ONE call, not one
-// per chunk, and the refusal must name the model and the provider so the
-// operator knows which of the two settings is wrong.
+// TestUnit_IndexCmd_UnusableEmbeddingModelIsCaughtByTheProbe asserts an unusable embedding model is caught in one probe call, not one per chunk, with a refusal naming both the model and the provider.
 func TestUnit_IndexCmd_UnusableEmbeddingModelIsCaughtByTheProbe(t *testing.T) {
 	ctx := context.Background()
 	deps, emb := newIndexTestDeps(t)
@@ -193,17 +164,11 @@ func TestUnit_IndexCmd_UnusableEmbeddingModelIsCaughtByTheProbe(t *testing.T) {
 	require.Equalf(t, 1, emb.calls(),
 		"an unusable model was called %d times — the probe exists so the whole tree is never spent against it", emb.calls())
 
-	// Nothing was half-created: the failed build left no index generation behind
-	// for a later search to find and report as empty.
+	// The failed build must leave no index generation behind.
 	require.ErrorContains(t, runSearchWith(ctx, cmd, deps, "anything", 0, false), "no index for this workspace")
 }
 
-// TestUnit_IndexCmd_MidBuildEmbedFailureLeavesNoHalfIndexedFile is the
-// resumability claim, which is the whole reason flush() is called only on a file
-// boundary. A build that dies part-way must leave every file either wholly
-// indexed or wholly absent — never partially indexed under a sha that MATCHES
-// disk, because the next incremental build would read that as "already done" and
-// skip the rest of the file forever.
+// TestUnit_IndexCmd_MidBuildEmbedFailureLeavesNoHalfIndexedFile asserts a build that dies mid-file leaves that file wholly indexed or wholly absent, never partially indexed under a sha matching disk (which a later build would read as done and skip).
 func TestUnit_IndexCmd_MidBuildEmbedFailureLeavesNoHalfIndexedFile(t *testing.T) {
 	ctx := context.Background()
 	deps, emb := newIndexTestDeps(t)
@@ -225,9 +190,8 @@ func TestUnit_IndexCmd_MidBuildEmbedFailureLeavesNoHalfIndexedFile(t *testing.T)
 	cmd2, _, _ := indexTestCmd(t, "")
 	require.Error(t, runIndexWith(ctx, cmd2, deps, tree, false, true), "a dead provider produced a successful refresh")
 
-	// Recover, and the refresh must still see doc00.md as work to do. If the
-	// failed run had written a partial doc00.md under the NEW sha, this second
-	// run would report "already current" and the file would stay half-indexed.
+	// Recover: the refresh must still see doc00.md as work to do, not "already
+	// current" from a partial write under the new sha.
 	emb.fail = nil
 	cmd3, out3, _ := indexTestCmd(t, "")
 	require.NoError(t, runIndexWith(ctx, cmd3, deps, tree, false, true))
@@ -253,11 +217,7 @@ func TestUnit_IndexCmd_MidBuildEmbedFailureLeavesNoHalfIndexedFile(t *testing.T)
 	require.Contains(t, out4.String(), "Already current", "the index never converged after the failure")
 }
 
-// TestUnit_IndexProgress_NonTerminalGetsNoScrollbackAtAll is the anti-spam rule.
-// A line per file would put thousands of lines into the scrollback of a command
-// whose useful output is three lines, and a carriage return written into a pipe
-// or a CI log is noise nobody can read — so a non-terminal (which is what `go
-// test` gives us) must get nothing during the build.
+// TestUnit_IndexProgress_NonTerminalGetsNoScrollbackAtAll asserts a non-terminal writer gets no progress output at all during the build.
 func TestUnit_IndexProgress_NonTerminalGetsNoScrollbackAtAll(t *testing.T) {
 	var buf bytes.Buffer
 	p := newIndexProgress(&buf)
@@ -273,11 +233,7 @@ func TestUnit_IndexProgress_NonTerminalGetsNoScrollbackAtAll(t *testing.T) {
 		"progress wrote %d byte(s) into a non-terminal; a redirect or CI log gets the report only", buf.Len())
 }
 
-// TestUnit_IndexProgress_TerminalRewritesOneLineAndClearsIt exercises the
-// enabled renderer directly, since the terminal check is on the real stderr and
-// a test never has one. What is pinned is the discipline: carriage returns, no
-// newlines, and a shorter line fully erasing the longer one it replaced (or the
-// tail of the previous path is left dangling on screen).
+// TestUnit_IndexProgress_TerminalRewritesOneLineAndClearsIt asserts the enabled renderer rewrites its status line with carriage returns, no newlines, and pads a shorter line to fully erase the longer one it replaced.
 func TestUnit_IndexProgress_TerminalRewritesOneLineAndClearsIt(t *testing.T) {
 	var buf bytes.Buffer
 	p := &indexProgress{w: &buf, enabled: true}
@@ -297,11 +253,7 @@ func TestUnit_IndexProgress_TerminalRewritesOneLineAndClearsIt(t *testing.T) {
 	require.Regexpf(t, `b\.go\s{2,}`, s, "a shorter line did not erase the longer one it replaced: %q", s)
 }
 
-// TestUnit_DeferredQuerier_UnboundIsAnInstructionNotAPanic covers the ordering
-// hole bindWorkspaceSearch fills: the toolset is registered BEFORE the engine
-// that supplies its embedding seam exists. Until it is bound — or when no
-// embedding model resolved at all — a call must degrade to the one thing the
-// tool already renders as a runnable instruction.
+// TestUnit_DeferredQuerier_UnboundIsAnInstructionNotAPanic asserts a query on an unbound (or never-bound) querier degrades to a runnable instruction rather than a panic, including under concurrent bind.
 func TestUnit_DeferredQuerier_UnboundIsAnInstructionNotAPanic(t *testing.T) {
 	var d deferredQuerier
 

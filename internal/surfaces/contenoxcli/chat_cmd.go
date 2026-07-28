@@ -10,12 +10,16 @@ import (
 
 	"github.com/contenox/beam/internal/kernel/taskengine"
 	libdb "github.com/contenox/beam/internal/libdbexec"
+	"github.com/contenox/beam/internal/libtracker"
 	"github.com/contenox/beam/internal/services/agentservice"
 	"github.com/contenox/beam/internal/services/localtools"
 )
 
 // chatOpts carries all effective config and flags needed by the run pipeline.
 type chatOpts struct {
+	// EffectiveTracker, when non-nil, overrides the engine's tracker (Noop, or
+	// the log tracker under --trace). Beam sets its beam.log-backed tracker.
+	EffectiveTracker             libtracker.ActivityTracker
 	EffectiveDB                  string
 	EffectiveChain               string
 	EffectiveDefaultModel        string
@@ -50,20 +54,14 @@ type chatOpts struct {
 	// EffectiveTaskEventSink lets editor integrations receive task events
 	// directly without subscribing to the engine bus.
 	EffectiveTaskEventSink taskengine.TaskEventSink
-	// WarnW is where engine construction prints the messages an OPERATOR has
-	// to read and act on (today: the ungated-local_shell posture in
-	// localToolset). It is not an instrumentation seam — telemetry goes to the
-	// tracker — it is the command's own stderr, carried this far down because
-	// BuildEngine has nine call sites and only the command layer knows which
-	// writer is the operator's.
-	//
-	// A nil writer means "nobody is listening": tests and editor-embedded
-	// callers get silence rather than a line on some unrelated stream.
+	// WarnW is where engine construction prints messages the operator must act
+	// on (e.g. the ungated-local_shell posture); it is the command's own
+	// stderr, not the tracker. A nil writer means tests and embedded callers
+	// get silence instead.
 	WarnW io.Writer
 }
 
-// execChat runs the full chat pipeline and returns any error encountered.
-// db is already opened by the caller (runChat in cli.go) so we share it here.
+// execChat runs the full chat pipeline against db, which the caller already opened.
 func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW io.Writer) error {
 	engine, err := BuildEngine(ctx, db, opts)
 	if err != nil {
@@ -75,9 +73,6 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 		return err
 	}
 
-	// ------------------------------------------------------------------------
-	// 10. Load chain from file
-	// ------------------------------------------------------------------------
 	chainPathAbs, err := filepath.Abs(opts.EffectiveChain)
 	if err != nil {
 		return fmt.Errorf("invalid chain path: %w", err)
@@ -107,18 +102,13 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	if err != nil {
 		return err
 	}
-	// An image-only turn is valid ("what is this?" asked by attachment alone);
-	// no input AND no attachment is not.
+	// An image-only turn is valid; no input and no attachment is not.
 	if in == "" && len(images) == 0 {
 		return fmt.Errorf("no input for chain: pass input as args, --input, or pipe via stdin")
 	}
 
-	// ------------------------------------------------------------------------
-	// 11. Build agent and execute via service layer
-	// ------------------------------------------------------------------------
 	workspaceID := ResolveWorkspaceID(opts.ContenoxDir)
 
-	// Resolve session
 	sessionReportErr, _, sessionEnd := engine.Tracker.Start(ctx, "resolve", "active_session")
 	sessionID, err := ensureDefaultSession(ctx, db, workspaceID)
 	if err != nil {
@@ -130,18 +120,13 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 
 	templateVars := buildTemplateVars(opts)
 
-	// Create agent using new Engine-based Deps.
 	ag := agentservice.New(agentservice.Deps{
 		Engine:      engine,
 		DB:          db,
 		WorkspaceID: workspaceID,
 	})
 
-	// The chain run is a tracked OPERATION, not a log line: engine.Tracker is a
-	// log-backed tracker exactly when --trace is on and a Noop otherwise, so
-	// this replaces the old `if tracing { slog.Info(...) }` with the same
-	// condition expressed through the one instrumentation seam — and gains the
-	// completion record and duration that the bare Info line never had.
+	// engine.Tracker is log-backed exactly when --trace is on, Noop otherwise.
 	_, _, chainEnd := engine.Tracker.Start(ctx, "execute", "chain", "chain", chainPathAbs)
 	defer chainEnd()
 	if !opts.EffectiveTracing {
@@ -173,9 +158,6 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 		return fmt.Errorf("chain execution failed: %w", err)
 	}
 
-	// ------------------------------------------------------------------------
-	// 12. Print results (CLI-specific output formatting)
-	// ------------------------------------------------------------------------
 	if shouldPrintThinking(opts.EffectiveThink) {
 		if hist, ok := resp.Output.(taskengine.ChatHistory); ok {
 			for _, msg := range hist.Messages {

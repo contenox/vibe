@@ -12,10 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testAgent is a configurable libacp.Agent used only by the ClientSideConnection
-// loopback tests below: it plays the agent side of the wire so a real
-// ClientSideConnection can be exercised end to end (newPipePair, bufReader,
-// bufWriter live in conn_test.go and are reused here).
+// testAgent is a configurable libacp.Agent that plays the agent side of the
+// wire so a real ClientSideConnection can be exercised end to end.
 type testAgent struct {
 	libacp.UnimplementedAgent
 
@@ -134,9 +132,8 @@ func (c *testClient) RequestPermission(_ context.Context, _ libacp.RequestPermis
 }
 
 // wireUpTestConnections starts an AgentSideConnection and a ClientSideConnection
-// back to back over an in-memory pipe (newPipePair, from conn_test.go), each
-// running its own Run loop, and returns them plus their Run() error channels
-// and a cleanup func that closes the pipe and waits for both loops to exit.
+// back to back over an in-memory pipe, each running its own Run loop, and
+// returns a cleanup func that closes the pipe and waits for both to exit.
 func wireUpTestConnections(t *testing.T, ctx context.Context, agent *testAgent, client libacp.Client) (*libacp.AgentSideConnection, *libacp.ClientSideConnection, func()) {
 	t.Helper()
 
@@ -207,9 +204,7 @@ func TestUnit_ClientSideConnection_InitializeSessionPrompt(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, libacp.StopReasonEndTurn, promptResp.StopReason)
 
-	// By the time Prompt's response has arrived, both session/update chunks
-	// sent ahead of it on the wire must already have been delivered, in
-	// order, to the client's SessionUpdate handler.
+	// Both session/update chunks must be delivered, in order, before Prompt's response.
 	client.mu.Lock()
 	updates := append([]libacp.SessionNotification(nil), client.updates...)
 	client.mu.Unlock()

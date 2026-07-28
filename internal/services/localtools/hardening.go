@@ -1,21 +1,17 @@
 package localtools
 
-// hardening.go implements the model-diversity hardening the local tools were
-// missing, per docs/development/blueprints/tool-hardening.md. Three recs live
-// here:
+// hardening.go implements model-diversity hardening for the local tools:
 //
-//   - Rec 5 (fatal-vs-recoverable severity): a terse, greppable severity marker
-//     appended to error text so a model can decide whether a retry-with-correction
-//     is worth attempting. Not a type system — error-string craft, as the rec
-//     directs — kept deliberately distinct from toolguidance's "[harness] " prefix
-//     so the two never collide.
-//   - Rec 7 (did-you-mean on match failures): sibling-filename fuzzy suggestions on
-//     a missing path, and nearest-line suggestions on a sed no-match. Both obey the
-//     fuzzy law (tool-hardening.md): tools may search fuzzily and TELL, they must
-//     never fuzzily ACT. Everything here only SUGGESTS.
-//   - Rec 4 support (never truncate silently): streamRange is the bounded,
-//     size-cap-agnostic line reader that lets read_file page a file larger than the
-//     read cap and name the exact next line to resume from.
+//   - fatal-vs-recoverable severity: a terse, greppable marker appended to
+//     error text so a model can decide whether a corrected retry is worth
+//     attempting. Error-string craft, not a type system — kept distinct from
+//     toolguidance's "[harness] " prefix so the two never collide.
+//   - did-you-mean suggestions on missing paths and sed no-matches: tools may
+//     search fuzzily and tell, but must never act on a fuzzy match —
+//     everything here only suggests.
+//   - streamRange: the bounded, size-cap-agnostic line reader that lets
+//     read_file page a file larger than the read cap and name the exact next
+//     line to resume from.
 
 import (
 	"bufio"
@@ -28,7 +24,7 @@ import (
 	"syscall"
 )
 
-// --- Rec 5: fatal-vs-recoverable severity convention ---
+// --- Fatal-vs-recoverable severity convention ---
 //
 // The convention is a suffix on the error text, consistent across every local
 // tool so a model (or a human grepping a transcript) can key on it:
@@ -37,8 +33,8 @@ import (
 //     not-found, boundary/escape refusals, denied paths, size/output caps, binary
 //     refusals, missing/unknown args, read-before-write denials, no-match.
 //   - "(fatal: <reason>)" — the environment is broken and no parameter change
-//     helps: disk full, spool file unwritable. Only these are marked fatal
-//     (gemini-cli's own bar), applied at the source via fatalf.
+//     helps: disk full, spool file unwritable. Only these are marked fatal,
+//     applied at the source via fatalf.
 const (
 	severityRecoverable = "(recoverable: adjust parameters and retry)"
 	severityFatalToken  = "(fatal:"
@@ -80,15 +76,15 @@ func isDiskFull(err error) bool {
 	return errors.Is(err, syscall.ENOSPC)
 }
 
-// --- Rec 7: did-you-mean over sibling filenames ---
+// --- Did-you-mean over sibling filenames ---
 
-// maxSuggestions caps how many "did you mean" candidates are surfaced, per the
-// blueprint (cap 5). Enough to be useful, few enough to stay terse.
+// maxSuggestions caps how many "did you mean" candidates are surfaced (5).
+// Enough to be useful, few enough to stay terse.
 const maxSuggestions = 5
 
 // didYouMean renders a " Did you mean: a, b, c?" clause for a missing entry named
-// `missing` inside `dir`, or "" when nothing in dir resembles it. Pure suggestion
-// (the fuzzy law): the caller never acts on the result.
+// `missing` inside `dir`, or "" when nothing in dir resembles it. Pure
+// suggestion: the caller never acts on the result.
 func didYouMean(dir, missing string) string {
 	s := suggestSiblings(dir, missing, maxSuggestions)
 	if len(s) == 0 {
@@ -196,7 +192,7 @@ func min3(a, b, c int) int {
 	return m
 }
 
-// --- Rec 7: nearest-line suggestion for sed no-match ---
+// --- Nearest-line suggestion for sed no-match ---
 
 // suggestNearestLinesMaxScan bounds how many lines suggestNearestLines will
 // scan, keeping the best-window search cheap on a large file.
@@ -208,9 +204,9 @@ const suggestLineCompareLen = 256
 
 // suggestNearestLines returns the window of `content` most similar to `pattern`,
 // with ±contextLines of surrounding lines, rendered as "N: text" lines (1-based).
-// aider's best-window pattern: slide a window the size of the pattern's line
-// count across the file, score each by similarity, keep the best. SUGGEST-only —
-// the caller never applies it (the fuzzy law). Returns "" when content is empty.
+// It slides a window the size of the pattern's line count across the file,
+// scores each by similarity, and keeps the best. Suggestion-only — the caller
+// never applies it. Returns "" when content is empty.
 func suggestNearestLines(content, pattern string, contextLines int) string {
 	if strings.TrimSpace(content) == "" {
 		return ""
@@ -279,7 +275,7 @@ func similarity(a, b string) float64 {
 	return 1.0 - float64(levenshtein(a, b))/float64(maxLen)
 }
 
-// --- Rec 4 support: bounded streaming line reader ---
+// --- Bounded streaming line reader ---
 
 // streamRange reads lines [start,end] (1-based inclusive) from r, honoring the
 // same line model as strings.Split(content,"\n"): a trailing newline yields a

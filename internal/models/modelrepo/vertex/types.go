@@ -105,12 +105,10 @@ type vertexUsageMetadata struct {
 }
 
 // neutralUsage maps usageMetadata onto the neutral TokenUsage. Like the
-// Gemini Developer API, Vertex context caching is IMPLICIT by default on
+// Gemini Developer API, Vertex context caching is implicit by default on
 // 2.5+ models — nothing is sent on the wire to activate it; byte-stable
 // prefixes plus session affinity are the whole client-side contract, and
-// this counter is where hits become visible. Explicit cachedContents
-// resources (project/region-scoped, storage billed hourly) are a recorded
-// follow-up (blueprint S1b.6) gated on measured implicit hit rates.
+// this counter is where hits become visible.
 func (u *vertexUsageMetadata) neutralUsage() *modelrepo.TokenUsage {
 	if u == nil {
 		return nil

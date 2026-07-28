@@ -11,8 +11,7 @@ import (
 )
 
 // fakePolicyValidator is a hitlservice.PolicyValidator double: it records the
-// name it was asked to validate and returns a preset error, so a test can prove
-// Dispatch consults it and honors its verdict without a real policy source.
+// name it was asked to validate and returns a preset error.
 type fakePolicyValidator struct {
 	err       error
 	validated []string
@@ -23,10 +22,8 @@ func (v *fakePolicyValidator) ValidatePolicy(_ context.Context, name string) err
 	return v.err
 }
 
-// TestFleetService_Dispatch_NonexistentPolicyRefused pins the envelope-existence
-// guard: a dispatch naming a policy that does not load is refused as a 4xx BEFORE
-// any instance is brought up, so a typo can never run a mission under the silently
-// substituted default gate.
+// TestFleetService_Dispatch_NonexistentPolicyRefused: a policy that does not
+// load is refused as a 4xx before any instance is brought up.
 func TestFleetService_Dispatch_NonexistentPolicyRefused(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -50,10 +47,8 @@ func TestFleetService_Dispatch_NonexistentPolicyRefused(t *testing.T) {
 	require.Empty(t, man.starts(), "a refused dispatch must never bring an instance up")
 }
 
-// TestFleetService_Dispatch_ValidPolicyPassesGate proves the guard is not a
-// blanket refusal: a policy the validator accepts flows PAST the gate — the
-// dispatch proceeds to bring the unit up (StartResolved is reached). A sentinel
-// start error stops it right after, so the test needs no mission store.
+// TestFleetService_Dispatch_ValidPolicyPassesGate: a policy the validator
+// accepts flows past the gate to StartResolved.
 func TestFleetService_Dispatch_ValidPolicyPassesGate(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)

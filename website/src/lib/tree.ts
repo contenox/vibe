@@ -56,10 +56,12 @@ export async function buildDocsTree(): Promise<TreeNode> {
  *  Sections without their own landing page anchor into the /docs/ index. */
 export async function buildNavSections(): Promise<{ name: string; url: string }[]> {
   const tree = await buildDocsTree();
+  // Display overrides for sections whose directory name isn't the label.
+  const labels: Record<string, string> = { rnd: 'Lab' };
   return tree.children
     .filter((n) => n.url || n.children.length > 0)
     .map((n) => ({
-      name: n.name,
+      name: labels[n.name] ?? n.name,
       url: n.url ?? `/docs/#${n.name}`,
     }));
 }

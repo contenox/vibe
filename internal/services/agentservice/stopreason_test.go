@@ -1,8 +1,7 @@
 package agentservice_test
 
-// InferStopReason must tell a truncated SUCCESS from a normal end of turn:
-// err == nil with the last model step's finish reason in the "length" class →
-// StopMaxTokens, in every provider's vocabulary.
+// InferStopReason must distinguish a truncated success (finish reason in
+// the "length" class) from a normal end of turn.
 
 import (
 	"testing"
@@ -30,8 +29,8 @@ func TestUnit_InferStopReason_NormalFinishStaysEndTurn(t *testing.T) {
 	}
 }
 
-// The LAST model step decides: an earlier truncation followed by a normal
-// completion (e.g. a retry or continuation) is not a truncated turn.
+// The last model step decides; an earlier truncation is overridden by a
+// later normal finish.
 func TestUnit_InferStopReason_LastModelStepDecides(t *testing.T) {
 	steps := []taskengine.CapturedStateUnit{stepWithFinish("length"), stepWithFinish("stop")}
 	require.Equal(t, agentservice.StopEndTurn, agentservice.InferStopReason(nil, steps))

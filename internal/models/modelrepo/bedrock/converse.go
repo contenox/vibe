@@ -15,20 +15,19 @@ import (
 
 // buildConverseInput maps neutral messages + config into a Converse request.
 // Adjacent same-role messages are merged (Bedrock requires alternating roles).
-// Bedrock tool names must match ^[a-zA-Z0-9_-]{1,64}$, so tool names are
-// sanitized before being sent; the returned map lets the caller translate
-// sanitized names in the response back to the caller's original names.
-// A reasoning request (cfg.Think) that the model cannot honor is a hard error,
-// never a silent drop.
+// Tool names are sanitized to match Bedrock's ^[a-zA-Z0-9_-]{1,64}$ before
+// sending; the returned map translates sanitized names back to the caller's
+// originals. A reasoning request (cfg.Think) the model cannot honor is a hard
+// error, never a silent drop.
 func buildConverseInput(modelName string, messages []modelrepo.Message, cfg *modelrepo.ChatConfig, maxOutputTokens int) (*bedrockruntime.ConverseInput, map[string]string, error) {
 	in := &bedrockruntime.ConverseInput{ModelId: aws.String(modelName)}
 	toOriginal := map[string]string{}
 
-	// Bedrock rejects toolUse/toolResult content blocks unless the request also
-	// carries toolConfig. Tasks without tools (recovery/summarise steps) still
-	// receive histories from tool-using turns, so those blocks are rendered as
-	// plain text instead — a synthetic toolConfig would invite the model to
-	// call tools this task cannot execute.
+	// Bedrock rejects toolUse/toolResult blocks unless the request also carries
+	// toolConfig. Tool-less tasks (e.g. recovery/summarise steps) can still
+	// receive histories from tool-using turns, so those blocks render as plain
+	// text instead — a synthetic toolConfig would invite the model to call
+	// tools this task cannot execute.
 	hasTools := false
 	if cfg != nil {
 		for _, t := range cfg.Tools {
@@ -98,11 +97,10 @@ func buildConverseInput(modelName string, messages []modelrepo.Message, cfg *mod
 			if m.Content != "" {
 				blocks = append(blocks, &types.ContentBlockMemberText{Value: m.Content})
 			}
-			// Vision: append an image content block per attachment, after any
-			// text block. Bedrock takes the raw image bytes in the Bytes source
-			// (the SDK base64-encodes them on the wire). Images with an
-			// unrecognised MIME type are skipped rather than sent with an
-			// invalid Format that Bedrock would reject.
+			// Vision: append an image block per attachment after any text block.
+			// Bedrock takes raw bytes via the Bytes source (the SDK base64-encodes
+			// on the wire). Images with an unrecognised MIME type are skipped
+			// rather than sent with an invalid Format.
 			for _, img := range m.Images {
 				format, ok := imageFormatFromMime(img.MimeType)
 				if !ok {
@@ -177,25 +175,22 @@ func buildConverseInput(modelName string, messages []modelrepo.Message, cfg *mod
 }
 
 // bedrockSupportsPromptCaching gates cachePoint insertion by model family.
-// AWS documents prompt caching for Anthropic Claude (3.5 Sonnet v2 / 3.7
-// onward) and Amazon Nova on the Converse API; the gate is deliberately
-// family-coarse and unsupported models simply get no cachePoints (Bedrock
-// rejects cachePoint blocks on unsupported models rather than ignoring them,
-// so silence here means omission, not a server-side no-op).
+// AWS documents prompt caching for Anthropic Claude (3.5 Sonnet v2+) and
+// Amazon Nova on Converse; unsupported models get no cachePoints because
+// Bedrock rejects (rather than ignores) cachePoint blocks it doesn't support.
 func bedrockSupportsPromptCaching(modelName string) bool {
 	base := strings.ToLower(bedrockBaseModelID(modelName))
 	return strings.Contains(base, "anthropic.claude") || strings.Contains(base, "amazon.nova")
 }
 
-// applyBedrockCachePoints inserts Converse cachePoint blocks where the hints
-// assert stability: after the last tool definition (tools render first) and
-// after the last system block. Placement is metadata-only — cachePoint is its
-// own union member and never alters model-visible content. History
-// breakpoints are not placed on Bedrock (Claude gets simplified cache
-// management server-side; blueprint §4.3). The advisory hint TTL is ignored:
-// the 1h tier is limited to 4.5-class Claude models with ordering
-// constraints, so the 5m sliding default is used until a model-accurate gate
-// exists. At most 2 of the 4 allowed checkpoints are used.
+// applyBedrockCachePoints inserts Converse cachePoint blocks after the last
+// tool definition and after the last system block, where the hints assert
+// stability. Placement is metadata-only: cachePoint is its own union member
+// and never alters model-visible content. History breakpoints are not placed
+// on Bedrock (Claude manages caching server-side). The advisory TTL hint is
+// ignored — the 1h tier needs 4.5-class Claude models with ordering
+// constraints, so the 5m default is used. At most 2 of the 4 allowed
+// checkpoints are used.
 func applyBedrockCachePoints(in *bedrockruntime.ConverseInput, modelName string, hints *modelrepo.CacheHints) {
 	if in == nil || hints == nil || !bedrockSupportsPromptCaching(modelName) {
 		return
@@ -337,7 +332,7 @@ func decodeConverse(out *bedrockruntime.ConverseOutput, toOriginal map[string]st
 }
 
 // usageFromConverse maps the Converse usage report onto the neutral
-// TokenUsage. Bedrock's inputTokens counts ONLY the uncached remainder;
+// TokenUsage. Bedrock's inputTokens counts only the uncached remainder;
 // cacheRead/cacheWriteInputTokens are separate, and per the normalization
 // rule PromptTokens is the sum of all three. TotalTokens is recomputed from
 // the normalized prompt count rather than trusted from the wire.

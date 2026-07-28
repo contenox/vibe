@@ -16,31 +16,29 @@ import (
 
 // Agent kinds.
 //
-//   - AgentKindChain: one of the runtime's OWN task chains, addressable as an
+//   - AgentKindChain: one of the runtime's own task chains, addressable as an
 //     agent. The kernel re-executes this binary (`contenox acp`) bound to the
-//     named chain file, so a chain runs as an ACP peer over stdio. This is the
-//     only kind users declare; chain agents are seeded by discovery from chain
-//     files on disk (see runtime/chainagents). See ChainConfig and
-//     runtime/agentinstance's chain branch.
-//   - AgentKindExternalACP: INTERNAL only. Not user-registerable — there is no
-//     CLI, API, or UI path to create one, and discovery never emits one. It
-//     survives solely as the spawn-config shape the instance kernel and the
-//     agenthost one-shot driver build to run an ACP peer over stdio (see
-//     ExternalACPConfig), reused by the chain path and the host test harness.
+//     named chain file, so a chain runs as an ACP peer over stdio. The only
+//     kind users declare; seeded by discovery from chain files on disk (see
+//     runtime/chainagents, ChainConfig).
+//   - AgentKindExternalACP: internal only, not user-registerable — no CLI,
+//     API, or UI path creates one. It is the spawn-config shape the instance
+//     kernel and the agenthost one-shot driver build to run an ACP peer over
+//     stdio (see ExternalACPConfig), reused by the chain path and test harness.
 const (
 	AgentKindExternalACP = "external_acp"
 	AgentKindChain       = "chain"
 )
 
 // Agent.Source values — system-managed provenance, never part of the
-// user-editable run spec (see Agent.Source).
+// user-editable run spec.
 //
 //   - AgentSourceRegistry: seeded from the ACP agent catalog.
 //   - AgentSourceManual: registered by hand from a bare command.
 //   - AgentSourceDiscovered: seeded by chain-agent discovery from a chain file
-//     on disk (see runtime/chainagents). Discovery OWNS these rows: it
-//     re-upserts them on every startup and disables the ones whose chain file
-//     has gone away. A row with any other Source is never touched by it.
+//     on disk (see runtime/chainagents). Discovery owns these rows — it
+//     re-upserts on every startup and disables ones whose chain file is gone;
+//     rows with any other Source are never touched by it.
 const (
 	AgentSourceRegistry   = "registry"
 	AgentSourceManual     = "manual"
@@ -66,13 +64,10 @@ type ExternalACPConfig struct {
 	URL       string            `json:"url,omitempty" example:"https://agent.example.com/acp"`
 
 	// McpServers is the explicit allowlist of registered MCP server names
-	// (the mcp_servers table, `contenox mcp list`) forwarded to this agent
-	// in ACP session/new. Forwarding hands the agent everything it needs to
-	// reach that server — argv for stdio servers, URL and configured headers
-	// (which may carry auth) for http/sse — so it is per-agent consent, named
-	// server by named server: there is deliberately no "all servers"
-	// wildcard, and contenox-side auth synthesis (authToken/authEnvKey/
-	// oauth/injectParams) is never forwarded. Empty means forward nothing.
+	// forwarded to this agent in ACP session/new — per-agent consent, named
+	// server by named server, deliberately no "all servers" wildcard.
+	// contenox-side auth synthesis (authToken/authEnvKey/oauth/injectParams)
+	// is never forwarded. Empty means forward nothing.
 	McpServers []string `json:"mcp_servers,omitempty" example:"['filesystem']" openapi_include_type:"string"`
 }
 
@@ -110,36 +105,29 @@ func (c ExternalACPConfig) Validate() error {
 }
 
 // ChainConfig is the config_json shape for an AgentKindChain agent: which of
-// the runtime's own task chains a unit launched from this template runs. It is
-// the sibling of ExternalACPConfig and deliberately much smaller, because a
-// chain unit has nothing to configure that the chain file does not already
-// say — no command, no credentials, no transport choice.
+// the runtime's own task chains a unit launched from this template runs. Much
+// smaller than ExternalACPConfig because the chain file already says
+// everything — no command, no credentials, no transport choice.
 //
-// Path, not a chain id or a name, is the field: the spawned runtime resolves
-// its chain from a FILE (runtime/acpsvc's chain registry reads a path), so a
-// name would only have to be resolved back into one, and the resolution would
-// then be a second implementation of the lookup discovery already performs.
-// It is required to be absolute for the same reason a session cwd is: the
-// spawned process's working directory is the session's, not the declarer's, so
-// a relative path would resolve somewhere neither of them intended.
+// Path, not a chain id or name, is the field: the spawned runtime resolves its
+// chain from a file (runtime/acpsvc's chain registry reads a path), avoiding a
+// second implementation of the lookup discovery already performs. Required to
+// be absolute because the spawned process's working directory is the
+// session's, not the declarer's.
 type ChainConfig struct {
 	Path string `json:"path" example:"/home/user/.contenox/agent-reviewer.json"`
 
 	// ChainID is the "id" field inside that chain file, recorded at declaration
-	// time so a listing can show WHICH chain a unit runs without reading every
-	// file. It is a display copy of a fact the file owns: nothing resolves
-	// through it, and an edit that changes the file's id leaves this stale
-	// until the next discovery pass rewrites it. Optional.
+	// time so a listing can show which chain a unit runs without reading every
+	// file. A display copy, not resolved through: it goes stale until the next
+	// discovery pass rewrites it. Optional.
 	ChainID string `json:"chainId,omitempty" example:"agent-reviewer"`
 }
 
-// Validate checks a ChainConfig in isolation, in the same spirit as
-// ExternalACPConfig.Validate: it knows nothing about the owning Agent. It
-// deliberately does NOT stat the path — existence is a runtime condition that
-// can change between declaration and spawn, and a validator that pretended
-// otherwise would reject a perfectly good declaration made before its chain
-// file is written. A missing file surfaces at spawn, where the ACP chain
-// loader already fails closed with the path in the message.
+// Validate checks a ChainConfig in isolation, knowing nothing about the
+// owning Agent. It deliberately does not stat the path — existence can
+// change between declaration and spawn, and a missing file surfaces there,
+// where the ACP chain loader fails closed with the path in the message.
 func (c ChainConfig) Validate() error {
 	if strings.TrimSpace(c.Path) == "" {
 		return fmt.Errorf("chain: path is required (the chain file this agent runs)")
@@ -151,14 +139,12 @@ func (c ChainConfig) Validate() error {
 }
 
 // Agent represents a persisted, declared agent resource: something the
-// runtime can spawn/drive as an ACP peer — either somebody else's program
-// (kind "external_acp") or one of the runtime's own task chains (kind
-// "chain").
+// runtime can spawn/drive as an ACP peer, either somebody else's program
+// (kind "external_acp") or one of the runtime's own task chains (kind "chain").
 //
 // ConfigJSON carries the kind-specific config as raw JSON rather than flat
-// columns — mcp_servers can use flat columns because it has exactly one
-// kind; agents is polymorphic, so flat-columns-per-kind would have been a
-// migration trap the moment the second kind (chain) was implemented.
+// columns, since agents is polymorphic and flat-columns-per-kind would have
+// been a migration trap the moment a second kind was implemented.
 type Agent struct {
 	ID          string          `json:"id" example:"a1b2c3d4-e5f6-7890-abcd-ef1234567890"`
 	Name        string          `json:"name" example:"local-claude-code"`
@@ -169,11 +155,9 @@ type Agent struct {
 	WorkspaceID *string         `json:"workspaceId,omitempty"` // reserved scoping seam, consistent with kv/message_indices
 
 	// Source, RegistryID, and RegistryVersion are system-managed provenance for
-	// display and updates — NOT part of the user-editable run spec (which lives
-	// in ConfigJSON). Source is one of AgentSourceRegistry / AgentSourceManual /
-	// AgentSourceDiscovered; RegistryID/RegistryVersion record the catalog entry
-	// a registry-sourced agent was seeded from. nil for agents predating
-	// provenance tracking.
+	// display and updates, not part of the user-editable run spec (ConfigJSON).
+	// RegistryID/RegistryVersion record the catalog entry a registry-sourced
+	// agent was seeded from; nil for agents predating provenance tracking.
 	Source          *string `json:"source,omitempty"`
 	RegistryID      *string `json:"registryId,omitempty"`
 	RegistryVersion *string `json:"registryVersion,omitempty"`

@@ -34,9 +34,8 @@ func TestUnit_AsErrorLeavesCancellationNonRetryable(t *testing.T) {
 	assert.False(t, libacp.IsRetryableError(err), "an explicit cancellation is a decision, not a fault")
 }
 
-// The wire contract is code/message/data and nothing else: a cause carried for
-// local matching must not leak into the serialized form, or a peer would see a
-// field it never agreed to.
+// Invariant: the wire contract is code/message/data only; a cause carried for
+// local matching must never leak into the serialized form.
 func TestUnit_ErrorWireFormatUnchangedByCause(t *testing.T) {
 	raw, err := json.Marshal(libacp.AsError(context.DeadlineExceeded))
 	require.NoError(t, err)
@@ -49,8 +48,7 @@ func TestUnit_ErrorWireFormatUnchangedByCause(t *testing.T) {
 	require.JSONEq(t, `{"code":-32602,"message":"bad"}`, string(raw))
 }
 
-// After a real serialize/parse the Go sentinel is gone for good; only the code
-// can still carry the verdict, which is why AsError promotes deadlines.
+// Invariant: after a real serialize/parse only the code carries the verdict.
 func TestUnit_TimeoutSurvivesSerializationRoundTrip(t *testing.T) {
 	raw, err := json.Marshal(libacp.AsError(context.DeadlineExceeded))
 	require.NoError(t, err)
@@ -62,8 +60,7 @@ func TestUnit_TimeoutSurvivesSerializationRoundTrip(t *testing.T) {
 	assert.True(t, libacp.IsRetryableError(remote))
 }
 
-// timingOutAgent's Prompt fails on its *own* deadline rather than on the
-// client's session/cancel — the case a supervisor must be able to retry.
+// timingOutAgent's Prompt fails on its own deadline, not on session/cancel.
 type timingOutAgent struct {
 	libacp.UnimplementedAgent
 	started chan struct{}
@@ -85,10 +82,8 @@ func (a *timingOutAgent) Prompt(ctx context.Context, _ libacp.PromptRequest) (li
 	return libacp.PromptResponse{}, own.Err()
 }
 
-// Pins the boundary of conn.go's cancellation special case: only a prompt
-// cancelled by the *client* resolves as StopReasonCancelled. A prompt that ran
-// out of time on the agent's own deadline is a genuine failure and must reach
-// the client as a retryable error, not as a silent cancelled turn.
+// Invariant: only a client-cancelled prompt resolves as StopReasonCancelled;
+// one that times out on the agent's own deadline is a retryable error instead.
 func TestUnit_PromptOwnDeadlineIsRetryableErrorNotCancelledStop(t *testing.T) {
 	agent := &timingOutAgent{started: make(chan struct{})}
 	h := newCancelHarness(t, agent)

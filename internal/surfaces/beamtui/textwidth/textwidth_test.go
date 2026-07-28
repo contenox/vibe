@@ -70,9 +70,8 @@ func TestUnit_WrapBreaksAtWordBoundaries(t *testing.T) {
 	}
 }
 
-// TestUnit_WrapSplitsNewlinesAtEveryWidth: a returned element is a terminal
-// row, so no width — degenerate ones included — may hand a caller a string
-// with a newline in it.
+// TestUnit_WrapSplitsNewlinesAtEveryWidth pins that no width, degenerate
+// ones included, may hand a caller a string with a newline in it.
 func TestUnit_WrapSplitsNewlinesAtEveryWidth(t *testing.T) {
 	for _, in := range []string{"a\nb", "\n", "one\ntwo\nthree", "", "no newline"} {
 		for _, w := range []int{-5, -1, 0, 1, 2, 40} {
@@ -87,7 +86,7 @@ func TestUnit_WrapSplitsNewlinesAtEveryWidth(t *testing.T) {
 			}
 		}
 	}
-	// At a degenerate width the ONLY thing that happens is the newline split.
+	// At a degenerate width the only thing that happens is the newline split.
 	if got := Wrap("a long line that would wrap", 0); len(got) != 1 || got[0] != "a long line that would wrap" {
 		t.Fatalf("Wrap(_, 0) = %q, want the line unwrapped", got)
 	}

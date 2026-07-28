@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/contenox/beam/internal/libsandbox"
 )
 
 // requireBash skips a test that needs the real bash semantics (rc files,
@@ -23,14 +25,7 @@ func requireBash(t *testing.T) string {
 	return ""
 }
 
-// TestPTY_DoesNotEchoTheSubmittedLine is the direct check for the echo bug: the
-// PTY's line discipline repeated every submitted line back at us, so `!echo AAA`
-// showed the command text AND its output, doubling the transcript and making the
-// agent pay tokens for reading its own input back.
-//
-// The assertion is on the literal command text rather than a line count because
-// that is what distinguishes echo from output: "AAA" is the result either way,
-// "echo AAA" only appears if the terminal repeated it.
+// TestPTY_DoesNotEchoTheSubmittedLine pins that the submitted command text never appears in the scrollback, only its output.
 func TestPTY_DoesNotEchoTheSubmittedLine(t *testing.T) {
 	m := newTestManager(t, time.Minute)
 	ctx := ctxWithSession("sess-echo")
@@ -50,11 +45,7 @@ func TestPTY_DoesNotEchoTheSubmittedLine(t *testing.T) {
 	}
 }
 
-// TestPTY_CatRoundTripDeliversInputExactlyOnce is the stronger form of the same
-// claim, and the one that proves the fix did not simply break stdin: `cat`
-// copies whatever it reads straight back out, so a marker line typed at a
-// running cat MUST appear exactly once. Twice means the terminal is still
-// echoing; zero times means input stopped reaching the foreground process.
+// TestPTY_CatRoundTripDeliversInputExactlyOnce pins that a marker typed at a running `cat` appears exactly once (not echoed, not lost).
 func TestPTY_CatRoundTripDeliversInputExactlyOnce(t *testing.T) {
 	m := newTestManager(t, time.Minute)
 	ctx := ctxWithSession("sess-cat")
@@ -77,17 +68,7 @@ func TestPTY_CatRoundTripDeliversInputExactlyOnce(t *testing.T) {
 	}
 }
 
-// TestPTY_SuppressesAnRcFileProvidedPrompt pins the prompt fix against the case
-// that actually breaks: clearing PS1 in the environment is NOT enough, because
-// an interactive bash sources the user's rc file after importing the
-// environment and the stock rc assigns PS1 unconditionally. The rc prompt is a
-// privacy leak (login name, hostname, absolute cwd) in a scrollback the agent
-// reads and the user shares.
-//
-// The test gives bash a HOME of its own with an rc that sets a distinctive
-// prompt and an alias, so it asserts both halves of the deal at once: the
-// prompt is gone, and the shell is still interactive enough to have sourced the
-// rc (the alias resolves).
+// TestPTY_SuppressesAnRcFileProvidedPrompt pins that an rc-assigned PS1 is suppressed while the rc file is still sourced (its alias resolves).
 func TestPTY_SuppressesAnRcFileProvidedPrompt(t *testing.T) {
 	bash := requireBash(t)
 
@@ -118,11 +99,7 @@ func TestPTY_SuppressesAnRcFileProvidedPrompt(t *testing.T) {
 	}
 }
 
-// TestPromptSuppressionEnv_ShapePerShell pins the mechanism itself, which the
-// behavioural tests above cannot: for bash the assignment MUST ride on
-// PROMPT_COMMAND, because that is the only hook that runs after the rc file and
-// before the prompt is drawn. A refactor that "simplifies" this back to a plain
-// PS1= would pass a naive env test and silently restore the leak.
+// TestPromptSuppressionEnv_ShapePerShell pins that bash's clearing rides on PROMPT_COMMAND, not a plain PS1=, since PROMPT_COMMAND alone outruns the rc file.
 func TestPromptSuppressionEnv_ShapePerShell(t *testing.T) {
 	env := func(shell string) map[string]string {
 		out := map[string]string{}
@@ -133,7 +110,7 @@ func TestPromptSuppressionEnv_ShapePerShell(t *testing.T) {
 		return out
 	}
 
-	bash := env("/usr/local/bin/bash") // non-standard path: classified by base name
+	bash := env("/usr/local/bin/bash") // non-standard path, classified by base name
 	if bash["PS1"] != "" || bash["PS2"] != "" {
 		t.Fatalf("bash: PS1/PS2 must be cleared, got %#v", bash)
 	}
@@ -160,11 +137,7 @@ func TestPromptSuppressionEnv_ShapePerShell(t *testing.T) {
 	}
 }
 
-// TestShellSpawnArgs_KeepsInteractiveDropsLineEditor pins the argv contract:
-// -i stays (rc files and therefore aliases depend on it), and bash loses
-// readline, which is what removes the bracketed-paste escape noise around every
-// prompt. beam submits whole lines, so there is no keystroke for a line editor
-// to edit.
+// TestShellSpawnArgs_KeepsInteractiveDropsLineEditor pins that -i stays (rc/aliases depend on it) while bash loses readline.
 func TestShellSpawnArgs_KeepsInteractiveDropsLineEditor(t *testing.T) {
 	bash := strings.Join(shellSpawnArgs("/bin/bash"), " ")
 	if !strings.Contains(bash, "-i") {
@@ -181,9 +154,7 @@ func TestShellSpawnArgs_KeepsInteractiveDropsLineEditor(t *testing.T) {
 	}
 }
 
-// withHome returns a ScrubEnv that redirects HOME, so a test can hand the shell
-// an rc file of its own instead of depending on whatever the developer's
-// machine has in ~/.bashrc.
+// withHome returns a ScrubEnv that redirects HOME to a test's own rc file.
 func withHome(home string) func([]string) []string {
 	return func(env []string) []string {
 		out := make([]string, 0, len(env)+1)
@@ -197,13 +168,7 @@ func withHome(home string) func([]string) []string {
 	}
 }
 
-// TestPTY_SingleCommandProducesOnlyItsOutput is the acceptance test for the
-// whole `!` experience: `!echo AAA` must put AAA in the scrollback and nothing
-// else. Before the fix this one line produced the echoed command, two prompts
-// carrying user@host:cwd, and the bracketed-paste escapes around them.
-//
-// HOME is redirected so the assertion is about beam's spawn contract rather
-// than about whatever the developer's own .bashrc does.
+// TestPTY_SingleCommandProducesOnlyItsOutput pins that one submitted line yields exactly its own output, nothing else.
 func TestPTY_SingleCommandProducesOnlyItsOutput(t *testing.T) {
 	bash := requireBash(t)
 	home := t.TempDir()
@@ -225,5 +190,35 @@ func TestPTY_SingleCommandProducesOnlyItsOutput(t *testing.T) {
 	}
 	if got := m.Read("sess-clean", 0, 0).Content; got != "AAA\r\n" {
 		t.Fatalf("one command must yield exactly its own output; want %q, got %q", "AAA\r\n", got)
+	}
+}
+
+// TestPTY_ScrubEnv_StripsSecretKeepsPathAndHome pins that the default deny-secrets scrub strips credential-shaped vars while PATH/HOME survive.
+func TestPTY_ScrubEnv_StripsSecretKeepsPathAndHome(t *testing.T) {
+	t.Setenv("TESTSECRET_API_KEY", "leaked-value")
+
+	scrub := libsandbox.EnvScrub(libsandbox.ScrubDenySecrets, nil, nil)
+	m := newTestManagerWith(t, Config{
+		IdleTimeout: time.Minute,
+		ScrubEnv:    scrub,
+	})
+	ctx := ctxWithSession("sess-scrub")
+	if _, err := m.Run(ctx, "sess-scrub", "env"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !waitFor(t, 3*time.Second, func() bool {
+		return strings.Contains(m.Read("sess-scrub", 0, 0).Content, "PATH=")
+	}) {
+		t.Fatalf("no output: %q", m.Read("sess-scrub", 0, 0).Content)
+	}
+	got := m.Read("sess-scrub", 0, 0).Content
+	if strings.Contains(got, "TESTSECRET_API_KEY") {
+		t.Fatalf("the default scrub must strip credential-shaped names, got %q", got)
+	}
+	if !strings.Contains(got, "PATH=") {
+		t.Fatalf("PATH must survive the default scrub or the shell cannot run anything, got %q", got)
+	}
+	if !strings.Contains(got, "HOME=") {
+		t.Fatalf("HOME must survive the default scrub (Allow=\"*\" under deny-secrets), got %q", got)
 	}
 }

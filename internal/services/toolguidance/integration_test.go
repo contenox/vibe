@@ -13,12 +13,7 @@ import (
 	"github.com/contenox/beam/internal/services/toolguidance"
 )
 
-// TestUnit_ToolGuidance_RealLocalFS_RepeatMarker drives the decorator through the
-// REAL localtools local_fs provider and the real ToolsCall dispatch shape the
-// task engine uses — no stub. It is the integration proof that the seam works end
-// to end: wrap the aggregate-shaped repo, list the same directory three times,
-// and the third result carries the repeat marker while STILL carrying the real
-// directory listing (append-only, tool output never modified).
+// TestUnit_ToolGuidance_RealLocalFS_RepeatMarker pins that the decorator appends the repeat marker without altering the real local_fs listing.
 func TestUnit_ToolGuidance_RealLocalFS_RepeatMarker(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"alpha.go", "beta.go", "gamma.md"} {
@@ -27,7 +22,6 @@ func TestUnit_ToolGuidance_RealLocalFS_RepeatMarker(t *testing.T) {
 		}
 	}
 
-	// Real provider, default guidance thresholds (repeat == 3).
 	inner := localtools.NewLocalFSTools(dir, nil)
 	wrapped := toolguidance.Wrap(inner)
 
@@ -54,13 +48,11 @@ func TestUnit_ToolGuidance_RealLocalFS_RepeatMarker(t *testing.T) {
 	if !strings.Contains(third, "[harness] 3rd identical list_dir call this session.") {
 		t.Fatalf("third call missing repeat marker, got:\n%q", third)
 	}
-	// Append-only: the real listing must survive intact on the third call.
 	for _, name := range []string{"alpha.go", "beta.go", "gamma.md"} {
 		if !strings.Contains(third, name) {
 			t.Fatalf("guidance clobbered the tool's own output; %q missing from:\n%q", name, third)
 		}
 	}
-	// The marker is appended AFTER the tool output, on its own line.
 	if idx := strings.Index(third, "\n[harness] "); idx <= 0 {
 		t.Fatalf("marker must be appended on a new line after the listing, got:\n%q", third)
 	}

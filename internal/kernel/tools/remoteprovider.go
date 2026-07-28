@@ -79,20 +79,18 @@ func (p *PersistentRepo) Exec(
 	debug bool,
 	args *taskengine.ToolsCall,
 ) (any, taskengine.DataType, error) {
-	// 1. Check local built-in tools first. These carry their own tracking, so
-	// pass through untouched to avoid double-spanning.
+	// Local built-in tools carry their own tracking, so pass through
+	// untouched to avoid double-spanning.
 	if tools, ok := p.localTools[args.Name]; ok {
 		return tools.Exec(ctx, startingTime, input, debug, args)
 	}
 
-	// Remote (MCP / HTTP) dispatch is the external surface previously invisible
-	// to the tracker seam — span it so an injected exporter sees it.
+	// Remote (MCP / HTTP) dispatch is spanned here so an injected exporter sees it.
 	reportErr, reportChange, end := p.tracker.Start(ctx, "exec", "remote_tools", "tools", args.Name, "tool", args.ToolName)
 	defer end()
 
 	store := runtimetypes.New(p.dbInstance.WithoutTransaction())
 
-	// 2. Check MCP servers from DB (transient connection per call).
 	if runtimetypes.IsACPManagedMCPServerName(args.Name) && !acpMCPServerVisible(ctx, args.Name) {
 		err := fmt.Errorf("unknown tools: %s", args.Name)
 		reportErr(err)
@@ -108,7 +106,6 @@ func (p *PersistentRepo) Exec(
 		return out, dt, execErr
 	}
 
-	// 3. Fall back to HTTP remote tools from DB.
 	remoteTools, err := store.GetRemoteToolsByName(ctx, args.Name)
 	if err != nil {
 		err = fmt.Errorf("unknown tools: %s", args.Name)
@@ -132,7 +129,7 @@ func (p *PersistentRepo) execMCPTools(
 	args *taskengine.ToolsCall,
 	input any,
 ) (any, taskengine.DataType, error) {
-	// Determine tool name: strip "toolsname." prefix that taskengine adds.
+	// Strip the "toolsname." prefix that taskengine adds.
 	toolName := args.ToolName
 	if prefix := srv.Name + "."; strings.HasPrefix(toolName, prefix) {
 		toolName = strings.TrimPrefix(toolName, prefix)
@@ -141,7 +138,6 @@ func (p *PersistentRepo) execMCPTools(
 		toolName = args.Args["tool"]
 	}
 
-	// Merge model args first, then inject system params (injected values always win).
 	toolArgs := map[string]any{}
 	if m, ok := input.(map[string]any); ok {
 		for k, v := range m {
@@ -153,7 +149,7 @@ func (p *PersistentRepo) execMCPTools(
 	for k, v := range args.Args {
 		toolArgs[k] = v
 	}
-	// Inject system-level params — these override any model-provided values.
+	// System-level params override any model-provided values.
 	for k, v := range srv.InjectParams {
 		toolArgs[k] = v
 	}
@@ -183,7 +179,7 @@ func (p *PersistentRepo) execMCPTools(
 	if err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("mcp tools %q: %w", srv.Name, err)
 	}
-	// Always return JSON so the LLM sees structured data, not Go's map[key:value] format.
+	// JSON, so the LLM sees structured data rather than Go's map[key:value] format.
 	if result != nil {
 		if s, ok := result.(string); ok {
 			return s, taskengine.DataTypeString, nil
@@ -201,12 +197,10 @@ func (p *PersistentRepo) execRemoteTools(
 	input any,
 	args *taskengine.ToolsCall,
 ) (any, taskengine.DataType, error) {
-	// Validate tools
 	if tools.TimeoutMs <= 0 {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("timeout must be positive: %dms", tools.TimeoutMs)
 	}
 
-	// Build injection map from tools.Properties
 	injectParams := make(map[string]ParamArg)
 	if tools.Properties.Name != "" {
 		loc := p.mapLocation(tools.Properties.In)
@@ -223,14 +217,13 @@ func (p *PersistentRepo) execRemoteTools(
 			In:    ArgLocationHeader,
 		}
 	}
-	// Strip the tools-name prefix that taskengine adds to tool names
-	// (e.g. "nws.obs_stations" → "obs_stations" when tools.Name == "nws").
+	// Strip the tools-name prefix taskengine adds to tool names (e.g.
+	// "nws.obs_stations" → "obs_stations" when tools.Name == "nws").
 	bareName := args.ToolName
 	if prefix := tools.Name + "."; strings.HasPrefix(bareName, prefix) {
 		bareName = strings.TrimPrefix(bareName, prefix)
 	}
 
-	// Construct ToolCall
 	toolCall := taskengine.ToolCall{
 		Function: taskengine.FunctionCall{
 			Name:      bareName,
@@ -250,14 +243,12 @@ func (p *PersistentRepo) execRemoteTools(
 		argumentsMap[k] = v
 	}
 
-	// Serialize arguments safely
 	argsJSON, err := safeJSONString(argumentsMap)
 	if err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("failed to prepare tool arguments: %w", err)
 	}
 	toolCall.Function.Arguments = argsJSON
 
-	// Set timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(tools.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
@@ -266,7 +257,7 @@ func (p *PersistentRepo) execRemoteTools(
 		client = p.insecureClient()
 	}
 
-	// Execute via OpenAPI protocol; spec loaded from SpecURL when set.
+	// Spec loaded from SpecURL when set.
 	result, dataType, err := p.protocolFor(tools.SpecURL).ExecuteTool(
 		timeoutCtx,
 		tools.EndpointURL,
@@ -275,14 +266,13 @@ func (p *PersistentRepo) execRemoteTools(
 		toolCall,
 	)
 
-	// Check for auth failure and attempt auto-login if AuthFlow is configured
+	// Auto-login retry on an auth failure, when AuthFlow is configured.
 	if err != nil && tools.AuthFlow != nil && IsAuthError(err) {
 		newInjects, loginErr := PerformAuthFlow(timeoutCtx, tools, client)
 		if loginErr != nil {
 			return nil, dataType, fmt.Errorf("execution failed: auth retry failed: %w (original error: %v)", loginErr, err)
 		}
 
-		// Update injection params with the new auth token
 		var needsPersist bool
 		for k, v := range newInjects {
 			injectParams[k] = v
@@ -300,7 +290,6 @@ func (p *PersistentRepo) execRemoteTools(
 			_ = store.UpdateRemoteTools(ctx, tools)
 		}
 
-		// Retry execution
 		result, dataType, err = p.protocolFor(tools.SpecURL).ExecuteTool(
 			timeoutCtx,
 			tools.EndpointURL,
@@ -319,7 +308,6 @@ func (p *PersistentRepo) execRemoteTools(
 
 // GetToolsForToolsByName returns the list of tools exposed by the named tools.
 func (p *PersistentRepo) GetToolsForToolsByName(ctx context.Context, name string) ([]taskengine.Tool, error) {
-	// 1. Local tools.
 	if tools, ok := p.localTools[name]; ok {
 		return tools.GetToolsForToolsByName(ctx, name)
 	}
@@ -329,9 +317,9 @@ func (p *PersistentRepo) GetToolsForToolsByName(ctx context.Context, name string
 
 	store := runtimetypes.New(p.dbInstance.WithoutTransaction())
 
-	// 2. MCP servers — route list-tools through persistent NATS worker.
+	// MCP servers route list-tools through the persistent NATS worker.
 	if mcpSrv, err := store.GetMCPServerByName(ctx, name); err == nil {
-		// Extract SessionID so the worker routes to the correct per-session pool.
+		// SessionID routes the worker to the correct per-session pool.
 		sessionID := ""
 		if v := ctx.Value(runtimetypes.SessionIDContextKey); v != nil {
 			if s, ok := v.(string); ok {
@@ -354,7 +342,6 @@ func (p *PersistentRepo) GetToolsForToolsByName(ctx context.Context, name string
 		return tools, nil
 	}
 
-	// 3. HTTP remote tools from DB.
 	remoteTools, err := store.GetRemoteToolsByName(ctx, name)
 	if err != nil {
 		return nil, fmt.Errorf("unknown tools %q: %w", name, taskengine.ErrToolsNotFound)
@@ -388,7 +375,6 @@ func (p *PersistentRepo) GetToolsForToolsByName(ctx context.Context, name string
 func (p *PersistentRepo) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
 	schemas := make(map[string]*openapi3.T)
 
-	// Local tools have no schema (for now)
 	for name, repo := range p.localTools {
 		repoSchemas, err := repo.GetSchemasForSupportedTools(ctx)
 		if err != nil {
@@ -397,7 +383,6 @@ func (p *PersistentRepo) GetSchemasForSupportedTools(ctx context.Context) (map[s
 		maps.Copy(schemas, repoSchemas)
 	}
 
-	// Fetch and process remote tools page by page
 	store := runtimetypes.New(p.dbInstance.WithoutTransaction())
 	var cursor *time.Time
 	const limit = 100
@@ -408,17 +393,14 @@ func (p *PersistentRepo) GetSchemasForSupportedTools(ctx context.Context) (map[s
 			return nil, fmt.Errorf("failed to list remote tools: %w", err)
 		}
 
-		// Process this page immediately
 		for _, tools := range page {
 			schema, err := p.protocolFor(tools.SpecURL).FetchSchema(ctx, tools.EndpointURL, p.httpClient)
 			if err != nil {
-				// Optionally log here (e.g., via p.logger.Warn(...)) in real implementation
-				continue // Graceful: one failing tools doesn't break all
+				continue // one failing tools doesn't break all
 			}
-			schemas[tools.Name] = schema // Store the *openapi3.T directly
+			schemas[tools.Name] = schema
 		}
 
-		// Break if this is the last page
 		if len(page) < limit {
 			break
 		}
@@ -439,7 +421,6 @@ func (p *PersistentRepo) Supports(ctx context.Context) ([]string, error) {
 	var cursor *time.Time
 	const limit = 100
 
-	// MCP servers
 	for {
 		page, err := store.ListMCPServers(ctx, cursor, limit)
 		if err != nil {
@@ -457,7 +438,6 @@ func (p *PersistentRepo) Supports(ctx context.Context) ([]string, error) {
 		cursor = &page[len(page)-1].CreatedAt
 	}
 
-	// HTTP remote tools
 	cursor = nil
 	for {
 		page, err := store.ListRemoteTools(ctx, cursor, limit)
@@ -498,8 +478,6 @@ func acpMCPServerVisible(ctx context.Context, name string) bool {
 	return hasStar || hasExact
 }
 
-// --- Helper Functions ---
-
 func (p *PersistentRepo) mapLocation(in string) ArgLocation {
 	switch in {
 	case runtimetypes.LocationPath:
@@ -509,7 +487,7 @@ func (p *PersistentRepo) mapLocation(in string) ArgLocation {
 	case runtimetypes.LocationBody:
 		return ArgLocationBody
 	default:
-		return ArgLocationBody // default fallback
+		return ArgLocationBody
 	}
 }
 

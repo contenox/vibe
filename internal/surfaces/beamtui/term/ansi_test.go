@@ -15,8 +15,8 @@ import (
 	xterm "golang.org/x/term"
 )
 
-// tty spins up a real pty pair so the raw-mode, signal and reader glue can
-// be exercised without inheriting a terminal from the test runner.
+// tty spins up a real pty pair so raw-mode and reader glue can be exercised
+// without inheriting a terminal from the test runner.
 func newTTY(t *testing.T) (master *os.File, engine *ANSI, output func() string) {
 	t.Helper()
 	master, slave, err := pty.Open()
@@ -274,10 +274,9 @@ func TestUnit_EngineFlushesAnAmbiguousPrefixWhenInputGoesIdle(t *testing.T) {
 	}
 }
 
-// New must never return an error AND a raw terminal. The caller has no engine
-// to Close in that case — it drops the half-built one on the floor — so a
-// termios left in raw mode strands the shell it returns to with no echo, no
-// line editing and no Ctrl+C.
+// TestUnit_EngineNewRestoresTheTerminalWhenModeSetupFails pins that New
+// never returns an error alongside a raw terminal, since the caller has no
+// engine to Close in that case.
 func TestUnit_EngineNewRestoresTheTerminalWhenModeSetupFails(t *testing.T) {
 	master, slave, err := pty.Open()
 	if err != nil {
@@ -304,8 +303,8 @@ func TestUnit_EngineNewRestoresTheTerminalWhenModeSetupFails(t *testing.T) {
 		e.Close()
 		t.Fatal("New succeeded with an unwritable terminal")
 	}
-	// Pin the failure this test is about: it has to be the write AFTER
-	// MakeRaw, or it proves nothing about undoing MakeRaw.
+	// The failure must be the write after MakeRaw, or this proves nothing
+	// about undoing MakeRaw.
 	if !strings.Contains(err.Error(), "enable terminal modes") {
 		t.Fatalf("New failed at the wrong step: %v", err)
 	}
@@ -318,15 +317,9 @@ func TestUnit_EngineNewRestoresTheTerminalWhenModeSetupFails(t *testing.T) {
 	}
 }
 
-// Input ending is not the app ending: the engine reports EOF by closing the
-// event channel, and Close must still run the whole restore path afterwards
-// without hanging.
-//
-// This test also pins the failure contract. When the far end of a pty is gone
-// every tty operation on it fails with EIO, including tcsetattr — there is no
-// terminal left to restore. Close says so instead of returning nil, and the
-// engine keeps its raw flag and saved termios so a later Restore tries again
-// rather than recording a hand-back that never happened.
+// TestUnit_EngineInputEOFClosesEventsAndCloseIsHonest pins that EOF closes
+// the event channel without ending the app, and that Close reports an
+// unclean restore rather than silently claiming success when the pty is gone.
 func TestUnit_EngineInputEOFClosesEventsAndCloseIsHonest(t *testing.T) {
 	master, slave, err := pty.Open()
 	if err != nil {
@@ -367,9 +360,8 @@ func TestUnit_EngineInputEOFClosesEventsAndCloseIsHonest(t *testing.T) {
 	}
 }
 
-// resume() runs on the app-shell loop, which is the only reader of the event
-// channel. A blocking send from there deadlocks the process with the terminal
-// raw and ISIG off — no keystroke reaches the app and Ctrl+C is not a signal.
+// TestUnit_EventSinkResizeNeverBlocks pins that a resize send never blocks,
+// since resume() runs on the event channel's only reader.
 func TestUnit_EventSinkResizeNeverBlocks(t *testing.T) {
 	s := newEventSink(1)
 	done := make(chan struct{})
@@ -401,9 +393,8 @@ func TestUnit_EventSinkResizeNeverBlocks(t *testing.T) {
 	}
 }
 
-// close() must not wait on the mutex a blocked producer is holding — there
-// must be no such mutex — and closing the channel under a blocked sender must
-// not panic.
+// TestUnit_EventSinkClosesUnderABlockedProducer pins that close() never
+// panics closing the channel under a blocked sender.
 func TestUnit_EventSinkClosesUnderABlockedProducer(t *testing.T) {
 	s := newEventSink(1)
 	done := make(chan struct{})

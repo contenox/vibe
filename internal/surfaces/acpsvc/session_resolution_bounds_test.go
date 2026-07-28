@@ -9,11 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The unit side of the envelope's model bound: a dispatched unit's session must
-// turn the allowlist it received at session/new into the bound its own resolver
-// is held to. This is the last link of the chain — envelope -> dispatcher ->
-// `_meta` -> session -> turn context -> llmrepo refusal — and if it breaks, the
-// allowlist parses everywhere and stops nothing.
+// TestUnit_SessionEntry_BindsEnvelopeAllowlistOntoTheTurnContext pins that a
+// session's model/backend allowlist reaches the turn's resolution bounds.
 func TestUnit_SessionEntry_BindsEnvelopeAllowlistOntoTheTurnContext(t *testing.T) {
 	meta, ok := missionservice.ParseMissionMetaFull(
 		missionservice.MarshalMissionMetaBounded("m-1", []string{"gemini-2.5-flash"}, []string{"my-ollama"}),
@@ -34,9 +31,8 @@ func TestUnit_SessionEntry_BindsEnvelopeAllowlistOntoTheTurnContext(t *testing.T
 	require.False(t, bound.IsZero())
 }
 
-// An ordinary chat session — and a mission whose envelope declares no allowlist —
-// must bind nothing at all, so those turns resolve exactly as they did before
-// compute bounds existed.
+// TestUnit_SessionEntry_ChatAndUnboundedMissionBindNothing pins that an
+// ordinary chat session and an unbounded mission resolve no allowlist at all.
 func TestUnit_SessionEntry_ChatAndUnboundedMissionBindNothing(t *testing.T) {
 	for _, sess := range []*sessionEntry{
 		{},                 // an ordinary chat session

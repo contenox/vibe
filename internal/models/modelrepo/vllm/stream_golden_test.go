@@ -13,11 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_VLLMStreamClient_GoldenFixture_ToolCallFragments drives a recorded
-// chat-completions SSE transcript — reasoning, split content, tool-call
-// fragments across chunks, finish_reason and the trailing usage chunk —
-// through the real adapter and the engine-side assembler, proving the
-// raw-delta contract end to end.
+// Drives a recorded chat-completions SSE transcript through the real adapter
+// and the engine-side assembler, proving the raw-delta contract end to end.
 func TestUnit_VLLMStreamClient_GoldenFixture_ToolCallFragments(t *testing.T) {
 	t.Parallel()
 
@@ -71,8 +68,7 @@ func TestUnit_VLLMStreamClient_GoldenFixture_ToolCallFragments(t *testing.T) {
 	assert.Equal(t, 8, res.Usage.CompletionTokens)
 }
 
-// TestUnit_VLLMStreamClient_ErrorChunkSurfaces: an in-stream error frame ends
-// the stream with an Error parcel; the assembler refuses to produce a result.
+// An in-stream error frame ends the stream with an Error parcel.
 func TestUnit_VLLMStreamClient_ErrorChunkSurfaces(t *testing.T) {
 	t.Parallel()
 

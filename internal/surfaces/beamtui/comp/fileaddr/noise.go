@@ -7,31 +7,14 @@ import (
 	"strings"
 )
 
-// ---------------------------------------------------------------------------
-// DUPLICATED NOISE FILTER — extraction pending
-//
-// Everything below is a copy of the matcher the agent's own local_fs
-// find_files uses: internal/services/localtools/fs_gitignore.go (ignoreRule,
-// ignoreMatcher, parseIgnoreFile) and internal/services/localtools/
-// fs_policy.go's defaultSkipDirNames. Not one of those identifiers is
-// exported, so there is nothing to import today.
-//
-// TODO(blueprint beam-tui.md section 3, item 9 — "Extract the
-// gitignore/skip-dirs matcher"): that item exists precisely because @-mention
-// completion and find_files MUST filter identically, or the human's list and
-// the agent's list disagree about which files exist. Where the shared matcher
-// lands (its own package, or folded into vfs/localfileservice) is still an
-// open design decision. When it lands, DELETE this file and call it — the
-// semantics here were copied to match, and a copy is exactly the drift the
-// blueprint item is about.
-//
-// Scope note, unchanged from the original: this is a NOISE filter, never
-// access control. Containment is vfs's job, and Source.walk runs every
-// candidate through vfs.View.Resolve for that reason.
-// ---------------------------------------------------------------------------
+// defaultSkipDirNames, ignoreRule, ignoreMatcher and parseIgnoreFile duplicate
+// localtools' matcher (fs_gitignore.go, fs_policy.go) because those
+// identifiers are unexported; keep them in sync so @-mention completion and
+// find_files agree on which files exist. This is a noise filter only —
+// containment is vfs's job via Source.walk.
 
-// defaultSkipDirNames is a verbatim copy of localtools' fallback set of
-// directory basenames omitted from listings. See the extraction TODO above.
+// defaultSkipDirNames is a copy of localtools' fallback set of directory
+// basenames omitted from listings.
 var defaultSkipDirNames = map[string]bool{
 	".git": true, ".hg": true, ".svn": true,
 	"node_modules": true, "bower_components": true, "Pods": true,
@@ -48,13 +31,10 @@ var defaultSkipDirNames = map[string]bool{
 // skipDir reports whether a directory basename is noise.
 func skipDir(base string) bool { return defaultSkipDirNames[base] }
 
-// ignoreRule and ignoreMatcher mirror localtools' partial gitignore
-// implementation: comments, negation (last match wins), directory-only
-// patterns, root-anchored patterns, filepath.Match globs matched against the
-// basename when the pattern has no slash and against the root-relative path
-// when it does, and a leading "**/" meaning "at any depth". Nested .gitignore
-// files, .git/info/exclude, core.excludesFile, and mid-pattern "**" are out
-// of scope there and therefore out of scope here.
+// ignoreRule and ignoreMatcher mirror localtools' partial gitignore support:
+// comments, negation, directory-only/root-anchored patterns, and globs
+// against the basename or root-relative path. Nested .gitignore files,
+// .git/info/exclude, and mid-pattern "**" are out of scope.
 type ignoreRule struct {
 	pattern string
 	negate  bool
@@ -157,14 +137,9 @@ func parseIgnoreFile(data []byte) *ignoreMatcher {
 	return m
 }
 
-// gitignoreFor loads the root's .gitignore. A missing or unreadable file
-// yields nil, which Match treats as "nothing is ignored".
-//
-// Unlike localtools' copy this does not cache: a candidate walk happens at
-// most once per debounced keystroke, and a cache keyed on a root the user can
-// edit under us buys microseconds in exchange for staleness rules nobody
-// asked for. The blueprint's answer for repos big enough to care is the
-// "Later: incremental index", not a matcher cache.
+// gitignoreFor loads the root's .gitignore; a missing or unreadable file
+// yields nil ("nothing is ignored"). Unlike localtools' copy, this does not
+// cache.
 func gitignoreFor(absRoot string) *ignoreMatcher {
 	path := filepath.Join(absRoot, ".gitignore")
 	info, err := os.Stat(path)
