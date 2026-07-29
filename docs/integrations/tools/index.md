@@ -66,11 +66,11 @@ Contenox ships with built-in local tools and supports unlimited remote tools:
 | Tools name | Type | Always available | What it does |
 |---|---|---|---|
 | `local_fs` | Local | ✅ | Read, write, and search files within a configured directory (10 verb-specific tools, read-before-write contract for mutations) |
-| `git` | Local | `contenox chat`/`run`/`beam`, ACP sessions | Read and mutate the workspace's own Git repository in-process — status, diff, log, show, branches, blame, add, commit, checkout, restore |
-| `gointel` | Local | `contenox chat`/`run`/`beam`, ACP sessions | Six read-only Go code-intelligence tools (`go_describe`, `go_definition`, `go_references`, `go_implementations`, `go_symbols`, `go_diagnostics`) backed by a real type checker |
-| `jq` | Local | `contenox chat`/`run`/`beam`, ACP sessions | `jq_query` — run a jq program over a JSON or YAML document, read-only |
-| `workspace` | Local | `contenox chat`/`run`/`beam`, ACP sessions | `workspace_search` — semantic search over the index built by `contenox index` |
-| `goja` | Local | `contenox chat`/`run`/`beam`, ACP sessions | `goja_eval` — a JavaScript (ES2023) sandbox with no ambient I/O, plus one tool per operator-authored script under `$CONTENOX_DIR/tools/*.js` |
+| `git` | Local | `contenox chat`/`run`/`new`, ACP sessions | Read and mutate the workspace's own Git repository in-process — status, diff, log, show, branches, blame, add, commit, checkout, restore |
+| `gointel` | Local | `contenox chat`/`run`/`new`, ACP sessions | Six read-only Go code-intelligence tools (`go_describe`, `go_definition`, `go_references`, `go_implementations`, `go_symbols`, `go_diagnostics`) backed by a real type checker |
+| `jq` | Local | `contenox chat`/`run`/`new`, ACP sessions | `jq_query` — run a jq program over a JSON or YAML document, read-only |
+| `workspace` | Local | `contenox chat`/`run`/`new`, ACP sessions | `workspace_search` — semantic search over the index built by `contenox index` |
+| `goja` | Local | `contenox chat`/`run`/`new`, ACP sessions | `goja_eval` — a JavaScript (ES2023) sandbox with no ambient I/O, plus one tool per operator-authored script under `$CONTENOX_DIR/tools/*.js` |
 | `webtools` | Local | ✅ | Call HTTP endpoints — `web_get`, `web_head`, `web_post`, `web_put`, `web_patch`, `web_delete`. SSRF guarding is opt-in (`_denied_hosts` is empty by default — see [local tools](/docs/integrations/tools/local/)); mutating verbs HITL-approve by default. |
 | `local_shell` | Local | CLI opt-in | Run shell commands. `contenox run` and `contenox chat` require `--shell`; editor clients route shell execution through their own approval surface where supported. |
 | `print` | Local | ✅ | Append a message to the chat history or return it as a string |

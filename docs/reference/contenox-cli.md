@@ -129,15 +129,15 @@ contenox run --chain .contenox/my-chain.json --shell "refactor main.go"
 - `--auto`: Disable HITL approval prompts for non-interactive runs. Default is HITL on.
 - `--think` / `--trace` / `--steps`: Global flags (see table above).
 
-### `contenox beam`
+### `contenox new`
 
 The Contenox terminal UI: chat, plan, and shell in one persistent session, in a full-screen TUI.
 
 ```bash
-contenox beam                 # open in the current directory
-contenox beam ~/src/myproject # open in a specific directory
-contenox beam --session zed-a1b2c3
-contenox beam --plain         # no color or unicode, ASCII glyphs only
+contenox new                 # open in the current directory
+contenox new ~/src/myproject # open in a specific directory
+contenox new --session zed-a1b2c3
+contenox new --plain         # no color or unicode, ASCII glyphs only
 ```
 
 | Flag              | Description                                                                 |
@@ -146,9 +146,9 @@ contenox beam --plain         # no color or unicode, ASCII glyphs only
 | `--light`          | Render for a light terminal background (overrides automatic detection)      |
 | `--plain`          | Drop all color and unicode: ASCII glyphs, no styling                        |
 
-The beam TUI requires a real terminal on stdout; it refuses to start on a non-TTY. Unlike `chat`, `local_shell` is enabled by default here (pass `--shell=false` to disable). It also supports the `/mission` slash command the same way an ACP editor session does — see [The `/mission` slash command](#the-mission-slash-command) below.
+The terminal UI requires a real terminal on stdout; it refuses to start on a non-TTY. Unlike `chat`, `local_shell` is enabled by default here (pass `--shell=false` to disable). It also supports the `/mission` slash command the same way an ACP editor session does — see [The `/mission` slash command](#the-mission-slash-command) below.
 
-`contenox beam` loads its own chain, `~/.contenox/default-beam-chain.json` (override with `CONTENOX_BEAM_CHAIN_PATH`), and its own HITL envelope, `hitl-policy-beam.json` — a copy of the editor profile's policy tuned for the attended terminal UI (see [HITL Policies](/docs/guide/hitl/#built-in-presets)).
+`contenox new` loads its own chain, `~/.contenox/default-beam-chain.json` (override with `CONTENOX_BEAM_CHAIN_PATH`), and its own HITL envelope, `hitl-policy-beam.json` — a copy of the editor profile's policy tuned for the attended terminal UI (see [HITL Policies](/docs/guide/hitl/#built-in-presets)).
 
 ### `contenox doctor`
 
@@ -460,7 +460,7 @@ contenox mission stop <mission-id> --reason "no longer needed"
 | `--timeout` (`fire`)            | Maximum time to wait for a terminal status before tearing the unit down (default `30m`)           |
 | `--reason` (`stop`)             | One line on why the mission is being stopped, persisted as the status reason                     |
 
-`mission fire <agent> <intent...>` dispatches the fleet **in-process**: the unit is a child subprocess of this CLI invocation, so `--wait` is required — a detached fire from a one-shot CLI would tear its own mission down when the command exits. Fire-and-detach needs a long-lived host: an editor session (`contenox acp`, the `/mission` command) or `contenox beam`. Exit status is 0 when the mission lands; non-zero when it derails, gets stuck, is abandoned, or the wait times out.
+`mission fire <agent> <intent...>` dispatches the fleet **in-process**: the unit is a child subprocess of this CLI invocation, so `--wait` is required — a detached fire from a one-shot CLI would tear its own mission down when the command exits. Fire-and-detach needs a long-lived host: an editor session (`contenox acp`, the `/mission` command) or `contenox new`. Exit status is 0 when the mission lands; non-zero when it derails, gets stuck, is abandoned, or the wait times out.
 
 Answering a mission's pending question or permission gate is not a mission verb — use `contenox approvals respond`, which answers every pending ask in the system, mission-bound or not; `mission asks` only narrows the view to one mission (or every open one).
 
@@ -581,7 +581,7 @@ See [Least-privilege shell environment](/docs/guide/environment-scrubbing/) for 
 
 Missions are the dual of chat mode. In chat you prompt turn by turn and approve each gated action yourself. In mission mode you fire a one-line intent at a declared agent under an **envelope** — a HITL policy that bounds what it may do unattended — and keep working; the unit acts inside the envelope, and only crossing it costs your attention.
 
-From inside a session (`contenox acp`, or the beam TUI) fire a mission without leaving the conversation:
+From inside a session (`contenox acp`, or the terminal UI) fire a mission without leaving the conversation:
 
 - `/mission <intent>` — fires the configured `default-mission-agent` under the `default-mission-policy` envelope.
 - `/mission <agent-name> <intent>` — fires the named agent instead.
@@ -650,7 +650,7 @@ contenox version
 |---|---|
 | `CONTENOX_ACP_CHAIN_PATH` | Override the chain file used by `contenox acp` sessions |
 | `CONTENOX_ACPX_CHAIN_PATH`| Override the chain file used by headless ACPX sessions |
-| `CONTENOX_BEAM_CHAIN_PATH` | Override the chain file used by `contenox beam` (default `~/.contenox/default-beam-chain.json`) — beam drives the same in-process ACP transport an editor session does, but resolves its own chain file and env var independently of `CONTENOX_ACP_CHAIN_PATH` |
+| `CONTENOX_BEAM_CHAIN_PATH` | Override the chain file used by `contenox new` (default `~/.contenox/default-beam-chain.json`) — the terminal UI drives the same in-process ACP transport an editor session does, but resolves its own chain file and env var independently of `CONTENOX_ACP_CHAIN_PATH` |
 | `CONTENOX_DEFAULT_MODEL` / `CONTENOX_DEFAULT_PROVIDER` | Process-level override of the configured default model/provider (nothing is persisted). Also the ACP `env_var` auth-method contract for non-interactive setup. |
 | `CONTENOX_DEFAULT_ALT_MODEL` / `CONTENOX_DEFAULT_ALT_PROVIDER` | Same, for the alt model pair. |
 | `CONTENOX_DEFAULT_MAX_TOKENS` / `CONTENOX_DEFAULT_THINK` | Same, for the response token cap and reasoning level. |

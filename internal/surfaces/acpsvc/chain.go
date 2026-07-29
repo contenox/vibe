@@ -12,6 +12,12 @@ import (
 const (
 	defaultChainFilename = "default-acp-chain.json"
 	chainPathEnv         = "CONTENOX_ACP_CHAIN_PATH"
+
+	// defaultFIMChainFilename/fimChainPathEnv are the autocomplete analog of
+	// defaultChainFilename/chainPathEnv, kept separate so the completion
+	// model/chain can differ from the chat one.
+	defaultFIMChainFilename = "default-fim-chain.json"
+	fimChainPathEnv         = "CONTENOX_ACP_FIM_CHAIN_PATH"
 )
 
 type ChainRegistry struct {
@@ -57,3 +63,11 @@ func LoadChainRegistryFrom(filename, envVar string) (*ChainRegistry, error) {
 func (r *ChainRegistry) Default() *taskengine.TaskChainDefinition { return r.defaultChain }
 
 func (r *ChainRegistry) Source() string { return r.source }
+
+// LoadFIMChainRegistry loads the fill-in-the-middle chain for
+// _contenox/autocomplete, mirroring LoadChainRegistry's file+env-var
+// convention (fail-closed: a missing/invalid file is a hard error, never a
+// silent fallback to the chat chain).
+func LoadFIMChainRegistry() (*ChainRegistry, error) {
+	return LoadChainRegistryFrom(defaultFIMChainFilename, fimChainPathEnv)
+}

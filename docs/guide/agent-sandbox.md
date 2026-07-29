@@ -8,7 +8,7 @@ description: How the default filesystem/exec/environment fence and the opt-in ne
 The wall confines a **foreign agent**: an external ACP agent — code contenox did not write — spawned as a subprocess and given a workspace and a set of tools. It governs the surface no tool gate can see: the code the agent runs *inside its own process* — its own shell, its own file access, whatever its toolchain pulls in (an `npm install` postinstall script, for example). An agent that only uses its tools never touches the wall.
 
 > [!IMPORTANT]
-> This page does not cover contenox's own chains. `chat`, `run`, `beam`, an editor `acp` session, and mission units the fleet dispatches all run outside the wall by design — see [what the wall does not confine](#what-the-wall-does-not-confine-contenox-itself). Registering a foreign agent is also not exposed yet: `external_acp` agents are internal-only, so a stock install never reaches the wall. The mechanism below is built and tested; it is waiting on the registration path.
+> This page does not cover contenox's own chains. `chat`, `run`, `new`, an editor `acp` session, and mission units the fleet dispatches all run outside the wall by design — see [what the wall does not confine](#what-the-wall-does-not-confine-contenox-itself). Registering a foreign agent is also not exposed yet: `external_acp` agents are internal-only, so a stock install never reaches the wall. The mechanism below is built and tested; it is waiting on the registration path.
 
 There are two layers: one is always on and needs no configuration, the other is opt-in.
 
@@ -28,7 +28,7 @@ The wall confines code contenox did not write. It does not apply to contenox re-
 
 A unit like this shares the one runtime state — the same database, the same seeded presets, the same workspace — and the wall denies exactly that state (`~/.contenox` is never carved out, so an agent can never reach the policy that governs it). Running as contenox only grants the right to run as contenox: what the unit then does runs through the runtime's own tool grants and the [human-in-the-loop gate](/docs/guide/hitl/), which is the layer built to govern it.
 
-The same applies to every chain contenox runs in its own process — `chat`, `run`, `beam`, an editor `acp` session. The shells those chains run (`local_shell`, the `shell_session` PTY) are **not confined**: they are ordinary child processes of the runtime, rooted at the session's workspace but free of the filesystem, exec, and environment fence a foreign agent gets. What governs a chain's shell access is the approval gate and the chain's tool policy — a gate at the tool layer, not a wall at the kernel. Give an untrusted driver the hardened `acpx` profile (`local_shell` denied outright) rather than assuming a sandbox that is not there.
+The same applies to every chain contenox runs in its own process — `chat`, `run`, `new`, an editor `acp` session. The shells those chains run (`local_shell`, the `shell_session` PTY) are **not confined**: they are ordinary child processes of the runtime, rooted at the session's workspace but free of the filesystem, exec, and environment fence a foreign agent gets. What governs a chain's shell access is the approval gate and the chain's tool policy — a gate at the tool layer, not a wall at the kernel. Give an untrusted driver the hardened `acpx` profile (`local_shell` denied outright) rather than assuming a sandbox that is not there.
 
 ## Confining the network too (the opt-in wall)
 

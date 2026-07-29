@@ -1,7 +1,7 @@
 # Engine event contract
 
 Status: normative. This document is THE contract between the task engine's
-event stream and its consumers — the ACP translators today, the beam TUI's
+event stream and its consumers — the ACP translators today, the terminal UI's
 engine-bridge next, and the checkpoint machinery. The matrix below is
 asserted in CI:
 
@@ -156,6 +156,11 @@ The engine executes one task at a time; events of one run are totally ordered
   journal is the durable record.
 - `KVJournalTaskEventSink` delegates `Wants` to its wrapped sink (with no
   inner sink it consumes everything) and journals per §5.
+- `bridgeEventSink` (`internal/surfaces/vscodeagent/events.go`) wants only the
+  kinds the VS Code bridge maps to a notification: `step_chunk`, `print`,
+  `tool_call_pending`, `tool_call`, `hitl_decision`,
+  `step_started/completed/failed`, `token_usage`. It is an in-process sink —
+  no bus, no journal.
 
 ## 7. ACP translation
 

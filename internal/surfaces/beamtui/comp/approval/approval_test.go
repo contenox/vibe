@@ -42,11 +42,12 @@ func sampleEvent(resolve func(bool)) enginebridge.PermissionRequested {
 		Kind:       libacp.ToolKindEdit,
 		Status:     libacp.ToolCallStatusPending,
 		Meta: approvalflow.Meta{
-			ToolsName:  "local_fs",
-			ToolName:   "write_file",
-			PolicyName: "guarded",
-			PolicyPath: "rules[3].local_fs.write_file",
-			Diff:       sampleDiff,
+			ToolsName:   "local_fs",
+			ToolName:    "write_file",
+			PolicyName:  "guarded",
+			PolicyPath:  "rules[3].local_fs.write_file",
+			MatchedRule: intp(4),
+			Diff:        sampleDiff,
 		},
 		RawInput: raw,
 		Options: []libacp.PermissionOption{
@@ -103,6 +104,7 @@ func scriptEvent(mayCall []string, declared *bool) enginebridge.PermissionReques
 }
 
 func boolp(v bool) *bool { return &v }
+func intp(v int) *int    { return &v }
 
 func texts(lines []frame.Line) []string {
 	out := make([]string, 0, len(lines))
@@ -175,9 +177,82 @@ func TestUnit_ArgsAreSortedAndSummarised(t *testing.T) {
 		t.Fatalf("long arg leaked a newline into a span: %q", args[0])
 	}
 
-	if want := "policy guarded · rule rules[3].local_fs.write_file"; lines[5] != want {
+	if want := "policy guarded · path rules[3].local_fs.write_file · rule 5"; lines[5] != want {
 		t.Fatalf("policy line = %q, want %q", lines[5], want)
 	}
+}
+
+// TestUnit_PolicyLineShowsMatchedRuleOrDefault: MatchedRule renders 1-based,
+// so "rule 1" reads as an ordinal no one can mistake for the wire's 0-based
+// index; nil beside a known policy name reads as "no rule matched", never a
+// bare rule number, since no rule matching is exactly what nil means. A
+// MatchedRule with no policy name withholds the rule claim entirely — it
+// would be an index into a document the card never named.
+func TestUnit_PolicyLineShowsMatchedRuleOrDefault(t *testing.T) {
+	policyLine := func(ev enginebridge.PermissionRequested) string {
+		for _, l := range texts(New(ev).Render(200, false, "")) {
+			if strings.HasPrefix(l, "policy ") || strings.HasPrefix(l, "path ") {
+				return l
+			}
+		}
+		return ""
+	}
+
+	t.Run("matched rule present, shown 1-based", func(t *testing.T) {
+		ev := sampleEvent(nil)
+		ev.Meta.MatchedRule = intp(0)
+		if got, want := policyLine(ev), "policy guarded · path rules[3].local_fs.write_file · rule 1"; got != want {
+			t.Fatalf("policy line = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("nil matched rule reads as no rule matched, never rule 0", func(t *testing.T) {
+		ev := sampleEvent(nil)
+		ev.Meta.MatchedRule = nil
+		got := policyLine(ev)
+		if want := "policy guarded · path rules[3].local_fs.write_file · no rule matched"; got != want {
+			t.Fatalf("policy line = %q, want %q", got, want)
+		}
+		if strings.Contains(got, "rule 0") {
+			t.Fatalf("policy line = %q, nil must never render as rule 0", got)
+		}
+	})
+
+	t.Run("no policy name withholds the rule claim even if MatchedRule is set", func(t *testing.T) {
+		ev := sampleEvent(nil)
+		ev.Meta.PolicyName = ""
+		ev.Meta.MatchedRule = intp(0)
+		if got, want := policyLine(ev), "path rules[3].local_fs.write_file"; got != want {
+			t.Fatalf("policy line = %q, want %q (no rule/default claim without a named policy)", got, want)
+		}
+	})
+
+	t.Run("detail present displaces the rule index", func(t *testing.T) {
+		ev := sampleEvent(nil)
+		ev.Meta.Detail = `shell command "rm" matched command_ask_always`
+		want := `policy guarded · path rules[3].local_fs.write_file · shell command "rm" matched command_ask_always`
+		if got := policyLine(ev); got != want {
+			t.Fatalf("policy line = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("detail absent falls back to the rule index", func(t *testing.T) {
+		ev := sampleEvent(nil)
+		ev.Meta.Detail = ""
+		if got, want := policyLine(ev), "policy guarded · path rules[3].local_fs.write_file · rule 5"; got != want {
+			t.Fatalf("policy line = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("detail present with nil MatchedRule still shows the detail, not no rule matched", func(t *testing.T) {
+		ev := sampleEvent(nil)
+		ev.Meta.MatchedRule = nil
+		ev.Meta.Detail = `shell command "rm" matched command_ask_always`
+		want := `policy guarded · path rules[3].local_fs.write_file · shell command "rm" matched command_ask_always`
+		if got := policyLine(ev); got != want {
+			t.Fatalf("policy line = %q, want %q", got, want)
+		}
+	})
 }
 
 // TestUnit_DiffIsLast: the diff sits immediately above the decision line, and its lines are styled by their own first character.

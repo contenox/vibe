@@ -2,6 +2,7 @@ package localtools_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/getkin/kin-openapi/openapi3"
@@ -490,5 +492,58 @@ func TestUnit_HITLWrapper_DiffReadError_ApprovalStillShown(t *testing.T) {
 	// Diff is empty but the approval request was still sent.
 	if capturedReq.ToolsName != "local_fs" {
 		t.Errorf("approval request was not sent, got toolsName=%q", capturedReq.ToolsName)
+	}
+}
+
+// TestUnit_HITLWrapper_Detail_SurvivesToApprovalflowMeta traces the matched
+// rule's human-readable cause across all three hops: the policy evaluator's
+// EvaluationResult.Detail, onto the ApprovalRequest the wrapper builds, and
+// finally onto approvalflow.Meta -- the shape that reaches the wire. A prior
+// gap left Detail computed but never copied past EvaluationResult, so a
+// gated card could only say "rule 41", not what rule 41 actually caught.
+func TestUnit_HITLWrapper_Detail_SurvivesToApprovalflowMeta(t *testing.T) {
+	const wantDetail = `shell command "rm" matched command_ask_always`
+	rule := 4
+	policy := &mockPolicyEval{result: hitlservice.EvaluationResult{
+		Action:      hitlservice.ActionApprove,
+		Reason:      hitlservice.ReasonMatchedRule,
+		MatchedRule: &rule,
+		PolicyName:  "hitl-policy-acp.json",
+		Detail:      wantDetail,
+	}}
+
+	var capturedReq hitlservice.ApprovalRequest
+	ask := func(_ context.Context, req hitlservice.ApprovalRequest) (bool, error) {
+		capturedReq = req
+		return true, nil
+	}
+
+	inner := &mockInnerTools{}
+	w := localtools.NewHITLWrapper(inner, ask, policy, nil)
+
+	_, _, err := w.Exec(context.Background(), time.Now(),
+		map[string]any{"command": "rm", "args": []string{"-rf", "build/"}}, false,
+		&taskengine.ToolsCall{Name: "local_shell", ToolName: "local_shell"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Hop 1->2: EvaluationResult.Detail reaches ApprovalRequest.Detail.
+	if capturedReq.Detail != wantDetail {
+		t.Fatalf("ApprovalRequest.Detail = %q, want %q", capturedReq.Detail, wantDetail)
+	}
+
+	// Hop 2->3: ApprovalRequest.Detail reaches approvalflow.Meta.Detail on the wire.
+	rpcReq := approvalflow.BuildRequest(capturedReq, approvalflow.BuildOptions{
+		PolicyName:  capturedReq.PolicyName,
+		MatchedRule: capturedReq.MatchedRule,
+		Detail:      capturedReq.Detail,
+	})
+	var meta approvalflow.Meta
+	if err := json.Unmarshal(rpcReq.Meta, &meta); err != nil {
+		t.Fatalf("unmarshal meta: %v", err)
+	}
+	if meta.Detail != wantDetail {
+		t.Fatalf("Meta.Detail = %q, want %q", meta.Detail, wantDetail)
 	}
 }

@@ -86,6 +86,23 @@ func seedACPChainIfMissing(contenoxDir string) error {
 	return os.WriteFile(dst, []byte(initACPChain), 0644)
 }
 
+// seedFIMChainIfMissing writes the default-fim-chain.json preset when it is
+// absent, so `contenox acp` autocomplete (_contenox/autocomplete) works on a
+// fresh install, the same self-sufficiency seedACPChainIfMissing gives the
+// chat chain. Callers must treat a failure here as non-fatal: autocomplete
+// is optional and a missing/unwritable FIM chain must not block `acp`
+// startup (see loadOptionalFIMChain / acpsvc's nil FIMChainRegistry check).
+func seedFIMChainIfMissing(contenoxDir string) error {
+	dst := filepath.Join(contenoxDir, "default-fim-chain.json")
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, []byte(initFIMChain), 0644)
+}
+
 // defaultBeamChainFilename is the on-disk name beam loads its chain from,
 // parallel to default-acp-chain.json for the acp profile.
 const defaultBeamChainFilename = "default-beam-chain.json"
@@ -200,6 +217,9 @@ func RunGlobalInit(out io.Writer) error {
 		return err
 	}
 	if err := writeFile(filepath.Join(homeDir, "default-acp-chain.json"), initACPChain); err != nil {
+		return err
+	}
+	if err := writeFile(filepath.Join(homeDir, "default-fim-chain.json"), initFIMChain); err != nil {
 		return err
 	}
 	if err := writeFile(filepath.Join(homeDir, headlessACPChainFilename), initACPXChain); err != nil {
@@ -327,6 +347,9 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 		return err
 	}
 	if err := writeFile(filepath.Join(homeDir, "default-acp-chain.json"), initACPChain); err != nil {
+		return err
+	}
+	if err := writeFile(filepath.Join(homeDir, "default-fim-chain.json"), initFIMChain); err != nil {
 		return err
 	}
 	if err := writeFile(filepath.Join(homeDir, headlessACPChainFilename), initACPXChain); err != nil {

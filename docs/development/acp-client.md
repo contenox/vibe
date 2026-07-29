@@ -5,7 +5,7 @@ the conversation:
 
 - **Agent side** — `libacp.AgentSideConnection` serving a `libacp.Agent`.
   This is the upward direction: `internal/surfaces/acpsvc` implements the production
-  agent that ACP clients (Zed, JetBrains, the beam TUI) drive via
+  agent that ACP clients (Zed, JetBrains, the terminal UI) drive via
   `contenox acp`.
 - **Client side** — `libacp.ClientSideConnection` driving a `libacp.Client`.
   This is the downward direction: contenox itself opening sessions on other

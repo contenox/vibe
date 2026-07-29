@@ -34,7 +34,7 @@
 @theme {
   /* Primary accent (focus rings, accents) — the brand accent: a warm
      light-brand mint. Dark surfaces use the luminous 400; light surfaces the
-     700 for AA contrast. Mirrors the beam TUI's accent ladder (beam-tui.md). */
+     700 for AA contrast. Mirrors the terminal UI's accent ladder. */
   --color-primary-50: #ecfdf5;
   --color-primary-100: #d1fae5;
   --color-primary-200: #a7f3d0;

@@ -19,6 +19,14 @@ type BuildOptions struct {
 	PolicyName string
 	PolicyPath string
 
+	// MatchedRule is the policy rule index that gated this call (nil when the
+	// policy's DefaultAction applied, not a matched rule). See Meta.MatchedRule.
+	MatchedRule *int
+
+	// Detail is the matched rule's human-readable cause, when it has one.
+	// See Meta.Detail.
+	Detail string
+
 	// MayCall and MayCallDeclared are the gated call's declared reach; see Meta.MayCall.
 	MayCall         []string
 	MayCallDeclared *bool
@@ -32,6 +40,18 @@ type Meta struct {
 	Diff       string `json:"diff,omitempty"`
 	DiffOld    string `json:"diffOld,omitempty"`
 	DiffNew    string `json:"diffNew,omitempty"`
+
+	// MatchedRule is the 0-based index, in the active policy's rule list, of
+	// the rule that gated this call; nil when no rule matched and the
+	// policy's DefaultAction applied instead. Mirrors
+	// hitlservice.EvaluationResult.MatchedRule onto the wire.
+	MatchedRule *int `json:"matchedRule,omitempty"`
+
+	// Detail is the matched rule's human-readable cause -- what in the call
+	// actually tripped it (e.g. which shell command), when the rule has one.
+	// Mirrors hitlservice.EvaluationResult.Detail onto the wire. Empty for
+	// rules with no such cause, or when DefaultAction applied.
+	Detail string `json:"detail,omitempty"`
 
 	// MayCall is the gated call's declared reach, in order; a declaration, not a proof.
 	MayCall []string `json:"mayCall,omitempty"`
@@ -58,13 +78,15 @@ func BuildRequest(req hitlservice.ApprovalRequest, opts BuildOptions) libacp.Req
 	}
 
 	meta := MarshalMeta(Meta{
-		ToolsName:  req.ToolsName,
-		ToolName:   req.ToolName,
-		PolicyName: opts.PolicyName,
-		PolicyPath: opts.PolicyPath,
-		Diff:       req.Diff,
-		DiffOld:    req.DiffOld,
-		DiffNew:    req.DiffNew,
+		ToolsName:   req.ToolsName,
+		ToolName:    req.ToolName,
+		PolicyName:  opts.PolicyName,
+		PolicyPath:  opts.PolicyPath,
+		MatchedRule: opts.MatchedRule,
+		Detail:      opts.Detail,
+		Diff:        req.Diff,
+		DiffOld:     req.DiffOld,
+		DiffNew:     req.DiffNew,
 
 		MayCall:         opts.MayCall,
 		MayCallDeclared: opts.MayCallDeclared,

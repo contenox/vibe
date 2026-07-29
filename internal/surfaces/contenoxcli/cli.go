@@ -386,6 +386,7 @@ func init() {
 	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(acpCmd)
 	rootCmd.AddCommand(acpxCmd)
+	rootCmd.AddCommand(vscodeAgentCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(workspaceCmd)

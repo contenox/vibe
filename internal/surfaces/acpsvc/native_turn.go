@@ -13,6 +13,7 @@ import (
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libacp"
 )
@@ -229,6 +230,9 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 	if policyName := t.resolveSessionHITLPolicy(sess); policyName != "" {
 		turnCtx = hitlservice.WithPolicyName(turnCtx, policyName)
 	}
+	// The session's own workspace root — see prompt.go's identical line for
+	// why this rides every turn, not just mission units.
+	turnCtx = vfs.WithSessionCwd(turnCtx, sess.Cwd)
 	if sess.MissionID != "" {
 		turnCtx = missiontools.WithMissionID(turnCtx, sess.MissionID)
 		turnCtx = missiontools.WithWorkdir(turnCtx, sess.Cwd)

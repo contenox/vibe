@@ -36,7 +36,7 @@ EXPECTED_CMDS=(
   "agent"
   "approvals"
   "backend"
-  "beam"
+  "new"
   "cache"
   "chat"
   "config"

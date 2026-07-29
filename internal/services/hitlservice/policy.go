@@ -43,6 +43,12 @@ type ApprovalRequest struct {
 	TimeoutS    int
 	OnTimeout   Action
 
+	// Detail is the human-readable cause the matched rule's condition found
+	// (e.g. which shell command tripped it), mirroring
+	// EvaluationResult.Detail. Empty when the rule (or DefaultAction) has no
+	// such cause to report.
+	Detail string
+
 	// InstanceID, SessionID, AgentName, and MissionID attribute the ask to
 	// the fleet unit that raised it. All four are optional, supplied by the
 	// unattended-permission answerer; the attached-session path ignores them.

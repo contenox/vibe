@@ -116,7 +116,7 @@ a person) answered it.
 
 ## Built-in presets
 
-Contenox ships six policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the last three are the profiles the ACP editor transports and beam load.
+Contenox ships six policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the last three are the profiles the ACP editor transports and the terminal UI load.
 
 | Name | Behaviour |
 |---|---|
@@ -125,14 +125,14 @@ Contenox ships six policy presets, written to `~/.contenox/` by `contenox init`.
 | `hitl-policy-dev.json` | `default_action: allow`, but explicit rules still gate `local_shell` (every shell call requires approval, and a fixed blacklist is always denied); useful for local development when you don't want prompts on filesystem/webtools calls |
 | `hitl-policy-acp.json` | Profile for editor (ACP) sessions — gated tool calls route through the editor's own approval UI |
 | `hitl-policy-acpx.json` | Hardened profile for headless / untrusted-driver (ACPX, e.g. OpenClaw) sessions — shell, writes, and network are denied outright rather than offered for approval |
-| `hitl-policy-beam.json` | beam's default envelope — a copy of `hitl-policy-acp.json` tuned for the attended terminal UI: approve-tier writes and shell commands surface as a one-keypress card in the transcript rather than an editor approval dialog |
+| `hitl-policy-beam.json` | the terminal UI's default envelope — a copy of `hitl-policy-acp.json` tuned for the attended terminal UI: approve-tier writes and shell commands surface as a one-keypress card in the transcript rather than an editor approval dialog |
 
 Each preset also states who may answer a unit's question (see [`attention`](#who-may-answer-a-units-question-attention)) rather than inheriting the invisible default, and the stances follow each preset's character:
 
 | Name | `attention` |
 |---|---|
 | `hitl-policy-acp.json` | agent may answer, up to 3 — an editor session's agent holds the conversation the mission was fired in |
-| `hitl-policy-beam.json` | agent may answer, up to 3 — same stance as `hitl-policy-acp.json`, for beam's attended session |
+| `hitl-policy-beam.json` | agent may answer, up to 3 — same stance as `hitl-policy-acp.json`, for the terminal UI's attended session |
 | `hitl-policy-default.json` | agent may answer, up to 2 — routine questions, while whatever the unit then *does* stays gated by this same envelope |
 | `hitl-policy-dev.json` | agent may answer, up to 5 — the permissive local-development posture |
 | `hitl-policy-strict.json` | **human only** — a policy whose character is "a human decides" does not hand the deciding to a model |

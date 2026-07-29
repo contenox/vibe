@@ -17,6 +17,7 @@ import (
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
@@ -37,12 +38,46 @@ type checkpointSaver struct {
 	chainRef  string
 }
 
+// checkpointEnvelope wraps taskengine's own versioned checkpoint bytes with
+// one piece of state taskengine has no business owning: the session's
+// workspace root (vfs.WithSessionCwd), captured from ctx at suspend time and
+// restored onto the resumed run's ctx so a relative local_fs/git/jq path
+// resolves exactly as the original call would have — never against whichever
+// process happens to answer the approval. Additive on top of taskengine's own
+// wire format: a payload with no "checkpoint" field is one written before
+// this envelope existed (see unwrapCheckpointEnvelope).
+type checkpointEnvelope struct {
+	WorkspaceRoot string          `json:"workspace_root,omitempty"`
+	Checkpoint    json.RawMessage `json:"checkpoint"`
+}
+
+// unwrapCheckpointEnvelope splits a persisted checkpoint row's payload back
+// into taskengine's own wire bytes plus the workspace root this package
+// wrapped around them. A payload with no "checkpoint" field predates the
+// envelope: raw passes through unchanged and the root is "" (resolveCwd's
+// per-tool fail-closed path then refuses any relative path it cannot anchor,
+// rather than silently resolving against the resumer's own cwd).
+func unwrapCheckpointEnvelope(raw []byte) (checkpoint []byte, workspaceRoot string) {
+	var env checkpointEnvelope
+	if err := json.Unmarshal(raw, &env); err == nil && len(env.Checkpoint) > 0 {
+		return env.Checkpoint, env.WorkspaceRoot
+	}
+	return raw, ""
+}
+
 func (s *checkpointSaver) SaveCheckpoint(ctx context.Context, cp *taskengine.Checkpoint) error {
 	cp.SessionID = s.sessionID
 	cp.ChainRef = s.chainRef
-	payload, err := taskengine.MarshalCheckpoint(cp)
+	inner, err := taskengine.MarshalCheckpoint(cp)
 	if err != nil {
 		return fmt.Errorf("agentservice: serialize checkpoint for approval %s: %w", cp.ApprovalID, err)
+	}
+	payload, err := json.Marshal(checkpointEnvelope{
+		WorkspaceRoot: vfs.SessionCwdFromContext(ctx),
+		Checkpoint:    inner,
+	})
+	if err != nil {
+		return fmt.Errorf("agentservice: envelope checkpoint for approval %s: %w", cp.ApprovalID, err)
 	}
 	row := &runtimetypes.ChainCheckpoint{
 		ID:            cp.ApprovalID,
@@ -137,7 +172,8 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 	if err != nil {
 		return nil, fmt.Errorf("agentservice: load claimed checkpoint %s: %w", approvalID, err)
 	}
-	cp, err := taskengine.UnmarshalCheckpoint(cpRow.Payload)
+	innerPayload, workspaceRoot := unwrapCheckpointEnvelope(cpRow.Payload)
+	cp, err := taskengine.UnmarshalCheckpoint(innerPayload)
 	if err != nil {
 		// Version drift or corruption: annotate and keep, stranded but visible.
 		_ = store.SetChainCheckpointFailure(ctx, approvalID, "decode: "+err.Error())
@@ -161,6 +197,10 @@ func ResumeFromCheckpoint(ctx context.Context, deps Deps, approvalID string) (*P
 		ctx = context.WithValue(ctx, runtimetypes.SessionIDContextKey, cp.SessionID)
 		ctx = llmrepo.WithSessionKey(ctx, llmrepo.DeriveSessionKey(cp.SessionID))
 	}
+	// Restores the session's own workspace root (see checkpointEnvelope) so a
+	// resumed local_fs/git/jq call anchors a relative path exactly as the
+	// original run would have, regardless of this process's own cwd.
+	ctx = vfs.WithSessionCwd(ctx, workspaceRoot)
 	// Without it, mission tools are invisible to the resumed chain.
 	if row.MissionID != nil && *row.MissionID != "" {
 		ctx = missiontools.WithMissionID(ctx, *row.MissionID)

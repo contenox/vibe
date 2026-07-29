@@ -1,0 +1,164 @@
+/* Tailwind + typography plugin + vendored @contenox/ui theme tokens. */
+@import "./ui/index.css";
+
+@source './chat';
+@source './ui/chat.ts';
+@source './ui/components/chat';
+@source './ui/components/{Button,Badge,Panel,InlineNotice,TextArea,Typography,Tooltip,Spinner,Collapsible,Card}.tsx';
+@source './ui/utils.ts';
+
+/* VS Code webviews use vscode-light / vscode-dark on <body>, not .dark */
+@custom-variant dark (&:where(.vscode-dark, .vscode-dark *, .dark, .dark *));
+
+/* VS Code theme bridge: remap Beam tokens to VS Code semantic variables. */
+@theme {
+  /* Typography */
+  --font-body: var(--vscode-font-family);
+  --font-display: var(--vscode-font-family);
+  --font-mono: var(--vscode-editor-font-family, ui-monospace, monospace);
+
+  /* Text */
+  --color-text: var(--vscode-foreground);
+  --color-text-muted: var(--vscode-descriptionForeground, var(--vscode-foreground));
+  --color-text-inverted: var(--vscode-button-foreground, #ffffff);
+  --color-dark-text: var(--vscode-foreground);
+  --color-dark-text-muted: var(--vscode-descriptionForeground, var(--vscode-foreground));
+  --color-dark-text-inverted: var(--vscode-button-foreground, #ffffff);
+
+  /* Brand / Primary */
+  --color-primary-500: var(--vscode-button-background);
+  --color-primary-600: var(
+    --vscode-button-hoverBackground,
+    var(--vscode-button-background)
+  );
+  --color-primary: var(--color-primary-500);
+  --color-brand: var(--color-primary-500);
+  --color-dark-primary-500: var(--vscode-button-background);
+  --color-dark-primary-600: var(
+    --vscode-button-hoverBackground,
+    var(--vscode-button-background)
+  );
+
+  /* Links / Accent */
+  --color-accent-500: var(--vscode-textLink-foreground);
+  --color-accent: var(--color-accent-500);
+  --color-dark-accent-500: var(--vscode-textLink-foreground);
+
+  /* Surfaces */
+  --color-surface-50: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --color-surface-100: var(--vscode-editorWidget-background);
+  --color-surface-200: var(
+    --vscode-widget-border,
+    var(--vscode-panel-border, #3a3a3a)
+  );
+  --color-surface-300: var(--vscode-editor-background);
+  --color-surface-400: var(--vscode-panel-border, #3a3a3a);
+  --color-surface-500: var(--vscode-panel-border, #3a3a3a);
+  --color-surface-600: var(--vscode-panel-border, #3a3a3a);
+  --color-surface-700: var(--vscode-panel-border, #3a3a3a);
+  --color-surface-800: var(--vscode-panel-border, #3a3a3a);
+  --color-surface-900: var(--vscode-panel-border, #3a3a3a);
+  --color-surface: var(--color-surface-50);
+
+  --color-dark-surface-100: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --color-dark-surface-200: var(--vscode-editorWidget-background);
+  --color-dark-surface-300: var(--vscode-input-background, var(--vscode-editorWidget-background));
+  --color-dark-surface-500: var(--vscode-widget-border, var(--vscode-panel-border));
+  --color-dark-surface-600: var(--vscode-input-background, var(--vscode-editorWidget-background));
+  --color-dark-surface-700: var(--vscode-widget-border, var(--vscode-panel-border));
+
+  /* Status / semantic helpers */
+  --color-info-500: var(--vscode-editorInfo-foreground, #525252);
+  --color-error-500: var(--vscode-errorForeground, #dc2626);
+  --color-warning-50: var(--vscode-inputValidation-warningBackground, #eab30833);
+  --color-warning-200: var(--vscode-inputValidation-warningBorder, #eab308);
+  --color-warning-500: var(--vscode-inputValidation-warningBorder, #eab308);
+  --color-warning-900: var(--vscode-editorWarning-foreground, var(--vscode-foreground));
+  --color-success-500: var(--vscode-testing-iconPassed, #22c55e);
+
+  --color-dark-error-100: var(--vscode-inputValidation-errorBackground, #dc262633);
+  --color-dark-warning-50: var(--vscode-inputValidation-warningBackground, #eab30833);
+
+  /* Background system aliases */
+  --color-background-light: var(--vscode-editor-background);
+  --color-background-dark: var(--color-surface-50);
+  --color-background: var(--color-background-light);
+
+  --color-gradientStart: var(--color-primary-500);
+  --color-gradientEnd: var(--color-accent-500);
+}
+
+:root,
+body {
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.4;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  margin: 0;
+}
+
+#root {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.prose,
+.prose-compact {
+  color: var(--vscode-foreground);
+  font-size: 0.95em;
+}
+
+.prose a,
+.prose-compact a {
+  color: var(--vscode-textLink-foreground);
+}
+
+#root pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Native-feeling controls inside the embedded session picker */
+#beam-embedded-session,
+textarea,
+input,
+button {
+  font-family: inherit;
+}
+
+textarea,
+select {
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  background: var(--vscode-input-background, var(--vscode-editorWidget-background));
+  border-color: var(--vscode-input-border, var(--vscode-widget-border));
+}
+
+textarea::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+}
+
+textarea:focus,
+select:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+/* High-contrast: stronger borders */
+body.vscode-high-contrast textarea,
+body.vscode-high-contrast select,
+body.vscode-high-contrast #beam-embedded-session {
+  border-width: 2px;
+}

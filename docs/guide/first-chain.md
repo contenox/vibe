@@ -29,7 +29,7 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 ├── hitl-policy-dev.json
 ├── hitl-policy-acp.json        ← editor (ACP) sessions
 ├── hitl-policy-acpx.json       ← headless / untrusted-driver (ACPX) sessions
-└── hitl-policy-beam.json       ← contenox beam's attended terminal session
+└── hitl-policy-beam.json       ← contenox new's attended terminal session
 
 ./my-project/.contenox/         ← project-local workspace marker
 └── workspace.id                ← unique workspace ID
@@ -50,7 +50,7 @@ You don't have to start there. You can write your own.
 
 Chains live as files in `~/.contenox/` (and your workspace `.contenox/`); the
 CLI picks one per invocation with `--chain`, or falls back to the configured
-`default-chain`. Sessions in the beam TUI (`contenox beam`) and in ACP editors
+`default-chain`. Sessions in the terminal UI (`contenox new`) and in ACP editors
 run the workspace's default chain the same way.
 
 ---

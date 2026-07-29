@@ -8,7 +8,7 @@ approval gates. Missions are what envelopes make safe: fire one, detach,
 come back to done. Envelopes survive restarts — an unanswered approval
 checkpoints the run; answer it later with `contenox approvals respond`, from
 any terminal, and the run resumes exactly once. Terminal CLI, the same
-sessions inside Zed, JetBrains, or any ACP editor, and the beam TUI. Any
+sessions inside Zed, JetBrains, or any ACP editor, and the contenox TUI. Any
 model, any MCP server, any OpenAPI spec as tools, in combination. SQLite.
 No account.
 
@@ -124,7 +124,7 @@ project.
 
 *Step-by-step guides:* [Zed](https://contenox.com/docs/integrations/editors/zed/) | [JetBrains](https://contenox.com/docs/integrations/editors/jetbrains/) | [AionUi](https://contenox.com/docs/integrations/editors/aionui/) | [OpenClaw](https://contenox.com/docs/integrations/editors/openclaw/).
 
-Terminal. Editor. **beam**.
+Terminal. Editor. **Contenox**.
 
 ---
 
@@ -159,7 +159,7 @@ leaves reviewable local state. Approval policies are yours to author — loosen 
 tighten per chain, and the harness stays out of your way everywhere else.
 
 Know exactly what that gate is. Everything you run today — `chat`, `run`,
-`beam`, an editor `acp` session, and the mission units the fleet dispatches — is
+`new`, an editor `acp` session, and the mission units the fleet dispatches — is
 contenox's own chains in contenox's own process, bounded by the approval gate and
 the chain's tool policy. That is a gate at the tool layer, not a kernel sandbox:
 their shells are ordinary child processes and inherit the runtime's environment.

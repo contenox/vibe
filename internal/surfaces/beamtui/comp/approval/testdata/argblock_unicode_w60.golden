@@ -8,5 +8,5 @@
 [code]    }[/]
 [code]    return { lines: notes.split("\n").length };[/]
 [muted]  timeout_ms = [/]2000
-[muted]policy guarded · rule rules[2].goja[/]
+[muted]policy guarded · path rules[2].goja · no rule matched[/]
 [pending]⠋[/] [strong]y[/][muted] allow · [/][strong]n[/][muted] deny · Esc cancels turn[/]

@@ -17,6 +17,7 @@ import (
 	"github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/libtracker"
 	"github.com/contenox/contenox/internal/services/agentservice"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
 )
@@ -189,6 +190,14 @@ Examples:
 			DB:          db,
 			WorkspaceID: workspaceID,
 		})
+
+		// This process's own cwd, so a run that parks on an approval and is
+		// resumed later — by a different process, from a different directory
+		// — still resolves a relative local_fs/git/jq path against where this
+		// session actually started, not against the resumer's cwd.
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			execCtx = vfs.WithSessionCwd(execCtx, cwd)
+		}
 
 		resp, err := ag.Prompt(execCtx, agentservice.PromptRequest{
 			Input:         rawInput,

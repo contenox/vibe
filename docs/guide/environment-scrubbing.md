@@ -12,7 +12,7 @@ This surface gives each spawned shell — the `local_shell` tool, the `shell_ses
 - **scrub** — strip the runtime's own credentials out of the shell, so there is nothing to leak
 - **inject** — add back only the variables you choose, with the values you set
 
-This is the environment slice of least privilege: deny by default, grant what the job needs. It is live today across every agent-reachable shell this CLI spawns — `contenox chat` / `contenox run` (`local_shell`), `contenox acp` / `contenox acpx` (the ACP session's shell), and `contenox beam` (`local_shell` and the `!` PTY).
+This is the environment slice of least privilege: deny by default, grant what the job needs. It is live today across every agent-reachable shell this CLI spawns — `contenox chat` / `contenox run` (`local_shell`), `contenox acp` / `contenox acpx` (the ACP session's shell), and `contenox new` (`local_shell` and the `!` PTY).
 
 ## How it works
 
@@ -63,10 +63,10 @@ TMPDIR   USER   LOGNAME   SHELL
 
 ```bash
 # Agent shells scrubbed of secrets (the default); lock down the operator terminal too:
-SANDBOX_TERMINAL_SCRUB=deny-secrets contenox beam
+SANDBOX_TERMINAL_SCRUB=deny-secrets contenox new
 
 # Hand agent shells only a hand-picked environment:
-SANDBOX_SHELL_SCRUB=strict SANDBOX_ENV_ALLOW="GOCACHE,CARGO_HOME,HTTP_PROXY" contenox beam
+SANDBOX_SHELL_SCRUB=strict SANDBOX_ENV_ALLOW="GOCACHE,CARGO_HOME,HTTP_PROXY" contenox new
 ```
 
 > [!NOTE]

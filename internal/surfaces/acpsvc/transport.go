@@ -13,6 +13,7 @@ import (
 	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
+	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/shellsession"
@@ -22,9 +23,15 @@ import (
 )
 
 type Deps struct {
-	Engine             *enginesvc.Engine
-	DB                 libdb.DBManager
-	ChainRegistry      *ChainRegistry
+	Engine        *enginesvc.Engine
+	DB            libdb.DBManager
+	ChainRegistry *ChainRegistry
+	// FIMChainRegistry supplies the fill-in-the-middle chain the
+	// `_contenox/autocomplete` extension method runs. Nil disables
+	// autocomplete: the method reports a clean method-not-found error rather
+	// than a panic. Independent of ChainRegistry so the completion model can
+	// differ from the chat model (see LoadFIMChainRegistry).
+	FIMChainRegistry   *ChainRegistry
 	DefaultModel       string
 	DefaultProvider    string
 	DefaultAltModel    string
@@ -208,6 +215,10 @@ type Transport struct {
 	// the stale one.
 	promptCancelMu sync.Mutex
 	promptCancels  map[libacp.SessionID]*inflightPrompt
+
+	// acAgent is a test seam: when set, _contenox/autocomplete uses it instead
+	// of building a fresh agentservice.Agent from deps. Nil in production.
+	acAgent agentservice.Agent
 }
 
 // inflightPrompt is a running turn's cancellation registration. Pointer

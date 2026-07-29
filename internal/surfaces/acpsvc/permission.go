@@ -2,6 +2,8 @@ package acpsvc
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 
 	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -17,7 +19,17 @@ func (t *Transport) AskApproval(ctx context.Context, req hitlservice.ApprovalReq
 	}
 
 	toolCallID := approvalflow.ToolCallID(req)
-	rpcReq := approvalflow.BuildRequest(req, approvalflow.BuildOptions{SessionID: acpSessionID})
+	// req.PolicyName, req.MatchedRule, and req.Detail are the verdict that
+	// actually gated this call (set by localtools.HITLWrapper from
+	// hitlservice.EvaluationResult), not re-derived guesses — forward them
+	// as-is so the card can say why.
+	rpcReq := approvalflow.BuildRequest(req, approvalflow.BuildOptions{
+		SessionID:   acpSessionID,
+		PolicyName:  req.PolicyName,
+		PolicyPath:  t.hitlPolicyPath(req.PolicyName),
+		MatchedRule: req.MatchedRule,
+		Detail:      req.Detail,
+	})
 
 	t.markPermissionPending(acpSessionID, toolCallID)
 	defer t.clearPermissionPending(acpSessionID, toolCallID)
@@ -45,4 +57,16 @@ func (t *Transport) AskApproval(ctx context.Context, req hitlservice.ApprovalReq
 		return resp.Outcome.OptionID == approvalflow.OptionAllow, nil
 	}
 	return false, nil
+}
+
+// hitlPolicyPath resolves the on-disk path of a named HITL policy for
+// display, mirroring how acpPolicySource (contenoxcli/acp_cmd.go) and
+// writeEmbeddedHITLPolicies resolve policy files under ContenoxDir. Empty
+// name or unset ContenoxDir (e.g. a setup-only transport) yields "".
+func (t *Transport) hitlPolicyPath(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || t.deps.ContenoxDir == "" {
+		return ""
+	}
+	return filepath.Join(t.deps.ContenoxDir, name)
 }

@@ -30,4 +30,4 @@ The companion backend manager configured providers, declared models with their c
 
 ## Where this lives now
 
-The Beam name lives on as `contenox beam`, the terminal UI — the same supervise-review-intervene loop, same HITL policies, no browser required.
+These capabilities — the supervise-review-intervene loop, HITL policies, no browser required — now live in contenox's terminal UI (`contenox new`).

@@ -11,6 +11,7 @@ import (
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libacp"
 )
@@ -149,6 +150,10 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	if policyName := t.resolveSessionHITLPolicy(sess); policyName != "" {
 		promptCtx = hitlservice.WithPolicyName(promptCtx, policyName)
 	}
+	// The session's own workspace root, so a run that parks on an approval
+	// and resumes later — in any process — resolves a relative local_fs/git/jq
+	// path exactly as this live call would, not against the resumer's cwd.
+	promptCtx = vfs.WithSessionCwd(promptCtx, sess.Cwd)
 
 	// A dispatched unit's mission id, workdir, and compute-resolution bounds
 	// ride the same context so its mission tools and model resolution are

@@ -3,7 +3,7 @@
 [muted]  content = [/]a line of replacement content\na line of replacement content\na line of... [1200 bytes, 41 lines - see diff]
 [muted]  create = [/]true
 [muted]  path = [/]/repo/internal/app.go
-[muted]policy guarded - rule rules[3].local_fs.write_file[/]
+[muted]policy guarded - path rules[3].local_fs.write_file - rule 5[/]
 [error]--- a/internal/app.go[/]
 [done]+++ b/internal/app.go[/]
 [muted]@@ -12,3 +12,3 @@[/]

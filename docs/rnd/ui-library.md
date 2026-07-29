@@ -22,4 +22,4 @@ The component library dressed every surface the platform shipped — the marketi
 
 ## Where this lives now
 
-The interaction patterns it proved out — approval cards, tool-call display, diff-first review — now render as text and panels in the terminal beam experience, no React runtime required.
+The interaction patterns it proved out — approval cards, tool-call display, diff-first review — now render as text and panels in the terminal UI experience, no React runtime required.

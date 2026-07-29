@@ -119,7 +119,7 @@ Values are strings even when conceptually numeric — `tools_policies` is the ch
 
 ## `git` — Git operations
 
-Available in `contenox chat`, `contenox run`, `contenox beam`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). Runs in-process against the workspace's own Git repository (no `git` binary, no shell quoting) — the read tools are `allow` by default, the mutating ones require approval in the seeded HITL policies. The repository root is found by walking up from the allowed/working directory, same as `git` itself; network operations (push, pull, fetch, clone) are out of scope here — reach them through `local_shell` under its own policy.
+Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). Runs in-process against the workspace's own Git repository (no `git` binary, no shell quoting) — the read tools are `allow` by default, the mutating ones require approval in the seeded HITL policies. The repository root is found by walking up from the allowed/working directory, same as `git` itself; network operations (push, pull, fetch, clone) are out of scope here — reach them through `local_shell` under its own policy.
 
 ### Tools
 
@@ -152,7 +152,7 @@ The default HITL presets (`hitl-policy-default.json`, `hitl-policy-acp.json`) al
 
 ## `gointel` — Go code intelligence
 
-Available in `contenox chat`, `contenox run`, `contenox beam`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). Six read-only tools backed by a real Go type checker over the module containing the target directory (default: workspace root; host `GOOS`/`GOARCH`, no build tags, tests excluded). Prefer these over `grep`/`local_shell` for exact questions about Go symbols — they answer from the type graph, not from text search.
+Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). Six read-only tools backed by a real Go type checker over the module containing the target directory (default: workspace root; host `GOOS`/`GOARCH`, no build tags, tests excluded). Prefer these over `grep`/`local_shell` for exact questions about Go symbols — they answer from the type graph, not from text search.
 
 ### Tools
 
@@ -181,7 +181,7 @@ Available in `contenox chat`, `contenox run`, `contenox beam`, and ACP editor se
 
 ## `jq` — Structured data query
 
-Available in `contenox chat`, `contenox run`, `contenox beam`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). One tool, `jq_query`: runs a [jq](https://jqlang.org/) program (pure-Go `gojq`) over a JSON or YAML document and returns the emitted values. Read-only — a filter like `.a = 1` returns a modified copy, never touching the file on disk — with no network access and a bounded execution deadline (including recursion).
+Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). One tool, `jq_query`: runs a [jq](https://jqlang.org/) program (pure-Go `gojq`) over a JSON or YAML document and returns the emitted values. Read-only — a filter like `.a = 1` returns a modified copy, never touching the file on disk — with no network access and a bounded execution deadline (including recursion).
 
 ### Tool
 
@@ -212,7 +212,7 @@ Prefer `jq_query` over reading a whole config file when you only need one field 
 
 ## `workspace` — Semantic search
 
-Available in `contenox chat`, `contenox run`, `contenox beam`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). One tool, `workspace_search`, over the semantic index built by [`contenox index`](/docs/reference/contenox-cli/). Returns ranked hits, each a `file:line-range` citation plus the matching text, so an answer can be attributed and the cited range re-read in full. A workspace with no index is not an error — the result names `contenox index` for the operator to run.
+Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). One tool, `workspace_search`, over the semantic index built by [`contenox index`](/docs/reference/contenox-cli/). Returns ranked hits, each a `file:line-range` citation plus the matching text, so an answer can be attributed and the cited range re-read in full. A workspace with no index is not an error — the result names `contenox index` for the operator to run.
 
 ### Tool
 
@@ -239,7 +239,7 @@ Results can go stale: a hit is flagged when the source file changed since the la
 
 ## `goja` — JavaScript sandbox
 
-Available in `contenox chat`, `contenox run`, `contenox beam`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). `goja_eval` runs JavaScript (ES2023) in a sandbox with no network, no filesystem, no `require`/`import`, and no async — its only way out is `host.tool("provider.tool_name", {args})`, which calls another registered tool under the same HITL rules a direct model call would. The sandbox's result is the last expression evaluated.
+Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). `goja_eval` runs JavaScript (ES2023) in a sandbox with no network, no filesystem, no `require`/`import`, and no async — its only way out is `host.tool("provider.tool_name", {args})`, which calls another registered tool under the same HITL rules a direct model call would. The sandbox's result is the last expression evaluated.
 
 Beyond `goja_eval`, Contenox scans `$CONTENOX_DIR/tools/*.js` at startup and registers one additional tool per script file, each under the name and description the script itself declares — a broken script fails at startup naming the file, rather than silently vanishing as a tool the operator believes still exists.
 

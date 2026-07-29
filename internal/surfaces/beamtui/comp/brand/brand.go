@@ -19,7 +19,7 @@ const CompactWidth = 66
 // wordmark and tagline are fixed brand copy: lowercase "contenox", em-dash
 // in unicode, plain hyphen in ASCII — do not paraphrase either string.
 const (
-	wordmark       = "contenox beam"
+	wordmark       = "contenox"
 	taglineUnicode = " — open coding harness"
 	taglineASCII   = " - open coding harness"
 )

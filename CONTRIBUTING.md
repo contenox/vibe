@@ -2,7 +2,7 @@
 
 Thanks for helping improve Contenox. This repository centers on the V1 runtime
 surface: the `contenox` CLI, ACP over stdio for editors (Zed, JetBrains,
-AionUi, OpenClaw), and the upcoming `contenox beam` terminal UI. Why the
+AionUi, OpenClaw), and the upcoming `contenox new` terminal UI. Why the
 surface looks like this: see WHY.md.
 
 ## Code of Conduct
@@ -15,7 +15,7 @@ actionable.
 Contenox is a single-binary agent with a thin set of host adapters:
 
 ```text
-CLI / ACP stdio sessions / beam TUI
+CLI / ACP stdio sessions / terminal UI
     ->
 Service Layer (runtime/*service/)
     ->
@@ -34,7 +34,7 @@ semantics elsewhere.
 - `contenox` CLI (chat, run, sessions, config, backends, models, tools, MCP,
   workspace grants, sandbox inspection)
 - `contenox acp` / `contenox acpx` for ACP editors
-- `contenox beam` — the terminal UI (in development, built on the same ACP
+- `contenox new` — the terminal UI (in development, built on the same ACP
   session services)
 
 When you change this surface, update the relevant user docs in the same
@@ -79,7 +79,7 @@ subscribe without direct package coupling.
 | `internal/kernel/taskengine/taskenv.go` | Runtime tool resolution and chain execution context |
 | `internal/surfaces/contenoxcli/cli.go` | CLI dispatch |
 | `internal/surfaces/contenoxcli/engine.go` | CLI-local engine bootstrap |
-| `internal/surfaces/acpsvc/` | ACP session transport (editors and the beam TUI build on this) |
+| `internal/surfaces/acpsvc/` | ACP session transport (editors and the terminal UI build on this) |
 | `internal/kernel/agentinstance/` | the embeddable fleet kernel (missions run in-process) |
 
 ## Repository structure

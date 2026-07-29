@@ -91,7 +91,7 @@ If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) fo
 
 ## Next steps
 
-- **The beam TUI** — run `contenox beam` for chat, plan, and shell in one persistent session
+- **The terminal UI** — run `contenox new` for chat, plan, and shell in one persistent session
 - [**Your first chain**](/docs/guide/first-chain/) — author your own agent in five edits
 - [Core concepts](/docs/guide/concepts/) — how chains, tasks, and tools fit together
 - [MCP integration](/docs/integrations/tools/mcp/) — connect external tools

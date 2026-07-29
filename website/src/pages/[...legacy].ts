@@ -36,7 +36,7 @@ export async function getStaticPaths() {
   const retiredDocs: Record<string, string> = {
     'guide/beam': 'rnd/beam-web',
     'development/beam-serve-auth': 'rnd/beam-web',
-    'integrations/editors/vscode-vscodium': 'rnd/vscode-extension',
+    'rnd/vscode-extension': 'integrations/editors/vscode-vscodium',
     'integrations/providers/modeld': 'rnd/modeld',
     'integrations/providers/modeld-architecture': 'rnd/modeld',
     'integrations/providers/local-models': 'rnd/modeld',

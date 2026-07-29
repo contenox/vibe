@@ -224,6 +224,7 @@ func (h *HITLWrapper) Exec(
 			MatchedRule: result.MatchedRule,
 			TimeoutS:    result.TimeoutS,
 			OnTimeout:   result.OnTimeout,
+			Detail:      result.Detail,
 		}
 		h.publishDecision(ctx, tools.Name, toolName, args, result, true)
 		h.hitlLog(ctx, "ask raised", "tool", toolName, "approval_id", toolCallID, "rule", result.MatchedRule, "policy", result.PolicyName)

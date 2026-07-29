@@ -479,19 +479,45 @@ func summarizeValue(s string, budget int, ascii bool) string {
 	return head + marker
 }
 
-// policyText names the rule that gated the call. Both halves are optional:
-// a policy without a matched rule path is still worth saying.
+// policyText names the policy that gated the call, its file, and why: the
+// matched rule's human-readable cause when it has one (e.g. `shell command
+// "rm" matched command_ask_always`), else which rule fired, else that none
+// did. The third segment only appears once a named policy is known — a bare
+// MatchedRule with no policy would be an index into a document the card
+// never identified. Detail displaces the rule index rather than piling onto
+// it: an index tells a human almost nothing next to the actual cause. When
+// Detail is empty, it reads as the two cases approvalflow.Meta.MatchedRule
+// can mean: a matched rule (shown 1-based, so "rule 1" reads as an ordinal
+// no reader can mistake for the wire's 0-based index, and can never be
+// misread as "rule 0" meaning none) versus nil, which is the policy's own
+// DefaultAction having applied — stated as "no rule matched" rather than
+// silently omitted, since that fact is itself worth knowing. Not "policy
+// default": a policy is often literally named "default", which rendered as
+// "policy default · … · policy default".
 func policyText(m approvalflow.Meta, ascii bool) string {
 	name, path := sanitize.Line(m.PolicyName), sanitize.Line(m.PolicyPath)
-	switch {
-	case name != "" && path != "":
-		return "policy " + name + sep(ascii) + "rule " + path
-	case name != "":
-		return "policy " + name
-	case path != "":
-		return "rule " + path
+	detail := sanitize.Line(m.Detail)
+	parts := make([]string, 0, 3)
+	if name != "" {
+		parts = append(parts, "policy "+name)
 	}
-	return ""
+	if path != "" {
+		parts = append(parts, "path "+path)
+	}
+	if name != "" {
+		switch {
+		case detail != "":
+			parts = append(parts, detail)
+		case m.MatchedRule != nil:
+			parts = append(parts, fmt.Sprintf("rule %d", *m.MatchedRule+1))
+		default:
+			parts = append(parts, "no rule matched")
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, sep(ascii))
 }
 
 // diffStyle classifies a diff body line by its own first character, so

@@ -173,7 +173,17 @@ func (h *GitTools) policyArgs(ctx context.Context) map[string]string {
 	return taskengine.ToolsArgsFromContext(ctx, h.name)
 }
 
+// cwd resolves the directory a relative allowed dir or repo search anchors
+// against. The session's own restored workspace root (see vfs.WithSessionCwd)
+// takes priority over the live per-process cwdResolver — it reflects what the
+// *session* established, not wherever this process (possibly a resumer
+// nowhere near the original session) happens to sit. Only when neither is
+// known does this fall back to the process's own working directory, same as
+// the real git CLI.
 func (h *GitTools) cwd(ctx context.Context) string {
+	if root := vfs.SessionCwdFromContext(ctx); root != "" {
+		return filepath.Clean(root)
+	}
 	if h.cwdResolver != nil {
 		if r := strings.TrimSpace(h.cwdResolver(ctx)); r != "" {
 			return filepath.Clean(r)

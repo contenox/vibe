@@ -270,24 +270,46 @@ func (h *LocalFSTools) baseDir(ctx context.Context) (string, error) {
 			if filepath.IsAbs(cleaned) {
 				return cleaned, nil
 			}
-			if h.cwdResolver != nil {
-				if cwd := h.cwdResolver(ctx); cwd != "" {
-					return filepath.Clean(filepath.Join(cwd, cleaned)), nil
-				}
+			if cwd := h.resolveCwd(ctx); cwd != "" {
+				return filepath.Clean(filepath.Join(cwd, cleaned)), nil
 			}
-			return cleaned, nil
+			// A relative policy dir with no root to anchor it must not fall
+			// through to the OS's own path resolution: that would silently
+			// scope every call to whichever directory this process happens
+			// to be running in (e.g. a resumer far from the original
+			// session), rather than refusing outright.
+			return "", fmt.Errorf(
+				"local_fs: tools_policies.local_fs._allowed_dir %q is relative but no session workspace root could be resolved to anchor it "+
+					"(this run has no live cwd resolver and its checkpoint carries no restored workspace root); "+
+					"set _allowed_dir to an absolute path, or resume from a process that can restore the session's workspace root",
+				policyDir)
 		}
 	}
 	base := h.allowedDir
-	if base == "" && h.cwdResolver != nil {
-		if r := h.cwdResolver(ctx); r != "" {
-			base = filepath.Clean(r)
-		}
+	if base == "" {
+		base = h.resolveCwd(ctx)
 	}
 	if base == "" {
 		return "", errors.New("local_fs: no allowed directory configured")
 	}
 	return base, nil
+}
+
+// resolveCwd returns the directory relative paths anchor against absent an
+// absolute policy/allowed dir: the session's own restored workspace root
+// (see vfs.WithSessionCwd) takes priority over the live per-process
+// cwdResolver, since it reflects what the *session* established rather than
+// wherever this particular process (possibly a resumer) happens to sit.
+func (h *LocalFSTools) resolveCwd(ctx context.Context) string {
+	if root := vfs.SessionCwdFromContext(ctx); root != "" {
+		return filepath.Clean(root)
+	}
+	if h.cwdResolver != nil {
+		if r := h.cwdResolver(ctx); r != "" {
+			return filepath.Clean(r)
+		}
+	}
+	return ""
 }
 
 // absAllowedDir returns the symlink-resolved base directory for the current

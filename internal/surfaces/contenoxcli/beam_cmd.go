@@ -61,7 +61,7 @@ const (
 )
 
 var beamCmd = &cobra.Command{
-	Use:   "beam [dir]",
+	Use:   "new [dir]",
 	Args:  cobra.MaximumNArgs(1),
 	Short: "The contenox terminal UI.",
 	Long: `Run contenox as a terminal UI: the transcript flows into your terminal's own
@@ -69,7 +69,7 @@ scrollback (so copy and paste work exactly as they always have), the composer
 takes / for commands, ! for a shell line, and @ to attach a file, and gated
 tool calls are answered inline with one keystroke.
 
-beam drives the same in-process ACP transport an editor does, so its sessions,
+The terminal UI drives the same in-process ACP transport an editor does, so its sessions,
 slash commands and approval flow are identical to 'contenox acp'.
 
   ctrl+x ctrl+e   compose the draft in $EDITOR
@@ -81,7 +81,7 @@ Needs a terminal: for scripted or piped use, run 'contenox "your prompt"'.`,
 }
 
 func init() {
-	beamCmd.Flags().String("session", "", "Open the named session instead of the last active one (see 'contenox beam --session' errors for the known names)")
+	beamCmd.Flags().String("session", "", "Open the named session instead of the last active one (see 'contenox new --session' errors for the known names)")
 	beamCmd.Flags().Bool("light", false, "Render for a light terminal background (overrides detection)")
 	beamCmd.Flags().Bool("plain", false, "Drop all color and unicode: ASCII glyphs, no styling")
 	rootCmd.AddCommand(beamCmd)
@@ -92,7 +92,7 @@ func runBeam(cmd *cobra.Command, args []string) error {
 
 	// The non-TTY check happens once, here: every component below assumes it.
 	if !xterm.IsTerminal(int(os.Stdout.Fd())) {
-		return errors.New("beam needs a terminal — try: contenox \"your prompt\"")
+		return errors.New("the terminal UI needs a terminal — try: contenox \"your prompt\"")
 	}
 
 	parentCtx := cmd.Context()
@@ -245,7 +245,7 @@ func runBeam(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
-	// `contenox beam .` (or any directory) sets the workspace, like an
+	// `contenox new .` (or any directory) sets the workspace, like an
 	// editor's "open here" — every downstream consumer (session cwd, the `!`
 	// shell, @ completion) flows from this one variable.
 	if len(args) > 0 {
@@ -510,7 +510,7 @@ func resolveBeamSession(ctx context.Context, db libdb.DBManager, workspaceID str
 func knownSessionHint(roster []*sessionservice.SessionInfo) string {
 	const maxListed = 8
 	if len(roster) == 0 {
-		return "\n  beam has no sessions yet — run 'contenox beam' to start one"
+		return "\n  no sessions yet — run 'contenox new' to start one"
 	}
 	var b strings.Builder
 	b.WriteString("\n  known sessions:")

@@ -1,9 +1,12 @@
 package contenoxcli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/contenox/contenox/internal/libtracker"
 )
 
 func TestUnit_acpxIsReservedSubcommand(t *testing.T) {
@@ -53,6 +56,114 @@ func TestUnit_seedHeadlessACPChainIfMissing(t *testing.T) {
 	}
 	if string(got) != "USER EDIT" {
 		t.Fatal("seedHeadlessACPChainIfMissing overwrote a user-edited chain file")
+	}
+}
+
+// TestUnit_seedFIMChainIfMissing mirrors TestUnit_seedHeadlessACPChainIfMissing:
+// seeds default-fim-chain.json when absent, never overwrites a user edit.
+func TestUnit_seedFIMChainIfMissing(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "default-fim-chain.json")
+
+	if err := seedFIMChainIfMissing(dir); err != nil {
+		t.Fatalf("seed when absent: %v", err)
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("expected %s written: %v", dst, err)
+	}
+
+	if err := os.WriteFile(dst, []byte("USER EDIT"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedFIMChainIfMissing(dir); err != nil {
+		t.Fatalf("seed when present: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "USER EDIT" {
+		t.Fatal("seedFIMChainIfMissing overwrote a user-edited chain file")
+	}
+}
+
+// TestUnit_seedOptionalFIMChain_ACPXDoesNotSeed proves acpx, which has no
+// seedFIMChain wired (no editor buffer to complete into), never writes the
+// FIM chain preset — the seed step must be a no-op for that profile.
+func TestUnit_seedOptionalFIMChain_ACPXDoesNotSeed(t *testing.T) {
+	dir := t.TempDir()
+	seedOptionalFIMChain(acpProfileACPX, dir)
+	if _, err := os.Stat(filepath.Join(dir, "default-fim-chain.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected acpx to leave default-fim-chain.json unwritten, stat err: %v", err)
+	}
+}
+
+// TestUnit_seedOptionalFIMChain_ACPSeeds proves acp, the editor profile, does
+// seed the FIM chain preset via the same seedFIMChainIfMissing wired above.
+func TestUnit_seedOptionalFIMChain_ACPSeeds(t *testing.T) {
+	dir := t.TempDir()
+	seedOptionalFIMChain(acpProfileACP, dir)
+	if _, err := os.Stat(filepath.Join(dir, "default-fim-chain.json")); err != nil {
+		t.Fatalf("expected acp to seed default-fim-chain.json: %v", err)
+	}
+}
+
+// TestUnit_loadOptionalFIMChain_PopulatesRegistryWhenPresent proves the FIM
+// registry is populated for the acp profile when default-fim-chain.json (or
+// its env override) resolves to a valid chain — the case that must produce a
+// non-nil Deps.FIMChainRegistry so _contenox/autocomplete actually works on a
+// real `contenox acp` run.
+func TestUnit_loadOptionalFIMChain_PopulatesRegistryWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "custom-fim-chain.json")
+	chain := `{"id":"fim-test","tasks":[{"id":"only","handler":"chat_completion"}]}`
+	if err := os.WriteFile(path, []byte(chain), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONTENOX_ACP_FIM_CHAIN_PATH", path)
+
+	tracker := libtracker.NoopTracker{}
+	got := loadOptionalFIMChain(context.Background(), tracker, acpProfileACP)
+	if got == nil || got.Default() == nil {
+		t.Fatal("expected a populated FIM chain registry")
+	}
+	if got.Default().ID != "fim-test" {
+		t.Fatalf("unexpected chain ID %q", got.Default().ID)
+	}
+}
+
+// TestUnit_loadOptionalFIMChain_MissingFileDegradesToNil proves a missing or
+// unparseable FIM chain does not error: autocomplete is optional, so startup
+// must still succeed (chat keeps working) with a nil registry, which
+// Transport.handleAutocomplete already turns into a clean method-not-found.
+func TestUnit_loadOptionalFIMChain_MissingFileDegradesToNil(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CONTENOX_ACP_FIM_CHAIN_PATH", filepath.Join(dir, "does-not-exist.json"))
+
+	tracker := libtracker.NoopTracker{}
+	got := loadOptionalFIMChain(context.Background(), tracker, acpProfileACP)
+	if got != nil {
+		t.Fatal("expected nil FIM chain registry for a missing chain file")
+	}
+}
+
+// TestUnit_loadOptionalFIMChain_ACPXNeverLoads proves acpx never attempts to
+// load a FIM chain at all (no seedFIMChain wired), regardless of what the env
+// var points at — the profile gate, not just a load failure, is what keeps
+// autocomplete off that profile.
+func TestUnit_loadOptionalFIMChain_ACPXNeverLoads(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "custom-fim-chain.json")
+	chain := `{"id":"fim-test","tasks":[{"id":"only","handler":"chat_completion"}]}`
+	if err := os.WriteFile(path, []byte(chain), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONTENOX_ACP_FIM_CHAIN_PATH", path)
+
+	tracker := libtracker.NoopTracker{}
+	got := loadOptionalFIMChain(context.Background(), tracker, acpProfileACPX)
+	if got != nil {
+		t.Fatal("expected acpx to never load a FIM chain registry")
 	}
 }
 

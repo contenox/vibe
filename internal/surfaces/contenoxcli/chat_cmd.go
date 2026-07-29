@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/contenox/contenox/internal/libtracker"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/localtools"
+	"github.com/contenox/contenox/internal/services/vfs"
 )
 
 // chatOpts carries all effective config and flags needed by the run pipeline.
@@ -139,6 +141,14 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	defer stopThoughts()
 
 	agentsMD, agentsMDSource := loadAgentsMDFromCwd()
+
+	// This process's own cwd, so a run that parks on an approval and is
+	// resumed later — by a different process, from a different directory —
+	// still resolves a relative local_fs/git/jq path against where this
+	// session actually started, not against the resumer's cwd.
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		ctx = vfs.WithSessionCwd(ctx, cwd)
+	}
 
 	resp, err := ag.Prompt(ctx, agentservice.PromptRequest{
 		SessionID:      sessionID,

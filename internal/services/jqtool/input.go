@@ -51,19 +51,20 @@ func (h *tools) baseDir(ctx context.Context) (string, error) {
 			if filepath.IsAbs(cleaned) {
 				return cleaned, nil
 			}
-			if h.cwdResolver != nil {
-				if cwd := strings.TrimSpace(h.cwdResolver(ctx)); cwd != "" {
-					return filepath.Clean(filepath.Join(cwd, cleaned)), nil
-				}
+			if cwd := h.resolveCwd(ctx); cwd != "" {
+				return filepath.Clean(filepath.Join(cwd, cleaned)), nil
 			}
-			return cleaned, nil
+			// A relative policy dir with nothing to anchor it must refuse,
+			// not silently resolve against whatever directory this process
+			// happens to be running in (see resolveCwd).
+			return "", fmt.Errorf("%w: tools_policies.jq._allowed_dir %q is relative but no session workspace root could be "+
+				"resolved to anchor it; set _allowed_dir to an absolute path, or resume from a process that can restore "+
+				"the session's workspace root (fatal: no workspace root)", ErrNoWorkspaceRoot, policyDir)
 		}
 	}
 	base := h.allowedDir
-	if base == "" && h.cwdResolver != nil {
-		if r := strings.TrimSpace(h.cwdResolver(ctx)); r != "" {
-			base = filepath.Clean(r)
-		}
+	if base == "" {
+		base = h.resolveCwd(ctx)
 	}
 	if base == "" {
 		return "", fmt.Errorf("%w: no workspace root is configured for this session, so no file path can be resolved; "+
@@ -72,6 +73,22 @@ func (h *tools) baseDir(ctx context.Context) (string, error) {
 			"instead — that source needs no workspace root (fatal: no workspace root)", ErrNoWorkspaceRoot)
 	}
 	return base, nil
+}
+
+// resolveCwd returns the directory relative paths anchor against absent an
+// absolute policy/allowed dir: the session's own restored workspace root
+// (see vfs.WithSessionCwd) takes priority over the live per-process
+// cwdResolver — see the identical rationale in localtools.LocalFSTools.
+func (h *tools) resolveCwd(ctx context.Context) string {
+	if root := vfs.SessionCwdFromContext(ctx); root != "" {
+		return filepath.Clean(root)
+	}
+	if h.cwdResolver != nil {
+		if r := strings.TrimSpace(h.cwdResolver(ctx)); r != "" {
+			return filepath.Clean(r)
+		}
+	}
+	return ""
 }
 
 // absAllowedDir returns the symlink-resolved base directory for this call.

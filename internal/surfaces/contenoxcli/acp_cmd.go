@@ -100,14 +100,22 @@ type acpProfile struct {
 	// fleet in-process. Disabled for acpx: an untrusted driver must not get a
 	// lever to dispatch fleet units at all.
 	embedFleet bool
+	// seedFIMChain seeds the default-fim-chain.json preset consumed by
+	// _contenox/autocomplete. Nil disables autocomplete for this profile
+	// entirely (no seed, no load): acpx serves non-editor drivers (OpenClaw
+	// and friends) with no code buffer to complete into, so the method would
+	// only ever be a dead lever there. IDE clients (Zed, GoLand, AionUi) run
+	// under acp and are the only consumers.
+	seedFIMChain func(contenoxDir string) error
 }
 
 var acpProfileACP = acpProfile{
-	hitlPolicy: "hitl-policy-acp.json",
-	chainFile:  "default-acp-chain.json",
-	chainEnv:   "CONTENOX_ACP_CHAIN_PATH",
-	seedChain:  seedACPChainIfMissing,
-	embedFleet: true,
+	hitlPolicy:   "hitl-policy-acp.json",
+	chainFile:    "default-acp-chain.json",
+	chainEnv:     "CONTENOX_ACP_CHAIN_PATH",
+	seedChain:    seedACPChainIfMissing,
+	embedFleet:   true,
+	seedFIMChain: seedFIMChainIfMissing,
 }
 
 var acpProfileACPX = acpProfile{
@@ -119,6 +127,40 @@ var acpProfileACPX = acpProfile{
 
 func runACP(cmd *cobra.Command, _ []string) error  { return runACPProfile(cmd, acpProfileACP) }
 func runACPX(cmd *cobra.Command, _ []string) error { return runACPProfile(cmd, acpProfileACPX) }
+
+// seedOptionalFIMChain seeds the FIM chain preset for profiles that offer
+// autocomplete. Unlike profile.seedChain (the chat chain, which fails
+// startup on a seed error), this is best-effort: autocomplete is optional,
+// so a seed failure (e.g. an unwritable ~/.contenox) is logged and swallowed
+// rather than blocking `contenox acp`/`acpx` from serving chat.
+func seedOptionalFIMChain(profile acpProfile, contenoxDir string) {
+	if profile.seedFIMChain == nil {
+		return
+	}
+	if err := profile.seedFIMChain(contenoxDir); err != nil {
+		fmt.Fprintf(os.Stderr, "contenox acp: seed FIM chain preset: %v\n", err)
+	}
+}
+
+// loadOptionalFIMChain resolves the _contenox/autocomplete FIM chain for
+// profiles that support it, or nil for profiles that don't (acpx) or on any
+// load error. Unlike acpsvc.LoadChainRegistryFrom for the chat chain (fails
+// closed: a missing/invalid file is a hard error), a missing or unparseable
+// FIM chain here must not break startup — Transport.handleAutocomplete
+// already degrades a nil FIMChainRegistry to a clean method-not-found.
+func loadOptionalFIMChain(ctx context.Context, tracker libtracker.ActivityTracker, profile acpProfile) *acpsvc.ChainRegistry {
+	if profile.seedFIMChain == nil {
+		return nil
+	}
+	fim, err := acpsvc.LoadFIMChainRegistry()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "contenox acp: autocomplete not configured: %v\n", err)
+		return nil
+	}
+	_, _, end := tracker.Start(ctx, "load", "fim_chain", "source", fim.Source(), "id", fim.Default().ID)
+	end()
+	return fim
+}
 
 func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	if setup, _ := cmd.Flags().GetBool("setup"); setup {
@@ -188,6 +230,8 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		}
 	}
 	reportChange("phase", "seed_chain")
+	seedOptionalFIMChain(profile, contenoxDir)
+	reportChange("phase", "seed_fim_chain")
 
 	closeLogs, err := setupTelemetryLogging(ctx, runtimetypes.New(db.WithoutTransaction()), contenoxDir)
 	if err != nil {
@@ -236,6 +280,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	}
 	_, _, end := tracker.Start(ctx, "load", "acp_chain", "source", chains.Source(), "id", chains.Default().ID)
 	end()
+	fimChains := loadOptionalFIMChain(ctx, tracker, profile)
 
 	// Created before the tools and engine so both share one bus instead of
 	// minting their own; the engine doesn't own it, so this defer closes it.
@@ -402,6 +447,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		Engine:                engine,
 		DB:                    db,
 		ChainRegistry:         chains,
+		FIMChainRegistry:      fimChains,
 		DefaultModel:          defaultModel,
 		DefaultProvider:       defaultProvider,
 		DefaultAltModel:       defaultAltModel,
