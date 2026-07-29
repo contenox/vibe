@@ -9,6 +9,10 @@ runnerd was the self-hosted half of a tabletop-exercise simulation product: a sm
 
 A scenario could carry participant roles and a scripted timeline of injected events, turning a single-shot run into a bounded multi-turn exercise — and when a role was marked human, the runner parked mid-run and waited for a live person to submit their move before the AI played its own reaction, rotating through every human party in turn. Every run closed with a size-capped evidence bundle: a full transcript, timings, and outcomes, with confidential participant goals and any grounding material redacted from the recorded form even though they had shaped what the model saw — an explicit redaction seam rather than an accidental leak.
 
+An earlier browser surface over the same substrate, recorded driving a chain run from dispatch through to its collected result:
+
+<video src="/chain-runner-demo.webm" controls muted playsinline style="width:100%;border-radius:8px"></video>
+
 ## What it proved
 
 - **An outbound-only, enroll-once dial-home model is a workable way to run agent work on infrastructure you don't own and never need to reach** — the same shape self-hosted CI runners use, applied to AI-driven exercises.

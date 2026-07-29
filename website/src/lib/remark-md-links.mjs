@@ -36,8 +36,9 @@ const S3_MEDIA = new Set([
   'chain_flow_diagram.png',
   'hooks_architecture.png',
   'aionui-custom-agent.png',
-  // R&D section (docs/rnd/**) — pending upload, see docs/development/internal/rnd-assets.md.
+  // R&D section (docs/rnd/**). Asset log lives outside this repo.
   'beam-demo.webm',
+  'chain-runner-demo.webm',
   'backend-manager-demo.mp4',
   'beam-video-cover.png',
   'beam-login.png',
