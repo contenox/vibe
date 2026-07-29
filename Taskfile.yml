@@ -18,6 +18,58 @@ vars:
   ACP_MCP_ECHO_BIN:
     sh: ls {{.ROOT_DIR}}/tools/rust-sdk/target/debug/mcp-echo-server 2>/dev/null || true
 
+  # modeld native build config (ported from mk/llama-flags.mk, mk/openvino-flags.mk,
+  # Makefile.llamacpp-direct, Makefile.openvino — those Makefiles are gone, this repo
+  # builds with Task only. See the "modeld:*" tasks below. Linux-focused: the original
+  # mk/ fragments also carried Windows/MinGW-specific DSO layout branches that are not
+  # reproduced here (see modeld:build-llamacpp-runtime).
+  MODELD_BUILD_JOBS: '4'
+  LLAMA_CPP_COMMIT: '86b94708f22478f900b76ca02e316f4f3418faff'
+  LLAMA_CPP_REF_REPO: 'https://github.com/ggml-org/llama.cpp.git'
+  LLAMA_CPP_REF_DIR: '{{.ROOT_DIR}}/tmp/ref/llama.cpp'
+  LLAMA_CPP_BUILD_ROOT: '{{.ROOT_DIR}}/.build/llamacpp'
+  LLAMA_CPP_BUILD_DIR: '{{.LLAMA_CPP_BUILD_ROOT}}/local'
+  LLAMA_CPP_BUILD_TYPE: 'Release'
+  LLAMA_RUNTIME_ROOT: '{{.ROOT_DIR}}/.llamacpp-runtime'
+  LLAMA_RUNTIME_DIR: '{{.LLAMA_RUNTIME_ROOT}}/local'
+  LLAMA_RUNTIME_LIB_DIR: '{{.LLAMA_RUNTIME_DIR}}/lib'
+  LLAMA_RUNTIME_ABI: 'dl-v2'
+  LLAMA_LIBS_DIR: '{{.ROOT_DIR}}/lib/llamacpp'
+  MODELD_DIST_DIR: '{{.ROOT_DIR}}/bin/dist'
+  MODELD_VERSION:
+    sh: tr -d '\r\n' < {{.ROOT_DIR}}/cmd/modeld/version.txt 2>/dev/null || true
+  # llama.cpp is linked as a dl-loaded backend-plugin build (GGML_BACKEND_DL); CUDA/HIP
+  # are auto-detected from nvcc/hipcc on PATH.
+  LLAMA_HAVE_NVCC:
+    sh: command -v nvcc >/dev/null 2>&1 && echo 1 || true
+  LLAMA_HAVE_HIPCC:
+    sh: command -v hipcc >/dev/null 2>&1 && echo 1 || true
+  LLAMA_COMMON_CPPFLAGS: '-I{{.LLAMA_CPP_REF_DIR}}/common -I{{.LLAMA_CPP_REF_DIR}}/vendor'
+  LLAMA_DIRECT_CPPFLAGS: '-I{{.LLAMA_RUNTIME_DIR}}/include'
+  LLAMA_DIRECT_LINK_LIBS: '-l:libllama-common.so -l:libllama.so -l:libmtmd.so -l:libggml.so -l:libggml-base.so -lstdc++ -lm -ldl -lpthread'
+  LLAMA_DIRECT_LDFLAGS: '-L{{.LLAMA_RUNTIME_LIB_DIR}} -Wl,--disable-new-dtags -Wl,-rpath,{{.LLAMA_RUNTIME_LIB_DIR}} -Wl,-rpath-link,{{.LLAMA_RUNTIME_LIB_DIR}} {{.LLAMA_DIRECT_LINK_LIBS}}'
+  MODELD_LD_FLAGS: >-
+    -X 'main.version={{.MODELD_VERSION}}'
+    -X 'github.com/contenox/contenox/internal/modeld/llama.llamaCPPCommit={{.LLAMA_CPP_COMMIT}}'
+  # OpenVINO (optional backend; requires the venv from modeld:deps-openvino).
+  OPENVINO_WORKDIR: '{{.ROOT_DIR}}/.openvino'
+  OPENVINO_VENV: '{{.OPENVINO_WORKDIR}}/venv'
+  OPENVINO_GENAI_VERSION: '2026.2.0.0'
+  OPENVINO_GENAI_REPO:
+    sh: echo "$HOME/src/github.com/openvinotoolkit/openvino.genai"
+  OPENVINO_GENAI_SRC:
+    sh: echo "$HOME/src/github.com/openvinotoolkit/openvino.genai-2026.2.0.0"
+  OPENVINO_PKG:
+    sh: test -x "{{.OPENVINO_VENV}}/bin/python" && "{{.OPENVINO_VENV}}/bin/python" -c 'import openvino, os; print(os.path.dirname(openvino.__file__))' 2>/dev/null || true
+  OPENVINO_GENAI_PKG:
+    sh: test -x "{{.OPENVINO_VENV}}/bin/python" && "{{.OPENVINO_VENV}}/bin/python" -c 'import openvino_genai, os; print(os.path.dirname(openvino_genai.__file__))' 2>/dev/null || true
+  OPENVINO_TOKENIZERS_PKG:
+    sh: test -x "{{.OPENVINO_VENV}}/bin/python" && "{{.OPENVINO_VENV}}/bin/python" -c 'import openvino_tokenizers, os; print(os.path.dirname(openvino_tokenizers.__file__))' 2>/dev/null || true
+  OPENVINO_TOKENIZERS_LIB: '{{.OPENVINO_TOKENIZERS_PKG}}/lib'
+  OPENVINO_CGO_CXXFLAGS: '-std=c++17 -I{{.OPENVINO_PKG}}/include'
+  OPENVINO_GENAI_CGO_CXXFLAGS: '{{.OPENVINO_CGO_CXXFLAGS}} -I{{.OPENVINO_GENAI_SRC}}/src/cpp/include -I{{.OPENVINO_GENAI_SRC}}/src/cpp/src -I{{.OPENVINO_GENAI_SRC}}/build/_deps/minja-src/include -I{{.OPENVINO_GENAI_SRC}}/build/_deps/nlohmann_json-src/single_include -I{{.OPENVINO_GENAI_SRC}}/build/_deps/safetensors.h-src -I{{.OPENVINO_GENAI_SRC}}/build/_deps/gguflib-src -I{{.OPENVINO_GENAI_SRC}}/build/_deps/stb-src'
+  OPENVINO_GENAI_CGO_LDFLAGS: '-L{{.OPENVINO_PKG}}/libs -L{{.OPENVINO_GENAI_PKG}} -L{{.OPENVINO_TOKENIZERS_LIB}} -lopenvino_genai -lopenvino -lstdc++ -Wl,--disable-new-dtags -Wl,-rpath,{{.OPENVINO_PKG}}/libs -Wl,-rpath,{{.OPENVINO_GENAI_PKG}} -Wl,-rpath,{{.OPENVINO_TOKENIZERS_LIB}}'
+
 tasks:
   default:
     desc: List available tasks
@@ -94,6 +146,163 @@ tasks:
       - task: acp-host-e2e
       - task: test
       - 'echo "==> test-all: all gates green"'
+
+  # modeld: the native inference daemon (cmd/modeld, internal/modeld). It links
+  # llama.cpp via cgo and optionally OpenVINO GenAI, so it is NOT part of `build`
+  # or `test-all` above (same reasoning as the original Makefile: it needs
+  # per-device native deps that a plain Go toolchain does not provide). Ported
+  # from the pre-refactor Makefile + Makefile.llamacpp-direct + Makefile.openvino
+  # (see the vars block above, ported from mk/llama-flags.mk and
+  # mk/openvino-flags.mk). Only the Linux dev path is ported; the original mk/
+  # fragments' Windows/MinGW DLL-layout branches and the S3-backed
+  # bundle/push/pull release-distribution pipeline (bundle-modeld-deps*,
+  # push/pull-modeld-deps, package-modeld-release-*, modeld-deps-fingerprint)
+  # are intentionally NOT ported here — that is release/CI machinery, not a dev
+  # build, and porting ~500 lines of platform-branching Make untested would be
+  # more likely to hide a bug than catch one. Rebuild it deliberately if/when
+  # the release pipeline is restored.
+  modeld:deps-llamacpp-ref:
+    desc: 'Fetch the pinned upstream llama.cpp source used to build the direct runtime'
+    cmds:
+      - mkdir -p {{.LLAMA_CPP_REF_DIR}}
+      - |
+        set -eu
+        if [ -d "{{.LLAMA_CPP_REF_DIR}}/.git" ] && [ "$(git -C "{{.LLAMA_CPP_REF_DIR}}" rev-parse HEAD 2>/dev/null)" = "{{.LLAMA_CPP_COMMIT}}" ]; then
+          git -C "{{.LLAMA_CPP_REF_DIR}}" log -1 --oneline
+        elif [ -d "{{.LLAMA_CPP_REF_DIR}}/.git" ]; then
+          git -C "{{.LLAMA_CPP_REF_DIR}}" fetch --depth 1 origin "{{.LLAMA_CPP_COMMIT}}"
+          git -C "{{.LLAMA_CPP_REF_DIR}}" checkout --detach "{{.LLAMA_CPP_COMMIT}}" >/dev/null
+          git -C "{{.LLAMA_CPP_REF_DIR}}" log -1 --oneline
+        else
+          git clone --no-checkout "{{.LLAMA_CPP_REF_REPO}}" "{{.LLAMA_CPP_REF_DIR}}"
+          git -C "{{.LLAMA_CPP_REF_DIR}}" fetch --depth 1 origin "{{.LLAMA_CPP_COMMIT}}"
+          git -C "{{.LLAMA_CPP_REF_DIR}}" checkout --detach "{{.LLAMA_CPP_COMMIT}}" >/dev/null
+          git -C "{{.LLAMA_CPP_REF_DIR}}" log -1 --oneline
+        fi
+
+  modeld:build-llamacpp-runtime:
+    desc: 'Build/install the pinned direct llama.cpp runtime (CUDA auto-enabled when nvcc is present)'
+    deps: [modeld:deps-llamacpp-ref]
+    cmds:
+      - command -v cmake >/dev/null 2>&1 || { echo "missing cmake; install CMake before building direct llama.cpp"; exit 1; }
+      - 'test -f "{{.LLAMA_CPP_REF_DIR}}/CMakeLists.txt" || { echo "missing llama.cpp source; run: task modeld:deps-llamacpp-ref"; exit 1; }'
+      - |
+        set -eu
+        CUDA={{if .LLAMA_HAVE_NVCC}}ON{{else}}OFF{{end}}
+        HIP={{if .LLAMA_HAVE_HIPCC}}ON{{else}}OFF{{end}}
+        rm -rf "{{.LLAMA_CPP_BUILD_DIR}}" "{{.LLAMA_RUNTIME_DIR}}"
+        cmake -S "{{.LLAMA_CPP_REF_DIR}}" -B "{{.LLAMA_CPP_BUILD_DIR}}" \
+          -DCMAKE_BUILD_TYPE="{{.LLAMA_CPP_BUILD_TYPE}}" \
+          -DCMAKE_INSTALL_PREFIX="{{.LLAMA_RUNTIME_DIR}}" \
+          -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_NATIVE=OFF \
+          -DGGML_CUDA=$CUDA -DGGML_HIP=$HIP \
+          -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_MTMD=ON -DMTMD_VIDEO=OFF \
+          -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_APP=OFF -DLLAMA_BUILD_COMMON=ON \
+          -DLLAMA_CURL=OFF -DCMAKE_INSTALL_LIBDIR=lib
+        cmake --build "{{.LLAMA_CPP_BUILD_DIR}}" --target install -j {{.MODELD_BUILD_JOBS}}
+        libdir="{{.LLAMA_RUNTIME_DIR}}/lib"
+        mkdir -p "$libdir"
+        test -f "$libdir/libllama-common.so" || { echo "runtime missing libllama-common.so in $libdir"; exit 1; }
+        test -f "$libdir/libllama.so" || { echo "runtime missing libllama.so in $libdir"; exit 1; }
+        test -e "$libdir/libmtmd.so" || { echo "runtime missing libmtmd.so in $libdir (LLAMA_BUILD_MTMD)"; exit 1; }
+        for plugin in "{{.LLAMA_RUNTIME_DIR}}"/bin/libggml-*.so; do [ -e "$plugin" ] && cp "$plugin" "$libdir/"; done
+        ls "$libdir"/libggml-cpu*.so >/dev/null 2>&1 || { echo "runtime missing libggml-cpu*.so backend plugins"; exit 1; }
+        echo "direct llama.cpp runtime (cuda=$CUDA hip=$HIP) -> {{.LLAMA_RUNTIME_DIR}}"
+
+  modeld:check-llama-deps:
+    desc: 'Preflight: fail clearly if the llama.cpp runtime/headers modeld needs are missing'
+    cmds:
+      - 'test -f "{{.LLAMA_CPP_REF_DIR}}/common/chat.h" || { echo "missing pinned llama.cpp common headers — run: task modeld:deps-llamacpp-ref"; exit 1; }'
+      - 'ls "{{.LLAMA_RUNTIME_LIB_DIR}}"/libllama-common.* >/dev/null 2>&1 || { echo "missing direct llama.cpp common library ({{.LLAMA_RUNTIME_LIB_DIR}}) — run: task modeld:build-llamacpp-runtime"; exit 1; }'
+
+  modeld:build:
+    desc: 'Build modeld (llama.cpp always; OpenVINO GenAI added automatically when its venv is set up)'
+    deps: [modeld:build-llamacpp-runtime, modeld:check-llama-deps]
+    cmds:
+      - |
+        set -eu
+        if [ -n "{{.OPENVINO_PKG}}" ] && [ -d "{{.OPENVINO_GENAI_SRC}}/src/cpp/include" ]; then
+          TAGS='llamanode llamacpp_direct openvino openvino_genai'
+          OV_CXXFLAGS='{{.OPENVINO_GENAI_CGO_CXXFLAGS}}'
+          OV_LDFLAGS='{{.OPENVINO_GENAI_CGO_LDFLAGS}} -Wl,-rpath,$ORIGIN/modeld-libs'
+          LDFLAGS="{{.MODELD_LD_FLAGS}} -X 'github.com/contenox/contenox/internal/modeld/openvino.buildTokenizersPath={{.OPENVINO_TOKENIZERS_LIB}}/libopenvino_tokenizers.so' -X 'github.com/contenox/contenox/internal/modeld/openvino.buildGenAIVersion={{.OPENVINO_GENAI_VERSION}}'"
+        else
+          TAGS='llamanode llamacpp_direct'
+          OV_CXXFLAGS=''
+          OV_LDFLAGS=''
+          LDFLAGS="{{.MODELD_LD_FLAGS}}"
+        fi
+        echo "building modeld: tags=[$TAGS] openvino=$([ -n "$OV_CXXFLAGS" ] && echo yes || echo no)"
+        CGO_ENABLED=1 \
+        CGO_CPPFLAGS="{{.LLAMA_COMMON_CPPFLAGS}} {{.LLAMA_DIRECT_CPPFLAGS}}" \
+        CGO_CXXFLAGS="$OV_CXXFLAGS" \
+        CGO_LDFLAGS="{{.LLAMA_DIRECT_LDFLAGS}} $OV_LDFLAGS" \
+        go build -a -p {{.MODELD_BUILD_JOBS}} -tags "$TAGS" -ldflags "$LDFLAGS" \
+          -o {{.BIN_DIR}}/modeld {{.ROOT_DIR}}/cmd/modeld
+
+  modeld:run:
+    desc: 'Run modeld from the local build output (CONTENOX_MODELD_BACKEND=llama|openvino to pin backend)'
+    deps: [modeld:build]
+    cmds:
+      - CONTENOX_LLAMA_BACKEND_DIR={{.LLAMA_RUNTIME_LIB_DIR}} {{.BIN_DIR}}/modeld serve
+
+  modeld:package:
+    desc: 'Build a relocatable modeld bundle under bin/dist (Linux-oriented; wraps the binary + runtime libs)'
+    deps: [modeld:build-llamacpp-runtime, modeld:check-llama-deps]
+    cmds:
+      - rm -rf {{.MODELD_DIST_DIR}} && mkdir -p {{.MODELD_DIST_DIR}}
+      - |
+        set -eu
+        CGO_ENABLED=1 \
+        CGO_CPPFLAGS="{{.LLAMA_COMMON_CPPFLAGS}} {{.LLAMA_DIRECT_CPPFLAGS}}" \
+        CGO_LDFLAGS="-L{{.LLAMA_RUNTIME_LIB_DIR}} -Wl,--disable-new-dtags -Wl,-rpath,\$ORIGIN/lib/llamacpp -Wl,-rpath-link,{{.LLAMA_RUNTIME_LIB_DIR}} {{.LLAMA_DIRECT_LINK_LIBS}}" \
+        go build -a -p {{.MODELD_BUILD_JOBS}} -tags 'llamanode llamacpp_direct' -ldflags "{{.MODELD_LD_FLAGS}}" \
+          -o {{.MODELD_DIST_DIR}}/modeld.bin {{.ROOT_DIR}}/cmd/modeld
+        printf '%s\n' '#!/usr/bin/env sh' 'set -eu' \
+          'SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)' \
+          'LIB_DIR="$SELF_DIR/lib/llamacpp"' \
+          'if [ -d "$LIB_DIR" ]; then export LD_LIBRARY_PATH="$LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; export CONTENOX_LLAMA_BACKEND_DIR="${CONTENOX_LLAMA_BACKEND_DIR:-$LIB_DIR}"; fi' \
+          'exec "$SELF_DIR/modeld.bin" "$@"' > {{.MODELD_DIST_DIR}}/modeld
+        chmod +x {{.MODELD_DIST_DIR}}/modeld
+        rm -rf {{.LLAMA_LIBS_DIR}} && mkdir -p $(dirname {{.LLAMA_LIBS_DIR}})
+        ln -s {{.LLAMA_RUNTIME_LIB_DIR}} {{.LLAMA_LIBS_DIR}}
+        echo "relocatable modeld package -> {{.MODELD_DIST_DIR}} (run: {{.MODELD_DIST_DIR}}/modeld serve)"
+
+  modeld:deps-openvino:
+    desc: 'Create the .openvino venv and install the OpenVINO + OpenVINO GenAI SDKs, plus matching GenAI C++ headers'
+    cmds:
+      - python3 -m venv {{.OPENVINO_VENV}}
+      - '{{.OPENVINO_VENV}}/bin/pip install -q --upgrade pip'
+      - '{{.OPENVINO_VENV}}/bin/pip install -q openvino huggingface_hub openvino-genai'
+      - test -d "{{.OPENVINO_GENAI_REPO}}/.git" || git clone https://github.com/openvinotoolkit/openvino.genai.git {{.OPENVINO_GENAI_REPO}}
+      - git -C {{.OPENVINO_GENAI_REPO}} fetch --tags --force
+      - test -d "{{.OPENVINO_GENAI_SRC}}" || git -C {{.OPENVINO_GENAI_REPO}} worktree add --detach {{.OPENVINO_GENAI_SRC}} {{.OPENVINO_GENAI_VERSION}}
+
+  modeld:test-llamacpp-direct:
+    desc: 'Build the direct llama.cpp runtime and test modeld/llama/llamacppshim + llamasession (needs an in-tree tiny GGUF)'
+    deps: [modeld:build-llamacpp-runtime]
+    cmds:
+      - |
+        set -eu
+        libdir="{{.LLAMA_RUNTIME_LIB_DIR}}"
+        test -f "$libdir/libllama.so" || { echo "missing direct llama.cpp runtime; run: task modeld:build-llamacpp-runtime"; exit 1; }
+        CGO_ENABLED=1 \
+        CGO_CPPFLAGS="{{.LLAMA_COMMON_CPPFLAGS}} {{.LLAMA_DIRECT_CPPFLAGS}}" \
+        CGO_LDFLAGS="-L$libdir -Wl,--disable-new-dtags -Wl,-rpath,$libdir -Wl,-rpath-link,$libdir {{.LLAMA_DIRECT_LINK_LIBS}}" \
+        LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        CONTENOX_LLAMA_BACKEND_DIR="$libdir" \
+        go test -tags 'llamacpp_direct' ./internal/modeld/llama/llamacppshim
+        CGO_ENABLED=1 \
+        CGO_CPPFLAGS="{{.LLAMA_COMMON_CPPFLAGS}} {{.LLAMA_DIRECT_CPPFLAGS}}" \
+        CGO_LDFLAGS="-L$libdir -Wl,--disable-new-dtags -Wl,-rpath,$libdir -Wl,-rpath-link,$libdir {{.LLAMA_DIRECT_LINK_LIBS}}" \
+        LD_LIBRARY_PATH="$libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        CONTENOX_LLAMA_BACKEND_DIR="$libdir" \
+        go test -tags 'llamanode llamacpp_direct' ./internal/modeld/llama/llamasession
+
+  modeld:clean:
+    desc: 'Remove modeld native build/runtime outputs'
+    cmds:
+      - rm -rf {{.LLAMA_CPP_BUILD_ROOT}} {{.LLAMA_RUNTIME_ROOT}} {{.OPENVINO_WORKDIR}} {{.MODELD_DIST_DIR}} {{.LLAMA_LIBS_DIR}}
 
   dev-install:
     desc: Build and link the CLI into ~/.local/bin
