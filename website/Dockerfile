@@ -1,8 +1,8 @@
 # Static contenox.com image: builds the Astro site from this repo and serves
 # it with nginx.
 #
-# Build context is the runtime repo root (the site pulls content from docs/
-# and design tokens from packages/ui):
+# Build context is the runtime repo root (the site pulls content from docs/;
+# design tokens are vendored locally in website/src/styles/tokens.css):
 #
 #   docker build -f website/Dockerfile .          # from the runtime repo
 #   docker build -f runtime/website/Dockerfile runtime   # from a superproject
@@ -15,7 +15,6 @@ FROM node:24-alpine AS builder
 WORKDIR /src
 
 COPY docs ./docs
-COPY packages/ui ./packages/ui
 COPY website ./website
 
 WORKDIR /src/website
