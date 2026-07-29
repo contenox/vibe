@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/store/runtimetypes"

@@ -16,8 +16,8 @@ import (
 	"strings"
 	"syscall"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libtracker"
+	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"

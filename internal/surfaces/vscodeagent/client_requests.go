@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libacp"
 )

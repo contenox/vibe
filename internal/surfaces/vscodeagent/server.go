@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	libbus "github.com/contenox/contenox/internal/libbus"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libbus "github.com/contenox/contenox/libbus"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/models/providerservice"
 	"github.com/contenox/contenox/internal/models/runtimestate"

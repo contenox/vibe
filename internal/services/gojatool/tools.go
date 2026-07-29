@@ -12,7 +12,7 @@ import (
 	"unicode"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // ToolsProviderName is the tools-provider key this package registers under.

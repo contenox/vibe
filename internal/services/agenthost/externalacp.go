@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/libsandbox"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libacp"
 	"github.com/contenox/contenox/libacp/acpexec"

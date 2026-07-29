@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"

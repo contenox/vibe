@@ -8,8 +8,8 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"

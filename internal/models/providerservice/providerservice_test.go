@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/models/providerservice"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/services/clikv"

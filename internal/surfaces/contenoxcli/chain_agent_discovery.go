@@ -3,7 +3,7 @@ package contenoxcli
 import (
 	"context"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/chainagents"
 )

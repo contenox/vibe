@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 )
 
 type activityTrackerDecorator struct {

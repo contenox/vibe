@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/services/shellsession"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"

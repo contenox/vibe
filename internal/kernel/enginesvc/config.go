@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/internal/libbus"
-	"github.com/contenox/contenox/internal/libkvstore"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/libkvstore"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/services/execservice"

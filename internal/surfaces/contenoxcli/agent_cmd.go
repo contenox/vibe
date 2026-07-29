@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"text/tabwriter"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libtracker"
+	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/spf13/cobra"
 )

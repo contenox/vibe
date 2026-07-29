@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/models/backendservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"

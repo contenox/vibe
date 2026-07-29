@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/jqtool"
 	"github.com/contenox/contenox/internal/services/localtools"

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/errdefs"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 

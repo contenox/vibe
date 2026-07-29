@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	libdbexec "github.com/contenox/contenox/internal/libdbexec"
+	libdbexec "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/contenox/contenox/internal/kernel/reasoning"
-	"github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/setupcheck"

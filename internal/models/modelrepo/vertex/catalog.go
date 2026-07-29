@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 
 	"github.com/contenox/contenox/internal/models/modelrepo"
 )

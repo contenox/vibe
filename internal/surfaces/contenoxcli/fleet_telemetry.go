@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // newInstanceEventSink adapts the agentinstance lifecycle EventSink onto the

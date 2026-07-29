@@ -6,9 +6,9 @@ package contenoxcli
 
 import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/internal/libbus"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libbus"
+	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"

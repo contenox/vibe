@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // applyIsolation fails closed off Linux: Landlock and the network/mount

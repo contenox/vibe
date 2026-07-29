@@ -13,7 +13,7 @@ import (
 	"github.com/Masterminds/sprig/v3"
 
 	"github.com/contenox/contenox/internal/errdefs"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/getkin/kin-openapi/openapi3"
 )
 

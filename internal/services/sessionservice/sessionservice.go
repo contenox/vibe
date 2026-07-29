@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libtracker"
+	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )

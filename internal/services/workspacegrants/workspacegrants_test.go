@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/services/workspacegrants"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/assert"

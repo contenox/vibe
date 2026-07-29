@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

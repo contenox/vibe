@@ -14,8 +14,8 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libtracker"
+	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentservice"

@@ -10,7 +10,7 @@ import (
 
 	"github.com/contenox/contenox/internal/errdefs"
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/stretchr/testify/require"

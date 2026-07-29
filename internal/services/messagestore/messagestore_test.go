@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/store/runtimetypes"

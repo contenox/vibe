@@ -3,7 +3,7 @@ package stateservice
 import (
 	"context"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 )

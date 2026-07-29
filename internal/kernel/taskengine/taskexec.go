@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine/llmretry"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/google/uuid"

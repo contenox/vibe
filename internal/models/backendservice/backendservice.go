@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )

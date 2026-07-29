@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // The declared reach: a script says what it touches via `tools: [...]`, and

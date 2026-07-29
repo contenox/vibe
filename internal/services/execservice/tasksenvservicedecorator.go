@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 )
 
 type activityTrackerTaskEnvDecorator struct {

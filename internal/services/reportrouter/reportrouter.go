@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	libbus "github.com/contenox/contenox/internal/libbus"
-	"github.com/contenox/contenox/internal/libtracker"
+	libbus "github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/operatorinbox"
 	"github.com/contenox/contenox/libacp"

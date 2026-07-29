@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/spf13/cobra"
 )
 

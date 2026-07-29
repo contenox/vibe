@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"syscall"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libkvstore"
-	"github.com/contenox/contenox/internal/libtracker"
+	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libkvstore"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/presence"

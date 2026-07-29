@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libkvstore"
+	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libkvstore"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/services/clikv"

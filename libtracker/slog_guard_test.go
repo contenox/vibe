@@ -14,8 +14,11 @@ import (
 )
 
 // guardedRoots covers this project's own logic; libacp is a published library
-// with its own rules, and tools/examples aren't the product.
-var guardedRoots = []string{"internal", "cmd"}
+// with its own rules, and tools/examples aren't the product. libbus, libdbexec,
+// libkvstore and libtracker sit beside internal/ rather than inside it so they
+// stay importable from outside the module, but they are still this project's
+// logic, so the guard keeps walking them.
+var guardedRoots = []string{"internal", "cmd", "libbus", "libdbexec", "libkvstore", "libtracker"}
 
 // slogSinkAllowlist is the closed set of files permitted to import log/slog,
 // keyed by module-root-relative slash path (trailing "/" = directory prefix,
@@ -28,7 +31,7 @@ var guardedRoots = []string{"internal", "cmd"}
 var slogSinkAllowlist = map[string]string{
 	// The sink adapter itself: builds a tracker over an *slog.Logger, stamps
 	// request/trace/span IDs, and redacts on the way out.
-	"internal/libtracker/": "the tracker's slog sink adapter — slog is its output, not its API",
+	"libtracker/": "the tracker's slog sink adapter — slog is its output, not its API",
 
 	// Composition roots that configure the sink, named file by file.
 	"internal/surfaces/contenoxcli/cli.go":      "setupTelemetryLogging: tees the default handler to <data-dir>/telemetry.log when the operator sets telemetry-enabled",
@@ -104,20 +107,20 @@ func TestUnit_NoDirectSlogOutsideSinks(t *testing.T) {
 
 log/slog is the ActivityTracker's OUTPUT SINK, not an API for project logic to
 call. Values reported through the tracker are redacted by field name before they
-are written (internal/libtracker/redact.go) and stamped with request/trace/span
+are written (libtracker/redact.go) and stamped with request/trace/span
 IDs from the context; a direct slog call gets neither, so it can put a token in
 a log file.
 
 Replace it with one of:
   - TELEMETRY (an event about the program's own behavior) -> report it through
     an ActivityTracker. The pattern is on the interface in
-    internal/libtracker/activitytracker.go; a worked consumer, including the
+    libtracker/activitytracker.go; a worked consumer, including the
     nil-tracker-degrades-to-Noop idiom, is internal/services/reportrouter.
   - A MESSAGE THE OPERATOR MUST ACT ON -> print it, in the surrounding command's
     voice, to that command's stderr. It was never a log line.
   - GENUINE SINK WIRING (slog.SetDefault / building a handler, and NOTHING else
     in the file) -> add the file, by exact path and with its reason, to
-    slogSinkAllowlist in %s.`, len(offenders), "  "+strings.Join(offenders, "\n  "), "internal/libtracker/slog_guard_test.go")
+    slogSinkAllowlist in %s.`, len(offenders), "  "+strings.Join(offenders, "\n  "), "libtracker/slog_guard_test.go")
 }
 
 // allowed reports whether rel is on slogSinkAllowlist, as an exact file or

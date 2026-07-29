@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	libbus "github.com/contenox/contenox/internal/libbus"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libtracker"
+	libbus "github.com/contenox/contenox/libbus"
+	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"

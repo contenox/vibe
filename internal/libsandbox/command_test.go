@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/libsandbox"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 

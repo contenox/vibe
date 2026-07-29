@@ -1,7 +1,7 @@
 package llmresolver
 
 import (
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 )
 
 type Request struct {

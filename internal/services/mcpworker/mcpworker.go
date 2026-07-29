@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/contenox/contenox/internal/libbus"
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/localtools/mcpoauth"
 	"github.com/contenox/contenox/internal/store/runtimetypes"

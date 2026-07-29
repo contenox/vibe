@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 )
 
 // ErrWorkspaceIndexConfigLive refuses deletion of the config a workspace is

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"

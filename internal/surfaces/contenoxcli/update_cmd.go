@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 
-	"github.com/contenox/contenox/internal/libtracker"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/updatecheck"
 	"github.com/spf13/cobra"
 )
