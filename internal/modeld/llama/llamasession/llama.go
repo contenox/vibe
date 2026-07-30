@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"runtime"
 	"strings"
 	"sync"
@@ -1182,7 +1181,6 @@ func (p *chatOutputParser) Push(piece string, partial bool) (textDelta, thinking
 		// (or the authoritative final partial=false parse) emit the cumulative
 		// delta. Only a failure on the final parse is fatal.
 		if partial {
-			slog.Debug("llamasession: tolerating partial chat-parse failure", "error", p.parseError(err, partial, raw))
 			return "", "", nil, nil
 		}
 		if p.parseToolCalls {
@@ -1191,7 +1189,6 @@ func (p *chatOutputParser) Push(piece string, partial bool) (textDelta, thinking
 				return "", "", nil, fmt.Errorf("%w; qwen tool-call fallback failed: %v", p.parseError(err, partial, raw), fallbackErr)
 			}
 			if ok {
-				slog.Debug("llamasession: recovered qwen tool-call output after common chat parse failure", "error", p.parseError(err, partial, raw))
 				return textDelta, thinkingDelta, toolCalls, nil
 			}
 		}

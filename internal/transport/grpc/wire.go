@@ -2,10 +2,11 @@ package grpc
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 	"runtime/debug"
 
 	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtracker"
 	grpclib "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -368,7 +369,7 @@ var serviceDesc = grpclib.ServiceDesc{
 			Handler: func(srv any, stream grpclib.ServerStream) (err error) {
 				defer func() {
 					if r := recover(); r != nil {
-						err = recoveredHandlerPanic("Decode", r)
+						err = recoveredHandlerPanic(stream.Context(), trackerOf(srv), "Decode", r)
 					}
 				}()
 				in := new(decodeReq)
@@ -384,7 +385,7 @@ var serviceDesc = grpclib.ServiceDesc{
 			Handler: func(srv any, stream grpclib.ServerStream) (err error) {
 				defer func() {
 					if r := recover(); r != nil {
-						err = recoveredHandlerPanic("PushModel", r)
+						err = recoveredHandlerPanic(stream.Context(), trackerOf(srv), "PushModel", r)
 					}
 				}()
 				in := new(pushModelChunk)
@@ -407,18 +408,31 @@ func unaryHandler(name string, call func(*Server, context.Context, func(any) err
 	return func(srv any, ctx context.Context, dec func(any) error, _ grpclib.UnaryServerInterceptor) (resp any, err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				err = recoveredHandlerPanic(name, r)
+				err = recoveredHandlerPanic(ctx, trackerOf(srv), name, r)
 			}
 		}()
 		return call(srv.(*Server), ctx, dec)
 	}
 }
 
+// trackerOf recovers srv's ActivityTracker for a recovered-panic report. srv is
+// always a *Server in practice (grpc dispatches to the registered handler
+// type); the fallback exists only so a panic recovery path can never itself
+// panic on a bad type assertion.
+func trackerOf(srv any) libtracker.ActivityTracker {
+	if s, ok := srv.(*Server); ok && s.tracker != nil {
+		return s.tracker
+	}
+	return libtracker.NoopTracker{}
+}
+
 // recoveredHandlerPanic converts a recovered handler panic into an Internal gRPC
 // error instead of letting it crash the whole daemon (which would drop the
 // resident model and the lease for every client). The panic and its stack are
-// logged so the fault stays diagnosable.
-func recoveredHandlerPanic(method string, r any) error {
-	slog.Error("modeld transport handler panic", "method", method, "panic", r, "stack", string(debug.Stack()))
+// reported through the tracker so the fault stays diagnosable.
+func recoveredHandlerPanic(ctx context.Context, tracker libtracker.ActivityTracker, method string, r any) error {
+	reportErr, _, end := tracker.Start(ctx, "modeld_transport", "handler_panic", "method", method, "stack", string(debug.Stack()))
+	reportErr(fmt.Errorf("panic: %v", r))
+	end()
 	return status.Errorf(codes.Internal, "internal: handler %s panicked: %v", method, r)
 }

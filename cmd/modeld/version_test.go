@@ -5,6 +5,7 @@ import (
 
 	"github.com/contenox/contenox/internal/modeld/capacity"
 	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // TestUnit_VersionInfo locks the contract the release smoke check relies on:
@@ -21,7 +22,7 @@ func TestUnit_VersionInfo(t *testing.T) {
 		version = origVersion
 	})
 
-	fakeFactory := func(capacity.Policy) transport.Service { return unavailableBackend{} }
+	fakeFactory := func(capacity.Policy, libtracker.ActivityTracker) transport.Service { return unavailableBackend{} }
 
 	t.Run("reports sorted backends and stamped version", func(t *testing.T) {
 		backends = map[string]backendFactory{"openvino": fakeFactory, "llama": fakeFactory}

@@ -3,13 +3,13 @@ package llama
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"strconv"
 
 	"github.com/contenox/contenox/internal/modeld/capacity"
 	"github.com/contenox/contenox/internal/modeld/llama/llamacppshim"
 	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // Service implements the runtime/transport.Service boundary.
@@ -18,12 +18,13 @@ type Service struct {
 	memory     capacity.MemorySource
 	hostMemory capacity.MemorySource
 	policy     capacity.Policy
+	tracker    libtracker.ActivityTracker
 }
 
 type ServiceOption func(*Service)
 
 func NewService(opts ...ServiceOption) *Service {
-	s := &Service{}
+	s := &Service{tracker: libtracker.NoopTracker{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -40,6 +41,16 @@ func WithMemorySource(src capacity.MemorySource) ServiceOption {
 
 func WithHostMemorySource(src capacity.MemorySource) ServiceOption {
 	return func(s *Service) { s.hostMemory = src }
+}
+
+// WithTracker sets the ActivityTracker session-open telemetry is reported
+// through. Unset defaults to libtracker.NoopTracker.
+func WithTracker(t libtracker.ActivityTracker) ServiceOption {
+	return func(s *Service) {
+		if t != nil {
+			s.tracker = t
+		}
+	}
 }
 
 var _ transport.Service = (*Service)(nil)
@@ -59,27 +70,29 @@ func (s *Service) OpenSession(ctx context.Context, req transport.OpenSessionRequ
 	}
 	cfg := plan.config
 	info := plan.info
-	slog.Info("llama session config",
-		"num_ctx", cfg.NumCtx,
-		"hot_context_tokens", info.HotContextTokens,
-		"planner_effective_context", cfg.PlannerEffectiveContext,
-		"host_cold_budget_bytes", info.HostColdBudgetBytes,
-		"num_batch", cfg.NumBatch,
-		"num_gpu_layers", cfg.NumGpuLayers,
-		"requested_gpu_layers", info.RequestedGpuLayers,
-		"resolved_gpu_layers", info.ResolvedGpuLayers,
-		"free_bytes", info.FreeBytes,
-		"user_limit_bytes", info.UserLimitBytes,
-		"usable_bytes", info.UsableBytes,
-		"weights_bytes", info.WeightsBytes,
-		"overhead_bytes", info.OverheadBytes,
-		"required_bytes", info.RequiredBytes,
-		"capacity_reason", info.Reason,
-		"flash_attention", cfg.FlashAttn,
-		"kv_cache_type", cfg.KVCacheType,
-		"sparse_attention", info.SparseAttention,
-		"sliding_window_attention_tokens", info.SlidingWindowAttentionTokens,
-	)
+	_, reportChange, end := s.tracker.Start(ctx, "modeld_llama", "open_session", "model", req.ModelName)
+	defer end()
+	reportChange("session_config", map[string]any{
+		"num_ctx":                         cfg.NumCtx,
+		"hot_context_tokens":              info.HotContextTokens,
+		"planner_effective_context":       cfg.PlannerEffectiveContext,
+		"host_cold_budget_bytes":          info.HostColdBudgetBytes,
+		"num_batch":                       cfg.NumBatch,
+		"num_gpu_layers":                  cfg.NumGpuLayers,
+		"requested_gpu_layers":            info.RequestedGpuLayers,
+		"resolved_gpu_layers":             info.ResolvedGpuLayers,
+		"free_bytes":                      info.FreeBytes,
+		"user_limit_bytes":                info.UserLimitBytes,
+		"usable_bytes":                    info.UsableBytes,
+		"weights_bytes":                   info.WeightsBytes,
+		"overhead_bytes":                  info.OverheadBytes,
+		"required_bytes":                  info.RequiredBytes,
+		"capacity_reason":                 info.Reason,
+		"flash_attention":                 cfg.FlashAttn,
+		"kv_cache_type":                   cfg.KVCacheType,
+		"sparse_attention":                info.SparseAttention,
+		"sliding_window_attention_tokens": info.SlidingWindowAttentionTokens,
+	})
 	return newSession(req.Path, cfg, toAdapterSpecs(req.Adapters))
 }
 
@@ -403,7 +416,6 @@ func (s *Service) describe(req transport.OpenSessionRequest) (transport.ModelInf
 func applyChatTemplateProbe(info *transport.ModelInfo, modelPath string) {
 	probe, err := llamacppshim.ProbeChatTemplate(modelPath)
 	if err != nil {
-		slog.Debug("llama chat template probe skipped", "model", modelPath, "err", err)
 		return
 	}
 	info.ChatTemplateFormat = probe.FormatName

@@ -9,7 +9,6 @@ package capacity
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -381,8 +380,11 @@ func WithHostColdDefaults(p Policy, host DeviceSnapshot) Policy {
 // JSON accepts either numeric byte fields or string fields ("8GiB", "512MiB"):
 //
 //	{"memory":{"max_resident":"8GiB","reserve_free":"2GiB","headroom_frac":0.15}}
-func LoadPolicy(dataRoot string) Policy {
+//
+// Returned warnings are operator-facing text; the caller prints them.
+func LoadPolicy(dataRoot string) (Policy, []string) {
 	var p Policy
+	var warnings []string
 	if dataRoot != "" {
 		var raw struct {
 			Memory struct {
@@ -399,7 +401,7 @@ func LoadPolicy(dataRoot string) Policy {
 		path := dataRoot + string(os.PathSeparator) + "modeld.json"
 		if b, err := os.ReadFile(path); err == nil {
 			if err := json.Unmarshal(b, &raw); err != nil {
-				slog.Warn("modeld.json is malformed; memory policy falls back to defaults", "path", path, "err", err)
+				warnings = append(warnings, fmt.Sprintf("modeld.json is malformed; memory policy falls back to defaults (path=%s err=%v)", path, err))
 			}
 			p.MaxResidentBytes = raw.Memory.MaxResidentBytes
 			p.MinFreeBytes = raw.Memory.MinFreeBytes
@@ -412,19 +414,19 @@ func LoadPolicy(dataRoot string) Policy {
 				}
 			}
 			p.HeadroomFrac = raw.Memory.HeadroomFrac
-			applyBytesSetting("modeld.json memory.max_resident", raw.Memory.MaxResident, &p.MaxResidentBytes)
-			applyBytesSetting("modeld.json memory.reserve_free", raw.Memory.ReserveFree, &p.MinFreeBytes)
-			applyBytesSetting("modeld.json memory.host_cold_budget", raw.Memory.HostColdBudget, &p.HostColdBudgetBytes)
+			applyBytesSetting(&warnings, "modeld.json memory.max_resident", raw.Memory.MaxResident, &p.MaxResidentBytes)
+			applyBytesSetting(&warnings, "modeld.json memory.reserve_free", raw.Memory.ReserveFree, &p.MinFreeBytes)
+			applyBytesSetting(&warnings, "modeld.json memory.host_cold_budget", raw.Memory.HostColdBudget, &p.HostColdBudgetBytes)
 		}
 	}
-	applyBytesSetting("CONTENOX_MODELD_MEM_MAX", os.Getenv("CONTENOX_MODELD_MEM_MAX"), &p.MaxResidentBytes)
-	applyBytesSetting("CONTENOX_MODELD_MEM_RESERVE", os.Getenv("CONTENOX_MODELD_MEM_RESERVE"), &p.MinFreeBytes)
-	applyBytesSetting("CONTENOX_MODELD_MEM_COLD", os.Getenv("CONTENOX_MODELD_MEM_COLD"), &p.HostColdBudgetBytes)
+	applyBytesSetting(&warnings, "CONTENOX_MODELD_MEM_MAX", os.Getenv("CONTENOX_MODELD_MEM_MAX"), &p.MaxResidentBytes)
+	applyBytesSetting(&warnings, "CONTENOX_MODELD_MEM_RESERVE", os.Getenv("CONTENOX_MODELD_MEM_RESERVE"), &p.MinFreeBytes)
+	applyBytesSetting(&warnings, "CONTENOX_MODELD_MEM_COLD", os.Getenv("CONTENOX_MODELD_MEM_COLD"), &p.HostColdBudgetBytes)
 	if v := os.Getenv("CONTENOX_MODELD_MEM_HEADROOM"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f < 1 {
 			p.HeadroomFrac = f
 		} else {
-			slog.Warn("memory setting ignored: headroom must be a fraction in (0,1)", "setting", "CONTENOX_MODELD_MEM_HEADROOM", "value", v)
+			warnings = append(warnings, fmt.Sprintf("memory setting ignored: headroom must be a fraction in (0,1) (setting=CONTENOX_MODELD_MEM_HEADROOM value=%s)", v))
 		}
 	}
 	if v := os.Getenv("CONTENOX_MODELD_MIN_HOT_CONTEXT"); v != "" {
@@ -435,23 +437,23 @@ func LoadPolicy(dataRoot string) Policy {
 				p.MinHotContextTokens = n
 			}
 		} else {
-			slog.Warn("memory setting ignored: min hot context must be a non-negative integer", "setting", "CONTENOX_MODELD_MIN_HOT_CONTEXT", "value", v)
+			warnings = append(warnings, fmt.Sprintf("memory setting ignored: min hot context must be a non-negative integer (setting=CONTENOX_MODELD_MIN_HOT_CONTEXT value=%s)", v))
 		}
 	}
-	return p
+	return p, warnings
 }
 
 // applyBytesSetting applies one byte-size policy setting, warning instead of
 // silently ignoring an invalid value: a typo'd "8GBB" degrading quietly to a
 // default budget is exactly the failure mode a memory policy must not have.
 // Empty raw means the setting is absent and dst is left untouched.
-func applyBytesSetting(name, raw string, dst *int64) {
+func applyBytesSetting(warnings *[]string, name, raw string, dst *int64) {
 	if strings.TrimSpace(raw) == "" {
 		return
 	}
 	v, err := ParseBytes(raw)
 	if err != nil {
-		slog.Warn("memory setting ignored: invalid byte size", "setting", name, "value", raw, "err", err)
+		*warnings = append(*warnings, fmt.Sprintf("memory setting ignored: invalid byte size (setting=%s value=%s err=%v)", name, raw, err))
 		return
 	}
 	if v > 0 {

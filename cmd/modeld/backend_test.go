@@ -5,6 +5,7 @@ import (
 
 	"github.com/contenox/contenox/internal/modeld/capacity"
 	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // TestUnit_SelectBackend covers the hardware-aware tie-break in selectBackend:
@@ -26,7 +27,7 @@ func TestUnit_SelectBackend(t *testing.T) {
 		preferredAcceleratedBackendOrder = origAccelOrder
 	})
 
-	fakeFactory := func(policy capacity.Policy) transport.Service { return unavailableBackend{} }
+	fakeFactory := func(policy capacity.Policy, tracker libtracker.ActivityTracker) transport.Service { return unavailableBackend{} }
 	yes := func() bool { return true }
 	no := func() bool { return false }
 
@@ -103,7 +104,7 @@ func TestUnit_SelectBackend(t *testing.T) {
 			}
 			t.Setenv("CONTENOX_MODELD_BACKEND", tc.override)
 
-			if _, got := selectBackend(capacity.Policy{}); got != tc.want {
+			if _, got := selectBackend(capacity.Policy{}, libtracker.NoopTracker{}); got != tc.want {
 				t.Fatalf("selectBackend = %q, want %q", got, tc.want)
 			}
 		})

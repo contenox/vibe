@@ -11,12 +11,12 @@ package owner
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/contenox/contenox/liblease"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // Role is whether this instance owns the lease.
@@ -54,6 +54,8 @@ type Config struct {
 	// Meta carries additional holder metadata for specialized leases. Endpoint
 	// and Backend, when set above, override same-named entries here.
 	Meta map[string]string
+	// Tracker reports renew-loop telemetry. Nil degrades to a Noop tracker.
+	Tracker libtracker.ActivityTracker
 }
 
 // EndpointMetaKey is the lease metadata key used to advertise the owner's
@@ -90,9 +92,10 @@ func leaseMeta(cfg Config) map[string]string {
 // Owner is the result of a Join: either this instance (RoleOwner) with a running
 // renew loop, or a handle describing the current owner (RoleFollower).
 type Owner struct {
-	role   Role
-	id     string
-	holder liblease.Record
+	role    Role
+	id      string
+	holder  liblease.Record
+	tracker libtracker.ActivityTracker
 
 	lease  *liblease.Lease
 	cancel context.CancelFunc
@@ -112,6 +115,10 @@ type Owner struct {
 func Join(ctx context.Context, cfg Config) (*Owner, error) {
 	if cfg.TTL <= 0 {
 		return nil, errors.New("owner: ttl must be positive")
+	}
+	tracker := cfg.Tracker
+	if tracker == nil {
+		tracker = libtracker.NoopTracker{}
 	}
 	interval := cfg.RenewInterval
 	if interval <= 0 {
@@ -152,21 +159,23 @@ func Join(ctx context.Context, cfg Config) (*Owner, error) {
 			return nil, ierr
 		}
 		return &Owner{
-			role:   RoleFollower,
-			id:     rec.InstanceID,
-			holder: rec,
-			lost:   make(chan struct{}), // never fires for a follower
+			role:    RoleFollower,
+			id:      rec.InstanceID,
+			holder:  rec,
+			tracker: tracker,
+			lost:    make(chan struct{}), // never fires for a follower
 		}, nil
 	}
 
 	rctx, cancel := context.WithCancel(ctx)
 	o := &Owner{
-		role:   RoleOwner,
-		id:     l.InstanceID(),
-		holder: l.Record(),
-		lease:  l,
-		cancel: cancel,
-		lost:   make(chan struct{}),
+		role:    RoleOwner,
+		id:      l.InstanceID(),
+		holder:  l.Record(),
+		tracker: tracker,
+		lease:   l,
+		cancel:  cancel,
+		lost:    make(chan struct{}),
 	}
 	go o.renewLoop(rctx, cfg.TTL, interval)
 	return o, nil
@@ -218,8 +227,10 @@ func (o *Owner) renewLoop(ctx context.Context, ttl, interval time.Duration) {
 			return
 		}
 		retry := renewRetryDelay(interval, time.Until(validUntil))
-		slog.Warn("modeld lease renew failed; retrying before forfeiting",
-			"instance", o.id, "err", err, "retry_in", retry, "valid_until", validUntil)
+		reportErr, _, end := o.tracker.Start(ctx, "modeld_owner", "lease_renew_retry",
+			"instance", o.id, "retry_in", retry, "valid_until", validUntil)
+		reportErr(err)
+		end()
 		timer.Reset(retry)
 	}
 }

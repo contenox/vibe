@@ -33,6 +33,7 @@ import (
 	"github.com/contenox/contenox/internal/modeld/owner"
 	"github.com/contenox/contenox/internal/modeld/slot"
 	transportgrpc "github.com/contenox/contenox/internal/transport/grpc"
+	"github.com/contenox/contenox/libtracker"
 )
 
 func main() {
@@ -58,6 +59,7 @@ func run(args []string) error {
 	memCold := fs.String("mem-cold", "", "host-RAM KV cold-store budget (bytes or e.g. 16GiB)")
 	minHotContext := fs.Int("min-hot-context", -1, "minimum hot context tokens to prefer before reducing llama GPU layers (unset uses default, 0 disables)")
 	idleTTL := fs.String("idle-ttl", "", "release the resident model after it sits idle this long, freeing device memory (e.g. 5m; 0/off disables; default 5m)")
+	trace := fs.Bool("trace", false, "emit structured activity-tracker events to stderr")
 	asJSON := fs.Bool("json", false, "machine-readable JSON output (status)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -84,7 +86,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		return serve(resolvedRoot, leasePath, *ttl, *listen, *modelsDir, policy, idle)
+		return serve(resolvedRoot, leasePath, *ttl, *listen, *modelsDir, policy, idle, buildTracker(*trace))
 	case "status":
 		return status(leasePath, *asJSON)
 	default:
@@ -92,8 +94,21 @@ func run(args []string) error {
 	}
 }
 
+// buildTracker returns the ActivityTracker modeld reports session/operation
+// telemetry through: a Noop by default, or one that emits structured text to
+// stderr when --trace is set.
+func buildTracker(trace bool) libtracker.ActivityTracker {
+	if !trace {
+		return libtracker.NoopTracker{}
+	}
+	return libtracker.NewTextActivityTracker(os.Stderr)
+}
+
 func resolvePolicy(dataRoot, memMax, memReserve, memCold string, minHotContext int) (capacity.Policy, error) {
-	policy := capacity.LoadPolicy(dataRoot)
+	policy, warnings := capacity.LoadPolicy(dataRoot)
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "modeld: %s\n", w)
+	}
 	if memMax != "" {
 		v, err := capacity.ParseBytes(memMax)
 		if err != nil {
@@ -206,7 +221,7 @@ func resolvePaths(dataRoot string) (string, string, error) {
 	return dataRoot, filepath.Join(dataRoot, "modeld.lease"), nil
 }
 
-func serve(dataRoot, leasePath string, ttl time.Duration, listen, modelsDir string, policy capacity.Policy, idleTTL time.Duration) error {
+func serve(dataRoot, leasePath string, ttl time.Duration, listen, modelsDir string, policy capacity.Policy, idleTTL time.Duration, tracker libtracker.ActivityTracker) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -228,7 +243,7 @@ func serve(dataRoot, leasePath string, ttl time.Duration, listen, modelsDir stri
 	// (llama / openvino / none); the runtime's detector reads it without a
 	// network round-trip. A build with no local backend still owns the lease and
 	// answers health probes so detection reports the daemon running.
-	svc, backend := selectBackend(policy)
+	svc, backend := selectBackend(policy, tracker)
 	svc = devicelease.New(svc,
 		devicelease.WithTTL(ttl),
 		devicelease.WithMeta(map[string]string{
@@ -237,7 +252,7 @@ func serve(dataRoot, leasePath string, ttl time.Duration, listen, modelsDir stri
 		}),
 	)
 
-	o, err := owner.Join(ctx, owner.Config{LeasePath: leasePath, TTL: ttl, Endpoint: endpoint, Backend: backend})
+	o, err := owner.Join(ctx, owner.Config{LeasePath: leasePath, TTL: ttl, Endpoint: endpoint, Backend: backend, Tracker: tracker})
 	if err != nil {
 		_ = lis.Close()
 		return err
@@ -263,7 +278,7 @@ func serve(dataRoot, leasePath string, ttl time.Duration, listen, modelsDir stri
 
 	// Serve the runtime/transport.Service contract over gRPC, fenced by the owner
 	// instance id, while we hold the lease.
-	slotSvc := slot.New(svc, slot.WithOwner(o.InstanceID()), slot.WithBackend(backend), slot.WithIdleTTL(idleTTL), slot.WithDataRoot(dataRoot), slot.WithModelsDir(modelsDir))
+	slotSvc := slot.New(svc, slot.WithOwner(o.InstanceID()), slot.WithBackend(backend), slot.WithIdleTTL(idleTTL), slot.WithDataRoot(dataRoot), slot.WithModelsDir(modelsDir), slot.WithTracker(tracker))
 	svc = slotSvc
 	fmt.Printf("modeld transport serving: instance=%s endpoint=%s backend=%s idle_ttl=%s\n", o.InstanceID(), endpoint, backend, formatIdleTTL(idleTTL))
 	serveCtx, serveCancel := context.WithCancel(ctx)
@@ -272,7 +287,9 @@ func serve(dataRoot, leasePath string, ttl time.Duration, listen, modelsDir stri
 	// return to idle while the daemon keeps holding the lease. Stops with serveCtx.
 	slotSvc.StartReaper(serveCtx)
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- transportgrpc.Serve(serveCtx, lis, svc, o.InstanceID(), backend) }()
+	go func() {
+		serveErr <- transportgrpc.Serve(serveCtx, lis, svc, o.InstanceID(), backend, transportgrpc.WithTracker(tracker))
+	}()
 
 	select {
 	case <-ctx.Done(): // signal -> graceful shutdown

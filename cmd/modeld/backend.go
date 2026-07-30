@@ -11,10 +11,11 @@ import (
 
 	"github.com/contenox/contenox/internal/modeld/capacity"
 	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // backendFactory builds the transport.Service for one compiled-in local backend.
-type backendFactory func(capacity.Policy) transport.Service
+type backendFactory func(capacity.Policy, libtracker.ActivityTracker) transport.Service
 
 // backends holds every inference backend compiled into this build, keyed by
 // name. Backend files register themselves from init() under their build tags
@@ -99,11 +100,14 @@ var preferredAcceleratedBackendOrder = []string{"llama", "openvino"}
 //     preferredAcceleratedBackendOrder breaking remaining ties;
 //  4. unavailableBackend when none is compiled in — the daemon still owns the
 //     lease and answers health probes, it just cannot open sessions.
-func selectBackend(policy capacity.Policy) (transport.Service, string) {
+func selectBackend(policy capacity.Policy, tracker libtracker.ActivityTracker) (transport.Service, string) {
+	if tracker == nil {
+		tracker = libtracker.NoopTracker{}
+	}
 	if want := os.Getenv("CONTENOX_MODELD_BACKEND"); want != "" {
 		if f, ok := backends[want]; ok {
 			fmt.Fprintf(os.Stderr, "modeld backend selected: backend=%s reason=env_override env=CONTENOX_MODELD_BACKEND compiled=%s\n", want, availableBackends())
-			return f(policy), want
+			return f(policy, tracker), want
 		}
 		fmt.Fprintf(os.Stderr, "modeld: CONTENOX_MODELD_BACKEND=%q is not compiled into this build (have: %s); falling back\n", want, availableBackends())
 	}
@@ -115,7 +119,7 @@ func selectBackend(policy capacity.Policy) (transport.Service, string) {
 		return unavailableBackend{}, "none"
 	case 1:
 		fmt.Fprintf(os.Stderr, "modeld backend selected: backend=%s reason=only_compiled_backend\n", names[0])
-		return backends[names[0]](policy), names[0]
+		return backends[names[0]](policy, tracker), names[0]
 	}
 
 	// Several backends compiled in and no override: prefer one that reports an
@@ -149,7 +153,7 @@ func selectBackend(policy capacity.Policy) (transport.Service, string) {
 		fmt.Fprintf(os.Stderr, "modeld backend selected: backend=%s reason=no_accelerator_detected compiled=%s preference=%s override_hint=CONTENOX_MODELD_BACKEND\n",
 			chosen, availableBackends(), strings.Join(preference, ","))
 	}
-	return backends[chosen](policy), chosen
+	return backends[chosen](policy, tracker), chosen
 }
 
 func collectBackendProbes(names []string) []backendProbeResult {

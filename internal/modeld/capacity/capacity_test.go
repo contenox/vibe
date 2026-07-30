@@ -339,7 +339,7 @@ func TestUnit_LoadPolicy_FromConfigAndEnv(t *testing.T) {
 	t.Setenv("CONTENOX_MODELD_MEM_COLD", "6GiB")
 	t.Setenv("CONTENOX_MODELD_MEM_HEADROOM", "")
 	t.Setenv("CONTENOX_MODELD_MIN_HOT_CONTEXT", "8192")
-	p := LoadPolicy(dir)
+	p, _ := LoadPolicy(dir)
 	if p.MaxResidentBytes != 2<<30 {
 		t.Fatalf("MaxResidentBytes = %d, want env override 2GiB", p.MaxResidentBytes)
 	}
@@ -362,13 +362,13 @@ func TestUnit_LoadPolicy_MinHotContextZeroDisables(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "modeld.json"), []byte(`{"memory":{"min_hot_context_tokens":0}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	p := LoadPolicy(dir)
+	p, _ := LoadPolicy(dir)
 	if p.MinHotContextTokens >= 0 {
 		t.Fatalf("config MinHotContextTokens = %d, want explicit-off sentinel", p.MinHotContextTokens)
 	}
 
 	t.Setenv("CONTENOX_MODELD_MIN_HOT_CONTEXT", "0")
-	p = LoadPolicy(t.TempDir())
+	p, _ = LoadPolicy(t.TempDir())
 	if p.MinHotContextTokens >= 0 {
 		t.Fatalf("env MinHotContextTokens = %d, want explicit-off sentinel", p.MinHotContextTokens)
 	}

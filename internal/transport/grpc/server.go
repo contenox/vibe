@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtracker"
 	grpclib "google.golang.org/grpc"
 	"google.golang.org/grpc/stats"
 )
@@ -23,6 +24,7 @@ type Server struct {
 	svc        transport.Service
 	instanceID string
 	backend    string
+	tracker    libtracker.ActivityTracker
 
 	mu       sync.Mutex
 	seq      uint64
@@ -33,19 +35,37 @@ type Server struct {
 	handleConn    map[string]uint64
 }
 
+// ServeOption configures a Server built by NewServer or Serve.
+type ServeOption func(*Server)
+
+// WithTracker sets the ActivityTracker handler-panic telemetry is reported
+// through. Unset defaults to libtracker.NoopTracker.
+func WithTracker(t libtracker.ActivityTracker) ServeOption {
+	return func(s *Server) {
+		if t != nil {
+			s.tracker = t
+		}
+	}
+}
+
 // NewServer wraps a transport.Service. instanceID is the owner's lease instance
 // id used for fencing; pass "" to disable fencing (the unwired/local path).
 // backend is the served inference backend ("llama"/"openvino"/"none"/"") echoed
 // on the health probe so the runtime learns the daemon's mode over the wire.
-func NewServer(svc transport.Service, instanceID, backend string) *Server {
-	return &Server{
+func NewServer(svc transport.Service, instanceID, backend string, opts ...ServeOption) *Server {
+	s := &Server{
 		svc:           svc,
 		instanceID:    instanceID,
 		backend:       backend,
+		tracker:       libtracker.NoopTracker{},
 		sessions:      map[string]transport.Session{},
 		handlesByConn: map[uint64]map[string]struct{}{},
 		handleConn:    map[string]uint64{},
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Register mounts the service on a gRPC server.
@@ -53,8 +73,8 @@ func (s *Server) Register(reg grpclib.ServiceRegistrar) { reg.RegisterService(&s
 
 // Serve runs a gRPC server for svc on lis until ctx is cancelled, then stops it
 // gracefully. This is the entry point modeld calls once it holds the lease.
-func Serve(ctx context.Context, lis net.Listener, svc transport.Service, instanceID, backend string) error {
-	srv := NewServer(svc, instanceID, backend)
+func Serve(ctx context.Context, lis net.Listener, svc transport.Service, instanceID, backend string, opts ...ServeOption) error {
+	srv := NewServer(svc, instanceID, backend, opts...)
 	gs := grpclib.NewServer(
 		grpclib.StatsHandler(srv),
 		grpclib.MaxRecvMsgSize(maxTransportMessageBytes),

@@ -3,7 +3,6 @@ package openvino
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +12,7 @@ import (
 	"github.com/contenox/contenox/internal/modeld/openvino/ovsession"
 	"github.com/contenox/contenox/internal/modeld/residency"
 	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // openvinoEvictionBlock aligns the derived cache-eviction sizes to OpenVINO's KV
@@ -75,12 +75,13 @@ type Service struct {
 	memory     capacity.MemorySource
 	hostMemory capacity.MemorySource
 	policy     capacity.Policy
+	tracker    libtracker.ActivityTracker
 }
 
 type ServiceOption func(*Service)
 
 func NewService(opts ...ServiceOption) *Service {
-	s := &Service{}
+	s := &Service{tracker: libtracker.NoopTracker{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -97,6 +98,16 @@ func WithMemorySource(src capacity.MemorySource) ServiceOption {
 
 func WithHostMemorySource(src capacity.MemorySource) ServiceOption {
 	return func(s *Service) { s.hostMemory = src }
+}
+
+// WithTracker sets the ActivityTracker session-open telemetry is reported
+// through. Unset defaults to libtracker.NoopTracker.
+func WithTracker(t libtracker.ActivityTracker) ServiceOption {
+	return func(s *Service) {
+		if t != nil {
+			s.tracker = t
+		}
+	}
 }
 
 func (s *Service) memorySource(device string) capacity.MemorySource {
@@ -143,7 +154,7 @@ var (
 // for a llama model on an openvino-mode daemon fails at the boundary. In a build
 // without the openvino + openvino_genai tags, ovsession.NewGenAI reports the
 // backend is not compiled in and that error surfaces here unchanged.
-func (s *Service) OpenSession(_ context.Context, req transport.OpenSessionRequest) (transport.Session, error) {
+func (s *Service) OpenSession(ctx context.Context, req transport.OpenSessionRequest) (transport.Session, error) {
 	if req.Type != "" && req.Type != "openvino" {
 		return nil, fmt.Errorf("%w: requested %q, this daemon serves openvino", transport.ErrBackendMismatch, req.Type)
 	}
@@ -160,8 +171,10 @@ func (s *Service) OpenSession(_ context.Context, req transport.OpenSessionReques
 	// VLMPipeline exposes only its public generate() surface (private pimpl, no
 	// prefix-cache/cold-KV hook), so the ContinuousBatching tuning below does
 	// not apply to it. See visionsession.go for the v1 limitations.
+	_, reportChange, end := s.tracker.Start(ctx, "modeld_openvino", "open_session", "model", req.ModelName)
+	defer end()
 	if isVLMModelDir(req.Path) {
-		return s.openVisionSession(req, info, cfg)
+		return s.openVisionSession(reportChange, req, info, cfg)
 	}
 	// The OpenVINO-specific tuning (device, KV precision, sparse attention, cache
 	// size) is model-driven: read from the model's own contenox-openvino.json
@@ -203,7 +216,7 @@ func (s *Service) OpenSession(_ context.Context, req transport.OpenSessionReques
 	var lastErr error
 	for _, dev := range candidates {
 		genaiCfg.Device = dev
-		b, usedCfg, derr := openGenAIWithSparseFallback(req.Path, req.ModelName, genaiCfg)
+		b, usedCfg, derr := openGenAIWithSparseFallback(reportChange, req.Path, req.ModelName, genaiCfg)
 		if derr == nil {
 			backend = b
 			genaiCfg = usedCfg
@@ -211,8 +224,7 @@ func (s *Service) OpenSession(_ context.Context, req transport.OpenSessionReques
 		}
 		lastErr = derr
 		if len(candidates) > 1 {
-			slog.Warn("openvino device candidate unavailable, trying next",
-				"model", req.ModelName, "device", dev, "error", derr)
+			reportChange("device_candidate_unavailable", map[string]any{"model": req.ModelName, "device": dev, "error": derr.Error()})
 		}
 	}
 	if backend == nil {
@@ -222,7 +234,7 @@ func (s *Service) OpenSession(_ context.Context, req transport.OpenSessionReques
 		return nil, fmt.Errorf("openvino: no usable device among %v: %w", candidates, lastErr)
 	}
 	if len(candidates) > 1 {
-		slog.Info("openvino device autoselected", "model", req.ModelName, "device", genaiCfg.Device)
+		reportChange("device_autoselected", map[string]any{"model": req.ModelName, "device": genaiCfg.Device})
 	}
 	sparseAttention := true
 	if genaiCfg.UseSparseAttention != nil {
@@ -237,12 +249,12 @@ func (s *Service) OpenSession(_ context.Context, req transport.OpenSessionReques
 	// is thereby lost, so the loss of effective-context offload is visible.
 	sess.coldKVLossless = kvPrecisionLossless(genaiCfg.KVCachePrecision)
 	if !sess.coldKVLossless && sess.coldMaxTokens > 0 {
-		slog.Warn("openvino cold KV disabled: lossy KV precision cannot round-trip cold blocks",
-			"model", req.ModelName,
-			"kv_cache_precision", genaiCfg.KVCachePrecision,
-			"cold_max_tokens", sess.coldMaxTokens,
-			"hint", "set kv_cache_precision to f16 or f32 to enable cold KV / effective-context offload",
-		)
+		reportChange("cold_kv_disabled", map[string]any{
+			"model":              req.ModelName,
+			"kv_cache_precision": genaiCfg.KVCachePrecision,
+			"cold_max_tokens":    sess.coldMaxTokens,
+			"hint":               "set kv_cache_precision to f16 or f32 to enable cold KV / effective-context offload",
+		})
 	}
 	return sess, nil
 }
@@ -251,7 +263,7 @@ func (s *Service) OpenSession(_ context.Context, req transport.OpenSessionReques
 // VLM directory. Device selection mirrors the text path's autodetect-and-try
 // loop; the NPU stays rejected (same gating policy as the text pipeline, and
 // the VLM path is not validated on NPU). CPU is the baseline device.
-func (s *Service) openVisionSession(req transport.OpenSessionRequest, info transport.ModelInfo, cfg transport.Config) (transport.Session, error) {
+func (s *Service) openVisionSession(reportChange func(string, any), req transport.OpenSessionRequest, info transport.ModelInfo, cfg transport.Config) (transport.Session, error) {
 	// LoRA adapters are not wired through the VLM cell in v1: VLMPipeline
 	// accepts adapters at construction, but the adapter-identity plumbing
 	// (cache keys, alpha folding) is only validated on the text path.
@@ -274,8 +286,7 @@ func (s *Service) openVisionSession(req transport.OpenSessionRequest, info trans
 		}
 		lastErr = derr
 		if len(candidates) > 1 {
-			slog.Warn("openvino VLM device candidate unavailable, trying next",
-				"model", req.ModelName, "device", dev, "error", derr)
+			reportChange("vlm_device_candidate_unavailable", map[string]any{"model": req.ModelName, "device": dev, "error": derr.Error()})
 		}
 	}
 	if backend == nil {
@@ -285,12 +296,12 @@ func (s *Service) openVisionSession(req transport.OpenSessionRequest, info trans
 		return nil, fmt.Errorf("openvino VLM: no usable device among %v: %w", candidates, lastErr)
 	}
 	if len(candidates) > 1 {
-		slog.Info("openvino VLM device autoselected", "model", req.ModelName, "device", genaiCfg.Device)
+		reportChange("vlm_device_autoselected", map[string]any{"model": req.ModelName, "device": genaiCfg.Device})
 	}
 	return newVisionSession(backend, cfg.NumCtx, info.VisionTokensPerImage), nil
 }
 
-func openGenAIWithSparseFallback(modelPath, modelName string, cfg ovsession.GenAIConfig) (*ovsession.GenAISession, ovsession.GenAIConfig, error) {
+func openGenAIWithSparseFallback(reportChange func(string, any), modelPath, modelName string, cfg ovsession.GenAIConfig) (*ovsession.GenAISession, ovsession.GenAIConfig, error) {
 	backend, err := newOpenVINOGenAI(modelPath, cfg)
 	if err == nil {
 		return backend, cfg, nil
@@ -305,11 +316,7 @@ func openGenAIWithSparseFallback(modelPath, modelName string, cfg ovsession.GenA
 	if denseErr != nil {
 		return nil, cfg, fmt.Errorf("%w; dense fallback after unsupported XAttention also failed: %v", err, denseErr)
 	}
-	slog.Warn("openvino XAttention unsupported on selected device; retried with dense attention",
-		"model", modelName,
-		"device", cfg.Device,
-		"error", err,
-	)
+	reportChange("xattention_unsupported_dense_fallback", map[string]any{"model": modelName, "device": cfg.Device, "error": err.Error()})
 	return backend, denseCfg, nil
 }
 
@@ -562,7 +569,6 @@ func (s *Service) describe(req transport.OpenSessionRequest) (transport.ModelInf
 func applyOpenVINOChatTemplateProbe(info *transport.ModelInfo, modelPath string) {
 	probe, err := probeOpenVINOChatTemplate(modelPath)
 	if err != nil {
-		slog.Debug("openvino chat template probe skipped", "model", modelPath, "err", err)
 		return
 	}
 	info.ChatTemplateFormat = probe.FormatName

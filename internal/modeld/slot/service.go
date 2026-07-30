@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,6 +17,7 @@ import (
 	"github.com/contenox/contenox/internal/modeld/modelstore"
 	"github.com/contenox/contenox/internal/kernel/contextasm"
 	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // Service wraps a backend transport.Service and exposes it as one active model
@@ -52,6 +52,8 @@ type Service struct {
 	// resolveModelPath resolves against. Constructed once in New so its
 	// per-model in-flight push guard is shared across every admin call.
 	admin *modelstore.Admin
+
+	tracker libtracker.ActivityTracker
 }
 
 type activeSlot struct {
@@ -110,9 +112,19 @@ func WithClock(now func() time.Time) Option {
 	}
 }
 
+// WithTracker sets the ActivityTracker session-operation telemetry is
+// reported through. Unset defaults to libtracker.NoopTracker.
+func WithTracker(t libtracker.ActivityTracker) Option {
+	return func(s *Service) {
+		if t != nil {
+			s.tracker = t
+		}
+	}
+}
+
 // New returns a transport service that allows only one active resident model.
 func New(backend transport.Service, opts ...Option) *Service {
-	s := &Service{backend: backend, op: make(chan struct{}, 1), state: transport.SlotEmpty, now: time.Now}
+	s := &Service{backend: backend, op: make(chan struct{}, 1), state: transport.SlotEmpty, now: time.Now, tracker: libtracker.NoopTracker{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -667,11 +679,11 @@ func (s *Service) withSession(ctx context.Context, gen uint64, op string, fn fun
 
 	sess, err := s.beginOperation(gen, op)
 	if err != nil {
-		s.logOperationFailure(op, gen, err)
+		s.logOperationFailure(ctx, op, gen, err)
 		return err
 	}
 	err = fn(sess)
-	s.logOperationFailure(op, gen, err)
+	s.logOperationFailure(ctx, op, gen, err)
 	s.markReadyOrError(err)
 	return err
 }
@@ -734,7 +746,7 @@ func (s *Service) markReadyOrError(err error) {
 	s.mu.Unlock()
 }
 
-func (s *Service) logOperationFailure(op string, gen uint64, err error) {
+func (s *Service) logOperationFailure(ctx context.Context, op string, gen uint64, err error) {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return
 	}
@@ -752,29 +764,19 @@ func (s *Service) logOperationFailure(op string, gen uint64, err error) {
 	}
 	s.mu.Unlock()
 
-	level := slog.LevelWarn
-	if errors.Is(err, transport.ErrSlotGenerationStale) ||
-		errors.Is(err, transport.ErrSessionClosed) ||
-		errors.Is(err, transport.ErrModelNotActive) {
-		level = slog.LevelDebug
-	}
-	args := []any{
+	reportErr, _, end := s.tracker.Start(ctx, "modeld_slot", "session_operation_failed",
 		"op", op,
 		"generation", gen,
 		"backend", s.backendName,
 		"state", state,
 		"busy_op", busyOp,
 		"class", operationErrorClass(err),
-		"err", err,
-	}
-	if modelName != "" {
-		args = append(args,
-			"model", modelName,
-			"type", modelType,
-			"digest", modelDigest,
-		)
-	}
-	slog.Log(context.Background(), level, "modeld session operation failed", args...)
+		"model", modelName,
+		"type", modelType,
+		"digest", modelDigest,
+	)
+	reportErr(err)
+	end()
 }
 
 func operationErrorClass(err error) string {
@@ -966,12 +968,12 @@ func (s *slotSession) Decode(ctx context.Context, cfg transport.DecodeConfig) (<
 	sess, err := s.svc.beginOperation(s.generation, "decode")
 	if err != nil {
 		unlock()
-		s.svc.logOperationFailure("decode", s.generation, err)
+		s.svc.logOperationFailure(ctx, "decode", s.generation, err)
 		return nil, err
 	}
 	src, err := sess.Decode(ctx, cfg)
 	if err != nil {
-		s.svc.logOperationFailure("decode", s.generation, err)
+		s.svc.logOperationFailure(ctx, "decode", s.generation, err)
 		s.svc.markReadyOrError(err)
 		unlock()
 		return nil, err
@@ -989,12 +991,12 @@ func (s *slotSession) Decode(ctx context.Context, cfg transport.DecodeConfig) (<
 			case out <- chunk:
 			case <-ctx.Done():
 				streamErr = ctx.Err()
-				s.svc.logOperationFailure("decode", s.generation, streamErr)
+				s.svc.logOperationFailure(ctx, "decode", s.generation, streamErr)
 				s.svc.markReadyOrError(streamErr)
 				return
 			}
 		}
-		s.svc.logOperationFailure("decode", s.generation, streamErr)
+		s.svc.logOperationFailure(ctx, "decode", s.generation, streamErr)
 		s.svc.markReadyOrError(streamErr)
 	}()
 	return out, nil
@@ -1045,7 +1047,9 @@ func (s *slotSession) Snapshot(ctx context.Context) (transport.SessionSnapshot, 
 				out.StateID = stateID
 				out.State = nil
 			} else {
-				slog.Error("failed to write snapshot blob", "path", tmp, "err", err)
+				reportErr, _, end := s.svc.tracker.Start(ctx, "modeld_slot", "snapshot_blob_write_failed", "path", tmp)
+				reportErr(err)
+				end()
 			}
 		}
 	}
@@ -1061,7 +1065,9 @@ func (s *slotSession) Restore(ctx context.Context, snap transport.SessionSnapsho
 		if data, err := os.ReadFile(path); err == nil {
 			snap.State = data
 		} else {
-			slog.Error("failed to read snapshot blob", "path", path, "err", err)
+			reportErr, _, end := s.svc.tracker.Start(ctx, "modeld_slot", "snapshot_blob_read_failed", "path", path)
+			reportErr(err)
+			end()
 			return fmt.Errorf("snapshot blob not found: %w", err)
 		}
 	}

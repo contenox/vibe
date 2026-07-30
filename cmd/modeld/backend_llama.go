@@ -10,13 +10,14 @@ import (
 	// pure-Go contract but never the backend, leaving OpenSession unavailable.
 	_ "github.com/contenox/contenox/internal/modeld/llama/llamasession"
 	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // Register the llama.cpp backend; selectBackend (backend.go) serves it when it
 // is the only one compiled in or when CONTENOX_MODELD_BACKEND=llama.
 func init() {
-	registerBackend("llama", func(policy capacity.Policy) transport.Service {
-		return llama.NewService(llama.WithCapacityPolicy(policy))
+	registerBackend("llama", func(policy capacity.Policy, tracker libtracker.ActivityTracker) transport.Service {
+		return llama.NewService(llama.WithCapacityPolicy(policy), llama.WithTracker(tracker))
 	}, llama.HasAccelerator, func() backendDiagnostic {
 		return backendDiagnosticFromModelInfo(llama.RuntimeInfo())
 	})
