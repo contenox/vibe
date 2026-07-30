@@ -130,6 +130,15 @@ task dev-link     # symlink it into ~/.local/bin
 task --list       # everything else
 ```
 
+Working on `modeld` (the native local-inference daemon) needs a separate,
+per-OS native toolchain (cmake, a C/C++ compiler, OpenVINO GenAI, optionally
+CUDA/HIP) and is built with `make`, not `task` — see
+[docs/development/build-requirements.md](docs/development/build-requirements.md)
+for the full per-platform list and `make help` for the targets. Cutting an
+actual release (GitHub Release, VS Code Marketplace, or a shipped `modeld`
+build) is maintainer-only and documented separately in
+[docs/development/release-pipelines.md](docs/development/release-pipelines.md).
+
 ## Running tests
 
 Before submitting a pull request, run the checks that match your change.
