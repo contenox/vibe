@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // version is the modeld release version, injected at link time by the Makefile

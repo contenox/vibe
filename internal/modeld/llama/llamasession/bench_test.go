@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/modeld/llama"
-	"github.com/contenox/contenox/internal/benchreport"
-	"github.com/contenox/contenox/internal/kernel/contextasm"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libbenchreport"
+	"github.com/contenox/contenox/libcontextasm"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // benchHarness drives the common benchmark report against a real llama.cpp

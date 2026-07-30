@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 	"github.com/contenox/contenox/libtracker"
 	grpclib "google.golang.org/grpc"
 	"google.golang.org/grpc/stats"

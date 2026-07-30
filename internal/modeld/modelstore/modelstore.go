@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 
 	"github.com/contenox/contenox/internal/modeld/llama"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // DefaultSubdir is the models directory name under a data root when no

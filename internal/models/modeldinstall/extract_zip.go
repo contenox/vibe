@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/contenox/contenox/internal/archiveutil"
+	"github.com/contenox/contenox/libarchiveutil"
 )
 
 // extractZip unpacks a .zip archive into dest with the same escape protections as

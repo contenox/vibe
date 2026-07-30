@@ -13,7 +13,7 @@ import (
 
 	"github.com/contenox/contenox/internal/modeld/llama"
 	"github.com/contenox/contenox/internal/modeld/openvino"
-	"github.com/contenox/contenox/internal/archiveutil"
+	"github.com/contenox/contenox/libarchiveutil"
 	"github.com/shirou/gopsutil/v4/disk"
 )
 

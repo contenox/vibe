@@ -11,7 +11,7 @@ import (
 	"github.com/contenox/contenox/internal/modeld/internal/sessiontest"
 	"github.com/contenox/contenox/internal/modeld/llama"
 	"github.com/contenox/contenox/internal/modeld/residency"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 func TestSystem_LlamaSessionEvictRange_SlidingWindowStaysDecodable(t *testing.T) {

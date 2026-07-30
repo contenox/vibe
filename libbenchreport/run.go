@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // Harness adapts a concrete backend to the benchmark runner. OpenSession opens a

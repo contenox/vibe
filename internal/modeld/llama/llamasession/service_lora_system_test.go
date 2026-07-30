@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/modeld/llama"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 func TestSystem_LlamaService_AdapterRequestChangesGeneration(t *testing.T) {

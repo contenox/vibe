@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/contenox/contenox/internal/kernel/contextasm"
+	"github.com/contenox/contenox/libcontextasm"
 )
 
 // MemoryService is an in-process, in-memory Service. It does no real inference:

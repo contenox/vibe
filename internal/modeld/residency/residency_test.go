@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/contenox/contenox/internal/kernel/contextasm"
+	"github.com/contenox/contenox/libcontextasm"
 )
 
 func TestUnit_ClassForSegment_DefaultsAndExplicitTags(t *testing.T) {

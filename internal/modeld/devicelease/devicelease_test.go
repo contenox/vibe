@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 func TestUnit_DeviceLeaseBlocksSecondAcceleratorSessionUntilClose(t *testing.T) {

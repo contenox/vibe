@@ -18,7 +18,7 @@ import (
 
 	"github.com/contenox/contenox/internal/modeld/capacity"
 	"github.com/contenox/contenox/internal/modeld/owner"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 const (

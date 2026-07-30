@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/modeld/capacity"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 func TestUnit_ServiceDescribeReportsDirectRuntime(t *testing.T) {

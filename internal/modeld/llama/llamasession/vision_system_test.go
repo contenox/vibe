@@ -16,7 +16,7 @@ import (
 
 	"github.com/contenox/contenox/internal/modeld/llama"
 	"github.com/contenox/contenox/internal/modeld/llama/llamacppshim"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 func TestUnit_VisionImageCellSentinelStableAndNegative(t *testing.T) {

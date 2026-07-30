@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/modeld/slot"
-	"github.com/contenox/contenox/internal/kernel/contextasm"
-	"github.com/contenox/contenox/internal/transport"
-	transportgrpc "github.com/contenox/contenox/internal/transport/grpc"
+	"github.com/contenox/contenox/libcontextasm"
+	"github.com/contenox/contenox/libtransport"
+	transportgrpc "github.com/contenox/contenox/libtransport/grpc"
 )
 
 // startServer serves a MemoryService over gRPC on a loopback port and returns a

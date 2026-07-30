@@ -12,7 +12,7 @@ import (
 	"github.com/contenox/contenox/internal/modeld/llama"
 	"github.com/contenox/contenox/internal/modeld/llama/llamacppshim"
 	"github.com/contenox/contenox/internal/modeld/residency"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // bareSession returns a session with no native state (lctx nil), which is

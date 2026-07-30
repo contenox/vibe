@@ -14,7 +14,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 type Config = transport.Config

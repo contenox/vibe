@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/models/modeldprobe"
-	"github.com/contenox/contenox/internal/transport"
-	transportgrpc "github.com/contenox/contenox/internal/transport/grpc"
+	"github.com/contenox/contenox/libtransport"
+	transportgrpc "github.com/contenox/contenox/libtransport/grpc"
 )
 
 // dataRoot is the contenox data root the probe inspects. It defaults to the

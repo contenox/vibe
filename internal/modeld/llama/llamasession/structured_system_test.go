@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/modeld/llama"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // toolCallEnvelopeSchema mirrors the runtime's llama:json_schema_tool_calls

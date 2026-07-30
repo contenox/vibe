@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/modeld/llama"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // TestBoundaryErrorsMatchTransportSentinels pins the llama backend's boundary

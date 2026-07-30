@@ -50,8 +50,8 @@ MODELD_RELEASE_S3_URI ?=
 MODELD_STORE := bash $(PROJECT_ROOT)scripts/modeld-store.sh
 MODELD_RELEASE_DIST_DIR ?= $(PROJECT_ROOT)dist
 MODELD_RELEASE_NAME ?= modeld-$(MODELD_VERSION)-$(MODELD_PLATFORM)
-MODELD_PROTOCOL_VERSION ?= $(shell sed -n 's/^const ProtocolVersion = //p' $(PROJECT_ROOT)/internal/transport/protocol.go | head -1)
-MODELD_MIN_PROTOCOL ?= $(shell sed -n 's/^const MinProtocol = //p' $(PROJECT_ROOT)/internal/transport/protocol.go | head -1)
+MODELD_PROTOCOL_VERSION ?= $(shell sed -n 's/^const ProtocolVersion = //p' $(PROJECT_ROOT)/libtransport/protocol.go | head -1)
+MODELD_MIN_PROTOCOL ?= $(shell sed -n 's/^const MinProtocol = //p' $(PROJECT_ROOT)/libtransport/protocol.go | head -1)
 # Release requires OpenVINO by default; package-modeld-release hard-fails if the
 # bundle lacks it. Set MODELD_RELEASE_OPENVINO=0 for llama-only platforms.
 MODELD_RELEASE_OPENVINO ?= 1

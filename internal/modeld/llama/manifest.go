@@ -1,6 +1,6 @@
 package llama
 
-import "github.com/contenox/contenox/internal/kernel/contextasm"
+import "github.com/contenox/contenox/libcontextasm"
 
 // The llama backend keys warm KV reuse on the backend-neutral context manifest
 // owned by the runtime (runtime/contextasm, surfaced to the runtime as

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/modeld/capacity"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // formatIdleTTL renders the idle-release TTL for logs; zero means disabled.

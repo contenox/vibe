@@ -11,7 +11,7 @@ import (
 	"github.com/contenox/contenox/internal/modeld/capacity"
 	"github.com/contenox/contenox/internal/modeld/openvino/ovsession"
 	"github.com/contenox/contenox/internal/modeld/residency"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 type staticMemory int64

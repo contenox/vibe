@@ -18,7 +18,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/contenox/contenox/internal/kernel/contextasm"
+	"github.com/contenox/contenox/libcontextasm"
 )
 
 // ContextManifest is the shared, backend-neutral cache key: profile, model,

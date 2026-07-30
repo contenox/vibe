@@ -27,7 +27,7 @@ import (
 
 	"github.com/contenox/contenox/liblease"
 	"github.com/contenox/contenox/internal/models/modeldinstall"
-	transportgrpc "github.com/contenox/contenox/internal/transport/grpc"
+	transportgrpc "github.com/contenox/contenox/libtransport/grpc"
 )
 
 // Convention shared with the daemon; kept local so runtime does not depend on

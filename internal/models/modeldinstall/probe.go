@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // versionInfo mirrors the subset of `modeld version --json` we validate against.

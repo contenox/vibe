@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/contenox/contenox/internal/kernel/contextasm"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libcontextasm"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // TestUnit_OpenVINO_DriveEvictToFit_ParksVolatileToCold proves the residency

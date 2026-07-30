@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/liblease"
-	"github.com/contenox/contenox/internal/transport"
-	transportgrpc "github.com/contenox/contenox/internal/transport/grpc"
+	"github.com/contenox/contenox/libtransport"
+	transportgrpc "github.com/contenox/contenox/libtransport/grpc"
 )
 
 // serveModeld starts a real gRPC transport server on a loopback port serving as

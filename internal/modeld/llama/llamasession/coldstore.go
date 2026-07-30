@@ -9,7 +9,7 @@ import (
 
 	"github.com/contenox/contenox/internal/modeld/llama"
 	"github.com/contenox/contenox/internal/modeld/residency"
-	"github.com/contenox/contenox/internal/kernel/contextasm"
+	"github.com/contenox/contenox/libcontextasm"
 )
 
 type coldBlock struct {

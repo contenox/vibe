@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/contenox/contenox/internal/kernel/contextasm"
+	"github.com/contenox/contenox/libcontextasm"
 )
 
 // TestSentinelTableRoundTrips asserts every sentinel in the wire map survives

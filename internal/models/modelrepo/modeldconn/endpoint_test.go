@@ -10,8 +10,8 @@ import (
 
 	"github.com/contenox/contenox/liblease"
 	"github.com/contenox/contenox/internal/modeld/slot"
-	"github.com/contenox/contenox/internal/transport"
-	transportgrpc "github.com/contenox/contenox/internal/transport/grpc"
+	"github.com/contenox/contenox/libtransport"
+	transportgrpc "github.com/contenox/contenox/libtransport/grpc"
 )
 
 // fakeNode is a real gRPC-served modeld-shaped server (slot.Service wrapping

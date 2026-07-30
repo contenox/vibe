@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/contenox/contenox/internal/models/modeldprobe"
-	transportgrpc "github.com/contenox/contenox/internal/transport/grpc"
+	transportgrpc "github.com/contenox/contenox/libtransport/grpc"
 )
 
 // LocalSentinel is the backend BaseURL value meaning "this modeld backend row

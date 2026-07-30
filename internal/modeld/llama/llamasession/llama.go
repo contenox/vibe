@@ -16,7 +16,7 @@ import (
 	"github.com/contenox/contenox/internal/modeld/llama"
 	"github.com/contenox/contenox/internal/modeld/llama/llamacppshim"
 	"github.com/contenox/contenox/internal/modeld/residency"
-	"github.com/contenox/contenox/internal/kernel/contextasm"
+	"github.com/contenox/contenox/libcontextasm"
 )
 
 // Available reports whether the llama.cpp backend is compiled into this build.

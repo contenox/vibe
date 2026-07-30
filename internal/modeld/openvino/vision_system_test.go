@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/contenox/internal/kernel/contextasm"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libcontextasm"
+	"github.com/contenox/contenox/libtransport"
 )
 
 func solidRedPNG(t *testing.T, w, h int) []byte {

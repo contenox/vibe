@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/modeld/openvino/ovsession"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // toGenAILoRA is the service-boundary mapper from the transport adapter handle to

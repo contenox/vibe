@@ -4,7 +4,7 @@ import (
 	"compress/gzip"
 	"os"
 
-	"github.com/contenox/contenox/internal/archiveutil"
+	"github.com/contenox/contenox/libarchiveutil"
 )
 
 // extractTarGz unpacks a .tar.gz archive into dest, rejecting any entry that

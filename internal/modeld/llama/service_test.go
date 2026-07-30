@@ -7,7 +7,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // fakeSession is a no-op transport.Session used to check that Service wires a

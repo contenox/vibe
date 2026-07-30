@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/modeld/internal/sessiontest"
-	"github.com/contenox/contenox/internal/kernel/contextasm"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libcontextasm"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // TestSystem_OpenVINOEvictAdmitTail_RestoresContinuation is the keystone E2E

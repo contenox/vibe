@@ -9,8 +9,8 @@ import (
 	"github.com/contenox/contenox/internal/modeld/internal/sessionkit"
 	"github.com/contenox/contenox/internal/modeld/openvino/ovsession"
 	"github.com/contenox/contenox/internal/modeld/residency"
-	"github.com/contenox/contenox/internal/kernel/contextasm"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libcontextasm"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // fakeGenAIBackend is a string-prompt GenAI stand-in: it records the prompt it

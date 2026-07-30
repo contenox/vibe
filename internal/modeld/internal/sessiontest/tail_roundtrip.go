@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/modeld/residency"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // TailColdRoundTripCase supplies backend-specific session construction and

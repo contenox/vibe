@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/contenox/contenox/internal/kernel/contextasm"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libcontextasm"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // memHarness drives the runner against the in-memory transport.Service, proving

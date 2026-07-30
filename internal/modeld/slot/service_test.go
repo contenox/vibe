@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/modeld/modelstore"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 type fakeBackend struct {

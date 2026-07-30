@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/contenox/contenox/internal/kernel/contextasm"
+	"github.com/contenox/contenox/libcontextasm"
 )
 
 // Range is a half-open token range [Start, End).

@@ -8,8 +8,8 @@ import (
 
 	"github.com/contenox/contenox/internal/modeld/internal/sessionkit"
 	"github.com/contenox/contenox/internal/modeld/openvino/ovsession"
-	"github.com/contenox/contenox/internal/kernel/contextasm"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libcontextasm"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // vlmBackend is the subset of *ovsession.VLMSession the vision transport-session

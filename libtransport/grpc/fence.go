@@ -3,7 +3,7 @@ package grpc
 import (
 	"context"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 	"google.golang.org/grpc/metadata"
 )
 

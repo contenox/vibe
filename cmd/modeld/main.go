@@ -32,7 +32,7 @@ import (
 	"github.com/contenox/contenox/internal/modeld/devicelease"
 	"github.com/contenox/contenox/internal/modeld/owner"
 	"github.com/contenox/contenox/internal/modeld/slot"
-	transportgrpc "github.com/contenox/contenox/internal/transport/grpc"
+	transportgrpc "github.com/contenox/contenox/libtransport/grpc"
 	"github.com/contenox/contenox/libtracker"
 )
 

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/modeld/openvino/ovsession"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // fakeVLMBackend is a no-CGO vlmBackend for adapter-logic unit tests.

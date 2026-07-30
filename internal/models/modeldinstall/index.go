@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 const maxIndexBytes = 4 * 1024 * 1024

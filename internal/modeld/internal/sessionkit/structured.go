@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // ParsedToolCall is the permissive wire shape of one model-emitted tool call.

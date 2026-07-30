@@ -11,7 +11,7 @@ import (
 	"context"
 
 	"github.com/contenox/contenox/internal/modeld/residency"
-	"github.com/contenox/contenox/internal/transport"
+	"github.com/contenox/contenox/libtransport"
 )
 
 // Send delivers v on ch, or reports false if ctx is canceled before a slot is
