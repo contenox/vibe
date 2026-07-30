@@ -24,7 +24,3 @@ A cooperative, cross-process TTL lease file gave one daemon per data root a sing
 - **Capability truth has to be reported, not inferred.** Metadata parsing, loader support, pipeline support, device support, memory fit and certified quality are six independent questions, and only their intersection is a usable model — a GGUF can declare an architecture the linked runtime cannot load while its numeric metadata still parses perfectly, so the capacity output looks valid right up until nothing serves it. Device enumeration is likewise not device support.
 - **A benchmark row is only worth what its label says.** Every measurement was tagged by the path that produced it — the shipped product path, a raw backend control, or a microbenchmark — and a run that produced zero tokens because of a launcher failure, a missing library, or a context rejection was recorded as a failed run rather than as throughput.
 - **Refuse-don't-spill beats silent degradation.** An explicit, typed context-overflow refusal proved more useful to an agent than a quietly truncated or CPU-spilled response — and when the refusal itself quoted a stale context number, the fix was to make the error carry the live one.
-
-## Where this lives now
-
-Local inference now rides Ollama and vLLM directly; the capacity-aware, session-first thinking modeld proved out still shapes how the runtime treats any local backend.
