@@ -4,26 +4,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
+	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/operatorinbox"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,6 +53,9 @@ const (
 func TestSystem_ACPMissionInProcess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping acp in-process mission system e2e: builds contenox and spawns a real acp + child subprocess")
+	}
+	if runtime.GOOS != "linux" {
+		t.Skip("child-process reaping is verified via /proc (see childPIDs); Linux-only")
 	}
 
 	bin := fwdBuildBin(t)
@@ -453,53 +454,7 @@ func waitProcess(t *testing.T, cmd *exec.Cmd, timeout time.Duration, h *fwdACPHa
 	}
 }
 
-// childPIDs returns the pids of live processes whose parent is parentPid — the
-// dispatched unit subprocess(es) an editor spawned. Linux-only (the e2e env),
-// read straight from /proc.
-func childPIDs(parentPid int) []int {
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return nil
-	}
-	var out []int
-	for _, e := range entries {
-		pid, convErr := strconv.Atoi(e.Name())
-		if convErr != nil {
-			continue
-		}
-		if ppid, ok := procPPID(pid); ok && ppid == parentPid {
-			out = append(out, pid)
-		}
-	}
-	return out
-}
-
-// procPPID reads the parent pid from /proc/<pid>/stat. The comm field (field 2)
-// can contain spaces and parentheses, so PPID is parsed from AFTER the last ')'.
-func procPPID(pid int) (int, bool) {
-	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-	if err != nil {
-		return 0, false
-	}
-	s := string(data)
-	i := strings.LastIndex(s, ")")
-	if i < 0 || i+1 >= len(s) {
-		return 0, false
-	}
-	fields := strings.Fields(s[i+1:])
-	// fields[0] = state, fields[1] = ppid.
-	if len(fields) < 2 {
-		return 0, false
-	}
-	ppid, err := strconv.Atoi(fields[1])
-	if err != nil {
-		return 0, false
-	}
-	return ppid, true
-}
-
-// pidAlive reports whether pid names a live process (signal 0 probe): ESRCH means
-// gone (reaped), any other outcome means it still exists.
-func pidAlive(pid int) bool {
-	return !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
-}
+// childPIDs, procPPID, and pidAlive live in
+// acp_mission_inproc_e2e_procs_linux_test.go / _other_test.go: they read
+// /proc and call syscall.Kill, both Linux-only, so this file's build must not
+// carry that dependency on other platforms.

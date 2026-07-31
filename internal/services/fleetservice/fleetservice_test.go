@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -12,13 +13,13 @@ import (
 
 	"github.com/contenox/contenox/internal/errdefs"
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
-	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libtracker"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
+	"github.com/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -603,10 +604,18 @@ func TestFleetService_Cancel_UnknownInstancePropagatesNotFound(t *testing.T) {
 
 // buildStubAgentBin compiles libacp/cmd/acp-stub-agent, the hermetic in-repo
 // ACP agent with no LLM backend, into t.TempDir() and returns its path.
+//
+// The caller spawns this binary through the sandbox, which is Landlock-based
+// and Linux-only (see internal/libsandbox/isolation_other.go) — off Linux the
+// spawn always fails with ErrIsolation before the binary is even exec'd, so
+// there is nothing meaningful left to test.
 func buildStubAgentBin(t *testing.T) string {
 	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("external agent spawn runs through the sandbox, which is Landlock-based and Linux-only")
+	}
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
-	out, err := exec.Command("go", "build", "-o", binPath, "github.com/contenox/contenox/libacp/cmd/acp-stub-agent").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", binPath, "github.com/contenox/libacp/cmd/acp-stub-agent").CombinedOutput()
 	require.NoError(t, err, "build acp-stub-agent:\n%s", out)
 	return binPath
 }

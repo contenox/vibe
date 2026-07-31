@@ -10,7 +10,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // Adopt binds an already-running instance+session (typically from a fleet

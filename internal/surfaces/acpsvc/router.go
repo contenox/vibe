@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"

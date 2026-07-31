@@ -10,8 +10,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libkvstore"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libkvstore"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/backendservice"
 	"github.com/contenox/contenox/internal/models/runtimestate"

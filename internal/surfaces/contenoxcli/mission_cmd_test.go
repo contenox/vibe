@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/hitlservice"

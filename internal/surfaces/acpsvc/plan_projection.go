@@ -6,7 +6,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // planToolEventName is the fully-qualified tool name a mission_plan call

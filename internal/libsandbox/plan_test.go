@@ -26,7 +26,7 @@ func TestUnit_buildPlan_CanonicalizesSymlinkedTopLevel(t *testing.T) {
 		WorkspaceRoot: wsLink,
 		Home:          t.TempDir(),
 		FS:            []FSCarveout{{Path: link, Mode: ModeRO, Needs: "x"}},
-	}, "/bin/true", []string{"true"})
+	}, absTestPath("/bin/true"), []string{"true"})
 	require.NoError(t, err)
 
 	wantTarget, err := filepath.EvalSymlinks(target)
@@ -48,7 +48,7 @@ func TestUnit_buildPlan_MissingCarveoutFallsBackToClean(t *testing.T) {
 		WorkspaceRoot: t.TempDir(),
 		Home:          t.TempDir(),
 		FS:            []FSCarveout{{Path: missing, Mode: ModeRO, Needs: "x"}},
-	}, "/bin/true", []string{"true"})
+	}, absTestPath("/bin/true"), []string{"true"})
 	require.NoError(t, err)
 	require.Len(t, plan.FS, 1)
 	require.Equal(t, filepath.Clean(missing), plan.FS[0].Path)

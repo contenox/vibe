@@ -92,26 +92,30 @@ protocols for editors; `workspace` grants or revokes the workspace roots a
 session may run in; the rest work against the local database directly.)
 
 The layout is layered, and almost everything lives under Go `internal/` so
-the compiler defines the public surface. `libacp/` is the one deliberately
-public library (a reusable Go ACP implementation).
+the compiler defines the public surface. `github.com/contenox/libacp` is the
+one deliberately external, public library (a reusable Go ACP implementation)
+— it lives in its own repo and is pulled in as a normal module dependency,
+not part of this tree.
 
 ```text
 cmd/contenox/            contenox binary entry point
-libacp/                  the public ACP library (agent+client wire impl)
 internal/kernel/         the guts: taskengine, agentinstance, nativeturn,
-                         contextasm, enginesvc, reasoning, llmresolver, tools
+                         enginesvc, reasoning, llmresolver, tools
 internal/models/         model plumbing: modelrepo + provider drivers,
-                         llmrepo, runtimestate, backend/provider services,
-                         modelregistry, hostcapacity
+                         llmrepo, modelcapability, modelservice,
+                         providerservice, runtimestate
 internal/services/       domain services: chat, session, mission, fleet,
                          hitl, mcp, tools, shell, vfs, workspace, …
 internal/store/          runtimetypes — entities + the SQLite Store
+                         (including the model registry)
 internal/surfaces/       thin adapters: contenoxcli (CLI), acpsvc (ACP
                          sessions), beamtui (the TUI, in development)
-internal/libbus, libdbexec, libkvstore, libsandbox, libtracker
+internal/libbus, libdbexec, libkvstore, libsandbox
                          infrastructure libraries with no LLM dependency
 internal/errdefs/        shared error vocabulary (tiny leaf)
-docs/development/blueprints/  design records and R&D directions
+libtracker/              infrastructure library that stays top-level
+                         (not under internal/), no LLM dependency
+docs/rnd/                design records and R&D directions
 website/                 contenox.com (Astro; renders docs/ as content)
 ```
 
@@ -130,13 +134,8 @@ task dev-link     # symlink it into ~/.local/bin
 task --list       # everything else
 ```
 
-Working on `modeld` (the native local-inference daemon) needs a separate,
-per-OS native toolchain (cmake, a C/C++ compiler, OpenVINO GenAI, optionally
-CUDA/HIP) and is built with `make`, not `task` — see
-[docs/development/build-requirements.md](docs/development/build-requirements.md)
-for the full per-platform list and `make help` for the targets. Cutting an
-actual release (GitHub Release, VS Code Marketplace, or a shipped `modeld`
-build) is maintainer-only and documented separately in
+Cutting an actual release (GitHub Release) is maintainer-only and documented
+separately in
 [docs/development/release-pipelines.md](docs/development/release-pipelines.md).
 
 ## Running tests

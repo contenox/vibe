@@ -4,13 +4,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/missionservice"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
+
+// absTestPath returns p as a genuinely OS-absolute path so fixtures still
+// exercise filepath.IsAbs's real behavior on Windows, where a bare leading
+// "/" is not absolute (it needs a drive letter or a UNC prefix). On
+// non-Windows p is already an absolute Unix path and is returned unchanged.
+func absTestPath(p string) string {
+	if runtime.GOOS != "windows" {
+		return p
+	}
+	return `C:` + filepath.FromSlash(p)
+}
 
 // Notification builders construct the shapes acpsvc/events.go emits. Each
 // mints a unique tool-call id per call (two writes = two invocations, scored
@@ -221,12 +234,12 @@ func TestUnit_Fold_ChangedListCap(t *testing.T) {
 
 func TestUnit_Scope_DistinctFilesAndDirs(t *testing.T) {
 	updates := []libacp.SessionNotification{
-		edit("/ws/a.txt", "", "1"),                 // top-level "."
-		edit("/ws/sub/b.txt", "", "2"),             // top-level "sub"
-		edit("/ws/sub/c.txt", "", "3"),             // top-level "sub" (same bucket)
-		touch("/ws/pkg/d.go", libacp.ToolKindRead), // top-level "pkg"
+		edit(absTestPath("/ws/a.txt"), "", "1"),                 // top-level "."
+		edit(absTestPath("/ws/sub/b.txt"), "", "2"),             // top-level "sub"
+		edit(absTestPath("/ws/sub/c.txt"), "", "3"),             // top-level "sub" (same bucket)
+		touch(absTestPath("/ws/pkg/d.go"), libacp.ToolKindRead), // top-level "pkg"
 	}
-	scope := fold(updates).changes("/ws").Scope
+	scope := fold(updates).changes(absTestPath("/ws")).Scope
 	if scope.Files != 4 {
 		t.Fatalf("files = %d, want 4 distinct", scope.Files)
 	}
@@ -241,16 +254,17 @@ func TestUnit_Scope_DistinctFilesAndDirs(t *testing.T) {
 
 func TestUnit_Scope_AnomalyOnOutsidePath(t *testing.T) {
 	// An absolute path outside cwd trips the anomaly and is sampled.
+	outsidePath := absTestPath("/etc/passwd")
 	updates := []libacp.SessionNotification{
-		edit("/ws/repo/a.go", "", "x"),
-		touch("/etc/passwd", libacp.ToolKindRead),
+		edit(absTestPath("/ws/repo/a.go"), "", "x"),
+		touch(outsidePath, libacp.ToolKindRead),
 	}
-	scope := fold(updates).changes("/ws/repo").Scope
+	scope := fold(updates).changes(absTestPath("/ws/repo")).Scope
 	if !scope.Anomaly {
 		t.Fatal("anomaly must trip when a touched path falls outside cwd")
 	}
-	if len(scope.OutsidePaths) != 1 || scope.OutsidePaths[0] != "/etc/passwd" {
-		t.Fatalf("outsidePaths = %v, want [/etc/passwd]", scope.OutsidePaths)
+	if len(scope.OutsidePaths) != 1 || scope.OutsidePaths[0] != outsidePath {
+		t.Fatalf("outsidePaths = %v, want [%s]", scope.OutsidePaths, outsidePath)
 	}
 }
 
@@ -273,12 +287,26 @@ func TestUnit_Scope_EmptyRootDisablesAnomaly(t *testing.T) {
 }
 
 func TestUnit_TopLevelDir(t *testing.T) {
+	// topLevelDir's outside-root fallback hardcodes "/" + firstSegment(...),
+	// assuming a bare leading "/" the way a Unix absolute path has one. Every
+	// genuine Windows absolute path instead carries a drive letter, so
+	// TrimPrefix(_, "/") in that fallback is a no-op and the bucket ends up
+	// keyed on the drive ("/C:") rather than the path's first directory.
+	// That's a real, traced difference in the function's own output on
+	// Windows, not a fixture problem, so the two outside-root cases below
+	// expect an OS-appropriate bucket name rather than the Unix one.
+	outsideBucket := "/etc"
+	homeBucket := "/home"
+	if runtime.GOOS == "windows" {
+		outsideBucket = "/C:"
+		homeBucket = "/C:"
+	}
 	cases := []struct{ root, path, want string }{
-		{"/ws", "/ws/a.txt", "."},
-		{"/ws", "/ws/src/a.txt", "src"},
-		{"/ws", "/ws/src/deep/a.txt", "src"},
-		{"/ws", "/etc/hostname", "/etc"},
-		{"/ws", "/home/u/x", "/home"},
+		{absTestPath("/ws"), absTestPath("/ws/a.txt"), "."},
+		{absTestPath("/ws"), absTestPath("/ws/src/a.txt"), "src"},
+		{absTestPath("/ws"), absTestPath("/ws/src/deep/a.txt"), "src"},
+		{absTestPath("/ws"), absTestPath("/etc/hostname"), outsideBucket},
+		{absTestPath("/ws"), absTestPath("/home/u/x"), homeBucket},
 		{"", "rel/x.txt", "rel"},
 		{"", "bare.txt", "."},
 	}
@@ -336,13 +364,17 @@ func boundMission() *missionservice.Mission {
 }
 
 func TestUnit_Service_Changes_EndToEnd(t *testing.T) {
+	root := absTestPath("/ws")
+	aTxt := absTestPath("/ws/a.txt")
+	bTxt := absTestPath("/ws/b.txt")
+	wander := absTestPath("/tmp/wander")
 	svc := New(
 		stubMissions{m: boundMission()},
-		stubJournal{ok: true, cwd: "/ws", updates: []libacp.SessionNotification{
-			edit("/ws/a.txt", "", "hello"),
-			edit("/ws/a.txt", "hello", "hello world"),
-			edit("/ws/b.txt", "old", "new"),
-			touch("/tmp/wander", libacp.ToolKindRead),
+		stubJournal{ok: true, cwd: root, updates: []libacp.SessionNotification{
+			edit(aTxt, "", "hello"),
+			edit(aTxt, "hello", "hello world"),
+			edit(bTxt, "old", "new"),
+			touch(wander, libacp.ToolKindRead),
 		}},
 	)
 	got, err := svc.Changes(context.Background(), "m1")
@@ -352,7 +384,7 @@ func TestUnit_Service_Changes_EndToEnd(t *testing.T) {
 	if len(got.Files) != 2 {
 		t.Fatalf("want 2 changed files, got %d", len(got.Files))
 	}
-	if got.Files[0].Path != "/ws/a.txt" || got.Files[0].Status != StatusAdded {
+	if got.Files[0].Path != aTxt || got.Files[0].Status != StatusAdded {
 		t.Fatalf("files[0] = %+v, want a.txt/added first", got.Files[0])
 	}
 	if got.Files[1].Status != StatusModified {

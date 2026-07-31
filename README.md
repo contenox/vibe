@@ -19,6 +19,10 @@ No account.
 | Watching it work | Detached missions |
 | One vendor | Any model, any MCP, together |
 
+We don't build toward one model with standing access to everything. You
+declare the agent with exactly what it needs — the tools, the model, the
+budget, the approval gate — nothing implied, nothing assumed.
+
 Docs: **[contenox.com](https://contenox.com)**
 
 ---
@@ -59,6 +63,10 @@ pick past contexts back up. That's it; sensible defaults do the rest, and
 
 ## What people use it for
 
+* **Running standing, scheduled agents:** declare a narrow agent once —
+  triage this inbox, watch this feed — and call it from cron or CI every
+  morning; it starts clean each run and never carries yesterday's job into
+  today's.
 * **Reviewing diffs:** run tests, summarize risks, and keep destructive
   operations behind an approval prompt.
 * **Drafting release evidence:** aggregate git logs, PRs, tickets, and CI

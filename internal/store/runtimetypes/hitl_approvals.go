@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 )
 
 // HITLApprovalState is the lifecycle state of one durable human-in-the-loop

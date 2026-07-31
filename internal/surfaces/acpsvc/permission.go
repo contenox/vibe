@@ -8,7 +8,7 @@ import (
 	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 func (t *Transport) AskApproval(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {

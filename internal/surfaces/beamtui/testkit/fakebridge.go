@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // EngineBridge is the subset of *enginebridge.Bridge's API a beam surface

@@ -7,7 +7,7 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/libtracker"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

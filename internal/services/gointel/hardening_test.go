@@ -18,6 +18,22 @@ import (
 
 // E2E hardening: hostile arguments cannot panic or escape the workspace, concurrent queries/edits/teardown do not race, and real-world module shapes answer rather than hang. Tests loading this repository are gated on -short.
 
+// realSystemDir returns a real, genuinely OS-absolute system directory that
+// is certainly outside any test fixture's workspace root — "/etc" on Unix,
+// but a bare leading "/" is not absolute on Windows (filepath.IsAbs needs a
+// drive letter there), so an absolute-path escape attempt needs an actual
+// Windows system path to be a meaningful test of the same containment rule.
+func realSystemDir(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return "/etc"
+	}
+	if root := os.Getenv("SystemRoot"); root != "" {
+		return root
+	}
+	return `C:\Windows`
+}
+
 // repoRootDir walks up to the module root of this repository.
 func repoRootDir(t *testing.T) string {
 	t.Helper()
@@ -165,7 +181,7 @@ func TestSystem_GoIntel_HostileDirArgumentsCannotEscapeTheWorkspace(t *testing.T
 		"traversal":         "../..",
 		"traversal_to_root": "../../../../../../../..",
 		"absolute_outside":  outside,
-		"absolute_etc":      "/etc",
+		"absolute_system":   realSystemDir(t),
 		"symlink_escape":    "escape",
 		"symlink_deep":      "escape/secret",
 	}
@@ -557,9 +573,20 @@ func atomicWrite(t *testing.T, path, body string) {
 		t.Errorf("write %s: %v", tmp, err)
 		return
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		t.Errorf("rename %s: %v", tmp, err)
+	// Windows refuses to rename onto a file another handle currently has
+	// open (unlike POSIX, where existing readers keep the old inode) — the
+	// concurrent readers this test deliberately races against can hold
+	// shapes.go open for the instant a rename lands. A short bounded retry
+	// rides out that transient sharing violation; it never masks a real
+	// failure since renaming the same tmp file repeatedly is idempotent.
+	var err error
+	for attempt := 0; attempt < 20; attempt++ {
+		if err = os.Rename(tmp, path); err == nil {
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
+	t.Errorf("rename %s: %v", tmp, err)
 }
 
 // TestSystem_GoIntel_QueriesAfterShutdownFailTypedRatherThanRebuild pins: a query after Shutdown returns ErrShutdown rather than rebuilding.

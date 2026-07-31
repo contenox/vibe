@@ -4,12 +4,24 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// absTestPath returns p as a genuinely OS-absolute path: a bare leading "/"
+// is not absolute on Windows (filepath.IsAbs requires a drive letter there),
+// so fixtures exercising that check need a real Windows-style root to stay
+// meaningful on both platforms.
+func absTestPath(p string) string {
+	if runtime.GOOS != "windows" {
+		return p
+	}
+	return `C:` + filepath.FromSlash(p)
+}
 
 func TestUnit_Contain_AllowsPathsWithinRoot(t *testing.T) {
 	root := t.TempDir()
@@ -232,9 +244,10 @@ func TestUnit_ResolveSessionCwd(t *testing.T) {
 	})
 
 	t.Run("no allowlist: an absolute cwd passes through, an absent one takes the caller's fallback", func(t *testing.T) {
-		got, err := vfs.ResolveSessionCwd(nil, "/anywhere/at/all", "/fallback")
+		anywhere := absTestPath("/anywhere/at/all")
+		got, err := vfs.ResolveSessionCwd(nil, anywhere, "/fallback")
 		require.NoError(t, err)
-		assert.Equal(t, "/anywhere/at/all", got, "the editor owns the filesystem on the stdio path")
+		assert.Equal(t, anywhere, got, "the editor owns the filesystem on the stdio path")
 
 		got, err = vfs.ResolveSessionCwd(nil, "/", "/fallback")
 		require.NoError(t, err)

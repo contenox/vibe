@@ -7,7 +7,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/picker"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/transcript"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // Session management: beam shows exactly one session at a time, so every act

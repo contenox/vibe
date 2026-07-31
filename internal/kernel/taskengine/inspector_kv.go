@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	libkv "github.com/contenox/contenox/libkvstore"
+	libkv "github.com/contenox/contenox/internal/libkvstore"
 	"github.com/contenox/contenox/libtracker"
 )
 

@@ -113,7 +113,8 @@ func isBroadParent(abs string) (bool, string) {
 			return true, "is your home directory"
 		}
 	}
-	if trimmed := strings.Trim(abs, sep); trimmed != "" && !strings.Contains(trimmed, sep) {
+	rest := strings.TrimPrefix(abs, filepath.VolumeName(abs))
+	if trimmed := strings.Trim(rest, sep); trimmed != "" && !strings.Contains(trimmed, sep) {
 		return true, "is a top-level system directory"
 	}
 	return false, ""

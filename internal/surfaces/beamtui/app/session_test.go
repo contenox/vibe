@@ -10,7 +10,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/keymap"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/testkit"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // sessionBridge decorates testkit.FakeBridge with scripted results for

@@ -176,9 +176,18 @@ func TestUnit_Command_FailsClosedOffLinux(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		t.Skip("on Linux the wall is built; the off-Linux fail-closed path does not apply")
 	}
+	// SystemExecDirs (and so canonicalPATH/confinedPATH's fallback) is a
+	// Linux-only exec surface of hardcoded Unix paths; on a non-Linux host
+	// none of it — nor the real ambient PATH Command would otherwise read
+	// via os.Getenv — resolves to something validatePATH accepts. That is
+	// orthogonal to what this test pins (the fail-closed isolation seam), so
+	// PATH is explicitly overridden to empty: validatePATH treats an empty
+	// PATH as inert (see validatePATH's doc comment), letting assembly reach
+	// applyIsolation, which is the off-Linux path under test.
 	cmd, err := libsandbox.Command(context.Background(), libsandbox.Spec{
 		WorkspaceRoot: t.TempDir(),
 		Home:          t.TempDir(),
+		EnvSet:        map[string]string{"PATH": ""},
 	}, "true")
 
 	require.Nil(t, cmd, "no command may be returned when the wall cannot be built")

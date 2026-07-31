@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +34,7 @@ func TestUnit_NewSession_SetupOnly_ReturnsActionableError(t *testing.T) {
 	tr := transportWithMeta("")
 	require.Nil(t, tr.deps.Engine)
 
-	_, err := tr.NewSession(context.Background(), libacp.NewSessionRequest{Cwd: "/tmp"})
+	_, err := tr.NewSession(context.Background(), libacp.NewSessionRequest{Cwd: absTestPath("/tmp")})
 	require.Error(t, err)
 	var e *libacp.Error
 	require.ErrorAs(t, err, &e)

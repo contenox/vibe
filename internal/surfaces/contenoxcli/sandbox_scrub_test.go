@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/shellenvservice"
 	"github.com/spf13/cobra"

@@ -10,7 +10,7 @@ import (
 
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/version"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // RecordingHarness is the minimal libacp.Client harness for observing a

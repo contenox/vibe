@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // Mapped is an inbound ACP permission request projected onto hitlservice's

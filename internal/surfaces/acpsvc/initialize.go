@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/contenox/contenox/internal/version"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // Initialize negotiates the protocol version and reports which auth methods,

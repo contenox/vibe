@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
-	"github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )

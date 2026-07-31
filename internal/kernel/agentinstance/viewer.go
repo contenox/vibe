@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // Viewer is a consumer attached to one downstream session: it receives the

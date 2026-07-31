@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/contenox/contenox/internal/services/presence"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // presenceAgent decorates the ACP transport to feed the fleet-presence

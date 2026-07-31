@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // ErrSessionBusy reports that a session already has a turn in flight, so an

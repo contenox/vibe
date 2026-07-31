@@ -37,9 +37,11 @@ export default defineConfig({
     "/docs/guide/providers/openrouter": "/docs/integrations/providers/openrouter/",
     "/docs/guide/providers/vertex": "/docs/integrations/providers/vertex/",
     "/docs/guide/local-models": "/docs/rnd/modeld/",
-    "/docs/guide/vscode-vscodium": "/docs/integrations/editors/vscode-vscodium/",
-    // The extension came back; its lab retrospective is gone.
-    "/docs/rnd/vscode-extension": "/docs/integrations/editors/vscode-vscodium/",
+    // The VS Code extension is retired again; both old URLs now land on its
+    // lab retrospective, same as the local-models -> modeld redirect above.
+    "/docs/guide/vscode-vscodium": "/docs/rnd/editor-agent/",
+    "/docs/rnd/vscode-extension": "/docs/rnd/editor-agent/",
+    "/docs/integrations/editors/vscode-vscodium": "/docs/rnd/editor-agent/",
     "/docs/guide/zed": "/docs/integrations/editors/zed/",
     "/docs/guide/jetbrains": "/docs/integrations/editors/jetbrains/",
     "/docs/guide/aionui": "/docs/integrations/editors/aionui/",

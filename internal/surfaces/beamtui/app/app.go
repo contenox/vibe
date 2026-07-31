@@ -25,7 +25,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/liveness"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/style"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/term"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 const (

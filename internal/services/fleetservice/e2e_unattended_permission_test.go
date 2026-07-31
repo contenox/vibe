@@ -6,18 +6,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libtracker"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,10 +36,18 @@ const (
 // buildStubAgentBinary compiles the repo's ACP stub agent into t.TempDir() and
 // returns its path; the go build cache makes reruns cheap. Mirrors
 // buildContenoxBinary in the chain-dispatch e2e.
+//
+// Every caller spawns this binary through the sandbox, which is
+// Landlock-based and Linux-only (see internal/libsandbox/isolation_other.go)
+// — off Linux the spawn always fails with ErrIsolation before the binary is
+// even exec'd, so there is nothing meaningful left to test.
 func buildStubAgentBinary(t *testing.T) string {
 	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("external agent spawn runs through the sandbox, which is Landlock-based and Linux-only")
+	}
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
-	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/contenox/libacp/cmd/acp-stub-agent")
+	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/libacp/cmd/acp-stub-agent")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build stub agent: %v\n%s", err, out)

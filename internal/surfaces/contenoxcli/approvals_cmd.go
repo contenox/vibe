@@ -9,7 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"

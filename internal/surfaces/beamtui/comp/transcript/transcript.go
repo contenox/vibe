@@ -14,7 +14,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // Transcript is the transcript state machine. The zero value is not usable;

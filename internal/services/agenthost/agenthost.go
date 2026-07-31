@@ -8,7 +8,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // Agent drives another ACP agent: Connect establishes a live connection

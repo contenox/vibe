@@ -1,8 +1,8 @@
 // Package presence lets an editor-spawned contenox process (`contenox acp`,
-// `vscode-agent`, `serve` itself) self-register into the shared store so the
-// fleet board can show it. A presence entry is observation only: the kernel
-// owns no lifecycle over these processes, so it carries no Stop/Cancel
-// verbs. Registration is crash-safe (TTL + heartbeat) and always best-effort.
+// `serve` itself) self-register into the shared store so the fleet board can
+// show it. A presence entry is observation only: the kernel owns no
+// lifecycle over these processes, so it carries no Stop/Cancel verbs.
+// Registration is crash-safe (TTL + heartbeat) and always best-effort.
 package presence
 
 import (
@@ -13,7 +13,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/contenox/contenox/libkvstore"
+	"github.com/contenox/contenox/internal/libkvstore"
 )
 
 // Kind is which contenox surface a process is — the primary way the board
@@ -24,8 +24,6 @@ type Kind string
 const (
 	// KindACP is a `contenox acp` stdio process (Zed, GoLand, AionUi, etc.); ClientName carries which one.
 	KindACP Kind = "acp"
-	// KindVSCodeAgent is a `contenox vscode-agent` stdio process.
-	KindVSCodeAgent Kind = "vscode-agent"
 	// KindServe is the `contenox serve` process itself.
 	KindServe Kind = "serve"
 )

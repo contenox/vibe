@@ -2,12 +2,23 @@ package runtimetypes_test
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// absTestPath returns p as a genuinely OS-absolute path — a bare leading
+// separator is not absolute on Windows (filepath.IsAbs needs a drive
+// letter there), so fixtures exercising that check need a real root.
+func absTestPath(p string) string {
+	if runtime.GOOS != "windows" {
+		return p
+	}
+	return `C:` + filepath.FromSlash(p)
+}
 
 func TestUnit_ExternalACPConfig_Validate(t *testing.T) {
 	tests := []struct {
@@ -74,7 +85,7 @@ func TestUnit_ExternalACPConfig_Validate(t *testing.T) {
 }
 
 func TestUnit_ChainConfig_Validate(t *testing.T) {
-	abs := filepath.Join(string(filepath.Separator), "home", "u", ".contenox", "agent-reviewer.json")
+	abs := absTestPath(filepath.Join(string(filepath.Separator), "home", "u", ".contenox", "agent-reviewer.json"))
 	tests := []struct {
 		name    string
 		cfg     runtimetypes.ChainConfig

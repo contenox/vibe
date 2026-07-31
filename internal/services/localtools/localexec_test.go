@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -309,6 +310,9 @@ func TestUnit_LocalExecTools_Exec_NoPolicy_Allowed(t *testing.T) {
 func TestUnit_LocalExecTools_Exec_ShellMode_NoPolicy_Allowed(t *testing.T) {
 	// shell:true is allowed when no allowlist exists: the injection guard only
 	// triggers when there is a policy for shell mode to bypass.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell:true dispatches to cmd.exe/PowerShell on Windows (see shell.go), not /bin/sh — the exact stdout framing this pins is POSIX-sh-specific")
+	}
 	ctx := context.Background()
 	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
 	start := time.Now().UTC()
@@ -378,6 +382,9 @@ func TestUnit_LocalExecTools_Exec_AllowlistDirReject(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_AllowlistDirAllow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("direct-execs a #!/bin/sh script by path; Windows's CreateProcess has no shebang interpretation")
+	}
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "script.sh")
 	err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho ok\n"), 0755)
@@ -455,6 +462,9 @@ func TestUnit_LocalExecTools_Exec_NilTools(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_NonZeroExit(t *testing.T) {
 	// Run a script under allowedDir WITHOUT shell mode to capture a non-zero exit.
+	if runtime.GOOS == "windows" {
+		t.Skip("direct-execs a #!/bin/sh script by path; Windows's CreateProcess has no shebang interpretation")
+	}
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "fail.sh")
 	err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 3\n"), 0755)

@@ -1,6 +1,6 @@
 package agentinstance
 
-import "github.com/contenox/contenox/libacp"
+import "github.com/contenox/libacp"
 
 // defaultJournalSize bounds how many recent session/update notifications a
 // single session's journal retains for replay to a newly-attached viewer. A

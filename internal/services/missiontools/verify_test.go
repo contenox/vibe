@@ -4,6 +4,7 @@ package missiontools_test
 // real Exec path against the real sqlite-backed mission store.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,7 +119,10 @@ func TestUnit_Verify_AbsoluteMissingPathNeedsNoWorkdir(t *testing.T) {
 
 	rep := storedReport(t, svc, missionID)
 	require.Equal(t, missionservice.ReportKindProgress, rep.Kind)
-	require.Contains(t, rep.Detail, gone)
+	// verificationWarning renders each missing ref via %q (see quoteList in
+	// verify.go), which escapes backslashes — on Windows, gone's raw form
+	// (single backslashes) is never a literal substring of that quoted text.
+	require.Contains(t, rep.Detail, fmt.Sprintf("%q", gone))
 }
 
 // TestUnit_Verify_StatErrorCountsAsPresent pins that a non-not-exists stat error (e.g. a permission wall) never downgrades.

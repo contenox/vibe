@@ -15,10 +15,13 @@ import (
 
 // guardedRoots covers this project's own logic; libacp is a published library
 // with its own rules, and tools/examples aren't the product. libbus, libdbexec,
-// libkvstore and libtracker sit beside internal/ rather than inside it so they
-// stay importable from outside the module, but they are still this project's
-// logic, so the guard keeps walking them.
-var guardedRoots = []string{"internal", "cmd", "libbus", "libdbexec", "libkvstore", "libtracker"}
+// and libkvstore now live under internal/ (already walked). liblease was only
+// ever consumed by modeld's device-lease code, which now lives entirely in the
+// separate modeld repo, so it has no importers left here and was removed;
+// libtracker still sits beside internal/ rather than inside it so it stays
+// importable from outside the module, but it is still this project's logic,
+// so the guard keeps walking it.
+var guardedRoots = []string{"internal", "cmd", "libtracker"}
 
 // slogSinkAllowlist is the closed set of files permitted to import log/slog,
 // keyed by module-root-relative slash path (trailing "/" = directory prefix,

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"text/tabwriter"
 
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/mcpserverservice"

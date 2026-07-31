@@ -11,7 +11,7 @@ import (
 
 	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // FixtureStreamingTurn scripts a whole ordinary turn: user message echoed

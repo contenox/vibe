@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/vfs"
 )
 

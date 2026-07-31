@@ -13,7 +13,7 @@ import (
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // Prompt resolves the session and dispatches the turn to its driver. The driver

@@ -12,7 +12,7 @@ import (
 	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // UnattendedPermissionDeps is what an answerer needs to turn "a unit nobody is

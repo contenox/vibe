@@ -1,11 +1,24 @@
 package libsandbox
 
 import (
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// absTestPath turns a Unix-style absolute literal into a real absolute path
+// on the host running the test: unchanged on Unix, prefixed with a drive
+// letter and converted to backslashes on Windows (a bare leading "/" is not
+// absolute there per filepath.IsAbs).
+func absTestPath(p string) string {
+	if runtime.GOOS != "windows" {
+		return p
+	}
+	return `C:` + filepath.FromSlash(p)
+}
 
 // canonicalPATH joins the system exec dirs in precedence order, with no profile-derived entry.
 func TestUnit_canonicalPATH_IsSystemExecDirsJoined(t *testing.T) {
@@ -76,9 +89,11 @@ func TestUnit_validatePATH_AllowsCarveoutCoveredDir(t *testing.T) {
 
 // A "~"-relative carve-out resolves against the scoped home; without it the same dir is outside the surface.
 func TestUnit_validatePATH_ResolvesTildeCarveoutAgainstHome(t *testing.T) {
+	home := absTestPath("/scoped/home")
+	localBin := absTestPath("/scoped/home/.local/bin")
 	fs := []FSCarveout{{Path: "~/.local/bin", Mode: ModeRO, Needs: "user bin"}}
-	require.NoError(t, validatePATH("/scoped/home/.local/bin", "/scoped/home", fs))
-	require.ErrorIs(t, validatePATH("/scoped/home/.local/bin", "/scoped/home", nil), ErrInvalidSpec)
+	require.NoError(t, validatePATH(localBin, home, fs))
+	require.ErrorIs(t, validatePATH(localBin, home, nil), ErrInvalidSpec)
 }
 
 // pathWithin is boundary-aware: a string-prefix sibling ("/usrlocal" vs "/usr") is not within.

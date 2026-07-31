@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/google/uuid"
 )
 
@@ -307,12 +307,25 @@ func (s *store) DeleteAgent(ctx context.Context, id string) error {
 }
 
 func (s *store) ListAgents(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Agent, error) {
-	cursor := time.Now().UTC()
-	if createdAtCursor != nil {
-		cursor = *createdAtCursor
-	}
 	if limit > MAXLIMIT {
 		return nil, ErrLimitParamExceeded
+	}
+
+	// No cursor means "first page": there is no prior row to exclude, so the
+	// query carries no time filter at all. A defaulted cursor of time.Now()
+	// with a strict "<" would instead race the row just inserted — on a
+	// coarse-resolution clock, an immediately-following list can land on the
+	// same tick as the insert's created_at and silently exclude it.
+	if createdAtCursor == nil {
+		rows, err := s.Exec.QueryContext(ctx, `
+			SELECT id, name, kind, enabled, config_json, harness_id, workspace_id, source, registry_id, registry_version, created_at, updated_at
+			FROM agents
+			ORDER BY created_at DESC, id DESC
+			LIMIT $1`, limit)
+		if err != nil {
+			return nil, fmt.Errorf("agents: list query: %w", err)
+		}
+		return scanAgentRows(rows)
 	}
 
 	rows, err := s.Exec.QueryContext(ctx, `
@@ -320,10 +333,14 @@ func (s *store) ListAgents(ctx context.Context, createdAtCursor *time.Time, limi
 		FROM agents
 		WHERE created_at < $1
 		ORDER BY created_at DESC, id DESC
-		LIMIT $2`, cursor, limit)
+		LIMIT $2`, *createdAtCursor, limit)
 	if err != nil {
 		return nil, fmt.Errorf("agents: list query: %w", err)
 	}
+	return scanAgentRows(rows)
+}
+
+func scanAgentRows(rows *sql.Rows) ([]*Agent, error) {
 	defer rows.Close()
 
 	var out []*Agent

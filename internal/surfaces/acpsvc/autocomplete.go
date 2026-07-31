@@ -14,7 +14,7 @@ import (
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // extMethodAutocomplete is the FIM (fill-in-the-middle) extension method:

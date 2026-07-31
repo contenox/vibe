@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libkvstore"
+	"github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libkvstore"
 	"github.com/contenox/contenox/internal/services/presence"
 )
 
@@ -195,8 +195,8 @@ func TestUnit_Board_ComposedFleetView(t *testing.T) {
 	if err := liveWriter.Register(ctx, presence.Record{InstanceID: "live-zed", Kind: presence.KindACP, ClientName: "zed"}); err != nil {
 		t.Fatalf("register live editor: %v", err)
 	}
-	if err := liveWriter.Register(ctx, presence.Record{InstanceID: "live-code", Kind: presence.KindVSCodeAgent}); err != nil {
-		t.Fatalf("register vscode editor: %v", err)
+	if err := liveWriter.Register(ctx, presence.Record{InstanceID: "live-goland", Kind: presence.KindACP, ClientName: "goland"}); err != nil {
+		t.Fatalf("register live editor: %v", err)
 	}
 
 	reader := presence.NewStore(readerKV)
@@ -223,7 +223,7 @@ func TestUnit_Board_ComposedFleetView(t *testing.T) {
 	if _, ok := ids["live-zed"]; !ok {
 		t.Error("the live acp editor must appear on the board")
 	}
-	if _, ok := ids["live-code"]; !ok {
-		t.Error("the live vscode editor must appear on the board")
+	if _, ok := ids["live-goland"]; !ok {
+		t.Error("the second live editor must appear on the board")
 	}
 }

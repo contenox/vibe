@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/contenox/contenox/internal/version"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // driverClientName is the ClientInfo.Name the kernel presents to a

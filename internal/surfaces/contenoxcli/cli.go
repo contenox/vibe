@@ -215,7 +215,7 @@ box; for local inference run Ollama or vLLM.
     contenox config set default-model    gpt-4o-mini
     contenox config set default-provider openai
 
-  VS Code autocomplete can use a separate model from chat:
+  Editor autocomplete (FIM, over ACP) can use a separate model from chat:
     # Example: chat on OpenAI, ghost text on local Ollama.
     contenox config set default-provider openai
     contenox config set default-model    gpt-5-mini
@@ -316,7 +316,7 @@ After init, register a backend, make sure the runtime can see a model, then set 
   contenox config set default-provider gemini
   contenox config set default-model gemini-3.1-pro-preview
 
-  # Optional VS Code autocomplete model, independent from chat:
+  # Optional editor autocomplete model, independent from chat:
   contenox config set default-autocomplete-provider ollama
   contenox config set default-autocomplete-model qwen2.5-coder:7b
 
@@ -386,7 +386,6 @@ func init() {
 	rootCmd.AddCommand(stateCmd)
 	rootCmd.AddCommand(acpCmd)
 	rootCmd.AddCommand(acpxCmd)
-	rootCmd.AddCommand(vscodeAgentCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(workspaceCmd)

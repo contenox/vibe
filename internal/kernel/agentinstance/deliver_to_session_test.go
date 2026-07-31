@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

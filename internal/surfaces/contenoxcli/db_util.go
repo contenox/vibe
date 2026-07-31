@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libkvstore"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libkvstore"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 

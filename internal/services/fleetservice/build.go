@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
-	"github.com/contenox/contenox/libbus"
-	libdb "github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/clikv"

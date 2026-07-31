@@ -18,7 +18,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/style"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/term"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/testkit"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // Both testkit doubles satisfy Bridge; asserted here rather than in the

@@ -8,7 +8,7 @@ import (
 
 	"github.com/contenox/contenox/internal/libsandbox"
 	"github.com/contenox/contenox/internal/services/localtools"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 func TestUnit_ACPCommandRunner_FallsBackToOSWhenClientLacksTerminalCapability(t *testing.T) {

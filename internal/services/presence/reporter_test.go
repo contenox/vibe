@@ -254,7 +254,7 @@ func TestUnit_Reporter_StopDeregisters(t *testing.T) {
 func TestUnit_Reporter_CtxCancelDeregisters(t *testing.T) {
 	store := &recordingStore{}
 	ctx, cancel := context.WithCancel(context.Background())
-	r := presence.StartReporter(ctx, store, presence.Record{Kind: presence.KindVSCodeAgent})
+	r := presence.StartReporter(ctx, store, presence.Record{Kind: presence.KindACP})
 	waitFor(t, func() bool { return store.writeCount() >= 1 })
 
 	cancel()

@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/models/backendservice"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	// Blank-imported so the "ollama" catalog provider is registered even if

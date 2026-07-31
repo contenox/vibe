@@ -9,7 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/contenox/contenox/internal/kernel/reasoning"
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
@@ -22,8 +22,8 @@ var validConfigKeys = map[string]string{
 	"default-provider":              "Default LLM provider type (e.g. ollama, openai, gemini)",
 	"default-alt-model":             "Optional alt LLM model name. Used by chains referencing {{var:alt_model}}.",
 	"default-alt-provider":          "Optional alt LLM provider type. Used by chains referencing {{var:alt_provider}}.",
-	"default-autocomplete-model":    "Optional VS Code autocomplete model name, independent from default-model.",
-	"default-autocomplete-provider": "Optional VS Code autocomplete provider type, independent from default-provider.",
+	"default-autocomplete-model":    "Optional editor autocomplete model name, independent from default-model.",
+	"default-autocomplete-provider": "Optional editor autocomplete provider type, independent from default-provider.",
 	"default-embed-model":           "Embedding model for 'contenox index' / 'contenox search' (e.g. nomic-embed-text). Unset falls back to default-model, which embeds only on some providers.",
 	"default-embed-provider":        "Optional embedding provider type, independent from default-provider. Unset uses default-provider.",
 	"default-max-tokens":            "Optional default response token cap. Used by chains referencing {{var:max_tokens}}.",
@@ -50,8 +50,8 @@ Supported keys:
   default-provider               Default LLM provider type (e.g. ollama, openai, gemini)
   default-alt-model              Optional alt LLM model name (chains using {{var:alt_model}})
   default-alt-provider           Optional alt LLM provider (chains using {{var:alt_provider}})
-  default-autocomplete-model     Optional VS Code autocomplete model, separate from chat
-  default-autocomplete-provider  Optional VS Code autocomplete provider, separate from chat
+  default-autocomplete-model     Optional editor autocomplete model, separate from chat
+  default-autocomplete-provider  Optional editor autocomplete provider, separate from chat
   default-embed-model            Embedding model for 'contenox index' / 'contenox search'
   default-embed-provider         Optional embedding provider, separate from default-provider
   default-max-tokens             Optional response token cap (chains using {{var:max_tokens}})

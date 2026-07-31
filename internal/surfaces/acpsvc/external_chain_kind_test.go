@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

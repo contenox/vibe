@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/services/agenthost"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // Instance lifecycle states — the vocabulary of InstanceStatus.State.

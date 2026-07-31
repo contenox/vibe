@@ -16,9 +16,9 @@ import (
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/reasoning"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libbus"
-	libdb "github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libkvstore"
+	"github.com/contenox/contenox/internal/libbus"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/libkvstore"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
@@ -34,7 +34,7 @@ import (
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/contenox/contenox/internal/surfaces/fleetboot"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 	"github.com/spf13/cobra"
 )
 

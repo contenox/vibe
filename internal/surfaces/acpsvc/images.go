@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // extractImageParts splits content blocks into image attachments (as

@@ -6,18 +6,35 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
+
+// realSystemDir returns a real, genuinely OS-absolute system directory
+// certainly outside any test fixture's workspace root — "/etc" on Unix, but
+// a bare leading "/" is not absolute on Windows (filepath.IsAbs needs a
+// drive letter there), so an absolute-outside-workspace escape attempt needs
+// an actual Windows system path to test the same containment rule.
+func realSystemDir(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return "/etc"
+	}
+	if root := os.Getenv("SystemRoot"); root != "" {
+		return root
+	}
+	return `C:\Windows`
+}
 
 // ---------------------------------------------------------------------------
 // gointel on the engine path: asserts a gointel call travelling through
@@ -235,7 +252,7 @@ func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *te
 				require.Truef(t, ok, "result is %T, not the declared schema", out)
 				require.Equal(t, "github.com/contenox/contenox/internal/surfaces/beamtui/frame.StyleBrand", res.Symbol)
 				require.Equal(t, "const", res.Kind)
-				require.Equal(t, "internal/surfaces/beamtui/frame/frame.go:37:2", res.Location,
+				require.Equal(t, "internal/surfaces/beamtui/frame/frame.go:31:2", res.Location,
 					"ground truth moved: check where frame.StyleBrand is declared")
 				require.Contains(t, res.Line, "StyleBrand")
 				require.Equal(t, "github.com/contenox/contenox", res.Module)
@@ -343,7 +360,7 @@ func TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping(t *test
 		{"symbol nul byte", gointel.ToolDefinition, map[string]string{"symbol": "frame\x00.StyleBrand"}, false},
 
 		{"dir traversal", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": "../../.."}, true},
-		{"dir absolute outside", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": "/etc"}, true},
+		{"dir absolute outside", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": realSystemDir(t)}, true},
 		{"dir 10KB", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": huge}, false},
 
 		{"scope garbage", gointel.ToolDiagnostics, map[string]string{"scope": "everything"}, false},

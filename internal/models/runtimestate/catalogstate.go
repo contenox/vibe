@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/contenox/contenox/libkvstore"
+	"github.com/contenox/contenox/internal/libkvstore"
 	"github.com/contenox/contenox/internal/models/modelcapability"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/store/runtimetypes"

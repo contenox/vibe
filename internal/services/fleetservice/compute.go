@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 )
 
 // computeBoundLead is the stable prefix of every compute-exhaustion reason a

@@ -107,131 +107,8 @@ jobs:
           name: contenox-${{ matrix.goos }}-${{ matrix.goarch }}
           path: bin/contenox-${{ matrix.goos }}-${{ matrix.goarch }}*
 
-  # Platform-specific VSIXes: each bundles the contenox binary for the machine
-  # the extension host runs on, so the target must be built natively per matrix
-  # entry rather than cross-compiled into one package.
-  vscode:
-    needs: verify
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x64
-            os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            smoke: true
-          - target: linux-arm64
-            os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-          - target: darwin-arm64
-            os: macos-15
-            goos: darwin
-            goarch: arm64
-            smoke: true
-          - target: darwin-x64
-            os: macos-15-intel
-            goos: darwin
-            goarch: amd64
-          - target: win32-x64
-            os: ubuntu-latest
-            goos: windows
-            goarch: amd64
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: packages/vscode/package-lock.json
-
-      - name: Install Linux package inspection dependencies
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y unzip file
-
-      - name: Install extension dependencies
-        working-directory: packages/vscode
-        run: npm ci
-
-      - name: Sync extension metadata
-        working-directory: packages/vscode
-        run: npm run sync:metadata
-
-      - name: Verify synced metadata is committed
-        run: git diff --exit-code -- packages/vscode/package.json packages/vscode/package-lock.json packages/vscode/README.md
-
-      - name: Type-check extension
-        working-directory: packages/vscode
-        run: npm run check
-
-      - name: Compile extension
-        working-directory: packages/vscode
-        run: npm run compile
-
-      - name: Build webview (for embedded chat)
-        working-directory: packages/vscode
-        run: npm run build:webview
-
-      - name: Build target Contenox binary
-        working-directory: packages/vscode
-        env:
-          CONTENOX_VSCODE_TARGET: ${{ matrix.target }}
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-          CONTENOX_VERSION: ${{ needs.verify.outputs.tag }}
-        run: node scripts/build-binary.js
-
-      - name: Inspect target binary
-        working-directory: packages/vscode
-        shell: bash
-        run: |
-          set -euo pipefail
-          file bin/contenox*
-          if [ "${{ matrix.smoke || false }}" = "true" ]; then
-            ./bin/contenox --version
-          fi
-
-      - name: Package target VSIX
-        working-directory: packages/vscode
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts
-          npx vsce package \
-            --target "${{ matrix.target }}" \
-            --out "artifacts/contenox-runtime-${{ matrix.target }}-${{ needs.verify.outputs.extension_version }}.vsix"
-
-      - name: Verify target VSIX contents
-        working-directory: packages/vscode
-        env:
-          CONTENOX_VSCODE_TARGET: ${{ matrix.target }}
-        run: npm run package:check -- artifacts/*.vsix
-
-      - name: Upload VSIX artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vscode-${{ matrix.target }}
-          path: packages/vscode/artifacts/*.vsix
-          if-no-files-found: error
-
   release:
-    needs: [verify, build, vscode]
+    needs: [verify, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -246,18 +123,11 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Download VS Code extension artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: vscode-*
-          merge-multiple: true
-          path: release-assets
-
       - name: Create GitHub Release and upload assets
         run: |
           TAG="${{ needs.verify.outputs.tag }}"
           cd release-assets
-          gh release create "$TAG" contenox-linux-* contenox-darwin-* contenox-windows-* contenox-runtime-*.vsix \
+          gh release create "$TAG" contenox-linux-* contenox-darwin-* contenox-windows-* \
             --title "$TAG" \
             --notes "" \
             --latest \

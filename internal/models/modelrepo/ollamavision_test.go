@@ -14,6 +14,7 @@ import (
 	"github.com/contenox/contenox/internal/models/modelrepo/ollama"
 	"github.com/ollama/ollama/api"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 )
 
 // visionModel is the smallest broadly-available ollama vision model (~1.7GB).
@@ -45,6 +46,7 @@ func TestSystem_Ollama_Vision(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping ollama vision system test: starts a container and pulls a multi-GB vision model")
 	}
+	testcontainers.SkipIfProviderIsNotHealthy(t)
 	ctx := t.Context()
 	uri, _, cleanup, err := modelrepo.SetupOllamaLocalInstance(ctx, "latest")
 	require.NoError(t, err)

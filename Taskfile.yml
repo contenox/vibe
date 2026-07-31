@@ -139,67 +139,6 @@ tasks:
     cmds:
       - npm run preview
 
-  # Not in test-all: vscode:test downloads VS Code (~340 MB) and needs a display.
-  # CI gate: .github/workflows/vscode-extension-ci.yml. Local gate: task vscode:all.
-  vscode:deps:
-    desc: Install VS Code extension dependencies
-    dir: packages/vscode
-    cmds:
-      - npm ci
-
-  vscode:check:
-    desc: Type-check the VS Code extension
-    dir: packages/vscode
-    cmds:
-      - npm run check
-
-  vscode:test:
-    desc: Run the VS Code extension integration tests (downloads VS Code; needs a display)
-    dir: packages/vscode
-    cmds:
-      - '{{if eq OS "linux"}}xvfb-run -a {{end}}npm test'
-
-  vscode:visual:
-    desc: Screenshot and DOM-assert the extension's panels (own VS Code instance; needs a display)
-    dir: packages/vscode
-    cmds:
-      - '{{if eq OS "linux"}}xvfb-run -a {{end}}npm run test:visual'
-      - 'echo "==> screenshots in packages/vscode/artifacts/screenshots/"'
-
-  vscode:build:
-    desc: Build the VS Code extension (compile, webview, bundled host binary)
-    dir: packages/vscode
-    cmds:
-      - npm run build
-
-  vscode:package:
-    desc: Package a host-target VSIX into packages/vscode/artifacts
-    dir: packages/vscode
-    cmds:
-      - npm run package
-
-  vscode:package-check:
-    desc: Verify the packaged VSIX contents
-    dir: packages/vscode
-    cmds:
-      - npm run package:check -- artifacts/*.vsix
-
-  vscode:all:
-    desc: Full VS Code extension gate (deps, type-check, tests, package, verify)
-    cmds:
-      - task: vscode:deps
-      - task: vscode:check
-      - task: vscode:test
-      - task: vscode:package
-      - task: vscode:package-check
-      - 'echo "==> vscode:all: extension gate green"'
-
-  vscode:clean:
-    desc: Remove VS Code extension build outputs
-    dir: packages/vscode
-    cmds:
-      - rm -rf dist bin artifacts media/chat .vscode-test
-
   version:set:
     desc: Stamp the version file (tools/version)
     cmds:
@@ -229,7 +168,6 @@ tasks:
       - 'echo "  2. Review the generated release commit and tag"'
       - 'echo "  3. Push: git push && git push origin vX.Y.Z"'
       - 'echo "CI verifies internal/version/version.txt matches the tag, then builds and publishes assets."'
-      - 'echo "The tag also drives .github/workflows/vscode-marketplace.yml; run task vscode:all first to catch extension breakage locally."'
 
   clean:
     desc: Remove build outputs

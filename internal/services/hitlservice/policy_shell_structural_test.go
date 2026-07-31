@@ -31,9 +31,15 @@ func structuralTiers(t *testing.T, blacklist, askAlways, prefixes string) hitlse
 
 const structuralSafeVerbs = "git status,git log,git diff,go build,go test,ls,cat,head,wc,echo,grep"
 
+// evalShell evaluates through a POSIX-shell-pinned context: these tests
+// exercise the mvdan-based structural parser itself, not host shell
+// detection, so they must not depend on the test runner's GOOS (see A1 in
+// shellstructure.go — structural analysis is otherwise disabled on Windows,
+// where local_shell's real shell is not POSIX sh).
 func evalShell(t *testing.T, svc hitlservice.PolicyEvaluator, args map[string]any) hitlservice.EvaluationResult {
 	t.Helper()
-	r, err := svc.Evaluate(context.Background(), "local_shell", "local_shell", args)
+	ctx := hitlservice.WithShellKind(context.Background(), "sh")
+	r, err := svc.Evaluate(ctx, "local_shell", "local_shell", args)
 	require.NoError(t, err)
 	return r
 }

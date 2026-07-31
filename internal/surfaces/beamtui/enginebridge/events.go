@@ -5,7 +5,7 @@ import (
 
 	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // Event is one fact produced by the runtime, already destructured out of the

@@ -9,7 +9,7 @@ import (
 	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,9 +20,9 @@ import (
 // rather than a bogus join, since a setup-only transport has no ContenoxDir.
 func TestUnit_HitlPolicyPath(t *testing.T) {
 	tr := &Transport{}
-	tr.deps.ContenoxDir = "/home/op/.contenox"
+	tr.deps.ContenoxDir = filepath.Join(string(filepath.Separator), "home", "op", ".contenox")
 
-	require.Equal(t, "/home/op/.contenox/hitl-policy-strict.json", tr.hitlPolicyPath("hitl-policy-strict.json"))
+	require.Equal(t, filepath.Join(tr.deps.ContenoxDir, "hitl-policy-strict.json"), tr.hitlPolicyPath("hitl-policy-strict.json"))
 	require.Equal(t, "", tr.hitlPolicyPath(""), "no policy name yields no path")
 	require.Equal(t, "", tr.hitlPolicyPath("  "), "a blank policy name yields no path")
 

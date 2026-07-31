@@ -1,7 +1,0 @@
-node_modules/
-dist/
-bin/
-artifacts/
-.vscode-test/
-*.vsix
-media/chat/

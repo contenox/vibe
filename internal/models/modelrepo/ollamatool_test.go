@@ -11,12 +11,14 @@ import (
 	"github.com/ollama/ollama/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 )
 
 func TestSystem_Ollama_Tools(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping ollama system test: starts a container and pulls multi-GB models")
 	}
+	testcontainers.SkipIfProviderIsNotHealthy(t)
 	ctx := t.Context()
 	uri, _, cleanup, err := modelrepo.SetupOllamaLocalInstance(ctx, "latest")
 	require.NoError(t, err)

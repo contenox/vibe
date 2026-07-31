@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	libdb "github.com/contenox/contenox/libdbexec"
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/localfileservice"
 	"github.com/stretchr/testify/require"
 )

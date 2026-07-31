@@ -186,7 +186,7 @@ func cwdRefusal(format string, args ...any) error {
 // when f is nil); otherwise cwd must resolve under an allowlisted root, or
 // (with f nil, the stdio path with no allowlist) is returned unchanged.
 func ResolveSessionCwd(f *Factory, cwd, fallback string) (string, error) {
-	if cwd != "" && !filepath.IsAbs(cwd) {
+	if cwd != "" && cwd != "/" && !filepath.IsAbs(cwd) {
 		return "", cwdRefusal("cwd must be an absolute path, got %q", cwd)
 	}
 	if f == nil {

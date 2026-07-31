@@ -8,7 +8,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
-	libacp "github.com/contenox/contenox/libacp"
+	libacp "github.com/contenox/libacp"
 )
 
 // quoteMarker is a blockquote's literal source prefix, kept verbatim so a

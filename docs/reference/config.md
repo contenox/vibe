@@ -99,7 +99,7 @@ contenox config list   # review current settings and their scope
 | `default-provider` | global | Provider type used when `--provider` is not passed |
 | `default-alt-model` | global | Secondary model exposed to chains through `{{var:alt_model}}` |
 | `default-alt-provider` | global | Secondary provider exposed to chains through `{{var:alt_provider}}` |
-| `default-autocomplete-model` | global | Model used for VS Code code-completion requests, independent of `default-model` |
+| `default-autocomplete-model` | global | Model used for editor code-completion (FIM autocomplete) requests over ACP, independent of `default-model` |
 | `default-autocomplete-provider` | global | Provider for the autocomplete model, independent of `default-provider` |
 | `default-embed-model` | global | Embedding model used by `contenox index` / `contenox search`. Unset falls back to `default-model`, which embeds only on some providers |
 | `default-embed-provider` | global | Provider for the embedding model, independent of `default-provider`. Unset uses `default-provider` |
