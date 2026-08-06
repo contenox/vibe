@@ -183,6 +183,18 @@ const navSections = await buildNavSections();
         });
         pre.appendChild(btn);
       });
+      document.querySelectorAll('[data-copy]').forEach((btn) => {
+        const original = btn.textContent;
+        btn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(btn.dataset.copy);
+            btn.textContent = 'Copied';
+          } catch {
+            btn.textContent = 'Failed';
+          }
+          setTimeout(() => { btn.textContent = original; }, 1500);
+        });
+      });
     </script>
   </body>
 </html>

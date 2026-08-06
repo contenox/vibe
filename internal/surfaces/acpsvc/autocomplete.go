@@ -10,11 +10,11 @@ import (
 	"unicode"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // extMethodAutocomplete is the FIM (fill-in-the-middle) extension method:

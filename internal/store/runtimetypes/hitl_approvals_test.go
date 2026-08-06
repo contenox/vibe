@@ -342,3 +342,112 @@ func TestUnit_HITLApprovals_UnattributedRowIsEmptyNotNull(t *testing.T) {
 	require.Empty(t, got.AgentName)
 	require.Nil(t, got.MissionID, "no mission must read back as NULL, not as an empty string")
 }
+
+// attentionAsk builds a pending attention ask on missionID, in the shape
+// hitlservice writes them (the marks ResolveHITLApprovalWithinBound counts on).
+func attentionAsk(missionID string) *runtimetypes.HITLApproval {
+	a := newPendingApproval()
+	a.ToolsName, a.ToolName = "mission", "mission_ask_attention"
+	a.ArgsSummary = "which branch?"
+	a.MissionID = &missionID
+	return a
+}
+
+// agentAnswerBound is the predicate hitlservice passes for missionID.
+func agentAnswerBound(missionID string, max int) runtimetypes.AgentAnswerBound {
+	return runtimetypes.AgentAnswerBound{
+		MissionID:      missionID,
+		ToolsName:      "mission",
+		ToolName:       "mission_ask_attention",
+		ResolutionLike: `%"answeredBy":%`,
+		Max:            max,
+	}
+}
+
+// TestUnit_HITLApprovals_ResolveWithinBoundStopsAtTheCap pins the count-and-write
+// as one statement: the write itself refuses once the mission holds Max
+// agent-answered asks, so a caller that counted before any of them landed
+// cannot spend budget that is gone.
+func TestUnit_HITLApprovals_ResolveWithinBoundStopsAtTheCap(t *testing.T) {
+	t.Parallel()
+	ctx, s := setupHITLApprovalsStore(t)
+	const missionID = "m-bounded"
+	const max = 2
+
+	rows := make([]*runtimetypes.HITLApproval, 0, 5)
+	for i := 0; i < 5; i++ {
+		a := attentionAsk(missionID)
+		require.NoError(t, s.CreateHITLApproval(ctx, a))
+		rows = append(rows, a)
+	}
+
+	landed := 0
+	for _, a := range rows {
+		err := s.ResolveHITLApprovalWithinBound(ctx, a.ID, agentAnswerBound(missionID, max),
+			runtimetypes.HITLApprovalApproved, json.RawMessage(`{"answer":"main","answeredBy":"oracle"}`), time.Now().UTC())
+		if err == nil {
+			landed++
+			continue
+		}
+		require.ErrorIs(t, err, libdb.ErrNotFound, "a spent bound refuses like a lost CAS does")
+		got, getErr := s.GetHITLApproval(ctx, a.ID)
+		require.NoError(t, getErr)
+		require.Equal(t, runtimetypes.HITLApprovalPending, got.State,
+			"the row is untouched, which is how a caller tells a spent bound from an already-answered ask")
+	}
+	require.Equal(t, max, landed)
+}
+
+// TestUnit_HITLApprovals_ResolveWithinBoundCountsOnlyAgentAnswers pins the two
+// halves of the predicate: a human's answer on the same mission spends no
+// budget, and another mission's agent answers spend none of this one's.
+func TestUnit_HITLApprovals_ResolveWithinBoundCountsOnlyAgentAnswers(t *testing.T) {
+	t.Parallel()
+	ctx, s := setupHITLApprovalsStore(t)
+	const missionID = "m-mixed"
+	now := time.Now().UTC()
+
+	human := attentionAsk(missionID)
+	require.NoError(t, s.CreateHITLApproval(ctx, human))
+	require.NoError(t, s.ResolveHITLApproval(ctx, human.ID, runtimetypes.HITLApprovalApproved,
+		json.RawMessage(`{"answer":"a human said answeredBy is not a key here"}`), now))
+
+	other := attentionAsk("m-elsewhere")
+	require.NoError(t, s.CreateHITLApproval(ctx, other))
+	require.NoError(t, s.ResolveHITLApprovalWithinBound(ctx, other.ID, agentAnswerBound("m-elsewhere", 1),
+		runtimetypes.HITLApprovalApproved, json.RawMessage(`{"answer":"x","answeredBy":"oracle"}`), now))
+
+	agent := attentionAsk(missionID)
+	require.NoError(t, s.CreateHITLApproval(ctx, agent))
+	require.NoError(t, s.ResolveHITLApprovalWithinBound(ctx, agent.ID, agentAnswerBound(missionID, 1),
+		runtimetypes.HITLApprovalApproved, json.RawMessage(`{"answer":"main","answeredBy":"oracle"}`), now),
+		"neither the human answer nor another mission's agent answer counts against this cap")
+
+	next := attentionAsk(missionID)
+	require.NoError(t, s.CreateHITLApproval(ctx, next))
+	require.ErrorIs(t, s.ResolveHITLApprovalWithinBound(ctx, next.ID, agentAnswerBound(missionID, 1),
+		runtimetypes.HITLApprovalApproved, json.RawMessage(`{"answer":"main","answeredBy":"oracle"}`), now),
+		libdb.ErrNotFound, "the one agent answer that does count spends the cap")
+}
+
+// TestUnit_HITLApprovals_ResolveWithinBoundKeepsThePendingCAS pins that the
+// bound is an EXTRA predicate, not a replacement: a row already resolved stays
+// single-winner even with budget to spare.
+func TestUnit_HITLApprovals_ResolveWithinBoundKeepsThePendingCAS(t *testing.T) {
+	t.Parallel()
+	ctx, s := setupHITLApprovalsStore(t)
+	const missionID = "m-cas"
+	now := time.Now().UTC()
+
+	a := attentionAsk(missionID)
+	require.NoError(t, s.CreateHITLApproval(ctx, a))
+	require.NoError(t, s.ResolveHITLApproval(ctx, a.ID, runtimetypes.HITLApprovalExpired, nil, now))
+
+	require.ErrorIs(t, s.ResolveHITLApprovalWithinBound(ctx, a.ID, agentAnswerBound(missionID, 5),
+		runtimetypes.HITLApprovalApproved, json.RawMessage(`{"answer":"late","answeredBy":"oracle"}`), now),
+		libdb.ErrNotFound)
+
+	got, err := s.GetHITLApproval(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, runtimetypes.HITLApprovalExpired, got.State)
+}

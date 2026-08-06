@@ -341,6 +341,83 @@ func TestUnit_GitTools_RestoreDiscardsAndUnstages(t *testing.T) {
 	assert.Contains(t, err.Error(), "restoring the whole repository")
 }
 
+// TestUnit_GitTools_PathsStringIsOnePath pins the paths contract of git_add and
+// git_restore: ONE string is ONE path. The argument used to be shell-split, so
+// "my notes.txt" staged neither "my" nor "notes.txt", and a backslash or a quote
+// in a name was interpreted rather than used. BREAKING for any caller that
+// passed "a b" meaning two paths — that spelling now names a single file, and
+// two paths need the array form.
+func TestUnit_GitTools_PathsStringIsOnePath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	newTestRepo(t, dir, map[string]string{"a.txt": "one\n"})
+	writeRepoFile(t, dir, "my notes.txt", "spaced\n")
+	tools := localtools.NewGitTools(dir)
+
+	added := mustGitExec(t, tools, "git_add", map[string]any{"paths": "my notes.txt"})
+	assert.Contains(t, added, "staged my notes.txt")
+
+	status := mustGitExec(t, tools, "git_status", nil)
+	assert.Contains(t, status, "staged for commit")
+	assert.Contains(t, status, "my notes.txt")
+
+	// The same name survives a round trip through git_restore.
+	out := mustGitExec(t, tools, "git_restore", map[string]any{"paths": "my notes.txt", "staged": true})
+	assert.Contains(t, out, "unstaged my notes.txt")
+	content, err := os.ReadFile(filepath.Join(dir, "my notes.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "spaced\n", string(content), "staged=true must not touch file contents")
+
+	// Two paths in one string are no longer two paths: the call fails naming the
+	// path it looked for, instead of silently staging something else.
+	_, err = gitExec(t, tools, "git_add", map[string]any{"paths": "a.txt my notes.txt"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "a.txt my notes.txt")
+
+	// A blank string is "no paths", the same missing-argument error as no paths.
+	_, err = gitExec(t, tools, "git_add", map[string]any{"paths": "   "})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "paths is required")
+}
+
+// TestUnit_GitTools_PathsDeclaredAsStringOrArray pins the other half of that
+// fix: the descriptor and the published schema say what repoRelPaths accepts.
+// The descriptor used to declare paths a plain "string" while the code took an
+// array too.
+func TestUnit_GitTools_PathsDeclaredAsStringOrArray(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tools := localtools.NewGitTools(t.TempDir())
+
+	declared, err := tools.GetToolsForToolsByName(ctx, "git")
+	require.NoError(t, err)
+	byName := map[string]taskengine.Tool{}
+	for _, tool := range declared {
+		byName[tool.Function.Name] = tool
+	}
+
+	docs, err := tools.(schemaRepo).GetSchemasForSupportedTools(ctx)
+	require.NoError(t, err)
+	require.NoError(t, docs["git"].Validate(ctx), "a type union must still render as a valid document")
+
+	for tool, component := range map[string]string{"git_add": "GitAdd", "git_restore": "GitRestore"} {
+		params, ok := byName[tool].Function.Parameters.(map[string]any)
+		require.Truef(t, ok, "%s: %T", tool, byName[tool].Function.Parameters)
+		paths, ok := params["properties"].(map[string]any)["paths"].(map[string]any)
+		require.Truef(t, ok, "%s declares no paths property", tool)
+		types, ok := paths["type"].([]any)
+		require.Truef(t, ok, "%s.paths declares type %v, want a union", tool, paths["type"])
+		assert.Containsf(t, types, "string", "%s.paths takes one path", tool)
+		assert.Containsf(t, types, "array", "%s.paths takes an array of paths", tool)
+
+		published := docs["git"].Components.Schemas[component+"Request"].Value.Properties["paths"].Value
+		require.NotNilf(t, published.Type, "%s.paths is published without a type", tool)
+		assert.Containsf(t, []string(*published.Type), "string", "%s.paths loses its string branch", tool)
+		assert.Containsf(t, []string(*published.Type), "array", "%s.paths loses its array branch", tool)
+		require.NotNilf(t, published.Items, "%s.paths: an array branch needs an item schema to be a valid document", tool)
+	}
+}
+
 func TestUnit_GitTools_ArgumentContract(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

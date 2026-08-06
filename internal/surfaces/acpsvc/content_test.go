@@ -3,7 +3,7 @@ package acpsvc
 import (
 	"testing"
 
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

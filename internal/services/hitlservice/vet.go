@@ -30,10 +30,11 @@ func VetPolicy(data []byte) error {
 	if err := json.Unmarshal(data, &top); err != nil {
 		return fmt.Errorf("%w: not a JSON object: %v", ErrEnvelopeVet, err)
 	}
-	errs = append(errs, vetUnknownKeys("", top, []string{"default_action", "rules", "compute", "attention"})...)
+	errs = append(errs, vetUnknownKeys("", top, []string{"version", "default_action", "rules", "compute", "attention", "trusted_binaries"})...)
 	errs = append(errs, vetRuleShapes(top["rules"])...)
 	errs = append(errs, vetSubObjectShape("compute", top["compute"], []string{"maxTurns", "maxToolCalls", "maxTokens", "modelAllowlist", "backendAllowlist", "onExhausted"})...)
 	errs = append(errs, vetSubObjectShape("attention", top["attention"], []string{"allowAgentAnswers", "maxAgentAnswers"})...)
+	errs = append(errs, vetSubObjectShape("trusted_binaries", top["trusted_binaries"], []string{"dirs", "hashes"})...)
 
 	var p Policy
 	if err := json.Unmarshal(data, &p); err != nil {

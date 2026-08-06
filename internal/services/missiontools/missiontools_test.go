@@ -2,9 +2,11 @@ package missiontools_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +131,23 @@ func TestUnit_MissionTools_ReportDefaultsKind(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, reports, 1)
 	require.Equal(t, missionservice.ReportKindProgress, reports[0].Kind)
+
+	// Neither the enum nor the required set can carry a default, so the
+	// descriptor states it — and the published request schema, which is that
+	// descriptor rendered, therefore states it too.
+	declared, err := tools.GetToolsForToolsByName(missiontools.WithMissionID(ctx, missionID), missiontools.ToolsProviderName)
+	require.NoError(t, err)
+	var params map[string]any
+	for _, tool := range declared {
+		if tool.Function.Name == missiontools.ToolNameReport {
+			params = tool.Function.Parameters.(map[string]any)
+		}
+	}
+	require.NotNil(t, params, "mission_report is declared on a mission")
+	require.NotContains(t, params["required"], "kind", "kind stays optional; the default is what makes that safe")
+	kind := params["properties"].(map[string]any)["kind"].(map[string]any)
+	require.Contains(t, kind["description"], "Omitted or blank files the report as progress.",
+		"the default Exec applies must be in the description, since no error would ever teach it")
 }
 
 // TestUnit_MissionTools_ReportReadsModelArgs pins that the model-driven map[string]any input is read, including refs as a JSON array.
@@ -518,7 +537,11 @@ func finishCall(status, reason string) *taskengine.ToolsCall {
 	}
 }
 
-// TestUnit_MissionTools_FinishSetsTerminalStatus pins that mission_finish moves to the named terminal state, records the reason, heartbeats.
+// TestUnit_MissionTools_FinishSetsTerminalStatus pins that mission_finish
+// moves to the named terminal state and records the reason, and that the
+// heartbeat every tool call ends with leaves a terminal mission at rest —
+// liveness on a finished mission is meaningless, and stamping it would put an
+// at-rest row back in motion past the abandoned-mission sweep.
 func TestUnit_MissionTools_FinishSetsTerminalStatus(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -532,7 +555,7 @@ func TestUnit_MissionTools_FinishSetsTerminalStatus(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, missionservice.StatusLanded, m.Status)
 	require.Equal(t, "shipped it", m.StatusReason)
-	require.NotNil(t, m.LastHeartbeat, "finishing a mission heartbeats it")
+	require.Nil(t, m.LastHeartbeat, "a terminal mission is left at rest, not heartbeated")
 }
 
 // TestUnit_MissionTools_FinishReadsModelStuck pins that the model-driven shape and a stuck verdict both work.
@@ -619,4 +642,133 @@ func TestUnit_MissionTools_AskAttentionFallsBackWhenUnanswered(t *testing.T) {
 	require.Equal(t, "which project?", reports[0].Summary)
 	require.Contains(t, reports[0].Detail, "the intent named none", "the original detail is kept")
 	require.Contains(t, reports[0].Detail, "got no answer", "…and says an answer was solicited and missed")
+}
+
+// marshalJSON renders a value as JSON for a schema-versus-descriptor comparison.
+func marshalJSON(t *testing.T, v any) string {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	require.NoError(t, err)
+	return string(raw)
+}
+
+// decodedSchema renders a descriptor's parameters or a published schema as
+// plain JSON values, dropping an empty `properties` map: "declares no
+// properties" and "declares an empty property set" are the same statement, and
+// only the descriptor spells it out.
+func decodedSchema(t *testing.T, v any) map[string]any {
+	t.Helper()
+	var out map[string]any
+	require.NoError(t, json.Unmarshal([]byte(marshalJSON(t, v)), &out))
+	if props, ok := out["properties"].(map[string]any); ok && len(props) == 0 {
+		delete(out, "properties")
+	}
+	return out
+}
+
+// TestUnit_MissionTools_PublishedSchemaMatchesToolDescriptors pins the
+// declared OpenAPI contract and its agreement with what actually reaches the
+// model: every tool this provider declares — the unit's four and the
+// supervisor's two — carries a request schema that IS its descriptor rendered,
+// and a response schema describing what Exec returns for it.
+func TestUnit_MissionTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
+	ctx, tools, _ := supervisorFixture(t)
+
+	docs, err := tools.GetSchemasForSupportedTools(ctx)
+	require.NoError(t, err)
+	doc, ok := docs[missiontools.ToolsProviderName]
+	require.True(t, ok, "the toolset publishes its contract under its provider name")
+	require.Equal(t, "3.1.0", doc.OpenAPI)
+	require.NotNil(t, doc.Info)
+	require.NotEmpty(t, doc.Info.Title)
+	require.NotEmpty(t, doc.Info.Description)
+	require.NotEmpty(t, doc.Info.Version)
+	require.NotNil(t, doc.Components)
+	require.NoError(t, doc.Validate(ctx), "the published document is a valid OpenAPI document, not a shape that only looks like one")
+
+	// The component name is part of the contract: a rename is a breaking change.
+	components := map[string]string{
+		missiontools.ToolNameReport:       "MissionReport",
+		missiontools.ToolNameAskAttention: "MissionAskAttention",
+		missiontools.ToolNamePlan:         "MissionPlan",
+		missiontools.ToolNameFinish:       "MissionFinish",
+		missiontools.ToolNameListMissions: "MissionList",
+		missiontools.ToolNameAnswer:       "MissionAnswer",
+	}
+	require.Len(t, doc.Components.Schemas, 2*len(components)+1,
+		"a request and a response per tool, plus the document mission_list returns as text")
+
+	// Both gates, since neither alone lists everything the provider declares.
+	unit, err := tools.GetToolsForToolsByName(missiontools.WithMissionID(ctx, "m-mine"), missiontools.ToolsProviderName)
+	require.NoError(t, err)
+	supervisor, err := tools.GetToolsForToolsByName(missiontools.WithParentSessionID(ctx, "cnx-parent"), missiontools.ToolsProviderName)
+	require.NoError(t, err)
+	declared := map[string]taskengine.Tool{}
+	for _, tool := range append(unit, supervisor...) {
+		declared[tool.Function.Name] = tool
+	}
+	require.Len(t, declared, len(components), "every tool the provider declares is published")
+
+	for name, tool := range declared {
+		component, ok := components[name]
+		require.Truef(t, ok, "%s declares no OpenAPI component prefix", name)
+
+		req := doc.Components.Schemas[component+"Request"]
+		require.NotNilf(t, req, "%s: no request schema is published", name)
+		require.Equalf(t, decodedSchema(t, tool.Function.Parameters), decodedSchema(t, req.Value),
+			"%s: the published request must be the descriptor rendered, not a second copy of it", name)
+		for prop, published := range req.Value.Properties {
+			require.NotNilf(t, published.Value.Type, "%s.%s is typed", name, prop)
+			require.NotEmptyf(t, published.Value.Description, "%s.%s is described", name, prop)
+		}
+
+		resp := doc.Components.Schemas[component+"Response"]
+		require.NotNilf(t, resp, "%s: no response schema is published", name)
+		require.NotEmptyf(t, resp.Value.Description+strings.Join(resp.Value.Required, ""),
+			"%s: the response schema says nothing about what the tool returns", name)
+	}
+
+	// Closed value sets are declared as enums, not left to prose.
+	report := doc.Components.Schemas["MissionReportRequest"]
+	require.ElementsMatch(t, []string{"summary"}, report.Value.Required)
+	require.ElementsMatch(t, []any{"progress", "finding", "blocker", "result"}, report.Value.Properties["kind"].Value.Enum)
+	require.Contains(t, report.Value.Properties["kind"].Value.Description, "Omitted or blank files the report as progress.",
+		"kind is enum'd but not required: the default execReport applies is part of the published contract")
+	require.NotEmpty(t, report.Value.Properties["handover"].Value.Properties, "the nested hand-off shape survives publication")
+	finish := doc.Components.Schemas["MissionFinishRequest"]
+	require.ElementsMatch(t, []any{"landed", "derailed", "stuck", "abandoned"}, finish.Value.Properties["status"].Value.Enum)
+	entries := doc.Components.Schemas["MissionPlanRequest"].Value.Properties["entries"]
+	require.ElementsMatch(t, []string{"content", "status", "priority"}, entries.Value.Items.Value.Required,
+		"the nested plan-entry shape survives publication")
+
+	// Every tool but mission_plan answers with a line of text.
+	for _, component := range []string{"MissionReport", "MissionAskAttention", "MissionFinish", "MissionList", "MissionAnswer"} {
+		require.Truef(t, doc.Components.Schemas[component+"Response"].Value.Type.Is("string"),
+			"%s returns text, and the published contract must say so", component)
+	}
+	require.NotNil(t, doc.Components.Schemas["MissionListPayload"], "the document mission_list serializes is declared too")
+
+	// The plan response is declared against what execPlan actually returns.
+	planSchema := doc.Components.Schemas["MissionPlanResponse"]
+	require.True(t, planSchema.Value.Type.Is("object"))
+	planCtx, svc, missionID := setup(t)
+	out, dt, err := missiontools.New(svc, nil).Exec(missiontools.WithMissionID(planCtx, missionID), time.Now(), map[string]any{
+		"entries":     []any{map[string]any{"content": "read the code", "status": "in_progress", "priority": "high"}},
+		"explanation": "first cut",
+	}, false, &taskengine.ToolsCall{Name: missiontools.ToolsProviderName, ToolName: missiontools.ToolNamePlan})
+	require.NoError(t, err)
+	require.Equal(t, taskengine.DataTypeJSON, dt)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(marshalJSON(t, out)), &got))
+	for key := range got {
+		require.Containsf(t, planSchema.Value.Properties, key, "the plan payload carries %s but the published schema does not declare it", key)
+	}
+	for _, key := range planSchema.Value.Required {
+		require.Containsf(t, got, key, "the published schema requires %s but the payload omits it", key)
+	}
+	entry := got["entries"].([]any)[0].(map[string]any)
+	for key := range entry {
+		require.Containsf(t, planSchema.Value.Properties["entries"].Value.Items.Value.Properties, key,
+			"a stored plan entry carries %s but the published schema does not declare it", key)
+	}
 }

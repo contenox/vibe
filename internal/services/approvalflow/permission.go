@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 const (

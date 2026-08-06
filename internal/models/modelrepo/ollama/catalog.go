@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/ollama/ollama/api"
 	ollamamodel "github.com/ollama/ollama/types/model"
 )

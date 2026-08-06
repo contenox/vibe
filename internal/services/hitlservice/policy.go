@@ -4,12 +4,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strings"
 )
+
+// PolicySchemaVersion is the envelope wire version this binary can load, the
+// taskengine.CheckpointSchemaVersion of the policy document. Bump it only
+// together with the migration a document written under the previous version
+// needs, never alone: an unmigratable version is refused, not guessed at.
+const PolicySchemaVersion = 1
+
+// ErrPolicyVersion reports an envelope whose declared version this binary
+// cannot load — newer than it knows, or older with no migration.
+var ErrPolicyVersion = errors.New("hitlservice: unsupported hitl policy version")
 
 // Action is the outcome of policy evaluation for a tool call.
 type Action string
@@ -126,12 +138,25 @@ type Rule struct {
 // Compute is the optional compute half of the envelope (see ComputeBounds);
 // a nil Compute is unbounded, matching pre-existing behavior byte-for-byte.
 type Policy struct {
+	// Version is the envelope's wire version (see PolicySchemaVersion).
+	// Absent (0) means PolicySchemaVersion: every shipped preset and every
+	// user-authored policy predates the field and must keep loading
+	// unchanged, so absence can never be a load failure. The top-level decode
+	// is lax (only the named sub-objects run DisallowUnknownFields), so an
+	// older binary reading a versioned document ignores the key rather than
+	// refusing it — which is why the refusal has to be a validation, not a
+	// decode error.
+	Version       int            `json:"version,omitempty"`
 	DefaultAction Action         `json:"default_action,omitempty"`
 	Rules         []Rule         `json:"rules"`
 	Compute       *ComputeBounds `json:"compute,omitempty"`
 	// Attention is the optional attention half: who may answer a unit's
 	// question (see AttentionBounds). Nil means a human must.
 	Attention *AttentionBounds `json:"attention,omitempty"`
+	// TrustedBinaries gates every allow a command_prefix_allowlist would
+	// grant on the identity and integrity of the binary the named command
+	// resolves to (see TrustedBinaries). Nil is inert.
+	TrustedBinaries *TrustedBinaries `json:"trusted_binaries,omitempty"`
 }
 
 // OnExhausted names what a mission does when it crosses a compute bound —
@@ -140,11 +165,11 @@ type OnExhausted string
 
 const (
 	// OnExhaustedFinishStuck finishes the mission at StatusStuck; the
-	// default and only behavior enforced today.
+	// default and only implemented behavior.
 	OnExhaustedFinishStuck OnExhausted = "finish_stuck"
-	// OnExhaustedPauseAsk is declared but not implemented: until the
-	// machinery lands, an envelope that sets it is honored as finish_stuck
-	// at the enforcement seam. `contenox vet` warns on it at authoring time.
+	// OnExhaustedPauseAsk is rejected by validatePolicy: it was declared
+	// but never implemented, and was silently honored as
+	// OnExhaustedFinishStuck before it became an error.
 	OnExhaustedPauseAsk OnExhausted = "pause_ask"
 )
 
@@ -153,10 +178,13 @@ const (
 // ceiling and opt-in — zero/absent is unbounded, and bounds only ever
 // restrict. Exhaustion is never silent (see OnExhausted).
 //
-// MaxTurns and MaxToolCalls are enforced host-side. MaxTokens is
-// best-effort, enforced only when the unit reports usage. ModelAllowlist and
-// BackendAllowlist are enforced at the resolution seam, covering chat,
-// prompt, stream, and embed.
+// MaxTurns is enforced host-side, and only 1 has an effect: it drops the one
+// runtime nudge turn, since the dispatcher never issues more than two (see
+// validateMaxTurns, which refuses any other non-zero value). MaxToolCalls is validated but not enforced
+// by any shipped host: its one enforcement seam is the unattended permission
+// answerer, which no shipped host wires. MaxTokens is best-effort, enforced
+// only when the unit reports usage. ModelAllowlist and BackendAllowlist are
+// enforced at the resolution seam, covering chat, prompt, stream, and embed.
 type ComputeBounds struct {
 	MaxTurns         int         `json:"maxTurns,omitempty"`
 	MaxToolCalls     int         `json:"maxToolCalls,omitempty"`
@@ -170,7 +198,6 @@ type ComputeBounds struct {
 // negative or absurd value (a typo) rather than impose a house style on how
 // tight a bound should be.
 const (
-	maxComputeTurns               = 100_000
 	maxComputeToolCalls           = 10_000_000
 	maxComputeTokens              = 100_000_000_000
 	maxComputeAllowlist           = 256
@@ -202,12 +229,22 @@ type EvaluationResult struct {
 type evalScope struct {
 	args      map[string]any
 	shellKind ShellKind
+	trusted   *TrustedBinaries
 	readOnce  bool
 	reading   shellReading
+	// trustNote is the first binary refusal that withdrew an allow. It
+	// outlives the rule that triggered it — the rule stops matching, so its
+	// own matchNote is discarded — and is attached to the resulting ask (see
+	// detailWithTrustNote) so the card says which binary was not trusted.
+	trustNote string
 }
 
-func newEvalScope(ctx context.Context, args map[string]any) *evalScope {
-	return &evalScope{args: args, shellKind: ShellKindFromContext(ctx)}
+func newEvalScope(ctx context.Context, p *Policy, args map[string]any) *evalScope {
+	scope := &evalScope{args: args, shellKind: ShellKindFromContext(ctx)}
+	if p != nil {
+		scope.trusted = p.TrustedBinaries
+	}
+	return scope
 }
 
 func (e *evalScope) shell() shellReading {
@@ -216,6 +253,36 @@ func (e *evalScope) shell() shellReading {
 		e.readOnce = true
 	}
 	return e.reading
+}
+
+// trusts is the allow path's last gate: every command word an allow would
+// bless must resolve to a declared binary (see TrustedBinaries). It can only
+// withdraw an allow, so a policy without declarations answers exactly as before.
+func (e *evalScope) trusts(names []string) bool {
+	if !e.trusted.enforced() {
+		return true
+	}
+	if len(names) == 0 {
+		// An allow whose program word cannot even be named is not one this
+		// gate can vouch for.
+		e.noteTrustRefusal("the allowed command could not be named for a trusted-binary check — allow refused")
+		return false
+	}
+	for _, name := range names {
+		if msg := e.trusted.verifyCommand(name); msg != "" {
+			e.noteTrustRefusal(msg)
+			return false
+		}
+	}
+	return true
+}
+
+// noteTrustRefusal keeps the FIRST refusal: it is the one the operator should
+// fix first, and a later rule's identical finding adds nothing.
+func (e *evalScope) noteTrustRefusal(msg string) {
+	if e.trustNote == "" {
+		e.trustNote = msg
+	}
 }
 
 // matchNote is what a condition learned while matching, for EvaluationResult.Detail.
@@ -240,7 +307,7 @@ func (n matchNote) detail() string {
 
 // evaluate returns the EvaluationResult for the given tools, tool name, and call args.
 func evaluate(ctx context.Context, p *Policy, toolsName, toolName string, args map[string]any) EvaluationResult {
-	scope := newEvalScope(ctx, args)
+	scope := newEvalScope(ctx, p, args)
 	for i, r := range p.Rules {
 		var note matchNote
 		if ruleMatches(r, toolsName, toolName, scope, &note) {
@@ -251,7 +318,7 @@ func evaluate(ctx context.Context, p *Policy, toolsName, toolName string, args m
 				Reason:      ReasonMatchedRule,
 				TimeoutS:    r.TimeoutS,
 				OnTimeout:   r.OnTimeout,
-				Detail:      note.detail(),
+				Detail:      detailWithTrustNote(note.detail(), r.Action, scope),
 			}
 		}
 	}
@@ -262,7 +329,22 @@ func evaluate(ctx context.Context, p *Policy, toolsName, toolName string, args m
 	return EvaluationResult{
 		Action: defaultAction,
 		Reason: ReasonDefaultAction,
+		Detail: detailWithTrustNote("", defaultAction, scope),
 	}
+}
+
+// detailWithTrustNote attaches a withdrawn allow's cause to the ask that
+// resulted — the card a human is looking at wondering why this stopped.
+// Attached only to an approve: an allow means the refusal decided nothing,
+// and a deny already carries the stronger reason it was denied for.
+func detailWithTrustNote(base string, action Action, scope *evalScope) string {
+	if action != ActionApprove || scope.trustNote == "" {
+		return base
+	}
+	if base == "" {
+		return scope.trustNote
+	}
+	return base + "; " + scope.trustNote
 }
 
 func ruleMatches(r Rule, toolsName, toolName string, scope *evalScope, note *matchNote) bool {
@@ -272,14 +354,18 @@ func ruleMatches(r Rule, toolsName, toolName string, scope *evalScope, note *mat
 		return false
 	}
 	for _, c := range r.When {
-		if !conditionMatches(c, scope, note) {
+		if !conditionMatches(c, r.Action, scope, note) {
 			return false
 		}
 	}
 	return true
 }
 
-func conditionMatches(c Condition, scope *evalScope, note *matchNote) bool {
+// conditionMatches takes the rule's action because one operator's behavior
+// depends on it: the trusted-binary gate may only withdraw an ALLOW. Applied
+// to a rule that denies or asks, withdrawing the match would let the call
+// through — a widening, and the one shape this whole layer must never have.
+func conditionMatches(c Condition, action Action, scope *evalScope, note *matchNote) bool {
 	args := scope.args
 	val, ok := args[c.Key]
 	if !ok {
@@ -314,7 +400,7 @@ func conditionMatches(c Condition, scope *evalScope, note *matchNote) bool {
 				return true
 			}
 		case OpCommandPrefixAllowlist:
-			if commandPrefixAllowMatch(scope, c.Value) {
+			if commandPrefixAllowMatch(scope, c.Value, action) {
 				return true
 			}
 		}
@@ -352,11 +438,60 @@ func commandSubstitutionMatch(scope *evalScope) bool {
 // tokenizer's own match is revoked when structure shows a command it wasn't
 // reading (see structuralContradictsPrefix) — the one place a structural
 // reading overrides an allow rather than adding one.
-func commandPrefixAllowMatch(scope *evalScope, prefixList string) bool {
-	if isCommandPrefixAllowed(scope.args, prefixList) {
-		return !structuralContradictsPrefix(scope.shell(), prefixList)
+//
+// Whichever path grants it, the allow is then gated on the identity and
+// integrity of the binaries the names resolve to (see TrustedBinaries): a
+// prefix pins a NAME, and PATH decides what that name is. That gate applies
+// ONLY when the rule allows — withdrawing the match from a rule that denies
+// or asks would let the call through, which is the one thing this may not do.
+func commandPrefixAllowMatch(scope *evalScope, prefixList string, action Action) bool {
+	gate := func(names []string) bool {
+		if action != ActionAllow {
+			return true
+		}
+		return scope.trusts(names)
 	}
-	return structuralPrefixAllowed(scope.shell(), prefixList)
+	if isCommandPrefixAllowed(scope.args, prefixList) {
+		if structuralContradictsPrefix(scope.shell(), prefixList) {
+			return false
+		}
+		return gate(tokenizerProgramWords(scope.args))
+	}
+	if !structuralPrefixAllowed(scope.shell(), prefixList) {
+		return false
+	}
+	return gate(structuralProgramWords(scope.shell()))
+}
+
+// tokenizerProgramWords is the program word of a plain argv call as WRITTEN —
+// before commandTokens flattens it to a basename, since "/usr/bin/git" and
+// "git" resolve differently and the resolution is the point.
+func tokenizerProgramWords(args map[string]any) []string {
+	if cmd, ok := args["command"].(string); ok {
+		if fields := strings.Fields(cmd); len(fields) > 0 {
+			return fields[:1]
+		}
+	}
+	if tokens := argTokens(args["args"]); len(tokens) > 0 {
+		return tokens[:1]
+	}
+	return nil
+}
+
+// structuralProgramWords is every program word the structural reading named.
+// Only reached on the upgrade path, where the audit guarantees each one is a
+// fully literal word.
+func structuralProgramWords(r shellReading) []string {
+	out := make([]string, 0, len(r.commands))
+	for _, cmd := range r.commands {
+		if cmd.name == "" {
+			// Unnameable here means the upgrade path let something through it
+			// could not read; refuse rather than vouch for it.
+			return nil
+		}
+		out = append(out, cmd.name)
+	}
+	return out
 }
 
 // urlHostMatches parses rawURL and reports whether its host equals, or is a
@@ -658,8 +793,28 @@ func commandTokens(args map[string]any) (tokens []string, ok bool) {
 			}
 		}
 	}
-	raw[0] = path.Base(raw[0])
+	raw[0] = allowlistProgramWord(raw[0])
 	return raw, true
+}
+
+// allowlistProgramWord normalizes a program word for prefix matching.
+//
+// An absolute path keeps the basename rule: /usr/bin/git is the git a bare
+// "git" entry meant, and pinning identity for that case is trusted_binaries'
+// job, not the matcher's.
+//
+// A RELATIVE pathed word does not: "./node_modules/.bin/eslint" or
+// "tools/cat" names a file inside the very tree the agent was pointed at, so
+// reducing it to "eslint"/"cat" would let a checked-out repo or an unpacked
+// dependency inherit an allow meant for the operator's own toolchain. It is
+// compared as written instead, which no bare-name entry equals. The refusal
+// is not a denial: the call falls through to the next tier, which asks. An
+// operator who means a repo-local binary writes that path in the allowlist.
+func allowlistProgramWord(word string) string {
+	if !filepath.IsAbs(word) && strings.ContainsAny(word, `/\`) {
+		return word
+	}
+	return path.Base(word)
 }
 
 // shellModeRequested reports whether the call asked for the platform shell,
@@ -746,6 +901,9 @@ func loadPolicy(ctx context.Context, src PolicySource, tenantID, policyPath stri
 	if err := rejectUnknownComputeFields(data); err != nil {
 		return nil, fmt.Errorf("invalid hitl policy %q: %w", policyPath, err)
 	}
+	if err := rejectUnknownSubObjectFields(data, "trusted_binaries", &TrustedBinaries{}); err != nil {
+		return nil, fmt.Errorf("invalid hitl policy %q: %w", policyPath, err)
+	}
 	if err := validatePolicy(&p); err != nil {
 		return nil, fmt.Errorf("invalid hitl policy %q: %w", policyPath, err)
 	}
@@ -757,27 +915,38 @@ func loadPolicy(ctx context.Context, src PolicySource, tenantID, policyPath stri
 // silently running the mission unbounded. The rest of the policy stays
 // laxly parsed.
 func rejectUnknownComputeFields(data []byte) error {
-	var probe struct {
-		Compute json.RawMessage `json:"compute"`
-	}
+	return rejectUnknownSubObjectFields(data, "compute", &ComputeBounds{})
+}
+
+// rejectUnknownSubObjectFields strict-decodes one named sub-object of the
+// policy document into `into`, so a typo inside an enforcement block fails
+// the policy to load (falling back to the rule-free approve-everything
+// default) rather than silently disarming it.
+func rejectUnknownSubObjectFields(data []byte, field string, into any) error {
+	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(data, &probe); err != nil {
 		// Already reported by the top-level Unmarshal in loadPolicy.
 		return nil
 	}
-	if len(probe.Compute) == 0 {
+	raw, ok := probe[field]
+	if !ok || len(raw) == 0 || string(raw) == "null" {
 		return nil
 	}
-	dec := json.NewDecoder(bytes.NewReader(probe.Compute))
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var cb ComputeBounds
-	if err := dec.Decode(&cb); err != nil {
-		return fmt.Errorf("compute: %w", err)
+	if err := dec.Decode(into); err != nil {
+		return fmt.Errorf("%s: %w", field, err)
 	}
 	return nil
 }
 
 // validatePolicy checks semantic constraints that cannot be expressed in the JSON schema.
 func validatePolicy(p *Policy) error {
+	// Version first: every check below reads fields whose meaning is only
+	// pinned by the version that declared them.
+	if err := validatePolicyVersion(p.Version); err != nil {
+		return err
+	}
 	validActions := map[Action]bool{ActionAllow: true, ActionApprove: true, ActionDeny: true}
 	if p.DefaultAction != "" && !validActions[p.DefaultAction] {
 		return fmt.Errorf("unknown default_action %q", p.DefaultAction)
@@ -814,13 +983,32 @@ func validatePolicy(p *Policy) error {
 			return err
 		}
 	}
-	return nil
+	return validateTrustedBinaries(p.TrustedBinaries)
+}
+
+// validatePolicyVersion refuses a version this binary cannot load, rather
+// than decoding a document whose fields may have changed meaning under it.
+// Absent (0) is PolicySchemaVersion, so a policy written before the field
+// existed loads byte-identically. The older-with-no-migration arm is
+// unreachable while PolicySchemaVersion is 1 and becomes the seam a bump
+// must fill.
+func validatePolicyVersion(v int) error {
+	switch {
+	case v == 0 || v == PolicySchemaVersion:
+		return nil
+	case v < 0:
+		return fmt.Errorf("%w: version must not be negative (got %d)", ErrPolicyVersion, v)
+	case v > PolicySchemaVersion:
+		return fmt.Errorf("%w: policy declares version %d but this binary knows only %d — update contenox to load it", ErrPolicyVersion, v, PolicySchemaVersion)
+	default:
+		return fmt.Errorf("%w: policy declares version %d, which this binary can no longer load (current %d) — no migration is registered for it", ErrPolicyVersion, v, PolicySchemaVersion)
+	}
 }
 
 // validateComputeBounds checks shape only — non-negative and within its
 // defensive cap — never tightness.
 func validateComputeBounds(c *ComputeBounds) error {
-	if err := validateComputeCeiling("maxTurns", c.MaxTurns, maxComputeTurns); err != nil {
+	if err := validateMaxTurns(c.MaxTurns); err != nil {
 		return err
 	}
 	if err := validateComputeCeiling("maxToolCalls", c.MaxToolCalls, maxComputeToolCalls); err != nil {
@@ -830,14 +1018,31 @@ func validateComputeBounds(c *ComputeBounds) error {
 		return err
 	}
 	switch c.OnExhausted {
-	case "", OnExhaustedFinishStuck, OnExhaustedPauseAsk:
+	case "", OnExhaustedFinishStuck:
+	case OnExhaustedPauseAsk:
+		return fmt.Errorf("compute: %s is not implemented; use %s", OnExhaustedPauseAsk, OnExhaustedFinishStuck)
 	default:
-		return fmt.Errorf("compute: unknown onExhausted %q (must be finish_stuck or pause_ask)", c.OnExhausted)
+		return fmt.Errorf("compute: unknown onExhausted %q (must be %s)", c.OnExhausted, OnExhaustedFinishStuck)
 	}
 	if err := validateComputeAllowlist("modelAllowlist", c.ModelAllowlist); err != nil {
 		return err
 	}
 	return validateComputeAllowlist("backendAllowlist", c.BackendAllowlist)
+}
+
+// validateMaxTurns admits only the two values that change what a mission
+// does. The dispatcher issues at most two prompt turns — the unit's own turn
+// and one runtime nudge when it went mute — so 1 suppresses the nudge and
+// anything above it names a turn the dispatcher was never going to take.
+// Refusing those is the whole point: accepting them silently is how a shipped
+// preset came to declare maxTurns: 8, a ceiling nothing could ever reach.
+func validateMaxTurns(v int) error {
+	switch v {
+	case 0, 1:
+		return nil
+	default:
+		return fmt.Errorf("compute: maxTurns is %d, but a mission runs at most two prompt turns (its own, plus one runtime nudge when it reports nothing): only 1 has an effect — it drops the nudge — and omitting the field keeps it. Remove maxTurns or set it to 1", v)
+	}
 }
 
 func validateComputeCeiling(name string, v, max int) error {

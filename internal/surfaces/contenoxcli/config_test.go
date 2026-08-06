@@ -63,7 +63,7 @@ func TestUnit_getConfigKV_allConfigKeys(t *testing.T) {
 		"default-autocomplete-provider": "ollama",
 		"default-max-tokens":            "8192",
 		"default-think":                 "medium",
-		"default-chain":                 "default-chain.json",
+		"default-chain":                 "chain-agent-contenox.json",
 	}
 	for k, v := range pairs {
 		data, _ := json.Marshal(v)

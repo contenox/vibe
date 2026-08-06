@@ -13,11 +13,11 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -292,6 +292,7 @@ func newGojaHarness(t *testing.T, scripts map[string]string, answer func(hitlser
 		EffectiveSkipBackendCycle:    true,
 		EffectiveAskApproval:         asker.ask,
 		EffectiveTaskEventSink:       sink,
+		EffectiveOptInBeta:           true, // goja is beta-gated
 		ContenoxDir:                  contenoxDir,
 	})
 	require.NoError(t, err)
@@ -780,6 +781,7 @@ func TestSystem_Goja_ABadScriptIsAStartupErrorNamingTheFile(t *testing.T) {
 				EffectiveDefaultProvider:  "ollama",
 				EffectiveContext:          4096,
 				EffectiveSkipBackendCycle: true,
+				EffectiveOptInBeta:        true, // goja is beta-gated
 				ContenoxDir:               contenoxDir,
 			})
 			if engine != nil && engine.Stop != nil {

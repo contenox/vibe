@@ -7,7 +7,6 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/chatservice"
-	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -26,7 +25,7 @@ func newTitleTransport(t *testing.T) (context.Context, *Transport, *sessionEntry
 	internalID := "idx-" + uuid.NewString()
 	sessionName := "beam-" + uuid.NewString()
 
-	store := messagestore.New(db.WithoutTransaction(), titleTestWorkspace)
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), titleTestWorkspace)
 	require.NoError(t, store.CreateNamedMessageIndex(ctx, internalID, "acp-client", sessionName))
 
 	tr := &Transport{deps: Deps{DB: db, WorkspaceID: titleTestWorkspace}}
@@ -100,7 +99,7 @@ func TestUnit_SessionTitle_OverrideBeatsTheDerivedTitle(t *testing.T) {
 	mgr := chatservice.NewManager(titleTestWorkspace)
 
 	// No messages: the roster falls back to the raw `beam-<uuid>` name.
-	require.Equal(t, sessionName, tr.sessionListTitle(ctx, mgr, exec, sess.InternalSessionID, sessionName))
+	require.Equal(t, sessionName, tr.sessionListTitle(ctx, exec, sess.InternalSessionID, sessionName))
 	require.Equal(t, "", tr.sessionInfoTitle(ctx, sess.InternalSessionID), "no message, no live title")
 
 	// One user message: both readers derive the same subject.
@@ -108,19 +107,19 @@ func TestUnit_SessionTitle_OverrideBeatsTheDerivedTitle(t *testing.T) {
 		{ID: uuid.NewString(), Role: "user", Content: "why does the ingest retry loop forever?", Timestamp: time.Now().UTC()},
 	}))
 	const derived = "why does the ingest retry loop forever?"
-	require.Equal(t, derived, tr.sessionListTitle(ctx, mgr, exec, sess.InternalSessionID, sessionName))
+	require.Equal(t, derived, tr.sessionListTitle(ctx, exec, sess.InternalSessionID, sessionName))
 	require.Equal(t, derived, tr.sessionInfoTitle(ctx, sess.InternalSessionID))
 
 	// The operator's own name wins over the derived one, on both readers.
 	_, err := tr.handleRename(ctx, sess, "ingest retry bug")
 	require.NoError(t, err)
-	require.Equal(t, "ingest retry bug", tr.sessionListTitle(ctx, mgr, exec, sess.InternalSessionID, sessionName))
+	require.Equal(t, "ingest retry bug", tr.sessionListTitle(ctx, exec, sess.InternalSessionID, sessionName))
 	require.Equal(t, "ingest retry bug", tr.sessionInfoTitle(ctx, sess.InternalSessionID))
 
 	// Resetting falls back to the derived title, not the raw name.
 	_, err = tr.handleRename(ctx, sess, "-")
 	require.NoError(t, err)
-	require.Equal(t, derived, tr.sessionListTitle(ctx, mgr, exec, sess.InternalSessionID, sessionName))
+	require.Equal(t, derived, tr.sessionListTitle(ctx, exec, sess.InternalSessionID, sessionName))
 }
 
 // TestUnit_FirstUserMessageTitle_SkipsCommandShapedMessages pins that a
@@ -183,7 +182,7 @@ func TestUnit_FirstUserMessageTitle_SkipsCommandShapedMessages(t *testing.T) {
 			}
 			require.NoError(t, mgr.PersistDiff(ctx, exec, sess.InternalSessionID, msgs))
 
-			require.Equal(t, tc.want, firstUserMessageTitle(ctx, mgr, exec, sess.InternalSessionID))
+			require.Equal(t, tc.want, tr.firstUserMessageTitle(ctx, exec, sess.InternalSessionID))
 			// sessionInfoTitle shares the same derivation; must agree.
 			require.Equal(t, tc.want, tr.sessionInfoTitle(ctx, sess.InternalSessionID))
 		})
@@ -201,7 +200,7 @@ func TestUnit_SessionListTitle_RederivesOnceRealProseArrives(t *testing.T) {
 		{ID: uuid.NewString(), Role: "user", Content: "/doctor", Timestamp: time.Now().UTC()},
 		{ID: uuid.NewString(), Role: "assistant", Content: "all providers healthy", Timestamp: time.Now().UTC()},
 	}))
-	require.Equal(t, sessionName, tr.sessionListTitle(ctx, mgr, exec, sess.InternalSessionID, sessionName),
+	require.Equal(t, sessionName, tr.sessionListTitle(ctx, exec, sess.InternalSessionID, sessionName),
 		"a command-only session falls back to the raw name, not the command text")
 	require.Equal(t, "", tr.sessionInfoTitle(ctx, sess.InternalSessionID))
 
@@ -209,7 +208,7 @@ func TestUnit_SessionListTitle_RederivesOnceRealProseArrives(t *testing.T) {
 		{ID: uuid.NewString(), Role: "user", Content: "the retry loop never backs off", Timestamp: time.Now().UTC().Add(time.Millisecond)},
 	}))
 	const derived = "the retry loop never backs off"
-	require.Equal(t, derived, tr.sessionListTitle(ctx, mgr, exec, sess.InternalSessionID, sessionName))
+	require.Equal(t, derived, tr.sessionListTitle(ctx, exec, sess.InternalSessionID, sessionName))
 	require.Equal(t, derived, tr.sessionInfoTitle(ctx, sess.InternalSessionID))
 }
 

@@ -10,8 +10,8 @@ import (
 
 	"github.com/contenox/contenox/internal/errdefs"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/terminalstore"
+	"github.com/contenox/contenox/libtracker"
 )
 
 type CreateRequest struct {

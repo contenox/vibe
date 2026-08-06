@@ -10,7 +10,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/keymap"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/testkit"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // sessionBridge decorates testkit.FakeBridge with scripted results for
@@ -262,24 +262,31 @@ func TestUnit_Sessions_LoadFailureRestoresTheFilter(t *testing.T) {
 	requireContains(t, h.scrollback(), "you are still on", "the failure says where you ended up")
 }
 
-// TestUnit_Rename_ForwardsToTheAgentAndRelabels pins that /rename sends the
-// line verbatim and the status bar adopts the new title immediately.
-func TestUnit_Rename_ForwardsToTheAgentAndRelabels(t *testing.T) {
+// TestUnit_Rename_IsTheCoresCommandNotALocalShadow pins that /rename reaches
+// the agent as an ordinary line and that the label follows what the server
+// publishes back. beam registered a local shadow for this once; the two
+// derived the title differently (raw argument here, trimmed and
+// whitespace-collapsed there), so beam showed a name no other ACP client
+// would ever see.
+func TestUnit_Rename_IsTheCoresCommandNotALocalShadow(t *testing.T) {
 	h, _ := newSessionHarness(t)
 	h.start()
 	requireContains(t, testkit.EncodeLines(h.last().Live), "beam-0001", "the status bar starts on the session name")
 
-	h.runCommand("/rename the ingest rewrite")
+	if e, ok := h.a.pal.Lookup("rename"); ok && e.Local {
+		t.Fatal("beam still shadows the core's /rename with a local")
+	}
 
-	requireContains(t, h.calls(), `SubmitPrompt(beam-test-session, "/rename the ingest rewrite")`,
+	h.runCommand("/rename   the ingest   rewrite")
+	requireContains(t, h.calls(), `SubmitPrompt(beam-test-session, "/rename   the ingest   rewrite")`,
 		"rename is persisted server-side so every surface sees it")
-	requireContains(t, testkit.EncodeLines(h.last().Live), "the ingest rewrite", "the status bar adopts the new title")
-	requireNotContains(t, testkit.EncodeLines(h.last().Live), "beam-0001", "the old name is gone from the bar")
+	requireContains(t, testkit.EncodeLines(h.last().Live), "beam-0001",
+		"beam guessed at the title instead of waiting for the server's")
 
-	// `-` hands the label back to the derived title.
-	h.deliver(enginebridge.TurnEnded{SessionID: testSession, StopReason: libacp.StopReasonEndTurn})
-	h.runCommand("/rename -")
-	requireContains(t, testkit.EncodeLines(h.last().Live), "beam-0001", "reset falls back to the session name")
+	// The server's own session_info_update is what relabels the bar.
+	h.deliver(enginebridge.SessionInfoUpdated{SessionID: testSession, Title: "the ingest rewrite"})
+	requireContains(t, testkit.EncodeLines(h.last().Live), "the ingest rewrite", "the status bar adopts the published title")
+	requireNotContains(t, testkit.EncodeLines(h.last().Live), "beam-0001", "the old name is gone from the bar")
 }
 
 // TestUnit_Session_TitleFromTheServerReachesTheStatusBar pins that a title
@@ -337,7 +344,7 @@ func TestUnit_Session_UuidLabelIsShortenedUntilATitleLands(t *testing.T) {
 }
 
 // TestUnit_Sessions_BindingIsRegisteredAndDiscoverable pins that ctrl+s and
-// the session locals are discoverable via the registry, /help and the bare
+// the session locals are discoverable via the registry, /keys and the bare
 // "/" menu, with no separate hand-written text.
 func TestUnit_Sessions_BindingIsRegisteredAndDiscoverable(t *testing.T) {
 	r := keymap.NewRegistry()
@@ -360,10 +367,10 @@ func TestUnit_Sessions_BindingIsRegisteredAndDiscoverable(t *testing.T) {
 
 	h, _ := newSessionHarness(t)
 	h.start()
-	h.runCommand("/help")
+	h.runCommand("/keys")
 	printed := h.scrollback()
-	for _, want := range []string{"/new", "/sessions", "/rename", "switch sessions"} {
-		requireContains(t, printed, want, "/help is a projection of the registry and the palette")
+	for _, want := range []string{"/new", "/sessions", "switch sessions"} {
+		requireContains(t, printed, want, "/keys is a projection of the registry and the palette")
 	}
 
 	// The bare `/` menu lists them too.
@@ -401,6 +408,30 @@ func TestUnit_Sessions_CtrlSOpensAndJKMoveOnlyThere(t *testing.T) {
 	// Typing cannot reach the composer while the switcher is up.
 	if !h.a.comp.Empty() {
 		t.Fatalf("the switcher leaked keystrokes into the composer: %q", h.a.comp.Draft())
+	}
+	h.press(input.KeyEscape)
+
+	// Typed runes filter the roster instead of being swallowed: the switcher
+	// blocks the composer, so an unclaimed key has nowhere else to go.
+	h.chord('s', true, false)
+	h.typeText("ingest")
+	if got := h.a.sessions.Query(); got != "ingest" {
+		t.Fatalf("the switcher swallowed the filter: query = %q", got)
+	}
+	if it, ok := h.a.sessions.Selected(); !ok || it.ID != string(olderSession) {
+		t.Fatalf("the filter did not narrow the roster: %+v", it)
+	}
+	requireContains(t, testkit.EncodeLines(h.last().Live), sessionsFilterPrefix+"ingest", "the filter is visible")
+	h.press(input.KeyBackspace)
+	if got := h.a.sessions.Query(); got != "inges" {
+		t.Fatalf("backspace did not edit the filter: query = %q", got)
+	}
+	h.press(input.KeyEscape)
+
+	// Every open starts clean rather than reopening on a stale filter.
+	h.chord('s', true, false)
+	if got := h.a.sessions.Query(); got != "" {
+		t.Fatalf("the switcher reopened on a stale filter: %q", got)
 	}
 	h.press(input.KeyEscape)
 

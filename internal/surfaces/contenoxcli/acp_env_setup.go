@@ -11,7 +11,7 @@ import (
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // Environment variables of the non-interactive ACP setup route: process-level
@@ -43,10 +43,7 @@ func configValueWithEnv(ctx context.Context, db libdb.DBManager, key, envKey str
 // method: which environment the client should collect to configure contenox.
 func acpEnvSetupVars() []libacp.AuthEnvVar {
 	notSecret := false
-	providerKeys := make([]string, 0, len(setupProviders))
-	for _, sp := range setupProviders {
-		providerKeys = append(providerKeys, sp.key)
-	}
+	providerKeys := setupProviderKeys()
 	vars := []libacp.AuthEnvVar{
 		{Name: envDefaultProvider, Label: "Provider (" + strings.Join(providerKeys, ", ") + ")", Secret: &notSecret},
 		{Name: envDefaultModel, Label: "Model (defaults to the provider's default model)", Secret: &notSecret, Optional: true},
@@ -83,11 +80,7 @@ func completeEnvSetup(ctx context.Context, db libdb.DBManager) error {
 		}
 	}
 	if sp == nil {
-		keys := make([]string, 0, len(setupProviders))
-		for _, p := range setupProviders {
-			keys = append(keys, p.key)
-		}
-		return fmt.Errorf("unknown provider %q in %s (choose one of: %s)", provider, envDefaultProvider, strings.Join(keys, ", "))
+		return fmt.Errorf("unknown provider %q in %s (choose one of: %s)", provider, envDefaultProvider, strings.Join(setupProviderKeys(), ", "))
 	}
 
 	if model == "" {
@@ -118,11 +111,11 @@ func completeEnvSetup(ctx context.Context, db libdb.DBManager) error {
 	}
 
 	store := runtimetypes.New(db.WithoutTransaction())
-	if err := clikv.WriteConfig(ctx, store, "global", "default-provider", sp.key); err != nil {
+	if err := clikv.WriteConfig(ctx, store, "", "default-provider", sp.key); err != nil {
 		return fmt.Errorf("persist default-provider: %w", err)
 	}
 	if model != "" {
-		if err := clikv.WriteConfig(ctx, store, "global", "default-model", model); err != nil {
+		if err := clikv.WriteConfig(ctx, store, "", "default-model", model); err != nil {
 			return fmt.Errorf("persist default-model: %w", err)
 		}
 	}

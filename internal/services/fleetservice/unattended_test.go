@@ -14,7 +14,7 @@ import (
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,6 +79,12 @@ func (f *fakeHITL) RequestAttention(context.Context, hitlservice.AttentionReques
 }
 func (f *fakeHITL) Answer(context.Context, string, string) error        { return nil }
 func (f *fakeHITL) AnswerAsAgent(context.Context, string, string) error { return nil }
+func (f *fakeHITL) AnswerAsAgentNamed(context.Context, string, string, string) error {
+	return nil
+}
+func (f *fakeHITL) AnswerAsAgentBounded(context.Context, string, string, string, int) error {
+	return nil
+}
 func (f *fakeHITL) PendingAttentionAsks(context.Context, string) ([]*runtimetypes.HITLApproval, error) {
 	return nil, nil
 }

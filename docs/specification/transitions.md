@@ -25,7 +25,7 @@ Task chains are state machines. When a task finishes running its `handler`, the 
 
 If the branch specifies `"goto": "end"` (or an empty `goto`), the chain terminates successfully.
 
-A task with **no branches at all** is a leaf: the chain ends cleanly with that task's output, rather than erroring. So a terminal task can simply omit `transition.branches` instead of authoring an explicit `{ "operator": "default", "goto": "end" }` — though the explicit form is still the way to end *conditionally*.
+A task with **no branches at all** is a leaf: the chain ends cleanly with that task's output, rather than erroring. So a terminal task can omit `transition.branches` instead of authoring an explicit `{ "operator": "default", "goto": "end" }` — though the explicit form is still the way to end *conditionally*.
 
 ## `on_failure`
 
@@ -63,7 +63,7 @@ model's text. To branch on what the model actually said, use `route`.
 - **`noop`**: passes the input through; eval is `"noop"`.
 - **`raise_error`**: terminates the chain with an error — no branch is evaluated.
 
-> [!NOTE]
+> **Note:**
 > You **cannot** branch on `"failed"`. When a task fails (including `execute_tool_calls` / `tools`), the engine raises an error and immediately routes to `on_failure` (or terminates the chain if `on_failure` is absent) — this happens *before* any branch is evaluated, so a `{ "when": "failed" }` branch can never fire. Handle failure with `on_failure`, not a branch.
 
 Place a `default` branch last as the fallback. For agentic loops, put an `edge_traversed_at_least` branch ahead of the loop branch to bound iterations.

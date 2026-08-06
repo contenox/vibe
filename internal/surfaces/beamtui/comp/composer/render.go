@@ -26,9 +26,8 @@ const (
 	upUnicode = "↑"
 	upASCII   = "^"
 
-	// placeholder is the empty-and-unfocused hint listing the three
-	// affordances a user cannot discover by typing; ASCII swaps the middot
-	// for a hyphen.
+	// placeholder is the empty-buffer hint listing the three affordances a
+	// user cannot discover by typing; ASCII swaps the middot for a hyphen.
 	placeholderUnicode = "type / for commands · ! for shell · @ to attach"
 	placeholderASCII   = "type / for commands - ! for shell - @ to attach"
 
@@ -52,9 +51,11 @@ const MinWidth = 4
 // then counts what scrolled off the top (see prefixSpan). At or above
 // MinWidth no returned line exceeds width.
 //
-// Empty and unfocused renders the placeholder hint; empty and focused
-// renders just the sigil. Render also computes the caret CursorPos reports,
-// so call it before reading the caret for a frame.
+// An empty buffer renders the placeholder hint, focused or not: focused IS
+// the state that needs it, since an operator facing an empty prompt has no
+// other way to learn that `/`, `!` and `@` mean anything. The caret rests on
+// its first cell. Render also computes the caret CursorPos reports, so call
+// it before reading the caret for a frame.
 func (c *Composer) Render(width int, focused, ascii bool) []frame.Line {
 	c.curRow, c.curCol = 0, prefixWidth
 
@@ -72,11 +73,8 @@ func (c *Composer) Render(width int, focused, ascii bool) []frame.Line {
 	}
 
 	if c.Empty() {
-		if focused {
-			return []frame.Line{{frame.S(frame.StyleBrand, sigil(ascii))}}
-		}
 		return []frame.Line{{
-			frame.S(frame.StyleMuted, sigil(ascii)),
+			frame.S(sigilStyle(focused), sigil(ascii)),
 			frame.S(frame.StyleMuted, clip(placeholder(ascii), contentW, ascii)),
 		}}
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 const compactDefaultKeep = 8
@@ -71,6 +71,79 @@ func (t *Transport) handleRename(ctx context.Context, sess *sessionEntry, args s
 	return fmt.Sprintf("Session renamed to %s.", title), nil
 }
 
+// handleNewSessionCommand starts a second session in this workspace and
+// reports its id. It runs the same Transport.NewSession the client's own
+// session/new runs, so the new session is durable, listed by /sessions, and
+// loadable from any client — the one thing it cannot do is move this client
+// onto it: ACP has no agent→client "switch session" message, so the switch
+// stays the client's act (session/load, or its session picker).
+func (t *Transport) handleNewSessionCommand(ctx context.Context, sess *sessionEntry) (string, error) {
+	if t.deps.DB == nil || t.deps.Engine == nil {
+		return "", errSetupRequired()
+	}
+	cwd := strings.TrimSpace(sess.Cwd)
+	if cwd == "" {
+		return "", fmt.Errorf("this session has no workspace directory to start another session in")
+	}
+	resp, err := t.NewSession(ctx, libacp.NewSessionRequest{Cwd: cwd, McpServers: []libacp.McpServer{}})
+	if err != nil {
+		return "", fmt.Errorf("could not start a session: %w", err)
+	}
+	return fmt.Sprintf("Started session %s in %s.\nOpen it from your editor's session picker (ACP session/load %s); /sessions lists every session here. This session is untouched.",
+		resp.SessionID, cwd, resp.SessionID), nil
+}
+
+// handleSessions lists this workspace's sessions — the roster session/list
+// serves, rendered for a client with no session UI of its own. Titles follow
+// the same precedence session/list uses (sessionListTitle), so the two
+// surfaces never disagree about what a session is called.
+func (t *Transport) handleSessions(ctx context.Context, sess *sessionEntry) (string, error) {
+	if t.deps.DB == nil {
+		return "", fmt.Errorf("listing sessions is unavailable without a database")
+	}
+	cwd := strings.TrimSpace(sess.Cwd)
+	resp, err := t.ListSessions(ctx, libacp.ListSessionsRequest{Cwd: cwd})
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Sessions) == 0 {
+		return "No sessions recorded here yet — /new starts one.", nil
+	}
+	current, _ := t.acpSessionForContenoxID(sess.InternalSessionID)
+
+	var b strings.Builder
+	if cwd != "" {
+		fmt.Fprintf(&b, "Sessions in %s (newest first):\n", cwd)
+	} else {
+		b.WriteString("Sessions (newest first):\n")
+	}
+	for _, info := range resp.Sessions {
+		marker := "  "
+		if info.SessionID == current {
+			marker = "* "
+		}
+		// session/list falls back to the id as the title; printing it twice
+		// would read as two different facts.
+		title := info.Title
+		if title == string(info.SessionID) {
+			title = "(no title yet)"
+		}
+		fmt.Fprintf(&b, "%s%s  %s", marker, info.SessionID, title)
+		if info.UpdatedAt != "" {
+			fmt.Fprintf(&b, "  (%s)", info.UpdatedAt)
+		}
+		if info.SessionID == current {
+			b.WriteString("  — this session")
+		}
+		b.WriteString("\n")
+	}
+	if resp.NextCursor != "" {
+		b.WriteString("\nMore sessions exist than are shown; session/list pages through the rest.")
+	}
+	b.WriteString("\nOpen one from your editor's session picker (ACP session/load <id>); /new starts a fresh one.")
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
 // handleCompact summarizes older history into a single message, reclaiming
 // context while keeping the last `keep` messages verbatim. It reuses the same
 // chatservice.CompactHistory core the CLI's `session fork --summary` uses.
@@ -126,11 +199,12 @@ func (t *Transport) handleCompact(ctx context.Context, _ libacp.SessionID, sess 
 	return fmt.Sprintf("Compacted %d messages to %d (kept last %d).", len(history), len(compacted), keep), nil
 }
 
-// loadCompactChain reads chain-compact.json from the active .contenox directory,
-// falling back to ~/.contenox. It does not import the CLI's resolver (that would
-// create an import cycle); this is a plain file lookup, not duplicated logic.
+// loadCompactChain reads chain-compact-default.json from the active .contenox
+// directory, falling back to ~/.contenox. It does not import the CLI's resolver
+// (that would create an import cycle); this is a plain file lookup, not
+// duplicated logic.
 func (t *Transport) loadCompactChain() (*taskengine.TaskChainDefinition, error) {
-	const name = "chain-compact.json"
+	const name = "chain-compact-default.json"
 	var candidates []string
 	if t.deps.ContenoxDir != "" {
 		candidates = append(candidates, filepath.Join(t.deps.ContenoxDir, name))

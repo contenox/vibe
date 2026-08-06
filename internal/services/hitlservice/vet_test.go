@@ -20,7 +20,7 @@ func TestUnit_VetPolicy_AcceptsShippedShapes(t *testing.T) {
 			 "timeout_s": 300, "on_timeout": "deny"}
 		],
 		"attention": {"allowAgentAnswers": true, "maxAgentAnswers": 5},
-		"compute": {"maxTurns": 40, "onExhausted": "finish_stuck"}
+		"compute": {"maxTurns": 1, "onExhausted": "finish_stuck"}
 	}`
 	require.NoError(t, VetPolicy([]byte(good)))
 }

@@ -280,15 +280,18 @@ func readCLIConfigValue(ctx context.Context, store runtimetypes.Store, key strin
 	return strings.TrimSpace(val), true
 }
 
+// readWorkspaceCLIConfigValue reports what `contenox config get` would show
+// for key in workspaceID, plus whether a row backs it. It defers the scope
+// decision to clikv rather than re-deriving it, so `contenox state` cannot
+// report a different effective value than the readers that consume the
+// setting (an empty workspace row falls back to the global one there).
 func readWorkspaceCLIConfigValue(ctx context.Context, store runtimetypes.Store, workspaceID, key string) (string, string, bool) {
-	if workspaceID != "" {
-		var val string
-		if err := store.GetWorkspaceKV(ctx, workspaceID, clikv.Prefix+key, &val); err == nil {
-			return strings.TrimSpace(val), "workspace", true
-		}
+	val, scope := clikv.ReadConfig(ctx, store, workspaceID, key)
+	if scope == "workspace" {
+		return val, scope, true
 	}
-	val, present := readCLIConfigValue(ctx, store, key)
-	return val, "global", present
+	_, present := readCLIConfigValue(ctx, store, key)
+	return val, scope, present
 }
 
 // normalizeDefaultThink validates/normalizes a default-think value the same

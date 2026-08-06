@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // Turn states, the vocabulary of TurnStatus.State.

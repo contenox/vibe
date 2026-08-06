@@ -10,10 +10,10 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/chainagents"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -88,12 +88,17 @@ func mustGet(t *testing.T, ctx context.Context, agents agentregistryservice.Serv
 func TestUnit_Discover_FilenameConventionDeclaresAnAgent(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	declared := writeChain(t, dir, "agent-reviewer.json", "reviewer")
+	declared := writeChain(t, dir, "chain-agent-reviewer.json", "reviewer")
 	writeChain(t, dir, "helper.json", "helper")
+	writeChain(t, dir, "agent-oldstyle.json", "oldstyle")
 
 	res, err := chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
 	require.Equal(t, []string{"reviewer"}, res.Created)
+
+	_, err = agents.GetByName(ctx, "oldstyle")
+	require.ErrorIs(t, err, libdb.ErrNotFound,
+		"the pre-convention agent-* filename no longer declares an agent; rename the file to chain-agent-*")
 
 	agent := mustGet(t, ctx, agents, "reviewer")
 	require.Equal(t, runtimetypes.AgentKindChain, agent.Kind)
@@ -110,33 +115,96 @@ func TestUnit_Discover_FilenameConventionDeclaresAnAgent(t *testing.T) {
 	require.ErrorIs(t, err, libdb.ErrNotFound, "an undeclared chain is not an agent")
 }
 
-// Shipped agent-shaped chains are eligible by id; shipped utility chains are not.
+// Shipped agent-shaped chains are eligible by id even under a legacy disk
+// name (an install that has not run `init --update` yet); shipped utility
+// chains are not agents whatever their name.
 func TestUnit_Discover_ShippedAgenticChainsAreEligibleByID(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
 	writeChain(t, dir, "default-chain.json", "chain-contenox")
 	writeChain(t, dir, "default-acp-chain.json", "chain-acp")
 	writeChain(t, dir, "headless-acp-chain.json", "chain-acpx")
-	writeChain(t, dir, "chain-compact.json", "chain-compact")
-	writeChain(t, dir, "default-fim-chain.json", "chain-fim")
 	writeChain(t, dir, "default-run-chain.json", "chain-run")
+	writeChain(t, dir, "chain-compact-default.json", "chain-compact")
+	writeChain(t, dir, "chain-fim-default.json", "chain-fim")
 
 	res, err := chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"chain-contenox", "chain-acp", "chain-acpx"}, res.Created)
+	require.ElementsMatch(t, []string{"chain-contenox", "chain-acp", "chain-acpx", "chain-run"}, res.Created)
 
-	for _, utility := range []string{"chain-compact", "chain-fim", "chain-run"} {
+	for _, utility := range []string{"chain-compact", "chain-fim"} {
 		_, err := agents.GetByName(ctx, utility)
 		require.ErrorIsf(t, err, libdb.ErrNotFound, "%s is a utility chain, not an agent template", utility)
 	}
+}
+
+// The planner is eligible by its shipped chain id, and the agent NAME is the
+// chain id verbatim — the chain-planner-default.json rename must not move
+// `mission fire agent-planner` or an existing default-mission-agent config.
+func TestUnit_Discover_PlannerNameIsStableAcrossTheRename(t *testing.T) {
+	ctx, agents := setupRegistry(t)
+	dir := t.TempDir()
+	seeded := writeChain(t, dir, "chain-planner-default.json", "agent-planner")
+
+	res, err := chainagents.Discover(ctx, agents, dir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"agent-planner"}, res.Created,
+		"the planner registers under its chain id, not its filename")
+
+	cfg, err := mustGet(t, ctx, agents, "agent-planner").ChainConfig()
+	require.NoError(t, err)
+	require.Equal(t, seeded, cfg.Path)
+
+	// The legacy seeded filename (pre `init --update`) resolves to the same
+	// agent name: the row is rewritten to the new path, never renamed.
+	legacyDir := t.TempDir()
+	legacy := writeChain(t, legacyDir, "agent-planner.json", "agent-planner")
+	res, err = chainagents.Discover(ctx, agents, legacyDir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"agent-planner"}, res.Updated)
+	cfg, err = mustGet(t, ctx, agents, "agent-planner").ChainConfig()
+	require.NoError(t, err)
+	require.Equal(t, legacy, cfg.Path)
+}
+
+// DiscoverKept restricted to the stable roster: shipped chains and the
+// planner register; a user-authored chain-agent-* chain is neither registered
+// nor — once registered by an unrestricted pass — reconciled or disabled.
+func TestUnit_DiscoverKept_StableRosterCut(t *testing.T) {
+	ctx, agents := setupRegistry(t)
+	dir := t.TempDir()
+	writeChain(t, dir, "chain-planner-default.json", "agent-planner")
+	writeChain(t, dir, "chain-agent-contenox.json", "chain-contenox")
+	custom := writeChain(t, dir, "chain-agent-custom.json", "agent-custom")
+
+	res, err := chainagents.DiscoverKept(ctx, agents, nil, chainagents.StableAgentName, dir)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"agent-planner", "chain-contenox"}, res.Created,
+		"the shipped planner and surface chains stay dispatchable without the beta roster")
+	_, err = agents.GetByName(ctx, "agent-custom")
+	require.ErrorIs(t, err, libdb.ErrNotFound, "a user-authored chain-agent-* chain is invisible without opt-in")
+
+	// Registered while the roster was unrestricted...
+	_, err = chainagents.Discover(ctx, agents, dir)
+	require.NoError(t, err)
+	require.True(t, mustGet(t, ctx, agents, "agent-custom").Enabled)
+
+	// ...then the file vanishes and a restricted pass runs: the row is outside
+	// the pass entirely — untouched, not disabled.
+	require.NoError(t, os.Remove(custom))
+	res, err = chainagents.DiscoverKept(ctx, agents, nil, chainagents.StableAgentName, dir)
+	require.NoError(t, err)
+	require.Empty(t, res.Disabled)
+	require.True(t, mustGet(t, ctx, agents, "agent-custom").Enabled,
+		"a restricted pass never scanned for the row, so it must not judge it vanished")
 }
 
 // A repeat pass must not even touch updated_at.
 func TestUnit_Discover_IsIdempotent(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	writeChain(t, dir, "agent-reviewer.json", "reviewer")
-	writeChain(t, dir, "default-acp-chain.json", "chain-acp")
+	writeChain(t, dir, "chain-agent-reviewer.json", "reviewer")
+	writeChain(t, dir, "chain-agent-acp.json", "chain-acp")
 
 	first, err := chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
@@ -170,12 +238,12 @@ func TestUnit_Discover_IsIdempotent(t *testing.T) {
 func TestUnit_Discover_MovedChainIsRewritten(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	first := t.TempDir()
-	writeChain(t, first, "agent-reviewer.json", "reviewer")
+	writeChain(t, first, "chain-agent-reviewer.json", "reviewer")
 	_, err := chainagents.Discover(ctx, agents, first)
 	require.NoError(t, err)
 
 	second := t.TempDir()
-	moved := writeChain(t, second, "agent-reviewer.json", "reviewer")
+	moved := writeChain(t, second, "chain-agent-reviewer.json", "reviewer")
 	res, err := chainagents.Discover(ctx, agents, second)
 	require.NoError(t, err)
 	require.Equal(t, []string{"reviewer"}, res.Updated)
@@ -188,7 +256,7 @@ func TestUnit_Discover_MovedChainIsRewritten(t *testing.T) {
 func TestUnit_Discover_VanishedChainIsDisabledNotDeleted(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	path := writeChain(t, dir, "agent-reviewer.json", "reviewer")
+	path := writeChain(t, dir, "chain-agent-reviewer.json", "reviewer")
 
 	_, err := chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
@@ -214,7 +282,7 @@ func TestUnit_Discover_VanishedChainIsDisabledNotDeleted(t *testing.T) {
 func TestUnit_Discover_NeverReEnablesAnExistingRow(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	writeChain(t, dir, "agent-reviewer.json", "reviewer")
+	writeChain(t, dir, "chain-agent-reviewer.json", "reviewer")
 
 	_, err := chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
@@ -232,7 +300,7 @@ func TestUnit_Discover_NeverReEnablesAnExistingRow(t *testing.T) {
 func TestUnit_Discover_LeavesForeignRowsAlone(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	writeChain(t, dir, "agent-reviewer.json", "reviewer")
+	writeChain(t, dir, "chain-agent-reviewer.json", "reviewer")
 
 	manual := &runtimetypes.Agent{Name: "reviewer", Enabled: true}
 	source := runtimetypes.AgentSourceManual
@@ -256,8 +324,8 @@ func TestUnit_Discover_LeavesForeignRowsAlone(t *testing.T) {
 func TestUnit_Discover_WorkspaceShadowsHome(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	workspace, home := t.TempDir(), t.TempDir()
-	winner := writeChain(t, workspace, "agent-reviewer.json", "reviewer")
-	writeChain(t, home, "agent-reviewer.json", "reviewer")
+	winner := writeChain(t, workspace, "chain-agent-reviewer.json", "reviewer")
+	writeChain(t, home, "chain-agent-reviewer.json", "reviewer")
 
 	res, err := chainagents.Discover(ctx, agents, workspace, home)
 	require.NoError(t, err)
@@ -272,9 +340,9 @@ func TestUnit_Discover_WorkspaceShadowsHome(t *testing.T) {
 func TestUnit_Discover_ToleratesMissingAndBrokenInput(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	writeChain(t, dir, "agent-good.json", "good")
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-broken.json"), []byte("{not json"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-empty.json"), []byte(`{"id":"empty"}`), 0o600))
+	writeChain(t, dir, "chain-agent-good.json", "good")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-agent-broken.json"), []byte("{not json"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-agent-empty.json"), []byte(`{"id":"empty"}`), 0o600))
 
 	absent := filepath.Join(t.TempDir(), "does-not-exist")
 	res, err := chainagents.Discover(ctx, agents, absent, dir)
@@ -291,7 +359,7 @@ func TestUnit_Discover_RequiresARegistry(t *testing.T) {
 func TestUnit_Discover_LintFailingChainIsSkippedAndDisabled(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	writeChain(t, dir, "agent-worker.json", "worker")
+	writeChain(t, dir, "chain-agent-worker.json", "worker")
 
 	res, err := chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
@@ -304,7 +372,7 @@ func TestUnit_Discover_LintFailingChainIsSkippedAndDisabled(t *testing.T) {
 	}
 	data, err := json.Marshal(broken)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-worker.json"), data, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-agent-worker.json"), data, 0o600))
 
 	res, err = chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
@@ -314,7 +382,7 @@ func TestUnit_Discover_LintFailingChainIsSkippedAndDisabled(t *testing.T) {
 		"a chain the linter refuses must be disabled like a vanished file")
 	require.False(t, mustGet(t, ctx, agents, "worker").Enabled)
 
-	writeChain(t, dir, "agent-worker.json", "worker")
+	writeChain(t, dir, "chain-agent-worker.json", "worker")
 	_, err = chainagents.Discover(ctx, agents, dir)
 	require.NoError(t, err)
 	require.False(t, mustGet(t, ctx, agents, "worker").Enabled)
@@ -324,13 +392,13 @@ func TestUnit_Discover_LintFailingChainIsSkippedAndDisabled(t *testing.T) {
 func TestUnit_Discover_RepeatedRootIsWalkedOnce(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	writeChain(t, dir, "agent-good.json", "good")
+	writeChain(t, dir, "chain-agent-good.json", "good")
 	broken, err := json.Marshal(taskengine.TaskChainDefinition{
 		ID:    "brokenagent",
 		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
 	})
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-broken.json"), broken, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-agent-broken.json"), broken, 0o600))
 
 	tracker := &recordingTracker{}
 	res, err := chainagents.DiscoverWithTracker(ctx, agents, tracker, dir, dir)
@@ -347,7 +415,7 @@ func TestUnit_Discover_RepeatedRootIsWalkedOnce(t *testing.T) {
 func TestUnit_Discover_ReportsRefusedChainAndDisabledAgent(t *testing.T) {
 	ctx, agents := setupRegistry(t)
 	dir := t.TempDir()
-	writeChain(t, dir, "agent-worker.json", "worker")
+	writeChain(t, dir, "chain-agent-worker.json", "worker")
 
 	tracker := &recordingTracker{}
 	_, err := chainagents.DiscoverWithTracker(ctx, agents, tracker, dir)
@@ -360,7 +428,7 @@ func TestUnit_Discover_ReportsRefusedChainAndDisabledAgent(t *testing.T) {
 		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
 	})
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-worker.json"), broken, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-agent-worker.json"), broken, 0o600))
 
 	tracker = &recordingTracker{}
 	res, err := chainagents.DiscoverWithTracker(ctx, agents, tracker, dir)
@@ -384,8 +452,8 @@ func TestUnit_Discover_WithoutTrackerStillRuns(t *testing.T) {
 		Tasks: []taskengine.TaskDefinition{{ID: "one", Handler: "prompt"}},
 	})
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "agent-broken.json"), broken, 0o600))
-	writeChain(t, dir, "agent-good.json", "good")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain-agent-broken.json"), broken, 0o600))
+	writeChain(t, dir, "chain-agent-good.json", "good")
 
 	res, err := chainagents.DiscoverWithTracker(ctx, agents, nil, dir)
 	require.NoError(t, err)

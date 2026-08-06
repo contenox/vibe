@@ -16,7 +16,8 @@ act:
 - Can the workflow be reviewed, committed, diffed, and run again?
 
 In Contenox, a Chain is not a prompt pipeline. It is the reviewed execution
-contract around an agent loop.
+contract around an agent loop. The loop inside that contract is mapped, task by
+task, in [The agentic loop](https://contenox.com/docs/guide/agentic-loop/).
 
 ![A sudo command is refused because the chain's command policy denies it; the policy is plain JSON](/chain-blocked.gif)
 

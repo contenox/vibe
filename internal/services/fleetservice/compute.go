@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // computeBoundLead is the stable prefix of every compute-exhaustion reason a
@@ -19,30 +19,15 @@ import (
 const computeBoundLead = "compute bound exhausted"
 
 func turnsExhaustedReason(b hitlservice.ComputeBounds) string {
-	return withOnExhaustedTruth(fmt.Sprintf("%s: maxTurns=%d — the mission spent its turn budget without reaching its operator.", computeBoundLead, b.MaxTurns), b)
+	return fmt.Sprintf("%s: maxTurns=%d — the mission spent its turn budget without reaching its operator.", computeBoundLead, b.MaxTurns)
 }
 
 func toolCallsExhaustedReason(b hitlservice.ComputeBounds) string {
-	return withOnExhaustedTruth(fmt.Sprintf("%s: maxToolCalls=%d — the mission reached its envelope-gated action budget; this call and any after it are refused.", computeBoundLead, b.MaxToolCalls), b)
+	return fmt.Sprintf("%s: maxToolCalls=%d — the mission reached its envelope-gated action budget; this call and any after it are refused.", computeBoundLead, b.MaxToolCalls)
 }
 
 func tokensExhaustedReason(b hitlservice.ComputeBounds, used int) string {
-	return withOnExhaustedTruth(fmt.Sprintf("%s: maxTokens=%d (reported usage %d) — the mission spent its token budget.", computeBoundLead, b.MaxTokens, used), b)
-}
-
-// withOnExhaustedTruth appends the onExhausted deferral note to reason when the
-// envelope requested pause_ask (behavior the runtime does not implement), using
-// the same wording as hitlservice.ComputeDiagnostics. An envelope that took the
-// default, or wrote finish_stuck explicitly, gets nothing appended.
-func withOnExhaustedTruth(reason string, b hitlservice.ComputeBounds) string {
-	if b.OnExhausted != hitlservice.OnExhaustedPauseAsk {
-		return reason
-	}
-	notes := hitlservice.ComputeDiagnostics(&b)
-	for _, n := range notes {
-		reason += "\n" + n.String()
-	}
-	return reason
+	return fmt.Sprintf("%s: maxTokens=%d (reported usage %d) — the mission spent its token budget.", computeBoundLead, b.MaxTokens, used)
 }
 
 // turnBudgetExceeded reports whether starting the nextTurn'th prompt turn

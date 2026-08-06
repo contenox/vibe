@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/ollama/ollama/api"
 )
 

@@ -92,8 +92,8 @@ Local files → model reads & reasons → Notion page created
 
 The task engine handles the full tool-call loop automatically. The model can interleave reads (filesystem) and writes (Notion) in a single run.
 
-> [!TIP]
+> **Tip:**
 > Add `--trace` to watch every file read and Notion API call in real time — useful for debugging large repos where the model might need to follow import chains.
 
-> [!NOTE]
+> **Note:**
 > For very large codebases, scope the read to specific packages or pass a file list via stdin to stay within the model's context window.

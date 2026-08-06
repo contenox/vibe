@@ -47,7 +47,7 @@ func buildStubAgentBinary(t *testing.T) string {
 		t.Skip("external agent spawn runs through the sandbox, which is Landlock-based and Linux-only")
 	}
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
-	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/libacp/cmd/acp-stub-agent")
+	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/contenox/libacp/cmd/acp-stub-agent")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build stub agent: %v\n%s", err, out)

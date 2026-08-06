@@ -13,10 +13,10 @@ import (
 	"sync"
 
 	libbus "github.com/contenox/contenox/internal/libbus"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/operatorinbox"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // SessionDeliverer injects a report update into a supervising session's
@@ -151,8 +151,18 @@ func (r *Router) routeAsk(ctx context.Context, ev missionservice.AttentionAskedE
 	defer end()
 
 	if ev.ParentSessionID == "" {
-		// Operator-fired mission: their queue is the inbox already.
+		// Operator-fired mission: their queue is the inbox already. The
+		// question is still offered on the supervisor seam — the oracle
+		// attention driver mounts here as the a2a offer's sibling; each
+		// supervisor self-selects (the firing-agent offer declines a
+		// parentless ask, the driver declines a parented one). A decline or
+		// failure changes nothing: the ask is durable either way.
 		reportChange("routed", "queue_operator_fired")
+		if r.deps.AgentSupervisor != nil {
+			if err := r.deps.AgentSupervisor.OfferToSupervisingAgent(ctx, ev); err != nil {
+				reportErr(err)
+			}
+		}
 		return
 	}
 	reportChange("parent_session_id", ev.ParentSessionID)

@@ -1,5 +1,10 @@
-# CI: contenox compile smoke, Windows cross-compile smoke, CLI help smoke, and cheap TestUnit_* Go tests.
-# No TestSystem_* / Docker / LLM integration tests.
+# CI: hygiene gates (gofmt, vet, govulncheck), contenox compile smoke, Windows
+# cross-compile smoke, CLI help smoke, and cheap TestUnit_* Go tests.
+# No TestSystem_* / Docker / LLM integration tests — those run in release-gate.yml.
+#
+# Third-party actions are pinned to a commit SHA with a trailing version comment.
+# A floating tag (@v4) lets a compromised tag run arbitrary code in this job.
+# Bump by resolving the new SHA explicitly, never by editing the comment.
 name: CI
 
 on:
@@ -16,11 +21,32 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
+
+      # CONTRIBUTING says "run gofmt on Go changes". A rule that is not
+      # machine-enforced is not a rule.
+      - name: gofmt (no diff allowed)
+        run: |
+          UNFORMATTED="$(gofmt -l .)"
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::gofmt found unformatted files. Run: gofmt -w ."
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+          echo "gofmt: clean"
+
+      - name: go vet
+        run: go vet ./...
+
+      # Fetched through the Go module proxy, so the download is verified against
+      # sum.golang.org rather than a mutable GitHub tag — no extra action to pin.
+      # Deliberately unpinned: a vulnerability scanner's value is its freshness.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       - name: Install task
         run: go install github.com/go-task/task/v3/cmd/task@latest

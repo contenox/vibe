@@ -6,6 +6,8 @@ interface Props {
   title: string;
   description?: string;
   lang?: string;
+  /** hreflang alternates, passed through to Base. */
+  alternates?: Record<string, string>;
 }
 const current = Astro.url.pathname;
 

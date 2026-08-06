@@ -1,0 +1,24 @@
+{
+  "//": "Envelope for the oracle attention driver's chains (chain-oracle-*.json), mounted by `contenox mission fire --oracle`. Two capabilities, both in-process: oracle.submit_verdict (the one model-facing verdict tool; delivery runs through the service layer under the MISSION envelope's own attention bounds) and oracle.verdict_state (the deterministic chain gate). Everything else is denied — deny, not approve, because nobody watches this chain to answer an ask. No shell, no filesystem, no network: the oracle executes nothing and no command/prefix rule exists to be subverted via PATH.",
+  "default_action": "deny",
+  "rules": [
+    {
+      "//": "The verdict tool. A wait verdict executes nothing; an answer verdict is still bounded by the mission envelope's attention.allowAgentAnswers / maxAgentAnswers, enforced in the service layer.",
+      "tools": "oracle",
+      "tool": "submit_verdict",
+      "action": "allow"
+    },
+    {
+      "//": "The deterministic corrective gate — a pure in-process read of the bound contract's state; never advertised to the model.",
+      "tools": "oracle",
+      "tool": "verdict_state",
+      "action": "allow"
+    }
+  ],
+  "compute": {
+    "onExhausted": "finish_stuck"
+  },
+  "attention": {
+    "allowAgentAnswers": false
+  }
+}

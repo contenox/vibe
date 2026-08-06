@@ -1,6 +1,6 @@
 {
   "//compute": "Tighter than the default preset's, matching this policy's default_action \"deny\": a mission is fire-and-detach, so these bounds guard against an unwatched runaway spend.",
-  "//compute-fields": "maxToolCalls is exact; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted because the dispatcher never issues more than two prompt turns per mission. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
+  "//compute-fields": "maxToolCalls is validated but not enforced by the shipped hosts; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted; only 1 has an effect (it drops the runtime nudge turn), since the dispatcher never issues more than two. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
   "compute": {
     "maxToolCalls": 150,
     "maxTokens": 1000000,

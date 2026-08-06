@@ -30,7 +30,7 @@ contenox backend add bedrock --type bedrock \
   --url "https://bedrock-runtime.us-east-1.amazonaws.com"          # the region lives in the URL
 
 contenox model list                                                 # live: Converse-capable models in your account/region
-contenox config set default-model anthropic.claude-3-5-sonnet-20241022-v2:0   # example — use an enabled id
+contenox config set default-model us.anthropic.claude-3-5-sonnet-20241022-v2:0   # example — use an enabled id
 contenox config set default-provider bedrock
 ```
 
@@ -56,6 +56,23 @@ Most current Claude/Llama models can't be invoked on-demand by their bare founda
 ```bash
 contenox config set default-model us.anthropic.claude-3-5-sonnet-20241022-v2:0
 ```
+
+## EU regions
+
+Bedrock is available in EU regions including Frankfurt (`eu-central-1`), Ireland (`eu-west-1`), London (`eu-west-2`), Paris (`eu-west-3`), Zurich (`eu-central-2`), Stockholm (`eu-north-1`), Milan (`eu-south-1`), and Spain (`eu-south-2`). As always, the region lives in the backend `--url`:
+
+```bash
+contenox backend add bedrock-eu --type bedrock \
+  --url "https://bedrock-runtime.eu-central-1.amazonaws.com"     # Frankfurt
+```
+
+For models that require an inference profile, use the `eu.` prefix — an EU (geography-tied) profile routes requests only among its EU destination regions, listed on the model's detail page in the AWS docs:
+
+```bash
+contenox config set default-model eu.anthropic.claude-3-5-sonnet-20240620-v1:0   # example — use an enabled id
+```
+
+Model access is granted **per region**: enable the models you want in the Bedrock console → **Model access** for that region, then run `contenox model list` to see what your account can invoke there. See [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/) for how region pinning fits the larger deployment posture.
 
 ## Troubleshooting
 

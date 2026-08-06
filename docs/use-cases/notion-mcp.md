@@ -20,7 +20,7 @@ contenox mcp add notion --transport http \
 contenox mcp auth notion
 ```
 
-> [!NOTE]
+> **Note:**
 > Notion's MCP server uses OAuth 2.0 with dynamic client registration. `contenox mcp auth` handles the full flow — discovery, registration, authorization code exchange, and token storage — automatically. Tokens are refreshed transparently on each run.
 >
 > Official docs: [Notion MCP server guide](https://developers.notion.com/guides/mcp/mcp)
@@ -79,7 +79,7 @@ Combine stdin piping with Notion write access to push any local file directly in
 
 ## How it works
 
-These recipes work with `contenox run`. The default run chain (`.contenox/default-run-chain.json`) is configured with `"tools": ["*"]`, so registered MCP servers such as Notion are available to the model automatically.
+These recipes work with `contenox run`. The default run chain (`.contenox/chain-agent-run.json`) is configured with `"tools": ["*"]`, so registered MCP servers such as Notion are available to the model automatically.
 
 ```json
 {
@@ -95,10 +95,10 @@ These recipes work with `contenox run`. The default run chain (`.contenox/defaul
 ```
 
 - `tools: ["*"]` — exposes all registered MCP servers to the model. Add `"!name"` entries to exclude specific servers (e.g. `["*", "!filesystem"]`).
-- A bare `contenox "..."` command is session-backed chat (injected as `chat`) and uses `default-chain.json`; only `contenox run` is the stateless path that uses `.contenox/default-run-chain.json`.
+- A bare `contenox "..."` command is session-backed chat (injected as `chat`) and uses `chain-agent-contenox.json`; only `contenox run` is the stateless path that uses `.contenox/chain-agent-run.json`.
 - The task engine handles the full tool-call loop automatically: model calls a tool → result appended to history → model continues.
 
-> [!TIP]
+> **Tip:**
 > Add `--trace` to watch every Notion API call, its arguments, and the raw results in real time.
 
 ---

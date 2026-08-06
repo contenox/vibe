@@ -9,29 +9,46 @@ export interface LandingStrings {
   copyLabel: string;
   installNote: string;
   trustChips: string[];
-  positioning: string;
-  tableWorld: string;
-  tableWhy: string;
-  rows: [string, string][];
-  authorEyebrow: string;
-  authorH2: string;
-  authorItems: string[];
-  editorsEyebrow: string;
-  editorsH2: string;
-  editorsLede: string;
+  missionEyebrow: string;
+  missionH2: string;
+  missionLede: string;
+  /** [kind, text] — kind is 'cmd' (operator input), 'out' (runtime output), or 'note' (narrative comment). */
+  missionLines: [string, string][];
+  missionOutro: string;
+  missionCta: [string, string];
+  panelEyebrow: string;
+  panelH2: string;
+  panelP1: string;
+  panelP2: string;
+  rulesEyebrow: string;
+  rulesH2: string;
+  rulesLede: string;
+  rulesCode: string;
+  rulesOutro: string;
+  rulesCta: [string, string];
+  hitlDemoAlt: string;
+  craftEyebrow: string;
+  craftH2: string;
+  craftP1: string;
+  craftP2: string;
+  everyEyebrow: string;
+  everyH2: string;
+  everyLede: string;
+  surfaces: [string, string][];
+  /** [line text, link label, href] — one supporting line per protocol. */
+  protocols: [string, string, string][];
   guides: [string, string][];
+  tuiShotAlt: string;
+  seatEyebrow: string;
+  seatH2: string;
+  seatP1: string;
+  seatP2: string;
+  yoursEyebrow: string;
+  yoursH2: string;
+  yoursPoints: string[];
+  yoursCta: [string, string];
   capsEyebrow: string;
   caps: [string, string][];
-  hitlDemoAlt: string;
-  tuiShotAlt: string;
-  tuiEyebrow: string;
-  tuiH2: string;
-  tuiLede: string;
-  tuiPoints: [string, string][];
-  tuiCta: string;
-  standardsEyebrow: string;
-  standardsH2: string;
-  standards: [string, string, string][];
   bottomEyebrow: string;
   bottomH2: string;
   bottomCta: string;
@@ -46,10 +63,9 @@ interface Props {
 const { t } = Astro.props;
 // Large media (gifs, screenshots) is served from the website's S3 bucket.
 const media = 'https://contenox-website-assets-573643652148.s3.amazonaws.com/media/';
-const th = 'border-b border-neutral-200 bg-neutral-100/50 px-4 py-3 text-left font-semibold text-neutral-900 dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-neutral-100';
-const tdKey = 'border-b border-neutral-100 px-4 py-3 font-medium text-neutral-800 dark:border-neutral-800/50 dark:text-neutral-200';
-const tdVal = 'border-b border-neutral-100 px-4 py-3 dark:border-neutral-800/50';
+const card = 'rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-primary-500/30 hover:shadow-lg hover:shadow-primary-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-primary-400/30';
 const btnGhost = 'rounded-lg border border-neutral-200 px-4 py-2 text-sm font-semibold transition-all hover:bg-neutral-50 hover:shadow-sm dark:border-neutral-800 dark:hover:bg-neutral-900';
+const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300';
 ---
 <section class="hero-grid border-b border-neutral-200 px-5 py-20 text-center dark:border-neutral-800">
   <span class="inline-block rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-600 dark:border-neutral-800 dark:bg-black dark:text-neutral-400">
@@ -86,125 +102,128 @@ const btnGhost = 'rounded-lg border border-neutral-200 px-4 py-2 text-sm font-se
 </section>
 
 <section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.tuiEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.tuiH2}</h2>
-  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.tuiLede}</p>
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.missionEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.missionH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.missionLede}</p>
+  <div class="mx-auto mt-8 max-w-3xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-5 text-left font-mono text-sm leading-7 shadow-lg backdrop-blur-md dark:border-neutral-800/60 dark:bg-neutral-950/70">
+    {t.missionLines.map(([kind, text]) => (
+      kind === 'cmd' ? (
+        <div class="whitespace-nowrap text-neutral-800 dark:text-neutral-100"><span class="mr-2 select-none text-neutral-400 dark:text-neutral-500">$</span>{text}</div>
+      ) : kind === 'note' ? (
+        <div class="whitespace-nowrap text-neutral-400 italic dark:text-neutral-500">{text}</div>
+      ) : (
+        <div class="whitespace-nowrap pl-5 text-neutral-500 dark:text-neutral-400">{text}</div>
+      )
+    ))}
+  </div>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.missionOutro}</p>
+  <div class="mt-6 text-center text-sm">
+    <a href={t.missionCta[1]} class={ctaLink}>{t.missionCta[0]} →</a>
+  </div>
+</section>
+
+<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.panelEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.panelH2}</h2>
+  <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
+    <p>{t.panelP1}</p>
+    <p>{t.panelP2}</p>
+  </div>
+</section>
+
+<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.rulesEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.rulesH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.rulesLede}</p>
+  <div class="mx-auto mt-8 max-w-3xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-5 text-left font-mono text-xs leading-6 text-neutral-700 shadow-sm backdrop-blur-md sm:text-sm dark:border-neutral-800/60 dark:bg-neutral-950/60 dark:text-neutral-300">
+    <pre class="m-0">{t.rulesCode}</pre>
+  </div>
+  <p class="mx-auto mt-4 max-w-2xl text-center text-sm text-neutral-500">{t.rulesOutro}</p>
+  <img
+    src={`${media}hitl-approve.gif`}
+    alt={t.hitlDemoAlt}
+    loading="lazy"
+    class="mx-auto mt-8 w-full max-w-3xl rounded-xl border border-neutral-200/60 shadow-lg dark:border-neutral-800/60"
+  />
+  <div class="mt-6 text-center text-sm">
+    <a href={t.rulesCta[1]} class={ctaLink}>{t.rulesCta[0]} →</a>
+  </div>
+</section>
+
+<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.craftEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.craftH2}</h2>
+  <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
+    <p>{t.craftP1}</p>
+    <p>{t.craftP2}</p>
+  </div>
+</section>
+
+<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.everyEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.everyH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.everyLede}</p>
+  <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-2">
+    {t.surfaces.map(([title, body]) => (
+      <div class={card}>
+        <h3 class="font-semibold">{title}</h3>
+        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
+      </div>
+    ))}
+  </div>
   <img
     src={`${media}hero.gif`}
     alt={t.tuiShotAlt}
     loading="lazy"
     class="mx-auto mt-8 w-full max-w-3xl rounded-xl border border-neutral-200/60 shadow-lg dark:border-neutral-800/60"
   />
-  <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-3">
-    {t.tuiPoints.map(([title, body]) => (
-      <div class="rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-primary-500/30 hover:shadow-lg hover:shadow-primary-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-primary-400/30">
-        <h3 class="font-semibold">{title}</h3>
-        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
-      </div>
-    ))}
-  </div>
-  <div class="mt-8 text-center text-sm">
-    <a href="/docs/reference/contenox-cli/" class="font-semibold text-primary-700 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300">{t.tuiCta} →</a>
-  </div>
-</section>
-
-<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.capsEyebrow}</p>
-  <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-2">
-    {t.caps.map(([title, body]) => (
-      <div class="rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-primary-500/30 hover:shadow-lg hover:shadow-primary-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-primary-400/30">
-        <h3 class="font-semibold">{title}</h3>
-        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
-      </div>
-    ))}
-  </div>
-  <img
-    src={`${media}hitl-approve.gif`}
-    alt={t.hitlDemoAlt}
-    loading="lazy"
-    class="mx-auto mt-10 w-full max-w-3xl rounded-xl border border-neutral-200/60 shadow-lg dark:border-neutral-800/60"
-  />
-</section>
-
-<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="mx-auto max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.positioning}</p>
-  <div class="mx-auto mt-10 max-w-3xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/50 shadow-sm backdrop-blur-sm dark:border-neutral-800/60 dark:bg-neutral-950/50">
-    <table class="w-full text-sm">
-      <thead>
-        <tr>
-          <th class={th}>{t.tableWorld}</th>
-          <th class={th}>{t.tableWhy}</th>
-        </tr>
-      </thead>
-      <tbody class="text-neutral-600 dark:text-neutral-400">
-        {t.rows.map(([world, why]) => (
-          <tr>
-            <td class={tdKey}>{world}</td>
-            <td class={tdVal}>{why}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.authorEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.authorH2}</h2>
-  <ul class="mx-auto mt-8 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
-    {t.authorItems.map((item) => (
-      <li class="flex gap-3"><span class="text-neutral-400 dark:text-neutral-600">→</span><span>{item}</span></li>
+  <ul class="mx-auto mt-8 max-w-2xl space-y-2 text-sm text-neutral-600 dark:text-neutral-400">
+    {t.protocols.map(([line, label, href]) => (
+      <li class="flex gap-3">
+        <span class="text-neutral-400 dark:text-neutral-600">→</span>
+        <span>{line} <a href={href} class="text-neutral-700 underline decoration-neutral-300 underline-offset-2 hover:text-black dark:text-neutral-300 dark:decoration-neutral-700 dark:hover:text-white">{label}</a></span>
+      </li>
     ))}
   </ul>
-</section>
-
-<section class="px-5 py-16">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.editorsEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.editorsH2}</h2>
-  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.editorsLede}</p>
-  <div class="mx-auto mt-8 max-w-lg overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-4 font-mono text-sm text-neutral-700 shadow-sm backdrop-blur-md dark:border-neutral-800/60 dark:bg-neutral-950/60 dark:text-neutral-300">
-    <pre class="m-0">// ~/.config/zed/settings.json
-&#123;
-  "agent_servers": &#123;
-    "Contenox": &#123;
-      "type": "custom",
-      "command": "contenox",
-      "args": ["acp"]
-    &#125;
-  &#125;
-&#125;</pre>
-  </div>
-  <div class="mt-8 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
+  <div class="mt-6 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
     {t.guides.map(([label, href]) => (
       <a href={href} class="text-neutral-600 hover:text-black dark:text-neutral-400 dark:hover:text-white">{label} →</a>
     ))}
   </div>
 </section>
 
-<section class="border-t border-neutral-200 px-5 py-16 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.standardsEyebrow}</p>
-  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.standardsH2}</h2>
-  <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-3">
-    {t.standards.map(([name, body, href]) => (
-      <a href={href} class="rounded-xl border border-neutral-200/60 bg-white/80 p-5 shadow-sm backdrop-blur-sm transition-all hover:-translate-y-1 hover:border-primary-500/30 hover:shadow-lg hover:shadow-primary-500/10 dark:border-neutral-800/60 dark:bg-neutral-950/80 dark:hover:border-primary-400/30 no-underline">
-        <h3 class="font-semibold">{name}</h3>
-        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
-      </a>
-    ))}
+<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.seatEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.seatH2}</h2>
+  <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
+    <p>{t.seatP1}</p>
+    <p>{t.seatP2}</p>
   </div>
 </section>
 
-<section class="border-t border-neutral-200 px-5 py-12 dark:border-neutral-800">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.builtOnEyebrow}</p>
-  <div class="mx-auto mt-6 flex max-w-3xl flex-wrap items-baseline justify-center gap-x-8 gap-y-3">
-    {t.builtOn.map(([name, role, href]) => (
-      <a href={href} rel="noopener noreferrer" class="group text-sm no-underline">
-        <span class="font-semibold text-neutral-700 group-hover:text-black dark:text-neutral-300 dark:group-hover:text-white">{name}</span>
-        <span class="ml-1.5 text-neutral-500">{role}</span>
-      </a>
+<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.yoursEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.yoursH2}</h2>
+  <ul class="mx-auto mt-8 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
+    {t.yoursPoints.map((item) => (
+      <li class="flex gap-3"><span class="text-neutral-400 dark:text-neutral-600">→</span><span>{item}</span></li>
+    ))}
+  </ul>
+  <div class="mt-6 text-center text-sm">
+    <a href={t.yoursCta[1]} class={ctaLink}>{t.yoursCta[0]} →</a>
+  </div>
+</section>
+
+<section class="px-5 py-16">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.capsEyebrow}</p>
+  <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-2">
+    {t.caps.map(([title, body]) => (
+      <div class={card}>
+        <h3 class="font-semibold">{title}</h3>
+        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
+      </div>
     ))}
   </div>
-  <p class="mx-auto mt-5 max-w-2xl text-center text-xs text-neutral-500">{t.builtOnNote}</p>
 </section>
 
 <section class="hero-grid border-t border-neutral-200 px-5 py-16 text-center dark:border-neutral-800">
@@ -219,7 +238,18 @@ const btnGhost = 'rounded-lg border border-neutral-200 px-4 py-2 text-sm font-se
     <a href="/docs/guide/quickstart/" class="rounded-lg bg-gradient-to-r from-primary-500 to-primary-700 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-primary-500/20 transition-all hover:scale-105 hover:shadow-primary-500/40">{t.bottomCta}</a>
   </div>
   <p class="mt-6 text-sm text-neutral-500" set:html={t.bottomContact} />
-  
+
+  <p class="mt-14 text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.builtOnEyebrow}</p>
+  <div class="mx-auto mt-4 flex max-w-3xl flex-wrap items-baseline justify-center gap-x-8 gap-y-3">
+    {t.builtOn.map(([name, role, href]) => (
+      <a href={href} rel="noopener noreferrer" class="group text-sm no-underline">
+        <span class="font-semibold text-neutral-700 group-hover:text-black dark:text-neutral-300 dark:group-hover:text-white">{name}</span>
+        <span class="ml-1.5 text-neutral-500">{role}</span>
+      </a>
+    ))}
+  </div>
+  <p class="mx-auto mt-4 max-w-2xl text-center text-xs text-neutral-500">{t.builtOnNote}</p>
+
   <div class="mt-20 flex justify-center pointer-events-none select-none overflow-hidden">
     <img src="/logo-wide-colored-light.svg" alt="" aria-hidden="true" class="w-full max-w-5xl opacity-40 dark:hidden" />
     <img src="/logo-wide-colored-dark.svg" alt="" aria-hidden="true" class="hidden w-full max-w-5xl opacity-40 dark:block" />

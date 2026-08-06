@@ -16,7 +16,7 @@ import (
 	"github.com/contenox/contenox/internal/services/agenthost"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +33,7 @@ func buildStubAgent(t *testing.T) string {
 		t.Skip("external agent spawn runs through the sandbox, which is Landlock-based and Linux-only")
 	}
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
-	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/libacp/cmd/acp-stub-agent")
+	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/contenox/libacp/cmd/acp-stub-agent")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build acp-stub-agent: %v\n%s", err, out)
@@ -348,6 +348,56 @@ func TestManager_Chain_SelfSpawnConfig(t *testing.T) {
 		"ONLY the chain path is set: the child inherits the environment so it shares the one global state")
 }
 
+// TestManager_Chain_SelfSpawnCarriesWorkspaceID pins that WithWorkspaceID
+// rides every chain spawn as the ChainWorkspaceFlag argument, so the child's
+// mission-event publisher stamps the dispatching host's workspace instead of
+// resolving its own default.
+func TestManager_Chain_SelfSpawnCarriesWorkspaceID(t *testing.T) {
+	ctx, _, svc := setupRegistry(t)
+	stub := buildStubAgent(t)
+	registerChain(t, ctx, svc, "chain-unit", filepath.Join(t.TempDir(), "agent-fixture.json"))
+
+	mgr := New(svc, WithSelfExecutable(stub), WithWorkspaceID("ws-mission"))
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	id, err := mgr.Start(ctx, "chain-unit", t.TempDir())
+	require.NoError(t, err)
+
+	spawner, ok := instanceOf(t, mgr, id).spawner.(*agenthost.ExternalACPAgent)
+	require.True(t, ok)
+	require.Equal(t, []string{"acp", "--workspace-id", "ws-mission"}, spawner.Config.Args,
+		"the dispatching host's workspace rides the spawn so the unit publishes mission events under the FIRING workspace")
+}
+
+// TestManager_Chain_SelfSpawnCarriesEventHop pins the hop's survival across the
+// exec boundary: a spawn made from a dispatch context stamps ChainHopEnvVar so
+// the child's event publisher inherits the budget, and a spawn made without one
+// adds nothing. Verbatim, not incremented — the child is the same generation's
+// actuation.
+func TestManager_Chain_SelfSpawnCarriesEventHop(t *testing.T) {
+	ctx, _, svc := setupRegistry(t)
+	stub := buildStubAgent(t)
+	chainPath := filepath.Join(t.TempDir(), "agent-fixture.json")
+	registerChain(t, ctx, svc, "chain-unit", chainPath)
+
+	mgr := New(svc, WithSelfExecutable(stub))
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	fired, err := mgr.Start(runtimetypes.WithEventHop(ctx, 3), "chain-unit", t.TempDir())
+	require.NoError(t, err)
+	spawner, ok := instanceOf(t, mgr, fired).spawner.(*agenthost.ExternalACPAgent)
+	require.True(t, ok)
+	require.Equal(t, map[string]string{"CONTENOX_ACP_CHAIN_PATH": chainPath, "CONTENOX_EVENT_HOP": "3"}, spawner.Config.Env,
+		"the firing context's hop rides the spawn; without it every event the child appends would read hop 0")
+
+	plain, err := mgr.Start(ctx, "chain-unit", t.TempDir())
+	require.NoError(t, err)
+	spawner, ok = instanceOf(t, mgr, plain).spawner.(*agenthost.ExternalACPAgent)
+	require.True(t, ok)
+	require.Equal(t, map[string]string{"CONTENOX_ACP_CHAIN_PATH": chainPath}, spawner.Config.Env,
+		"an unfired spawn stamps no hop at all")
+}
+
 // TestManager_Chain_RunsThroughTheSameBringUp pins that a chain unit reaches
 // StateRunning, opens a session, and tears down through the same bringUp
 // path as an external agent.
@@ -406,7 +456,7 @@ func TestManager_Chain_DefaultsToTheRunningExecutable(t *testing.T) {
 	mgr := New(svc)
 	t.Cleanup(func() { _ = mgr.Close() })
 
-	spawner, err := mgr.(*manager).chainSpawner(agent, "/tmp/chain-cwd")
+	spawner, err := mgr.(*manager).chainSpawner(context.Background(), agent, "/tmp/chain-cwd")
 	require.NoError(t, err)
 	require.Equal(t, self, spawner.(*agenthost.ExternalACPAgent).Config.Command)
 	require.Equal(t, "/tmp/chain-cwd", spawner.(*agenthost.ExternalACPAgent).Config.Cwd,

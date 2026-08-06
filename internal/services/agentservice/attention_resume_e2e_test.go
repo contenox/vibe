@@ -14,13 +14,13 @@ import (
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/execservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -56,6 +56,16 @@ type attentionInstance struct {
 
 func newAttentionInstance(t *testing.T, dbPath string) *attentionInstance {
 	t.Helper()
+	return newAttentionInstanceWithAsker(t, dbPath, func(h hitlservice.Service) missiontools.AttentionAsker {
+		return hitlAttentionAsker{hitl: h}
+	})
+}
+
+// newAttentionInstanceWithAsker builds an instance whose mission_ask_attention
+// goes through a caller-chosen asker, so a test can drive the exact moment an
+// answer lands relative to the park window.
+func newAttentionInstanceWithAsker(t *testing.T, dbPath string, newAsker func(hitlservice.Service) missiontools.AttentionAsker) *attentionInstance {
+	t.Helper()
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
@@ -63,7 +73,7 @@ func newAttentionInstance(t *testing.T, dbPath string) *attentionInstance {
 	hitl := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()), "e2e-tenant", store, libtracker.NoopTracker{}, "")
 	missions := missionservice.New(db)
 
-	tools := missiontools.New(missions, hitlAttentionAsker{hitl: hitl},
+	tools := missiontools.New(missions, newAsker(hitl),
 		missiontools.WithAttentionParkWindow(20*time.Millisecond))
 
 	exec, err := taskengine.NewExec(ctx, stubModelRepo{}, tools, libtracker.NoopTracker{})

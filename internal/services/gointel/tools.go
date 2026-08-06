@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/getkin/kin-openapi/openapi3"
 )
 
 // Tool names. The provider ("gointel") exposes six function tools, each a pure read of an in-memory type-checked snapshot: no process spawned, no write, nothing leaves the workspace. Expected to sit at allow tier.
@@ -119,11 +118,6 @@ func jsonResult[T any](res *T, err error) (any, taskengine.DataType, error) {
 
 func (h *tools) Supports(context.Context) ([]string, error) {
 	return append([]string{ToolsProviderName}, toolNames...), nil
-}
-
-// GetSchemasForSupportedTools returns no OpenAPI documents: gointel is a local toolset with hand-written function schemas; the model-facing contract is GetToolsForToolsByName.
-func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
-	return map[string]*openapi3.T{}, nil
 }
 
 // Argument decoding: small models routinely emit JSON scalars as strings ({"max": "20"}), and a strict type assertion would silently answer a different question than the one asked. Argument names stay strict — rejectUnknownArgs is the guard.

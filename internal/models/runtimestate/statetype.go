@@ -18,7 +18,7 @@ type BackendRuntimeState struct {
 	Backend      runtimetypes.Backend `json:"backend"`
 	// Error stores a description of the last encountered error when
 	// interacting with or reconciling this backend's state, if any.
-	Error string `json:"error,omitempty" example:"connection timeout: context deadline exceeded"`
+	Error            string `json:"error,omitempty" example:"connection timeout: context deadline exceeded"`
 	ResolvedEndpoint string `json:"resolvedEndpoint,omitempty"`
 	ResolvedInstance string `json:"resolvedInstance,omitempty"`
 	LiveEngine       string `json:"liveEngine,omitempty"` // "llama" or "openvino"

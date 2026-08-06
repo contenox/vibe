@@ -92,10 +92,11 @@ protocols for editors; `workspace` grants or revokes the workspace roots a
 session may run in; the rest work against the local database directly.)
 
 The layout is layered, and almost everything lives under Go `internal/` so
-the compiler defines the public surface. `github.com/contenox/libacp` is the
-one deliberately external, public library (a reusable Go ACP implementation)
-— it lives in its own repo and is pulled in as a normal module dependency,
-not part of this tree.
+the compiler defines the public surface. `libacp/` is the one deliberate
+exception: a reusable Go ACP implementation anyone may import as
+`github.com/contenox/contenox/libacp`. It is maintained here rather than in a
+separate repo so a clone of this repository builds with no dependency you
+cannot fetch.
 
 ```text
 cmd/contenox/            contenox binary entry point

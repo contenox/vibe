@@ -14,8 +14,8 @@ import (
 	"github.com/contenox/contenox/internal/services/agenthost"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
-	"github.com/contenox/libacp/acpexec"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libacp/acpexec"
 	"github.com/stretchr/testify/require"
 )
 

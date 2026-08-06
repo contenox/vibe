@@ -41,7 +41,7 @@ That's it — pick **Contenox** as the active agent and start a session.
 
 ## What you get
 
-**Your chain, in a chat UI.** Every prompt runs the contenox chain at `~/.contenox/default-acp-chain.json` — the same agent behavior you'd get from the CLI or any other ACP client, in AionUi's conversation surface.
+**Your chain, in a chat UI.** Every prompt runs your contenox `chain-agent-acp.json` chain — the same agent behavior you'd get from the CLI or any other ACP client, in AionUi's conversation surface.
 
 **Tool steps with real context.** When the chain runs a tool, AionUi's step view shows the actual operation — `local_shell: ls -l`, `local_fs.read_file: README.md` — not just a bare tool name.
 
@@ -61,7 +61,7 @@ AionUi layers its own chat UI and skill ecosystem on top; the agent itself — t
 
 ACP sessions use a dedicated chain file separate from the CLI's default chain:
 
-- Default location: `~/.contenox/default-acp-chain.json`
+- Loaded from `~/.contenox/chain-agent-acp.json` (formerly `default-acp-chain.json` — `contenox init --update` renames it).
 - Override with the `CONTENOX_ACP_CHAIN_PATH` environment variable.
 
 The default chain uses `"tools": ["*"]`, exposing everything the engine has registered — `local_fs`, `local_shell`, `webtools`, plus any MCP servers you've added.
@@ -73,11 +73,11 @@ The default chain uses `"tools": ["*"]`, exposing everything the engine has regi
 ACP reads from your global model/provider config — the same one the CLI uses:
 
 ```bash
-contenox config set default-model qwen2.5:7b
+contenox config set default-model qwen3:8b
 contenox config set default-provider ollama
 ```
 
-Models are global; chains are local. Switching the model for ACP also switches it for `contenox chat`.
+Models are global; chains resolve workspace-first. Switching the model for ACP also switches it for `contenox chat`.
 
 ---
 

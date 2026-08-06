@@ -3,6 +3,7 @@ package missiontools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -48,6 +49,11 @@ type PendingAsk struct {
 // AttentionResolver is the answering half of the supervisor surface: find
 // what a mission is waiting on, and answer it. Kept separate from
 // SupervisorStore since the two live in different services.
+//
+// AnswerAsAgent must enforce the mission envelope's agent-answer bounds: a
+// session agent can reach a live askId without ever being offered the
+// question, so the write is where the bound has to hold. An
+// *AnswerRefusedError says the envelope held; any other error is plumbing.
 type AttentionResolver interface {
 	// PendingAsks returns the unanswered questions for missionID.
 	PendingAsks(ctx context.Context, missionID string) ([]PendingAsk, error)
@@ -55,6 +61,14 @@ type AttentionResolver interface {
 	// agent rather than a human — a distinction the envelope's cap counts on.
 	AnswerAsAgent(ctx context.Context, askID, text string) error
 }
+
+// AnswerRefusedError is the mission envelope declining an agent answer — a
+// refusal, not broken plumbing. This package discards Reason (the model sees
+// the plain denial only), so the resolver must state it on the operator's
+// trace at the refusal point or the denial is invisible.
+type AnswerRefusedError struct{ Reason string }
+
+func (e *AnswerRefusedError) Error() string { return e.Reason }
 
 // WithParentSessionID marks ctx as belonging to a session that may supervise
 // its own missions. The mirror of WithMissionID: that says "you ARE a
@@ -198,6 +212,13 @@ func (p *provider) execAnswer(ctx context.Context, parentSessionID string, input
 				continue
 			}
 			if err := p.resolver.AnswerAsAgent(ctx, askID, answer); err != nil {
+				var refused *AnswerRefusedError
+				if errors.As(err, &refused) {
+					// The envelope holding, nothing more: a plain result, so
+					// the model stops rather than retrying a denial that
+					// cannot change. The reason stays on the operator's trace.
+					return fmt.Sprintf("answer denied per policy for ask %s.", askID), taskengine.DataTypeString, nil
+				}
 				return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: answer %s: %w", askID, err)
 			}
 			return fmt.Sprintf("answered %s — unit %q has your reply and continues", askID, m.AgentName), taskengine.DataTypeString, nil

@@ -9,9 +9,9 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
 
@@ -118,7 +118,7 @@ func summarizeForFork(ctx context.Context, cmd *cobra.Command, db libdb.DBManage
 		return nil, err
 	}
 	if model == "" {
-		return nil, fmt.Errorf("no default model configured; run 'contenox config set default-model <model>'")
+		return nil, fmt.Errorf("no default model configured; run 'contenox setup' (or 'contenox config set default-model <model>')")
 	}
 
 	rootFlags := cmd.Root().PersistentFlags()
@@ -134,6 +134,7 @@ func summarizeForFork(ctx context.Context, cmd *cobra.Command, db libdb.DBManage
 		EffectiveAltDefaultProvider: altProvider,
 		EffectiveMaxTokens:          maxTokens,
 		EffectiveNoDeleteModels:     noDeleteModels,
+		EffectiveOptInBeta:          betaEnabled(ctx, runtimetypes.New(db.WithoutTransaction())),
 		ContenoxDir:                 contenoxDir,
 	}
 
@@ -144,7 +145,7 @@ func summarizeForFork(ctx context.Context, cmd *cobra.Command, db libdb.DBManage
 	}
 	defer engine.Stop()
 
-	chainPath, err := resolveSystemChain(cmd, contenoxDir, "chain-compact.json")
+	chainPath, err := resolveSystemChain(cmd, contenoxDir, chainCompactDefaultFilename)
 	if err != nil {
 		return nil, err
 	}

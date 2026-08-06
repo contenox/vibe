@@ -14,7 +14,7 @@ import (
 
 	"github.com/contenox/contenox/internal/errdefs"
 	"github.com/contenox/contenox/internal/services/missionservice"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // DOI (Degree-of-Interest) weights for Stage 1 scoring. These are tunable

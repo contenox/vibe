@@ -1,10 +1,11 @@
 package hitlservice
 
-// diagnostics.go surfaces envelope fields that parse cleanly but enforce
-// less than their plain reading suggests — validatePolicy only rejects
-// malformed envelopes, not misleading ones. The bar for adding a diagnostic
-// is high: a field that does what it says gets none. Diagnostics never fail
-// a vet run; a policy that warns still loads, validates, and governs.
+// diagnostics.go carries the vocabulary for envelope fields that parse and
+// validate cleanly but enforce less than their plain reading suggests. The
+// bar is high: a field that does what it says gets none, and a field that
+// lies is rejected outright rather than warned about (OnExhaustedPauseAsk).
+// Diagnostics never fail a vet run; a policy that warns still loads,
+// validates, and governs. TrustedBinaryDiagnostics is the one producer.
 
 import (
 	"encoding/json"
@@ -24,33 +25,25 @@ func (d PolicyDiagnostic) String() string {
 	return fmt.Sprintf("%s: %s", d.Field, d.Message)
 }
 
-// PolicyDiagnostics reports every declared-but-not-fully-enforced field in a
-// policy document. Returns nil for a document that doesn't parse, or that
-// claims nothing it cannot deliver.
-func PolicyDiagnostics(data []byte) []PolicyDiagnostic {
+// TrustedBinaryDiagnostics reports every declared trusted-binary entry that is
+// not OK on THIS host: the declarations describe one machine, so a missing,
+// mismatched, unreadable, or outside-dirs entry is a warning rather than a
+// defect — the envelope stays valid and the runtime's answer for such an entry
+// is a refusal, never a silent pass. Reads and hashes files, so it belongs to
+// host-aware callers (vet, doctor). Returns nil for a document that does not
+// parse or declares nothing.
+func TrustedBinaryDiagnostics(data []byte) []PolicyDiagnostic {
 	var p Policy
 	if err := json.Unmarshal(data, &p); err != nil {
 		return nil
 	}
-	return ComputeDiagnostics(p.Compute)
-}
-
-// ComputeDiagnostics is PolicyDiagnostics for an already-loaded compute
-// block. A nil block reports nothing.
-func ComputeDiagnostics(c *ComputeBounds) []PolicyDiagnostic {
-	if c == nil {
+	statuses := CheckTrustedBinaries(p.TrustedBinaries)
+	if len(statuses) == 0 {
 		return nil
 	}
-	var out []PolicyDiagnostic
-	if c.OnExhausted == OnExhaustedPauseAsk {
-		out = append(out, PolicyDiagnostic{
-			Field:   "compute.onExhausted",
-			Message: unenforcedPauseAskMessage,
-		})
+	out := make([]PolicyDiagnostic, 0, len(statuses))
+	for _, s := range statuses {
+		out = append(out, PolicyDiagnostic{Field: "trusted_binaries.hashes", Message: s.String()})
 	}
 	return out
 }
-
-// unenforcedPauseAskMessage is the one unenforced-field message today, kept
-// in a constant so `contenox vet` and the terminal mission record agree.
-const unenforcedPauseAskMessage = `"pause_ask" is ACCEPTED BUT NOT IMPLEMENTED — a mission that hits a compute bound is finished stuck, exactly as onExhausted:"finish_stuck" would. It does not pause, and it files no ask for you to answer. Until it is implemented, rely on the mission finishing at StatusStuck with a reason naming the bound (visible on the board, in the inbox, and to "mission fire --wait"), and set the ceiling you are willing to spend rather than one you plan to extend.`

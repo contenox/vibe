@@ -15,10 +15,9 @@ import (
 	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/services/localtools"
-	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -481,9 +480,9 @@ func TestE2E_Wire_SessionListOrder(t *testing.T) {
 		client.drainNotifications(1) // available_commands_update
 	}
 
-	// Backdate activity out of creation order via messagestore, the exact
+	// Backdate activity out of creation order via the message store, the exact
 	// production path whose stored time format the list must parse back.
-	store := messagestore.New(db.WithoutTransaction(), "order-ws")
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "order-ws")
 	base := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	activity := map[int]time.Time{
 		0: base.Add(1 * time.Hour), // middle
@@ -491,9 +490,9 @@ func TestE2E_Wire_SessionListOrder(t *testing.T) {
 		2: base.Add(2 * time.Hour), // freshest
 	}
 	for i, at := range activity {
-		info, err := store.GetSessionByName(ctx, "acp-client", string(sids[i]))
+		info, err := store.GetMessageSessionByName(ctx, "acp-client", string(sids[i]))
 		require.NoError(t, err)
-		require.NoError(t, store.AppendMessages(ctx, &messagestore.Message{
+		require.NoError(t, store.AppendMessages(ctx, &runtimetypes.Message{
 			ID:      string(sids[i]) + "-m1",
 			IDX:     info.ID,
 			Payload: []byte(`{"role":"user","content":"hello"}`),

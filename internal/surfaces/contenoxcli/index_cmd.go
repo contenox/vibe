@@ -20,11 +20,11 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/ollamatokenizer"
 	"github.com/contenox/contenox/internal/services/searchtool"
 	"github.com/contenox/contenox/internal/services/workspaceindex"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 	xterm "golang.org/x/term"
 )
@@ -139,14 +139,14 @@ func openWorkspaceIndex(ctx context.Context, cmd *cobra.Command, dir string) (io
 		return nil, nil, fmt.Errorf("failed to build engine: %w", err)
 	}
 
+	// No embedding model is not a refusal: workspaceindex builds a lexical-only
+	// generation from a nil embedder, and the FTS5 leg alone answers exact
+	// identifiers — which is most of what a code search asks for. Only the
+	// semantic leg is missing, and index/search say so rather than declining.
 	model := strings.TrimSpace(engine.EmbeddingModel.Name)
-	if model == "" {
-		engine.Stop()
-		db.Close()
-		return nil, nil, errors.New("no embedding model resolved, so nothing can be indexed or searched.\n" +
-			"Set one (most chat models cannot embed):\n" +
-			"  contenox config set default-embed-model nomic-embed-text\n" +
-			"  contenox config set default-embed-provider ollama   # only if it differs from default-provider")
+	var embedder workspaceindex.Embedder
+	if model != "" {
+		embedder = workspaceindex.NewLLMRepoEmbedder(engine.Models, model, engine.EmbeddingModel.Provider)
 	}
 
 	store := runtimetypes.New(db.WithoutTransaction())
@@ -157,7 +157,7 @@ func openWorkspaceIndex(ctx context.Context, cmd *cobra.Command, dir string) (io
 		EmbedFallback: strings.TrimSpace(getConfigValue(ctx, store, "default-embed-model")) == "",
 		Svc: workspaceindex.New(
 			store,
-			workspaceindex.NewLLMRepoEmbedder(engine.Models, model, engine.EmbeddingModel.Provider),
+			embedder,
 			ollamatokenizer.NewEstimateTokenizer(),
 			workspaceindex.Config{EmbedModel: model, EmbedProvider: engine.EmbeddingModel.Provider},
 		),
@@ -562,15 +562,17 @@ func bindWorkspaceSearch(tools map[string]taskengine.ToolsRepo, db libdb.DBManag
 	if !ok || engine == nil {
 		return
 	}
+	// Bound with or without an embedder: a nil one yields a lexical-only
+	// querier that still answers over whatever `contenox index` wrote, so the
+	// tool is absent only when the toolset itself is.
 	model := strings.TrimSpace(engine.EmbeddingModel.Name)
-	if model == "" {
-		// Leaving the querier unbound: the tool then tells the model retrieval
-		// is unavailable instead of failing inside a provider call.
-		return
+	var embedder workspaceindex.Embedder
+	if model != "" {
+		embedder = workspaceindex.NewLLMRepoEmbedder(engine.Models, model, engine.EmbeddingModel.Provider)
 	}
 	repo.querier.bind(workspaceindex.New(
 		runtimetypes.New(db.WithoutTransaction()),
-		workspaceindex.NewLLMRepoEmbedder(engine.Models, model, engine.EmbeddingModel.Provider),
+		embedder,
 		ollamatokenizer.NewEstimateTokenizer(),
 		workspaceindex.Config{EmbedModel: model, EmbedProvider: engine.EmbeddingModel.Provider},
 	))

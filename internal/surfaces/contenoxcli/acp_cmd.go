@@ -19,10 +19,10 @@ import (
 	"github.com/contenox/contenox/internal/libbus"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/libkvstore"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/agentservice"
+	"github.com/contenox/contenox/internal/services/eventlog"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -34,7 +34,8 @@ import (
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/contenox/contenox/internal/surfaces/fleetboot"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +44,7 @@ var acpCmd = &cobra.Command{
 	Short: "Run the Contenox ACP server over stdio.",
 	Long: `Speak Agent Client Protocol over stdio so editors like Zed can run local Contenox chains.
 
-The chain executed for each session/prompt is loaded from ~/.contenox/default-acp-chain.json
+The chain executed for each session/prompt is loaded from ~/.contenox/chain-agent-acp.json
 (override with the CONTENOX_ACP_CHAIN_PATH environment variable). Populate it like any other
 contenox chain.
 
@@ -65,7 +66,7 @@ var acpxCmd = &cobra.Command{
 	Long: `Same Agent Client Protocol server as 'acp', for drivers that are not the
 device owner — OpenClaw and other non-editor clients. It loads the hardened
 hitl-policy-acpx.json (local_shell denied, web mutations denied, web reads
-gated) and the chain at ~/.contenox/headless-acp-chain.json (override with
+gated) and the chain at ~/.contenox/chain-agent-acpx.json (override with
 CONTENOX_ACPX_CHAIN_PATH).
 
 Containment for the untrusted driver is the HITL policy, not an in-chain
@@ -100,7 +101,7 @@ type acpProfile struct {
 	// fleet in-process. Disabled for acpx: an untrusted driver must not get a
 	// lever to dispatch fleet units at all.
 	embedFleet bool
-	// seedFIMChain seeds the default-fim-chain.json preset consumed by
+	// seedFIMChain seeds the chain-fim-default.json preset consumed by
 	// _contenox/autocomplete. Nil disables autocomplete for this profile
 	// entirely (no seed, no load): acpx serves non-editor drivers (OpenClaw
 	// and friends) with no code buffer to complete into, so the method would
@@ -111,7 +112,7 @@ type acpProfile struct {
 
 var acpProfileACP = acpProfile{
 	hitlPolicy:   "hitl-policy-acp.json",
-	chainFile:    "default-acp-chain.json",
+	chainFile:    chainAgentACPFilename,
 	chainEnv:     "CONTENOX_ACP_CHAIN_PATH",
 	seedChain:    seedACPChainIfMissing,
 	embedFleet:   true,
@@ -120,7 +121,7 @@ var acpProfileACP = acpProfile{
 
 var acpProfileACPX = acpProfile{
 	hitlPolicy: "hitl-policy-acpx.json",
-	chainFile:  headlessACPChainFilename,
+	chainFile:  chainAgentACPXFilename,
 	chainEnv:   "CONTENOX_ACPX_CHAIN_PATH",
 	seedChain:  seedHeadlessACPChainIfMissing,
 }
@@ -257,6 +258,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	// Config reads are environment-first: a CONTENOX_DEFAULT_* variable
 	// overrides the stored value for this process without persisting.
+	optInBeta := betaEnabled(ctx, runtimetypes.New(db.WithoutTransaction()))
 	defaultModel := configValueWithEnv(ctx, db, "default-model", envDefaultModel)
 	defaultProvider := configValueWithEnv(ctx, db, "default-provider", envDefaultProvider)
 	defaultAltModel := configValueWithEnv(ctx, db, "default-alt-model", envDefaultAltModel)
@@ -288,12 +290,20 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	defer bus.Close()
 	// Publisher-wired so AddReport emits a ReportAddedEvent: the dispatcher's
 	// embedded report router consumes it, and a dispatched unit's publisher
-	// carries its report across the process boundary the same way.
-	missions := missionservice.New(db, missionservice.WithEventPublisher(bus))
+	// carries its report across the process boundary the same way. Under
+	// opt-in-beta the publisher also appends each event to the durable log;
+	// the trigger holder fires matching triggers live once the engine exists
+	// below (the standalone dispatcher stays the catch-up consumer).
+	trigHook := eventlog.NewTriggerHolder()
+	missionPub := missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)
+	missions := missionservice.New(db, missionservice.WithEventPublisher(missionPub))
 
 	// One durable-ask service for this process: the unit half raises
 	// questions through it, the supervisor half answers them through it.
 	acpHITL := hitlservice.NewWithDefaultPolicy(acpPolicySource(), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, profile.hitlPolicy)
+	// /policy and `contenox config set hitl-policy-name` both write this
+	// workspace's row; the evaluator must read the same one.
+	hitlservice.SetWorkspaceID(acpHITL, workspaceID)
 
 	// Same SANDBOX_* scrub composition BuildEngine wires for local_shell (see
 	// sandbox_scrub.go): this profile builds its own toolset rather than going
@@ -312,8 +322,14 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		CwdResolver: acpsvc.NewACPCwdResolver(func() *acpsvc.Transport { return transport }),
 	})
 	// The goja sandbox: goja_eval plus one tool per operator-authored script in
-	// $CONTENOX_DIR/tools, exactly as BuildEngine constructs it for the CLI.
-	gt, err := gojatool.New(gojatool.Config{ScriptDir: filepath.Join(contenoxDir, "tools")})
+	// $CONTENOX_DIR/tools, exactly as BuildEngine constructs it for the CLI —
+	// including the opt-in-beta gate: without it the scripts are never loaded
+	// and acpToolset leaves the provider unregistered.
+	gojaScriptDir := filepath.Join(contenoxDir, "tools")
+	if !optInBeta {
+		gojaScriptDir = ""
+	}
+	gt, err := gojatool.New(gojatool.Config{ScriptDir: gojaScriptDir})
 	if err != nil {
 		goIndex.Shutdown()
 		return fmt.Errorf("build goja sandbox: %w", err)
@@ -326,7 +342,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		}
 	}()
 
-	tools := acpToolset(db, tracker, goIndex, gt, workspaceID, func() *acpsvc.Transport { return transport }, shellScrub, missions, acpHITL, bus)
+	tools := acpToolset(db, tracker, goIndex, gt, workspaceID, func() *acpsvc.Transport { return transport }, shellScrub, missions, acpHITL, missionPub, optInBeta)
 
 	var askApproval localtools.AskApproval
 	if enableHITL {
@@ -395,6 +411,26 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			DB:          db,
 			WorkspaceID: workspaceID,
 		}))
+		// Live in-process trigger dispatch on this host's appends (beta; nil
+		// when no triggers load). Minimal opts: what buildTemplateVars and the
+		// firing runner consume.
+		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, chatOpts{
+			EffectiveDefaultModel:       defaultModel,
+			EffectiveDefaultProvider:    defaultProvider,
+			EffectiveConfiguredModel:    defaultModel,
+			EffectiveConfiguredProvider: defaultProvider,
+			EffectiveAltDefaultModel:    defaultAltModel,
+			EffectiveAltDefaultProvider: defaultAltProvider,
+			EffectiveMaxTokens:          defaultMaxTokens,
+			EffectiveThink:              defaultThink,
+			EffectiveOptInBeta:          optInBeta,
+			ContenoxDir:                 contenoxDir,
+		}, os.Stderr))
+		// Deferred AFTER engine.Stop so LIFO drains in-flight firings first: an
+		// editor closing the session tears this host down, and a firing killed
+		// between its claim and its finish is never retried by the catch-up
+		// dispatcher.
+		defer trigHook.Drain(eventlog.DefaultDrainTimeout)
 	}
 
 	updateBanner := acpUpdateBanner(dbCtx, db, contenoxDir)
@@ -429,8 +465,11 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			HITL:         acpHITL,
 			PolicySource: hitlPolicySource(contenoxDir),
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-				discoverChainAgents(dctx, agents, contenoxDir, tracker)
+				discoverChainAgents(dctx, agents, contenoxDir, tracker, optInBeta)
 			},
+			// The workspace missionPub stamps; a dispatched unit's own
+			// publisher must stamp the same one.
+			WorkspaceID: workspaceID,
 		})
 		if buildErr != nil {
 			return buildErr
@@ -463,6 +502,16 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		// setup-only editor) — nil-safe throughout acpsvc when unwired.
 		Fleet:  missionFleet,
 		Agents: missionAgents,
+		// /answer's two seams: the durable ask store it reads and resolves
+		// through, and the ownership check that confines it to asks raised by
+		// missions this session fired. Same values the mission toolset uses,
+		// so the command and the tool cannot disagree about who owns an ask.
+		Asks:        acpHITL,
+		Supervision: missionSupervision{missions: missions, hitl: acpHITL, db: db, tracker: tracker},
+		// The envelopes /mission --policy offers and validates against, read
+		// from the same search path the unit's policy loader reads.
+		MissionEnvelopes: newMissionEnvelopes(contenoxDir),
+		OptInBeta:        optInBeta,
 		EnvSetup: &acpsvc.EnvSetupSpec{
 			Vars: acpEnvSetupVars(),
 			Complete: func(cctx context.Context) error {
@@ -503,7 +552,10 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 type missionAttentionAsker struct {
 	hitl     hitlservice.Service
 	missions missionservice.Service
-	bus      libbus.Messenger
+	// bus is the narrow publish seam (libbus.Messenger satisfies it); wired
+	// with the mission event publisher so an attention_asked announce follows
+	// the same dual-write path the other mission events take.
+	bus missionservice.EventPublisher
 }
 
 var _ missiontools.AttentionAsker = missionAttentionAsker{}

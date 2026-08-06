@@ -56,7 +56,7 @@ Restart the IDE. Open the agent panel — Contenox now appears in the agent pick
 
 ACP sessions use a dedicated chain file separate from the CLI's default chain:
 
-- Default location: `~/.contenox/default-acp-chain.json`
+- Loaded from `~/.contenox/chain-agent-acp.json` (formerly `default-acp-chain.json` — `contenox init --update` renames it).
 - Override path with the `CONTENOX_ACP_CHAIN_PATH` environment variable (set it in the shell that launches the IDE).
 
 The default chain uses `"tools": ["*"]`, which exposes everything the engine has registered — `local_fs`, `local_shell`, `webtools`, plus any MCP servers you've added via `contenox mcp add`.
@@ -68,11 +68,11 @@ The default chain uses `"tools": ["*"]`, which exposes everything the engine has
 ACP reads from your global model/provider config — the same one the CLI uses:
 
 ```bash
-contenox config set default-model qwen2.5:7b
+contenox config set default-model qwen3:8b
 contenox config set default-provider ollama
 ```
 
-Models are global; chains are local. Switching the model for ACP also switches it for `contenox chat`.
+Models are global; chains resolve workspace-first. Switching the model for ACP also switches it for `contenox chat`.
 
 ---
 

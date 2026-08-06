@@ -25,9 +25,9 @@ contenox mcp add playwright --transport stdio \
 
 The default **run** chain from `contenox init` exposes registered tools automatically via `"tools": ["*"]`, so Playwright is available as soon as you add the server.
 
-If you want tighter control, replace `"*"` with an explicit allowlist in `.contenox/default-run-chain.json`, or use a custom chain whose `tools` include only the tools you want.
+If you want tighter control, replace `"*"` with an explicit allowlist in `.contenox/chain-agent-run.json`, or use a custom chain whose `tools` include only the tools you want.
 
-> [!TIP]
+> **Tip:**
 > Tool names exposed to the model are prefixed with the server name, e.g. `playwright.<tool_name>`.
 
 For tighter control before sensitive actions, use explicit `tools_policies` in your chain. HITL approval is on by default; pass `--auto` only for trusted, unattended runs.

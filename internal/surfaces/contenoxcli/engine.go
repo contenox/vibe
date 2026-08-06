@@ -8,9 +8,10 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	libbus "github.com/contenox/contenox/internal/libbus"
 	"github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentservice"
+	"github.com/contenox/contenox/internal/services/eventlog"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -20,7 +21,9 @@ import (
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/searchtool"
 	"github.com/contenox/contenox/internal/services/setupcheck"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // ComputeReadiness builds the engine (a read-only backend sync, never a model
@@ -69,23 +72,83 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	// The goja sandbox: goja_eval plus one tool per operator-authored script in
 	// $CONTENOX_DIR/tools. Construction loads and validates every script file,
 	// so a broken script is a startup error naming the file — never a
-	// silently skipped tool the operator believes exists.
-	gt, err := gojatool.New(gojatool.Config{ScriptDir: filepath.Join(opts.ContenoxDir, "tools")})
+	// silently skipped tool the operator believes exists. Without opt-in-beta
+	// the scripts are not even loaded: the toolset stays unregistered
+	// (localToolset), and an invisible feature must not fail startup.
+	gojaScriptDir := filepath.Join(opts.ContenoxDir, "tools")
+	if !opts.EffectiveOptInBeta {
+		gojaScriptDir = ""
+	}
+	gt, err := gojatool.New(gojatool.Config{ScriptDir: gojaScriptDir})
 	if err != nil {
 		goIndex.Shutdown()
 		reportErr(err)
 		return nil, err
 	}
 
+	// One bus for this process, built here instead of letting enginesvc mint
+	// one internally, so the mission tools below publish on the same bus the
+	// engine runs on. A resumed unit's report and its mission_finish must reach
+	// the report router and fleetservice's status teardown; a second, undrained
+	// bus would reap nothing.
+	bus := libbus.NewSQLite(db.WithoutTransaction())
+
 	engineBuilt := false
 	defer func() {
 		if !engineBuilt {
 			goIndex.Shutdown()
 			gt.Shutdown()
+			bus.Close()
 		}
 	}()
 
-	tools := localToolset(opts, db, tracker, goIndex, gt)
+	// The control-plane denylist is process-global and consulted by every
+	// vfs.Contain call, so it must be registered before any file tool exists.
+	// Registering it here rather than per-surface is what makes the guarantee
+	// unconditional: an agent can never reach the config, database, or
+	// policies that govern it. This registration used to live in the retired
+	// `serve` command, and nothing replaced it — until it returned, the
+	// denylist was empty at runtime and the refusal never fired.
+	if err := vfs.SetControlPlaneDenied(controlPlaneDirs(opts.ContenoxDir)...); err != nil {
+		reportErr(err)
+		return nil, fmt.Errorf("register control-plane denylist: %w", err)
+	}
+
+	workspaceID := ResolveWorkspaceID(opts.ContenoxDir)
+
+	// Built here and injected, rather than letting enginesvc mint one
+	// internally, because the resume-on-verdict hook can only be registered
+	// once the engine exists.
+	var hitlSvc hitlservice.Service
+	if opts.EffectiveHITL {
+		hitlSvc = newHITLService(opts.ContenoxDir, runtimetypes.New(db.WithoutTransaction()), tracker, "")
+	}
+
+	// The mission store this engine's tools write through, wired with the same
+	// dual-write publisher every other mission producer uses, and — when a HITL
+	// service exists — with the attention asker that turns a unit's question
+	// into a durable ask. Both matter on the resume path: a run resumed here
+	// (see SetResumeHook below) re-enters mission_ask_attention for every
+	// question its batch had not reached yet, and a publisher-less,
+	// asker-less provider silently downgrades each one to a self-answered
+	// blocker report nobody is notified of.
+	// Late-bound like the acp and mission-fire hosts: the holder joins the
+	// publisher now and receives the in-process dispatch hook once the engine
+	// below exists, so a resumed unit's events fire triggers here too instead
+	// of waiting for the catch-up dispatcher.
+	trigHook := eventlog.NewTriggerHolder()
+	missionPub := missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)
+	missions := missionservice.New(db, missionservice.WithEventPublisher(missionPub))
+	// Nil only when HITL is off — the same condition under which no resume hook
+	// is registered below, so no resumed run ever meets a nil asker on this
+	// engine. Wiring one without a gate would be the --auto posture answering
+	// its own questions.
+	var missionAsker missiontools.AttentionAsker
+	if hitlSvc != nil {
+		missionAsker = missionAttentionAsker{hitl: hitlSvc, missions: missions, bus: missionPub}
+	}
+
+	tools := localToolset(opts, db, tracker, goIndex, gt, missions, missionAsker)
 
 	askApproval := opts.EffectiveAskApproval
 	if askApproval == nil {
@@ -93,14 +156,6 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	}
 
 	readinessModel, readinessProvider := readinessDefaults(opts)
-
-	// Built here and injected, rather than letting enginesvc mint one
-	// internally, because the resume-on-verdict hook can only be registered
-	// once the engine exists.
-	var hitlSvc hitlservice.Service
-	if opts.EffectiveHITL {
-		hitlSvc = hitlservice.NewWithDefaultPolicy(hitlPolicySource(opts.ContenoxDir), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, "")
-	}
 
 	reportChange("phase", "tools_prepared")
 	engine, err := enginesvc.Build(ctx, db, enginesvc.Config{
@@ -119,9 +174,10 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		Tracker:                  tracker,
 		Tracing:                  opts.EffectiveTracing,
 		SkipBackendCycle:         opts.EffectiveSkipBackendCycle,
-		WorkspaceID:              ResolveWorkspaceID(opts.ContenoxDir),
+		WorkspaceID:              workspaceID,
 		HITLPolicySource:         hitlPolicySource(opts.ContenoxDir),
 		TaskEventSink:            opts.EffectiveTaskEventSink,
+		Bus:                      bus, // reuse the one bus the mission tools publish on
 		// Closes the goja sandbox's construction cycle: host.tool needs the
 		// aggregate repo the sandbox is itself registered inside. enginesvc
 		// hands back the HITL-wrapped repo here, so a script's tool call meets
@@ -136,11 +192,12 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	}
 	// The engine now has the resolved model route workspace_search needs.
 	bindWorkspaceSearch(tools, db, engine)
+	trigHook.Set(buildInProcessTriggerHook(ctx, db, opts.ContenoxDir, workspaceID, engine, opts, os.Stderr))
 	if hitlSvc != nil {
 		hitlservice.SetResumeHook(hitlSvc, agentservice.ResumeHook(agentservice.Deps{
 			Engine:      engine,
 			DB:          db,
-			WorkspaceID: ResolveWorkspaceID(opts.ContenoxDir),
+			WorkspaceID: workspaceID,
 		}))
 	}
 	reportChange("phase", "enginesvc_built")
@@ -148,11 +205,18 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	engineBuilt = true
 	oldStop := engine.Stop
 	engine.Stop = func() {
+		// First: a firing claims its (trigger, nid) row before running the
+		// chain, so a host that exits mid-firing strands the claim and the
+		// catch-up dispatcher then skips it. Draining before teardown is what
+		// keeps at-least-once true for the process that fired.
+		trigHook.Drain(eventlog.DefaultDrainTimeout)
 		goIndex.Shutdown()
 		// Refuses further executions and joins in-flight ones (bounded — a
 		// call may be parked on a human approval).
 		gt.Shutdown()
 		oldStop()
+		// Ours to close: enginesvc closes only a bus it minted itself.
+		bus.Close()
 	}
 	return engine, nil
 }
@@ -161,7 +225,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 // It is a function rather than an inline literal so what is registered — and,
 // just as importantly, what is registered only when asked for — is assertable
 // without standing up a whole engine (engine_test.go).
-func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, goIndex gointel.Index, gojaTools *gojatool.Toolset) map[string]taskengine.ToolsRepo {
+func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, goIndex gointel.Index, gojaTools *gojatool.Toolset, missions missionservice.Service, missionAsker missiontools.AttentionAsker) map[string]taskengine.ToolsRepo {
 	tools := map[string]taskengine.ToolsRepo{
 		"echo":     localtools.NewEchoTools(),
 		"print":    localtools.NewPrint(tracker),
@@ -188,15 +252,20 @@ func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.Acti
 		// once the engine's embedding seam exists (see workspaceSearchRepo in
 		// index_cmd.go).
 		searchtool.ToolsProviderName: newWorkspaceSearchTools(ResolveWorkspaceID(opts.ContenoxDir)),
-		// Always registered: with no $CONTENOX_DIR/tools, goja carries only
-		// goja_eval, a pure compute sandbox with no ambient I/O — its only
-		// reach out is host.tool, gated by this same envelope. Script tools
-		// get no rule, so operator-authored code falls to default_action.
-		gojatool.ToolsProviderName: gojaTools,
-		// Durable-only (no asker, no publisher): this engine resumes
-		// suspended mission chains, whose later report/finish calls must
-		// land in the store rather than fail as unknown tools.
-		missiontools.ToolsProviderName: missiontools.New(missionservice.New(db), nil),
+		// Wired, not durable-only: this engine resumes suspended mission
+		// chains, and a resumed unit asks its remaining questions here. The
+		// asker makes each one a durable ask over the store `contenox
+		// approvals` reads; missions carries the event publisher that announces
+		// its reports and its terminal status change. Built by BuildEngine —
+		// see the invariant on missionAsker there.
+		missiontools.ToolsProviderName: missiontools.New(missions, missionAsker),
+	}
+	if opts.EffectiveOptInBeta {
+		// Registered only under opt-in-beta: with no $CONTENOX_DIR/tools, goja
+		// carries only goja_eval, a pure compute sandbox with no ambient I/O —
+		// its only reach out is host.tool, gated by this same envelope. Script
+		// tools get no rule, so operator-authored code falls to default_action.
+		tools[gojatool.ToolsProviderName] = gojaTools
 	}
 	if opts.EffectiveEnableLocalExec {
 		execOpts := []localtools.LocalExecOption{}
@@ -221,6 +290,12 @@ func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.Acti
 		if !opts.EffectiveHITL && opts.EffectiveLocalExecAllowedDir == "" && opts.WarnW != nil {
 			fmt.Fprint(opts.WarnW, "warning: --auto disabled the approval prompt and local_shell has no allowed dir — the agent may run any command, anywhere.\n"+
 				"         scope it with: --local-exec-allowed-dir .\n")
+		}
+	}
+	// Host-scoped providers last, never overriding a standard registration.
+	for name, repo := range opts.EffectiveExtraTools {
+		if _, exists := tools[name]; !exists {
+			tools[name] = repo
 		}
 	}
 	return tools
@@ -251,4 +326,15 @@ func hitlPolicySource(primaryDir string) hitlservice.PolicySource {
 		dirs = append(dirs, filepath.Join(home, ".contenox"))
 	}
 	return hitlservice.NewFSPolicySource(dirs...)
+}
+
+// newHITLService is the CLI's one HITL service constructor. It derives the
+// policy source AND the workspace from the same contenoxDir, so the evaluator
+// reads the cli.hitl-policy-name row `contenox config set hitl-policy-name`
+// writes for that project. Constructing hitlservice directly here would leave
+// the workspace unbound, and the policy switch silently inert.
+func newHITLService(contenoxDir string, store runtimetypes.Store, tracker libtracker.ActivityTracker, fallbackPolicy string) hitlservice.Service {
+	svc := hitlservice.NewWithDefaultPolicy(hitlPolicySource(contenoxDir), runtimetypes.LocalTenantID, store, tracker, fallbackPolicy)
+	hitlservice.SetWorkspaceID(svc, ResolveWorkspaceID(contenoxDir))
+	return svc
 }

@@ -11,7 +11,7 @@ import (
 
 	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/missionservice"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // absTestPath returns p as a genuinely OS-absolute path so fixtures still

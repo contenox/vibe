@@ -10,7 +10,16 @@ export async function getStaticPaths() {
 
 const { entry } = Astro.props;
 const { Content } = await render(entry);
+
+// Docs pages with a German-language counterpart under /de/ get reciprocal
+// hreflang alternates; the DE pages declare the same pair from their side.
+const deCounterparts: Record<string, string> = {
+  'guide/sovereignty': '/de/ki-souveraenitaet/',
+};
+const alternates = deCounterparts[entry.id]
+  ? { en: `/docs/${entry.id}/`, de: deCounterparts[entry.id] }
+  : undefined;
 ---
-<Prose title={`${entryTitle(entry)} — Contenox Docs`} description={entry.data.description}>
+<Prose title={`${entryTitle(entry)} — Contenox Docs`} description={entry.data.description} alternates={alternates}>
   <Content />
 </Prose>

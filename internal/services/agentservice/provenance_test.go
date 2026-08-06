@@ -13,7 +13,7 @@ func TestUnit_StampTurnProvenance_StampsOnlyUnstampedMessages(t *testing.T) {
 		{ID: "a1", Role: "assistant", Content: "reply"},
 	}
 
-	stampTurnProvenance(msgs, "req-new", "default-chain.json")
+	stampTurnProvenance(msgs, "req-new", "chain-agent-contenox.json")
 
 	if msgs[0].RequestID != "req-old" || msgs[0].ChainRef != "old-chain.json" {
 		t.Fatalf("prior-turn provenance must not be overwritten, got %q/%q", msgs[0].RequestID, msgs[0].ChainRef)
@@ -22,8 +22,8 @@ func TestUnit_StampTurnProvenance_StampsOnlyUnstampedMessages(t *testing.T) {
 		if msgs[i].RequestID != "req-new" {
 			t.Fatalf("message %d: expected requestID req-new, got %q", i, msgs[i].RequestID)
 		}
-		if msgs[i].ChainRef != "default-chain.json" {
-			t.Fatalf("message %d: expected chainRef default-chain.json, got %q", i, msgs[i].ChainRef)
+		if msgs[i].ChainRef != "chain-agent-contenox.json" {
+			t.Fatalf("message %d: expected chainRef chain-agent-contenox.json, got %q", i, msgs[i].ChainRef)
 		}
 	}
 }

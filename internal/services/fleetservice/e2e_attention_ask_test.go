@@ -12,13 +12,13 @@ import (
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	libbus "github.com/contenox/contenox/internal/libbus"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/chainagents"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,7 +73,7 @@ func writeAskChainAgentFixture(t *testing.T, contenoxDir string) string {
 	}
 	data, err := json.Marshal(chain)
 	require.NoError(t, err)
-	path := filepath.Join(contenoxDir, "agent-ask-fixture.json")
+	path := filepath.Join(contenoxDir, "chain-agent-ask-fixture.json")
 	require.NoError(t, os.WriteFile(path, data, 0o600))
 	return path
 }

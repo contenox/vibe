@@ -5,6 +5,7 @@ package workspaceindex
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,22 @@ import (
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
+
+// affinityEmbedder embeds every text as a 2-D unit vector whose cosine against
+// the question is exactly the affinity scripted for it. A hash-of-words fake
+// cannot state "the vector leg prefers the wrong chunk" as a fact; this can.
+type affinityEmbedder struct {
+	question string
+	affinity func(text string) float64
+}
+
+func (e *affinityEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+	a := 1.0
+	if text != e.question {
+		a = e.affinity(text)
+	}
+	return []float32{float32(a), float32(math.Sqrt(1 - a*a))}, nil
+}
 
 // searchFixture plants a near-duplicate of the question in one file and
 // plausible-but-different prose everywhere else.
@@ -119,13 +136,168 @@ func TestUnit_Query_EmptyIndexDegradesToErrNoIndex(t *testing.T) {
 	_, err = h.svc.Status(h.ctx, h.ws)
 	require.ErrorIs(t, err, ErrNoIndex)
 
-	// An index that exists but holds nothing returns no hits, no error.
+	// An index that exists but holds nothing says so: an empty hit list would
+	// read as "the workspace does not contain that", which is a different claim.
 	h.write(t, "empty.md", "\n")
 	_, err = h.svc.Build(h.ctx, h.root, h.opts(false))
 	require.NoError(t, err)
-	hits, err := h.svc.Query(h.ctx, h.ws, "anything at all", 5)
+	_, err = h.svc.Query(h.ctx, h.ws, "anything at all", 5)
+	require.ErrorIs(t, err, ErrIndexEmpty, "an empty generation must be distinguishable from a query that matched nothing")
+	require.ErrorIs(t, err, ErrNoIndex, "and must stay matchable by every caller that already degrades ErrNoIndex")
+
+	// A populated index that simply matches nothing is NOT the empty case.
+	h.write(t, "docs/retry.md", "Retry backoff is explained here.\n")
+	_, err = h.svc.Build(h.ctx, h.root, h.opts(false))
 	require.NoError(t, err)
-	require.Empty(t, hits)
+	hits, err := h.svc.Query(h.ctx, h.ws, "zzqqxx unrelatedtoken", 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, hits, "the vector leg still ranks the bounded scan")
+}
+
+// TestUnit_Query_ExactIdentifierOutranksTheSemanticDecoy is the reason this
+// retrieval is hybrid: the vector leg is scripted to prefer prose that restates
+// the question in other words, and rank fusion must still put the file that
+// literally declares the symbol first.
+func TestUnit_Query_ExactIdentifierOutranksTheSemanticDecoy(t *testing.T) {
+	const (
+		question = "where is ResolveHITLApprovalWithinBound called"
+		target   = "internal/hitl/resolve.go"
+		decoy    = "docs/approvals.md"
+	)
+
+	h := newHarness(t, Config{})
+	h.write(t, target, "package hitl\n\nfunc ResolveHITLApprovalWithinBound(ctx context.Context) error {\n\treturn nil\n}\n")
+	h.write(t, decoy, strings.Repeat(
+		"This document explains where a pending human approval is resolved, how the bound on it is applied, and what happens when the approval flow is called again later.\n", 6))
+	// Filler that shares only the question's common words, so the lexical leg
+	// has a realistic field to rank the decoy against.
+	fillers := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"}
+	for i, name := range fillers {
+		h.write(t, fmt.Sprintf("docs/fill%02d.md", i), fmt.Sprintf("Where the %s rollout is called out, the runbook is authoritative.\n", name))
+	}
+
+	// The vector leg's verdict: the prose decoy, not the declaration. Ranked by
+	// cosine alone — which is what this retrieval did before it was hybrid —
+	// the answer to "where is X called" is a document that never mentions X.
+	scripted := &affinityEmbedder{question: question, affinity: func(text string) float64 {
+		switch {
+		case strings.Contains(text, "pending human approval"):
+			return 0.99
+		case strings.Contains(text, "func ResolveHITLApprovalWithinBound"):
+			return 0.85
+		}
+		for i, name := range fillers {
+			if strings.Contains(text, name+" rollout") {
+				return 0.35 - 0.03*float64(i)
+			}
+		}
+		return 0.10
+	}}
+	h.svc = New(h.spy, scripted, ollamatokenizer.NewEstimateTokenizer(), Config{EmbedModel: "fake-embed", EmbedProvider: "fake"})
+	h.build(t, false)
+
+	cfg, err := h.store.GetActiveWorkspaceIndexConfig(h.ctx, h.ws)
+	require.NoError(t, err)
+	candidates, err := h.store.SearchWorkspaceChunks(h.ctx, cfg.ID, ftsMatchQuery(question), 200)
+	require.NoError(t, err)
+	require.Len(t, candidates, 1+1+len(fillers), "every document shares at least one term with the question")
+
+	// Premise 1: the lexical leg finds the declaration by its rare token.
+	require.Equal(t, target, candidates[0].Path, "bm25's IDF must put the exact identifier first")
+	lexical := rankByOrder(candidates)
+
+	// Premise 2: the vector leg gets it wrong, and by how much.
+	qvec, err := scripted.Embed(h.ctx, question)
+	require.NoError(t, err)
+	vector := rankByCosine(qvec, candidates)
+	byPath := map[string]*runtimetypes.WorkspaceChunk{}
+	for _, c := range candidates {
+		byPath[c.Path] = c
+	}
+	require.Equal(t, 1, vector[byPath[decoy].ID], "the decoy must be the vector leg's own answer")
+	require.Greater(t, vector[byPath[target].ID], 1, "and the declaration must not be")
+	require.Greater(t, lexical[byPath[decoy].ID], vector[byPath[target].ID],
+		"the fixture is only meaningful while the decoy is lexically worse than the target is semantically")
+
+	// The fusion's verdict: the declaration, not the prose about it.
+	hits, err := h.svc.Query(h.ctx, h.ws, question, 3)
+	require.NoError(t, err)
+	require.NotEmpty(t, hits)
+	require.Equal(t, target, hits[0].Path, "rank fusion must not let a confident vector leg bury an exact identifier")
+	require.Contains(t, hits[0].Text, "ResolveHITLApprovalWithinBound")
+	require.Greater(t, hits[0].Score, hits[1].Score)
+}
+
+// TestUnit_Query_LexicalOnlyIndexAnswersWithNoEmbeddingModel pins the degraded
+// mode: no embedding model at all, and search still works.
+func TestUnit_Query_LexicalOnlyIndexAnswersWithNoEmbeddingModel(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.svc = New(h.spy, nil, ollamatokenizer.NewEstimateTokenizer(), Config{})
+	h.write(t, "docs/retry.md", "Retry backoff is explained here: the delay doubles on every attempt until a ceiling.\n")
+	h.write(t, "docs/widgets.md", "The widget catalogue enumerates every widget by taxonomy and colour.\n")
+
+	rep := h.build(t, false)
+	require.Zero(t, rep.EmbedCalls, "a lexical-only build spends nothing at the model, not even the dimension probe")
+	require.Positive(t, rep.ChunksWritten)
+
+	st, err := h.svc.Status(h.ctx, h.ws)
+	require.NoError(t, err)
+	require.Zero(t, st.Dimension, "dimension 0 is how a lexical-only generation declares itself")
+
+	hits, err := h.svc.Query(h.ctx, h.ws, "retry backoff ceiling", 3)
+	require.NoError(t, err)
+	require.NotEmpty(t, hits)
+	require.Equal(t, "docs/retry.md", hits[0].Path)
+	require.Positive(t, hits[0].Score)
+	require.False(t, hits[0].Stale)
+
+	// Staleness flagging is a property of the hit, not of the vector leg.
+	h.write(t, "docs/retry.md", "Retry backoff is explained here: the delay doubles on every attempt until a ceiling.\nAnd one more line.\n")
+	hits, err = h.svc.Query(h.ctx, h.ws, "retry backoff ceiling", 3)
+	require.NoError(t, err)
+	require.True(t, hits[0].Stale, "a hybrid hit must still report that its file moved")
+
+	// With no vector leg the bounded scan would be an unranked list, so a
+	// question sharing no term answers with nothing rather than with noise.
+	_, scansBefore := h.spy.counts()
+	none, err := h.svc.Query(h.ctx, h.ws, "zzqqxx unrelatedtoken", 3)
+	require.NoError(t, err)
+	require.Empty(t, none)
+	_, scansAfter := h.spy.counts()
+	require.Equal(t, scansBefore, scansAfter, "there is nothing to rank a scan with, so it is not taken")
+}
+
+// TestUnit_RRF_FusesRanksAndDegradesToOneLeg pins the fusion arithmetic and the
+// tie-break, independently of any store or embedder.
+func TestUnit_RRF_FusesRanksAndDegradesToOneLeg(t *testing.T) {
+	require.InDelta(t, 1.0/61.0, rrf(1), 1e-12, "k=60 plus a 1-based rank")
+	require.InDelta(t, 1.0/70.0, rrf(10), 1e-12)
+	require.Zero(t, rrf(0), "a leg that did not return the chunk contributes nothing, not a rank-0 bonus")
+
+	chunks := []*runtimetypes.WorkspaceChunk{
+		{ID: "a", Path: "a.go"}, {ID: "b", Path: "b.go"}, {ID: "c", Path: "c.go"},
+	}
+	lexical := map[string]int{"a": 1, "b": 5}
+	vector := map[string]int{"b": 1, "a": 5, "c": 2}
+
+	fused := fuse(chunks, lexical, vector)
+	require.Equal(t, []string{"a.go", "b.go", "c.go"}, hitPaths(fused))
+	require.InDelta(t, 1.0/61.0+1.0/65.0, fused[0].Score, 1e-12)
+	require.InDelta(t, fused[0].Score, fused[1].Score, 1e-12, "a symmetric rank swap ties on score")
+	require.InDelta(t, 1.0/62.0, fused[2].Score, 1e-12, "a chunk only one leg returned scores from that leg alone")
+
+	// One leg absent degrades to the other leg's own order, not to no order.
+	require.Equal(t, []string{"b.go", "c.go", "a.go"}, hitPaths(fuse(chunks, nil, vector)))
+	require.Equal(t, []string{"a.go", "b.go", "c.go"}, hitPaths(fuse(chunks, lexical, nil)),
+		"a chunk no leg returned sorts last, by location")
+}
+
+func hitPaths(hits []Hit) []string {
+	out := make([]string, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, h.Path)
+	}
+	return out
 }
 
 func TestUnit_Query_TopKBounds(t *testing.T) {

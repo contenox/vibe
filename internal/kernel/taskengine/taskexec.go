@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine/llmretry"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/google/uuid"
 )
 
@@ -918,6 +918,12 @@ func (exe *SimpleExec) TaskExec(taskCtx context.Context, startingTime time.Time,
 			toolExecErr := err
 			switch {
 			case err != nil && (errors.Is(err, context.Canceled) || callCtx.Err() != nil):
+				toolReportErr(err)
+				taskErr = err
+			case err != nil && errors.Is(err, ErrGateRecordFailed):
+				// The world changed but the exactly-once record did not
+				// land; the soft "tool failed" wrap below would invite the
+				// model (or a human re-approval) to run it again.
 				toolReportErr(err)
 				taskErr = err
 			case err != nil:

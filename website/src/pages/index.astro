@@ -3,6 +3,23 @@ import Base from '../layouts/Base.astro';
 import Landing from '../components/Landing.astro';
 import type { LandingStrings } from '../components/Landing.astro';
 
+const rulesCode = `{
+  "default_action": "approve",
+  "compute": { "maxToolCalls": 300, "maxTokens": 2000000, "onExhausted": "finish_stuck" },
+  "rules": [
+    { "tools": "local_fs", "tool": "*", "action": "deny",
+      "when": [{ "key": "path", "op": "glob",
+                 "value": "**/{.ssh,.aws,.kube,.config/gcloud}/**" }] },
+    { "tools": "local_fs", "tool": "read_file", "action": "allow" },
+    { "tools": "local_fs", "tool": "write_file", "action": "approve" },
+    { "tools": "local_shell", "tool": "local_shell", "action": "allow",
+      "when": [{ "key": "command", "op": "command_prefix_allowlist",
+                 "value": "go test,go vet,ls,cat,grep,npm test,pytest" }] },
+    { "tools": "local_shell", "tool": "local_shell", "action": "approve" }
+  ],
+  "attention": { "allowAgentAnswers": false }
+}`;
+
 const t: LandingStrings = {
   badge: 'Missions, not sessions',
   h1a: 'Fire the mission.',
@@ -13,59 +30,88 @@ const t: LandingStrings = {
   ctaGithub: 'View on GitHub',
   installNote: 'Installs <code class="font-mono">contenox</code>. Run <code class="font-mono">contenox init</code> to scaffold a workspace.',
   trustChips: ['any model', 'one binary', 'no account', 'SQLite', 'your rules in a file you can read'],
-  positioning: 'Fire one, detach, come back to done. The envelope bounds what the agent may do while you’re gone; the chain is the contract for what it does. Same sessions in your terminal and your editor, any model and any MCP in combination. Built by its first customer — who is hard to convince.',
-  tableWorld: 'The old way',
-  tableWhy: 'contenox',
-  rows: [
-    ['A hidden prompt', 'A file you edit'],
-    ['Guessing the blast radius', 'An envelope you wrote'],
-    ['Watching it work', 'Detached missions'],
-    ['One vendor', 'Any model, any MCP, together'],
+
+  missionEyebrow: 'The mission, live',
+  missionH2: 'Thirty seconds, end to end.',
+  missionLede: 'One command fires a declared agent at a task, bounded by a policy you wrote. What happens after you walk away is the point.',
+  missionLines: [
+    ['note', '# fire a mission under a strict envelope'],
+    ['cmd', 'contenox mission fire agent-reviewer "review the payment-retry PR for regressions" --wait'],
+    ['out', 'mission fired · envelope hitl-policy-strict.json'],
+    ['out', 'unit reads the diff, runs the tests — allowed rules pass silently'],
+    ['out', '⏸ the agent asks: two regressions found, patch drafted — apply it to the branch?'],
+    ['out', 'no answer: run checkpointed, ask saved, process released'],
+    ['note', '# close the laptop. days pass. then, from any terminal that reaches your models:'],
+    ['cmd', 'contenox approvals list'],
+    ['out', 'ask 8f3c · apply the drafted patch? · mission 01jm…'],
+    ['cmd', 'contenox approvals respond 8f3c --answer "yes, apply it"'],
+    ['out', 'checkpoint resumed — exactly once. mission landed.'],
+    ['cmd', 'contenox inbox list'],
+    ['out', 'report · agent-reviewer: findings, patch applied, test results — waiting for you'],
   ],
-  authorEyebrow: 'What you can author',
-  authorH2: 'Repeatable work, with policy in the file.',
-  authorItems: [
-    'Release evidence pack: feed in git history, PRs, ticket notes, and CI output; the chain drafts the changelog, risk notes, and deployment checklist, then stops before publishing.',
-    'API-to-workflow wrapper: register a narrow OpenAPI subset, inject hidden workspace or environment arguments, and require approval for mutating calls.',
-    'Repo maintenance chain: inspect an issue, plan the patch, touch only approved files, run tests, and prepare a review packet instead of silently changing the project.',
-    'Browser QA evidence: Playwright captures the live app state, the chain writes documentation or screenshots, and the policy decides what needs human approval.',
+  missionOutro: 'No babysitting a terminal, no timed-out approvals, no silent changes. The envelope decided what could run unattended, the chain decided where a human gets the final word, and one answer resumed the run exactly once.',
+  missionCta: ['How missions, approvals, and the inbox work', '/docs/reference/contenox-cli/#contenox-mission'],
+
+  panelEyebrow: 'The part you can’t download',
+  panelH2: 'You’ve already used this engine. You’ve just never held the controls.',
+  panelP1: 'When an assistant shows you its "thinking steps," you’re watching an orchestration loop: plan, call a tool, check the result, check the budget, decide again. Every major AI product runs on one — event-driven agent choreography under governance. That layer decides what the model may do, when it pauses, and what it costs. The vendor configures it. You never see it, and you can’t change it.',
+  panelP2: 'Contenox is that layer, shipped as the product — with the control panel handed to the operator. The loop is a chain file you author. The boundaries are an envelope you wrote. The state is on your disk. The differentiator isn’t inventing the machine; it’s who holds the controls.',
+
+  rulesEyebrow: 'You write the rules',
+  rulesH2: 'How much agency? You decide — in writing.',
+  rulesLede: 'Every run is bounded by an envelope: a JSON policy naming what passes silently, what pauses for a human, and what is denied outright — plus hard ceilings on tool calls and tokens, and a pin on which models and backends the unit may use. No hidden prompt decides for you. The file lives in your repo and gets reviewed like any other change.',
+  rulesCode,
+  rulesOutro: 'Trimmed from the shipped default preset. Anything no rule matches fails closed — it asks a human. Six presets ship with contenox init, and contenox vet checks your policy before anything runs under it.',
+  rulesCta: ['The full policy format', '/docs/guide/hitl/'],
+  hitlDemoAlt: 'Terminal demo: a destructive rm command stops at a human approval gate before it runs',
+
+  craftEyebrow: 'Agentic engineering',
+  craftH2: 'Vibecoding finds the loop. Loop engineering keeps it.',
+  craftP1: 'Vibecoding is real discovery — improvising with an agent until the loop works. We’ve shipped features that way and written honestly about what it cost. But a loop that has to run tomorrow, in CI, unattended, isn’t a vibe anymore. It’s an artifact.',
+  craftP2: 'That’s agentic engineering: the loop itself is authored, reviewed, versioned, and bounded. The staged loop in every contenox chain came from named failure modes — classify, inspect, patch, verify, audit — under one discipline: never let confusion default into unattended mutation.',
+
+  everyEyebrow: 'One harness, everywhere',
+  everyH2: 'Author once. Run it where the work is.',
+  everyLede: 'The same agentic workflow, the same envelope, the same session state behind every surface — what you approved in the editor is what runs from cron.',
+  surfaces: [
+    ['Your terminal', 'contenox new is one persistent session for chat, plan, and shell. Stateful tools keep their state across turns, and an approval is a one-keypress card in the transcript.'],
+    ['Your editor', 'The full agent inside Zed, JetBrains, AionUi, or OpenClaw — approvals route through the editor’s own UI, and the workflow stays in the chain file, not the plugin.'],
+    ['Your scripts and pipelines', 'contenox run executes a chain non-interactively — from cron, CI, or a shell script. Tool-heavy jobs are the home ground: release evidence packs, request-processing chains, narrow API wrappers with approval on every mutating call.'],
+    ['Untrusted drivers', 'A headless acpx session gets the hardened profile: shell, writes, and network are denied outright rather than offered for approval.'],
   ],
-  editorsEyebrow: 'Run it where work happens',
-  editorsH2: 'The same chain can run in your editor, terminal, or automation.',
-  editorsLede: 'Contenox speaks the Agent Client Protocol over stdio. Use Zed, JetBrains, AionUi, or OpenClaw when an editor UI helps; keep the workflow itself in the chain file, with tool calls and HITL approvals routed through the client.',
+  protocols: [
+    ['Editors talk to the full agent over stdio — no plugin lock-in.', 'Agent Client Protocol', 'https://agentclientprotocol.com'],
+    ['Any MCP server — stdio, SSE, or HTTP — registers once; its tools become policy-scoped chain tools.', 'Model Context Protocol', 'https://modelcontextprotocol.io'],
+    ['Any HTTP service with a spec becomes a callable, allowlistable tool.', 'OpenAPI tools guide', '/docs/integrations/tools/remote/'],
+  ],
   guides: [
     ['Read the Zed guide', '/docs/integrations/editors/zed/'],
     ['Read the JetBrains guide', '/docs/integrations/editors/jetbrains/'],
     ['Read the AionUi guide', '/docs/integrations/editors/aionui/'],
     ['Read the OpenClaw guide', '/docs/integrations/editors/openclaw/'],
   ],
-  capsEyebrow: 'Core capabilities',
-  caps: [
-    ['Close the terminal. It can’t wreck anything while you’re gone.', 'Tool allowlists, command policy, budgets, approval gates — what the agent may do unattended is a file you wrote, not a guess. An unanswered approval checkpoints the run and frees the seat; answer it from any terminal, even days later, and the run resumes exactly once.'],
-    ['The chain is the contract', 'Prompts, model routing, and every rule are visible keys in a versioned file — reviewable, diffable, repeatable. One harness behind the CLI, the contenox TUI, and any ACP editor.'],
-    ['It reads Go like the compiler', 'Describe, definition, references, implementations, symbols, diagnostics — six queries answered in-process by the real type-checker, warm in microseconds. No language server to install or babysit.'],
-    ['Ask the repo, get cited lines', 'contenox index builds a hybrid full-text and embedding index in local SQLite; contenox search answers with file:line citations and marks a hit stale the moment its file changes.'],
-    ['Providers are config', 'Route inference to local Ollama or vLLM, or to OpenAI, Anthropic, Gemini, Bedrock, or Vertex — without touching the workflow.'],
-    ['Local by default', 'Sessions, config, run logs, and state live in SQLite on your machine. No hosted Contenox service, no account — telemetry is opt-in and off by default.'],
-  ],
-  hitlDemoAlt: 'Terminal demo: a destructive rm command stops at a human approval gate before it runs',
   tuiShotAlt: 'contenox new in the terminal: a natural-language task, contenox reads the repo and answers in the same session',
-  tuiEyebrow: 'The terminal UI',
-  tuiH2: 'One session. Chat, plan, shell.',
-  tuiLede: 'contenox new opens a persistent terminal session where conversation, plans, and shell commands share one context — and MCP tool connections stay alive across turns instead of reconnecting on every call.',
-  tuiPoints: [
-    ['Chat, plan, and run in one place', 'Talk through the problem, sketch the plan, execute the commands — without switching windows or losing context between modes.'],
-    ['MCP stays warm', 'Tool servers connect once and stay connected across turns, so stateful tools keep their state and answers come back fast.'],
-    ['Approvals that stay out of the way', 'Risky steps pause for a quick yes or no right in the session — sensible defaults, no ceremony. A compound line of allowlisted commands just runs; the envelope interrupts only where it must.'],
+
+  seatEyebrow: 'The same seat, contested',
+  seatH2: 'Copilot helps you type. Contenox does the shift while you’re gone.',
+  seatP1: 'The AI that does work for you at work is one seat, and there are two ways to fill it. The vendor’s agent runs on your work: behavior decided in Redmond, rules you can’t read, tenant-admin-controlled, your usage flowing into their telemetry.',
+  seatP2: 'Contenox is the other way to fill it: your agent under your envelope — rules you wrote, state on your disk, models you chose. Not two categories. One category, contested from opposite ends.',
+
+  yoursEyebrow: 'Yours by default',
+  yoursH2: 'Your machine, your state, your models.',
+  yoursPoints: [
+    'Sessions, config, run logs, and captured execution state live in SQLite on your machine. No hosted service, no account — telemetry is opt-in and off by default.',
+    'Inference is configuration: local Ollama or vLLM when nothing may leave your network, or OpenAI, Anthropic, Gemini, Bedrock, and Vertex on your own keys, pinned to a region you choose. Swapping later is a config change, not a rewrite.',
+    'Secrets resolve from your environment at request time and never land in config on disk; agent-reachable shells get a scrubbed environment with only what the task needs.',
   ],
-  tuiCta: 'Explore the contenox CLI',
-  standardsEyebrow: 'Built on open standards',
-  standardsH2: 'Speaks the protocols your tools already use.',
-  standards: [
-    ['Agent Client Protocol', 'The full agent inside Zed, JetBrains, AionUi, and any ACP client — over stdio, no plugin lock-in.', 'https://agentclientprotocol.com'],
-    ['Model Context Protocol', 'Register any MCP server — stdio, SSE, or HTTP — and its tools become policy-scoped chain tools.', 'https://modelcontextprotocol.io'],
-    ['OpenAPI', 'Point at any HTTP service with a spec and every operation becomes a callable, allowlistable tool.', '/docs/integrations/tools/remote/'],
+  yoursCta: ['AI sovereignty & the EU AI Act', '/docs/guide/sovereignty/'],
+
+  capsEyebrow: 'Also in the box',
+  caps: [
+    ['It reads Go like the compiler', 'Definition, references, implementations, symbols, diagnostics — answered in-process by the real type-checker, warm in microseconds. No language server to install or babysit.'],
+    ['Ask the repo, get cited lines', 'contenox index builds a hybrid full-text and embedding index in local SQLite; contenox search answers with file:line citations and marks a hit stale the moment its file changes.'],
   ],
+
   bottomEyebrow: 'Get started',
   bottomH2: 'Fire your first mission.',
   bottomCta: 'Read the Quickstart',
@@ -82,7 +128,7 @@ const t: LandingStrings = {
 ---
 <Base
   title="Contenox — Fire the mission. Come back to done."
-  description="Fire coding work at an agent under rules you can read. Detach, answer from any terminal later, and it resumes exactly once — any model, any MCP, no account."
+  description="Fire coding work at an agent under rules you can read. Detach, answer later from any terminal that reaches your models, and it resumes exactly once — any model, any MCP, no account."
   alternates={{ en: '/', de: '/de/' }}
 >
   <Landing t={t} />

@@ -16,12 +16,14 @@ Chains aren't limited to AI loops. A single chain can mix LLM steps, direct tool
 ```bash
 # run subcommand — use any chain for this invocation:
 contenox run --chain ./my-chain.json "input"
-# (falls back to <resolved .contenox>/default-run-chain.json if --chain is omitted)
+# (falls back to chain-agent-run.json if --chain is omitted)
 
 # chat — set the default session chain:
 contenox config set default-chain ./my-chain.json
-# (falls back to .contenox/default-chain.json if not set)
+# (falls back to chain-agent-contenox.json if not set)
 ```
+
+Fallback chain files are resolved by name, workspace-first: the workspace `.contenox/` copy wins when present, otherwise `~/.contenox/`. The shipped files follow the `chain-<role>-<variant>.json` convention — see [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for every role and the full resolution story.
 
 ```json
 {
@@ -41,7 +43,7 @@ Each item in `tasks[]` is a **task** — a single step with a handler, optional 
   "handler": "chat_completion",
   "system_instruction": "You are a helpful assistant.",
   "execute_config": {
-    "model": "qwen2.5:7b",
+    "model": "qwen3:8b",
     "provider": "ollama"
   },
   "transition": {
@@ -56,10 +58,11 @@ The `handler` determines what the task does. See [Handlers](/docs/specification/
 
 ## Tools
 
-A **tools** is a capability the model can call — a local shell command, the local filesystem, or a remote HTTP service.
+A **tool** is a capability the model can call — a local shell command, the local filesystem, or a remote HTTP service.
 
 - **`local_shell`** — run shell commands (`contenox run` and `contenox chat` require `--shell`; editor clients route shell execution through their approval surface where supported)
 - **`local_fs`** — read/write local files
+- **`workspace`** — ask the workspace's semantic index questions via `workspace_search`; see [Workspace index & search](/docs/guide/search/)
 - **Remote tools** — any service exposing an OpenAPI v3 spec; by default discovered at `<url>/openapi.json`, overridable with `--spec` at registration time
 - **MCP servers** — any Model Context Protocol server (added via `contenox mcp add`)
 
@@ -71,11 +74,14 @@ Tools are listed by name in `execute_config.tools`. Use `["*"]` to expose all re
 }
 ```
 
-> [!IMPORTANT]
+> **Important:**
 > `"tools": ["*"]` grants the model access to every registered tool in this run.
 > For production or sensitive environments, list only the tools the task actually needs.
-> This is how Contenox enforces per-invocation tool policy — the model can only call what you explicitly grant.
+> This is the per-invocation tool allowlist — the model can only see and call what you explicitly grant.
+> What happens when a call is actually made (allow, approve, or deny) is a separate layer: the [HITL policy](/docs/guide/hitl/).
 > See [Tools reference](/docs/integrations/tools/) for access control patterns.
+
+Chains are started by you — a prompt, `contenox run`, a fired mission — or, with the opt-in, by the runtime's own internal events: [Events & triggers (beta)](/docs/guide/events/) fires a chain when a matching event lands in the durable log.
 
 ## Transitions
 
@@ -91,6 +97,8 @@ After a task runs, the chain evaluates **transition branches** to decide the nex
 ```
 
 Branches are evaluated top to bottom. `"goto": "end"` terminates the chain.
+
+The same branches are what build the agentic loop — a `tool_call` branch into an execute step and a back-edge — walked through in [The agentic loop](/docs/guide/agentic-loop/).
 
 ## Data flow
 
@@ -130,3 +138,5 @@ A `{{var:…}}` macro can supply a fallback for when the variable is missing or 
 For example, `{{var:alt_model\|var:model}}` falls back to the primary chat model when no alt model is configured.
 
 See [Transitions & Branching](/docs/specification/transitions) and [Handlers](/docs/specification/handlers) for the full reference.
+
+The chain is also the first of two artifacts: it says what happens, and the [HITL policy](/docs/guide/hitl/) says what is permitted. Why that split is the structural difference — and what contenox shares with the dedicated coding agents — is in [How contenox compares](/docs/guide/comparison/).

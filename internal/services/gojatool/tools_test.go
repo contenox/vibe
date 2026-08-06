@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/getkin/kin-openapi/openapi3"
 )
 
 const leakerScript = `
@@ -151,18 +153,107 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 	}
 }
 
-// This provider offers no OpenAPI documents, only hand-written function
-// schemas.
-func TestUnit_Tools_NoOpenAPISchemas(t *testing.T) {
+// TestUnit_Tools_PublishedSchemaMatchesToolDescriptors pins the declared
+// OpenAPI contract: every tool the provider lists — goja_eval and each script
+// tool — has a request schema converted from its own descriptor and a response
+// schema for the result envelope. A script tool's contract is the schema its
+// FILE declares, so publishing it can never paraphrase the operator's schema.
+func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	ts, _ := newTestToolset(t)
+	ctx := context.Background()
 
-	got, err := ts.GetSchemasForSupportedTools(context.Background())
+	docs, err := ts.GetSchemasForSupportedTools(ctx)
 	if err != nil {
 		t.Fatalf("GetSchemasForSupportedTools: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("got %d OpenAPI documents, want none (hand-written function schemas, as in local_fs)", len(got))
+	doc, ok := docs[ToolsProviderName]
+	if !ok {
+		t.Fatalf("no document published under %q, got %v", ToolsProviderName, docs)
 	}
+	if doc.OpenAPI != "3.1.0" {
+		t.Errorf("openapi version = %q", doc.OpenAPI)
+	}
+	if doc.Info == nil || doc.Info.Title == "" || doc.Info.Description == "" || doc.Info.Version == "" {
+		t.Fatalf("document is not described: %+v", doc.Info)
+	}
+	if doc.Components == nil {
+		t.Fatal("document declares no components")
+	}
+	if err := doc.Validate(ctx); err != nil {
+		t.Errorf("the published document is not a valid OpenAPI document: %v", err)
+	}
+
+	declared, err := ts.GetToolsForToolsByName(ctx, ToolsProviderName)
+	if err != nil {
+		t.Fatalf("GetToolsForToolsByName: %v", err)
+	}
+	if len(doc.Components.Schemas) != 2*len(declared) {
+		t.Errorf("%d component schemas, want a request and a response for each of the %d declared tools",
+			len(doc.Components.Schemas), len(declared))
+	}
+
+	for _, tool := range declared {
+		name := tool.Function.Name
+		req := doc.Components.Schemas[name+"Request"]
+		if req == nil || req.Value == nil {
+			t.Fatalf("%s: no request schema is published", name)
+		}
+		// The published request is the descriptor, rendered — not a second copy.
+		if !sameJSON(t, tool.Function.Parameters, req.Value) {
+			t.Errorf("%s: published request schema and tool descriptor disagree", name)
+		}
+		for prop, published := range req.Value.Properties {
+			if published.Value.Description == "" {
+				t.Errorf("%s.%s is published without a description", name, prop)
+			}
+			if published.Value.Type == nil {
+				t.Errorf("%s.%s is published without a type", name, prop)
+			}
+		}
+
+		resp := doc.Components.Schemas[name+"Response"]
+		if resp == nil || resp.Value == nil {
+			t.Fatalf("%s: no response schema is published", name)
+		}
+		if strings.Join(resp.Value.Required, ",") != "value,duration_ms" {
+			t.Errorf("%s response requires %v, want the result envelope's always-present fields", name, resp.Value.Required)
+		}
+		for prop, published := range resp.Value.Properties {
+			if published.Value.Description == "" {
+				t.Errorf("%s response: %s is published without a description", name, prop)
+			}
+		}
+	}
+
+	// The script's own declaration is what got published.
+	echo := doc.Components.Schemas["echo_upperRequest"]
+	if echo == nil {
+		t.Fatal("the script tool's request schema is missing")
+	}
+	if strings.Join(echo.Value.Required, ",") != "text" {
+		t.Errorf("echo_upper requires %v, want the script file's required list", echo.Value.Required)
+	}
+	if got := echo.Value.Properties["text"].Value.Description; got != "What to echo." {
+		t.Errorf("echo_upper.text description = %q, want the script file's wording", got)
+	}
+}
+
+// sameJSON reports whether a tool descriptor's parameters and a published
+// schema encode the same JSON Schema.
+func sameJSON(t *testing.T, params any, schema *openapi3.Schema) bool {
+	t.Helper()
+	decode := func(v any) any {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var out any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return out
+	}
+	return reflect.DeepEqual(decode(params), decode(schema))
 }
 
 // Exec dispatches goja_eval and script tools alike, accepts arguments from

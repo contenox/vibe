@@ -1,6 +1,7 @@
 package hitlservice_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -187,6 +188,74 @@ func TestUnit_RequestAttention_ParkWindowReturnsTypedPending(t *testing.T) {
 	row, err := store.GetHITLApproval(ctx, "call-park1")
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalPending, row.State, "parking must leave the question answerable")
+}
+
+// parkAsk seeds a pending attention ask for missionID via the real
+// RequestAttention park path, so the row is exactly what production writes.
+func parkAsk(t *testing.T, ctx context.Context, svc hitlservice.Service, missionID, askID, summary string) {
+	t.Helper()
+	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
+		Summary:    summary,
+		MissionID:  missionID,
+		AskID:      askID,
+		ParkWindow: 10 * time.Millisecond,
+	}, taskengine.NoopTaskEventSink{})
+	var pending *hitlservice.AttentionPendingError
+	require.ErrorAs(t, err, &pending, "the park window must leave the row pending and answerable")
+}
+
+// TestUnit_AnswerAsAgentNamed_RecordsNameAndCountsAgainstBound pins the
+// attribution invariant: the durable record shows WHO answered — a named
+// agent, the generic agent marker, or (by absence) a human — and
+// AgentAnswerCount counts exactly the non-human answers.
+func TestUnit_AnswerAsAgentNamed_RecordsNameAndCountsAgainstBound(t *testing.T) {
+	ctx, store, _ := setupHITLDB(t)
+	svc := newDurableService(t, store)
+	const missionID = "m-named"
+
+	parkAsk(t, ctx, svc, missionID, "ask-named", "which repo?")
+	parkAsk(t, ctx, svc, missionID, "ask-generic", "which branch?")
+	parkAsk(t, ctx, svc, missionID, "ask-human", "should I delete it?")
+
+	require.NoError(t, svc.AnswerAsAgentNamed(ctx, "ask-named", "attention-reviewer", "the runtime repo"))
+	require.NoError(t, svc.AnswerAsAgent(ctx, "ask-generic", "main"))
+	require.NoError(t, svc.Answer(ctx, "ask-human", "no — keep it"))
+
+	named, err := store.GetHITLApproval(ctx, "ask-named")
+	require.NoError(t, err)
+	require.Equal(t, runtimetypes.HITLApprovalApproved, named.State)
+	require.Equal(t, "the runtime repo", hitlservice.AnswerOf(named))
+	require.Equal(t, "attention-reviewer", hitlservice.AnsweredByOf(named),
+		"the durable record must name the answering agent, not only that an agent answered")
+
+	generic, err := store.GetHITLApproval(ctx, "ask-generic")
+	require.NoError(t, err)
+	require.Equal(t, "agent", hitlservice.AnsweredByOf(generic))
+
+	human, err := store.GetHITLApproval(ctx, "ask-human")
+	require.NoError(t, err)
+	require.Empty(t, hitlservice.AnsweredByOf(human), "a human answer records no non-human actor")
+
+	count, err := svc.AgentAnswerCount(ctx, missionID)
+	require.NoError(t, err)
+	require.Equal(t, 2, count, "named and generic agent answers count against the envelope's bound; the human one does not")
+}
+
+// TestUnit_AnswerAsAgentNamed_BlankNameDegradesToGenericMarker pins that a
+// blank name never records an empty actor (which would read as human).
+func TestUnit_AnswerAsAgentNamed_BlankNameDegradesToGenericMarker(t *testing.T) {
+	ctx, store, _ := setupHITLDB(t)
+	svc := newDurableService(t, store)
+	parkAsk(t, ctx, svc, "m-blank", "ask-blank", "which port?")
+
+	require.NoError(t, svc.AnswerAsAgentNamed(ctx, "ask-blank", "   ", "8080"))
+	row, err := store.GetHITLApproval(ctx, "ask-blank")
+	require.NoError(t, err)
+	require.Equal(t, "agent", hitlservice.AnsweredByOf(row))
+
+	count, err := svc.AgentAnswerCount(ctx, "m-blank")
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
 }
 
 // TestUnit_RequestAttention_CallerChosenAskIDIsTheRowID pins that a caller-chosen AskID becomes the durable row's ID.

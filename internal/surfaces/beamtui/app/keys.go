@@ -60,15 +60,18 @@ const (
 
 // The client-side slash commands, registered as palette locals so they
 // appear in the same menu as the agent's own commands and shadow a
-// same-named remote. localRename still forwards its line to the agent (the
-// title is server-side truth) and adopts the label locally; see
-// (*app).renameSession.
+// same-named remote.
+//
+// Only what is genuinely client-side belongs here. Keybindings are: they are
+// this terminal's, not the session's, which is why the list is /keys and not
+// a second /help — the ACP core owns /help, and a command name must mean one
+// thing across every client. Anything the core already answers (/rename among
+// them) is deliberately absent, so the core's version is the one that runs.
 const (
-	localHelp     = "help"
+	localKeys     = "keys"
 	localQuit     = "quit"
 	localNew      = "new"
 	localSessions = "sessions"
-	localRename   = "rename"
 )
 
 // registerBindings declares every chord beam answers, once, at startup.
@@ -223,14 +226,13 @@ func registerBindings(r *keymap.Registry) {
 // through SubmitPrompt. Descriptions are sentence case with a full stop,
 // which is the one register beam's own half of the menu can keep consistent.
 func registerLocalCommands(p *palette.Palette) {
-	p.MustRegisterLocal(localHelp, "Keys and commands, printed here.", "")
+	p.MustRegisterLocal(localKeys, "Keybindings and commands, printed here.", "")
 	p.MustRegisterLocal(localQuit, "Leave beam.", "")
 	p.MustRegisterLocal(localNew, "Start a fresh session.", "")
 	p.MustRegisterLocal(localSessions, "Switch to another session (ctrl+s).", "")
-	p.MustRegisterLocal(localRename, "Name this session.", "<title>")
 }
 
-// helpScopes is every scope the help overlay and /help list — the whole
+// helpScopes is every scope the `?` overlay and /keys list — the whole
 // registry, modal keys included.
 var helpScopes = []keymap.Scope{
 	keymap.ScopeGlobal,
@@ -381,6 +383,13 @@ func (a *app) dispatch(ctx context.Context, act keymap.Action) bool {
 // deliberately does not model as semantic actions, because every one of them
 // means exactly one thing to a text buffer and nothing to anyone else.
 func (a *app) editKey(ctx context.Context, k input.KeyEvent) {
+	if a.sessionsOpen {
+		// The switcher blocks the composer, so an unclaimed key has nowhere
+		// else to go: route it to the roster filter, the same thing typing
+		// does with the file list open.
+		a.sessionsKey(k)
+		return
+	}
 	if a.composerBlocked() {
 		return
 	}
@@ -502,13 +511,16 @@ func (a *app) restoreCancelledPrompt() {
 	a.lastPrompt, a.hasLastPrompt = "", false
 }
 
-// resolveCard answers the pending approval and drops the modal.
+// resolveCard answers the pending approval and retires the modal. The
+// verdict goes into scrollback on the way out (see retireCard): an approval
+// answered and forgotten leaves a transcript in which a gated call simply
+// happened.
 func (a *app) resolveCard(allow bool) {
 	if a.card == nil {
 		return
 	}
 	a.card.Resolve(allow)
-	a.card = nil
+	a.retireCard()
 }
 
 // openEditor is the Ctrl+X, Ctrl+E round trip: the draft is carried in as the seed,
@@ -577,7 +589,7 @@ func (a *app) submit(ctx context.Context) {
 	case composer.KindCommand:
 		if e, ok := a.pal.Lookup(commandToken(sub.Text)); ok && e.Local {
 			a.echo(sub.Text)
-			a.runLocal(ctx, e.Name, commandArgs(sub.Text))
+			a.runLocal(ctx, e.Name)
 			return
 		}
 	}
@@ -594,19 +606,19 @@ func (a *app) submit(ctx context.Context) {
 	a.startTurn()
 }
 
-// runLocal executes a client-side slash command.
-func (a *app) runLocal(ctx context.Context, name, args string) {
+// runLocal executes a client-side slash command. It takes no arguments: not
+// one of beam's locals has any, since a command that needs an argument is
+// almost always the session's business and therefore the core's.
+func (a *app) runLocal(ctx context.Context, name string) {
 	switch name {
 	case localQuit:
 		a.quit = true
-	case localHelp:
+	case localKeys:
 		a.notices = append(a.notices, a.helpLines()...)
 	case localNew:
 		a.newSession(ctx)
 	case localSessions:
 		a.openSessions(ctx)
-	case localRename:
-		a.renameSession(ctx, args)
 	}
 }
 
@@ -843,20 +855,4 @@ func commandToken(buffer string) string {
 		s = s[:i]
 	}
 	return s
-}
-
-// commandArgs is everything AFTER the command name: "/rename the ingest
-// rewrite" -> "the ingest rewrite". It is the other half of commandToken and
-// splits at the same place, so the two can never disagree about where a name
-// ends. A command with no arguments yields "".
-func commandArgs(buffer string) string {
-	s := strings.TrimLeft(buffer, " \t")
-	if !strings.HasPrefix(s, "/") {
-		return ""
-	}
-	i := strings.IndexAny(s[1:], " \t\n")
-	if i < 0 {
-		return ""
-	}
-	return strings.TrimSpace(s[1+i:])
 }

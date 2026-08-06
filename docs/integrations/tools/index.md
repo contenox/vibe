@@ -21,7 +21,7 @@ In your chain JSON, specify which tools the task can use via the `execute_config
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["local_fs", "nws", "local_shell"]
 }
@@ -70,7 +70,7 @@ Contenox ships with built-in local tools and supports unlimited remote tools:
 | `gointel` | Local | `contenox chat`/`run`/`new`, ACP sessions | Six read-only Go code-intelligence tools (`go_describe`, `go_definition`, `go_references`, `go_implementations`, `go_symbols`, `go_diagnostics`) backed by a real type checker |
 | `jq` | Local | `contenox chat`/`run`/`new`, ACP sessions | `jq_query` — run a jq program over a JSON or YAML document, read-only |
 | `workspace` | Local | `contenox chat`/`run`/`new`, ACP sessions | `workspace_search` — semantic search over the index built by `contenox index` |
-| `goja` | Local | `contenox chat`/`run`/`new`, ACP sessions | `goja_eval` — a JavaScript (ES2023) sandbox with no ambient I/O, plus one tool per operator-authored script under `$CONTENOX_DIR/tools/*.js` |
+| `goja` | Local | `contenox chat`/`run`/`new`, ACP sessions — **beta**, requires `opt-in-beta` | `goja_eval` — a JavaScript (ES2023) sandbox with no ambient I/O, plus one tool per operator-authored script under `$CONTENOX_DIR/tools/*.js` |
 | `webtools` | Local | ✅ | Call HTTP endpoints — `web_get`, `web_head`, `web_post`, `web_put`, `web_patch`, `web_delete`. SSRF guarding is opt-in (`_denied_hosts` is empty by default — see [local tools](/docs/integrations/tools/local/)); mutating verbs HITL-approve by default. |
 | `local_shell` | Local | CLI opt-in | Run shell commands. `contenox run` and `contenox chat` require `--shell`; editor clients route shell execution through their own approval surface where supported. |
 | `print` | Local | ✅ | Append a message to the chat history or return it as a string |
@@ -84,7 +84,7 @@ Contenox ships with built-in local tools and supports unlimited remote tools:
 - **`gointel`** — exact questions about Go code (type, signature, references, implementers). Prefer over `grep`/`local_shell` — it answers from a type checker, not text search.
 - **`jq`** — pull one field or projection out of a JSON/YAML file instead of reading the whole thing.
 - **`workspace`** — semantic, meaning-based search over an already-built `contenox index`; approximately right, not exact — use `gointel` when you need an exact Go-symbol answer.
-- **`goja`** — imperative logic or multi-tool composition over data you already have, via `host.tool(...)`; reach for `jq` instead for simple declarative shape-work.
+- **`goja`** — imperative logic or multi-tool composition over data you already have, via `host.tool(...)`; reach for `jq` instead for simple declarative shape-work. Beta: requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`); absent otherwise.
 - **`webtools`** — when the model needs to call HTTP. Use `web_get` / `web_head` for retrieval; mutating verbs trigger HITL approval by default.
 - **`local_shell`** — full power; use only in trusted, sandboxed environments. Reach for it for build / test scripts, not for cat / grep / sed / git against project files — those have dedicated tools.
 - **`print`** / **`echo`** — inject messages or inspect task output during development
@@ -92,5 +92,5 @@ Contenox ships with built-in local tools and supports unlimited remote tools:
 
 ## Further reading
 
-- [Remote Tools](/docs/integrations/tools/remote) — register external APIs as agent tools
-- [Local Tools](/docs/integrations/tools/local) — built-in in-process tools reference
+- [Remote Tools](/docs/integrations/tools/remote/) — register external APIs as agent tools
+- [Local Tools](/docs/integrations/tools/local/) — built-in in-process tools reference

@@ -176,7 +176,9 @@ type Store interface {
 
 	SetKV(ctx context.Context, key string, value json.RawMessage) error
 	UpdateKV(ctx context.Context, key string, value json.RawMessage) error
+	UpdateKVIfUnchanged(ctx context.Context, key string, expected, value json.RawMessage) error
 	GetKV(ctx context.Context, key string, out interface{}) error
+	GetKVRaw(ctx context.Context, key string) (json.RawMessage, error)
 	DeleteKV(ctx context.Context, key string) error
 	ListKV(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*KV, error)
 	ListKVPrefix(ctx context.Context, prefix string, createdAtCursor *time.Time, limit int) ([]*KV, error)
@@ -225,6 +227,7 @@ type Store interface {
 	CreateHITLApproval(ctx context.Context, a *HITLApproval) error
 	GetHITLApproval(ctx context.Context, id string) (*HITLApproval, error)
 	ResolveHITLApproval(ctx context.Context, id string, state HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error
+	ResolveHITLApprovalWithinBound(ctx context.Context, id string, bound AgentAnswerBound, state HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error
 	ListExpiredHITLApprovals(ctx context.Context, asOf time.Time, limit int) ([]*HITLApproval, error)
 	ListHITLApprovals(ctx context.Context, state HITLApprovalState, createdAtCursor *time.Time, limit int) ([]*HITLApproval, error)
 	ListHITLApprovalsForMission(ctx context.Context, missionID string, limit int) ([]*HITLApproval, error)
@@ -236,6 +239,8 @@ type Store interface {
 	CreateChainCheckpoint(ctx context.Context, cp *ChainCheckpoint) error
 	GetChainCheckpoint(ctx context.Context, id string) (*ChainCheckpoint, error)
 	ClaimChainCheckpoint(ctx context.Context, id string, now, staleBefore time.Time) error
+	TouchChainCheckpointClaim(ctx context.Context, id string, now time.Time) error
+	UpdateChainCheckpointPayload(ctx context.Context, id string, payload json.RawMessage) error
 	SetChainCheckpointFailure(ctx context.Context, id string, failure string) error
 	DeleteChainCheckpoint(ctx context.Context, id string) error
 	ListChainCheckpoints(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*ChainCheckpoint, error)

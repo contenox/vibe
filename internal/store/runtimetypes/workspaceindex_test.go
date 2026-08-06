@@ -222,6 +222,45 @@ func TestUnit_WorkspaceIndex_FTS5IsAvailable(t *testing.T) {
 	require.Empty(t, hits)
 }
 
+// A dimension-0 generation is the lexical-only mode: no embedding model, no
+// vectors, but the FTS5 mirror is written and searchable. This is what a
+// workspace with no `default-embed-model` gets instead of nothing.
+func TestUnit_WorkspaceIndex_LexicalOnlyGenerationIsSearchable(t *testing.T) {
+	ctx, store, _ := setupWorkspaceIndexStore(t)
+
+	cfg := newIndexConfig("cfg-lex", "ws-lex")
+	cfg.EmbedModel = ""
+	cfg.EmbedProvider = ""
+	cfg.Dimension = 0
+	require.NoError(t, store.CreateWorkspaceIndexConfig(ctx, cfg))
+
+	require.NoError(t, store.AppendWorkspaceChunks(ctx,
+		newChunk("l1", "cfg-lex", "docs/retry.md", 1, 10, "exponential retry backoff for flaky backends", nil),
+		newChunk("l2", "cfg-lex", "docs/other.md", 1, 10, "the widget catalogue and its taxonomy", nil),
+	))
+
+	hits, err := store.SearchWorkspaceChunks(ctx, "cfg-lex", `"retry" OR "backoff"`, 10)
+	require.NoError(t, err)
+	require.Len(t, hits, 1, "the lexical leg must work with no vectors at all")
+	require.Equal(t, "l1", hits[0].ID)
+	require.Empty(t, hits[0].Vector, "a lexical-only chunk carries no vector")
+	require.Less(t, hits[0].Score, 0.0)
+
+	all, err := store.ScanWorkspaceChunks(ctx, "cfg-lex", 10)
+	require.NoError(t, err)
+	require.Len(t, all, 2, "an empty vector blob must round-trip, not read back as NULL")
+
+	// The dimension check still holds in the other direction: a vector cannot
+	// be smuggled into a lexical-only generation.
+	err = store.AppendWorkspaceChunks(ctx, newChunk("l3", "cfg-lex", "docs/x.md", 1, 5, "with a vector", []float32{1, 0, 0, 0}))
+	require.ErrorIs(t, err, runtimetypes.ErrVectorDimensionMismatch)
+
+	// Negative is a bug, not a mode.
+	bad := newIndexConfig("cfg-bad", "ws-lex")
+	bad.Dimension = -1
+	require.Error(t, store.CreateWorkspaceIndexConfig(ctx, bad))
+}
+
 // The dimension pinned on the config is enforced on both sides: refused at
 // write, and a row that somehow carries one fails to load rather than score.
 func TestUnit_WorkspaceChunks_DimensionMismatchIsRefused(t *testing.T) {

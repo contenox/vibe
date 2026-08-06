@@ -1,0 +1,89 @@
+# Release gate: the suites CI is too slow to run on every push.
+#
+# Taskfile.yml calls `task test-all` "the one-command release gate" and until
+# now nothing invoked it. This runs it nightly and on demand, so the ACP
+# wire-conformance harnesses and the full serial Go suite fail here rather than
+# in a release.
+#
+# `acp-conformance` and `acp-client-e2e` target `./libacp/...`, which lives in
+# this tree again — libacp was briefly its own module and was brought back so a
+# clone of the public repo builds with no private dependency. Both suites need
+# Rust reference peers on PATH and skip via preconditions when they are absent.
+# This is wired to `task test-all` deliberately: the gate should track the
+# documented contract, not a workflow-local copy of it.
+#
+# Third-party actions are pinned to a commit SHA with a trailing version comment.
+name: Release gate
+
+on:
+  schedule:
+    # 03:00 UTC nightly — off-peak for GitHub-hosted runners.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-all:
+    runs-on: ubuntu-latest
+    # `task test` alone is GOMAXPROCS=1 with a 30m internal timeout; the ACP
+    # harnesses spawn subprocess peers and the website build runs a full Astro
+    # + pagefind pass. 120m is deliberately generous — this job should fail on
+    # a real regression, never on the clock.
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25"
+
+      # test-all depends on website:build, which needs node_modules present.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+
+      - name: Install website dependencies
+        run: task website:deps
+
+      # The ACP harnesses drive contenox against the Rust reference peers. The
+      # Taskfile discovers these by path and degrades to a skip (or a clear
+      # precondition failure) when absent, so a peer-build hiccup must not read
+      # as a contenox regression — hence continue-on-error.
+      - name: Build ACP reference peers (Rust)
+        continue-on-error: true
+        run: |
+          set -x
+          git clone --depth 1 https://github.com/agentclientprotocol/rust-sdk tools/rust-sdk
+          cargo build --manifest-path tools/rust-sdk/Cargo.toml \
+            -p agent-client-protocol-test --bins
+          cargo build --manifest-path tools/rust-sdk/Cargo.toml --bins
+          # acp-validator depends on the SDK crate by relative path, so it must
+          # build as a sibling of the rust-sdk checkout (tools/acp-validator/README.md).
+          cp -r tools/acp-validator tools/acp-validator-build
+          cargo build --manifest-path tools/acp-validator-build/Cargo.toml
+          mkdir -p tools/acp-validator/target/debug
+          cp tools/acp-validator-build/target/debug/acp-validator \
+            tools/acp-validator/target/debug/acp-validator
+
+      - name: Report discovered ACP peers
+        run: |
+          for p in tools/acp-validator/target/debug/acp-validator \
+                   tools/rust-sdk/target/debug/yopo \
+                   tools/rust-sdk/target/debug/testy \
+                   tools/rust-sdk/target/debug/mcp-echo-server; do
+            if [ -x "$p" ]; then echo "found: $p"; else echo "MISSING: $p"; fi
+          done
+
+      - name: task test-all (the release gate)
+        run: task test-all

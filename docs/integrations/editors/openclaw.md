@@ -11,7 +11,7 @@ This guide covers one specific integration: driving Contenox from OpenClaw throu
 
 Why `acpx` and not `acp`: prompts arrive from a chat inbox with no human at an editor to approve actions. So `contenox acpx` ships a **static containment policy** instead of interactive approval — the boundary the [nested-permission-bomb](/docs/use-cases/nested-permission-bomb/) argues for. You don't hand an untrusted channel your keyring; you give it an authored, version-controlled allow/deny boundary.
 
-Assumes `contenox` is installed and configured with a default model (`contenox init` plus a local Ollama model, or a configured cloud backend). Verified against **OpenClaw 2026.5.12**.
+Assumes `contenox` is installed and configured with a default model (`contenox setup`, or a configured backend plus `contenox config set default-model …`). Verified against **OpenClaw 2026.5.12**.
 
 > **Use a chat channel, not the dashboard.** OpenClaw's Control UI webchat cannot bind to an ACP agent. Drive Contenox from a bindable channel — Telegram (used here), Discord, Slack, or iMessage.
 

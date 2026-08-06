@@ -39,13 +39,13 @@ func TestSystem_EnrichResultWithOllamaAt_noBackends(t *testing.T) {
 			if !strings.Contains(iss.Message, "Local Ollama responded at") {
 				t.Fatalf("expected probe hint in message, got %q", iss.Message)
 			}
-			if !strings.Contains(iss.CLICommand, "ollama pull qwen2.5:7b") {
+			if !strings.Contains(iss.CLICommand, "ollama pull "+DefaultOllamaSuggestModel) {
 				t.Fatalf("expected ollama pull in command, got %q", iss.CLICommand)
 			}
-			if !strings.Contains(iss.CLICommand, "contenox backend add local --type ollama") {
+			if !strings.Contains(iss.CLICommand, "contenox backend add ollama --type ollama") {
 				t.Fatalf("expected registration command, got %q", iss.CLICommand)
 			}
-			if !strings.Contains(iss.CLICommand, "contenox config set default-model qwen2.5:7b") {
+			if !strings.Contains(iss.CLICommand, "contenox config set default-model "+DefaultOllamaSuggestModel) {
 				t.Fatalf("expected default-model in command, got %q", iss.CLICommand)
 			}
 		}

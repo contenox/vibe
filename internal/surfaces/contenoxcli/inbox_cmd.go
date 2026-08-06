@@ -13,8 +13,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/operatorinbox"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
 

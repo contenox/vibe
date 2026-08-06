@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/localtools"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -322,6 +322,101 @@ func TestUnit_WebTools_Post_BodyMarshalsAndSends(t *testing.T) {
 		"body": map[string]any{"k": "v"},
 	})
 	require.NoError(t, err)
+}
+
+// TestUnit_WebTools_Post_BodyFromCallArgs drives the declarative path: a `tools`
+// task carries its arguments on the ToolsCall rather than in the input map, and
+// the body has to reach the request from there like the url and the headers do.
+func TestUnit_WebTools_Post_BodyFromCallArgs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "POST", r.Method)
+		require.Equal(t, "bar", r.Header.Get("X-Foo"))
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, `{"k":"v"}`, string(body), "a call-args body is sent as-is")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	ctx := ctxWithPolicy(map[string]string{"_denied_hosts": ""})
+	tools := newWebTools(t, &recTracker{})
+
+	// input is nil: everything the task declared sits on the call.
+	_, _, err := tools.Exec(ctx, time.Now(), nil, false, &taskengine.ToolsCall{
+		ToolName: "web_post",
+		Args: map[string]string{
+			"url":     srv.URL,
+			"headers": `{"X-Foo":"bar"}`,
+			"body":    `{"k":"v"}`,
+		},
+	})
+	require.NoError(t, err)
+}
+
+// TestUnit_WebTools_Get_SendsNoCallArgsBody is the other half of that contract:
+// web_get and web_head declare no body argument, so a call that carries one
+// anyway still sends a bodyless request.
+func TestUnit_WebTools_Get_SendsNoCallArgsBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Empty(t, string(body), "GET declares no body argument")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	ctx := ctxWithPolicy(map[string]string{"_denied_hosts": ""})
+	tools := newWebTools(t, &recTracker{})
+
+	_, _, err := tools.Exec(ctx, time.Now(), nil, false, &taskengine.ToolsCall{
+		ToolName: "web_get",
+		Args:     map[string]string{"url": srv.URL, "body": `{"k":"v"}`},
+	})
+	require.NoError(t, err)
+}
+
+// ── HEAD answers with metadata, not with a body ─────────────────────────────
+
+// TestUnit_WebTools_Head_ReturnsStatusAndHeaders pins what web_head promises:
+// the status code and the response headers. It used to return the response
+// body, which for HEAD is the empty string.
+func TestUnit_WebTools_Head_ReturnsStatusAndHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "HEAD", r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"abc123"`)
+		w.Header().Add("X-Multi", "one")
+		w.Header().Add("X-Multi", "two")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ctx := ctxWithPolicy(map[string]string{"_denied_hosts": ""})
+	tools := newWebTools(t, &recTracker{})
+
+	res, dt, err := execWeb(t, ctx, tools, "web_head", map[string]any{"url": srv.URL})
+	require.NoError(t, err)
+	require.Equal(t, taskengine.DataTypeJSON, dt)
+	head, ok := res.(localtools.WebHeadResult)
+	require.Truef(t, ok, "web_head must answer with WebHeadResult, got %T (%v)", res, res)
+	require.Equal(t, 200, head.Status)
+	require.Equal(t, "application/json", head.Headers["Content-Type"])
+	require.Equal(t, `"abc123"`, head.Headers["Etag"], "names are canonical, so ETag is keyed Etag")
+	require.Equal(t, "one, two", head.Headers["X-Multi"], "a repeated header is joined with \", \"")
+
+	// The engine hands DataTypeJSON to json.Marshal, so this is the text the
+	// model reads — and it has to be the shape the published schema declares.
+	raw, err := json.Marshal(head)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"status":200`)
+
+	docs, err := tools.(schemaRepo).GetSchemasForSupportedTools(ctx)
+	require.NoError(t, err)
+	require.NoError(t, docs["webtools"].Validate(ctx))
+	declared := variantByRequired(t, docs["webtools"].Components.Schemas["WebHeadResponse"].Value, "status")
+	assertResultIsDeclared(t, "web_head", declared, head)
+	require.NotNil(t, declared.Properties["headers"].Value.AdditionalProperties.Schema,
+		"headers is published as a string map")
 }
 
 func TestUnit_WebTools_UnknownToolErrors(t *testing.T) {

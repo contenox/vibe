@@ -131,7 +131,7 @@ Reference them by name in `execute_config.tools`:
   "handler": "chat_completion",
   "system_instruction": "Available tools: {{toolservice:list}}.",
   "execute_config": {
-    "model": "qwen2.5:7b",
+    "model": "qwen3:8b",
     "provider": "ollama",
     "tools": ["myfiles", "memory"]
   }
@@ -177,7 +177,7 @@ For HTTP request headers (SSE/HTTP transports), use `--header` instead:
 contenox mcp update myserver --header "X-Tenant: acme" --header "X-Version: 2"
 ```
 
-> [!NOTE]
+> **Note:**
 > `mcp update --header` and `mcp update --inject` each replace the **entire** corresponding map. Pass all required values in one call.
 
 ## Security notes
@@ -185,7 +185,7 @@ contenox mcp update myserver --header "X-Tenant: acme" --header "X-Version: 2"
 - Use `--auth-env` instead of `--auth-token` to keep secrets out of shell history.  
 - `--inject` and `--header` values are stored in SQLite and **never logged or shown by `mcp show`** (keys are shown, values are masked).  
 - `stdio` servers run as child processes—limit their filesystem access.  
-- Session tokens are scoped to the current CLI session and never stored in plain text.
+- Bearer tokens referenced via `--auth-env` are resolved from your environment at connection time and never stored. OAuth access/refresh tokens **are** stored in the local SQLite database (`~/.contenox/local.db`) and reused across sessions — protect that file like any credential store.
 
 ## Further reading
 

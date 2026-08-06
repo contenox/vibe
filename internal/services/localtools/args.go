@@ -31,6 +31,10 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 		toolName, strings.Join(unknown, ", "), strings.Join(allowed, ", "))
 }
 
+// stringSliceArg reads a repeated argument as a []string, accepting a string,
+// a []string or a []any of strings. The string case is SHELL-SPLIT — quotes
+// and backslash escapes are interpreted — which is right for a command line
+// and wrong for filenames; a paths argument takes pathListArg instead.
 func stringSliceArg(toolName, key string, raw any) ([]string, error) {
 	switch v := raw.(type) {
 	case string:
@@ -50,4 +54,20 @@ func stringSliceArg(toolName, key string, raw any) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("%s: %s must be a string or array of strings, got %T", toolName, key, raw)
 	}
+}
+
+// pathListArg reads a path-list argument as a []string. It is stringSliceArg
+// with one deliberate difference: a lone string is ONE path, never shell-split,
+// so a filename may contain spaces, quotes or backslashes and still name the
+// file it spells. A blank string yields no paths, leaving "which paths?" to the
+// caller's own required-argument error.
+func pathListArg(toolName, key string, raw any) ([]string, error) {
+	if s, ok := raw.(string); ok {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil, nil
+		}
+		return []string{s}, nil
+	}
+	return stringSliceArg(toolName, key, raw)
 }

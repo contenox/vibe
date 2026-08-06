@@ -14,13 +14,13 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/ollamatokenizer"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/searchtool"
 	"github.com/contenox/contenox/internal/services/workspaceindex"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -449,13 +449,13 @@ func TestSystem_WorkspaceSearch_PreStateFileInstallIsNamedNotSilentlyRewritten(t
 
 	// The toolset is named precisely, from the rules the file lacks, instead
 	// of the install discovering it one approval card at a time.
-	detected := stalePolicyPresets([]string{contenoxDir})
+	detected := stalePolicyPresets([]string{contenoxDir}, nil)
 	require.Len(t, detected, 1)
 	require.Equal(t, "hitl-policy-default.json", detected[0].Name)
 	require.Containsf(t, detected[0].Toolsets, searchtool.ToolsProviderName,
 		"the workspace toolset is exactly what this envelope will nag about")
 
-	notice := stalePolicyNotice("hitl-policy-default.json", []string{contenoxDir})
+	notice := stalePolicyNotice("hitl-policy-default.json", []string{contenoxDir}, nil)
 	require.Contains(t, notice, searchtool.ToolsProviderName)
 	require.Contains(t, notice, "stops for approval")
 	require.Contains(t, notice, RefreshPoliciesCommand)
@@ -471,8 +471,8 @@ func TestSystem_WorkspaceSearch_PreStateFileInstallIsNamedNotSilentlyRewritten(t
 	// And the verb the notice names actually ends it — the search runs
 	// unattended, and the notice never fires again.
 	require.NoError(t, writeEmbeddedHITLPolicies(contenoxDir, true)) // contenox init --refresh-policies
-	require.Empty(t, stalePolicyNotice("hitl-policy-default.json", []string{contenoxDir}))
-	require.Empty(t, stalePolicyPresets([]string{contenoxDir}))
+	require.Empty(t, stalePolicyNotice("hitl-policy-default.json", []string{contenoxDir}, nil))
+	require.Empty(t, stalePolicyPresets([]string{contenoxDir}, nil))
 
 	svc = hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(contenoxDir), testTenant, nopKV{}, libtracker.NoopTracker{}, "hitl-policy-default.json")
 	r, err = svc.Evaluate(context.Background(), searchtool.ToolsProviderName, searchtool.ToolSearch,

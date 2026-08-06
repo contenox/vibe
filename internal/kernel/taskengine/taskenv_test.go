@@ -216,6 +216,89 @@ func TestUnit_SimpleEnv_ExecEnv_CapsInputForFailureSummaryTask(t *testing.T) {
 	require.Contains(t, got.Messages[0].Content, "truncated original_bytes=")
 }
 
+func TestUnit_SimpleEnv_ExecEnv_FailureHandlerFailureLeadsWithRootError(t *testing.T) {
+	rootErr := errors.New("chat stream failed: stream failed (provider=vertex-google, model=gemini-3.6-flash): 404")
+	handlerErr := errors.New("summariser also down")
+	exec := &scriptedExecutor{
+		outputs:     []any{nil, nil},
+		outputTypes: []taskengine.DataType{taskengine.DataTypeAny, taskengine.DataTypeAny},
+		errors:      []error{rootErr, handlerErr},
+	}
+
+	tracker := libtracker.NoopTracker{}
+	env, err := taskengine.NewEnv(context.Background(), tracker, exec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
+	require.NoError(t, err)
+
+	chain := &taskengine.TaskChainDefinition{
+		Tasks: []taskengine.TaskDefinition{
+			{
+				ID:      "main",
+				Handler: taskengine.HandleNoop,
+				Transition: taskengine.TaskTransition{
+					OnFailure: "summarise_failure",
+				},
+			},
+			{
+				ID:      "summarise_failure",
+				Handler: taskengine.HandleNoop,
+				Transition: taskengine.TaskTransition{
+					Branches: []taskengine.TransitionBranch{
+						{Operator: taskengine.OpDefault, Goto: taskengine.TermEnd},
+					},
+				},
+			},
+		},
+	}
+
+	_, _, _, err = env.ExecEnv(libtracker.WithNewRequestID(context.Background()), chain, "input", taskengine.DataTypeString)
+	require.Error(t, err)
+	require.EqualError(t, err, "task main failed after 0 retries: task main: "+rootErr.Error()+" (on_failure handler also failed: task summarise_failure: "+handlerErr.Error()+")")
+	require.ErrorIs(t, err, rootErr, "root cause must stay reachable via errors.Is")
+	require.ErrorIs(t, err, handlerErr, "handler failure must stay reachable via errors.Is")
+}
+
+func TestUnit_SimpleEnv_ExecEnv_RecoveredFailureDoesNotTaintLaterFailure(t *testing.T) {
+	laterErr := errors.New("later failure")
+	exec := &scriptedExecutor{
+		outputs:     []any{nil, "recovered", nil},
+		outputTypes: []taskengine.DataType{taskengine.DataTypeAny, taskengine.DataTypeString, taskengine.DataTypeAny},
+		errors:      []error{errors.New("recovered failure"), nil, laterErr},
+	}
+
+	tracker := libtracker.NoopTracker{}
+	env, err := taskengine.NewEnv(context.Background(), tracker, exec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
+	require.NoError(t, err)
+
+	chain := &taskengine.TaskChainDefinition{
+		Tasks: []taskengine.TaskDefinition{
+			{
+				ID:      "main",
+				Handler: taskengine.HandleNoop,
+				Transition: taskengine.TaskTransition{
+					OnFailure: "recover",
+				},
+			},
+			{
+				ID:      "recover",
+				Handler: taskengine.HandleNoop,
+				Transition: taskengine.TaskTransition{
+					Branches: []taskengine.TransitionBranch{
+						{Operator: taskengine.OpDefault, Goto: "later"},
+					},
+				},
+			},
+			{
+				ID:      "later",
+				Handler: taskengine.HandleNoop,
+			},
+		},
+	}
+
+	_, _, _, err = env.ExecEnv(libtracker.WithNewRequestID(context.Background()), chain, "input", taskengine.DataTypeString)
+	require.Error(t, err)
+	require.EqualError(t, err, "task later failed after 0 retries: task later: "+laterErr.Error())
+}
+
 func TestUnit_SimpleEnv_ExecEnv_UsesParentCancellation(t *testing.T) {
 	tracker := libtracker.NoopTracker{}
 	env, err := taskengine.NewEnv(context.Background(), tracker, cancelAwareExecutor{}, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())

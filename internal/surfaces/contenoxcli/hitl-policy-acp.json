@@ -1,6 +1,6 @@
 {
   "//compute": "Compute bounds are per-mission and inert for this policy's usual job, an attached editor session; they take effect only when this policy is used as a mission envelope, to catch an unwatched runaway spend.",
-  "//compute-fields": "maxToolCalls is exact; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted because the dispatcher never issues more than two prompt turns per mission. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
+  "//compute-fields": "maxToolCalls is validated but not enforced by the shipped hosts; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted; only 1 has an effect (it drops the runtime nudge turn), since the dispatcher never issues more than two. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
   "compute": {
     "maxToolCalls": 300,
     "maxTokens": 2000000,

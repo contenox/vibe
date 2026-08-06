@@ -12,7 +12,6 @@ import (
 	libbus "github.com/contenox/contenox/internal/libbus"
 	"github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/libkvstore"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/contenox/contenox/internal/models/ollamatokenizer"
 	"github.com/contenox/contenox/internal/models/runtimestate"
@@ -26,6 +25,7 @@ import (
 	"github.com/contenox/contenox/internal/services/stateservice"
 	"github.com/contenox/contenox/internal/services/toolguidance"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // LocalTenantID is re-exported from runtimetypes for backwards compatibility.
@@ -289,6 +289,12 @@ func buildTools(engineCtx context.Context, cfg Config, db libdbexec.DBManager, t
 			}
 			hitlSvc = hitlservice.NewWithDefaultPolicy(cfg.HITLPolicySource, hitlTenant, store, tracker, cfg.HITLDefaultPolicyName)
 		}
+		// Unconditional, injected service included: cfg.WorkspaceID is this
+		// engine's workspace and hitlSvc is its gate, so the evaluator reads
+		// the same workspace-scoped cli.hitl-policy-name row `contenox config
+		// set` writes. Binding only the internally-constructed one left the
+		// CLI's own engine (which injects) reading the global row.
+		hitlservice.SetWorkspaceID(hitlSvc, cfg.WorkspaceID)
 		// The mission tools (mission_report / mission_ask_attention /
 		// mission_finish / mission_plan) are exempted from the HITL gate by
 		// construction, not by policy data: they are the attention channel

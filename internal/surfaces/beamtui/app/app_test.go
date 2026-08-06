@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/fileaddr"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/statusbar"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
@@ -18,7 +19,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/style"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/term"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/testkit"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // Both testkit doubles satisfy Bridge; asserted here rather than in the
@@ -324,17 +325,24 @@ func TestUnit_Palette_RemoteCommandGoesToTheAgent(t *testing.T) {
 	requireContains(t, h.calls(), `SubmitPrompt(beam-test-session, "/mission audit deps")`, "bridge calls")
 }
 
-// TestUnit_Help_IsGeneratedFromTheRegistry pins that both help surfaces are
-// projections of the registrations, not hand-written text.
+// TestUnit_Help_IsGeneratedFromTheRegistry pins that both key-list surfaces
+// are projections of the registrations, not hand-written text — and that the
+// local is /keys, since keybindings are this client's while /help is the
+// core's and must mean one thing everywhere.
 func TestUnit_Help_IsGeneratedFromTheRegistry(t *testing.T) {
 	h := newHarness(t).start()
 
-	h.typeText("/help")
+	h.typeText("/keys")
 	h.press(input.KeyEnter)
 	printed := h.scrollback()
-	requireContains(t, printed, "compose the draft in $EDITOR", "the /help key list")
-	requireContains(t, printed, "/quit", "the /help command list")
-	requireNotContains(t, h.calls(), "SubmitPrompt", "/help is client-side")
+	requireContains(t, printed, "compose the draft in $EDITOR", "the /keys key list")
+	requireContains(t, printed, "/quit", "the /keys command list")
+	requireNotContains(t, h.calls(), "SubmitPrompt", "/keys is client-side")
+
+	// /help is the ACP core's, not a second beam-local meaning of the word.
+	if e, ok := h.a.pal.Lookup("help"); ok && e.Local {
+		t.Fatal("beam still shadows the core's /help with a local")
+	}
 
 	// `?` on an empty composer opens the overlay; on a non-empty one it types.
 	h.input(input.KeyEvent{Key: input.KeyRune, Rune: '?'})
@@ -471,8 +479,14 @@ func TestUnit_Palette_EscHoldsForTheTokenNotForever(t *testing.T) {
 	}
 }
 
-// TestUnit_ApprovalFlow_AllowResolvesOnce pins the HITL gate: the card blocks
-// the composer, y answers allow exactly once, and the tool call resumes.
+// TestUnit_ApprovalFlow_AllowResolvesOnce pins the HITL gate: the ask lands
+// in scrollback whole, the card blocks the composer, y answers allow exactly
+// once, the answer leaves a record, and the tool call resumes.
+//
+// The record is the inversion of what this test used to pin. Dropping the
+// card the instant it is answered made approval.Card's own resolved footers
+// unreachable, so an approved call left a transcript in which a gated tool
+// simply ran: no verdict, no policy, nothing to audit after the fact.
 func TestUnit_ApprovalFlow_AllowResolvesOnce(t *testing.T) {
 	h := newHarness(t, func(d *Deps) { d.FreshSession = false }).start()
 
@@ -495,12 +509,21 @@ func TestUnit_ApprovalFlow_AllowResolvesOnce(t *testing.T) {
 	}
 	testkit.Golden(t, "approval_card_frame", testkit.EncodeFrame(h.last()))
 
+	// The ask is in scrollback, where no row budget can clip it; the live
+	// region keeps the subject beside the y/n line so the prompt has one.
+	asked := h.scrollback()
+	requireContains(t, asked, "approval required", "the ask settles into scrollback")
+	requireContains(t, asked, ".contenox/policies/default.yaml", "the policy line survives")
+	live := testkit.EncodeLines(h.last().Live)
+	requireContains(t, live, "local_fs.write_file", "the live prompt names its subject")
+
 	// Blocked while the card is up (text avoids y/n, which the card claims).
 	h.typeText("xxx")
 	if !h.a.comp.Empty() {
 		t.Fatalf("composer accepted input while an approval was pending: %q", h.a.comp.Draft())
 	}
 
+	mark := len(h.term.frames)
 	h.input(input.KeyEvent{Key: input.KeyRune, Rune: 'y'})
 	h.input(input.KeyEvent{Key: input.KeyRune, Rune: 'y'}) // doubled keystroke
 	if len(resolved) != 1 || !resolved[0] {
@@ -509,9 +532,58 @@ func TestUnit_ApprovalFlow_AllowResolvesOnce(t *testing.T) {
 	if h.a.card != nil {
 		t.Fatal("card outlived its answer")
 	}
+	verdict := scrollbackFrom(h, mark)
+	requireContains(t, verdict, "allowed", "the answer is recorded in the transcript")
+	requireContains(t, verdict, "local_fs.write_file", "the record names what was allowed")
+	requireContains(t, verdict, "policy default", "the record names the policy that asked")
 
 	h.deliver(events[2], events[3])
 	requireContains(t, h.scrollback(), "write_file: internal/config/limits.go", "resumed tool card")
+}
+
+// TestUnit_Approval_PermissionResolvedRetiresTheCard pins the fact a card
+// retires on: without it any resolution beam did not itself perform leaves a
+// pending card owning the keyboard — typing swallowed, y/n going to a channel
+// nobody reads, and Ctrl+C twice the only way out.
+func TestUnit_Approval_PermissionResolvedRetiresTheCard(t *testing.T) {
+	h := newHarness(t).start()
+	events := testkit.FixtureApprovalFlow(testSession)
+	h.deliver(events[1])
+	if h.a.card == nil {
+		t.Fatal("no approval card after PermissionRequested")
+	}
+
+	h.deliver(enginebridge.PermissionResolved{
+		SessionID:  testSession,
+		ToolCallID: h.a.card.ToolCallID(),
+		Outcome:    libacp.PermissionOutcomeSelected,
+	})
+	if h.a.card != nil {
+		t.Fatal("PermissionResolved did not retire the card")
+	}
+
+	// The keyboard is back: an ordinary keystroke reaches the composer again.
+	h.typeText("back to typing")
+	if got := h.a.comp.Draft(); got != "back to typing" {
+		t.Fatalf("the retired card kept the keyboard: draft = %q", got)
+	}
+}
+
+// TestUnit_Approval_ResolvedForAnotherCallLeavesTheCardAlone pins the
+// ToolCallID match: tool calls are sequential per turn, but a late
+// resolution from a previous gate must not retire the card now on screen.
+func TestUnit_Approval_ResolvedForAnotherCallLeavesTheCardAlone(t *testing.T) {
+	h := newHarness(t).start()
+	h.deliver(testkit.FixtureApprovalFlow(testSession)[1])
+
+	h.deliver(enginebridge.PermissionResolved{
+		SessionID:  testSession,
+		ToolCallID: "some.other.call#9",
+		Outcome:    libacp.PermissionOutcomeSelected,
+	})
+	if h.a.card == nil {
+		t.Fatal("a resolution for another tool call retired the pending card")
+	}
 }
 
 // TestUnit_Approval_EscCancelsTheTurn pins that Esc on a card asks the bridge
@@ -1101,6 +1173,93 @@ func TestUnit_MissionLifecycleReachesTheTranscript(t *testing.T) {
 	requireContains(t, back, "2 done · 1 running · 1 pending", "plan counts line")
 	requireContains(t, back, "unit porter landed", "mission landed card")
 	requireContains(t, back, "migration applied; 3 tables updated", "landing reason")
+}
+
+// TestUnit_MissionsBadgeCountsOpenMissions pins that the badge counts work
+// still running rather than announcements seen: statusbar has carried a
+// Missions field the app never assigned, so a fired mission left no trace on
+// the bar at all.
+func TestUnit_MissionsBadgeCountsOpenMissions(t *testing.T) {
+	h := newHarness(t).start()
+	status := func(id, from, to string) enginebridge.Event {
+		return enginebridge.MissionStatusChanged{
+			SessionID: testSession, MissionID: id, AgentName: "porter", Old: from, New: to,
+		}
+	}
+
+	if got := h.a.status().Missions; got != 0 {
+		t.Fatalf("fresh app reports Missions=%d, want 0", got)
+	}
+
+	h.deliver(status("mis-1", "", enginebridge.MissionStatusOpen))
+	h.deliver(status("mis-2", "", enginebridge.MissionStatusOpen))
+	// A redelivered opening is the same mission, not a third one.
+	h.deliver(status("mis-1", "", enginebridge.MissionStatusOpen))
+	if got := h.a.status().Missions; got != 2 {
+		t.Fatalf("Missions=%d with two open, want 2", got)
+	}
+	requireContains(t, testkit.EncodeLines(h.last().Live), "◇ 2", "status bar missions badge")
+
+	h.deliver(status("mis-1", enginebridge.MissionStatusOpen, enginebridge.MissionStatusLanded))
+	h.deliver(status("mis-2", enginebridge.MissionStatusOpen, enginebridge.MissionStatusStuck))
+	if got := h.a.status().Missions; got != 0 {
+		t.Fatalf("Missions=%d once both came to rest, want 0", got)
+	}
+	requireNotContains(t, testkit.EncodeLines(h.last().Live), "◇", "the badge outlived the work")
+
+	// A status this build does not know counts as still running.
+	h.deliver(status("mis-3", "", "quarantined"))
+	if got := h.a.status().Missions; got != 1 {
+		t.Fatalf("Missions=%d for an unrecognized status, want it counted as running", got)
+	}
+}
+
+// TestUnit_ConfigOptionUpdateMovesTheStatusBar pins that the bar names the
+// model the session is running now. The update carrying it was consumed for
+// palette completion only, so /model changed the session and left the bar
+// asserting the launch-time model — a lie about which model answered.
+func TestUnit_ConfigOptionUpdateMovesTheStatusBar(t *testing.T) {
+	h := newHarness(t).start()
+	requireContains(t, testkit.EncodeLines(h.last().Live), "qwen3:8b · ollama", "the bar starts on Deps")
+
+	h.deliver(enginebridge.ConfigOptionUpdated{SessionID: testSession, Options: []libacp.SessionConfigOption{{
+		ID:           "model",
+		Type:         "select",
+		CurrentValue: "openai/gpt-5.1-codex",
+	}}})
+	live := testkit.EncodeLines(h.last().Live)
+	requireContains(t, live, "gpt-5.1-codex · openai", "the bar follows the session's model")
+	requireNotContains(t, live, "qwen3:8b", "the launch-time model outlived the switch")
+
+	// An update carrying no model select must not blank what is on screen.
+	h.deliver(enginebridge.ConfigOptionUpdated{SessionID: testSession, Options: []libacp.SessionConfigOption{{
+		ID: "think", Type: "select", CurrentValue: "high",
+	}}})
+	requireContains(t, testkit.EncodeLines(h.last().Live), "gpt-5.1-codex · openai", "a think update blanked the model")
+}
+
+// TestUnit_BridgeClose_ShowsDisconnectedAndRetiresTheCard pins the two facts
+// a closed event stream carries: the health state statusbar has always been
+// able to render, and that no permission can still be answered.
+func TestUnit_BridgeClose_ShowsDisconnectedAndRetiresTheCard(t *testing.T) {
+	h := newHarness(t).start()
+	h.deliver(testkit.FixtureApprovalFlow(testSession)[1])
+	if h.a.card == nil {
+		t.Fatal("no approval card after PermissionRequested")
+	}
+
+	h.a.onBridgeClosed()
+	if err := h.a.commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	if h.a.card != nil {
+		t.Fatal("a closed bridge left a card nobody can ever answer")
+	}
+	if got := h.a.status().Health; got != statusbar.HealthDisconnected {
+		t.Fatalf("Health=%q after the bridge closed, want %q", got, statusbar.HealthDisconnected)
+	}
+	requireContains(t, h.scrollback(), "cancelled", "the abandoned gate is recorded")
 }
 
 // TestUnit_Mention_PickerSplicesAPath pins the `@` seam over a real fileaddr

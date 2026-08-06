@@ -63,7 +63,7 @@ func TestUnit_RedirectBeamLogsToFile_AppendsAcrossRuns(t *testing.T) {
 // overridable via its own env var — editors keep using acp_cmd's defaults.
 func TestUnit_BeamCmd_DefaultsToItsOwnPolicyAndChain(t *testing.T) {
 	require.Equal(t, "hitl-policy-beam.json", beamHITLPolicy)
-	require.Equal(t, "default-beam-chain.json", beamChainFile)
+	require.Equal(t, "chain-agent-beam.json", beamChainFile)
 	require.Equal(t, "CONTENOX_BEAM_CHAIN_PATH", beamChainEnv)
 	require.NotEqual(t, beamChainEnv, "CONTENOX_ACP_CHAIN_PATH", "beam must not share acp_cmd's chain override var")
 }

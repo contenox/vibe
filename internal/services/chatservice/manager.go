@@ -10,7 +10,7 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/services/messagestore"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
 type Manager struct {
@@ -36,7 +36,7 @@ func (m *Manager) AddInstruction(ctx context.Context, tx libdb.Exec, id string, 
 	if messageID == "" {
 		messageID = generateMessageID(id, &msg)
 	}
-	return messagestore.New(tx, m.workspaceID).AppendMessages(ctx, &messagestore.Message{
+	return runtimetypes.NewMessageStore(tx, m.workspaceID).AppendMessages(ctx, &runtimetypes.Message{
 		ID:      messageID,
 		IDX:     id,
 		Payload: payload,
@@ -56,7 +56,7 @@ func (m *Manager) AppendMessage(_ context.Context, messages []taskengine.Message
 
 // ListMessages retrieves all stored messages for a given subject ID.
 func (m *Manager) ListMessages(ctx context.Context, tx libdb.Exec, subjectID string) ([]taskengine.Message, error) {
-	conversation, err := messagestore.New(tx, m.workspaceID).ListMessages(ctx, subjectID)
+	conversation, err := runtimetypes.NewMessageStore(tx, m.workspaceID).ListMessages(ctx, subjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (m *Manager) PersistDiff(ctx context.Context, tx libdb.Exec, subjectID stri
 		return nil
 	}
 
-	conversation, err := messagestore.New(tx, m.workspaceID).ListMessages(ctx, subjectID)
+	conversation, err := runtimetypes.NewMessageStore(tx, m.workspaceID).ListMessages(ctx, subjectID)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (m *Manager) PersistDiff(ctx context.Context, tx libdb.Exec, subjectID stri
 		existingIDs[msg.ID] = true
 	}
 
-	var newMessages []*messagestore.Message
+	var newMessages []*runtimetypes.Message
 	for _, msg := range hist {
 		if msg.ID == "" {
 			msg.ID = generateMessageID(subjectID, &msg)
@@ -105,7 +105,7 @@ func (m *Manager) PersistDiff(ctx context.Context, tx libdb.Exec, subjectID stri
 		if err != nil {
 			return fmt.Errorf("failed to marshal message: %w", err)
 		}
-		newMessages = append(newMessages, &messagestore.Message{
+		newMessages = append(newMessages, &runtimetypes.Message{
 			ID:      msg.ID,
 			IDX:     subjectID,
 			Payload: payload,
@@ -114,14 +114,14 @@ func (m *Manager) PersistDiff(ctx context.Context, tx libdb.Exec, subjectID stri
 	}
 
 	if len(newMessages) > 0 {
-		return messagestore.New(tx, m.workspaceID).AppendMessages(ctx, newMessages...)
+		return runtimetypes.NewMessageStore(tx, m.workspaceID).AppendMessages(ctx, newMessages...)
 	}
 	return nil
 }
 
 // DeleteSession removes all messages and the index for a session.
 func (m *Manager) DeleteSession(ctx context.Context, tx libdb.Exec, sessionID string, identity string) error {
-	store := messagestore.New(tx, m.workspaceID)
+	store := runtimetypes.NewMessageStore(tx, m.workspaceID)
 	// DeleteMessageIndex cascades to messages via ON DELETE CASCADE.
 	if err := store.DeleteMessageIndex(ctx, sessionID, identity); err != nil {
 		return fmt.Errorf("failed to delete session index: %w", err)
@@ -131,7 +131,7 @@ func (m *Manager) DeleteSession(ctx context.Context, tx libdb.Exec, sessionID st
 
 // ClearSession removes all messages for a session while keeping the index.
 func (m *Manager) ClearSession(ctx context.Context, tx libdb.Exec, sessionID string) error {
-	if err := messagestore.New(tx, m.workspaceID).DeleteMessages(ctx, sessionID); err != nil {
+	if err := runtimetypes.NewMessageStore(tx, m.workspaceID).DeleteMessages(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to clear session messages: %w", err)
 	}
 	return nil
@@ -139,7 +139,7 @@ func (m *Manager) ClearSession(ctx context.Context, tx libdb.Exec, sessionID str
 
 // RenameSession updates the human-readable name of a session.
 func (m *Manager) RenameSession(ctx context.Context, tx libdb.Exec, sessionID string, name string) error {
-	return messagestore.New(tx, m.workspaceID).RenameSession(ctx, sessionID, name)
+	return runtimetypes.NewMessageStore(tx, m.workspaceID).RenameMessageSession(ctx, sessionID, name)
 }
 
 // generateMessageID creates a deterministic ID from the message content.

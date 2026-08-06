@@ -170,13 +170,18 @@ func TestUnit_CursorAlwaysVisible(t *testing.T) {
 	}
 }
 
-// TestUnit_RenderEmptyStates pins the two empty renderings: focused shows a clean caret, unfocused shows the hint.
+// TestUnit_RenderEmptyStates pins the two empty renderings: both draw the
+// hint, and only the sigil's style says which one is focused.
+//
+// Focused used to draw a bare sigil. Since focused is the composer's resting
+// state — it is unfocused only while a modal covers it — the hint listing
+// `/`, `!` and `@` was never on screen at a moment anyone could act on it.
 func TestUnit_RenderEmptyStates(t *testing.T) {
 	c := New()
 
 	lines := c.Render(80, true, false)
-	if len(lines) != 1 || lines[0].Text() != sigilUnicode {
-		t.Fatalf("focused empty = %q, want just the sigil", testkit.EncodeLines(lines))
+	if want := sigilUnicode + placeholderUnicode; len(lines) != 1 || lines[0].Text() != want {
+		t.Fatalf("focused empty = %q, want the sigil and the hint", testkit.EncodeLines(lines))
 	}
 	if row, col := c.CursorPos(); row != 0 || col != prefixWidth {
 		t.Fatalf("focused empty caret = (%d, %d), want (0, %d)", row, col, prefixWidth)

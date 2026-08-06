@@ -55,7 +55,7 @@ func TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks(t *testing.T) {
 	if found.Category != CategoryPolicy {
 		t.Fatalf("category = %q, want %q", found.Category, CategoryPolicy)
 	}
-	for _, want := range []string{"hitl-policy-default.json", "gointel", "goja", "jq", "workspace", "stops for approval"} {
+	for _, want := range []string{"/home/u/.contenox/hitl-policy-default.json", "gointel", "goja", "jq", "workspace", "stops for approval"} {
 		if !strings.Contains(found.Message, want) {
 			t.Fatalf("message does not name %q: %s", want, found.Message)
 		}
@@ -71,6 +71,49 @@ func TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks(t *testing.T) {
 	}
 	if !res.Ready() {
 		t.Fatalf("a stale policy preset made the runtime not ready: %#v", res.BlockingIssues())
+	}
+}
+
+// TestUnit_AddStalePolicyPresetIssue_NamesPathAndDefaultActionFallThrough pins the message contract: every stale file appears with its full path, its effect reads as that file's default_action fall-through, and tool visibility is stated as unaffected.
+func TestUnit_AddStalePolicyPresetIssue_NamesPathAndDefaultActionFallThrough(t *testing.T) {
+	res := AddStalePolicyPresetIssue(Evaluate(readyInput()), []StalePolicyPreset{
+		{
+			Name:     "hitl-policy-default.json",
+			Path:     "/w/.contenox/hitl-policy-default.json",
+			Toolsets: []string{"git", "jq"},
+			Effect:   "every call stops for approval",
+		},
+		{
+			Name:     "hitl-policy-strict.json",
+			Path:     "/home/u/.contenox/hitl-policy-strict.json",
+			Toolsets: []string{"git"},
+			Effect:   "every call is denied",
+		},
+	}, "contenox init --refresh-policies")
+
+	var found Issue
+	for _, iss := range res.Issues {
+		if iss.Code == StalePolicyPresetsCode {
+			found = iss
+		}
+	}
+	if found.Code == "" {
+		t.Fatalf("no %s issue was added: %#v", StalePolicyPresetsCode, res.Issues)
+	}
+	for _, want := range []string{
+		// Path + toolsets + that file's own fall-through, per file.
+		"/w/.contenox/hitl-policy-default.json predates toolsets git, jq — calls to them fall to this file's default_action (every call stops for approval)",
+		"/home/u/.contenox/hitl-policy-strict.json predates toolsets git — calls to them fall to this file's default_action (every call is denied)",
+		// The rule list never gates availability; the message must say so.
+		"The tools stay visible to the model",
+		"never overwritten automatically",
+	} {
+		if !strings.Contains(found.Message, want) {
+			t.Fatalf("message does not contain %q: %s", want, found.Message)
+		}
+	}
+	if strings.Contains(found.Message, "\n") {
+		t.Fatalf("message must stay a single line for the doctor bullet renderer: %q", found.Message)
 	}
 }
 

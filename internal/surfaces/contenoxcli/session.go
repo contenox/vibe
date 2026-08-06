@@ -5,8 +5,8 @@ import (
 	"context"
 
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/sessionservice"
+	"github.com/contenox/contenox/libtracker"
 )
 
 const localIdentity = "local-user"

@@ -14,13 +14,13 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/reasoning"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelcapability"
 	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // allACPCommands is the full, capability-unfiltered admin command set, so
@@ -40,27 +40,42 @@ func allACPCommands() []libacp.AvailableCommand {
 		{Name: "think", Description: "Show or set this session's reasoning level: /think <level|off|auto>.", Input: &libacp.AvailableCommandInput{Hint: "[level|off|auto]"}},
 		{Name: "capability", Description: "Show or set persistent provider/model capability overrides.", Input: &libacp.AvailableCommandInput{Hint: "set|show|unset <provider> <model> [--think true|false]"}},
 		{Name: "policy", Description: "Show the active HITL policy, or switch it: /policy <name>.", Input: &libacp.AvailableCommandInput{Hint: "[policy-name]"}},
-		{Name: "mission", Description: "Fire a mission from this session: /mission [agent-name] <intent>.", Input: &libacp.AvailableCommandInput{Hint: "[agent-name] <intent>"}},
+		{Name: "mission", Description: "Fire a mission from this session; alone, lists the envelopes it can run under.", Input: &libacp.AvailableCommandInput{Hint: "[--policy <envelope>] [agent-name] <intent>"}},
+		{Name: "answer", Description: "Answer a question one of this session's mission units is waiting on; alone, lists them.", Input: &libacp.AvailableCommandInput{Hint: "[ask-id <answer>]"}},
+		{Name: "new", Description: "Start a new session in this workspace and report its id."},
+		{Name: "sessions", Description: "List the sessions in this workspace, newest first."},
 	}
 }
 
 // acpCommands is the admin command set advertised to this transport's ACP
-// clients: allACPCommands filtered by capability. /mission is dropped unless
-// hasMissionCapability reports both the fleet kernel and agent resolver
-// wired — never advertise a command that can only error out.
+// clients: allACPCommands filtered by commandAvailable — never advertise a
+// command that can only error out.
 func (t *Transport) acpCommands() []libacp.AvailableCommand {
 	all := allACPCommands()
-	if t.hasMissionCapability() {
-		return all
-	}
-	out := make([]libacp.AvailableCommand, 0, len(all)-1)
+	out := make([]libacp.AvailableCommand, 0, len(all))
 	for _, c := range all {
-		if c.Name == "mission" {
+		if !t.commandAvailable(c.Name) {
 			continue
 		}
 		out = append(out, c)
 	}
 	return out
+}
+
+// commandAvailable reports whether a command can actually run on this
+// transport. Only capability-gated names are filtered; everything else is
+// always advertised. parseCommand still recognizes a filtered command (see
+// allACPCommands), so typing it gets the handler's teaching error rather than
+// "unknown command".
+func (t *Transport) commandAvailable(name string) bool {
+	switch name {
+	case "mission":
+		return t.hasMissionCapability()
+	case "answer":
+		return t.hasAnswerCapability()
+	default:
+		return true
+	}
 }
 
 // acpCommandNames is the set of recognized command names, used by
@@ -174,6 +189,12 @@ func (t *Transport) dispatchCommand(ctx context.Context, sid libacp.SessionID, s
 		out, err = t.handlePolicy(ctx, args)
 	case "mission":
 		out, err = t.handleMission(ctx, sess, args)
+	case "answer":
+		out, err = t.handleAnswer(ctx, sess, args)
+	case "new":
+		out, err = t.handleNewSessionCommand(ctx, sess)
+	case "sessions":
+		out, err = t.handleSessions(ctx, sess)
 	case "clear":
 		out, err = t.handleClear(ctx, sid, sess)
 	case "compact":
@@ -555,15 +576,17 @@ func parseCapabilitySetArgs(fields []string) (string, string, bool, error) {
 }
 
 // handlePolicy shows or switches the active HITL approval policy, writing the
-// global cli.hitl-policy-name key the engine reads live on every gated call.
+// cli.hitl-policy-name row the engine reads live on every gated call — at
+// this session's workspace scope, the same row `contenox config set
+// hitl-policy-name` writes, so the two cannot shadow each other.
 func (t *Transport) handlePolicy(ctx context.Context, args string) (string, error) {
 	store := runtimetypes.New(t.deps.DB.WithoutTransaction())
 	value := strings.TrimSpace(args)
 	if value == "" {
-		return t.policyStatus(clikv.ReadHITLPolicy(ctx, store)), nil
+		return t.policyStatus(clikv.ReadHITLPolicy(ctx, store, t.workspaceID())), nil
 	}
 	cfgCtx := libtracker.WithNewRequestID(ctx)
-	if err := clikv.SetHITLPolicy(cfgCtx, store, value); err != nil {
+	if err := clikv.SetHITLPolicy(cfgCtx, store, t.workspaceID(), value); err != nil {
 		return "", fmt.Errorf("set hitl policy: %w", err)
 	}
 	return fmt.Sprintf("HITL policy set to %s. Applies to the next gated tool call.", value), nil
@@ -596,8 +619,10 @@ func (t *Transport) policyStatus(active string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// persistConfig writes a global CLI config value, mirroring `contenox config
-// set` so the change also applies to future sessions and CLI invocations.
+// persistConfig writes a CLI config value at the scope clikv assigns the key
+// (this session's workspace for a workspace-scoped one, global otherwise),
+// mirroring `contenox config set` so the change also applies to future
+// sessions and CLI invocations.
 func (t *Transport) persistConfig(ctx context.Context, key, value string) error {
 	store := runtimetypes.New(t.deps.DB.WithoutTransaction())
 	cfgCtx := libtracker.WithNewRequestID(ctx)

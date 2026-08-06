@@ -6,9 +6,7 @@ package contenoxcli
 
 import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/internal/libbus"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -18,13 +16,15 @@ import (
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/searchtool"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // acpToolset is the CLI's full localToolset (engine.go) plus the ACP fs/shell
 // wiring that routes through the live Transport instead of a fixed cwd, plus
 // this profile's mission tools. Same construction, same tool names, so the
 // seeded HITL policies (which already rule on gointel/workspace/jq/goja) gate
-// an ACP session exactly as they gate `contenox chat`/`run`.
+// an ACP session exactly as they gate `contenox chat`/`run`. optInBeta gates
+// goja registration exactly as localToolset does.
 func acpToolset(
 	db libdb.DBManager,
 	tracker libtracker.ActivityTracker,
@@ -35,10 +35,11 @@ func acpToolset(
 	shellScrub func([]string) []string,
 	missions missionservice.Service,
 	acpHITL hitlservice.Service,
-	bus libbus.Messenger,
+	bus missionservice.EventPublisher,
+	optInBeta bool,
 ) map[string]taskengine.ToolsRepo {
 	cwdResolver := acpsvc.NewACPCwdResolver(transportFn)
-	return map[string]taskengine.ToolsRepo{
+	tools := map[string]taskengine.ToolsRepo{
 		"echo":     localtools.NewEchoTools(),
 		"print":    localtools.NewPrint(tracker),
 		"webtools": localtools.NewWebCaller(tracker),
@@ -64,7 +65,6 @@ func acpToolset(
 		gointel.ToolsProviderName:    gointel.NewTools(goIndex),
 		jqtool.ToolsProviderName:     jqtool.NewToolsWith("", jqtool.ToolsProviderName, cwdResolver),
 		searchtool.ToolsProviderName: newWorkspaceSearchTools(workspaceID),
-		gojatool.ToolsProviderName:   gt,
 		// Mission tools: inert without a mission id in session/new `_meta`, so
 		// an ordinary editor session never sees them. The asker raises
 		// mission_ask_attention as a durable ask over the same store
@@ -74,8 +74,12 @@ func acpToolset(
 			missions: missions,
 			bus:      bus,
 		}, missiontools.WithSupervision(
-			missionSupervision{missions: missions, hitl: acpHITL},
-			missionSupervision{missions: missions, hitl: acpHITL},
+			missionSupervision{missions: missions, hitl: acpHITL, db: db, tracker: tracker},
+			missionSupervision{missions: missions, hitl: acpHITL, db: db, tracker: tracker},
 		)),
 	}
+	if optInBeta {
+		tools[gojatool.ToolsProviderName] = gt
+	}
+	return tools
 }

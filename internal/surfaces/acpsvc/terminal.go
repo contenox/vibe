@@ -7,7 +7,7 @@ import (
 
 	"github.com/contenox/contenox/internal/services/shellsession"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 const (

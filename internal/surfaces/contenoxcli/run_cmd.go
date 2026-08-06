@@ -15,10 +15,10 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
 
@@ -44,7 +44,7 @@ Input types (--input-type):
   json              Parsed as a JSON object (DataTypeJSON)
   int               Parsed as integer (DataTypeInt)
 
-If --chain is not specified, falls back to .contenox/default-run-chain.json
+If --chain is not specified, falls back to .contenox/chain-agent-run.json
 if that file exists in the current directory.
 
 Examples:
@@ -52,7 +52,7 @@ Examples:
   cat diff.txt | contenox run --chain .contenox/review.json --input-type chat
   contenox run --chain .contenox/embed.json --input @myfile.go
   contenox run --chain .contenox/parse-chain.json --input-type json '{"key":"value"}'
-  git diff | contenox run "suggest a commit message"  # uses default-run-chain.json
+  git diff | contenox run "suggest a commit message"  # uses chain-agent-run.json
 
   # HITL is on by default (write_file, sed, and local_shell prompt for approval).
   # Run unattended (no prompts) by passing --auto:
@@ -74,12 +74,12 @@ Examples:
 
 		chainPath, _ := flags.GetString("chain")
 		if chainPath == "" && !flags.Changed("chain") {
-			if resolved, rerr := lookupSystemFile(contenoxDir, "default-run-chain.json"); rerr == nil {
+			if resolved, rerr := lookupSystemFile(contenoxDir, chainAgentRunFilename); rerr == nil {
 				chainPath = resolved
 			}
 		}
 		if chainPath == "" {
-			fmt.Fprintln(os.Stderr, "No default-run-chain.json found in .contenox/ (workspace) or ~/.contenox/.")
+			fmt.Fprintln(os.Stderr, "No chain-agent-run.json found in .contenox/ (workspace) or ~/.contenox/.")
 			fmt.Fprintln(os.Stderr, "Run 'contenox init' to scaffold it, or pass --chain explicitly.")
 			return errChainRequired
 		}
@@ -211,7 +211,9 @@ Examples:
 			if isModelResolverFailure(err) {
 				PrintSetupIssues(cmd.ErrOrStderr(), engine.SetupCheck)
 			}
-			return fmt.Errorf("chain execution failed: %w", err)
+			// agentservice already wraps chain failures; wrapping again doubles
+			// the "chain execution failed" prefix.
+			return err
 		}
 
 		effectiveRaw, _ := flags.GetBool("raw")
@@ -395,6 +397,7 @@ func buildRunOpts(cmd *cobra.Command, db libdbexec.DBManager, contenoxDir string
 		EffectiveHITL:                effectiveHITL,
 		EffectiveTracing:             effectiveTracing,
 		EffectiveThink:               effectiveThink,
+		EffectiveOptInBeta:           betaEnabled(ctx, store),
 		ContenoxDir:                  contenoxDir,
 		// Shared by `run` and `beam`: both are invoked by a person, so engine
 		// construction has somewhere to address an operator warning.
@@ -404,7 +407,7 @@ func buildRunOpts(cmd *cobra.Command, db libdbexec.DBManager, contenoxDir string
 
 func init() {
 	f := runCmd.Flags()
-	f.String("chain", "", "Path to a task chain JSON file (falls back to .contenox/default-run-chain.json if present)")
+	f.String("chain", "", "Path to a task chain JSON file (falls back to .contenox/chain-agent-run.json if present)")
 	f.String("input", "", "Input value or @path to read from a file (e.g. --input @main.go)")
 	f.String("input-type", "string", "Input data type: string, chat, json, int")
 	f.Bool("auto", false, "Non-interactive mode: disable HITL approval prompts. Default is HITL on; tools route through the active hitl-policy. Use --auto only in trusted/scripted contexts.")

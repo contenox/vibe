@@ -11,12 +11,11 @@ import (
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/contenox/contenox/internal/services/chatservice"
-	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/services/sessionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/google/uuid"
 )
 
@@ -121,7 +120,7 @@ func (a *agent) SessionResume(ctx context.Context, name string) (string, error) 
 
 func (a *agent) SessionDelete(ctx context.Context, name string) error {
 	_, err := a.sessionSvc().Delete(ctx, a.deps.Identity, name)
-	if err != nil && errors.Is(err, messagestore.ErrNotFound) {
+	if err != nil && errors.Is(err, libdb.ErrNotFound) {
 		return nil
 	}
 	return err

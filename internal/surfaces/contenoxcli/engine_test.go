@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/jqtool"
+	"github.com/contenox/contenox/internal/services/missionservice"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -124,23 +125,24 @@ func TestUnit_LocalToolset_GitIsAlwaysOnAndShellIsGated(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(gt.Shutdown)
 
-	off := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, tracker, goIndex, gt)
+	off := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, tracker, goIndex, gt, missionservice.New(nil), nil)
 	require.Contains(t, off, "git", "git must be registered even with the shell off")
 	require.Contains(t, off, "local_fs")
 	require.Contains(t, off, gointel.ToolsProviderName, "gointel is a read surface, always on")
-	require.Contains(t, off, gojatool.ToolsProviderName, "goja is a compute surface, always on")
+	require.NotContains(t, off, gojatool.ToolsProviderName, "goja is a beta surface, absent without opt-in-beta")
 	require.NotContains(t, off, "local_shell", "the shell stays opt-in")
 
-	on := localToolset(chatOpts{EffectiveEnableLocalExec: true, EffectiveHITL: true}, nil, tracker, goIndex, gt)
+	on := localToolset(chatOpts{EffectiveEnableLocalExec: true, EffectiveHITL: true, EffectiveOptInBeta: true}, nil, tracker, goIndex, gt, missionservice.New(nil), nil)
 	require.Contains(t, on, "git")
 	require.Contains(t, on, "local_shell")
+	require.Contains(t, on, gojatool.ToolsProviderName, "goja registers under opt-in-beta")
 
 	supported, err := off["git"].Supports(context.Background())
 	require.NoError(t, err)
 	require.Contains(t, supported, "git_status")
 	require.Contains(t, supported, "git_commit")
 
-	gojaSupported, err := off[gojatool.ToolsProviderName].Supports(context.Background())
+	gojaSupported, err := on[gojatool.ToolsProviderName].Supports(context.Background())
 	require.NoError(t, err)
 	require.Contains(t, gojaSupported, gojatool.ToolEval)
 }
@@ -165,7 +167,7 @@ func TestUnit_LocalToolset_JQIsAlwaysOn(t *testing.T) {
 			EffectiveEnableLocalExec:     shellOn,
 			EffectiveHITL:                true,
 			EffectiveLocalExecAllowedDir: dir,
-		}, nil, tracker, goIndex, gt)
+		}, nil, tracker, goIndex, gt, missionservice.New(nil), nil)
 
 		require.Containsf(t, tools, jqtool.ToolsProviderName,
 			"jq is a read surface and must be registered with the shell %v", shellOn)
@@ -209,7 +211,7 @@ func TestUnit_LocalToolset_WriteFileInvalidatesGoIntelIndex(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(gt.Shutdown)
 
-	tools := localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, goIndex, gt)
+	tools := localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, goIndex, gt, missionservice.New(nil), nil)
 
 	// Warm the index on the pre-edit source.
 	_, _, err = tools[gointel.ToolsProviderName].Exec(context.Background(), time.Now(),
@@ -289,7 +291,7 @@ func TestUnit_LocalToolset_OnFileMutatedCallsGoIntelInvalidate(t *testing.T) {
 
 	// db is nil, so the read-before-write guard is a no-op — this test is
 	// about the mutate callback, not that gate.
-	tools := localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, fake, gt)
+	tools := localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, fake, gt, missionservice.New(nil), nil)
 
 	_, _, err = tools["local_fs"].Exec(context.Background(), time.Now(),
 		map[string]any{"path": "a.txt", "content": "alpha bravo\n"}, false,

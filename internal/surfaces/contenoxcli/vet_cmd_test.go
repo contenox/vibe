@@ -36,7 +36,7 @@ func TestUnit_Vet_AllInRepoChainsAndPoliciesPass(t *testing.T) {
 	for _, path := range files {
 		path := path
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			vetted, err, diags := vetOneFile(path)
+			vetted, err, diags := vetOneFile(path, vetOpts{})
 			require.True(t, vetted, "shipped file %s must classify as chain or envelope", path)
 			require.NoError(t, err)
 			// No shipped file may lean on a field the runtime does not enforce.
@@ -46,12 +46,12 @@ func TestUnit_Vet_AllInRepoChainsAndPoliciesPass(t *testing.T) {
 }
 
 func TestUnit_Vet_ClassifiesByContentThenName(t *testing.T) {
-	require.Equal(t, vetKindChain, classifyVetFile("x.json", []byte(`{"id":"c","tasks":[]}`)))
-	require.Equal(t, vetKindEnvelope, classifyVetFile("x.json", []byte(`{"rules":[]}`)))
-	require.Equal(t, vetKindEnvelope, classifyVetFile("x.json", []byte(`{"default_action":"allow"}`)))
-	require.Equal(t, vetKindEnvelope, classifyVetFile("hitl-policy-custom.json", []byte(`{}`)))
-	require.Equal(t, vetKindSkip, classifyVetFile("workspace.json", []byte(`{"id":"w"}`)))
-	require.Equal(t, vetKindSkip, classifyVetFile("notes.json", []byte(`[1,2,3]`)))
+	require.Equal(t, vetKindChain, classifyVetFile("x.json", []byte(`{"id":"c","tasks":[]}`), vetOpts{}))
+	require.Equal(t, vetKindEnvelope, classifyVetFile("x.json", []byte(`{"rules":[]}`), vetOpts{}))
+	require.Equal(t, vetKindEnvelope, classifyVetFile("x.json", []byte(`{"default_action":"allow"}`), vetOpts{}))
+	require.Equal(t, vetKindEnvelope, classifyVetFile("hitl-policy-custom.json", []byte(`{}`), vetOpts{}))
+	require.Equal(t, vetKindSkip, classifyVetFile("workspace.json", []byte(`{"id":"w"}`), vetOpts{}))
+	require.Equal(t, vetKindSkip, classifyVetFile("notes.json", []byte(`[1,2,3]`), vetOpts{}))
 }
 
 // TestUnit_Vet_ReportsPerFileAndCountsFailures asserts vet reports each file's verdict and counts only real failures, not skips.
@@ -79,7 +79,7 @@ func TestUnit_Vet_ReportsPerFileAndCountsFailures(t *testing.T) {
 	skipped := write("random.json", `{"hello": "world"}`)
 
 	var out strings.Builder
-	failed := runVetOnFiles(&out, []string{good, badChain, badPolicy, skipped})
+	failed := runVetOnFiles(&out, []string{good, badChain, badPolicy, skipped}, vetOpts{})
 	require.Equal(t, 2, failed)
 
 	report := out.String()
@@ -93,8 +93,9 @@ func TestUnit_Vet_ReportsPerFileAndCountsFailures(t *testing.T) {
 	require.Contains(t, report, "skip "+skipped)
 }
 
-// TestUnit_Vet_WarnsOnDeclaredButUnenforcedEnvelopeFields asserts an envelope declaring an unenforced field still verdicts "ok" but prints a WARN line.
-func TestUnit_Vet_WarnsOnDeclaredButUnenforcedEnvelopeFields(t *testing.T) {
+// TestUnit_Vet_FailsOnPauseAsk asserts an envelope setting the removed
+// pause_ask value fails vet outright, with the message naming the replacement.
+func TestUnit_Vet_FailsOnPauseAsk(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "hitl-policy-pause.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{
@@ -104,16 +105,13 @@ func TestUnit_Vet_WarnsOnDeclaredButUnenforcedEnvelopeFields(t *testing.T) {
 	}`), 0o600))
 
 	var out strings.Builder
-	failed := runVetOnFiles(&out, []string{path})
-	require.Equal(t, 0, failed, "a warning is not a defect and must not fail the run")
+	failed := runVetOnFiles(&out, []string{path}, vetOpts{})
+	require.Equal(t, 1, failed, "pause_ask is not implemented and must fail vet, not warn")
 
 	report := out.String()
-	require.Contains(t, report, "ok   "+path)
-	require.Contains(t, report, "WARN "+path)
-	require.Contains(t, report, "compute.onExhausted")
-	require.Contains(t, report, "NOT IMPLEMENTED")
+	require.Contains(t, report, "FAIL "+path)
 	// It must say what to rely on instead, not merely that the field is broken.
-	require.Contains(t, report, "finish_stuck")
+	require.Contains(t, report, "pause_ask is not implemented; use finish_stuck")
 }
 
 // TestUnit_Vet_IsSilentForEnvelopesThatClaimOnlyWhatIsEnforced asserts an envelope using no unenforced field prints no WARN line.
@@ -127,7 +125,7 @@ func TestUnit_Vet_IsSilentForEnvelopesThatClaimOnlyWhatIsEnforced(t *testing.T) 
 	}`), 0o600))
 
 	var out strings.Builder
-	require.Equal(t, 0, runVetOnFiles(&out, []string{path}))
+	require.Equal(t, 0, runVetOnFiles(&out, []string{path}, vetOpts{}))
 	require.NotContains(t, out.String(), "WARN")
 }
 

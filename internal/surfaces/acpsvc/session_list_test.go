@@ -9,27 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_ParseDBTime_SQLiteDriverFormat pins every time layout the sqlite
-// and postgres drivers hand back for a bound time.Time.
-func TestUnit_ParseDBTime_SQLiteDriverFormat(t *testing.T) {
-	for _, tc := range []struct {
-		in   string
-		want time.Time
-	}{
-		{"2026-07-15 21:43:19.742065508 +0000 UTC", time.Date(2026, 7, 15, 21, 43, 19, 742065508, time.UTC)},
-		{"2026-07-16 05:34:46.365453246 +0000 UTC", time.Date(2026, 7, 16, 5, 34, 46, 365453246, time.UTC)},
-		{"2026-07-16 07:00:00 +0200 CEST", time.Date(2026, 7, 16, 5, 0, 0, 0, time.UTC)},
-		{"2026-07-16T05:34:46Z", time.Date(2026, 7, 16, 5, 34, 46, 0, time.UTC)},
-		{"2026-07-16 05:34:46", time.Date(2026, 7, 16, 5, 34, 46, 0, time.UTC)},
-	} {
-		ts, ok := parseDBTimeString(tc.in)
-		require.True(t, ok, "parseDBTimeString(%q) must parse", tc.in)
-		assert.True(t, ts.UTC().Equal(tc.want), "parseDBTimeString(%q) = %v, want %v", tc.in, ts.UTC(), tc.want)
-	}
-	_, ok := parseDBTimeString("not a time")
-	assert.False(t, ok)
-}
-
 func listRow(id string, at string) sessionListRow {
 	r := sessionListRow{internalID: id, name: "acp-" + id}
 	if at != "" {

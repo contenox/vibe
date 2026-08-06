@@ -12,10 +12,10 @@ import (
 
 	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/libkvstore"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/backendservice"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
@@ -59,7 +59,9 @@ Examples:
   # Register a Google Vertex AI backend (run gcloud auth application-default login first):
   export GOOGLE_CLOUD_PROJECT=my-project-id
   contenox backend add vertex --type vertex-google \
-    --url "https://us-central1-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/us-central1"
+    --url "https://aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/global"
+  # or regional (data residency): --url "https://{REGION}-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/{REGION}"
+  # Model availability differs per endpoint — check with: contenox model list
 
   # Register a custom vLLM server:
   contenox backend add myvllm --type vllm --url http://gpu-host:8000
@@ -85,7 +87,7 @@ func defaultBaseURLForType(typ string) (string, error) {
 	case "gemini":
 		return "https://generativelanguage.googleapis.com", nil
 	case "vertex-google":
-		return "", fmt.Errorf("--url is required for %s backends\n  Include project and location, e.g.:\n  --url \"https://us-central1-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/us-central1\"", typ)
+		return "", fmt.Errorf("--url is required for %s backends\n  Include project and location — global endpoint:\n  --url \"https://aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/global\"\n  or regional (data residency):\n  --url \"https://{REGION}-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/{REGION}\"\n  Model availability differs per endpoint (contenox model list)", typ)
 	case "bedrock":
 		return "", fmt.Errorf("--url is required for bedrock backends (it carries the region)\n  e.g.: --url \"https://bedrock-runtime.us-east-1.amazonaws.com\"\n  Credentials come from the ambient AWS chain (env / profile / IAM role); no --api-key needed unless storing static keys.")
 	default:

@@ -19,7 +19,7 @@ import (
 	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/version"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // AgentMetaKey is the session/new (and session/list) `_meta` key a client sets
@@ -905,7 +905,7 @@ func (b *externalBridge) persistConfigOptions(ctx context.Context, opts []libacp
 func (b *externalBridge) RequestPermission(ctx context.Context, req libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error) {
 	t := b.transport()
 	if t == nil || t.conn == nil {
-		return libacp.RequestPermissionResponse{}, libacp.InternalError("acpsvc: no upstream connection to relay permission to")
+		return libacp.RequestPermissionResponse{}, libacp.InternalError("this tool call needs approval, but the editor connection that would show the card is gone")
 	}
 	req.SessionID = b.upstreamID
 	return t.conn.RequestPermission(ctx, req)
@@ -1181,7 +1181,7 @@ func (r storeMcpResolver) GetByName(ctx context.Context, name string) (*runtimet
 // spawns.
 func (t *Transport) resolveExternalAgent(ctx context.Context, name string) (*runtimetypes.Agent, *runtimetypes.ExternalACPConfig, error) {
 	if t.deps.DB == nil {
-		return nil, nil, libacp.InternalError("acpsvc: no database configured for external agents")
+		return nil, nil, libacp.InternalError("external agents are unavailable: this process has no database configured")
 	}
 	reg := agentregistryservice.New(t.deps.DB)
 	// ResolveForSpawn is the one shared disabled-agent check every spawn path
@@ -1195,7 +1195,7 @@ func (t *Transport) resolveExternalAgent(ctx context.Context, name string) (*run
 		if errors.Is(err, libdb.ErrNotFound) {
 			return nil, nil, libacp.NewErrorf(libacp.ErrInvalidParams, "unknown contenox.agent %q", name)
 		}
-		return nil, nil, libacp.InternalError(fmt.Sprintf("acpsvc: resolve agent %q: %v", name, err))
+		return nil, nil, libacp.InternalError(fmt.Sprintf("could not look up agent %q: %v", name, err))
 	}
 	// A chain-kind agent has no external_acp config to read — its config names
 	// a chain file, and the Manager builds the spawn from it — so asking for
@@ -1272,7 +1272,7 @@ func (t *Transport) resolveMcpAllowlist(ctx context.Context, cfg *runtimetypes.E
 	store := runtimetypes.New(t.deps.DB.WithoutTransaction())
 	servers, err := agenthost.ResolveForwardedMcpServers(ctx, storeMcpResolver{store: store}, cfg.McpServers)
 	if err != nil {
-		return nil, libacp.InternalError(fmt.Sprintf("acpsvc: resolve mcp allowlist for agent %q: %v", agentName, err))
+		return nil, libacp.InternalError(fmt.Sprintf("could not resolve the MCP servers agent %q may use: %v", agentName, err))
 	}
 	return servers, nil
 }
@@ -1296,7 +1296,7 @@ func (t *Transport) openInstanceSession(ctx context.Context, instanceID string, 
 		Terminal:   false,
 	})
 	if err != nil {
-		return "", libacp.InternalError(fmt.Sprintf("acpsvc: open session on agent %q instance: %v", agentName, err))
+		return "", libacp.InternalError(fmt.Sprintf("could not open a session on the running %q agent: %v", agentName, err))
 	}
 	bridge.setDownstreamID(downstreamID)
 	// Persist the kernel's captured surface so a session/load before the first
@@ -1333,10 +1333,10 @@ func (t *Transport) initExternalConn(ctx context.Context, conn *libacp.ClientSid
 		ClientInfo:         &libacp.Implementation{Name: "contenox", Version: version.Get()},
 	})
 	if err != nil {
-		return "", libacp.InternalError(fmt.Sprintf("acpsvc: initialize agent %q: %v", agentName, err))
+		return "", libacp.InternalError(fmt.Sprintf("agent %q failed its handshake: %v", agentName, err))
 	}
 	if init.ProtocolVersion != libacp.ProtocolVersion {
-		return "", libacp.InternalError(fmt.Sprintf("acpsvc: agent %q negotiated unsupported protocol version %d", agentName, init.ProtocolVersion))
+		return "", libacp.InternalError(fmt.Sprintf("agent %q speaks ACP protocol version %d, which this runtime does not support", agentName, init.ProtocolVersion))
 	}
 
 	forwarded, _ := filterMcpForCaps(mcpServers, init.AgentCapabilities.McpCapabilities)
@@ -1348,7 +1348,7 @@ func (t *Transport) initExternalConn(ctx context.Context, conn *libacp.ClientSid
 		McpServers: forwarded,
 	})
 	if err != nil {
-		return "", libacp.InternalError(fmt.Sprintf("acpsvc: session/new against agent %q: %v", agentName, err))
+		return "", libacp.InternalError(fmt.Sprintf("agent %q refused to open a session: %v", agentName, err))
 	}
 	// Capture the downstream's config options, session modes, and unstable
 	// model-picker state so the upstream session/new response carries them
@@ -1393,7 +1393,7 @@ func (t *Transport) bringUpExternal(ctx context.Context, upstreamID libacp.Sessi
 		// closes the TOCTOU window and saves a query.
 		instanceID, err := t.deps.Instances.StartResolved(ctx, agent, cwd)
 		if err != nil {
-			return nil, libacp.InternalError(fmt.Sprintf("acpsvc: start agent %q instance: %v", agentName, err))
+			return nil, libacp.InternalError(fmt.Sprintf("could not start agent %q: %v", agentName, err))
 		}
 		// Bind before the handshake: openInstanceSession persists the
 		// kernel-owned surface, readable only once the bridge knows its instance.
@@ -1408,7 +1408,7 @@ func (t *Transport) bringUpExternal(ctx context.Context, upstreamID libacp.Sessi
 		// requests. A fresh instance's journal is empty, so no suppression needed.
 		if _, err := t.deps.Instances.Attach(ctx, instanceID, downstreamID, bridge); err != nil {
 			_ = t.deps.Instances.Stop(instanceID)
-			return nil, libacp.InternalError(fmt.Sprintf("acpsvc: attach to agent %q instance: %v", agentName, err))
+			return nil, libacp.InternalError(fmt.Sprintf("could not attach to the running %q agent: %v", agentName, err))
 		}
 		return &externalAttach{instanceID: instanceID, downstreamID: downstreamID, bridge: bridge}, nil
 	}
@@ -1435,7 +1435,7 @@ func (t *Transport) bringUpExternal(ctx context.Context, upstreamID libacp.Sessi
 	host := &agenthost.ExternalACPAgent{Config: spawnCfg, KillGrace: externalKillGrace}
 	handle, err := host.Connect(t.connCtx, bridge)
 	if err != nil {
-		return nil, libacp.InternalError(fmt.Sprintf("acpsvc: spawn agent %q: %v", agentName, err))
+		return nil, libacp.InternalError(fmt.Sprintf("could not spawn agent %q: %v", agentName, err))
 	}
 	downstreamID, err := t.initExternalConn(ctx, handle.Conn, bridge, cfg, cwd, agentName, t.deps.ShellSessions != nil)
 	if err != nil {

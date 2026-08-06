@@ -27,7 +27,7 @@ func TestUnit_Discover_SurvivesControlPlaneDeny(t *testing.T) {
 	}
 	data, err := json.Marshal(chain)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(contenoxDir, "agent-cp-regression.json"), data, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(contenoxDir, "chain-agent-cp-regression.json"), data, 0o600))
 
 	require.NoError(t, vfs.SetControlPlaneDenied(contenoxDir))
 	t.Cleanup(func() { require.NoError(t, vfs.SetControlPlaneDenied()) })

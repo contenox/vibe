@@ -14,14 +14,15 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/ollamatokenizer"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/searchtool"
 	"github.com/contenox/contenox/internal/services/workspaceindex"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -134,7 +135,7 @@ func TestUnit_LocalToolset_RegistersWorkspaceSearchAlwaysOn(t *testing.T) {
 	t.Cleanup(gt.Shutdown)
 
 	// Registered with the shell OFF, like gointel and git: it is a read.
-	tools := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, libtracker.NoopTracker{}, goIndex, gt)
+	tools := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, libtracker.NoopTracker{}, goIndex, gt, missionservice.New(nil), nil)
 	repo, ok := tools[searchtool.ToolsProviderName]
 	require.True(t, ok, "workspace_search is a read surface and must always be registered")
 

@@ -8,11 +8,11 @@ import (
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -88,40 +88,22 @@ func TestUnit_Compute_TokenBudgetExceeded(t *testing.T) {
 	require.True(t, tokenBudgetExceeded(101, hitlservice.ComputeBounds{MaxTokens: 100}))
 }
 
-// TestUnit_Compute_ReasonsNameThePauseAskSubstitution: pause_ask gets
-// finish_stuck, and the durable reason says so.
-func TestUnit_Compute_ReasonsNameThePauseAskSubstitution(t *testing.T) {
-	t.Parallel()
-	pauseAsk := hitlservice.ComputeBounds{
-		MaxTurns:     1,
-		MaxToolCalls: 2,
-		MaxTokens:    3,
-		OnExhausted:  hitlservice.OnExhaustedPauseAsk,
-	}
-	for name, reason := range map[string]string{
-		"turns":  turnsExhaustedReason(pauseAsk),
-		"tools":  toolCallsExhaustedReason(pauseAsk),
-		"tokens": tokensExhaustedReason(pauseAsk, 99),
-	} {
-		require.Contains(t, reason, computeBoundLead, name)
-		require.Contains(t, reason, "compute.onExhausted", name)
-		require.Contains(t, reason, "NOT IMPLEMENTED", name)
-	}
-}
-
-// TestUnit_Compute_ReasonsStaySilentWhenOnExhaustedIsHonored: an envelope
-// honored as written gets nothing appended.
-func TestUnit_Compute_ReasonsStaySilentWhenOnExhaustedIsHonored(t *testing.T) {
+// TestUnit_Compute_ReasonsNameTheBound: every exhaustion reason carries the
+// stable lead and names the bound that was crossed. pause_ask no longer
+// exists (rejected at policy validation), so no reason ever appends a
+// deferral note.
+func TestUnit_Compute_ReasonsNameTheBound(t *testing.T) {
 	t.Parallel()
 	for _, b := range []hitlservice.ComputeBounds{
-		{MaxTurns: 1},
-		{MaxTurns: 1, OnExhausted: hitlservice.OnExhaustedFinishStuck},
+		{MaxTurns: 1, MaxToolCalls: 2, MaxTokens: 3},
+		{MaxTurns: 1, MaxToolCalls: 2, MaxTokens: 3, OnExhausted: hitlservice.OnExhaustedFinishStuck},
 	} {
-		require.NotContains(t, turnsExhaustedReason(b), "NOT IMPLEMENTED")
-		require.NotContains(t, toolCallsExhaustedReason(b), "NOT IMPLEMENTED")
-		require.NotContains(t, tokensExhaustedReason(b, 1), "NOT IMPLEMENTED")
-		// The bound itself is still named, exactly as before.
+		require.Contains(t, turnsExhaustedReason(b), computeBoundLead)
 		require.Contains(t, turnsExhaustedReason(b), "maxTurns=1")
+		require.Contains(t, toolCallsExhaustedReason(b), "maxToolCalls=2")
+		require.Contains(t, tokensExhaustedReason(b, 99), "maxTokens=3")
+		require.Contains(t, tokensExhaustedReason(b, 99), "99")
+		require.NotContains(t, turnsExhaustedReason(b), "NOT IMPLEMENTED")
 	}
 }
 

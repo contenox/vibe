@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/services/shellsession"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 

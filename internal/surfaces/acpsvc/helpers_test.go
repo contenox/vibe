@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // absTestPath returns p as a genuinely OS-absolute path: a bare leading

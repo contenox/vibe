@@ -15,7 +15,6 @@ import (
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	libbus "github.com/contenox/contenox/internal/libbus"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/chainagents"
 	"github.com/contenox/contenox/internal/services/fleetservice"
@@ -23,7 +22,8 @@ import (
 	"github.com/contenox/contenox/internal/services/operatorinbox"
 	"github.com/contenox/contenox/internal/services/reportrouter"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -143,7 +143,7 @@ func TestFleetE2E_MissionRoundTrip(t *testing.T) {
 	mrtWriteChainAgentFixture(t, contenoxDir)
 	res, err := chainagents.Discover(ctx, agentRegistry, contenoxDir)
 	require.NoError(t, err)
-	require.Contains(t, res.Created, "agent-fleet-fixture", "the agent-*.json file must declare the chain agent")
+	require.Contains(t, res.Created, "agent-fleet-fixture", "the chain-agent-*.json file must declare the chain agent")
 
 	// The reporter is the fired unit: a `contenox acp --auto` subprocess (no
 	// HITL, so mission_report runs unattended), sharing this HOME/DB.
@@ -431,7 +431,9 @@ func mrtWriteChainAgentFixture(t *testing.T, contenoxDir string) {
 	}
 	data, err := json.Marshal(chain)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(contenoxDir, "agent-fleet-fixture.json"), data, 0o600))
+	// chainagents.AgentChainFilePrefix: discovery keys on the FILE prefix while
+	// the registry name is the chain id verbatim, so the id stays as-is.
+	require.NoError(t, os.WriteFile(filepath.Join(contenoxDir, "chain-agent-fleet-fixture.json"), data, 0o600))
 }
 
 // mrtFindReporterSubmission returns the reporter mission whose parent is the

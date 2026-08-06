@@ -2,11 +2,16 @@ package contenoxcli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
+	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // missionSupervision adapts missionservice and hitlservice so a session that
@@ -21,6 +26,12 @@ import (
 type missionSupervision struct {
 	missions missionservice.Service
 	hitl     hitlservice.Service
+	// db backs the ask lookup AnswerAsAgent's bounds check needs; nil leaves
+	// mission_answer refusing every write rather than answering unbounded.
+	db libdb.DBManager
+	// tracker carries the operator-facing reason for a refusal — the ONLY
+	// place it is stated, since the model gets the plain denial.
+	tracker libtracker.ActivityTracker
 }
 
 var (
@@ -83,6 +94,47 @@ func (s missionSupervision) PendingAsks(ctx context.Context, missionID string) (
 	return out, nil
 }
 
+// AnswerAsAgent answers one of this session's units, enforcing the mission
+// envelope's agent-answer bounds first. The bound has to hold HERE, not only
+// where the question was offered: a session agent reaches a live askId from
+// mission_list or a delivered ask and can call mission_answer unprompted, so
+// the offer-side check it never went through would grant nothing. Runs the
+// same hitlservice.AnswerAsAgentWithinBounds as `approvals respond --as-agent`
+// and the oracle driver — one statement that counts and writes — so a mix of
+// the three cannot exceed the envelope's total even concurrently.
 func (s missionSupervision) AnswerAsAgent(ctx context.Context, askID, text string) error {
-	return s.hitl.AnswerAsAgent(ctx, askID, text)
+	if s.db == nil {
+		return s.refuse(ctx, askID, "mission supervision has no store wired in this process, so the envelope's agent-answer bound cannot be read")
+	}
+	store := runtimetypes.New(s.db.WithoutTransaction())
+	row, err := store.GetHITLApproval(ctx, askID)
+	if err != nil {
+		if errors.Is(err, libdb.ErrNotFound) {
+			return s.refuse(ctx, askID, fmt.Sprintf("ask %s no longer exists", askID))
+		}
+		return fmt.Errorf("read ask %s: %w", askID, err)
+	}
+	if !hitlservice.IsAttentionAsk(row) {
+		return s.refuse(ctx, askID, fmt.Sprintf("ask %s is a permission request, not a question", askID))
+	}
+	if err := hitlservice.AnswerAsAgentWithinBounds(ctx, s.missions, s.hitl, row, "", text); err != nil {
+		if hitlservice.IsAgentAnswerRefusal(err) {
+			return s.refuse(ctx, askID, err.Error())
+		}
+		return err
+	}
+	return nil
+}
+
+// refuse states reason on the operator's trace and returns the typed refusal
+// missiontools renders as the plain denied-per-policy result, reason discarded.
+func (s missionSupervision) refuse(ctx context.Context, askID, reason string) error {
+	tracker := s.tracker
+	if tracker == nil {
+		tracker = libtracker.NoopTracker{}
+	}
+	_, reportChange, end := tracker.Start(ctx, "refuse", missiontools.ToolNameAnswer, "ask_id", askID)
+	reportChange("refused", reason)
+	end()
+	return &missiontools.AnswerRefusedError{Reason: reason}
 }

@@ -9,7 +9,7 @@ These chains show the handlers and transition patterns from the [specification](
 
 ## 1. The Default Chain (Tool Use)
 
-This is the chain used for **interactive chat** — both `contenox chat "hello"` and a bare `contenox "hello"` (a bare prompt is session-backed chat, injected as `chat`) resolve `default-chain.json` when no `--chain` is given. It defines a loop between the model and the tools. Only `contenox run` uses `default-run-chain.json` — see the [CLI reference](/docs/reference/contenox-cli). The example below is simplified for clarity; the `default-chain.json` that ships with `contenox init` (`chain-contenox.json`) is a fuller ~10-task chain with a router, a coding loop, and a recovery loop.
+This is the chain used for **interactive chat** — both `contenox chat "hello"` and a bare `contenox "hello"` (a bare prompt is session-backed chat, injected as `chat`) resolve `chain-agent-contenox.json` when no `--chain` is given. It defines a loop between the model and the tools. Only `contenox run` uses `chain-agent-run.json` — see the [CLI reference](/docs/reference/contenox-cli). The example below is simplified for clarity; the `chain-agent-contenox.json` that ships with `contenox init` is a fuller ~10-task chain with a router, a coding loop, and a recovery loop.
 
 ```jsonc
 {

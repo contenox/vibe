@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/google/uuid"
 )
@@ -79,6 +79,12 @@ type HITLWrapper struct {
 	responder approvalResponder
 	// parkWindow is ApprovalParkWindow unless overridden via SetParkWindow.
 	parkWindow time.Duration
+	// shellKind is the shell local_shell will actually spawn on this host,
+	// declared to the policy on every evaluation (see trustedShellKind).
+	// hitlservice cannot establish it on its own — it would have to infer the
+	// shell from GOOS and from a model-supplied "shell_kind" argument — and
+	// this package is the one that spawns it, so the declaration is made here.
+	shellKind hitlservice.ShellKind
 }
 
 // approvalResponder is the subset of hitlservice.Service that askDurable
@@ -116,6 +122,30 @@ func NewHITLWrapper(inner taskengine.ToolsRepo, ask AskApproval, policy hitlserv
 		recorder:   recorder,
 		responder:  responder,
 		parkWindow: ApprovalParkWindow,
+		shellKind:  trustedShellKind(DetectPlatformShell()),
+	}
+}
+
+// SetShell declares the platform shell this wrapper's local_shell calls will
+// be interpreted by, overriding the detected default. Call before the wrapper
+// serves requests — it is not synchronized against in-flight Execs.
+func (h *HITLWrapper) SetShell(shell PlatformShell) {
+	h.shellKind = trustedShellKind(shell)
+}
+
+// trustedShellKind maps the detected platform shell onto the kind the policy
+// reasons about. An unrecognized kind maps to ShellKindUnknown, which
+// disables structural shell reading rather than guessing at the grammar.
+func trustedShellKind(shell PlatformShell) hitlservice.ShellKind {
+	switch shell.WithDefaults().Kind {
+	case ShellKindSh:
+		return hitlservice.ShellKindPOSIX
+	case ShellKindPowerShell:
+		return hitlservice.ShellKindPowerShell
+	case ShellKindCmd:
+		return hitlservice.ShellKindCmd
+	default:
+		return hitlservice.ShellKindUnknown
 	}
 }
 
@@ -130,6 +160,34 @@ func (h *HITLWrapper) SetParkWindow(d time.Duration) {
 }
 
 const DenyMessage = "User denied the operation. Please ask for clarification or try a different, less destructive approach."
+
+// policyEvalArgs is the argument view the policy evaluates: the call's
+// dynamic input overlaid with the chain-authored static tools.Args, static
+// winning — the precedence the executing tool applies (localexec parseArgs).
+// A plain-string input is the call's stdin and is exposed as "stdin", so
+// content conditions read the full payload. Invariant: a policy judges the
+// call as it will execute — without the overlay a tools-handler task's
+// static command is invisible and a deny-by-default envelope denies every
+// deterministic chain step.
+func policyEvalArgs(input any, tools *taskengine.ToolsCall) map[string]any {
+	args := make(map[string]any)
+	switch v := input.(type) {
+	case map[string]any:
+		for k, val := range v {
+			args[k] = val
+		}
+	case string:
+		if v != "" {
+			args["stdin"] = v
+		}
+	}
+	if tools != nil {
+		for k, v := range tools.Args {
+			args[k] = v
+		}
+	}
+	return args
+}
 
 // askOutcome is the ask() callback's result, carried over a channel between
 // askDurable's launching goroutine and whichever code eventually reads it —
@@ -159,11 +217,13 @@ func (h *HITLWrapper) Exec(
 		reportChange("input", input)
 	}
 
-	args, ok := input.(map[string]any)
-	if !ok {
-		reportErr(fmt.Errorf("hitl: non-map input %T; When-conditions will not be evaluated", input))
-		args = make(map[string]any)
-	}
+	args := policyEvalArgs(input, tools)
+
+	// Declare the shell that will interpret this call, so the policy's
+	// structural reader runs on a positively established grammar instead of
+	// inferring one from GOOS — and so a model-supplied "shell_kind" argument
+	// cannot decide whether the analyzer runs at all.
+	ctx = hitlservice.WithShellKind(ctx, string(h.shellKind))
 
 	result, err := h.policy.Evaluate(ctx, tools.Name, toolName, args)
 	if err != nil {
@@ -197,7 +257,28 @@ func (h *HITLWrapper) Exec(
 				reportChange("denied", DenyMessage)
 				return DenyMessage, taskengine.DataTypeString, nil
 			}
-			return h.inner.Exec(ctx, startTime, input, debug, tools)
+			// A retry of a partially completed resume must not run the world
+			// twice: a prior resume's recorded result replays verbatim, and a
+			// fresh execution records its result before the chain continues.
+			if rec, ok := taskengine.RecordedGateResultFromContext(ctx, toolCallID); ok {
+				h.hitlLog(ctx, "tool result replayed from gate record", "tool", toolName, "approval_id", toolCallID)
+				return rec.Value, rec.Type, nil
+			}
+			out, dt, execErr := h.inner.Exec(ctx, startTime, input, debug, tools)
+			if execErr != nil {
+				return out, dt, execErr
+			}
+			if record := taskengine.GateResultRecorderFromContext(ctx); record != nil {
+				if recErr := record(ctx, toolCallID, taskengine.GateResult{Value: out, Type: dt}); recErr != nil {
+					// ErrGateRecordFailed makes this a hard task failure:
+					// execute_tool_calls must not soften it into a "tool
+					// failed" result the model would re-issue.
+					recErr = fmt.Errorf("hitl: gated call %s: %w: %w", toolCallID, taskengine.ErrGateRecordFailed, recErr)
+					reportErr(recErr)
+					return nil, taskengine.DataTypeAny, recErr
+				}
+			}
+			return out, dt, nil
 		}
 
 		oldContent, newContent, diffErr := h.buildDiff(ctx, tools, toolName, args)

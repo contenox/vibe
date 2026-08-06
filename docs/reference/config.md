@@ -79,7 +79,7 @@ Backends are **global** — they live in `~/.contenox/local.db` and are visible 
 ```bash
 contenox config set default-provider ollama
 contenox config set default-model    qwen3:8b
-contenox config set default-alt-model gemini-2.5-flash
+contenox config set default-alt-model gemini-3.6-flash
 contenox config set default-alt-provider gemini
 contenox config set default-autocomplete-model qwen2.5-coder:7b
 contenox config set default-autocomplete-provider ollama
@@ -87,7 +87,7 @@ contenox config set default-embed-model nomic-embed-text
 contenox config set default-embed-provider ollama
 contenox config set default-max-tokens 8192
 contenox config set default-think high
-contenox config set default-chain    .contenox/default-chain.json
+contenox config set default-chain    .contenox/chain-agent-contenox.json
 contenox config set hitl-policy-name hitl-policy-strict.json
 
 contenox config list   # review current settings and their scope
@@ -107,6 +107,7 @@ contenox config list   # review current settings and their scope
 | `default-think` | global | Default reasoning level for supported models (`auto`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
 | `telemetry-enabled` | global | Enable local telemetry logs (`true` / `false`) |
 | `update-check` | global | Enable automatic update checks (`true` / `false`) |
+| `opt-in-beta` | global | Enable beta features (`true` / `false`; default off): the `goja` and `shell_session` toolsets and the agent roster (`contenox agent`, user-authored `chain-agent-*` chain discovery). Off means the features are absent, not disabled. The `CONTENOX_OPT_IN_BETA` environment variable (`1`/`true` on, any other value off) overrides this key for a single invocation |
 | `default-mission-agent` | global | Declared agent the ACP `/mission <intent>` slash command falls back to when none is named. `contenox mission fire` always takes the agent as a required argument, so this key does not affect it |
 | `default-mission-policy` | global | Envelope (HITL policy) both `/mission` and `contenox mission fire --policy` fall back to when none is named |
 | `fleet-max-parallel` | global | Max concurrently open mission units across the fleet (integer; `0` = unlimited; default 8) |
@@ -115,7 +116,7 @@ contenox config list   # review current settings and their scope
 
 `contenox config list` shows each key's current value **and its scope** (`global` / `workspace`) so you can see whether a setting is inherited or overridden locally.
 
-The `default-*` model settings can also be overridden per process — without persisting anything — via the `CONTENOX_DEFAULT_*` environment variables; see the [environment variables table](/docs/reference/contenox-cli/#environment-variables) in the CLI reference.
+The `default-*` model settings can also be overridden per process — without persisting anything — via the `CONTENOX_DEFAULT_*` environment variables, and `opt-in-beta` via `CONTENOX_OPT_IN_BETA`; see the [environment variables table](/docs/reference/contenox-cli/#environment-variables) in the CLI reference.
 
 ## Manage backends
 

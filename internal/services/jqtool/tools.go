@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/getkin/kin-openapi/openapi3"
 )
 
 // tools implements taskengine.ToolsRepo: a constructor-supplied allowed
@@ -127,7 +126,7 @@ func (h *tools) resolveInput(ctx context.Context, args map[string]any, format st
 
 	case path == "" && !hasInput:
 		return nil, recoverablef(
-			"jq: an input source is required — pass `path` (a file in the workspace, e.g. \"chain-acp.json\") " +
+			"jq: an input source is required — pass `path` (a file in the workspace, e.g. \"chain-agent-acp.json\") " +
 				"or `input` (the document itself, as a JSON/YAML string)")
 
 	case path != "":
@@ -159,12 +158,6 @@ func normalizeFormat(format string) (string, error) {
 
 func (h *tools) Supports(context.Context) ([]string, error) {
 	return append([]string{ToolsProviderName}, toolNames...), nil
-}
-
-// GetSchemasForSupportedTools returns no OpenAPI documents: jq is a local
-// toolset with a hand-written function schema (GetToolsForToolsByName).
-func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
-	return map[string]*openapi3.T{}, nil
 }
 
 // ---------------------------------------------------------------------------

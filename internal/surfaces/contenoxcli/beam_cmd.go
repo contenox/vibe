@@ -17,7 +17,6 @@ import (
 	"syscall"
 
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -35,19 +34,20 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/style"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/term"
 	"github.com/contenox/contenox/internal/surfaces/fleetboot"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 	xterm "golang.org/x/term"
 )
 
 const (
 	// beamChainFile / beamChainEnv are beam's own defaults, seeded to
-	// default-beam-chain.json and overridable independently of `contenox
+	// chain-agent-beam.json and overridable independently of `contenox
 	// acp`'s CONTENOX_ACP_CHAIN_PATH — the same per-profile pattern
 	// acpProfileACP/acpProfileACPX use (acp_cmd.go). beam still drives the
 	// same in-process ACP Transport an editor does; only the default chain
 	// content and its override var are its own.
-	beamChainFile = defaultBeamChainFilename
+	beamChainFile = chainAgentBeamFilename
 	beamChainEnv  = "CONTENOX_BEAM_CHAIN_PATH"
 
 	// beamHITLPolicy is beam's own default HITL envelope — an attended
@@ -120,9 +120,6 @@ func runBeam(cmd *cobra.Command, args []string) error {
 	if err := seedBeamChainIfMissing(contenoxDir); err != nil {
 		return fmt.Errorf("seed beam chain preset: %w", err)
 	}
-	// A stale policy falls through unnoticed inside the TUI, so it's named
-	// here and printed later beside the "logs:" line.
-	policyNotice := stalePolicyNotice(beamHITLPolicy, policyDirs(contenoxDir))
 
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -158,6 +155,10 @@ func runBeam(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// A stale policy falls through unnoticed inside the TUI, so it's named
+	// here and printed later beside the "logs:" line. Beta-gated toolsets are
+	// skipped: an invisible toolset cannot make an envelope stale.
+	policyNotice := stalePolicyNotice(beamHITLPolicy, policyDirs(contenoxDir), betaGatedToolsets(opts.EffectiveOptInBeta))
 	if beamTracker == nil {
 		beamTracker = libtracker.NoopTracker{}
 	}
@@ -287,14 +288,11 @@ func runBeam(cmd *cobra.Command, args []string) error {
 		// sibling instance over the same store: durable asks are shared, but
 		// an in-memory parked waiter is not, so a mission's question is
 		// answered through the durable queue.
-		missions := missionservice.New(db, missionservice.WithEventPublisher(engine.Bus))
-		beamHITL := hitlservice.NewWithDefaultPolicy(
-			hitlPolicySource(contenoxDir),
-			runtimetypes.LocalTenantID,
-			runtimetypes.New(db.WithoutTransaction()),
-			beamTracker,
-			beamHITLPolicy,
-		)
+		// The engine exists here, so the in-process trigger hook wires
+		// directly (nil when beta is off or no triggers load).
+		missions := missionservice.New(db, missionservice.WithEventPublisher(missionEventPublisher(ctx, db, engine.Bus, workspaceID, beamTracker,
+			buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, opts, errW))))
+		beamHITL := newHITLService(contenoxDir, runtimetypes.New(db.WithoutTransaction()), beamTracker, beamHITLPolicy)
 		fleet, agents, stopFleet, buildErr := fleetboot.BuildInProcessFleet(ctx, fleetboot.Deps{
 			DB:           db,
 			Bus:          engine.Bus,
@@ -306,8 +304,11 @@ func runBeam(cmd *cobra.Command, args []string) error {
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
 				// engine.Tracker, not the Noop this fleet is built with: a
 				// discovery pass is what `--trace` exists to see.
-				discoverChainAgents(dctx, agents, contenoxDir, engine.Tracker)
+				discoverChainAgents(dctx, agents, contenoxDir, engine.Tracker, opts.EffectiveOptInBeta)
 			},
+			// The workspace this process's mission publisher stamps; a
+			// dispatched unit's own publisher must stamp the same one.
+			WorkspaceID: workspaceID,
 		})
 		if buildErr != nil {
 			return buildErr
@@ -339,7 +340,12 @@ func runBeam(cmd *cobra.Command, args []string) error {
 		HITLDefaultPolicyName: beamHITLPolicy,
 		Fleet:                 missionFleet,
 		Agents:                missionAgents,
-		ClientInfo:            &libacp.Implementation{Name: "beam", Version: CLIVersion()},
+		// /mission --policy offers what the loader would actually read, so an
+		// operator-authored envelope is selectable and a typo is refused
+		// before a unit is spawned under a fallback nobody chose.
+		MissionEnvelopes: newMissionEnvelopes(contenoxDir),
+		OptInBeta:        opts.EffectiveOptInBeta,
+		ClientInfo:       &libacp.Implementation{Name: "beam", Version: CLIVersion()},
 	})
 	if err != nil {
 		return fmt.Errorf("open engine bridge: %w", err)

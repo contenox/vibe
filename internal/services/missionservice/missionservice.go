@@ -9,14 +9,15 @@ package missionservice
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/contenox/contenox/internal/errdefs"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/google/uuid"
 )
 
@@ -146,7 +147,9 @@ const missionReportKVPrefix = "fleet:mission_report:"
 // stays listed while open.
 //
 // LastHeartbeat/LastError are liveness facts, not status: a mission stays
-// StatusOpen for its whole run: see Heartbeat. ParentSessionID is the
+// StatusOpen for its whole run: see Heartbeat. Liveness bears on status in
+// exactly one place — SweepAbandoned reclaims a mission whose heartbeat went
+// silent past StaleHeartbeatAfter (see sweep.go). ParentSessionID is the
 // supervision edge — the upstream session that fired this mission, empty
 // when an operator fired it directly; this layer only records the edge,
 // reportrouter consumes it. Plan/PlanRevisions default to their zero value
@@ -298,8 +301,9 @@ type Service interface {
 	Bind(ctx context.Context, id string, sessionID, instanceID string) (*Mission, error)
 
 	// Heartbeat stamps LastHeartbeat to now and sets LastError to lastErr
-	// (empty clears it), then persists. An unknown mission id surfaces as
-	// libdb.ErrNotFound.
+	// (empty clears it), then persists. A mission already at rest is returned
+	// untouched: liveness never moves a terminal mission back into motion. An
+	// unknown mission id surfaces as libdb.ErrNotFound.
 	Heartbeat(ctx context.Context, id string, lastErr string) (*Mission, error)
 
 	// Finish moves mission id into a terminal state, records reason as
@@ -310,6 +314,16 @@ type Service interface {
 	// mission is errdefs.ErrConflict. An unknown mission id surfaces as
 	// libdb.ErrNotFound.
 	Finish(ctx context.Context, id string, status Status, reason string) (*Mission, error)
+
+	// SweepAbandoned reclaims every open mission whose heartbeat has been
+	// silent longer than that mission's own bound — StaleHeartbeatAfter,
+	// widened to the window of the longest ask still parked on it — finishing
+	// it as StatusAbandoned with a StatusReason led by AbandonedBySweepReason
+	// and a blocker report naming the silence. Returns how many it reclaimed.
+	// Idempotent: a reclaimed mission is terminal and never a candidate again,
+	// and a mission finishing normally under the race keeps its own outcome.
+	// See sweep.go.
+	SweepAbandoned(ctx context.Context) (int, error)
 
 	// SetPlan replaces mission id's plan with a full snapshot, bumps the
 	// revision counter, and publishes a PlanRevisedEvent. Entries are
@@ -392,14 +406,26 @@ func (s *service) Create(ctx context.Context, m *Mission) error {
 }
 
 func (s *service) Get(ctx context.Context, id string) (*Mission, error) {
+	m, _, err := s.getWithSnapshot(ctx, id)
+	return m, err
+}
+
+// getWithSnapshot is Get plus the exact stored bytes it decoded, the snapshot
+// putIfUnchanged carries as its CAS predicate. Every read-decide-write path
+// that must not clobber a concurrent write goes through this pair.
+func (s *service) getWithSnapshot(ctx context.Context, id string) (*Mission, json.RawMessage, error) {
 	if id == "" {
-		return nil, fmt.Errorf("id is required")
+		return nil, nil, fmt.Errorf("id is required")
+	}
+	raw, err := s.store().GetKVRaw(ctx, missionKVPrefix+id)
+	if err != nil {
+		return nil, nil, err
 	}
 	var m Mission
-	if err := s.store().GetKV(ctx, missionKVPrefix+id, &m); err != nil {
-		return nil, err
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, nil, fmt.Errorf("mission %q: %w", id, err)
 	}
-	return &m, nil
+	return &m, raw, nil
 }
 
 // scanPageSize bounds one page of the mission prefix scan GetByInstance
@@ -505,66 +531,93 @@ func (s *service) Delete(ctx context.Context, id string) error {
 // the same id is an idempotent no-op, and setting a different id over one
 // already bound is a conflict — a caller wanting a different unit dispatches
 // a new mission instead. An unknown mission id surfaces as libdb.ErrNotFound.
+//
+// Written under the snapshot the conflict check judged (see putIfUnchanged):
+// a bind carries the whole record, so a blind write would restore the status
+// its read saw and resurrect a mission a racing Finish had just brought to
+// rest.
 func (s *service) Bind(ctx context.Context, id string, sessionID, instanceID string) (*Mission, error) {
 	if sessionID == "" && instanceID == "" {
 		return nil, fmt.Errorf("bind requires a sessionId or instanceId")
 	}
-	m, err := s.Get(ctx, id)
-	if err != nil {
-		return nil, err
-	}
+	for attempt := 0; attempt < casAttempts; attempt++ {
+		m, snapshot, err := s.getWithSnapshot(ctx, id)
+		if err != nil {
+			return nil, err
+		}
 
-	changed := false
-	if sessionID != "" {
-		switch m.SessionID {
-		case "":
-			m.SessionID = sessionID
-			changed = true
-		case sessionID:
-			// Idempotent re-bind of the id already carried: no-op.
-		default:
-			return nil, errdefs.Conflict(fmt.Sprintf("mission %q is already bound to session %q", id, m.SessionID))
+		changed := false
+		if sessionID != "" {
+			switch m.SessionID {
+			case "":
+				m.SessionID = sessionID
+				changed = true
+			case sessionID:
+				// Idempotent re-bind of the id already carried: no-op.
+			default:
+				return nil, errdefs.Conflict(fmt.Sprintf("mission %q is already bound to session %q", id, m.SessionID))
+			}
 		}
-	}
-	if instanceID != "" {
-		switch m.InstanceID {
-		case "":
-			m.InstanceID = instanceID
-			changed = true
-		case instanceID:
-			// Idempotent re-bind of the id already carried: no-op.
-		default:
-			return nil, errdefs.Conflict(fmt.Sprintf("mission %q is already bound to instance %q", id, m.InstanceID))
+		if instanceID != "" {
+			switch m.InstanceID {
+			case "":
+				m.InstanceID = instanceID
+				changed = true
+			case instanceID:
+				// Idempotent re-bind of the id already carried: no-op.
+			default:
+				return nil, errdefs.Conflict(fmt.Sprintf("mission %q is already bound to instance %q", id, m.InstanceID))
+			}
 		}
-	}
-	if !changed {
+		if !changed {
+			return m, nil
+		}
+
+		m.UpdatedAt = time.Now().UTC()
+		err = s.putIfUnchanged(ctx, m, snapshot)
+		if errors.Is(err, libdb.ErrNotFound) {
+			continue // the row moved under us; re-read and re-judge the conflict check.
+		}
+		if err != nil {
+			return nil, err
+		}
 		return m, nil
 	}
-
-	m.UpdatedAt = time.Now().UTC()
-	if err := s.put(ctx, m, true); err != nil {
-		return nil, err
-	}
-	return m, nil
+	return nil, errdefs.Conflict(fmt.Sprintf("mission %q is being written concurrently; bind gave up after %d attempts", id, casAttempts))
 }
 
 // Heartbeat stamps LastHeartbeat to now, sets LastError to lastErr (empty
 // clears it), and persists — an explicit, agent-reported liveness fact since
-// nobody is watching an unattended mission's transcript. An unknown mission
-// id surfaces as libdb.ErrNotFound.
+// nobody is watching an unattended mission's transcript. Written under the
+// snapshot it read (see putIfUnchanged): a heartbeat racing a terminal
+// decision must never resurrect a mission already at rest, least of all one
+// SweepAbandoned just reclaimed. A terminal mission is returned untouched. An
+// unknown mission id surfaces as libdb.ErrNotFound.
 func (s *service) Heartbeat(ctx context.Context, id string, lastErr string) (*Mission, error) {
-	m, err := s.Get(ctx, id)
-	if err != nil {
-		return nil, err
+	for attempt := 0; attempt < casAttempts; attempt++ {
+		m, snapshot, err := s.getWithSnapshot(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if isTerminalStatus(m.Status) {
+			// Liveness for a finished mission is meaningless, and writing it
+			// would put an at-rest row back in motion.
+			return m, nil
+		}
+		now := time.Now().UTC()
+		m.LastHeartbeat = &now
+		m.LastError = lastErr
+		m.UpdatedAt = now
+		err = s.putIfUnchanged(ctx, m, snapshot)
+		if errors.Is(err, libdb.ErrNotFound) {
+			continue // the row moved under us; re-read and re-judge.
+		}
+		if err != nil {
+			return nil, err
+		}
+		return m, nil
 	}
-	now := time.Now().UTC()
-	m.LastHeartbeat = &now
-	m.LastError = lastErr
-	m.UpdatedAt = now
-	if err := s.put(ctx, m, true); err != nil {
-		return nil, err
-	}
-	return m, nil
+	return nil, errdefs.Conflict(fmt.Sprintf("mission %q is being written concurrently; heartbeat gave up after %d attempts", id, casAttempts))
 }
 
 // put marshals m and writes it to the KV store. When mustExist is true it
@@ -580,6 +633,24 @@ func (s *service) put(ctx context.Context, m *Mission, mustExist bool) error {
 	}
 	return s.store().SetKV(ctx, missionKVPrefix+m.ID, raw)
 }
+
+// putIfUnchanged writes m only while the stored row is still byte-for-byte
+// snapshot — the status m was judged against carried into the write itself,
+// so a status decision taken from a stale read can never land. Returns
+// libdb.ErrNotFound when the row moved on (or vanished); callers re-read and
+// re-judge rather than retrying blind.
+func (s *service) putIfUnchanged(ctx context.Context, m *Mission, snapshot json.RawMessage) error {
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal mission: %w", err)
+	}
+	return s.store().UpdateKVIfUnchanged(ctx, missionKVPrefix+m.ID, snapshot, raw)
+}
+
+// casAttempts bounds how often a CAS write re-reads and re-judges before
+// giving up. Contention on one mission row is a racing heartbeat or a racing
+// terminal decision, not a queue: a handful of attempts always settles it.
+const casAttempts = 5
 
 // AddReport validates report, assigns an id and CreatedAt when absent, binds
 // it to missionID (overriding whatever MissionID the caller supplied), and
@@ -682,31 +753,42 @@ func (s *service) ListReports(ctx context.Context, missionID string, limit int) 
 // hard-fact path a finished mission must not be silently re-terminalized
 // through. A retried Finish naming the same terminal status is a no-op; a
 // different terminal status over an already-finished mission is a conflict.
+// The transition is written under the snapshot the guard judged (see
+// putIfUnchanged), so a Finish and a racing terminal write — SweepAbandoned
+// reclaiming the same mission — cannot both land: the loser re-reads and gets
+// the no-op or the conflict its own guard prescribes.
 func (s *service) Finish(ctx context.Context, id string, status Status, reason string) (*Mission, error) {
 	if !isTerminalStatus(status) {
 		return nil, fmt.Errorf("cannot finish mission %q as %q: a terminal status is required (landed|derailed|stuck|abandoned)", id, status)
 	}
-	m, err := s.Get(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if isTerminalStatus(m.Status) {
-		if m.Status == status {
-			// Idempotent no-op: return the record untouched, no restamp, no event.
-			return m, nil
+	for attempt := 0; attempt < casAttempts; attempt++ {
+		m, snapshot, err := s.getWithSnapshot(ctx, id)
+		if err != nil {
+			return nil, err
 		}
-		return nil, errdefs.Conflict(fmt.Sprintf("mission %q already finished as %q; cannot re-finish as %q", id, m.Status, status))
+		if isTerminalStatus(m.Status) {
+			if m.Status == status {
+				// Idempotent no-op: return the record untouched, no restamp, no event.
+				return m, nil
+			}
+			return nil, errdefs.Conflict(fmt.Sprintf("mission %q already finished as %q; cannot re-finish as %q", id, m.Status, status))
+		}
+		old := m.Status
+		m.Status = status
+		m.StatusReason = strings.TrimSpace(reason)
+		m.UpdatedAt = time.Now().UTC()
+		// Persist first, then announce: a lost or failed publish never loses the outcome.
+		err = s.putIfUnchanged(ctx, m, snapshot)
+		if errors.Is(err, libdb.ErrNotFound) {
+			continue // the row moved under us; re-read and re-judge the guard.
+		}
+		if err != nil {
+			return nil, err
+		}
+		s.publishStatusChanged(ctx, m, old)
+		return m, nil
 	}
-	old := m.Status
-	m.Status = status
-	m.StatusReason = strings.TrimSpace(reason)
-	m.UpdatedAt = time.Now().UTC()
-	// Persist first, then announce: a lost or failed publish never loses the outcome.
-	if err := s.put(ctx, m, true); err != nil {
-		return nil, err
-	}
-	s.publishStatusChanged(ctx, m, old)
-	return m, nil
+	return nil, errdefs.Conflict(fmt.Sprintf("mission %q is being written concurrently; finishing as %q gave up after %d attempts", id, status, casAttempts))
 }
 
 // SetPlan implements Service.SetPlan: normalizes the incoming snapshot
@@ -715,12 +797,14 @@ func (s *service) Finish(ctx context.Context, id string, status Status, reason s
 // revision, then replaces the plan and bumps the revision. A fresh copy is
 // built rather than mutating the caller's slice, since the stored entries
 // (with assigned ids and new revision) are handed back to the caller.
+//
+// Written under the snapshot the immutability guard and the revision counter
+// were judged against (see putIfUnchanged): a plan write carries the whole
+// record, so a blind write would restore the status its read saw — a unit
+// planning while an operator stops its mission would resurrect the row to
+// open, with no unit behind it. Normalization is hoisted above the retry loop
+// so a re-judged attempt reuses the ids the first pass assigned.
 func (s *service) SetPlan(ctx context.Context, id string, entries []PlanEntry, explanation string) (*Mission, error) {
-	m, err := s.Get(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
 	normalized := make([]PlanEntry, len(entries))
 	for i, e := range entries {
 		e.Content = strings.TrimSpace(e.Content)
@@ -729,46 +813,57 @@ func (s *service) SetPlan(ctx context.Context, id string, entries []PlanEntry, e
 		}
 		normalized[i] = e
 	}
-
 	if err := validatePlan(normalized); err != nil {
 		return nil, err
 	}
-	if err := validateCompletedImmutable(m.Plan.Entries, normalized); err != nil {
-		return nil, err
-	}
 
-	prev := m.Plan.Entries
-	m.Plan = Plan{
-		Entries:     normalized,
-		Revision:    m.Plan.Revision + 1,
-		Explanation: strings.TrimSpace(explanation),
-	}
-	now := time.Now().UTC()
-	m.UpdatedAt = now
+	for attempt := 0; attempt < casAttempts; attempt++ {
+		m, snapshot, err := s.getWithSnapshot(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateCompletedImmutable(m.Plan.Entries, normalized); err != nil {
+			return nil, err
+		}
 
-	// Built once and threaded into both the durable ring and the event, so
-	// they carry byte-identical numbers by construction.
-	added, removed := planRevisionDelta(prev, m.Plan.Entries)
-	pending, inProgress, completed := planStatusCounts(m.Plan.Entries)
-	summary := PlanRevisionSummary{
-		Revision:    m.Plan.Revision,
-		Explanation: m.Plan.Explanation,
-		Added:       added,
-		Removed:     removed,
-		Pending:     pending,
-		InProgress:  inProgress,
-		Completed:   completed,
-		At:          now,
-	}
-	// Part of the durable put, not the best-effort publish: the history feed
-	// must survive an absent bus.
-	m.PlanRevisions = appendPlanRevision(m.PlanRevisions, summary)
+		prev := m.Plan.Entries
+		m.Plan = Plan{
+			Entries:     normalized,
+			Revision:    m.Plan.Revision + 1,
+			Explanation: strings.TrimSpace(explanation),
+		}
+		now := time.Now().UTC()
+		m.UpdatedAt = now
 
-	if err := s.put(ctx, m, true); err != nil {
-		return nil, err
+		// Built once and threaded into both the durable ring and the event, so
+		// they carry byte-identical numbers by construction.
+		added, removed := planRevisionDelta(prev, m.Plan.Entries)
+		pending, inProgress, completed := planStatusCounts(m.Plan.Entries)
+		summary := PlanRevisionSummary{
+			Revision:    m.Plan.Revision,
+			Explanation: m.Plan.Explanation,
+			Added:       added,
+			Removed:     removed,
+			Pending:     pending,
+			InProgress:  inProgress,
+			Completed:   completed,
+			At:          now,
+		}
+		// Part of the durable put, not the best-effort publish: the history feed
+		// must survive an absent bus.
+		m.PlanRevisions = appendPlanRevision(m.PlanRevisions, summary)
+
+		err = s.putIfUnchanged(ctx, m, snapshot)
+		if errors.Is(err, libdb.ErrNotFound) {
+			continue // the row moved under us; re-read and re-judge the guard.
+		}
+		if err != nil {
+			return nil, err
+		}
+		s.publishPlanRevised(ctx, m, summary)
+		return m, nil
 	}
-	s.publishPlanRevised(ctx, m, summary)
-	return m, nil
+	return nil, errdefs.Conflict(fmt.Sprintf("mission %q is being written concurrently; setting the plan gave up after %d attempts", id, casAttempts))
 }
 
 // maxPlanRevisions bounds the durable revision ring: the last N summaries

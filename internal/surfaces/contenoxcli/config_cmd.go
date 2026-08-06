@@ -10,15 +10,15 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/reasoning"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
 
 // validConfigKeys lists the keys users can set via `contenox config set`.
 var validConfigKeys = map[string]string{
-	"default-model":                 "Default LLM model name (e.g. qwen2.5:7b)",
+	"default-model":                 "Default LLM model name (e.g. qwen3:8b)",
 	"default-provider":              "Default LLM provider type (e.g. ollama, openai, gemini)",
 	"default-alt-model":             "Optional alt LLM model name. Used by chains referencing {{var:alt_model}}.",
 	"default-alt-provider":          "Optional alt LLM provider type. Used by chains referencing {{var:alt_provider}}.",
@@ -32,6 +32,7 @@ var validConfigKeys = map[string]string{
 	"hitl-policy-name":              "Active HITL policy file name (e.g. hitl-policy-strict.json). Empty = use hitl-policy-default.json.",
 	"telemetry-enabled":             "Enable writing telemetry logs to <data-dir>/telemetry.log (true/false)",
 	"update-check":                  "Enable automatic update availability checks (true/false). Set false for zero-trust/air-gapped environments.",
+	"opt-in-beta":                   "Enable beta features (true/false): goja, shell_session, agent roster. CONTENOX_OPT_IN_BETA overrides per invocation.",
 	"default-mission-agent":         "Default declared agent fired by '/mission <intent>' and 'contenox mission fire' with no --agent.",
 	"default-mission-policy":        "Default mission envelope (HITL policy) used when '/mission' or 'contenox mission fire' names none.",
 	"fleet-max-parallel":            "Fleet-width admission cap: max concurrently open mission units (integer; 0 = unlimited; default 8).",
@@ -42,11 +43,11 @@ var configCmd = &cobra.Command{
 	Short: "Manage persistent CLI settings (default model, provider, chain, HITL policy).",
 	Long: `Store and retrieve persistent CLI defaults backed by SQLite.
 
-Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-max-tokens, default-think, telemetry-enabled, update-check, default-mission-agent, default-mission-policy
+Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, default-mission-agent, default-mission-policy
 Workspace keys (scoped to current project): default-chain, hitl-policy-name
 
 Supported keys:
-  default-model                  Default LLM model name (e.g. qwen2.5:7b)
+  default-model                  Default LLM model name (e.g. qwen3:8b)
   default-provider               Default LLM provider type (e.g. ollama, openai, gemini)
   default-alt-model              Optional alt LLM model name (chains using {{var:alt_model}})
   default-alt-provider           Optional alt LLM provider (chains using {{var:alt_provider}})
@@ -58,6 +59,7 @@ Supported keys:
   default-think                  Default reasoning level: auto, off, minimal, low, medium, high, xhigh
   telemetry-enabled              Enable local telemetry logs (true/false)
   update-check                   Enable automatic update checks (true/false)
+  opt-in-beta                    Enable beta features: goja, shell_session, agent roster (true/false)
   default-chain                  Default chain file path
   hitl-policy-name               Active HITL policy file name (e.g. hitl-policy-strict.json)
   default-mission-agent          Default agent fired by /mission and 'mission fire' with no --agent
@@ -69,12 +71,12 @@ var configSetCmd = &cobra.Command{
 	Short: "Set a persistent config value.",
 	Long: `Set a persistent CLI default stored in the SQLite database.
 
-Global keys (default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-max-tokens, default-think, telemetry-enabled, update-check) are shared across all projects.
+Global keys (default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta) are shared across all projects.
 Workspace keys (default-chain, hitl-policy-name) are scoped to the current project
 workspace and fall back to the global value when not set locally.
 
 Examples:
-  contenox config set default-model    qwen2.5:7b
+  contenox config set default-model    qwen3:8b
   contenox config set default-provider ollama
 
   # Local-network Ollama autocomplete only:
@@ -83,7 +85,7 @@ Examples:
 
   contenox config set default-max-tokens 8192
   contenox config set default-think    high
-  contenox config set default-chain    .contenox/default-chain.json
+  contenox config set default-chain    .contenox/chain-agent-contenox.json
   contenox config set hitl-policy-name hitl-policy-strict.json`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {

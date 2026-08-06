@@ -640,7 +640,7 @@ func writeGointelModule(t *testing.T, root string) {
 	}
 }
 
-// TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably asserts that with no allowed dir (the default `contenox beam` wiring), gointel's refusal is marked fatal and names how to supply the root, rather than reading as broken.
+// TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably asserts that with no allowed dir (the default `contenox beam` wiring), the engine's cwd fallback becomes the workspace root and a query whose module root lies above it refuses by naming the boundary, rather than reading as broken.
 func TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping gointel engine e2e: builds a real engine")
@@ -648,12 +648,14 @@ func TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably(t *testing.T
 
 	h := newGointelHarness(t, "") // exactly what `contenox beam` passes today
 
+	// go test sets cwd to this package dir — mid-module, with go.mod above it —
+	// so the cwd-rooted index must refuse with the boundary refusal.
 	_, err := h.call(context.Background(), gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand"})
-	require.Error(t, err, "an index with no workspace root answered a query")
+	require.Error(t, err, "an index rooted at a dir whose module root lies above it answered a query")
 	msg := err.Error()
-	require.Containsf(t, msg, "no workspace root", "the refusal does not name the cause: %q", msg)
-	require.Containsf(t, msg, "(fatal:", "the refusal is not marked fatal, but no retry can fix a wiring gap: %q", msg)
-	require.Containsf(t, msg, "--local-exec-allowed-dir", "the refusal does not name how to supply the root: %q", msg)
+	require.Containsf(t, msg, "module root outside allowed directory", "the refusal does not name the cause: %q", msg)
+	require.Containsf(t, msg, "lies outside the allowed directory", "the refusal does not name the boundary: %q", msg)
+	require.Containsf(t, msg, "gointel only indexes modules rooted inside the workspace", "the refusal does not teach the rule: %q", msg)
 
 	// It still does not gate: an unusable tool that also interrupts would be the worst of both.
 	h.requireAllowedWithoutAsking(t, "hitl-policy-default.json", gointel.ToolDefinition)

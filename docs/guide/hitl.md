@@ -5,6 +5,8 @@ description: Control which tool calls require human approval using named policy 
 
 # HITL Policies
 
+Human + AI collaboration in contenox is an authored, versioned artifact — not a runtime default. The policy file decides what runs unattended, what pauses to ask a human, and what is denied outright, and it is diffable and swappable like any other file in your repo. Because approvals are durable, a question waits for a person instead of timing out: an unanswered ask checkpoints the run, and answering it later — from any terminal — resumes execution exactly once. For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
+
 Human-in-the-loop (HITL) lets you intercept tool calls before they execute and decide — approve, block, or let them pass automatically — based on a named policy file.
 
 ## How it works
@@ -30,7 +32,7 @@ contenox chat --shell --auto "refactor main.go"
 contenox run  --auto --chain ./my-chain.json "do the thing"
 ```
 
-> [!WARNING]
+> **Warning:**
 > `--auto` disables all approval prompts. Use only in trusted environments or non-interactive scripts.
 
 ## Policy file format
@@ -83,6 +85,9 @@ A rule with `when` conditions gates a tool only for calls whose arguments match 
   "when": [{ "key": "command", "op": "command_ask_always", "value": "rm,sudo,dd,chmod" }] }
 ```
 
+> **Note:**
+> `command_prefix_allowlist` pins a command **name**, and `PATH` decides what a name means — so an allowlisted `go` can be a `go` planted anywhere earlier on `PATH`. Add a `trusted_binaries` block to pin those names to a real path and a SHA256; see [Trusted binaries](/docs/guide/trusted-binaries/).
+
 ## Who may answer a unit's question (`attention`)
 
 A mission unit that hits something it must not decide alone calls its
@@ -108,6 +113,11 @@ mission was fired in:
 | `attention.allowAgentAnswers` | bool | Let the firing session's agent answer its own unit's questions. Omitted/`false` (the default) means a human must. You can always answer yourself either way — this only decides whether the agent is offered the question first. |
 | `attention.maxAgentAnswers` | int | How many of this mission's questions the agent may answer before the rest wait for a human. Omitted uses a small default (3); `0` is **not** unlimited. The count is durable and actor-aware, so a restart does not refill it and your own answers do not consume it. |
 
+Together the two fields are a delegation budget: an envelope may allow a bounded
+number of agent answers per mission, and once the bound is spent every further
+question waits for a human. Every answer — yours or an agent's — durably records
+who answered.
+
 The agent is also skipped when the firing session is busy with a turn you
 started, or is not currently open — a question is never silently swallowed by an
 agent-to-agent exchange you cannot see. When the agent does answer, it happens as
@@ -116,16 +126,17 @@ a person) answered it.
 
 ## Built-in presets
 
-Contenox ships six policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the last three are the profiles the ACP editor transports and the terminal UI load.
+Contenox ships seven policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the next three are the profiles the ACP editor transports and the terminal UI load; the last is the pinned envelope of the beta [attention oracle](/docs/use-cases/auto-attention/).
 
 | Name | Behaviour |
 |---|---|
 | `hitl-policy-default.json` | Prompts for filesystem writes, `sed`, shell commands, and the mutating webtools verbs (`web_post`, `web_put`, `web_patch`, `web_delete`); allows reads (`read_file`, `list_dir`, `grep`, `stat_file`, `count_stats`) and the safe webtools verbs (`web_get`, `web_head`); anything not matched by a rule fail-closes to approval (`default_action: "approve"`) |
 | `hitl-policy-strict.json` | Deny-by-default; only the rules listed are prompted |
-| `hitl-policy-dev.json` | `default_action: allow`, but explicit rules still gate `local_shell` (every shell call requires approval, and a fixed blacklist is always denied); useful for local development when you don't want prompts on filesystem/webtools calls |
+| `hitl-policy-dev.json` | `default_action: allow`, but explicit rules still gate `local_shell` (every shell call requires approval, and a fixed blacklist is always denied); useful for local development when you don't want prompts on filesystem/webtools calls. Unlike `hitl-policy-default.json` it carries **no secret quarantine** — its only rules cover the shell, so reads of `.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`, gcloud, browser profiles, wallets, shell history, `.netrc`, `.npmrc` and `id_rsa*` are not denied. Use it on a machine whose secrets you would not mind an agent reading |
 | `hitl-policy-acp.json` | Profile for editor (ACP) sessions — gated tool calls route through the editor's own approval UI |
 | `hitl-policy-acpx.json` | Hardened profile for headless / untrusted-driver (ACPX, e.g. OpenClaw) sessions — shell, writes, and network are denied outright rather than offered for approval |
 | `hitl-policy-beam.json` | the terminal UI's default envelope — a copy of `hitl-policy-acp.json` tuned for the attended terminal UI: approve-tier writes and shell commands surface as a one-keypress card in the transcript rather than an editor approval dialog |
+| `hitl-policy-oracle.json` | the [attention oracle's](/docs/use-cases/auto-attention/) pinned envelope — `default_action: deny` with exactly two allows, the in-process `oracle.submit_verdict` and `oracle.verdict_state` tools; no shell, filesystem, or network rule of any kind; seeded by init, inert until `mission fire --oracle` mounts the driver |
 
 Each preset also states who may answer a unit's question (see [`attention`](#who-may-answer-a-units-question-attention)) rather than inheriting the invisible default, and the stances follow each preset's character:
 
@@ -133,10 +144,11 @@ Each preset also states who may answer a unit's question (see [`attention`](#who
 |---|---|
 | `hitl-policy-acp.json` | agent may answer, up to 3 — an editor session's agent holds the conversation the mission was fired in |
 | `hitl-policy-beam.json` | agent may answer, up to 3 — same stance as `hitl-policy-acp.json`, for the terminal UI's attended session |
-| `hitl-policy-default.json` | agent may answer, up to 2 — routine questions, while whatever the unit then *does* stays gated by this same envelope |
+| `hitl-policy-default.json` | agent may answer, up to 3 — the mission path's default envelope: routine questions (a session agent's, or the attention oracle's), while whatever the unit then *does* stays gated by this same envelope; the file's `//attention` note documents the grant |
 | `hitl-policy-dev.json` | agent may answer, up to 5 — the permissive local-development posture |
 | `hitl-policy-strict.json` | **human only** — a policy whose character is "a human decides" does not hand the deciding to a model |
 | `hitl-policy-acpx.json` | **human only** — an untrusted driver's agent must not answer its own subagent's escalation |
+| `hitl-policy-oracle.json` | **human only** — the oracle never adjudicates its own asks; a question the oracle chain raises waits for a human |
 
 ## Selecting the active policy
 

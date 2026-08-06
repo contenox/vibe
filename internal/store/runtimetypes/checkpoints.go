@@ -99,6 +99,42 @@ func (s *store) ClaimChainCheckpoint(ctx context.Context, id string, now, staleB
 	return checkRowsAffected(result)
 }
 
+// TouchChainCheckpointClaim refreshes id's claim timestamp — the live
+// resumer's heartbeat. Wall-clock staleness (see ClaimChainCheckpoint) must
+// only ever reclaim a dead resumer, never a slow one still executing; the
+// periodic touch is what makes that distinction real. Only refreshes an
+// existing claim, never creates one.
+func (s *store) TouchChainCheckpointClaim(ctx context.Context, id string, now time.Time) error {
+	result, err := s.Exec.ExecContext(ctx, `
+		UPDATE chain_checkpoints
+		SET claimed_at = $2, updated_at = $2
+		WHERE id = $1 AND claimed_at IS NOT NULL`,
+		id, now,
+	)
+	if err != nil {
+		return fmt.Errorf("chain_checkpoints: touch claim %s: %w", id, err)
+	}
+	return checkRowsAffected(result)
+}
+
+// UpdateChainCheckpointPayload replaces id's payload — the claiming resumer's
+// own bookkeeping write (recording a completed gate call's result inside the
+// agentservice envelope). The claim CAS makes the live resumer the row's only
+// writer, so no compare is needed here; the payload stays opaque to this layer.
+func (s *store) UpdateChainCheckpointPayload(ctx context.Context, id string, payload json.RawMessage) error {
+	now := time.Now().UTC()
+	result, err := s.Exec.ExecContext(ctx, `
+		UPDATE chain_checkpoints
+		SET payload = $2, updated_at = $3
+		WHERE id = $1`,
+		id, nullableJSON(payload), now,
+	)
+	if err != nil {
+		return fmt.Errorf("chain_checkpoints: update payload %s: %w", id, err)
+	}
+	return checkRowsAffected(result)
+}
+
 // SetChainCheckpointFailure annotates id with why its resume failed, keeping
 // the row: a run whose resume errored must stay findable (and re-claimable
 // once the claim goes stale) rather than vanishing.

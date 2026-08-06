@@ -153,11 +153,13 @@ func Apply(ctx context.Context, db libdbexec.DBManager, probe OllamaProbe, model
 	}
 
 	store := runtimetypes.New(db.WithoutTransaction())
-	// "global": default-model/default-provider are not workspace-scoped keys.
-	if err := clikv.WriteConfig(ctx, store, "global", "default-provider", "ollama"); err != nil {
+	// Workspace ID "": default-model/default-provider are global keys, and the
+	// empty string is the canonical no-workspace spelling (scopeFor discards
+	// the dimension for global keys either way; "" cannot leave a stray row).
+	if err := clikv.WriteConfig(ctx, store, "", "default-provider", "ollama"); err != nil {
 		return fmt.Errorf("set default-provider: %w", err)
 	}
-	if err := clikv.WriteConfig(ctx, store, "global", "default-model", model); err != nil {
+	if err := clikv.WriteConfig(ctx, store, "", "default-model", model); err != nil {
 		return fmt.Errorf("set default-model: %w", err)
 	}
 	return nil

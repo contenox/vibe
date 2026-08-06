@@ -15,11 +15,12 @@ import (
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libacp"
 	"github.com/contenox/contenox/libtracker"
-	"github.com/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -615,7 +616,7 @@ func buildStubAgentBin(t *testing.T) string {
 		t.Skip("external agent spawn runs through the sandbox, which is Landlock-based and Linux-only")
 	}
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
-	out, err := exec.Command("go", "build", "-o", binPath, "github.com/contenox/libacp/cmd/acp-stub-agent").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", binPath, "github.com/contenox/contenox/libacp/cmd/acp-stub-agent").CombinedOutput()
 	require.NoError(t, err, "build acp-stub-agent:\n%s", out)
 	return binPath
 }
@@ -926,4 +927,116 @@ func TestFleetService_Dispatch_EmptyCwdResolvesToAllowlistDefault(t *testing.T) 
 	require.NotEqual(t, "/some/other/home", man.openSpecs[0].Cwd)
 
 	waitMissionSettled(t, missions, res.MissionID)
+}
+
+// ─── a turn that errors: the mission comes to rest, the unit is reaped ──────
+//
+// The drive loop is the only thing prompting a dispatched unit, so a turn
+// error is the moment nobody is driving the mission any more. Returning there
+// left a StateRunning instance holding fleet width against maxParallel until
+// its host exited — and stamped a fresh heartbeat, hiding the dead mission
+// from the sweep for a further StaleHeartbeatAfter. These pin both halves.
+
+func TestUnit_DriveLoop_TurnErrorFinishesDerailedAndReapsTheUnit(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1", promptErr: fmt.Errorf("backend refused the turn")}
+	svc, missions, run := driveFixture(t, hitlservice.ComputeBounds{}, mgr)
+
+	svc.driveUnattendedMission(context.Background(), run)
+
+	require.Equal(t, 1, mgr.prompts(), "a failed turn is neither retried nor nudged")
+	require.Equal(t, []string{"inst-1"}, mgr.stops(),
+		"the unit nobody drives is reaped rather than left holding a seat against fleet-max-parallel")
+
+	got, err := missions.Get(context.Background(), run.missionID)
+	require.NoError(t, err)
+	require.Equal(t, missionservice.StatusDerailed, got.Status, "a dead turn is a post-mortem, not a judgement call")
+	require.Contains(t, got.StatusReason, turnErrorBlockerLead)
+	require.Contains(t, got.StatusReason, "backend refused the turn", "the reason quotes what actually failed")
+	require.Nil(t, got.LastHeartbeat,
+		"a failed turn stamps no liveness: refreshing the stale clock at the moment the turn died would hide the mission from the sweep")
+
+	reps, err := missions.ListReports(context.Background(), run.missionID, 5)
+	require.NoError(t, err)
+	require.Len(t, reps, 1, "the runtime files the blocker itself; a mute-path blocker never runs on this path")
+	require.Equal(t, missionservice.ReportKindBlocker, reps[0].Kind)
+	require.Contains(t, reps[0].Detail, "backend refused the turn")
+}
+
+// TestUnit_DriveLoop_NudgeTurnErrorTakesTheSamePath pins the second prompt
+// site, so the failure path cannot be wired on one call and forgotten on the
+// other.
+func TestUnit_DriveLoop_NudgeTurnErrorTakesTheSamePath(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1", agentText: "still thinking"}
+	// Turn 1 succeeds mute, so the nudge runs; the backend dies under it.
+	mgr.onPrompt = func(call int) {
+		if call >= 2 {
+			mgr.promptErr = fmt.Errorf("backend died mid-mission")
+		}
+	}
+	svc, missions, run := driveFixture(t, hitlservice.ComputeBounds{}, mgr)
+
+	svc.driveUnattendedMission(context.Background(), run)
+
+	require.Equal(t, 2, mgr.prompts(), "one intent turn plus the one nudge, still hard-capped")
+	require.Equal(t, []string{"inst-1"}, mgr.stops())
+
+	got, err := missions.Get(context.Background(), run.missionID)
+	require.NoError(t, err)
+	require.Equal(t, missionservice.StatusDerailed, got.Status)
+	require.Contains(t, got.StatusReason, "backend died mid-mission")
+	require.NotNil(t, got.LastHeartbeat, "turn 1 completed, so its liveness stands; only the failed turn stamps nothing")
+}
+
+// TestUnit_DriveLoop_TurnErrorOnAnAlreadyStoppedMissionOnlyReapsTheUnit pins
+// the common case: an operator's `mission stop` reaps the subprocess, which is
+// itself how the in-flight turn errored. That mission owns its own verdict.
+func TestUnit_DriveLoop_TurnErrorOnAnAlreadyStoppedMissionOnlyReapsTheUnit(t *testing.T) {
+	mgr := &fakeManager{openID: "sess-1"}
+	svc, missions, run := driveFixture(t, hitlservice.ComputeBounds{}, mgr)
+	mgr.onPrompt = func(int) {
+		_, err := missions.Finish(context.Background(), run.missionID, missionservice.StatusAbandoned, "stopped by operator")
+		require.NoError(t, err)
+		mgr.promptErr = fmt.Errorf("session closed")
+	}
+
+	svc.driveUnattendedMission(context.Background(), run)
+
+	require.Equal(t, []string{"inst-1"}, mgr.stops(), "the unit is reaped either way")
+
+	got, err := missions.Get(context.Background(), run.missionID)
+	require.NoError(t, err)
+	require.Equal(t, missionservice.StatusAbandoned, got.Status, "the operator's verdict is not relabelled derailed")
+	require.Equal(t, "stopped by operator", got.StatusReason)
+
+	reps, err := missions.ListReports(context.Background(), run.missionID, 5)
+	require.NoError(t, err)
+	require.Empty(t, reps, "and a mission already at rest gets no second story about why it ended")
+}
+
+// TestFleetService_Dispatch_TurnErrorSettlesTheMissionEndToEnd walks the same
+// failure through Dispatch's detached goroutine, since that is where a leaked
+// seat would actually accumulate.
+func TestFleetService_Dispatch_TurnErrorSettlesTheMissionEndToEnd(t *testing.T) {
+	ctx, db := setupRegistryDB(t)
+	agents := agentregistryservice.New(db)
+	registerAgent(t, ctx, agents, "runner", true)
+	missions := missionservice.New(db)
+
+	man := &fakeManager{startID: "inst-err", openID: "sess-err", promptErr: fmt.Errorf("no backend configured")}
+	svc := New(man, agents, missions, nil, "/project/root", libtracker.NoopTracker{})
+
+	res, err := svc.Dispatch(ctx, DispatchRequest{
+		AgentName: "runner", Intent: "do the thing", HITLPolicyName: "default",
+	})
+	require.NoError(t, err, "a turn that fails later never fails the dispatch itself")
+
+	require.Eventually(t, func() bool {
+		m, gerr := missions.Get(ctx, res.MissionID)
+		return gerr == nil && m.Status == missionservice.StatusDerailed
+	}, 5*time.Second, 20*time.Millisecond, "the drive goroutine must settle the mission, not return silently")
+
+	require.Eventually(t, func() bool {
+		return len(man.stops()) == 1
+	}, 5*time.Second, 20*time.Millisecond, "and reap the unit it can no longer drive")
+	require.Equal(t, []string{"inst-err"}, man.stops())
 }

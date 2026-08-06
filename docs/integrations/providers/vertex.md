@@ -7,9 +7,6 @@ description: Configure Contenox to use Gemini on Vertex AI — billed through yo
 
 The `vertex-google` backend runs **Gemini** on your own GCP project. Use it when you want Google-managed inference billed against your GCP account, regional control, or models that aren't on AI Studio.
 
-> [!NOTE]
-> For **Claude** or **Llama**, use a direct provider instead — [Anthropic](/docs/integrations/providers/anthropic/) or [AWS Bedrock](/docs/integrations/providers/bedrock/). Contenox does not support the Vertex Anthropic/Meta/Mistral partner backends.
-
 ## Prerequisites
 
 1. A GCP project with billing enabled.
@@ -19,11 +16,14 @@ The `vertex-google` backend runs **Gemini** on your own GCP project. Use it when
    gcloud services enable aiplatform.googleapis.com --project YOUR_PROJECT_ID
    ```
 
-3. A region — e.g. `us-central1`, `europe-west4`. Each model is only available in some regions; check the [Vertex AI model availability matrix](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations).
+3. A location — either the **global endpoint** or a region like `us-central1`, `europe-west4`. Pick by need: a **regional endpoint** gives you data residency and regional control; the **global endpoint** carries the widest model catalog (some models — e.g. `gemini-3.6-flash`, and previews like `gemini-3.1-pro-preview` — are global-only or allowlist-gated regionally). Check the [model availability matrix](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations).
 
-The backend URL always follows this shape:
+**The location and your model choice are coupled**: `default-model` must be a model your backend's location actually serves. After registering the backend, run `contenox model list` and set `default-model` from that output — for any location choice.
+
+The backend URL follows one of these shapes:
 
 ```
+https://aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/global
 https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{REGION}
 ```
 
@@ -50,7 +50,7 @@ gcloud iam service-accounts keys create service-account.json \
   --iam-account=vertex-runner@YOUR_PROJECT_ID.iam.gserviceaccount.com
 ```
 
-> [!IMPORTANT]
+> **Important:**
 > Step 2 is easy to skip. Creating the account and a key succeeds without it, but the service account has **no permissions** until the role is bound — inference then fails with `403 PERMISSION_DENIED`. If you already created the account, just run step 2 against the existing `vertex-runner@...` member.
 
 Prefer the console? [GCP Console → IAM & Admin → Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts) → **Create Service Account** → assign **Vertex AI User** → open the account → **Keys** tab → **Add Key → Create new key → JSON**. The file downloads once and Google keeps no backup — store it safely and never commit it.
@@ -61,17 +61,17 @@ Prefer the console? [GCP Console → IAM & Admin → Service Accounts](https://c
 export VERTEX_SA_JSON=$(cat /path/to/service-account.json)
 
 contenox backend add vertex --type vertex-google \
-  --url "https://us-central1-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/us-central1" \
+  --url "https://aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/global" \
   --api-key-env VERTEX_SA_JSON
 
-contenox config set default-model gemini-2.5-flash
+contenox config set default-model gemini-3.6-flash
 contenox config set default-provider vertex-google
 ```
 
 Contenox reads the JSON from the named env var at request time, so the key never lands in the config file on disk.
 
-> [!NOTE]
-> Use a concrete model id like `gemini-2.5-flash`, not an AI-Studio-style alias such as `gemini-flash-latest` — those `-latest` aliases exist on the Gemini API / AI Studio catalog but not on Vertex, and setting one as `default-model` here will fail. Run `contenox model list` after adding the backend to see what's actually available in your project/region.
+> **Note:**
+> Use a concrete model id like `gemini-3.6-flash`, not an AI-Studio-style alias such as `gemini-flash-latest` — those `-latest` aliases exist on the Gemini API / AI Studio catalog but not on Vertex, and setting one as `default-model` here will fail. Model availability varies by project and location (the examples above use the global endpoint, which carries the widest catalog), so always run `contenox model list` after adding the backend and pick an id from that output before setting `default-model`.
 
 ## Auth method 2 — Application Default Credentials (CLI / dev only)
 
@@ -84,16 +84,39 @@ gcloud auth application-default login
 gcloud auth application-default set-quota-project YOUR_PROJECT_ID
 
 contenox backend add vertex --type vertex-google \
-  --url "https://us-central1-aiplatform.googleapis.com/v1/projects/YOUR_PROJECT_ID/locations/us-central1"
+  --url "https://aiplatform.googleapis.com/v1/projects/YOUR_PROJECT_ID/locations/global"
 
-contenox config set default-model gemini-2.5-flash
+contenox config set default-model gemini-3.6-flash
 contenox config set default-provider vertex-google
 ```
 
 Omit `--api-key-env` and Contenox falls back to ADC.
 
-> [!IMPORTANT]
+### Regional endpoint
+
+Both auth methods work identically with a regional URL — use one when you need data residency or regional control. The catalog is location-specific, so set `default-model` from what the backend actually serves rather than copying an id:
+
+```bash
+contenox backend add vertex --type vertex-google \
+  --url "https://europe-west4-aiplatform.googleapis.com/v1/projects/YOUR_PROJECT_ID/locations/europe-west4"
+
+contenox model list                       # what THIS location serves
+contenox config set default-model <id-from-that-list>
+```
+
+> **Important:**
 > `set-quota-project` is required. Without it, every Vertex AI call returns `403 SERVICE_DISABLED` — even if you already ran `gcloud config set project`.
+
+### EU regions and data residency
+
+A regional endpoint is what gives you data residency: pin the backend to an EU region such as `europe-west4` (Netherlands) or `europe-west3` (Frankfurt) and ML processing happens in that region. The **global endpoint does not** — with `locations/global`, you cannot control or know which region processes a request, so don't use it when you have residency requirements ([Google's data residency docs](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/data-residency)).
+
+```bash
+contenox backend add vertex-eu --type vertex-google \
+  --url "https://europe-west4-aiplatform.googleapis.com/v1/projects/YOUR_PROJECT_ID/locations/europe-west4"
+```
+
+The catalog caveat above applies with extra force here: EU regions serve different (often smaller) model sets than the global endpoint, and they differ from each other — always run `contenox model list` after registering and set `default-model` from that output. See [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/) for the larger deployment posture.
 
 ## Renewing credentials
 
@@ -157,7 +180,8 @@ gcloud iam service-accounts keys delete OLD_KEY_ID \
 | `oauth2: "invalid_grant"` | ADC refresh token revoked / aged out | `gcloud auth application-default login` |
 | `403 SERVICE_DISABLED` | Quota project not set, or Vertex AI API not enabled | `gcloud services enable aiplatform.googleapis.com` and `gcloud auth application-default set-quota-project ...` |
 | `403 PERMISSION_DENIED` on a service account | Missing `roles/aiplatform.user` | Grant the role on the project |
-| `404` on the model | Model not available in your region | Pick a region from the [model availability matrix](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations) and recreate the backend with the right URL |
+| `404` on the model | Model not served at your endpoint's location | Run `contenox model list` to see what this backend serves; set `default-model` from that list, or recreate the backend at a location that serves the model you want ([availability matrix](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations)) |
+| Chat worked, then `404` right after changing `default-model` | The model config is global but the backend URL pins a location — the new model isn't served there (e.g. a regional `us-central1` backend serving `gemini-2.5-flash` will 404 on `gemini-3.6-flash`, which needs the global endpoint) | Same as above: `contenox model list`, then either a model that location serves or a backend URL whose location serves the model |
 | `unreachable: vertex-google list models: ...` in `contenox model list` | Same as `invalid_grant` above — the catalog fetch refreshes tokens too | Renew per the section above; the backend stays registered |
 
 ## See also

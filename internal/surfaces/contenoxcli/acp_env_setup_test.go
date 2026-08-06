@@ -32,7 +32,7 @@ func TestUnit_CompleteEnvSetup_OllamaWithDefaults(t *testing.T) {
 	require.NoError(t, completeEnvSetup(ctx, db))
 
 	assert.Equal(t, "ollama", acpsvc.ReadConfigValue(ctx, db, "default-provider"))
-	assert.Equal(t, "qwen2.5:7b", acpsvc.ReadConfigValue(ctx, db, "default-model"),
+	assert.Equal(t, "qwen3:8b", acpsvc.ReadConfigValue(ctx, db, "default-model"),
 		"empty model must fall back to the provider's default, matching the wizard")
 
 	backends, err := backendservice.New(db).List(ctx, nil, 10)
@@ -117,4 +117,6 @@ func TestUnit_ChainAgentSpawnContract_MatchesTheACPCommand(t *testing.T) {
 		"the kernel's chain-path variable must be the one `contenox acp` reads")
 	assert.Equal(t, acpCmd.Use, agentinstance.ChainACPSubcommand,
 		"the kernel's self-spawn argv must name the subcommand that serves ACP")
+	assert.NotNil(t, acpCmd.Flags().Lookup(agentinstance.ChainWorkspaceFlag),
+		"the kernel's workspace flag must be one `contenox acp` registers, so a dispatched unit stamps mission events with the firing workspace")
 }

@@ -250,8 +250,20 @@ func (h *WebCaller) extractQuery(input map[string]any, toolsCall *taskengine.Too
 	return ""
 }
 
-func (h *WebCaller) extractBody(input map[string]any, maxBytes int) (io.Reader, int, error) {
+// extractBody reads the request body, falling back to the call's own arguments
+// the way extractURL, extractHeaders and extractQuery do — without that
+// fallback a declarative `tools` task, whose arguments sit on the ToolsCall
+// rather than in the input map, could never send one. A body arriving that way
+// is a string and is sent as-is.
+func (h *WebCaller) extractBody(input map[string]any, toolsCall *taskengine.ToolsCall, maxBytes int) (io.Reader, int, error) {
 	v, ok := input["body"]
+	if !ok {
+		if toolsCall != nil && toolsCall.Args != nil {
+			if s := toolsCall.Args["body"]; s != "" {
+				v, ok = s, true
+			}
+		}
+	}
 	if !ok || v == nil {
 		return nil, 0, nil
 	}
@@ -278,6 +290,7 @@ func (h *WebCaller) extractBody(input map[string]any, maxBytes int) (io.Reader, 
 // request, runs the retry/backoff loop, reads the size-limited response, and
 // closes the tracker span. On a soft policy denial (host/scheme/size) it
 // returns (denialString, DataTypeString, nil) so the model sees a tool result.
+// HEAD is the one verb that answers with WebHeadResult rather than the body.
 func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, input any, toolsCall *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	dynArgs, _ := input.(map[string]any)
 	if dynArgs == nil {
@@ -352,10 +365,15 @@ func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, inpu
 		}
 	}
 
+	// GET and HEAD declare no body argument (readVerbProps), so none is read for
+	// them even when the call carries one.
+	sendsBody := method != http.MethodGet && method != http.MethodHead
+
 	var (
-		respBody   []byte
-		statusCode int
-		truncated  bool
+		respBody    []byte
+		respHeaders http.Header
+		statusCode  int
+		truncated   bool
 	)
 	backoff := time.Duration(initialBackoffMs) * time.Millisecond
 	maxBackoff := time.Duration(maxBackoffMs) * time.Millisecond
@@ -365,10 +383,14 @@ func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, inpu
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// Body must be re-built per attempt because io.Reader is single-use.
-		body, _, bodyErr := h.extractBody(dynArgs, maxBodyBytes)
-		if bodyErr != nil {
-			reportErr(bodyErr)
-			return nil, taskengine.DataTypeAny, bodyErr
+		var body io.Reader
+		if sendsBody {
+			r, _, bodyErr := h.extractBody(dynArgs, toolsCall, maxBodyBytes)
+			if bodyErr != nil {
+				reportErr(bodyErr)
+				return nil, taskengine.DataTypeAny, bodyErr
+			}
+			body = r
 		}
 
 		req, reqErr := http.NewRequestWithContext(ctx, method, u.String(), body)
@@ -395,6 +417,7 @@ func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, inpu
 		}
 
 		statusCode = resp.StatusCode
+		respHeaders = resp.Header
 		var readErr error
 		respBody, truncated, readErr = readLimited(resp.Body, maxRespBytes)
 		_ = resp.Body.Close()
@@ -412,6 +435,17 @@ func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, inpu
 
 	if statusCode >= 200 && statusCode < 300 {
 		reportChange(fmt.Sprintf("status_%d", statusCode), nil)
+		// HEAD is asked for the status and the headers; its body is empty by
+		// definition, so returning the body would return nothing at all.
+		if method == http.MethodHead {
+			return WebHeadResult{Status: statusCode, Headers: flattenHeaders(respHeaders)}, taskengine.DataTypeJSON, nil
+		}
+		// A 204 carries no body by definition either — common on DELETE/PUT/
+		// PATCH — so it answers the same shape rather than an empty string
+		// that reads as a missing result.
+		if statusCode == http.StatusNoContent {
+			return WebHeadResult{Status: statusCode, Headers: flattenHeaders(respHeaders)}, taskengine.DataTypeJSON, nil
+		}
 		var parsed any
 		if json.Valid(respBody) {
 			if err := json.Unmarshal(respBody, &parsed); err == nil {
@@ -431,6 +465,27 @@ func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, inpu
 	failure := fmt.Errorf("webtools %s %s: HTTP %d: %s", method, u.String(), statusCode, truncatedTail(respBody, 512))
 	reportErr(failure)
 	return nil, taskengine.DataTypeAny, failure
+}
+
+// WebHeadResult is what web_head returns on a 2xx, and what every verb
+// returns on a 204 No Content: the status code and the response headers — the
+// two cases where the body is empty by definition, so there is nothing else
+// to return. The shape is not a public API; it lives beside the tool that
+// produces it.
+type WebHeadResult struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+}
+
+// flattenHeaders renders response headers as one string per name, keyed by Go's
+// canonical casing (Content-Type). A header sent more than once is joined with
+// ", " so the result is shaped like the headers argument the same toolset takes.
+func flattenHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for name, values := range h {
+		out[name] = strings.Join(values, ", ")
+	}
+	return out
 }
 
 func wrapTruncated(parsed any, n, max int) any {
@@ -529,8 +584,91 @@ func (h *WebCaller) Supports(_ context.Context) ([]string, error) {
 	return []string{WebToolsName, "web_get", "web_head", "web_post", "web_put", "web_patch", "web_delete"}, nil
 }
 
-func (h *WebCaller) GetSchemasForSupportedTools(_ context.Context) (map[string]*openapi3.T, error) {
-	return map[string]*openapi3.T{}, nil
+// webSchemaSpecs is every verb tool this toolset declares, in Supports order.
+// All six run the same doRequest, and five of them answer with the same shape;
+// HEAD answers with the status and headers, since it has no body to answer with.
+func webSchemaSpecs() []toolSchemaSpec {
+	return []toolSchemaSpec{
+		{tool: "web_get", component: "WebGet", response: webResponseSchema},
+		{tool: "web_head", component: "WebHead", response: webHeadResponseSchema},
+		{tool: "web_post", component: "WebPost", response: webResponseSchema},
+		{tool: "web_put", component: "WebPut", response: webResponseSchema},
+		{tool: "web_patch", component: "WebPatch", response: webResponseSchema},
+		{tool: "web_delete", component: "WebDelete", response: webResponseSchema},
+	}
+}
+
+// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
+// one request/response pair per verb. Requests are converted from the
+// descriptors GetToolsForToolsByName hands the model — readVerbProps and
+// writeVerbProps are the single declaration of those arguments, and they carry
+// shapes (headers' additionalProperties, body's type union) a flat property
+// table could not hold.
+func (h *WebCaller) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
+	declared, err := h.GetToolsForToolsByName(ctx, WebToolsName)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := buildToolsetDoc(WebToolsName, "Web HTTP Tools",
+		"One tool per HTTP verb. Scheme and host are checked against tools_policies.webtools before the request is built; the response is size-capped, retried with backoff on a transport error or a 5xx, and parsed as JSON when it is JSON. A non-2xx status is returned as an ERROR, not as a result, so a result always means the call succeeded.",
+		declared, webSchemaSpecs())
+	if err != nil {
+		return nil, err
+	}
+	return map[string]*openapi3.T{WebToolsName: doc}, nil
+}
+
+// webTruncatedEnvelopeSchema is wrapTruncated's envelope: a JSON body that hit
+// the response cap is wrapped rather than silently shortened.
+func webTruncatedEnvelopeSchema() *openapi3.SchemaRef {
+	return objectSchema("A JSON body that hit _max_response_bytes, wrapped so the cut is visible.",
+		map[string]*openapi3.SchemaRef{
+			"_truncated":  boolSchema("Always true on this shape."),
+			"_bytes_read": intSchema("How many bytes were read before the cap stopped the read."),
+			"_max_bytes":  intSchema("The cap that stopped it — tools_policies.webtools._max_response_bytes."),
+			"body":        {Value: &openapi3.Schema{Description: "The parsed JSON that was read, which is the head of a larger document."}},
+		}, "_truncated", "_bytes_read", "_max_bytes", "body")
+}
+
+// webPolicyDenialSchema is the soft denial validateURL produces: returned as a
+// tool result so the model can correct the URL, not as an error.
+func webPolicyDenialSchema() *openapi3.SchemaRef {
+	return strSchema("A policy denial, returned as a result rather than an error: the scheme is not in _allowed_schemes, the URL carries no host, or the host is denied by _denied_hosts or missing from _allowed_hosts. No request was sent.")
+}
+
+// webResponseSchema is what doRequest returns on a 2xx. A non-2xx status, a
+// transport failure that outlived the retries, and an oversized request body
+// are all errors instead, so nothing here is a failure marker.
+func webResponseSchema() *openapi3.SchemaRef {
+	return anyOfSchema("What the call returns on a 2xx status.",
+		&openapi3.SchemaRef{Value: &openapi3.Schema{
+			Description: "The response body parsed as JSON — any JSON value — when the body is valid JSON and fit within the response cap.",
+		}},
+		webTruncatedEnvelopeSchema(),
+		strSchema("The response body as text, when it is not valid JSON. A body that hit _max_response_bytes carries a trailing \"[response truncated to N bytes; …]\" marker."),
+		webHeadResultSchema("WebHeadResult: returned on a 204 No Content, whose body is empty by definition — the status and headers instead of an empty string."),
+		webPolicyDenialSchema())
+}
+
+// webHeadResponseSchema is webResponseSchema for HEAD, the one verb that
+// always answers with metadata instead of a body: WebHeadResult. The other
+// five return what they read, except on a 204 (see webResponseSchema).
+func webHeadResponseSchema() *openapi3.SchemaRef {
+	return anyOfSchema("What the call returns on a 2xx status.",
+		webHeadResultSchema("WebHeadResult: the status code and the response headers. A HEAD response carries no body, so none is returned."),
+		webPolicyDenialSchema())
+}
+
+// webHeadResultSchema is the WebHeadResult shape, declared once for the two
+// places it appears: every HEAD 2xx, and any verb's 204 No Content.
+func webHeadResultSchema(desc string) *openapi3.SchemaRef {
+	return objectSchema(desc,
+		map[string]*openapi3.SchemaRef{
+			"status": intSchema("The HTTP status code. Always 2xx on this shape — any other status is returned as an error, naming the status."),
+			"headers": stringMapSchema(
+				"The response headers, keyed by canonical name (\"Content-Type\", \"Content-Length\"). A header sent more than once is joined with \", \".",
+				"One header value."),
+		}, "status", "headers")
 }
 
 // readVerbProps returns the JSON schema parameters for read-only verbs (GET, HEAD).
@@ -563,36 +701,51 @@ func writeVerbProps() map[string]any {
 	}
 }
 
+// Two facts every verb's description states, because neither is discoverable
+// from a successful call and neither has an error that teaches it:
+//
+//   - nonSuccessNote: a non-2xx comes back as an ERROR, not a result. Without
+//     it a model cannot tell a 404 from a transport failure by contract, only
+//     by guessing at the text.
+//   - truncationNote: an oversized body changes the result's SHAPE rather than
+//     being silently shortened. A model reading only the description would
+//     otherwise take the envelope for the document.
+const (
+	nonSuccessNote = " A non-2xx status is returned as an ERROR naming the status, so a result always means the call succeeded."
+	truncationNote = " A body over _max_response_bytes comes back wrapped as {_truncated,_bytes_read,_max_bytes,body} when it is JSON, or with a trailing truncation marker when it is text."
+)
+
 func (h *WebCaller) GetToolsForToolsByName(_ context.Context, name string) ([]taskengine.Tool, error) {
 	all := []taskengine.Tool{
 		{Type: "function", Function: taskengine.FunctionTool{
 			Name:        "web_get",
-			Description: "Make an HTTP GET request. Use for read-only retrieval. Response is parsed as JSON when possible, otherwise returned as text. Subject to host allow/deny policy and a response-size cap (default 1 MiB).",
+			Description: "Make an HTTP GET request. Use for read-only retrieval. Response is parsed as JSON when possible, otherwise returned as text. Subject to host allow/deny policy and a response-size cap (default 1 MiB)." + nonSuccessNote + truncationNote,
 			Parameters:  readVerbProps(),
 		}},
 		{Type: "function", Function: taskengine.FunctionTool{
-			Name:        "web_head",
-			Description: "Make an HTTP HEAD request. Use to inspect headers and status without fetching the body.",
+			Name: "web_head",
+			// No truncation note: a HEAD response has no body to cap.
+			Description: "Make an HTTP HEAD request. Returns {status, headers} — the status code and the response headers — without fetching the body." + nonSuccessNote,
 			Parameters:  readVerbProps(),
 		}},
 		{Type: "function", Function: taskengine.FunctionTool{
 			Name:        "web_post",
-			Description: "Make an HTTP POST request. Triggers a HITL approval prompt by default — the user sees the URL and method before the request is sent. Body capped by _max_request_body_bytes.",
+			Description: "Make an HTTP POST request. Triggers a HITL approval prompt by default — the user sees the URL and method before the request is sent. Body capped by _max_request_body_bytes." + nonSuccessNote + truncationNote,
 			Parameters:  writeVerbProps(),
 		}},
 		{Type: "function", Function: taskengine.FunctionTool{
 			Name:        "web_put",
-			Description: "Make an HTTP PUT request. Triggers a HITL approval prompt by default.",
+			Description: "Make an HTTP PUT request. Triggers a HITL approval prompt by default." + nonSuccessNote + truncationNote,
 			Parameters:  writeVerbProps(),
 		}},
 		{Type: "function", Function: taskengine.FunctionTool{
 			Name:        "web_patch",
-			Description: "Make an HTTP PATCH request. Triggers a HITL approval prompt by default.",
+			Description: "Make an HTTP PATCH request. Triggers a HITL approval prompt by default." + nonSuccessNote + truncationNote,
 			Parameters:  writeVerbProps(),
 		}},
 		{Type: "function", Function: taskengine.FunctionTool{
 			Name:        "web_delete",
-			Description: "Make an HTTP DELETE request. Triggers a HITL approval prompt by default.",
+			Description: "Make an HTTP DELETE request. Triggers a HITL approval prompt by default." + nonSuccessNote + truncationNote,
 			Parameters:  writeVerbProps(),
 		}},
 	}

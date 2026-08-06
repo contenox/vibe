@@ -12,7 +12,7 @@ import (
 )
 
 // DefaultOllamaSuggestModel is the model name we suggest for local Ollama when no chat models are present yet.
-const DefaultOllamaSuggestModel = "qwen2.5:7b"
+const DefaultOllamaSuggestModel = "qwen3:8b"
 
 // resolveOllamaProbeBaseURL returns the Ollama HTTP base URL for health checks.
 // It respects OLLAMA_HOST (with or without scheme); otherwise http://127.0.0.1:11434.
@@ -68,9 +68,9 @@ func needsNonDefaultOllamaBackendURL(probedBase string) bool {
 
 func ollamaRegistrationCommand(probedBase string) string {
 	if needsNonDefaultOllamaBackendURL(probedBase) {
-		return fmt.Sprintf("contenox backend add local --type ollama --url %q", probedBase)
+		return fmt.Sprintf("contenox backend add ollama --type ollama --url %q", probedBase)
 	}
-	return "contenox backend add local --type ollama"
+	return "contenox backend add ollama --type ollama"
 }
 
 func ollamaBackendAlreadyReachable(r Result) bool {

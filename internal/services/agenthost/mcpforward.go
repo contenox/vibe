@@ -6,7 +6,7 @@ import (
 	"sort"
 
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 )
 
 // McpServerResolver is the narrow lookup surface ResolveForwardedMcpServers

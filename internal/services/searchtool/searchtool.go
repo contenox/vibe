@@ -1,4 +1,4 @@
-// Package searchtool exposes the workspace semantic index to an agent as one
+// Package searchtool exposes the workspace retrieval index to an agent as one
 // local toolset, provider "workspace", one tool: workspace_search. It is
 // deliberately thin — argument decoding, a token-budgeted payload, a schema
 // — with all retrieval in workspaceindex. A workspace with no index is not
@@ -70,9 +70,20 @@ const (
 )
 
 // noIndexNote is what a workspace with no index answers with: a result, not
-// an error, naming the fix.
+// an error, naming the fix. It states that indexing needs no embedding model
+// because the common reason a workspace has no index is a human who read
+// "semantic search" and concluded they had to configure one first.
 const noIndexNote = "No index exists for this workspace yet, so nothing could be searched. " +
 	"This is not a failure of the tool: ask the human to run `contenox index` in the workspace, " +
+	"which does not require an embedding model — without one the index is keyword-only, which still answers exact identifiers. " +
+	"Use the Go tools or a file read in the meantime."
+
+// emptyIndexNote separates "indexed, matched nothing" from "an index exists
+// but is empty". The second is the human's to fix and the model must not read
+// it as evidence that the workspace does not contain the thing.
+const emptyIndexNote = "An index exists for this workspace but holds no chunks, so there was nothing to search — " +
+	"this is NOT evidence that the workspace lacks what you asked for. " +
+	"Ask the human to run `contenox index` (it walks the tree; gitignored, binary and oversized files are skipped), " +
 	"and use the Go tools or a file read in the meantime."
 
 // Hit is one ranked citation returned to the model.

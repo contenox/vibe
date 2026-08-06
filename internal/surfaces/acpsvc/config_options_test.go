@@ -15,7 +15,7 @@ import (
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,7 +31,7 @@ func setupConfigOptionsDB(t *testing.T) (context.Context, libdb.DBManager) {
 func TestUnit_SessionConfigOptionsExposeModelPolicyAndThink(t *testing.T) {
 	ctx, db := setupConfigOptionsDB(t)
 	// Decoy global value: per-session display must ignore the global KV.
-	require.NoError(t, clikv.SetHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction()), "strict"))
+	require.NoError(t, clikv.SetHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction()), "", "strict"))
 
 	tr := &Transport{
 		deps: Deps{
@@ -132,7 +132,7 @@ func TestUnit_SetSessionConfigOptionUpdatesSessionAndPolicyConfig(t *testing.T) 
 	})
 	require.NoError(t, err)
 	require.Equal(t, "dev", sess.hitlPolicy(), "HITL policy is stored on the session")
-	require.Empty(t, clikv.ReadHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction())),
+	require.Empty(t, clikv.ReadHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction()), ""),
 		"setting the toolbar HITL policy must NOT write the global cli.hitl-policy-name KV")
 	require.Equal(t, "dev", optionByID(t, resp.ConfigOptions, configIDHITLPolicy).CurrentValue)
 	require.Equal(t, "dev", tr.resolveSessionHITLPolicy(sess), "a concrete selection resolves to its own name for enforcement")
@@ -144,7 +144,7 @@ func TestUnit_SetSessionConfigOptionUpdatesSessionAndPolicyConfig(t *testing.T) 
 	})
 	require.NoError(t, err)
 	require.Equal(t, hitlPolicyDefaultValue, sess.hitlPolicy())
-	require.Empty(t, clikv.ReadHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction())))
+	require.Empty(t, clikv.ReadHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction()), ""))
 	require.Equal(t, hitlPolicyDefaultValue, optionByID(t, resp.ConfigOptions, configIDHITLPolicy).CurrentValue)
 	require.Equal(t, "strict", tr.resolveSessionHITLPolicy(sess), "the sentinel resolves to the operator-configured default policy")
 
@@ -198,7 +198,7 @@ func TestUnit_HITLPolicyIsPerSessionIndependent(t *testing.T) {
 	require.Equal(t, "dev", optionByID(t, tr.sessionConfigOptions(ctx, sessA), configIDHITLPolicy).CurrentValue)
 	require.Equal(t, "strict", optionByID(t, tr.sessionConfigOptions(ctx, sessB), configIDHITLPolicy).CurrentValue)
 
-	require.Empty(t, clikv.ReadHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction())),
+	require.Empty(t, clikv.ReadHITLPolicy(ctx, runtimetypes.New(db.WithoutTransaction()), ""),
 		"per-session HITL selection must never write the global cli.hitl-policy-name KV")
 }
 

@@ -148,7 +148,7 @@ func evaluateCore(in Input) Result {
 			// Defaults live on the Settings page, not Backends — a
 			// registered backend alone never sets a default.
 			FixPath:    "/settings",
-			CLICommand: "contenox config set default-model <name>",
+			CLICommand: "contenox setup   # guided; or: contenox config set default-model <name>",
 		})
 	}
 	if r.DefaultProvider == "" {
@@ -158,7 +158,7 @@ func evaluateCore(in Input) Result {
 			Category:   CategoryDefaults,
 			Message:    "No default provider is set. Internal chat and chains using {{var:provider}} need it.",
 			FixPath:    "/settings",
-			CLICommand: "contenox config set default-provider ollama",
+			CLICommand: "contenox setup   # guided; or: contenox config set default-provider ollama",
 		})
 	}
 
@@ -909,11 +909,11 @@ func providerAddCommand(provider string) string {
 	case "gemini":
 		return "contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY"
 	case "vertex-google":
-		return fmt.Sprintf("gcloud auth application-default login && contenox backend add %s --type %s --url \"https://us-central1-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/us-central1\"", provider, provider)
+		return fmt.Sprintf("gcloud auth application-default login && contenox backend add %s --type %s --url \"https://aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/global\"   # or regional (data residency): --url \"https://{REGION}-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/{REGION}\"; models differ per endpoint: contenox model list", provider, provider)
 	case "bedrock":
 		return "contenox backend add bedrock --type bedrock --url \"https://bedrock-runtime.us-east-1.amazonaws.com\"   # uses the ambient AWS credential chain"
 	default:
-		return "contenox backend add local --type ollama  # or: contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY"
+		return "contenox backend add ollama --type ollama  # or: contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY"
 	}
 }
 

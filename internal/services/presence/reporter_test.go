@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/presence"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // errStoreBoom is the failure a primed recordingStore returns.

@@ -3,17 +3,21 @@ package contenoxcli
 import (
 	"context"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/chainagents"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // discoverChainAgents runs one chain-agent discovery pass over the workspace
-// .contenox/ and ~/.contenox/, declaring agent-* chains as fleet-dispatchable
-// agents. Best effort: a failed pass leaves the registry as it was, and the
-// outcome is reported via tracker (not stderr) since this runs unattended.
-// A nil tracker degrades to Noop.
-func discoverChainAgents(ctx context.Context, agents agentregistryservice.Service, contenoxDir string, tracker libtracker.ActivityTracker) {
+// .contenox/ and ~/.contenox/, declaring chain-agent-* chains (and the shipped
+// chains by id) as fleet-dispatchable agents. Without optInBeta the pass is
+// narrowed to the stable roster (chainagents.StableAgentName): the shipped
+// surface chains and agent-planner — the default-mission path — stay
+// registered, user-authored chain-agent-* chains are neither registered nor
+// reconciled. Best effort: a failed pass leaves
+// the registry as it was, and the outcome is reported via tracker (not
+// stderr) since this runs unattended. A nil tracker degrades to Noop.
+func discoverChainAgents(ctx context.Context, agents agentregistryservice.Service, contenoxDir string, tracker libtracker.ActivityTracker, optInBeta bool) {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
 	}
@@ -24,8 +28,12 @@ func discoverChainAgents(ctx context.Context, agents agentregistryservice.Servic
 	reportErr, reportChange, end := tracker.Start(ctx, "discover", "chain_agents", "roots", roots)
 	defer end()
 
-	// WithTracker (not Discover) reports refused files and vanished agents through the tracker.
-	res, err := chainagents.DiscoverWithTracker(ctx, agents, tracker, roots...)
+	var keep func(string) bool
+	if !optInBeta {
+		keep = chainagents.StableAgentName
+	}
+	// DiscoverKept (not Discover) reports refused files and vanished agents through the tracker.
+	res, err := chainagents.DiscoverKept(ctx, agents, tracker, keep, roots...)
 	if err != nil {
 		reportErr(err)
 		return

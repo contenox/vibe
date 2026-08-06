@@ -22,8 +22,14 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 ```
 ~/.contenox/                    ← global (shared across all workspaces)
 ├── local.db                    ← SQLite: backends, config, sessions, MCP registrations
-├── default-chain.json          ← the interactive chat chain
-├── default-run-chain.json      ← the one-shot pipeline chain
+├── chain-agent-contenox.json   ← the interactive chat chain
+├── chain-agent-run.json        ← the one-shot pipeline chain
+├── chain-agent-acp.json        ← editor (ACP) sessions
+├── chain-agent-acpx.json       ← headless / untrusted-driver (ACPX) sessions
+├── chain-agent-beam.json       ← contenox new's terminal UI
+├── chain-planner-default.json  ← the default mission planner
+├── chain-compact-default.json  ← history compaction
+├── chain-fim-default.json      ← editor autocomplete
 ├── hitl-policy-default.json    ← default HITL policy
 ├── hitl-policy-strict.json
 ├── hitl-policy-dev.json
@@ -37,14 +43,16 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 
 To make any directory a workspace, run `contenox init` inside it. Workspace-scoped config (like `default-chain` and `hitl-policy-name`) is stored per-workspace in the SQLite database. If you place a chain file in the workspace `.contenox/` with the same name as a global preset, the workspace file wins.
 
+> **Note:** `contenox init --local` seeds the default chains and HITL policy presets into the workspace `.contenox/` for you — the supported way to create workspace-local overrides without copying files by hand. `contenox doctor` lists which workspace copies are currently shadowing global ones.
+
 ## What `contenox init` already gave you
 
-Look in `~/.contenox/`. You'll find two chains the engine ships with:
+Look in `~/.contenox/`. Every chain file follows the `chain-<role>-<variant>.json` naming convention ([the full grammar](/docs/guide/chain-naming/)). Two of them carry the CLI's day-to-day work:
 
-- `default-chain.json` — the interactive chat loop, used by `contenox chat` **and** by a bare `contenox "..."` (a bare prompt is session-backed chat, not a stateless run)
-- `default-run-chain.json` — the one-shot, stateless pipeline loop, used only by `contenox run`
+- `chain-agent-contenox.json` — the interactive chat loop, used by `contenox chat` **and** by a bare `contenox "..."` (a bare prompt is session-backed chat, not a stateless run)
+- `chain-agent-run.json` — the one-shot, stateless pipeline loop, used only by `contenox run`
 
-The second one is a real authored chain: a main agentic loop with a 10-round budget, a recovery loop with another 10 rounds, and a final `summarise_failure` task that runs when both budgets are exhausted. Tool allowlists, retry policies, edge-traversal counters — every decision is a JSON key.
+The second one is a real authored chain: a main agentic loop with a 10-round budget, a recovery loop with another 10 rounds, and a final `summarise_failure` task that runs when both budgets are exhausted. Tool allowlists, retry policies, edge-traversal counters — every decision is a JSON key. The loop structure itself — why it is staged that way, and how to derive your own — is explained in [The agentic loop](/docs/guide/agentic-loop/).
 
 You don't have to start there. You can write your own.
 
@@ -67,7 +75,7 @@ Create `./my-chain.json`:
       "id": "answer",
       "handler": "chat_completion",
       "execute_config": {
-        "model": "qwen2.5:7b",
+        "model": "qwen3:8b",
         "provider": "ollama"
       },
       "transition": {
@@ -100,7 +108,7 @@ Add `system_instruction` to the task. This is the agent's persona for this chain
   "handler": "chat_completion",
   "system_instruction": "You are a terse senior engineer. One sentence answers. No preamble.",
   "execute_config": {
-    "model": "qwen2.5:7b",
+    "model": "qwen3:8b",
     "provider": "ollama"
   },
   "transition": { "branches": [{ "operator": "default", "goto": "end" }] }
@@ -118,7 +126,7 @@ The agent now answers in your voice, not the model's default voice.
 ```json
 {
   "execute_config": {
-    "models": ["qwen2.5:7b", "gpt-4o-mini"],
+    "models": ["qwen3:8b", "gpt-5-mini"],
     "providers": ["ollama", "openai"],
     "temperature": 0.2
   }
@@ -143,7 +151,7 @@ A single task is a function call. A chain becomes interesting when it branches. 
       "id": "classify",
       "handler": "route",
       "system_instruction": "Classify the message urgency. Respond 'urgent' or 'normal'.",
-      "execute_config": { "model": "qwen2.5:7b", "provider": "ollama" },
+      "execute_config": { "model": "qwen3:8b", "provider": "ollama" },
       "transition": {
         "branches": [
           { "operator": "equals", "when": "urgent", "goto": "escalate" },
@@ -156,14 +164,14 @@ A single task is a function call. A chain becomes interesting when it branches. 
       "id": "escalate",
       "handler": "chat_completion",
       "system_instruction": "This is urgent. Draft a one-line page to on-call.",
-      "execute_config": { "model": "qwen2.5:7b", "provider": "ollama" },
+      "execute_config": { "model": "qwen3:8b", "provider": "ollama" },
       "transition": { "branches": [{ "operator": "default", "goto": "end" }] }
     },
     {
       "id": "respond",
       "handler": "chat_completion",
       "system_instruction": "Reply briefly and helpfully.",
-      "execute_config": { "model": "qwen2.5:7b", "provider": "ollama" },
+      "execute_config": { "model": "qwen3:8b", "provider": "ollama" },
       "transition": { "branches": [{ "operator": "default", "goto": "end" }] }
     }
   ]
@@ -181,7 +189,7 @@ If the task uses tools, you author the policy. Allowlists, denylists, per-tool c
 ```json
 {
   "execute_config": {
-    "model": "qwen2.5:7b",
+    "model": "qwen3:8b",
     "provider": "ollama",
     "tools": ["local_shell", "local_fs"],
     "tools_policies": {
@@ -210,7 +218,7 @@ Transient failures shouldn't kill a CI step. Author the retry behavior in the ch
 ```json
 {
   "execute_config": {
-    "model": "qwen2.5:7b",
+    "model": "qwen3:8b",
     "provider": "ollama",
     "retry_policy": {
       "max_attempts": 4,

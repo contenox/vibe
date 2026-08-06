@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +32,7 @@ func TestUnit_ComputeBounds_ParsesAndReadsBackExactly(t *testing.T) {
 		"default_action":"approve",
 		"rules":[{"tools":"local_fs","tool":"write_file","action":"approve"}],
 		"compute":{
-			"maxTurns":8,
+			"maxTurns":1,
 			"maxToolCalls":40,
 			"maxTokens":1500000,
 			"modelAllowlist":["qwen2.5-coder","llama3.1"],
@@ -43,7 +43,7 @@ func TestUnit_ComputeBounds_ParsesAndReadsBackExactly(t *testing.T) {
 
 	bounds, err := boundsReader(t, dir, "envelope.json").ComputeBoundsFor(context.Background(), "envelope.json")
 	require.NoError(t, err)
-	assert.Equal(t, 8, bounds.MaxTurns)
+	assert.Equal(t, 1, bounds.MaxTurns)
 	assert.Equal(t, 40, bounds.MaxToolCalls)
 	assert.Equal(t, 1500000, bounds.MaxTokens)
 	assert.Equal(t, []string{"qwen2.5-coder", "llama3.1"}, bounds.ModelAllowlist)
@@ -65,31 +65,35 @@ func TestUnit_ComputeBounds_AbsentBlockIsUnbounded(t *testing.T) {
 	assert.Zero(t, bounds.MaxTokens)
 }
 
-// TestUnit_ComputeBounds_PauseAskParses pins that pause_ask parses, even
-// though the enforcement seam still honors it as finish_stuck.
-func TestUnit_ComputeBounds_PauseAskParses(t *testing.T) {
+// TestUnit_ComputeBounds_PauseAskIsRejected pins that pause_ask — formerly
+// accepted and silently honored as finish_stuck — now fails the policy to
+// load with a message naming the replacement.
+func TestUnit_ComputeBounds_PauseAskIsRejected(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writePolicy(t, dir, "envelope.json", []byte(`{"rules":[],"compute":{"maxTurns":3,"onExhausted":"pause_ask"}}`))
+	writePolicy(t, dir, "envelope.json", []byte(`{"rules":[],"compute":{"maxTurns":1,"onExhausted":"pause_ask"}}`))
 
-	bounds, err := boundsReader(t, dir, "envelope.json").ComputeBoundsFor(context.Background(), "envelope.json")
-	require.NoError(t, err)
-	assert.Equal(t, hitlservice.OnExhaustedPauseAsk, bounds.OnExhausted)
+	_, err := boundsReader(t, dir, "envelope.json").ComputeBoundsFor(context.Background(), "envelope.json")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pause_ask is not implemented; use finish_stuck")
 }
 
 // TestUnit_ComputeBounds_ValidateMatrix_RejectsMalformed pins that every malformed compute block fails the whole policy to load.
 func TestUnit_ComputeBounds_ValidateMatrix_RejectsMalformed(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"negative maxTurns":       `{"rules":[],"compute":{"maxTurns":-1}}`,
-		"negative maxToolCalls":   `{"rules":[],"compute":{"maxToolCalls":-5}}`,
-		"negative maxTokens":      `{"rules":[],"compute":{"maxTokens":-100}}`,
-		"maxTurns over cap":       `{"rules":[],"compute":{"maxTurns":1000000}}`,
-		"maxToolCalls over cap":   `{"rules":[],"compute":{"maxToolCalls":999999999}}`,
-		"unknown onExhausted":     `{"rules":[],"compute":{"onExhausted":"explode"}}`,
-		"empty allowlist entry":   `{"rules":[],"compute":{"modelAllowlist":["ok",""]}}`,
-		"unknown field (typo)":    `{"rules":[],"compute":{"maxTurn":5}}`,
-		"unknown field onExhaust": `{"rules":[],"compute":{"onExhaust":"finish_stuck"}}`,
+		"negative maxTurns":     `{"rules":[],"compute":{"maxTurns":-1}}`,
+		"negative maxToolCalls": `{"rules":[],"compute":{"maxToolCalls":-5}}`,
+		"negative maxTokens":    `{"rules":[],"compute":{"maxTokens":-100}}`,
+		// Above 1 names a turn the dispatcher never takes; accepting it is how
+		// a shipped preset came to declare a ceiling nothing could reach.
+		"maxTurns above the two-turn dispatch": `{"rules":[],"compute":{"maxTurns":2}}`,
+		"maxTurns far above":                   `{"rules":[],"compute":{"maxTurns":1000000}}`,
+		"maxToolCalls over cap":                `{"rules":[],"compute":{"maxToolCalls":999999999}}`,
+		"unknown onExhausted":                  `{"rules":[],"compute":{"onExhausted":"explode"}}`,
+		"empty allowlist entry":                `{"rules":[],"compute":{"modelAllowlist":["ok",""]}}`,
+		"unknown field (typo)":                 `{"rules":[],"compute":{"maxTurn":5}}`,
+		"unknown field onExhaust":              `{"rules":[],"compute":{"onExhaust":"finish_stuck"}}`,
 	}
 	for name, body := range cases {
 		name, body := name, body
@@ -109,7 +113,7 @@ func TestUnit_ComputeBounds_ValidateMatrix_AcceptsWellFormed(t *testing.T) {
 		"only maxTurns":     `{"rules":[],"compute":{"maxTurns":1}}`,
 		"only maxToolCalls": `{"rules":[],"compute":{"maxToolCalls":1}}`,
 		"zero fields":       `{"rules":[],"compute":{}}`,
-		"finish_stuck":      `{"rules":[],"compute":{"maxTurns":5,"onExhausted":"finish_stuck"}}`,
+		"finish_stuck":      `{"rules":[],"compute":{"maxTurns":1,"onExhausted":"finish_stuck"}}`,
 		"allowlists only":   `{"rules":[],"compute":{"modelAllowlist":["a"],"backendAllowlist":["b"]}}`,
 	}
 	for name, body := range cases {
@@ -132,7 +136,7 @@ func TestUnit_ComputeBounds_DoesNotAlterActionEvaluation(t *testing.T) {
 	writePolicy(t, dir, "envelope.json", []byte(`{
 		"default_action":"deny",
 		"rules":[{"tools":"webtools","tool":"call","action":"allow"}],
-		"compute":{"maxTurns":2}
+		"compute":{"maxTurns":1}
 	}`))
 	svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(dir), testTenant, fixedKVReader{"envelope.json"}, libtracker.NoopTracker{}, "envelope.json")
 

@@ -75,6 +75,22 @@ func values(res *jqtool.Result) []string {
 	return out
 }
 
+// declaredTypes reads a descriptor's "type", which JSON Schema spells as a bare
+// string for one type and as a list for a union.
+func declaredTypes(v any) []string {
+	switch t := v.(type) {
+	case string:
+		return []string{t}
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			out = append(out, item.(string))
+		}
+		return out
+	}
+	return nil
+}
+
 func writeFixture(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -172,6 +188,30 @@ func TestUnit_JQTool_BothInputSources(t *testing.T) {
 		"filter": `[.tasks[].id]`,
 	})
 	assert.Equal(t, []string{`["plan"]`}, values(asValue))
+
+	// Every non-string branch the descriptor declares for input is one Exec
+	// really takes; a branch the schema promised but loadValue refused would be
+	// a contract wider than the code.
+	for _, tc := range []struct {
+		name  string
+		input any
+		want  string
+	}{
+		{"array", []any{1.0, 2.0}, "2"},
+		{"number", 41.5, "41.5"},
+		{"integer", 7, "7"},
+		{"boolean", true, "true"},
+	} {
+		t.Run("input/"+tc.name, func(t *testing.T) {
+			res := mustExec(t, tools, map[string]any{"input": tc.input, "filter": `if type=="array" then length else . end`})
+			assert.Equal(t, []string{tc.want}, values(res))
+		})
+	}
+
+	// null is not one of the declared branches: it reads as no source at all.
+	_, err := exec(t, tools, map[string]any{"input": nil, "filter": "."})
+	require.Error(t, err, "a null input must be refused for having no source, not queried")
+	assert.Contains(t, err.Error(), "input source is required")
 }
 
 func TestUnit_JQTool_YAMLInput(t *testing.T) {
@@ -748,10 +788,6 @@ func TestUnit_JQTool_ToolsRepoContract(t *testing.T) {
 	assert.Contains(t, supported, jqtool.ToolsProviderName)
 	assert.Contains(t, supported, jqtool.ToolQuery)
 
-	schemas, err := tools.GetSchemasForSupportedTools(ctx)
-	require.NoError(t, err)
-	assert.Empty(t, schemas, "jq is a local toolset: the model-facing contract is GetToolsForToolsByName")
-
 	declared, err := tools.GetToolsForToolsByName(ctx, jqtool.ToolsProviderName)
 	require.NoError(t, err)
 	require.Len(t, declared, 1)
@@ -777,6 +813,110 @@ func TestUnit_JQTool_ToolsRepoContract(t *testing.T) {
 
 	_, err = tools.GetToolsForToolsByName(ctx, "jq_write")
 	require.Error(t, err)
+}
+
+// TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor pins the declared
+// OpenAPI contract and its agreement with what actually reaches the provider:
+// the request schema and the descriptor's parameters are rendered from one
+// property table, so they must agree property for property — types,
+// descriptions, enums and the required set — and the response schema must
+// describe the payload Exec really returns.
+func TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
+	t.Parallel()
+	tools := newTools(t, t.TempDir())
+	ctx := context.Background()
+
+	docs, err := tools.GetSchemasForSupportedTools(ctx)
+	require.NoError(t, err)
+	doc, ok := docs[jqtool.ToolsProviderName]
+	require.True(t, ok, "the toolset publishes its contract under its provider name")
+	require.Equal(t, "3.1.0", doc.OpenAPI)
+	require.NotNil(t, doc.Info)
+	require.NotEmpty(t, doc.Info.Title)
+	require.NotEmpty(t, doc.Info.Description)
+	require.NotEmpty(t, doc.Info.Version)
+	require.NotNil(t, doc.Components)
+	require.NoError(t, doc.Validate(ctx), "the published document is a valid OpenAPI document, not a shape that only looks like one")
+
+	req := doc.Components.Schemas["JqQueryRequest"]
+	require.NotNil(t, req, "the request contract is declared")
+	require.Equal(t, []string{"filter"}, req.Value.Required)
+	require.Len(t, req.Value.Properties, 6)
+	require.ElementsMatch(t, []any{"json", "yaml"}, req.Value.Properties["format"].Value.Enum,
+		"the accepted parsers are declared as an enum, not prose")
+
+	// input is the union resolveInput really accepts: a document string, or an
+	// already-decoded JSON value. null is deliberately absent — it reads as no
+	// input at all.
+	require.ElementsMatch(t,
+		[]string{"string", "object", "array", "number", "integer", "boolean"},
+		[]string(*req.Value.Properties["input"].Value.Type),
+		"input must declare the value shapes loadInline and loadValue between them accept")
+	require.NotNil(t, req.Value.Properties["input"].Value.Items,
+		"a union carrying an array branch must declare items or the document is invalid")
+
+	// The descriptor is what reaches the provider: it must not drift from the
+	// declaration above.
+	declared, err := tools.GetToolsForToolsByName(ctx, jqtool.ToolsProviderName)
+	require.NoError(t, err)
+	require.Len(t, declared, 1)
+	params, ok := declared[0].Function.Parameters.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "object", params["type"])
+	require.ElementsMatch(t, req.Value.Required, params["required"].([]string))
+
+	props, ok := params["properties"].(map[string]any)
+	require.True(t, ok)
+	require.Len(t, props, len(req.Value.Properties))
+	for name, published := range req.Value.Properties {
+		prop, ok := props[name].(map[string]any)
+		require.Truef(t, ok, "descriptor declares %s", name)
+		require.Equalf(t, declaredTypes(prop["type"]), []string(*published.Value.Type),
+			"%s: descriptor and published schema must declare the same type set", name)
+		// An array branch must declare items in both places, or the published
+		// document is not a valid OpenAPI document.
+		_, wantItems := prop["items"]
+		require.Equalf(t, wantItems, published.Value.Items != nil, "%s: items declared in only one of the two", name)
+		require.NotEmptyf(t, published.Value.Description, "%s is described", name)
+		require.Equalf(t, published.Value.Description, prop["description"],
+			"%s: descriptor and published schema must carry the same description", name)
+		if len(published.Value.Enum) == 0 {
+			require.NotContainsf(t, prop, "enum", "%s declares no enum in either place", name)
+			continue
+		}
+		enum, ok := prop["enum"].([]string)
+		require.Truef(t, ok, "%s: descriptor enum", name)
+		asAny := make([]any, 0, len(enum))
+		for _, v := range enum {
+			asAny = append(asAny, v)
+		}
+		require.ElementsMatch(t, published.Value.Enum, asAny,
+			"%s: descriptor and published schema must declare the same values", name)
+	}
+
+	// The response contract is the Result payload Exec returns.
+	resp := doc.Components.Schemas["JqQueryResponse"]
+	require.NotNil(t, resp)
+	require.ElementsMatch(t, []string{"filter", "source", "format", "documents", "values", "count"}, resp.Value.Required)
+	for name, published := range resp.Value.Properties {
+		require.NotEmptyf(t, published.Value.Description, "%s is described", name)
+	}
+
+	// Declared against what a call actually produces, field for field.
+	dir := t.TempDir()
+	writeFixture(t, dir, "chain.json", chainFixture)
+	res, err := exec(t, newTools(t, dir), map[string]any{"filter": ".tasks[].id", "path": "chain.json"})
+	require.NoError(t, err)
+	raw, err := json.Marshal(res)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(raw, &got))
+	for name := range got {
+		require.Containsf(t, resp.Value.Properties, name, "the result carries %s but the published schema does not declare it", name)
+	}
+	for _, name := range resp.Value.Required {
+		require.Containsf(t, got, name, "the published schema requires %s but the result omits it", name)
+	}
 }
 
 func TestUnit_JQTool_DeclarativeArgsOnTheCall(t *testing.T) {

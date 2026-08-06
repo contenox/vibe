@@ -25,7 +25,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/liveness"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/style"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/term"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 const (
@@ -181,10 +181,18 @@ type app struct {
 
 	// The active session's identity, held here because switching replaces
 	// it. sessionName is the ACP id's display form; sessionTitle is the
-	// server-derived or /rename label, and wins whenever known.
+	// server-published label (the agent's own /rename writes it), and wins
+	// whenever known.
 	sessionID    libacp.SessionID
 	sessionName  string
 	sessionTitle string
+
+	// model and provider are what the session is running NOW: seeded from
+	// Deps and replaced by every config_option_update, so /model and
+	// /provider move the status bar instead of leaving it on launch-time
+	// values (see ConfigOptionUpdated in events.go).
+	model    string
+	provider string
 
 	// pickerOpen, sessionsOpen and helpOpen are the overlay states with no
 	// component flag of their own (the palette has IsOpen, the card is
@@ -225,6 +233,16 @@ type app struct {
 	used     int
 	size     int
 	messages int
+
+	// disconnected latches the engine connection ending. Nothing reopens it:
+	// the event stream closes once, and the surface stays up only so the
+	// transcript can be read and beam quit deliberately.
+	disconnected bool
+
+	// missions holds the ids of missions this session fired that have not
+	// come to rest, so the status-bar badge counts open work rather than
+	// announcements (see trackMission).
+	missions map[string]bool
 
 	// inbox counts operator-inbox arrivals since launch. It only grows: beam
 	// has no dismiss action.
@@ -277,10 +295,13 @@ func newApp(deps Deps) (*app, error) {
 		sessions:       picker.New(),
 		live:           liveness.NewTracker(0),
 		openTools:      make(map[string]bool),
+		missions:       make(map[string]bool),
 		welcomePending: deps.FreshSession,
 		focusedWindow:  true,
 		sessionID:      deps.SessionID,
 		sessionName:    deps.SessionName,
+		model:          deps.Model,
+		provider:       deps.Provider,
 	}
 	a.width, a.height = deps.Term.Size()
 	a.focus.SetOrder([]keymap.Scope{keymap.ScopeComposer})
@@ -350,11 +371,8 @@ func (a *app) run(ctx context.Context) (err error) {
 
 		case ev, ok := <-bridgeEvents:
 			if !ok {
-				// The bridge is gone. Keep the surface alive so the operator
-				// can read the transcript and quit deliberately; nothing more
-				// will arrive.
 				bridgeEvents = nil
-				a.notice(frame.StyleWarn, "the engine connection closed — press ctrl+c to quit")
+				a.onBridgeClosed()
 				break
 			}
 			a.onBridge(ev)
@@ -378,6 +396,17 @@ func (a *app) run(ctx context.Context) (err error) {
 // commit builds exactly one frame and hands it to the terminal.
 func (a *app) commit() error {
 	return a.deps.Term.Commit(a.buildFrame())
+}
+
+// onBridgeClosed folds the one fact a closed event stream carries. The
+// surface stays alive so the operator can read the transcript and quit
+// deliberately, but nothing more will ever arrive: the health state latches,
+// and a pending permission retires here or never, since teardown emits no
+// PermissionResolved (the closed stream IS that fact).
+func (a *app) onBridgeClosed() {
+	a.disconnected = true
+	a.retireCard()
+	a.notice(frame.StyleWarn, "the engine connection closed — press ctrl+c to quit")
 }
 
 // ticking reports whether the loop needs its 130ms timer: liveness's own

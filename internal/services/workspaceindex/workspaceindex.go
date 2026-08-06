@@ -1,7 +1,10 @@
-// Package workspaceindex builds and queries a local semantic index over a
+// Package workspaceindex builds and queries a local retrieval index over a
 // workspace: `contenox index` fills it, `contenox search` reads it, and a
 // local tool exposes the same read to the agent. One local index per
-// workspace; V1 is a linear cosine scan over an FTS5-narrowed candidate set.
+// workspace. Retrieval is hybrid — an FTS5 bm25 leg and a linear cosine leg
+// over the same candidates, fused by Reciprocal Rank Fusion (see search.go) —
+// and either leg alone still answers, so a workspace with no embedding model
+// gets keyword retrieval rather than nothing.
 package workspaceindex
 
 import (
@@ -31,6 +34,13 @@ var ErrNoIndex = errors.New("no index for this workspace; run contenox index")
 // as a confident wrong answer.
 var ErrEmptyQuestion = errors.New("search question is empty")
 
+// ErrIndexEmpty is the narrower ErrNoIndex: a generation exists but holds no
+// chunks, so both retrieval legs have nothing to rank. It wraps ErrNoIndex on
+// purpose — every caller that already degrades "no index" to "run contenox
+// index" stays correct without changing — while a caller that wants to say
+// which of the two happened can test for this one.
+var ErrIndexEmpty = fmt.Errorf("%w: the index exists but holds no chunks", ErrNoIndex)
+
 const (
 	// embedConcurrencyDefault bounds in-flight embed calls.
 	embedConcurrencyDefault = 4
@@ -39,13 +49,13 @@ const (
 	// AppendWorkspaceChunks call; bounded by SQLite's host-parameter limit.
 	writeBatchDefault = 64
 
-	// candidateLimitDefault is how many chunks the FTS5 lexical prefilter
-	// hands to the cosine ranking stage.
+	// candidateLimitDefault bounds the lexical leg: the top 200 by bm25 are
+	// both that leg's ranking and the candidate set the vector leg ranks.
 	candidateLimitDefault = 200
 
-	// fullScanLimit bounds the degraded path taken when the lexical
-	// prefilter matches nothing at all; it is the store's own list ceiling,
-	// never an unbounded scan.
+	// fullScanLimit bounds the degraded path taken when the lexical leg
+	// matches nothing at all; it is the store's own list ceiling, never an
+	// unbounded scan.
 	fullScanLimit = runtimetypes.MAXLIMIT
 
 	// topKDefault / topKMax bound how many hits a query returns.
@@ -56,6 +66,14 @@ const (
 // Embedder is the narrow seam onto embedding generation, letting tests run
 // against a deterministic fake with no model and no network.
 // NewLLMRepoEmbedder adapts the real thing.
+//
+// A nil Embedder is legal and means LEXICAL-ONLY: Build writes chunks and
+// their FTS5 mirror with no vectors under a Dimension-0 generation, and Query
+// ranks on bm25 alone. That is the mode a workspace with no
+// `default-embed-model` runs in, and it answers exact-identifier questions
+// better than the vector leg does. Configuring a model later cuts over to a
+// new generation exactly as any model change does — a lexical-only generation
+// is never back-filled with vectors, so it cannot end up half-embedded.
 type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }
@@ -108,7 +126,8 @@ type Config struct {
 	MaxFileBytes int64
 	// EmbedConcurrency bounds in-flight embed calls.
 	EmbedConcurrency int
-	// CandidateLimit is how many chunks the FTS5 prefilter feeds to cosine.
+	// CandidateLimit bounds the lexical leg and, with it, the candidate set
+	// the vector leg ranks.
 	CandidateLimit int
 }
 
@@ -182,10 +201,13 @@ type BuildPlan struct {
 	Files  int
 	Chunks int
 	Bytes  int64
-	// FilesChanged / EmbedCalls describe the work: one embed call per chunk
-	// of a changed file.
-	FilesChanged int
-	EmbedCalls   int
+	// FilesChanged / ChunksToWrite describe the work: every chunk of every
+	// changed file gets written.
+	FilesChanged  int
+	ChunksToWrite int
+	// EmbedCalls is what that work costs at the model: one call per chunk
+	// written, or zero for a lexical-only build, which spends nothing.
+	EmbedCalls int
 	// ChunksReused / FilesDeleted describe what incremental avoids and cleans.
 	ChunksReused int
 	FilesDeleted int
@@ -207,7 +229,9 @@ type BuildReport struct {
 	Duration   time.Duration
 }
 
-// Status describes a workspace's active index.
+// Status describes a workspace's active index. Dimension 0 means the
+// generation is lexical-only: it was built with no embedding model, so only
+// the bm25 leg can rank it.
 type Status struct {
 	ConfigID      string
 	WorkspaceID   string
@@ -228,7 +252,10 @@ type Hit struct {
 	StartLine int
 	EndLine   int
 	Text      string
-	Score     float64
+	// Score is the Reciprocal Rank Fusion score, not a similarity: it is a
+	// sum of 1/(rrfK + rank) over the legs that returned this chunk, so its
+	// magnitude is meaningful only against the other hits of the same query.
+	Score float64
 	// Stale means the file's content sha no longer matches what was
 	// indexed (or the file is gone). A stale hit is still returned, never
 	// silently presented as current.
@@ -243,7 +270,8 @@ type service struct {
 }
 
 // New builds the index service over the store, an embedding seam, and a
-// token counter.
+// token counter. A nil embedder builds and searches lexical-only (see
+// Embedder); it is a supported mode, not a broken wiring.
 func New(store Store, embedder Embedder, tokens TokenCounter, cfg Config) Service {
 	return &service{
 		store:    store,
@@ -353,7 +381,10 @@ func (s *service) plan(ctx context.Context, root string, opts BuildOptions) (*Bu
 			return nil
 		}
 		plan.FilesChanged++
-		plan.EmbedCalls += len(chunks)
+		plan.ChunksToWrite += len(chunks)
+		if s.embedder != nil {
+			plan.EmbedCalls += len(chunks)
+		}
 		return nil
 	})
 	if err != nil {
@@ -395,7 +426,7 @@ func (s *service) Build(ctx context.Context, root string, opts BuildOptions) (*B
 	emit(opts.Progress, Progress{
 		Phase:       PhasePlanning,
 		FilesTotal:  plan.FilesChanged,
-		ChunksTotal: plan.EmbedCalls,
+		ChunksTotal: plan.ChunksToWrite,
 		Plan:        plan,
 	})
 
@@ -428,8 +459,8 @@ func (s *service) Build(ctx context.Context, root string, opts BuildOptions) (*B
 		}
 	}
 
-	// Nothing to embed, but the walk above still ran and any deletions already happened.
-	if plan.EmbedCalls == 0 {
+	// Nothing to write, but the walk above still ran and any deletions already happened.
+	if plan.ChunksToWrite == 0 {
 		emit(opts.Progress, Progress{Phase: PhaseDone, ChunksTotal: 0, FilesTotal: 0, Plan: plan})
 		report.Plan = *plan
 		report.Duration = time.Since(started)
@@ -449,7 +480,7 @@ func (s *service) Build(ctx context.Context, root string, opts BuildOptions) (*B
 		Files:       plan.FilesChanged,
 		FilesTotal:  plan.FilesChanged,
 		Chunks:      written,
-		ChunksTotal: plan.EmbedCalls,
+		ChunksTotal: plan.ChunksToWrite,
 		Plan:        plan,
 	})
 	return report, nil
@@ -458,18 +489,23 @@ func (s *service) Build(ctx context.Context, root string, opts BuildOptions) (*B
 // ensureConfig returns the index generation this build writes into,
 // creating one when the workspace has none or when the model/chunking/root
 // changed. A new generation needs its vector dimension up front, so one
-// probe embed runs first and is counted in the report.
+// probe embed runs first and is counted in the report. A lexical-only build
+// (nil embedder) probes nothing and pins Dimension 0.
 func (s *service) ensureConfig(ctx context.Context, plan *BuildPlan, opts BuildOptions, report *BuildReport) (*runtimetypes.WorkspaceIndexConfig, error) {
 	if !plan.CutOver && plan.ConfigID != "" {
 		return s.store.GetActiveWorkspaceIndexConfig(ctx, opts.WorkspaceID)
 	}
-	probe, err := s.embedder.Embed(ctx, "dimension probe")
-	if err != nil {
-		return nil, fmt.Errorf("workspaceindex: embedding model %q (provider %q) is unusable: %w", s.cfg.EmbedModel, s.cfg.EmbedProvider, err)
-	}
-	report.EmbedCalls++
-	if len(probe) == 0 {
-		return nil, fmt.Errorf("workspaceindex: embedding model %q returned a zero-length vector", s.cfg.EmbedModel)
+	dimension := 0
+	if s.embedder != nil {
+		probe, err := s.embedder.Embed(ctx, "dimension probe")
+		if err != nil {
+			return nil, fmt.Errorf("workspaceindex: embedding model %q (provider %q) is unusable: %w", s.cfg.EmbedModel, s.cfg.EmbedProvider, err)
+		}
+		report.EmbedCalls++
+		if len(probe) == 0 {
+			return nil, fmt.Errorf("workspaceindex: embedding model %q returned a zero-length vector", s.cfg.EmbedModel)
+		}
+		dimension = len(probe)
 	}
 	cfg := &runtimetypes.WorkspaceIndexConfig{
 		ID:            uuid.NewString(),
@@ -477,7 +513,7 @@ func (s *service) ensureConfig(ctx context.Context, plan *BuildPlan, opts BuildO
 		Root:          plan.Root,
 		EmbedModel:    s.cfg.EmbedModel,
 		EmbedProvider: s.cfg.EmbedProvider,
-		Dimension:     len(probe),
+		Dimension:     dimension,
 		ChunkTokens:   s.cfg.ChunkTokens,
 		ChunkOverlap:  s.cfg.OverlapLines,
 		CreatedAt:     time.Now().UTC(),
@@ -530,7 +566,7 @@ func (s *service) embedAndWrite(ctx context.Context, cfg *runtimetypes.Workspace
 		written      int
 		calls        int
 		filesDone    int
-		chunksTotal  = plan.EmbedCalls
+		chunksTotal  = plan.ChunksToWrite
 		filesChanged = plan.FilesChanged
 	)
 
@@ -617,8 +653,20 @@ func (s *service) discardPartialFlush(ctx context.Context, configID string, pend
 // embedBatch embeds one batch of chunks through a bounded pool, preserving
 // order. A single failure cancels the rest; it returns how many calls were
 // attempted even on failure, so a failed build still reports the cost it
-// incurred.
+// incurred. Under a lexical-only generation it embeds nothing and the rows
+// carry no vector — the FTS5 mirror is still written, so the chunks are still
+// searchable.
 func (s *service) embedBatch(ctx context.Context, cfg *runtimetypes.WorkspaceIndexConfig, chunks []Chunk) ([]*runtimetypes.WorkspaceChunk, int, error) {
+	if s.embedder == nil {
+		rows := make([]*runtimetypes.WorkspaceChunk, len(chunks))
+		for i, c := range chunks {
+			if err := ctx.Err(); err != nil {
+				return nil, 0, err
+			}
+			rows[i] = newChunkRow(cfg, c, nil)
+		}
+		return rows, 0, nil
+	}
 	rows := make([]*runtimetypes.WorkspaceChunk, len(chunks))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(s.cfg.EmbedConcurrency)
@@ -636,17 +684,7 @@ func (s *service) embedBatch(ctx context.Context, cfg *runtimetypes.WorkspaceInd
 				return fmt.Errorf("%w: %s:%d-%d embedded to %d dimensions, index %s declares %d — the embedding model changed under this index; rebuild with --force",
 					runtimetypes.ErrVectorDimensionMismatch, c.Path, c.StartLine, c.EndLine, len(vec), cfg.ID, cfg.Dimension)
 			}
-			row := &runtimetypes.WorkspaceChunk{
-				ID:          uuid.NewString(),
-				ConfigID:    cfg.ID,
-				WorkspaceID: cfg.WorkspaceID,
-				Path:        c.Path,
-				StartLine:   c.StartLine,
-				EndLine:     c.EndLine,
-				ContentSHA:  c.SHA,
-				Text:        c.Text,
-				Vector:      vec,
-			}
+			row := newChunkRow(cfg, c, vec)
 			mu.Lock()
 			rows[i] = row
 			mu.Unlock()
@@ -657,6 +695,22 @@ func (s *service) embedBatch(ctx context.Context, cfg *runtimetypes.WorkspaceInd
 		return nil, int(attempted.Load()), err
 	}
 	return rows, int(attempted.Load()), nil
+}
+
+// newChunkRow is the one place a chunk becomes a store row, so the vector-bearing
+// and lexical-only paths cannot drift in what they record.
+func newChunkRow(cfg *runtimetypes.WorkspaceIndexConfig, c Chunk, vec []float32) *runtimetypes.WorkspaceChunk {
+	return &runtimetypes.WorkspaceChunk{
+		ID:          uuid.NewString(),
+		ConfigID:    cfg.ID,
+		WorkspaceID: cfg.WorkspaceID,
+		Path:        c.Path,
+		StartLine:   c.StartLine,
+		EndLine:     c.EndLine,
+		ContentSHA:  c.SHA,
+		Text:        c.Text,
+		Vector:      vec,
+	}
 }
 
 func emit(fn func(Progress), p Progress) {

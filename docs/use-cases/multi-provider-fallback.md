@@ -22,7 +22,7 @@ Chain a candidate list of models and providers with a retry policy, so a rate li
      "handler": "chat_completion",
      "system_instruction": "Summarise the input in two sentences.",
      "execute_config": {
-       "models": ["qwen2.5:7b", "gpt-4o-mini", "gemini-2.0-flash"],
+       "models": ["qwen3:8b", "gpt-5-mini", "gemini-flash-latest"],
        "providers": ["ollama", "openai", "gemini"],
        "retry_policy": {
          "max_attempts": 3,
@@ -47,9 +47,9 @@ Chain a candidate list of models and providers with a retry policy, so a rate li
 
 One task now encodes a four-level resilience policy:
 
-1. Try `qwen2.5:7b` on Ollama. On a transient failure, retry with backoff and jitter (3 attempts).
-2. If Ollama's retries exhaust, fall over to `gpt-4o-mini` on OpenAI and retry there.
-3. If OpenAI also exhausts, try `gemini-2.0-flash` on Gemini.
+1. Try `qwen3:8b` on Ollama. On a transient failure, retry with backoff and jitter (3 attempts).
+2. If Ollama's retries exhaust, fall over to `gpt-5-mini` on OpenAI and retry there.
+3. If OpenAI also exhausts, try `gemini-flash-latest` on Gemini.
 4. If all three fail, `transition.on_failure` routes to `summarise_locally`.
 
 ## Customize

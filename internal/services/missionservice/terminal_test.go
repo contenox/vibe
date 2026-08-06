@@ -1,8 +1,11 @@
 package missionservice
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/contenox/contenox/internal/errdefs"
@@ -182,4 +185,190 @@ func TestUnit_MissionService_FinishNoPublisherStillStores(t *testing.T) {
 	persisted, err := svc.Get(ctx, m.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusLanded, persisted.Status)
+}
+
+// ─── no whole-record write may resurrect a terminal mission ────────────────
+//
+// SetPlan and Bind carry the whole record, so a write built on a read taken
+// before a terminal decision restores the status that read saw. The concrete
+// failure: a unit calls mission_plan while an operator runs `mission stop`;
+// the reclaim lands and the host reaps the subprocess, then the in-flight plan
+// write resurrects the row to open — a stopped mission listed as running with
+// no unit behind it. Both go through the snapshot/CAS/re-judge loop Finish
+// uses; Update stays the documented unguarded override.
+
+// interposingDB wraps a DBManager so a hook fires exactly once, after a
+// read-decide-write path's read and before the write it decided on. A
+// wall-clock race can only hope to hit that window; this pins it open, so the
+// tests below fail deterministically against an unguarded write rather than
+// on an unlucky schedule.
+type interposingDB struct {
+	libdb.DBManager
+	once      sync.Once
+	afterRead func()
+}
+
+func (d *interposingDB) WithoutTransaction() libdb.Exec {
+	return interposingExec{Exec: d.DBManager.WithoutTransaction(), owner: d}
+}
+
+type interposingExec struct {
+	libdb.Exec
+	owner *interposingDB
+}
+
+// QueryRowContext intercepts GetKVRaw's read — the one whose bytes become
+// putIfUnchanged's predicate. Matched on its projection, which no other kv
+// read shares.
+func (e interposingExec) QueryRowContext(ctx context.Context, query string, args ...any) libdb.QueryRower {
+	row := e.Exec.QueryRowContext(ctx, query, args...)
+	if !strings.Contains(query, "SELECT value") {
+		return row
+	}
+	return interposingRow{QueryRower: row, owner: e.owner}
+}
+
+type interposingRow struct {
+	libdb.QueryRower
+	owner *interposingDB
+}
+
+func (r interposingRow) Scan(dest ...any) error {
+	err := r.QueryRower.Scan(dest...)
+	if err == nil {
+		r.owner.once.Do(r.owner.afterRead)
+	}
+	return err
+}
+
+// TestUnit_SetPlan_CannotResurrectAMissionStoppedUnderIt pins the plan write's
+// conditional predicate: a unit calls mission_plan while an operator runs
+// `mission stop`, the reclaim lands, the host reaps the subprocess, and the
+// in-flight plan write arrives microseconds later. An unguarded put would
+// restore the status its read saw — a stopped mission listed as open with no
+// unit behind it and its asks already closed.
+func TestUnit_SetPlan_CannotResurrectAMissionStoppedUnderIt(t *testing.T) {
+	ctx, db := setupMissionDB(t)
+	stopper := New(db) // unwrapped: the operator's own `mission stop`
+
+	m := newMission("plan while being stopped")
+	require.NoError(t, stopper.Create(ctx, m))
+
+	interposed := &interposingDB{DBManager: db}
+	interposed.afterRead = func() {
+		_, err := stopper.Finish(ctx, m.ID, StatusAbandoned, "stopped by operator")
+		require.NoError(t, err)
+	}
+
+	planned, err := New(interposed).SetPlan(ctx, m.ID, []PlanEntry{
+		entry("e1", "step one", PlanEntryPending, PlanEntryPriorityHigh),
+	}, "first pass")
+	require.NoError(t, err, "the write re-reads and re-judges rather than failing its caller")
+	require.Equal(t, StatusAbandoned, planned.Status)
+
+	got, err := stopper.Get(ctx, m.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusAbandoned, got.Status, "a plan write must never put an at-rest row back in motion")
+	require.Equal(t, "stopped by operator", got.StatusReason, "nor overwrite the reason the operator's stop recorded")
+	require.Equal(t, 1, got.Plan.Revision, "the plan still lands — on the row as it actually is")
+}
+
+// TestUnit_Bind_CannotResurrectAMissionStoppedUnderIt is the same window on
+// the other whole-record write: dispatch binding its session and instance
+// while the mission is stopped out from under it.
+func TestUnit_Bind_CannotResurrectAMissionStoppedUnderIt(t *testing.T) {
+	ctx, db := setupMissionDB(t)
+	stopper := New(db)
+
+	m := newMission("bind while being stopped")
+	require.NoError(t, stopper.Create(ctx, m))
+
+	interposed := &interposingDB{DBManager: db}
+	interposed.afterRead = func() {
+		_, err := stopper.Finish(ctx, m.ID, StatusAbandoned, "stopped by operator")
+		require.NoError(t, err)
+	}
+
+	bound, err := New(interposed).Bind(ctx, m.ID, "sess-1", "inst-1")
+	require.NoError(t, err)
+	require.Equal(t, StatusAbandoned, bound.Status)
+
+	got, err := stopper.Get(ctx, m.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusAbandoned, got.Status, "a bind must never put an at-rest row back in motion")
+	require.Equal(t, "sess-1", got.SessionID, "the bind itself still lands")
+	require.Equal(t, "inst-1", got.InstanceID)
+}
+
+// TestUnit_Bind_ReJudgesTheConflictGuardAgainstTheRowItWrites pins that the
+// retry re-runs the guard rather than retrying blind: a session bound by
+// someone else inside the window is a conflict, not an overwrite.
+func TestUnit_Bind_ReJudgesTheConflictGuardAgainstTheRowItWrites(t *testing.T) {
+	ctx, db := setupMissionDB(t)
+	other := New(db)
+
+	m := newMission("two dispatches, one mission")
+	require.NoError(t, other.Create(ctx, m))
+
+	interposed := &interposingDB{DBManager: db}
+	interposed.afterRead = func() {
+		_, err := other.Bind(ctx, m.ID, "sess-winner", "")
+		require.NoError(t, err)
+	}
+
+	_, err := New(interposed).Bind(ctx, m.ID, "sess-loser", "")
+	require.Error(t, err)
+	require.ErrorIs(t, err, errdefs.ErrConflict, "the loser is refused against the row as it now is")
+
+	got, err := other.Get(ctx, m.ID)
+	require.NoError(t, err)
+	require.Equal(t, "sess-winner", got.SessionID, "and never overwrites the binding that landed")
+}
+
+// TestUnit_SetPlan_ReJudgesTheCompletedGuardAgainstTheRowItWrites pins that
+// the retry loop re-runs the immutability guard rather than retrying blind:
+// the guard is judged against whatever prior revision the write lands on.
+func TestUnit_SetPlan_ReJudgesTheCompletedGuardAgainstTheRowItWrites(t *testing.T) {
+	ctx, db := setupMissionDB(t)
+	svc := New(db)
+
+	m := newMission("revise a finished step")
+	require.NoError(t, svc.Create(ctx, m))
+
+	_, err := svc.SetPlan(ctx, m.ID, []PlanEntry{
+		entry("e1", "ship the parser", PlanEntryCompleted, PlanEntryPriorityHigh),
+	}, "done")
+	require.NoError(t, err)
+
+	_, err = svc.SetPlan(ctx, m.ID, []PlanEntry{
+		entry("e1", "ship a different parser", PlanEntryCompleted, PlanEntryPriorityHigh),
+	}, "rewrite history")
+	require.Error(t, err, "completed work stays immutable across the CAS loop")
+
+	got, err := svc.Get(ctx, m.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, got.Plan.Revision, "a rejected snapshot bumps nothing")
+	require.Equal(t, "ship the parser", got.Plan.Entries[0].Content)
+}
+
+// TestUnit_SetPlan_AssignsEachEntryIdExactlyOnce pins that normalization sits
+// above the retry loop: a re-judged attempt must reuse the ids the first pass
+// assigned, or a retry would silently rewrite entry identity.
+func TestUnit_SetPlan_AssignsEachEntryIdExactlyOnce(t *testing.T) {
+	ctx, db := setupMissionDB(t)
+	svc := New(db)
+
+	m := newMission("id-less entries")
+	require.NoError(t, svc.Create(ctx, m))
+
+	planned, err := svc.SetPlan(ctx, m.ID, []PlanEntry{
+		{Content: "step one", Status: PlanEntryPending, Priority: PlanEntryPriorityHigh},
+	}, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, planned.Plan.Entries[0].ID)
+
+	got, err := svc.Get(ctx, m.ID)
+	require.NoError(t, err)
+	require.Equal(t, planned.Plan.Entries[0].ID, got.Plan.Entries[0].ID,
+		"the id handed back is the id stored")
 }

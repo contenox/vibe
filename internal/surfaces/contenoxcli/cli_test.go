@@ -27,6 +27,23 @@ func TestUnit_retiredServeIsReservedSubcommand(t *testing.T) {
 	}
 }
 
+func TestUnit_newIsReservedSubcommand(t *testing.T) {
+	if !reservedSubcommands["new"] {
+		t.Fatal(`"new" must be reserved so 'contenox new' opens the TUI instead of being injected as a chat prompt ("beam" alone covers only the retired name)`)
+	}
+	if !firstNonFlagIsReserved([]string{"new"}) {
+		t.Fatal(`expected "new" to be recognized as a reserved subcommand`)
+	}
+}
+
+func TestUnit_shellCompletionRequestsAreReserved(t *testing.T) {
+	for _, name := range []string{"__complete", "__completeNoDesc"} {
+		if !reservedSubcommands[name] {
+			t.Fatalf("%q must be reserved: the completion script invokes it on every TAB, and chat injection would run a model call per keystroke", name)
+		}
+	}
+}
+
 func TestUnit_promptInputIsNotReserved(t *testing.T) {
 	if firstNonFlagIsReserved([]string{"summarise", "README.md"}) {
 		t.Fatal("ordinary prompt input must remain eligible for default run injection")
@@ -35,7 +52,7 @@ func TestUnit_promptInputIsNotReserved(t *testing.T) {
 
 func TestUnit_seedHeadlessACPChainIfMissing(t *testing.T) {
 	dir := t.TempDir()
-	dst := filepath.Join(dir, headlessACPChainFilename)
+	dst := filepath.Join(dir, chainAgentACPXFilename)
 
 	if err := seedHeadlessACPChainIfMissing(dir); err != nil {
 		t.Fatalf("seed when absent: %v", err)
@@ -60,10 +77,10 @@ func TestUnit_seedHeadlessACPChainIfMissing(t *testing.T) {
 }
 
 // TestUnit_seedFIMChainIfMissing mirrors TestUnit_seedHeadlessACPChainIfMissing:
-// seeds default-fim-chain.json when absent, never overwrites a user edit.
+// seeds chain-fim-default.json when absent, never overwrites a user edit.
 func TestUnit_seedFIMChainIfMissing(t *testing.T) {
 	dir := t.TempDir()
-	dst := filepath.Join(dir, "default-fim-chain.json")
+	dst := filepath.Join(dir, "chain-fim-default.json")
 
 	if err := seedFIMChainIfMissing(dir); err != nil {
 		t.Fatalf("seed when absent: %v", err)
@@ -93,8 +110,8 @@ func TestUnit_seedFIMChainIfMissing(t *testing.T) {
 func TestUnit_seedOptionalFIMChain_ACPXDoesNotSeed(t *testing.T) {
 	dir := t.TempDir()
 	seedOptionalFIMChain(acpProfileACPX, dir)
-	if _, err := os.Stat(filepath.Join(dir, "default-fim-chain.json")); !os.IsNotExist(err) {
-		t.Fatalf("expected acpx to leave default-fim-chain.json unwritten, stat err: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "chain-fim-default.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected acpx to leave chain-fim-default.json unwritten, stat err: %v", err)
 	}
 }
 
@@ -103,13 +120,13 @@ func TestUnit_seedOptionalFIMChain_ACPXDoesNotSeed(t *testing.T) {
 func TestUnit_seedOptionalFIMChain_ACPSeeds(t *testing.T) {
 	dir := t.TempDir()
 	seedOptionalFIMChain(acpProfileACP, dir)
-	if _, err := os.Stat(filepath.Join(dir, "default-fim-chain.json")); err != nil {
-		t.Fatalf("expected acp to seed default-fim-chain.json: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "chain-fim-default.json")); err != nil {
+		t.Fatalf("expected acp to seed chain-fim-default.json: %v", err)
 	}
 }
 
 // TestUnit_loadOptionalFIMChain_PopulatesRegistryWhenPresent proves the FIM
-// registry is populated for the acp profile when default-fim-chain.json (or
+// registry is populated for the acp profile when chain-fim-default.json (or
 // its env override) resolves to a valid chain — the case that must produce a
 // non-nil Deps.FIMChainRegistry so _contenox/autocomplete actually works on a
 // real `contenox acp` run.

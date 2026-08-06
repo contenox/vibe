@@ -1,0 +1,198 @@
+---
+import Base from '../../layouts/Base.astro';
+
+// Beispiel aus dem englischen Sovereignty-Guide: ein Envelope, dessen
+// compute-Block eine unbeaufsichtigte Mission auf lokale Inferenz pinnt.
+const envelope = `{
+  "default_action": "approve",
+  "rules": [],
+  "compute": {
+    "maxTurns": 40,
+    "maxToolCalls": 200,
+    "maxTokens": 2000000,
+    "modelAllowlist": ["qwen3:8b"],
+    "backendAllowlist": ["ollama"],
+    "onExhausted": "finish_stuck"
+  },
+  "attention": { "allowAgentAnswers": false }
+}`;
+---
+<Base
+  title="KI-Agenten, lokal und souverän — AI-Souveränität mit Contenox"
+  description="AI-Souveränität operativ: KI-Agenten self-hosted mit Ollama oder vLLM, oder EU-Region auf eigenen Schlüsseln. KI-Governance als Datei, Human-in-the-Loop-Freigaben, harte Budgets, lokale SQLite — Open Source, kein Konto. Und was die KI-Verordnung damit zu tun hat."
+  lang="de"
+  ogType="article"
+  alternates={{ en: '/docs/guide/sovereignty/', de: '/de/ki-souveraenitaet/' }}
+>
+  <article data-pagefind-body class="prose prose-compact prose-neutral dark:prose-invert mx-auto max-w-3xl px-5 py-10">
+    <p class="text-xs font-semibold tracking-widest text-neutral-500 uppercase">AI-Souveränität</p>
+    <h1>KI-Agenten, lokal und souverän</h1>
+    <p>
+      Agentenbasierte KI-Systeme bleiben nicht im Chatfenster: Sie führen
+      Shell-Kommandos aus, schreiben Dateien, rufen APIs auf. Damit ist
+      AI-Souveränität keine Grundsatzdebatte mehr, sondern eine Betriebsfrage
+      in fünf Teilen — wo läuft die Inferenz, wo liegt der Zustand, wer hält
+      die Schlüssel, was kann der Agent erreichen, und wer entscheidet, wann
+      ein Mensch eingreift.
+    </p>
+    <p>
+      Contenox ist so gebaut, dass jede dieser Antworten dir gehört. Nicht der
+      Anbieter entscheidet, wie sich der Agent auf deinem Rechner verhält —
+      du. Jede Antwort ist eine Datei, ein Flag oder ein Grant: lesbar,
+      versionierbar, widerrufbar.
+    </p>
+
+    <h2>Was digitale Souveränität hier operativ heißt</h2>
+    <ul>
+      <li>
+        <strong>Zustand bleibt lokal.</strong> Sessions, Konfiguration,
+        Run-Logs und erfasster Ausführungszustand liegen in SQLite auf deinem
+        Rechner. Kein gehosteter Dienst, kein Konto; Telemetrie ist opt-in und
+        standardmäßig aus.
+      </li>
+      <li>
+        <strong>Secrets bleiben in deiner Umgebung.</strong> Backends
+        referenzieren Credentials per Umgebungsvariable; der Wert wird zur
+        Anfragezeit gelesen und landet nie in einer Config auf der Platte.
+      </li>
+      <li>
+        <strong>Der Agent sieht, was du gewährst — nicht, was du hast.</strong>
+        Jede agent-erreichbare Shell bekommt eine
+        <a href="/docs/guide/environment-scrubbing/">bereinigte Least-Privilege-Umgebung</a>,
+        Tools sind pro Aufruf allowlistet, und Sessions laufen nur in
+        Workspace-Roots, die du freigegeben hast.
+      </li>
+    </ul>
+
+    <h2>Self-hosted und lokale KI — oder EU-Region auf deinen Schlüsseln</h2>
+    <p>
+      Inferenz ist Konfiguration, nicht Architektur. Wenn nichts dein Netzwerk
+      verlassen darf, läuft alles lokal:
+      <a href="/docs/integrations/providers/ollama/">Ollama</a> auf deinem
+      Rechner oder <a href="/docs/integrations/providers/openai/">vLLM</a> auf
+      eigenen GPUs — kein Prompt und keine Antwort verlässt dein Netzwerk. Das
+      ist die stärkste Souveränitäts-Haltung, die contenox kennt, und der
+      Standardweg im <a href="/docs/guide/quickstart/">Quickstart</a>. So wird
+      contenox zur selbst-gehosteten Copilot-Alternative: deine Regeln, deine
+      Modelle, deine Maschine — statt eines Assistenten, dessen Verhalten und
+      Telemetrie dem Anbieter gehören.
+    </p>
+    <p>
+      Für gehostete Modelle gilt: eigene Keys, gepinnte Region.
+      <a href="/docs/integrations/providers/bedrock/#eu-regions">AWS Bedrock in Frankfurt</a>
+      (<code>eu-central-1</code>),
+      <a href="/docs/integrations/providers/vertex/#eu-regions-and-data-residency">Vertex AI in <code>europe-west3</code> oder <code>europe-west4</code></a>,
+      <a href="/docs/integrations/providers/openai/#eu-data-residency">OpenAI über <code>eu.api.openai.com</code></a>.
+      Ehrlich eingeordnet: Eine EU-Region beim US-Anbieter ist die schwächere
+      Haltung — dessen Infrastruktur und Vertragsbedingungen bleiben in der
+      Schleife. Aber Konto, Region und Schlüssel bleiben deine, und der
+      Wechsel zu lokaler Inferenz ist später eine Konfigurationsänderung, kein
+      Umbau.
+    </p>
+
+    <h2>KI-Governance für dich selbst, nicht für ein Gremium</h2>
+    <p>
+      KI-Governance klingt nach Ausschusssitzung. Gemeint ist hier etwas
+      anderes: Du willst einem KI-Agenten um drei Uhr nachts eine Mission
+      überlassen können — und wissen, dass er Arbeitsergebnisse nicht als
+      „Cleanup“ wegräumt, weil deine Policy die Pfade, die zählen, per
+      Deny-Regel unantastbar macht.
+    </p>
+    <p>
+      Das Instrument dafür ist der Envelope: eine JSON-Policy, die du
+      geschrieben hast. Sie benennt, was still durchläuft, was für einen
+      Menschen pausiert und was verweigert wird; was keine Regel trifft,
+      schlägt geschlossen fehl — es fragt. Dazu kommen Budgets: Obergrenzen
+      für Turns, Tool-Aufrufe und Tokens, Allowlists für Modelle und Backends.
+      Eine Mission, die eine Grenze reißt, endet als „stuck“, statt
+      weiterzulaufen. Die Datei liegt in deinem Repo und wird reviewt wie jede
+      andere Änderung; <code>contenox vet</code> prüft sie, bevor irgendetwas
+      unter ihr läuft.
+    </p>
+    <pre><code>{envelope}</code></pre>
+    <p>
+      Dieser Envelope pinnt eine unbeaufsichtigte Mission auf lokale Inferenz:
+      Die Unit kann sich nicht selbst auf ein Modell oder Backend umschalten,
+      das du nicht benannt hast.
+    </p>
+    <p>
+      Und wenn der Run scheitert, rätst du nicht — du liest nach.
+      <code>contenox state</code> zeigt den erfassten Ausführungszustand
+      vergangener Runs, Schritt für Schritt; <code>--trace</code> liefert
+      strukturierte Telemetrie auf stderr; jedes beantwortete Ask hält
+      dauerhaft fest, wer geantwortet hat — Mensch oder Agent.
+      Vertrauenswürdige, robuste KI ist als Formel ziemlich abgenutzt;
+      mechanisch heißt sie hier: geschriebene Regeln statt versteckter
+      Prompts, Budgets statt Hoffnung, Traces statt Vermutung.
+    </p>
+
+    <h2>Human-in-the-Loop heißt: Die Freigabe wartet auf dich</h2>
+    <p>
+      Human-in-the-Loop ist bei contenox kein Dialog mit Timeout. Eine Frage,
+      die die Unit nicht allein entscheiden darf, checkpointet den Run: Das
+      Ask wird gespeichert, der Prozess freigegeben. Tage später beantwortest
+      du es aus irgendeinem Terminal —
+      <code>contenox approvals respond</code> — und der Run läuft genau einmal
+      weiter. Standardmäßig darf nur ein Mensch antworten; ein Envelope kann
+      eine begrenzte Zahl von Routinefragen an den feuernden Agenten
+      delegieren, und der Datensatz zeigt immer, wer es war. Das vollständige
+      Policy-Format steht im <a href="/docs/guide/hitl/">HITL-Guide</a>.
+    </p>
+
+    <h2>Die KI-Verordnung, ohne Beratersprech</h2>
+    <p>
+      Die KI-Verordnung — die deutsche Bezeichnung des EU AI Act, Verordnung
+      (EU) 2024/1689 — verlangt für Hochrisiko-Systeme unter anderem wirksame
+      menschliche Aufsicht: Die Menschen dahinter sollen das System verstehen,
+      in seinen Betrieb eingreifen und es unterbrechen können. Man muss die
+      Verordnung nicht mögen, um ihre Fragen gut zu finden — es sind
+      dieselben, die du dir selbst stellst, bevor du einem Agenten etwas
+      überlässt. Envelope, durable Freigaben, Budgets und Traces sind die
+      operativen Antworten darauf, geschrieben von dir statt von einem
+      Anbieter-Default.
+    </p>
+    <p>
+      Klar gesagt: Das ist keine Rechtsberatung, und contenox macht ein
+      Deployment nicht „compliant“. Ob die Verordnung dein System überhaupt
+      betrifft, hängt davon ab, was du baust und ausrollst — die Bewertung
+      gehört dir und deiner Rechtsberatung. Was contenox liefert, sind
+      Kontrollen, auf die eine solche Bewertung zeigen kann: von dir verfasst,
+      versioniert, inspizierbar.
+    </p>
+
+    <h2>Open Source, eine Binärdatei, kein Konto</h2>
+    <p>
+      Contenox ist Open Source unter Apache-2.0. Der Code, der deine Regeln
+      durchsetzt, ist der Code, den du lesen kannst — dieselbe Transparenz,
+      die du vom Envelope erwartest, eine Ebene tiefer. Eine Binärdatei,
+      lokale SQLite, kein Konto, nichts telefoniert nach Hause ohne Opt-in.
+      Und wenn du morgen aufhörst, contenox zu benutzen, bleiben deine Chains,
+      Policies und Logs, was sie immer waren: Dateien auf deiner Platte.
+    </p>
+
+    <h2>Weiter in die Tiefe (englisch)</h2>
+    <ul>
+      <li>
+        <a href="/docs/guide/sovereignty/">AI Sovereignty &amp; the EU AI Act</a>
+        — das englische Gegenstück dieser Seite, mit der vollständigen
+        Zuordnung von Aufsichts-Themen zu Mechanismen.
+      </li>
+      <li>
+        <a href="/docs/guide/hitl/">HITL Policies</a> — Policy-Format,
+        Bedingungsoperatoren, Presets und Attention-Bounds.
+      </li>
+      <li>
+        <a href="/docs/integrations/providers/ollama/">Ollama</a> ·
+        <a href="/docs/integrations/providers/openai/">vLLM / OpenAI-kompatibel</a> ·
+        <a href="/docs/integrations/providers/bedrock/#eu-regions">Bedrock EU-Regionen</a> ·
+        <a href="/docs/integrations/providers/vertex/#eu-regions-and-data-residency">Vertex EU-Regionen</a> ·
+        <a href="/docs/integrations/providers/openai/#eu-data-residency">OpenAI EU-Residency</a>
+        — die Provider-Anleitungen hinter „lokal und souverän“.
+      </li>
+      <li>
+        <a href="/docs/guide/quickstart/">Quickstart</a> — Installation und
+        die erste Mission.
+      </li>
+    </ul>
+  </article>
+</Base>

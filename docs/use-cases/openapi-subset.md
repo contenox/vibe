@@ -1,6 +1,6 @@
 ---
 title: Authoring your tool inventory
-description: Why partial OpenAPI registration is a game-changer for agent capabilities.
+description: Expose a curated subset of an OpenAPI spec as agent tools — least privilege at registration time.
 ---
 
 # Authoring your tool inventory

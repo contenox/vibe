@@ -10,13 +10,13 @@ import (
 )
 
 const (
-	defaultChainFilename = "default-acp-chain.json"
+	defaultChainFilename = "chain-agent-acp.json"
 	chainPathEnv         = "CONTENOX_ACP_CHAIN_PATH"
 
 	// defaultFIMChainFilename/fimChainPathEnv are the autocomplete analog of
 	// defaultChainFilename/chainPathEnv, kept separate so the completion
 	// model/chain can differ from the chat one.
-	defaultFIMChainFilename = "default-fim-chain.json"
+	defaultFIMChainFilename = "chain-fim-default.json"
 	fimChainPathEnv         = "CONTENOX_ACP_FIM_CHAIN_PATH"
 )
 

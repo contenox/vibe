@@ -13,7 +13,6 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/workspaceindex"
-	"github.com/getkin/kin-openapi/openapi3"
 )
 
 // tools implements taskengine.ToolsRepo over a Querier: args come from the
@@ -68,13 +67,6 @@ func (h *tools) Supports(context.Context) ([]string, error) {
 	return append([]string{ToolsProviderName}, toolNames...), nil
 }
 
-// GetSchemasForSupportedTools returns no OpenAPI documents: this is a local
-// toolset with a hand-written function schema, exactly like local_fs, gointel
-// and shell_session. The model-facing contract is GetToolsForToolsByName.
-func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
-	return map[string]*openapi3.T{}, nil
-}
-
 // search runs the one query and renders the result payload. ErrNoIndex
 // becomes a result with a runnable instruction, not a fault; every hit
 // carries its file:line-range; and the payload is capped in tokens and
@@ -92,6 +84,11 @@ func (h *tools) search(ctx context.Context, question string, topK int) (*Result,
 
 	hits, err := h.q.Query(ctx, h.workspaceID, question, clampTopK(topK))
 	if err != nil {
+		// ErrIndexEmpty wraps ErrNoIndex, so it is matched first or it would
+		// answer with the wrong one of the two notes.
+		if errors.Is(err, workspaceindex.ErrIndexEmpty) {
+			return &Result{Question: echoQuestion(question), Hits: []Hit{}, Note: appendNote(note, emptyIndexNote)}, nil
+		}
 		if errors.Is(err, workspaceindex.ErrNoIndex) {
 			return &Result{Question: echoQuestion(question), Hits: []Hit{}, Note: appendNote(note, noIndexNote)}, nil
 		}
@@ -120,7 +117,8 @@ func renderHits(question string, hits []workspaceindex.Hit) *Result {
 		Found:    len(hits),
 	}
 	if len(hits) == 0 {
-		res.Note = "No indexed chunk matched. The index covers only what `contenox index` walked — gitignored paths, binaries and oversized files are excluded — and it is a snapshot, not a live read: content added since the last index is not here."
+		res.Note = "No indexed chunk matched. Retry with the exact identifier, path fragment or error string if you have one — the keyword half of the ranking matches those literally. " +
+			"The index covers only what `contenox index` walked — gitignored paths, binaries and oversized files are excluded — and it is a snapshot, not a live read: content added since the last index is not here."
 		return res
 	}
 

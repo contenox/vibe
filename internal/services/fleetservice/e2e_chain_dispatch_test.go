@@ -13,17 +13,17 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/chainagents"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
 // This file is the acceptance for chains-as-agents: a task chain declared by
-// convention (an agent-* file) is dispatched as a fleet unit and answers,
+// convention (a chain-agent-* file) is dispatched as a fleet unit and answers,
 // through the real fleetservice → agentinstance kernel → agenthost spawn
 // path, with determinism from a single noop-handler task. HOME is isolated
 // per test; the kernel sets no HOME on the child, so a reply proves
@@ -60,7 +60,7 @@ func runContenoxCLI(t *testing.T, bin, home string, args ...string) {
 }
 
 // writeChainAgentFixture writes the deterministic no-model chain under a name
-// that declares it as an agent (the agent-* filename convention), and
+// that declares it as an agent (the chain-agent-* filename convention), and
 // returns its path.
 func writeChainAgentFixture(t *testing.T, contenoxDir string) string {
 	t.Helper()
@@ -76,7 +76,7 @@ func writeChainAgentFixture(t *testing.T, contenoxDir string) string {
 	}
 	data, err := json.Marshal(chain)
 	require.NoError(t, err)
-	path := filepath.Join(contenoxDir, "agent-fleet-fixture.json")
+	path := filepath.Join(contenoxDir, "chain-agent-fleet-fixture.json")
 	require.NoError(t, os.WriteFile(path, data, 0o600))
 	return path
 }
@@ -173,7 +173,7 @@ func TestFleetE2E_ChainAgent_DiscoveredDispatchedAndAnswers(t *testing.T) {
 	res, err := chainagents.Discover(ctx, agents, contenoxDir)
 	require.NoError(t, err)
 	require.Equal(t, []string{"agent-fleet-fixture"}, res.Created,
-		"naming the file agent-*.json is the whole declaration")
+		"naming the file chain-agent-*.json is the whole declaration")
 
 	declared, err := agents.GetByName(ctx, "agent-fleet-fixture")
 	require.NoError(t, err)

@@ -124,6 +124,17 @@ func resolveLeaf(absPath string) (string, error) {
 		return "", err
 	}
 
+	// EvalSymlinks reports ENOENT both for a path that does not exist and for
+	// a symlink whose target does not exist. The two are not the same: the
+	// second is a link that still redirects a write. Lstat tells them apart,
+	// and a dangling link is refused rather than treated as a plain missing
+	// file that re-appends inside the root (which would let
+	// "<root>/notes.md -> ~/.ssh/authorized_keys" pass containment and land
+	// the bytes outside).
+	if fi, lerr := os.Lstat(absPath); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("%w: %s is a symlink whose target cannot be resolved", ErrEscape, absPath)
+	}
+
 	probe := absPath
 	var missing []string
 

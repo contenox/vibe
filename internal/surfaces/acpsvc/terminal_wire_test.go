@@ -13,7 +13,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

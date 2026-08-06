@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/eventtrigger"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/spf13/cobra"
 )
@@ -59,6 +60,14 @@ func init() {
 func runVetCmd(cmd *cobra.Command, args []string) error {
 	all, _ := cmd.Flags().GetBool("all")
 
+	contenoxDir, err := ResolveContenoxDir(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
+	}
+	// Trigger files are a beta surface: without the opt-in they stay in the
+	// "skip" class exactly as before, so a stable vet run never changes.
+	vo := vetOpts{triggers: betaEnabledGlobal(), contenoxDir: contenoxDir}
+
 	var files []string
 	switch {
 	case len(args) == 1:
@@ -68,10 +77,6 @@ func runVetCmd(cmd *cobra.Command, args []string) error {
 		}
 		files = found
 	default:
-		contenoxDir, err := ResolveContenoxDir(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to resolve .contenox dir: %w", err)
-		}
 		dirs := []string{contenoxDir}
 		if all {
 			if home, err := globalContenoxDir(); err == nil && home != contenoxDir {
@@ -94,7 +99,7 @@ func runVetCmd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	failed := runVetOnFiles(cmd.OutOrStdout(), files)
+	failed := runVetOnFiles(cmd.OutOrStdout(), files, vo)
 	if failed > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "\nvet: %d of %d file(s) failed\n", failed, len(files))
 		return &exitError{1}
@@ -135,12 +140,27 @@ const (
 	vetKindSkip vetFileKind = iota
 	vetKindChain
 	vetKindEnvelope
+	vetKindTrigger
 )
+
+// vetOpts carries cross-file vet context: whether trigger-*.json files are
+// vetted at all (a beta surface — off, they stay skipped as they always
+// were), and the workspace dir trigger chain/policy references resolve
+// against.
+type vetOpts struct {
+	triggers    bool
+	contenoxDir string
+}
 
 // classifyVetFile decides by content first (a "tasks" array is a chain, a
 // "rules" array is an envelope) and falls back to the hitl-policy-* filename
 // convention, so a policy with an empty rules list still gets vetted.
-func classifyVetFile(path string, data []byte) vetFileKind {
+// Trigger files classify by the trigger-*.json discovery convention, and only
+// when vo.triggers is on.
+func classifyVetFile(path string, data []byte, vo vetOpts) vetFileKind {
+	if vo.triggers && eventtrigger.IsTriggerFile(filepath.Base(path)) {
+		return vetKindTrigger
+	}
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(data, &probe); err != nil {
 		// Not a JSON object: let the name decide which validator reports the
@@ -177,12 +197,12 @@ func jsonIsArray(raw json.RawMessage) bool {
 // bool reports whether the file was actually vetted (false = skipped). The
 // third return is diagnostics: fields that parse and validate but enforce
 // less than they read like. They never influence the verdict or exit code.
-func vetOneFile(path string) (bool, error, []hitlservice.PolicyDiagnostic) {
+func vetOneFile(path string, vo vetOpts) (bool, error, []hitlservice.PolicyDiagnostic) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return true, fmt.Errorf("cannot read %q: %w", path, err), nil
 	}
-	switch classifyVetFile(path, data) {
+	switch classifyVetFile(path, data, vo) {
 	case vetKindChain:
 		var chain taskengine.TaskChainDefinition
 		if err := json.Unmarshal(data, &chain); err != nil {
@@ -190,7 +210,13 @@ func vetOneFile(path string) (bool, error, []hitlservice.PolicyDiagnostic) {
 		}
 		return true, taskengine.LintChain(&chain), nil
 	case vetKindEnvelope:
-		return true, hitlservice.VetPolicy(data), hitlservice.PolicyDiagnostics(data)
+		// Trusted-binary declarations describe THIS host, so vet checks them
+		// against it: an entry that is missing or no longer matches is a
+		// warning, not a defect — the envelope is still valid, and the
+		// runtime's answer for it is a refusal, never a silent pass.
+		return true, hitlservice.VetPolicy(data), hitlservice.TrustedBinaryDiagnostics(data)
+	case vetKindTrigger:
+		return true, eventtrigger.Vet(data, resolveTriggerRef(vo.contenoxDir)), nil
 	default:
 		return false, nil, nil
 	}
@@ -199,10 +225,10 @@ func vetOneFile(path string) (bool, error, []hitlservice.PolicyDiagnostic) {
 // runVetOnFiles vets each file, reporting per-file verdicts to out, and
 // returns how many failed. A file can be both "ok" and warned; only the
 // verdict counts toward the failure tally.
-func runVetOnFiles(out io.Writer, files []string) int {
+func runVetOnFiles(out io.Writer, files []string, vo vetOpts) int {
 	failed := 0
 	for _, path := range files {
-		vetted, err, diags := vetOneFile(path)
+		vetted, err, diags := vetOneFile(path, vo)
 		switch {
 		case !vetted:
 			fmt.Fprintf(out, "skip %s (not a chain or hitl-policy file)\n", path)

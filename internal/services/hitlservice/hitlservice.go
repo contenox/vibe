@@ -13,8 +13,9 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libtracker"
+	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/google/uuid"
 
 	libdb "github.com/contenox/contenox/internal/libdbexec"
@@ -84,9 +85,17 @@ type approvalStore interface {
 	CreateHITLApproval(ctx context.Context, a *runtimetypes.HITLApproval) error
 	GetHITLApproval(ctx context.Context, id string) (*runtimetypes.HITLApproval, error)
 	ResolveHITLApproval(ctx context.Context, id string, state runtimetypes.HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error
+	ResolveHITLApprovalWithinBound(ctx context.Context, id string, bound runtimetypes.AgentAnswerBound, state runtimetypes.HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error
 	ListExpiredHITLApprovals(ctx context.Context, asOf time.Time, limit int) ([]*runtimetypes.HITLApproval, error)
 	ListHITLApprovals(ctx context.Context, state runtimetypes.HITLApprovalState, createdAtCursor *time.Time, limit int) ([]*runtimetypes.HITLApproval, error)
 	ListHITLApprovalsForMission(ctx context.Context, missionID string, limit int) ([]*runtimetypes.HITLApproval, error)
+}
+
+// checkpointReader is the optional store slice behind the verdict-ordering
+// gate (ErrVerdictNeedsResumer): asserted separately from approvalStore so a
+// narrower fake keeps every pre-existing behavior, minus the gate.
+type checkpointReader interface {
+	GetChainCheckpoint(ctx context.Context, id string) (*runtimetypes.ChainCheckpoint, error)
 }
 
 type Service interface {
@@ -113,6 +122,17 @@ type Service interface {
 	// AnswerAsAgent is Answer, recorded as answered by a supervising agent
 	// rather than a human.
 	AnswerAsAgent(ctx context.Context, askID, text string) error
+
+	// AnswerAsAgentNamed is AnswerAsAgent with the answering agent's name as
+	// the recorded actor; a blank name degrades to the generic marker.
+	AnswerAsAgentNamed(ctx context.Context, askID, agentName, text string) error
+
+	// AnswerAsAgentBounded is AnswerAsAgentNamed written under an atomic cap:
+	// the resolution lands only while the ask's mission holds fewer than max
+	// agent-answered asks, counted inside the same statement. Returns
+	// ErrAgentAnswerBoundSpent when the cap refused the write. Callers use
+	// AnswerAsAgentWithinBounds, which resolves max from the envelope.
+	AnswerAsAgentBounded(ctx context.Context, askID, agentName, text string, max int) error
 
 	// PendingAttentionAsks returns a mission's unanswered questions, newest first.
 	PendingAttentionAsks(ctx context.Context, missionID string) ([]*runtimetypes.HITLApproval, error)
@@ -147,6 +167,17 @@ var (
 	ErrApprovalExpired = errors.New("hitlservice: approval expired before it was answered")
 	// ErrNoCheckpoint reports no run is checkpointed under this approval; Respond treats it as a no-op.
 	ErrNoCheckpoint = errors.New("hitlservice: no suspended run is checkpointed under this approval")
+	// ErrAgentAnswerBoundSpent reports that the mission's agent-answer cap was
+	// already spent when the conditional write ran — the durable half of the
+	// envelope holding. AnswerAsAgentWithinBounds maps it to the operator-facing
+	// *AgentAnswerBoundsError refusal.
+	ErrAgentAnswerBoundSpent = errors.New("hitlservice: mission agent-answer bound spent")
+	// ErrVerdictNeedsResumer reports a verdict refused before it was recorded:
+	// a suspended run is checkpointed under the ask, and this process has
+	// neither a parked waiter nor a resume hook, so recording the one-shot
+	// verdict here would strand the run permanently. The ask stays pending and
+	// answerable from a process that can resume it.
+	ErrVerdictNeedsResumer = errors.New("hitlservice: a suspended run is checkpointed under this ask and this process cannot resume it; the verdict was not recorded and the ask is still pending")
 )
 
 // ResumeHook resumes the suspended run checkpointed under approvalID once
@@ -173,9 +204,11 @@ type service struct {
 	src            PolicySource
 	tenantID       string
 	store          KVReader
+	workspaceID    string
 	tracker        libtracker.ActivityTracker
 	fallbackPolicy string
 	approvals      approvalStore
+	checkpoints    checkpointReader
 
 	mu              sync.Mutex
 	pending         map[string]chan answer
@@ -206,7 +239,34 @@ func NewWithDefaultPolicy(src PolicySource, tenantID string, store KVReader, tra
 	if as, ok := store.(approvalStore); ok {
 		svc.approvals = as
 	}
+	if cr, ok := store.(checkpointReader); ok {
+		svc.checkpoints = cr
+	}
 	return svc
+}
+
+// requireResumerForVerdict is the F-class ordering gate: a verdict for an ask
+// whose run is checkpointed is one-shot, so it must not be recorded by a
+// process that cannot resume the run — no parked waiter here, no resume hook
+// registered. Runs BEFORE the resolve CAS; refusal leaves the ask pending.
+// Without a checkpointReader the gate is inert, matching the narrower fakes.
+func (s *service) requireResumerForVerdict(ctx context.Context, askID string) error {
+	if s.checkpoints == nil {
+		return nil
+	}
+	s.mu.Lock()
+	_, hasWaiter := s.pending[askID]
+	hook := s.resumeHook
+	s.mu.Unlock()
+	if hasWaiter || hook != nil {
+		return nil
+	}
+	if _, err := s.checkpoints.GetChainCheckpoint(ctx, askID); err != nil {
+		// No checkpoint: the verdict is a plain record (a parked asker in its
+		// own process polls it up), not a stranded run in the making.
+		return nil
+	}
+	return fmt.Errorf("%w (ask %s)", ErrVerdictNeedsResumer, askID)
 }
 
 // SetApprovalCeiling overrides the approval-wait ceiling on svc (when
@@ -220,6 +280,25 @@ func SetApprovalCeiling(svc Service, ceiling time.Duration) {
 		s.approvalCeiling = ceiling
 		s.mu.Unlock()
 	}
+}
+
+// SetWorkspaceID binds svc to the workspace whose active-policy row Evaluate
+// reads (see readActivePolicyName), so the evaluator resolves
+// clikv.KeyHITLPolicyName at the same scope `contenox config set` and ACP's
+// /policy write it. Composition roots that resolve a workspace must call it;
+// an unset workspace reads the global row, the same fallback ReadConfig ends at.
+func SetWorkspaceID(svc Service, workspaceID string) {
+	if s, ok := svc.(*service); ok {
+		s.mu.Lock()
+		s.workspaceID = strings.TrimSpace(workspaceID)
+		s.mu.Unlock()
+	}
+}
+
+func (s *service) workspace() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.workspaceID
 }
 
 // SetResumeHook registers the resume-on-verdict hook (see ResumeHook) on svc
@@ -274,8 +353,6 @@ func (s *service) ComputeBoundsFor(ctx context.Context, policyName string) (Comp
 	return *p.Compute, nil
 }
 
-const kvPrefixHITLPolicy = "cli.hitl-policy-name"
-
 // policyNameContextKey scopes a per-request HITL policy override onto a
 // context, so concurrent ACP sessions sharing one hitlservice can each pin
 // their own policy. Evaluate prefers it over the process-global KV.
@@ -298,12 +375,16 @@ func PolicyNameFromContext(ctx context.Context) string {
 	return strings.TrimSpace(name)
 }
 
+// readActivePolicyName returns the operator's active policy through clikv,
+// the one owner of the key's name and scope. Reading it here by hand is what
+// let `contenox config set hitl-policy-name` (a workspace row) go unseen by
+// the evaluator (the global row). A store that cannot reach workspace rows
+// gets clikv's own global fallback leg, not a second scope rule.
 func (s *service) readActivePolicyName(ctx context.Context) string {
-	var val string
-	if err := s.store.GetKV(ctx, kvPrefixHITLPolicy, &val); err != nil {
-		return ""
+	if r, ok := s.store.(clikv.Reader); ok {
+		return clikv.ReadHITLPolicy(ctx, r, s.workspace())
 	}
-	return strings.TrimSpace(val)
+	return clikv.Read(ctx, s.store, clikv.KeyHITLPolicyName)
 }
 
 func (s *service) Evaluate(ctx context.Context, toolsName, toolName string, args map[string]any) (EvaluationResult, error) {
@@ -507,6 +588,14 @@ func (s *service) resolve(ctx context.Context, approvalID string, approved bool,
 	if s.approvals == nil {
 		return fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
 	}
+	// Ordering, not cleanup: the capability check precedes the CAS so an
+	// unresumable process never spends the one-shot verdict (ErrVerdictNeedsResumer).
+	// The inline path (runHook=false) still holds its waiter and is exempt.
+	if runHook {
+		if err := s.requireResumerForVerdict(ctx, approvalID); err != nil {
+			return err
+		}
+	}
 	state := runtimetypes.HITLApprovalApproved
 	if !approved {
 		state = runtimetypes.HITLApprovalDenied
@@ -651,7 +740,9 @@ type approvalResolution struct {
 	Approved *bool `json:"approved,omitempty"`
 	// Answer carries an attention ask's reply — the operator's own words.
 	Answer *string `json:"answer,omitempty"`
-	// AnsweredBy records who answered when not human (only "agent" today).
+	// AnsweredBy records who answered when not human: the generic "agent"
+	// marker (AnswerAsAgent) or the agent's name (AnswerAsAgentNamed).
+	// Absent for a human answer.
 	AnsweredBy *string `json:"answeredBy,omitempty"`
 }
 

@@ -20,16 +20,19 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/agentservice"
-	"github.com/contenox/contenox/internal/services/chatservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // sessionListTitleMaxLen bounds SessionInfo.Title derived from a session's
 // first user message, so a session picker never renders a multi-paragraph prompt.
 const sessionListTitleMaxLen = 60
+
+// acpClientIdentity is the message_indices identity every ACP session is
+// created under; the store reads that list sessions must filter by it.
+const acpClientIdentity = "acp-client"
 
 // truncateSessionListTitle collapses whitespace and clips to
 // sessionListTitleMaxLen runes, appending an ellipsis when it clips.
@@ -543,7 +546,7 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 		contenoxSessionID, sessErr := ag.SessionNew(ctx, internalID)
 		if sessErr != nil {
 			att.teardown(t)
-			wrapped := fmt.Errorf("acpsvc: agent.SessionNew: %w", sessErr)
+			wrapped := fmt.Errorf("could not start a session: %w", sessErr)
 			reportErr(wrapped)
 			return libacp.NewSessionResponse{}, wrapped
 		}
@@ -609,7 +612,7 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 	contenoxSessionID, err := ag.SessionNew(ctx, internalID)
 	if err != nil {
 		t.cleanupMcpServers(ctx, store, registered)
-		wrapped := fmt.Errorf("acpsvc: agent.SessionNew: %w", err)
+		wrapped := fmt.Errorf("could not start a session: %w", err)
 		reportErr(wrapped)
 		return libacp.NewSessionResponse{}, wrapped
 	}
@@ -904,19 +907,19 @@ func (t *Transport) registerMcpServers(ctx context.Context, store runtimetypes.S
 	for _, srv := range servers {
 		if err := srv.Validate(); err != nil {
 			t.cleanupMcpServers(ctx, store, registered)
-			return nil, fmt.Errorf("acpsvc: invalid mcp server %q: %w", srv.Name, err)
+			return nil, fmt.Errorf("invalid MCP server %q: %w", srv.Name, err)
 		}
 		name := mcpNameFor(t.mcpOwnerID(), sessionID, srv.Name)
 		row := mcpRowFromLibacp(name, srv)
 		if err := store.UpsertMCPServerByName(ctx, row); err != nil {
 			t.cleanupMcpServers(ctx, store, registered)
-			return nil, fmt.Errorf("acpsvc: register mcp server %q: %w", srv.Name, err)
+			return nil, fmt.Errorf("could not register MCP server %q: %w", srv.Name, err)
 		}
 		if t.deps.Engine != nil && t.deps.Engine.MCPManager != nil {
 			if err := t.deps.Engine.MCPManager.StartWorker(ctx, row); err != nil {
 				registered = append(registered, name)
 				t.cleanupMcpServers(ctx, store, registered)
-				return nil, fmt.Errorf("acpsvc: start mcp worker %q: %w", srv.Name, err)
+				return nil, fmt.Errorf("could not start MCP server %q: %w", srv.Name, err)
 			}
 		}
 		registered = append(registered, name)
@@ -967,7 +970,7 @@ func (t *Transport) runtimeToolsAllowlist(ctx context.Context, store runtimetype
 	for {
 		page, err := store.ListMCPServers(ctx, cursor, 100)
 		if err != nil {
-			return nil, fmt.Errorf("acpsvc: list mcp servers for runtime allowlist: %w", err)
+			return nil, fmt.Errorf("could not read this session's MCP servers: %w", err)
 		}
 		for _, srv := range page {
 			if !runtimetypes.IsACPManagedMCPServerName(srv.Name) {
@@ -1123,14 +1126,9 @@ func (t *Transport) resolveSessionWorkspace(ctx context.Context, name string) (s
 	if name == "" {
 		return "", false
 	}
-	row := t.deps.DB.WithoutTransaction().QueryRowContext(ctx, `
-		SELECT mi.workspace_id
-		FROM message_indices mi
-		WHERE mi.name = $1 AND mi.identity = 'acp-client'
-		ORDER BY (SELECT COUNT(*) FROM messages m WHERE m.idx_id = mi.id) DESC, mi.id DESC
-		LIMIT 1`, name)
-	var workspaceID string
-	if err := row.Scan(&workspaceID); err != nil || workspaceID == "" {
+	workspaceID, err := runtimetypes.ResolveMessageIndexWorkspace(
+		ctx, t.deps.DB.WithoutTransaction(), acpClientIdentity, name)
+	if err != nil || workspaceID == "" {
 		return "", false
 	}
 	return workspaceID, true
@@ -1200,33 +1198,26 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 
 	// The ACP session id is the message-index name; unnamed rows predate ACP
 	// naming and aren't listed. Ordering/pagination happen in Go: mi.id is a
-	// random UUID and the two DB dialects disagree on timestamp representation.
+	// random UUID and the store's session order is not this surface's order.
 	// The cwd filter applies after pagination, so a filtered page may carry
 	// fewer items but the cursor still advances.
-	rows, err := exec.QueryContext(ctx, `
-		SELECT mi.id, mi.name,
-		       (SELECT MAX(m.added_at) FROM messages m WHERE m.idx_id = mi.id)
-		FROM message_indices mi
-		WHERE mi.workspace_id = $1
-		  AND mi.identity = 'acp-client'
-		  AND mi.name IS NOT NULL AND mi.name != ''`, t.workspaceID())
+	indices, err := runtimetypes.NewMessageStore(exec, t.workspaceID()).
+		ListMessageSessions(ctx, acpClientIdentity)
 	if err != nil {
-		return libacp.ListSessionsResponse{}, fmt.Errorf("acpsvc: list sessions: %w", err)
+		return libacp.ListSessionsResponse{}, fmt.Errorf("could not list sessions: %w", err)
 	}
-	defer rows.Close()
 
 	var all []sessionListRow
-	for rows.Next() {
-		var row sessionListRow
-		var updatedAt any
-		if err := rows.Scan(&row.internalID, &row.name, &updatedAt); err != nil {
-			return libacp.ListSessionsResponse{}, fmt.Errorf("acpsvc: scan session: %w", err)
+	for _, s := range indices {
+		if s.Name == "" {
+			continue
 		}
-		row.updatedAt, row.hasTime = parseDBTime(updatedAt)
-		all = append(all, row)
-	}
-	if err := rows.Err(); err != nil {
-		return libacp.ListSessionsResponse{}, fmt.Errorf("acpsvc: rows: %w", err)
+		all = append(all, sessionListRow{
+			internalID: s.ID,
+			name:       s.Name,
+			updatedAt:  s.UpdatedAt,
+			hasTime:    !s.UpdatedAt.IsZero(),
+		})
 	}
 	sort.Slice(all, func(i, j int) bool { return sessionListRowLess(all[i], all[j]) })
 
@@ -1237,12 +1228,11 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 	end := min(start+listSessionsPageSize, len(all))
 
 	store := runtimetypes.New(exec)
-	chatMgr := chatservice.NewManager(t.workspaceID())
 	var sessions []libacp.SessionInfo
 	for _, row := range all[start:end] {
 		info := libacp.SessionInfo{
 			SessionID: libacp.SessionID(row.name),
-			Title:     t.sessionListTitle(ctx, chatMgr, exec, row.internalID, row.name),
+			Title:     t.sessionListTitle(ctx, exec, row.internalID, row.name),
 			Cwd:       t.sessionCwd(ctx, store, libacp.SessionID(row.name)),
 		}
 		// `_meta` attribution: which agent runs an external session, which
@@ -1271,15 +1261,20 @@ func (t *Transport) ListSessions(ctx context.Context, req libacp.ListSessionsReq
 // sessionListTitle resolves a session/list Title in the fixed precedence:
 // the /rename override, then the derived heuristic, then fallback (also on
 // read failure — session/list must never error out over a title).
-func (t *Transport) sessionListTitle(ctx context.Context, mgr *chatservice.Manager, exec libdb.Exec, internalSessionID, fallback string) string {
+func (t *Transport) sessionListTitle(ctx context.Context, exec libdb.Exec, internalSessionID, fallback string) string {
 	if title := sessionTitleOverride(ctx, runtimetypes.New(exec), internalSessionID); title != "" {
 		return title
 	}
-	if title := firstUserMessageTitle(ctx, mgr, exec, internalSessionID); title != "" {
+	if title := t.firstUserMessageTitle(ctx, exec, internalSessionID); title != "" {
 		return title
 	}
 	return fallback
 }
+
+// sessionTitleScanPage is how many messages one firstUserMessageTitle keyset
+// page reads. Small on purpose: the answer is almost always in the first page,
+// and session/list runs this once per listed session.
+const sessionTitleScanPage = 20
 
 // firstUserMessageTitle derives a session title from the first non-empty,
 // non-command-shaped user message, whitespace-collapsed and clipped. Returns
@@ -1287,22 +1282,39 @@ func (t *Transport) sessionListTitle(ctx context.Context, mgr *chatservice.Manag
 // and sessionInfoTitle, so both readers agree. Command turns are skipped:
 // persistCommandTurn stores "/doctor" as an ordinary user message, but it is
 // an instruction, not a title-worthy subject.
-func firstUserMessageTitle(ctx context.Context, mgr *chatservice.Manager, exec libdb.Exec, internalSessionID string) string {
-	msgs, err := mgr.ListMessages(ctx, exec, internalSessionID)
-	if err != nil {
-		return ""
-	}
-	for _, m := range msgs {
-		if m.Role != "user" {
-			continue
+//
+// Reads by keyset page rather than pulling the thread: a title lives at the
+// front of a conversation, so a session/list over N sessions must not load N
+// full histories to find N first lines. Each page resumes from the previous
+// page's last row, so a message appended mid-scan cannot shift a boundary and
+// hide the very message being looked for.
+func (t *Transport) firstUserMessageTitle(ctx context.Context, exec libdb.Exec, internalSessionID string) string {
+	store := runtimetypes.NewMessageStore(exec, t.workspaceID())
+	filter := runtimetypes.MessagePageFilter{Limit: sessionTitleScanPage}
+	for {
+		page, err := store.ListMessagesPage(ctx, internalSessionID, filter)
+		if err != nil {
+			return ""
 		}
-		text := strings.TrimSpace(m.Content)
-		if text == "" || isCommandShapedText(text) {
-			continue
+		for _, row := range page {
+			var m taskengine.Message
+			if err := json.Unmarshal(row.Payload, &m); err != nil {
+				return ""
+			}
+			if m.Role != "user" {
+				continue
+			}
+			text := strings.TrimSpace(m.Content)
+			if text == "" || isCommandShapedText(text) {
+				continue
+			}
+			return truncateSessionListTitle(text)
 		}
-		return truncateSessionListTitle(text)
+		if len(page) < sessionTitleScanPage {
+			return ""
+		}
+		filter.After = page[len(page)-1].Cursor()
 	}
-	return ""
 }
 
 // isCommandShapedText reports whether text is shaped like a slash command,
@@ -1329,8 +1341,7 @@ func (t *Transport) sessionInfoTitle(ctx context.Context, internalSessionID stri
 	if title := sessionTitleOverride(ctx, runtimetypes.New(exec), internalSessionID); title != "" {
 		return title
 	}
-	mgr := chatservice.NewManager(t.workspaceID())
-	return firstUserMessageTitle(ctx, mgr, exec, internalSessionID)
+	return t.firstUserMessageTitle(ctx, exec, internalSessionID)
 }
 
 // acpSessionTitleKVPrefix namespaces operator session titles, keyed by the
@@ -1414,42 +1425,4 @@ func (t *Transport) sessionCwd(ctx context.Context, store runtimetypes.Store, si
 		return ""
 	}
 	return rec.Cwd
-}
-
-// parseDBTime normalizes MAX(added_at) across drivers: SQLite hands back
-// strings (layout depends on how the value was written), Postgres a time.Time.
-func parseDBTime(v any) (time.Time, bool) {
-	switch tv := v.(type) {
-	case nil:
-		return time.Time{}, false
-	case time.Time:
-		return tv, true
-	case []byte:
-		return parseDBTimeString(string(tv))
-	case string:
-		return parseDBTimeString(tv)
-	}
-	return time.Time{}, false
-}
-
-func parseDBTimeString(s string) (time.Time, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}, false
-	}
-	for _, layout := range []string{
-		time.RFC3339Nano,
-		"2006-01-02 15:04:05.999999999-07:00",
-		// time.Time.String() — what the sqlite driver stores when a time.Time
-		// is bound to a TIMESTAMP column.
-		"2006-01-02 15:04:05.999999999 -0700 MST",
-		"2006-01-02 15:04:05.999999999 -0700",
-		"2006-01-02 15:04:05.999999999",
-		"2006-01-02 15:04:05",
-	} {
-		if ts, err := time.Parse(layout, s); err == nil {
-			return ts, true
-		}
-	}
-	return time.Time{}, false
 }

@@ -7,7 +7,8 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/picker"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/transcript"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
-	libacp "github.com/contenox/libacp"
+	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // Session management: beam shows exactly one session at a time, so every act
@@ -25,7 +26,11 @@ const (
 	// list, not a paginated archive browser.
 	sessionRosterCap = 100
 
-	sessionsHint = "j/k or arrows to move, enter switches, esc closes"
+	sessionsHint = "j/k or arrows to move, enter switches, esc closes, type to filter"
+
+	// sessionsFilterPrefix labels the typed filter on the switcher's footer
+	// row, so it cannot be mistaken for the hint it replaces.
+	sessionsFilterPrefix = "filter: "
 )
 
 // sessionLabel is what the status bar and welcome header call the current
@@ -63,6 +68,11 @@ const idTailCells = 8
 // setSessionTitle adopts a title published for the current session and
 // ignores one published for any other, since during a switch's unfiltered
 // window session_info_update can arrive for a neighbour session.
+//
+// It is the only writer of sessionTitle after a switch: `/rename` is the ACP
+// core's command, and the title it stores (trimmed, whitespace-collapsed) is
+// the one every client sees. Deriving a label locally from the typed
+// argument put a name on this bar that no other client would ever show.
 func (a *app) setSessionTitle(id libacp.SessionID, title string) {
 	if id != a.sessionID || strings.TrimSpace(title) == "" {
 		return
@@ -127,6 +137,45 @@ func sessionItems(infos []libacp.SessionInfo, active libacp.SessionID, cap int) 
 		}
 	}
 	return items
+}
+
+// sessionsKey types into the switcher's roster filter. The picker holds the
+// query, so there is no second copy to keep in step, and every open starts
+// clean (see openSessions). Chorded keys are declined: they belong to the
+// registry, which already had its refusal.
+//
+// j and k never reach here — the registry claims them for the switcher's own
+// navigation — so those two letters cannot be typed into a filter. That is
+// the documented trade (see sessionsHint) and the reason the filter matches
+// on substrings rather than needing a full name.
+func (a *app) sessionsKey(k input.KeyEvent) {
+	if k.Ctrl || k.Alt {
+		return
+	}
+	switch k.Key {
+	case input.KeyRune:
+		if k.Rune == 0 {
+			return
+		}
+		a.sessions.SetQuery(a.sessions.Query() + string(k.Rune))
+	case input.KeyBackspace:
+		q := []rune(a.sessions.Query())
+		if len(q) == 0 {
+			return
+		}
+		a.sessions.SetQuery(string(q[:len(q)-1]))
+	}
+}
+
+// sessionsFooter is the switcher's one spare row: the filter once anything
+// is typed, the key hint until then. The filter displaces the hint rather
+// than adding a row, since the typed text is invisible everywhere else — the
+// composer is blocked while the switcher owns the keyboard.
+func (a *app) sessionsFooter() string {
+	if q := a.sessions.Query(); q != "" {
+		return sessionsFilterPrefix + q
+	}
+	return sessionsHint
 }
 
 // sessionsAccept is Enter in the switcher: switch to the highlighted row, or
@@ -229,30 +278,11 @@ func (a *app) resetForSession(id libacp.SessionID, name, title string) {
 
 	a.messages = 0
 	a.used, a.size = 0, 0
+	// Missions are announced into the session that fired them, so the badge
+	// belongs to that session and starts over with it.
+	a.missions = make(map[string]bool)
 	a.echoSeq = 0
 	a.history = nil
 	a.comp.SetHistory(nil)
 	a.lastPrompt, a.hasLastPrompt = "", false
-}
-
-// renameSession is `/rename`. The rename is the agent's — stored server-side
-// so it is visible to any ACP client, not just this beam — but the status
-// bar adopts the same label locally rather than waiting on a round trip.
-func (a *app) renameSession(ctx context.Context, args string) {
-	title := strings.TrimSpace(args)
-	line := "/rename"
-	if title != "" {
-		line += " " + title
-	}
-	if err := a.deps.Bridge.SubmitPrompt(a.sessionID, line); err != nil {
-		a.noticef(frame.StyleError, "rename failed: %v", err)
-		return
-	}
-	if title != "" && title != "-" {
-		a.sessionTitle = title
-	}
-	if title == "-" {
-		a.sessionTitle = ""
-	}
-	a.startTurn()
 }

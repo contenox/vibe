@@ -29,7 +29,7 @@ Sends the current input to the LLM and waits for a reply. If the model calls a t
 | Field | Required | Description |
 |-------|----------|-------------|
 | `system_instruction` | No | System prompt (supports macros) |
-| `execute_config.model` | Yes | Model name, e.g. `qwen2.5:7b` |
+| `execute_config.model` | Yes | Model name, e.g. `qwen3:8b` |
 | `execute_config.provider` | Yes | `ollama`, `openai`, `anthropic`, `vllm`, `gemini`, `bedrock`, `vertex-google` |
 | `execute_config.tools` | No | Tools allowlist: `[]`=none, `["*"]`=all, `["a","b"]`=named, `["*","!x"]`=all-except. Absent/`null`=none — the task has no tools until this field explicitly grants some. |
 | `execute_config.hide_tools` | No | Tools to suppress (by namespaced name) from **both** the registry tools selected via `tools` and any client-passed tools |

@@ -21,7 +21,6 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/missionservice"
-	"github.com/getkin/kin-openapi/openapi3"
 )
 
 // ToolsProviderName is the tools-provider key this package registers under.
@@ -168,11 +167,6 @@ func New(missions MissionStore, asker AttentionAsker, opts ...Option) taskengine
 // themselves is gated in GetToolsForToolsByName.
 func (p *provider) Supports(context.Context) ([]string, error) {
 	return []string{ToolsProviderName}, nil
-}
-
-// GetSchemasForSupportedTools has no OpenAPI schema surface.
-func (p *provider) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
-	return map[string]*openapi3.T{}, nil
 }
 
 // GetToolsForToolsByName lists the mission tools only when the caller is on
@@ -407,7 +401,7 @@ func reportToolSchema() taskengine.Tool {
 					"kind": map[string]any{
 						"type":        "string",
 						"enum":        []string{string(missionservice.ReportKindProgress), string(missionservice.ReportKindFinding), string(missionservice.ReportKindBlocker), string(missionservice.ReportKindResult)},
-						"description": "The shape of the report: progress, finding, blocker, or result.",
+						"description": "The shape of the report: progress, finding, blocker, or result. Omitted or blank files the report as progress.",
 					},
 					"summary": map[string]any{
 						"type":        "string",

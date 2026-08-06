@@ -11,9 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
-	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 )
 
 const kvActiveSession = "contenox.session.active"
@@ -74,7 +73,7 @@ func (s *service) New(ctx context.Context, identity, name string) (string, error
 		name = "session-" + uuid.New().String()[:8]
 	}
 	exec := s.db.WithoutTransaction()
-	if _, err := messagestore.New(exec, s.workspaceID).GetSessionByName(ctx, identity, name); err == nil {
+	if _, err := runtimetypes.NewMessageStore(exec, s.workspaceID).GetMessageSessionByName(ctx, identity, name); err == nil {
 		return "", fmt.Errorf("session %q already exists", name)
 	}
 
@@ -85,7 +84,7 @@ func (s *service) New(ctx context.Context, identity, name string) (string, error
 	}
 	defer release()
 
-	if err := messagestore.New(txExec, s.workspaceID).CreateNamedMessageIndex(ctx, newID, identity, name); err != nil {
+	if err := runtimetypes.NewMessageStore(txExec, s.workspaceID).CreateNamedMessageIndex(ctx, newID, identity, name); err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 	if err := s.setKV(ctx, txExec, newID); err != nil {
@@ -99,7 +98,7 @@ func (s *service) New(ctx context.Context, identity, name string) (string, error
 
 func (s *service) List(ctx context.Context, identity string) ([]*SessionInfo, error) {
 	exec := s.db.WithoutTransaction()
-	sessions, err := messagestore.New(exec, s.workspaceID).ListAllSessions(ctx, identity)
+	sessions, err := runtimetypes.NewMessageStore(exec, s.workspaceID).ListMessageSessions(ctx, identity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
 	}
@@ -119,9 +118,9 @@ func (s *service) List(ctx context.Context, identity string) ([]*SessionInfo, er
 
 func (s *service) Switch(ctx context.Context, identity, name string) error {
 	exec := s.db.WithoutTransaction()
-	si, err := messagestore.New(exec, s.workspaceID).GetSessionByName(ctx, identity, name)
+	si, err := runtimetypes.NewMessageStore(exec, s.workspaceID).GetMessageSessionByName(ctx, identity, name)
 	if err != nil {
-		if errors.Is(err, messagestore.ErrNotFound) {
+		if errors.Is(err, libdb.ErrNotFound) {
 			return fmt.Errorf("session %q not found", name)
 		}
 		return fmt.Errorf("failed to look up session: %w", err)
@@ -131,9 +130,9 @@ func (s *service) Switch(ctx context.Context, identity, name string) error {
 
 func (s *service) Delete(ctx context.Context, identity, name string) (bool, error) {
 	exec := s.db.WithoutTransaction()
-	si, err := messagestore.New(exec, s.workspaceID).GetSessionByName(ctx, identity, name)
+	si, err := runtimetypes.NewMessageStore(exec, s.workspaceID).GetMessageSessionByName(ctx, identity, name)
 	if err != nil {
-		if errors.Is(err, messagestore.ErrNotFound) {
+		if errors.Is(err, libdb.ErrNotFound) {
 			return false, fmt.Errorf("session %q not found: %w", name, err)
 		}
 		return false, fmt.Errorf("failed to look up session: %w", err)
@@ -148,7 +147,7 @@ func (s *service) Delete(ctx context.Context, identity, name string) (bool, erro
 	}
 	defer release()
 
-	if err := messagestore.New(txExec, s.workspaceID).DeleteMessageIndex(ctx, si.ID, identity); err != nil {
+	if err := runtimetypes.NewMessageStore(txExec, s.workspaceID).DeleteMessageIndex(ctx, si.ID, identity); err != nil {
 		return false, fmt.Errorf("failed to delete session: %w", err)
 	}
 	if wasActive {
@@ -187,7 +186,7 @@ func (s *service) EnsureDefault(ctx context.Context, identity string) (string, e
 		return "", err
 	}
 	if activeID != "" {
-		sessions, err := messagestore.New(exec, s.workspaceID).ListAllSessions(ctx, identity)
+		sessions, err := runtimetypes.NewMessageStore(exec, s.workspaceID).ListMessageSessions(ctx, identity)
 		if err == nil {
 			for _, sess := range sessions {
 				if sess.ID == activeID {
@@ -199,7 +198,7 @@ func (s *service) EnsureDefault(ctx context.Context, identity string) (string, e
 	}
 
 	// Re-use an existing "default" session if present.
-	if existing, err := messagestore.New(exec, s.workspaceID).GetSessionByName(ctx, identity, defaultName); err == nil {
+	if existing, err := runtimetypes.NewMessageStore(exec, s.workspaceID).GetMessageSessionByName(ctx, identity, defaultName); err == nil {
 		if setErr := s.setKV(ctx, exec, existing.ID); setErr != nil {
 			reportErr(fmt.Errorf("set active session: %w", setErr))
 		}
@@ -214,7 +213,7 @@ func (s *service) EnsureDefault(ctx context.Context, identity string) (string, e
 	}
 	defer release()
 
-	if err := messagestore.New(txExec, s.workspaceID).CreateNamedMessageIndex(ctx, newID, identity, defaultName); err != nil {
+	if err := runtimetypes.NewMessageStore(txExec, s.workspaceID).CreateNamedMessageIndex(ctx, newID, identity, defaultName); err != nil {
 		return "", fmt.Errorf("failed to create default session: %w", err)
 	}
 	if err := s.setKV(ctx, txExec, newID); err != nil {

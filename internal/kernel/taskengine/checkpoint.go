@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -352,6 +353,126 @@ func ApprovalVerdictFromContext(ctx context.Context, approvalID string) (approve
 	}
 	approved, ok = verdicts[approvalID]
 	return approved, ok
+}
+
+// GateResult is the durably recorded output of a resumed run's approved gate
+// call. A resume that executes the gated tool records its result before the
+// chain continues (WithGateResultRecorder); a retry of that same run replays
+// the record instead of executing again (WithRecordedGateResults) — the seam
+// that keeps the approved call exactly-once across partially completed resumes.
+type GateResult struct {
+	Value any
+	Type  DataType
+}
+
+// MarshalGateResult encodes r for storage alongside a checkpoint, in the same
+// typed wire form as checkpoint vars.
+func MarshalGateResult(r GateResult) ([]byte, error) {
+	raw, err := json.Marshal(r.Value)
+	if err != nil {
+		return nil, fmt.Errorf("taskengine: gate result (%s) is not JSON-serializable: %w", r.Type.String(), err)
+	}
+	return json.Marshal(checkpointVarWire{Type: r.Type.String(), Value: raw})
+}
+
+// UnmarshalGateResult decodes bytes MarshalGateResult produced, materializing
+// the value through the closed DataType enum exactly as checkpoint vars do.
+func UnmarshalGateResult(raw []byte) (GateResult, error) {
+	var wire checkpointVarWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return GateResult{}, fmt.Errorf("taskengine: gate result payload is not valid JSON: %w", err)
+	}
+	dt, err := DataTypeFromString(wire.Type)
+	if err != nil {
+		return GateResult{}, fmt.Errorf("taskengine: gate result: %w", err)
+	}
+	value, err := decodeCheckpointVar(dt, wire.Value)
+	if err != nil {
+		return GateResult{}, fmt.Errorf("taskengine: gate result: %w", err)
+	}
+	return GateResult{Value: value, Type: dt}, nil
+}
+
+type gateResultRecorderContextKey struct{}
+
+// GateResultRecorder persists the approved gate call's result under its
+// approval ID before the resumed chain continues past it. Installed only on
+// the resume path; recording failure fails the call rather than letting an
+// unrecorded side effect become repeatable on retry.
+type GateResultRecorder func(ctx context.Context, approvalID string, result GateResult) error
+
+// WithGateResultRecorder installs the durable gate-result sink for a resumed run.
+func WithGateResultRecorder(ctx context.Context, rec GateResultRecorder) context.Context {
+	if rec == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, gateResultRecorderContextKey{}, rec)
+}
+
+// GateResultRecorderFromContext reports the installed recorder, nil when none.
+func GateResultRecorderFromContext(ctx context.Context) GateResultRecorder {
+	rec, _ := ctx.Value(gateResultRecorderContextKey{}).(GateResultRecorder)
+	return rec
+}
+
+// ErrGateRecordFailed marks a gated call that executed but whose
+// exactly-once record could not be persisted. execute_tool_calls treats it as
+// a hard task failure instead of the usual soft tool-error result: continuing
+// would tell the model the call failed and invite a re-issue of work the
+// world already saw.
+var ErrGateRecordFailed = errors.New("taskengine: gated call executed but recording its result failed")
+
+type recordedGateResultsContextKey struct{}
+
+// GateResultStore is the mutable record/replay table a resumed run shares
+// between its recorder and the HITL wrapper's replay lookup. Mutable on
+// purpose: a record made during attempt N of a retrying task must replay in
+// attempt N+1 of the same Execute call — the durable row is not re-read
+// mid-run, so a snapshot map would leave same-process retries unprotected.
+type GateResultStore struct {
+	mu sync.Mutex
+	m  map[string]GateResult
+}
+
+// NewGateResultStore returns an empty store.
+func NewGateResultStore() *GateResultStore {
+	return &GateResultStore{m: map[string]GateResult{}}
+}
+
+// Set records approvalID's completed result for replay.
+func (s *GateResultStore) Set(approvalID string, r GateResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[approvalID] = r
+}
+
+// Get reports the recorded result for approvalID, ok=false when none.
+func (s *GateResultStore) Get(approvalID string) (GateResult, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.m[approvalID]
+	return r, ok
+}
+
+// WithGateResultStore installs the shared record/replay table for a resumed run.
+func WithGateResultStore(ctx context.Context, store *GateResultStore) context.Context {
+	if store == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, recordedGateResultsContextKey{}, store)
+}
+
+// RecordedGateResultFromContext reports the recorded result for approvalID,
+// ok=false when none was recorded on this run.
+func RecordedGateResultFromContext(ctx context.Context, approvalID string) (GateResult, bool) {
+	if approvalID == "" {
+		return GateResult{}, false
+	}
+	store, _ := ctx.Value(recordedGateResultsContextKey{}).(*GateResultStore)
+	if store == nil {
+		return GateResult{}, false
+	}
+	return store.Get(approvalID)
 }
 
 type attentionAnswersContextKey struct{}

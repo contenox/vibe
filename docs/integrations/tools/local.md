@@ -103,13 +103,13 @@ Set per-task read/output limits and denied path substrings by adding a `tools_po
 }
 ```
 
-Values are strings even when conceptually numeric — `tools_policies` is the chain's policy carrier and uses string values uniformly across tools. The default chains (`default-chain.json`, `default-run-chain.json`) ship with conservative limit, root, and deny-substring defaults.
+Values are strings even when conceptually numeric — `tools_policies` is the chain's policy carrier and uses string values uniformly across tools. The default chains (`chain-agent-contenox.json`, `chain-agent-run.json`) ship with conservative limit, root, and deny-substring defaults.
 
 ### Chain example
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["local_fs"]
 }
@@ -142,7 +142,7 @@ The default HITL presets (`hitl-policy-default.json`, `hitl-policy-acp.json`) al
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["git"]
 }
@@ -171,7 +171,7 @@ Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor ses
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["gointel"]
 }
@@ -202,7 +202,7 @@ Prefer `jq_query` over reading a whole config file when you only need one field 
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["jq"]
 }
@@ -223,13 +223,13 @@ Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor ses
 | `question` | string | ✅ | Natural-language question about the workspace, phrased as what you want to find (the ranking is semantic, not keyword). |
 | `top_k` | integer | — | Maximum citations to return. The result is also capped by an overall token budget and says how many hits it withheld. |
 
-Results can go stale: a hit is flagged when the source file changed since the last index run. `workspace_search` answers by meaning and can be approximately right; for exact Go-symbol questions use the `gointel` tools instead. `workspace_search` is `allow` by default in the seeded HITL policies.
+Results can go stale: a hit is flagged when the source file changed since the last index run. `workspace_search` answers by meaning and can be approximately right; for exact Go-symbol questions use the `gointel` tools instead. `workspace_search` is `allow` by default in the seeded HITL policies. See the [workspace index & search guide](/docs/guide/search/) for setting up the embedding model and building the index.
 
 ### Chain example
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["workspace"]
 }
@@ -238,6 +238,8 @@ Results can go stale: a hit is flagged when the source file changed since the la
 ---
 
 ## `goja` — JavaScript sandbox
+
+> **Beta:** this toolset requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) and its interface may change; without the opt-in it is not registered at all.
 
 Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). `goja_eval` runs JavaScript (ES2023) in a sandbox with no network, no filesystem, no `require`/`import`, and no async — its only way out is `host.tool("provider.tool_name", {args})`, which calls another registered tool under the same HITL rules a direct model call would. The sandbox's result is the last expression evaluated.
 
@@ -258,7 +260,7 @@ Beyond `goja_eval`, Contenox scans `$CONTENOX_DIR/tools/*.js` at startup and reg
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["goja"]
 }
@@ -270,7 +272,7 @@ Beyond `goja_eval`, Contenox scans `$CONTENOX_DIR/tools/*.js` at startup and reg
 
 Always available. Lets the model call any HTTP endpoint via per-verb tools. Unlike remote tools (which require an OpenAPI spec), `webtools` exposes six generic verb tools — the model picks the verb, URL, query params, headers, and body at call time.
 
-> [!CAUTION]
+> **Caution:**
 > Because the model controls the destination URL, every request is subject to size limits and an *opt-in* host policy configured via `tools_policies.webtools` (see below). By default `_denied_hosts` is empty — no host, including link-local / loopback / cloud-metadata addresses, is blocked unless you set it. Response size is capped at 1 MiB by default. Mutating verbs (`web_post`, `web_put`, `web_patch`, `web_delete`) trigger a HITL approval prompt by default. Do not point chains at untrusted user input without setting `_denied_hosts` (or an equivalent HITL policy rule with `op:"host"`) yourself.
 
 ### Tools
@@ -312,7 +314,7 @@ Always available. Lets the model call any HTTP endpoint via per-verb tools. Unli
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["webtools"],
   "tools_policies": {
@@ -329,7 +331,7 @@ Always available. Lets the model call any HTTP endpoint via per-verb tools. Unli
 
 ## `local_shell` — Shell command execution
 
-> [!CAUTION]
+> **Caution:**
 > `local_shell` gives the model direct access to run arbitrary commands on your machine. **Never enable it in public-facing deployments or when processing untrusted user input.**
 
 For direct CLI use, `local_shell` is opt-in. Enable it per invocation with `--shell`:
@@ -359,7 +361,7 @@ contenox chat --shell "run the tests and fix anything that breaks"
 - `_denied_commands` — comma-separated commands that are always blocked, regardless of the allowlist.
 - `_allowed_dir` — if set, the command executable or script path must reside under this directory. The global `--local-exec-allowed-dir` flag sets the same executable/script boundary for an invocation.
 
-The default chains (`default-chain.json`, `default-run-chain.json`) ship with sensible defaults: common dev tools allowed, privilege-escalation and raw-disk commands denied.
+The default chains (`chain-agent-contenox.json`, `chain-agent-run.json`) ship with sensible defaults: common dev tools allowed, privilege-escalation and raw-disk commands denied.
 
 To use `local_shell` with **no policy restrictions** (fully open), omit `tools_policies` entirely. Only do this in fully trusted, local-only environments. Review tool use in your chain and enable shell only when you intend to grant command execution.
 
@@ -393,7 +395,7 @@ Always available. Appends a message to the chat history as a system message, or 
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["print"]
 }
@@ -417,7 +419,7 @@ Always available. Echoes the input back, prefixed with `"Echo: "`. Useful for ve
 
 ```json
 "execute_config": {
-  "model": "qwen2.5:7b",
+  "model": "qwen3:8b",
   "provider": "ollama",
   "tools": ["echo"]
 }

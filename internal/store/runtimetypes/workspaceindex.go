@@ -46,6 +46,11 @@ var ErrWorkspaceChunkConfigMixed = errors.New("workspace chunk batch spans multi
 // Root is recorded because an index is an index of a specific tree: search
 // needs it to resolve a hit's path back to a file for the staleness check, and
 // it makes "you indexed a different directory under this workspace id" visible.
+//
+// Dimension == 0 declares a LEXICAL-ONLY generation: built with no embedding
+// model, every chunk carries an empty vector and only the FTS5 mirror can be
+// ranked. It is a first-class state, not a broken index — a workspace with no
+// `default-embed-model` still gets keyword retrieval instead of nothing.
 type WorkspaceIndexConfig struct {
 	ID            string    `json:"id"`
 	WorkspaceID   string    `json:"workspaceId"`
@@ -138,8 +143,10 @@ func (s *store) CreateWorkspaceIndexConfig(ctx context.Context, cfg *WorkspaceIn
 	if cfg == nil {
 		return errors.New("workspace_index_configs: nil config")
 	}
-	if cfg.Dimension <= 0 {
-		return fmt.Errorf("workspace_index_configs: create %s: dimension must be positive, got %d", cfg.ID, cfg.Dimension)
+	// 0 is the lexical-only generation (see WorkspaceIndexConfig); negative is
+	// always a bug, never a mode.
+	if cfg.Dimension < 0 {
+		return fmt.Errorf("workspace_index_configs: create %s: dimension must not be negative, got %d", cfg.ID, cfg.Dimension)
 	}
 	if cfg.CreatedAt.IsZero() {
 		cfg.CreatedAt = time.Now().UTC()
@@ -263,7 +270,9 @@ func (s *store) DeleteWorkspaceIndexConfig(ctx context.Context, id string) error
 // AppendWorkspaceChunks inserts a batch of chunks and mirrors their text into
 // the FTS5 table in the same call, so the lexical index cannot drift from the
 // vector index. Every vector is checked against the owning config's dimension
-// before insert, refusing a vector from the wrong model at the store boundary.
+// before insert, refusing a vector from the wrong model at the store boundary;
+// under a lexical-only config (Dimension 0) that same check refuses any chunk
+// that carries a vector, so the two modes cannot be mixed in one generation.
 func (s *store) AppendWorkspaceChunks(ctx context.Context, chunks ...*WorkspaceChunk) error {
 	if len(chunks) == 0 {
 		return nil

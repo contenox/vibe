@@ -144,6 +144,12 @@ func renderApprovalRequest(w io.Writer, req hitlservice.ApprovalRequest) {
 	fmt.Fprintf(w, "  HITL approval required\n")
 	fmt.Fprintf(w, "  Tools : %s\n", req.ToolsName)
 	fmt.Fprintf(w, "  Tool  : %s\n", req.ToolName)
+	// Why THIS call stopped, when the args alone do not say — which command of
+	// a compound line tripped a rule, or which binary was not trusted. Without
+	// it a withdrawn allow looks like an unexplained card.
+	if detail := strings.TrimSpace(req.Detail); detail != "" {
+		fmt.Fprintf(w, "  Reason: %s\n", sanitize.Lines(detail))
+	}
 
 	if len(req.Args) > 0 {
 		fmt.Fprintln(w, "  Args  :")

@@ -15,7 +15,7 @@ import (
 	"github.com/contenox/contenox/internal/services/shellsession"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

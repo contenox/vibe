@@ -14,14 +14,14 @@ import (
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/libbus"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/fleetservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/reportrouter"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // Deps are the collaborators BuildInProcessFleet wires the embedded fleet
@@ -41,6 +41,10 @@ type Deps struct {
 	// must not import contenoxcli to compute them itself).
 	PolicySource   hitlservice.PolicySource
 	DiscoverAgents func(ctx context.Context, agents agentregistryservice.Service)
+	// WorkspaceID is the workspace the host stamps mission events with,
+	// forwarded to dispatched chain-kind units. See
+	// fleetservice.InProcessDeps.WorkspaceID.
+	WorkspaceID string
 }
 
 // BuildInProcessFleet embeds the fleet a host process dispatches `/mission`
@@ -57,6 +61,7 @@ func BuildInProcessFleet(ctx context.Context, deps Deps) (fleetservice.Service, 
 		Bus:            deps.Bus,
 		Missions:       deps.Missions,
 		ProjectRoot:    projectRoot,
+		WorkspaceID:    deps.WorkspaceID,
 		Tracker:        deps.Tracker,
 		PolicySource:   deps.PolicySource,
 		DiscoverAgents: deps.DiscoverAgents,

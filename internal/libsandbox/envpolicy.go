@@ -74,6 +74,25 @@ func SecretEnvDeny() []string {
 		"*_PASSWORD",
 		"*_PASSWD",
 		"*_CREDENTIALS",
+		// Named forms the suffix shapes above miss: a credential that ends in
+		// _ID, carries the secret inside a URL, or spells its own name.
+		"*_API_KEY_ID",
+		"AWS_ACCESS_KEY_ID",
+		"AWS_SESSION_TOKEN",
+		"PGPASSWORD",
+		"PGPASSFILE",
+		"MYSQL_PWD",
+		"*_PWD",
+		"DATABASE_URL",
+		"*_DATABASE_URL",
+		"REDIS_URL",
+		"MONGODB_URI",
+		"*_DSN",
+		"SSH_AUTH_SOCK",
+		"KUBECONFIG",
+		"*_AUTH",
+		"*_PAT",
+		"NETRC",
 	}
 }
 
@@ -148,10 +167,29 @@ func (p EnvPolicy) Apply(parentEnv []string) []string {
 	return out
 }
 
+// envNameVetoes is envNameMatches for the Deny side, matched case-folded.
+// The asymmetry is the point: a veto that misses `github_token` because it
+// was spelled for `GITHUB_TOKEN` fails OPEN, handing the shell the very
+// credential the rule names, while the same folding on Allow would only ever
+// widen a grant. Deny may over-match; Allow may not.
+func envNameVetoes(pattern, name string) bool {
+	return envNameMatches(strings.ToUpper(pattern), strings.ToUpper(name))
+}
+
+// vetoesAny reports whether name is vetoed by any Deny pattern.
+func vetoesAny(patterns []string, name string) bool {
+	for _, p := range patterns {
+		if envNameVetoes(p, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // passes reports whether name matches an Allow rule and no Deny rule (Deny
 // wins).
 func (p EnvPolicy) passes(name string) bool {
-	return !matchesAny(p.Deny, name) && matchesAny(p.Allow, name)
+	return !vetoesAny(p.Deny, name) && matchesAny(p.Allow, name)
 }
 
 // ParseEnvList splits an operator-supplied allow/deny list (comma,
@@ -180,8 +218,10 @@ func matchesAny(patterns []string, name string) bool {
 
 // envNameMatches reports whether name matches pattern: an exact name, or a
 // name with a single leading or trailing "*" (prefix/suffix match), or a
-// bare "*" matching everything. Case-sensitive. An empty pattern matches
-// nothing.
+// bare "*" matching everything. Case-sensitive — on Unix PATH and path are
+// genuinely different variables, so an Allow rule must not widen across
+// case. The Deny side is deliberately different: see envNameVetoes. An empty
+// pattern matches nothing.
 func envNameMatches(pattern, name string) bool {
 	switch {
 	case pattern == "":

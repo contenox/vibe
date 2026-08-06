@@ -28,6 +28,9 @@ var hitlPolicyACPX string
 //go:embed hitl-policy-beam.json
 var hitlPolicyBeam string
 
+//go:embed hitl-policy-oracle.json
+var hitlPolicyOracle string
+
 // HITLPolicyPresets lists the names and content of all embedded HITL policy presets
 // in the order they should be written to disk.
 var HITLPolicyPresets = []struct {
@@ -40,6 +43,7 @@ var HITLPolicyPresets = []struct {
 	{"hitl-policy-acp.json", hitlPolicyACP},
 	{"hitl-policy-acpx.json", hitlPolicyACPX},
 	{"hitl-policy-beam.json", hitlPolicyBeam},
+	{"hitl-policy-oracle.json", hitlPolicyOracle},
 }
 
 // embeddedPolicyNames returns the preset file names in preset order, for the
@@ -131,4 +135,30 @@ func upgradeEmbeddedHITLPolicies(contenoxDir string, overwrite bool) (stale []st
 		writePresetState(contenoxDir, state)
 	}
 	return stale, nil
+}
+
+// refreshExistingHITLPolicies overwrites only the presets contenoxDir already
+// holds with this build's content, recording provenance the way
+// upgradeEmbeddedHITLPolicies does. Absent presets stay absent: seeding a
+// workspace dir would widen its shadow over ~/.contenox.
+func refreshExistingHITLPolicies(contenoxDir string) (written []string, err error) {
+	state := readPresetState(contenoxDir)
+	changed := false
+	for _, p := range HITLPolicyPresets {
+		dst := filepath.Join(contenoxDir, p.Name)
+		if _, statErr := os.Stat(dst); statErr != nil {
+			continue
+		}
+		if writeErr := os.WriteFile(dst, []byte(p.Content), 0644); writeErr != nil {
+			err = fmt.Errorf("failed to write %s: %w", dst, writeErr)
+			break
+		}
+		state[p.Name] = presetSHA(p.Content)
+		changed = true
+		written = append(written, dst)
+	}
+	if changed {
+		writePresetState(contenoxDir, state)
+	}
+	return written, err
 }

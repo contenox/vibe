@@ -29,8 +29,8 @@ func (a *app) buildFrame() frame.Frame {
 		a.welcomePending = false
 		scrollback = append(scrollback, brand.Welcome(a.width, brand.Info{
 			ASCII:    a.ascii,
-			Model:    a.deps.Model,
-			Provider: a.deps.Provider,
+			Model:    a.model,
+			Provider: a.provider,
 			Session:  a.sessionLabel(),
 		})...)
 	}
@@ -45,14 +45,20 @@ func (a *app) buildFrame() frame.Frame {
 
 	switch {
 	case a.card != nil:
-		live = append(live, a.card.Render(a.width, a.ascii, spinner)...)
+		// Only the subject and the decision line: the ask itself was settled
+		// into scrollback when it arrived, since a card is far taller than
+		// any row budget and the live region's overflow is clipped, not
+		// scrolled back (see PermissionRequested in events.go).
+		live = append(live, clip(a.card.Prompt(a.width, a.ascii, spinner), a.rowBudget())...)
 	case a.helpOpen:
 		live = append(live, a.overlayHelp()...)
 	case a.sessionsOpen:
 		// One row of the budget goes to the key hint, since the switcher is
-		// the one overlay an operator arrives at without typing anything.
+		// the one overlay an operator arrives at without typing anything —
+		// and to the filter once there is one, which has nowhere else to
+		// show (the composer is blocked while the switcher is up).
 		live = append(live, a.sessions.Render(a.width, a.rowBudget()-1, a.ascii)...)
-		live = append(live, frame.Styled(frame.StyleMuted, sessionsHint))
+		live = append(live, frame.Styled(frame.StyleMuted, a.sessionsFooter()))
 	case a.pickerOpen:
 		// The walk budget is otherwise invisible, so a truncated index gets a
 		// muted footer telling the operator to narrow the query. Only under a
@@ -104,6 +110,17 @@ func (a *app) rowBudget() int {
 	return budget
 }
 
+// clip cuts an overlay's lines to its row budget, keeping the HEAD. The
+// terminal keeps the tail of an over-tall live region instead, and a live
+// region never enters scrollback, so anything past the budget is gone for
+// good — the first rows are the ones worth keeping.
+func clip(lines []frame.Line, budget int) []frame.Line {
+	if budget < 0 || len(lines) <= budget {
+		return lines
+	}
+	return lines[:budget]
+}
+
 // spinner is the current activity glyph, or "" when nothing is open, which
 // keeps an idle frame byte-identical across ticks.
 func (a *app) spinner() string {
@@ -126,15 +143,21 @@ func (a *app) status() statusbar.State {
 		// The session segment shows the label, not the id.
 		Session:  a.sessionLabel(),
 		Messages: a.messages,
-		Model:    a.deps.Model,
-		Provider: a.deps.Provider,
+		Model:    a.model,
+		Provider: a.provider,
 		Used:     a.used,
 		Size:     a.size,
+		Missions: len(a.missions),
 		Inbox:    a.inbox,
 		Health:   statusbar.HealthReady,
 	}
 	if a.inFlight {
 		s.Health = statusbar.HealthWorking
+	}
+	// Last, and unconditional: a closed engine connection outranks every
+	// other health reading, and nothing reopens it.
+	if a.disconnected {
+		s.Health = statusbar.HealthDisconnected
 	}
 	if frames := a.glyphs.SpinnerFrames; len(frames) > 0 {
 		if snap, _, ok := a.live.Aggregate(a.now(), len(frames)); ok {
@@ -178,10 +201,10 @@ func (a *app) overlayHelp() []frame.Line {
 	}
 	out := append([]frame.Line(nil), rows[:budget-1]...)
 	return append(out, a.gutterLine(frame.S(frame.StyleMuted,
-		fmt.Sprintf("+%d more — /help prints them all", len(rows)-(budget-1)))))
+		fmt.Sprintf("+%d more — /%s prints them all", len(rows)-(budget-1), localKeys))))
 }
 
-// helpLines is `/help`'s scrollback output: the same grouped key list the
+// helpLines is `/keys`' scrollback output: the same grouped key list the
 // overlay shows, then the commands. Both are projections of the registry and
 // the palette, so beam cannot document a key or command that does not exist.
 func (a *app) helpLines() []frame.Line {

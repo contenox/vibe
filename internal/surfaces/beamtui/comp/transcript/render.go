@@ -8,7 +8,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // quoteMarker is a blockquote's literal source prefix, kept verbatim so a
@@ -56,6 +56,7 @@ type glyphs struct {
 	done       string // completed tool call
 	failed     string // failed tool call
 	pending    string // pending (or spinner-less) tool call
+	running    string // a plan entry in progress
 	abandoned  string // a call the turn ended underneath
 	shell      string // user shell line marker
 	dash       string // turn-notice lead-in
@@ -71,6 +72,7 @@ var unicodeGlyphs = glyphs{
 	done:       "✓",
 	failed:     "✗",
 	pending:    "·",
+	running:    "▸",
 	abandoned:  "·",
 	shell:      "!",
 	dash:       "—",
@@ -81,6 +83,8 @@ var unicodeGlyphs = glyphs{
 
 // asciiGlyphs is the legacy-console fallback. Status markers are single
 // cells so a completed and a failed card's titles stay column-aligned.
+// running is "~" rather than the obvious ">": that is already the user
+// sigil, and "-" and "*" are already pending and mission here.
 var asciiGlyphs = glyphs{
 	quote:      "| ",
 	user:       ASCIIUser + " ",
@@ -88,6 +92,7 @@ var asciiGlyphs = glyphs{
 	done:       ASCIIDone,
 	failed:     ASCIIFailed,
 	pending:    "-",
+	running:    "~",
 	abandoned:  "-",
 	shell:      "!",
 	dash:       "-",
@@ -311,6 +316,72 @@ func (u missionPlanUnit) render(_ int, g glyphs) []frame.Line {
 		styled(frame.StyleMuted, head),
 		styled(frame.StyleMuted, g.indentUser+counts),
 	}
+}
+
+// planEntry is one row of the agent's own plan, already sanitized.
+type planEntry struct {
+	content string
+	status  libacp.PlanEntryStatus
+}
+
+// planEntries projects the wire's plan onto rows, dropping entries with no
+// content: a checklist item with nothing written on it is not reviewable.
+func planEntries(entries []libacp.PlanEntry) []planEntry {
+	out := make([]planEntry, 0, len(entries))
+	for _, e := range entries {
+		content := sanitize.Line(e.Content)
+		if content == "" {
+			continue
+		}
+		out = append(out, planEntry{content: content, status: e.Status})
+	}
+	return out
+}
+
+// planUnit is the agent's current plan (session/update kind "plan"): the
+// shape of the plan on the header row and the checklist under it, the same
+// device missionPlanUnit uses for a dispatched unit's plan. Muted throughout
+// so a re-planning agent never outshouts the answer it is working towards.
+type planUnit struct{ entries []planEntry }
+
+func (u planUnit) render(_ int, g glyphs) []frame.Line {
+	var done, running, pending int
+	for _, e := range u.entries {
+		switch e.status {
+		case libacp.PlanStatusCompleted:
+			done++
+		case libacp.PlanStatusInProgress:
+			running++
+		default:
+			pending++
+		}
+	}
+	sep := " " + g.dot + " "
+	head := g.mission + " plan  " + fmt.Sprintf("%d done%s%d running%s%d pending", done, sep, running, sep, pending)
+
+	out := make([]frame.Line, 0, len(u.entries)+1)
+	out = append(out, styled(frame.StyleMuted, head))
+	for _, e := range u.entries {
+		mark, style := planMark(e.status, g)
+		out = append(out, buildLine(
+			frame.S(style, g.indentUser+mark+" "),
+			frame.S(frame.StyleMuted, e.content),
+		))
+	}
+	return out
+}
+
+// planMark is one entry's status marker. The three states differ by glyph,
+// not only by color, so a plan stays readable under NO_COLOR; an unknown
+// status reads as pending, which is the state that claims the least.
+func planMark(status libacp.PlanEntryStatus, g glyphs) (string, frame.StyleID) {
+	switch status {
+	case libacp.PlanStatusCompleted:
+		return g.done, frame.StyleDone
+	case libacp.PlanStatusInProgress:
+		return g.running, frame.StylePending
+	}
+	return g.pending, frame.StyleMuted
 }
 
 // splitSourceLines cuts multi-line unit text into rows, expanding each

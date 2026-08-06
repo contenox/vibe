@@ -1,16 +1,18 @@
 # contenox
 
-**Fire coding work at an agent, under rules you can read.**
+**Fire work at an agent, under rules you can read.**
 
-An open coding harness, built around the envelope: a plain file that bounds
+An open agentic harness, built around the envelope: a plain file that bounds
 what an agent may do unattended — tool allowlists, command policy, budgets,
-approval gates. Missions are what envelopes make safe: fire one, detach,
-come back to done. Envelopes survive restarts — an unanswered approval
-checkpoints the run; answer it later with `contenox approvals respond`, from
-any terminal, and the run resumes exactly once. Terminal CLI, the same
-sessions inside Zed, JetBrains, or any ACP editor, and the contenox TUI. Any
-model, any MCP server, any OpenAPI spec as tools, in combination. SQLite.
-No account.
+approval gates. Missions are what envelopes make safe: fire one from a
+persistent session, detach, come back to done. Envelopes survive restarts — an
+unanswered approval checkpoints the run; answer it later with
+`contenox approvals respond`, from any terminal that can reach your models, and
+the run resumes exactly once. Terminal CLI, the same
+sessions inside Zed, JetBrains, or any ACP editor, and `contenox new` — a
+full-screen TUI with chat, plan, shell, and editor-grade file tools in one
+persistent coding session. Any model, any MCP server, any OpenAPI spec as
+tools, in combination. SQLite. No account.
 
 | The old way | contenox |
 | --- | --- |
@@ -24,6 +26,42 @@ declare the agent with exactly what it needs — the tools, the model, the
 budget, the approval gate — nothing implied, nothing assumed.
 
 Docs: **[contenox.com](https://contenox.com)**
+
+---
+
+## How it compares
+
+Most of what contenox does, the dedicated coding agents also do: a chat loop
+with tools, tool calling, MCP servers, provider switching, ACP editor sessions,
+sessions in local SQLite, a terminal UI. `contenox new` is a real coding
+session — chat, plan, shell, and editor-grade file tools in one persistent
+full-screen UI. Aider, OpenCode, Kilo Code and Claude Code all ship that set,
+and for pure coding ergonomics — repo mapping, diff application, edit formats —
+they are more refined. That part is table stakes, not the argument.
+
+Three things are built differently:
+
+* **The envelope is a separate artifact from the workflow.** The chain says
+  what happens; the [envelope](https://contenox.com/docs/guide/hitl/) says what
+  is permitted. Two files, authored and versioned independently, both checked
+  by `contenox vet`, evaluated before every tool call, fail-closed when nothing
+  matches. Hand someone a chain and keep the policy; tighten the policy without
+  touching the workflow.
+* **Human gates are durable.** An unanswered approval checkpoints the run and
+  releases its process. Answer it days later from another terminal with
+  [`contenox approvals respond`](https://contenox.com/docs/reference/contenox-cli/#contenox-approvals);
+  the verdict is recorded once by a compare-and-swap and the checkpoint is
+  claimed before the run rebuilds. The closest analog is workflow
+  infrastructure, not a dev tool.
+* **Delegation is bounded and attributed.** An envelope may grant an agent
+  [a fixed number of answers](https://contenox.com/docs/guide/hitl/#who-may-answer-a-units-question-attention)
+  to another agent's questions. The budget is durable, your own answers don't
+  spend it, and the record shows who answered.
+
+The cost: the weakest surfaces are the ones you meet first, kernel-enforced
+sandboxing is Landlock and Linux-only, and all three differences pay off on day
+thirty rather than day one. The long version, with the mechanisms and the rest
+of the caveats: **[How contenox compares](https://contenox.com/docs/guide/comparison/)**.
 
 ---
 
@@ -53,6 +91,7 @@ sh install.sh
 contenox setup                          # pick a provider and model, once
 contenox "say hello world in python"    # chat straight from the CLI
 contenox chat -e                        # compose a rich prompt in $EDITOR
+contenox new                            # full-screen TUI: chat, plan, shell, file edits
 ```
 
 Sessions persist — `contenox session list` and `contenox session switch <name>`

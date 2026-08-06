@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 )
 
 var osFallback = localtools.NewOSFileIO()
@@ -144,10 +144,11 @@ func NewServeCwdResolver(db libdb.DBManager, roots *vfs.Factory, tracker libtrac
 // stores the cwd in the KV store.
 func serveSessionCwd(ctx context.Context, db libdb.DBManager, internalID string) string {
 	exec := db.WithoutTransaction()
-	var name string
-	if err := exec.QueryRowContext(ctx,
-		`SELECT name FROM message_indices WHERE id = $1`, internalID,
-	).Scan(&name); err != nil || name == "" {
+	// The store is workspace-scoped but this lookup is keyed on the session's
+	// primary key, which GetMessageIndexName documents as workspace-independent;
+	// the serve path has no workspace of its own to pass.
+	name, err := runtimetypes.NewMessageStore(exec, "").GetMessageIndexName(ctx, internalID)
+	if err != nil || name == "" {
 		return ""
 	}
 	var rec sessionCwdRecord

@@ -14,7 +14,6 @@ import (
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/libbus"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -22,6 +21,7 @@ import (
 	"github.com/contenox/contenox/internal/services/operatorinbox"
 	"github.com/contenox/contenox/internal/services/reportrouter"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // InProcessDeps are the collaborators BuildInProcess wires an embedded fleet
@@ -36,6 +36,11 @@ type InProcessDeps struct {
 	// ProjectRoot is the working directory a dispatched mission defaults to
 	// when the request names none. See service.resolveCwd.
 	ProjectRoot string
+
+	// WorkspaceID is the workspace the host publishes mission events under,
+	// forwarded to every chain-kind child so its own publisher stamps the same
+	// workspace. Empty leaves the child to its own default.
+	WorkspaceID string
 
 	// Tracker degrades to a Noop when nil, exactly as New does.
 	Tracker libtracker.ActivityTracker
@@ -73,13 +78,22 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 		deps.DiscoverAgents(ctx, agents)
 	}
 
-	// No unattended permission answerer is wired here (unlike serve): a
-	// dispatched unit runs bounded/ungated work or --auto.
+	// No unattended permission answerer is wired here, deliberately: with
+	// none, the hub keeps its built-in deny, so an unattended permission
+	// request is refused rather than auto-answered (fail-closed, working as
+	// intended). A dispatched unit therefore runs bounded/ungated work or
+	// --auto, and a chain that wants a human's decision asks for one through
+	// mission_ask_attention. Leaving this unwired also leaves maxToolCalls
+	// unenforced: this answerer is its one enforcement seam.
 	stderr := deps.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	kernel := agentinstance.New(agents, agentinstance.WithStderr(stderr))
+	kernelOpts := []agentinstance.Option{agentinstance.WithStderr(stderr)}
+	if deps.WorkspaceID != "" {
+		kernelOpts = append(kernelOpts, agentinstance.WithWorkspaceID(deps.WorkspaceID))
+	}
+	kernel := agentinstance.New(agents, kernelOpts...)
 
 	operatorInbox := operatorinbox.New(deps.DB, operatorinbox.WithEventPublisher(deps.Bus))
 
@@ -107,6 +121,12 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 	var opts []Option
 	if deps.PolicySource != nil {
 		opts = append(opts, WithPolicyValidator(hitlservice.NewPolicyValidator(deps.PolicySource, runtimetypes.LocalTenantID, "")))
+		// Read-only over the same source: a nil KVReader leaves the approval
+		// and checkpoint seams unbound, so this instance can only load and
+		// parse a policy's compute half.
+		if reader, ok := hitlservice.New(deps.PolicySource, runtimetypes.LocalTenantID, nil, deps.Tracker).(hitlservice.ComputeBoundsReader); ok {
+			opts = append(opts, WithComputeBounds(reader))
+		}
 	}
 	if raw := clikv.Read(ctx, runtimetypes.New(deps.DB.WithoutTransaction()), MaxParallelConfigKey); raw != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
@@ -124,10 +144,38 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 		return nil, nil, nil, err
 	}
 
+	// Every unit this host opens dies with it, so a host coming up is the
+	// moment to collect what a dead one left behind.
+	sweepAbandonedMissions(ctx, deps.Missions, deps.Tracker)
+
 	stop := func() {
 		stopTeardown()
 		stopRouter()
 		_ = kernel.Close()
 	}
 	return fleet, agents, stop, nil
+}
+
+// sweepAbandonedMissions reclaims missions whose host process is gone (see
+// missionservice.SweepAbandoned). Best-effort: a fleet that cannot collect
+// yesterday's wreckage must still come up and dispatch today's work.
+func sweepAbandonedMissions(ctx context.Context, missions missionservice.Service, tracker libtracker.ActivityTracker) {
+	if missions == nil {
+		return
+	}
+	if tracker == nil {
+		tracker = libtracker.NoopTracker{}
+	}
+	reclaimed, err := missions.SweepAbandoned(ctx)
+	if err != nil {
+		reportErr, _, end := tracker.Start(ctx, "sweep", "abandoned_missions")
+		reportErr(fmt.Errorf("fleetservice: reclaiming abandoned missions failed; the fleet is up either way: %w", err))
+		end()
+		return
+	}
+	if reclaimed > 0 {
+		_, reportChange, end := tracker.Start(ctx, "sweep", "abandoned_missions")
+		reportChange("reclaimed", reclaimed)
+		end()
+	}
 }

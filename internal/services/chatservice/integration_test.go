@@ -15,10 +15,9 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/kernel/tools"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/chatservice"
-	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -126,7 +125,7 @@ func roundTrip(t *testing.T, ctx context.Context, db libdb.DBManager, sessionID 
 
 func loadRoles(t *testing.T, ctx context.Context, db libdb.DBManager, sessionID string) []string {
 	t.Helper()
-	store := messagestore.New(db.WithoutTransaction(), "")
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "")
 	rows, err := store.ListMessages(ctx, sessionID)
 	require.NoError(t, err)
 	roles := make([]string, 0, len(rows))
@@ -140,7 +139,7 @@ func loadRoles(t *testing.T, ctx context.Context, db libdb.DBManager, sessionID 
 
 func loadContents(t *testing.T, ctx context.Context, db libdb.DBManager, sessionID string) []string {
 	t.Helper()
-	store := messagestore.New(db.WithoutTransaction(), "")
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "")
 	rows, err := store.ListMessages(ctx, sessionID)
 	require.NoError(t, err)
 	contents := make([]string, 0, len(rows))
@@ -155,7 +154,7 @@ func loadContents(t *testing.T, ctx context.Context, db libdb.DBManager, session
 // TestIntegration_ChatRoundTrip_FreshSession pins that a fresh session persists only user+assistant.
 func TestIntegration_ChatRoundTrip_FreshSession(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction(), "")
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "")
 	require.NoError(t, store.CreateMessageIndex(ctx, "s-fresh", "alice"))
 
 	chainInput := taskengine.ChatHistory{
@@ -173,7 +172,7 @@ func TestIntegration_ChatRoundTrip_FreshSession(t *testing.T) {
 // TestIntegration_ChatRoundTrip_SubsequentTurn pins that PersistDiff dedups against existing DB rows.
 func TestIntegration_ChatRoundTrip_SubsequentTurn(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction(), "")
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "")
 	require.NoError(t, store.CreateMessageIndex(ctx, "s-cont", "alice"))
 	clock := newFixedClock()
 
@@ -209,7 +208,7 @@ func TestIntegration_ChatRoundTrip_SubsequentTurn(t *testing.T) {
 // TestIntegration_ChatRoundTrip_FailurePath pins that a hard chain failure still persists the transcript.
 func TestIntegration_ChatRoundTrip_FailurePath(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction(), "")
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "")
 	require.NoError(t, store.CreateMessageIndex(ctx, "s-fail", "alice"))
 
 	exec := &chatExecutor{err: errors.New("model exploded")}
@@ -237,7 +236,7 @@ func TestIntegration_ChatRoundTrip_FailurePath(t *testing.T) {
 // TestIntegration_ChatRoundTrip_IdempotentReplay pins that replaying identical input does not duplicate rows.
 func TestIntegration_ChatRoundTrip_IdempotentReplay(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction(), "")
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "")
 	require.NoError(t, store.CreateMessageIndex(ctx, "s-replay", "alice"))
 
 	stableUserTime := time.Unix(1_700_000_000, 0).UTC()
@@ -267,7 +266,7 @@ func TestIntegration_ChatRoundTrip_IdempotentReplay(t *testing.T) {
 // TestIntegration_ChatRoundTrip_AssistantWithToolCall pins that a tool call persists with a pairing stub result.
 func TestIntegration_ChatRoundTrip_AssistantWithToolCall(t *testing.T) {
 	ctx, db := setupDB(t)
-	store := messagestore.New(db.WithoutTransaction(), "")
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "")
 	require.NoError(t, store.CreateMessageIndex(ctx, "s-tool", "alice"))
 
 	exec := &chatExecutor{

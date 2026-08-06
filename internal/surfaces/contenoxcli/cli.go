@@ -17,12 +17,13 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/reasoning"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/clikv"
+	"github.com/contenox/contenox/internal/services/eventlog"
 	"github.com/contenox/contenox/internal/services/project"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/internal/version"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -48,7 +49,7 @@ const DefaultWorkspaceID = "00000000-0000-0000-0000-000000000002"
 
 const (
 	defaultOllama  = "http://127.0.0.1:11434"
-	defaultModel   = "qwen2.5:7b"
+	defaultModel   = "qwen3:8b"
 	defaultContext = 0
 	defaultTimeout = 5 * time.Minute
 )
@@ -56,7 +57,10 @@ const (
 // reservedSubcommands are first-arg names never treated as run input. Retired
 // names stay reserved so typing one gets an unknown-command error rather than
 // being injected as a chat prompt.
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true, "index": true, "search": true}
+var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true, "new": true, "index": true, "search": true, "events": true, "hitl": true,
+	// cobra's shell-completion protocol: every TAB press invokes these; treated
+	// as chat input they would run a live model call per keystroke.
+	"__complete": true, "__completeNoDesc": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
@@ -77,7 +81,21 @@ func Main() {
 	if sub := dispatchSubcommand(args, onlyHelp); sub != "" {
 		rootCmd.SetArgs(append([]string{sub}, args...))
 	}
-	err := rootCmd.Execute()
+	// The beta agent-roster and event-dispatch surfaces are absent from help
+	// without the opt-in; Hidden gates visibility only, never execution.
+	betaHidden := !betaEnabledGlobal()
+	agentCmd.Hidden = betaHidden
+	eventsCmd.Hidden = betaHidden
+	// Beta flags on stable commands are absent, not hidden: an unregistered
+	// --as-agent or --oracle neither shows in help nor parses.
+	if !betaHidden {
+		registerApprovalsRespondFlags(true)
+		registerMissionFireFlags(true)
+	}
+	// Seeded with the inherited event hop so a CLI spawned by a fired chain can
+	// forward it to its own spawns: the publisher reads the env var directly,
+	// but only a context carries it onward (see eventlog.InheritHop).
+	err := rootCmd.ExecuteContext(eventlog.InheritHop(context.Background()))
 	// Flush warm-session KV snapshots before exit so the next start restores
 	// warm instead of cold-prefilling. Best-effort.
 	_ = modelrepo.Shutdown()
@@ -186,20 +204,22 @@ prompts, model routing, tools, retries, and approval gates in one versioned
 file. State lives in local SQLite. Hosted providers and Ollama work out of the
 box; for local inference run Ollama or vLLM.
 
-  Quickstart:
-    contenox setup                         # interactive wizard — pick provider, model, API key
-    contenox init                          # scaffold .contenox/ with default chains
-    contenox "list files in my home dir"   # session-backed chat using your configured policy
+  Quickstart (in this order):
+    contenox setup                         # 1. start here: wizard — pick provider, model, API key
+    contenox doctor                        # 2. verdict: can I chat right now, yes or no
+    contenox init                          # 3. once per project: scaffold .contenox/ and its chains
+    contenox new                           # 4. the terminal UI: chat, plan, and shell in one session
+    contenox "list files in my home dir"   #    or one-shot, session-backed chat
 
   Inspect models:
     contenox model list                    # models exposed by registered live backends
 
   Or register an LLM backend manually:
     # Local Ollama daemon
-    ollama serve && ollama pull qwen2.5:7b
+    ollama serve && ollama pull qwen3:8b
     contenox backend add ollama --type ollama
     contenox config set default-provider ollama
-    contenox config set default-model qwen2.5:7b
+    contenox config set default-model qwen3:8b
 
     # Hosted Ollama Cloud
     contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
@@ -207,25 +227,28 @@ box; for local inference run Ollama or vLLM.
 
     # Google Gemini (no GPU required)
     contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
-    contenox config set default-model  gemini-flash-latest
+    contenox config set default-model gemini-flash-latest
     contenox config set default-provider gemini
 
     # OpenAI
     contenox backend add openai --type openai --api-key-env OPENAI_API_KEY
-    contenox config set default-model    gpt-4o-mini
+    contenox config set default-model gpt-5-mini
     contenox config set default-provider openai
 
   Editor autocomplete (FIM, over ACP) can use a separate model from chat:
     # Example: chat on OpenAI, ghost text on local Ollama.
     contenox config set default-provider openai
-    contenox config set default-model    gpt-5-mini
+    contenox config set default-model gpt-5-mini
     contenox config set default-autocomplete-provider ollama
-    contenox config set default-autocomplete-model    qwen2.5-coder:7b
+    contenox config set default-autocomplete-model qwen2.5-coder:7b
 
   Scope note:
     Backends and config are GLOBAL (stored in ~/.contenox/local.db).
-    Chain files (.contenox/) are LOCAL to each project directory — like .git/.
-    Run 'contenox init' once per project to create the local chain files.`,
+    Chain files and HITL policy presets are GLOBAL too: 'contenox init' writes
+    them to ~/.contenox/ and creates a per-project workspace marker
+    (.contenox/workspace.id). Run 'contenox init' once per project for the
+    marker; run 'contenox init --local' to seed workspace-local copies in
+    .contenox/ that override the global files by name.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -289,17 +312,26 @@ Examples:
 
 var initCmd = &cobra.Command{
 	Use:   "init [provider]",
-	Short: "Scaffold .contenox/ with default chain files.",
-	Long: `Create the .contenox/ directory and populate it with default chain files.
+	Short: "Seed the default chain files and HITL policy presets; mark the project.",
+	Long: `Seed the default chain files and HITL policy presets, and mark the project.
 
-This writes default-chain.json and default-run-chain.json.
+By default the chain files (chain-agent-contenox.json, chain-agent-run.json, …) and
+the hitl-policy-*.json presets are written to ~/.contenox/ and shared by every
+project; the project itself only gets a workspace marker (.contenox/workspace.id).
+With --local they are written into the workspace .contenox/ instead, creating
+deliberate workspace-local overrides — a same-named workspace file wins over
+the global copy.
 
-After init, register a backend, make sure the runtime can see a model, then set your defaults:
+'contenox setup' is the recommended entry point and runs first: it picks a provider
+and model and registers the backend. Run init afterwards, once per project.
+
+To configure by hand instead, register a backend, make sure the runtime can see a
+model, then set your defaults:
 
   # Local Ollama:
-  contenox backend add local --type ollama
+  contenox backend add ollama --type ollama
   contenox config set default-provider ollama
-  contenox config set default-model qwen2.5:7b
+  contenox config set default-model qwen3:8b
 
   # Hosted Ollama Cloud:
   contenox backend add ollama-cloud --type ollama --url https://ollama.com/api --api-key-env OLLAMA_API_KEY
@@ -314,17 +346,22 @@ After init, register a backend, make sure the runtime can see a model, then set 
   # Google Gemini:
   contenox backend add gemini --type gemini --api-key-env GEMINI_API_KEY
   contenox config set default-provider gemini
-  contenox config set default-model gemini-3.1-pro-preview
+  contenox config set default-model gemini-flash-latest
 
   # Optional editor autocomplete model, independent from chat:
   contenox config set default-autocomplete-provider ollama
   contenox config set default-autocomplete-model qwen2.5-coder:7b
 
-Use --force to overwrite existing files, or --update to refresh unchanged default files to the latest version.
+Use --force to overwrite existing files, or --update to refresh unchanged default files to the
+latest version. --update also renames shipped chain files still carrying a pre-v0.38 name (for
+example default-acp-chain.json) to the chain-<role>-<variant>.json convention, byte-for-byte —
+in ~/.contenox and the workspace .contenox both — before refreshing; hand-edited files keep
+their content under the new name.
 
-Use --refresh-policies to rewrite ONLY the HITL policy presets (hitl-policy-*.json) in
-~/.contenox from this build. That is what 'contenox doctor' points at when an envelope
-predates a shipped toolset: it leaves chains, config and sessions alone, unlike --force.`,
+Use --refresh-policies to rewrite ONLY the HITL policy presets (hitl-policy-*.json) from
+this build — in ~/.contenox and in any workspace .contenox copy that shadows it. That is
+what 'contenox doctor' points at when an envelope predates a shipped toolset: it leaves
+chains, config and sessions alone, unlike --force.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInitCmd,
 }
@@ -362,7 +399,8 @@ func init() {
 	f.Int("max-tokens", 0, "Response token cap for chains referencing {{var:max_tokens}}. Overrides config default-max-tokens when set.")
 	f.Int("context", defaultContext, "Context length")
 	f.Bool("no-delete-models", true, "Legacy compatibility flag; OSS runtime model deletion is disabled.")
-	f.String("chain", "", "Path to a task chain JSON file. Chains define the LLM workflow: which model, which tools, how to branch. Falls back to default_chain in config, then .contenox/default-chain.json")
+	_ = f.MarkHidden("no-delete-models")
+	f.String("chain", "", "Path to a task chain JSON file. Chains define the LLM workflow: which model, which tools, how to branch. Falls back to default-chain in config, then .contenox/chain-agent-contenox.json")
 	f.String("input", "", "Input for the chain (default: positional args or stdin if piped)")
 	f.Bool("shell", false, "Enable the local_shell tools (use only in trusted environments)")
 	f.String("local-exec-allowed-dir", "", "If set, local_shell may only run scripts/binaries under this directory")
@@ -392,11 +430,14 @@ func init() {
 	rootCmd.AddCommand(sandboxCmd)
 	rootCmd.AddCommand(shellEnvCmd)
 	rootCmd.AddCommand(vetCmd)
+	rootCmd.AddCommand(eventsCmd)
+	rootCmd.AddCommand(hitlCmd)
 
 	rootCmd.InitDefaultHelpCmd() // so "contenox help" is handled by Cobra, not passed as run input
 	initCmd.Flags().BoolP("force", "f", false, "Overwrite existing files")
-	initCmd.Flags().Bool("update", false, "Update unchanged default files to the latest version")
-	initCmd.Flags().Bool("refresh-policies", false, "Rewrite ONLY the HITL policy presets in ~/.contenox from this build (chains, config and sessions are untouched; your edits to those policy files are replaced)")
+	initCmd.Flags().Bool("update", false, "Update unchanged default files to the latest version; also renames shipped chain files still under a pre-v0.38 name to the chain-<role>-<variant>.json convention (content kept byte-for-byte)")
+	initCmd.Flags().Bool("refresh-policies", false, "Rewrite ONLY the HITL policy presets from this build, in ~/.contenox and any workspace .contenox copy that shadows it (chains, config and sessions are untouched; your edits to those policy files are replaced)")
+	initCmd.Flags().Bool("local", false, "Write the chain files and HITL policy presets into the workspace .contenox/ instead of ~/.contenox — same-named workspace copies override the global ones")
 	initCmd.Flags().Bool("project", false, "Create a project marker in the CURRENT directory (a fresh workspace id), instead of reusing an ancestor's .contenox")
 	initCmd.Flags().String("name", "", "Friendly project name for the marker (default: the directory name)")
 
@@ -493,12 +534,19 @@ func ResolveWorkspaceID(contenoxDir string) string {
 }
 
 func runInitCmd(cmd *cobra.Command, args []string) error {
-	// Narrower than --force: presets only, no chains, marker, or config.
+	// Narrower than --force: presets only, no chains, marker, or config. The
+	// policy loader is workspace-first, so the refresh needs the resolved
+	// workspace dir, not just ~/.contenox.
 	if refresh, _ := cmd.Flags().GetBool("refresh-policies"); refresh {
-		return runRefreshPolicies(cmd.OutOrStdout())
+		contenoxDir, err := ResolveContenoxDir(cmd)
+		if err != nil {
+			return fmt.Errorf("failed to resolve .contenox dir: %w", err)
+		}
+		return runRefreshPolicies(cmd.OutOrStdout(), contenoxDir, betaGatedToolsets(betaEnabledGlobal()))
 	}
 	force, _ := cmd.Flags().GetBool("force")
 	update, _ := cmd.Flags().GetBool("update")
+	localMode, _ := cmd.Flags().GetBool("local")
 	projectMode, _ := cmd.Flags().GetBool("project")
 	rawName, _ := cmd.Flags().GetString("name")
 	projectName, err := project.NormalizeName(rawName)
@@ -518,7 +566,11 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to resolve current directory: %w", err)
 		}
 		contenoxDir, projectName = resolveProjectInit(cwd, projectName)
-		if err := RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, update, provider, contenoxDir, projectName); err != nil {
+		if localMode {
+			if err := RunLocalInit(cmd.OutOrStdout(), force, update, contenoxDir, projectName); err != nil {
+				return err
+			}
+		} else if err := RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, update, provider, contenoxDir, projectName); err != nil {
 			return err
 		}
 		// Marking a project doesn't grant it as a workspace root; that's a
@@ -530,6 +582,9 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 	contenoxDir, err = ResolveContenoxDir(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
+	}
+	if localMode {
+		return RunLocalInit(cmd.OutOrStdout(), force, update, contenoxDir, projectName)
 	}
 	return RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, update, provider, contenoxDir, projectName)
 }
@@ -639,7 +694,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 
 	effectiveChain, _ := flags.GetString("chain")
 	if effectiveChain == "" && !changed("chain") {
-		if kv, _ := getConfigKV(dbCtx, store, "default-chain"); kv != "" {
+		// Workspace-scoped: read at the same scope `contenox config set
+		// default-chain` writes, not the global row alone.
+		if kv, _ := clikv.ReadConfig(dbCtx, store, ResolveWorkspaceID(contenoxDir), clikv.KeyDefaultChain); kv != "" {
 			effectiveChain = kv
 			if !filepath.IsAbs(effectiveChain) {
 				if resolved, rerr := lookupSystemFile(contenoxDir, effectiveChain); rerr == nil {
@@ -651,7 +708,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if effectiveChain == "" && !changed("chain") {
-		if resolved, rerr := lookupSystemFile(contenoxDir, "default-chain.json"); rerr == nil {
+		if resolved, rerr := lookupSystemFile(contenoxDir, chainAgentContenoxFilename); rerr == nil {
 			effectiveChain = resolved
 		}
 	}
@@ -736,6 +793,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		EffectiveHITL:                effectiveHITL,
 		EffectiveRaw:                 effectiveRaw,
 		EffectiveThink:               effectiveThink,
+		EffectiveOptInBeta:           betaEnabled(dbCtx, store),
 		HistoryTrim:                  historyTrim,
 		LastN:                        lastN,
 		InputValue:                   inputValue,
@@ -743,6 +801,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 		AttachPaths:                  attachPaths,
 		ContenoxDir:                  contenoxDir,
 		WarnW:                        cmd.ErrOrStderr(),
+		// A terminal gets the answer as it is produced; a pipe keeps the single
+		// buffered payload its consumer parses.
+		EffectiveStreamOutput: stdoutIsTerminal(),
 	}
 	return execChat(ctx, db, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 }

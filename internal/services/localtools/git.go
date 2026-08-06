@@ -290,9 +290,11 @@ func repoRelPath(root, tool, p string) (string, error) {
 }
 
 // repoRelPaths applies repoRelPath to a paths argument, which models supply
-// either as one string or as an array.
+// either as one string or as an array. A lone string is ONE path — it is not
+// split on whitespace, so "my notes.txt" names one file and two files need an
+// array.
 func repoRelPaths(root, tool string, raw any) ([]string, error) {
-	list, err := stringSliceArg(tool, "paths", raw)
+	list, err := pathListArg(tool, "paths", raw)
 	if err != nil {
 		return nil, err
 	}
@@ -1014,8 +1016,144 @@ func (h *GitTools) Supports(ctx context.Context) ([]string, error) {
 	}, nil
 }
 
+// gitSchemaSpecs is every tool this toolset declares, in Supports order, with
+// the OpenAPI component prefix and the response schema for each. The prefixes
+// are fixed even though the toolset NAME is configurable (NewGitToolsWith).
+func gitSchemaSpecs() []toolSchemaSpec {
+	return []toolSchemaSpec{
+		{tool: "git_status", component: "GitStatus", response: gitStatusResponse},
+		{tool: "git_diff", component: "GitDiff", response: gitDiffResponse},
+		{tool: "git_log", component: "GitLog", response: gitLogResponse},
+		{tool: "git_show", component: "GitShow", response: gitShowResponse},
+		{tool: "git_branch_list", component: "GitBranchList", response: gitBranchListResponse},
+		{tool: "git_blame", component: "GitBlame", response: gitBlameResponse},
+		{tool: "git_add", component: "GitAdd", response: gitAddResponse},
+		{tool: "git_commit", component: "GitCommit", response: gitCommitResponse},
+		{tool: "git_checkout_branch", component: "GitCheckoutBranch", response: gitCheckoutBranchResponse},
+		{tool: "git_restore", component: "GitRestore", response: gitRestoreResponse},
+	}
+}
+
+// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
+// one request/response pair per declared tool. Requests are converted from the
+// descriptors GetToolsForToolsByName hands the model; responses are what the
+// handlers above return. The three tools that answer with a typed result
+// (status, log, branch_list) declare that object; the rest answer with text,
+// and a failed call returns an error rather than any payload.
 func (h *GitTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
-	return map[string]*openapi3.T{}, nil
+	declared, err := h.GetToolsForToolsByName(ctx, h.name)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := buildToolsetDoc(h.name, "Git Tools",
+		"Repository operations run in-process against the workspace repository — no git binary, no shell quoting — so reads and mutations can be gated separately. Network operations (push, pull, fetch, clone) are deliberately absent; reach them through local_shell. Every result is capped at 32 KiB and says what it withheld.",
+		declared, gitSchemaSpecs())
+	if err != nil {
+		return nil, err
+	}
+	return map[string]*openapi3.T{h.name: doc}, nil
+}
+
+// --- Response schemas ---------------------------------------------------------
+
+// gitStatusEntrySchema is GitStatusEntry: one path and its status code. The
+// code set is git's own and is not closed here — the implementation copies
+// whatever go-git reports rather than mapping it to a fixed list.
+func gitStatusEntrySchema() *openapi3.SchemaRef {
+	return objectSchema("One changed path.", map[string]*openapi3.SchemaRef{
+		"path": strSchema("Path relative to the repository root."),
+		"code": strSchema("The single-letter status code `git status --short` prints for it — 'M', 'A', 'D', 'R' and friends, taken verbatim from go-git."),
+	}, "path", "code")
+}
+
+func gitStatusResponse() *openapi3.SchemaRef {
+	return objectSchema(
+		"GitStatusResult. The lists are complete even when the rendered text was truncated: truncation bounds the reader's context, not the repository. Reaches the model as its rendered text.",
+		map[string]*openapi3.SchemaRef{
+			"branch": strSchema("The current branch."),
+			"head": objectSchema("The commit HEAD points at. Absent in a repository with no commits yet.",
+				map[string]*openapi3.SchemaRef{
+					"hash":    strSchema("Short commit hash."),
+					"subject": strSchema("First line of the commit message."),
+				}, "hash", "subject"),
+			"clean":     boolSchema("True when nothing is staged, changed or untracked."),
+			"staged":    arraySchema("Paths staged for the next commit. Empty when none are.", gitStatusEntrySchema()),
+			"unstaged":  arraySchema("Paths changed in the worktree but not staged. Empty when none are.", gitStatusEntrySchema()),
+			"untracked": arraySchema("Paths the repository does not track. Empty when none are.", strSchema("Path relative to the repository root.")),
+		}, "branch", "clean", "staged", "unstaged", "untracked")
+}
+
+func gitDiffResponse() *openapi3.SchemaRef {
+	return strSchema("The worktree against HEAD as a unified diff — staged and unstaged together — with a `diff --git a/<path> b/<path>` header per file and \"Binary files differ\" in place of a binary file's body. \"no changes against HEAD\" (or \"… under <path>\") when there is nothing to show. Past 25 changed files the remainder is named but not rendered; untracked paths are listed at the end without a diff, since they are not in the repository yet. Truncated at 32 KiB with a notice naming what to narrow.")
+}
+
+// gitLogEntrySchema is GitLogEntry: one commit as git_log renders it.
+func gitLogEntrySchema() *openapi3.SchemaRef {
+	return objectSchema("One commit.", map[string]*openapi3.SchemaRef{
+		"hash":    strSchema("Short commit hash."),
+		"author":  strSchema("Author name."),
+		"email":   strSchema("Author email."),
+		"date":    strSchema("Author date, RFC3339."),
+		"subject": strSchema("First line of the commit message."),
+	}, "hash", "author", "email", "date", "subject")
+}
+
+func gitLogResponse() *openapi3.SchemaRef {
+	return objectSchema(
+		"GitLogResult. Reaches the model as its rendered text, one commit per two lines.",
+		map[string]*openapi3.SchemaRef{
+			"commits": arraySchema("The commits, newest first. Empty — with the text \"no commits yet\" or \"no commits match\" — when the repository has no history or nothing touched the given path.", gitLogEntrySchema()),
+		}, "commits")
+}
+
+func gitShowResponse() *openapi3.SchemaRef {
+	return strSchema("The commit: full hash, author, RFC3339 date and message, then its patch against the first parent. A root commit has no parent, so it lists its files instead of a patch. Truncated at 32 KiB with a notice naming what to narrow.")
+}
+
+func gitBranchListResponse() *openapi3.SchemaRef {
+	return objectSchema(
+		"GitBranchListResult, local branches only. Reaches the model as its rendered text, with the current branch marked '*'.",
+		map[string]*openapi3.SchemaRef{
+			"current": strSchema("The current branch."),
+			"branches": arraySchema("The local branches, sorted by name. Empty — with the text \"no branches yet\" — in a repository with no commits.",
+				objectSchema("One local branch.", map[string]*openapi3.SchemaRef{
+					"name":    strSchema("Branch name."),
+					"hash":    strSchema("Short hash of the branch head."),
+					"current": boolSchema("Whether this is the checked-out branch."),
+				}, "name", "hash", "current")),
+		}, "current", "branches")
+}
+
+func gitBlameResponse() *openapi3.SchemaRef {
+	return strSchema("Per-line authorship at HEAD, one line each: short commit hash, author name (clipped to 20 characters), the 1-based line number, and the line's text. Truncated at 32 KiB with a notice naming what to narrow.")
+}
+
+func gitAddResponse() *openapi3.SchemaRef {
+	return strSchema("\"staged <paths>\" naming what was staged; a path of \".\" is reported as \"everything\".")
+}
+
+func gitCommitResponse() *openapi3.SchemaRef {
+	return strSchema("\"committed <short hash> on <branch>: <subject> (N file(s) staged)\". Committing with nothing staged is an error, not an empty commit.")
+}
+
+func gitCheckoutBranchResponse() *openapi3.SchemaRef {
+	return strSchema("\"switched to branch <name>\", or \"created and switched to branch <name>\" when create was set.")
+}
+
+func gitRestoreResponse() *openapi3.SchemaRef {
+	return strSchema("\"unstaged <paths> (file contents left alone)\" when staged was set, otherwise \"restored <paths> to HEAD (uncommitted changes discarded)\" — the discarded changes are not recoverable.")
+}
+
+// gitPathsProp declares the paths argument of git_add and git_restore. The type
+// is the union repoRelPaths really accepts — one string or an array of them —
+// spelled the way webtools' body spells its own union, so the published schema
+// renders both branches instead of promising only the string one.
+func gitPathsProp() map[string]any {
+	return map[string]any{
+		"type":        []any{"string", "array"},
+		"items":       map[string]any{"type": "string"},
+		"description": "A path relative to the repository root, or an array of them. One string is one path: it is not split on spaces, so a name containing spaces needs no quoting and two paths need an array.",
+	}
 }
 
 // GetToolsForToolsByName returns the git tool declarations. Descriptions are
@@ -1045,7 +1183,7 @@ func (h *GitTools) GetToolsForToolsByName(ctx context.Context, name string) ([]t
 		}, "path"),
 
 		fsTool("git_add", "Stage paths for the next commit. Pass \".\" to stage everything.", map[string]any{
-			"paths": fsProp("string", "A path, or an array of paths, relative to the repository root"),
+			"paths": gitPathsProp(),
 		}, "paths"),
 
 		fsTool("git_commit", "Commit what is staged. Refuses when nothing is staged; the author comes from the repository's own git config.", map[string]any{
@@ -1058,7 +1196,7 @@ func (h *GitTools) GetToolsForToolsByName(ctx context.Context, name string) ([]t
 		}, "branch"),
 
 		fsTool("git_restore", "DESTRUCTIVE: throw away uncommitted changes to the named paths (back to HEAD). With staged=true it only unstages them and leaves the file contents alone.", map[string]any{
-			"paths":  fsProp("string", "A path, or an array of paths, relative to the repository root"),
+			"paths":  gitPathsProp(),
 			"staged": fsProp("boolean", "Only unstage (index back to HEAD); file contents are left untouched"),
 		}, "paths"),
 	}

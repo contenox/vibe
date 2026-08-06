@@ -9,7 +9,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/liveness"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // notifiableStopReasons are the turn endings worth a completion bell: the
@@ -71,6 +71,12 @@ func (a *app) onBridge(ev enginebridge.Event) {
 		// commands that set them (e.g. what /model accepts); this is beam's
 		// whole value-completion source, re-pushed by the server on change.
 		a.pal.SetValueDomains(enginebridge.ValueDomains(e.Options))
+		// The same update also says which of those values is in force. The
+		// status bar reads it here rather than from Deps, or /model would
+		// change the session and leave the bar naming the launch-time model.
+		if provider, model, ok := enginebridge.SelectedModel(e.Options); ok {
+			a.provider, a.model = provider, model
+		}
 
 	case enginebridge.ReplayEnded:
 		// Nothing on the wire ends a replay; without this the trailing
@@ -84,9 +90,26 @@ func (a *app) onBridge(ev enginebridge.Event) {
 
 	case enginebridge.PermissionRequested:
 		a.card = approval.New(e)
+		// The ask settles into scrollback whole and immediately: it is
+		// complete on arrival, and the live region can neither hold a card
+		// this tall (its over-tall tail is what survives, clipping the
+		// header away) nor hand what it clips to scrollback afterwards. Only
+		// the subject and the decision line stay live (see buildFrame).
+		a.notices = append(a.notices, a.card.Ask(a.width, a.ascii)...)
 		// Rings even when beam has focus: an unanswered ask blocks a tool
 		// call until its ceiling expires.
 		a.bell(now, true)
+
+	case enginebridge.PermissionResolved:
+		// The fact a card retires on, whichever way the gate ended. Without
+		// it a card beam did not itself answer keeps the keyboard forever:
+		// typing is swallowed and y/n go to a channel nobody reads. The
+		// outcome is not consulted — a card beam answered is already retired
+		// with its own verdict, and one it did not is over either way, which
+		// is exactly what retireCard records.
+		if a.card != nil && a.card.ToolCallID() == e.ToolCallID {
+			a.retireCard()
+		}
 
 	case enginebridge.MissionReport:
 		a.live.Bump(turnActivityID, now)
@@ -100,6 +123,7 @@ func (a *app) onBridge(ev enginebridge.Event) {
 		a.bell(now, true)
 
 	case enginebridge.MissionStatusChanged:
+		a.trackMission(e.MissionID, e.New)
 		// A mission coming to rest rings under the focus-suppressed rule;
 		// opening one does not, since the operator just fired it.
 		if enginebridge.MissionStatusTerminal(e.New) {
@@ -125,9 +149,11 @@ func (a *app) onBridge(ev enginebridge.Event) {
 
 	case enginebridge.TurnEnded:
 		a.endTurn(now)
-		if e.StopReason == libacp.StopReasonCancelled && a.card != nil {
-			a.card.MarkCancelled()
-			a.card = nil
+		// Backstop to PermissionResolved: a turn that ended cancelled leaves
+		// no gate anyone can still answer, whether or not the resolution
+		// reached beam.
+		if e.StopReason == libacp.StopReasonCancelled {
+			a.retireCard()
 		}
 		if notifiableStopReasons[e.StopReason] {
 			a.bell(now, false)
@@ -135,12 +161,40 @@ func (a *app) onBridge(ev enginebridge.Event) {
 
 	case enginebridge.TurnFailed:
 		a.endTurn(now)
-		if a.card != nil {
-			a.card.MarkCancelled()
-			a.card = nil
-		}
+		a.retireCard()
 		a.noticef(frame.StyleError, "turn failed: %v", e.Err)
 	}
+}
+
+// retireCard drops the approval card, settling the verdict it reached into
+// scrollback first. It is the only way a card is dropped: every retirement
+// path leaves a record, and dropping the card is what hands the keyboard
+// back to the composer. A card still pending here was never answered by
+// anyone, so it is recorded as cancelled rather than as a decision.
+func (a *app) retireCard() {
+	if a.card == nil {
+		return
+	}
+	a.card.MarkCancelled()
+	if l := a.card.Record(a.width, a.ascii); len(l) > 0 {
+		a.notices = append(a.notices, l)
+	}
+	a.card = nil
+}
+
+// trackMission keeps the open-mission set the status bar badges. A status
+// this build does not recognize counts as still running, matching
+// MissionStatusTerminal's own rule; a mission with no id is not counted,
+// since nothing could ever retire it.
+func (a *app) trackMission(id, status string) {
+	if id == "" {
+		return
+	}
+	if enginebridge.MissionStatusTerminal(status) {
+		delete(a.missions, id)
+		return
+	}
+	a.missions[id] = true
 }
 
 // startTurn opens the turn activity. There is no TurnStarted event — the

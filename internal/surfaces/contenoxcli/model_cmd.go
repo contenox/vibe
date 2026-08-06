@@ -12,10 +12,10 @@ import (
 
 	libbus "github.com/contenox/contenox/internal/libbus"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelservice"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
 
@@ -246,8 +246,8 @@ Accepts a bare integer or a k/m shorthand (case-insensitive):
 
 Examples:
   contenox model set-context gpt-5-mini           --context 128k
-  contenox model set-context gemini-3.1-pro-preview --context 1m
-  contenox model set-context qwen2.5:7b             --context 32k`,
+  contenox model set-context gemini-flash-latest --context 1m
+  contenox model set-context qwen3:8b            --context 32k`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())

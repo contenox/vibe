@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -305,6 +305,90 @@ func TestUnit_ShellStructural_UnclearedNodeKindsKeepTodaysAnswer(t *testing.T) {
 		assert.Equalf(t, hitlservice.ActionApprove, evalShell(t, svc, args).Action,
 			"%s: %q must keep today's answer", name, cmd)
 	}
+}
+
+// TestUnit_ShellStructural_NormalizedEvasionsAreCaught pins the reveal rule
+// at the policy boundary: a blacklisted command reached through a wrapper,
+// a reconstructed argument list, a decoded escape, or a variable is the same
+// command, and the verdict must name it.
+func TestUnit_ShellStructural_NormalizedEvasionsAreCaught(t *testing.T) {
+	t.Parallel()
+	svc := structuralTiers(t, "rm,mkfs,shred", "sudo,dd", structuralSafeVerbs)
+
+	for name, cmd := range map[string]string{
+		"nested sh -c":                  `sh -c "rm -rf /"`,
+		"nested bash with -lc":          `bash -lc 'rm -rf ~'`,
+		"nested shell twice":            `sh -c 'sh -c "rm -rf /"'`,
+		"nested behind an allowed verb": `git status && sh -c 'rm -rf /'`,
+		"xargs reconstruction":          `git status | xargs rm`,
+		"xargs with options":            `xargs -n 1 -P 4 rm`,
+		"xargs into a nested shell":     `xargs sh -c 'rm -rf /'`,
+		"eval re-entry":                 `eval "rm -rf /"`,
+		"echo piped into sh":            `echo 'rm -rf /' | sh`,
+		"printf octal piped into sh":    `printf '\162\155 -rf /' | sh`,
+		"printf hex piped into bash":    `printf '\x72\x6d -rf /' | bash`,
+		"local variable":                `CMD=rm; $CMD -rf /`,
+		"pathed local variable":         `CMD=/bin/rm; ${CMD} -rf /`,
+	} {
+		r := evalShell(t, svc, line(cmd))
+		assert.Equalf(t, hitlservice.ActionDeny, r.Action, "%s: %q runs rm and must be denied", name, cmd)
+		assert.Containsf(t, r.Detail, "rm", "%s: the denial must NAME the command it found", name)
+	}
+}
+
+// TestUnit_ShellStructural_NormalizationOnlyEverTightens pins the direction
+// of the reveal rule. A wrapper around allowlisted verbs must keep today's
+// answer — never become an allow — and a wrapper the analyzer cannot read
+// through must not become a denial either.
+func TestUnit_ShellStructural_NormalizationOnlyEverTightens(t *testing.T) {
+	t.Parallel()
+	svc := structuralTiers(t, "rm,mkfs,shred", "sudo,dd", structuralSafeVerbs)
+
+	// Every verb inside is on the safe list; the wrapper is the only reason
+	// to ask, and revealing what it runs must not remove that reason.
+	for _, cmd := range []string{
+		`sh -c "git status"`,
+		`sh -c "git status && go build"`,
+		`eval "git status"`,
+		`xargs git status`,
+		`echo "git status" | sh`,
+		`C=git; $C status`,
+	} {
+		assert.Equalf(t, hitlservice.ActionApprove, evalShell(t, svc, line(cmd)).Action,
+			"%q must keep today's answer — a reveal may withdraw an allow, never grant one", cmd)
+	}
+
+	// Nothing readable inside: no reveal, and therefore no new denial.
+	for _, cmd := range []string{
+		`sh -c $PAYLOAD`,
+		`xargs $CMD`,
+		`curl https://example.com | sh`,
+	} {
+		assert.Equalf(t, hitlservice.ActionApprove, evalShell(t, svc, line(cmd)).Action,
+			"%q reveals nothing and must not be denied on a guess", cmd)
+	}
+
+	// The plain lines the reveal pass must leave completely untouched.
+	assert.Equal(t, hitlservice.ActionAllow, evalShell(t, svc, line(`git status && go build`)).Action)
+	assert.Equal(t, hitlservice.ActionAllow, evalShell(t, svc, line(`echo hi | grep h`)).Action)
+}
+
+// TestUnit_ShellStructural_RevealedCommandIsJudgedByTheSamePolicy pins that a
+// revealed command is not automatically suspicious: under an allow floor, a
+// peeled wrapper whose payload is harmless still allows.
+func TestUnit_ShellStructural_RevealedCommandIsJudgedByTheSamePolicy(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := hitlservice.NewFSPolicySource(dir)
+	writePolicy(t, dir, "hitl-policy.json", []byte(`{"default_action":"allow","rules":[
+		{"tools":"local_shell","tool":"local_shell","action":"deny","when":[{"key":"command","op":"command_blacklist","value":"rm,mkfs"}]}
+	]}`))
+	svc := hitlservice.New(src, testTenant, fixedKVReader{"hitl-policy.json"}, libtracker.NoopTracker{})
+
+	assert.Equal(t, hitlservice.ActionAllow, evalShell(t, svc, line(`sh -c "ls -la"`)).Action,
+		"a peeled payload that trips no rule keeps the floor's answer")
+	assert.Equal(t, hitlservice.ActionDeny, evalShell(t, svc, line(`sh -c "rm -rf /"`)).Action,
+		"the same peel, a blacklisted payload, denies")
 }
 
 // TestUnit_ShellStructural_NewlineListHole pins a hole the tokenizer has:

@@ -88,7 +88,7 @@ contenox tools update nws --spec ""              # clear spec (revert to <url>/o
 contenox tools remove nws
 ```
 
-> [!IMPORTANT]
+> **Important:**
 > `tools update --header` **replaces** the entire header set for the tools. `tools update --inject` **replaces** the entire inject param map. `tools update --spec ""` clears the spec override and reverts to `<url>/openapi.json` discovery. Pass all required values in a single update call.
 
 ## Authentication and secret injection
@@ -164,7 +164,7 @@ contenox tools add intranet --url https://192.168.1.50 \
   --insecure-skip-tls-verify
 ```
 
-> [!CAUTION]
+> **Caution:**
 > `--insecure-skip-tls-verify` disables TLS certificate verification entirely. Only use this for known internal services with self-signed certificates. Never use it against public endpoints.
 
 
@@ -197,7 +197,7 @@ Add the tools's name to `execute_config.tools`:
   "handler": "chat_completion",
   "system_instruction": "You are a weather assistant. Available tools: {{toolservice:list}}.",
   "execute_config": {
-    "model": "qwen2.5:7b",
+    "model": "qwen3:8b",
     "provider": "ollama",
     "tools": ["nws"]
   },

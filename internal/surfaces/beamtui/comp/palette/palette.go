@@ -14,16 +14,12 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // ASCIIMarker is the selection marker on a Mono terminal, exported so
 // testkit's glyph-parity test can check it against style's GlyphSet.
 const ASCIIMarker = "|"
-
-// EmptyInputHint is the composer's empty-buffer affordance: the palette
-// owns this one sentence; the composer decides when to draw it.
-const EmptyInputHint = "type / for commands"
 
 const (
 	// markerUnicode marks the active row; ASCII degrades to a pipe.

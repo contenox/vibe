@@ -47,7 +47,7 @@ Restart Zed (or reload the window). Open the agent panel — Contenox now appear
 
 ACP sessions use a dedicated chain file separate from the CLI's default chain:
 
-- Default location: `~/.contenox/default-acp-chain.json`
+- Loaded from `~/.contenox/chain-agent-acp.json` (formerly `default-acp-chain.json` — `contenox init --update` renames it).
 - Override path with the `CONTENOX_ACP_CHAIN_PATH` environment variable (set it in the shell that launches Zed).
 
 The ACP chain looks like any other Contenox chain. The default chain uses `"tools": ["*"]`, which exposes everything the engine has registered — `local_fs`, `local_shell`, `webtools`, plus any MCP servers you've added via `contenox mcp add`.
@@ -59,11 +59,11 @@ The ACP chain looks like any other Contenox chain. The default chain uses `"tool
 ACP reads from your global model/provider config — the same one the CLI uses:
 
 ```bash
-contenox config set default-model qwen2.5:7b
+contenox config set default-model qwen3:8b
 contenox config set default-provider ollama
 ```
 
-Models are global; chains are local. Switching the model for ACP also switches it for `contenox chat`.
+Models are global; the ACP chain loads from `~/.contenox/` as described above. Switching the model for ACP also switches it for `contenox chat`.
 
 ---
 
@@ -93,6 +93,8 @@ To skip Contenox HITL entirely (trusted/scripted contexts), launch with `--auto`
 
 Type `/mission <intent>` (or `/mission <agent-name> <intent>`) in the agent panel to fire a [mission](/docs/reference/contenox-cli/#the-mission-slash-command) without leaving the conversation: a declared agent runs the intent unattended under its envelope, as a child subprocess of this editor session. The unit's reports stream live back into the session that fired it.
 
+> **Beta:** naming a user-authored agent (a custom `chain-agent-*` chain) requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`); `/mission` itself and the shipped `agent-planner` work without it.
+
 Set the fallbacks the bare form uses first:
 
 ```bash
@@ -100,7 +102,6 @@ contenox config set default-mission-agent  <agent-name>
 contenox config set default-mission-policy <hitl-policy-file>
 ```
 
-Setting `CONTENOX_SERVER_URL` (in the shell that launches Zed) forwards `/mission` dispatches to that running serve instead — reports then land in its operator inbox.
 
 ---
 

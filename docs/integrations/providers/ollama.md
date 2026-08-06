@@ -5,17 +5,18 @@ description: Connect Contenox to a local Ollama instance or Ollama Cloud.
 
 # Ollama
 
-Ollama runs models locally on your machine — no API key, no data leaving your network.
+Ollama runs models locally on your machine — no API key, no data leaving your network. Together with contenox's local SQLite state, this is the fully sovereign deployment option — see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
 
 ## Local Ollama
 
 Install Ollama from [ollama.com](https://ollama.com), pull a model, then register it:
 
 ```bash
-ollama pull qwen2.5:7b
+ollama pull qwen3:8b
 
-contenox backend add local --type ollama
-contenox config set default-model qwen2.5:7b
+contenox backend add ollama --type ollama
+contenox config set default-model qwen3:8b
+contenox config set default-provider ollama
 ```
 
 ## Ollama Cloud

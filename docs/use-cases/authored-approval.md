@@ -50,12 +50,12 @@ Reads and other `allow` rules run without interruption. Every `approve` rule pau
 
 ## Built-in presets
 
-Contenox ships six policy presets under `~/.contenox/`. Switch between them with `contenox config set hitl-policy-name <file>`.
+Contenox ships seven policy presets under `~/.contenox/`. Switch between them with `contenox config set hitl-policy-name <file>`.
 
 | Preset | File | Behavior |
 |---|---|---|
 | Default | `hitl-policy-default.json` | Prompts on writes, `edit_file`, `sed`, shell commands, and mutating HTTP verbs; allows reads and safe HTTP methods; fails closed to approval otherwise. Runs out of the box. |
-| Strict | `hitl-policy-strict.json` | Deny-by-default. Plain reads (`read_file`, `list_dir`, `grep`, `web_get`, …) pass silently; every other explicitly listed tool still prompts for approval; anything not listed is denied. For production or compliance-sensitive environments. |
+| Strict | `hitl-policy-strict.json` | Deny-by-default. Plain reads (`read_file`, `list_dir`, `grep`, `web_get`, …) pass silently; every other explicitly listed tool still prompts for approval; anything not listed is denied. For runs where you want everything to ask first. |
 | Dev | `hitl-policy-dev.json` | Allow-all by default — most tool calls pass silently. `local_shell` itself still prompts for approval (with a handful of destructive commands denied outright even here). For local development when you trust the chain and don't want interruptions outside the shell. |
 | ACP | `hitl-policy-acp.json` | Transport-specific: editor (ACP) sessions — Zed, JetBrains, AionUi. |
 | ACPX | `hitl-policy-acpx.json` | Transport-specific: headless/untrusted-driver sessions (OpenClaw). Deny-by-default with no approval tier. |

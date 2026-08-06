@@ -58,7 +58,7 @@ The wall is not a rulebook of allowed operations. It is a deny-by-default fence 
 
 The loot paths a supply-chain payload hunts — `~/.ssh`, `~/.aws`, `~/.npmrc`, the control plane — are not on the list unless a real breakage forces them, and the carve-out list itself lives where the agent cannot reach it, so the agent can never punch its own hole.
 
-> [!NOTE]
+> **Note:**
 > This page is the rationale; the [sandbox guide](/docs/guide/agent-sandbox/) is the mechanism — how the default filesystem/exec/environment fence works with no setup, and how to turn on the per-host network wall by naming the hosts an agent needs.
 
 ## Next steps
@@ -66,3 +66,4 @@ The loot paths a supply-chain payload hunts — `~/.ssh`, `~/.aws`, `~/.npmrc`, 
 - [Confining agents: the sandbox wall](/docs/guide/agent-sandbox/) — the default fence and the opt-in network wall.
 - [Least-privilege shell environment](/docs/guide/environment-scrubbing/) — the same idea for the shells contenox runs in its own process; configured, not yet enforced.
 - [Human-in-the-loop](/docs/guide/hitl/) — the tool-layer gate that governs a declared chain's effects, and the only thing governing contenox's own chains, which run outside the wall.
+- [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/) — how this confinement posture, local state, and authored oversight fit together as an operator-controlled deployment.

@@ -10,7 +10,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // Adopt binds an already-running instance+session (typically from a fleet
@@ -148,7 +148,7 @@ func (t *Transport) resolveAdoptTarget(ctx context.Context, ref adoptRef) (agent
 				"contenox.adopt: unknown instance %q", ref.InstanceID)
 		}
 		return agentinstance.InstanceStatus{}, libacp.InternalError(
-			fmt.Sprintf("acpsvc: resolve instance %q for adopt: %v", ref.InstanceID, err))
+			fmt.Sprintf("could not look up instance %q to adopt: %v", ref.InstanceID, err))
 	}
 	// Only a running instance has a live downstream to observe or steer.
 	if st.State != agentinstance.StateRunning {
@@ -216,7 +216,7 @@ func (t *Transport) newAdoptedSession(
 	})
 	contenoxSessionID, sessErr := ag.SessionNew(ctx, internalID)
 	if sessErr != nil {
-		return libacp.NewSessionResponse{}, fmt.Errorf("acpsvc: agent.SessionNew: %w", sessErr)
+		return libacp.NewSessionResponse{}, fmt.Errorf("could not start a session: %w", sessErr)
 	}
 
 	// bound=false: the response isn't on the wire yet, so the downstream's
@@ -241,7 +241,7 @@ func (t *Transport) newAdoptedSession(
 		// The instance isn't ours to stop; just drop the bridge's relay binding.
 		bridge.detachFrom(t)
 		return libacp.NewSessionResponse{}, libacp.InternalError(
-			fmt.Sprintf("acpsvc: adopt session %q on instance %q: %v", ref.SessionID, ref.InstanceID, attachErr))
+			fmt.Sprintf("could not adopt session %q on instance %q: %v", ref.SessionID, ref.InstanceID, attachErr))
 	}
 
 	entry := &sessionEntry{

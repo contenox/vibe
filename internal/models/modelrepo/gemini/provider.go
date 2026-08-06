@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/libtracker"
 )
 
 type GeminiProvider struct {

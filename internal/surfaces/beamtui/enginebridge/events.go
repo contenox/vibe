@@ -2,10 +2,11 @@ package enginebridge
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // Event is one fact produced by the runtime, already destructured out of the
@@ -133,6 +134,37 @@ type ConfigOptionUpdated struct {
 // as "anything the operator types is fine", never as a gate.
 func ValueDomains(options []libacp.SessionConfigOption) map[string][]string {
 	return acpsvc.CommandValueDomains(options)
+}
+
+// modelConfigOptionID is the wire id of the model select inside
+// ConfigOptionUpdated.Options. Duplicated here rather than imported for the
+// reason the mission vocabulary below is: this package models the wire, and
+// acpsvc keeps its option ids unexported.
+const modelConfigOptionID = "model"
+
+// SelectedModel reports the model the session is running now, and the
+// provider serving it, from the same update ValueDomains reads. ok is false
+// when no model select was carried (an external driver advertises none), in
+// which case a consumer must keep what it already shows rather than blank
+// the display. An empty provider with ok true is a real answer: the select's
+// value carried no provider group.
+func SelectedModel(options []libacp.SessionConfigOption) (provider, model string, ok bool) {
+	for _, option := range options {
+		if option.ID != modelConfigOptionID {
+			continue
+		}
+		value := strings.TrimSpace(option.CurrentValue)
+		if value == "" {
+			return "", "", false
+		}
+		// acpsvc encodes the select value as "provider/model" (modelConfigValue);
+		// the cut is on the FIRST slash, since a model name may hold others.
+		if before, after, cut := strings.Cut(value, "/"); cut {
+			return strings.TrimSpace(before), strings.TrimSpace(after), true
+		}
+		return "", value, true
+	}
+	return "", "", false
 }
 
 // ModeUpdated reports the session's current mode id (current_mode_update).

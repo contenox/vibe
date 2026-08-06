@@ -1,3 +1,9 @@
+# Release: cross-compile four targets, publish them with a SHA256SUMS manifest
+# and GitHub-native build provenance.
+#
+# Third-party actions are pinned to a commit SHA with a trailing version comment.
+# This workflow holds a contents:write token — a compromised floating tag would
+# run arbitrary code with permission to rewrite published releases.
 name: Release
 
 on:
@@ -13,7 +19,7 @@ jobs:
       extension_version: ${{ steps.vars.outputs.EXTENSION_VERSION }}
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -58,10 +64,10 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
 
@@ -102,7 +108,7 @@ jobs:
           fi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: contenox-${{ matrix.goos }}-${{ matrix.goarch }}
           path: bin/contenox-${{ matrix.goos }}-${{ matrix.goarch }}*
@@ -112,22 +118,46 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # attest-build-provenance signs through Sigstore with the job's OIDC
+      # identity and writes the attestation to this repo's attestation store.
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Download runtime artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: contenox-*
           merge-multiple: true
           path: release-assets
 
+      # install.sh fetches SHA256SUMS and refuses to install on a mismatch, so
+      # this manifest is the only thing standing between a tampered release
+      # asset and a `curl | sh` install. Format is plain `sha256sum -c` input.
+      - name: Generate SHA256SUMS
+        working-directory: release-assets
+        run: |
+          # Sorted for a stable, diffable manifest. The glob never matches
+          # SHA256SUMS itself, so the file cannot checksum its own output.
+          # shellcheck disable=SC2046
+          sha256sum $(ls contenox-* | LC_ALL=C sort) > SHA256SUMS
+          echo "--- SHA256SUMS ---"
+          cat SHA256SUMS
+          sha256sum -c SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: "release-assets/*"
+
       - name: Create GitHub Release and upload assets
         run: |
           TAG="${{ needs.verify.outputs.tag }}"
           cd release-assets
-          gh release create "$TAG" contenox-linux-* contenox-darwin-* contenox-windows-* \
+          gh release create "$TAG" \
+            contenox-linux-* contenox-darwin-* contenox-windows-* SHA256SUMS \
             --title "$TAG" \
             --notes "" \
             --latest \

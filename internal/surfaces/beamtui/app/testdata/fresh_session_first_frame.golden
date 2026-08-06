@@ -9,5 +9,5 @@
 [brand]▌[/]  /[muted] commands[/][muted]   [/]@[muted] files[/][muted]   [/]![muted] shell[/][muted]   [/]Ctrl+X Ctrl+E[muted] editor[/][muted]   [/]?[muted] keys[/]
 
 ── live (cursor 0,2) ──
-[brand]▌ [/]
+[brand]▌ [/][muted]type / for commands · ! for shell · @ to attach[/]
 [brand]▌[/] [muted]contenox[/]  [muted]beam-0001[/]  [muted]qwen3:8b · ollama[/]                                        

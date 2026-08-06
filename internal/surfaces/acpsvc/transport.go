@@ -11,7 +11,6 @@ import (
 	"github.com/contenox/contenox/internal/kernel/nativeturn"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/chatservice"
@@ -19,7 +18,8 @@ import (
 	"github.com/contenox/contenox/internal/services/shellsession"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 )
 
 type Deps struct {
@@ -40,7 +40,7 @@ type Deps struct {
 	DefaultThink       string
 	WorkspaceID        string
 	// ContenoxDir is the active .contenox directory for auxiliary chains
-	// (e.g. chain-compact.json for /compact).
+	// (e.g. chain-compact-default.json for /compact).
 	ContenoxDir string
 
 	// WorkspaceRoots allowlists session cwd roots. Nil accepts any absolute
@@ -88,6 +88,28 @@ type Deps struct {
 	// Agents resolves a declared agent by name for /mission's grammar. Fleet
 	// and Agents together gate whether `/mission` is advertised and usable.
 	Agents MissionAgentResolver
+
+	// MissionEnvelopes lists and resolves the HITL policy files /mission may
+	// fire under (`--policy`), over the host's own policy search path. Nil
+	// drops the listing and the pre-dispatch existence check; /mission still
+	// fires under whatever name it is given.
+	MissionEnvelopes MissionEnvelopeSource
+
+	// Asks is the durable ask inbox `/answer` records an answer through: the
+	// process's OWN hitlservice.Service, the instance the engine gates on and
+	// the resume hook is registered against. Nil (with Supervision) drops
+	// /answer from the advertised menu.
+	Asks AskInbox
+
+	// Supervision resolves which missions a session fired, the ownership check
+	// /answer applies. Asks and Supervision together gate whether `/answer` is
+	// advertised and usable.
+	Supervision MissionSupervision
+
+	// OptInBeta mirrors the CLI's opt-in-beta gate, so a beta lever exposed by
+	// a slash command (today: /mission --oracle) is hidden exactly where its
+	// CLI flag is.
+	OptInBeta bool
 }
 
 // EnvSetupSpec describes environment-variable-based setup (the non-interactive

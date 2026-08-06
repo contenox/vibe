@@ -62,10 +62,30 @@ func (e *EchoTools) Supports(ctx context.Context) ([]string, error) {
 	return []string{"echo"}, nil
 }
 
-// GetSchemasForSupportedTools returns OpenAPI schemas for supported tools.
+// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract.
+// The request schema is converted from the descriptor GetToolsForToolsByName
+// hands the model, so the two cannot drift.
 func (e *EchoTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
-	// Echo tools doesn't have a schema
-	return map[string]*openapi3.T{}, nil
+	declared, err := e.GetToolsForToolsByName(ctx, "echo")
+	if err != nil {
+		return nil, err
+	}
+	doc, err := buildToolsetDoc("echo", "Echo Tools",
+		"Returns its input unchanged. A test and wiring fixture — it reads nothing, writes nothing, and spawns nothing.",
+		declared, []toolSchemaSpec{{tool: "echo", component: "Echo", response: echoResponseSchema}})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]*openapi3.T{"echo": doc}, nil
+}
+
+// echoResponseSchema is what Exec returns. The chat-history shape is not
+// reachable through a tool call — it is the declarative `tools` task form,
+// where the task input is the conversation rather than an argument map.
+func echoResponseSchema() *openapi3.SchemaRef {
+	return oneOfSchema("What echo returns, following the shape of its input.",
+		strSchema("The input echoed back: the input argument as given, a non-string argument rendered with %v, or \"nothing to echo\" when the argument map carries no input key."),
+		chatHistorySchema("The conversation with one assistant message appended, \"Echo: \" followed by the last user message — or \"Echo: nothing to echo\" when it holds none."))
 }
 
 // GetToolsForToolsByName returns tools exposed by this tools.

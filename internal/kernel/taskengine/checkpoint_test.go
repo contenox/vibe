@@ -40,7 +40,7 @@ func fullyPopulatedMessage() Message {
 		},
 		Timestamp: time.Date(2026, 7, 27, 10, 30, 0, 0, time.UTC),
 		RequestID: "req-1",
-		ChainRef:  "default-chain.json",
+		ChainRef:  "chain-agent-contenox.json",
 	}
 }
 
@@ -92,7 +92,7 @@ func fullyPopulatedCheckpoint(t *testing.T) *Checkpoint {
 		SessionID:         "sess-1",
 		MissionID:         "mission-1",
 		RequestID:         "req-1",
-		ChainRef:          "default-chain.json",
+		ChainRef:          "chain-agent-contenox.json",
 		CreatedAt:         time.Date(2026, 7, 27, 10, 31, 0, 0, time.UTC),
 	}
 }

@@ -138,6 +138,52 @@ func (s *store) ResolveHITLApproval(ctx context.Context, id string, state HITLAp
 	return checkRowsAffected(result)
 }
 
+// AgentAnswerBound is the count predicate an agent-attributed resolution is
+// written under (see ResolveHITLApprovalWithinBound). Every field is supplied
+// by the caller: runtimetypes sits below hitlservice and so cannot name that
+// package's attention marks or its resolution payload shape.
+type AgentAnswerBound struct {
+	// MissionID scopes the count to one mission's asks.
+	MissionID string
+	// ToolsName and ToolName are the pair that marks a row as an attention ask
+	// rather than a permission one.
+	ToolsName string
+	ToolName  string
+	// ResolutionLike is the SQL LIKE pattern a resolution written by an agent
+	// matches and a human's does not.
+	ResolutionLike string
+	// Max is the exclusive ceiling: the write lands only while strictly fewer
+	// than Max matching rows already exist.
+	Max int
+}
+
+// ResolveHITLApprovalWithinBound is ResolveHITLApproval's pending-state CAS
+// with bound's count predicate carried in the same WHERE clause, so the
+// database — not the caller — decides which of several concurrent
+// agent-attributed answers fit under a mission's cap. A caller that counts and
+// then writes cannot: every racer reads the same count before any of them
+// writes, and they all pass. Returns libdb.ErrNotFound when id does not exist,
+// is no longer pending, or the bound is already spent; callers tell those
+// apart by re-reading with GetHITLApproval.
+func (s *store) ResolveHITLApprovalWithinBound(ctx context.Context, id string, bound AgentAnswerBound, state HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error {
+	result, err := s.Exec.ExecContext(ctx, `
+		UPDATE hitl_approvals
+		SET state = $2, resolution = $3, resolved_at = $4
+		WHERE id = $1 AND state = 'pending'
+		  AND (SELECT COUNT(*) FROM hitl_approvals prior
+		       WHERE prior.mission_id = $5
+		         AND prior.tools_name = $6
+		         AND prior.tool_name = $7
+		         AND prior.resolution LIKE $8) < $9`,
+		id, string(state), nullableJSON(resolution), resolvedAt,
+		bound.MissionID, bound.ToolsName, bound.ToolName, bound.ResolutionLike, bound.Max,
+	)
+	if err != nil {
+		return err
+	}
+	return checkRowsAffected(result)
+}
+
 // nullableJSON returns raw as a string for binding, or untyped nil (SQL
 // NULL) when raw is empty — mirrors how *string/*int fields elsewhere in
 // this package (e.g. Agent.HarnessID) bind nil as NULL, since json.RawMessage

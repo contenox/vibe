@@ -172,14 +172,31 @@ func (c *Card) Allowed() bool { return c.allowed }
 // against later tool-call events without keeping a side table.
 func (c *Card) ToolCallID() string { return c.ev.ToolCallID }
 
-// Render draws the card at width. spinner is the current activity glyph
-// (empty for none), shown only while pending.
+// Render draws the whole card at width: the ask (see Ask) followed by the
+// decision line. spinner is the current activity glyph (empty for none),
+// shown only while pending.
+//
+// It is the card as one block, for a surface with the rows to spend on it.
+// A bounded live region cannot promise those rows — an over-tall live region
+// is kept by its tail, and a live region never enters scrollback — so beam's
+// app-shell settles Ask into scrollback and keeps only Prompt live.
+func (c *Card) Render(width int, ascii bool, spinner string) []frame.Line {
+	if width <= 0 {
+		return nil
+	}
+	return append(c.Ask(width, ascii), clamp(c.footer(ascii, spinner), width, ascii))
+}
+
+// Ask is everything the operator needs to read before answering: header,
+// tool identity, declared reach, arguments, policy, and the diff — the card
+// minus its decision line. It is complete on arrival and never changes, so a
+// caller settles it once into scrollback where no row budget can clip it.
 //
 // Every line fits width except diff body lines and multi-line argument
 // block bodies, which are emitted unwrapped and verbatim: a wrapped or
 // elided line of either would copy out of the terminal as something that is
 // not what is under review.
-func (c *Card) Render(width int, ascii bool, spinner string) []frame.Line {
+func (c *Card) Ask(width int, ascii bool) []frame.Line {
 	if width <= 0 {
 		return nil
 	}
@@ -217,8 +234,68 @@ func (c *Card) Render(width int, ascii bool, spinner string) []frame.Line {
 
 	// Diff last: closest to the decision line, per the CLI's ordering.
 	out = append(out, c.diffLines(width, ascii)...)
-	out = append(out, clamp(c.footer(ascii, spinner), width, ascii))
 	return out
+}
+
+// Prompt is the card's bounded live block: the subject line naming what is
+// being authorised, then the decision line. Exactly [PromptRows] lines at any
+// width, so it fits every live region the composer and status bar leave
+// room for — a y/n prompt whose subject scrolled away is not a decision an
+// operator can make.
+func (c *Card) Prompt(width int, ascii bool, spinner string) []frame.Line {
+	if width <= 0 {
+		return nil
+	}
+	subject := frame.L(
+		frame.S(frame.StyleHITL, headerGlyph(ascii)+" approval required"),
+		frame.S(frame.StyleMuted, sep(ascii)),
+		frame.S(frame.StyleNone, c.toolIdentity()),
+	)
+	if target := c.target(); target != "" {
+		subject = append(subject, frame.S(frame.StyleMuted, sep(ascii)+target))
+	}
+	return []frame.Line{
+		clamp(subject, width, ascii),
+		clamp(c.footer(ascii, spinner), width, ascii),
+	}
+}
+
+// PromptRows is how many rows Prompt occupies, so a caller can budget for it
+// without rendering first.
+const PromptRows = 2
+
+// Record is the one line a card leaves behind once it is answered: the
+// verdict, what it was about, and the policy that asked. Answering otherwise
+// leaves no trace at all — the card is dropped and its own resolved footer
+// is never drawn — so the transcript would show a gate that opened for no
+// recorded reason. A still-pending card has no verdict to record and returns
+// nil; Resolve or MarkCancelled first.
+func (c *Card) Record(width int, ascii bool) frame.Line {
+	if c.state == StatePending {
+		return nil
+	}
+	verdict := c.footer(ascii, "")
+	l := make(frame.Line, 0, len(verdict)+4)
+	l = append(l, verdict...)
+	l = append(l, frame.S(frame.StyleMuted, sep(ascii)), frame.S(frame.StyleNone, c.toolIdentity()))
+	if target := c.target(); target != "" {
+		l = append(l, frame.S(frame.StyleMuted, sep(ascii)+target))
+	}
+	if name := sanitize.Line(c.ev.Meta.PolicyName); name != "" {
+		l = append(l, frame.S(frame.StyleMuted, sep(ascii)+"policy "+name))
+	}
+	return clamp(l, width, ascii)
+}
+
+// target names what the call acts on, for the one-line surfaces (Prompt,
+// Record) that have no room for the argument list. approvalflow decides
+// which argument carries the meaning for a given tool; when it declines
+// there is no honest one-word answer and the line simply omits it.
+func (c *Card) target() string {
+	if len(c.args) == 0 {
+		return ""
+	}
+	return sanitize.Line(approvalflow.SummarizeToolCallArgs(c.ev.Meta.ToolName, c.args))
 }
 
 // diffLines renders the change under review, or a one-line stand-in when

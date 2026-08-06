@@ -15,7 +15,6 @@ import (
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentservice"
@@ -23,8 +22,8 @@ import (
 	"github.com/contenox/contenox/internal/services/execservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
-	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/require"
 )
@@ -210,7 +209,7 @@ func e2eInput() taskengine.ChatHistory {
 // createSession registers the session's message index, as sessionservice's SessionNew does.
 func createSession(t *testing.T, db libdb.DBManager, sessionID string) {
 	t.Helper()
-	require.NoError(t, messagestore.New(db.WithoutTransaction(), "").CreateMessageIndex(context.Background(), sessionID, "e2e"))
+	require.NoError(t, runtimetypes.NewMessageStore(db.WithoutTransaction(), "").CreateMessageIndex(context.Background(), sessionID, "e2e"))
 }
 
 func loadSessionMessages(t *testing.T, db libdb.DBManager, sessionID string) []taskengine.Message {

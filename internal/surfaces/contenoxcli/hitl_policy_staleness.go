@@ -103,8 +103,9 @@ func policyDefaultAction(raw []byte) string {
 // missingPolicyToolsets returns the toolsets `shipped` writes rules for that
 // `onDisk` mentions nowhere at all — a rule that denies a toolset, or a
 // catch-all rule, still counts as mentioning it. An unparseable file reports
-// no claim.
-func missingPolicyToolsets(shipped, onDisk []byte) []string {
+// no claim. Names in gated are skipped: a toolset invisible this invocation
+// (betaGatedToolsets) cannot make an envelope stale.
+func missingPolicyToolsets(shipped, onDisk []byte, gated map[string]bool) []string {
 	want, ok := policyToolsets(shipped)
 	if !ok {
 		return nil
@@ -115,7 +116,7 @@ func missingPolicyToolsets(shipped, onDisk []byte) []string {
 	}
 	var missing []string
 	for name := range want {
-		if name == catchAllToolset || have[name] {
+		if name == catchAllToolset || have[name] || gated[name] {
 			continue
 		}
 		missing = append(missing, name)
@@ -163,8 +164,8 @@ func readPolicyFile(dirs []string, name string) (path string, raw []byte, ok boo
 }
 
 // stalePolicyPresetNamed reports whether the policy file that WOULD BE LOADED
-// for name predates this build's toolsets.
-func stalePolicyPresetNamed(name string, dirs []string) (stalePolicyPreset, bool) {
+// for name predates this build's toolsets, ignoring gated (invisible) ones.
+func stalePolicyPresetNamed(name string, dirs []string, gated map[string]bool) (stalePolicyPreset, bool) {
 	var shipped string
 	for _, p := range HITLPolicyPresets {
 		if p.Name == name {
@@ -181,7 +182,7 @@ func stalePolicyPresetNamed(name string, dirs []string) (stalePolicyPreset, bool
 		// nothing stale to report.
 		return stalePolicyPreset{}, false
 	}
-	missing := missingPolicyToolsets([]byte(shipped), raw)
+	missing := missingPolicyToolsets([]byte(shipped), raw, gated)
 	if len(missing) == 0 {
 		return stalePolicyPreset{}, false
 	}
@@ -195,10 +196,10 @@ func stalePolicyPresetNamed(name string, dirs []string) (stalePolicyPreset, bool
 
 // stalePolicyPresets checks every preset this build ships against the copy the
 // loader would read for it.
-func stalePolicyPresets(dirs []string) []stalePolicyPreset {
+func stalePolicyPresets(dirs []string, gated map[string]bool) []stalePolicyPreset {
 	var out []stalePolicyPreset
 	for _, p := range HITLPolicyPresets {
-		if stale, ok := stalePolicyPresetNamed(p.Name, dirs); ok {
+		if stale, ok := stalePolicyPresetNamed(p.Name, dirs, gated); ok {
 			out = append(out, stale)
 		}
 	}
@@ -224,21 +225,24 @@ func staleFallthrough(defaultAction string) string {
 
 // stalePolicyNotice renders the ONE muted line a surface prints on the way in,
 // or "" when there is nothing to say. It stops the moment the file gains the
-// rules — by refresh, or by the operator's own hand.
-func stalePolicyNotice(name string, dirs []string) string {
-	stale, ok := stalePolicyPresetNamed(name, dirs)
+// rules — by refresh, or by the operator's own hand. The line names the file
+// by full path and states the effect as that file's default_action
+// fall-through; a policy never gates tool visibility (the chain's tools
+// allowlist does).
+func stalePolicyNotice(name string, dirs []string, gated map[string]bool) string {
+	stale, ok := stalePolicyPresetNamed(name, dirs, gated)
 	if !ok {
 		return ""
 	}
-	return fmt.Sprintf("policy: %s predates %s — %s · refresh: %s",
-		stale.Name, strings.Join(stale.Toolsets, ", "), staleFallthrough(stale.DefaultAction), RefreshPoliciesCommand)
+	return fmt.Sprintf("policy: %s predates %s — calls to them fall to its default_action (%s); the tools stay visible to the model · refresh: %s",
+		stale.Path, strings.Join(stale.Toolsets, ", "), staleFallthrough(stale.DefaultAction), RefreshPoliciesCommand)
 }
 
 // stalePolicyPresetIssues adapts the detector to setupcheck's issue vocabulary
 // for `contenox doctor`. Callers pass the same search path the engine's policy
 // loader uses (policyDirs).
-func stalePolicyPresetIssues(dirs []string) []setupcheck.StalePolicyPreset {
-	stale := stalePolicyPresets(dirs)
+func stalePolicyPresetIssues(dirs []string, gated map[string]bool) []setupcheck.StalePolicyPreset {
+	stale := stalePolicyPresets(dirs, gated)
 	if len(stale) == 0 {
 		return nil
 	}
@@ -254,19 +258,58 @@ func stalePolicyPresetIssues(dirs []string) []setupcheck.StalePolicyPreset {
 	return out
 }
 
-// runRefreshPolicies rewrites the HITL policy presets in ~/.contenox and
-// touches nothing else — no chains, no config, no database. It is the only
-// path that replaces a policy file that cannot be proven untouched.
-func runRefreshPolicies(out io.Writer) error {
-	dir, err := globalContenoxDir()
+// refreshPoliciesOnSearchPath rewrites the shipped presets in every directory
+// the policy loader consults for primaryDir (policyDirs): ~/.contenox gets
+// every preset; a dir ahead of it only the presets it already holds, so a
+// shadowing copy is refreshed without widening the shadow. Each written path
+// is printed to out. A non-home write failure is a warning, not an abort:
+// home must still refresh, and stalePolicyPresets names the survivor.
+func refreshPoliciesOnSearchPath(out io.Writer, primaryDir string) error {
+	home, err := globalContenoxDir()
 	if err != nil {
 		return fmt.Errorf("could not resolve ~/.contenox: %w", err)
 	}
-	if err := writeEmbeddedHITLPolicies(dir, true); err != nil {
+	for _, dir := range policyDirs(primaryDir) {
+		if dir == home {
+			// A failure at home is fatal: no copy resolves behind it.
+			if err := writeEmbeddedHITLPolicies(dir, true); err != nil {
+				return err
+			}
+			for _, p := range HITLPolicyPresets {
+				fmt.Fprintf(out, "  Refreshed %s\n", filepath.Join(dir, p.Name))
+			}
+			continue
+		}
+		written, refreshErr := refreshExistingHITLPolicies(dir)
+		for _, path := range written {
+			fmt.Fprintf(out, "  Refreshed %s\n", path)
+		}
+		if refreshErr != nil {
+			fmt.Fprintf(out, "  warning: %v\n", refreshErr)
+		}
+	}
+	return nil
+}
+
+// runRefreshPolicies rewrites the HITL policy presets along the loader's whole
+// search path and touches nothing else — no chains, no config, no database. It
+// is the only path that replaces a policy file that cannot be proven
+// untouched. primaryDir is the resolved workspace .contenox, whose copies
+// shadow ~/.contenox (policyDirs order). gated toolsets are skipped in the
+// residual report, as everywhere the detector runs.
+func runRefreshPolicies(out io.Writer, primaryDir string, gated map[string]bool) error {
+	if err := refreshPoliciesOnSearchPath(out, primaryDir); err != nil {
 		return err
 	}
-	for _, p := range HITLPolicyPresets {
-		fmt.Fprintf(out, "  Refreshed %s\n", filepath.Join(dir, p.Name))
+	// The detector, not the writer, earns the closing line: a copy that
+	// survived the rewrite is still the one the loader reads.
+	if stale := stalePolicyPresets(policyDirs(primaryDir), gated); len(stale) > 0 {
+		for _, s := range stale {
+			fmt.Fprintf(out, "  Still stale: %s predates %s — %s\n",
+				s.Path, strings.Join(s.Toolsets, ", "), staleFallthrough(s.DefaultAction))
+		}
+		fmt.Fprintln(out, "The loader still reads these copies; edit or remove them, then re-run the refresh.")
+		return nil
 	}
 	fmt.Fprintln(out, "HITL policy presets are now this build's. Chains, config and sessions were not touched.")
 	return nil

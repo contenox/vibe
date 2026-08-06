@@ -16,7 +16,7 @@ import (
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,7 +38,7 @@ func buildStubAgentBin(t *testing.T) string {
 		t.Skip("external agent spawn runs through the sandbox, which is Landlock-based and Linux-only")
 	}
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
-	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/libacp/cmd/acp-stub-agent")
+	cmd := exec.Command("go", "build", "-o", binPath, "github.com/contenox/contenox/libacp/cmd/acp-stub-agent")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build acp-stub-agent: %v\n%s", err, out)
@@ -1348,7 +1348,8 @@ func TestLoopback_NativeSession_PolicySlashCommandStillWorks(t *testing.T) {
 	}
 	require.True(t, confirmed, "the /policy confirmation must reach the client")
 
-	// The native slash path writes the global KV, unlike the per-session picker.
-	require.Equal(t, "dev", clikv.ReadHITLPolicy(ctx, runtimetypes.New(h.tr.deps.DB.WithoutTransaction())),
-		"native /policy still writes the global cli.hitl-policy-name KV")
+	// The native slash path writes the persisted KV at this session's
+	// workspace scope, unlike the per-session picker, which writes nothing.
+	require.Equal(t, "dev", clikv.ReadHITLPolicy(ctx, runtimetypes.New(h.tr.deps.DB.WithoutTransaction()), h.tr.workspaceID()),
+		"native /policy still writes the cli.hitl-policy-name KV the evaluator reads")
 }

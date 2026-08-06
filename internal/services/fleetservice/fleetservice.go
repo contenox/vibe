@@ -13,13 +13,13 @@ import (
 
 	"github.com/contenox/contenox/internal/errdefs"
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/vfs"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/google/uuid"
 )
 
@@ -60,7 +60,8 @@ type Service interface {
 	// records a mission, and runs the intent as its first turn on a detached
 	// context, returning once the session is open. It also shepherds the
 	// turn's outcome: liveness on every completed turn, one nudge if mute,
-	// then a blocker (see driveUnattendedMission). Any failure after Start
+	// then a blocker; a turn that errors finishes the mission derailed and
+	// reaps its unit (see driveUnattendedMission). Any failure after Start
 	// tears the fresh instance back down.
 	Dispatch(ctx context.Context, req DispatchRequest) (DispatchResult, error)
 
@@ -260,7 +261,9 @@ type missionRun struct {
 
 // driveUnattendedMission runs a dispatched unit's turns and shepherds their
 // outcomes: liveness on every completed turn, one nudge if mute, then a
-// runtime-filed blocker. The nudge loop is hard-capped at one turn.
+// runtime-filed blocker. The nudge loop is hard-capped at one turn. Every exit
+// leaves the mission either reached, at rest, or blocker-reported — a turn
+// that errors goes through failTurn rather than returning silently.
 func (s *service) driveUnattendedMission(ctx context.Context, run missionRun) {
 	reportErr, reportChange, end := s.tracker.Start(ctx, "prompt", "fleet_dispatch",
 		"instance_id", run.instanceID, "session_id", string(run.sessionID), "agent_name", run.agentName)
@@ -275,7 +278,7 @@ func (s *service) driveUnattendedMission(ctx context.Context, run missionRun) {
 	}
 	stop, err := s.promptTurn(ctx, run, firstTurn)
 	if err != nil {
-		reportErr(err)
+		s.failTurn(ctx, run, err, reportErr, reportChange)
 		return
 	}
 	reportChange(string(run.sessionID), string(stop))
@@ -293,7 +296,7 @@ func (s *service) driveUnattendedMission(ctx context.Context, run missionRun) {
 	}
 	stop, err = s.promptTurn(ctx, run, []libacp.ContentBlock{libacp.NewTextContent(missionNudge)})
 	if err != nil {
-		reportErr(err)
+		s.failTurn(ctx, run, err, reportErr, reportChange)
 		return
 	}
 	reportChange(string(run.sessionID), string(stop))
@@ -382,16 +385,76 @@ func (s *service) sessionJournal(run missionRun) ([]libacp.SessionNotification, 
 	return notes, owned
 }
 
-// promptTurn drives one detached turn and stamps mission liveness from its
-// outcome. The heartbeat write's own error is deliberately dropped.
+// promptTurn drives one detached turn and stamps mission liveness on a
+// completed one. The heartbeat write's own error is deliberately dropped.
+//
+// A failed turn stamps nothing: liveness means "this mission is being driven",
+// and a turn error is the moment that stopped being true — refreshing the
+// stale clock there would hide a dead mission from the sweep for a further
+// StaleHeartbeatAfter. failTurn owns the failure instead.
 func (s *service) promptTurn(ctx context.Context, run missionRun, blocks []libacp.ContentBlock) (libacp.StopReason, error) {
 	stop, err := s.instances.Prompt(ctx, run.instanceID, run.sessionID, blocks)
 	if err != nil {
-		_, _ = s.missions.Heartbeat(ctx, run.missionID, err.Error())
 		return "", err
 	}
 	_, _ = s.missions.Heartbeat(ctx, run.missionID, "")
 	return stop, nil
+}
+
+// failTurn brings a mission whose turn errored to rest and reaps its unit.
+// The drive loop is the only thing driving a dispatched unit, so returning on
+// a turn error without this leaves a StateRunning instance nobody prompts,
+// holding fleet width against maxParallel until its host exits.
+//
+// A mission already at rest owns its own verdict — an operator's `mission
+// stop` reaps the subprocess, which is itself how the in-flight turn errored —
+// so that case only stops the unit, filing no second story. Otherwise the
+// blocker records why (durable, and the half that reaches the operator inbox),
+// the derailed verdict is the terminal fact, and the unit is stopped directly
+// rather than through the status-teardown subscriber, which not every topology
+// wires. Stop is idempotent per the kernel contract.
+func (s *service) failTurn(ctx context.Context, run missionRun, turnErr error, reportErr func(error), reportChange func(string, any)) {
+	reportErr(turnErr)
+	defer func() {
+		if err := s.instances.Stop(run.instanceID); err != nil {
+			reportChange("turn_error_stop_error", err.Error())
+		}
+	}()
+
+	if m, err := s.missions.Get(ctx, run.missionID); err == nil && m != nil && m.Status != missionservice.StatusOpen {
+		reportChange("turn_error", fmt.Sprintf("mission already at rest as %s; unit reaped", m.Status))
+		return
+	}
+
+	reason := turnErrorLine(turnErr)
+	reportChange("turn_error", reason)
+	if err := s.missions.AddReport(ctx, run.missionID, &missionservice.Report{
+		Kind:    missionservice.ReportKindBlocker,
+		Summary: reason,
+		Detail:  turnErrorDetail(turnErr, string(run.sessionID)),
+	}); err != nil {
+		reportChange("turn_error_report_error", err.Error())
+	}
+	if _, err := s.missions.Finish(ctx, run.missionID, missionservice.StatusDerailed, reason); err != nil {
+		reportChange("turn_error_finish_error", err.Error())
+	}
+}
+
+// turnErrorBlockerLead is the stable prefix of a failed turn's blocker and
+// StatusReason.
+const turnErrorBlockerLead = "unit turn failed"
+
+// turnErrorLine renders the one line both the blocker summary and the
+// StatusReason carry, single-line and bounded as AddReport requires.
+func turnErrorLine(turnErr error) string {
+	return singleLineExcerpt(fmt.Sprintf("%s: %v", turnErrorBlockerLead, turnErr), 240)
+}
+
+func turnErrorDetail(turnErr error, sessionID string) string {
+	return fmt.Sprintf(
+		"The unit's turn on session %s returned an error, and the drive loop is the only thing prompting a dispatched unit:\n\n%v\n\n"+
+			"The mission was finished %s and the unit stopped, so it no longer holds fleet width. Re-dispatch once the cause is addressed.",
+		sessionID, turnErr, missionservice.StatusDerailed)
 }
 
 // missionReached reports whether the mission carries any fact a unit

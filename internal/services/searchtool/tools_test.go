@@ -88,9 +88,11 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 		t.Fatalf("tool = %+v", tool)
 	}
 
-	// The four statements that cannot be re-taught by an error that never fires.
+	// The statements that cannot be re-taught by an error that never fires.
 	for _, want := range []string{
-		"ANY language",    // it is not a Go-only tool
+		"ANY language", // it is not a Go-only tool
+		"KEYWORD",      // ranking is not vector-only, so an identifier is a good query
+		"exact identifier",
 		"file:line-range", // it cites locations
 		"go_*",            // it is not gointel
 		"NOT a live",      // it is not a filesystem read
@@ -379,6 +381,47 @@ func TestUnit_Tools_NoIndexIsAnInstructionNotAnError(t *testing.T) {
 	}
 }
 
+// An index that exists but is empty is a different claim from "nothing
+// matched", and ErrIndexEmpty wraps ErrNoIndex, so the wrong note is one
+// mis-ordered errors.Is away.
+func TestUnit_Tools_EmptyIndexIsNotTheSameAsNoIndex(t *testing.T) {
+	q := &fakeQuerier{err: fmt.Errorf("%w (workspace ws-test, index cfg-1)", workspaceindex.ErrIndexEmpty)}
+	res, dt, err := exec(t, newTools(q), map[string]any{"question": "anything"})
+	if err != nil {
+		t.Fatalf("an empty index must NOT be an error: %v", err)
+	}
+	if dt != taskengine.DataTypeJSON {
+		t.Errorf("data type = %v", dt)
+	}
+	if len(res.Hits) != 0 {
+		t.Errorf("%d hits, want none", len(res.Hits))
+	}
+	if !strings.Contains(res.Note, "holds no chunks") {
+		t.Errorf("note must say the index is empty, not that nothing exists: %q", res.Note)
+	}
+	if !strings.Contains(res.Note, "NOT evidence") {
+		t.Errorf("note must refuse to be read as an absence proof: %q", res.Note)
+	}
+	if !strings.Contains(res.Note, "contenox index") {
+		t.Errorf("note must name the command that fixes it: %q", res.Note)
+	}
+}
+
+// The no-index note is also where a human learns that indexing does not
+// require an embedding model — the keyword leg answers without one.
+func TestUnit_Tools_NoIndexNoteSaysIndexingNeedsNoEmbeddingModel(t *testing.T) {
+	q := &fakeQuerier{err: fmt.Errorf("%w (workspace ws-test)", workspaceindex.ErrNoIndex)}
+	res, _, err := exec(t, newTools(q), map[string]any{"question": "anything"})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	for _, want := range []string{"does not require an embedding model", "keyword-only"} {
+		if !strings.Contains(res.Note, want) {
+			t.Errorf("no-index note does not state %q: %q", want, res.Note)
+		}
+	}
+}
+
 func TestUnit_Tools_OtherIndexFailuresStayErrorsWithSeverity(t *testing.T) {
 	q := &fakeQuerier{err: errors.New("store: disk I/O error")}
 	if _, _, err := exec(t, newTools(q), map[string]any{"question": "x"}); err == nil {
@@ -475,5 +518,138 @@ func TestUnit_Tools_ShortHitsAreNotClipped(t *testing.T) {
 	}
 	if res.Note != "" {
 		t.Errorf("nothing was withheld, so there is nothing to note: %q", res.Note)
+	}
+}
+
+// TestUnit_Tools_PublishedSchemaMatchesToolDescriptor pins the declared
+// OpenAPI contract and its agreement with what actually reaches the provider:
+// the request schema and the descriptor's parameters are rendered from one
+// property table (searchProperties), so they must agree property for property,
+// and the response schema must describe the payload Exec really returns.
+func TestUnit_Tools_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
+	repo := newTools(&fakeQuerier{})
+	ctx := context.Background()
+
+	docs, err := repo.GetSchemasForSupportedTools(ctx)
+	if err != nil {
+		t.Fatalf("GetSchemasForSupportedTools: %v", err)
+	}
+	doc, ok := docs[ToolsProviderName]
+	if !ok {
+		t.Fatalf("no document published under %q, got %v", ToolsProviderName, docs)
+	}
+	if doc.OpenAPI != "3.1.0" {
+		t.Errorf("openapi version = %q", doc.OpenAPI)
+	}
+	if doc.Info == nil || doc.Info.Title == "" || doc.Info.Description == "" || doc.Info.Version == "" {
+		t.Fatalf("document is not described: %+v", doc.Info)
+	}
+	if doc.Components == nil {
+		t.Fatal("document declares no components")
+	}
+	if err := doc.Validate(ctx); err != nil {
+		t.Errorf("the published document is not a valid OpenAPI document: %v", err)
+	}
+	if len(doc.Components.Schemas) != 2 {
+		t.Errorf("%d component schemas, want a request and a response for the one tool", len(doc.Components.Schemas))
+	}
+
+	// The component names are part of the contract: a rename is a breaking change.
+	req := doc.Components.Schemas["WorkspaceSearchRequest"]
+	if req == nil || req.Value == nil {
+		t.Fatal("no WorkspaceSearchRequest schema is published")
+	}
+	resp := doc.Components.Schemas["WorkspaceSearchResponse"]
+	if resp == nil || resp.Value == nil {
+		t.Fatal("no WorkspaceSearchResponse schema is published")
+	}
+
+	declared, err := repo.GetToolsForToolsByName(ctx, ToolSearch)
+	if err != nil || len(declared) != 1 {
+		t.Fatalf("GetToolsForToolsByName: %v / %d", err, len(declared))
+	}
+	params := declared[0].Function.Parameters.(map[string]any)
+	props := params["properties"].(map[string]any)
+	if len(props) != len(req.Value.Properties) {
+		t.Errorf("descriptor declares %d properties, the published schema %d", len(props), len(req.Value.Properties))
+	}
+	for name, published := range req.Value.Properties {
+		declaredProp, ok := props[name].(map[string]any)
+		if !ok {
+			t.Errorf("%s is published but the descriptor does not declare it", name)
+			continue
+		}
+		if published.Value.Type == nil || !published.Value.Type.Is(declaredProp["type"].(string)) {
+			t.Errorf("%s: published type %v, descriptor type %v", name, published.Value.Type, declaredProp["type"])
+		}
+		if published.Value.Description == "" {
+			t.Errorf("%s: published without a description", name)
+		}
+		if published.Value.Description != declaredProp["description"] {
+			t.Errorf("%s: descriptor and published schema disagree on the description", name)
+		}
+		// Nothing here has a closed value set, in either place.
+		if len(published.Value.Enum) != 0 {
+			t.Errorf("%s: published an enum the descriptor does not declare", name)
+		}
+	}
+	wantRequired, _ := params["required"].([]string)
+	if strings.Join(wantRequired, ",") != strings.Join(req.Value.Required, ",") {
+		t.Errorf("required = %v, descriptor requires %v", req.Value.Required, wantRequired)
+	}
+
+	for name, published := range resp.Value.Properties {
+		if published.Value.Description == "" {
+			t.Errorf("response: %s is published without a description", name)
+		}
+		if published.Value.Type == nil {
+			t.Errorf("response: %s is published without a type", name)
+		}
+	}
+	hits := resp.Value.Properties["hits"]
+	if hits == nil || hits.Value.Items == nil {
+		t.Fatal("response: hits is published without an item schema")
+	}
+	for name, published := range hits.Value.Items.Value.Properties {
+		if published.Value.Description == "" || published.Value.Type == nil {
+			t.Errorf("hit: %s is published without a type or a description", name)
+		}
+	}
+
+	// Declared against what a call actually produces, field for field.
+	res, _, err := exec(t, newTools(&fakeQuerier{hits: []workspaceindex.Hit{
+		{Path: "a.md", StartLine: 1, EndLine: 3, Text: "some text", Score: 0.5, Stale: true},
+	}}), map[string]any{"question": "where is retry backoff configured"})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	for name := range got {
+		if _, ok := resp.Value.Properties[name]; !ok {
+			t.Errorf("the result carries %s but the published schema does not declare it", name)
+		}
+	}
+	for _, name := range resp.Value.Required {
+		if _, ok := got[name]; !ok {
+			t.Errorf("the published schema requires %s but the result omits it", name)
+		}
+	}
+	gotHit := got["hits"].([]any)[0].(map[string]any)
+	for name := range gotHit {
+		if _, ok := hits.Value.Items.Value.Properties[name]; !ok {
+			t.Errorf("a hit carries %s but the published schema does not declare it", name)
+		}
+	}
+	for _, name := range hits.Value.Items.Value.Required {
+		if _, ok := gotHit[name]; !ok {
+			t.Errorf("the published hit schema requires %s but the hit omits it", name)
+		}
 	}
 }

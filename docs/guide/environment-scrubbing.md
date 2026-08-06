@@ -9,8 +9,10 @@ An agent that can run a shell can read its environment. By default that environm
 
 This surface gives each spawned shell — the `local_shell` tool, the `shell_session` / `!` PTY, and an ACP session's own shell — exactly the environment a task needs, in two steps:
 
-- **scrub** — strip the runtime's own credentials out of the shell, so there is nothing to leak
+- **scrub** — strip the runtime's own credentials out of the shell
 - **inject** — add back only the variables you choose, with the values you set
+
+> **What the scrub is, and is not.** It removes the credentials from the shell's *own* environment, so a task that reads `env`, echoes `$STRIPE_SECRET_KEY`, or hands its environment to a subprocess finds nothing. It is not a kernel boundary. These shells are ordinary child processes of the runtime, running as you, and on Linux a shell that can read files can read `/proc/<contenox-pid>/environ` — the runtime's own pre-scrub environment, which it still needs in order to reach your providers. Closing that would take the [sandbox](/docs/guide/agent-sandbox/), which confines foreign agents, not contenox's own chains. The scrub is the environment slice of least privilege against accident and casual reach; a shell you have allowed to run arbitrary read commands is trusted with what it can read.
 
 This is the environment slice of least privilege: deny by default, grant what the job needs. It is live today across every agent-reachable shell this CLI spawns — `contenox chat` / `contenox run` (`local_shell`), `contenox acp` / `contenox acpx` (the ACP session's shell), and `contenox new` (`local_shell` and the `!` PTY).
 
@@ -30,7 +32,7 @@ The scrub policy is set per surface:
 
 Agent-reachable shells scrub by default because the agent is untrusted. The terminal panel is the operator's own shell, so it defaults to `off`; set it to `deny-secrets` or `strict` for the same guarantees there.
 
-> [!NOTE]
+> **Note:**
 > `SANDBOX_TERMINAL_SCRUB` and `contenox sandbox env --terminal` are real, working config and preview today — they just have no consumer yet: contenox does not currently spawn a distinct operator-facing terminal panel (as opposed to the agent-reachable `local_shell` / `!` PTY covered by `SANDBOX_SHELL_SCRUB` above). Configure it now for when that surface lands, or ignore it — it governs nothing yet.
 
 ## Scrub: deny by default
@@ -69,7 +71,7 @@ SANDBOX_TERMINAL_SCRUB=deny-secrets contenox new
 SANDBOX_SHELL_SCRUB=strict SANDBOX_ENV_ALLOW="GOCACHE,CARGO_HOME,HTTP_PROXY" contenox new
 ```
 
-> [!NOTE]
+> **Note:**
 > Whenever a scrub is active, `CONTENOX_*` — the control plane's own variables — is always dropped. In `off` mode nothing is scrubbed. `HOME` and `PATH` are not forced to anything special here: an agent shell runs in the operator's own home and inherited toolchain, scrubbed of credentials rather than reshaped into a different filesystem identity — that reshaping is what the separate [agent sandbox](/docs/guide/agent-sandbox/) does for a foreign agent process.
 
 ## Inject: grant what the task needs
@@ -84,7 +86,7 @@ contenox shell-env unset HTTP_PROXY
 
 Injected values are layered on top of the scrub, so they always win and apply even when the scrub mode is `off`. They are plain config, not a place for secrets.
 
-> [!NOTE]
+> **Note:**
 > `SANDBOX_ENV_ALLOW` and `shell-env` are different tools. `SANDBOX_ENV_ALLOW` passes through a variable the process already has; `shell-env` sets a variable to a value you choose, whether or not the process has it.
 
 ## Verify before you trust it

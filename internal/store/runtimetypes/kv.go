@@ -45,8 +45,49 @@ func (s *store) UpdateKV(ctx context.Context, key string, value json.RawMessage)
 	return checkRowsAffected(result)
 }
 
+// UpdateKVIfUnchanged is UpdateKV under a compare-and-swap predicate: the
+// write lands only while the stored value is still byte-for-byte expected. A
+// KV row is an opaque document with no status column to name in a WHERE
+// clause, so the snapshot it was read from IS the predicate — the equivalent
+// of the pending-state CAS hitl_approvals resolves verdicts under. Returns
+// libdb.ErrNotFound when the key is gone or its value has moved on; callers
+// tell those apart by re-reading with GetKVRaw.
+func (s *store) UpdateKVIfUnchanged(ctx context.Context, key string, expected, value json.RawMessage) error {
+	now := time.Now().UTC()
+	result, err := s.Exec.ExecContext(ctx, `
+        UPDATE kv
+        SET value = $2, updated_at = $3
+        WHERE key = $1 AND workspace_id = '' AND value = $4`,
+		key, value, now, expected,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to conditionally update key-value pair: %w", err)
+	}
+	return checkRowsAffected(result)
+}
+
 func (s *store) GetKV(ctx context.Context, key string, out interface{}) error {
 	return s.getKVScoped(ctx, "", key, out)
+}
+
+// GetKVRaw returns key's stored value verbatim instead of decoding it into a
+// caller type — the exact bytes UpdateKVIfUnchanged's predicate is taken
+// against, which a re-marshalled equivalent would not reliably reproduce.
+func (s *store) GetKVRaw(ctx context.Context, key string) (json.RawMessage, error) {
+	var rawValue []byte
+	err := s.Exec.QueryRowContext(ctx, `
+		SELECT value
+		FROM kv
+		WHERE key = $1 AND workspace_id = ''`,
+		key,
+	).Scan(&rawValue)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, libdb.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(rawValue), nil
 }
 
 func (s *store) GetWorkspaceKV(ctx context.Context, workspaceID string, key string, out interface{}) error {

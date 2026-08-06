@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/contenox/contenox/internal/services/agenthost"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
 	"github.com/google/uuid"
 )
 
@@ -21,14 +22,20 @@ import (
 // agents never exit on stdin-close, so this keeps Stop/Close from stalling.
 const defaultKillGrace = 2 * time.Second
 
-// ChainACPSubcommand and ChainPathEnvVar describe this binary's own ACP
-// server for a chain-kind spawn: the subcommand that serves ACP over stdio,
-// and the env var naming which chain file to run. Declared here rather than
-// imported to avoid an import cycle with the packages that own them; kept
-// exported so those packages can assert the definitions still agree.
+// ChainACPSubcommand, ChainPathEnvVar, ChainHopEnvVar, and ChainWorkspaceFlag
+// describe this binary's own ACP server for a chain-kind spawn: the subcommand
+// that serves ACP over stdio, the env var naming which chain file to run, the
+// env var carrying the dispatch hop of the context that spawned it, and the
+// flag (bare name, no dashes) carrying the dispatching host's workspace id so
+// the child stamps mission events with the firing workspace instead of its own
+// default. Declared here rather than imported to avoid an import cycle with
+// the packages that own them; kept exported so those packages can assert the
+// definitions still agree.
 const (
 	ChainACPSubcommand = "acp"
 	ChainPathEnvVar    = "CONTENOX_ACP_CHAIN_PATH"
+	ChainHopEnvVar     = "CONTENOX_EVENT_HOP"
+	ChainWorkspaceFlag = "workspace-id"
 )
 
 // ErrNotFound is returned for an unknown instance id. It is a sentinel so callers
@@ -226,6 +233,14 @@ func WithSelfExecutable(path string) Option {
 	return func(m *manager) { m.selfExecutable = path }
 }
 
+// WithWorkspaceID passes id to every chain-kind spawn via ChainWorkspaceFlag,
+// so the child's mission-event publisher stamps the dispatching host's
+// workspace rather than resolving its own default. Empty (the default) adds
+// no flag and leaves the child to its own resolution.
+func WithWorkspaceID(id string) Option {
+	return func(m *manager) { m.workspaceID = id }
+}
+
 type manager struct {
 	agents      agentregistryservice.Service
 	stderr      io.Writer
@@ -235,6 +250,10 @@ type manager struct {
 	// selfExecutable is the program a chain-kind agent re-executes. Empty means
 	// "resolve os.Executable() at spawn time"; see WithSelfExecutable.
 	selfExecutable string
+
+	// workspaceID is the dispatching host's workspace, forwarded to chain-kind
+	// children via ChainWorkspaceFlag. Empty adds no flag; see WithWorkspaceID.
+	workspaceID string
 
 	restartEnabled bool
 	restartLimit   int
@@ -294,7 +313,6 @@ func (m *manager) Start(ctx context.Context, agentName, cwd string) (string, err
 }
 
 func (m *manager) StartResolved(ctx context.Context, agent *runtimetypes.Agent, cwd string) (string, error) {
-	_ = ctx // no registry read happens here; ctx is kept for interface uniformity.
 	if agent == nil {
 		return "", fmt.Errorf("agentinstance: agent is required")
 	}
@@ -317,7 +335,9 @@ func (m *manager) StartResolved(ctx context.Context, agent *runtimetypes.Agent, 
 		}
 		return m.bringUp(agent, spawner)
 	case runtimetypes.AgentKindChain:
-		spawner, err := m.chainSpawner(agent, cwd)
+		// ctx, not the Manager's root: the hop the child inherits is a property
+		// of the dispatch that asked for this spawn, not of the Manager.
+		spawner, err := m.chainSpawner(ctx, agent, cwd)
 		if err != nil {
 			return "", err
 		}
@@ -334,7 +354,13 @@ func (m *manager) StartResolved(ctx context.Context, agent *runtimetypes.Agent, 
 // shares the one global runtime state (HOME, DB, workspace). HITL is not
 // disabled: gated tool calls still route through session/request_permission
 // to the session's controller, the same as an external agent.
-func (m *manager) chainSpawner(agent *runtimetypes.Agent, cwd string) (agenthost.Agent, error) {
+//
+// ctx's dispatch hop (runtimetypes.EventHopFromContext) rides along in
+// ChainHopEnvVar when set. The hop is an in-process context value, so without
+// this the events the child appends would all read hop 0 and a trigger chain
+// dispatching units that emit the events it listens for would never exhaust the
+// dispatch budget.
+func (m *manager) chainSpawner(ctx context.Context, agent *runtimetypes.Agent, cwd string) (agenthost.Agent, error) {
 	cfg, err := agent.ChainConfig()
 	if err != nil {
 		return nil, fmt.Errorf("agentinstance: agent %q: %w", agent.Name, err)
@@ -349,15 +375,28 @@ func (m *manager) chainSpawner(agent *runtimetypes.Agent, cwd string) (agenthost
 			return nil, fmt.Errorf("agentinstance: agent %q: resolve this executable to run its chain: %w", agent.Name, err)
 		}
 	}
+	args := []string{ChainACPSubcommand}
+	if m.workspaceID != "" {
+		// The child's own workspace resolution is anchored to ~/.contenox, not
+		// the mission's; the flag makes it stamp the firing workspace.
+		args = append(args, "--"+ChainWorkspaceFlag, m.workspaceID)
+	}
+	env := map[string]string{ChainPathEnvVar: cfg.Path}
+	// Verbatim, not incremented: the child is this chain's actuation, one more
+	// producer inside the same generation, so its events belong at the same hop
+	// the dispatcher already stamped on the firing context.
+	if hop := runtimetypes.EventHopFromContext(ctx); hop > 0 {
+		env[ChainHopEnvVar] = strconv.Itoa(hop)
+	}
 	return &agenthost.ExternalACPAgent{
 		Config: runtimetypes.ExternalACPConfig{
 			Transport: runtimetypes.ExternalACPTransportStdio,
 			Command:   self,
-			Args:      []string{ChainACPSubcommand},
+			Args:      args,
 			// A chain unit declares no cwd of its own, so it runs in the
 			// caller's resolved cwd (the mission/session root).
 			Cwd: cwd,
-			Env: map[string]string{ChainPathEnvVar: cfg.Path},
+			Env: env,
 		},
 		// This is contenox spawning contenox, not a foreign agent, so it
 		// runs outside the sandbox (see agenthost.ExternalACPAgent.SelfSpawn);

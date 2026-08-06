@@ -10,7 +10,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/testkit"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/textwidth"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // goldenWidths is the resize matrix: narrow, default, wide.
@@ -916,10 +916,52 @@ func TestUnit_SettledLinesNeverChange(t *testing.T) {
 	}
 }
 
+// TestUnit_PlanUpdatedSettlesAsAPlanCard pins that the agent's own plan
+// reaches the transcript. Every other ACP client renders it; beam used to
+// drop it on the floor, so an agent that announced what it was about to do
+// announced it to nobody.
+func TestUnit_PlanUpdatedSettlesAsAPlanCard(t *testing.T) {
+	tr := apply(enginebridge.PlanUpdated{SessionID: sess, Entries: []libacp.PlanEntry{
+		{Content: "read the retry loop", Status: libacp.PlanStatusCompleted},
+		{Content: "add exponential backoff", Status: libacp.PlanStatusInProgress},
+		{Content: "update the tests", Status: libacp.PlanStatusPending},
+		// No status at all: unknown reads as pending, never as done.
+		{Content: "write the changelog"},
+	}})
+
+	got := texts(tr.TakeAppends(80, false))
+	want := []string{
+		"◆ plan  1 done · 1 running · 2 pending",
+		"  ✓ read the retry loop",
+		"  ▸ add exponential backoff",
+		"  · update the tests",
+		"  · write the changelog",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("plan settled %q, want %q", got, want)
+	}
+
+	// The three states differ by glyph, not only by color, in ASCII too.
+	tr = apply(enginebridge.PlanUpdated{SessionID: sess, Entries: []libacp.PlanEntry{
+		{Content: "done thing", Status: libacp.PlanStatusCompleted},
+		{Content: "running thing", Status: libacp.PlanStatusInProgress},
+		{Content: "pending thing", Status: libacp.PlanStatusPending},
+	}})
+	marks := map[string]bool{}
+	for _, l := range texts(tr.TakeAppends(80, true))[1:] {
+		marks[strings.Fields(l)[0]] = true
+	}
+	if len(marks) != 3 {
+		t.Fatalf("ASCII plan marks collapse to %v — a plan must be readable without color", marks)
+	}
+}
+
 // TestUnit_IgnoresNonTranscriptEvents pins that events other components own
 // leave no mark, even when handed the whole stream.
 func TestUnit_IgnoresNonTranscriptEvents(t *testing.T) {
 	evs := []enginebridge.Event{
+		// A plan is a transcript fact (see above), but an EMPTY one is the
+		// agent saying it has none, which is not worth a card.
 		enginebridge.PlanUpdated{SessionID: sess},
 		enginebridge.UsageUpdated{SessionID: sess, Used: 10, Size: 100},
 		enginebridge.CommandsUpdated{SessionID: sess},

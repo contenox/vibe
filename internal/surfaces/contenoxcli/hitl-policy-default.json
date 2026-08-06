@@ -1,6 +1,6 @@
 {
   "//compute": "Generous per-mission ceilings, not per-chat: a fire-and-detach mission has nobody watching it, so unbounded would mean a runaway spends real money unchecked. A mission that crosses a bound finishes at status \"stuck\" with the reason named.",
-  "//compute-fields": "maxToolCalls is exact; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted because the dispatcher never issues more than two prompt turns per mission. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
+  "//compute-fields": "maxToolCalls is validated but not enforced by the shipped hosts; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted; only 1 has an effect (it drops the runtime nudge turn), since the dispatcher never issues more than two. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
   "compute": {
     "maxToolCalls": 300,
     "maxTokens": 2000000,
@@ -631,8 +631,9 @@
       "action": "allow"
     }
   ],
+  "//attention": "Bounded delegation on the mission path's default envelope: an agent (the firing session's own, or the attention oracle mounted by `contenox mission fire --oracle`) may answer up to 3 of a mission's routine questions; the rest wait for a human. The count is durable per mission, and whatever the unit then DOES stays gated by this same envelope.",
   "attention": {
     "allowAgentAnswers": true,
-    "maxAgentAnswers": 2
+    "maxAgentAnswers": 3
   }
 }

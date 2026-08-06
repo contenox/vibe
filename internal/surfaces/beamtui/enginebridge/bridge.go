@@ -19,12 +19,12 @@ import (
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
 	"github.com/contenox/contenox/internal/libbus"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/approvalflow"
 	"github.com/contenox/contenox/internal/services/shellsession"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // extMethodTerminalRun mirrors acpsvc's unexported constant of the same name:
@@ -111,6 +111,11 @@ type Deps struct {
 	// Fleet and Agents together enable /mission: both must be non-nil.
 	Fleet  acpsvc.MissionDispatcher
 	Agents acpsvc.MissionAgentResolver
+	// MissionEnvelopes lists and resolves the envelopes /mission --policy
+	// offers; nil drops the listing and the pre-dispatch check.
+	MissionEnvelopes acpsvc.MissionEnvelopeSource
+	// OptInBeta mirrors the CLI's beta gate for beta slash-command levers.
+	OptInBeta bool
 	// SessionRouter is the shared session->transport registry HITL approvals
 	// route through; nil for a single-transport process.
 	SessionRouter *acpsvc.SessionRouter
@@ -253,6 +258,8 @@ func New(ctx context.Context, deps Deps) (*Bridge, error) {
 		HITLDefaultPolicyName: deps.HITLDefaultPolicyName,
 		Fleet:                 deps.Fleet,
 		Agents:                deps.Agents,
+		MissionEnvelopes:      deps.MissionEnvelopes,
+		OptInBeta:             deps.OptInBeta,
 		SessionRouter:         deps.SessionRouter,
 	})
 

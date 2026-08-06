@@ -547,3 +547,69 @@ func TestUnit_HITLWrapper_Detail_SurvivesToApprovalflowMeta(t *testing.T) {
 		t.Fatalf("Meta.Detail = %q, want %q", meta.Detail, wantDetail)
 	}
 }
+
+// capturingPolicyEval records the args the wrapper hands the policy, so
+// tests can pin the evaluated view rather than only the verdict.
+type capturingPolicyEval struct {
+	result hitlservice.EvaluationResult
+	args   map[string]any
+}
+
+func (m *capturingPolicyEval) Evaluate(_ context.Context, _, _ string, args map[string]any) (hitlservice.EvaluationResult, error) {
+	m.args = args
+	return m.result, nil
+}
+
+// TestUnit_HITLWrapper_StaticToolsArgsVisibleToPolicy pins policyEvalArgs:
+// a tools-handler task's chain-authored static tools.Args reach the policy,
+// a plain-string input is exposed as "stdin", and static args win over
+// input keys — the same precedence the executing tool applies. The inner
+// tool still receives the original input untouched.
+func TestUnit_HITLWrapper_StaticToolsArgsVisibleToPolicy(t *testing.T) {
+	policy := &capturingPolicyEval{result: hitlservice.EvaluationResult{Action: hitlservice.ActionAllow}}
+	var gotInput any
+	inner := &mockInnerTools{fn: func(_ context.Context, _ time.Time, input any, _ bool, _ *taskengine.ToolsCall) (any, taskengine.DataType, error) {
+		gotInput = input
+		return "ok", taskengine.DataTypeString, nil
+	}}
+	w := localtools.NewHITLWrapper(inner, alwaysDeny, policy, nil)
+
+	stdin := `{"query":"open items","limit":5}`
+	_, _, err := w.Exec(context.Background(), time.Now(), stdin, false, &taskengine.ToolsCall{
+		Name: "local_shell",
+		Args: map[string]string{
+			"command": "recordsctl",
+			"args":    "records list --format json",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := policy.args["command"]; got != "recordsctl" {
+		t.Fatalf("policy must see the static command, got %v", got)
+	}
+	if got := policy.args["args"]; got != "records list --format json" {
+		t.Fatalf("policy must see the static args, got %v", got)
+	}
+	if got := policy.args["stdin"]; got != stdin {
+		t.Fatalf("policy must see the string input as stdin, got %v", got)
+	}
+	if gotInput != stdin {
+		t.Fatalf("inner tool must receive the original input unchanged, got %v", gotInput)
+	}
+
+	// Static args win over same-named input keys, mirroring execution.
+	policy.args = nil
+	_, _, err = w.Exec(context.Background(), time.Now(),
+		map[string]any{"command": "rm", "note": "dynamic"}, false,
+		&taskengine.ToolsCall{Name: "local_shell", Args: map[string]string{"command": "contenox"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := policy.args["command"]; got != "contenox" {
+		t.Fatalf("static command must win over the input's, got %v", got)
+	}
+	if got := policy.args["note"]; got != "dynamic" {
+		t.Fatalf("input keys without a static counterpart must survive, got %v", got)
+	}
+}

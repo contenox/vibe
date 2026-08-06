@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/spf13/cobra"
 )
 
@@ -32,25 +33,26 @@ type sessionIndexRow struct {
 	msgs      int
 }
 
+// querySessionIndex reads every session index in the database, across
+// workspaces and identities — the inventory these commands exist to show, so
+// it goes through the store's deliberately unscoped read rather than the
+// workspace-scoped MessageStore.
 func querySessionIndex(ctx context.Context, exec libdb.Exec) ([]sessionIndexRow, error) {
-	rows, err := exec.QueryContext(ctx, `
-		SELECT mi.id, mi.identity, mi.workspace_id, COALESCE(mi.name, ''),
-		       (SELECT COUNT(*) FROM messages m WHERE m.idx_id = mi.id)
-		FROM message_indices mi`)
+	rows, err := runtimetypes.ListAllMessageIndices(ctx, exec)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var out []sessionIndexRow
-	for rows.Next() {
-		var r sessionIndexRow
-		if err := rows.Scan(&r.id, &r.identity, &r.workspace, &r.name, &r.msgs); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
+	out := make([]sessionIndexRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, sessionIndexRow{
+			id:        r.ID,
+			identity:  r.Identity,
+			workspace: r.WorkspaceID,
+			name:      r.Name,
+			msgs:      r.MessageCount,
+		})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 var sessionWorkspacesCmd = &cobra.Command{
@@ -152,10 +154,12 @@ func runSessionListFiltered(cmd *cobra.Command, ctx context.Context, db libdb.DB
 	return w.Flush()
 }
 
+// resolveSessionByID turns an internal session id into its name. The lookup is
+// workspace-independent on purpose (see GetMessageIndexName): the CLI resolves
+// ids the operator pasted from the cross-workspace inventory above.
 func resolveSessionByID(ctx context.Context, db libdb.DBManager, id string) (name string, found bool) {
-	row := db.WithoutTransaction().QueryRowContext(ctx,
-		`SELECT COALESCE(name, '') FROM message_indices WHERE id = $1`, id)
-	if err := row.Scan(&name); err != nil {
+	name, err := runtimetypes.NewMessageStore(db.WithoutTransaction(), "").GetMessageIndexName(ctx, id)
+	if err != nil {
 		return "", false
 	}
 	return name, true

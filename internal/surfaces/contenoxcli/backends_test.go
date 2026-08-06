@@ -188,7 +188,7 @@ func TestUnit_getConfigKV_multipleKeys(t *testing.T) {
 	for k, v := range map[string]string{
 		"default-model":    "phi3:3.8b",
 		"default-provider": "ollama",
-		"default-chain":    "default-chain.json",
+		"default-chain":    "chain-agent-contenox.json",
 	} {
 		data, _ := json.Marshal(v)
 		require.NoError(t, store.SetKV(ctx, clikv.Prefix+k, data))
@@ -197,7 +197,7 @@ func TestUnit_getConfigKV_multipleKeys(t *testing.T) {
 	for k, want := range map[string]string{
 		"default-model":    "phi3:3.8b",
 		"default-provider": "ollama",
-		"default-chain":    "default-chain.json",
+		"default-chain":    "chain-agent-contenox.json",
 	} {
 		got, err := getConfigKV(ctx, store, k)
 		require.NoError(t, err, "key=%s", k)

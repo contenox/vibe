@@ -217,12 +217,15 @@ const attentionPollInterval = time.Second
 // Answer resolves an attention ask with the operator's text, waking the unit
 // parked on it. It refuses a permission ask by design.
 func (s *service) Answer(ctx context.Context, askID, text string) error {
-	return s.answerAttention(ctx, askID, text, "")
+	return s.answerAttention(ctx, askID, text, "", nil)
 }
 
 // answerAttention is the shared body of Answer and AnswerAsAgent, differing
-// only in the actor recorded on the durable row.
-func (s *service) answerAttention(ctx context.Context, askID, text, by string) error {
+// only in the actor recorded on the durable row. bound, when non-nil, makes
+// the resolve conditional on the ask's mission still having budget left (see
+// AnswerAsAgentBounded); nil is the unconditional human path, byte-identical
+// to what it always did.
+func (s *service) answerAttention(ctx context.Context, askID, text, by string, bound *int) error {
 	if s.approvals == nil {
 		return fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
 	}
@@ -240,16 +243,42 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string) e
 		return fmt.Errorf("hitlservice: ask %s is a permission request (%s.%s), which is answered approve/deny, not with text",
 			askID, row.ToolsName, row.ToolName)
 	}
+	// Same ordering gate as resolve(): an answer for a checkpointed run is
+	// one-shot, so a process that cannot resume must not record it.
+	if err := s.requireResumerForVerdict(ctx, askID); err != nil {
+		return err
+	}
 
 	now := time.Now().UTC()
-	if err := s.approvals.ResolveHITLApproval(ctx, askID, runtimetypes.HITLApprovalApproved, marshalAttentionResolution(text, by), now); err != nil {
-		if !errors.Is(err, libdb.ErrNotFound) {
-			return fmt.Errorf("hitlservice: resolve ask %s: %w", askID, err)
+	resolution := marshalAttentionResolution(text, by)
+	var resolveErr error
+	if bound == nil {
+		resolveErr = s.approvals.ResolveHITLApproval(ctx, askID, runtimetypes.HITLApprovalApproved, resolution, now)
+	} else {
+		if row.MissionID == nil || strings.TrimSpace(*row.MissionID) == "" {
+			return fmt.Errorf("hitlservice: ask %s belongs to no mission, so no agent-answer bound can be applied to it", askID)
+		}
+		resolveErr = s.approvals.ResolveHITLApprovalWithinBound(ctx, askID, runtimetypes.AgentAnswerBound{
+			MissionID:      *row.MissionID,
+			ToolsName:      AttentionToolsName,
+			ToolName:       AttentionToolName,
+			ResolutionLike: agentResolutionLike,
+			Max:            *bound,
+		}, runtimetypes.HITLApprovalApproved, resolution, now)
+	}
+	if resolveErr != nil {
+		if !errors.Is(resolveErr, libdb.ErrNotFound) {
+			return fmt.Errorf("hitlservice: resolve ask %s: %w", askID, resolveErr)
 		}
 		// Lost the CAS: tell expired from already-answered, same as Respond.
 		current, getErr := s.approvals.GetHITLApproval(ctx, askID)
 		if getErr != nil {
 			return fmt.Errorf("hitlservice: look up ask %s: %w", askID, getErr)
+		}
+		// Still pending means the row itself was writable and the count
+		// predicate is what refused — reachable only under a bound.
+		if current.State == runtimetypes.HITLApprovalPending {
+			return ErrAgentAnswerBoundSpent
 		}
 		if current.State == runtimetypes.HITLApprovalExpired {
 			return ErrApprovalExpired
@@ -282,11 +311,60 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string) e
 // answeredByAgent marks a resolution written by a supervising agent rather than a human.
 const answeredByAgent = "agent"
 
+// agentResolutionLike is the SQL LIKE pattern matching a resolution that
+// records a non-human actor: approvalResolution.AnsweredBy is omitempty, so
+// the key exists only on an agent answer, and a human answer's text cannot
+// forge it (json.Marshal escapes an embedded quote to \", which the pattern's
+// literal quotes then miss). The Go-side twin is AnsweredByOf; both must agree
+// or the durable count and the conditional write would disagree.
+const agentResolutionLike = `%"answeredBy":%`
+
 // AnswerAsAgent resolves an attention ask exactly as Answer does, but
 // records that an agent answered — the actor AgentAnswerCount counts
-// against the envelope's cap.
+// against the envelope's cap. Enforces no cap itself; see
+// AnswerAsAgentWithinBounds.
 func (s *service) AnswerAsAgent(ctx context.Context, askID, text string) error {
-	return s.answerAttention(ctx, askID, text, answeredByAgent)
+	return s.answerAttention(ctx, askID, text, answeredByAgent, nil)
+}
+
+// AnswerAsAgentNamed is AnswerAsAgent with the answering agent's name as the
+// recorded actor, so the durable row shows which agent answered, not only
+// that one did. A blank name degrades to the generic marker. Counts against
+// the envelope's cap exactly as AnswerAsAgent does.
+func (s *service) AnswerAsAgentNamed(ctx context.Context, askID, agentName, text string) error {
+	return s.answerAttention(ctx, askID, text, agentActor(agentName), nil)
+}
+
+// AnswerAsAgentBounded implements Service: the same write AnswerAsAgentNamed
+// makes, but conditional on the ask's mission holding fewer than max
+// agent-answered asks — counted by the database inside the same statement, so
+// concurrent answers in this process or another cannot together overrun max.
+func (s *service) AnswerAsAgentBounded(ctx context.Context, askID, agentName, text string, max int) error {
+	return s.answerAttention(ctx, askID, text, agentActor(agentName), &max)
+}
+
+// agentActor is the recorded actor for an agent answer: the agent's name, or
+// the generic marker when it is blank.
+func agentActor(agentName string) string {
+	name := strings.TrimSpace(agentName)
+	if name == "" {
+		return answeredByAgent
+	}
+	return name
+}
+
+// AnsweredByOf returns the recorded non-human actor of a resolved attention
+// ask — "agent" or an agent's name — and "" for a human answer, a pending
+// row, or a permission ask.
+func AnsweredByOf(row *runtimetypes.HITLApproval) string {
+	if row == nil || len(row.Resolution) == 0 {
+		return ""
+	}
+	var res approvalResolution
+	if err := json.Unmarshal(row.Resolution, &res); err != nil || res.AnsweredBy == nil {
+		return ""
+	}
+	return strings.TrimSpace(*res.AnsweredBy)
 }
 
 // PendingAttentionAsks returns missionID's unanswered questions, newest first.
@@ -319,14 +397,12 @@ func (s *service) AgentAnswerCount(ctx context.Context, missionID string) (int, 
 	}
 	count := 0
 	for _, row := range rows {
-		if !IsAttentionAsk(row) || len(row.Resolution) == 0 {
+		if !IsAttentionAsk(row) {
 			continue
 		}
-		var res approvalResolution
-		if json.Unmarshal(row.Resolution, &res) != nil {
-			continue
-		}
-		if res.AnsweredBy != nil && *res.AnsweredBy == answeredByAgent {
+		// Any recorded non-human actor counts — the generic "agent" marker or
+		// a named agent; a human answer records no actor at all.
+		if AnsweredByOf(row) != "" {
 			count++
 		}
 	}

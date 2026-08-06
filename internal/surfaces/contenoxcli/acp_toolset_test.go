@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/jqtool"
@@ -13,6 +12,7 @@ import (
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/searchtool"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,7 +29,7 @@ func TestUnit_ACPToolset_CarriesTheCodeIntelligenceToolsets(t *testing.T) {
 
 	noTransport := func() *acpsvc.Transport { return nil }
 	tools := acpToolset(nil, libtracker.NoopTracker{}, goIndex, gt, "test-workspace",
-		noTransport, nil, missionservice.New(nil), nil, nil)
+		noTransport, nil, missionservice.New(nil), nil, nil, true)
 
 	// Every provider chat/run already had must still be present.
 	for _, name := range []string{"echo", "print", "webtools", "local_fs", "local_shell", missiontools.ToolsProviderName} {
@@ -54,5 +54,16 @@ func TestUnit_ACPToolset_CarriesTheCodeIntelligenceToolsets(t *testing.T) {
 		supported, err := repo.Supports(context.Background())
 		require.NoError(t, err)
 		require.Containsf(t, supported, tc.tool, "%s must support %s", tc.provider, tc.tool)
+	}
+
+	// Without opt-in-beta the goja provider is absent, exactly as localToolset
+	// gates it; everything stable stays.
+	stable := acpToolset(nil, libtracker.NoopTracker{}, goIndex, gt, "test-workspace",
+		noTransport, nil, missionservice.New(nil), nil, nil, false)
+	require.NotContains(t, stable, gojatool.ToolsProviderName, "goja is a beta surface, absent without opt-in-beta")
+	for _, name := range []string{"echo", "print", "webtools", "local_fs", "local_shell",
+		gointel.ToolsProviderName, searchtool.ToolsProviderName, localtools.GitToolsName,
+		jqtool.ToolsProviderName, missiontools.ToolsProviderName} {
+		require.Containsf(t, stable, name, "stable toolset %q must not be beta-gated", name)
 	}
 }

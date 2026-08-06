@@ -10,9 +10,9 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
-	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/services/sessionservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
 
@@ -273,7 +273,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	}
 
 	contenoxDir, _ := ResolveContenoxDir(cmd)
-	store := messagestore.New(db.WithoutTransaction(), ResolveWorkspaceID(contenoxDir))
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), ResolveWorkspaceID(contenoxDir))
 	rawMsgs, err := store.ListMessages(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to read messages: %w", err)

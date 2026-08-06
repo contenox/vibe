@@ -28,12 +28,12 @@ func TestUnit_TaskChainService_CRUD(t *testing.T) {
 	require.NoError(t, err)
 	svc := taskchainservice.NewLocal(files)
 
-	require.NoError(t, svc.CreateAtPath(ctx, "default-chain.json", testChain("default")))
+	require.NoError(t, svc.CreateAtPath(ctx, "chain-agent-contenox.json", testChain("default")))
 	paths, err := svc.List(ctx)
 	require.NoError(t, err)
-	require.Equal(t, []string{"default-chain.json"}, paths)
+	require.Equal(t, []string{"chain-agent-contenox.json"}, paths)
 
-	byPath, err := svc.Get(ctx, "default-chain.json")
+	byPath, err := svc.Get(ctx, "chain-agent-contenox.json")
 	require.NoError(t, err)
 	require.Equal(t, "default", byPath.ID)
 
@@ -41,12 +41,12 @@ func TestUnit_TaskChainService_CRUD(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "default", byID.ID)
 
-	require.NoError(t, svc.UpdateAtPath(ctx, "default-chain.json", testChain("updated")))
-	got, err := svc.Get(ctx, "default-chain.json")
+	require.NoError(t, svc.UpdateAtPath(ctx, "chain-agent-contenox.json", testChain("updated")))
+	got, err := svc.Get(ctx, "chain-agent-contenox.json")
 	require.NoError(t, err)
 	require.Equal(t, "updated", got.ID)
 
-	require.NoError(t, svc.DeleteByPath(ctx, "default-chain.json"))
+	require.NoError(t, svc.DeleteByPath(ctx, "chain-agent-contenox.json"))
 	paths, err = svc.List(ctx)
 	require.NoError(t, err)
 	require.Empty(t, paths)

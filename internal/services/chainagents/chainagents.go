@@ -1,8 +1,8 @@
 // Package chainagents seeds the declared-agent registry from the runtime's
 // own task chains, so a reviewed chain can be fired as a fleet unit without
 // a second registration step. Eligibility is by convention (shipped
-// agent-shaped chains, or files named "agent-*.json"); discovery upserts
-// rows it owns (Source "discovered") and never writes to any other row.
+// agent-shaped chains by id, or files named "chain-agent-*.json"); discovery
+// upserts rows it owns (Source "discovered") and never writes to any other row.
 package chainagents
 
 import (
@@ -15,22 +15,36 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/localfileservice"
 	"github.com/contenox/contenox/internal/services/taskchainservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // AgentChainFilePrefix: a chain file whose basename starts with it is an agent template.
-const AgentChainFilePrefix = "agent-"
+const AgentChainFilePrefix = "chain-agent-"
 
 // shippedAgentChains are the ids of the runtime's own agent-shaped (not utility) chains.
 var shippedAgentChains = map[string]bool{
-	"chain-contenox": true, // default interactive chat agent (default-chain.json)
-	"chain-acp":      true, // the ACP agent surface (default-acp-chain.json)
-	"chain-acpx":     true, // the headless/untrusted-driver ACP agent (headless-acp-chain.json)
-	"chain-beam":     true, // the beam TUI agent surface (default-beam-chain.json)
+	"chain-contenox": true, // default interactive chat agent (chain-agent-contenox.json)
+	"chain-acp":      true, // the ACP agent surface (chain-agent-acp.json)
+	"chain-acpx":     true, // the headless/untrusted-driver ACP agent (chain-agent-acpx.json)
+	"chain-beam":     true, // the beam TUI agent surface (chain-agent-beam.json)
+	"chain-run":      true, // the one-shot `contenox run` agent (chain-agent-run.json)
+}
+
+// shippedPlannerAgent is the shipped default-mission planner's chain id and
+// agent name (seeded as chain-planner-default.json), eligible by id so the
+// planner role needs no chain-agent-* filename. The name is the chain id, so
+// `mission fire agent-planner` is stable across file renames.
+const shippedPlannerAgent = "agent-planner"
+
+// StableAgentName reports whether a discovered-agent name is visible without
+// the beta agent-roster opt-in: a shipped agent-shaped chain, or the shipped
+// planner. User-authored chain-agent-* chains are not.
+func StableAgentName(name string) bool {
+	return shippedAgentChains[name] || name == shippedPlannerAgent
 }
 
 // Result reports what one Discover pass did. Every slice holds agent names.
@@ -51,6 +65,14 @@ func Discover(ctx context.Context, agents agentregistryservice.Service, roots ..
 
 // DiscoverWithTracker is Discover with diagnostics reported to tracker (nil degrades to a no-op).
 func DiscoverWithTracker(ctx context.Context, agents agentregistryservice.Service, tracker libtracker.ActivityTracker, roots ...string) (Result, error) {
+	return DiscoverKept(ctx, agents, tracker, nil, roots...)
+}
+
+// DiscoverKept is DiscoverWithTracker restricted to agent names keep allows.
+// A name keep refuses is outside the pass entirely: neither registered nor
+// reconciled — its existing row, if any, is left exactly as it stands. A nil
+// keep keeps every candidate.
+func DiscoverKept(ctx context.Context, agents agentregistryservice.Service, tracker libtracker.ActivityTracker, keep func(string) bool, roots ...string) (Result, error) {
 	var result Result
 	if agents == nil {
 		return result, fmt.Errorf("chainagents: agent registry is required")
@@ -66,6 +88,9 @@ func DiscoverWithTracker(ctx context.Context, agents agentregistryservice.Servic
 
 	names := make(map[string]bool, len(found))
 	for _, c := range found {
+		if keep != nil && !keep(c.name) {
+			continue
+		}
 		names[c.name] = true
 		action, err := upsert(ctx, agents, c)
 		if err != nil {
@@ -83,7 +108,7 @@ func DiscoverWithTracker(ctx context.Context, agents agentregistryservice.Servic
 		}
 	}
 
-	disabled, err := disableVanished(ctx, agents, tracker, names)
+	disabled, err := disableVanished(ctx, agents, tracker, names, keep)
 	if err != nil {
 		return result, err
 	}
@@ -161,9 +186,10 @@ func scan(ctx context.Context, tracker libtracker.ActivityTracker, roots []strin
 	return out, nil
 }
 
-// eligible applies the two conventions: shipped agent-shaped chain by id, or the agent-* filename.
+// eligible applies the two conventions: shipped agent-shaped chain by id
+// (incl. the planner), or the chain-agent-* filename.
 func eligible(base, chainID string) bool {
-	if shippedAgentChains[chainID] {
+	if shippedAgentChains[chainID] || chainID == shippedPlannerAgent {
 		return true
 	}
 	return strings.HasPrefix(strings.ToLower(base), AgentChainFilePrefix)
@@ -220,7 +246,9 @@ func upsert(ctx context.Context, agents agentregistryservice.Service, c candidat
 }
 
 // disableVanished disables every discovered agent with no matching chain file.
-func disableVanished(ctx context.Context, agents agentregistryservice.Service, tracker libtracker.ActivityTracker, found map[string]bool) ([]string, error) {
+// An agent keep refuses was never scanned for, so its absence proves nothing;
+// it is skipped, not disabled.
+func disableVanished(ctx context.Context, agents agentregistryservice.Service, tracker libtracker.ActivityTracker, found map[string]bool, keep func(string) bool) ([]string, error) {
 	all, err := agents.List(ctx, nil, runtimetypes.MAXLIMIT)
 	if err != nil {
 		return nil, fmt.Errorf("chainagents: list declared agents: %w", err)
@@ -228,6 +256,9 @@ func disableVanished(ctx context.Context, agents agentregistryservice.Service, t
 	var disabled []string
 	for _, agent := range all {
 		if agent.Source == nil || *agent.Source != runtimetypes.AgentSourceDiscovered {
+			continue
+		}
+		if keep != nil && !keep(agent.Name) {
 			continue
 		}
 		if found[agent.Name] || !agent.Enabled {

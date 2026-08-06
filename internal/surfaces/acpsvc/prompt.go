@@ -6,19 +6,21 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/contenox/libacp"
+	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // Prompt resolves the session and dispatches the turn to its driver. The driver
 // (native chain engine vs. registered downstream ACP agent) owns everything the
-// turn does — there is no native-vs-external branch here.
+// turn does — there is no native-vs-external branch here. It is also where a
+// stop reason leaves acpsvc, so a turn that ended short is explained here (see
+// explainTurnStop) rather than in each driver.
 func (t *Transport) Prompt(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
 	sess, ok := t.sessionFor(req.SessionID)
 	if !ok {
@@ -28,7 +30,11 @@ func (t *Transport) Prompt(ctx context.Context, req libacp.PromptRequest) (libac
 		reportErr(err)
 		return libacp.PromptResponse{}, err
 	}
-	return sess.driver.Prompt(ctx, req, sess)
+	resp, err := sess.driver.Prompt(ctx, req, sess)
+	if err != nil {
+		return resp, err
+	}
+	return t.explainTurnStop(ctx, req.SessionID, sess, resp), nil
 }
 
 // nativeDriver drives a session against the contenox task-chain engine — the

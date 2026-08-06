@@ -162,7 +162,7 @@ contenox run \
 The model uses `search_nodes` on the memory graph and replies:  
 *"You asked me to remember the project 'Contenox' with version '0.2.4'."*
 
-> [!TIP]
+> **Tip:**
 > `contenox run` is intentionally stateless for predictability and scripting safety. `stdio` MCP servers are spawned as child processes and terminated on exit.  
 > For cross-invocation persistence, use servers that manage their own storage (e.g. `@modelcontextprotocol/server-memory` writes to disk) or remote HTTP/SSE servers you control.
 
@@ -200,5 +200,5 @@ All three example chains use the same simple structure:
 - `{{toolservice:list}}` injects the live tool manifest into the system prompt — filtered to only the tools the task allows.  
 - The task engine automatically handles the full tool-call loop — no manual branching required.
 
-> [!TIP]
+> **Tip:**
 > Add `--trace` to watch every MCP tool call, its arguments, and results in real time.

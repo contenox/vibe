@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/contenox/contenox/libtracker"
 	"github.com/contenox/contenox/internal/services/hitlservice"
+	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -192,4 +192,61 @@ func TestUnit_Evaluate_DefaultPolicyOverrideSelectsACPPolicyWhenKVUnset(t *testi
 	r, err = explicit.Evaluate(ctx, "local_shell", "local_shell", nil)
 	require.NoError(t, err)
 	assert.Equal(t, hitlservice.ActionAllow, r.Action, "an explicit hitl-policy-name KV must still override the per-process ACP default")
+}
+
+// TestUnit_PolicyVersion_AbsentIsCurrentAndLoadsUnchanged pins the migration
+// contract's floor: every shipped preset and every operator-authored policy
+// predates the version field, so its absence must load exactly as before.
+func TestUnit_PolicyVersion_AbsentIsCurrentAndLoadsUnchanged(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const rules = `"default_action":"approve","rules":[{"tools":"webtools","tool":"call","action":"allow"}]`
+
+	dir := t.TempDir()
+	writePolicy(t, dir, "absent.json", []byte(`{`+rules+`}`))
+	writePolicy(t, dir, "explicit.json", []byte(`{"version":1,`+rules+`}`))
+	src := hitlservice.NewFSPolicySource(dir)
+
+	for _, name := range []string{"absent.json", "explicit.json"} {
+		svc := hitlservice.New(src, testTenant, fixedKVReader{name}, libtracker.NoopTracker{})
+		r, err := svc.Evaluate(ctx, "webtools", "call", nil)
+		require.NoError(t, err)
+		assert.Equalf(t, hitlservice.ActionAllow, r.Action, "%s must evaluate identically", name)
+		r, err = svc.Evaluate(ctx, "local_fs", "write_file", nil)
+		require.NoError(t, err)
+		assert.Equalf(t, hitlservice.ActionApprove, r.Action, "%s must evaluate identically", name)
+	}
+
+	// The declared version is validated where it is authored, too.
+	require.NoError(t, hitlservice.VetPolicy([]byte(`{`+rules+`}`)))
+	require.NoError(t, hitlservice.VetPolicy([]byte(`{"version":1,`+rules+`}`)))
+}
+
+// TestUnit_PolicyVersion_UnloadableVersionIsRefused pins that a version this
+// binary cannot load fails the policy to load — the fail-closed default gate,
+// not a best-effort decode of fields whose meaning may have changed.
+func TestUnit_PolicyVersion_UnloadableVersionIsRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	src := hitlservice.NewFSPolicySource(dir)
+
+	for name, doc := range map[string]string{
+		"future.json":   `{"version":9999,"default_action":"allow"}`,
+		"negative.json": `{"version":-1,"default_action":"allow"}`,
+	} {
+		writePolicy(t, dir, name, []byte(doc))
+
+		err := hitlservice.VetPolicy([]byte(doc))
+		require.Errorf(t, err, "%s must not vet", name)
+		assert.ErrorIsf(t, err, hitlservice.ErrPolicyVersion, "%s", name)
+
+		// The load path falls back to the built-in fail-closed policy, so an
+		// unreadable version can never leave a run less gated than before.
+		svc := hitlservice.New(src, testTenant, fixedKVReader{name}, libtracker.NoopTracker{})
+		r, err := svc.Evaluate(ctx, "local_shell", "local_shell", nil)
+		require.NoError(t, err)
+		assert.Equalf(t, hitlservice.ActionApprove, r.Action,
+			"%s declares a version this binary cannot load and must fall back to the fail-closed default, never to its own allow", name)
+	}
 }

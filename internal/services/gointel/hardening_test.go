@@ -980,7 +980,18 @@ func TestSystem_GoIntel_ThisRepoExcludesTestFiles(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo is a regression fence, not a benchmark: budgets sit orders of magnitude above measured warm-query cost, so only a cache-missing regression can blow them.
+// TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo is a regression fence, not a
+// benchmark. Every budget is set so that a cache-missing regression — a cold
+// packages.Load per query — is the only thing that can blow it: each sits
+// several times above the measured warm cost and more than an order of
+// magnitude below a cold load of this repo (tens of seconds; see the cold
+// timing this test logs).
+//
+// Per-query costs are not alike. Definition and describe answer from the
+// index and are flat in repo size. References scans every package for call
+// sites, so its cost grows with the tree — it is the one budget that must be
+// re-derived when the repo gains a package set, and it carries proportionally
+// less headroom than the flat queries for that reason.
 func TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo(t *testing.T) {
 	ix := repoIndex(t)
 	repo := NewTools(ix)
@@ -999,7 +1010,13 @@ func TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo(t *testing.T) {
 	}{
 		{"warm definition", ToolDefinition, map[string]any{"symbol": "frame.StyleBrand"}, 50 * time.Millisecond},
 		{"warm describe", ToolDescribe, map[string]any{"symbol": "frame.StyleID"}, 50 * time.Millisecond},
-		{"references across the repo", ToolReferences, map[string]any{"symbol": "frame.StyleBrand", "max": 200}, 500 * time.Millisecond},
+		// 3s: ~4x the warm cost measured after libacp joined the tree as a
+		// first-party package set (~700ms isolated, ~975ms under a loaded
+		// machine), matching the headroom the flat queries carry, and still
+		// well over an order of magnitude below a cold load. Re-derive this
+		// when the repo gains another package set; do not raise it to make a
+		// failing run pass.
+		{"references across the repo", ToolReferences, map[string]any{"symbol": "frame.StyleBrand", "max": 200}, 3 * time.Second},
 		{"diagnostics scope=all", ToolDiagnostics, map[string]any{"scope": "all"}, 2 * time.Second},
 	} {
 		start := time.Now()
@@ -1009,7 +1026,7 @@ func TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo(t *testing.T) {
 		took := time.Since(start)
 		t.Logf("%-28s %v (budget %v)", tc.name, took, tc.budget)
 		if took > tc.budget {
-			t.Errorf("%s took %v, over the %v budget — the most likely cause is a cold load per query", tc.name, took, tc.budget)
+			t.Errorf("%s took %v, over the %v budget — a cold load per query is the usual cause; for the references query, check whether the repo grew instead (see this test's doc)", tc.name, took, tc.budget)
 		}
 	}
 }

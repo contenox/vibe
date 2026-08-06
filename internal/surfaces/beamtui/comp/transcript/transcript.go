@@ -14,7 +14,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
-	libacp "github.com/contenox/libacp"
+	libacp "github.com/contenox/contenox/libacp"
 )
 
 // Transcript is the transcript state machine. The zero value is not usable;
@@ -91,6 +91,17 @@ func (t *Transcript) Apply(ev enginebridge.Event) {
 
 	case enginebridge.ToolCallUpdated:
 		t.tool(e.ToolCallID, sanitize.Line(e.Title), e.Kind, e.Status)
+
+	case enginebridge.PlanUpdated:
+		// The wire replaces the whole list rather than patching it, so each
+		// update is a plan that genuinely changed and settles as its own card.
+		// An empty list is the agent saying it has no plan, which is not a
+		// fact worth a card.
+		if len(e.Entries) == 0 {
+			return
+		}
+		t.startGroup(group{kind: groupPlan, n: t.next()})
+		t.push(planUnit{entries: planEntries(e.Entries)})
 
 	case enginebridge.MissionReport:
 		// Does not close the streaming message: a report can race the live
@@ -495,6 +506,7 @@ const (
 	groupTool
 	groupShell
 	groupMission
+	groupPlan
 	groupUser
 	groupNotice
 )

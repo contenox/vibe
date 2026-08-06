@@ -133,8 +133,153 @@ func (h *LocalFSTools) Supports(ctx context.Context) ([]string, error) {
 	}, nil
 }
 
+// fsSchemaSpecs is every tool local_fs declares, in Supports order, with the
+// OpenAPI component prefix and the response schema for each. The prefixes are
+// fixed even though the toolset NAME is configurable (NewLocalFSToolsWith), so
+// a second instance under another name publishes the same component names.
+func fsSchemaSpecs() []toolSchemaSpec {
+	return []toolSchemaSpec{
+		{tool: "read_file", component: "LocalFsReadFile", response: fsReadFileResponse},
+		{tool: "write_file", component: "LocalFsWriteFile", response: fsWriteFileResponse},
+		{tool: "edit_file", component: "LocalFsEditFile", response: fsEditFileResponse},
+		{tool: "list_dir", component: "LocalFsListDir", response: fsListDirResponse},
+		{tool: "grep", component: "LocalFsGrep", response: fsGrepResponse},
+		{tool: "find_files", component: "LocalFsFindFiles", response: fsFindFilesResponse},
+		{tool: "sed", component: "LocalFsSed", response: fsSedResponse},
+		{tool: "count_stats", component: "LocalFsCountStats", response: fsCountStatsResponse},
+		{tool: "read_file_range", component: "LocalFsReadFileRange", response: fsReadFileRangeResponse},
+		{tool: "stat_file", component: "LocalFsStatFile", response: fsStatFileResponse},
+	}
+}
+
+// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
+// one request/response pair per declared tool. Requests are converted from the
+// descriptors GetToolsForToolsByName produces for THIS ctx, so a document
+// published under _verbose_tool_descriptions carries the same descriptions the
+// model was given. Responses describe what Exec returns, including the
+// refusals and no-match messages it returns as results rather than errors.
 func (h *LocalFSTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
-	return map[string]*openapi3.T{}, nil
+	declared, err := h.GetToolsForToolsByName(ctx, h.name)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := buildToolsetDoc(h.name, "Local Filesystem Tools",
+		"Read, search and modify files inside the workspace directory. Every path is contained to that directory, binaries are refused rather than dumped into the transcript, every result is capped and says what it withheld, and modifying an existing file requires having read its current version first.",
+		declared, fsSchemaSpecs())
+	if err != nil {
+		return nil, err
+	}
+	return map[string]*openapi3.T{h.name: doc}, nil
+}
+
+// --- Response schemas ---------------------------------------------------------
+// One per tool, written from what its handler in fs.go returns. Where a
+// handler answers a refusal or a no-match with a RESULT rather than an error,
+// that shape is declared too: it is part of the contract.
+
+// fsUnchangedSchema is FsUnchangedResult, the stub read_file returns instead of
+// re-sending content this session has already seen.
+func fsUnchangedSchema() *openapi3.SchemaRef {
+	return objectSchema(
+		"The dedup stub: this session already read this exact version, so the content was not re-sent. Pass force=true to get it again. Reaches the model as a short stub line.",
+		map[string]*openapi3.SchemaRef{
+			"path":      strSchema("The file, relative to the project root."),
+			"sha256":    strSchema("SHA-256 of the content the stub stands in for."),
+			"bytes":     intSchema("Size of that content in bytes."),
+			"unchanged": boolSchema("Always true on this shape."),
+		}, "path", "sha256", "bytes", "unchanged")
+}
+
+func fsReadFileResponse() *openapi3.SchemaRef {
+	return oneOfSchema("What read_file returns: the file's text, or the dedup stub.",
+		strSchema("The file's text. When the output cap bit, a line-based HEAD followed by a notice naming the exact line to resume from — never a silent cut."),
+		fsUnchangedSchema())
+}
+
+func fsWriteFileResponse() *openapi3.SchemaRef {
+	return oneOfSchema("What write_file returns: the write receipt, or a refusal.",
+		objectSchema("FsWriteResult: the write happened. Old and new file bodies are NOT returned.",
+			map[string]*openapi3.SchemaRef{
+				"path":       strSchema("The file that was written, relative to the project root — the same form every other result and error message uses."),
+				"written":    boolSchema("Always true on this shape."),
+				"old_bytes":  intSchema("Size of the previous content in bytes; 0 when the file was created."),
+				"new_bytes":  intSchema("Size of the written content in bytes."),
+				"old_sha256": strSchema("SHA-256 of the previous content."),
+				"new_sha256": strSchema("SHA-256 of the written content."),
+			}, "path", "written", "old_bytes", "new_bytes", "old_sha256", "new_sha256"),
+		refusalSchema())
+}
+
+func fsEditFileResponse() *openapi3.SchemaRef {
+	return oneOfSchema("What edit_file returns: the edit receipt, a refusal, or a message saying the file was left alone.",
+		objectSchema("FsEditResult: the replacement was applied.",
+			map[string]*openapi3.SchemaRef{
+				"path":         strSchema("The file that was written, relative to the project root — the same form every other result and error message uses."),
+				"written":      boolSchema("Always true on this shape."),
+				"replacements": intSchema("How many occurrences of old_string were replaced; 1 unless replace_all was set."),
+				"old_bytes":    intSchema("Size of the previous content in bytes."),
+				"new_bytes":    intSchema("Size of the written content in bytes."),
+				"old_sha256":   strSchema("SHA-256 of the previous content."),
+				"new_sha256":   strSchema("SHA-256 of the written content."),
+			}, "path", "written", "replacements", "old_bytes", "new_bytes", "old_sha256", "new_sha256"),
+		refusalSchema(),
+		strSchema("The file was left UNCHANGED and why: old_string was not found, or it occurs more than once and replace_all was not set. Returned as a result so the call can be corrected and retried."))
+}
+
+func fsSedResponse() *openapi3.SchemaRef {
+	return oneOfSchema("What sed returns: the edit receipt, a refusal, or a message saying the file was left alone.",
+		objectSchema("FsSedResult: the replacement was applied.",
+			map[string]*openapi3.SchemaRef{
+				"path":         strSchema("The file that was written, relative to the project root — the same form every other result and error message uses."),
+				"written":      boolSchema("Always true on this shape."),
+				"changed":      boolSchema("Whether the new content differs from the old — false when the replacement equals what it replaced."),
+				"replacements": intSchema("How many occurrences of pattern were replaced within the scoped range."),
+				"old_bytes":    intSchema("Size of the previous content in bytes."),
+				"new_bytes":    intSchema("Size of the written content in bytes."),
+				"old_sha256":   strSchema("SHA-256 of the previous content."),
+				"new_sha256":   strSchema("SHA-256 of the written content."),
+			}, "path", "written", "changed", "replacements", "old_bytes", "new_bytes", "old_sha256", "new_sha256"),
+		refusalSchema(),
+		strSchema("The file was left UNCHANGED and why: the pattern was not found (with the closest actual lines quoted so it can be corrected), start_line is past the end of the file, expect_replacements did not match the count found, or the pattern is ambiguous and neither all nor expect_replacements was given."))
+}
+
+func fsListDirResponse() *openapi3.SchemaRef {
+	return strSchema("The entries, one per line: bare names for a one-level listing, paths relative to the listed directory when recursive. A directory ends with '/', a trailing '*' marks the executable bit, and a file over 1 MiB carries a compact size. Gitignored and high-noise paths are omitted. Empty when nothing matched. When the output cap bit, a trailing notice names the offset to resume from.")
+}
+
+func fsGrepResponse() *openapi3.SchemaRef {
+	return strSchema("The matching lines: \"N: text\" when path is a file, \"relative/path:N: text\" when it is a directory. Empty when nothing matched. When a cap bit, a trailing notice names how many matches are shown, which lines were searched, which cap stopped it and the policy key that raises it, and the line to continue from.")
+}
+
+func fsFindFilesResponse() *openapi3.SchemaRef {
+	return objectSchema("The matched paths.", map[string]*openapi3.SchemaRef{
+		"matches":   arraySchema("Matching files, relative to the searched directory. Empty when nothing matched.", strSchema("One workspace-relative path.")),
+		"count":     intSchema("How many paths are in matches."),
+		"truncated": boolSchema("True when the result cap stopped the walk. Absent means the listing is complete."),
+		"note":      strSchema("Why the listing is not the whole answer — the cap that bit and what to narrow. Absent when nothing was cut."),
+	}, "matches", "count")
+}
+
+func fsCountStatsResponse() *openapi3.SchemaRef {
+	return strSchema("\"Lines: N, Words: N, Bytes: N\" for the file.")
+}
+
+func fsReadFileRangeResponse() *openapi3.SchemaRef {
+	return strSchema("The requested lines, joined by newlines. Empty when start_line is past the end of the file. When the output cap bit, a notice naming the exact line to resume from is appended — never a silent cut.")
+}
+
+func fsStatFileResponse() *openapi3.SchemaRef {
+	return objectSchema("Metadata for the path. At most the first ~512 bytes of content are read, for the binary sniff.",
+		map[string]*openapi3.SchemaRef{
+			"name":       strSchema("The base name."),
+			"size":       intSchema("Size in bytes."),
+			"sizeHuman":  strSchema("The same size rendered for a reader, e.g. \"48 MiB\"."),
+			"modTime":    strSchema("Last modification time, RFC3339."),
+			"isDir":      boolSchema("Whether the path is a directory."),
+			"mode":       strSchema("The Go permission string, e.g. \"-rwxr-xr-x\"."),
+			"executable": boolSchema("Whether any executable bit is set."),
+			"binary":     boolSchema("Best-effort content sniff of the first ~512 bytes. Only sniffed for regular files; always false for a directory or other special file."),
+		}, "name", "size", "sizeHuman", "modTime", "isDir", "mode", "executable", "binary")
 }
 
 func fsTool(name, desc string, props map[string]any, required ...string) taskengine.Tool {

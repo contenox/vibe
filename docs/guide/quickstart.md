@@ -21,34 +21,62 @@ The whole path — install, setup, first prompt — in one take:
 
 ---
 
-## 2. Initialize a workspace
+## 2. Connect a model
 
-Run this once in the project directory you want Contenox to work in:
+`contenox setup` is the entry point. For the local path, install [Ollama](https://ollama.com) and pull a model first:
+
+```bash
+ollama pull qwen3:8b
+contenox setup          # pick Ollama, then pick your model from the list
+```
+
+When Ollama is running, the wizard reads the models you have actually pulled and offers them as a numbered menu — press Enter to take the suggested one.
+
+See the [Ollama guide](/docs/integrations/providers/ollama/) for details, including Ollama Cloud.
+
+Then confirm you can chat:
+
+```bash
+contenox doctor
+```
+
+Its first line is the verdict:
+
+```
+Ready: yes — chat now with `contenox new` or `contenox "your prompt"`.
+```
+
+If it says `Ready: no`, the line under it names the one command that fixes it.
+
+---
+
+## 3. Initialize a workspace
+
+Run this once in each project directory you want Contenox to work in:
 
 ```bash
 contenox init
 ```
 
-This creates the workspace marker and writes the default chain and HITL policy presets.
+This creates the project-local `.contenox/workspace.id` marker; the default chains and HITL policy presets live globally in `~/.contenox` (a workspace-local file with the same name overrides its global counterpart). See [Your first chain](/docs/guide/first-chain/) for the full layout.
 
 ---
 
-## 3. Connect a model
+## 4. Start working
 
-For the local path, install [Ollama](https://ollama.com), pull a model, and point Contenox at it:
+The terminal UI is the main surface — chat, plan, and shell in one persistent session:
 
 ```bash
-ollama pull qwen3:8b
-contenox setup          # pick Ollama, done
-contenox doctor
+contenox new
 ```
 
-See the [Ollama guide](/docs/integrations/providers/ollama/) for details, including Ollama Cloud.
+The transcript flows into your terminal's own scrollback, `/` opens commands, `!` runs a shell line, `@` attaches a file, and gated tool calls are answered inline with one keystroke. Press `?` on an empty composer for the full key list.
 
-Run your first prompt:
+For one-shot and scripted use, pass the prompt directly:
 
 ```bash
 contenox "hello, what can you do?"
+echo "summarise README.md" | contenox
 ```
 
 ![contenox backend list showing local and hosted providers, then a first chat on a local model](/quickstart.gif)
@@ -62,7 +90,7 @@ contenox chat -e
 
 ---
 
-## 4. Optional editor use
+## 5. Optional editor use
 
 Contenox can also run inside editor or desktop clients that speak ACP. The same chains, model config, tools, and HITL policy are used either way:
 
@@ -84,6 +112,8 @@ Contenox needs at least one model to work. Pick the option that fits:
 | [OpenAI](/docs/integrations/providers/openai/) | An OpenAI API key |
 | [Anthropic](/docs/integrations/providers/anthropic/) | An Anthropic API key (Claude) |
 | [AWS Bedrock](/docs/integrations/providers/bedrock/) | An AWS account with Bedrock model access |
+| [Vertex AI](/docs/integrations/providers/vertex/) | Gemini billed through your GCP project |
+| [vLLM / OpenAI-compatible](/docs/integrations/providers/openai/) | Any server speaking the OpenAI API (vLLM, LM Studio, …) |
 
 If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) for a fully local setup, or [Gemini](/docs/integrations/providers/gemini/) for a free hosted key.
 
@@ -91,7 +121,9 @@ If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) fo
 
 ## Next steps
 
-- **The terminal UI** — run `contenox new` for chat, plan, and shell in one persistent session
 - [**Your first chain**](/docs/guide/first-chain/) — author your own agent in five edits
 - [Core concepts](/docs/guide/concepts/) — how chains, tasks, and tools fit together
+- [How contenox compares](/docs/guide/comparison/) — what it shares with the coding agents, and the three things that are built differently
 - [MCP integration](/docs/integrations/tools/mcp/) — connect external tools
+- [Workspace index & search](/docs/guide/search/) — ask the repo a question, get file:line citations back
+- [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/) — hosting, state, and oversight controls you own

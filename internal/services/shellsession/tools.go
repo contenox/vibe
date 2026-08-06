@@ -9,7 +9,6 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/getkin/kin-openapi/openapi3"
 )
 
 // Tool names. The provider ("shell_session") is one ToolsRepo exposing two
@@ -123,65 +122,6 @@ func (h *tools) execRead(sessionID string, input any, call *taskengine.ToolsCall
 
 func (h *tools) Supports(context.Context) ([]string, error) {
 	return []string{ToolsProviderName, ToolRun, ToolRead}, nil
-}
-
-func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
-	return map[string]*openapi3.T{}, nil
-}
-
-func (h *tools) GetToolsForToolsByName(_ context.Context, name string) ([]taskengine.Tool, error) {
-	runTool := taskengine.Tool{
-		Type: "function",
-		Function: taskengine.FunctionTool{
-			Name: ToolRun,
-			Description: "Submit ONE command line to this chat's persistent shell (a real terminal rooted at the session workspace). " +
-				"The shell keeps its working directory, environment, and history between calls, and long-running processes stay alive — a second run while one is still going types into the same running shell (that is normal shell stdin behavior, not an error). " +
-				"Returns quickly with {offset, output} where output is a short initial snapshot, NOT the full result: it does not block until the command finishes. " +
-				"To follow a command's ongoing output, call " + ToolRead + " with 'since' set to the returned offset. Requires approval under the active HITL policy, one approval per line.",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"command": map[string]interface{}{
-						"type":        "string",
-						"description": "The single command line to run in the shell, e.g. \"go test ./... 2>&1 | tail -n 40\".",
-					},
-				},
-				"required": []string{"command"},
-			},
-		},
-	}
-	readTool := taskengine.Tool{
-		Type: "function",
-		Function: taskengine.FunctionTool{
-			Name: ToolRead,
-			Description: "Read scrollback from this chat's persistent shell. Terminal output is never streamed into your context automatically — read it here when you need it. " +
-				"Pass 'since' (an offset from a previous " + ToolRun + "/" + ToolRead + " result) to get only new output since that marker, or 'tail_bytes' to get the last N bytes. With neither, returns the full retained scrollback. " +
-				"Returns {content, from_offset, next_offset}; use next_offset as the next 'since'. This read is not gated by HITL.",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"since": map[string]interface{}{
-						"type":        "integer",
-						"description": "Return output at/after this scrollback offset (from a prior result's offset/next_offset).",
-					},
-					"tail_bytes": map[string]interface{}{
-						"type":        "integer",
-						"description": "When 'since' is omitted, return only the last N bytes of scrollback.",
-					},
-				},
-			},
-		},
-	}
-	switch name {
-	case ToolRun:
-		return []taskengine.Tool{runTool}, nil
-	case ToolRead:
-		return []taskengine.Tool{readTool}, nil
-	case ToolsProviderName, "":
-		return []taskengine.Tool{runTool, readTool}, nil
-	default:
-		return nil, fmt.Errorf("shell_session: unknown tool %q", name)
-	}
 }
 
 func sessionIDFromCtx(ctx context.Context) string {

@@ -63,10 +63,29 @@ func (h *Print) Supports(ctx context.Context) ([]string, error) {
 	return []string{"print"}, nil
 }
 
-// GetSchemasForSupportedTools returns OpenAPI schemas for supported tools.
+// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract.
+// The request schema is converted from the descriptor GetToolsForToolsByName
+// hands the model, so the two cannot drift.
 func (h *Print) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
-	// Print tools doesn't have a schema
-	return map[string]*openapi3.T{}, nil
+	declared, err := h.GetToolsForToolsByName(ctx, "print")
+	if err != nil {
+		return nil, err
+	}
+	doc, err := buildToolsetDoc("print", "Print Tools",
+		"Emits a message the caller supplies. A test and wiring fixture — it reads nothing, writes nothing, and spawns nothing.",
+		declared, []toolSchemaSpec{{tool: "print", component: "Print", response: printResponseSchema}})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]*openapi3.T{"print": doc}, nil
+}
+
+// printResponseSchema is what Exec returns. An empty or missing message is an
+// error, not one of these shapes.
+func printResponseSchema() *openapi3.SchemaRef {
+	return oneOfSchema("What print returns, following the shape of its input.",
+		strSchema("The message, as given — a non-string argument is rendered with %v."),
+		chatHistorySchema("The conversation with the message appended as a system message."))
 }
 
 // GetToolsForToolsByName returns tools exposed by this tools.

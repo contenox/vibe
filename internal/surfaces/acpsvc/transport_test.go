@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	libdb "github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/services/messagestore"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +27,7 @@ func TestUnit_ResolveSessionWorkspace_FindsSessionRegardlessOfPlacementWorkspace
 	const sessionID = "sess-1778834208786461947"
 	const storedWorkspace = "acp-client-0b9a4d57f597718a"
 
-	store := messagestore.New(db.WithoutTransaction(), storedWorkspace)
+	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), storedWorkspace)
 	require.NoError(t, store.CreateNamedMessageIndex(ctx, "idx-1", "acp-client", sessionID))
 
 	tr := &Transport{deps: Deps{DB: db, WorkspaceID: "some-other-current-workspace"}}

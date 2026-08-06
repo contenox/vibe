@@ -141,6 +141,11 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_idx_id ON messages (idx_id);
 CREATE INDEX IF NOT EXISTS idx_messages_added_at ON messages (added_at);
+-- Serves ListMessagesPage's keyset walk: the (idx_id, added_at, id) prefix
+-- seeks the cursor and satisfies ORDER BY added_at, id from the index, so a
+-- page costs its own size rather than a sort of the whole stream. Measured on
+-- a multi-stream shape: 50 pages 221ms -> 66ms, inserts +1.5%.
+CREATE INDEX IF NOT EXISTS idx_messages_idx_added_id ON messages (idx_id, added_at, id);
 CREATE INDEX IF NOT EXISTS idx_message_indices_identity ON message_indices (identity);
 
 CREATE INDEX IF NOT EXISTS idx_functions_created_at ON functions(created_at);
@@ -427,6 +432,85 @@ ALTER TABLE hitl_approvals ADD COLUMN instance_id VARCHAR(255) NOT NULL DEFAULT 
 ALTER TABLE hitl_approvals ADD COLUMN session_id  VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE hitl_approvals ADD COLUMN agent_name  VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE hitl_approvals ADD COLUMN mission_id  VARCHAR(255);
+
+-- Durable event-dispatch tier. The tables are owned by events.go and
+-- event_firings.go in this package; the service tier over them is
+-- internal/services/eventlog + eventtrigger. A beta surface — the tables are
+-- always present, like functions/event_triggers, but nothing writes or reads
+-- them without opt-in-beta.
+--
+-- The event log itself is DATE-PARTITIONED: one table per UTC day
+-- (event_log_YYYYMMDD), created at runtime by
+-- EventStore.EnsureEventPartitionExists (events.go), so retention is an O(1)
+-- whole-table DROP (PruneEventPartitionsBefore) rather than DELETE+VACUUM on
+-- the operator's hot database — bob2's partition property, SQLite-native.
+-- Each partition also gets (workspace_id, nid) and (workspace_id, type)
+-- indexes at creation: the cursor-tail and query-surface access paths, bob2's
+-- per-tenant index pair. The static schema holds only the registry, the
+-- global NID sequence, and the dispatcher's cursor/firings tables.
+--
+-- WORKSPACE scoping (bob2's tenancy, mapped to the runtime's workspaces):
+-- every event row carries workspace_id (a column + (workspace_id, nid) index
+-- per partition — partitioning stays date-based, workspace is a filter), and
+-- reads/cursors/firings are workspace-scoped. Bus subjects stay unscoped:
+-- the bus is a nudge, the log carries the workspace dimension.
+--
+-- event_partitions: one row per live per-day event table.
+CREATE TABLE IF NOT EXISTS event_partitions (
+    period     TEXT PRIMARY KEY,
+    table_name TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL
+);
+
+-- event_nid_seq: the single-row global NID counter. Bumped in the same
+-- transaction as each partition-table insert, so NIDs stay monotonic across
+-- partitions — the ordering ListEventsSince and the dispatch cursor rely on.
+CREATE TABLE IF NOT EXISTS event_nid_seq (
+    id       INTEGER PRIMARY KEY CHECK (id = 1),
+    last_nid INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO event_nid_seq (id, last_nid) VALUES (1, 0);
+
+-- event_cursors: one row per (consumer, workspace) — the last event nid that
+-- dispatcher has fully processed for that workspace. Per-workspace so two
+-- workspaces' dispatchers never share or fight over a cursor; catch-up after
+-- downtime is ListEventsSince(workspace, last_nid).
+CREATE TABLE IF NOT EXISTS event_cursors (
+    consumer     TEXT NOT NULL,
+    workspace_id TEXT NOT NULL DEFAULT '',
+    last_nid     INTEGER NOT NULL DEFAULT 0,
+    updated_at   TIMESTAMP NOT NULL,
+    PRIMARY KEY (consumer, workspace_id)
+);
+
+-- event_firings: one row per (workspace, trigger, event) execution attempt.
+-- The PK is the at-least-once dedup: an event reaching the dispatcher via
+-- both the live bus and the catch-up scan claims the row once
+-- (INSERT OR IGNORE), so a chain fires at most once per trigger per event.
+-- status/error record the outcome ('running'/'ok'/'error'/'refused');
+-- request_id links to `contenox state`.
+CREATE TABLE IF NOT EXISTS event_firings (
+    workspace_id TEXT NOT NULL DEFAULT '',
+    trigger_name TEXT NOT NULL,
+    nid          INTEGER NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'running',
+    error        TEXT,
+    request_id   TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMP NOT NULL,
+    updated_at   TIMESTAMP NOT NULL,
+    PRIMARY KEY (workspace_id, trigger_name, nid)
+);
+
+-- The PK's leading (workspace_id, trigger_name) serves the claim and the
+-- outcome UPDATE, but not ListEventFirings' newest-first read: ORDER BY nid
+-- DESC across trigger names made SQLite materialize a temp b-tree over the
+-- whole workspace before applying LIMIT. This index is that read's access
+-- path, in its exact order, with status trailing so a --status filter is
+-- answered from the index instead of a row fetch per candidate. Measured on
+-- 20k firings: default listing 40ms -> 0.7ms, --status error 45ms -> 1.2ms,
+-- with no measurable cost on the claim/finish writes (both fsync-bound).
+CREATE INDEX IF NOT EXISTS idx_event_firings_ws_nid
+    ON event_firings (workspace_id, nid DESC, trigger_name, status);
 
 PRAGMA foreign_keys=off;
 BEGIN TRANSACTION;

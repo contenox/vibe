@@ -663,6 +663,19 @@ func (h *LocalFSTools) readFileRange(ctx context.Context, args map[string]any) (
 // write_file / sed
 // ---------------------------------------------------------------------------
 
+// The mutating results carry the file TWICE, because two audiences address it
+// differently and neither can use the other's form:
+//
+//   - Path is the workspace-relative display form, the one every other local_fs
+//     result and every error message uses and the only one the model can paste
+//     back into the next call. It is what gets serialized.
+//   - AbsPath is the host-absolute form, needed by ToolDiff alone: the ACP
+//     tool-call locations and diffs it feeds are absolute by protocol. It is
+//     never serialized, so it cannot leak into a transcript.
+//
+// ToolDiff falls back to Path when AbsPath is unset, so a result built outside
+// this package still produces a diff.
+
 type FsWriteResult struct {
 	Path      string `json:"path"`
 	Written   bool   `json:"written"`
@@ -670,15 +683,13 @@ type FsWriteResult struct {
 	NewBytes  int    `json:"new_bytes"`
 	OldSHA256 string `json:"old_sha256"`
 	NewSHA256 string `json:"new_sha256"`
+	AbsPath   string `json:"-"`
 	OldText   string `json:"-"`
 	NewText   string `json:"-"`
 }
 
 func (r FsWriteResult) ToolDiff() (string, string, string, bool) {
-	if r.Path == "" || !r.Written || r.OldText == r.NewText {
-		return "", "", "", false
-	}
-	return r.Path, r.OldText, r.NewText, true
+	return toolDiff(r.AbsPath, r.Path, r.Written, r.OldText, r.NewText)
 }
 
 type FsSedResult struct {
@@ -690,15 +701,26 @@ type FsSedResult struct {
 	NewBytes     int    `json:"new_bytes"`
 	OldSHA256    string `json:"old_sha256"`
 	NewSHA256    string `json:"new_sha256"`
+	AbsPath      string `json:"-"`
 	OldText      string `json:"-"`
 	NewText      string `json:"-"`
 }
 
 func (r FsSedResult) ToolDiff() (string, string, string, bool) {
-	if r.Path == "" || !r.Written || r.OldText == r.NewText {
+	return toolDiff(r.AbsPath, r.Path, r.Written, r.OldText, r.NewText)
+}
+
+// toolDiff is the shared ToolDiff body: the absolute path when the result was
+// built here, the display path otherwise, and no diff at all unless the write
+// happened and changed something.
+func toolDiff(absPath, path string, written bool, oldText, newText string) (string, string, string, bool) {
+	if absPath == "" {
+		absPath = path
+	}
+	if absPath == "" || !written || oldText == newText {
 		return "", "", "", false
 	}
-	return r.Path, r.OldText, r.NewText, true
+	return absPath, oldText, newText, true
 }
 
 func (h *LocalFSTools) writeFile(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
@@ -756,7 +778,8 @@ func (h *LocalFSTools) writeFile(ctx context.Context, args map[string]any) (any,
 	h.notifyFileMutated(absPath)
 
 	return FsWriteResult{
-		Path:      absPath,
+		Path:      display,
+		AbsPath:   absPath,
 		Written:   true,
 		OldBytes:  len(oldBytes),
 		NewBytes:  len(content),
@@ -777,15 +800,13 @@ type FsEditResult struct {
 	NewBytes     int    `json:"new_bytes"`
 	OldSHA256    string `json:"old_sha256"`
 	NewSHA256    string `json:"new_sha256"`
+	AbsPath      string `json:"-"`
 	OldText      string `json:"-"`
 	NewText      string `json:"-"`
 }
 
 func (r FsEditResult) ToolDiff() (string, string, string, bool) {
-	if r.Path == "" || !r.Written || r.OldText == r.NewText {
-		return "", "", "", false
-	}
-	return r.Path, r.OldText, r.NewText, true
+	return toolDiff(r.AbsPath, r.Path, r.Written, r.OldText, r.NewText)
 }
 
 // editFile implements edit_file: an exact byte-string replacement, unlike
@@ -868,7 +889,8 @@ func (h *LocalFSTools) editFile(ctx context.Context, args map[string]any) (any, 
 
 	newBytes := []byte(newText)
 	return FsEditResult{
-		Path:         absPath,
+		Path:         display,
+		AbsPath:      absPath,
 		Written:      true,
 		Replacements: count,
 		OldBytes:     len(gate.content),
@@ -1021,7 +1043,8 @@ func (h *LocalFSTools) sed(ctx context.Context, args map[string]any) (any, taske
 
 	newBytes := []byte(newContent)
 	return FsSedResult{
-		Path:         absPath,
+		Path:         display,
+		AbsPath:      absPath,
 		Written:      true,
 		Changed:      newContent != oldText,
 		Replacements: count,

@@ -105,21 +105,17 @@ func normalizeShellKind(s string) ShellKind {
 	}
 }
 
-// shellKindArgKey is an optional, untrusted hint in the call args. It may
-// only narrow: naming a non-POSIX kind disables analysis, naming "sh" grants
-// nothing new.
-const shellKindArgKey = "shell_kind"
-
-// structuralShellEnabled is the A1 guard, shaped so no model-controlled
-// input can ever turn it on:
+// structuralShellEnabled is the A1 guard. The shell kind is declared by the
+// caller that spawns the shell (HITLWrapper, at construction) and travels on
+// the context; call args never reach it, so no model-controlled input decides
+// whether the analyzer runs:
 //
-//	trusted kind (ctx)  | args hint      | host GOOS | analyze?
-//	sh/bash/dash        | ignored        | any       | yes — positively established
-//	powershell/cmd/other| ignored        | any       | no  — mvdan reads a different program
-//	unset               | non-POSIX kind | any       | no  — a hint may only narrow
-//	unset               | unset or sh    | !windows  | yes — local_shell can only be sh here
-//	unset               | unset or sh    | windows   | no  — fail closed
-func structuralShellEnabled(trusted ShellKind, args map[string]any, goos string) bool {
+//	trusted kind (ctx)  | host GOOS | analyze?
+//	sh/bash/dash        | any       | yes — positively established
+//	powershell/cmd/other| any       | no  — mvdan reads a different program
+//	unset               | !windows  | yes — local_shell can only be sh here
+//	unset               | windows   | no  — fail closed
+func structuralShellEnabled(trusted ShellKind, goos string) bool {
 	switch normalizeShellKind(string(trusted)) {
 	case ShellKindPOSIX:
 		return true
@@ -128,18 +124,8 @@ func structuralShellEnabled(trusted ShellKind, args map[string]any, goos string)
 	default:
 		return false
 	}
-	if hint := normalizeShellKind(shellKindHintFromArgs(args)); hint != "" && hint != ShellKindPOSIX {
-		return false
-	}
 	// On non-Windows, local_shell's shell detection can only produce sh.
 	return goos != "windows"
-}
-
-func shellKindHintFromArgs(args map[string]any) string {
-	if v, ok := args[shellKindArgKey].(string); ok {
-		return v
-	}
-	return ""
 }
 
 // clearedAssignmentNames starts empty on purpose: a command carrying env
@@ -221,7 +207,7 @@ func analyzeShellArgs(trusted ShellKind, args map[string]any) shellReading {
 	if len(args) == 0 {
 		return r
 	}
-	if !structuralShellEnabled(trusted, args, runtime.GOOS) {
+	if !structuralShellEnabled(trusted, runtime.GOOS) {
 		return r
 	}
 	src, ok := shellLineFromArgs(args)
@@ -234,7 +220,7 @@ func analyzeShellArgs(trusted ShellKind, args map[string]any) shellReading {
 		return r
 	}
 	r.parsed = true
-	collectShellNodes(f, &r)
+	collectShellNodes(f, &r, 0)
 	// A bash-only-accepted line is read for tightening only; the executor is
 	// `sh -c`, so a reading sh itself would reject must not be an allow's basis.
 	r.upgradable = !bashOnly && fileClearedForUpgrade(f)
@@ -295,17 +281,29 @@ func parseShellLine(src string) (f *syntax.File, bashOnly bool, ok bool) {
 }
 
 // collectShellNodes walks the whole tree by statement, not call expression,
-// since a redirect hangs off the Stmt — walking only calls would miss it.
-func collectShellNodes(f *syntax.File, r *shellReading) {
+// since a redirect hangs off the Stmt — walking only calls would miss it. It
+// also runs the normalization pass (see the reveal rule below), which is why
+// it carries a depth: a revealed payload is collected by re-entering here.
+func collectShellNodes(f *syntax.File, r *shellReading, depth int) {
+	assigns := literalAssignments(f)
 	syntax.Walk(f, func(node syntax.Node) bool {
 		switch n := node.(type) {
 		case *syntax.Stmt:
 			for _, rd := range n.Redirs {
 				r.redirects = append(r.redirects, redirectView(rd))
 			}
-			if call, ok := n.Cmd.(*syntax.CallExpr); ok {
-				if cmd, ok := commandView(call); ok {
-					r.commands = append(r.commands, cmd)
+			switch cmd := n.Cmd.(type) {
+			case *syntax.CallExpr:
+				if view, ok := commandView(cmd); ok {
+					r.commands = append(r.commands, view)
+				}
+				peelWrapper(lenientWords(cmd), r, depth)
+				if words, ok := resolveAssignedWords(cmd, assigns); ok {
+					revealWords(words, r, depth)
+				}
+			case *syntax.BinaryCmd:
+				if cmd.Op == syntax.Pipe {
+					revealPipedPayload(cmd, r, depth)
 				}
 			}
 		case *syntax.CmdSubst:
@@ -317,6 +315,445 @@ func collectShellNodes(f *syntax.File, r *shellReading) {
 		}
 		return true
 	})
+}
+
+// THE REVEAL RULE (normalization to a fixed point). A tokenized reading sees
+// the words a line was written with; a shell runs the program those words
+// name after it has peeled wrappers, decoded escapes, and reconstructed
+// argument lists. Everything below closes that gap in exactly ONE direction:
+// a normalization may only ever ADD a shellCommandView, never remove or
+// rewrite one. That is what keeps it inside the monotonicity contract at the
+// top of this file, because every consumer of r.commands is monotone in the
+// set:
+//
+//   - structuralCommandInList  — more commands, more deny/ask catches
+//   - structuralPrefixAllowed  — EVERY command must be listed, so more
+//     commands can only refuse an upgrade, never grant one
+//   - structuralContradictsPrefix — more commands, more revoked allows
+//   - structuralProgramWords   — more names to vouch for, never fewer
+//
+// A reveal may therefore be wrong (a guessed reading of an ambiguous line)
+// without being unsafe: the worst outcome is an ask that could have been an
+// allow. Where a reading is ambiguous, EVERY candidate is revealed rather
+// than one being chosen.
+//
+// The reveal never reaches the upgrade path in practice either: every trigger
+// word below (sh/bash/dash/ash/ksh/zsh/fish, xargs, eval, source) is in
+// unclearedCommandNames, so a line carrying one is never upgradable — pinned
+// by TestUnit_ShellAnalyzer_RevealNeverClearsAnUpgrade.
+const (
+	// maxRevealDepth bounds wrapper peeling; `sh -c "xargs sh -c ..."` nests,
+	// and one evaluation must not become unbounded parsing.
+	maxRevealDepth = 4
+	// maxRevealedCommands bounds how far the enumeration may grow. Reveals
+	// only: a plain line's collection is unchanged.
+	maxRevealedCommands = 256
+)
+
+// nestedShellNames take their program from a -c payload the outer parse can
+// only see as one opaque word.
+var nestedShellNames = map[string]bool{
+	"sh": true, "bash": true, "dash": true, "ash": true,
+	"ksh": true, "zsh": true, "fish": true,
+}
+
+// lenientWords resolves a call's words the way wordName does — the
+// deny-direction resolution — with "" standing for a word only run time knows.
+func lenientWords(call *syntax.CallExpr) []string {
+	out := make([]string, 0, len(call.Args))
+	for _, w := range call.Args {
+		v, ok := wordName(w)
+		if !ok {
+			v = ""
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// revealWords records one reconstructed command and keeps peeling it, so
+// `xargs sh -c 'rm -rf /'` names xargs, sh, AND rm.
+func revealWords(words []string, r *shellReading, depth int) {
+	if depth > maxRevealDepth || len(r.commands) >= maxRevealedCommands {
+		return
+	}
+	if len(words) == 0 || words[0] == "" {
+		return
+	}
+	r.commands = append(r.commands, viewFromWords(words))
+	peelWrapper(words, r, depth)
+}
+
+// peelWrapper reveals what a wrapper actually runs. Each arm is additive: the
+// wrapper's own command view was already recorded by the caller.
+func peelWrapper(words []string, r *shellReading, depth int) {
+	if depth >= maxRevealDepth || len(words) == 0 || words[0] == "" {
+		return
+	}
+	base := path.Base(words[0])
+	switch {
+	case nestedShellNames[base]:
+		if payload, ok := dashCPayload(words); ok {
+			revealSource(payload, r, depth+1)
+		}
+	case base == "xargs":
+		if rest, ok := xargsCommandWords(words); ok {
+			revealWords(rest, r, depth+1)
+		}
+	case base == "eval":
+		if src, ok := joinKnown(words[1:]); ok {
+			revealSource(src, r, depth+1)
+		}
+	}
+}
+
+// revealSource parses a payload and collects it into the same reading. A
+// payload that only the bash parser accepts is still collected: bashOnly is
+// dropped here because r.upgradable is computed from the TOP-LEVEL file alone
+// (see analyzeShellArgs), so a wider reading here can only tighten.
+func revealSource(src string, r *shellReading, depth int) {
+	if depth > maxRevealDepth || len(r.commands) >= maxRevealedCommands {
+		return
+	}
+	src = strings.TrimSpace(src)
+	if src == "" || len(src) > maxShellLineBytes {
+		return
+	}
+	f, _, ok := parseShellLine(src)
+	if !ok {
+		return
+	}
+	collectShellNodes(f, r, depth)
+}
+
+// viewFromWords renders a reconstructed command. literal is claimed only when
+// every word was statically knowable; otherwise tokens() falls back to the
+// name plus unknowable sentinels, which no prefix entry can equal.
+func viewFromWords(words []string) shellCommandView {
+	out := shellCommandView{
+		name:     words[0],
+		base:     path.Base(words[0]),
+		argCount: len(words),
+		display:  displayWords(words),
+	}
+	for _, w := range words {
+		if w == "" {
+			return out
+		}
+	}
+	out.words = append([]string(nil), words...)
+	out.literal = true
+	return out
+}
+
+// dashCPayload returns a nested shell's -c program text. It stops at the
+// first non-option word (a script filename, not a payload) and at any word it
+// could not read, rather than guessing which slot held the -c.
+func dashCPayload(words []string) (string, bool) {
+	for i := 1; i < len(words); i++ {
+		w := words[i]
+		if w == "" || w == "-" || w == "--" || !strings.HasPrefix(w, "-") {
+			return "", false
+		}
+		if strings.ContainsRune(w[1:], 'c') {
+			if i+1 < len(words) && words[i+1] != "" {
+				return words[i+1], true
+			}
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// xargsValueOptions take their value as a SEPARATE word, so the word after
+// them is not the command xargs reconstructs. An attached form (-n1, -I{})
+// carries its own value and needs no entry.
+var xargsValueOptions = map[string]bool{
+	"-a": true, "-d": true, "-E": true, "-I": true, "-L": true,
+	"-n": true, "-P": true, "-s": true,
+	"--arg-file": true, "--delimiter": true, "--eof": true, "--replace": true,
+	"--max-lines": true, "--max-args": true, "--max-procs": true,
+	"--max-chars": true, "--process-slot-var": true,
+}
+
+// xargsCommandWords returns the command line xargs reconstructs from its own
+// arguments — the program that actually runs, which the outer reading names
+// only as "xargs".
+func xargsCommandWords(words []string) ([]string, bool) {
+	for i := 1; i < len(words); i++ {
+		w := words[i]
+		if w == "" {
+			return nil, false
+		}
+		if !strings.HasPrefix(w, "-") || w == "-" {
+			return words[i:], true
+		}
+		if w == "--" {
+			if i+1 < len(words) {
+				return words[i+1:], true
+			}
+			return nil, false
+		}
+		if xargsValueOptions[w] {
+			i++
+		}
+	}
+	return nil, false
+}
+
+// revealPipedPayload peels a literal payload piped into an evaluator:
+// `printf '\162\155 -rf /' | sh` runs rm, a name no reading of the written
+// words contains.
+func revealPipedPayload(pipe *syntax.BinaryCmd, r *shellReading, depth int) {
+	if depth >= maxRevealDepth {
+		return
+	}
+	producer, ok := stmtCallWords(pipe.X)
+	if !ok || !consumerEvaluatesStdin(pipe.Y) {
+		return
+	}
+	for _, src := range printedPayloads(producer) {
+		revealSource(src, r, depth+1)
+	}
+}
+
+func stmtCallWords(st *syntax.Stmt) ([]string, bool) {
+	if st == nil {
+		return nil, false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Args) == 0 {
+		return nil, false
+	}
+	return lenientWords(call), true
+}
+
+// consumerEvaluatesStdin reports whether the right side of a pipe runs its
+// standard input as a program.
+func consumerEvaluatesStdin(st *syntax.Stmt) bool {
+	words, ok := stmtCallWords(st)
+	if !ok || words[0] == "" {
+		return false
+	}
+	base := path.Base(words[0])
+	return nestedShellNames[base] || base == "eval" || base == "source" || base == "."
+}
+
+// printedPayloads is what a literal echo/printf writes to stdout, as the
+// candidate program texts a piped evaluator would then run. BOTH the raw join
+// and its escape-decoded form are returned: which one a given shell's echo
+// produces is exactly what this must not have to guess, and revealing both
+// only ever adds commands.
+func printedPayloads(words []string) []string {
+	base := path.Base(words[0])
+	if base != "echo" && base != "printf" {
+		return nil
+	}
+	rest := words[1:]
+	if base == "echo" {
+		for len(rest) > 0 && isEchoFlag(rest[0]) {
+			rest = rest[1:]
+		}
+	}
+	if len(rest) == 0 {
+		return nil
+	}
+	raw, ok := joinKnown(rest)
+	if !ok {
+		return nil
+	}
+	out := []string{raw}
+	if decoded := decodeShellEscapes(raw); decoded != raw {
+		out = append(out, decoded)
+	}
+	return out
+}
+
+func isEchoFlag(w string) bool {
+	switch w {
+	case "-n", "-e", "-E", "-ne", "-en", "-nE", "-En":
+		return true
+	}
+	return false
+}
+
+// joinKnown joins words back into one line, refusing when any of them exists
+// only at run time — a hole in the middle would make the join a different
+// program than the one that runs.
+func joinKnown(words []string) (string, bool) {
+	if len(words) == 0 {
+		return "", false
+	}
+	for _, w := range words {
+		if w == "" {
+			return "", false
+		}
+	}
+	return strings.Join(words, " "), true
+}
+
+// decodeShellEscapes applies printf/echo -e backslash decoding, which is how
+// a command name is spelled when it is meant not to be read as one
+// (`printf '\162\155'` is "rm"). Unknown escapes keep their backslash.
+func decodeShellEscapes(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var sb strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			sb.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch c := s[i]; c {
+		case '\\':
+			sb.WriteByte('\\')
+		case 'a':
+			sb.WriteByte(0x07)
+		case 'b':
+			sb.WriteByte(0x08)
+		case 'e':
+			sb.WriteByte(0x1b)
+		case 'f':
+			sb.WriteByte(0x0c)
+		case 'n':
+			sb.WriteByte('\n')
+		case 'r':
+			sb.WriteByte('\r')
+		case 't':
+			sb.WriteByte('\t')
+		case 'v':
+			sb.WriteByte(0x0b)
+		case 'x':
+			if n, width, ok := parseEscapedNumber(s[i+1:], 16, 2); ok {
+				sb.WriteByte(n)
+				i += width
+				continue
+			}
+			sb.WriteString(`\x`)
+		case '0', '1', '2', '3', '4', '5', '6', '7':
+			start := i
+			if c == '0' {
+				start = i + 1 // printf's \0NNN form
+			}
+			if n, width, ok := parseEscapedNumber(s[start:], 8, 3); ok {
+				sb.WriteByte(n)
+				i = start + width - 1
+				continue
+			}
+			sb.WriteByte(c)
+		default:
+			sb.WriteByte('\\')
+			sb.WriteByte(c)
+		}
+	}
+	return sb.String()
+}
+
+// parseEscapedNumber reads up to maxDigits digits of the given base,
+// returning the byte they encode and how many bytes were consumed. It stops
+// before overflowing a byte rather than rejecting the escape, matching what a
+// shell does with a too-large sequence: the extra digit is output text.
+func parseEscapedNumber(s string, base, maxDigits int) (value byte, width int, ok bool) {
+	n := 0
+	for width < len(s) && width < maxDigits {
+		d := digitValue(s[width])
+		if d < 0 || d >= base {
+			break
+		}
+		next := n*base + d
+		if next > 0xff {
+			break
+		}
+		n = next
+		width++
+	}
+	if width == 0 {
+		return 0, 0, false
+	}
+	return byte(n), width, true
+}
+
+func digitValue(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'F':
+		return int(c-'A') + 10
+	default:
+		return -1
+	}
+}
+
+// literalAssignments collects NAME=value pairs whose value is statically
+// knowable, from anywhere in the tree. Flow-INSENSITIVE exactly as the A2
+// clearance rule is: reading the wrong branch's assignment can only reveal a
+// command that is not run, which asks where it could have allowed — never the
+// other way round.
+func literalAssignments(f *syntax.File) map[string]string {
+	out := map[string]string{}
+	syntax.Walk(f, func(node syntax.Node) bool {
+		as, ok := node.(*syntax.Assign)
+		if !ok || as.Append || as.Naked || as.Name == nil || as.Index != nil || as.Value == nil {
+			return true
+		}
+		if v, ok := wordName(as.Value); ok && v != "" {
+			out[as.Name.Value] = v
+		}
+		return true
+	})
+	return out
+}
+
+// resolveAssignedWords substitutes collected assignments into a command's
+// words, so `CMD=rm; $CMD -rf /` names rm. ok is false when nothing resolved,
+// so a command with no variable in it is never recorded twice.
+func resolveAssignedWords(call *syntax.CallExpr, assigns map[string]string) ([]string, bool) {
+	if len(assigns) == 0 || len(call.Args) == 0 {
+		return nil, false
+	}
+	out := make([]string, 0, len(call.Args))
+	resolved := false
+	for _, w := range call.Args {
+		if v, ok := wordName(w); ok {
+			out = append(out, v)
+			continue
+		}
+		if name, ok := soleParamName(w); ok {
+			if v, ok := assigns[name]; ok {
+				out = append(out, v)
+				resolved = true
+				continue
+			}
+		}
+		out = append(out, "")
+	}
+	if !resolved || out[0] == "" {
+		return nil, false
+	}
+	return out, true
+}
+
+// soleParamName reports the variable a word consists of entirely — $X or
+// ${X}. Any modifier (length, slice, replacement, default) makes the value
+// something other than the assignment, so it resolves to nothing.
+func soleParamName(w *syntax.Word) (string, bool) {
+	if w == nil || len(w.Parts) != 1 {
+		return "", false
+	}
+	pe, ok := w.Parts[0].(*syntax.ParamExp)
+	if !ok || pe.Param == nil {
+		return "", false
+	}
+	if pe.Excl || pe.Length || pe.Width || pe.IsSet ||
+		pe.Index != nil || pe.Slice != nil || pe.Repl != nil || pe.Exp != nil ||
+		len(pe.Modifiers) > 0 {
+		return "", false
+	}
+	return pe.Param.Value, true
 }
 
 func redirectView(rd *syntax.Redirect) shellRedirect {
@@ -381,6 +818,23 @@ func displayOf(call *syntax.CallExpr) string {
 		}
 		parts = append(parts, "…")
 	}
+	return flattenDisplay(parts)
+}
+
+// displayWords is displayOf for a reconstructed command (see viewFromWords),
+// where "" is the already-resolved form of an unknowable word.
+func displayWords(words []string) string {
+	parts := make([]string, 0, len(words))
+	for _, w := range words {
+		if w == "" {
+			w = "…"
+		}
+		parts = append(parts, w)
+	}
+	return flattenDisplay(parts)
+}
+
+func flattenDisplay(parts []string) string {
 	// Control characters are flattened: a decision message must not be able
 	// to forge a log line or a terminal escape.
 	s := strings.Map(func(r rune) rune {
@@ -656,7 +1110,11 @@ func (c shellCommandView) tokens() []string {
 	} else {
 		return nil
 	}
-	words[0] = path.Base(words[0])
+	// Same normalization as the tokenizer twin (allowlistProgramWord): a
+	// pathed program word keeps its path, so it cannot inherit a bare-name
+	// allow. Structure may only ever revoke, so keeping this in step means a
+	// pathed word the tokenizer refused is refused here too.
+	words[0] = allowlistProgramWord(words[0])
 	return words
 }
 

@@ -16,7 +16,7 @@ When `contenox chat` starts a new session, it walks up from the current working 
 Because it lands in chat history (not the system prompt), it's:
 
 - **Cached** by providers on subsequent turns — no re-render cost
-- **Persisted** in `messagestore` — survives restarts, visible in `sqlite3 ~/.contenox/local.db`
+- **Persisted** in the message store — survives restarts, visible in `sqlite3 ~/.contenox/local.db`
 - **Reference material**, not unconditional rules — the model treats it as project context to consult, not directives to obey blindly
 
 `contenox run` is stateless, so it loads `AGENTS.md` afresh on every invocation when input type is `chat`.
@@ -75,4 +75,4 @@ The first message should be a `system` message whose content is your `AGENTS.md`
 
 ## Per-tool conventions
 
-Other AGENTS.md adopters expose configuration knobs (Aider's `read: AGENTS.md`, Gemini CLI's `context.fileName`). Contenox doesn't need configuration — the loader is on by default and follows the spec verbatim. To disable, simply don't ship an `AGENTS.md` in the project tree.
+Other AGENTS.md adopters expose configuration knobs (Aider's `read: AGENTS.md`, Gemini CLI's `context.fileName`). Contenox doesn't need configuration — the loader is on by default and follows the spec verbatim. To disable, don't ship an `AGENTS.md` in the project tree.

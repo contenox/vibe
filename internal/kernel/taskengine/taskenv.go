@@ -236,6 +236,13 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 	var taskErr error
 	var inputVar string
 
+	// rootFailureErr is the first taskErr routed through an on_failure
+	// transition; cleared when a subsequent task succeeds. While non-nil, a
+	// terminal failure reports it before the failure handler's own error.
+	var rootFailureErr error
+	var rootFailureTaskID string
+	var rootFailureRetries int
+
 	// edgeCounts tracks how many times each edge "fromTaskID->toTaskID" has been
 	// traversed during this chain run. Consulted by OpEdgeTraversedAtLeast to
 	// bound workflow loops and other cyclic chains. Per-Execute, no DB.
@@ -498,6 +505,11 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 
 		if taskErr != nil {
 			if currentTask.Transition.OnFailure != "" {
+				if rootFailureErr == nil {
+					rootFailureErr = taskErr
+					rootFailureTaskID = currentTask.ID
+					rootFailureRetries = maxRetries
+				}
 				// Prefer the typed input that led to the failure. Only keep
 				// the task's output if it is a real, typed value. If the
 				// available type is DataTypeAny, infer a concrete type from the
@@ -543,8 +555,12 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 				endErrTransition() // direct call, not defer: defers inside loops leak
 				continue
 			}
+			if rootFailureErr != nil {
+				return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s failed after %d retries: %w (on_failure handler also failed: %w)", rootFailureTaskID, rootFailureRetries, rootFailureErr, taskErr)
+			}
 			return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("task %s failed after %d retries: %w", currentTask.ID, maxRetries, taskErr)
 		}
+		rootFailureErr = nil
 
 		if currentTask.Print != "" {
 			printMsg, err := renderTemplate(expandStepMacros(currentTask.Print, edgeCounts), vars)

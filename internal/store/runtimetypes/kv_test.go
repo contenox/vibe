@@ -329,3 +329,38 @@ func TestUnitKV(t *testing.T) {
 		require.True(t, items[0].UpdatedAt.After(items[0].CreatedAt))
 	})
 }
+
+// TestUnitKV_UpdateKVIfUnchanged pins the compare-and-swap a KV row's owner
+// writes a status decision under: the snapshot it read is the predicate, so a
+// write built on a read that has since moved on is refused rather than taken.
+func TestUnitKV_UpdateKVIfUnchanged(t *testing.T) {
+	ctx, s := runtimetypes.SetupStore(t)
+
+	key := "cas-" + uuid.NewString()
+	initial := json.RawMessage(`{"status":"open"}`)
+	require.NoError(t, s.SetKV(ctx, key, initial))
+	t.Cleanup(func() { _ = s.DeleteKV(ctx, key) })
+
+	snapshot, err := s.GetKVRaw(ctx, key)
+	require.NoError(t, err)
+	require.JSONEq(t, string(initial), string(snapshot), "GetKVRaw returns the stored bytes, undecoded")
+
+	reclaimed := json.RawMessage(`{"status":"abandoned"}`)
+	require.NoError(t, s.UpdateKVIfUnchanged(ctx, key, snapshot, reclaimed))
+
+	stored, err := s.GetKVRaw(ctx, key)
+	require.NoError(t, err)
+	require.JSONEq(t, string(reclaimed), string(stored))
+
+	// The same write replayed from the same stale snapshot no longer matches.
+	landed := json.RawMessage(`{"status":"landed"}`)
+	err = s.UpdateKVIfUnchanged(ctx, key, snapshot, landed)
+	require.ErrorIs(t, err, libdb.ErrNotFound, "a moved row refuses the write")
+
+	stored, err = s.GetKVRaw(ctx, key)
+	require.NoError(t, err)
+	require.JSONEq(t, string(reclaimed), string(stored), "and leaves the winner's value in place")
+
+	_, err = s.GetKVRaw(ctx, "cas-missing-"+uuid.NewString())
+	require.ErrorIs(t, err, libdb.ErrNotFound)
+}
