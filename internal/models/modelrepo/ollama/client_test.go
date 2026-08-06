@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/models/modelrepo"
-	"github.com/ollama/ollama/api"
 )
 
 // TestUnit_OllamaChat_SerializesImageInput asserts an image attachment reaches
@@ -105,7 +104,7 @@ func TestUnit_OllamaHTTPClient_GenerateStreamsNDJSON(t *testing.T) {
 	}
 
 	var chunks []string
-	err = client.Generate(context.Background(), &api.GenerateRequest{Model: "test"}, func(resp api.GenerateResponse) error {
+	err = client.Generate(context.Background(), &GenerateRequest{Model: "test"}, func(resp GenerateResponse) error {
 		chunks = append(chunks, resp.Response)
 		return nil
 	})

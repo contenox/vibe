@@ -4,9 +4,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/contenox/contenox/internal/models/modelrepo/ollama"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
-	"github.com/ollama/ollama/api"
-	ollamamodel "github.com/ollama/ollama/types/model"
 )
 
 // BackendRuntimeState represents the observed state of a single LLM backend.
@@ -63,16 +62,16 @@ func (s *BackendRuntimeState) SetAPIKey(key string) {
 // EnrichFromOllamaShow populates capability and context fields on a ModelPullStatus
 // using the response from Ollama's /api/show endpoint.
 // Only zero/false fields are written — callers may override afterwards.
-func EnrichFromOllamaShow(m *ModelPullStatus, r *api.ShowResponse) {
+func EnrichFromOllamaShow(m *ModelPullStatus, r *ollama.ShowResponse) {
 	for _, cap := range r.Capabilities {
 		switch cap {
-		case ollamamodel.CapabilityCompletion:
+		case ollama.CapabilityCompletion:
 			m.CanChat = true
 			m.CanPrompt = true
 			m.CanStream = true
-		case ollamamodel.CapabilityEmbedding:
+		case ollama.CapabilityEmbedding:
 			m.CanEmbed = true
-		case ollamamodel.CapabilityTools:
+		case ollama.CapabilityTools:
 			m.CanChat = true
 		}
 	}
@@ -88,7 +87,7 @@ func EnrichFromOllamaShow(m *ModelPullStatus, r *api.ShowResponse) {
 	}
 }
 
-func ConvertOllamaModelResponse(model *api.ListModelResponse) *ModelPullStatus {
+func ConvertOllamaModelResponse(model *ollama.ListModelResponse) *ModelPullStatus {
 	list := &ModelPullStatus{
 		Name:       model.Name,
 		Model:      model.Model,

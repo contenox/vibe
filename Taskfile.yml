@@ -35,6 +35,28 @@ tasks:
     cmds:
       - CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o {{.BIN_DIR}}/contenox-windows-amd64.exe {{.ROOT_DIR}}/cmd/contenox
 
+  lint:
+    desc: The formatting and static gates CI enforces (gofmt, vet)
+    cmds:
+      - cmd: |
+          # Skip gitignored paths so this agrees with CI, which lints a clean
+          # checkout; a local scratch dir must not fail a gate CI would pass.
+          unformatted=$(gofmt -l . | while read -r f; do git check-ignore -q "$f" || echo "$f"; done)
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            echo "gofmt found unformatted files (above). Fix with, gofmt -w ."
+            exit 1
+          fi
+      - go vet ./...
+
+  vuln:
+    desc: Known vulnerabilities in reachable code (the same gate CI runs)
+    cmds:
+      # Deliberately unpinned: a scanner's value is the freshness of its
+      # database, and it is fetched through the module proxy and verified
+      # against sum.golang.org.
+      - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   test:
     desc: Full serial Go test suite
     cmds:
@@ -87,6 +109,10 @@ tasks:
     desc: 'The one-command release gate: build, then every suite, fast gates first'
     deps: [build, 'website:build']
     cmds:
+      # Cheapest gates first, and in CI's order, so a release run fails on a
+      # formatting or vulnerability regression before spending 30m on tests.
+      - task: lint
+      - task: vuln
       - task: test-unit
       - task: test-cli-help
       - task: acp-conformance

@@ -6,13 +6,11 @@ import (
 	"image/color"
 	"image/png"
 	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/models/modelrepo/ollama"
-	"github.com/ollama/ollama/api"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 )
@@ -52,13 +50,9 @@ func TestSystem_Ollama_Vision(t *testing.T) {
 	require.NoError(t, err)
 	defer cleanup()
 
-	u, err := url.Parse(uri)
-	require.NoError(t, err)
-	ollamaClient := api.NewClient(u, http.DefaultClient)
-
 	t.Logf("Pulling vision model: %s", visionModel)
-	require.NoError(t, pullModel(t, ollamaClient, visionModel))
-	require.NoError(t, waitForModelReady(t, ollamaClient, visionModel))
+	require.NoError(t, pullModel(t, uri, visionModel))
+	require.NoError(t, waitForModelReady(t, uri, visionModel))
 
 	caps := modelrepo.CapabilityConfig{
 		ContextLength: 2048,

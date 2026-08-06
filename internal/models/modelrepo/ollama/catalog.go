@@ -7,8 +7,6 @@ import (
 
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/libtracker"
-	"github.com/ollama/ollama/api"
-	ollamamodel "github.com/ollama/ollama/types/model"
 )
 
 const displayNameMetaKey = "display_name"
@@ -64,7 +62,7 @@ func (p *catalogProvider) ListModels(ctx context.Context) ([]modelrepo.ObservedM
 			},
 		}
 
-		if showResp, err := client.Show(ctx, &api.ShowRequest{Model: model.Model}); err == nil {
+		if showResp, err := client.Show(ctx, &ShowRequest{Model: model.Model}); err == nil {
 			applyShowMetadata(&observed, showResp)
 		}
 
@@ -85,20 +83,20 @@ func (p *catalogProvider) ProviderFor(model modelrepo.ObservedModel) modelrepo.P
 	)
 }
 
-func applyShowMetadata(model *modelrepo.ObservedModel, resp *api.ShowResponse) {
+func applyShowMetadata(model *modelrepo.ObservedModel, resp *ShowResponse) {
 	for _, cap := range resp.Capabilities {
 		switch cap {
-		case ollamamodel.CapabilityCompletion:
+		case CapabilityCompletion:
 			model.CanChat = true
 			model.CanPrompt = true
 			model.CanStream = true
-		case ollamamodel.CapabilityEmbedding:
+		case CapabilityEmbedding:
 			model.CanEmbed = true
-		case ollamamodel.CapabilityTools:
+		case CapabilityTools:
 			model.CanChat = true
-		case ollamamodel.CapabilityVision:
+		case CapabilityVision:
 			model.CanVision = true
-		case ollamamodel.CapabilityThinking:
+		case CapabilityThinking:
 			model.CanThink = true
 		}
 	}

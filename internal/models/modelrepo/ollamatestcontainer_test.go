@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/ollama/ollama/api"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -69,18 +69,15 @@ func SetupOllamaLocalInstance(ctx context.Context, tag string) (string, testcont
 	}
 
 	uri := fmt.Sprintf("http://%s:%s", host, mappedPort.Port())
-	u, err := url.Parse(uri)
-	if err != nil {
+	if _, err := url.Parse(uri); err != nil {
 		return "", nil, cleanup, err
 	}
-
-	client := api.NewClient(u, http.DefaultClient)
 
 	const maxRetries = 5
 	const retryInterval = 1 * time.Second
 	var heartbeatErr error
 	for attempt := range maxRetries {
-		heartbeatErr = client.Heartbeat(ctx)
+		heartbeatErr = ollamaHeartbeat(ctx, uri)
 		if heartbeatErr == nil {
 			break
 		}
@@ -93,4 +90,22 @@ func SetupOllamaLocalInstance(ctx context.Context, tag string) (string, testcont
 	}
 
 	return uri, container, cleanup, nil
+}
+
+// ollamaHeartbeat reports whether the server answers, matching what the ollama
+// CLI probes: HEAD on the root path, any non-error status.
+func ollamaHeartbeat(ctx context.Context, baseURL string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, strings.TrimSuffix(baseURL, "/")+"/", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		return fmt.Errorf("ollama heartbeat returned %d", resp.StatusCode)
+	}
+	return nil
 }

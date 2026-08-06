@@ -3,12 +3,10 @@ package modelrepo_test
 import (
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"testing"
 
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/models/modelrepo/ollama"
-	"github.com/ollama/ollama/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -24,15 +22,11 @@ func TestSystem_Ollama_Tools(t *testing.T) {
 	require.NoError(t, err)
 	defer cleanup()
 
-	u, err := url.Parse(uri)
-	require.NoError(t, err)
-	ollamaClient := api.NewClient(u, http.DefaultClient)
-
 	toolModel := "qwen3:4b"
 	t.Logf("Pulling tool-capable model: %s", toolModel)
-	err = pullModel(t, ollamaClient, toolModel)
+	err = pullModel(t, uri, toolModel)
 	require.NoError(t, err, "failed to pull tool model %s", toolModel)
-	err = waitForModelReady(t, ollamaClient, toolModel)
+	err = waitForModelReady(t, uri, toolModel)
 	require.NoError(t, err)
 
 	t.Run("ToolSupport", func(t *testing.T) {
@@ -158,6 +152,84 @@ func TestSystem_Ollama_Tools(t *testing.T) {
 			err := json.Unmarshal([]byte(call.Function.Arguments), &args)
 			assert.NoError(t, err)
 			assert.Contains(t, args, "timezone")
+		}
+	})
+
+	// Tool calls arriving over NDJSON exercise ToolCallFunctionArguments'
+	// decode-then-remarshal path per frame, which the non-streaming tests
+	// above never reach.
+	t.Run("StreamedToolCalls", func(t *testing.T) {
+		caps := modelrepo.CapabilityConfig{
+			ContextLength: 2048,
+			CanChat:       true,
+			CanStream:     true,
+		}
+		provider := ollama.NewOllamaProvider(toolModel, []string{uri}, http.DefaultClient, caps, "", nil)
+
+		streamClient, err := provider.GetStreamConnection(ctx, uri)
+		require.NoError(t, err)
+
+		tool := modelrepo.Tool{
+			Type: "function",
+			Function: &modelrepo.FunctionTool{
+				Name:        "get_weather",
+				Description: "Get the current weather in a location",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"location": map[string]interface{}{
+							"type":        "string",
+							"description": "The city and state, e.g. San Francisco, CA",
+						},
+					},
+					"required": []string{"location"},
+				},
+			},
+		}
+
+		messages := []modelrepo.Message{
+			{
+				Role: "system",
+				Content: "You are a helpful assistant with access to tools. " +
+					"Use the get_weather tool when asked about weather.",
+			},
+			{Role: "user", Content: "What's the weather like in Paris?"},
+		}
+
+		ch, err := streamClient.Stream(ctx, messages, modelrepo.WithTool(tool))
+		require.NoError(t, err)
+
+		var (
+			deltas   []*modelrepo.ToolCallDelta
+			content  string
+			terminal *modelrepo.StreamTerminal
+		)
+		for parcel := range ch {
+			require.NoError(t, parcel.Error)
+			switch {
+			case parcel.Terminal != nil:
+				terminal = parcel.Terminal
+			case parcel.ToolCall != nil:
+				deltas = append(deltas, parcel.ToolCall)
+			case parcel.Data != "":
+				content += parcel.Data
+			}
+		}
+		require.NotNil(t, terminal, "stream ended without a terminal parcel")
+
+		if len(deltas) == 0 {
+			require.NotEmpty(t, content, "stream produced neither tool calls nor content")
+			t.Skip("model answered without calling a tool")
+		}
+		for i, delta := range deltas {
+			assert.Equal(t, "function", delta.Type)
+			assert.Equal(t, i, delta.Index, "tool call deltas must be sequentially indexed")
+			assert.Equal(t, "get_weather", delta.Name)
+
+			var args map[string]interface{}
+			require.NoError(t, json.Unmarshal([]byte(delta.ArgsFragment), &args),
+				"streamed tool arguments are not valid JSON: %s", delta.ArgsFragment)
+			assert.Contains(t, args, "location")
 		}
 	})
 }

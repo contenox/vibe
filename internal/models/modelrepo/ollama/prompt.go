@@ -6,7 +6,6 @@ import (
 
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/libtracker"
-	"github.com/ollama/ollama/api"
 )
 
 type OllamaPromptClient struct {
@@ -25,11 +24,11 @@ func (o *OllamaPromptClient) Prompt(ctx context.Context, systemInstruction strin
 	stream := false
 	config := &modelrepo.ChatConfig{}
 	modelrepo.WithTemperature(float64(temperature)).Apply(config)
-	var think *api.ThinkValue
+	var think *ThinkValue
 	if o.supportsThink {
 		think = buildOllamaThink(config)
 	}
-	req := &api.GenerateRequest{
+	req := &GenerateRequest{
 		Model:     o.modelName,
 		Prompt:    prompt,
 		System:    systemInstruction,
@@ -41,10 +40,10 @@ func (o *OllamaPromptClient) Prompt(ctx context.Context, systemInstruction strin
 
 	var (
 		content       string
-		finalResponse api.GenerateResponse
+		finalResponse GenerateResponse
 	)
 
-	err := o.ollamaClient.Generate(ctx, req, func(gr api.GenerateResponse) error {
+	err := o.ollamaClient.Generate(ctx, req, func(gr GenerateResponse) error {
 		content += gr.Response
 		if gr.Done {
 			finalResponse = gr

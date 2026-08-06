@@ -7,7 +7,6 @@ import (
 
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/libtracker"
-	"github.com/ollama/ollama/api"
 )
 
 type OllamaStreamClient struct {
@@ -22,26 +21,26 @@ type OllamaStreamClient struct {
 func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "ollama", "model", c.modelName)
 
-	apiMessages := make([]api.Message, 0, len(messages))
+	apiMessages := make([]Message, 0, len(messages))
 	for _, msg := range messages {
-		var apiToolCalls []api.ToolCall
+		var apiToolCalls []ToolCall
 		if len(msg.ToolCalls) > 0 {
 			for _, tc := range msg.ToolCalls {
 				argsStr := tc.Function.Arguments
 				if argsStr == "" {
 					argsStr = "{}"
 				}
-				var tcArgs api.ToolCallFunctionArguments
+				var tcArgs ToolCallFunctionArguments
 				_ = json.Unmarshal([]byte(argsStr), &tcArgs)
-				apiToolCalls = append(apiToolCalls, api.ToolCall{
-					Function: api.ToolCallFunction{
+				apiToolCalls = append(apiToolCalls, ToolCall{
+					Function: ToolCallFunction{
 						Name:      tc.Function.Name,
 						Arguments: tcArgs,
 					},
 				})
 			}
 		}
-		apiMessages = append(apiMessages, api.Message{
+		apiMessages = append(apiMessages, Message{
 			Role:      msg.Role,
 			Content:   msg.Content,
 			Images:    toOllamaImages(msg.Images),
@@ -55,7 +54,7 @@ func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 	}
 
 	stream := true
-	var think *api.ThinkValue
+	var think *ThinkValue
 	if c.supportsThink {
 		think = buildOllamaThink(config)
 	}
@@ -65,7 +64,7 @@ func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		end()
 		return nil, err
 	}
-	req := &api.ChatRequest{
+	req := &ChatRequest{
 		Model:     c.modelName,
 		Messages:  apiMessages,
 		Stream:    &stream,
@@ -105,7 +104,7 @@ func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 			toolCallIndex int
 			terminal      *modelrepo.StreamTerminal
 		)
-		err := c.ollamaClient.Chat(ctx, req, func(resp api.ChatResponse) error {
+		err := c.ollamaClient.Chat(ctx, req, func(resp ChatResponse) error {
 			if resp.Message.Content != "" {
 				chunkCount++
 				totalLen += len(resp.Message.Content)

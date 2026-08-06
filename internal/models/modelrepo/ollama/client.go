@@ -13,7 +13,6 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/reasoning"
 	"github.com/contenox/contenox/internal/models/modelrepo"
-	"github.com/ollama/ollama/api"
 )
 
 const ollamaMaxStreamBuffer = 8 * 1024 * 1024
@@ -140,9 +139,9 @@ func (c *ollamaHTTPClient) stream(ctx context.Context, method, endpoint string, 
 	return nil
 }
 
-func (c *ollamaHTTPClient) Chat(ctx context.Context, req *api.ChatRequest, fn func(api.ChatResponse) error) error {
+func (c *ollamaHTTPClient) Chat(ctx context.Context, req *ChatRequest, fn func(ChatResponse) error) error {
 	return c.stream(ctx, http.MethodPost, "/chat", req, func(line []byte) error {
-		var resp api.ChatResponse
+		var resp ChatResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
 			return err
 		}
@@ -150,9 +149,9 @@ func (c *ollamaHTTPClient) Chat(ctx context.Context, req *api.ChatRequest, fn fu
 	})
 }
 
-func (c *ollamaHTTPClient) Generate(ctx context.Context, req *api.GenerateRequest, fn func(api.GenerateResponse) error) error {
+func (c *ollamaHTTPClient) Generate(ctx context.Context, req *GenerateRequest, fn func(GenerateResponse) error) error {
 	return c.stream(ctx, http.MethodPost, "/generate", req, func(line []byte) error {
-		var resp api.GenerateResponse
+		var resp GenerateResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
 			return err
 		}
@@ -160,31 +159,31 @@ func (c *ollamaHTTPClient) Generate(ctx context.Context, req *api.GenerateReques
 	})
 }
 
-func (c *ollamaHTTPClient) Embed(ctx context.Context, req *api.EmbedRequest) (*api.EmbedResponse, error) {
-	var resp api.EmbedResponse
+func (c *ollamaHTTPClient) Embed(ctx context.Context, req *EmbedRequest) (*EmbedResponse, error) {
+	var resp EmbedResponse
 	if err := c.do(ctx, http.MethodPost, "/embed", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-func (c *ollamaHTTPClient) List(ctx context.Context) (*api.ListResponse, error) {
-	var resp api.ListResponse
+func (c *ollamaHTTPClient) List(ctx context.Context) (*ListResponse, error) {
+	var resp ListResponse
 	if err := c.do(ctx, http.MethodGet, "/tags", nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-func (c *ollamaHTTPClient) Show(ctx context.Context, req *api.ShowRequest) (*api.ShowResponse, error) {
-	var resp api.ShowResponse
+func (c *ollamaHTTPClient) Show(ctx context.Context, req *ShowRequest) (*ShowResponse, error) {
+	var resp ShowResponse
 	if err := c.do(ctx, http.MethodPost, "/show", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-func (c *ollamaHTTPClient) Delete(ctx context.Context, req *api.DeleteRequest) error {
+func (c *ollamaHTTPClient) Delete(ctx context.Context, req *DeleteRequest) error {
 	return c.do(ctx, http.MethodDelete, "/delete", req, nil)
 }
 
@@ -230,7 +229,7 @@ func buildOllamaOptions(config *modelrepo.ChatConfig, maxOutputTokens int) map[s
 	return opts
 }
 
-func buildOllamaThink(config *modelrepo.ChatConfig) *api.ThinkValue {
+func buildOllamaThink(config *modelrepo.ChatConfig) *ThinkValue {
 	if config == nil || config.Think == nil {
 		return nil
 	}
@@ -239,7 +238,7 @@ func buildOllamaThink(config *modelrepo.ChatConfig) *api.ThinkValue {
 		return nil
 	}
 	if level == reasoning.Off {
-		return &api.ThinkValue{Value: false}
+		return &ThinkValue{Value: false}
 	}
 	mapped := level
 	if mapped == reasoning.Minimal {
@@ -248,21 +247,21 @@ func buildOllamaThink(config *modelrepo.ChatConfig) *api.ThinkValue {
 	if mapped == reasoning.XHigh {
 		mapped = reasoning.High
 	}
-	return &api.ThinkValue{Value: mapped}
+	return &ThinkValue{Value: mapped}
 }
 
-func buildOllamaTools(config *modelrepo.ChatConfig) (api.Tools, error) {
+func buildOllamaTools(config *modelrepo.ChatConfig) (Tools, error) {
 	if len(config.Tools) == 0 {
 		return nil, nil
 	}
 
-	apiTools := make(api.Tools, 0, len(config.Tools))
+	apiTools := make(Tools, 0, len(config.Tools))
 	for _, tool := range config.Tools {
 		if tool.Type == "" || tool.Function == nil || tool.Function.Name == "" {
 			continue
 		}
 
-		var params api.ToolFunctionParameters
+		var params ToolFunctionParameters
 		if tool.Function.Parameters != nil {
 			raw, err := json.Marshal(tool.Function.Parameters)
 			if err != nil {
@@ -273,9 +272,9 @@ func buildOllamaTools(config *modelrepo.ChatConfig) (api.Tools, error) {
 			}
 		}
 
-		apiTools = append(apiTools, api.Tool{
+		apiTools = append(apiTools, Tool{
 			Type: tool.Type,
-			Function: api.ToolFunction{
+			Function: ToolFunction{
 				Name:        tool.Function.Name,
 				Description: tool.Function.Description,
 				Parameters:  params,

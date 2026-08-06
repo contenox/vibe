@@ -8,7 +8,6 @@ import (
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/google/uuid"
-	"github.com/ollama/ollama/api"
 )
 
 type OllamaChatClient struct {
@@ -20,16 +19,16 @@ type OllamaChatClient struct {
 	tracker         libtracker.ActivityTracker
 }
 
-// toOllamaImages maps image attachments to the Ollama SDK's image list. Ollama
+// toOllamaImages maps image attachments to the Ollama image list. Ollama
 // carries raw image bytes (base64-encoded on the wire) and sniffs the format
 // itself, so MimeType is not sent.
-func toOllamaImages(images []modelrepo.ImagePart) []api.ImageData {
+func toOllamaImages(images []modelrepo.ImagePart) []ImageData {
 	if len(images) == 0 {
 		return nil
 	}
-	out := make([]api.ImageData, 0, len(images))
+	out := make([]ImageData, 0, len(images))
 	for _, img := range images {
-		out = append(out, api.ImageData(img.Data))
+		out = append(out, ImageData(img.Data))
 	}
 	return out
 }
@@ -40,26 +39,26 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 
 	// Prior ToolCalls must be mapped too, or Ollama has no record of what
 	// tools were already called.
-	apiMessages := make([]api.Message, 0, len(messages))
+	apiMessages := make([]Message, 0, len(messages))
 	for _, msg := range messages {
-		var apiToolCalls []api.ToolCall
+		var apiToolCalls []ToolCall
 		if len(msg.ToolCalls) > 0 {
 			for _, tc := range msg.ToolCalls {
 				argsStr := tc.Function.Arguments
 				if argsStr == "" {
 					argsStr = "{}"
 				}
-				var tcArgs api.ToolCallFunctionArguments
+				var tcArgs ToolCallFunctionArguments
 				_ = json.Unmarshal([]byte(argsStr), &tcArgs)
-				apiToolCalls = append(apiToolCalls, api.ToolCall{
-					Function: api.ToolCallFunction{
+				apiToolCalls = append(apiToolCalls, ToolCall{
+					Function: ToolCallFunction{
 						Name:      tc.Function.Name,
 						Arguments: tcArgs,
 					},
 				})
 			}
 		}
-		apiMessages = append(apiMessages, api.Message{
+		apiMessages = append(apiMessages, Message{
 			Role:      msg.Role,
 			Content:   msg.Content,
 			Images:    toOllamaImages(msg.Images),
@@ -73,7 +72,7 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	}
 
 	llamaOptions := buildOllamaOptions(config, c.maxOutputTokens)
-	var think *api.ThinkValue
+	var think *ThinkValue
 	if c.supportsThink {
 		think = buildOllamaThink(config)
 	}
@@ -85,7 +84,7 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		return modelrepo.ChatResult{}, err
 	}
 
-	req := &api.ChatRequest{
+	req := &ChatRequest{
 		Model:     c.modelName,
 		Messages:  apiMessages,
 		Stream:    &stream,
@@ -101,10 +100,10 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		req.Truncate = config.Truncate
 	}
 
-	var finalResponse api.ChatResponse
+	var finalResponse ChatResponse
 
 	// Only the final frame is kept; Ollama includes the full message there.
-	err = c.ollamaClient.Chat(ctx, req, func(res api.ChatResponse) error {
+	err = c.ollamaClient.Chat(ctx, req, func(res ChatResponse) error {
 		if res.Done {
 			finalResponse = res
 		}
@@ -150,7 +149,8 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 
 	var toolCalls []modelrepo.ToolCall
 	for _, tc := range finalResponse.Message.ToolCalls {
-		// Arguments is a map; String() renders it as the JSON string modelrepo.ToolCall expects.
+		// Arguments is an ordered map; String() renders it as the JSON string
+		// modelrepo.ToolCall expects.
 		argsJSON := tc.Function.Arguments.String()
 
 		toolCalls = append(toolCalls, modelrepo.ToolCall{
