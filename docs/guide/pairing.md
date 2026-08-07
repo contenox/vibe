@@ -1,0 +1,148 @@
+---
+title: "Pairing a machine with a relay"
+description: How /pair attaches a machine to a relay so it can be reached from a phone — what is sent, what is stored, and how to undo it.
+---
+
+# Pairing a machine with a relay
+
+An agent you can walk away from is only half a promise if the only place you can
+answer it is the desk it is running on. A **relay** closes that: your machine
+dials out and holds a connection, and you supervise it from somewhere else.
+
+Pairing is how a machine gets permission to do that. It is opt-in, it is one
+command, and until you run it **nothing about your machine leaves it**.
+
+> **Beta, and not finished.**
+> `/pair` is behind the beta opt-in (below), and it is honest to say what it
+> does today: it exchanges a key for this machine's credentials and stores them.
+> **Nothing dials the relay yet** — the connector is built and tested but has no
+> caller. Pairing now is useful for trying the flow, not for reaching anything.
+
+## The flow
+
+You need the contenox app, signed in, and a running contenox session — the TUI
+(`contenox new`) or any ACP editor.
+
+1. In the app, tap **Pair device**. It shows a six-character key and a
+   countdown.
+2. In your contenox session, type the key:
+
+   ```
+   /pair K7M-3PQ
+   ```
+
+That is the whole flow. No browser opens, on either device. That matters more
+than it sounds: half the machines worth pairing are headless boxes, containers
+and WSL, where there is no browser to open and an attempt to launch one is a
+failure rather than a convenience. A typed key works the same everywhere.
+
+The key is short-lived and can be redeemed exactly once. If it expires while you
+are walking to the machine, mint another — they cost nothing.
+
+### Why it is typed into a session rather than a shell command
+
+There is no `contenox pair`, deliberately. The session you are looking at is the
+process that will hold the connection to the relay, so pairing anywhere else
+would write a credential with nothing running to use it. Pairing where the work
+happens is the point, not an accident of where the command was put.
+
+## Enabling it
+
+`/pair` is beta. Off, it is invisible — absent from `/help` and answered as an
+unknown command — rather than present and refusing.
+
+```bash
+contenox config set opt-in-beta true
+```
+
+Or, for one invocation:
+
+```bash
+CONTENOX_OPT_IN_BETA=1 contenox new
+```
+
+You also need to say which relay to pair with. There is no default in this
+build, on purpose: a runtime that has not been told talks to no relay at all.
+
+```bash
+export CONTENOX_RELAY_ENDPOINT=https://relay.contenox.com
+```
+
+Or pass it inline, which is also how you point a machine at a relay you run
+yourself:
+
+```
+/pair K7M-3PQ https://relay.example.internal
+```
+
+Self-hosting is the same mechanism, not a second one. Your relay hands out its
+own public key at redemption, and the machine verifies that key from then on.
+
+## What is sent, and what is stored
+
+When you redeem a key, your machine sends exactly two things: **the key**, and
+**its hostname** — the name your fleet list will show. Nothing else. No files,
+no paths, no environment, no session content, no model keys.
+
+What comes back is written to `~/.contenox/relay.json`:
+
+| Field | What it is |
+| --- | --- |
+| `endpoint` | The relay this pairing is for |
+| `instance_token` | This machine's credential. Secret. |
+| `instance_id` | This machine's identity at the relay |
+| `account_id` | The account it now belongs to |
+| `relay_public_key` | How this machine recognises that relay, forever after |
+
+The credentials live in your home directory rather than beside a project,
+because a pairing describes the **machine**, not the directory you happened to
+be standing in.
+
+Two properties are worth stating plainly, because they are the ones that would
+matter if they were untrue:
+
+- **The instance belongs to the account, not to you.** Whoever minted the key is
+  recorded for audit, but the machine is the account's. That is what makes "a
+  colleague answers the approval you are asleep for" a permission rather than a
+  future rewrite.
+- **The relay's public key is checked, not the TLS certificate.** Your machine
+  refuses any relay that cannot sign with the key it was given at pairing, which
+  is what defends against a rogue certificate authority or corporate TLS
+  interception. It is deliberately *not* certificate pinning — that certificate
+  rotates every ninety days, and a binary pinned to it would break itself in the
+  field on machines nobody can reach.
+
+## Turning it off
+
+```
+/unpair
+```
+
+This is local: it deletes the credential file, and this machine stops dialling.
+It does **not** revoke anything. Revoking an instance is done in the app, and a
+revoked machine is refused at its next dial whether or not it still holds the
+file — so if a machine is lost or stolen, revoke it there rather than hoping to
+reach it.
+
+You can also just delete `~/.contenox/relay.json`. There is nothing else to
+clean up, and no daemon to stop.
+
+To check what a machine is attached to without changing anything:
+
+```
+/pair
+```
+
+It prints the relay, the instance and the account. It never prints the token.
+
+## Not pairing at all
+
+The relay is optional and always was. A contenox install that is never paired
+behaves exactly as it did before: local models or your own provider keys, local
+SQLite, no account, nothing outbound. Every feature that does not involve
+reaching your machine from elsewhere works the same.
+
+## See also
+
+- [Human gates and envelopes](hitl.md) — what parks a run and waits for you
+- [Sovereignty](sovereignty.md) — what stays on your machine, and why

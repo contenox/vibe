@@ -44,6 +44,8 @@ func allACPCommands() []libacp.AvailableCommand {
 		{Name: "answer", Description: "Answer a question one of this session's mission units is waiting on; alone, lists them.", Input: &libacp.AvailableCommandInput{Hint: "[ask-id <answer>]"}},
 		{Name: "new", Description: "Start a new session in this workspace and report its id."},
 		{Name: "sessions", Description: "List the sessions in this workspace, newest first."},
+		{Name: "pair", Description: "Attach this machine to a relay with a key from the app; alone, shows what it is attached to.", Input: &libacp.AvailableCommandInput{Hint: "[key] [relay-endpoint]"}},
+		{Name: "unpair", Description: "Forget this machine's relay pairing (local only — revoke in the app)."},
 	}
 }
 
@@ -73,6 +75,10 @@ func (t *Transport) commandAvailable(name string) bool {
 		return t.hasMissionCapability()
 	case "answer":
 		return t.hasAnswerCapability()
+	case "pair", "unpair":
+		// Beta: off means absent, not refused. dispatchCommand answers these
+		// as unknown to match.
+		return t.deps.OptInBeta
 	default:
 		return true
 	}
@@ -163,6 +169,14 @@ func (t *Transport) answerUnknownCommand(ctx context.Context, sid libacp.Session
 // as an agent message. Command failures are surfaced inline (not as a protocol
 // error) and still end the turn, so the editor shows them in the conversation.
 func (t *Transport) dispatchCommand(ctx context.Context, sid libacp.SessionID, sess *sessionEntry, name, args string) (libacp.PromptResponse, error) {
+	// parseCommand recognizes every name in the unfiltered set, so a gated
+	// command reaches here even when it is unadvertised. mission and answer
+	// are excluded: their teaching errors report a missing capability rather
+	// than hide the command.
+	if (name == "pair" || name == "unpair") && !t.commandAvailable(name) {
+		return t.answerUnknownCommand(ctx, sid, name), nil
+	}
+
 	reportErr, _, end := t.tracker().Start(ctx, "command", "acp_session", "session_id", string(sid), "command", name)
 	defer end()
 
@@ -195,6 +209,10 @@ func (t *Transport) dispatchCommand(ctx context.Context, sid libacp.SessionID, s
 		out, err = t.handleNewSessionCommand(ctx, sess)
 	case "sessions":
 		out, err = t.handleSessions(ctx, sess)
+	case "pair":
+		out, err = t.handlePair(ctx, args)
+	case "unpair":
+		out, err = t.handleUnpair(ctx)
 	case "clear":
 		out, err = t.handleClear(ctx, sid, sess)
 	case "compact":
