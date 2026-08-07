@@ -18,8 +18,6 @@ package relaytest
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -27,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/contenox/contenox/libcipher"
 	"github.com/contenox/contenox/librelay"
 )
 
@@ -55,7 +54,7 @@ type Relay struct {
 	// relay has one, generated per [New], so two relays in one test are
 	// two identities and a test for "signed by the wrong relay" is a
 	// second New rather than a special mode.
-	priv ed25519.PrivateKey
+	priv libcipher.SigningPrivateKey
 	sign bool
 
 	mu    sync.Mutex
@@ -74,7 +73,7 @@ func NoAutoControl() Option { return func(r *Relay) { r.autoControl = false } }
 
 // SigningKey replaces the generated identity, for a test that must pin a
 // specific key or share one identity across two relays.
-func SigningKey(priv ed25519.PrivateKey) Option { return func(r *Relay) { r.priv = priv } }
+func SigningKey(priv libcipher.SigningPrivateKey) Option { return func(r *Relay) { r.priv = priv } }
 
 // NoSignature makes the relay answer welcome without signing the connector's
 // nonce, the way a relay that has not been given a key would. A connector that
@@ -84,7 +83,7 @@ func NoSignature() Option { return func(r *Relay) { r.sign = false } }
 
 // New returns a running fake relay with a fresh signing identity.
 func New(opts ...Option) *Relay {
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	_, priv, err := libcipher.GenerateSigningKey()
 	if err != nil {
 		// crypto/rand failing is not a condition a test double can
 		// carry on through, and New has no error to return: every
@@ -102,7 +101,7 @@ func New(opts ...Option) *Relay {
 // [librelay.ParsePublicKey] reads, ready to be handed to a connector as its
 // pinned key.
 func (r *Relay) PublicKey() string {
-	return librelay.FormatPublicKey(r.priv.Public().(ed25519.PublicKey))
+	return librelay.FormatPublicKey(r.priv.Public().(libcipher.SigningPublicKey))
 }
 
 // Link is one connector's connection. It owns the relay side of a pipe and

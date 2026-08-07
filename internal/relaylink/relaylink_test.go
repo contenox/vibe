@@ -731,7 +731,13 @@ func TestUnit_RuntimeIsUnaffectedWhenTheRelayIsDown(t *testing.T) {
 
 	// Meanwhile the connector is quietly still trying, and says so only if
 	// asked.
-	waitFor(t, "retries in the background", func() bool { return dials.Load() >= 3 })
+	//
+	// Gate on the counter this then asserts, not on the dial count. A dial is
+	// counted when it is ENTERED and an attempt is recorded when it FAILS, so
+	// waiting for dials >= 3 admits a state where the third dial is still in
+	// flight and Attempts is 2 — a flake that needs a loaded machine to show
+	// itself, which means CI and not here.
+	waitFor(t, "retries in the background", func() bool { return c.Status().Attempts >= 3 })
 	st := c.Status()
 	if st.State != relaylink.StateConnecting {
 		t.Fatalf("State = %v with the relay down, want connecting", st.State)

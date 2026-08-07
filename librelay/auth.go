@@ -1,14 +1,14 @@
 package librelay
 
 import (
-	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/contenox/contenox/libcipher"
 )
 
 // Relay authentication lives here because both ends must compute one byte
@@ -101,22 +101,22 @@ func SigningInput(nonce []byte, negotiatedVersion int, instance string) ([]byte,
 // version is the one the relay selected, not the one the connector offered:
 // the connector verifies against what it was told, so signing the offer would
 // never verify.
-func SignWelcome(priv ed25519.PrivateKey, nonce []byte, negotiatedVersion int, instance string) ([]byte, error) {
-	if len(priv) != ed25519.PrivateKeySize {
+func SignWelcome(priv libcipher.SigningPrivateKey, nonce []byte, negotiatedVersion int, instance string) ([]byte, error) {
+	if len(priv) != libcipher.SigningPrivateKeySize {
 		return nil, fmt.Errorf("librelay: sign welcome: %w", ErrBadPublicKey)
 	}
 	input, err := SigningInput(nonce, negotiatedVersion, instance)
 	if err != nil {
 		return nil, err
 	}
-	return ed25519.Sign(priv, input), nil
+	return libcipher.Sign(priv, input)
 }
 
 // VerifyWelcome checks a relay's answer against the public key pinned at
 // pairing time. A nil error is the only success; every other outcome is one of
 // the sentinels above and none of them is retryable.
-func VerifyWelcome(pub ed25519.PublicKey, nonce []byte, negotiatedVersion int, instance string, sig []byte) error {
-	if len(pub) != ed25519.PublicKeySize {
+func VerifyWelcome(pub libcipher.SigningPublicKey, nonce []byte, negotiatedVersion int, instance string, sig []byte) error {
+	if len(pub) != libcipher.SigningPublicKeySize {
 		return ErrBadPublicKey
 	}
 	input, err := SigningInput(nonce, negotiatedVersion, instance)
@@ -130,7 +130,7 @@ func VerifyWelcome(pub ed25519.PublicKey, nonce []byte, negotiatedVersion int, i
 		// mismatch that does not exist.
 		return ErrNoSignature
 	}
-	if !ed25519.Verify(pub, input, sig) {
+	if !libcipher.Verify(pub, input, sig) {
 		return ErrBadSignature
 	}
 	return nil
@@ -145,41 +145,21 @@ func checkNonce(nonce []byte) error {
 }
 
 // FormatPublicKey renders a relay's key for storage and for an enrolment
-// payload: standard base64, which is what encoding/json already produces for a
-// []byte field, so a relay that marshals its key and a tool that prints one
-// agree without a second convention.
-func FormatPublicKey(pub ed25519.PublicKey) string {
-	return base64.StdEncoding.EncodeToString(pub)
+// payload. The encoding is [libcipher.SigningKeyEncoding]; this is a spelling
+// of [libcipher.FormatPublicKey] kept so relay callers do not have to learn a
+// second package for one call, not a second implementation.
+func FormatPublicKey(pub libcipher.SigningPublicKey) string {
+	return libcipher.FormatPublicKey(pub)
 }
 
-// ParsePublicKey reads a key produced by [FormatPublicKey]. It also accepts
-// unpadded and URL-safe base64 and lowercase hex, because the key arrives as
-// text a human may have moved between machines; the encoding it came in is not
-// a security property, and every accepted form must still decode to exactly
-// [ed25519.PublicKeySize] bytes. Widening what is *read* is safe here in a way
-// that widening what is *accepted as valid* would not be — the signature check
-// is unchanged by how the key was spelled.
-func ParsePublicKey(s string) (ed25519.PublicKey, error) {
-	if s == "" {
-		return nil, fmt.Errorf("%w: empty", ErrBadPublicKey)
+// ParsePublicKey reads a key produced by [FormatPublicKey], delegating to
+// [libcipher.ParsePublicKey] for which spellings are accepted. The error is
+// wrapped so it matches both [ErrBadPublicKey] — which relay callers already
+// test for — and the libcipher sentinel underneath it.
+func ParsePublicKey(s string) (libcipher.SigningPublicKey, error) {
+	pub, err := libcipher.ParsePublicKey(s)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrBadPublicKey, err)
 	}
-	if len(s) == ed25519.PublicKeySize*2 {
-		if b, err := hex.DecodeString(s); err == nil {
-			return ed25519.PublicKey(b), nil
-		}
-	}
-	for _, enc := range []*base64.Encoding{
-		base64.StdEncoding, base64.RawStdEncoding,
-		base64.URLEncoding, base64.RawURLEncoding,
-	} {
-		b, err := enc.DecodeString(s)
-		if err != nil {
-			continue
-		}
-		if len(b) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("%w: %d bytes, want %d", ErrBadPublicKey, len(b), ed25519.PublicKeySize)
-		}
-		return ed25519.PublicKey(b), nil
-	}
-	return nil, fmt.Errorf("%w: not base64 or hex", ErrBadPublicKey)
+	return pub, nil
 }

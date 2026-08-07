@@ -2,22 +2,21 @@ package librelay_test
 
 import (
 	"bytes"
-	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"testing"
 
+	"github.com/contenox/contenox/libcipher"
 	"github.com/contenox/contenox/librelay"
 )
 
-func testKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
+func testKey(t *testing.T) (libcipher.SigningPublicKey, libcipher.SigningPrivateKey) {
 	t.Helper()
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	pub, priv, err := libcipher.GenerateSigningKey()
 	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
+		t.Fatalf("GenerateSigningKey: %v", err)
 	}
 	return pub, priv
 }
@@ -57,7 +56,7 @@ func TestUnit_WelcomeSignatureBindsEveryTerm(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		pub      ed25519.PublicKey
+		pub      libcipher.SigningPublicKey
 		nonce    []byte
 		version  int
 		instance string

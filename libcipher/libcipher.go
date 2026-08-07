@@ -12,10 +12,16 @@
 //   - Sealed HMAC hash creation and comparison, where a unique salt is automatically added and the
 //     resulting JSON-encoded object encapsulates both the computed HMAC digest and the salt.
 //   - Cryptographically secure key generation.
+//   - Ed25519 signing keys: generation, seed and public-key parsing/formatting, signing and
+//     verification. These live here rather than at the call site so that one encoding and one
+//     set of length checks serve every component that handles a key.
 //
 // Security Considerations:
 //   - The encryption key and integrity key must be kept secret and must be distinct. Reusing keys
 //     for different purposes can compromise security.
+//   - An Ed25519 keypair is an identity, not a transport secret: what it signs is defined by the
+//     protocol using it, and that definition belongs in that protocol's package. This package
+//     signs the bytes it is given and nothing more.
 //   - When using AES-CBC with HMAC, ensure that the entire ciphertext fits in memory as the HMAC is
 //     computed over the complete message. For high-volume systems, AES-GCM may be preferred.
 package libcipher
