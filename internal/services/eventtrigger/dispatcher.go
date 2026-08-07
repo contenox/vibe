@@ -69,8 +69,12 @@ type Dispatcher struct {
 // Both write the same event_firings claims, so a (trigger, nid) pair fires at
 // most once no matter which path saw the event first.
 type firingCore struct {
-	deps   Deps
-	byType map[string][]Trigger
+	deps Deps
+	// triggers is kept as an ordered slice rather than a type-keyed map:
+	// listen_for.type is a PATTERN (an exact type, or a dotted prefix ending
+	// in ".*"), so the set a given event selects cannot be indexed by string
+	// equality. Declaration order is firing order.
+	triggers []Trigger
 }
 
 // newFiringCore validates the Deps both paths share (Log is the Dispatcher's
@@ -100,11 +104,37 @@ func newFiringCore(deps Deps) (firingCore, error) {
 	if deps.Batch <= 0 {
 		deps.Batch = 256
 	}
-	byType := map[string][]Trigger{}
-	for _, t := range deps.Triggers {
-		byType[t.ListenFor.Type] = append(byType[t.ListenFor.Type], t)
+	return firingCore{deps: deps, triggers: append([]Trigger(nil), deps.Triggers...)}, nil
+}
+
+// matching returns the triggers whose listener selects eventType, in
+// declaration order.
+func (d *firingCore) matching(eventType string) []Trigger {
+	var matched []Trigger
+	for _, t := range d.triggers {
+		if eventlog.MatchesType(t.ListenFor.Type, eventType) {
+			matched = append(matched, t)
+		}
 	}
-	return firingCore{deps: deps, byType: byType}, nil
+	return matched
+}
+
+// liveSubjects returns the distinct EXACT event types the loaded triggers
+// listen for. Bus subjects are exact strings, so a prefix pattern gets no live
+// subscription: it is covered by the backstop poll, which is the only
+// load-bearing path anyway (a live delivery never does more than shorten the
+// wait).
+func (d *firingCore) liveSubjects() []string {
+	seen := map[string]bool{}
+	subjects := []string{}
+	for _, t := range d.triggers {
+		if eventlog.IsPattern(t.ListenFor.Type) || seen[t.ListenFor.Type] {
+			continue
+		}
+		seen[t.ListenFor.Type] = true
+		subjects = append(subjects, t.ListenFor.Type)
+	}
+	return subjects
 }
 
 // New validates deps and builds a Dispatcher.
@@ -138,7 +168,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	// drains the log.
 	nudge := make(chan []byte, nudgeBuffer)
 	var subs []libbus.Subscription
-	for eventType := range d.byType {
+	for _, eventType := range d.liveSubjects() {
 		sub, err := d.deps.Log.Subscribe(ctx, eventType, nudge)
 		if err != nil {
 			reportErr, _, end := d.deps.Tracker.Start(ctx, "subscribe", "event_dispatch", "type", eventType)
@@ -214,7 +244,7 @@ func (d *Dispatcher) drain(ctx context.Context) {
 // outcome — including a chain failure — is recorded without ever stopping
 // the loop.
 func (d *firingCore) handle(ctx context.Context, ev runtimetypes.Event) {
-	for _, t := range d.byType[ev.Type] {
+	for _, t := range d.matching(ev.Type) {
 		requestID := newRequestID()
 		claimed, err := d.deps.Store.BeginEventFiring(ctx, t.Name, ev.NID, requestID)
 		if err != nil {

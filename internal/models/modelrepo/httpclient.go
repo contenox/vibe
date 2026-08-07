@@ -15,7 +15,15 @@ var SharedHTTPClient = &http.Client{}
 
 // DefaultCallTimeout bounds one non-streaming provider call end-to-end
 // (connect, request, and full response body).
-const DefaultCallTimeout = 120 * time.Second
+//
+// It covers the whole DoWithRetry loop, not one attempt: every retry and every
+// honoured Retry-After is charged against the same budget. At 120s a single
+// rate-limited response carrying "Retry-After: 60" left barely a third of the
+// budget for the two remaining attempts, so the cap fired on a provider that
+// was merely busy. Sized here for a slow reasoning model returning a large
+// body after a rate-limit wait; a call that genuinely hangs is caught by the
+// turn deadline above it.
+const DefaultCallTimeout = 10 * time.Minute
 
 // NonStreamingContext derives the context for a non-streaming provider call:
 // the caller's ctx capped at DefaultCallTimeout. Callers must defer cancel.

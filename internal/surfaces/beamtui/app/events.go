@@ -5,30 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/contenox/contenox/internal/services/sessionvitals"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/approval"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
-	"github.com/contenox/contenox/internal/surfaces/beamtui/liveness"
 	libacp "github.com/contenox/contenox/libacp"
 )
-
-// notifiableStopReasons are the turn endings worth a completion bell: the
-// turn is genuinely over and the operator's attention is worth reclaiming. A
-// cancelled turn is deliberately absent — the operator cancelled it, they are
-// already here.
-var notifiableStopReasons = map[libacp.StopReason]bool{
-	libacp.StopReasonEndTurn:         true,
-	libacp.StopReasonMaxTokens:       true,
-	libacp.StopReasonMaxTurnRequests: true,
-	libacp.StopReasonRefusal:         true,
-}
-
-// notifiableReportKinds are the mission-report kinds that mean "a human is
-// needed or the work is done" — progress pings never ring.
-var notifiableReportKinds = map[string]bool{
-	"blocker": true,
-	"result":  true,
-}
 
 // onBridge folds one runtime event into every consumer: the transcript, the
 // liveness tracker, the status-bar counters, the palette's remote half, the
@@ -113,7 +95,7 @@ func (a *app) onBridge(ev enginebridge.Event) {
 
 	case enginebridge.MissionReport:
 		a.live.Bump(turnActivityID, now)
-		if notifiableReportKinds[e.Kind] {
+		if sessionvitals.NotifiableReport(e.Kind) {
 			a.bell(now, false)
 		}
 
@@ -155,7 +137,7 @@ func (a *app) onBridge(ev enginebridge.Event) {
 		if e.StopReason == libacp.StopReasonCancelled {
 			a.retireCard()
 		}
-		if notifiableStopReasons[e.StopReason] {
+		if sessionvitals.NotifiableStop(e.StopReason) {
 			a.bell(now, false)
 		}
 
@@ -201,7 +183,7 @@ func (a *app) trackMission(id, status string) {
 // submitted prompt IS the start, and the bridge answers only when it ends.
 func (a *app) startTurn() {
 	a.inFlight = true
-	a.live.Open(liveness.KindTurn, turnActivityID, turnLabel, a.now())
+	a.live.Open(sessionvitals.KindTurn, turnActivityID, turnLabel, a.now())
 }
 
 // endTurn closes the turn and every tool call it left open. A tool call whose
@@ -231,7 +213,7 @@ func (a *app) openTool(id, title, kind string, status libacp.ToolCallStatus, now
 	}
 	if !a.openTools[id] {
 		a.openTools[id] = true
-		a.live.Open(liveness.KindToolCall, activity, toolLabel(title, kind), now)
+		a.live.Open(sessionvitals.KindToolCall, activity, toolLabel(title, kind), now)
 		return
 	}
 	a.live.Bump(activity, now)
@@ -248,19 +230,13 @@ func toolLabel(title, kind string) string {
 	return toolLabelFallback
 }
 
-// bell emits the completion signal, suppressed while beam has the window's
-// focus (the operator is already looking) unless always is set, and rate-
-// limited to one ring per bellWindow however many facts land inside it.
+// bell emits the completion signal when the Alerter says the operator should
+// be interrupted. The suppression and coalescing rules are the service's (see
+// sessionvitals.Alerter.Ring); beam only owns the BEL.
 func (a *app) bell(now time.Time, always bool) {
-	if !always && a.focusedWindow {
-		return
+	if a.alerts.Ring(now, a.focusedWindow, always) {
+		a.deps.Term.Bell()
 	}
-	if a.hasBell && now.Sub(a.lastBell) < bellWindow {
-		return
-	}
-	a.hasBell = true
-	a.lastBell = now
-	a.deps.Term.Bell()
 }
 
 // styleForShellErr distinguishes "the runtime has no shell sessions" — a

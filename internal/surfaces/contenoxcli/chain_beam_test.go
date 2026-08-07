@@ -37,18 +37,12 @@ func TestUnit_BeamChain_MirrorsACPStructure(t *testing.T) {
 		require.Truef(t, ok, "beam task %s has no acp counterpart", bt.ID)
 		require.Equal(t, at.Handler, bt.Handler, "task %s handler", bt.ID)
 		require.Equal(t, at.InputVar, bt.InputVar, "task %s input_var", bt.ID)
-		// Beam deliberately raises the attended coding loop's tool-round cap
-		// (the operator is watching and can cancel); everything else mirrors.
-		atTransition := at.Transition
-		if bt.ID == "coding_chat" {
-			atTransition.Branches = append([]taskengine.TransitionBranch(nil), at.Transition.Branches...)
-			for i, b := range atTransition.Branches {
-				if b.Operator == "edge_traversed_at_least" {
-					atTransition.Branches[i].When = "16"
-				}
-			}
-		}
-		require.Equal(t, atTransition, bt.Transition, "task %s transition", bt.ID)
+		// Transitions mirror exactly. Beam used to raise the attended coding
+		// loop's tool-round cap above ACP's on the grounds that the operator is
+		// watching; both now carry the same ceiling, sized so only a
+		// non-converging turn reaches it, so the surfaces no longer differ in
+		// how much work one turn may do.
+		require.Equal(t, at.Transition, bt.Transition, "task %s transition", bt.ID)
 		if at.ExecuteConfig == nil || bt.ExecuteConfig == nil {
 			require.Equal(t, at.ExecuteConfig == nil, bt.ExecuteConfig == nil, "task %s execute_config presence", bt.ID)
 			continue

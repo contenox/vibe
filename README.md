@@ -92,11 +92,14 @@ contenox setup                          # pick a provider and model, once
 contenox "say hello world in python"    # chat straight from the CLI
 contenox chat -e                        # compose a rich prompt in $EDITOR
 contenox new                            # full-screen TUI: chat, plan, shell, file edits
+contenox resume                         # same TUI, reopening your last session
 ```
 
-Sessions persist — `contenox session list` and `contenox session switch <name>`
-pick past contexts back up. That's it; sensible defaults do the rest, and
-`contenox doctor` explains itself when something is missing.
+`new` always starts a fresh session; `resume` replays the last active one (or
+`--session <name>`). Sessions persist — `contenox session list` and
+`contenox session switch <name>` pick past contexts back up. That's it;
+sensible defaults do the rest, and `contenox doctor` explains itself when
+something is missing.
 
 ---
 

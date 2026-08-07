@@ -1,10 +1,12 @@
-// Package liveness owns "does the user believe something is happening
-// right now": the shared activity-pulse primitive (spinner cadence, elapsed
-// timers, stall detection) every activity-bearing view in beam renders from
-// instead of tracking its own clock. Every render-time value Tracker
-// produces is a pure function of stored timestamps and an injected "now",
-// so it is golden-testable without a terminal, a goroutine, or a channel.
-package liveness
+// Package sessionvitals holds the surface-neutral facts about one live agent
+// session — what is happening right now (Tracker), how full the context
+// window is (ContextUsage), what deserves the operator's attention (Alerter),
+// and what a session is called (Label, Roster). None of it depends on cells,
+// ANSI, or a TTY: a terminal and a window must reach the same answer from the
+// same event stream, so the answer lives here and each surface only renders
+// it. Every value is a pure function of stored state and an injected "now",
+// so the whole package tests without a clock, a goroutine, or a channel.
+package sessionvitals
 
 import (
 	"fmt"
@@ -46,11 +48,11 @@ type activity struct {
 	closedElapsed time.Duration
 }
 
-// Tracker is beam's single source of truth for "is something happening
-// right now". It holds zero goroutines and no clock of its own — every
-// method takes the caller's current time explicitly, so the whole liveness
-// story tests as pure data transformations. Not safe for concurrent use;
-// beam drives it from one single-threaded event loop.
+// Tracker is the single source of truth for "is something happening right
+// now". It holds zero goroutines and no clock of its own — every method takes
+// the caller's current time explicitly, so the whole liveness story tests as
+// pure data transformations. Not safe for concurrent use; a surface drives it
+// from one single-threaded event loop.
 type Tracker struct {
 	stallAfter time.Duration
 	activities map[string]*activity

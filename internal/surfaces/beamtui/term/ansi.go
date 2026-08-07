@@ -21,6 +21,13 @@ const (
 	pausePollWait    = 20 * time.Millisecond  // wakeup rate while a child owns the tty
 	readerStopWait   = time.Second            // how long Close waits for the reader to let go of the tty
 	parkWait         = 100 * time.Millisecond // how long Suspend waits for the reader to park
+	// resizeSettleWait is the quiet period a reported size must survive before
+	// the engine acts on it. A window drag reports every geometry it passes
+	// through, and acting on each one costs an erase and a full repaint of a
+	// region the terminal is about to reflow again — which is what deposits one
+	// truncated copy of the composer hint and status bar per intermediate width.
+	// Long enough to swallow a drag, short enough that letting go feels instant.
+	resizeSettleWait = 120 * time.Millisecond
 )
 
 // eventParser is the decoding half of the engine, owned by the input
@@ -99,7 +106,7 @@ func New(in, out *os.File, styles StyleResolver) (*ANSI, error) {
 		in:          in,
 		out:         out,
 		parser:      newParser(),
-		events:      newEventSink(eventBuffer),
+		events:      newEventSink(eventBuffer, resizeSettleWait),
 		done:        make(chan struct{}),
 		wakeR:       wakeR,
 		wakeW:       wakeW,
@@ -123,8 +130,11 @@ func New(in, out *os.File, styles StyleResolver) (*ANSI, error) {
 		wakeW.Close()
 		return nil, err
 	}
+	// Set before any goroutine exists, so the sink's release hook is visible to
+	// every one of them without further synchronization.
+	e.events.release = e.applySize
 	e.winch = notifyResize()
-	e.events.sendResize(input.ResizeEvent{Width: width, Height: height})
+	e.events.sendResizeNow(input.ResizeEvent{Width: width, Height: height})
 	go e.readLoop()
 	go e.watchResize()
 	return e, nil
@@ -141,11 +151,24 @@ func (e *ANSI) Commit(f frame.Frame) error {
 	return e.painter.commit(f)
 }
 
-// Size reports the last observed terminal size in cells.
+// Size reports the terminal size the engine has adopted — the last one whose
+// ResizeEvent was released to the app, not the last one the tty reported. The
+// two differ only while a drag is in flight, and that gap is the point: the app
+// lays out for the size it was told, and Commit paints at the size the app laid
+// out for, so no frame is ever built for one geometry and painted at another.
 func (e *ANSI) Size() (int, int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.width, e.height
+}
+
+// applySize adopts a resize at the instant the sink releases it to the app,
+// which is what keeps Size, the app's layout and painter.resize describing one
+// geometry. See eventSink.settle for why release lags the tty.
+func (e *ANSI) applySize(ev input.ResizeEvent) {
+	e.mu.Lock()
+	e.width, e.height = ev.Width, ev.Height
+	e.mu.Unlock()
 }
 
 // Bell emits BEL. Errors are ignored: a terminal that cannot take a bell
@@ -289,19 +312,24 @@ func (e *ANSI) resume() error {
 	err := e.enterRawLocked()
 	e.mu.Unlock()
 	e.painter.reset()
-	width, height := e.refreshSize()
-	e.events.sendResize(input.ResizeEvent{Width: width, Height: height})
+	width, height := e.probeSize()
+	// Not debounced: a child process just repainted the screen, so the app must
+	// be told to redraw now rather than after a settle window it has no reason
+	// to wait out.
+	e.events.sendResizeNow(input.ResizeEvent{Width: width, Height: height})
 	return err
 }
 
-func (e *ANSI) refreshSize() (int, int) {
+// probeSize asks the tty for its current geometry without adopting it: the
+// engine's size advances only through applySize, when a resize is released.
+// A tty that will not report falls back to the adopted size, which reads as
+// "nothing changed" and emits no event.
+func (e *ANSI) probeSize() (int, int) {
 	width, height, err := xterm.GetSize(int(e.out.Fd()))
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if err == nil {
-		e.width, e.height = width, height
+	if err != nil {
+		return e.Size()
 	}
-	return e.width, e.height
+	return width, height
 }
 
 // readLoop polls the tty rather than blocking in Read, so a paused engine
@@ -369,19 +397,42 @@ func (e *ANSI) readLoop() {
 	}
 }
 
+// watchResize turns size changes into ResizeEvents. It is signal-driven where
+// the platform has a signal, and polled where it does not (Windows, see
+// resizePollInterval) — a poll that finds the same size emits nothing, so the
+// two paths deliver the same events and only their latency differs.
 func (e *ANSI) watchResize() {
 	defer close(e.watcherDone)
+
+	var tick <-chan time.Time
+	if every := resizePollInterval(); every > 0 {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		tick = t.C
+	}
+	// nil on a signal-driven platform: a receive on it blocks forever, which
+	// is exactly "never poll".
+	lastW, lastH := e.Size()
+
 	for {
 		select {
 		case <-e.done:
 			return
+		case <-tick:
+			width, height := e.probeSize()
+			if width == lastW && height == lastH {
+				continue // the common case while nobody is dragging
+			}
+			lastW, lastH = width, height
+			e.events.sendResize(input.ResizeEvent{Width: width, Height: height})
 		case <-e.winch:
 			select { // a signal queued as the engine closed is not a resize
 			case <-e.done:
 				return
 			default:
 			}
-			width, height := e.refreshSize()
+			width, height := e.probeSize()
+			lastW, lastH = width, height
 			e.events.sendResize(input.ResizeEvent{Width: width, Height: height})
 		}
 	}
@@ -401,7 +452,9 @@ func (e *ANSI) emit(events []input.Event) {
 // channel's only reader, so a blocking send from it would deadlock the
 // process with the terminal raw and ISIG off; resizes instead go through a
 // one-deep coalescing slot that never blocks, since only the latest size is
-// ever true and Commit re-reads it from the engine anyway).
+// ever true and Commit re-reads it from the engine anyway). The slot is also
+// where a drag is debounced into the single size it came to rest at — see
+// settle, and painter.eraseRegion for what each size acted on costs.
 type eventSink struct {
 	mu       sync.Mutex
 	ch       chan input.Event
@@ -409,13 +462,26 @@ type eventSink struct {
 	closed   bool
 	inFlight sync.WaitGroup
 
+	// settle is how long a reported size must go unchanged before its event is
+	// released. The coalescing slot alone only merges sizes that arrive faster
+	// than the app drains the queue, which a drag never does — it reports a new
+	// size every few frames and the app keeps up with every one. Debouncing is
+	// what turns a whole drag into a single erase and repaint. Zero releases
+	// immediately, which is what the tests and sendResizeNow rely on.
+	settle time.Duration
+	// release, if set, adopts a size at the instant it is handed to the app.
+	// Assigned once before the sink is shared with any goroutine.
+	release func(input.ResizeEvent)
+
 	resizeMu  sync.Mutex
 	resize    input.ResizeEvent
 	hasResize bool
+	releaseAt time.Time   // earliest instant the pending resize may be released
+	timer     *time.Timer // wakes flushResize at releaseAt; nil until first armed
 }
 
-func newEventSink(size int) *eventSink {
-	return &eventSink{ch: make(chan input.Event, size), closing: make(chan struct{})}
+func newEventSink(size int, settle time.Duration) *eventSink {
+	return &eventSink{ch: make(chan input.Event, size), closing: make(chan struct{}), settle: settle}
 }
 
 // enter registers a producer, reporting whether the sink is still open. Every
@@ -448,29 +514,82 @@ func (s *eventSink) send(ev input.Event, done <-chan struct{}) {
 	}
 }
 
-// sendResize delivers a resize without ever blocking, so it is safe from the
-// app loop itself. See the type comment for why the coalescing slot is enough.
+// sendResize records a reported size without ever blocking, so it is safe from
+// the app loop itself, and restarts the settle window: the size only reaches
+// the app once it has stood still for settle. Each call supersedes the last,
+// since only the newest size is ever true.
 func (s *eventSink) sendResize(ev input.ResizeEvent) {
+	s.pendResize(ev, s.settle)
+}
+
+// sendResizeNow bypasses the settle window for sizes that are not a drag — the
+// engine's first size and the one after Suspend — where waiting would only
+// delay the app's first or next frame.
+func (s *eventSink) sendResizeNow(ev input.ResizeEvent) {
+	s.pendResize(ev, 0)
+}
+
+func (s *eventSink) pendResize(ev input.ResizeEvent, wait time.Duration) {
 	s.resizeMu.Lock()
 	s.resize, s.hasResize = ev, true
+	s.releaseAt = time.Now().Add(wait)
+	if wait > 0 {
+		s.armLocked(wait)
+	}
 	s.resizeMu.Unlock()
 	s.flushResize()
 }
 
-// flushResize tries to place the pending resize ahead of whatever the caller
-// is about to queue. A resize that still does not fit stays pending unless a
-// newer one has replaced it in the meantime.
+// armLocked schedules the wakeup that releases a pending resize when nothing
+// else does. It is the only thing that makes a drag's last size arrive at all:
+// once the drag stops there are no further events to piggyback on. A closed
+// sink is never armed, so no timer outlives Close.
+func (s *eventSink) armLocked(d time.Duration) {
+	select {
+	case <-s.closing:
+		return
+	default:
+	}
+	if s.timer == nil {
+		s.timer = time.AfterFunc(d, s.flushResize)
+		return
+	}
+	s.timer.Reset(d)
+}
+
+// flushResize releases the pending resize if its settle window has elapsed,
+// placing it ahead of whatever the caller is about to queue. A resize that has
+// not settled is left pending with the wakeup rearmed; one that has settled but
+// still does not fit in the queue stays pending and immediately releasable,
+// unless a newer one has replaced it in the meantime.
 func (s *eventSink) flushResize() {
 	s.resizeMu.Lock()
-	ev, ok := s.resize, s.hasResize
+	if !s.hasResize {
+		s.resizeMu.Unlock()
+		return
+	}
+	if wait := time.Until(s.releaseAt); wait > 0 {
+		s.armLocked(wait)
+		s.resizeMu.Unlock()
+		return
+	}
+	ev := s.resize
 	s.hasResize = false
+	release := s.release
 	s.resizeMu.Unlock()
-	if !ok || s.trySend(ev) {
+
+	// Adopting the size before the event is queued is what lets the app read
+	// Size() from its handler and get the geometry the event describes.
+	if release != nil {
+		release(ev)
+	}
+	if s.trySend(ev) {
 		return
 	}
 	s.resizeMu.Lock()
 	if !s.hasResize {
 		s.resize, s.hasResize = ev, true
+		s.releaseAt = time.Time{} // already settled: the next attempt delivers
 	}
 	s.resizeMu.Unlock()
 }
@@ -500,6 +619,15 @@ func (s *eventSink) close() {
 	s.closed = true
 	close(s.closing)
 	s.mu.Unlock()
+	// After closing, armLocked refuses to rearm, so stopping once is final; a
+	// callback already running only finds the sink closed and gives up.
+	s.resizeMu.Lock()
+	if s.timer != nil {
+		s.timer.Stop()
+		s.timer = nil
+	}
+	s.hasResize = false
+	s.resizeMu.Unlock()
 	s.inFlight.Wait()
 	close(s.ch)
 }

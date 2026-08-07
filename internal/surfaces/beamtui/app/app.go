@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/contenox/contenox/internal/services/sessionvitals"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/approval"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/composer"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/fileaddr"
@@ -22,14 +23,13 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/keymap"
-	"github.com/contenox/contenox/internal/surfaces/beamtui/liveness"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/style"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/term"
 	libacp "github.com/contenox/contenox/libacp"
 )
 
 const (
-	// tickInterval matches liveness's spinnerTick: one tick is one spinner
+	// tickInterval matches sessionvitals's spinner tick: one tick is one spinner
 	// frame, never more, never fewer.
 	tickInterval = 130 * time.Millisecond
 
@@ -44,13 +44,16 @@ const (
 	// ctrlCWindow is how long the "press again to quit" offer stands.
 	ctrlCWindow = 2 * time.Second
 
-	// bellWindow is the completion-notification rate floor: at most one BEL
-	// per window, however many notifiable facts land inside it.
+	// bellWindow is the completion-notification rate floor handed to the
+	// Alerter: at most one BEL per window, however many notifiable facts land
+	// inside it.
 	bellWindow = 2 * time.Second
 
 	// shutdownBudget bounds every quit path: a wedged bridge is abandoned
-	// rather than waited on, so quitting can never hang the terminal.
-	shutdownBudget = 2 * time.Second
+	// rather than waited on, so quitting can never hang the terminal. Sized so
+	// a long session's final persist actually lands — at 2s the exit truncated
+	// the work of the session it was closing.
+	shutdownBudget = 10 * time.Second
 
 	// overlayRows is the row budget one overlay (palette, picker, help) may
 	// spend in the live region.
@@ -172,7 +175,11 @@ type app struct {
 	pal  *palette.Palette
 	pick *picker.Picker
 	card *approval.Card
-	live *liveness.Tracker
+	live *sessionvitals.Tracker
+
+	// alerts is the surface-neutral "should the operator be interrupted"
+	// decision; beam's only job on a true verdict is to ring the terminal.
+	alerts *sessionvitals.Alerter
 
 	// sessions is the session switcher's own Picker instance (not a mode of
 	// pick): unlike the file picker, it owns the keyboard outright instead of
@@ -261,9 +268,7 @@ type app struct {
 	hasLastPrompt bool
 
 	lastCtrlC time.Time
-	lastBell  time.Time
 	hasCtrlC  bool
-	hasBell   bool
 
 	quit bool
 }
@@ -293,7 +298,8 @@ func newApp(deps Deps) (*app, error) {
 		pal:            palette.New(),
 		pick:           picker.New(),
 		sessions:       picker.New(),
-		live:           liveness.NewTracker(0),
+		live:           sessionvitals.NewTracker(0),
+		alerts:         sessionvitals.NewAlerter(bellWindow),
 		openTools:      make(map[string]bool),
 		missions:       make(map[string]bool),
 		welcomePending: deps.FreshSession,

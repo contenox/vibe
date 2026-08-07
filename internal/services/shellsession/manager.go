@@ -7,12 +7,46 @@ package shellsession
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/contenox/contenox/internal/services/vfs"
 )
+
+// ErrNoSession is returned by Write for a session with no live shell. Distinct
+// from a spawn failure: the caller addressed something that is not there.
+var ErrNoSession = errors.New("shellsession: no live shell for this session")
+
+// spawnKey carries a per-call spawn override. Unexported so the only way to
+// set one is WithSpawn — a context value cannot be forged by a caller that
+// does not import this package.
+type spawnKey struct{}
+
+// spawnOverride is the per-call half of Config: what THIS shell should be
+// rooted at and run, when the manager-wide defaults are not it.
+type spawnOverride struct {
+	cwd   string
+	shell string
+}
+
+// WithSpawn attaches a per-shell cwd and/or shell to ctx, honoured by the next
+// shell this manager creates for the session named in that call. Empty strings
+// fall back to the manager's CwdResolver and Config.Shell. The cwd is still
+// validated against the workspace allowlist — an override chooses among
+// permitted roots, it never escapes them.
+func WithSpawn(ctx context.Context, cwd, shell string) context.Context {
+	return context.WithValue(ctx, spawnKey{}, spawnOverride{cwd: cwd, shell: shell})
+}
+
+func spawnFrom(ctx context.Context) spawnOverride {
+	if ctx == nil {
+		return spawnOverride{}
+	}
+	ov, _ := ctx.Value(spawnKey{}).(spawnOverride)
+	return ov
+}
 
 const (
 	// defaultScrollbackBytes bounds the retained output per shell.
@@ -69,6 +103,15 @@ type Manager interface {
 	// against ctx) and submits one line to it. ctx is used only for cwd
 	// resolution at creation time.
 	Run(ctx context.Context, sessionID, line string) (RunResult, error)
+	// Open ensures a shell exists for sessionID without submitting anything,
+	// so an interactive client can attach before the first keystroke.
+	// Idempotent: an already-live shell is returned as-is.
+	Open(ctx context.Context, sessionID string) error
+	// Write feeds raw bytes to sessionID's shell stdin VERBATIM — unlike Run
+	// it appends no newline and imposes no line discipline, because the bytes
+	// are a human's keystrokes (arrow keys, ^C, partial lines). Never creates
+	// a shell: an unknown session is ErrNoSession.
+	Write(sessionID string, data []byte) error
 	// Read returns scrollback for sessionID: bytes since `since` when since >= 0,
 	// otherwise the last `tailBytes`. Never creates a shell.
 	Read(sessionID string, since int64, tailBytes int) ReadResult
@@ -106,6 +149,17 @@ type Config struct {
 	// shell inherits, so serve's own secrets never reach an agent-reachable
 	// PTY. Nil inherits the full environment.
 	ScrubEnv func([]string) []string
+	// Interactive spawns shells for a HUMAN at a real terminal: ECHO stays on
+	// and the shell draws its own prompt, because the operator must see what
+	// they type. The default (false) is the agent-facing posture — echo off,
+	// prompt suppressed — where output is scrollback for a model to read and a
+	// prompt is noise plus a login/host/cwd leak.
+	Interactive bool
+	// OnExit, when set, is invoked once per shell when it terminates, from a
+	// dedicated goroutine. Fires for every cause — process exit, Kill, idle
+	// reap, Shutdown — so a client can report the terminal as gone exactly
+	// once. Total: never called twice for the same shell.
+	OnExit func(sessionID string)
 }
 
 type manager struct {
@@ -155,11 +209,28 @@ func NewManager(cfg Config) Manager {
 // fleet dispatch use — rather than trusting CwdResolver's answer directly.
 // The fallback is "" since Workspace already carries the default root.
 func (m *manager) resolveCwd(ctx context.Context) (string, error) {
-	cwd := ""
-	if m.cfg.CwdResolver != nil {
+	cwd := spawnFrom(ctx).cwd
+	if cwd == "" && m.cfg.CwdResolver != nil {
 		cwd = m.cfg.CwdResolver(ctx)
 	}
 	return vfs.ResolveSessionCwd(m.cfg.Workspace, cwd, "")
+}
+
+func (m *manager) Open(ctx context.Context, sessionID string) error {
+	_, _, err := m.ensureShell(ctx, sessionID)
+	return err
+}
+
+func (m *manager) Write(sessionID string, data []byte) error {
+	m.mu.Lock()
+	sh, ok := m.shells[sessionID]
+	m.mu.Unlock()
+	if !ok || sh.closed.Load() {
+		return ErrNoSession
+	}
+	sh.touch()
+	_, err := sh.pty.Write(data)
+	return err
 }
 
 func (m *manager) Run(ctx context.Context, sessionID, line string) (RunResult, error) {
@@ -286,7 +357,18 @@ func (m *manager) ensureShell(ctx context.Context, sessionID string) (*shell, bo
 	if !ok {
 		size = ptySize{rows: defaultRows, cols: defaultCols}
 	}
-	pty, err := startPTY(cwd, m.cfg.Shell, m.cfg.ScrubEnv, size.rows, size.cols)
+	shellPath := spawnFrom(ctx).shell
+	if shellPath == "" {
+		shellPath = m.cfg.Shell
+	}
+	pty, err := startPTY(spawnSpec{
+		cwd:         cwd,
+		shell:       shellPath,
+		scrub:       m.cfg.ScrubEnv,
+		rows:        size.rows,
+		cols:        size.cols,
+		interactive: m.cfg.Interactive,
+	})
 	if err != nil {
 		return nil, false, err
 	}
@@ -452,7 +534,24 @@ func (s *shell) shutdown() {
 		close(s.done)
 		s.pty.close()
 		go s.pty.wait()
+		// once guarantees exactly one notification per shell, whichever of the
+		// four teardown paths got here first.
+		if fn := s.mgr.cfg.OnExit; fn != nil {
+			go fn(s.id)
+		}
 	})
+}
+
+// spawnSpec is everything startPTY needs for one shell: the already-validated
+// cwd, the shell to exec, the environment mapping, the initial geometry, and
+// whether this PTY faces a human (see Config.Interactive).
+type spawnSpec struct {
+	cwd         string
+	shell       string
+	scrub       func([]string) []string
+	rows        int
+	cols        int
+	interactive bool
 }
 
 var _ Manager = (*manager)(nil)

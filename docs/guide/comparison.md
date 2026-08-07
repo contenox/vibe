@@ -22,7 +22,7 @@ Concretely, the overlap:
 | Provider switching | `contenox backend add` for Ollama, vLLM, OpenAI, Anthropic, Gemini, Vertex AI, Bedrock; routing is config, not code |
 | Editor sessions | `contenox acp` over stdio — [Zed](/docs/integrations/editors/zed/), [JetBrains](/docs/integrations/editors/jetbrains/), [AionUi](/docs/integrations/editors/aionui/), [OpenClaw](/docs/integrations/editors/openclaw/) |
 | Local session state | SQLite at `~/.contenox/local.db`; no account, no hosted service |
-| Terminal UI | `contenox new` — chat, plan, and shell in one persistent full-screen session |
+| Terminal UI | `contenox new` (fresh session) and `contenox resume` (the last one, transcript replayed) — chat, plan, and shell in one persistent full-screen session |
 
 `contenox new` is a real coding session, not a demo shell: it routes coding turns into their own loop with its own budget, `local_shell` is on by default there, and the filesystem tools are editor-grade — `read_file`, `read_file_range`, `write_file`, `edit_file`, `sed`, `grep`, `list_dir`, `stat_file`, `delete_file`, with a read-before-write gate that refuses to mutate a file the model has not read. The `/mission` slash command works the same way it does in an editor.
 
@@ -126,4 +126,5 @@ Reach for contenox when the work is **governed, unattended, or repeatable** and 
 - [Core concepts](/docs/guide/concepts/) — chains, tasks, tools, transitions
 - [HITL policies](/docs/guide/hitl/) — the envelope in full
 - [The agentic loop](/docs/guide/agentic-loop/) — the loop as an authored task graph
+- [Request routing](/docs/guide/request-routing/) — one prompt, several specialist loops, each with its own tool scope and budget
 - [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/) — hosting, state, and oversight controls you own

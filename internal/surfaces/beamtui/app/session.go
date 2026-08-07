@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/contenox/contenox/internal/services/sessionvitals"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/picker"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/transcript"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
@@ -34,36 +35,11 @@ const (
 )
 
 // sessionLabel is what the status bar and welcome header call the current
-// session: the server's title when there is one, the shortened session name
-// otherwise. Matches acpsvc's own precedence (sessionListTitle).
+// session. The precedence is sessionvitals.Label's, not beam's: every surface
+// naming this session must reach the same string.
 func (a *app) sessionLabel() string {
-	if a.sessionTitle != "" {
-		return a.sessionTitle
-	}
-	if a.sessionName != "" {
-		return shortSessionName(a.sessionName)
-	}
-	return shortSessionName(string(a.sessionID))
+	return sessionvitals.Label(a.sessionTitle, a.sessionName, string(a.sessionID))
 }
-
-// shortSessionName is the id fallback's display form: the prefix plus the
-// first idTailCells of the tail, so `beam-20a88ab8-4f2e-4b0d-9c31-6f1a2b3c4d5e`
-// reads as `beam-20a88ab8`. A name whose tail is not long enough to be a
-// uuid is returned untouched.
-func shortSessionName(name string) string {
-	i := strings.IndexByte(name, '-')
-	if i < 0 {
-		return name
-	}
-	tail := name[i+1:]
-	if len(tail) <= idTailCells {
-		return name
-	}
-	return name[:i+1] + tail[:idTailCells]
-}
-
-// idTailCells is how much of a session uuid the label keeps.
-const idTailCells = 8
 
 // setSessionTitle adopts a title published for the current session and
 // ignores one published for any other, since during a switch's unfiltered
@@ -106,35 +82,18 @@ func (a *app) openSessions(ctx context.Context) {
 	}
 }
 
-// sessionItems projects the ACP roster into picker rows: the title as label
-// (the id when there is none), the id plus an "active" mark as detail. The
-// active session stays in the list, selected first, so Esc changes nothing.
+// sessionItems decorates sessionvitals.Roster into picker rows. The rows,
+// their labels and their order are the service's; beam adds only the id
+// detail column and the "(active)" mark, which are this surface's rendering.
 func sessionItems(infos []libacp.SessionInfo, active libacp.SessionID, cap int) []picker.Item {
-	items := make([]picker.Item, 0, len(infos))
-	for _, s := range infos {
-		if len(items) >= cap {
-			break
-		}
-		if s.SessionID == "" {
-			continue
-		}
-		label := strings.TrimSpace(s.Title)
-		if label == "" {
-			label = string(s.SessionID)
-		}
-		detail := string(s.SessionID)
-		if s.SessionID == active {
+	entries := sessionvitals.Roster(infos, active, cap)
+	items := make([]picker.Item, 0, len(entries))
+	for _, e := range entries {
+		detail := string(e.ID)
+		if e.Active {
 			detail += "  (active)"
 		}
-		items = append(items, picker.Item{ID: string(s.SessionID), Label: label, Detail: detail})
-	}
-	// The active row leads so Enter on an untouched overlay is a no-op.
-	for i, it := range items {
-		if it.ID == string(active) {
-			moved := append([]picker.Item{items[i]}, items[:i]...)
-			items = append(moved, items[i+1:]...)
-			break
-		}
+		items = append(items, picker.Item{ID: string(e.ID), Label: e.Label, Detail: detail})
 	}
 	return items
 }

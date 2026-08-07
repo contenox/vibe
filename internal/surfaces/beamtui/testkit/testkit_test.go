@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/contenox/contenox/internal/services/sessionvitals"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
-	"github.com/contenox/contenox/internal/surfaces/beamtui/liveness"
 	libacp "github.com/contenox/contenox/libacp"
 )
 
@@ -204,9 +204,9 @@ func TestUnit_FakeBridgeRecordsCalls(t *testing.T) {
 }
 
 func TestUnit_AssertMicroMotionOnActiveTracker(t *testing.T) {
-	tr := liveness.NewTracker(8 * time.Second)
+	tr := sessionvitals.NewTracker(8 * time.Second)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	tr.Open(liveness.KindTurn, "turn-1", "thinking", base)
+	tr.Open(sessionvitals.KindTurn, "turn-1", "thinking", base)
 
 	// render derives "now" from a fixed base plus a fixed per-tick advance,
 	// never a real clock, per the harness's render contract.
@@ -223,9 +223,9 @@ func TestUnit_AssertMicroMotionOnActiveTracker(t *testing.T) {
 }
 
 func TestUnit_AssertStabilizesOnClosedTracker(t *testing.T) {
-	tr := liveness.NewTracker(8 * time.Second)
+	tr := sessionvitals.NewTracker(8 * time.Second)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	tr.Open(liveness.KindTurn, "turn-1", "thinking", base)
+	tr.Open(sessionvitals.KindTurn, "turn-1", "thinking", base)
 	tr.Close("turn-1", base.Add(3*time.Second))
 
 	// Once closed, Tracker freezes the snapshot: render must be stable

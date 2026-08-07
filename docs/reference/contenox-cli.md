@@ -132,26 +132,29 @@ contenox run --chain .contenox/my-chain.json --shell "refactor main.go"
 - `--auto`: Disable HITL approval prompts for non-interactive runs. Default is HITL on.
 - `--think` / `--trace` / `--steps`: Global flags (see table above).
 
-### `contenox new`
+### `contenox new` / `contenox resume`
 
-The Contenox terminal UI: chat, plan, and shell in one persistent session, in a full-screen TUI.
+The Contenox terminal UI: chat, plan, and shell in one persistent session, in a full-screen TUI. Two verbs, one UI — they differ only in which session they open. `new` always starts a fresh session, with an empty transcript every time. `resume` reopens the last active session with its transcript replayed, and starts a fresh one when there is nothing to resume.
 
 ```bash
-contenox new                 # open in the current directory
-contenox new ~/src/myproject # open in a specific directory
-contenox new --session zed-a1b2c3
+contenox new                 # fresh session, in the current directory
+contenox new ~/src/myproject # fresh session, in a specific directory
 contenox new --plain         # no color or unicode, ASCII glyphs only
+contenox resume              # reopen the last active session
+contenox resume --session zed-a1b2c3
 ```
 
 | Flag              | Description                                                                 |
 | ----------------- | ---------------------------------------------------------------------------- |
-| `--session <name>` | Open the named session instead of the last active one                       |
+| `--session <name>` | `resume` only: open the named session instead of the last active one       |
 | `--light`          | Render for a light terminal background (overrides automatic detection)      |
 | `--plain`          | Drop all color and unicode: ASCII glyphs, no styling                        |
 
+`new` does not accept `--session`: naming a session to open is the opposite of starting a new one.
+
 The terminal UI requires a real terminal on stdout; it refuses to start on a non-TTY. Unlike `chat`, `local_shell` is enabled by default here (pass `--shell=false` to disable). It also supports the `/mission` slash command the same way an ACP editor session does — including envelope selection (`/mission --policy <envelope> …`) and the envelope listing `/mission` prints on its own. See [The `/mission` slash command](#the-mission-slash-command) below.
 
-`contenox new` loads its own chain, `~/.contenox/chain-agent-beam.json` (override with `CONTENOX_BEAM_CHAIN_PATH`), and its own HITL envelope, `hitl-policy-beam.json` — a copy of the editor profile's policy tuned for the attended terminal UI (see [HITL Policies](/docs/guide/hitl/#built-in-presets)).
+The terminal UI loads its own chain, `~/.contenox/chain-agent-beam.json` (override with `CONTENOX_BEAM_CHAIN_PATH`), and its own HITL envelope, `hitl-policy-beam.json` — a copy of the editor profile's policy tuned for the attended terminal UI (see [HITL Policies](/docs/guide/hitl/#built-in-presets)).
 
 ### `contenox doctor`
 
@@ -721,7 +724,7 @@ contenox version
 |---|---|
 | `CONTENOX_ACP_CHAIN_PATH` | Override the chain file used by `contenox acp` sessions |
 | `CONTENOX_ACPX_CHAIN_PATH`| Override the chain file used by headless ACPX sessions |
-| `CONTENOX_BEAM_CHAIN_PATH` | Override the chain file used by `contenox new` (default `~/.contenox/chain-agent-beam.json`) — the terminal UI drives the same in-process ACP transport an editor session does, but resolves its own chain file and env var independently of `CONTENOX_ACP_CHAIN_PATH` |
+| `CONTENOX_BEAM_CHAIN_PATH` | Override the chain file used by the terminal UI, `contenox new` / `contenox resume` (default `~/.contenox/chain-agent-beam.json`) — the terminal UI drives the same in-process ACP transport an editor session does, but resolves its own chain file and env var independently of `CONTENOX_ACP_CHAIN_PATH` |
 | `CONTENOX_DEFAULT_MODEL` / `CONTENOX_DEFAULT_PROVIDER` | Process-level override of the configured default model/provider (nothing is persisted). Also the ACP `env_var` auth-method contract for non-interactive setup. |
 | `CONTENOX_DEFAULT_ALT_MODEL` / `CONTENOX_DEFAULT_ALT_PROVIDER` | Same, for the alt model pair. |
 | `CONTENOX_DEFAULT_MAX_TOKENS` / `CONTENOX_DEFAULT_THINK` | Same, for the response token cap and reasoning level. |

@@ -18,6 +18,11 @@ func notifyResize() chan os.Signal {
 	return ch
 }
 
+// resizePollInterval is zero here: SIGWINCH wakes the watcher exactly when the
+// size changes, so polling would only add wakeups that find nothing. A zero
+// interval tells the watcher to run signal-driven (see ANSI.watchResize).
+func resizePollInterval() time.Duration { return 0 }
+
 // stopResize unsubscribes; safe on a nil channel.
 func stopResize(ch chan os.Signal) {
 	if ch != nil {

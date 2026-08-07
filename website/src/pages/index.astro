@@ -20,6 +20,26 @@ const rulesCode = `{
   "attention": { "allowAgentAnswers": false }
 }`;
 
+const routeCode = `{
+  "id": "classify_request",
+  "handler": "route",
+  "system_instruction": "Classify the user's latest message. Use 'coding_change'
+    for requests to create, edit, refactor, fix, test or otherwise change
+    code/files. Use 'general' for questions, explanations, setup help. Use
+    'review_change' for requests to review, audit or assess code that already
+    exists, where nothing is to be modified...",
+  "execute_config": { "model": "{{var:alt_model|var:model}}", "tools": [] },
+  "transition": {
+    "on_failure": "acp_chat",
+    "branches": [
+      { "operator": "equals",  "when": "coding_change", "goto": "coding_chat" },
+      { "operator": "equals",  "when": "general",       "goto": "acp_chat" },
+      { "operator": "equals",  "when": "review_change", "goto": "review_chat" },
+      { "operator": "default", "when": "",              "goto": "acp_chat" }
+    ]
+  }
+}`;
+
 const t: LandingStrings = {
   badge: 'Missions, not sessions',
   h1a: 'Fire the mission.',
@@ -57,6 +77,22 @@ const t: LandingStrings = {
   panelP1: 'When an assistant shows you its "thinking steps," you’re watching an orchestration loop: plan, call a tool, check the result, check the budget, decide again. Every major AI product runs on one — event-driven agent choreography under governance. That layer decides what the model may do, when it pauses, and what it costs. The vendor configures it. You never see it, and you can’t change it.',
   panelP2: 'Contenox is that layer, shipped as the product — with the control panel handed to the operator. The loop is a chain file you author. The boundaries are an envelope you wrote. The state is on your disk. The differentiator isn’t inventing the machine; it’s who holds the controls.',
 
+  routeEyebrow: 'Chain → workflow → agent loop',
+  routeH2: 'One sentence in. The loop that sentence deserves.',
+  routeLede: 'A chain does not begin with an agent. It begins with a route task that reads the request, labels it, and hands it to the loop built for that label — its own instruction, its own tool scope, its own budget, its own recovery path. The interactive chains that ship with contenox sort every message into coding_change, general, or review_change before anything else runs.',
+  routeCode,
+  routeOutro: 'Trimmed from the shipped chain-agent-acp.json. The classifier holds no tools, so it cannot act on a request it has not yet understood, and it can run on a cheaper model than the loops it feeds. An unrecognised label falls to the default branch — the least-powerful loop, never the most. Which branch ran is in the run log, so a disappointing answer is a question with an answer.',
+  routeDomains: [
+    'A specialist is configuration, not phrasing: the review loop withholds every mutating tool with hide_tools, enforced where calls execute rather than by leaving them out of what the model was offered.',
+    'A support assistant routes billing questions to a read-only loop with the billing API, and account changes to one that can write but pauses for a human.',
+    'A data workflow routes "summarise this" and "extract these fields" to loops with different output contracts, so callers get parseable output without asking for it every time.',
+    'A governed deployment routes anything touching regulated data to a loop under a stricter policy, no matter how the request was phrased.',
+  ],
+  routeCtas: [
+    ['How request routing works', '/docs/guide/request-routing/'],
+    ['The story: a review branch, with the write tools taken away', '/docs/use-cases/review-specialist/'],
+  ],
+
   rulesEyebrow: 'You write the rules',
   rulesH2: 'How much agency? You decide — in writing.',
   rulesLede: 'Every run is bounded by an envelope: a JSON policy naming what passes silently, what pauses for a human, and what is denied outright — plus hard ceilings on tool calls and tokens, and a pin on which models and backends the unit may use. No hidden prompt decides for you. The file lives in your repo and gets reviewed like any other change.',
@@ -68,13 +104,13 @@ const t: LandingStrings = {
   craftEyebrow: 'Agentic engineering',
   craftH2: 'Vibecoding finds the loop. Loop engineering keeps it.',
   craftP1: 'Vibecoding is real discovery — improvising with an agent until the loop works. We’ve shipped features that way and written honestly about what it cost. But a loop that has to run tomorrow, in CI, unattended, isn’t a vibe anymore. It’s an artifact.',
-  craftP2: 'That’s agentic engineering: the loop itself is authored, reviewed, versioned, and bounded. The staged loop in every contenox chain came from named failure modes — classify, inspect, patch, verify, audit — under one discipline: never let confusion default into unattended mutation.',
+  craftP2: 'That’s agentic engineering: the loop is authored, reviewed, versioned, and bounded — and so is the choice of which loop runs. Every stage in a contenox chain came from a named failure mode, under one discipline: never let confusion default into unattended mutation.',
 
   everyEyebrow: 'One harness, everywhere',
   everyH2: 'Author once. Run it where the work is.',
   everyLede: 'The same agentic workflow, the same envelope, the same session state behind every surface — what you approved in the editor is what runs from cron.',
   surfaces: [
-    ['Your terminal', 'contenox new is one persistent session for chat, plan, and shell. Stateful tools keep their state across turns, and an approval is a one-keypress card in the transcript.'],
+    ['Your terminal', 'contenox new opens a fresh session for chat, plan, and shell; contenox resume reopens the last one with its transcript. Stateful tools keep their state across turns, and an approval is a one-keypress card in the transcript.'],
     ['Your editor', 'The full agent inside Zed, JetBrains, AionUi, or OpenClaw — approvals route through the editor’s own UI, and the workflow stays in the chain file, not the plugin.'],
     ['Your scripts and pipelines', 'contenox run executes a chain non-interactively — from cron, CI, or a shell script. Tool-heavy jobs are the home ground: release evidence packs, request-processing chains, narrow API wrappers with approval on every mutating call.'],
     ['Untrusted drivers', 'A headless acpx session gets the hardened profile: shell, writes, and network are denied outright rather than offered for approval.'],
@@ -128,7 +164,7 @@ const t: LandingStrings = {
 ---
 <Base
   title="Contenox — Fire the mission. Come back to done."
-  description="Fire coding work at an agent under rules you can read. Detach, answer later from any terminal that reaches your models, and it resumes exactly once — any model, any MCP, no account."
+  description="Fire work at an agent under rules you can read. A chain routes each request to the specialist loop built for it. Detach, answer later from any terminal that reaches your models, and it resumes exactly once — any model, any MCP, no account."
   alternates={{ en: '/', de: '/de/' }}
 >
   <Landing t={t} />

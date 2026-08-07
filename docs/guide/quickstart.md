@@ -72,6 +72,12 @@ contenox new
 
 The transcript flows into your terminal's own scrollback, `/` opens commands, `!` runs a shell line, `@` attaches a file, and gated tool calls are answered inline with one keystroke. Press `?` on an empty composer for the full key list.
 
+`new` always starts fresh. To carry on where you left off, reopen the last session with its transcript replayed:
+
+```bash
+contenox resume
+```
+
 For one-shot and scripted use, pass the prompt directly:
 
 ```bash

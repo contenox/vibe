@@ -19,31 +19,38 @@ type ptySession struct {
 	cmd    *exec.Cmd
 }
 
-// startPTY launches an interactive shell rooted at cwd on a fresh PTY sized
-// rows x cols, becoming its controlling terminal. ECHO is cleared and the
-// window size applied on the PTY pair before the shell execs (via pty.Open
-// + an explicit Start, not pty.Start, to avoid a race where the child could
-// snapshot termios with ECHO still on).
-func startPTY(cwd, shell string, scrub func([]string) []string, rows, cols int) (*ptySession, error) {
+// startPTY launches an interactive shell rooted at spec.cwd on a fresh PTY
+// sized rows x cols, becoming its controlling terminal. For an agent-facing
+// shell ECHO is cleared and the prompt suppressed before the child execs (via
+// pty.Open + an explicit Start, not pty.Start, to avoid a race where the child
+// could snapshot termios with ECHO still on). An interactive shell keeps both:
+// a human must see their own keystrokes and needs a prompt to orient by.
+func startPTY(spec spawnSpec) (*ptySession, error) {
+	shell := spec.shell
 	if shell == "" {
 		shell = defaultShell()
 	}
-	cmd := exec.Command(shell, shellSpawnArgs(shell)...)
-	cmd.Dir = cwd
+	cmd := exec.Command(shell, shellSpawnArgs(shell, spec.interactive)...)
+	cmd.Dir = spec.cwd
 	// Scrub serve's credentials when configured; TERM/prompt-suppression vars are appended last so they win.
 	parent := os.Environ()
-	if scrub != nil {
-		parent = scrub(parent)
+	if spec.scrub != nil {
+		parent = spec.scrub(parent)
 	}
-	cmd.Env = append(append(parent, "TERM=xterm-256color"), promptSuppressionEnv(shell)...)
+	cmd.Env = append(parent, "TERM=xterm-256color")
+	if !spec.interactive {
+		cmd.Env = append(cmd.Env, promptSuppressionEnv(shell)...)
+	}
 
 	master, tty, err := pty.Open()
 	if err != nil {
 		return nil, err
 	}
-	_ = pty.Setsize(master, winsize(rows, cols))
+	_ = pty.Setsize(master, winsize(spec.rows, spec.cols))
 	// Master and slave share one termios, so clearing ECHO on the slave configures the pair.
-	_ = disableEcho(tty)
+	if !spec.interactive {
+		_ = disableEcho(tty)
+	}
 
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
 	// Setsid + Setctty makes the PTY the shell's controlling terminal.
@@ -72,13 +79,18 @@ func shellFamily(shell string) string {
 }
 
 // shellSpawnArgs picks the argv for a shell family. bash/zsh start
-// interactive (-i) so the user's rc file defines their aliases. bash also
-// gets --noediting: Run submits one complete line at a time, so readline
-// buys nothing while adding re-echoed input and bracketed-paste escapes to
-// the scrollback. rc files, aliases, job control, and history still apply.
-func shellSpawnArgs(shell string) []string {
+// interactive (-i) so the user's rc file defines their aliases. An
+// agent-facing bash also gets --noediting: Run submits one complete line at a
+// time, so readline buys nothing while adding re-echoed input and
+// bracketed-paste escapes to the scrollback. A human's terminal keeps
+// readline — line editing and history are the point. rc files, aliases, job
+// control, and history still apply either way.
+func shellSpawnArgs(shell string, interactive bool) []string {
 	switch shellFamily(shell) {
 	case "bash":
+		if interactive {
+			return []string{"-i"}
+		}
 		return []string{"--noediting", "-i"}
 	case "zsh":
 		return []string{"-i"}

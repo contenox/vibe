@@ -1,6 +1,6 @@
 ---
 title: "Lab"
-description: The contenox Lab — research built, shipped, and run for real. Beam web UI, modeld, the editor agent, hooks, the HTTP API layer, the UI component library, Bob, runnerd, vald-operator, the early Telegram/GitHub MVP, and blueprints.
+description: The contenox Lab — research built, shipped, and run for real. Beam web UI, Beam Desktop, modeld, the editor agent, hooks, the HTTP API layer, the UI component library, Bob, runnerd, vald-operator, the early Telegram/GitHub MVP, and blueprints.
 ---
 
 # Lab
@@ -8,6 +8,7 @@ description: The contenox Lab — research built, shipped, and run for real. Bea
 Research, built for real. Every line here was shipped and run — each one feeds the runtime, the envelope model, and the harness you use today.
 
 - **[Beam: the web UI](/docs/rnd/beam-web/)** — a full React admin + chat SPA served straight out of the `contenox` binary, with a diff-backed approval gate and a live workspace file tree.
+- **[Beam Desktop: the client as a peer](/docs/rnd/beam-desktop/)** — an Electron shell that deleted HTTP from the loading path, spawned the runtime as a child process, and carried both ACP and a private editor method family over one NDJSON pipe.
 - **[modeld](/docs/rnd/modeld/)** — a cross-backend local inference daemon with a live-hardware capacity planner, lease-based multi-client ownership, and llama.cpp/OpenVINO backends behind one gRPC contract.
 - **[The editor agent](/docs/rnd/editor-agent/)** — a VS Code extension that bundled the runtime and registered as a native language-model vendor, and an Agent Client Protocol implementation that made approval a blocking protocol operation in both directions.
 - **[Hooks became tools](/docs/rnd/hooks/)** — the external-capability boundary, shipped before the industry settled on a name for it: one repo interface, five wire protocols, OpenAPI tool discovery, and MCP slotting in unchanged.

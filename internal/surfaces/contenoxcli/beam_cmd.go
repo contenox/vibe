@@ -60,14 +60,23 @@ const (
 	acpSessionIdentity = "acp-client"
 )
 
-var beamCmd = &cobra.Command{
-	Use:   "new [dir]",
-	Args:  cobra.MaximumNArgs(1),
-	Short: "The contenox terminal UI.",
-	Long: `Run contenox as a terminal UI: the transcript flows into your terminal's own
-scrollback (so copy and paste work exactly as they always have), the composer
-takes / for commands, ! for a shell line, and @ to attach a file, and gated
-tool calls are answered inline with one keystroke.
+// The terminal UI is one implementation behind two verbs that differ only in
+// which session they open. Splitting them is a correctness fix, not a
+// preference: a command called "new" that silently continued the last
+// conversation was the single most surprising thing the CLI did, and no flag
+// spelling makes "new" mean "resume".
+//
+//	new      always starts a fresh session
+//	resume   opens the last active session (or --session NAME), and starts a
+//	         fresh one only when there is nothing to resume
+//
+// tuiLong is shared because everything below the first paragraph is identical
+// for both; only the session sentence differs.
+const tuiLong = `
+The transcript flows into your terminal's own scrollback (so copy and paste work
+exactly as they always have), the composer takes / for commands, ! for a shell
+line, and @ to attach a file, and gated tool calls are answered inline with one
+keystroke.
 
 The terminal UI drives the same in-process ACP transport an editor does, so its sessions,
 slash commands and approval flow are identical to 'contenox acp'.
@@ -76,18 +85,45 @@ slash commands and approval flow are identical to 'contenox acp'.
   ctrl+c          clear the composer, interrupt a turn, then quit
   ?               the full key list (on an empty composer)
 
-Needs a terminal: for scripted or piped use, run 'contenox "your prompt"'.`,
-	RunE: runBeam,
+Needs a terminal: for scripted or piped use, run 'contenox "your prompt"'.`
+
+var newCmd = &cobra.Command{
+	Use:   "new [dir]",
+	Args:  cobra.MaximumNArgs(1),
+	Short: "Start a new session in the terminal UI.",
+	Long: `Start a NEW session in the contenox terminal UI. The transcript begins empty
+every time; to carry on where you left off, use 'contenox resume'.
+` + tuiLong,
+	RunE: func(cmd *cobra.Command, args []string) error { return runBeam(cmd, args, true) },
+}
+
+var resumeCmd = &cobra.Command{
+	Use:   "resume [dir]",
+	Args:  cobra.MaximumNArgs(1),
+	Short: "Reopen your last session in the terminal UI.",
+	Long: `Reopen the last active session in the contenox terminal UI, with its transcript
+replayed into your scrollback. Name a different one with --session. When there
+is no session to resume, this starts a fresh one, exactly as 'contenox new'
+would.
+` + tuiLong,
+	RunE: func(cmd *cobra.Command, args []string) error { return runBeam(cmd, args, false) },
 }
 
 func init() {
-	beamCmd.Flags().String("session", "", "Open the named session instead of the last active one (see 'contenox new --session' errors for the known names)")
-	beamCmd.Flags().Bool("light", false, "Render for a light terminal background (overrides detection)")
-	beamCmd.Flags().Bool("plain", false, "Drop all color and unicode: ASCII glyphs, no styling")
-	rootCmd.AddCommand(beamCmd)
+	// --session belongs to resume alone: naming a session to open is the
+	// opposite of starting a new one, so 'new' does not accept it.
+	resumeCmd.Flags().String("session", "", "Open the named session instead of the last active one (see 'contenox resume --session' errors for the known names)")
+	for _, c := range []*cobra.Command{newCmd, resumeCmd} {
+		c.Flags().Bool("light", false, "Render for a light terminal background (overrides detection)")
+		c.Flags().Bool("plain", false, "Drop all color and unicode: ASCII glyphs, no styling")
+		rootCmd.AddCommand(c)
+	}
 }
 
-func runBeam(cmd *cobra.Command, args []string) error {
+// runBeam drives the terminal UI. freshSession is the only difference between
+// the 'new' and 'resume' verbs: it skips session resolution entirely, so no
+// active-session pointer can pull a previous transcript into a new one.
+func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	errW := cmd.ErrOrStderr()
 
 	// The non-TTY check happens once, here: every component below assumes it.
@@ -366,7 +402,7 @@ func runBeam(cmd *cobra.Command, args []string) error {
 
 	// Loading replays the session's transcript as updates from the same
 	// event stream a live turn uses; beam has no separate rendering path.
-	sessionName, sessionFlag, err := resolveBeamSession(ctx, db, workspaceID, cmd)
+	sessionName, sessionFlag, err := resolveBeamSession(ctx, db, workspaceID, cmd, freshSession)
 	if err != nil {
 		return err
 	}
@@ -479,7 +515,14 @@ type beamSession struct {
 // resolveBeamSession picks the ACP session beam attaches to, reporting "" when
 // a fresh one should be created. --session names a known session by name; an
 // unknown name errors and lists the known ones rather than auto-creating.
-func resolveBeamSession(ctx context.Context, db libdb.DBManager, workspaceID string, cmd *cobra.Command) (string, beamSession, error) {
+func resolveBeamSession(ctx context.Context, db libdb.DBManager, workspaceID string, cmd *cobra.Command, freshSession bool) (string, beamSession, error) {
+	// 'contenox new' resolves nothing: an empty name is the caller's contract
+	// for "mint one". Returning before the roster read also means a fresh
+	// session costs no query.
+	if freshSession {
+		return "", beamSession{}, nil
+	}
+
 	sessions := sessionservice.New(db, workspaceID, libtracker.NoopTracker{})
 	roster, err := sessions.List(ctx, acpSessionIdentity)
 	if err != nil {

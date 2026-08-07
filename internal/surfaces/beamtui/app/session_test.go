@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/contenox/contenox/internal/services/sessionvitals"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/enginebridge"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/input"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/keymap"
@@ -337,8 +338,8 @@ func TestUnit_Session_UuidLabelIsShortenedUntilATitleLands(t *testing.T) {
 
 	// A name that is not id-shaped is left alone.
 	for _, name := range []string{"beam-0001", "notes", "the ingest rewrite"} {
-		if got := shortSessionName(name); got != name {
-			t.Fatalf("shortSessionName(%q) = %q, want it untouched", name, got)
+		if got := sessionvitals.ShortName(name); got != name {
+			t.Fatalf("ShortName(%q) = %q, want it untouched", name, got)
 		}
 	}
 }

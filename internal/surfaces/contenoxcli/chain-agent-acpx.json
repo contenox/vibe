@@ -4,16 +4,18 @@
   "tasks": [
     {
       "id": "acp_chat",
-      "description": "Tool-using workflow loop — model may call driver-provided tools (transition tool_call) or finish the turn (transition default → end).",
+      "description": "Tool-using workflow loop \u2014 model may call driver-provided tools (transition tool_call) or finish the turn (transition default \u2192 end).",
       "handler": "chat_completion",
-      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox, a task-execution engine — not a chat-only product, a bit cheeky used as Assistant.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess. Ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nGROUND YOUR CLAIMS: State facts about files, code, or command results ONLY from tool output in this turn. When you assert what something contains — an item, a name, a count, or that two things match — quote the exact lines you read, THEN make the claim; never call two sets consistent without showing both from quoted output. If a tool errors, returns nothing, or you cannot read something, say so verbatim and stop — NEVER substitute a guessed or remembered answer for failed or missing tool output. When unsure, re-read rather than recall.",
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox, a task-execution engine \u2014 not a chat-only product, a bit cheeky used as Assistant.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess. Ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nGROUND YOUR CLAIMS: State facts about files, code, or command results ONLY from tool output in this turn. When you assert what something contains \u2014 an item, a name, a count, or that two things match \u2014 quote the exact lines you read, THEN make the claim; never call two sets consistent without showing both from quoted output. If a tool errors, returns nothing, or you cannot read something, say so verbatim and stop \u2014 NEVER substitute a guessed or remembered answer for failed or missing tool output. When unsure, re-read rather than recall.",
       "execute_config": {
         "model": "{{var:model}}",
         "provider": "{{var:provider}}",
         "think": "{{var:think}}",
         "shift": true,
         "pass_clients_tools": false,
-        "tools": ["*"],
+        "tools": [
+          "*"
+        ],
         "tools_policies": {
           "local_fs": {
             "_allowed_dir": ".",
@@ -46,7 +48,7 @@
           {
             "operator": "edge_traversed_at_least",
             "edge": "acp_chat->run_tools",
-            "when": "10",
+            "when": "60",
             "goto": "recovery_chat"
           },
           {
@@ -68,7 +70,9 @@
       "handler": "execute_tool_calls",
       "input_var": "acp_chat",
       "execute_config": {
-        "tools": ["*"],
+        "tools": [
+          "*"
+        ],
         "tools_policies": {
           "local_fs": {
             "_allowed_dir": ".",
@@ -100,17 +104,19 @@
     },
     {
       "id": "recovery_chat",
-      "description": "Recovery workflow loop — picks up the full chat history from the main loop with a fresh system instruction noting the prior workflow got stuck. Has its own tool access and 10-round budget.",
+      "description": "Recovery workflow loop \u2014 picks up the full chat history from the main loop with a fresh system instruction noting the prior workflow got stuck. Has its own tool access and 10-round budget.",
       "handler": "chat_completion",
       "input_var": "acp_chat",
-      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox, a coding assistant driven over the Agent Client Protocol by an untrusted client.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess. Ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nBUDGET: You have already used {{edge_count:acp_chat->run_tools}} of 10 main and {{edge_count:recovery_chat->recovery_tools}} of 10 recovery tool_call rounds this turn. Be efficient — pick the most direct remaining path, prefer producing an answer over gathering more information, and address root causes rather than retrying the same thing.\n\nGROUND YOUR CLAIMS: State facts about files, code, or command results ONLY from tool output in this turn. When you assert what something contains — an item, a name, a count, or that two things match — quote the exact lines you read, THEN make the claim; never call two sets consistent without showing both from quoted output. If a tool errors, returns nothing, or you cannot read something, say so verbatim and stop — NEVER substitute a guessed or remembered answer for failed or missing tool output. When unsure, re-read rather than recall.",
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox, a coding assistant driven over the Agent Client Protocol by an untrusted client.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, DO NOT guess. Ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nBUDGET: You have already used {{edge_count:acp_chat->run_tools}} of 10 main and {{edge_count:recovery_chat->recovery_tools}} of 10 recovery tool_call rounds this turn. Be efficient \u2014 pick the most direct remaining path, prefer producing an answer over gathering more information, and address root causes rather than retrying the same thing.\n\nGROUND YOUR CLAIMS: State facts about files, code, or command results ONLY from tool output in this turn. When you assert what something contains \u2014 an item, a name, a count, or that two things match \u2014 quote the exact lines you read, THEN make the claim; never call two sets consistent without showing both from quoted output. If a tool errors, returns nothing, or you cannot read something, say so verbatim and stop \u2014 NEVER substitute a guessed or remembered answer for failed or missing tool output. When unsure, re-read rather than recall.",
       "execute_config": {
         "model": "{{var:alt_model|var:default_model}}",
         "provider": "{{var:alt_provider|var:default_provider}}",
         "think": "{{var:think}}",
         "shift": true,
         "pass_clients_tools": false,
-        "tools": ["*"],
+        "tools": [
+          "*"
+        ],
         "tools_policies": {
           "local_fs": {
             "_allowed_dir": ".",
@@ -165,7 +171,9 @@
       "handler": "execute_tool_calls",
       "input_var": "recovery_chat",
       "execute_config": {
-        "tools": ["*"],
+        "tools": [
+          "*"
+        ],
         "tools_policies": {
           "local_fs": {
             "_allowed_dir": ".",
@@ -197,9 +205,9 @@
     },
     {
       "id": "summarise_failure",
-      "description": "Final safety net. Reached when both the main and recovery workflow loops exceeded their budgets. No tools — tells the user what was tried and what would unblock the work.",
+      "description": "Final safety net. Reached when both the main and recovery workflow loops exceeded their budgets. No tools \u2014 tells the user what was tried and what would unblock the work.",
       "handler": "chat_completion",
-      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox, a coding assistant driven over the Agent Client Protocol by an untrusted client.\n\nYou've exhausted the tool-call budget for this turn without completing the work. Look at the chat history above. In one short reply, tell the user: (1) what was being attempted, (2) what concrete steps were taken, (3) where things got stuck, and (4) what would unblock the work — more information from the user, a different approach, a missing tool, or that the goal as stated may not be achievable with the available tools. Do not call any tools. Do not pretend the work is complete — be honest that you gave up, and useful about why.\n\nGround this strictly in the actual chat history above — describe only steps that were really taken and results that actually occurred; do not invent attempts, tools, or causes.",
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox, a coding assistant driven over the Agent Client Protocol by an untrusted client.\n\nYou've exhausted the tool-call budget for this turn without completing the work. Look at the chat history above. In one short reply, tell the user: (1) what was being attempted, (2) what concrete steps were taken, (3) where things got stuck, and (4) what would unblock the work \u2014 more information from the user, a different approach, a missing tool, or that the goal as stated may not be achievable with the available tools. Do not call any tools. Do not pretend the work is complete \u2014 be honest that you gave up, and useful about why.\n\nGround this strictly in the actual chat history above \u2014 describe only steps that were really taken and results that actually occurred; do not invent attempts, tools, or causes.",
       "input_var": "recovery_chat",
       "input_max_bytes": 8192,
       "execute_config": {

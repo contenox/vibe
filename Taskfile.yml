@@ -5,6 +5,12 @@ version: '3'
 
 vars:
   BIN_DIR: '{{.ROOT_DIR}}/bin'
+  # Windows refuses to execute a file whose extension is not in PATHEXT, so the
+  # native build must carry .exe there — an extensionless binary is not merely
+  # unconventional on Windows, it is unrunnable. Every task that names the built
+  # binary goes through BIN so the suffix cannot drift between them.
+  EXE: '{{if eq OS "windows"}}.exe{{end}}'
+  BIN: '{{.BIN_DIR}}/contenox{{.EXE}}'
   # ACP peers default to their in-repo builds when present, so the harness
   # targets run with zero manual env on a checkout that has built them
   # (tools/acp-validator README, rust-sdk at tools/rust-sdk). Explicit env
@@ -28,7 +34,7 @@ tasks:
   build:
     desc: Build the contenox CLI (pure Go, static)
     cmds:
-      - CGO_ENABLED=0 go build -o {{.BIN_DIR}}/contenox {{.ROOT_DIR}}/cmd/contenox
+      - CGO_ENABLED=0 go build -o {{.BIN}} {{.ROOT_DIR}}/cmd/contenox
 
   build-windows:
     desc: Cross-build the Windows CLI binary
@@ -122,23 +128,34 @@ tasks:
       - 'echo "==> test-all: all gates green"'
 
   dev-install:
-    desc: Build and link the CLI into ~/.local/bin
+    desc: Build and put the CLI on your PATH (~/.local/bin, or %LOCALAPPDATA%\Programs\contenox on Windows)
     deps: [build]
     cmds:
       - task: dev-link
 
+  # POSIX symlinks into ~/.local/bin; Windows copies into a directory it also
+  # registers on the user PATH, because Windows has no conventional bin dir
+  # that is already there. See scripts/dev-install.ps1 for why it copies.
   dev-link:
-    desc: Symlink bin/contenox into ~/.local/bin
+    desc: Put bin/contenox on your PATH
     deps: [build]
     cmds:
-      - mkdir -p $HOME/.local/bin
-      - ln -sf {{.BIN_DIR}}/contenox $HOME/.local/bin/contenox
-      - 'echo "Linked $HOME/.local/bin/contenox -> {{.BIN_DIR}}/contenox (ensure ~/.local/bin precedes other installs on PATH)"'
+      - cmd: mkdir -p $HOME/.local/bin
+        platforms: [linux, darwin]
+      - cmd: ln -sf {{.BIN}} $HOME/.local/bin/contenox
+        platforms: [linux, darwin]
+      - cmd: 'echo "Linked $HOME/.local/bin/contenox -> {{.BIN}} (ensure ~/.local/bin precedes other installs on PATH)"'
+        platforms: [linux, darwin]
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File {{.ROOT_DIR}}/scripts/dev-install.ps1 -Source {{.BIN}}
+        platforms: [windows]
 
   dev-unlink:
-    desc: Remove the ~/.local/bin symlink
+    desc: Remove the installed CLI from your PATH
     cmds:
-      - rm -f $HOME/.local/bin/contenox
+      - cmd: rm -f $HOME/.local/bin/contenox
+        platforms: [linux, darwin]
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File {{.ROOT_DIR}}/scripts/dev-install.ps1 -Uninstall
+        platforms: [windows]
 
   website:deps:
     desc: Install website dependencies
@@ -198,4 +215,7 @@ tasks:
   clean:
     desc: Remove build outputs
     cmds:
-      - rm -rf {{.BIN_DIR}}
+      - cmd: rm -rf {{.BIN_DIR}}
+        platforms: [linux, darwin]
+      - cmd: powershell -NoProfile -Command "if (Test-Path -LiteralPath '{{.BIN_DIR}}') { Remove-Item -LiteralPath '{{.BIN_DIR}}' -Recurse -Force }"
+        platforms: [windows]

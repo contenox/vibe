@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -668,8 +669,105 @@ func TestUnit_ResizeForcesAFullRepaint(t *testing.T) {
 	}
 }
 
-// TestUnit_ResizeDisownsTheRegion pins that a resize disowns the region
-// exactly as reset() does, rather than moving over rows it can no longer
+// TestUnit_ResizeErasesFromTheOriginDownward pins the erase a resize emits,
+// byte for byte: up to the origin and one ED0 from there. There is no counted
+// row loop, on purpose — a narrowing terminal rewraps the region, so any count
+// taken at the old width names rows that no longer exist, while ED0 covers
+// whatever the rewrap produced all the way to the bottom of the screen.
+//
+// Note this asserts bytes written by resize ITSELF, which the commit helper
+// cannot see: it resets the buffer before committing, so a resize's own
+// output never reaches TestUnit_ResizeDisownsTheRegion below.
+func TestUnit_ResizeErasesFromTheOriginDownward(t *testing.T) {
+	p, buf := newTestPainter(20, 10)
+	commit(t, p, buf, frame.Frame{Live: lines("a", "b", "c", "d", "e"), Cursor: frame.Cursor{Row: 2}})
+
+	buf.Reset()
+	p.resize(30, 12)
+
+	want := cursorUp(2) + "\r" + seqClearBelow
+	if got := buf.String(); got != want {
+		t.Fatalf("resize erase\n got %q\nwant %q", got, want)
+	}
+}
+
+// TestUnit_ResizeErasesASingleRowRegion covers the degenerate region: the caret
+// is already on the origin, so no vertical movement is owed at all.
+func TestUnit_ResizeErasesASingleRowRegion(t *testing.T) {
+	p, buf := newTestPainter(20, 10)
+	commit(t, p, buf, frame.Frame{Live: lines("a"), Cursor: frame.Cursor{Row: 0}})
+
+	buf.Reset()
+	p.resize(30, 12)
+
+	want := "\r" + seqClearBelow
+	if got := buf.String(); got != want {
+		t.Fatalf("resize erase\n got %q\nwant %q", got, want)
+	}
+}
+
+// TestUnit_ResizeNeverWalksAboveTheRegionOrigin pins the one rule the erase may
+// never break. p.row is a floor on the distance to the origin — a rewrap can
+// only have pushed the caret further down, never up — so moving up exactly
+// p.row rows stops at or below the origin. Anything beyond it is the user's
+// committed transcript, and erasing that is not recoverable by a repaint.
+func TestUnit_ResizeNeverWalksAboveTheRegionOrigin(t *testing.T) {
+	p, buf := newTestPainter(40, 20)
+	commit(t, p, buf, frame.Frame{
+		Live:   lines("transcript tail", "", "> type / for commands", "contenox  beam-629a9e4f"),
+		Cursor: frame.Cursor{Row: 2, Col: 2},
+	})
+
+	buf.Reset()
+	p.resize(30, 20)
+	got := buf.String()
+
+	net := 0
+	for _, m := range regexp.MustCompile(`\x1b\[([0-9]*)([AB])`).FindAllStringSubmatch(got, -1) {
+		n := 1
+		if m[1] != "" {
+			n, _ = strconv.Atoi(m[1])
+		}
+		if m[2] == "A" {
+			net -= n
+		} else {
+			net += n
+		}
+		if net < -2 {
+			t.Fatalf("resize walked %d rows above the caret, past the region origin: %q", -net, got)
+		}
+	}
+	if net != -2 {
+		t.Fatalf("resize left the cursor %d rows from the caret, want the region origin at -2: %q", net, got)
+	}
+	if !strings.Contains(got, "\r"+seqClearBelow) {
+		t.Fatalf("resize did not sweep from the origin to the bottom of the screen: %q", got)
+	}
+
+	// And the next frame paints from that origin without reaching for rows it
+	// can no longer locate.
+	after := commit(t, p, buf, frame.Frame{Live: lines("x"), Cursor: frame.Cursor{Row: 0}})
+	want := seqSyncBegin + seqCursorHide + "\r" + seqClearLine + "x" + "\r" + seqCursorShow + seqSyncEnd
+	if after != want {
+		t.Fatalf("commit after resize\n got %q\nwant %q", after, want)
+	}
+}
+
+// TestUnit_ResizeBeforeAnyFrameWritesNothing pins that a resize arriving
+// before the first commit — the initial size event always does — touches the
+// terminal not at all. There is no region to walk off, and emitting a newline
+// would push the shell's own output down by a row for free.
+func TestUnit_ResizeBeforeAnyFrameWritesNothing(t *testing.T) {
+	p, buf := newTestPainter(20, 10)
+	p.resize(30, 12)
+	if got := buf.String(); got != "" {
+		t.Fatalf("resize before any frame wrote %q, want nothing", got)
+	}
+}
+
+// TestUnit_ResizeDisownsTheRegion pins that once the region has been erased a
+// resize disowns it exactly as reset() does, so the next commit paints where
+// the erase left the cursor rather than moving over rows it can no longer
 // locate.
 func TestUnit_ResizeDisownsTheRegion(t *testing.T) {
 	p, buf := newTestPainter(20, 10)

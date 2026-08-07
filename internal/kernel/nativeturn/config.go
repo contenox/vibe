@@ -32,9 +32,21 @@ type Config struct {
 
 const (
 	// DefaultTurnDeadline is the fallback hard turn ceiling (belt 2).
-	DefaultTurnDeadline = 15 * time.Minute
+	//
+	// Sized for the turn this runtime actually runs: dozens of tool calls, a
+	// large diff read back, and a hosted model that thinks. Fifteen minutes
+	// killed working turns, and a turn killed at the ceiling loses everything
+	// it had done — the cost of being wrong here is asymmetric, so the ceiling
+	// is set where only a wedged turn reaches it.
+	DefaultTurnDeadline = 60 * time.Minute
 	// DefaultGraceWindow is the fallback last-viewer-detach survival window (belt 1).
-	DefaultGraceWindow = 60 * time.Second
+	//
+	// This is anti-zombie, not a deadline: belts 2 and 4 already bound how long
+	// an unattended turn can live, so belt 1 does not need to be the tight one.
+	// At 60s a closed laptop lid, a suspended terminal, a VPN reconnect or an
+	// editor restart destroyed an in-flight turn the operator fully intended to
+	// come back to.
+	DefaultGraceWindow = 15 * time.Minute
 	// DefaultJournalSize bounds the per-session replay journal (belt 3).
 	DefaultJournalSize = 512
 )

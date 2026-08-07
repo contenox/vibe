@@ -3,6 +3,7 @@ package contenoxcli
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
@@ -49,12 +50,48 @@ func TestUnit_BuiltinChains_SetThinkOnlyOnUserFacingChatTasks(t *testing.T) {
 	}
 }
 
+// requireReadOnlyReviewLoop pins the property that makes the review branch a
+// specialist rather than a differently-worded assistant: it cannot write.
+//
+// Every mutating tool is listed in hide_tools, which taskexec enforces at
+// EXECUTION (isExecutionToolHidden), not merely by omitting it from the
+// advertised list — so a model that asks for write_file anyway still cannot
+// run it. Both halves of the loop must carry the same withholding, since a
+// tool withheld only at the chat step would still execute at the tool step.
+func requireReadOnlyReviewLoop(t *testing.T, byID map[string]taskengine.TaskDefinition) {
+	t.Helper()
+	mutating := []string{
+		"local_fs.write_file",
+		"local_fs.edit_file",
+		"local_fs.sed",
+		"git.git_add",
+		"git.git_commit",
+		"git.git_checkout_branch",
+		"git.git_restore",
+	}
+	for _, id := range []string{"review_chat", "review_tools"} {
+		task, ok := byID[id]
+		require.True(t, ok, "chain has no %s task", id)
+		require.NotNil(t, task.ExecuteConfig, "task %s execute_config", id)
+		for _, tool := range mutating {
+			require.Contains(t, task.ExecuteConfig.HideTools, tool,
+				"task %s must withhold %s: a reviewer that can write is not read-only", id, tool)
+		}
+		require.Contains(t, task.ExecuteConfig.Tools, "!webtools",
+			"task %s must exclude the network", id)
+	}
+	require.Equal(t, taskengine.HandleChatCompletion, byID["review_chat"].Handler)
+	require.Equal(t, taskengine.HandleExecuteToolCalls, byID["review_tools"].Handler)
+	require.Equal(t, "review_chat", byID["review_tools"].InputVar)
+	require.Equal(t, "review_chat", branchGoto(t, byID["review_tools"], taskengine.OpDefault, "", "review_chat").Goto)
+}
+
 func TestUnit_ACPChain_RoutesToSimpleBoundedLoops(t *testing.T) {
 	var chain taskengine.TaskChainDefinition
 	require.NoError(t, json.Unmarshal([]byte(initACPChain), &chain))
 	require.NotEmpty(t, chain.Tasks)
 	require.Equal(t, "classify_request", chain.Tasks[0].ID)
-	require.Len(t, chain.Tasks, 10)
+	require.Len(t, chain.Tasks, 12)
 
 	byID := make(map[string]taskengine.TaskDefinition)
 	for _, task := range chain.Tasks {
@@ -69,7 +106,8 @@ func TestUnit_ACPChain_RoutesToSimpleBoundedLoops(t *testing.T) {
 			routeLabels = append(routeLabels, branch.When)
 		}
 	}
-	require.ElementsMatch(t, []string{"coding_change", "general"}, routeLabels)
+	require.ElementsMatch(t, []string{"coding_change", "general", "review_change"}, routeLabels)
+	requireReadOnlyReviewLoop(t, byID)
 
 	for _, oldID := range []string{
 		"coding_inspect",
@@ -111,8 +149,8 @@ func TestUnit_ACPChain_RoutesToSimpleBoundedLoops(t *testing.T) {
 		require.Equal(t, "131072", tools.ExecuteConfig.ToolsPolicies["local_fs"]["_max_output_bytes"])
 	}
 
-	requireLoop("coding_chat", "coding_tools", "coding_recovery", "12")
-	requireLoop("acp_chat", "run_tools", "recovery_chat", "10")
+	requireLoop("coding_chat", "coding_tools", "coding_recovery", "60")
+	requireLoop("acp_chat", "run_tools", "recovery_chat", "60")
 
 	codingRecoveryTools := byID["coding_recovery_tools"]
 	require.Equal(t, taskengine.HandleExecuteToolCalls, codingRecoveryTools.Handler)
@@ -130,7 +168,7 @@ func TestUnit_ContenoxChain_RoutesToSpecialistLoops(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(initChain), &chain))
 	require.NotEmpty(t, chain.Tasks)
 	require.Equal(t, "classify_request", chain.Tasks[0].ID)
-	require.Len(t, chain.Tasks, 10)
+	require.Len(t, chain.Tasks, 12)
 
 	byID := make(map[string]taskengine.TaskDefinition)
 	for _, task := range chain.Tasks {
@@ -141,7 +179,9 @@ func TestUnit_ContenoxChain_RoutesToSpecialistLoops(t *testing.T) {
 	require.Equal(t, taskengine.HandleRoute, classifier.Handler)
 	require.Equal(t, "coding_chat", branchGoto(t, classifier, taskengine.OpEquals, "coding_change", "coding_chat").Goto)
 	require.Equal(t, "contenox_chat", branchGoto(t, classifier, taskengine.OpEquals, "general", "contenox_chat").Goto)
+	require.Equal(t, "review_chat", branchGoto(t, classifier, taskengine.OpEquals, "review_change", "review_chat").Goto)
 	require.Equal(t, "contenox_chat", branchGoto(t, classifier, taskengine.OpDefault, "", "contenox_chat").Goto)
+	requireReadOnlyReviewLoop(t, byID)
 
 	requireLoop := func(chatID, toolsID, recoveryID string, toolBudget string) {
 		chat := byID[chatID]
@@ -161,8 +201,8 @@ func TestUnit_ContenoxChain_RoutesToSpecialistLoops(t *testing.T) {
 		require.Contains(t, tools.ExecuteConfig.ToolsPolicies, "webtools", "task %s", toolsID)
 	}
 
-	requireLoop("coding_chat", "coding_tools", "coding_recovery", "12")
-	requireLoop("contenox_chat", "run_tools", "recovery_chat", "10")
+	requireLoop("coding_chat", "coding_tools", "coding_recovery", "60")
+	requireLoop("contenox_chat", "run_tools", "recovery_chat", "60")
 
 	codingRecoveryTools := byID["coding_recovery_tools"]
 	require.Equal(t, taskengine.HandleExecuteToolCalls, codingRecoveryTools.Handler)
@@ -260,14 +300,40 @@ func TestUnit_BuiltinInteractiveChains_ScopeToolExecutionNodes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var chain taskengine.TaskChainDefinition
 			require.NoError(t, json.Unmarshal([]byte(tc.raw), &chain))
+			byID := map[string]taskengine.TaskDefinition{}
+			for _, task := range chain.Tasks {
+				byID[task.ID] = task
+			}
 			for _, task := range chain.Tasks {
 				if task.Handler != taskengine.HandleExecuteToolCalls {
 					continue
 				}
 				require.NotNil(t, task.ExecuteConfig, "task %s execute_config", task.ID)
-				require.Equal(t, []string{"*"}, task.ExecuteConfig.Tools, "task %s tools", task.ID)
+
+				// The executor must offer EXACTLY the scope its chat node
+				// offered. Asserting a literal ["*"] instead would forbid a
+				// scoped specialist (the review loop drops the network; the
+				// planner grants only mission tools) while still missing the
+				// drift that actually matters: a tool withheld from the model
+				// at the chat step but still runnable at the execute step.
+				source, found := byID[task.InputVar]
+				require.True(t, found, "task %s input_var %q names no task", task.ID, task.InputVar)
+				require.NotNil(t, source.ExecuteConfig, "task %s source execute_config", source.ID)
+				require.Equal(t, source.ExecuteConfig.Tools, task.ExecuteConfig.Tools,
+					"task %s tools must match its %s scope", task.ID, source.ID)
+				require.ElementsMatch(t, source.ExecuteConfig.HideTools, task.ExecuteConfig.HideTools,
+					"task %s hide_tools must match its %s scope, or a withheld tool still runs", task.ID, source.ID)
+
 				require.Contains(t, task.ExecuteConfig.ToolsPolicies, "local_fs", "task %s", task.ID)
-				require.Contains(t, task.ExecuteConfig.ToolsPolicies, "webtools", "task %s", task.ID)
+				// webtools carries the response/body byte caps, so it is
+				// required whenever the network is in scope — and meaningless
+				// when it has been excluded.
+				if slices.Contains(task.ExecuteConfig.Tools, "!webtools") {
+					require.NotContains(t, task.ExecuteConfig.ToolsPolicies, "webtools",
+						"task %s excludes webtools but still carries its policy", task.ID)
+				} else {
+					require.Contains(t, task.ExecuteConfig.ToolsPolicies, "webtools", "task %s", task.ID)
+				}
 			}
 		})
 	}

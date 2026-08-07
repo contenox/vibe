@@ -98,7 +98,7 @@ After a task runs, the chain evaluates **transition branches** to decide the nex
 
 Branches are evaluated top to bottom. `"goto": "end"` terminates the chain.
 
-The same branches are what build the agentic loop — a `tool_call` branch into an execute step and a back-edge — walked through in [The agentic loop](/docs/guide/agentic-loop/).
+The same branches are what build the agentic loop — a `tool_call` branch into an execute step and a back-edge — walked through in [The agentic loop](/docs/guide/agentic-loop/). Branches on a `route` task do something else: they pick which loop runs at all, which is how one chain serves requests that need different methods and different tools. See [Request routing](/docs/guide/request-routing/).
 
 ## Data flow
 

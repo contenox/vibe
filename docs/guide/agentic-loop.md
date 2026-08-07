@@ -194,6 +194,7 @@ The production set is the template you copied — so "upgrading" the minimal loo
 
 ## Next
 
+- [Request routing](/docs/guide/request-routing/) — the layer above this one: how a `route` task picks which loop runs, and what a specialist carries beyond its prompt
 - [Your first chain](/docs/guide/first-chain/) — authoring basics: tasks, prompts, models, policies
 - [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) — where chain files live and what the `agent` role means
 - [Transitions & branching](/docs/specification/transitions/) and [Handlers](/docs/specification/handlers/) — the full operator and handler reference

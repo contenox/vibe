@@ -363,7 +363,7 @@ func TestUnit_EngineInputEOFClosesEventsAndCloseIsHonest(t *testing.T) {
 // TestUnit_EventSinkResizeNeverBlocks pins that a resize send never blocks,
 // since resume() runs on the event channel's only reader.
 func TestUnit_EventSinkResizeNeverBlocks(t *testing.T) {
-	s := newEventSink(1)
+	s := newEventSink(1, 0)
 	done := make(chan struct{})
 	tab := input.KeyEvent{Key: input.KeyTab}
 	s.send(tab, done) // the queue is now full
@@ -396,7 +396,7 @@ func TestUnit_EventSinkResizeNeverBlocks(t *testing.T) {
 // TestUnit_EventSinkClosesUnderABlockedProducer pins that close() never
 // panics closing the channel under a blocked sender.
 func TestUnit_EventSinkClosesUnderABlockedProducer(t *testing.T) {
-	s := newEventSink(1)
+	s := newEventSink(1, 0)
 	done := make(chan struct{})
 	s.send(input.KeyEvent{Key: input.KeyTab}, done) // full
 
@@ -426,6 +426,104 @@ func TestUnit_EventSinkClosesUnderABlockedProducer(t *testing.T) {
 	s.close() // idempotent
 	s.send(input.KeyEvent{}, done)
 	s.sendResize(input.ResizeEvent{})
+}
+
+// TestUnit_EventSinkDebouncesADrag pins the coalescing the renderer depends on:
+// a window drag reports a size every few frames, and acting on each one erases
+// and repaints a region the terminal is about to reflow again, leaving one
+// truncated copy of the chrome per intermediate width. Only the size the drag
+// came to rest at is released, and it is released without anything else having
+// to happen.
+func TestUnit_EventSinkDebouncesADrag(t *testing.T) {
+	const settle = 80 * time.Millisecond
+	s := newEventSink(8, settle)
+	var mu sync.Mutex
+	var adopted []input.ResizeEvent
+	s.release = func(ev input.ResizeEvent) {
+		mu.Lock()
+		adopted = append(adopted, ev)
+		mu.Unlock()
+	}
+
+	for _, w := range []int{100, 88, 71, 54, 40} {
+		s.sendResize(input.ResizeEvent{Width: w, Height: 24})
+		time.Sleep(5 * time.Millisecond)
+	}
+	if n := len(s.ch); n != 0 {
+		t.Fatalf("%d resizes reached the app mid-drag, want none until it settles", n)
+	}
+
+	var got input.Event
+	select {
+	case got = <-s.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the settled size never arrived; a drag that stops emits no further events to carry it")
+	}
+	want := input.ResizeEvent{Width: 40, Height: 24}
+	if got != input.Event(want) {
+		t.Fatalf("released %#v, want the size the drag came to rest at %#v", got, want)
+	}
+	select {
+	case extra := <-s.ch:
+		t.Fatalf("a drag released a second event %#v, want exactly one", extra)
+	case <-time.After(3 * settle):
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(adopted) != 1 || adopted[0] != want {
+		t.Fatalf("engine adopted %#v, want only the released size %#v", adopted, want)
+	}
+}
+
+// TestUnit_EventSinkImmediateResizeSkipsTheSettleWindow pins that the sizes
+// which are not a drag — the engine's first, and the one after Suspend — are
+// not made to wait out a window they have no reason to.
+func TestUnit_EventSinkImmediateResizeSkipsTheSettleWindow(t *testing.T) {
+	s := newEventSink(8, time.Hour)
+	s.sendResizeNow(input.ResizeEvent{Width: 80, Height: 24})
+	select {
+	case ev := <-s.ch:
+		if ev != input.Event(input.ResizeEvent{Width: 80, Height: 24}) {
+			t.Fatalf("event = %#v, want the size sent immediately", ev)
+		}
+	default:
+		t.Fatal("an immediate resize was held behind the settle window")
+	}
+}
+
+// TestUnit_EventSinkCloseDropsAPendingResize pins that a resize still inside
+// its settle window cannot keep a timer, a goroutine or the channel alive past
+// Close.
+func TestUnit_EventSinkCloseDropsAPendingResize(t *testing.T) {
+	s := newEventSink(8, time.Hour)
+	s.sendResize(input.ResizeEvent{Width: 80, Height: 24})
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		s.close()
+	}()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("close wedged on a resize waiting out its settle window")
+	}
+	for ev := range s.ch {
+		t.Fatalf("a resize that never settled was delivered after close: %#v", ev)
+	}
+	s.resizeMu.Lock()
+	timer := s.timer
+	s.resizeMu.Unlock()
+	if timer != nil {
+		t.Fatal("close left the settle timer armed")
+	}
+	s.sendResize(input.ResizeEvent{Width: 10, Height: 10}) // idempotent, rearms nothing
+	s.resizeMu.Lock()
+	timer = s.timer
+	s.resizeMu.Unlock()
+	if timer != nil {
+		t.Fatal("a resize after close armed a timer on a dead sink")
+	}
 }
 
 func TestUnit_EngineRejectsNonTerminals(t *testing.T) {

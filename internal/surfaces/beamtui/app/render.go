@@ -42,6 +42,7 @@ func (a *app) buildFrame() frame.Frame {
 
 	spinner := a.spinner()
 	live := a.tr.Live(a.width, a.ascii, spinner)
+	beforeOverlay := len(live)
 
 	switch {
 	case a.card != nil:
@@ -80,6 +81,15 @@ func (a *app) buildFrame() frame.Frame {
 		if hint, ok := a.pal.ArgHint(a.comp.Draft()); ok {
 			live = append(live, frame.Styled(frame.StyleMuted, hint))
 		}
+	}
+
+	// One blank row separates the last output from the composer: replies and
+	// the input rule otherwise sit flush against each other and read as one
+	// block. Skipped when an overlay is up — it already fills the live region
+	// and owns the space above the composer — and on a terminal at the
+	// minimum height, where the row is owed to content.
+	if len(live) == beforeOverlay && a.height > minHeight {
+		live = append(live, frame.Line{})
 	}
 
 	above := len(live)

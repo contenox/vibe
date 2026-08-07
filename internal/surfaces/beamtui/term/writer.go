@@ -22,6 +22,7 @@ const (
 	seqCursorHide = "\x1b[?25l"
 	seqCursorShow = "\x1b[?25h"
 	seqClearLine  = "\x1b[2K" // EL 2: erase the whole current line
+	seqClearBelow = "\x1b[0J" // ED 0: erase from the cursor to the end of the screen
 	seqPasteOn    = "\x1b[?2004h"
 	seqPasteOff   = "\x1b[?2004l"
 	seqFocusOn    = "\x1b[?1004h"
@@ -78,18 +79,73 @@ type painter struct {
 	invalid  bool         // the next commit must fully repaint
 }
 
-// resize records a new terminal size and disowns the live region, exactly as
-// reset() does: a resize reflows the rows the painter measured at the old
-// width, so both its remembered row count and anchor are wrong, and
-// repainting in place would interleave fragments of two frames. A stale
-// snapshot may be left scrolled into history instead, which is strictly
-// better than erasing rows the painter can no longer locate.
+// resize erases the live region at the geometry it was painted with and then
+// adopts the new size. The rows were measured at the old width, so every count
+// the painter holds is about to become wrong and the diff cache with it — but
+// the moment before the size is adopted is the last one in which the region can
+// still be located, so that is when it is erased. Disowning it instead leaves
+// the composer and the status bar scrolled into permanent history, one copy per
+// resize.
+//
+// The cursor is left at column 0 of the region's origin, which is a blank row
+// the next frame paints straight onto: that is why reset()'s p.row = 0 is the
+// correct anchor afterwards and no further state has to survive.
 func (p *painter) resize(width, height int) {
 	if width == p.width && height == p.height {
 		return
 	}
+	p.eraseRegion()
 	p.width, p.height = width, height
 	p.reset()
+}
+
+// eraseRegion blanks the live region in place and parks the cursor on its
+// origin. Nothing is written before the first frame: there is no region to
+// erase, and a resize arriving ahead of the initial commit is the normal case.
+//
+// Reflow is what shapes this. Live rows are truncated to the width they were
+// painted at, so on a terminal that rewraps a narrowing screen — Windows
+// Terminal, VTE and iTerm do; xterm does not — a row that filled the old width,
+// as the status bar always does, becomes two or more physical rows. Every count
+// the painter holds then describes a geometry that no longer exists, in both
+// directions at once: prevRows undercounts the region, and p.row undercounts
+// how far the caret now sits below the origin. The two directions are not
+// symmetric and are not treated alike.
+//
+// Downward, nothing has to be counted at all. A single ED0 issued at column 0
+// of the origin erases from there to the bottom of the screen, covering however
+// many rows the rewrap produced, and nothing but the live region is ever below
+// the origin, so the sweep can only reach rows the painter owns. That is
+// strictly more thorough than blanking prevRows rows and cannot be wrong.
+//
+// Upward, p.row is used as a floor and deliberately left uncorrected. p.prev
+// and the new width would allow an estimate — ceil(textwidth.Width(row)/width)
+// physical rows per row above the caret — but whether the terminal reflowed at
+// all is not discoverable from here, and the estimate is only right on the
+// terminals that do. On one that does not, every estimated row moves the erase
+// one row further into the user's committed transcript, which no repaint can
+// bring back; the worst a too-short move can do is strand a row of chrome,
+// which the next narrowing or a redraw sweeps up. Recoverable beats
+// unrecoverable: never move above the origin p.row names.
+//
+// Rows that reflowed above the caret are therefore the residue this cannot
+// reach. Widening never produces any — each live row is its own logical line no
+// wider than the width it was painted at, so a growing screen has nothing to
+// rejoin — and the engine's resize debounce (see resizeSettleWait) collapses a
+// drag to its resting size, so the common gesture of narrowing and widening
+// back settles on geometry the counts describe exactly.
+func (p *painter) eraseRegion() {
+	if !p.painted || p.prevRows == 0 {
+		return
+	}
+	var b bytes.Buffer
+	p.moveToRow(&b, 0)
+	b.WriteString("\r")
+	b.WriteString(seqClearBelow)
+	// A failed write only means the stale region stays on screen; the caller
+	// is mid-resize and has no way to act on it, and the next commit repaints
+	// regardless because reset() sets invalid.
+	_, _ = p.out.Write(b.Bytes())
 }
 
 // reset forgets the live region entirely: the next commit paints fresh at

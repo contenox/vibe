@@ -16,7 +16,7 @@ Three things run work in contenox, and they are not interchangeable.
 | | What it is | Who drives it | What survives |
 |---|---|---|---|
 | **Chain run** (`contenox run`) | One stateless execution of a chain file | The invoking process, start to finish | The captured execution state (`contenox state show <reqID>`) |
-| **Session** (`contenox new`, `contenox acp`, `contenox chat`) | An attended conversation: you prompt, you approve each gated call | You, turn by turn | The session history |
+| **Session** (`contenox new` / `contenox resume`, `contenox acp`, `contenox chat`) | An attended conversation: you prompt, you approve each gated call | You, turn by turn | The session history |
 | **Mission** (`mission fire`, `/mission`) | An unattended work order: one intent, one agent, one envelope | The runtime's drive loop, unattended | The mission record, its reports, its plan, and its asks |
 
 A mission dispatches a **unit**: a child subprocess running the agent, with its own session underneath. You do not prompt that session. The runtime does, under the rules below.

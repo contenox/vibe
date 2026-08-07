@@ -1,4 +1,4 @@
-package liveness
+package sessionvitals
 
 import (
 	"strings"

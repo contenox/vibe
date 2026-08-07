@@ -51,13 +51,19 @@ const (
 	defaultOllama  = "http://127.0.0.1:11434"
 	defaultModel   = "qwen3:8b"
 	defaultContext = 0
-	defaultTimeout = 5 * time.Minute
+	// defaultTimeout is a total wall clock over an entire one-shot run, not a
+	// per-call bound: at 5m any `contenox "..."` or `contenox run` turn longer
+	// than five minutes was cancelled outright and reported as cancelled by the
+	// user. The interactive surfaces (beam, acp) never applied it, so the same
+	// turn survived in the TUI and died from the CLI. Sized above the turn
+	// deadline that is meant to be the real ceiling; --timeout still narrows it.
+	defaultTimeout = 2 * time.Hour
 )
 
 // reservedSubcommands are first-arg names never treated as run input. Retired
 // names stay reserved so typing one gets an unknown-command error rather than
 // being injected as a chat prompt.
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true, "new": true, "index": true, "search": true, "events": true, "hitl": true,
+var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true, "new": true, "resume": true, "index": true, "search": true, "events": true, "hitl": true,
 	// cobra's shell-completion protocol: every TAB press invokes these; treated
 	// as chat input they would run a live model call per keystroke.
 	"__complete": true, "__completeNoDesc": true}
@@ -209,6 +215,7 @@ box; for local inference run Ollama or vLLM.
     contenox doctor                        # 2. verdict: can I chat right now, yes or no
     contenox init                          # 3. once per project: scaffold .contenox/ and its chains
     contenox new                           # 4. the terminal UI: chat, plan, and shell in one session
+    contenox resume                        #    reopen your last session, transcript and all
     contenox "list files in my home dir"   #    or one-shot, session-backed chat
 
   Inspect models:

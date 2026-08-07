@@ -47,6 +47,7 @@ EXPECTED_CMDS=(
   "mcp"
   "mission"
   "model"
+  "resume"
   "run"
   "sandbox"
   "search"

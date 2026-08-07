@@ -476,11 +476,15 @@ func sanitizeSchemaMap(schema map[string]any) map[string]any {
 		case []interface{}:
 			var typeStr string
 			nullable := false
+			unionHasArray := false
 			for _, elem := range v {
 				if s, ok := elem.(string); ok {
 					if s == "null" {
 						nullable = true
 						continue
+					}
+					if s == "array" {
+						unionHasArray = true
 					}
 					if typeStr == "" {
 						typeStr = s
@@ -489,6 +493,14 @@ func sanitizeSchemaMap(schema map[string]any) map[string]any {
 			}
 			if typeStr == "" {
 				typeStr = "string"
+			}
+			// A union carrying its own items ("one path, or an array of them")
+			// must collapse to the ARRAY branch, not merely the first one:
+			// Vertex rejects a declaration whose schema has items while its
+			// type is anything else. Widening to array loses nothing, because
+			// every such argument's Go side already accepts a one-element list.
+			if _, hasItems := schema["items"]; hasItems && unionHasArray {
+				typeStr = "array"
 			}
 			result["type"] = typeStr
 			if nullable {
@@ -503,7 +515,11 @@ func sanitizeSchemaMap(schema map[string]any) map[string]any {
 		}
 	}
 
-	if items, ok := schema["items"]; ok {
+	// items rides along ONLY on an array. Vertex refuses the whole
+	// functionDeclaration when it sees items under any other type, which takes
+	// down every tool in the request rather than the one bad property — so a
+	// stray items is dropped here instead of forwarded.
+	if items, ok := schema["items"]; ok && result["type"] == "array" {
 		if itemsMap, ok := items.(map[string]any); ok {
 			result["items"] = sanitizeSchemaMap(itemsMap)
 		}

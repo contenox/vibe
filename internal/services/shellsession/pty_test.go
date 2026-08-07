@@ -139,18 +139,22 @@ func TestPromptSuppressionEnv_ShapePerShell(t *testing.T) {
 
 // TestShellSpawnArgs_KeepsInteractiveDropsLineEditor pins that -i stays (rc/aliases depend on it) while bash loses readline.
 func TestShellSpawnArgs_KeepsInteractiveDropsLineEditor(t *testing.T) {
-	bash := strings.Join(shellSpawnArgs("/bin/bash"), " ")
+	bash := strings.Join(shellSpawnArgs("/bin/bash", false), " ")
 	if !strings.Contains(bash, "-i") {
 		t.Fatalf("bash must stay interactive so the user's aliases exist, got %q", bash)
 	}
 	if !strings.Contains(bash, "--noediting") {
 		t.Fatalf("bash must run without readline, got %q", bash)
 	}
-	if zsh := strings.Join(shellSpawnArgs("/bin/zsh"), " "); zsh != "-i" {
+	if zsh := strings.Join(shellSpawnArgs("/bin/zsh", false), " "); zsh != "-i" {
 		t.Fatalf("zsh must be interactive, got %q", zsh)
 	}
-	if other := shellSpawnArgs("/bin/sh"); len(other) != 0 {
+	if other := shellSpawnArgs("/bin/sh", false); len(other) != 0 {
 		t.Fatalf("an unrecognized shell keeps its default argv, got %q", other)
+	}
+	// A human's terminal keeps readline: line editing and history are the point.
+	if hbash := strings.Join(shellSpawnArgs("/bin/bash", true), " "); strings.Contains(hbash, "--noediting") {
+		t.Fatalf("an interactive bash must keep readline, got %q", hbash)
 	}
 }
 

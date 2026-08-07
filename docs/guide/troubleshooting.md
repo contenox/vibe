@@ -136,7 +136,7 @@ Files are classified by content: a `"tasks"` array is a chain, a `"rules"` array
 
 ## Recovering after a crash or a restart
 
-**There is no `contenox resume` command.** Resume is not a verb — it is a side effect of the two commands you would run anyway.
+**Nothing resumes a *run*.** `contenox resume` reopens a terminal-UI session, not a suspended run — resuming a run is not a verb, it is a side effect of the two commands you would run anyway.
 
 **`contenox approvals respond <id> …`** records the verdict and, when a checkpoint exists under that ask, resumes the suspended run *in the responding process*. Ordering matters here and is deliberate: for a checkpointed run, the process proves it can build an engine **before** anything is recorded. A process with no usable model configuration is refused outright and the ask stays pending, answerable from a terminal that can reach your models — because a checkpointed run's verdict is one-shot and must not be spent by a process that cannot act on it.
 

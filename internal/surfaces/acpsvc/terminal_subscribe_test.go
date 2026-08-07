@@ -67,6 +67,13 @@ func (f *fakeShellManager) Resize(sessionID string, rows, cols int) {
 	f.resizes = append(f.resizes, fakeResize{sessionID: sessionID, rows: rows, cols: cols})
 }
 
+// Open and Write joined shellsession.Manager for the host terminal (the
+// operator's own shell, driven keystroke-by-keystroke). This fake serves the
+// agent-facing Run path only, so both are inert here.
+func (f *fakeShellManager) Open(context.Context, string) error { return nil }
+
+func (f *fakeShellManager) Write(string, []byte) error { return nil }
+
 func (f *fakeShellManager) Kill(string) {}
 func (f *fakeShellManager) Shutdown()   {}
 

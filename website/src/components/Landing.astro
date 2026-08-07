@@ -20,6 +20,15 @@ export interface LandingStrings {
   panelH2: string;
   panelP1: string;
   panelP2: string;
+  routeEyebrow: string;
+  routeH2: string;
+  routeLede: string;
+  routeCode: string;
+  routeOutro: string;
+  /** One line per domain the same router shape serves. */
+  routeDomains: string[];
+  /** [label, href] — reading paths out of the routing section. */
+  routeCtas: [string, string][];
   rulesEyebrow: string;
   rulesH2: string;
   rulesLede: string;
@@ -128,6 +137,26 @@ const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text
   <div class="mx-auto mt-6 max-w-2xl space-y-4 text-neutral-600 dark:text-neutral-400">
     <p>{t.panelP1}</p>
     <p>{t.panelP2}</p>
+  </div>
+</section>
+
+<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.routeEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.routeH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.routeLede}</p>
+  <div class="mx-auto mt-8 max-w-3xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-5 text-left font-mono text-xs leading-6 text-neutral-700 shadow-sm backdrop-blur-md sm:text-sm dark:border-neutral-800/60 dark:bg-neutral-950/60 dark:text-neutral-300">
+    <pre class="m-0">{t.routeCode}</pre>
+  </div>
+  <p class="mx-auto mt-4 max-w-2xl text-center text-sm text-neutral-500">{t.routeOutro}</p>
+  <ul class="mx-auto mt-8 max-w-2xl space-y-2 text-sm text-neutral-600 dark:text-neutral-400">
+    {t.routeDomains.map((line) => (
+      <li class="flex gap-3"><span class="text-neutral-400 dark:text-neutral-600">→</span><span>{line}</span></li>
+    ))}
+  </ul>
+  <div class="mt-6 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
+    {t.routeCtas.map(([label, href]) => (
+      <a href={href} class={ctaLink}>{label} →</a>
+    ))}
   </div>
 </section>
 

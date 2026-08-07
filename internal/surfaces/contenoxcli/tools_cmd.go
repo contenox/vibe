@@ -172,7 +172,9 @@ func init() {
 	_ = toolsAddCmd.MarkFlagRequired("url")
 	toolsAddCmd.Flags().StringArray("header", nil, `Header to inject into every call, e.g. "Authorization: Bearer $TOKEN" (repeatable)`)
 	toolsAddCmd.Flags().StringArray("inject", nil, `Param to inject as a tool call argument and hide from the model, e.g. "tenant_id=acme" (repeatable)`)
-	toolsAddCmd.Flags().Int("timeout", 10000, "Request timeout in milliseconds")
+	// 60s, not 10s: a remote tool that aborts early is retried by the model,
+	// so a slow one used to cost several tool rounds rather than one wait.
+	toolsAddCmd.Flags().Int("timeout", 60000, "Request timeout in milliseconds")
 	toolsAddCmd.Flags().String("spec", "", "Full URL or local file path to the OpenAPI v3 spec (e.g. https://host/openapi.yaml, ~/spec.yaml, ./spec.json)")
 
 	// Auth flow flags

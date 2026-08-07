@@ -100,7 +100,13 @@ func NewLocalExecTools(opts ...LocalExecOption) taskengine.ToolsRepo {
 
 func NewLocalExecToolsWith(runner CommandRunner, opts ...LocalExecOption) taskengine.ToolsRepo {
 	h := &LocalExecTools{
-		defaultTimeout: 60 * time.Second,
+		// The agent is told to verify its work, and verification is what takes
+		// time here: `go build ./...`, a test suite, `npm ci`. At 60s those were
+		// killed mid-run and came back as tool failures the model then tried to
+		// work around, spending tool rounds on a command that was never wrong.
+		// Per-call `timeout` still narrows this for a command that should be
+		// quick.
+		defaultTimeout: 10 * time.Minute,
 		shell:          DetectPlatformShell(),
 	}
 	for _, opt := range opts {

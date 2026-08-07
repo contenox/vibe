@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/contenox/contenox/internal/services/sessionvitals"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/comp/brand"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/frame"
 	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
@@ -203,7 +204,7 @@ func buildSegments(s State) []segment {
 	if s.Activity != "" {
 		segs = append(segs, segment{segActivity, activityLine(s)})
 	}
-	if s.Size > 0 {
+	if s.usage().Known() {
 		segs = append(segs, segment{segGauge, gaugeLine(s)})
 	}
 	if s.Inbox >= 1 {
@@ -254,20 +255,23 @@ func activityLine(s State) frame.Line {
 	}
 }
 
+// usage is the State's context-window reading as the service models it. The
+// numbers, the percentage and the thresholds all belong to sessionvitals; the
+// bar only chooses a colour for the pressure it is handed.
+func (s State) usage() sessionvitals.ContextUsage {
+	return sessionvitals.ContextUsage{Used: s.Used, Size: s.Size}
+}
+
 func gaugeLine(s State) frame.Line {
-	pct := 0
-	if s.Size > 0 {
-		pct = s.Used * 100 / s.Size
-	}
+	u := s.usage()
 	style := frame.StyleMuted
-	switch {
-	case pct >= 90:
+	switch u.Pressure() {
+	case sessionvitals.PressureCritical:
 		style = frame.StyleError
-	case pct >= 75:
+	case sessionvitals.PressureHigh:
 		style = frame.StyleWarn
 	}
-	text := fmt.Sprintf("%d/%d (%d%%)", s.Used, s.Size, pct)
-	return frame.Line{frame.S(style, text)}
+	return frame.Line{frame.S(style, u.Text())}
 }
 
 // inboxLine is the operator-inbox badge. It wears StyleHITL, the approval
