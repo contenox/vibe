@@ -17,8 +17,14 @@ fi
 
 echo "==> CLI help smoke: $BIN"
 
+# The opt-in-beta gate is pinned per pass rather than inherited: an operator's
+# real ~/.contenox has `opt-in-beta true`, CI's HOME is empty, and that
+# divergence once let a beta-hidden command pass locally and fail in CI. Both
+# states are asserted below, so neither environment can hide the other's bug.
+
 # 1. --help must exit 0.
-HELP_OUTPUT="$("$BIN" --help 2>&1)"
+HELP_OUTPUT="$(CONTENOX_OPT_IN_BETA=false "$BIN" --help 2>&1)"
+BETA_HELP_OUTPUT="$(CONTENOX_OPT_IN_BETA=true "$BIN" --help 2>&1)"
 echo "$HELP_OUTPUT" | head -5
 
 # 2. Version string must be present.
@@ -30,10 +36,9 @@ fi
 # 3. Every top-level subcommand must appear in the help output. Keep this list
 # in lockstep with the registrations in internal/surfaces/contenoxcli/cli.go — a command
 # added there but not here is invisible to this gate, and vice versa.
-EXPECTED_CMDS=(
+STABLE_CMDS=(
   "acp"
   "acpx"
-  "agent"
   "approvals"
   "backend"
   "new"
@@ -61,15 +66,49 @@ EXPECTED_CMDS=(
   "workspace"
 )
 
+# BETA_CMDS are registered unconditionally but marked Hidden without the
+# opt-in (see the betaHidden block in cli.go). They are asserted absent from
+# the stable help and present under the opt-in, so the gate still fails if one
+# is deleted outright rather than merely hidden.
+BETA_CMDS=(
+  "agent"
+  "events"
+)
+
+# has_cmd reports whether $2 lists $1 as a top-level subcommand.
+has_cmd() {
+  echo "$2" | grep -qE "^  $1[[:space:]]"
+}
+
 MISSING=()
-for cmd in "${EXPECTED_CMDS[@]}"; do
-  if ! echo "$HELP_OUTPUT" | grep -qE "^  $cmd[[:space:]]"; then
-    MISSING+=("$cmd")
-  fi
+for cmd in "${STABLE_CMDS[@]}"; do
+  has_cmd "$cmd" "$HELP_OUTPUT" || MISSING+=("$cmd")
 done
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
   echo "FAIL: missing subcommand(s) in --help output: ${MISSING[*]}" >&2
+  exit 1
+fi
+
+# Stable commands must not vanish when beta is enabled either: the opt-in adds
+# surface, it never replaces it.
+MISSING=()
+for cmd in "${STABLE_CMDS[@]}" "${BETA_CMDS[@]}"; do
+  has_cmd "$cmd" "$BETA_HELP_OUTPUT" || MISSING+=("$cmd")
+done
+
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+  echo "FAIL: missing subcommand(s) in --help output under opt-in-beta: ${MISSING[*]}" >&2
+  exit 1
+fi
+
+LEAKED=()
+for cmd in "${BETA_CMDS[@]}"; do
+  has_cmd "$cmd" "$HELP_OUTPUT" && LEAKED+=("$cmd")
+done
+
+if [[ ${#LEAKED[@]} -gt 0 ]]; then
+  echo "FAIL: beta subcommand(s) visible without opt-in-beta: ${LEAKED[*]}" >&2
   exit 1
 fi
 
@@ -81,4 +120,4 @@ if ! echo "$VERSION_OUTPUT" | grep -qE "v[0-9]+\.[0-9]+\.[0-9]+"; then
   exit 1
 fi
 
-echo "==> OK: all ${#EXPECTED_CMDS[@]} subcommands present, version $VERSION_OUTPUT"
+echo "==> OK: ${#STABLE_CMDS[@]} stable + ${#BETA_CMDS[@]} beta-gated subcommands present, version $VERSION_OUTPUT"
