@@ -305,3 +305,92 @@ func mustRead(t *testing.T, rd *librelay.Reader) librelay.Frame {
 	}
 	return f
 }
+
+// TestUnit_RelayDoubleSignsTheWelcome is what makes the connector's
+// verification path testable without a real relay: the double holds an
+// identity and proves it the way the contract says a relay must.
+func TestUnit_RelayDoubleSignsTheWelcome(t *testing.T) {
+	t.Parallel()
+	r := relaytest.New()
+	defer r.Close()
+	link := r.Dial()
+	w, rd := librelay.NewWriter(link.Conn()), librelay.NewReader(link.Conn())
+
+	nonce, err := librelay.NewNonce()
+	if err != nil {
+		t.Fatalf("NewNonce: %v", err)
+	}
+	hello, err := librelay.Frame{Type: librelay.TypeHello, Instance: "inst-a", ID: "1"}.
+		WithPayload(librelay.Hello{ProtocolVersion: librelay.ProtocolVersion, Instance: "inst-a", Nonce: nonce})
+	if err != nil {
+		t.Fatalf("WithPayload: %v", err)
+	}
+	if err := w.WriteFrame(hello); err != nil {
+		t.Fatalf("WriteFrame hello: %v", err)
+	}
+	var wel librelay.Welcome
+	if err := mustRead(t, rd).DecodePayload(&wel); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
+	pub, err := librelay.ParsePublicKey(r.PublicKey())
+	if err != nil {
+		t.Fatalf("ParsePublicKey: %v", err)
+	}
+	if err := librelay.VerifyWelcome(pub, nonce, wel.ProtocolVersion, "inst-a", wel.Signature); err != nil {
+		t.Fatalf("VerifyWelcome: %v", err)
+	}
+}
+
+// TestUnit_RelayDoubleCanRefuseToSign is the relay that was never given a key.
+// A connector that pinned one must be able to see that case in a test, and it
+// reaches the verifier by a different path from a wrong signature.
+func TestUnit_RelayDoubleCanRefuseToSign(t *testing.T) {
+	t.Parallel()
+	r := relaytest.New(relaytest.NoSignature())
+	defer r.Close()
+	link := r.Dial()
+	w, rd := librelay.NewWriter(link.Conn()), librelay.NewReader(link.Conn())
+
+	nonce, _ := librelay.NewNonce()
+	hello, err := librelay.Frame{Type: librelay.TypeHello, Instance: "inst-a", ID: "1"}.
+		WithPayload(librelay.Hello{ProtocolVersion: librelay.ProtocolVersion, Instance: "inst-a", Nonce: nonce})
+	if err != nil {
+		t.Fatalf("WithPayload: %v", err)
+	}
+	if err := w.WriteFrame(hello); err != nil {
+		t.Fatalf("WriteFrame hello: %v", err)
+	}
+	var wel librelay.Welcome
+	if err := mustRead(t, rd).DecodePayload(&wel); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
+	if len(wel.Signature) != 0 {
+		t.Fatal("NoSignature relay signed anyway")
+	}
+}
+
+// TestUnit_RelayDoubleSignsOnlyWhenChallenged: a connector that offers no
+// nonce is not asking to be convinced, and there is nothing to sign over.
+func TestUnit_RelayDoubleSignsOnlyWhenChallenged(t *testing.T) {
+	t.Parallel()
+	r := relaytest.New()
+	defer r.Close()
+	link := r.Dial()
+	w, rd := librelay.NewWriter(link.Conn()), librelay.NewReader(link.Conn())
+
+	hello, err := librelay.Frame{Type: librelay.TypeHello, Instance: "inst-a", ID: "1"}.
+		WithPayload(librelay.Hello{ProtocolVersion: librelay.ProtocolVersion, Instance: "inst-a"})
+	if err != nil {
+		t.Fatalf("WithPayload: %v", err)
+	}
+	if err := w.WriteFrame(hello); err != nil {
+		t.Fatalf("WriteFrame hello: %v", err)
+	}
+	var wel librelay.Welcome
+	if err := mustRead(t, rd).DecodePayload(&wel); err != nil {
+		t.Fatalf("DecodePayload: %v", err)
+	}
+	if len(wel.Signature) != 0 {
+		t.Fatal("relay signed an unchallenged hello")
+	}
+}

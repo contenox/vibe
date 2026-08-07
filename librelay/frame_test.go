@@ -3,6 +3,7 @@ package librelay_test
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -186,7 +187,9 @@ func TestUnit_DecodePayloadTolerantOfAbsence(t *testing.T) {
 	if err := (librelay.Frame{Type: librelay.TypeHeartbeat}).DecodePayload(&h); err != nil {
 		t.Fatalf("DecodePayload on an empty payload: %v", err)
 	}
-	if h != (librelay.Hello{}) {
+	// reflect rather than ==: Hello carries a nonce, and a struct with a
+	// slice in it is not comparable.
+	if !reflect.DeepEqual(h, librelay.Hello{}) {
 		t.Fatalf("payload decoded to %+v, want zero", h)
 	}
 }

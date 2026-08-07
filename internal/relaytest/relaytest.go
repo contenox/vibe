@@ -7,10 +7,19 @@
 // and no address anywhere in this package — a connector under test dials
 // nothing and the "never open a listening socket" rule is enforced by there
 // being no API that could break it.
+//
+// It holds an identity. Every [Relay] generates an Ed25519 key and signs the
+// handshake with it, so a connector's verification path is exercised here
+// rather than only against a deployed relay — which is the difference between
+// a check that is tested and a check that is hoped for. Two relays are two
+// identities, so "signed by the wrong relay" is a second [New] and needs no
+// special mode; [NoSignature] covers the relay that signs nothing at all.
 package relaytest
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +51,12 @@ const defaultDeadline = 10 * time.Second
 // (instance, session) without decoding the payload.
 type Relay struct {
 	autoControl bool
+	// priv is the identity a real relay proves itself with. Every fake
+	// relay has one, generated per [New], so two relays in one test are
+	// two identities and a test for "signed by the wrong relay" is a
+	// second New rather than a special mode.
+	priv ed25519.PrivateKey
+	sign bool
 
 	mu    sync.Mutex
 	links []*Link
@@ -57,13 +72,37 @@ type Option func(*Relay)
 // test misses.
 func NoAutoControl() Option { return func(r *Relay) { r.autoControl = false } }
 
-// New returns a running fake relay.
+// SigningKey replaces the generated identity, for a test that must pin a
+// specific key or share one identity across two relays.
+func SigningKey(priv ed25519.PrivateKey) Option { return func(r *Relay) { r.priv = priv } }
+
+// NoSignature makes the relay answer welcome without signing the connector's
+// nonce, the way a relay that has not been given a key would. A connector that
+// pinned a key must refuse it; this is the case a wrong-key test does not
+// cover, because "absent" and "wrong" reach a verifier by different paths.
+func NoSignature() Option { return func(r *Relay) { r.sign = false } }
+
+// New returns a running fake relay with a fresh signing identity.
 func New(opts ...Option) *Relay {
-	r := &Relay{autoControl: true, byID: map[string]*Link{}}
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		// crypto/rand failing is not a condition a test double can
+		// carry on through, and New has no error to return: every
+		// caller would ignore it.
+		panic("relaytest: generate signing key: " + err.Error())
+	}
+	r := &Relay{autoControl: true, priv: priv, sign: true, byID: map[string]*Link{}}
 	for _, o := range opts {
 		o(r)
 	}
 	return r
+}
+
+// PublicKey is the relay's identity in the encoding
+// [librelay.ParsePublicKey] reads, ready to be handed to a connector as its
+// pinned key.
+func (r *Relay) PublicKey() string {
+	return librelay.FormatPublicKey(r.priv.Public().(ed25519.PublicKey))
 }
 
 // Link is one connector's connection. It owns the relay side of a pipe and
@@ -173,8 +212,20 @@ func (l *Link) autoRespond(f librelay.Frame) {
 		}
 		l.bind(h.Instance)
 		version := min(h.ProtocolVersion, librelay.ProtocolVersion)
+		welcome := librelay.Welcome{ProtocolVersion: version, Relay: "relaytest"}
+		if l.relay.sign && len(h.Nonce) > 0 {
+			// Signed over the version selected above, not the one
+			// offered: the connector verifies against what it was
+			// told, so signing the offer would never verify.
+			sig, err := librelay.SignWelcome(l.relay.priv, h.Nonce, version, h.Instance)
+			if err != nil {
+				_ = l.Send(ctx, librelay.NewError(f, librelay.CodeMalformedFrame, err.Error()))
+				return
+			}
+			welcome.Signature = sig
+		}
 		reply := librelay.Frame{Type: librelay.TypeWelcome, Instance: h.Instance, ReplyTo: f.ID}
-		reply, _ = reply.WithPayload(librelay.Welcome{ProtocolVersion: version, Relay: "relaytest"})
+		reply, _ = reply.WithPayload(welcome)
 		_ = l.Send(ctx, reply)
 	case librelay.TypeHeartbeat:
 		if !f.IsRequest() {

@@ -114,6 +114,13 @@ type Hello struct {
 	// Agent names the implementation and version, for operator diagnosis
 	// only. Nothing may branch on it — that is what ProtocolVersion is for.
 	Agent string `json:"agent,omitempty"`
+	// Nonce is a fresh random challenge the relay signs into
+	// [Welcome.Signature], so the connector can tell the relay it paired
+	// with from anything else that answered the dial. It is generated per
+	// connection by [NewNonce] and is never a secret — it is only ever
+	// useful once. Empty means the connector is not asking to be convinced,
+	// which a relay may still answer by signing nothing.
+	Nonce []byte `json:"nonce,omitempty"`
 }
 
 // Welcome is the [TypeWelcome] payload: the relay's acceptance.
@@ -126,6 +133,13 @@ type Welcome struct {
 	ProtocolVersion int `json:"protocol_version"`
 	// Relay names the relay implementation and version, diagnostics only.
 	Relay string `json:"relay,omitempty"`
+	// Signature is Ed25519 over [SigningInput] of the connector's
+	// [Hello.Nonce], the ProtocolVersion selected above and the instance —
+	// the relay's half of a mutual authentication whose other half is a
+	// bearer credential on the transport. It is omitempty because a
+	// connector that pinned no key does not require one; a connector that
+	// did treats its absence as fatal. See [VerifyWelcome].
+	Signature []byte `json:"sig,omitempty"`
 }
 
 // Error is the [TypeError] payload.

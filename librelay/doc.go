@@ -49,6 +49,17 @@
 // anyway — a framing change severe enough to need it is a change that makes the
 // frame unparseable before the version is reachable.
 //
+// # Authentication
+//
+// The handshake is mutual but asymmetric, because the two directions have
+// different problems. The instance proves itself to the relay with a bearer
+// credential on the transport's upgrade request — never in a frame, so nothing
+// here handles it. The relay proves itself to the instance inside the
+// handshake: [Hello] carries a fresh [Hello.Nonce] and [Welcome] answers with
+// [Welcome.Signature], checked by [VerifyWelcome] against the public key the
+// instance stored when it paired. Both ends compute the signed bytes with
+// [SigningInput], which is the reason it lives in this shared module.
+//
 // # Framing
 //
 // NDJSON, the same framing ACP uses. The payload is already a JSON value, so a

@@ -65,9 +65,25 @@ type session struct {
 
 	seq atomic.Uint64
 
+	// note records a notable moment on the tracker operation that owns this
+	// connection (see Connector.hold). Nil in tests that build a session
+	// without a tracker; use note0 rather than calling it directly.
+	note func(id string, data any)
+
 	mu        sync.Mutex
 	pendingID string
 	pendingCh chan struct{}
+}
+
+// note0 reports a change on the owning operation, tolerating a session built
+// without one. Events that happen DURING a held connection belong to that
+// connection's operation: opening a fresh span per event would emit spans of
+// zero duration, which measure nothing and bury the one span whose duration is
+// worth reading.
+func (s *session) note0(id string, data any) {
+	if s.note != nil {
+		s.note(id, data)
+	}
 }
 
 func newSession(conn net.Conn, rd *librelay.Reader, w *librelay.Writer, backlog int) *session {

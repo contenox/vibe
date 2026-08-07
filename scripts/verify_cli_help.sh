@@ -49,6 +49,8 @@ STABLE_CMDS=(
   "inbox"
   "index"
   "init"
+  "login"
+  "logout"
   "mcp"
   "mission"
   "model"

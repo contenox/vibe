@@ -32,6 +32,7 @@ package relaylink
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,6 +75,15 @@ var (
 	// ErrUnauthorized is a relay refusing the credentials. Fatal for the
 	// same reason: credentials do not repair themselves.
 	ErrUnauthorized = errors.New("relaylink: relay refused the credentials")
+	// ErrRelayIdentity is the peer failing to prove it is the relay this
+	// instance paired with: no signature on welcome, or one that does not
+	// verify against [Credentials.RelayPublicKey]. It sits beside
+	// ErrVersionNegotiation and ErrUnauthorized in the fatal set for the
+	// same reason both of those are there — a peer that cannot prove itself
+	// on this dial will not start being able to on the next one, so
+	// retrying is a hot loop against something that is either misconfigured
+	// or hostile.
+	ErrRelayIdentity = errors.New("relaylink: relay did not prove its identity")
 	// ErrHeartbeatTimeout ends a connection whose peer stopped answering
 	// probes. It is the only way to notice a relay that died without
 	// closing its TCP connection.
@@ -156,11 +166,19 @@ type Handler func(librelay.Frame)
 // frame, it only hands them to [DialFunc], because how a credential is
 // presented is a property of the transport that pairing chooses.
 type Credentials struct {
-	// Token is the paired instance's secret.
+	// Token is the paired instance's secret. [DialTLS] presents it as a
+	// bearer credential on the upgrade request; it never enters a frame.
 	Token string
-	// RelayPublicKey is the relay identity pinned at pairing time. The
-	// default dialer does not yet check it; pinning belongs with the
-	// pairing step that produces it.
+	// RelayPublicKey is the relay's long-lived Ed25519 key, pinned at
+	// pairing time, in the encoding [librelay.ParsePublicKey] reads. When
+	// it is set the handshake refuses any peer that cannot sign the
+	// connector's nonce with it, fatally. When it is empty no relay
+	// identity was pinned and the handshake proceeds unverified, which is
+	// exactly how an unpaired runtime behaved before pairing existed.
+	//
+	// This pins the relay's application-layer identity, not its TLS leaf:
+	// the certificate rotates roughly every 90 days and a binary pinning it
+	// would break itself in the field.
 	RelayPublicKey string
 }
 
@@ -220,6 +238,12 @@ const (
 type Connector struct {
 	cfg     Config
 	tracker libtracker.ActivityTracker
+	// relayKey is Credentials.RelayPublicKey decoded once in New, or nil
+	// when nothing was pinned. Decoding at construction rather than per
+	// handshake means a malformed key is a configuration error the caller
+	// sees immediately, instead of a fatal state the retry loop discovers
+	// on the first dial and reports as the relay's fault.
+	relayKey ed25519.PublicKey
 
 	// cur is the live session, or nil. Send reads it without a lock so a
 	// caller on a mission path never contends with the retry loop.
@@ -264,11 +288,20 @@ func New(cfg Config) (*Connector, error) {
 	if cfg.Tracker == nil {
 		cfg.Tracker = libtracker.NoopTracker{}
 	}
+	var relayKey ed25519.PublicKey
+	if cfg.Credentials.RelayPublicKey != "" {
+		k, err := librelay.ParsePublicKey(cfg.Credentials.RelayPublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("relaylink: RelayPublicKey: %w", err)
+		}
+		relayKey = k
+	}
 	return &Connector{
-		cfg:     cfg,
-		tracker: cfg.Tracker,
-		stopped: make(chan struct{}),
-		status:  Status{State: StateIdle},
+		cfg:      cfg,
+		tracker:  cfg.Tracker,
+		relayKey: relayKey,
+		stopped:  make(chan struct{}),
+		status:   Status{State: StateIdle},
 	}, nil
 }
 
@@ -389,7 +422,7 @@ func (c *Connector) run(ctx context.Context) {
 			// attributed to the attempt that produced it, and a
 			// second record per retry is how an unreachable relay
 			// buries a real incident.
-			reportErr, _, end := c.tracker.Start(ctx, "relay", "abandon", "endpoint", c.cfg.Endpoint)
+			reportErr, _, end := c.tracker.Start(ctx, "abandon", "relay", "endpoint", c.cfg.Endpoint)
 			reportErr(err)
 			end()
 			c.setFatal(err)
@@ -412,11 +445,15 @@ func (c *Connector) run(ctx context.Context) {
 // enough to count as healthy, and why the attempt ended; success is impossible,
 // since a connection that never ends never returns.
 func (c *Connector) cycle(ctx context.Context) (healthy bool, err error) {
-	// One tracked attempt per cycle, ending when the link is established
-	// or the attempt has failed — never spanning the days a healthy
-	// connection lasts, which would make the span useless as a measure of
-	// anything.
-	reportErr, reportChange, end := c.tracker.Start(ctx, "relay", "connect", "endpoint", c.cfg.Endpoint)
+	// One tracked attempt per cycle, ending when the link is established or
+	// the attempt has failed. The lifetime of the resulting connection is a
+	// separate operation (see hold), so this span measures "how long did it
+	// take to get up" and that one measures "how long did it stay up".
+	//
+	// Argument order is (operation, subject) — the verb, then the thing it
+	// acts on — matching every other caller in this repo ("publish",
+	// "status_changed_event"; "sweep", "abandoned_missions").
+	reportErr, reportChange, end := c.tracker.Start(ctx, "connect", "relay", "endpoint", c.cfg.Endpoint)
 	conn, err := c.cfg.Dial(ctx, c.cfg.Endpoint, c.cfg.Credentials)
 	if err != nil {
 		reportErr(err)
@@ -436,15 +473,11 @@ func (c *Connector) cycle(ctx context.Context) (healthy bool, err error) {
 	end()
 
 	started := time.Now()
+	// hold owns its own tracker operation: its duration IS how long the link
+	// stayed up, which is what tells a stable relay from a flapping one, and
+	// is the same quantity ResetAfter below is judged against.
 	err = c.hold(ctx, conn, rd, w)
 	c.noteError(err)
-	// The end of a held connection is its own event: it is where an
-	// operator tells a relay restart apart from a link that was never up.
-	dropErr, _, dropEnd := c.tracker.Start(ctx, "relay", "disconnect", "endpoint", c.cfg.Endpoint)
-	if err != nil {
-		dropErr(err)
-	}
-	dropEnd()
 	return time.Since(started) >= c.cfg.Backoff.ResetAfter, err
 }
 
@@ -454,6 +487,15 @@ func (c *Connector) cycle(ctx context.Context) (healthy bool, err error) {
 func (c *Connector) hold(ctx context.Context, conn net.Conn, rd *librelay.Reader, w *librelay.Writer) error {
 	defer func() { _ = conn.Close() }()
 	s := newSession(conn, rd, w, c.cfg.Backlog)
+
+	// The held connection is the operation; everything notable that happens
+	// while it is up is a change on it. reportErr carries the reason it ended
+	// — always non-nil — so a relay restart is distinguishable from a link
+	// that was never up by the span's duration alone.
+	reportErr, reportChange, end := c.tracker.Start(ctx, "hold", "relay", "endpoint", c.cfg.Endpoint)
+	s.note = reportChange
+	defer end()
+
 	c.cur.Store(s)
 	c.markConnected()
 	defer func() {
@@ -473,7 +515,11 @@ func (c *Connector) hold(ctx context.Context, conn net.Conn, rd *librelay.Reader
 	case <-s.done:
 	}
 	wg.Wait()
-	return s.reason()
+	err := s.reason()
+	if err != nil {
+		reportErr(err)
+	}
+	return err
 }
 
 // setState records a lifecycle transition.
@@ -541,11 +587,19 @@ func (c *Connector) handshake(conn net.Conn) (*librelay.Reader, *librelay.Writer
 	}
 	rd, w := librelay.NewReader(conn), librelay.NewWriter(conn)
 	const helloID = "hello"
+	// A fresh nonce per handshake, always — including when nothing is
+	// pinned, so a relay's answer never depends on whether this connector
+	// intends to check it.
+	nonce, err := librelay.NewNonce()
+	if err != nil {
+		return nil, nil, err
+	}
 	hello, err := librelay.Frame{Type: librelay.TypeHello, Instance: c.cfg.Instance, ID: helloID}.
 		WithPayload(librelay.Hello{
 			ProtocolVersion: librelay.ProtocolVersion,
 			Instance:        c.cfg.Instance,
 			Agent:           c.cfg.Agent,
+			Nonce:           nonce,
 		})
 	if err != nil {
 		return nil, nil, err
@@ -583,6 +637,15 @@ func (c *Connector) handshake(conn net.Conn) (*librelay.Reader, *librelay.Writer
 			if wel.ProtocolVersion < MinProtocolVersion || wel.ProtocolVersion > librelay.ProtocolVersion {
 				return nil, nil, fmt.Errorf("%w: relay chose %d, this build speaks %d..%d",
 					ErrVersionNegotiation, wel.ProtocolVersion, MinProtocolVersion, librelay.ProtocolVersion)
+			}
+			// The signature is checked over the version the relay
+			// selected, after that version has been accepted: a
+			// signature is only meaningful once it is known which
+			// negotiation it belongs to.
+			if c.relayKey != nil {
+				if err := librelay.VerifyWelcome(c.relayKey, nonce, wel.ProtocolVersion, c.cfg.Instance, wel.Signature); err != nil {
+					return nil, nil, fmt.Errorf("%w: %w", ErrRelayIdentity, err)
+				}
 			}
 			if err := conn.SetDeadline(time.Time{}); err != nil {
 				return nil, nil, fmt.Errorf("relaylink: clear handshake deadline: %w", err)
@@ -646,9 +709,13 @@ func (c *Connector) dispatch(ctx context.Context, s *session, f librelay.Frame) 
 		// carries on.
 		var e librelay.Error
 		_ = f.DecodePayload(&e)
-		reportErr, _, end := c.tracker.Start(ctx, "relay", "peer_error", "code", e.Code, "re", f.ReplyTo)
-		reportErr(fmt.Errorf("relaylink: relay reported %s: %s", e.Code, e.Message))
-		end()
+		// Not fatal to the connection, so it is a change on the hold
+		// operation rather than an error that ends it.
+		s.note0("peer_error", map[string]string{
+			"code":    e.Code,
+			"message": e.Message,
+			"re":      f.ReplyTo,
+		})
 	case librelay.TypeWelcome:
 		// A second welcome is not owed an answer; the handshake is
 		// already settled and re-negotiating mid-connection is not a
@@ -713,7 +780,8 @@ func (c *Connector) heartbeatLoop(s *session) {
 // the cost of retrying a permanent failure is a capped backoff and the cost of
 // giving up on a transient one is a runtime that stays dark until it restarts.
 func isFatal(err error) bool {
-	return errors.Is(err, ErrVersionNegotiation) || errors.Is(err, ErrUnauthorized)
+	return errors.Is(err, ErrVersionNegotiation) || errors.Is(err, ErrUnauthorized) ||
+		errors.Is(err, ErrRelayIdentity)
 }
 
 // isMalformed reports whether err is the codec's per-frame failure, after which
