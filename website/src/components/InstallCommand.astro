@@ -1,0 +1,70 @@
+---
+// One-line install, per OS. The two rows are both rendered; the inline script
+// in Base.astro reveals the tab strip and hides the inactive row, so with
+// JavaScript off this degrades to two labelled rows rather than a dead toggle.
+interface Props {
+  posixLabel: string;
+  windowsLabel: string;
+  copyLabel: string;
+}
+const { posixLabel, windowsLabel, copyLabel } = Astro.props;
+const posixCmd = 'curl -fsSL https://contenox.com/install.sh | sh';
+const windowsCmd = 'irm https://contenox.com/install.ps1 | iex';
+const tab = 'rounded-md px-3 py-1 text-xs font-medium text-neutral-500 transition-colors hover:text-neutral-800 aria-selected:bg-white aria-selected:text-neutral-900 aria-selected:shadow-sm dark:hover:text-neutral-200 dark:aria-selected:bg-neutral-900 dark:aria-selected:text-white';
+const row = 'flex items-center gap-4 overflow-x-auto rounded-xl border border-neutral-200/50 bg-white/60 px-4 py-3 font-mono text-sm shadow-sm backdrop-blur-md whitespace-nowrap dark:border-neutral-800/50 dark:bg-neutral-950/60';
+const copyBtn = 'ml-auto shrink-0 rounded-md border border-neutral-200 px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:border-neutral-800 dark:hover:bg-neutral-900 dark:hover:text-neutral-200';
+---
+<div class="mx-auto max-w-lg" data-install>
+  <div role="tablist" hidden data-install-tabs class="mx-auto mb-3 inline-flex rounded-lg border border-neutral-200/60 bg-neutral-100/60 p-1 dark:border-neutral-800/60 dark:bg-neutral-900/60">
+    <button type="button" role="tab" data-install-tab="posix" aria-selected="true" class={tab}>{posixLabel}</button>
+    <button type="button" role="tab" data-install-tab="windows" aria-selected="false" class={tab}>{windowsLabel}</button>
+  </div>
+  <div class="flex flex-col gap-2">
+    <div data-install-row="posix" class={row}>
+      <span class="text-neutral-400 dark:text-neutral-500">$</span>
+      <span>{posixCmd}</span>
+      <button data-copy={posixCmd} class={copyBtn}>{copyLabel}</button>
+    </div>
+    <div data-install-row="windows" class={row}>
+      <span class="text-neutral-400 dark:text-neutral-500">PS&gt;</span>
+      <span>{windowsCmd}</span>
+      <button data-copy={windowsCmd} class={copyBtn}>{copyLabel}</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* The rows and the tab strip carry display utilities, which outrank the
+     user-agent [hidden] rule; without this the toggle would not hide them. */
+  [data-install-tabs][hidden],
+  [data-install-row][hidden] {
+    display: none !important;
+  }
+</style>
+
+<script>
+  // Bundled once per page even though the component is rendered twice; every
+  // group is kept in sync so the choice carries between hero and footer.
+  const groups = document.querySelectorAll('[data-install]');
+  if (groups.length) {
+    const isWindows = /win/i.test(navigator.userAgent) && !/(android|phone)/i.test(navigator.userAgent);
+    const select = (os) => {
+      groups.forEach((g) => {
+        g.querySelectorAll('[data-install-tab]').forEach((b) => {
+          b.setAttribute('aria-selected', String(b.dataset.installTab === os));
+        });
+        g.querySelectorAll('[data-install-row]').forEach((r) => {
+          r.hidden = r.dataset.installRow !== os;
+        });
+      });
+    };
+    groups.forEach((g) => {
+      const tabs = g.querySelector('[data-install-tabs]');
+      if (tabs) tabs.hidden = false;
+      g.querySelectorAll('[data-install-tab]').forEach((b) => {
+        b.addEventListener('click', () => select(b.dataset.installTab));
+      });
+    });
+    select(isWindows ? 'windows' : 'posix');
+  }
+</script>

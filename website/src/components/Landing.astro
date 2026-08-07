@@ -7,6 +7,9 @@ export interface LandingStrings {
   ctaRecipe: string;
   ctaGithub: string;
   copyLabel: string;
+  /** OS tab labels on the install command. */
+  installTabPosix: string;
+  installTabWindows: string;
   installNote: string;
   trustChips: string[];
   missionEyebrow: string;
@@ -69,6 +72,7 @@ export interface LandingStrings {
 interface Props {
   t: LandingStrings;
 }
+import InstallCommand from './InstallCommand.astro';
 const { t } = Astro.props;
 // Large media (gifs, screenshots) is served from the website's S3 bucket.
 const media = 'https://contenox-website-assets-573643652148.s3.amazonaws.com/media/';
@@ -89,10 +93,8 @@ const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text
     <a href="/docs/use-cases/" class="rounded-lg bg-gradient-to-r from-primary-500 to-primary-700 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-primary-500/20 transition-all hover:scale-105 hover:shadow-primary-500/40">{t.ctaRecipe}</a>
     <a href="https://github.com/contenox/contenox" class={btnGhost}>{t.ctaGithub}</a>
   </div>
-  <div class="mx-auto mt-10 flex max-w-lg items-center gap-4 overflow-x-auto rounded-xl border border-neutral-200/50 bg-white/60 px-4 py-3 font-mono text-sm shadow-sm backdrop-blur-md whitespace-nowrap dark:border-neutral-800/50 dark:bg-neutral-950/60">
-    <span class="text-neutral-400 dark:text-neutral-500">$</span>
-    <span>curl -fsSL https://contenox.com/install.sh | sh</span>
-    <button data-copy="curl -fsSL https://contenox.com/install.sh | sh" class="ml-auto shrink-0 rounded-md border border-neutral-200 px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:border-neutral-800 dark:hover:bg-neutral-900 dark:hover:text-neutral-200">{t.copyLabel}</button>
+  <div class="mt-10">
+    <InstallCommand posixLabel={t.installTabPosix} windowsLabel={t.installTabWindows} copyLabel={t.copyLabel} />
   </div>
   <p class="mt-3 text-xs text-neutral-500" set:html={t.installNote} />
   <div class="mx-auto mt-4 flex max-w-lg flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-neutral-500 dark:text-neutral-500">
@@ -258,10 +260,8 @@ const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text
 <section class="hero-grid border-t border-neutral-200 px-5 py-16 text-center dark:border-neutral-800">
   <p class="text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.bottomEyebrow}</p>
   <h2 class="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">{t.bottomH2}</h2>
-  <div class="mx-auto mt-8 flex max-w-lg items-center gap-4 overflow-x-auto rounded-xl border border-neutral-200/50 bg-white/60 px-4 py-3 font-mono text-sm shadow-sm backdrop-blur-md whitespace-nowrap dark:border-neutral-800/50 dark:bg-neutral-950/60">
-    <span class="text-neutral-400 dark:text-neutral-500">$</span>
-    <span>curl -fsSL https://contenox.com/install.sh | sh</span>
-    <button data-copy="curl -fsSL https://contenox.com/install.sh | sh" class="ml-auto shrink-0 rounded-md border border-neutral-200 px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:border-neutral-800 dark:hover:bg-neutral-900 dark:hover:text-neutral-200">{t.copyLabel}</button>
+  <div class="mt-8">
+    <InstallCommand posixLabel={t.installTabPosix} windowsLabel={t.installTabWindows} copyLabel={t.copyLabel} />
   </div>
   <div class="mt-6 flex flex-wrap justify-center gap-3">
     <a href="/docs/guide/quickstart/" class="rounded-lg bg-gradient-to-r from-primary-500 to-primary-700 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-primary-500/20 transition-all hover:scale-105 hover:shadow-primary-500/40">{t.bottomCta}</a>
