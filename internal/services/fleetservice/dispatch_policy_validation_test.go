@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/errdefs"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/stretchr/testify/require"
 )

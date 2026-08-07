@@ -18,7 +18,7 @@ import (
 	"github.com/contenox/contenox/libtracker"
 	"github.com/google/uuid"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 )
 
 // hitlLog reports one approval-lifecycle step through the service's tracker,

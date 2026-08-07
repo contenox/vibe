@@ -11,11 +11,11 @@ import (
 	"fmt"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
-	libbus "github.com/contenox/contenox/internal/libbus"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libbus "github.com/contenox/contenox/libbus"
+	libdb "github.com/contenox/contenox/libdbexec"
 )
 
 // StopMission abandons a running mission: finishes it (a terminal mission

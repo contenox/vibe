@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 )
 
 // Durable domain-event log, date-partitioned: one table per UTC day

@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	libbus "github.com/contenox/contenox/internal/libbus"
 	"github.com/contenox/contenox/internal/services/missionservice"
+	libbus "github.com/contenox/contenox/libbus"
 	"github.com/stretchr/testify/require"
 )
 

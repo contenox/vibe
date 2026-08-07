@@ -12,8 +12,6 @@ import (
 	"os"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
-	"github.com/contenox/contenox/internal/libbus"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/fleetservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -21,6 +19,8 @@ import (
 	"github.com/contenox/contenox/internal/services/reportrouter"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libbus"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 )
 

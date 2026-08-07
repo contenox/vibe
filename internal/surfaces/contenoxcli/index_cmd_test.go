@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/models/ollamatokenizer"
 	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
@@ -22,6 +21,7 @@ import (
 	"github.com/contenox/contenox/internal/services/searchtool"
 	"github.com/contenox/contenox/internal/services/workspaceindex"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"

@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"time"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libdb "github.com/contenox/contenox/libdbexec"
 )
 
 // heartbeatCeiling is the widest gap between two heartbeats a live mission can

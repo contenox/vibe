@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/contenox/contenox/internal/libbus"
+	"github.com/contenox/contenox/libbus"
 	"github.com/contenox/contenox/libtracker"
 )
 

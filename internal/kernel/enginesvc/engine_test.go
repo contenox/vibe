@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/contenox/contenox/internal/kernel/enginesvc"
-	"github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libdbexec"
 )
 
 func hasIssueCode(issues []setupcheck.Issue, code string) bool {

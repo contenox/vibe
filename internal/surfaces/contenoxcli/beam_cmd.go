@@ -16,7 +16,6 @@ import (
 	"strings"
 	"syscall"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -35,6 +34,7 @@ import (
 	"github.com/contenox/contenox/internal/surfaces/beamtui/term"
 	"github.com/contenox/contenox/internal/surfaces/fleetboot"
 	libacp "github.com/contenox/contenox/libacp"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 	xterm "golang.org/x/term"

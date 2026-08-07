@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/errdefs"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/google/uuid"
 )

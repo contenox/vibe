@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/models/backendservice"
 	"github.com/contenox/contenox/internal/models/modelrepo"
+	"github.com/contenox/contenox/libdbexec"
 	// Blank-imported so the "ollama" catalog provider is registered even if
 	// no other import already pulled it in; production wiring does this
 	// transitively, but this package should not depend on that surviving refactors.

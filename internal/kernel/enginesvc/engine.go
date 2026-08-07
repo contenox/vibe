@@ -9,9 +9,6 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/kernel/tools"
-	libbus "github.com/contenox/contenox/internal/libbus"
-	"github.com/contenox/contenox/internal/libdbexec"
-	"github.com/contenox/contenox/internal/libkvstore"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	"github.com/contenox/contenox/internal/models/ollamatokenizer"
 	"github.com/contenox/contenox/internal/models/runtimestate"
@@ -25,6 +22,9 @@ import (
 	"github.com/contenox/contenox/internal/services/stateservice"
 	"github.com/contenox/contenox/internal/services/toolguidance"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libbus "github.com/contenox/contenox/libbus"
+	"github.com/contenox/contenox/libdbexec"
+	"github.com/contenox/contenox/libkvstore"
 	"github.com/contenox/contenox/libtracker"
 )
 

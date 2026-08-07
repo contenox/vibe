@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 )
 
 // Durable chat history over message_indices and messages: an index row is one

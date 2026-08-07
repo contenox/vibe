@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/models/modelcapability"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )

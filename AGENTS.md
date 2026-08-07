@@ -66,12 +66,13 @@ dependency, expect govulncheck to have an opinion about it.
 
 ## Rules that earned their place
 
-- **Almost everything lives under `internal/`.** That is deliberate: the compiler
-  defines the public surface. `libacp/` is the one intentional exception — a
-  reusable Go ACP implementation, importable as
-  `github.com/contenox/contenox/libacp`. It is maintained in this tree so the
-  public repo builds from a clone with no private dependency. Do not add a second exception
-  without the maintainer saying so.
+- **Domain logic lives under `internal/`.** That is deliberate: the compiler
+  defines the public surface. The intentional exceptions are top-level and
+  import as `github.com/contenox/contenox/<pkg>`: `libacp/` (a reusable Go ACP
+  implementation), `libtracker/`, and the infrastructure leaves `libdbexec/`,
+  `libbus/`, `libkvstore/`, `errdefs/`. They are maintained in this tree so the
+  public repo builds from a clone with no private dependency. Do not add a
+  further exception without the maintainer saying so.
 - **Surfaces stay thin.** `internal/surfaces/` adapts; it never holds business
   logic. Surfaces call services. This is a rule, not a convention.
 - **Session-level ACP features belong in `acpsvc`, never in the TUI alone.**

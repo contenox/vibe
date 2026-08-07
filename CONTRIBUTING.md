@@ -91,11 +91,13 @@ The `contenox` binary is the only entrypoint. Current commands include
 protocols for editors; `workspace` grants or revokes the workspace roots a
 session may run in; the rest work against the local database directly.)
 
-The layout is layered, and almost everything lives under Go `internal/` so
-the compiler defines the public surface. `libacp/` is the one deliberate
-exception: a reusable Go ACP implementation anyone may import as
-`github.com/contenox/contenox/libacp`. It is maintained here rather than in a
-separate repo so a clone of this repository builds with no dependency you
+The layout is layered, and the domain logic lives under Go `internal/` so
+the compiler defines the public surface. The top-level packages are the
+deliberate exceptions: `libacp/` (a reusable Go ACP implementation),
+`libtracker/`, and the infrastructure leaves `libdbexec/`, `libbus/`,
+`libkvstore/`, and `errdefs/` — all importable as
+`github.com/contenox/contenox/<pkg>`. They are maintained here rather than in
+separate repos so a clone of this repository builds with no dependency you
 cannot fetch.
 
 ```text
@@ -111,11 +113,11 @@ internal/store/          runtimetypes — entities + the SQLite Store
                          (including the model registry)
 internal/surfaces/       thin adapters: contenoxcli (CLI), acpsvc (ACP
                          sessions), beamtui (the TUI, in development)
-internal/libbus, libdbexec, libkvstore, libsandbox
-                         infrastructure libraries with no LLM dependency
-internal/errdefs/        shared error vocabulary (tiny leaf)
-libtracker/              infrastructure library that stays top-level
-                         (not under internal/), no LLM dependency
+internal/libsandbox/     sandboxing, no LLM dependency
+libbus/, libdbexec/, libkvstore/, libtracker/
+                         top-level infrastructure libraries with no LLM
+                         dependency
+errdefs/                 shared error vocabulary (tiny leaf)
 docs/rnd/                design records and R&D directions
 website/                 contenox.com (Astro; renders docs/ as content)
 ```

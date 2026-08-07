@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/errdefs"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/libacp"
 )

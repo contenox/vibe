@@ -10,8 +10,6 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	libbus "github.com/contenox/contenox/internal/libbus"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/chainagents"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -19,6 +17,8 @@ import (
 	"github.com/contenox/contenox/internal/services/operatorinbox"
 	"github.com/contenox/contenox/internal/services/reportrouter"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libbus "github.com/contenox/contenox/libbus"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/stretchr/testify/require"
 )

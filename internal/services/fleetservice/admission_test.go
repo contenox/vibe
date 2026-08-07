@@ -8,7 +8,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/errdefs"
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/missionservice"

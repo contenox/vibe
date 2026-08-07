@@ -3,10 +3,10 @@ package setupcheck
 import (
 	"context"
 
-	"github.com/contenox/contenox/internal/libdbexec"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/libdbexec"
 )
 
 // GatherInput builds Input from SQLite KV defaults, registered backend count, and a runtime state snapshot.

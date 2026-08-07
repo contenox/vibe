@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	libdb "github.com/contenox/contenox/libdbexec"
 )
 
 // Dispatcher-side durable state over event_cursors and event_firings: where a

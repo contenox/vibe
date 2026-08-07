@@ -6,9 +6,9 @@ import (
 	"math/rand/v2"
 	"time"
 
-	libbus "github.com/contenox/contenox/internal/libbus"
 	"github.com/contenox/contenox/internal/services/eventlog"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libbus "github.com/contenox/contenox/libbus"
 	"github.com/contenox/contenox/libtracker"
 )
 

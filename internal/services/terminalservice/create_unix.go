@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/contenox/contenox/internal/errdefs"
+	"github.com/contenox/contenox/errdefs"
 	"github.com/contenox/contenox/internal/services/terminalstore"
 	"github.com/creack/pty"
 	"github.com/google/uuid"

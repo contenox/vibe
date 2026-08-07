@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/contenox/contenox/internal/errdefs"
-	libdb "github.com/contenox/contenox/internal/libdbexec"
+	"github.com/contenox/contenox/errdefs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
