@@ -58,6 +58,32 @@ const (
 // not need libacp linked to route it.
 const TypeACPMessage = "acp.message"
 
+// TypeACPDetach reports that the client behind one attachment is gone: the
+// [Frame.Session] it names will send nothing more and expects nothing more. It
+// carries no payload, because the identifier is the whole message.
+//
+// It closes the one thing [TypeACPMessage] cannot say. A tunnel learns that an
+// attachment began, from the first frame carrying a new Session, and otherwise
+// never learns that it ended — so an abandoned attachment is indistinguishable
+// from a silent one and is reclaimed only by a cap evicting the least recently
+// addressed, which can take a live but idle attachment with it. A detach makes
+// the ordinary ending deterministic; the cap remains the backstop for a client
+// that vanished without sending one.
+//
+// It is a new Type value and NOT a new [Frame] field, which is a compatibility
+// requirement rather than a preference. A relay forwards a frame by decoding
+// and re-encoding it, so a field its own librelay build does not know is not
+// ignored — it is destroyed in transit, silently, with nothing on either side
+// able to observe that it went missing. Type is a field both ends already
+// carry, so an unrecognized value of it survives the round trip intact and is
+// dropped only by a receiver that has decided to drop it.
+//
+// A relay built against a librelay that predates this constant emits none, and
+// that costs nothing: a detach is a hint that an ending has happened, never a
+// prerequisite for one. Nothing waits on it, no answer is owed to it, and the
+// eviction cap covers the whole interval until a deployed relay's pin moves.
+const TypeACPDetach = "acp.detach"
+
 // Resumption types. Not control traffic: a relay routes them to the producer,
 // which is the side holding the content to replay. See [Resume].
 const (
@@ -97,7 +123,13 @@ type Frame struct {
 	// Instance is the runtime instance this frame concerns. Empty only on
 	// frames that precede identification.
 	Instance string `json:"instance,omitempty"`
-	// Session is the ACP session within Instance. Empty on control traffic
+	// Session names the stream within Instance that this frame concerns.
+	// What that stream is belongs to the traffic rather than to the
+	// envelope: for cargo the two ACP endpoints exchange it is an ACP
+	// session, and for traffic a relay multiplexes per connected client
+	// (see [TypeACPMessage]) it is one client's attachment to the instance.
+	// A relay routes on the value without interpreting it, which is exactly
+	// what lets the two meanings share one field. Empty on control traffic
 	// and on anything instance-scoped.
 	Session string `json:"session,omitempty"`
 	// ID marks this frame as a request and correlates the reply. Its

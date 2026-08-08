@@ -21,6 +21,11 @@ import (
 // turn does — there is no native-vs-external branch here. It is also where a
 // stop reason leaves acpsvc, so a turn that ended short is explained here (see
 // explainTurnStop) rather than in each driver.
+//
+// It is also where this connection claims the session for HITL routing (see
+// claimSessionRouting): the client that asked for the turn is the client that
+// must answer the permission requests the turn raises, and it is not
+// necessarily the client that opened the session.
 func (t *Transport) Prompt(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
 	sess, ok := t.sessionFor(req.SessionID)
 	if !ok {
@@ -30,6 +35,7 @@ func (t *Transport) Prompt(ctx context.Context, req libacp.PromptRequest) (libac
 		reportErr(err)
 		return libacp.PromptResponse{}, err
 	}
+	t.claimSessionRouting(sess)
 	resp, err := sess.driver.Prompt(ctx, req, sess)
 	if err != nil {
 		return resp, err

@@ -66,8 +66,16 @@ type Deps struct {
 	EnvSetup *EnvSetupSpec
 
 	// SessionRouter is the process-shared (contenox session -> transport)
-	// registry a shared engine routes HITL approvals through. Nil on the
-	// stdio path (one transport, bound directly).
+	// registry a shared engine routes HITL approvals through. Required
+	// wherever one engine serves more than one connection — serve's
+	// WebSockets, and the ACP profile once relay attachments can arrive —
+	// because a shared engine has no other way to tell which client is
+	// driving the session an approval was raised on.
+	//
+	// Nil is legal and means "one transport, bound directly": a caller that
+	// serves exactly one connection may route through that connection and
+	// never consult a registry. Every method here is nil-safe, so an unwired
+	// router costs nothing rather than needing a guard at each call site.
 	SessionRouter *SessionRouter
 
 	// Instances owns external-agent instances off any single connection, so
@@ -320,6 +328,7 @@ func New(deps Deps) libacp.AgentFactory {
 		go func() {
 			<-conn.Closed()
 			connCancel()
+			t.releaseSessionRouting()
 		}()
 		return t
 	}
@@ -553,6 +562,63 @@ func (t *Transport) bindContenoxSession(contenoxSessionID string, sid libacp.Ses
 func (t *Transport) unbindContenoxSession(contenoxSessionID string) {
 	delete(t.contenoxToACPID, contenoxSessionID)
 	t.deps.SessionRouter.unbind(contenoxSessionID, t)
+}
+
+// claimSessionRouting records this transport as the owner of sess's approvals
+// and out-of-band deliveries, superseding whichever transport held it before.
+//
+// It is called at the top of every turn, not only when a session is created or
+// loaded, and that is what makes "the client driving the session" literal
+// rather than "the client that opened it last". Two clients may hold the same
+// session at once — a phone and a desk, both attached to one runtime — and the
+// binding a load left behind names whichever of them attached most recently,
+// which is not necessarily the one whose prompt is about to raise a permission
+// request. Routing the card to the other one strands it on a screen nobody is
+// looking at.
+//
+// One owner per session, last claim wins. A card for a turn already running
+// when another client claims the session follows the claim; that is the price
+// of a single owner, and the alternative — fanning a request out to every
+// attached client — would ask two humans one question and take whichever
+// answered first as the verdict.
+//
+// A nil router, an unwired session and a session with no contenox id are all
+// no-ops, so the single-connection path pays nothing for this.
+func (t *Transport) claimSessionRouting(sess *sessionEntry) {
+	if t.deps.SessionRouter == nil || sess == nil {
+		return
+	}
+	t.deps.SessionRouter.bind(sess.InternalSessionID, t)
+}
+
+// releaseSessionRouting deregisters every session this transport owns from the
+// shared router. It rides the connection's Closed signal, which is the only
+// teardown hook every caller reaches — serve and the relay tunnel never call
+// [Transport.Close] — so a client that detached, whether a phone that changed
+// network, a relay attachment torn down or a WebSocket dropped, stops being the
+// address approvals are sent to.
+//
+// Without it the router keeps naming a dead connection, and the next approval
+// raised on one of its sessions is written to a closed transport: libacp
+// resolves the pending request with ErrConnectionClosed, so the turn fails on a
+// question no human was ever shown. Deregistered, the same approval reports
+// ErrNoBoundSession and the caller falls back to whatever it uses for a session
+// nobody holds.
+//
+// It deliberately does NOT touch the connection-local session state, terminals
+// or downstream agents: a bare connection drop is not a session close (see
+// [Transport.Close]), and it is the router entry alone that must not outlive
+// the connection. The router's unbind is identity-guarded, so releasing a
+// session another connection has since claimed leaves that live claim standing.
+func (t *Transport) releaseSessionRouting() {
+	if t.deps.SessionRouter == nil {
+		return
+	}
+	t.sessionMu.Lock()
+	defer t.sessionMu.Unlock()
+	for _, e := range t.sessions {
+		t.deps.SessionRouter.unbind(e.InternalSessionID, t)
+	}
 }
 
 // registerPromptCancel records cancel as sid's in-flight turn canceller,

@@ -9,6 +9,8 @@ Contenox follows the [AGENTS.md community standard](https://agents.md) — a `RE
 
 The same file works across [60+ tools](https://agents.md) including Codex, Aider, Cursor, Gemini CLI, Jules, Devin, and more. Write it once, every agent reads it.
 
+This page is the mechanism. For the argument — what belongs in the file, what breaks without it, and why a stale one is worse than none — see [Why a project needs an AGENTS.md](/docs/guide/agents-md-why/).
+
 ## How it loads
 
 When `contenox chat` starts a new session, it walks up from the current working directory to find the closest `AGENTS.md`. If found, it's prepended to the chat history as a single `system` message — once per session, not once per turn — and persisted alongside the conversation.

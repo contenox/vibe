@@ -344,14 +344,16 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	tools := acpToolset(db, tracker, goIndex, gt, workspaceID, func() *acpsvc.Transport { return transport }, shellScrub, missions, acpHITL, missionPub, optInBeta)
 
+	// One registry for every connection this process serves: the stdio
+	// transport built below and each remote attachment the relay tunnel
+	// creates from the same factory. Without it a permission request raised by
+	// work a phone started would be answered on the desk, because a single
+	// engine has only ever had one place to send an approval.
+	sessionRouter := acpsvc.NewSessionRouter()
+
 	var askApproval localtools.AskApproval
 	if enableHITL {
-		askApproval = func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
-			if transport == nil {
-				return false, fmt.Errorf("acpsvc: HITL approval requested before transport initialization")
-			}
-			return transport.AskApproval(ctx, req)
-		}
+		askApproval = routedAskApproval(sessionRouter, func() *acpsvc.Transport { return transport })
 	}
 
 	// enginesvc.Build requires a configured model. When none is set, serve a
@@ -483,18 +485,22 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	}
 
 	transportFactory := acpsvc.New(acpsvc.Deps{
-		Engine:                engine,
-		DB:                    db,
-		ChainRegistry:         chains,
-		FIMChainRegistry:      fimChains,
-		DefaultModel:          defaultModel,
-		DefaultProvider:       defaultProvider,
-		DefaultAltModel:       defaultAltModel,
-		DefaultAltProvider:    defaultAltProvider,
-		DefaultMaxTokens:      defaultMaxTokens,
-		DefaultThink:          defaultThink,
-		WorkspaceID:           workspaceID,
-		ContenoxDir:           contenoxDir,
+		Engine:             engine,
+		DB:                 db,
+		ChainRegistry:      chains,
+		FIMChainRegistry:   fimChains,
+		DefaultModel:       defaultModel,
+		DefaultProvider:    defaultProvider,
+		DefaultAltModel:    defaultAltModel,
+		DefaultAltProvider: defaultAltProvider,
+		DefaultMaxTokens:   defaultMaxTokens,
+		DefaultThink:       defaultThink,
+		WorkspaceID:        workspaceID,
+		ContenoxDir:        contenoxDir,
+		// Every transport this factory builds registers here, so an approval
+		// goes to the connection driving the session rather than to the one
+		// this process bound at startup.
+		SessionRouter:         sessionRouter,
 		KnownPolicies:         embeddedPolicyNames(),
 		HITLDefaultPolicyName: profile.hitlPolicy,
 		UpdateBanner:          updateBanner,
@@ -519,6 +525,9 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			},
 		},
 	})
+
+	stopRelay := serveRemoteAttachments(ctx, optInBeta, contenoxDir, transportFactory, tracker, os.Stderr)
+	defer stopRelay()
 
 	// Makes this process visible on the fleet board: self-registers and
 	// heartbeats, entirely best-effort (never blocks or fails serving).
