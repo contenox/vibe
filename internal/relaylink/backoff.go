@@ -101,3 +101,33 @@ func (b *backoffState) next() time.Duration {
 
 // reset returns the schedule to its initial delay, after a link proved healthy.
 func (b *backoffState) reset() { b.ceiling = b.policy.Initial }
+
+// nextHinted is next with a relay-supplied delay applied, clamped to the
+// policy's own bounds.
+//
+// The hint becomes the CEILING of the jittered draw rather than the delay
+// itself. SSE's retry: is a fixed value, and a fixed value is the wrong shape
+// for a fleet: a draining relay that tells every connector "come back in 20s"
+// gets all of them at the same instant, which is the stampede the jitter in
+// [Backoff] exists to prevent. Used as a ceiling it does what the relay wants —
+// move the fleet's return — without synchronising it.
+//
+// Clamped because the hint is a remote input: a relay must not be able to park
+// a connector for a day, nor to spin it faster than the policy allows. A
+// non-positive hint means "no opinion" and falls through to the schedule.
+func (b *backoffState) nextHinted(hint time.Duration) time.Duration {
+	if hint <= 0 {
+		return b.next()
+	}
+	if hint < b.policy.Initial {
+		hint = b.policy.Initial
+	}
+	if hint > b.policy.Max {
+		hint = b.policy.Max
+	}
+	// The schedule still advances: a relay that hints on every attempt must
+	// not hold the connector at its initial delay forever if it is in fact
+	// failing repeatedly.
+	b.next()
+	return time.Duration(rand.Int64N(int64(hint))) + 1
+}

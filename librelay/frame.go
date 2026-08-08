@@ -58,6 +58,16 @@ const (
 // not need libacp linked to route it.
 const TypeACPMessage = "acp.message"
 
+// Resumption types. Not control traffic: a relay routes them to the producer,
+// which is the side holding the content to replay. See [Resume].
+const (
+	// TypeResume asks a session's producer to continue after a cursor. Always
+	// a request, so it is always answered exactly once.
+	TypeResume = "session.resume"
+	// TypeResumed answers [TypeResume] and precedes the replayed frames.
+	TypeResumed = "session.resumed"
+)
+
 // Error codes carried by [Error]. They are strings rather than integers so an
 // unrecognized code degrades to something legible in a log.
 const (
@@ -66,6 +76,10 @@ const (
 	CodeUnknownInstance = "unknown_instance"
 	CodeUnauthorized    = "unauthorized"
 	CodeVersion         = "unsupported_version"
+	// CodeCursorEvicted answers a [Resume] whose cursor the producer no
+	// longer retains, when it cannot replay at all. A producer that can
+	// replay part of the stream answers [Resumed] with Evicted set instead.
+	CodeCursorEvicted = "cursor_evicted"
 )
 
 // Frame is the transport envelope. Field names on the wire are short because
@@ -96,6 +110,24 @@ type Frame struct {
 	// never has to guess whether it owes an answer, and therefore never
 	// answers an answer.
 	ReplyTo string `json:"re,omitempty"`
+	// Seq is the producer's per-(Instance, Session) cursor for this frame,
+	// monotonically increasing and gap-free within a session.
+	//
+	// It exists so a dropped connection costs latency rather than content:
+	// the receiver remembers the last Seq it saw, and on reconnect asks the
+	// producer to continue from there ([Resume]). That is SSE's model — a
+	// cursor the receiver states once per connection, not an acknowledgement
+	// per message — and it is the reason nothing here carries delivery
+	// guarantees.
+	//
+	// Zero means unsequenced and is the correct value for control traffic and
+	// for any producer that does not replay. A receiver must not infer
+	// ordering from an unsequenced frame.
+	//
+	// Opaque to a relay, which routes on (Instance, Session) and never reads
+	// this. Replay is the producer's, because the producer is the side that
+	// still holds the content.
+	Seq uint64 `json:"seq,omitempty"`
 	// Payload is the message body, left as raw JSON so intermediaries do
 	// not parse it. Empty is legal: heartbeat and ack carry nothing.
 	Payload json.RawMessage `json:"payload,omitempty"`
@@ -140,6 +172,48 @@ type Welcome struct {
 	// connector that pinned no key does not require one; a connector that
 	// did treats its absence as fatal. See [VerifyWelcome].
 	Signature []byte `json:"sig,omitempty"`
+	// RetryAfterSeconds hints how long to wait before redialling if this
+	// connection ends, so a draining relay can stagger a fleet's return
+	// instead of taking the whole of it back at once. SSE's `retry:` field,
+	// and it is a hint: a connector clamps it to its own bounds and never
+	// lets a relay set an unbounded delay on itself.
+	//
+	// Zero means the connector's own backoff applies.
+	RetryAfterSeconds int `json:"retry_after,omitempty"`
+}
+
+// Resume is the [TypeResume] payload: continue a session's stream after a
+// cursor.
+//
+// It is NOT relay control traffic. The producer replays, so this is addressed
+// end to end and a relay routes it like any other cargo — a relay that answered
+// it would have to buffer session content, which is the design it does not
+// have.
+//
+// One direction only, deliberately. Replaying commands is not resumption: a
+// re-delivered "approve" is a second approval. Traffic that changes state
+// carries its own idempotency and is never replayed by this mechanism.
+type Resume struct {
+	// AfterSeq is the last [Frame.Seq] the requester saw. Zero asks for the
+	// whole retained stream, which is what a receiver that has seen nothing
+	// sends.
+	AfterSeq uint64 `json:"after_seq"`
+}
+
+// Resumed is the [TypeResumed] payload: what the producer is about to send.
+type Resumed struct {
+	// FromSeq is the first [Frame.Seq] that follows. Greater than
+	// Resume.AfterSeq+1 only when Evicted is set.
+	FromSeq uint64 `json:"from_seq"`
+	// Evicted reports that the requested cursor is older than what the
+	// producer retains, so frames between it and FromSeq are gone.
+	//
+	// Answered explicitly rather than by silently resuming from the oldest
+	// retained frame. SSE does the latter and it is its one real defect: the
+	// receiver cannot tell a continuous stream from one with a hole in it, so
+	// a transcript silently loses turns. A receiver seeing this must refetch
+	// state rather than append.
+	Evicted bool `json:"evicted,omitempty"`
 }
 
 // Error is the [TypeError] payload.

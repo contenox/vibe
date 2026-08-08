@@ -43,6 +43,15 @@
 //     response that will never come; a response or notification never induces a
 //     reply, so two peers cannot ping-pong errors at each other.
 //
+// ⚠ "Ignored" holds for an endpoint, which decodes a frame and acts on it. It
+// does NOT hold for a relay, which decodes a frame and RE-ENCODES it to forward:
+// there an unknown field is not ignored, it is destroyed, and silently, because
+// nothing on either side can see that it went missing. A relay must therefore be
+// built against a version of this package at least as new as the endpoints it
+// carries. Adding a field here is consequently a two-module change — the field,
+// then the relay's dependency on it — and shipping only the first half is
+// indistinguishable from the feature not working.
+//
 // The protocol version is negotiated once in [Hello] / [Welcome] and is
 // deliberately not a per-frame field: it would cost bytes on every frame to
 // carry a number that cannot change mid-connection, and it could not help
@@ -59,6 +68,20 @@
 // [Welcome.Signature], checked by [VerifyWelcome] against the public key the
 // instance stored when it paired. Both ends compute the signed bytes with
 // [SigningInput], which is the reason it lives in this shared module.
+//
+// # Resumption
+//
+// A dropped connection costs latency, never content. [Frame.Seq] is the
+// producer's per-session cursor; on reconnect the receiver sends [Resume] with
+// the last value it saw and the producer continues after it. That is SSE's
+// model — one cursor per connection rather than an acknowledgement per message
+// — and it is why nothing here carries delivery guarantees.
+//
+// Resumption is not relay control traffic. The producer replays because it is
+// the side still holding the content, so [TypeResume] routes end to end and a
+// relay treats it as any other cargo. It also travels one way only: replaying a
+// command is not resumption, since a re-delivered instruction is a second
+// instruction.
 //
 // # Framing
 //

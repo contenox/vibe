@@ -249,6 +249,11 @@ type Connector struct {
 	// caller on a mission path never contends with the retry loop.
 	cur atomic.Pointer[session]
 
+	// retryHint is the relay's last [librelay.Welcome.RetryAfterSeconds] in
+	// nanoseconds, awaiting the next redial. Written by the handshake and
+	// swapped to zero by the supervisor loop, so it applies exactly once.
+	retryHint atomic.Int64
+
 	startOnce sync.Once
 	closeOnce sync.Once
 	cancel    context.CancelFunc
@@ -428,7 +433,10 @@ func (c *Connector) run(ctx context.Context) {
 			c.setFatal(err)
 			return
 		}
-		d := b.next()
+		// Consumed once: a hint belongs to the connection that carried
+		// it, and a stale one must not govern a dial the relay never
+		// spoke to.
+		d := b.nextHinted(time.Duration(c.retryHint.Swap(0)))
 		timer.Reset(d)
 		select {
 		case <-ctx.Done():
@@ -647,6 +655,10 @@ func (c *Connector) handshake(conn net.Conn) (*librelay.Reader, *librelay.Writer
 					return nil, nil, fmt.Errorf("%w: %w", ErrRelayIdentity, err)
 				}
 			}
+			// Recorded, not applied here: it governs the delay
+			// before the NEXT dial, and this connection has only
+			// just been established.
+			c.retryHint.Store(int64(time.Duration(wel.RetryAfterSeconds) * time.Second))
 			if err := conn.SetDeadline(time.Time{}); err != nil {
 				return nil, nil, fmt.Errorf("relaylink: clear handshake deadline: %w", err)
 			}
