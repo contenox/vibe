@@ -34,12 +34,20 @@ import (
 // the loader's fail-closed validation asks for.
 const testChainEnv = "CONTENOX_BEAMBRIDGE_TEST_CHAIN_PATH"
 
+// harnessWorkspace is the workspace id every harness Bridge is built with, and
+// the one a test reads stored sessions back under.
+const harnessWorkspace = "beam-bridge-ws"
+
 type harness struct {
 	t      *testing.T
 	bridge *Bridge
 	db     libdb.DBManager
 	bus    libbus.Messenger
 	dir    string
+	// router is the registry the Bridge's loopback and every connection served
+	// from Bridge.AgentFactory register with. A test reaches approvals through
+	// it exactly as the composition root's approval callback does.
+	router *acpsvc.SessionRouter
 	// cancel kills the context the Bridge was built with. Tests that exercise
 	// context-driven teardown call it; everyone else leaves it to Cleanup.
 	cancel context.CancelFunc
@@ -66,13 +74,14 @@ func newHarness(t *testing.T) *harness {
 	chains, err := acpsvc.LoadChainRegistryFrom("unused.json", testChainEnv)
 	require.NoError(t, err)
 
+	router := acpsvc.NewSessionRouter()
 	b, err := New(ctx, Deps{
 		Engine:        &enginesvc.Engine{Bus: bus},
 		DB:            db,
 		Bus:           bus,
 		ChainRegistry: chains,
-		WorkspaceID:   "beam-bridge-ws",
-		SessionRouter: acpsvc.NewSessionRouter(),
+		WorkspaceID:   harnessWorkspace,
+		SessionRouter: router,
 	})
 	require.NoError(t, err)
 
@@ -85,7 +94,7 @@ func newHarness(t *testing.T) *harness {
 		cancel()
 	})
 
-	return &harness{t: t, bridge: b, db: db, bus: bus, dir: dir, cancel: cancel}
+	return &harness{t: t, bridge: b, db: db, bus: bus, dir: dir, router: router, cancel: cancel}
 }
 
 // initSession runs the handshake and opens one session, returning its id with

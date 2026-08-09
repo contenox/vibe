@@ -1,7 +1,19 @@
-// acp_relay.go attaches `contenox acp` to a paired relay, so a remote ACP
-// client is served by the same agent factory the stdio path is served by. It is
-// entirely optional: a machine with no pairing runs exactly the code it ran
-// before, and nothing on the stdio path sequences on any of this.
+// acp_relay.go attaches a running contenox surface to a paired relay, so a
+// remote ACP client is served by the same agent factory the surface's own
+// connection is served by. It is entirely optional: a machine with no pairing
+// runs exactly the code it ran before, and nothing on either local connection
+// sequences on any of this.
+//
+// Every surface that serves acpsvc calls it — `contenox acp` on its stdio
+// connection, beam on its in-process loopback — and that is a rule rather than
+// a convenience: /pair is answered inside a session an operator is looking at,
+// so the process that redeemed the credential is the process that must hold the
+// connection it mints. A surface that serves sessions and does not dial leaves
+// a machine paired and never connected.
+//
+// It lives in this package rather than one of its own because both call sites
+// are already here — acp_cmd.go and beam_cmd.go — so a shared package would
+// export a seam with no second importer.
 package contenoxcli
 
 import (
@@ -29,36 +41,37 @@ type approvalRouter interface {
 	AskApproval(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error)
 }
 
-// routedAskApproval is the approval callback the ACP profile hands the engine:
-// it asks the client driving the session the request was raised on, and falls
-// back to the process's stdio transport when no client holds that session.
+// routedAskApproval is the approval callback a surface hands the engine: it
+// asks the client driving the session the request was raised on, and falls back
+// to the surface's own transport when no client holds that session. `contenox
+// acp` passes its stdio transport as local, beam its loopback.
 //
 // Router first, because the engine is shared and the connections are not. Every
-// transport this process builds — the stdio one and each relay attachment —
+// transport this process builds — the local one and each relay attachment —
 // registers with one router, so a permission request raised by work a phone
 // started is answered on the phone. Before this, an approval was answered
-// through whichever transport the process bound at startup, which is the stdio
-// one: a card raised by remote work appeared at the desk and the phone waited
-// on a question it was never shown.
+// through whichever transport the process bound at startup: a card raised by
+// remote work appeared at the desk and the phone waited on a question it was
+// never shown.
 //
-// stdio is consulted on exactly one condition, [acpsvc.ErrNoBoundSession], and
+// local is consulted on exactly one condition, [acpsvc.ErrNoBoundSession], and
 // the narrowness is the point. A deny, a client cancellation and a dropped
 // connection are all answers from the connection that was asked; retrying any
 // of them against a second connection would ask a different human the same
 // question and take the second verdict. Only "nobody owns this session" leaves
-// the question unasked, and that is the case the stdio transport exists to
+// the question unasked, and that is the case the local transport exists to
 // cover — it is where a session created before anything attached still lives,
 // and it reproduces the pre-router behaviour exactly for a runtime that never
 // attaches anything.
 //
-// A stdio transport that does not hold the session either reports the durable
+// A local transport that does not hold the session either reports the durable
 // ask's own message, which names the terminal command that answers it. That is
 // the correct end of the chain: the ask outlives the connection, so an
 // unattached question is answerable rather than lost.
 //
-// stdio is a func because the transport is built after the engine that consumes
+// local is a func because the transport is built after the engine that consumes
 // this callback; nil until the connection's factory runs.
-func routedAskApproval(router approvalRouter, stdio func() *acpsvc.Transport) localtools.AskApproval {
+func routedAskApproval(router approvalRouter, local func() *acpsvc.Transport) localtools.AskApproval {
 	return func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
 		if router != nil {
 			allowed, err := router.AskApproval(ctx, req)
@@ -67,8 +80,8 @@ func routedAskApproval(router approvalRouter, stdio func() *acpsvc.Transport) lo
 			}
 		}
 		var t *acpsvc.Transport
-		if stdio != nil {
-			t = stdio()
+		if local != nil {
+			t = local()
 		}
 		if t == nil {
 			return false, fmt.Errorf("acpsvc: HITL approval requested before transport initialization")
@@ -80,14 +93,20 @@ func routedAskApproval(router approvalRouter, stdio func() *acpsvc.Transport) lo
 // serveRemoteAttachments starts the relay tunnel for this invocation and
 // returns the teardown, which is always safe to defer.
 //
+// Defer it after the surface's own connection teardown, so LIFO detaches every
+// remote client before the loopback, engine and database they are served by go
+// away.
+//
 // optInBeta gates it because /pair mints the credential it reads, and /pair is
 // gated. Gating the command that produces a thing but not the thing itself
 // would leave an operator who turned the opt-in off still dialing on a file
 // they can no longer see or remove.
 //
-// factory must be the raw transport factory, not the presence-wrapped one the
-// stdio connection uses: an attachment must never overwrite the process's bound
-// transport, which the toolset's cwd resolver and the approval path both read.
+// factory must be the raw transport factory — `contenox acp`'s
+// transportFactory, or [enginebridge.Bridge.AgentFactory] for beam — never the
+// wrapper a surface builds to capture its own connection's transport: an
+// attachment must never overwrite the process's bound transport, which the
+// toolset's cwd resolver and the approval path both read.
 //
 // warn receives one line when a pairing exists but could not be attached.
 // Failure is never fatal — it costs this process remote clients and nothing
@@ -105,7 +124,7 @@ func serveRemoteAttachments(
 	}
 	stop, err := startRelayTunnel(ctx, contenoxDir, factory, tracker)
 	if err != nil {
-		fmt.Fprintf(warn, "contenox acp: remote attachments are unavailable: %v\n", err)
+		fmt.Fprintf(warn, "contenox: remote attachments are unavailable: %v\n", err)
 	}
 	return stop
 }
@@ -124,7 +143,7 @@ func serveRemoteAttachments(
 //
 // It never waits on the relay. The connector's Start returns before the first
 // dial is attempted and reconnects on its own, so an unreachable relay costs
-// this command nothing and is invisible to the editor on stdio.
+// this command nothing and is invisible to the surface's own client.
 //
 // The tunnel and the connector cannot be built in one step — the connector
 // needs a handler and the handler needs somewhere to send — so the send closure
