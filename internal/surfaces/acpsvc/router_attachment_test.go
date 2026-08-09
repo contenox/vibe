@@ -26,8 +26,8 @@ import (
 
 // This file drives the case the relay tunnel exists for: one engine serving two
 // ACP clients at once — a desk on the process's own connection and a phone
-// behind a real relayacp.Tunnel — and asserts that a permission request raised
-// by work on one of them is shown on that one and nowhere else.
+// behind a real relayacp.Tunnel — and asserts that both of them see the session
+// they both hold: the same transcript, and the same approvals.
 //
 // Both clients are real libacp.ClientSideConnections with live Run loops, and
 // the phone's runs across a genuine frame boundary rather than a stand-in for
@@ -383,18 +383,27 @@ func TestFleet_StdioIsUnchangedWithNothingAttached(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoBoundSession, "an unheld session must fall through to the caller's own policy")
 }
 
-// TestFleet_TwoClientsOnOneSessionFollowTheOneDrivingIt is the documented
-// answer to the ambiguous case: one session has exactly one owner, and the
-// owner is whoever most recently claimed it — which a turn does, not only a
-// load. A phone and a desk may hold the same session at once, and the client
-// that asked for the turn is the client that must answer the questions the turn
-// raises; owning by "opened it last" would strand the card on the other screen.
-func TestFleet_TwoClientsOnOneSessionFollowTheOneDrivingIt(t *testing.T) {
+// TestFleet_TwoClientsOnOneSessionAreBothAskedAndFirstAnswerWins replaces a
+// single-owner rule this test previously pinned: a session is shared, so every
+// client holding it is shown the card, and the first real answer resolves the
+// question for all of them.
+//
+// The case the old rule got wrong is the ordinary one. A phone and a desk on
+// one session are one person looking from two places; asking only the
+// connection that fired the turn strands the question on whichever screen they
+// are not watching, which is how a turn ends up parked on an approval nobody
+// ever saw.
+//
+// The desk holds its card without answering, so the phone's answer is
+// unambiguously first. What the desk must then observe is a cancellation rather
+// than a card left on screen — libacp turns the losing request's cancelled
+// context into $/cancelRequest for precisely this.
+func TestFleet_TwoClientsOnOneSessionAreBothAskedAndFirstAnswerWins(t *testing.T) {
 	f := newFleet(t)
 	phone := f.attach(t, "att-phone")
 
 	phoneSID, internalID := phone.newSession(t)
-	require.Same(t, phone.tr, mustOwner(t, f.router, internalID), "the client that opened the session owns it")
+	require.Same(t, phone.tr, mustOwner(t, f.router, internalID), "the client that opened the session holds it")
 
 	ctx := context.Background()
 	_, err := f.desk.client.Initialize(ctx, libacp.InitializeRequest{ProtocolVersion: libacp.ProtocolVersion})
@@ -405,21 +414,26 @@ func TestFleet_TwoClientsOnOneSessionFollowTheOneDrivingIt(t *testing.T) {
 		McpServers: []libacp.McpServer{},
 	})
 	require.NoError(t, err)
-	require.Same(t, f.desk.tr, mustOwner(t, f.router, internalID), "the second client to take the session owns it")
+	require.Len(t, f.router.transportsFor(internalID), 2, "loading a session joins it rather than taking it")
 
+	releaseDesk := f.desk.lc.holdPermission()
+	defer releaseDesk()
 	phone.lc.setPermissionResponse(libacp.RequestPermissionResponse{
 		Outcome: libacp.RequestPermissionOutcome{Outcome: libacp.PermissionOutcomeSelected, OptionID: approvalflow.OptionAllow},
 	})
 	deskCardsBefore := f.desk.permissionCount()
+
 	allowed, err := phone.promptRaising(t, f.router, phoneSID, "call-driven-by-phone")
 	require.NoError(t, err)
-	require.True(t, allowed)
+	require.True(t, allowed, "the answer that arrived is the verdict")
 
 	req, ok := phone.lc.lastPermissionRequest()
-	require.True(t, ok, "the card belongs to the client that fired the turn")
+	require.True(t, ok, "the client that fired the turn is asked")
 	require.Equal(t, "call-driven-by-phone", req.ToolCall.ToolCallID)
-	require.Equal(t, deskCardsBefore, f.desk.permissionCount(), "the idle holder must not be asked")
-	require.Same(t, phone.tr, mustOwner(t, f.router, internalID), "prompting reclaims ownership")
+
+	require.Greater(t, f.desk.permissionCount(), deskCardsBefore, "the other screen is asked the same question")
+	require.Eventually(t, func() bool { return f.desk.lc.cancelledPermissions() > 0 }, 5*time.Second, 10*time.Millisecond,
+		"the losing card is torn down rather than left waiting on a question already answered")
 }
 
 // TestFleet_DetachStopsTheDetachedClientBeingTheApprovalTarget joins the two
@@ -462,6 +476,88 @@ func TestFleet_DetachStopsTheDetachedClientBeingTheApprovalTarget(t *testing.T) 
 func mustOwner(t *testing.T, r *SessionRouter, contenoxSessionID string) *Transport {
 	t.Helper()
 	owner, ok := r.transportFor(contenoxSessionID)
-	require.True(t, ok, "no transport owns %s", contenoxSessionID)
+	require.True(t, ok, "no transport holds %s", contenoxSessionID)
 	return owner
+}
+
+// waitForUpdate reports whether a session/update carrying text arrives on this
+// client within the window, draining whatever precedes it (a load replays the
+// transcript before anything new is sent).
+func (p *fleetPeer) waitForUpdate(t *testing.T, text string, within time.Duration) bool {
+	t.Helper()
+	deadline := time.After(within)
+	for {
+		select {
+		case n := <-p.lc.updates:
+			if n.Update.Content != nil && n.Update.Content.Text == text {
+				return true
+			}
+		case <-deadline:
+			return false
+		}
+	}
+}
+
+// TestFleet_ATurnOnOneClientRendersOnTheOther is the property the surfaces are
+// expected to have and did not: a session is one thing several screens watch.
+//
+// session/load already replayed the transcript to a late attacher, so the
+// scrollback matched; what did not was everything after. Updates were written
+// to the connection running the turn, so a turn driven from a phone rendered
+// nowhere else, and a desk attached to the same session sat showing a session
+// that had apparently stopped.
+//
+// The update is sent through the transport rather than through a fake agent so
+// the assertion is about the mirror and not about what a driver happens to
+// emit.
+func TestFleet_ATurnOnOneClientRendersOnTheOther(t *testing.T) {
+	f := newFleet(t)
+	phone := f.attach(t, "att-phone")
+
+	phoneSID, internalID := phone.newSession(t)
+
+	ctx := context.Background()
+	_, err := f.desk.client.Initialize(ctx, libacp.InitializeRequest{ProtocolVersion: libacp.ProtocolVersion})
+	require.NoError(t, err)
+	_, err = f.desk.client.LoadSession(ctx, libacp.LoadSessionRequest{
+		SessionID:  phoneSID,
+		Cwd:        t.TempDir(),
+		McpServers: []libacp.McpServer{},
+	})
+	require.NoError(t, err)
+	require.Len(t, f.router.transportsFor(internalID), 2)
+
+	const line = "this is what the phone is showing"
+	phone.tr.sendUpdate(ctx, libacp.SessionNotification{
+		SessionID: phoneSID,
+		Update:    libacp.NewAgentMessageChunk(line),
+	})
+
+	require.True(t, phone.waitForUpdate(t, line, 5*time.Second),
+		"the connection running the turn still receives its own updates")
+	require.True(t, f.desk.waitForUpdate(t, line, 5*time.Second),
+		"a client holding the same session sees the turn as it happens")
+}
+
+// TestFleet_MirroringStopsWhenAClientLeaves pins the other half: the mirror
+// follows the router, so a detached client stops being written to. Without it a
+// dead connection's queue would fill for the life of the process, and the
+// session would look held by something nobody can see.
+func TestFleet_MirroringStopsWhenAClientLeaves(t *testing.T) {
+	f := newFleet(t)
+	phone := f.attach(t, "att-phone")
+
+	phoneSID, internalID := phone.newSession(t)
+	require.Len(t, f.router.transportsFor(internalID), 1)
+
+	phone.tr.releaseSessionRouting()
+	require.Empty(t, f.router.transportsFor(internalID), "a departed client holds nothing")
+
+	f.desk.tr = f.desk.ensureTransport(t)
+	require.NotPanics(t, func() {
+		f.router.mirror(f.desk.tr, internalID, libacp.SessionNotification{
+			SessionID: phoneSID,
+			Update:    libacp.NewAgentMessageChunk("into the void"),
+		})
+	}, "mirroring a session nobody holds is a no-op, not a write to a dead transport")
 }
