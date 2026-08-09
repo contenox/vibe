@@ -246,6 +246,13 @@ type Transport struct {
 	promptCancelMu sync.Mutex
 	promptCancels  map[libacp.SessionID]*inflightPrompt
 
+	// mirrorOnce starts the mirror pump on first use and mirrorCh is its
+	// bounded queue: updates produced by another connection on a session this
+	// one also holds. Separate from the turn's own write path so a screen that
+	// stopped reading cannot stall the turn feeding it. See mirror.go.
+	mirrorOnce sync.Once
+	mirrorCh   chan mirrorItem
+
 	// acAgent is a test seam: when set, _contenox/autocomplete uses it instead
 	// of building a fresh agentservice.Agent from deps. Nil in production.
 	acAgent agentservice.Agent
@@ -547,6 +554,19 @@ func (t *Transport) acpSessionForContenoxID(contenoxSessionID string) (libacp.Se
 	return sid, ok
 }
 
+// contenoxSessionForACPID is the inverse, over this connection's own sessions:
+// the mirror addresses holders by contenox session id, which is the identity
+// the router keys on and the one thing two connections agree about.
+func (t *Transport) contenoxSessionForACPID(sid libacp.SessionID) (string, bool) {
+	t.sessionMu.Lock()
+	defer t.sessionMu.Unlock()
+	entry, ok := t.sessions[sid]
+	if !ok || entry == nil || entry.InternalSessionID == "" {
+		return "", false
+	}
+	return entry.InternalSessionID, true
+}
+
 // bindContenoxSession records the contenox<->ACP mapping and registers this
 // transport with the shared router for HITL routing. Callers hold sessionMu;
 // the router takes its own lock and never calls back under it, so there is
@@ -564,23 +584,19 @@ func (t *Transport) unbindContenoxSession(contenoxSessionID string) {
 	t.deps.SessionRouter.unbind(contenoxSessionID, t)
 }
 
-// claimSessionRouting records this transport as the owner of sess's approvals
-// and out-of-band deliveries, superseding whichever transport held it before.
+// claimSessionRouting records this transport as one of sess's holders: it
+// receives the session's updates and is asked its approvals, alongside every
+// other connection holding the same session.
 //
 // It is called at the top of every turn, not only when a session is created or
-// loaded, and that is what makes "the client driving the session" literal
-// rather than "the client that opened it last". Two clients may hold the same
-// session at once — a phone and a desk, both attached to one runtime — and the
-// binding a load left behind names whichever of them attached most recently,
-// which is not necessarily the one whose prompt is about to raise a permission
-// request. Routing the card to the other one strands it on a screen nobody is
-// looking at.
+// loaded. Joining is idempotent — [SessionRouter.bind] moves an existing holder
+// to the front rather than adding it twice — so the per-turn call costs
+// nothing and only refreshes the recency order [SessionRouter.transportFor]
+// reads.
 //
-// One owner per session, last claim wins. A card for a turn already running
-// when another client claims the session follows the claim; that is the price
-// of a single owner, and the alternative — fanning a request out to every
-// attached client — would ask two humans one question and take whichever
-// answered first as the verdict.
+// It does not evict anyone. Two clients on one session is the ordinary case,
+// not a conflict to resolve: a phone and a desk attached to one runtime are one
+// person looking at one session from two places, and both are addressed.
 //
 // A nil router, an unwired session and a session with no contenox id are all
 // no-ops, so the single-connection path pays nothing for this.
@@ -591,19 +607,18 @@ func (t *Transport) claimSessionRouting(sess *sessionEntry) {
 	t.deps.SessionRouter.bind(sess.InternalSessionID, t)
 }
 
-// releaseSessionRouting deregisters every session this transport owns from the
+// releaseSessionRouting deregisters every session this transport holds from the
 // shared router. It rides the connection's Closed signal, which is the only
 // teardown hook every caller reaches — serve and the relay tunnel never call
 // [Transport.Close] — so a client that detached, whether a phone that changed
-// network, a relay attachment torn down or a WebSocket dropped, stops being the
-// address approvals are sent to.
+// network, a relay attachment torn down or a WebSocket dropped, stops being
+// asked and stops being mirrored to.
 //
-// Without it the router keeps naming a dead connection, and the next approval
-// raised on one of its sessions is written to a closed transport: libacp
-// resolves the pending request with ErrConnectionClosed, so the turn fails on a
-// question no human was ever shown. Deregistered, the same approval reports
-// ErrNoBoundSession and the caller falls back to whatever it uses for a session
-// nobody holds.
+// Without it the router keeps naming a dead connection: every approval raised
+// on one of its sessions waits on a screen that is gone, and every update is
+// queued for a socket that will never drain. Deregistered, the remaining
+// holders carry on, and ErrNoBoundSession is reported only once the last one
+// leaves.
 //
 // It deliberately does NOT touch the connection-local session state, terminals
 // or downstream agents: a bare connection drop is not a session close (see
@@ -696,11 +711,37 @@ func (t *Transport) workspaceID() string {
 	return t.deps.WorkspaceID
 }
 
+// sendUpdate writes notif to this connection and mirrors it to every other
+// connection holding the same session.
+//
+// The mirror is what makes a session one thing several surfaces watch rather
+// than a private stream per connection: session/load already replays the
+// transcript to a late attacher, and this extends the same view to the live
+// tail, so a turn driven from a phone renders at the desk as it happens.
+//
+// Normalization runs once, here, and the mirror carries the result verbatim —
+// see [Transport.mirrorUpdate] for why re-normalizing per connection would
+// renumber tool cards.
 func (t *Transport) sendUpdate(ctx context.Context, notif libacp.SessionNotification) {
 	if t.conn == nil {
 		return
 	}
 	notif = t.normalizeToolCallNotification(notif)
+	t.writeUpdate(ctx, notif)
+	if t.deps.SessionRouter != nil {
+		if contenoxSessionID, ok := t.contenoxSessionForACPID(notif.SessionID); ok {
+			t.deps.SessionRouter.mirror(t, contenoxSessionID, notif)
+		}
+	}
+}
+
+// writeUpdate writes one already-normalized notification to this connection.
+// It is the only place a session update reaches a socket, reached both by the
+// turn that produced it and by the mirror pump carrying another connection's.
+func (t *Transport) writeUpdate(ctx context.Context, notif libacp.SessionNotification) {
+	if t.conn == nil {
+		return
+	}
 	kind := string(notif.Update.SessionUpdate)
 	kv := []any{"kind", kind, "session_id", string(notif.SessionID)}
 	if notif.Update.ToolCallID != "" {

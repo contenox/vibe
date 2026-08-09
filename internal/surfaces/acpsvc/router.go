@@ -11,116 +11,248 @@ import (
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
-// ErrNoBoundSession reports that no live ACP transport owns the contenox
+// ErrNoBoundSession reports that no live ACP transport holds the contenox
 // session named in the request context. AskApproval's caller falls back to
 // the approval-API path instead of hanging on an unanswerable prompt.
 var ErrNoBoundSession = errors.New("acpsvc: no ACP transport bound to contenox session")
 
-// SessionRouter maps a contenox session id to the ACP Transport that owns it.
-// One engine may be driven by several connections at once — serve's WebSockets,
-// and the ACP profile's stdio connection alongside every relay attachment — and
-// a question raised inside a turn must reach the client that asked for the
-// turn, not whichever connection the process happened to bind at startup.
-// AskApproval, DeliverToContenoxSession and PromptContenoxSession all address a
-// session through this one registry. Safe for concurrent use, and every method
-// is nil-safe so a caller serving exactly one connection may leave
-// Deps.SessionRouter unset.
+// SessionRouter maps a contenox session id to every ACP Transport that holds
+// it. One engine may be driven by several connections at once — serve's
+// WebSockets, and the ACP profile's stdio connection alongside every relay
+// attachment — and a session is one thing that several surfaces watch, not a
+// thing one surface owns.
 //
-// # Ownership, and the three cases it has to answer
+// Safe for concurrent use, and every method is nil-safe so a caller serving
+// exactly one connection may leave Deps.SessionRouter unset.
 //
-// A transport claims a session when it creates, loads, resumes or adopts it,
-// and again on every turn it prompts (Transport.claimSessionRouting). One
-// session has exactly one owner.
+// # A session is shared, not owned
 //
-// Nobody attached: the lookup fails with ErrNoBoundSession rather than picking
-// an arbitrary connection. The caller decides what an unanswerable question
-// means — falling back to another transport, or reporting the durable ask so an
-// operator answers it from a terminal — and neither is a decision a routing
-// table may make on its own.
+// A transport joins a session when it creates, loads, resumes or adopts it, and
+// again on every turn it prompts (Transport.claimSessionRouting). Joining does
+// not evict anyone: a phone and a desk attached to one runtime both hold the
+// session, and both are addressed.
 //
-// Several clients on one session: the most recent claim wins, so the client
-// driving the turn owns the questions the turn raises. A card for a turn that
-// was already running when another client claimed the session follows the
-// claim. That is the cost of a single owner, and it is the cheaper cost: asking
-// every attached client would put one question in front of two humans and take
-// whichever answered first as the verdict.
+// What that buys is the property the surfaces are expected to have — the same
+// transcript, the same tool cards, the same approvals, wherever you are
+// looking. The durable session already gave a late attacher the scrollback
+// through session/load's replay; holding every transport is what extends that
+// to the live tail.
 //
-// The owner detaching: the connection's close releases its entries
-// (Transport.releaseSessionRouting), so an outstanding request fails as
-// ErrConnectionClosed on the connection that was actually asked, and the next
-// request reports ErrNoBoundSession instead of being written to a dead
-// transport. Release is identity-guarded, so a session another connection has
-// since claimed keeps its live owner.
+// Order is most-recent-join first, which matters only to [transportFor], the
+// one address left that must resolve to exactly one connection.
+//
+// # Asking several clients one question
+//
+// [AskApproval] asks every transport holding the session and takes the first
+// real answer, cancelling the rest — libacp turns that cancellation into
+// $/cancelRequest, so the losing cards are torn down rather than left stale on
+// a second screen.
+//
+// This deliberately replaces a single-owner rule whose stated reason was that
+// fanning out "would put one question in front of two humans and take whichever
+// answered first as the verdict". The common case is not two humans; it is one
+// human with two screens, and for them first-answer-wins is the behaviour they
+// expect. A deployment that genuinely needs one destination states it in
+// [SessionRouter.askTargets] rather than by narrowing the routing table, which
+// is the seam an approval-forwarding surface plugs into.
+//
+// Nobody attached is still its own case: ErrNoBoundSession rather than an
+// arbitrary connection, because what an unanswerable question means is the
+// caller's to decide.
+//
+// # Leaving
+//
+// A connection's close releases its entries (Transport.releaseSessionRouting)
+// and leaves every other holder standing. An outstanding request on the closed
+// connection fails as ErrConnectionClosed on the connection that was actually
+// asked; ErrNoBoundSession is reported only once the last holder is gone.
 type SessionRouter struct {
 	mu       sync.RWMutex
-	bindings map[string]*Transport
+	bindings map[string][]*Transport
 }
 
 // NewSessionRouter returns an empty router ready to be shared across a
 // serve process's ACP WebSocket transports.
 func NewSessionRouter() *SessionRouter {
-	return &SessionRouter{bindings: make(map[string]*Transport)}
+	return &SessionRouter{bindings: make(map[string][]*Transport)}
 }
 
-// bind records that t owns contenoxSessionID. A nil receiver or empty input
-// is a no-op. Last writer wins, matching the per-transport contenoxToACPID
-// map's own semantics.
+// bind records that t holds contenoxSessionID, most-recent join first. A
+// transport already holding it moves to the front rather than being added
+// twice, so a re-claim on every turn cannot grow the list.
 func (r *SessionRouter) bind(contenoxSessionID string, t *Transport) {
 	if r == nil || contenoxSessionID == "" || t == nil {
 		return
 	}
 	r.mu.Lock()
-	r.bindings[contenoxSessionID] = t
-	r.mu.Unlock()
+	defer r.mu.Unlock()
+	held := r.bindings[contenoxSessionID]
+	for i, existing := range held {
+		if existing == t {
+			held = append(held[:i], held[i+1:]...)
+			break
+		}
+	}
+	r.bindings[contenoxSessionID] = append([]*Transport{t}, held...)
 }
 
-// unbind drops the binding for contenoxSessionID, but only when it still
-// points at t: a transport tearing down a session that a newer connection has
-// since re-bound must not evict the live binding.
+// unbind drops t from contenoxSessionID's holders and leaves the others alone.
+// The key is deleted once the last holder goes, so transportsFor reports an
+// empty session as unheld rather than as a session with no holders.
 func (r *SessionRouter) unbind(contenoxSessionID string, t *Transport) {
 	if r == nil || contenoxSessionID == "" {
 		return
 	}
 	r.mu.Lock()
-	if r.bindings[contenoxSessionID] == t {
-		delete(r.bindings, contenoxSessionID)
+	defer r.mu.Unlock()
+	held := r.bindings[contenoxSessionID]
+	for i, existing := range held {
+		if existing == t {
+			held = append(held[:i], held[i+1:]...)
+			break
+		}
 	}
-	r.mu.Unlock()
+	if len(held) == 0 {
+		delete(r.bindings, contenoxSessionID)
+		return
+	}
+	r.bindings[contenoxSessionID] = held
 }
 
-func (r *SessionRouter) transportFor(contenoxSessionID string) (*Transport, bool) {
+// transportsFor returns every transport holding contenoxSessionID, as a copy:
+// callers write to connections while holding no lock, and a stalled write must
+// never be reached through the router's own mutex.
+func (r *SessionRouter) transportsFor(contenoxSessionID string) []*Transport {
 	if r == nil || contenoxSessionID == "" {
-		return nil, false
+		return nil
 	}
 	r.mu.RLock()
-	t, ok := r.bindings[contenoxSessionID]
-	r.mu.RUnlock()
-	return t, ok
+	defer r.mu.RUnlock()
+	held := r.bindings[contenoxSessionID]
+	if len(held) == 0 {
+		return nil
+	}
+	out := make([]*Transport, len(held))
+	copy(out, held)
+	return out
 }
 
-// AskApproval bridges an engine HITL request to the ACP transport owning the
-// contenox session in ctx (runtimetypes.SessionIDContextKey), driving that
-// connection's session/request_permission flow. Returns ErrNoBoundSession only
-// when no transport owns the session; a genuine deny resolves (false, nil)
-// and a client cancellation (false, context.Canceled) — neither triggers the
-// caller's fallback.
+// transportFor returns the most recent holder. It exists for the addresses that
+// must resolve to exactly one connection — delivering a prompt to two of them
+// would run the turn twice — and not for anything a human reads.
+func (r *SessionRouter) transportFor(contenoxSessionID string) (*Transport, bool) {
+	held := r.transportsFor(contenoxSessionID)
+	if len(held) == 0 {
+		return nil, false
+	}
+	return held[0], true
+}
+
+// askTargets selects which of a session's holders are asked to approve. It is
+// the one place a destination policy belongs: today every holder is asked, and
+// a deployment that forwards approvals to one surface narrows the list here
+// rather than by making the session single-holder again — the difference is
+// that narrowing here still leaves every other surface watching the transcript.
+func (r *SessionRouter) askTargets(held []*Transport) []*Transport { return held }
+
+// AskApproval drives session/request_permission on every transport holding the
+// contenox session in ctx (runtimetypes.SessionIDContextKey) and resolves with
+// the first real answer.
+//
+// A deny is an answer and so is an approve; both resolve immediately and cancel
+// the outstanding requests on the other holders, which reaches them as
+// $/cancelRequest and clears the card. An error is not an answer: a connection
+// that drops mid-question leaves the remaining screens asked, which is the
+// whole point of asking them.
+//
+// Returns ErrNoBoundSession only when nothing holds the session. When every
+// holder failed, the first error is returned rather than ErrNoBoundSession —
+// the question was asked and went unanswered, which is not the same as having
+// nowhere to ask.
 func (r *SessionRouter) AskApproval(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
 	contenoxSessionID, _ := ctx.Value(runtimetypes.SessionIDContextKey).(string)
-	t, ok := r.transportFor(contenoxSessionID)
-	if !ok {
+	targets := r.askTargets(r.transportsFor(contenoxSessionID))
+	if len(targets) == 0 {
 		return false, ErrNoBoundSession
 	}
-	return t.AskApproval(ctx, req)
+	if len(targets) == 1 {
+		return targets[0].AskApproval(ctx, req)
+	}
+
+	askCtx, cancelLosers := context.WithCancel(ctx)
+	defer cancelLosers()
+
+	type verdict struct {
+		approved bool
+		err      error
+	}
+	answers := make(chan verdict, len(targets))
+	for _, target := range targets {
+		go func(t *Transport) {
+			approved, err := t.AskApproval(askCtx, req)
+			answers <- verdict{approved: approved, err: err}
+		}(target)
+	}
+
+	var firstErr error
+	for range targets {
+		got := <-answers
+		if got.err == nil {
+			return got.approved, nil
+		}
+		if firstErr == nil {
+			firstErr = got.err
+		}
+	}
+	return false, firstErr
 }
 
-// DeliverToContenoxSession routes an out-of-band mission report to whichever
-// live WS connection owns contenoxSessionID, returning ErrSessionNotLive when
-// none does. Ownership follows the same bind/unbind lifecycle as AskApproval,
-// so a report reaches the session for exactly as long as a connection holds it.
+// DeliverToContenoxSession routes an out-of-band mission report to every live
+// connection holding contenoxSessionID, returning ErrSessionNotLive when none
+// does. A report is something to read, so every screen gets it; delivery to one
+// holder succeeding is enough to call it delivered.
 func (r *SessionRouter) DeliverToContenoxSession(ctx context.Context, contenoxSessionID string, n libacp.SessionNotification) error {
-	t, ok := r.transportFor(contenoxSessionID)
-	if !ok {
+	held := r.transportsFor(contenoxSessionID)
+	if len(held) == 0 {
 		return ErrSessionNotLive
 	}
-	return t.DeliverToContenoxSession(ctx, contenoxSessionID, n)
+	var firstErr error
+	delivered := false
+	for _, t := range held {
+		if err := t.DeliverToContenoxSession(ctx, contenoxSessionID, n); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		delivered = true
+	}
+	if delivered {
+		return nil
+	}
+	return firstErr
+}
+
+// mirror copies notif to every holder of contenoxSessionID except origin, which
+// has already written it to its own connection.
+//
+// It never blocks: each copy goes onto the target's own bounded queue (see
+// mirror.go), because ndjsonWriter.Write takes a mutex and writes straight to
+// the socket — a second screen that stopped reading would otherwise stall the
+// turn that is feeding it.
+//
+// Delivery here is best-effort by design. The session's transcript is durable
+// and session/load replays it, so a surface that misses live frames re-syncs by
+// reattaching; that is the same property that lets a phone join a session that
+// started at a desk.
+func (r *SessionRouter) mirror(origin *Transport, contenoxSessionID string, notif libacp.SessionNotification) {
+	if r == nil || contenoxSessionID == "" {
+		return
+	}
+	for _, t := range r.transportsFor(contenoxSessionID) {
+		if t == origin {
+			continue
+		}
+		t.mirrorUpdate(contenoxSessionID, notif)
+	}
 }

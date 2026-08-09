@@ -50,6 +50,13 @@ type loopbackClient struct {
 	permMu   sync.Mutex
 	permReqs []libacp.RequestPermissionRequest
 	permResp libacp.RequestPermissionResponse
+	// permGate, when set, holds RequestPermission until it is closed or the
+	// request is cancelled — a client with a card on screen and nobody
+	// answering it. Nil by default, so a client answers instantly as before.
+	permGate chan struct{}
+	// permCancelled counts requests that ended in cancellation rather than an
+	// answer, which is how a torn-down card is observed from the client side.
+	permCancelled int
 }
 
 func newLoopbackClient() *loopbackClient {
@@ -70,12 +77,40 @@ func (c *loopbackClient) SessionUpdate(_ context.Context, n libacp.SessionNotifi
 	return nil
 }
 
-func (c *loopbackClient) RequestPermission(_ context.Context, req libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error) {
+func (c *loopbackClient) RequestPermission(ctx context.Context, req libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error) {
 	c.permMu.Lock()
 	c.permReqs = append(c.permReqs, req)
 	resp := c.permResp
+	gate := c.permGate
 	c.permMu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			c.permMu.Lock()
+			c.permCancelled++
+			c.permMu.Unlock()
+			return libacp.RequestPermissionResponse{}, ctx.Err()
+		}
+	}
 	return resp, nil
+}
+
+// holdPermission makes this client show the card and never answer, until the
+// returned release is called. Used to make "the first answer wins" observable
+// without racing two instant answers.
+func (c *loopbackClient) holdPermission() (release func()) {
+	gate := make(chan struct{})
+	c.permMu.Lock()
+	c.permGate = gate
+	c.permMu.Unlock()
+	return sync.OnceFunc(func() { close(gate) })
+}
+
+func (c *loopbackClient) cancelledPermissions() int {
+	c.permMu.Lock()
+	defer c.permMu.Unlock()
+	return c.permCancelled
 }
 
 func (c *loopbackClient) setPermissionResponse(resp libacp.RequestPermissionResponse) {
