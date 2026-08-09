@@ -204,7 +204,7 @@ func firstNonFlagIsReserved(args []string) bool {
 var rootCmd = &cobra.Command{
 	Use:   "contenox",
 	Short: "Fire coding work at an agent, under rules you can read — chat, chains, and missions from your terminal.",
-	Long: `Contenox is an open coding harness. Chat and shell in your terminal, use
+	Long: `Contenox is an open agentic harness. Chat and shell in your terminal, use
 the same harness from any ACP editor, and package repeatable work into chains —
 prompts, model routing, tools, retries, and approval gates in one versioned
 file. State lives in local SQLite. Hosted providers and Ollama work out of the

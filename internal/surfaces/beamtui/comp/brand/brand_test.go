@@ -102,8 +102,8 @@ func TestUnit_WordmarkCopyIsExact(t *testing.T) {
 		ascii bool
 		want  string
 	}{
-		{false, "contenox — open coding harness"},
-		{true, "contenox - open coding harness"},
+		{false, "contenox — open agentic harness"},
+		{true, "contenox - open agentic harness"},
 	}
 	for _, c := range cases {
 		for _, w := range []int{60, 80, 120} {

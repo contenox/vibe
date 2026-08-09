@@ -20,8 +20,8 @@ const CompactWidth = 66
 // in unicode, plain hyphen in ASCII — do not paraphrase either string.
 const (
 	wordmark       = "contenox"
-	taglineUnicode = " — open coding harness"
-	taglineASCII   = " - open coding harness"
+	taglineUnicode = " — open agentic harness"
+	taglineASCII   = " - open agentic harness"
 )
 
 // ASCIIGutter is the beam-bar a Mono terminal sees, exported so testkit's
