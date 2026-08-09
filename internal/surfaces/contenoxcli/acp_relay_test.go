@@ -6,12 +6,17 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/contenox/contenox/internal/relaycreds"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/contenox/contenox/libacp"
+	"github.com/contenox/contenox/libtracker"
 )
 
 // relayTestFactory is the agent factory the wiring tests hand over. Nothing
@@ -25,6 +30,145 @@ func writePairing(t *testing.T, dir string) {
 	if err := os.WriteFile(filepath.Join(dir, relaycreds.Filename), []byte("{not json"), 0o600); err != nil {
 		t.Fatalf("write credentials: %v", err)
 	}
+}
+
+// unreachableRelay is a port nothing answers on. A connector built against it
+// runs its whole lifecycle — start, dial, fail, back off, tear down — without
+// a relay existing anywhere, which is what makes the teardown assertion below
+// hermetic.
+const unreachableRelay = "127.0.0.1:1"
+
+// writeUnreachablePairing stores a well-formed enrolment for a relay that is
+// not there. It is the only shape that starts a real tunnel inside a test:
+// relaylink never blocks on a dial, so everything is constructed and started
+// and only the connection itself fails.
+func writeUnreachablePairing(t *testing.T, dir string) {
+	t.Helper()
+	if err := relaycreds.Save(dir, relaycreds.Credentials{
+		Endpoint:      unreachableRelay,
+		InstanceID:    "inst-relay-test",
+		InstanceToken: "token-relay-test",
+	}); err != nil {
+		t.Fatalf("save credentials: %v", err)
+	}
+}
+
+// recordingWriter is an io.Writer a test reads back while relay machinery may
+// still be writing to it from its own goroutines; an unlocked bytes.Buffer
+// would be a data race rather than an assertion.
+type recordingWriter struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (w *recordingWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *recordingWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+// settleTimeout bounds the wait for goroutines to finish exiting. A count that
+// never comes back down inside it is the leak the assertion is looking for.
+const settleTimeout = 30 * time.Second
+
+// requireGoroutinesSettleTo fails unless the live goroutine count returns to
+// want. Goroutines exit asynchronously, so the claim is that the count settles,
+// not that it is instantaneous.
+func requireGoroutinesSettleTo(t *testing.T, want int) {
+	t.Helper()
+	deadline := time.Now().Add(settleTimeout)
+	for {
+		got := runtime.NumGoroutine()
+		if got <= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines: %d wanted, %d still running", want, got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestUnit_RemoteAttachmentsStartNothingWhenThereIsNothingToStart is the
+// "changes nothing" half of this seam, asserted on every observable a surface
+// has: nothing is dialed, no goroutine is started, and not a line is written.
+// A terminal UI is the reason the last one matters — its stderr is the screen
+// it draws the transcript into, so a stray line is a corrupted scrollback.
+//
+// The opt-in-off case is paired on purpose. /pair mints the credential the
+// tunnel reads and /pair is gated, so a runtime with the opt-in off must not
+// dial on a pairing the operator can no longer see or remove.
+func TestUnit_RemoteAttachmentsStartNothingWhenThereIsNothingToStart(t *testing.T) {
+	paired := t.TempDir()
+	writeUnreachablePairing(t, paired)
+
+	for _, tc := range []struct {
+		name      string
+		optInBeta bool
+		dir       string
+	}{
+		{name: "the opt-in is off on a paired machine", optInBeta: false, dir: paired},
+		{name: "the opt-in is on and nothing is paired", optInBeta: true, dir: t.TempDir()},
+		{name: "there is no contenox directory at all", optInBeta: true, dir: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var warn, activity recordingWriter
+			before := runtime.NumGoroutine()
+
+			stop := serveRemoteAttachments(t.Context(), tc.optInBeta, tc.dir, relayTestFactory,
+				libtracker.NewTextActivityTracker(&activity), &warn)
+			if stop == nil {
+				t.Fatal("stop is nil; it must be safe to defer unconditionally")
+			}
+			if got := warn.String(); got != "" {
+				t.Fatalf("an inert invocation wrote %q", got)
+			}
+			if got := activity.String(); got != "" {
+				t.Fatalf("an inert invocation reached the relay machinery: %q", got)
+			}
+			requireGoroutinesSettleTo(t, before)
+			stop()
+		})
+	}
+}
+
+// TestUnit_RelayTunnelTeardownJoinsEverythingItStarted covers the exit path
+// every surface defers. A tunnel that outlived its process's teardown would go
+// on serving remote clients against an engine and a database being closed
+// underneath it, so the connector is closed and the tunnel joined before stop
+// returns.
+//
+// The pre-assertion that the count rose is what keeps this honest: without it a
+// tunnel that silently failed to start would pass the leak check trivially.
+func TestUnit_RelayTunnelTeardownJoinsEverythingItStarted(t *testing.T) {
+	dir := t.TempDir()
+	writeUnreachablePairing(t, dir)
+
+	before := runtime.NumGoroutine()
+	stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, nil)
+	if err != nil {
+		t.Fatalf("startRelayTunnel: %v", err)
+	}
+	if got := runtime.NumGoroutine(); got <= before {
+		t.Fatalf("goroutines: %d before, %d after start; the tunnel never ran", before, got)
+	}
+	stop()
+	requireGoroutinesSettleTo(t, before)
+
+	for range 4 {
+		stop, err := startRelayTunnel(t.Context(), dir, relayTestFactory, nil)
+		if err != nil {
+			t.Fatalf("startRelayTunnel: %v", err)
+		}
+		stop()
+	}
+	requireGoroutinesSettleTo(t, before)
 }
 
 // TestUnit_RemoteAttachmentsAreInertWithoutTheOptIn keeps the gate at the same
@@ -51,8 +195,12 @@ func TestUnit_RemoteAttachmentsAreInertWithoutTheOptIn(t *testing.T) {
 // TestUnit_RemoteAttachmentsReportAnUnreadablePairing is the other half of that
 // gate: with the opt-in on, a pairing that exists and cannot be read is the
 // operator's problem to hear about, since /pair wrote it and only /unpair
-// removes it. It is a warning and never a failure — the stdio path is
-// unaffected either way.
+// removes it. It is a warning and never a failure — the surface's own
+// connection is unaffected either way.
+//
+// Exactly one line, because a surface whose stderr is the screen it draws into
+// pays for every extra one, and the caller returns normally, because a broken
+// credential file costs this process remote clients and nothing else.
 func TestUnit_RemoteAttachmentsReportAnUnreadablePairing(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -64,8 +212,12 @@ func TestUnit_RemoteAttachmentsReportAnUnreadablePairing(t *testing.T) {
 		t.Fatal("stop is nil; it must be safe to defer unconditionally")
 	}
 	stop()
-	if warn.Len() == 0 {
+	reported := warn.String()
+	if reported == "" {
 		t.Fatal("an unreadable pairing was not reported")
+	}
+	if lines := strings.Count(strings.TrimSuffix(reported, "\n"), "\n") + 1; lines != 1 {
+		t.Fatalf("an unreadable pairing was reported over %d lines: %q", lines, reported)
 	}
 }
 

@@ -18,8 +18,6 @@ import (
 
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
-	"github.com/contenox/contenox/internal/services/hitlservice"
-	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/onboarding"
 	"github.com/contenox/contenox/internal/services/sessionservice"
@@ -212,15 +210,8 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	var bridge *enginebridge.Bridge
 	transportOf := func() *acpsvc.Transport { return bridge.Transport() } // nil-safe on a nil *Bridge
 
-	// Routes through the ACP permission flow so approvals render as the
-	// inline card, not the CLI's tty prompt (which would fight raw mode).
-	opts.EffectiveAskApproval = localtools.AskApproval(func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error) {
-		t := transportOf()
-		if t == nil {
-			return false, fmt.Errorf("beam: HITL approval requested before the transport was ready")
-		}
-		return t.AskApproval(ctx, req)
-	})
+	sessionRouter := acpsvc.NewSessionRouter()
+	opts.EffectiveAskApproval = routedAskApproval(sessionRouter, transportOf)
 
 	// Set only when the zero-config path below fires; printed once.
 	var zeroConfigNotice string
@@ -381,6 +372,7 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 		// before a unit is spawned under a fallback nobody chose.
 		MissionEnvelopes: newMissionEnvelopes(contenoxDir),
 		OptInBeta:        opts.EffectiveOptInBeta,
+		SessionRouter:    sessionRouter,
 		ClientInfo:       &libacp.Implementation{Name: "beam", Version: CLIVersion()},
 	})
 	if err != nil {
@@ -395,6 +387,9 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 			os.Exit(1)
 		}
 	}()
+
+	stopRelay := serveRemoteAttachments(ctx, opts.EffectiveOptInBeta, contenoxDir, bridge.AgentFactory(), beamTracker, errW)
+	defer stopRelay()
 
 	if _, err := bridge.Initialize(ctx); err != nil {
 		return fmt.Errorf("acp handshake: %w", err)

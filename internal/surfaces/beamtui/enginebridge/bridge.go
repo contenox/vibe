@@ -147,6 +147,12 @@ type Bridge struct {
 	transport *acpsvc.Transport
 	client    *routingClient
 
+	// factory is the raw acpsvc factory, never the closure New wraps it in to
+	// capture transport: a caller serving a further connection from it must
+	// mint a transport of its own and must not replace the loopback's. Set
+	// once in New before any other goroutine can see the Bridge.
+	factory libacp.AgentFactory
+
 	// inboxSub is the operator-inbox bus subscription, nil when Deps.Bus is.
 	// Set once in New before any other goroutine can see the Bridge, and read
 	// only by Close, so it needs no lock.
@@ -262,6 +268,7 @@ func New(ctx context.Context, deps Deps) (*Bridge, error) {
 		OptInBeta:             deps.OptInBeta,
 		SessionRouter:         deps.SessionRouter,
 	})
+	b.factory = factory
 
 	// Type-asserting inside the factory closure is the only way to reach the
 	// concrete Transport: NewAgentSideConnection invokes the factory eagerly,
@@ -339,6 +346,23 @@ func (b *Bridge) Transport() *acpsvc.Transport {
 		return nil
 	}
 	return b.transport
+}
+
+// AgentFactory returns the acpsvc factory this Bridge's loopback is served by,
+// so a composition root can serve further ACP connections — a relay attachment
+// — from the same acpsvc.Deps, and therefore from the same
+// [Deps.SessionRouter]. That shared registry is the whole point: it sends a
+// permission request raised by remote work back to the client driving it
+// instead of onto the operator's own screen.
+//
+// Every call mints a transport of its own, and none of them is
+// [Bridge.Transport] — that stays the loopback the surface itself draws,
+// whatever else attaches. Nil-safe on a nil receiver.
+func (b *Bridge) AgentFactory() libacp.AgentFactory {
+	if b == nil {
+		return nil
+	}
+	return b.factory
 }
 
 // Events returns the single ordered outlet, closed once the pump stops (by
