@@ -13,7 +13,7 @@ interface Props {
 }
 const {
   title,
-  description = 'Contenox — an open coding harness. Chat, missions, and tools in your terminal, the terminal UI, or any ACP editor, on the models you choose.',
+  description = 'Contenox — an open agentic harness. Chat, missions, and tools in your terminal, the terminal UI, or any ACP editor, on the models you choose.',
   lang = 'en',
   ogType = 'website',
   alternates,
@@ -25,7 +25,7 @@ const ogImage = new URL('/opengraph-image.png', Astro.site);
 
 const t = lang === 'de'
   ? { start: 'Loslegen', theme: 'Farbschema umschalten', tagline: 'Ein offenes Coding-Harness — jedes Modell, jeder Editor.' }
-  : { start: 'Get Started', theme: 'Toggle theme', tagline: 'An open coding harness — any model, any editor.' };
+  : { start: 'Get Started', theme: 'Toggle theme', tagline: 'An open agentic harness — any model, any editor.' };
 
 const navSections = await buildNavSections();
 ---
