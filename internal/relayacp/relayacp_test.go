@@ -429,7 +429,7 @@ func TestUnit_CloseJoinsEveryAttachmentAndLeaksNothing(t *testing.T) {
 			if got := h.tunnel.Len(); got != 0 {
 				t.Fatalf("Len after Close = %d, want 0", got)
 			}
-			h.tunnel.Handle(librelay.Frame{
+			h.tunnel.Handle(context.Background(), librelay.Frame{
 				Type:     librelay.TypeACPMessage,
 				Instance: testInstance,
 				Session:  "att-late",
@@ -474,13 +474,13 @@ func TestUnit_OnlyACPCargoForThisInstanceEverAttaches(t *testing.T) {
 		{Type: librelay.TypeACPMessage, Instance: testInstance, Session: "att-x"},
 		{Type: librelay.TypeACPMessage, Instance: "inst-other", Session: "att-y", Payload: body},
 	} {
-		h.tunnel.Handle(f)
+		h.tunnel.Handle(context.Background(), f)
 	}
 	if got := h.tunnel.Len(); got != 0 {
 		t.Fatalf("Len = %d after cargo the tunnel does not carry, want 0", got)
 	}
 
-	h.tunnel.Handle(librelay.Frame{Type: librelay.TypeACPMessage, Session: "att-x", Payload: body})
+	h.tunnel.Handle(context.Background(), librelay.Frame{Type: librelay.TypeACPMessage, Session: "att-x", Payload: body})
 	if _, from := decodeEcho(t, h.recv("att-x").Payload); from != "" {
 		t.Fatalf("unexpected echo %q", from)
 	}
@@ -595,21 +595,21 @@ func TestUnit_DetachNeverAttachesAnything(t *testing.T) {
 		{Type: librelay.TypeACPDetach, Instance: "inst-other", Session: "att-a"},
 		{Type: librelay.TypeACPDetach, Instance: testInstance},
 	} {
-		h.tunnel.Handle(f)
+		h.tunnel.Handle(context.Background(), f)
 	}
 	if got := h.tunnel.Len(); got != 1 {
 		t.Fatalf("Len = %d after detaches that name nothing this tunnel holds, want 1", got)
 	}
 
-	h.tunnel.Handle(librelay.Frame{Type: librelay.TypeACPDetach, Instance: testInstance, Session: "att-a"})
+	h.tunnel.Handle(context.Background(), librelay.Frame{Type: librelay.TypeACPDetach, Instance: testInstance, Session: "att-a"})
 	waitFor(t, "the detached attachment to be reclaimed", func() bool { return h.tunnel.Len() == 0 })
-	h.tunnel.Handle(librelay.Frame{Type: librelay.TypeACPDetach, Instance: testInstance, Session: "att-a"})
+	h.tunnel.Handle(context.Background(), librelay.Frame{Type: librelay.TypeACPDetach, Instance: testInstance, Session: "att-a"})
 	if got := h.tunnel.Len(); got != 0 {
 		t.Fatalf("Len = %d after a repeated detach, want 0", got)
 	}
 
 	h.tunnel.Close()
-	h.tunnel.Handle(librelay.Frame{Type: librelay.TypeACPDetach, Instance: testInstance, Session: "att-a"})
+	h.tunnel.Handle(context.Background(), librelay.Frame{Type: librelay.TypeACPDetach, Instance: testInstance, Session: "att-a"})
 	if got := h.tunnel.Len(); got != 0 {
 		t.Fatalf("Len = %d after a detach on a closed tunnel, want 0", got)
 	}

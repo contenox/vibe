@@ -34,6 +34,8 @@ func FuzzReadFrame(f *testing.F) {
 	f.Add([]byte(`{"type":"relay.hello","id":"1","payload":{"protocol_version":1,"instance":"i1"}}` + "\n"))
 	f.Add([]byte(`{"type":"invented.later","instance":"i1","re":"9","payload":[1,2,3]}` + "\n"))
 	f.Add([]byte(`{"type":"acp.message","instance":"i1","payload":"a < b & c > d"}` + "\n"))
+	f.Add([]byte(`{"type":"acp.message","instance":"i1","session":"s1","trace":"tr-0123456789abcdef"}` + "\n"))
+	f.Add([]byte(`{"type":"acp.message","instance":"i1","trace":"tr- not valid"}` + "\n"))
 	f.Add([]byte("\n\n\n"))
 	f.Add([]byte(`{"type":`))
 	f.Add([]byte(`{"type":"acp.message","instance":"i1"`))
@@ -65,7 +67,7 @@ func FuzzReadFrame(f *testing.F) {
 				continue // per-frame error; the reader stays usable
 			}
 			handed += len(frame.Type) + len(frame.Instance) + len(frame.Session) +
-				len(frame.ID) + len(frame.ReplyTo) + len(frame.Payload)
+				len(frame.ID) + len(frame.ReplyTo) + len(frame.Trace) + len(frame.Payload)
 			checkAcceptedFrame(t, frame)
 		}
 		// The ceiling is 3x rather than 1x because encoding/json replaces
@@ -96,7 +98,7 @@ func checkAcceptedFrame(t *testing.T, frame librelay.Frame) {
 		t.Fatalf("re-encoded frame does not decode: %v (%q)", err, buf.String())
 	}
 	if again.Type != frame.Type || again.Instance != frame.Instance || again.Session != frame.Session ||
-		again.ID != frame.ID || again.ReplyTo != frame.ReplyTo {
+		again.ID != frame.ID || again.ReplyTo != frame.ReplyTo || again.Trace != frame.Trace {
 		t.Fatalf("envelope changed across a hop: %+v -> %+v", frame, again)
 	}
 	if !sameJSON(frame.Payload, again.Payload) {
@@ -133,7 +135,7 @@ func FuzzFrameEncode(f *testing.F) {
 			t.Fatalf("writer emitted a frame its own reader rejects: %v (%q)", err, buf.String())
 		}
 		if got.Type != frame.Type || got.Instance != frame.Instance || got.Session != frame.Session ||
-			got.ID != frame.ID || got.ReplyTo != frame.ReplyTo {
+			got.ID != frame.ID || got.ReplyTo != frame.ReplyTo || got.Trace != frame.Trace {
 			t.Fatalf("envelope round-trip changed: %+v -> %+v", frame, got)
 		}
 		if !sameJSON(frame.Payload, got.Payload) {

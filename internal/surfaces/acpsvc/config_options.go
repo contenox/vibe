@@ -10,6 +10,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/reasoning"
 	"github.com/contenox/contenox/internal/models/runtimestate"
 	"github.com/contenox/contenox/internal/services/project"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	libacp "github.com/contenox/contenox/libacp"
 )
 
@@ -19,15 +20,37 @@ const (
 	configIDThink         = "think"
 	configIDTokenLimit    = "token-limit"
 	configIDWorkspaceRoot = "workspace-root"
+	configIDAgent         = "agent"
 
 	configCategoryModel         = "model"
 	configCategoryHITLPolicy    = "_hitl_policy"
 	configCategoryThink         = "thought_level"
 	configCategoryWorkspaceRoot = "workspace"
+	configCategoryAgent         = "agent"
 
 	configTypeSelect = "select"
 
 	hitlPolicyDefaultValue = "__contenox_default__"
+
+	// agentNativeValue is the agent select's value for the runtime's own
+	// task-chain engine — a value a person can pick their way back to, since a
+	// select cannot express "unset".
+	//
+	// It is the empty string rather than a namespaced sentinel because that is
+	// already what contenox.agent means by "no agent" everywhere else:
+	// parseAgentMeta returns "" for an absent key, session/new branches to the
+	// native path on "", and beam-desktop's client uses "" for the same thing.
+	// The value therefore round-trips by construction — whatever the picker
+	// hands out goes straight back on session/new's `_meta` — with no second
+	// spelling of the native path to keep in agreement. An agent's name is
+	// never empty (agentregistryservice.validate requires one), so it cannot
+	// collide.
+	agentNativeValue = ""
+
+	// agentCatalogLimit bounds the registry page the agent select is built
+	// from. The picker is a menu a person reads, not a paginated listing, and
+	// it matches what `contenox agent list` shows.
+	agentCatalogLimit = 100
 
 	// modelConfigDefaultGroup is a placeholder group for "no provider", not a
 	// provider name — CommandValueDomains must never offer it to /provider.
@@ -105,6 +128,111 @@ func (t *Transport) workspaceRootConfigOption(sess *sessionEntry) (libacp.Sessio
 
 func workspaceRootDisplayName(root string) string {
 	return project.DisplayName(root)
+}
+
+// agentConfigOption advertises the machine's registered agents a client may
+// bind a session to, so a client that speaks only ACP can discover the
+// catalogue — the desktop shell listed it over an Electron IPC bus a browser
+// reaching the relay does not have.
+//
+// It is the sibling of workspaceRootConfigOption and shares its contract:
+// present only when there is something to choose (absent and empty stay
+// distinguishable, so a client hides the picker rather than rendering an empty
+// one), chosen at session/new — through the contenox.agent `_meta` key, whose
+// values these are — and immutable afterward, so set_config_option for it is
+// refused.
+//
+// Only enabled agents are offered: a disabled agent is one the operator took
+// out of service and ResolveForSpawn would refuse, and offering it would put a
+// refusal behind a menu entry. The exception is the session's own bound agent,
+// folded in below so a session disabled underneath it still renders what it is
+// running as instead of falling back to the native label.
+//
+// A registry that holds only disabled agents is the same state as an empty
+// one: no option, so a client hides the picker rather than showing a menu
+// whose only entry is the default it already has. The offered names are sorted
+// by name — the registry's own order is by creation time, which is not how a
+// menu is read.
+func (t *Transport) agentConfigOption(ctx context.Context, sess *sessionEntry) (libacp.SessionConfigOption, bool) {
+	reg := t.agentRegistry()
+	if reg == nil {
+		return libacp.SessionConfigOption{}, false
+	}
+	agents, err := reg.List(ctx, nil, agentCatalogLimit)
+	if err != nil {
+		return libacp.SessionConfigOption{}, false
+	}
+
+	current := agentNativeValue
+	if sess != nil && sess.driver != nil {
+		if bound := strings.TrimSpace(sess.driver.AgentName()); bound != "" {
+			current = bound
+		}
+	}
+
+	offered := make([]libacp.SessionConfigValue, 0, len(agents))
+	seen := map[string]struct{}{agentNativeValue: {}}
+	for _, agent := range agents {
+		if agent == nil || !agent.Enabled {
+			continue
+		}
+		name := strings.TrimSpace(agent.Name)
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		offered = append(offered, libacp.SessionConfigValue{
+			Value:       name,
+			Name:        name,
+			Description: agentConfigDescription(agent),
+		})
+	}
+	if len(offered) == 0 && current == agentNativeValue {
+		return libacp.SessionConfigOption{}, false
+	}
+	sort.SliceStable(offered, func(i, j int) bool {
+		return strings.ToLower(offered[i].Name) < strings.ToLower(offered[j].Name)
+	})
+
+	values := make([]libacp.SessionConfigValue, 0, len(offered)+2)
+	values = append(values, libacp.SessionConfigValue{
+		Value:       agentNativeValue,
+		Name:        "Contenox",
+		Description: "The runtime's own coding chain",
+	})
+	values = append(values, offered...)
+	if _, ok := seen[current]; !ok {
+		values = append(values, libacp.SessionConfigValue{
+			Value:       current,
+			Name:        current,
+			Description: "This session's agent; no longer offered for new sessions",
+		})
+	}
+
+	return libacp.SessionConfigOption{
+		ID:           configIDAgent,
+		Name:         "Agent",
+		Description:  "Which agent answers this session. Chosen when the session starts and fixed for its lifetime.",
+		Category:     configCategoryAgent,
+		Type:         configTypeSelect,
+		CurrentValue: current,
+		Options:      libacp.NewSessionConfigValues(values),
+	}, true
+}
+
+// agentConfigDescription is the one-line sketch under an agent's name in the
+// picker, naming what kind of thing it is; "" when the kind is unrecognized.
+func agentConfigDescription(agent *runtimetypes.Agent) string {
+	switch agent.Kind {
+	case runtimetypes.AgentKindChain:
+		return "A task chain of this runtime, run as an agent"
+	case runtimetypes.AgentKindExternalACP:
+		return "An external ACP agent this runtime drives"
+	}
+	return ""
 }
 
 func (t *Transport) modelConfigOption(ctx context.Context, sess *sessionEntry) libacp.SessionConfigOption {
@@ -496,6 +624,12 @@ func (t *Transport) setSessionConfigOption(ctx context.Context, sess *sessionEnt
 	case configIDWorkspaceRoot:
 		// Fixed at session/new; refused rather than silently ignored.
 		return libacp.NewErrorf(libacp.ErrInvalidParams, "the workspace cannot be changed after the session starts")
+
+	case configIDAgent:
+		// Fixed at session/new (contenox.agent `_meta`), like the workspace
+		// root: a session cannot change what it is mid-flight, and a silent
+		// no-op would read to a client as a switch that took.
+		return libacp.NewErrorf(libacp.ErrInvalidParams, "the agent cannot be changed after the session starts; start a new session to use a different one")
 
 	default:
 		return libacp.NewErrorf(libacp.ErrInvalidParams, "unknown config option %q", configID)

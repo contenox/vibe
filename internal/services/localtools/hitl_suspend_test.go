@@ -14,6 +14,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,6 +26,7 @@ type recordingApprovePolicy struct {
 
 	mu        sync.Mutex
 	recorded  []string // approval IDs, in call order
+	requests  []hitlservice.ApprovalRequest
 	resolved  map[string]bool
 	recordErr error
 }
@@ -33,13 +35,14 @@ func (p *recordingApprovePolicy) Evaluate(context.Context, string, string, map[s
 	return p.result, nil
 }
 
-func (p *recordingApprovePolicy) RecordPendingApproval(_ context.Context, approvalID string, _ hitlservice.ApprovalRequest) error {
+func (p *recordingApprovePolicy) RecordPendingApproval(_ context.Context, approvalID string, req hitlservice.ApprovalRequest) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.recordErr != nil {
 		return p.recordErr
 	}
 	p.recorded = append(p.recorded, approvalID)
+	p.requests = append(p.requests, req)
 	return nil
 }
 
@@ -95,6 +98,39 @@ func TestUnit_HITLWrapper_ParkThenRelease(t *testing.T) {
 	require.Empty(t, policy.resolved, "the row stays pending — the human has not answered")
 	require.Empty(t, inner.calls, "the gated tool must not run")
 	require.GreaterOrEqual(t, elapsed, 25*time.Millisecond, "the fast-path park must actually wait its window")
+}
+
+// TestUnit_HITLWrapper_RecordedAskCarriesItsSession is the regression for a
+// parked approval that could not be found again: the durable row was written
+// with an empty session_id while the checkpoint beside it carried the session,
+// so the ask could neither be listed for its session nor re-offered to a
+// client attaching to it. The run context is where the session lives, and the
+// ask must copy it as it is recorded — and a run with no session must record
+// none rather than invent one.
+func TestUnit_HITLWrapper_RecordedAskCarriesItsSession(t *testing.T) {
+	inner := &mockInnerTools{}
+	policy := newRecordingApprovePolicy()
+	w := localtools.NewHITLWrapper(inner, blockUntilCtxDone, policy, nil)
+	w.SetParkWindow(25 * time.Millisecond)
+
+	ctx := context.WithValue(context.Background(), taskengine.ContextKeyToolCallID, "call-s")
+	ctx = context.WithValue(ctx, runtimetypes.SessionIDContextKey, "f1084c50-session")
+	_, _, err := w.Exec(ctx, time.Now(), map[string]any{"path": "a.txt"}, false,
+		&taskengine.ToolsCall{Name: "local_shell", ToolName: "run_command"})
+
+	var pend *taskengine.ApprovalPendingError
+	require.ErrorAs(t, err, &pend)
+	require.Len(t, policy.requests, 1)
+	require.Equal(t, "f1084c50-session", policy.requests[0].SessionID,
+		"the parked ask must know the session it belongs to")
+
+	bare := newRecordingApprovePolicy()
+	wBare := localtools.NewHITLWrapper(&mockInnerTools{}, blockUntilCtxDone, bare, nil)
+	wBare.SetParkWindow(25 * time.Millisecond)
+	_, _, err = execGatedCall(t, wBare, "call-bare")
+	require.ErrorAs(t, err, &pend)
+	require.Len(t, bare.requests, 1)
+	require.Empty(t, bare.requests[0].SessionID)
 }
 
 // TestUnit_HITLWrapper_FastPathVerdictInsideWindow pins that an in-session verdict resolves normally and closes the durable row inline.

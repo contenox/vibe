@@ -159,7 +159,13 @@ type Status struct {
 // read loop and must not block: a handler that waits turns relay backpressure
 // into a stalled heartbeat and then into a reconnect. Carrying real sessions
 // through it is a later step; a nil Handler drops routed frames.
-type Handler func(librelay.Frame)
+//
+// The context is the connector's, extended with the frame's correlation key
+// when it carries one (see [traceContext]), so everything a handler starts
+// inherits it without any call site having to know the frame had one. It is
+// cancelled when the connector closes, so a handler that hands it to work
+// outliving the frame gets that teardown for free.
+type Handler func(context.Context, librelay.Frame)
 
 // Credentials are what the relay authenticates the instance with. They are
 // opaque here: the connector never inspects them and never puts them in a
@@ -704,7 +710,7 @@ func (c *Connector) readLoop(ctx context.Context, s *session) {
 func (c *Connector) dispatch(ctx context.Context, s *session, f librelay.Frame) {
 	if !librelay.IsControl(f.Type) {
 		if c.cfg.Handler != nil {
-			c.cfg.Handler(f)
+			c.cfg.Handler(traceContext(ctx, f), f)
 		}
 		return
 	}
@@ -739,6 +745,31 @@ func (c *Connector) dispatch(ctx context.Context, s *session, f librelay.Frame) 
 			_ = s.enqueue(reply)
 		}
 	}
+}
+
+// traceContext returns ctx carrying f's correlation key under
+// [libtracker.ContextKeyTraceID], or ctx unchanged when the frame carries none.
+//
+// This is the single point where a peer's trace enters this process, and it is
+// deliberately upstream of the handler: every tracker record opened below it
+// then reports trace_id without one Start call site knowing a relay exists.
+//
+// An untraced frame yields an untouched context rather than a synthetic key. A
+// machine-initiated frame and a relay that predates [librelay.Frame.Trace] both
+// arrive this way, and a key minted here would name an action this process
+// never saw — worse than the empty field, which at least says so.
+//
+// The value is re-checked with [librelay.ValidTraceID] even though
+// [librelay.Reader.ReadFrame] has already validated everything it hands back.
+// The cost is a scan of at most librelay.MaxTraceBytes, and it buys the
+// property that this function is safe on a frame from any source: nothing that
+// fails the alphabet ever reaches a log line, whatever path the frame took to
+// get here.
+func traceContext(ctx context.Context, f librelay.Frame) context.Context {
+	if f.Trace == "" || !librelay.ValidTraceID(f.Trace) {
+		return ctx
+	}
+	return context.WithValue(ctx, libtracker.ContextKeyTraceID, f.Trace)
 }
 
 // heartbeatLoop probes the peer and ends the connection when a probe goes
@@ -800,6 +831,11 @@ func isFatal(err error) bool {
 // the reader is still usable. It answers false for anything it does not
 // recognize, including [librelay.ErrFrameTooLarge]: an oversized line is not
 // consumed and must not be resynchronized past, so the connection ends.
+//
+// A rejected [librelay.Frame.Trace] belongs on the recoverable side. Its line
+// was consumed like any other invalid frame's, and ending the link over one
+// peer's malformed correlation key would strand every session riding it — the
+// whole reason the codec's error split exists.
 func isMalformed(err error) bool {
 	if err == nil {
 		return false
@@ -817,6 +853,7 @@ func isMalformed(err error) bool {
 		librelay.ErrEmptyType, librelay.ErrTypeTooLong, librelay.ErrIDTooLong,
 		librelay.ErrControlChar, librelay.ErrBothIDs, librelay.ErrSessionAlone,
 		librelay.ErrNotUTF8,
+		librelay.ErrTraceTooLong, librelay.ErrTraceCharset,
 	} {
 		if errors.Is(err, sentinel) {
 			return true

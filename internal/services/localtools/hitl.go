@@ -189,6 +189,20 @@ func policyEvalArgs(input any, tools *taskengine.ToolsCall) map[string]any {
 	return args
 }
 
+// askSessionID is the contenox session the gated call is running under, read
+// from the run context agentservice.Prompt stamps (and the resume path
+// restores from the checkpoint). Recording it on the ask is what makes a
+// parked approval findable afterwards: the checkpoint written beside it
+// already carries the session, so without this the durable row is the only
+// half of a suspension that cannot be listed for its session, cannot be
+// re-offered when a client attaches, and cannot be attributed in an inbox
+// showing more than one session's asks. Empty for a run with no session (a
+// bare chain execution, a tools-handler task) — never guessed.
+func askSessionID(ctx context.Context) string {
+	id, _ := ctx.Value(runtimetypes.SessionIDContextKey).(string)
+	return id
+}
+
 // askOutcome is the ask() callback's result, carried over a channel between
 // askDurable's launching goroutine and whichever code eventually reads it —
 // the function's own select on the fast path, or deliverLateVerdict when
@@ -306,6 +320,7 @@ func (h *HITLWrapper) Exec(
 			TimeoutS:    result.TimeoutS,
 			OnTimeout:   result.OnTimeout,
 			Detail:      result.Detail,
+			SessionID:   askSessionID(ctx),
 		}
 		h.publishDecision(ctx, tools.Name, toolName, args, result, true)
 		h.hitlLog(ctx, "ask raised", "tool", toolName, "approval_id", toolCallID, "rule", result.MatchedRule, "policy", result.PolicyName)

@@ -1371,3 +1371,26 @@ func mustMeta(v map[string]any) json.RawMessage {
 	}
 	return raw
 }
+
+// stubAsks is an AskInbox that is never called: the assertion below is about
+// whether the value survives the trip into acpsvc.Deps, not what it answers.
+type stubAsks struct{ acpsvc.AskInbox }
+
+// TestUnit_Deps_ACPDepsCarriesTheAskInbox pins the seam this package forwards
+// rather than owns. Deps.Asks is the durable inbox an attaching client's
+// parked approvals are re-offered from; acpsvc holds the whole mechanism, and
+// this struct copy is the only thing between a composition root that wires it
+// and an operator who is shown the card. A field acpDeps forgets leaves the
+// capability green in acpsvc's own tests and dark on the surface.
+//
+// The absent case is written as an explicit == nil rather than require.Nil,
+// which passes on a typed nil in an interface field — precisely the value
+// acpsvc would then treat as a wired inbox and call through.
+func TestUnit_Deps_ACPDepsCarriesTheAskInbox(t *testing.T) {
+	inbox := stubAsks{}
+	require.NotNil(t, Deps{Asks: inbox}.acpDeps().Asks,
+		"a wired ask inbox must reach acpsvc, or an attach re-offers nothing")
+
+	seam := Deps{}.acpDeps().Asks
+	require.True(t, seam == nil, "an unwired inbox must arrive as a nil interface, not a typed nil")
+}

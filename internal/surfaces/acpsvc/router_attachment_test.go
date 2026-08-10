@@ -48,7 +48,7 @@ const fleetInstance = "inst-fleet"
 // queued payload is served back one at a time with its newline restored.
 type phoneAttachment struct {
 	session string
-	handle  func(librelay.Frame)
+	handle  func(context.Context, librelay.Frame)
 
 	in   chan json.RawMessage
 	done chan struct{}
@@ -58,7 +58,7 @@ type phoneAttachment struct {
 	outbound []byte
 }
 
-func newPhoneAttachment(session string, handle func(librelay.Frame)) *phoneAttachment {
+func newPhoneAttachment(session string, handle func(context.Context, librelay.Frame)) *phoneAttachment {
 	return &phoneAttachment{
 		session: session,
 		handle:  handle,
@@ -105,7 +105,7 @@ func (p *phoneAttachment) Write(b []byte) (int, error) {
 		if line := p.outbound[:i]; len(bytes.TrimSpace(line)) > 0 {
 			payload := make(json.RawMessage, len(line))
 			copy(payload, line)
-			p.handle(librelay.Frame{
+			p.handle(context.Background(), librelay.Frame{
 				Type:     librelay.TypeACPMessage,
 				Instance: fleetInstance,
 				Session:  p.session,
@@ -219,6 +219,9 @@ type fleet struct {
 	tunnel *relayacp.Tunnel
 	desk   *fleetPeer
 	built  <-chan *Transport
+	// db is the store every peer's transport shares, so a test can write the
+	// durable rows an attach is supposed to react to.
+	db libdb.DBManager
 
 	mu    sync.Mutex
 	pipes map[string]*phoneAttachment
@@ -253,7 +256,11 @@ func (f *fleet) attach(t *testing.T, session string) *fleetPeer {
 // ready to accept attachments. Transports appear on the returned channel in
 // creation order: the desk's is built by NewAgentSideConnection below, and each
 // attachment's by the tunnel when its first frame arrives.
-func newFleet(t *testing.T) *fleet {
+//
+// withFleetDeps mutates the Deps every peer's transport is built from, applied
+// before any transport exists — wiring after construction would race the live
+// connections already reading them.
+func newFleet(t *testing.T, withFleetDeps ...func(*Deps, libdb.DBManager)) *fleet {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -266,20 +273,24 @@ func newFleet(t *testing.T) *fleet {
 
 	router := NewSessionRouter()
 	built := make(chan *Transport, 8)
-	base := New(Deps{
+	deps := Deps{
 		Engine:        &enginesvc.Engine{Bus: bus},
 		DB:            db,
 		ChainRegistry: &ChainRegistry{defaultChain: &taskengine.TaskChainDefinition{}},
 		WorkspaceID:   "fleet-ws",
 		SessionRouter: router,
-	})
+	}
+	for _, apply := range withFleetDeps {
+		apply(&deps, db)
+	}
+	base := New(deps)
 	factory := func(c *libacp.AgentSideConnection) libacp.Agent {
 		a := base(c)
 		built <- a.(*Transport)
 		return a
 	}
 
-	f := &fleet{router: router, pipes: map[string]*phoneAttachment{}}
+	f := &fleet{router: router, db: db, pipes: map[string]*phoneAttachment{}}
 	tunnel, err := relayacp.New(relayacp.Config{
 		Instance: fleetInstance,
 		Factory:  factory,
@@ -431,7 +442,12 @@ func TestFleet_TwoClientsOnOneSessionAreBothAskedAndFirstAnswerWins(t *testing.T
 	require.True(t, ok, "the client that fired the turn is asked")
 	require.Equal(t, "call-driven-by-phone", req.ToolCall.ToolCallID)
 
-	require.Greater(t, f.desk.permissionCount(), deskCardsBefore, "the other screen is asked the same question")
+	// Eventually, not Greater: the losing ask runs on its own goroutine, so the
+	// winning verdict can return before the desk's card has been counted. A bare
+	// comparison here passes on a fast machine and fails under load, which is
+	// what it did.
+	require.Eventually(t, func() bool { return f.desk.permissionCount() > deskCardsBefore }, 5*time.Second, 10*time.Millisecond,
+		"the other screen is asked the same question")
 	require.Eventually(t, func() bool { return f.desk.lc.cancelledPermissions() > 0 }, 5*time.Second, 10*time.Millisecond,
 		"the losing card is torn down rather than left waiting on a question already answered")
 }
@@ -450,7 +466,7 @@ func TestFleet_DetachStopsTheDetachedClientBeingTheApprovalTarget(t *testing.T) 
 	_, internalID := phone.newSession(t)
 	require.Same(t, phone.tr, mustOwner(t, f.router, internalID))
 
-	f.tunnel.Handle(librelay.Frame{
+	f.tunnel.Handle(context.Background(), librelay.Frame{
 		Type:     librelay.TypeACPDetach,
 		Instance: fleetInstance,
 		Session:  "att-phone",

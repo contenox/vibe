@@ -89,6 +89,7 @@ type approvalStore interface {
 	ListExpiredHITLApprovals(ctx context.Context, asOf time.Time, limit int) ([]*runtimetypes.HITLApproval, error)
 	ListHITLApprovals(ctx context.Context, state runtimetypes.HITLApprovalState, createdAtCursor *time.Time, limit int) ([]*runtimetypes.HITLApproval, error)
 	ListHITLApprovalsForMission(ctx context.Context, missionID string, limit int) ([]*runtimetypes.HITLApproval, error)
+	ListPendingHITLApprovalsForSession(ctx context.Context, sessionID string, limit int) ([]*runtimetypes.HITLApproval, error)
 }
 
 // checkpointReader is the optional store slice behind the verdict-ordering
@@ -151,6 +152,13 @@ type Service interface {
 	// ListPending returns pending approvals newest first, bounded by limit,
 	// always a non-nil slice.
 	ListPending(ctx context.Context, limit int) ([]*runtimetypes.HITLApproval, error)
+
+	// ListPendingForSession is ListPending narrowed to one session's asks —
+	// what a client attaching to a session needs to re-offer an approval a
+	// parked run is still waiting on, instead of showing a session that looks
+	// finished. Requires the ask to have recorded its session (see
+	// localtools.askSessionID); an empty sessionID matches nothing.
+	ListPendingForSession(ctx context.Context, sessionID string, limit int) ([]*runtimetypes.HITLApproval, error)
 
 	// AbandonMissionAsks closes every pending ask under missionID without
 	// running the resume hook; each row resolves denied. Returns the closed IDs.
@@ -720,6 +728,22 @@ func (s *service) ListPending(ctx context.Context, limit int) ([]*runtimetypes.H
 	rows, err := s.approvals.ListHITLApprovals(ctx, runtimetypes.HITLApprovalPending, nil, limit)
 	if err != nil {
 		return nil, fmt.Errorf("hitlservice: list pending approvals: %w", err)
+	}
+	if rows == nil {
+		rows = []*runtimetypes.HITLApproval{}
+	}
+	return rows, nil
+}
+
+// ListPendingForSession implements Service.ListPendingForSession, with
+// ListPending's missing-store semantics.
+func (s *service) ListPendingForSession(ctx context.Context, sessionID string, limit int) ([]*runtimetypes.HITLApproval, error) {
+	if s.approvals == nil {
+		return nil, fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
+	}
+	rows, err := s.approvals.ListPendingHITLApprovalsForSession(ctx, sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("hitlservice: list pending approvals for session %q: %w", sessionID, err)
 	}
 	if rows == nil {
 		rows = []*runtimetypes.HITLApproval{}

@@ -13,17 +13,38 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// AskInbox is the narrow slice of hitlservice.Service /answer needs: read a
-// mission's unanswered questions, and record one operator answer. The host
+// AskInbox is the slice of hitlservice.Service the session-attached ask paths
+// need: read what is unanswered, and record one operator verdict. The host
 // must wire the process's OWN hitlservice instance (the one the engine gates
 // through) — a second instance cannot wake a waiter parked in the first, and
 // only the wired one carries the resume hook a checkpointed run needs.
+//
+// Two consumers share it, and deliberately share one Deps field rather than
+// two: /answer (commands_answer.go) and the attach-time re-offer of a parked
+// approval (reoffer.go). Both are the same capability — this process can
+// close a durable ask and resume what is parked on it — so splitting them
+// into separate wiring points would let a host turn one on and leave the
+// other silently dark.
 type AskInbox interface {
 	// PendingAttentionAsks returns a mission's unanswered questions, newest first.
 	PendingAttentionAsks(ctx context.Context, missionID string) ([]*runtimetypes.HITLApproval, error)
 	// Answer resolves a pending question with the operator's reply and wakes
 	// the unit parked on it; it rejects a permission ask.
 	Answer(ctx context.Context, askID, text string) error
+	// ListPendingForSession returns one session's unanswered asks, newest
+	// first — the rows a client attaching to that session must be shown
+	// again. An empty session id matches nothing.
+	ListPendingForSession(ctx context.Context, sessionID string, limit int) ([]*runtimetypes.HITLApproval, error)
+	// Respond records a permission verdict on a durable ask, waking a parked
+	// waiter or, when none is left, running the resume hook against the
+	// checkpointed run.
+	//
+	// This is the only path a re-offered card may resolve through. The
+	// goroutine that raised the original ask was abandoned when
+	// localtools.ApprovalParkWindow elapsed, so a verdict that stops at this
+	// surface unblocks nothing: it would tell the operator they released a
+	// run that is still parked.
+	Respond(ctx context.Context, approvalID string, approved bool) error
 }
 
 // MissionSupervision resolves which missions a session fired — the ownership

@@ -149,8 +149,34 @@ contenox resume --session zed-a1b2c3
 | `--session <name>` | `resume` only: open the named session instead of the last active one       |
 | `--light`          | Render for a light terminal background (overrides automatic detection)      |
 | `--plain`          | Drop all color and unicode: ASCII glyphs, no styling                        |
+| `--workspace-root <dir>` | Directory a client may root a session in, for this run (repeatable). Adds to the launch directory and the granted roots; see [Workspace roots](#workspace-roots). |
 
 `new` does not accept `--session`: naming a session to open is the opposite of starting a new one.
+
+#### Workspace roots
+
+There is **one** workspace-root allowlist, and it bounds every session this process serves. It is assembled from three sources, which **union** — no source overrides or subtracts from another:
+
+1. **The launch directory** — the directory you started in, or the one named positionally (`contenox new ~/src/proj`). Always present, and always the **default root**.
+2. **The roots you granted** with [`contenox workspace add`](#contenox-workspace) — durable operator config, read from the shared database when the process starts.
+3. **`--workspace-root` flags and `CONTENOX_WORKSPACE_ROOTS`** — additions for this run only.
+
+```bash
+contenox workspace add ~/src/shared-lib                       # durable: every future session may use it
+contenox new ~/src/myproject                                   # launch dir is the default root
+contenox new ~/src/myproject --workspace-root /tmp/scratch     # plus one, just this run
+CONTENOX_WORKSPACE_ROOTS=/tmp/scratch contenox new             # same, for launchers and service units
+```
+
+Because the sources union, a flag can never widen or narrow what you granted, and a grant can never displace the launch directory as the default. Withdrawing access is always `contenox workspace remove` — never "remember which flags the launcher passed".
+
+The allowlist belongs to the machine, and it matters because this process also serves remote clients once the machine is [paired](/docs/guide/pairing/). A client reads the advertised roots, picks one, and passes it as the new session's workspace; the runtime refuses any directory outside them. A client that proposes no workspace gets the default root — never the filesystem root, where an agent has no project to work in and goes hunting for one.
+
+Granting a root grants everything **under** it. A directory inside the runtime's own control plane (`~/.contenox` and the workspace `.contenox` — its config, database, and policies) is refused from every source, unconditionally: as a launch directory, as a flag, as an environment entry, and as a grant. There is no setting that turns this off.
+
+The same allowlist bounds a mission dispatched from this process: a unit cannot be given a working directory the session that fired it could not have opened.
+
+`contenox acp` is the deliberate exception — it configures no allowlist at all, because the ACP protocol makes the editor supply the session's cwd.
 
 The terminal UI requires a real terminal on stdout; it refuses to start on a non-TTY. Unlike `chat`, `local_shell` is enabled by default here (pass `--shell=false` to disable). It also supports the `/mission` slash command the same way an ACP editor session does — including envelope selection (`/mission --policy <envelope> …`) and the envelope listing `/mission` prints on its own. See [The `/mission` slash command](#the-mission-slash-command) below.
 
@@ -597,7 +623,9 @@ Indexing costs one embedding call per chunk, so `contenox index` always plans an
 
 ### `contenox workspace`
 
-Grant or revoke the **workspace roots** a session may run in — the directories a chat, a fired mission unit, or an ACP session may choose as its working directory. Granting a root grants everything **under** it; a directory outside every granted root (a sibling, a prefix-trick neighbour like `/home/meX` against `/home/me`, or a symlink whose real target escapes) is refused. A too-broad root — the filesystem root, your home directory, or a top-level system directory like `/srv` — is also refused, so a grant can never hand a session an entire home or disk; grant the specific project directory.
+Grant or revoke **workspace roots** — the durable half of the one allowlist that bounds where a session may run. A granted root joins the launch directory and this run's `--workspace-root` flags to form the allowlist described under [Workspace roots](#workspace-roots); the three sources union, and a directory outside all of them is refused.
+
+Granting a root grants everything **under** it. A directory outside every root (a sibling, a prefix-trick neighbour like `/home/meX` against `/home/me`, or a symlink whose real target escapes) is refused. A too-broad root — the filesystem root, your home directory, or a top-level system directory like `/srv` — is refused at grant time, so a grant can never hand a session an entire home or disk; grant the specific project directory. A directory inside the runtime's own control plane is refused unconditionally, both when granted and again when the allowlist is built.
 
 ```bash
 contenox workspace add /home/me/src              # grant a root (and everything under it)
@@ -608,9 +636,13 @@ contenox workspace remove /home/me/scratch        # revoke a grant
 
 Granting a root also **registers it as a project**: `add` writes (or reuses) the folder's `.contenox/workspace.id` marker, so a root added here shows the same friendly name in `list`. `--name` sets that name (default: the folder's own name); re-running `add` on an already-granted path with a new `--name` **renames** the project without changing its workspace id, so its existing sessions stay attached. This is the exact same marker stamp `init --project` applies — one on-disk result across both entry points.
 
-A grant is durable config in the shared database (`~/.contenox/local.db`), so `add`/`remove` write it directly and every session — CLI, TUI, or ACP — reads the same grants.
+A grant is durable config in the shared database (`~/.contenox/local.db`), so `add`/`remove` write it directly and every surface that serves sessions reads the same grants.
 
-`add` requires the path to be an existing directory (a workspace root must be a real directory); `remove` does not, so a grant to a since-deleted directory can be cleaned up. Both are idempotent. `list` prints the durable grants these verbs manage, each with its project name when set.
+**When a grant takes effect.** The allowlist is read once, when a surface starts. A session's working directory is chosen at session creation and is immutable afterward, so a grant added now applies to the **next** `contenox new` / `contenox resume` you start — not to a process already running, and not to a session already open. `remove` behaves the same way: it stops future sessions from choosing the root, and does not evict a session already running there. Restart the surface to apply either immediately.
+
+`add` requires the path to be an existing directory (a workspace root must be a real directory); `remove` does not, so a grant to a since-deleted directory can be cleaned up. Both are idempotent. `list` prints the durable grants these verbs manage, each with its project name when set — it lists what is granted, which is the durable source only; to see the full allowlist a given process is using, including its launch directory and flags, consult the roots that surface advertises to its client.
+
+A grant that can no longer be honoured — one pointing inside the control plane, for instance, written before that guard existed or under a different `--data-dir` — is skipped when the allowlist is built, with a note on stderr naming the `workspace remove` line that clears it. One stale row never stops a surface from starting.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -725,6 +757,7 @@ contenox version
 | `CONTENOX_ACP_CHAIN_PATH` | Override the chain file used by `contenox acp` sessions |
 | `CONTENOX_ACPX_CHAIN_PATH`| Override the chain file used by headless ACPX sessions |
 | `CONTENOX_BEAM_CHAIN_PATH` | Override the chain file used by the terminal UI, `contenox new` / `contenox resume` (default `~/.contenox/chain-agent-beam.json`) — the terminal UI drives the same in-process ACP transport an editor session does, but resolves its own chain file and env var independently of `CONTENOX_ACP_CHAIN_PATH` |
+| `CONTENOX_WORKSPACE_ROOTS` | Add roots to the [workspace-root allowlist](#workspace-roots) of `contenox new` / `contenox resume` for one run, as an OS path-list separated value (`:` on POSIX, `;` on Windows). Read in addition to `--workspace-root` and to the roots granted by `contenox workspace add`, never instead of either; the launch directory stays the default root. |
 | `CONTENOX_DEFAULT_MODEL` / `CONTENOX_DEFAULT_PROVIDER` | Process-level override of the configured default model/provider (nothing is persisted). Also the ACP `env_var` auth-method contract for non-interactive setup. |
 | `CONTENOX_DEFAULT_ALT_MODEL` / `CONTENOX_DEFAULT_ALT_PROVIDER` | Same, for the alt model pair. |
 | `CONTENOX_DEFAULT_MAX_TOKENS` / `CONTENOX_DEFAULT_THINK` | Same, for the response token cap and reasoning level. |

@@ -118,10 +118,14 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 
 	// Built here and injected, rather than letting enginesvc mint one
 	// internally, because the resume-on-verdict hook can only be registered
-	// once the engine exists.
+	// once the engine exists. A caller that needs the same instance supplies
+	// it (see chatOpts.EffectiveHITLService) instead of building a sibling.
 	var hitlSvc hitlservice.Service
 	if opts.EffectiveHITL {
-		hitlSvc = newHITLService(opts.ContenoxDir, runtimetypes.New(db.WithoutTransaction()), tracker, "")
+		hitlSvc = opts.EffectiveHITLService
+		if hitlSvc == nil {
+			hitlSvc = newHITLService(opts.ContenoxDir, runtimetypes.New(db.WithoutTransaction()), tracker, "")
+		}
 	}
 
 	// The mission store this engine's tools write through, wired with the same
