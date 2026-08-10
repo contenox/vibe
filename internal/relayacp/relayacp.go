@@ -53,6 +53,17 @@
 // Resumption added later must be strictly additive, and this tunnel must keep
 // working against a relay that erases every trace of it.
 //
+// [librelay.Frame.Trace] is no exception to that rule, and this package does
+// not read it either. The connector has already put it in the context by the
+// time [Tunnel.Handle] is called, so a correlation key arrives here as a context
+// value and not as a field — which is what lets the tunnel inherit it while the
+// sentence above stays true.
+//
+// Nothing outbound carries one. A frame this package emits answers an ACP
+// message rather than an action, and only the two ACP endpoints know which
+// action a given response belongs to; stamping the attachment's opening key on
+// every reply would assert a correlation that is false after the first turn.
+//
 // # Backpressure, and the leak it is really about
 //
 // [Tunnel.Handle] runs on the connector's read loop, which must never block: a
@@ -235,7 +246,13 @@ func New(cfg Config) (*Tunnel, error) {
 // does. Attaching in order to detach would let a peer mint an attachment per
 // stale identifier it still holds, which is the appetite the cap exists to
 // bound.
-func (t *Tunnel) Handle(f librelay.Frame) {
+//
+// ctx is the connector's, already carrying the correlation key of the action
+// this frame belongs to when it had one. It is read but never retained as the
+// attachment's own context: see [Tunnel.attachmentFor] for the distinction, and
+// [librelay.Frame.Trace] for why a per-action key must not become a
+// per-connection one.
+func (t *Tunnel) Handle(ctx context.Context, f librelay.Frame) {
 	if f.Session == "" {
 		return
 	}
@@ -247,7 +264,7 @@ func (t *Tunnel) Handle(f librelay.Frame) {
 		if len(f.Payload) == 0 {
 			return
 		}
-		if a := t.attachmentFor(f.Session); a != nil {
+		if a := t.attachmentFor(ctx, f.Session); a != nil {
 			a.deliver(f.Payload)
 		}
 	case librelay.TypeACPDetach:
@@ -328,7 +345,14 @@ func (t *Tunnel) detachSession(session string) {
 // Eviction closes the loser inline and under the lock, which is safe because
 // closing an attachment only closes a channel: it takes no lock of its own and
 // cannot block the connector's read loop.
-func (t *Tunnel) attachmentFor(session string) *attachment {
+//
+// ctx belongs to the frame that got here, so its correlation key names one
+// action. It is spent only on the attachment's own lifetime record, and only on
+// the call that creates one — that record then says which action opened this
+// attachment, which is a true statement about a single event. A later frame's
+// key is not applied to an attachment that already exists, because the
+// attachment is not that action and outlives it.
+func (t *Tunnel) attachmentFor(ctx context.Context, session string) *attachment {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
@@ -350,7 +374,7 @@ func (t *Tunnel) attachmentFor(session string) *attachment {
 	a.touch(t.clock.Add(1))
 	t.live[session] = a
 	t.wg.Add(1)
-	go t.run(a)
+	go t.run(a, libtracker.CopyTrackingValues(ctx, t.ctx))
 	return a
 }
 
@@ -378,10 +402,19 @@ func (t *Tunnel) oldestLocked() *attachment {
 // A client that hung up and a tunnel that is shutting down are the ordinary
 // endings and are not reported: recording them would bury the failures worth
 // reading.
-func (t *Tunnel) run(a *attachment) {
+//
+// openCtx is [Tunnel.ctx] carrying the tracking values of the frame that
+// created this attachment, so the lifetime record below reports the action that
+// opened it. It is the tracker's context and NOT the ACP connection's, and the
+// split is the whole point: an attachment serves every later action on the same
+// socket, so running its handlers under the first action's key would stamp that
+// key on work it had nothing to do with — the per-connection correlation
+// [librelay.Frame.Trace] exists to avoid. The connection therefore keeps
+// [Tunnel.ctx], which carries lifetime and no correlation.
+func (t *Tunnel) run(a *attachment, openCtx context.Context) {
 	defer t.wg.Done()
 	defer t.detach(a)
-	reportErr, _, end := t.tracker.Start(t.ctx, "hold", "relay_attachment", "session", a.session)
+	reportErr, _, end := t.tracker.Start(openCtx, "hold", "relay_attachment", "session", a.session)
 	defer end()
 
 	conn := libacp.NewAgentSideConnection(a.stream, t.cfg.Factory)

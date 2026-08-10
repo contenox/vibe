@@ -21,23 +21,45 @@ type sqliteDBManager struct {
 // NewSQLiteDBManager creates a new DBManager for SQLite.
 // path is the database file path (e.g. "./.contenox/local.db" or "file:local.db").
 // The parent directory is created if missing. schema is applied on open (e.g. runtimetypes.SchemaSQLite).
+//
+// It is NewSQLiteDBManagerWithOptions with a zero SQLiteOptions, which is
+// defined to reproduce this constructor's DSN and pool configuration exactly.
+// Callers needing synchronous, cache_size, or pool limits use that constructor.
 func NewSQLiteDBManager(ctx context.Context, path string, schema string) (DBManager, error) {
+	return NewSQLiteDBManagerWithOptions(ctx, path, schema, SQLiteOptions{})
+}
+
+// NewSQLiteDBManagerWithOptions creates a DBManager for SQLite tuned by opts.
+// path and schema behave as in NewSQLiteDBManager; a zero opts is byte-for-byte
+// equivalent to it.
+//
+// opts is validated before anything is opened, so an unsafe combination such as
+// a reduced synchronous level outside WAL fails here rather than silently
+// degrading durability. See SQLiteOptions for what each zero value means.
+//
+// Capping SQLiteOptions.MaxOpenConns suits a single-writer database on
+// network-attached storage, but database/sql does not distinguish readers from
+// writers: a cap of 1 serialises every query, forfeits WAL's concurrent-reader
+// advantage in-process, lets one slow query stall all others, and turns any
+// code path that issues a query on this DBManager while holding one of its
+// transactions open into a deadlock instead of an error. busy_timeout stays
+// load-bearing regardless of the cap, because it governs contention this
+// process cannot see: another pod during a Recreate rollout, a Litestream
+// sidecar or backup tool on the same file, WAL checkpointing, and any second
+// DBManager over the same path.
+func NewSQLiteDBManagerWithOptions(ctx context.Context, path string, schema string, opts SQLiteOptions) (DBManager, error) {
+	if err := opts.validate(); err != nil {
+		return nil, err
+	}
 	if err := ensureSQLiteParentDir(path); err != nil {
 		return nil, fmt.Errorf("sqlite parent dir: %w", err)
 	}
-	// Set via DSN pragmas, not a one-off ExecContext, so every pooled connection
-	// inherits WAL mode, busy timeout, and foreign_keys — not just one leased connection.
-	dsn := path
-	if !strings.Contains(dsn, "?") {
-		dsn += "?"
-	} else {
-		dsn += "&"
-	}
-	dsn += "_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	dsn := buildSQLiteDSN(path, opts)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", translateSQLiteError(err))
 	}
+	applySQLitePool(db, opts)
 
 	if err = db.PingContext(ctx); err != nil {
 		_ = db.Close()

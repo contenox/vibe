@@ -42,6 +42,18 @@ type Result struct {
 	// not a failure (Err is nil), and status reads StateSuspended instead of
 	// StateFinished until reaped.
 	Suspended bool
+	// ApprovalID is the durable approval a Suspended turn is parked on, and
+	// is what the connected client is told it is waiting for — StopReason
+	// alone cannot say it, since ACP has no suspended stop reason. Empty
+	// unless Suspended.
+	ApprovalID string
+	// DroppedContentKinds are the prompt content kinds the turn could not
+	// forward to the model. They ride the Result for the same reason
+	// ApprovalID does: a reattaching client resolves its prompt from here,
+	// not from the connection that started the turn, and a discarded
+	// attachment must not become invisible by reconnecting. Empty when the
+	// whole prompt was forwarded.
+	DroppedContentKinds []string
 }
 
 // TurnFunc runs one turn's work. ctx is the serve-rooted, hard-deadline-bounded

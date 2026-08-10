@@ -97,10 +97,15 @@ func TestLoopback_ExternalAgent_NewSessionAndPromptRelays(t *testing.T) {
 	require.NotEmpty(t, newResp.SessionID)
 	require.Equal(t, agentName, metaAgent(t, newResp.Meta),
 		"session/new response _meta must echo contenox.agent")
-	require.Len(t, newResp.ConfigOptions, 1,
-		"a non-advertising external agent surfaces no chain-engine selects — only contenox's own HITL policy select")
+	require.Len(t, newResp.ConfigOptions, 2,
+		"a non-advertising external agent surfaces no chain-engine selects — only contenox's own HITL policy and agent selects")
 	require.Equal(t, configIDHITLPolicy, newResp.ConfigOptions[0].ID,
-		"contenox's HITL policy select is the sole config option of a modes-and-config-less external session")
+		"contenox's HITL policy select leads its own options on a modes-and-config-less external session")
+	agentOption := optionByID(t, newResp.ConfigOptions, configIDAgent)
+	require.Equal(t, agentName, agentOption.CurrentValue,
+		"a session created by naming an agent must report that agent back, so a person sees what it is running as")
+	require.True(t, configOptionHasValue(agentOption, agentNativeValue),
+		"the native chain stays selectable, so a person can start a session back on it")
 
 	promptResp, err := h.client.Prompt(ctx, libacp.PromptRequest{
 		SessionID: newResp.SessionID,
@@ -469,11 +474,13 @@ func TestLoopback_ExternalAgent_SessionNewCarriesDownstreamConfigOptions(t *test
 	entry := h.tr.sessions[newResp.SessionID]
 	h.tr.sessionMu.Unlock()
 	opts := h.tr.sessionConfigOptions(ctx, entry)
-	require.Len(t, opts, 2,
-		"an external session advertises the downstream options plus contenox's own HITL policy select")
+	require.Len(t, opts, 3,
+		"an external session advertises the downstream options plus contenox's own HITL policy and agent selects")
 	require.Equal(t, "stub-verbosity", opts[0].ID, "the downstream agent's own option comes first")
 	require.Equal(t, configIDHITLPolicy, opts[1].ID,
 		"contenox's HITL policy select is appended after the downstream surface")
+	require.Equal(t, configIDAgent, opts[2].ID,
+		"the agent select is appended last, naming what this session runs as")
 }
 
 // TestLoopback_ExternalAgent_SetConfigOptionRoundTripsToDownstream pins: a
@@ -895,11 +902,13 @@ func TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModeOption(t *testing.
 	entry := h.tr.sessions[newResp.SessionID]
 	h.tr.sessionMu.Unlock()
 	opts := h.tr.sessionConfigOptions(ctx, entry)
-	require.Len(t, opts, 2,
-		"a modes-only downstream agent surfaces the synthetic mode select plus contenox's own HITL policy select")
+	require.Len(t, opts, 3,
+		"a modes-only downstream agent surfaces the synthetic mode select plus contenox's own HITL policy and agent selects")
 	require.Equal(t, AgentModeConfigOptionID, opts[0].ID, "the synthetic mode select leads")
-	require.Equal(t, configIDHITLPolicy, opts[len(opts)-1].ID,
-		"contenox's HITL policy select is appended last, after the downstream surface")
+	require.Equal(t, configIDHITLPolicy, opts[1].ID,
+		"contenox's HITL policy select is appended after the downstream surface")
+	require.Equal(t, configIDAgent, opts[len(opts)-1].ID,
+		"the agent select is appended last")
 }
 
 // TestLoopback_ExternalAgent_SetModeOptionRoundTripsToDownstream pins: setting
@@ -1096,11 +1105,13 @@ func TestLoopback_ExternalAgent_SessionNewCarriesSyntheticModelOption(t *testing
 	entry := h.tr.sessions[newResp.SessionID]
 	h.tr.sessionMu.Unlock()
 	opts := h.tr.sessionConfigOptions(ctx, entry)
-	require.Len(t, opts, 2,
-		"a models-only downstream agent surfaces the synthetic model select plus contenox's own HITL policy select")
+	require.Len(t, opts, 3,
+		"a models-only downstream agent surfaces the synthetic model select plus contenox's own HITL policy and agent selects")
 	require.Equal(t, AgentModelConfigOptionID, opts[0].ID, "the synthetic model select leads")
-	require.Equal(t, configIDHITLPolicy, opts[len(opts)-1].ID,
-		"contenox's HITL policy select is appended last, after the downstream surface")
+	require.Equal(t, configIDHITLPolicy, opts[1].ID,
+		"contenox's HITL policy select is appended after the downstream surface")
+	require.Equal(t, configIDAgent, opts[len(opts)-1].ID,
+		"the agent select is appended last")
 }
 
 // TestLoopback_ExternalAgent_SessionNewCarriesModeAndModelInOrder pins: mode,
@@ -1120,14 +1131,16 @@ func TestLoopback_ExternalAgent_SessionNewCarriesModeAndModelInOrder(t *testing.
 		Meta:       agentMetaJSON(agentName),
 	})
 	require.NoError(t, err)
-	require.Len(t, newResp.ConfigOptions, 3,
-		"a modes+models downstream agent surfaces the synthetic mode select, the synthetic model select, and contenox's HITL policy select")
+	require.Len(t, newResp.ConfigOptions, 4,
+		"a modes+models downstream agent surfaces the synthetic mode select, the synthetic model select, and contenox's HITL policy and agent selects")
 	require.Equal(t, AgentModeConfigOptionID, newResp.ConfigOptions[0].ID,
 		"the synthetic mode select leads")
 	require.Equal(t, AgentModelConfigOptionID, newResp.ConfigOptions[1].ID,
 		"the synthetic model select follows the mode select")
 	require.Equal(t, configIDHITLPolicy, newResp.ConfigOptions[2].ID,
-		"contenox's HITL policy select is last")
+		"contenox's HITL policy select follows the downstream surface")
+	require.Equal(t, configIDAgent, newResp.ConfigOptions[3].ID,
+		"contenox's agent select is last")
 	require.Equal(t, "code", optionByID(t, newResp.ConfigOptions, AgentModeConfigOptionID).CurrentValue)
 	require.Equal(t, "stub-model-fast", optionByID(t, newResp.ConfigOptions, AgentModelConfigOptionID).CurrentValue)
 }
@@ -1271,8 +1284,10 @@ func TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists(t 
 	})
 	require.NoError(t, err)
 	require.Equal(t, "stub-verbosity", newResp.ConfigOptions[0].ID, "the downstream option comes first")
-	require.Equal(t, configIDHITLPolicy, newResp.ConfigOptions[len(newResp.ConfigOptions)-1].ID,
-		"contenox's HITL policy select is appended last, after the downstream surface")
+	require.Equal(t, configIDHITLPolicy, newResp.ConfigOptions[1].ID,
+		"contenox's HITL policy select is appended after the downstream surface")
+	require.Equal(t, configIDAgent, newResp.ConfigOptions[len(newResp.ConfigOptions)-1].ID,
+		"contenox's agent select is last")
 	require.Equal(t, hitlPolicyDefaultValue,
 		optionByID(t, newResp.ConfigOptions, configIDHITLPolicy).CurrentValue,
 		"a fresh external session defaults to the sentinel policy")
@@ -1304,10 +1319,12 @@ func TestLoopback_ExternalAgent_HITLPolicyPickerRoundTripsNativelyAndPersists(t 
 	require.IsType(t, &externalDriver{}, reloaded.driver, "the reloaded entry is re-flagged external")
 	require.Equal(t, "dev", reloaded.hitlPolicy(), "the per-session HITL policy survives a reload")
 	reloadedOpts := h.tr.reloadedConfigOptions(ctx, store, newResp.SessionID, reloaded)
-	require.Equal(t, configIDHITLPolicy, reloadedOpts[len(reloadedOpts)-1].ID,
+	require.Equal(t, configIDHITLPolicy, reloadedOpts[len(reloadedOpts)-2].ID,
 		"the reloaded external session re-advertises the HITL policy picker after the downstream surface")
 	require.Equal(t, "dev", optionByID(t, reloadedOpts, configIDHITLPolicy).CurrentValue,
 		"the reloaded picker shows the previously-chosen value, not the sentinel default")
+	require.Equal(t, agentName, optionByID(t, reloadedOpts, configIDAgent).CurrentValue,
+		"a reopened session still names the agent it is running as, without respawning it")
 }
 
 // TestLoopback_NativeSession_PolicySlashCommandStillWorks pins: the native

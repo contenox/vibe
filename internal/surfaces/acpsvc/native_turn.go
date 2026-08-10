@@ -199,12 +199,23 @@ func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptR
 
 // nativeResultToResponse maps a completed turn's Result onto the ACP prompt
 // response: clean end/cancellation resolve with the stop reason and no
-// error; a genuine failure resolves as an InternalError.
+// error; a genuine failure resolves as an InternalError. A suspended turn
+// additionally carries its `_meta` explanation, which is the only thing
+// separating a park from a finished turn on the wire (see stopReasonSuspended)
+// — it must be attached here as well as in the connection-bound path, since a
+// reattaching client resolves its prompt from the Result, not from that path.
+// Discarded prompt content is attached here for the same reason, on the
+// sibling contenox.droppedContent envelope, which merges with the suspension
+// rather than displacing it: a turn can be both parked and lossy.
 func nativeResultToResponse(res nativeturn.Result) (libacp.PromptResponse, error) {
 	if res.Err != nil {
 		return libacp.PromptResponse{StopReason: res.StopReason}, libacp.InternalError(res.Err.Error())
 	}
-	return libacp.PromptResponse{StopReason: res.StopReason}, nil
+	resp := libacp.PromptResponse{StopReason: res.StopReason}
+	if res.Suspended {
+		resp.Meta = suspensionMeta(res.ApprovalID)
+	}
+	return withDroppedContentMeta(resp, res.DroppedContentKinds), nil
 }
 
 // runNativeTurn is the survival-path turn body: the same chain-execution flow
@@ -215,6 +226,15 @@ func nativeResultToResponse(res nativeturn.Result) (libacp.PromptResponse, error
 // journaled rather than sent via AfterResponse; and it owns its own
 // turn-scoped tracker span, since the turn outlives the connection that
 // started it.
+//
+// A park announces its suspension notice here, journaled ahead of the
+// terminal session_info so a client reattaching after the park reads it in
+// the same order the live one saw it; the matching response `_meta` is
+// attached by nativeResultToResponse.
+//
+// Discarded prompt content is announced the same way, before the turn runs,
+// and carried out on every Result — failure, cancellation and clean end alike
+// — so reconnecting cannot be what makes an attachment's loss disappear.
 func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, images []taskengine.ImagePart, droppedContentKinds []string, emit func(context.Context, libacp.SessionNotification)) nativeturn.Result {
 	t := d.t
 
@@ -224,6 +244,11 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 	reportErr, reportChange, end := t.tracker().Start(turnCtx, "prompt", "acp_session",
 		"session_id", string(req.SessionID), "prompt_blocks", len(req.Prompt))
 	defer end()
+
+	// Journaled ahead of anything the turn produces, so a client reattaching
+	// after the fact reads the loss in the same order the live one saw it —
+	// before the answer that ignored the attachment.
+	announceDroppedContent(turnCtx, req.SessionID, droppedContentKinds, emit)
 
 	// Same per-session HITL/mission context injection as prompt.go, riding
 	// turnCtx instead of the request ctx.
@@ -282,7 +307,7 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 				drainEvents()
 			}
 			reportErr(err)
-			return nativeturn.Result{Err: err}
+			return nativeturn.Result{Err: err, DroppedContentKinds: droppedContentKinds}
 		}
 	}
 
@@ -344,26 +369,39 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 				"request_id":            reqID,
 				"dropped_content_kinds": droppedContentKinds,
 			})
-			return nativeturn.Result{StopReason: libacp.StopReasonCancelled}
+			return nativeturn.Result{StopReason: libacp.StopReasonCancelled, DroppedContentKinds: droppedContentKinds}
 		}
 		reportErr(err)
 		if resp != nil {
-			return nativeturn.Result{StopReason: mapStopReason(resp.StopReason), Err: err}
+			return nativeturn.Result{StopReason: mapStopReason(resp.StopReason), Err: err, DroppedContentKinds: droppedContentKinds}
 		}
-		return nativeturn.Result{Err: err}
+		return nativeturn.Result{Err: err, DroppedContentKinds: droppedContentKinds}
 	}
 
 	stopReason := mapStopReason(resp.StopReason)
 	if errors.Is(turnCtx.Err(), context.Canceled) {
 		stopReason = libacp.StopReasonCancelled
 	}
+	suspended := resp != nil && resp.StopReason == agentservice.StopSuspended && stopReason != libacp.StopReasonCancelled
+	approvalID := ""
+	if suspended {
+		approvalID = resp.SuspendedApprovalID
+		emit(turnCtx, libacp.SessionNotification{
+			SessionID: req.SessionID,
+			Update:    suspensionNotice(approvalID),
+		})
+	}
 
 	// Journaled as the last event, so a reattaching client finds the
 	// freshened tab/sidebar label too.
 	d.emitSessionInfo(turnCtx, req.SessionID, sess, emit)
 
+	loggedReason := string(stopReason)
+	if suspended {
+		loggedReason = stopReasonSuspended
+	}
 	reportChange(string(req.SessionID), map[string]any{
-		"stop_reason":           string(stopReason),
+		"stop_reason":           loggedReason,
 		"request_id":            reqID,
 		"dropped_content_kinds": droppedContentKinds,
 	})
@@ -371,8 +409,10 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 	// checkpointed, and answering the approval resumes it. The Registry
 	// surfaces it as StateSuspended until reaped.
 	return nativeturn.Result{
-		StopReason: stopReason,
-		Suspended:  resp != nil && resp.StopReason == agentservice.StopSuspended,
+		StopReason:          stopReason,
+		Suspended:           suspended,
+		ApprovalID:          approvalID,
+		DroppedContentKinds: droppedContentKinds,
 	}
 }
 

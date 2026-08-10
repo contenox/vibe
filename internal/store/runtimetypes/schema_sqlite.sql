@@ -433,6 +433,15 @@ ALTER TABLE hitl_approvals ADD COLUMN session_id  VARCHAR(255) NOT NULL DEFAULT 
 ALTER TABLE hitl_approvals ADD COLUMN agent_name  VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE hitl_approvals ADD COLUMN mission_id  VARCHAR(255);
 
+-- The per-session ask inbox's access path
+-- (ListPendingHITLApprovalsForSession): name a session, then filter to
+-- pending — how a client attaching to a session finds the ask a parked run is
+-- waiting on. Indexed here rather than beside the table's other indexes
+-- because session_id only exists after the ALTER above has run; a pre-
+-- attribution database would otherwise fail the whole schema on "no such
+-- column".
+CREATE INDEX IF NOT EXISTS idx_hitl_approvals_session_state ON hitl_approvals(session_id, state);
+
 -- Durable event-dispatch tier. The tables are owned by events.go and
 -- event_firings.go in this package; the service tier over them is
 -- internal/services/eventlog + eventtrigger. A beta surface — the tables are

@@ -62,7 +62,12 @@ func (d *nativeDriver) Close() error { return nil }
 func (d *nativeDriver) AvailableCommands() []libacp.AvailableCommand { return d.t.acpCommands() }
 
 // ConfigOptions returns the chain-engine config selects (model/HITL/think/token,
-// plus the workspace root when an allowlist is configured).
+// plus the workspace root when an allowlist is configured and the agent picker
+// when the machine has registered agents).
+//
+// The agent picker is reached through here by the initialize-time snapshot too
+// (workspaceConfigOptions seeds a native driver), which is where a client picks
+// the agent for a session that does not exist yet.
 func (d *nativeDriver) ConfigOptions(ctx context.Context, sess *sessionEntry) []libacp.SessionConfigOption {
 	t := d.t
 	opts := []libacp.SessionConfigOption{
@@ -72,6 +77,9 @@ func (d *nativeDriver) ConfigOptions(ctx context.Context, sess *sessionEntry) []
 		t.tokenLimitConfigOption(ctx, sess),
 	}
 	if opt, ok := t.workspaceRootConfigOption(sess); ok {
+		opts = append(opts, opt)
+	}
+	if opt, ok := t.agentConfigOption(ctx, sess); ok {
 		opts = append(opts, opt)
 	}
 	return opts
@@ -88,6 +96,18 @@ func (d *nativeDriver) SetConfigOption(ctx context.Context, sess *sessionEntry, 
 
 // Prompt runs one native turn: it intercepts slash commands, then executes the
 // default chain, translating engine events to session/update notifications.
+//
+// A turn that parks on a human approval resolves here too, and must not read
+// as a completed one. ACP has no suspended stop reason, so the token stays
+// end_turn (see mapStopReason) and the park is reported by the two things that
+// name it: an announced notice carrying the approval id, and the same trio on
+// the response `_meta`, which a finished turn never carries.
+//
+// Prompt content that could not be forwarded is reported the same way, on the
+// sibling contenox.droppedContent envelope (see droppedContentReport). Every
+// branch that computes the kinds carries them out: the two command paths, the
+// cancellation, the park, and the ordinary ending. Nothing about what is
+// dropped, or when, is decided here — only whether the client is told.
 func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, sess *sessionEntry) (libacp.PromptResponse, error) {
 	t := d.t
 	reportErr, reportChange, end := t.tracker().Start(ctx, "prompt", "acp_session", "session_id", string(req.SessionID), "prompt_blocks", len(req.Prompt))
@@ -116,7 +136,12 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 			droppedContentKinds = append(droppedContentKinds, string(libacp.ContentKindImage))
 		}
 		cmdCtx := libtracker.WithNewRequestID(ctx)
-		return t.dispatchCommand(cmdCtx, req.SessionID, sess, name, args)
+		announceDroppedContent(ctx, req.SessionID, droppedContentKinds, t.sendUpdate)
+		resp, err := t.dispatchCommand(cmdCtx, req.SessionID, sess, name, args)
+		if err != nil {
+			return resp, err
+		}
+		return withDroppedContentMeta(resp, droppedContentKinds), nil
 	}
 
 	// An input shaped like a command whose name is unknown is answered here
@@ -132,7 +157,8 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 			"unknown_command":       name,
 			"dropped_content_kinds": droppedContentKinds,
 		})
-		return t.answerUnknownCommand(ctx, req.SessionID, name), nil
+		announceDroppedContent(ctx, req.SessionID, droppedContentKinds, t.sendUpdate)
+		return withDroppedContentMeta(t.answerUnknownCommand(ctx, req.SessionID, name), droppedContentKinds), nil
 	}
 
 	// When serve wires a native-turn Registry, the turn runs off this
@@ -142,6 +168,11 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	if t.deps.NativeTurns != nil {
 		return d.promptViaRegistry(ctx, req, sess, input, images, droppedContentKinds)
 	}
+
+	// Announced before the turn runs, so the operator learns the attachment was
+	// discarded ahead of the answer that ignores it. The survival path announces
+	// it from inside runNativeTurn for the same reason; the two are exclusive.
+	announceDroppedContent(ctx, req.SessionID, droppedContentKinds, t.sendUpdate)
 
 	promptCtx := libtracker.WithNewRequestID(ctx)
 	reqID, _ := promptCtx.Value(libtracker.ContextKeyRequestID).(string)
@@ -270,7 +301,7 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 				"request_id":            reqID,
 				"dropped_content_kinds": droppedContentKinds,
 			})
-			return libacp.PromptResponse{StopReason: libacp.StopReasonCancelled}, nil
+			return withDroppedContentMeta(libacp.PromptResponse{StopReason: libacp.StopReasonCancelled}, droppedContentKinds), nil
 		}
 		reportErr(err)
 		if resp != nil {
@@ -284,6 +315,7 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	if errors.Is(promptCtx.Err(), context.Canceled) {
 		stopReason = libacp.StopReasonCancelled
 	}
+	suspended := resp.StopReason == agentservice.StopSuspended && stopReason != libacp.StopReasonCancelled
 	// Push updatedAt (and the derived title, mirroring session/list's
 	// sessionListTitle) so clients notice activity without a re-list.
 	libacp.AfterResponse(ctx, func() {
@@ -299,14 +331,28 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 			Update:    update,
 		})
 	})
+	if suspended {
+		reportChange(string(req.SessionID), map[string]any{
+			"stop_reason":           stopReasonSuspended,
+			"approval_id":           resp.SuspendedApprovalID,
+			"request_id":            reqID,
+			"dropped_content_kinds": droppedContentKinds,
+		})
+		t.sendUpdate(ctx, libacp.SessionNotification{
+			SessionID: req.SessionID,
+			Update:    suspensionNotice(resp.SuspendedApprovalID),
+		})
+		return withDroppedContentMeta(libacp.PromptResponse{StopReason: stopReason, Meta: suspensionMeta(resp.SuspendedApprovalID)}, droppedContentKinds), nil
+	}
 	reportChange(string(req.SessionID), map[string]any{
 		"stop_reason":           string(stopReason),
 		"request_id":            reqID,
 		"dropped_content_kinds": droppedContentKinds,
 	})
-	return libacp.PromptResponse{StopReason: stopReason}, nil
+	return withDroppedContentMeta(libacp.PromptResponse{StopReason: stopReason}, droppedContentKinds), nil
 }
 
+// mapStopReason projects agentservice's stop reasons onto ACP's closed set.
 func mapStopReason(r agentservice.StopReason) libacp.StopReason {
 	switch r {
 	case agentservice.StopEndTurn:
@@ -318,8 +364,11 @@ func mapStopReason(r agentservice.StopReason) libacp.StopReason {
 	case agentservice.StopCancelled:
 		return libacp.StopReasonCancelled
 	case agentservice.StopSuspended:
-		// ACP has no "suspended" reason; the client sees a clean end turn,
-		// with the open permission card signaling what it's waiting on.
+		// ACP has no "suspended" reason and inventing a token would break a
+		// client that decodes stopReason as a closed enum, so the spec field
+		// stays end_turn. It is never the whole answer: the caller pairs it
+		// with suspensionMeta and suspensionNotice, which name the approval
+		// the turn is parked on. See stopReasonSuspended.
 		return libacp.StopReasonEndTurn
 	}
 	return libacp.StopReasonEndTurn

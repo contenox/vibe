@@ -4,12 +4,14 @@ package hitlservice_test
 // scaffolding durable_approval_test.go defines.
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libtracker"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,6 +44,59 @@ func TestUnit_ListPending_ReturnsOnlyPendingNewestFirst(t *testing.T) {
 	for _, row := range got {
 		require.Equal(t, runtimetypes.HITLApprovalPending, row.State)
 	}
+}
+
+// TestUnit_ListPendingForSession_ScopesToOneSessionsOpenAsks pins the query a
+// client attaching to a session needs to find the approval a parked run is
+// waiting on: this session's rows only, still-pending only, newest first. It
+// is the half of the repair path that was impossible while the durable row
+// carried no session id. A quiet session and the unattributed rows a pre-fix
+// database still holds both answer empty rather than everything.
+func TestUnit_ListPendingForSession_ScopesToOneSessionsOpenAsks(t *testing.T) {
+	t.Parallel()
+	ctx, store, _ := setupHITLDB(t)
+	svc := newDurableService(t, store)
+
+	base := time.Now().UTC().Add(-time.Hour)
+	mine := seedPendingRowForSession(t, ctx, store, "sess-mine", base)
+	newer := seedPendingRowForSession(t, ctx, store, "sess-mine", base.Add(time.Minute))
+	seedPendingRowForSession(t, ctx, store, "sess-other", base)
+	answered := seedPendingRowForSession(t, ctx, store, "sess-mine", base.Add(2*time.Minute))
+	require.NoError(t, svc.Respond(ctx, answered.ID, true))
+
+	got, err := svc.ListPendingForSession(ctx, "sess-mine", 100)
+	require.NoError(t, err)
+	require.Len(t, got, 2, "another session's ask and an answered one must not appear")
+	require.Equal(t, newer.ID, got[0].ID, "newest first")
+	require.Equal(t, mine.ID, got[1].ID)
+	for _, row := range got {
+		require.Equal(t, runtimetypes.HITLApprovalPending, row.State)
+		require.Equal(t, "sess-mine", row.SessionID)
+	}
+
+	none, err := svc.ListPendingForSession(ctx, "sess-quiet", 100)
+	require.NoError(t, err)
+	require.Empty(t, none)
+	unattributed, err := svc.ListPendingForSession(ctx, "", 100)
+	require.NoError(t, err)
+	require.Empty(t, unattributed)
+}
+
+// seedPendingRowForSession writes one pending row attributed to sessionID.
+func seedPendingRowForSession(t *testing.T, ctx context.Context, store runtimetypes.Store, sessionID string, createdAt time.Time) *runtimetypes.HITLApproval {
+	t.Helper()
+	row := &runtimetypes.HITLApproval{
+		ID:        uuid.NewString(),
+		ToolsName: "local_shell",
+		ToolName:  "run_command",
+		OnTimeout: "deny",
+		State:     runtimetypes.HITLApprovalPending,
+		SessionID: sessionID,
+		CreatedAt: createdAt,
+		ExpiresAt: createdAt.Add(time.Hour),
+	}
+	require.NoError(t, store.CreateHITLApproval(ctx, row))
+	return row
 }
 
 // TestUnit_ListPending_CarriesTheDecisionFields pins that ListPending hands

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -89,8 +88,7 @@ func (t *Transport) LoadSession(ctx context.Context, req libacp.LoadSessionReque
 		reportErr(err)
 		return libacp.LoadSessionResponse{}, err
 	}
-	if !filepath.IsAbs(req.Cwd) {
-		err := libacp.NewErrorf(libacp.ErrInvalidParams, "cwd must be an absolute path, got %q", req.Cwd)
+	if err := requireSessionCwd(req.Cwd); err != nil {
 		reportErr(err)
 		return libacp.LoadSessionResponse{}, err
 	}
@@ -163,6 +161,7 @@ func (t *Transport) LoadSession(ctx context.Context, req libacp.LoadSessionReque
 	// Join an in-flight native turn as a viewer so the client resumes the
 	// live stream; ordered after the replay, which the journal never overlaps.
 	t.reattachNativeTurn(ctx, req.SessionID)
+	t.reofferParkedAsks(ctx, req.SessionID, contenoxSessionID)
 	// Emit the slash-command menu only after the session/load result is on
 	// the wire. External re-emits its downstream agent's persisted menu (the
 	// live bridge died with the pre-load connection).
@@ -460,9 +459,38 @@ func errSetupRequired() error {
 	return libacp.NewError(libacp.ErrAuthRequired, "contenox is not configured yet: no default-model is set. Run the \"Setup Contenox\" auth method, set the CONTENOX_DEFAULT_* environment variables (or run `contenox acp --setup`), then reconnect.")
 }
 
+// requireSessionCwd rejects a malformed session cwd on session/new,
+// session/load and session/resume before any of them touches the engine or
+// the store, so a bad request costs no side effects.
+//
+// Only one rule is this transport's own: the ACP spec makes cwd mandatory, so
+// an absent one is a client bug rather than an unspecified workspace. The path
+// rules are not restated here — the check runs vfs.ResolveSessionCwd against a
+// nil allowlist, which applies exactly its syntactic half (absolute, and never
+// inside the runtime's control plane) and leaves the allowlist decision to the
+// real resolution later. One procedure, one implementation.
+//
+// The "/" sentinel deliberately survives. It means "the machine's default
+// root", it is what every browser client sends, and the duplicated
+// filepath.IsAbs check this replaced refused it before the allowlist was ever
+// consulted — which on Windows, where "/" is not an absolute path, refused
+// every remote session outright.
+func requireSessionCwd(cwd string) error {
+	if strings.TrimSpace(cwd) == "" {
+		return libacp.NewError(libacp.ErrInvalidParams, "cwd is required")
+	}
+	if _, err := vfs.ResolveSessionCwd(nil, cwd, ""); err != nil {
+		return libacp.NewError(libacp.ErrInvalidParams, err.Error())
+	}
+	return nil
+}
+
 // resolveWorkspaceCwd maps a requested session cwd onto the concrete root to
 // use, delegating the decision to vfs.ResolveSessionCwd (shared with
 // fleetservice's dispatch path) and translating a refusal into a wire error.
+// This is the enforcement point for the workspace-root allowlist: a cwd a
+// client proposes is untrusted input, and when Deps.WorkspaceRoots is
+// configured anything outside it is refused rather than adopted.
 // See vfs.ResolveSessionCwd for the full rule set.
 func (t *Transport) resolveWorkspaceCwd(cwd string) (string, error) {
 	resolved, err := vfs.ResolveSessionCwd(t.deps.WorkspaceRoots, cwd, "")
@@ -494,8 +522,7 @@ func (t *Transport) NewSession(ctx context.Context, req libacp.NewSessionRequest
 	reportErr, reportChange, end := t.tracker().Start(ctx, "new", "acp_session", "session_id", string(sessionID), "cwd", req.Cwd, "mcp_servers", len(req.McpServers))
 	defer end()
 
-	if !filepath.IsAbs(req.Cwd) {
-		err := libacp.NewErrorf(libacp.ErrInvalidParams, "cwd must be an absolute path, got %q", req.Cwd)
+	if err := requireSessionCwd(req.Cwd); err != nil {
 		reportErr(err)
 		return libacp.NewSessionResponse{}, err
 	}
@@ -681,8 +708,7 @@ func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionR
 		reportErr(err)
 		return libacp.ResumeSessionResponse{}, err
 	}
-	if !filepath.IsAbs(req.Cwd) {
-		err := libacp.NewErrorf(libacp.ErrInvalidParams, "cwd must be an absolute path, got %q", req.Cwd)
+	if err := requireSessionCwd(req.Cwd); err != nil {
 		reportErr(err)
 		return libacp.ResumeSessionResponse{}, err
 	}
@@ -745,6 +771,7 @@ func (t *Transport) ResumeSession(ctx context.Context, req libacp.ResumeSessionR
 	// Join an in-flight native turn so the resumed session picks the live
 	// stream back up; a no-op when no turn is in flight (see LoadSession).
 	t.reattachNativeTurn(ctx, req.SessionID)
+	t.reofferParkedAsks(ctx, req.SessionID, contenoxSessionID)
 
 	// Mirror LoadSession: native re-advertises its menu; external re-emits
 	// its downstream agent's persisted menu.

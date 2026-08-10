@@ -30,6 +30,15 @@ type rootSet struct {
 
 // buildRootSet cleans, absolutizes, symlink-resolves, and de-duplicates
 // roots into an immutable snapshot. At least one root is required.
+//
+// A root at or under the control plane is refused here, which is what makes
+// the deny structural: every way an allowlist comes into being (NewFactory,
+// SetRoots) funnels through this one function, so no caller can assemble a
+// Factory that advertises the runtime's own config, database, or policies as
+// a place a session may run. Refusing at construction is also what closes the
+// default-root hole — Resolve answers the "/" sentinel from roots[0], so a
+// control-plane path that reached position zero would be handed out as a cwd
+// without any further check.
 func buildRootSet(roots ...string) (*rootSet, error) {
 	rs := &rootSet{display: map[string]string{}}
 	seen := map[string]struct{}{}
@@ -40,6 +49,9 @@ func buildRootSet(roots ...string) (*rootSet, error) {
 		resolved, err := ResolveRoot(r)
 		if err != nil {
 			return nil, fmt.Errorf("vfs: workspace root %q: %w", r, err)
+		}
+		if denied, bad := deniedResolved(resolved); bad {
+			return nil, controlPlaneError(r, denied)
 		}
 		if _, dup := seen[resolved]; dup {
 			continue
@@ -132,10 +144,19 @@ func (f *Factory) DescribeRoots() string {
 // subpath, not its containing root. A path under the runtime's control plane
 // is refused first with ErrControlPlane; anything else outside every root is
 // refused with ErrNotAllowed.
+//
+// The default root is re-checked against the denylist rather than trusted
+// from buildRootSet: the denylist is process-global and may be registered
+// after a Factory exists, so construction order alone cannot carry the
+// guarantee for the one path that returns a root without matching it.
 func (f *Factory) Resolve(root string) (string, error) {
 	rs := f.load()
 	if root == "" || root == "/" {
-		return rs.defaultRoot(), nil
+		def := rs.defaultRoot()
+		if denied, bad := deniedResolved(def); bad {
+			return "", controlPlaneError(def, denied)
+		}
+		return def, nil
 	}
 	resolved, err := ResolveRoot(root)
 	if err != nil {

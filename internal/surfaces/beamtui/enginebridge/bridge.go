@@ -119,6 +119,17 @@ type Deps struct {
 	// SessionRouter is the shared session->transport registry HITL approvals
 	// route through; nil for a single-transport process.
 	SessionRouter *acpsvc.SessionRouter
+	// Asks is the durable ask inbox an attaching client's parked approvals are
+	// re-offered from, and the verdict on a re-offered card is recorded
+	// through. It must be the process's OWN hitlservice.Service — the instance
+	// the engine gates through and the resume-on-verdict hook is registered
+	// against. A parked ask outlived the goroutine that raised it, so only that
+	// instance can restart the checkpointed run; a second instance over the
+	// same store would record a verdict that resolves a row nothing is waiting
+	// on, which reads to the operator as an answered question and leaves the
+	// run parked. Nil leaves a re-attaching client with no card for a question
+	// its session is still parked on.
+	Asks acpsvc.AskInbox
 	// ClientInfo identifies this client in the handshake; defaults to
 	// {Name: "beam"} when nil.
 	ClientInfo *libacp.Implementation
@@ -136,6 +147,41 @@ func (d Deps) validate() error {
 		return errors.New("enginebridge: Deps.WorkspaceID is required")
 	}
 	return nil
+}
+
+// acpDeps is the acpsvc.Deps every connection built from d is served by: this
+// Bridge's own loopback, and every attachment minted from
+// [Bridge.AgentFactory].
+//
+// It is a named projection rather than a literal inside New so that what this
+// package forwards is assertable without standing up a connection. A Deps
+// field this method does not copy across is a capability that exists
+// everywhere except where the operator meets it — which is how a working
+// re-offer of a parked approval stayed dark on beam.
+func (d Deps) acpDeps() acpsvc.Deps {
+	return acpsvc.Deps{
+		Engine:                d.Engine,
+		DB:                    d.DB,
+		ChainRegistry:         d.ChainRegistry,
+		DefaultModel:          d.DefaultModel,
+		DefaultProvider:       d.DefaultProvider,
+		DefaultAltModel:       d.DefaultAltModel,
+		DefaultAltProvider:    d.DefaultAltProvider,
+		DefaultMaxTokens:      d.DefaultMaxTokens,
+		DefaultThink:          d.DefaultThink,
+		WorkspaceID:           d.WorkspaceID,
+		ContenoxDir:           d.ContenoxDir,
+		WorkspaceRoots:        d.WorkspaceRoots,
+		ShellSessions:         d.ShellSessions,
+		KnownPolicies:         d.KnownPolicies,
+		HITLDefaultPolicyName: d.HITLDefaultPolicyName,
+		Fleet:                 d.Fleet,
+		Agents:                d.Agents,
+		MissionEnvelopes:      d.MissionEnvelopes,
+		OptInBeta:             d.OptInBeta,
+		SessionRouter:         d.SessionRouter,
+		Asks:                  d.Asks,
+	}
 }
 
 // Bridge is the live loopback. It is safe for concurrent use; every method may
@@ -246,28 +292,7 @@ func New(ctx context.Context, deps Deps) (*Bridge, error) {
 	agentSide := &duplexPipe{r: agentR, w: agentW}
 	clientSide := &duplexPipe{r: clientR, w: clientW}
 
-	factory := acpsvc.New(acpsvc.Deps{
-		Engine:                deps.Engine,
-		DB:                    deps.DB,
-		ChainRegistry:         deps.ChainRegistry,
-		DefaultModel:          deps.DefaultModel,
-		DefaultProvider:       deps.DefaultProvider,
-		DefaultAltModel:       deps.DefaultAltModel,
-		DefaultAltProvider:    deps.DefaultAltProvider,
-		DefaultMaxTokens:      deps.DefaultMaxTokens,
-		DefaultThink:          deps.DefaultThink,
-		WorkspaceID:           deps.WorkspaceID,
-		ContenoxDir:           deps.ContenoxDir,
-		WorkspaceRoots:        deps.WorkspaceRoots,
-		ShellSessions:         deps.ShellSessions,
-		KnownPolicies:         deps.KnownPolicies,
-		HITLDefaultPolicyName: deps.HITLDefaultPolicyName,
-		Fleet:                 deps.Fleet,
-		Agents:                deps.Agents,
-		MissionEnvelopes:      deps.MissionEnvelopes,
-		OptInBeta:             deps.OptInBeta,
-		SessionRouter:         deps.SessionRouter,
-	})
+	factory := acpsvc.New(deps.acpDeps())
 	b.factory = factory
 
 	// Type-asserting inside the factory closure is the only way to reach the

@@ -5,7 +5,7 @@ description: Control which tool calls require human approval using named policy 
 
 # HITL Policies
 
-Human + AI collaboration in contenox is an authored, versioned artifact — not a runtime default. The policy file decides what runs unattended, what pauses to ask a human, and what is denied outright, and it is diffable and swappable like any other file in your repo. Because approvals are durable, a question waits for a person instead of timing out: an unanswered ask checkpoints the run, and answering it later — from any terminal — resumes execution exactly once. For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
+Human + AI collaboration in contenox is an authored, versioned artifact — not a runtime default. The policy file decides what runs unattended, what pauses to ask a human, and what is denied outright, and it is diffable and swappable like any other file in your repo. Because approvals are durable, a question waits for a person instead of timing out: an unanswered ask checkpoints the run, and answering it later — from any terminal — resumes execution exactly once. A parked turn says so rather than going quiet, and a client that reconnects is shown the question again; see [What a parked approval looks like](#what-a-parked-approval-looks-like). For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
 
 Human-in-the-loop (HITL) lets you intercept tool calls before they execute and decide — approve, block, or let them pass automatically — based on a named policy file.
 
@@ -34,6 +34,16 @@ contenox run  --auto --chain ./my-chain.json "do the thing"
 
 > **Warning:**
 > `--auto` disables all approval prompts. Use only in trusted environments or non-interactive scripts.
+
+## What a parked approval looks like
+
+An approval that nobody answers within the park window does not fail and does not hang. The run checkpoints, releases its process, and the ask stays a pending row any process can answer later. Three things make that state visible rather than silent:
+
+**The turn announces itself.** A parked turn ends with a message in the transcript saying it is suspended rather than finished, naming the approval id and the command that resolves it. On the wire the ACP `stopReason` stays `end_turn` — the protocol has no "suspended" reason, and inventing one would break clients that read it as a closed set — so the distinguishing detail travels in the response's `_meta` alongside the announcement. An ordinary completed turn carries neither.
+
+**A reconnecting client is asked again.** The approval prompt belongs to the connection that raised it, so it disappears when that connection goes. Attaching to the session again — reopening the terminal UI, or an editor reconnecting — re-presents the approvals the session is still parked on, as live prompts under the original ask ids. Answering a re-presented prompt resolves the same durable row and resumes the same checkpointed run; it is not a second question. Asks that were answered elsewhere, or that have expired and had their `on_timeout` verdict applied, are not re-offered. Questions asked with `mission_ask_attention` are not re-offered as prompts either — they are answered with words, through `contenox approvals respond --answer`. The re-offer is capped per attach, so a session holding an unusual number of open asks gets the first of them as cards and the rest stay answerable from a terminal.
+
+**Any terminal can still answer.** None of the above is required. `contenox approvals list` shows every pending ask and `contenox approvals respond` answers one from any terminal, whether or not a client is attached — see [`contenox approvals`](/docs/reference/contenox-cli/#contenox-approvals). Whichever route answers first wins: a row becomes terminal exactly once, so a prompt answered on a second screen after the verdict landed is discarded rather than applied twice.
 
 ## Policy file format
 
@@ -168,4 +178,4 @@ When HITL is enabled and a tool call needs evaluation, the engine resolves the p
 3. If the key is empty or the file is missing, fall back to `hitl-policy-default.json`.
 4. If that file is also missing, use a built-in fail-closed policy with no rules: every tool call, including reads, requires approval.
 
-See [`contenox workspace`](/docs/reference/contenox-cli/#contenox-workspace) in the CLI reference for granting and revoking the workspace roots sessions may run in.
+A policy decides which tool calls need a human. It does not decide **where** the session may run — that is the workspace-root allowlist, assembled from the launch directory, the roots you granted, and this run's flags. See [Workspace roots](/docs/reference/contenox-cli/#workspace-roots) for how the one allowlist is built and [`contenox workspace`](/docs/reference/contenox-cli/#contenox-workspace) for granting and revoking the durable half of it.

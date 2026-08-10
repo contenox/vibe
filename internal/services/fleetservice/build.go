@@ -18,6 +18,7 @@ import (
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/operatorinbox"
 	"github.com/contenox/contenox/internal/services/reportrouter"
+	"github.com/contenox/contenox/internal/services/vfs"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libbus"
 	libdb "github.com/contenox/contenox/libdbexec"
@@ -34,8 +35,16 @@ type InProcessDeps struct {
 	Missions missionservice.Service
 
 	// ProjectRoot is the working directory a dispatched mission defaults to
-	// when the request names none. See service.resolveCwd.
+	// when the request names none and no allowlist is configured. See
+	// service.resolveCwd.
 	ProjectRoot string
+
+	// WorkspaceRoots is the machine's workspace-root allowlist, bounding the
+	// cwd a dispatch request may name — a dispatched unit is an agent-driven
+	// session and gets the same boundary a chat or editor session does. Nil
+	// configures no allowlist, which leaves ProjectRoot as the default and any
+	// absolute cwd acceptable.
+	WorkspaceRoots *vfs.Factory
 
 	// WorkspaceID is the workspace the host publishes mission events under,
 	// forwarded to every chain-kind child so its own publisher stamps the same
@@ -133,7 +142,7 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 			opts = append(opts, WithMaxParallel(n))
 		}
 	}
-	fleet := New(kernel, agents, deps.Missions, nil, deps.ProjectRoot, deps.Tracker, opts...)
+	fleet := New(kernel, agents, deps.Missions, deps.WorkspaceRoots, deps.ProjectRoot, deps.Tracker, opts...)
 
 	// mission stop from any process reaches this host via the shared bus; the
 	// kernel hosting the unit reaps it (see stop.go).

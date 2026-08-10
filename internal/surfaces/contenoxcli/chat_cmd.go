@@ -14,6 +14,7 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/agentservice"
+	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/vfs"
 	libdb "github.com/contenox/contenox/libdbexec"
@@ -60,6 +61,18 @@ type chatOpts struct {
 	// EffectiveAskApproval lets editor integrations reuse BuildEngine while
 	// supplying their own HITL UI instead of the CLI tty prompt.
 	EffectiveAskApproval localtools.AskApproval
+	// EffectiveHITLService is the hitlservice.Service BuildEngine gates this
+	// engine through and registers the resume-on-verdict hook against, instead
+	// of the one it would otherwise mint. It is how a surface that also needs
+	// the service for itself — a mission fleet's attention channel, or the
+	// durable ask inbox an ACP transport re-offers a parked approval from —
+	// holds THE process's instance rather than a sibling over the same store:
+	// two instances share durable rows but no parked waiter, and only the
+	// hooked one can restart a checkpointed run, so a verdict recorded through
+	// the other resolves a row nothing is waiting on. Nil mints one, and the
+	// field is ignored when EffectiveHITL is false: no gate is built, so there
+	// is no hook to share.
+	EffectiveHITLService hitlservice.Service
 	// EffectiveTaskEventSink lets editor integrations receive task events
 	// directly without subscribing to the engine bus.
 	EffectiveTaskEventSink taskengine.TaskEventSink

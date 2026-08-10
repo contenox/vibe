@@ -114,6 +114,7 @@ func init() {
 	for _, c := range []*cobra.Command{newCmd, resumeCmd} {
 		c.Flags().Bool("light", false, "Render for a light terminal background (overrides detection)")
 		c.Flags().Bool("plain", false, "Drop all color and unicode: ASCII glyphs, no styling")
+		addWorkspaceRootFlag(c)
 		rootCmd.AddCommand(c)
 	}
 }
@@ -204,6 +205,8 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	if !cmd.Root().Flags().Changed("shell") {
 		opts.EffectiveEnableLocalExec = true
 	}
+	beamHITL := newHITLService(contenoxDir, runtimetypes.New(db.WithoutTransaction()), beamTracker, beamHITLPolicy)
+	opts.EffectiveHITLService = beamHITL
 
 	// Late-bound: the fleet's report deliverer and the HITL gate both need
 	// the transport, which doesn't exist until the loopback is built below.
@@ -288,6 +291,15 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 		cwd = dir
 	}
 
+	// The machine's workspace-root allowlist, with this launch directory as its
+	// default root. It is what makes a client's proposed cwd checkable, and the
+	// reason a remote client that sends no workspace (or the "/" sentinel) is
+	// rooted here instead of at the filesystem root.
+	workspaceRoots, err := buildWorkspaceFactory(cmd, cwd, runtimetypes.New(db.WithoutTransaction()))
+	if err != nil {
+		return err
+	}
+
 	// Same SANDBOX_* scrub composition local_shell gets (see sandbox_scrub.go):
 	// the "!" PTY is an agent-reachable shell too.
 	shellScrub, _, err := resolvedSandboxEnv(db, engine.Tracker, errW)
@@ -311,15 +323,10 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 		missionAgents acpsvc.MissionAgentResolver
 	)
 	if strings.TrimSpace(os.Getenv(beamChainEnv)) == "" {
-		// BuildEngine mints its own hitlservice internally, so this is a
-		// sibling instance over the same store: durable asks are shared, but
-		// an in-memory parked waiter is not, so a mission's question is
-		// answered through the durable queue.
 		// The engine exists here, so the in-process trigger hook wires
 		// directly (nil when beta is off or no triggers load).
 		missions := missionservice.New(db, missionservice.WithEventPublisher(missionEventPublisher(ctx, db, engine.Bus, workspaceID, beamTracker,
 			buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, opts, errW))))
-		beamHITL := newHITLService(contenoxDir, runtimetypes.New(db.WithoutTransaction()), beamTracker, beamHITLPolicy)
 		fleet, agents, stopFleet, buildErr := fleetboot.BuildInProcessFleet(ctx, fleetboot.Deps{
 			DB:           db,
 			Bus:          engine.Bus,
@@ -335,7 +342,8 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 			},
 			// The workspace this process's mission publisher stamps; a
 			// dispatched unit's own publisher must stamp the same one.
-			WorkspaceID: workspaceID,
+			WorkspaceID:    workspaceID,
+			WorkspaceRoots: workspaceRoots,
 		})
 		if buildErr != nil {
 			return buildErr
@@ -345,36 +353,21 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 		missionFleet, missionAgents = fleet, agents
 	}
 
-	// The in-process ACP loopback. WorkspaceRoots is nil: beam runs on the
-	// operator's own machine and takes an absolute cwd as given.
-	bridge, err = enginebridge.New(ctx, enginebridge.Deps{
-		Engine:                engine,
-		DB:                    db,
-		Bus:                   engine.Bus,
-		Tracker:               beamTracker,
-		ChainRegistry:         chains,
-		DefaultModel:          opts.EffectiveDefaultModel,
-		DefaultProvider:       opts.EffectiveDefaultProvider,
-		DefaultAltModel:       opts.EffectiveAltDefaultModel,
-		DefaultAltProvider:    opts.EffectiveAltDefaultProvider,
-		DefaultMaxTokens:      opts.EffectiveMaxTokens,
-		DefaultThink:          opts.EffectiveThink,
-		WorkspaceID:           workspaceID,
-		ContenoxDir:           contenoxDir,
-		WorkspaceRoots:        nil,
-		ShellSessions:         shells,
-		KnownPolicies:         embeddedPolicyNames(),
-		HITLDefaultPolicyName: beamHITLPolicy,
-		Fleet:                 missionFleet,
-		Agents:                missionAgents,
-		// /mission --policy offers what the loader would actually read, so an
-		// operator-authored envelope is selectable and a typo is refused
-		// before a unit is spawned under a fallback nobody chose.
-		MissionEnvelopes: newMissionEnvelopes(contenoxDir),
-		OptInBeta:        opts.EffectiveOptInBeta,
-		SessionRouter:    sessionRouter,
-		ClientInfo:       &libacp.Implementation{Name: "beam", Version: CLIVersion()},
-	})
+	// The in-process ACP loopback. It serves this process's own terminal client
+	// AND every relay attachment (serveRemoteAttachments below), so
+	// WorkspaceRoots is set rather than nil: a browser client reaching this
+	// loopback holds only a session cookie, and the directories it may root a
+	// session in are the operator's decision, taken at launch.
+	bridge, err = enginebridge.New(ctx, beamBridgeDeps(opts, enginebridge.Deps{
+		Engine:         engine,
+		DB:             db,
+		ChainRegistry:  chains,
+		WorkspaceRoots: workspaceRoots,
+		ShellSessions:  shells,
+		Fleet:          missionFleet,
+		Agents:         missionAgents,
+		SessionRouter:  sessionRouter,
+	}))
 	if err != nil {
 		return fmt.Errorf("open engine bridge: %w", err)
 	}
@@ -477,6 +470,54 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 			return captureFromEditor([]byte(seed), opts.EffectiveDefaultModel)
 		},
 	})
+}
+
+// beamBridgeDeps completes the enginebridge.Deps beam's in-process ACP
+// loopback — and every relay attachment served from its factory — is built
+// from. built carries what runBeam constructed for itself (the engine, the
+// database, the chain registry, the workspace allowlist, the shells, the
+// mission fleet, the session router); every other field is derived here from
+// opts, so it cannot be forgotten at the one call site that matters.
+//
+// It is a named constructor rather than a literal inside runBeam because
+// runBeam needs a terminal and no test can drive it. A Deps field nothing
+// fills is a capability that is real everywhere except on the surface the
+// operator uses — which is exactly how a working re-offer of a parked approval
+// stayed dark on beam — so what is wired is asserted here rather than only
+// behind the seam.
+//
+// Two fields are worth naming. MissionEnvelopes offers what the loader would
+// actually read, so an operator-authored envelope is selectable and a typo is
+// refused before a unit is spawned under a fallback nobody chose. Asks is the
+// durable ask inbox a re-attaching client's parked approvals come back
+// through: THE process's hitlservice.Service, the instance BuildEngine gated
+// this engine through and registered the resume hook on. It is left nil
+// exactly when no gate was built (--auto), because a card answered through an
+// unhooked service records a verdict that resumes nothing — worse than no card
+// at all, since it reads as an answered question.
+func beamBridgeDeps(opts chatOpts, built enginebridge.Deps) enginebridge.Deps {
+	deps := built
+	if deps.Engine != nil {
+		deps.Bus = deps.Engine.Bus
+	}
+	deps.Tracker = opts.EffectiveTracker
+	deps.DefaultModel = opts.EffectiveDefaultModel
+	deps.DefaultProvider = opts.EffectiveDefaultProvider
+	deps.DefaultAltModel = opts.EffectiveAltDefaultModel
+	deps.DefaultAltProvider = opts.EffectiveAltDefaultProvider
+	deps.DefaultMaxTokens = opts.EffectiveMaxTokens
+	deps.DefaultThink = opts.EffectiveThink
+	deps.WorkspaceID = ResolveWorkspaceID(opts.ContenoxDir)
+	deps.ContenoxDir = opts.ContenoxDir
+	deps.KnownPolicies = embeddedPolicyNames()
+	deps.HITLDefaultPolicyName = beamHITLPolicy
+	deps.MissionEnvelopes = newMissionEnvelopes(opts.ContenoxDir)
+	deps.OptInBeta = opts.EffectiveOptInBeta
+	deps.ClientInfo = &libacp.Implementation{Name: "beam", Version: CLIVersion()}
+	if opts.EffectiveHITL {
+		deps.Asks = opts.EffectiveHITLService
+	}
+	return deps
 }
 
 // beamLogFileName is the log beam redirects slog into. It sits beside the

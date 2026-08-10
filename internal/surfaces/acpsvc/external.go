@@ -102,6 +102,11 @@ const externalKillGrace = 2 * time.Second
 
 // parseAgentMeta extracts the AgentMetaKey value from a request `_meta`.
 // Missing key, malformed json, or a non-string value all read as "" (native path).
+//
+// "" is also the value the agent config option advertises for the native chain
+// (agentNativeValue), so a client picking its way back to the native engine
+// hands back exactly what this already treats as the native path — the picker
+// and the binding share one spelling rather than agreeing on two.
 func parseAgentMeta(meta json.RawMessage) string {
 	if len(meta) == 0 {
 		return ""
@@ -938,7 +943,7 @@ func (t *Transport) relayExternalUpdate(ctx context.Context, upstreamID libacp.S
 		return
 	}
 	if upd.SessionUpdate == libacp.SessionUpdateConfigOption {
-		upd.ConfigOptions = t.externalConfigOptionsForRelay(upstreamID, upd.ConfigOptions)
+		upd.ConfigOptions = t.externalConfigOptionsForRelay(ctx, upstreamID, upd.ConfigOptions)
 	}
 	reportErr, _, end := t.tracker().Start(ctx, "relay", "acp_session_update",
 		"session_id", string(upstreamID), "kind", string(upd.SessionUpdate))
@@ -949,20 +954,24 @@ func (t *Transport) relayExternalUpdate(ctx context.Context, upstreamID libacp.S
 }
 
 // externalConfigOptionsForRelay appends contenox's own per-session HITL policy
-// select to a downstream/merged config-option set bound for a relayed
-// config_option_update. The upstream client applies a config_option_update as
-// a wholesale replacement of the session's options, so a relay carrying only
-// the downstream surface would blank the HITL picker (and its file-explorer
-// labels) until the next set_config_option response restored it. Falls back
-// to the bare set when the session is not resolvable.
-func (t *Transport) externalConfigOptionsForRelay(sid libacp.SessionID, downstream []libacp.SessionConfigOption) []libacp.SessionConfigOption {
+// and agent selects to a downstream/merged config-option set bound for a
+// relayed config_option_update. The upstream client applies a
+// config_option_update as a wholesale replacement of the session's options, so
+// a relay carrying only the downstream surface would blank the HITL picker
+// (and its file-explorer labels) and the agent the session is running as until
+// the next set_config_option response restored them. Falls back to the bare
+// set when the session is not resolvable.
+func (t *Transport) externalConfigOptionsForRelay(ctx context.Context, sid libacp.SessionID, downstream []libacp.SessionConfigOption) []libacp.SessionConfigOption {
 	sess, ok := t.sessionFor(sid)
 	if !ok {
 		return downstream
 	}
-	out := make([]libacp.SessionConfigOption, 0, len(downstream)+1)
+	out := make([]libacp.SessionConfigOption, 0, len(downstream)+2)
 	out = append(out, downstream...)
 	out = append(out, t.hitlPolicyConfigOption(sess))
+	if opt, ok := t.agentConfigOption(ctx, sess); ok {
+		out = append(out, opt)
+	}
 	return out
 }
 
@@ -1022,7 +1031,10 @@ func (d *externalDriver) AvailableCommands() []libacp.AvailableCommand { return 
 // always appended even before the downstream is spawned (nil bridge on a
 // loaded session), when the lazy respawn later pushes an update to restore
 // the downstream pickers.
-func (d *externalDriver) ConfigOptions(_ context.Context, sess *sessionEntry) []libacp.SessionConfigOption {
+// The agent select is appended for the same reason: it is what a person reads
+// to see which agent this session is running as, and it is the one option
+// whose value an external session pins rather than defaults.
+func (d *externalDriver) ConfigOptions(ctx context.Context, sess *sessionEntry) []libacp.SessionConfigOption {
 	d.mu.Lock()
 	bridge := d.bridge
 	d.mu.Unlock()
@@ -1031,9 +1043,12 @@ func (d *externalDriver) ConfigOptions(_ context.Context, sess *sessionEntry) []
 		base = bridge.configOptionsSurface()
 	}
 	// Fresh slice avoids aliasing the bridge's backing array.
-	out := make([]libacp.SessionConfigOption, 0, len(base)+1)
+	out := make([]libacp.SessionConfigOption, 0, len(base)+2)
 	out = append(out, base...)
 	out = append(out, d.t.hitlPolicyConfigOption(sess))
+	if opt, ok := d.t.agentConfigOption(ctx, sess); ok {
+		out = append(out, opt)
+	}
 	return out
 }
 
@@ -1042,6 +1057,11 @@ func (d *externalDriver) ConfigOptions(_ context.Context, sess *sessionEntry) []
 // the upstream response reflects the downstream's authoritative value. The
 // value union (string/boolean) is forwarded intact. Contenox performs no
 // upstream validation: the downstream owns its option semantics.
+//
+// Two ids never reach the downstream. configIDHITLPolicy is enforced by the
+// runtime, not the agent (see below). configIDAgent is contenox's own
+// attribution, fixed at session/new, so it is routed to the native path's
+// refusal rather than forwarded to an agent that has no meaning for it.
 func (d *externalDriver) SetConfigOption(ctx context.Context, sess *sessionEntry, configID string, value libacp.SessionConfigOptionValue) error {
 	// contenox's own per-session HITL policy is enforced by the runtime, not the
 	// downstream agent: route through the native per-session path and persist it,
@@ -1053,6 +1073,10 @@ func (d *externalDriver) SetConfigOption(ctx context.Context, sess *sessionEntry
 		}
 		d.t.persistSessionHITLPolicy(ctx, d.upstreamID, sess.hitlPolicy())
 		return nil
+	}
+
+	if configID == configIDAgent {
+		return d.t.setSessionConfigOption(ctx, sess, configID, value.AsString())
 	}
 
 	d.mu.Lock()
@@ -1159,6 +1183,20 @@ func (d *externalDriver) Close() error {
 	return nil
 }
 
+// agentRegistry is the machine's declared-agent registry, or nil when this
+// process has no database (bare stdio, a setup-only editor) and therefore no
+// catalogue at all.
+//
+// It is the single reader both halves of the agent feature go through — the
+// listing the agent config option advertises and the resolution session/new
+// binds with — so a client is never offered a name the bind path cannot see.
+func (t *Transport) agentRegistry() agentregistryservice.Service {
+	if t.deps.DB == nil {
+		return nil
+	}
+	return agentregistryservice.New(t.deps.DB)
+}
+
 // storeMcpResolver adapts a runtimetypes.Store to agenthost.McpServerResolver so
 // an external agent's mcp_servers allowlist can be resolved to ACP session/new
 // wire shapes without acpsvc depending on mcpserverservice.
@@ -1180,10 +1218,10 @@ func (r storeMcpResolver) GetByName(ctx context.Context, name string) (*runtimet
 // must be made against the same bytes, or an agent disabled in between still
 // spawns.
 func (t *Transport) resolveExternalAgent(ctx context.Context, name string) (*runtimetypes.Agent, *runtimetypes.ExternalACPConfig, error) {
-	if t.deps.DB == nil {
+	reg := t.agentRegistry()
+	if reg == nil {
 		return nil, nil, libacp.InternalError("external agents are unavailable: this process has no database configured")
 	}
-	reg := agentregistryservice.New(t.deps.DB)
 	// ResolveForSpawn is the one shared disabled-agent check every spawn path
 	// uses (fleetservice.Dispatch too), so the judgment can't drift between
 	// the REST dispatch path and this chat path.
@@ -1863,12 +1901,17 @@ func (t *Transport) markExternalIfPersisted(ctx context.Context, store runtimety
 // session/load or session/resume response. A native session dispatches to its
 // driver. An external session's downstream is not respawned during load, so
 // its surface comes from the set persisted at session/new (and later
-// updates), with contenox's own HITL policy select appended after it — its
-// CurrentValue restored from the persisted selection by markExternalIfPersisted.
+// updates), with contenox's own HITL policy and agent selects appended after
+// it — the policy's CurrentValue and the driver's agent name both restored
+// from the persisted record by markExternalIfPersisted, so a reopened session
+// names the agent it is running as without respawning it.
 func (t *Transport) reloadedConfigOptions(ctx context.Context, store runtimetypes.Store, sid libacp.SessionID, entry *sessionEntry) []libacp.SessionConfigOption {
 	if _, ok := entry.driver.(*externalDriver); ok {
-		downstream := t.readSessionAgentConfigOptions(ctx, store, sid)
-		return append(downstream, t.hitlPolicyConfigOption(entry))
+		out := append(t.readSessionAgentConfigOptions(ctx, store, sid), t.hitlPolicyConfigOption(entry))
+		if opt, ok := t.agentConfigOption(ctx, entry); ok {
+			out = append(out, opt)
+		}
+		return out
 	}
 	return t.sessionConfigOptions(ctx, entry)
 }

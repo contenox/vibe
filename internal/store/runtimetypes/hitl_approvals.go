@@ -262,6 +262,36 @@ func (s *store) ListHITLApprovalsForMission(ctx context.Context, missionID strin
 	return scanHITLApprovalRows(rows)
 }
 
+// ListPendingHITLApprovalsForSession returns sessionID's unanswered asks,
+// newest first — the rows a client attaching to that session must be re-shown
+// so a run parked on an approval can be answered instead of looking dead.
+// State-filtered in SQL, unlike ListHITLApprovalsForMission: a long-lived
+// session accumulates resolved rows, and the caller wants exactly the open
+// ones. An empty sessionID matches nothing and returns no rows rather than
+// every unattributed ask.
+func (s *store) ListPendingHITLApprovalsForSession(ctx context.Context, sessionID string, limit int) ([]*HITLApproval, error) {
+	if limit > MAXLIMIT {
+		return nil, ErrLimitParamExceeded
+	}
+	if limit <= 0 {
+		limit = MAXLIMIT
+	}
+	if sessionID == "" {
+		return []*HITLApproval{}, nil
+	}
+	rows, err := s.Exec.QueryContext(ctx, `
+		SELECT `+hitlApprovalColumns+`
+		FROM hitl_approvals
+		WHERE session_id = $1 AND state = 'pending'
+		ORDER BY created_at DESC, id DESC
+		LIMIT $2`, sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("hitl_approvals: list pending for session query: %w", err)
+	}
+	defer rows.Close()
+	return scanHITLApprovalRows(rows)
+}
+
 func scanHITLApprovalRows(rows *sql.Rows) ([]*HITLApproval, error) {
 	out := []*HITLApproval{}
 	for rows.Next() {

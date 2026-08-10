@@ -231,6 +231,7 @@ type Store interface {
 	ListExpiredHITLApprovals(ctx context.Context, asOf time.Time, limit int) ([]*HITLApproval, error)
 	ListHITLApprovals(ctx context.Context, state HITLApprovalState, createdAtCursor *time.Time, limit int) ([]*HITLApproval, error)
 	ListHITLApprovalsForMission(ctx context.Context, missionID string, limit int) ([]*HITLApproval, error)
+	ListPendingHITLApprovalsForSession(ctx context.Context, sessionID string, limit int) ([]*HITLApproval, error)
 	EstimateHITLApprovalCount(ctx context.Context) (int64, error)
 
 	// Chain checkpoints back the suspend/resume machinery: a suspended

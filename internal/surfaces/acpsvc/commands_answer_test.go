@@ -32,6 +32,12 @@ func (f *fakeAskInbox) Answer(_ context.Context, askID, text string) error {
 	return f.err
 }
 
+func (f *fakeAskInbox) ListPendingForSession(context.Context, string, int) ([]*runtimetypes.HITLApproval, error) {
+	return nil, nil
+}
+
+func (f *fakeAskInbox) Respond(context.Context, string, bool) error { return nil }
+
 // fakeSupervision answers "which missions did this session fire", the
 // ownership seam /answer checks before it answers anything.
 type fakeSupervision struct {

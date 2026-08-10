@@ -1,9 +1,16 @@
 // workspace_cmd.go is the `contenox workspace` command tree: shell-side grant
-// verbs for the workspace-root allowlist that bounds a session's working
-// directory. Grants are durable config in the shared database; writing one
-// also publishes a bus event (workspacegrants.RootsChangedSubject), but
-// nothing subscribes to it today, so there is no live reload of an
-// already-open session.
+// verbs for the durable half of the workspace-root allowlist that bounds a
+// session's working directory.
+//
+// These verbs are the writer; workspace_roots.go is the reader, where the
+// grants are unioned with the launch directory and this run's flags into the
+// single allowlist a session cwd is checked against. Keep the help text here
+// and the source order documented there in agreement — they describe one
+// mechanism.
+//
+// Writing a grant also publishes workspacegrants.RootsChangedSubject. Nothing
+// subscribes, by decision rather than omission: see workspace_roots.go for why
+// a live reload is the wrong shape for a cwd that is fixed at session/new.
 package contenoxcli
 
 import (
@@ -22,15 +29,30 @@ import (
 var workspaceCmd = &cobra.Command{
 	Use:   "workspace",
 	Short: "Grant or revoke workspace roots a session may run in.",
-	Long: `Manage the workspace-root allowlist — the directories a session (a chat, a
-dispatched mission unit, or a beam file browse) may choose as its working
-directory. Granting a root grants everything UNDER it; a directory outside every
-granted root is refused.
+	Long: `Manage the durable roots in the workspace-root allowlist — the directories a
+session (a terminal-UI session, a client attached to it over a pairing, or a
+mission unit it dispatches) may choose as its working directory. Granting a
+root grants everything UNDER it; a directory outside the allowlist is refused.
 
-Grants are durable config in the shared database. Writing one also publishes a
-reload event on the bus, but nothing subscribes to it today, so a grant does
-not apply to an already-open session — it takes effect the next time a
-session is opened.
+There is one allowlist, built from three sources that UNION — none overrides
+or subtracts from another:
+
+  1. the directory a surface was launched in, which is always its default root
+  2. the roots granted here
+  3. --workspace-root / CONTENOX_WORKSPACE_ROOTS, for that run only
+
+So a grant never displaces the launch directory as the default, and a flag
+never widens or narrows what you granted. Withdrawing access is 'workspace
+remove', not remembering which flags a launcher passed.
+
+WHEN A CHANGE TAKES EFFECT: the allowlist is read once, when a surface starts,
+and a session's working directory is fixed when the session is created. A grant
+added now applies to the next 'contenox new' or 'contenox resume' you START —
+not to a process already running, and not to a session already open. Restart
+the surface to apply it immediately.
+
+'contenox acp' configures no allowlist at all: per the ACP protocol the editor
+supplies the session's working directory.
 
   contenox workspace add /home/me/src        # grant a root (and everything under it)
   contenox workspace add /home/me/scratch
@@ -42,9 +64,10 @@ var workspaceAddCmd = &cobra.Command{
 	Use:   "add <path>",
 	Short: "Grant a directory as a project workspace root.",
 	Long: `Grant <path> as a workspace root. The path must be an existing directory;
-granting it grants everything under it. The grant is durable immediately, but
-nothing today reloads it into an already-open session — open a new session to
-pick it up. Granting a path already granted is a no-op.
+granting it grants everything under it. The grant is durable immediately, but a
+surface already running read its allowlist when it started — start a new
+'contenox new' or 'contenox resume' to pick this up. Granting a path already
+granted is a no-op.
 
 The granted directory is also registered as a project: its
 .contenox/workspace.id marker is created if absent, and --name stamps a friendly
@@ -58,10 +81,13 @@ new --name renames the project.`,
 var workspaceRemoveCmd = &cobra.Command{
 	Use:   "remove <path>",
 	Short: "Revoke a workspace-root grant.",
-	Long: `Revoke the grant for <path>. Sessions may no longer choose it (or anything
-under it) unless it is still covered by another granted root. Revoking a path
-that was never granted is a no-op. The path need not still exist, so a grant
-to a since-deleted directory can be cleaned up.`,
+	Long: `Revoke the grant for <path>. Sessions started after this may no longer choose
+it (or anything under it) unless it is still covered by another granted root,
+by a surface's launch directory, or by a --workspace-root passed to that run.
+Revoking does not evict a session already running there, and a surface already
+running keeps the allowlist it started with — restart it to apply the change.
+Revoking a path that was never granted is a no-op. The path need not still
+exist, so a grant to a since-deleted directory can be cleaned up.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWorkspaceRemove,
 }
@@ -70,7 +96,9 @@ var workspaceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List the granted workspace roots.",
 	Long: `Print the workspace roots you have granted, one per line. This is the durable
-grant list these verbs manage.`,
+grant list these verbs manage — the granted source only. A running surface's
+full allowlist also includes the directory it was launched in and any
+--workspace-root passed to it, which it advertises to its own client.`,
 	Args: cobra.NoArgs,
 	RunE: runWorkspaceList,
 }
@@ -153,10 +181,16 @@ func runWorkspaceList(cmd *cobra.Command, args []string) error {
 }
 
 // ringReloadDoorbell publishes the workspace-roots-changed event on the bus.
-// No process subscribes to it today, so this is forward-looking rather than
-// a working live reload; the grant itself is what's durable regardless.
-// Best-effort: a publish failure is noted on stderr, never a command
-// failure, since the grant is already durable.
+//
+// Nothing subscribes, and that is a decision rather than a gap: a session's
+// cwd is fixed at session/new, so reloading a running process could only widen
+// what a future session may pick — which its next start does anyway — while a
+// live SetRoots would also move roots[0] and silently change the default root
+// under sessions already being served. The event stays published so an
+// external watcher can act on it; the grant is durable either way.
+//
+// Best-effort: a publish failure is noted on stderr, never a command failure,
+// since the grant is already durable.
 func ringReloadDoorbell(ctx context.Context, cmd *cobra.Command, db libdb.DBManager, roots []string) {
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()

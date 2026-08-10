@@ -59,8 +59,11 @@ const envelope = `{
         <strong>Der Agent sieht, was du gewährst — nicht, was du hast.</strong>
         Jede agent-erreichbare Shell bekommt eine
         <a href="/docs/guide/environment-scrubbing/">bereinigte Least-Privilege-Umgebung</a>,
-        Tools sind pro Aufruf allowlistet, und Sessions laufen nur in
-        Workspace-Roots, die du freigegeben hast.
+        Tools sind pro Aufruf allowlistet, und Sessions laufen nur in den
+        Workspace-Roots, die du konfiguriert hast — dem Startverzeichnis, den
+        per <code>contenox workspace add</code> freigegebenen Roots und den für
+        den jeweiligen Lauf übergebenen — und nie in Config, Datenbank oder
+        Policies der Runtime selbst.
       </li>
     </ul>
 

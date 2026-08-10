@@ -346,7 +346,7 @@ func TestUnit_MalformedFrameDoesNotDropTheConnection(t *testing.T) {
 	routed := make(chan librelay.Frame, 4)
 	cfg := baseConfig()
 	cfg.Dial = p.dial
-	cfg.Handler = func(f librelay.Frame) { routed <- f }
+	cfg.Handler = func(_ context.Context, f librelay.Frame) { routed <- f }
 	// Liveness is not what is under test, and a probe arriving mid-assertion
 	// would be a second reason for the connection to end.
 	cfg.Heartbeat = relaylink.Heartbeat{Interval: time.Minute, Timeout: time.Minute}

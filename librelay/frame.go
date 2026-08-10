@@ -160,6 +160,31 @@ type Frame struct {
 	// this. Replay is the producer's, because the producer is the side that
 	// still holds the content.
 	Seq uint64 `json:"seq,omitempty"`
+	// Trace is the correlation key for the one human action this frame
+	// belongs to, carried so that the records both ends write about that
+	// action share a field. Without it a request that crossed the relay and
+	// the work it caused on the machine are two unrelated piles of logs, and
+	// "did this reach the instance" is answerable only by reading every
+	// package on the path.
+	//
+	// Per action, never per connection. The side where an action begins mints
+	// one ([NewTraceID]) — one browser message, one prompt — and it lives
+	// exactly as long as that action's consequences. A value pinned to the
+	// socket instead would file a day's work under a single key and correlate
+	// nothing.
+	//
+	// Correlation only, and this bound is load-bearing rather than defensive.
+	// The value is peer-supplied text that nothing signs and nothing checks
+	// against anything, so it may be logged and joined on and must never be
+	// authorized on, looked up, or read back as an identifier for something.
+	// [MaxTraceBytes] and [TraceAlphabet] bound what a peer can put here, and
+	// [Frame.Validate] enforces both.
+	//
+	// Empty means untraced, which is ordinary and never repaired here: a
+	// machine-initiated frame has no action behind it, and a peer built before
+	// this field emits none. Minting a substitute at this layer would invent a
+	// key that correlates one hop with nothing.
+	Trace string `json:"trace,omitempty"`
 	// Payload is the message body, left as raw JSON so intermediaries do
 	// not parse it. Empty is legal: heartbeat and ack carry nothing.
 	Payload json.RawMessage `json:"payload,omitempty"`
@@ -286,6 +311,14 @@ func (f Frame) IsResponse() bool { return f.ReplyTo != "" }
 // makes a frame unroutable or unsafe to log; it deliberately says nothing
 // about whether Type is known, since rejecting unknown types is the
 // forward-compatibility failure the protocol is built to avoid.
+//
+// A malformed [Frame.Trace] fails the whole frame under the "unsafe to log"
+// half of that rule rather than being quietly stripped. Stripping would put a
+// receiver in the position of having handled a frame whose sender believes it
+// is traced, which is the one state that makes a correlation key worse than no
+// key. It costs nothing in practice: this same check runs in [Writer.WriteFrame],
+// so a peer using this package can never emit one, and only a peer that built
+// the value some other way can lose a frame to it.
 func (f Frame) Validate() error {
 	switch {
 	case f.Type == "":
@@ -296,6 +329,9 @@ func (f Frame) Validate() error {
 		return ErrBothIDs
 	case f.Session != "" && f.Instance == "":
 		return ErrSessionAlone
+	}
+	if err := validateTrace(f.Trace); err != nil {
+		return err
 	}
 	for name, v := range map[string]string{
 		"type": f.Type, "instance": f.Instance, "session": f.Session,

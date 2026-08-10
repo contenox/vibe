@@ -96,6 +96,9 @@ func (f *fakeHITL) SweepExpired(context.Context) (int, error)             { retu
 func (f *fakeHITL) ListPending(context.Context, int) ([]*runtimetypes.HITLApproval, error) {
 	return nil, nil
 }
+func (f *fakeHITL) ListPendingForSession(context.Context, string, int) ([]*runtimetypes.HITLApproval, error) {
+	return nil, nil
+}
 func (f *fakeHITL) AbandonMissionAsks(context.Context, string) ([]string, error) {
 	return nil, nil
 }

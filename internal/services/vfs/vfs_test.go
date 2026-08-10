@@ -442,16 +442,60 @@ func TestUnit_ControlPlane_SurvivesSetRoots(t *testing.T) {
 	require.ErrorIs(t, err, vfs.ErrControlPlane)
 }
 
-// TestUnit_ControlPlane_DeniedRootStillRefused pins that Resolve refuses the control-plane dir even if it were mistakenly configured as a workspace root.
-func TestUnit_ControlPlane_DeniedRootStillRefused(t *testing.T) {
+// TestUnit_ControlPlane_DeniedRootRefusedAtConstruction pins that a
+// control-plane dir cannot be configured as a workspace root at all. The
+// refusal happens where the allowlist is built, so it covers every way one
+// comes into being — and it is what keeps such a path out of roots[0], the one
+// position Resolve hands back without matching it against anything.
+func TestUnit_ControlPlane_DeniedRootRefusedAtConstruction(t *testing.T) {
 	controlPlane := t.TempDir()
+	other := t.TempDir()
 	setControlPlane(t, controlPlane)
+
+	_, err := vfs.NewFactory(controlPlane)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, vfs.ErrControlPlane), "a control-plane dir is refused as a configured root, got %v", err)
+
+	sub := filepath.Join(controlPlane, "policies")
+	require.NoError(t, os.MkdirAll(sub, 0o750))
+	_, err = vfs.NewFactory(other, sub)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, vfs.ErrControlPlane), "a subpath of the control plane is refused too, got %v", err)
+
+	f, err := vfs.NewFactory(other)
+	require.NoError(t, err)
+	require.ErrorIs(t, f.SetRoots([]string{other, controlPlane}), vfs.ErrControlPlane,
+		"a hot-reload must not be able to smuggle one in either")
+	ro, err := vfs.ResolveRoot(other)
+	require.NoError(t, err)
+	assert.Equal(t, []string{ro}, f.Roots(), "a refused SetRoots leaves the previous allowlist intact")
+}
+
+// TestUnit_ControlPlane_DefaultRootRefusedWhenRegisteredLate pins the
+// defense-in-depth half of the same guarantee. The denylist is process-global
+// and can be registered after a Factory already exists, so the sentinel path
+// re-checks the default root rather than trusting that construction screened
+// it. Without this, a Factory built before the denylist landed would keep
+// handing its control-plane default to any client that proposed no cwd. The
+// Factory here is therefore built first, while nothing is denied, since
+// construction cannot screen against a denylist that does not yet exist.
+func TestUnit_ControlPlane_DefaultRootRefusedWhenRegisteredLate(t *testing.T) {
+	controlPlane := t.TempDir()
+
 	f, err := vfs.NewFactory(controlPlane)
 	require.NoError(t, err)
 
-	_, err = f.Resolve(controlPlane)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, vfs.ErrControlPlane), "a control-plane dir is refused even when it is itself a configured root")
+	setControlPlane(t, controlPlane)
+
+	for _, sentinel := range []string{"", "/"} {
+		_, err := f.Resolve(sentinel)
+		require.Errorf(t, err, "sentinel %q must not return the control-plane default", sentinel)
+		assert.True(t, errors.Is(err, vfs.ErrControlPlane), "got %v", err)
+	}
+
+	_, err = vfs.ResolveSessionCwd(f, "", "")
+	require.ErrorIs(t, err, vfs.ErrCwdNotPermitted)
+	assert.Contains(t, err.Error(), "control plane")
 }
 
 // TestUnit_ControlPlane_ResolveSessionCwd pins that a cwd at or under the control plane is refused with ErrCwdNotPermitted and control-plane teaching text, with an allowlist and on the nil (stdio) path.

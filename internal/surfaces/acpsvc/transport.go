@@ -43,8 +43,22 @@ type Deps struct {
 	// (e.g. chain-compact-default.json for /compact).
 	ContenoxDir string
 
-	// WorkspaceRoots allowlists session cwd roots. Nil accepts any absolute
-	// cwd (the stdio path); the sentinel "/" and "" resolve to the default root.
+	// WorkspaceRoots is the machine's allowlist of directories a client may
+	// root a session in. The launch directory is always its default root;
+	// configured roots extend it. The sentinel "/" and "" resolve to that
+	// default, so a client that proposes nothing lands in the launch directory
+	// rather than at the filesystem root.
+	//
+	// Nil and empty are different states and must stay so: nil means no
+	// allowlist is configured, and the workspace-root config option is then
+	// absent from session/new and from the initialize `_meta` snapshot, so a
+	// client hides its picker instead of erroring. That is the stdio path,
+	// where the editor owns the filesystem and any absolute cwd is accepted.
+	//
+	// Set it on any surface reachable through the relay. A remote client holds
+	// only a session cookie, so its cwd is untrusted input and the machine
+	// stays authoritative: a cwd outside the allowlist is refused, not adopted.
+	// See Transport.resolveWorkspaceCwd, the single enforcement point.
 	WorkspaceRoots *vfs.Factory
 
 	// ShellSessions manages per-chat-session PTY shells. Nil disables shell
@@ -276,6 +290,31 @@ func (t *Transport) markPermissionPending(sid libacp.SessionID, toolCallID strin
 	}
 	t.permPending[permKey(sid, toolCallID)] = struct{}{}
 	t.permMu.Unlock()
+}
+
+// claimPermissionCard reserves this connection's permission-card slot for
+// (sid, toolCallID), reporting false when one is already open here.
+//
+// It is markPermissionPending made conditional, and it is where the re-offer
+// path's idempotency lives (see reoffer.go). The slot is per connection
+// because that is what "a second card" means: a session is held by every
+// attached connection and SessionRouter.AskApproval already asks all of them,
+// so the same approval showing on a phone and a desk is the intended state,
+// not a duplicate. What must never happen is one connection being asked twice
+// about one approval — a live ask and a re-offer racing, or a client loading
+// the same session twice — and both of those collide on this key.
+func (t *Transport) claimPermissionCard(sid libacp.SessionID, toolCallID string) bool {
+	t.permMu.Lock()
+	defer t.permMu.Unlock()
+	if t.permPending == nil {
+		t.permPending = make(map[string]struct{})
+	}
+	key := permKey(sid, toolCallID)
+	if _, open := t.permPending[key]; open {
+		return false
+	}
+	t.permPending[key] = struct{}{}
+	return true
 }
 
 func (t *Transport) clearPermissionPending(sid libacp.SessionID, toolCallID string) {

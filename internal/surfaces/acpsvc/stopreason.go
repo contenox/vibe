@@ -12,6 +12,17 @@ import (
 // (reportrouter's contenox.missionReport / contenox.missionAsk).
 const stopReasonMetaKey = "contenox.stopReason"
 
+// stopReasonSuspended names a turn that parked on a human approval rather
+// than finishing. It is deliberately NOT a libacp.StopReason: ACP's set
+// (end_turn, max_tokens, max_turn_requests, refusal, cancelled) has no
+// suspension, and a token outside it would break every client that decodes
+// stopReason as a closed enum — losing the whole prompt response, not just
+// the gloss. So the spec field stays end_turn (mapStopReason) and the truth
+// travels in the `_meta` slot ACP already reserves for exactly this. It is
+// distinguishable from a completed turn on the wire because an ordinary
+// end_turn carries no `contenox.stopReason` at all (see explainStopReason).
+const stopReasonSuspended = "suspended"
+
 // stopReasonExplained is the operator-facing form of a turn's stop reason:
 // what happened, and the command that resolves it. ACP puts only the token
 // ("max_tokens") on the wire, which is all a client can render — the sentence
@@ -23,6 +34,10 @@ type stopReasonExplained struct {
 	// Command is what the operator types next; empty when nothing resolves the
 	// stop except prompting again.
 	Command string `json:"command,omitempty"`
+	// ApprovalID names the durable approval a suspended turn is waiting on, so
+	// a client can render "waiting on approval X" instead of going quiet. Set
+	// only by explainSuspension; every ACP stop reason leaves it empty.
+	ApprovalID string `json:"approvalId,omitempty"`
 }
 
 // explainStopReason maps a stop reason onto its sentence. end_turn is the
@@ -56,6 +71,53 @@ func explainStopReason(r libacp.StopReason) (stopReasonExplained, bool) {
 	return stopReasonExplained{}, false
 }
 
+// explainSuspension is explainStopReason's counterpart for a park. It is a
+// separate function, not a case, because a suspension is not one of ACP's
+// stop reasons (see stopReasonSuspended) and because it is the only
+// explanation that varies per turn: the approval id is what an operator
+// answers and what a client tracks.
+func explainSuspension(approvalID string) stopReasonExplained {
+	e := stopReasonExplained{
+		Reason:      stopReasonSuspended,
+		Explanation: "The turn is suspended, not finished: a tool call is waiting on a human approval that nobody answered inside the park window. The run is checkpointed — answering the approval resumes it from exactly where it stopped, in this process or any other. The gated tool has not run.",
+		ApprovalID:  approvalID,
+	}
+	if approvalID != "" {
+		e.Command = "contenox approvals respond " + approvalID + " --approve  (or --deny)"
+	}
+	return e
+}
+
+// suspensionMeta renders a park's explanation into the prompt response's
+// `_meta` under the same envelope key explainTurnStop uses, so a client reads
+// one slot for every short ending. Returns nil when the explanation cannot be
+// marshalled, which leaves the response as the bare end_turn it already was.
+func suspensionMeta(approvalID string) json.RawMessage {
+	meta, err := json.Marshal(map[string]stopReasonExplained{stopReasonMetaKey: explainSuspension(approvalID)})
+	if err != nil {
+		return nil
+	}
+	return meta
+}
+
+// suspensionNotice is the agent message a parked turn announces into the
+// conversation. Unlike the response `_meta` it needs no client support: every
+// ACP client already renders an agent message, which is what makes a park
+// visible in the editor that did not read the meta. The approval id is in the
+// text and repeated on the update's own `_meta`, so a client can act on it
+// without parsing prose. An empty id (a park the engine could not key) still
+// announces the suspension — a turn that says nothing is the failure this
+// exists to prevent.
+func suspensionNotice(approvalID string) libacp.SessionUpdate {
+	text := stopReasonMessage(explainSuspension(approvalID))
+	if approvalID != "" {
+		text += "\nApproval: " + approvalID
+	}
+	update := libacp.NewAgentMessageChunk(text)
+	update.Meta = suspensionMeta(approvalID)
+	return update
+}
+
 // stopReasonAnnounced reports whether the explanation is also pushed into the
 // conversation as an agent message, rather than only riding the response
 // `_meta`. A cancellation is the operator's own act — telling them what they
@@ -72,8 +134,15 @@ func stopReasonAnnounced(r libacp.StopReason) bool {
 // at the transport boundary — the single point every driver's response passes
 // through — so no driver can forget it and none can double-send it.
 //
+// The explanation is merged into `_meta` rather than assigned onto it: the
+// driver may already have attached contenox.droppedContent, and a turn that
+// both ended short and discarded an attachment must report both.
+//
 // An external session is left untouched: its stop reason came from a
-// downstream agent, and these commands are not that agent's levers.
+// downstream agent, and these commands are not that agent's levers. A parked
+// turn passes through unchanged too — it arrives already carrying its
+// suspension `_meta` (see suspensionMeta), and its end_turn token has no
+// explanation of its own to overwrite it with.
 func (t *Transport) explainTurnStop(ctx context.Context, sid libacp.SessionID, sess *sessionEntry, resp libacp.PromptResponse) libacp.PromptResponse {
 	if sess != nil && sess.driver != nil && sess.driver.AgentName() != "" {
 		return resp
@@ -88,9 +157,7 @@ func (t *Transport) explainTurnStop(ctx context.Context, sid libacp.SessionID, s
 			Update:    libacp.NewAgentMessageChunk(stopReasonMessage(explained)),
 		})
 	}
-	if meta, err := json.Marshal(map[string]stopReasonExplained{stopReasonMetaKey: explained}); err == nil {
-		resp.Meta = meta
-	}
+	resp.Meta = mergeMeta(resp.Meta, stopReasonMetaKey, explained)
 	return resp
 }
 
