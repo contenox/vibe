@@ -19,7 +19,7 @@ func TestUnit_InProcessHandler_FiresAndClaimsFiring(t *testing.T) {
 	ctx := context.Background()
 	db := setupDispatchDB(t)
 	svc := eventlog.NewService(db, nil, nil)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 
 	runner := &fakeRunner{}
 	h, err := eventtrigger.NewHandler(eventtrigger.Deps{
@@ -54,7 +54,7 @@ func TestUnit_InProcessHandler_DispatcherNeverDoubleFires(t *testing.T) {
 	ctx := context.Background()
 	db := setupDispatchDB(t)
 	svc := eventlog.NewService(db, nil, nil)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 	triggers := []eventtrigger.Trigger{trigger("t1", "test.events.report")}
 
 	inprocRunner := &fakeRunner{}
@@ -110,7 +110,7 @@ func TestUnit_InProcessHandler_StrandedFiringIsRetried(t *testing.T) {
 	died := time.Now().UTC()
 
 	// The dead host: it claims, then the process ends before FinishEventFiring.
-	strandedStore := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS,
+	strandedStore := mustFiringStore(t, db.WithoutTransaction(), testWS,
 		runtimetypes.WithEventFiringClock(func() time.Time { return died }))
 	ev := &runtimetypes.Event{WorkspaceID: testWS, Type: "test.events.report", Data: []byte(`{}`)}
 	require.NoError(t, svc.Append(ctx, ev))
@@ -121,7 +121,7 @@ func TestUnit_InProcessHandler_StrandedFiringIsRetried(t *testing.T) {
 	// A host arriving while the claim could still be live leaves it alone.
 	tooSoon := &fakeRunner{}
 	soonHandler, err := eventtrigger.NewHandler(eventtrigger.Deps{
-		Store: runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS,
+		Store: mustFiringStore(t, db.WithoutTransaction(), testWS,
 			runtimetypes.WithEventFiringClock(func() time.Time { return died.Add(time.Minute) })),
 		WorkspaceID: testWS, Triggers: triggers, Runner: tooSoon,
 	})
@@ -132,7 +132,7 @@ func TestUnit_InProcessHandler_StrandedFiringIsRetried(t *testing.T) {
 	// Past the bound the firing is retried and reaches a recorded outcome.
 	retry := &fakeRunner{}
 	retryHandler, err := eventtrigger.NewHandler(eventtrigger.Deps{
-		Store: runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS,
+		Store: mustFiringStore(t, db.WithoutTransaction(), testWS,
 			runtimetypes.WithEventFiringClock(func() time.Time { return died.Add(runtimetypes.StaleEventFiringClaim + time.Minute) })),
 		WorkspaceID: testWS, Triggers: triggers, Runner: retry,
 	})
@@ -143,7 +143,7 @@ func TestUnit_InProcessHandler_StrandedFiringIsRetried(t *testing.T) {
 	require.Len(t, runs, 1, "the stranded firing is retried, not lost")
 	require.Equal(t, ev.NID, runs[0].NID)
 
-	firings, err := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS).ListEventFirings(ctx, runtimetypes.EventFiringFilter{Limit: 10})
+	firings, err := mustFiringStore(t, db.WithoutTransaction(), testWS).ListEventFirings(ctx, runtimetypes.EventFiringFilter{Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, firings, 1, "the retry reuses the claim row")
 	require.Equal(t, runtimetypes.EventFiringStatusOK, firings[0].Status, "the row finally carries an outcome")
@@ -157,7 +157,7 @@ func TestUnit_InProcessHandler_SkipsForeignWorkspaceAndSpentHops(t *testing.T) {
 	ctx := context.Background()
 	db := setupDispatchDB(t)
 	svc := eventlog.NewService(db, nil, nil)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 
 	runner := &fakeRunner{}
 	h, err := eventtrigger.NewHandler(eventtrigger.Deps{
@@ -191,7 +191,7 @@ func TestUnit_InProcessHandler_RunErrorRecordedNeverPropagates(t *testing.T) {
 	ctx := context.Background()
 	db := setupDispatchDB(t)
 	svc := eventlog.NewService(db, nil, nil)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 
 	runner := &fakeRunner{failFor: map[string]bool{"t1": true}}
 	h, err := eventtrigger.NewHandler(eventtrigger.Deps{

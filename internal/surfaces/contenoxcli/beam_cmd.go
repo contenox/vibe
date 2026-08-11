@@ -381,7 +381,7 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 		}
 	}()
 
-	stopRelay := serveRemoteAttachments(ctx, opts.EffectiveOptInBeta, contenoxDir, bridge.AgentFactory(), beamTracker, errW)
+	stopRelay := serveRemoteAttachments(ctx, contenoxDir, bridge.AgentFactory(), beamTracker, errW)
 	defer stopRelay()
 
 	if _, err := bridge.Initialize(ctx); err != nil {

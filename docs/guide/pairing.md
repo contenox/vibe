@@ -12,16 +12,12 @@ dials out and holds a connection, and you supervise it from somewhere else.
 Pairing is how a machine gets permission to do that. It is opt-in, it is one
 command, and until you run it **nothing about your machine leaves it**.
 
-> **Beta, and not finished.**
-> `/pair` is behind the beta opt-in (below), and it is honest to say what it
-> does today: it exchanges a key for this machine's credentials and stores them.
-> **Nothing dials the relay yet** — the connector is built and tested but has no
-> caller. Pairing now is useful for trying the flow, not for reaching anything.
-
 ## The flow
 
 You need the contenox app, signed in, and a running contenox session — the TUI
-(`contenox new`) or any ACP editor.
+(`contenox new`) or any ACP editor. The app lives at
+[relay.contenox.com](https://relay.contenox.com). An account is free — for you
+and up to three teammates, one machine each.
 
 1. In the app, tap **Pair device**. It shows a six-character key and a
    countdown.
@@ -46,30 +42,19 @@ process that will hold the connection to the relay, so pairing anywhere else
 would write a credential with nothing running to use it. Pairing where the work
 happens is the point, not an accident of where the command was put.
 
-## Enabling it
+## Choosing a relay
 
-`/pair` is beta. Off, it is invisible — absent from `/help` and answered as an
-unknown command — rather than present and refusing.
+By default a key is redeemed against the hosted relay, whose address and
+identity key ship in the binary. Shipping an address contacts nothing: pairing
+is the only call that reaches a relay, and it runs only when you type a key.
 
-```bash
-contenox config set opt-in-beta true
-```
-
-Or, for one invocation:
+To point a machine at a different relay, set the environment:
 
 ```bash
-CONTENOX_OPT_IN_BETA=1 contenox new
+export CONTENOX_RELAY_ENDPOINT=https://relay.example.internal
 ```
 
-You also need to say which relay to pair with. There is no default in this
-build, on purpose: a runtime that has not been told talks to no relay at all.
-
-```bash
-export CONTENOX_RELAY_ENDPOINT=https://relay.contenox.com
-```
-
-Or pass it inline, which is also how you point a machine at a relay you run
-yourself:
+Or pass it inline:
 
 ```
 /pair K7M-3PQ https://relay.example.internal

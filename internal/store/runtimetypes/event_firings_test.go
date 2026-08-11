@@ -41,7 +41,7 @@ func TestUnit_EventFirings_StaleRunningClaimIsReclaimable(t *testing.T) {
 	db := setupEventDB(t)
 	claimedAt := time.Now().UTC()
 	at := func(d time.Duration) runtimetypes.EventFiringStore {
-		return runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testEventWS,
+		return mustFiringStore(t, db.WithoutTransaction(), testEventWS,
 			runtimetypes.WithEventFiringClock(func() time.Time { return claimedAt.Add(d) }))
 	}
 
@@ -81,8 +81,8 @@ func TestUnit_EventFirings_FinishedClaimsAreNeverReclaimed(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
 	now := time.Now().UTC()
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testEventWS)
-	ancient := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testEventWS,
+	store := mustFiringStore(t, db.WithoutTransaction(), testEventWS)
+	ancient := mustFiringStore(t, db.WithoutTransaction(), testEventWS,
 		runtimetypes.WithEventFiringClock(func() time.Time { return now.Add(30 * 24 * time.Hour) }))
 
 	for nid, status := range map[int64]string{
@@ -119,7 +119,7 @@ func TestUnit_EventFirings_StrandedNamesTheInvisibleFailure(t *testing.T) {
 func TestUnit_EventFirings_NewestFirst(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testEventWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testEventWS)
 
 	seedEventFiring(t, store, "on-report", 1, runtimetypes.EventFiringStatusOK, "")
 	seedEventFiring(t, store, "on-report", 2, runtimetypes.EventFiringStatusError, "chain blew up")
@@ -139,7 +139,7 @@ func TestUnit_EventFirings_NewestFirst(t *testing.T) {
 func TestUnit_EventFirings_EachFilterNarrows(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testEventWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testEventWS)
 
 	seedEventFiring(t, store, "on-report", 1, runtimetypes.EventFiringStatusOK, "")
 	seedEventFiring(t, store, "on-status", 2, runtimetypes.EventFiringStatusError, "boom")
@@ -184,7 +184,7 @@ func TestUnit_EventFirings_EachFilterNarrows(t *testing.T) {
 func TestUnit_EventFirings_LimitDefaultsAndCeiling(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testEventWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testEventWS)
 
 	for nid := int64(1); nid <= runtimetypes.DefaultEventFiringLimit+5; nid++ {
 		seedEventFiring(t, store, "on-report", nid, runtimetypes.EventFiringStatusOK, "")
@@ -210,8 +210,8 @@ func TestUnit_EventFirings_LimitDefaultsAndCeiling(t *testing.T) {
 func TestUnit_EventFirings_WorkspaceIsolation(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
-	storeA := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), "ws-a")
-	storeB := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), "ws-b")
+	storeA := mustFiringStore(t, db.WithoutTransaction(), "ws-a")
+	storeB := mustFiringStore(t, db.WithoutTransaction(), "ws-b")
 
 	// Same trigger name, same nids, same statuses in both workspaces.
 	seedEventFiring(t, storeA, "iso", 1, runtimetypes.EventFiringStatusOK, "")
@@ -231,7 +231,7 @@ func TestUnit_EventFirings_WorkspaceIsolation(t *testing.T) {
 	require.Len(t, failedA, 1)
 	require.Equal(t, "a failed", failedA[0].Error, "a filter never reaches into the other workspace")
 
-	empty, err := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), "ws-c").ListEventFirings(ctx, runtimetypes.EventFiringFilter{})
+	empty, err := mustFiringStore(t, db.WithoutTransaction(), "ws-c").ListEventFirings(ctx, runtimetypes.EventFiringFilter{})
 	require.NoError(t, err)
 	require.Empty(t, empty, "a workspace that never fired sees nothing, not an error")
 }
@@ -241,7 +241,7 @@ func TestUnit_EventFirings_WorkspaceIsolation(t *testing.T) {
 func TestUnit_EventFirings_EmptyIsNotAnError(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testEventWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testEventWS)
 
 	for _, f := range []runtimetypes.EventFiringFilter{
 		{},

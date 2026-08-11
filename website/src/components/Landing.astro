@@ -59,6 +59,12 @@ export interface LandingStrings {
   yoursH2: string;
   yoursPoints: string[];
   yoursCta: [string, string];
+  relayEyebrow: string;
+  relayH2: string;
+  relayP: string;
+  relayCta: [string, string];
+  /** [line text, link label, href] — one muted line under the relay CTA: the managed option, ending in the contact link. */
+  relayNote: [string, string, string];
   capsEyebrow: string;
   caps: [string, string][];
   bottomEyebrow: string;
@@ -243,6 +249,18 @@ const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text
   <div class="mt-6 text-center text-sm">
     <a href={t.yoursCta[1]} class={ctaLink}>{t.yoursCta[0]} →</a>
   </div>
+</section>
+
+<section class="border-b border-neutral-200 px-5 py-16 dark:border-neutral-800">
+  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.relayEyebrow}</p>
+  <h2 class="mt-2 text-center text-2xl font-bold tracking-tight sm:text-3xl">{t.relayH2}</h2>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-neutral-600 dark:text-neutral-400">{t.relayP}</p>
+  <div class="mt-6 text-center text-sm">
+    <a href={t.relayCta[1]} class={ctaLink}>{t.relayCta[0]} →</a>
+  </div>
+  <p class="mx-auto mt-6 max-w-2xl text-center text-sm text-neutral-500">
+    {t.relayNote[0]} <a href={t.relayNote[2]} class="underline hover:text-black dark:hover:text-white">{t.relayNote[1]}</a>.
+  </p>
 </section>
 
 <section class="px-5 py-16">

@@ -182,7 +182,7 @@ func TestUnit_LocalExecTools_Exec_ContextPolicy_Enforced(t *testing.T) {
 	}
 	_, _, err := h.Exec(ctx, time.Now().UTC(), nil, false, toolsCall)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not in allowlist")
+	assert.Contains(t, err.Error(), "is not in this chain's allowed commands")
 }
 
 func TestUnit_LocalExecTools_Exec_ContextPolicy_Allows(t *testing.T) {
@@ -363,7 +363,7 @@ func TestUnit_LocalExecTools_Exec_AllowlistReject(t *testing.T) {
 	}
 	_, _, err := h.Exec(ctx, start, nil, false, toolsCall)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not in allowlist")
+	assert.Contains(t, err.Error(), "is not in this chain's allowed commands")
 }
 
 func TestUnit_LocalExecTools_Exec_AllowlistDirReject(t *testing.T) {

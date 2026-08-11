@@ -101,6 +101,15 @@ contenox resume                         # same TUI, reopening your last session
 sensible defaults do the rest, and `contenox doctor` explains itself when
 something is missing.
 
+Everything above is local: SQLite on your machine, no account. When you do want
+a running session reachable from elsewhere — reading the transcript and
+answering approvals from your phone — pair the machine with the hosted relay:
+sign in at [relay.contenox.com](https://relay.contenox.com), tap **Pair
+device**, and type the key into the session as `/pair <key>`. Free for you and
+three teammates (one machine each), opt-in per machine, and an install that
+never pairs contacts no relay at all.
+[How pairing works.](https://contenox.com/docs/guide/pairing/)
+
 ---
 
 ## What people use it for

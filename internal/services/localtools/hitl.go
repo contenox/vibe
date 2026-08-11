@@ -43,6 +43,20 @@ func IsApprovalPending() bool {
 // approve or (false, nil) to deny. Returning an error propagates it to the chain.
 type AskApproval func(ctx context.Context, req hitlservice.ApprovalRequest) (bool, error)
 
+// Prechecker refuses a call from static configuration alone. Implementations
+// run nothing and change nothing.
+//
+// Two authorizations sit in front of a gated tool: the HITL policy here, and
+// the tool's own configured limits. Evaluating the deterministic one second let
+// the gate reverse itself — an operator approved a kubectl card and local_shell
+// then refused the command as outside the chain's allowlist. An approval is
+// raised only for a call that can run.
+//
+// Optional; an inner repo without it is gated unchanged.
+type Prechecker interface {
+	Precheck(ctx context.Context, input any, tools *taskengine.ToolsCall) error
+}
+
 // ApprovalParkWindow is the fast-path park: how long an ActionApprove call
 // keeps its goroutine waiting for a verdict before the run suspends instead —
 // durable approval row + checkpoint, no parked goroutine. A verdict inside the
@@ -238,6 +252,13 @@ func (h *HITLWrapper) Exec(
 	// inferring one from GOOS — and so a model-supplied "shell_kind" argument
 	// cannot decide whether the analyzer runs at all.
 	ctx = hitlservice.WithShellKind(ctx, string(h.shellKind))
+
+	if pre, ok := h.inner.(Prechecker); ok {
+		if err := pre.Precheck(ctx, input, tools); err != nil {
+			reportErr(err)
+			return nil, taskengine.DataTypeAny, err
+		}
+	}
 
 	result, err := h.policy.Evaluate(ctx, tools.Name, toolName, args)
 	if err != nil {

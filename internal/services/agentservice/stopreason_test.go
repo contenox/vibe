@@ -29,6 +29,35 @@ func TestUnit_InferStopReason_NormalFinishStaysEndTurn(t *testing.T) {
 	}
 }
 
+// A chain reaches summarise_failure both by spending its loop budget and by a
+// task erroring into on_failure. Only the first is max_turn_requests; reporting
+// the second that way told operators to /clear over a provider 404 and hid the
+// error behind the handler's progress summary.
+func TestUnit_InferStopReason_ErroredRecoveryIsNotABudgetStop(t *testing.T) {
+	const cause = "vertex API returned non-200 status for stream: 404"
+	steps := []taskengine.CapturedStateUnit{
+		{TaskID: "coding_chat", TaskHandler: "chat_completion"},
+		{TaskID: "coding_recovery", TaskHandler: "chat_completion",
+			Error: taskengine.ErrorResponse{Error: cause}},
+		{TaskID: agentservice.FailureSummaryTaskID, TaskHandler: "chat_completion"},
+	}
+	require.Equal(t, agentservice.StopFailed, agentservice.InferStopReason(nil, steps))
+	require.Equal(t, cause, agentservice.RecoveredFailure(steps),
+		"the originating error must survive for the operator to read")
+}
+
+// The budget path is unchanged: the step before the summary succeeded, so
+// nothing errored and max_turn_requests is the honest answer.
+func TestUnit_InferStopReason_SpentBudgetStaysMaxTurnRequests(t *testing.T) {
+	steps := []taskengine.CapturedStateUnit{
+		{TaskID: "coding_chat", TaskHandler: "chat_completion"},
+		{TaskID: "coding_recovery", TaskHandler: "chat_completion"},
+		{TaskID: agentservice.FailureSummaryTaskID, TaskHandler: "chat_completion"},
+	}
+	require.Equal(t, agentservice.StopMaxTurnRequests, agentservice.InferStopReason(nil, steps))
+	require.Empty(t, agentservice.RecoveredFailure(steps))
+}
+
 // The last model step decides; an earlier truncation is overridden by a
 // later normal finish.
 func TestUnit_InferStopReason_LastModelStepDecides(t *testing.T) {

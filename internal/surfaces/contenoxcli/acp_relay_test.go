@@ -100,28 +100,19 @@ func requireGoroutinesSettleTo(t *testing.T, want int) {
 // has: nothing is dialed, no goroutine is started, and not a line is written.
 // A terminal UI is the reason the last one matters — its stderr is the screen
 // it draws the transcript into, so a stray line is a corrupted scrollback.
-//
-// The opt-in-off case is paired on purpose. /pair mints the credential the
-// tunnel reads and /pair is gated, so a runtime with the opt-in off must not
-// dial on a pairing the operator can no longer see or remove.
 func TestUnit_RemoteAttachmentsStartNothingWhenThereIsNothingToStart(t *testing.T) {
-	paired := t.TempDir()
-	writeUnreachablePairing(t, paired)
-
 	for _, tc := range []struct {
-		name      string
-		optInBeta bool
-		dir       string
+		name string
+		dir  string
 	}{
-		{name: "the opt-in is off on a paired machine", optInBeta: false, dir: paired},
-		{name: "the opt-in is on and nothing is paired", optInBeta: true, dir: t.TempDir()},
-		{name: "there is no contenox directory at all", optInBeta: true, dir: ""},
+		{name: "nothing is paired", dir: t.TempDir()},
+		{name: "there is no contenox directory at all", dir: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var warn, activity recordingWriter
 			before := runtime.NumGoroutine()
 
-			stop := serveRemoteAttachments(t.Context(), tc.optInBeta, tc.dir, relayTestFactory,
+			stop := serveRemoteAttachments(t.Context(), tc.dir, relayTestFactory,
 				libtracker.NewTextActivityTracker(&activity), &warn)
 			if stop == nil {
 				t.Fatal("stop is nil; it must be safe to defer unconditionally")
@@ -171,32 +162,10 @@ func TestUnit_RelayTunnelTeardownJoinsEverythingItStarted(t *testing.T) {
 	requireGoroutinesSettleTo(t, before)
 }
 
-// TestUnit_RemoteAttachmentsAreInertWithoutTheOptIn keeps the gate at the same
-// place /pair's is. /pair mints the credential the tunnel reads, so a runtime
-// with the opt-in off must not dial on a pairing the operator can no longer see
-// or remove — including one that is broken, which is why the broken file is the
-// case asserted here.
-func TestUnit_RemoteAttachmentsAreInertWithoutTheOptIn(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	writePairing(t, dir)
-
-	var warn bytes.Buffer
-	stop := serveRemoteAttachments(t.Context(), false, dir, relayTestFactory, nil, &warn)
-	if stop == nil {
-		t.Fatal("stop is nil; it must be safe to defer unconditionally")
-	}
-	stop()
-	if warn.Len() != 0 {
-		t.Fatalf("a gated-off invocation reported %q", warn.String())
-	}
-}
-
-// TestUnit_RemoteAttachmentsReportAnUnreadablePairing is the other half of that
-// gate: with the opt-in on, a pairing that exists and cannot be read is the
-// operator's problem to hear about, since /pair wrote it and only /unpair
-// removes it. It is a warning and never a failure — the surface's own
-// connection is unaffected either way.
+// TestUnit_RemoteAttachmentsReportAnUnreadablePairing: a pairing that exists
+// and cannot be read is the operator's problem to hear about, since /pair wrote
+// it and only /unpair removes it. It is a warning and never a failure — the
+// surface's own connection is unaffected either way.
 //
 // Exactly one line, because a surface whose stderr is the screen it draws into
 // pays for every extra one, and the caller returns normally, because a broken
@@ -207,7 +176,7 @@ func TestUnit_RemoteAttachmentsReportAnUnreadablePairing(t *testing.T) {
 	writePairing(t, dir)
 
 	var warn bytes.Buffer
-	stop := serveRemoteAttachments(t.Context(), true, dir, relayTestFactory, nil, &warn)
+	stop := serveRemoteAttachments(t.Context(), dir, relayTestFactory, nil, &warn)
 	if stop == nil {
 		t.Fatal("stop is nil; it must be safe to defer unconditionally")
 	}

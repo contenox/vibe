@@ -696,6 +696,19 @@ The dispatch runs **in-process**: the fired unit is a child subprocess of the ca
 
 `mission fire --oracle`'s [attention oracle](/docs/use-cases/auto-attention/) has no `/mission` equivalent, by design: the driver reviews **operator-fired** missions only — it declines any question that carries a parent session — and every `/mission` is parented to the session that fired it, so its questions come back to you. In a session the same lever is the envelope: its `attention` bounds decide whether the firing session's own agent may answer a unit's routine questions, and how many. Under opt-in-beta, `/mission --oracle` says so rather than silently ignoring the flag; without the gate the flag is unknown here exactly as it is on the CLI.
 
+### The `/pair` and `/unpair` slash commands
+
+Pairing attaches the machine to a relay, so the sessions this process serves can be reached from somewhere else — the [contenox app](https://relay.contenox.com) on a phone, typically. It is a session command, not a CLI verb, on purpose: the process you type it into is the one that holds the connection, so a `contenox pair` run anywhere else would store a credential with nothing running to use it.
+
+From inside a session (`contenox new`, or an ACP editor):
+
+- `/pair <key>` — redeem a key minted in the app (**Pair device**) against the hosted relay whose address ships in the binary.
+- `/pair <key> <endpoint>` — redeem against a relay you run yourself; the `CONTENOX_RELAY_ENDPOINT` environment variable sets the same thing for every `/pair` without an inline endpoint.
+- `/pair` — report what this machine is attached to (relay, instance, account), changing nothing. It never prints the credential.
+- `/unpair` — delete the stored credential, so this machine stops dialling. Local only: revoking the instance is done in the app, and a revoked machine is refused at its next dial whether or not it still holds the file.
+
+What is sent when a key is redeemed (the key and this machine's hostname, nothing else), what lands in `~/.contenox/relay.json`, and how the relay's identity is verified from then on: [Pairing a machine with a relay](/docs/guide/pairing/).
+
 ### `contenox state`
 
 Inspects captured execution state from past chain runs — the per-task steps, handlers, transitions, and timings recorded for each request.
@@ -763,6 +776,7 @@ contenox version
 | `CONTENOX_DEFAULT_MAX_TOKENS` / `CONTENOX_DEFAULT_THINK` | Same, for the response token cap and reasoning level. |
 | `CONTENOX_BASE_URL` | Endpoint URL for account-specific providers whose URL cannot be defaulted (e.g. Vertex: project + region). |
 | `CONTENOX_OPT_IN_BETA` | Per-invocation override of the `opt-in-beta` config key (`1`/`true` enables the beta features, any other value disables them; unset falls back to config). |
+| `CONTENOX_RELAY_ENDPOINT` | The relay `/pair` redeems against when none is given inline, instead of the hosted relay compiled into the binary — see [Pairing a machine with a relay](/docs/guide/pairing/). |
 | `CONTENOX_SANDBOX_NETWORK_WALL` | Set to `1` to build the [agent sandbox](/docs/guide/agent-sandbox/)'s network wall with no route at all, for a fully offline foreign agent. |
 
 `SANDBOX_SHELL_SCRUB`, `SANDBOX_TERMINAL_SCRUB`, `SANDBOX_ENV_ALLOW`, and `SANDBOX_ENV_DENY` configure the shell environment scrub — see [Least-privilege shell environment](/docs/guide/environment-scrubbing/) for their modes and current status.

@@ -453,8 +453,8 @@ func TestUnit_AcpCommands_WithMissionCapability_IncludesMission(t *testing.T) {
 	if !containsCommand(cmds, "mission") {
 		t.Fatalf("mission missing from advertised commands with capability wired: %v", commandNames(cmds))
 	}
-	// /answer carries its own capability and /pair//unpair the beta gate,
-	// neither wired here; every other command is unconditional.
+	// /answer carries its own capability, not wired here; every other command
+	// is unconditional.
 	for _, c := range allACPCommands() {
 		if conditionalCommand(c.Name) {
 			continue
@@ -463,8 +463,8 @@ func TestUnit_AcpCommands_WithMissionCapability_IncludesMission(t *testing.T) {
 			t.Fatalf("advertised commands missing %q: %v", c.Name, commandNames(cmds))
 		}
 	}
-	if want := len(allACPCommands()) - 3; len(cmds) != want {
-		t.Fatalf("advertised %d commands, want %d (full set minus answer, pair and unpair): %v", len(cmds), want, commandNames(cmds))
+	if want := len(allACPCommands()) - 1; len(cmds) != want {
+		t.Fatalf("advertised %d commands, want %d (full set minus answer): %v", len(cmds), want, commandNames(cmds))
 	}
 }
 
@@ -477,8 +477,7 @@ func TestUnit_AcpCommands_WithoutMissionCapability_ExcludesMission(t *testing.T)
 		t.Fatalf("mission advertised without capability: %v", commandNames(cmds))
 	}
 	for _, c := range allACPCommands() {
-		// /answer, /pair and /unpair are dropped by their own gates, not
-		// this one.
+		// /answer is dropped by its own gate, not this one.
 		if c.Name == "mission" || conditionalCommand(c.Name) {
 			continue
 		}
@@ -486,19 +485,14 @@ func TestUnit_AcpCommands_WithoutMissionCapability_ExcludesMission(t *testing.T)
 			t.Fatalf("advertised commands missing %q: %v", c.Name, commandNames(cmds))
 		}
 	}
-	if want := len(allACPCommands()) - 4; len(cmds) != want {
-		t.Fatalf("advertised %d commands, want %d (full set minus mission, answer, pair and unpair): %v", len(cmds), want, commandNames(cmds))
+	if want := len(allACPCommands()) - 2; len(cmds) != want {
+		t.Fatalf("advertised %d commands, want %d (full set minus mission and answer): %v", len(cmds), want, commandNames(cmds))
 	}
 }
 
 // conditionalCommand reports whether name carries a gate of its own.
 func conditionalCommand(name string) bool {
-	switch name {
-	case "answer", "pair", "unpair":
-		return true
-	default:
-		return false
-	}
+	return name == "answer"
 }
 
 // TestUnit_HandleMission_TeachingErrorWithoutCapability pins: without hasMissionCapability, /mission teaches the in-process fix, never serve.
