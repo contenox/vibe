@@ -92,7 +92,7 @@ func TestUnit_EventsFirings_Roundtrip(t *testing.T) {
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), DefaultWorkspaceID)
+	store := mustFiringStore(t, db.WithoutTransaction(), DefaultWorkspaceID)
 	for _, f := range []struct {
 		trigger string
 		nid     int64
@@ -166,7 +166,7 @@ func TestUnit_PrintFiringTrouble_SilentUntilSomethingBroke(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventsTestDB(t)
 	exec := db.WithoutTransaction()
-	store := runtimetypes.NewEventFiringStore(exec, DefaultWorkspaceID)
+	store := mustFiringStore(t, exec, DefaultWorkspaceID)
 
 	var quiet bytes.Buffer
 	printFiringTrouble(ctx, &quiet, exec, DefaultWorkspaceID)

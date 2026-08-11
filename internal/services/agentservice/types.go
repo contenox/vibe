@@ -49,7 +49,18 @@ const (
 	StopCancelled       StopReason = "cancelled"
 	// StopSuspended: parked on approval and checkpointed; not a failure.
 	StopSuspended StopReason = "suspended"
+	// StopFailed: a task errored and the chain's on_failure handler answered in
+	// its place. The turn carries that handler's output, so it is not a budget
+	// stop; [RecoveredFailure] names what actually went wrong.
+	StopFailed StopReason = "failed"
 )
+
+// FailureSummaryTaskID is the terminal task a chain reaches both by spending
+// its loop budget and by any task erroring into on_failure. The two arrive
+// identically, so the task id alone cannot tell them apart — a provider 404 was
+// reported for months as "used up its budget of model requests", advising a
+// /clear that could not help and hiding the error entirely.
+const FailureSummaryTaskID = "summarise_failure"
 
 type SessionInfo struct {
 	ID           string
@@ -72,6 +83,20 @@ type AgentCapabilities struct {
 	SupportsSession bool
 }
 
+// RecoveredFailure reports the error a chain's on_failure handler answered in
+// place of, empty when the turn reached [FailureSummaryTaskID] by spending its
+// loop budget instead. The step before the summary decides: it errored on the
+// failure path and succeeded on the budget path.
+func RecoveredFailure(steps []taskengine.CapturedStateUnit) string {
+	for i := len(steps) - 1; i >= 0; i-- {
+		if steps[i].TaskID == FailureSummaryTaskID {
+			continue
+		}
+		return steps[i].Error.Error
+	}
+	return ""
+}
+
 func InferStopReason(err error, steps []taskengine.CapturedStateUnit) StopReason {
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -85,7 +110,10 @@ func InferStopReason(err error, steps []taskengine.CapturedStateUnit) StopReason
 		}
 	}
 
-	if len(steps) > 0 && steps[len(steps)-1].TaskID == "summarise_failure" {
+	if len(steps) > 0 && steps[len(steps)-1].TaskID == FailureSummaryTaskID {
+		if RecoveredFailure(steps) != "" {
+			return StopFailed
+		}
 		return StopMaxTurnRequests
 	}
 

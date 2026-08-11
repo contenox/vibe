@@ -101,7 +101,7 @@ func TestSystem_Dispatcher_CatchUpAfterDowntimeFiresExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	db := setupDispatchDB(t)
 	svc := eventlog.NewService(db, nil, nil) // no bus: polling only, the downtime path
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 
 	// Events appended while no dispatcher ran.
 	var nids []int64
@@ -171,7 +171,7 @@ func TestSystem_Dispatcher_LivePlusCatchupDedupsThroughFirings(t *testing.T) {
 	bus := libbus.NewSQLiteWithOptions(db.WithoutTransaction(), libbus.SQLiteBusOptions{EventPoll: time.Millisecond, RequestPoll: time.Millisecond})
 	t.Cleanup(func() { _ = bus.Close() })
 	svc := eventlog.NewService(db, bus, nil)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 
 	runner := &fakeRunner{}
 	d, err := eventtrigger.New(eventtrigger.Deps{
@@ -207,7 +207,7 @@ func TestUnit_Dispatcher_RefusesEventsPastHopLimit(t *testing.T) {
 	ctx := context.Background()
 	db := setupDispatchDB(t)
 	svc := eventlog.NewService(db, nil, nil)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 
 	over := &runtimetypes.Event{WorkspaceID: testWS, Type: "test.events.loop", Hop: 5}
 	require.NoError(t, svc.Append(ctx, over))
@@ -249,7 +249,7 @@ func TestUnit_Dispatcher_ChainFailureNeverStallsOtherTriggers(t *testing.T) {
 	ctx := context.Background()
 	db := setupDispatchDB(t)
 	svc := eventlog.NewService(db, nil, nil)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 
 	first := &runtimetypes.Event{WorkspaceID: testWS, Type: "test.events.mixed"}
 	require.NoError(t, svc.Append(ctx, first))
@@ -308,8 +308,8 @@ func TestSystem_Dispatcher_TwoWorkspacesNeverCrossFire(t *testing.T) {
 
 	runnerA := &fakeRunner{}
 	runnerB := &fakeRunner{}
-	storeA := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), "ws-a")
-	storeB := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), "ws-b")
+	storeA := mustFiringStore(t, db.WithoutTransaction(), "ws-a")
+	storeB := mustFiringStore(t, db.WithoutTransaction(), "ws-b")
 	newDispatcher := func(ws string, store runtimetypes.EventFiringStore, runner *fakeRunner) *eventtrigger.Dispatcher {
 		d, err := eventtrigger.New(eventtrigger.Deps{
 			Log:         svc,

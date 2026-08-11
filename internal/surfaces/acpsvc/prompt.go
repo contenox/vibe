@@ -344,6 +344,20 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		})
 		return withDroppedContentMeta(libacp.PromptResponse{StopReason: stopReason, Meta: suspensionMeta(resp.SuspendedApprovalID)}, droppedContentKinds), nil
 	}
+	if resp.StopReason == agentservice.StopFailed && stopReason != libacp.StopReasonCancelled {
+		cause := agentservice.RecoveredFailure(resp.Steps)
+		reportChange(string(req.SessionID), map[string]any{
+			"stop_reason":           stopReasonFailed,
+			"cause":                 cause,
+			"request_id":            reqID,
+			"dropped_content_kinds": droppedContentKinds,
+		})
+		t.sendUpdate(ctx, libacp.SessionNotification{
+			SessionID: req.SessionID,
+			Update:    recoveredFailureNotice(cause),
+		})
+		return withDroppedContentMeta(libacp.PromptResponse{StopReason: stopReason, Meta: recoveredFailureMeta(cause)}, droppedContentKinds), nil
+	}
 	reportChange(string(req.SessionID), map[string]any{
 		"stop_reason":           string(stopReason),
 		"request_id":            reqID,
@@ -369,6 +383,12 @@ func mapStopReason(r agentservice.StopReason) libacp.StopReason {
 		// stays end_turn. It is never the whole answer: the caller pairs it
 		// with suspensionMeta and suspensionNotice, which name the approval
 		// the turn is parked on. See stopReasonSuspended.
+		return libacp.StopReasonEndTurn
+	case agentservice.StopFailed:
+		// Same treatment as StopSuspended, and never max_turn_requests: the
+		// recovery handler did answer, so the turn ended, and the cause travels
+		// through recoveredFailureMeta rather than through a budget token that
+		// would send the operator to /clear. See stopReasonFailed.
 		return libacp.StopReasonEndTurn
 	}
 	return libacp.StopReasonEndTurn

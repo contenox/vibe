@@ -190,8 +190,12 @@ func buildInProcessTriggerHook(ctx context.Context, db libdbexec.DBManager, cont
 	if err != nil || len(res.Triggers) == 0 {
 		return nil
 	}
+	firingStore, err := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), workspaceID)
+	if err != nil {
+		return nil
+	}
 	handler, err := eventtrigger.NewHandler(eventtrigger.Deps{
-		Store:       runtimetypes.NewEventFiringStore(db.WithoutTransaction(), workspaceID),
+		Store:       firingStore,
 		WorkspaceID: workspaceID,
 		Triggers:    res.Triggers,
 		Runner: &chainFiringRunner{
@@ -289,9 +293,13 @@ func runEventsDispatch(cmd *cobra.Command, args []string) error {
 		contenoxDir: contenoxDir,
 	}
 	out := cmd.OutOrStdout()
+	firingStore, err := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), workspaceID)
+	if err != nil {
+		return err
+	}
 	dispatcher, err := eventtrigger.New(eventtrigger.Deps{
 		Log:         logSvc,
-		Store:       runtimetypes.NewEventFiringStore(db.WithoutTransaction(), workspaceID),
+		Store:       firingStore,
 		WorkspaceID: workspaceID,
 		Triggers:    res.Triggers,
 		Runner:      runner,
@@ -428,7 +436,11 @@ func runEventsFirings(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	ctx := libtracker.WithNewRequestID(context.Background())
-	firings, err := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), workspaceID).ListEventFirings(ctx, runtimetypes.EventFiringFilter{
+	firingStore, err := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), workspaceID)
+	if err != nil {
+		return err
+	}
+	firings, err := firingStore.ListEventFirings(ctx, runtimetypes.EventFiringFilter{
 		SinceNID:    since,
 		Status:      status,
 		TriggerName: strings.TrimSpace(triggerName),
@@ -466,7 +478,11 @@ const doctorFiringWindow = 50
 // empty, or unreadable — doctor says nothing about firings on a healthy run.
 // Read-only, like every observability path over the event plane.
 func printFiringTrouble(ctx context.Context, w io.Writer, exec libdbexec.Exec, workspaceID string) {
-	firings, err := runtimetypes.NewEventFiringStore(exec, workspaceID).ListEventFirings(ctx, runtimetypes.EventFiringFilter{Limit: doctorFiringWindow})
+	store, err := runtimetypes.NewEventFiringStore(exec, workspaceID)
+	if err != nil {
+		return
+	}
+	firings, err := store.ListEventFirings(ctx, runtimetypes.EventFiringFilter{Limit: doctorFiringWindow})
 	if err != nil {
 		return
 	}

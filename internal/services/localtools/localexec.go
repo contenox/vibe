@@ -178,6 +178,24 @@ func (h *LocalExecTools) Exec(ctx context.Context, startTime time.Time, input an
 	return result, taskengine.DataTypeJSON, nil
 }
 
+// Precheck applies the command policy — denylist, allowed dir, allowlist — and
+// runs nothing. It satisfies [Prechecker].
+//
+// An early copy of the check, never a replacement: [LocalExecTools.Exec]
+// applies the same policy at execution time, since this boundary must hold with
+// nothing wrapping it.
+func (h *LocalExecTools) Precheck(ctx context.Context, input any, tools *taskengine.ToolsCall) error {
+	if tools == nil {
+		return errors.New("local_shell: tools required")
+	}
+	command, _, _, _, useShell, _, err := h.parseArgs(tools, input)
+	if err != nil {
+		return err
+	}
+	allowedCommands, allowedDir, deniedCommands := h.resolvePolicy(ctx)
+	return h.checkAllowlist(command, useShell, allowedCommands, allowedDir, deniedCommands)
+}
+
 func (h *LocalExecTools) parseArgs(tools *taskengine.ToolsCall, input any) (command string, argsSlice []string, cwd string, timeout time.Duration, useShell bool, stdin string, err error) {
 	timeout = h.defaultTimeout
 	// From tools.Args (string map)
@@ -315,7 +333,10 @@ func (h *LocalExecTools) checkAllowlist(command string, useShell bool, allowedCo
 			}
 		}
 		if !allowed {
-			return fmt.Errorf("local_shell: command %s is not in allowlist", command)
+			return fmt.Errorf("local_shell: command %s is not in this chain's allowed commands (%s); "+
+				"no approval can grant it — add it to _allowed_commands under the local_shell entry in "+
+				"the chain's tools_policies, or run it outside the agent",
+				command, strings.Join(allowedCommands, ", "))
 		}
 	}
 	return nil

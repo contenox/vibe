@@ -23,6 +23,11 @@ const stopReasonMetaKey = "contenox.stopReason"
 // end_turn carries no `contenox.stopReason` at all (see explainStopReason).
 const stopReasonSuspended = "suspended"
 
+// stopReasonFailed marks a turn whose task errored and whose on_failure handler
+// answered in its place. Not a libacp.StopReason for the same reason
+// stopReasonSuspended is not, and it travels the same way.
+const stopReasonFailed = "failed"
+
 // stopReasonExplained is the operator-facing form of a turn's stop reason:
 // what happened, and the command that resolves it. ACP puts only the token
 // ("max_tokens") on the wire, which is all a client can render — the sentence
@@ -86,6 +91,44 @@ func explainSuspension(approvalID string) stopReasonExplained {
 		e.Command = "contenox approvals respond " + approvalID + " --approve  (or --deny)"
 	}
 	return e
+}
+
+// explainRecoveredFailure is explainStopReason's counterpart for a turn whose
+// task errored and whose on_failure handler answered in its place. Separate for
+// the same reasons explainSuspension is: it is not one of ACP's stop reasons,
+// and it varies per turn.
+//
+// The cause is quoted rather than glossed. The handler's own output reads as a
+// tidy progress summary, so without this the operator is told the turn made
+// partial progress and never learns a call failed.
+func explainRecoveredFailure(cause string) stopReasonExplained {
+	e := stopReasonExplained{
+		Reason:      stopReasonFailed,
+		Explanation: "A step of this turn failed and the chain's recovery handler answered in its place, so the reply above is a summary rather than the work. Nothing here is a context or budget problem — clearing the session will not help.",
+	}
+	if cause != "" {
+		e.Explanation += " The failure was: " + cause
+	}
+	return e
+}
+
+// recoveredFailureMeta renders a recovered failure into the response `_meta`
+// under the envelope key explainTurnStop uses. Nil when it cannot be
+// marshalled, leaving the response the bare end_turn it already was.
+func recoveredFailureMeta(cause string) json.RawMessage {
+	meta, err := json.Marshal(map[string]stopReasonExplained{stopReasonMetaKey: explainRecoveredFailure(cause)})
+	if err != nil {
+		return nil
+	}
+	return meta
+}
+
+// recoveredFailureNotice is the agent message a recovered failure announces
+// into the conversation, for the clients that render no `_meta`.
+func recoveredFailureNotice(cause string) libacp.SessionUpdate {
+	update := libacp.NewAgentMessageChunk(stopReasonMessage(explainRecoveredFailure(cause)))
+	update.Meta = recoveredFailureMeta(cause)
+	return update
 }
 
 // suspensionMeta renders a park's explanation into the prompt response's

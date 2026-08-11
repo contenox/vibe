@@ -55,7 +55,7 @@ func (r *loopRunner) runs() []int {
 func TestUnit_HopCeiling_TerminatesASelfFeedingTriggerCycle(t *testing.T) {
 	ctx := context.Background()
 	db := setupDispatchDB(t)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 
 	holder := eventlog.NewTriggerHolder()
 	pub := eventlog.NewDualPublisher(runtimetypes.NewEventStore(db), nil, "test", testWS, nil,
@@ -116,7 +116,7 @@ func TestUnit_PrefixListener_MatchesSubtreeAndExactStaysExact(t *testing.T) {
 	ctx := context.Background()
 	db := setupDispatchDB(t)
 	svc := eventlog.NewService(db, nil, nil)
-	store := runtimetypes.NewEventFiringStore(db.WithoutTransaction(), testWS)
+	store := mustFiringStore(t, db.WithoutTransaction(), testWS)
 
 	runner := &fakeRunner{}
 	h, err := eventtrigger.NewHandler(eventtrigger.Deps{

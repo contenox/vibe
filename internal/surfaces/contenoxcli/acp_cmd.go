@@ -526,7 +526,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		},
 	})
 
-	stopRelay := serveRemoteAttachments(ctx, optInBeta, contenoxDir, transportFactory, tracker, os.Stderr)
+	stopRelay := serveRemoteAttachments(ctx, contenoxDir, transportFactory, tracker, os.Stderr)
 	defer stopRelay()
 
 	// Makes this process visible on the fleet board: self-registers and

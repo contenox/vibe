@@ -75,10 +75,6 @@ func (t *Transport) commandAvailable(name string) bool {
 		return t.hasMissionCapability()
 	case "answer":
 		return t.hasAnswerCapability()
-	case "pair", "unpair":
-		// Beta: off means absent, not refused. dispatchCommand answers these
-		// as unknown to match.
-		return t.deps.OptInBeta
 	default:
 		return true
 	}
@@ -169,14 +165,6 @@ func (t *Transport) answerUnknownCommand(ctx context.Context, sid libacp.Session
 // as an agent message. Command failures are surfaced inline (not as a protocol
 // error) and still end the turn, so the editor shows them in the conversation.
 func (t *Transport) dispatchCommand(ctx context.Context, sid libacp.SessionID, sess *sessionEntry, name, args string) (libacp.PromptResponse, error) {
-	// parseCommand recognizes every name in the unfiltered set, so a gated
-	// command reaches here even when it is unadvertised. mission and answer
-	// are excluded: their teaching errors report a missing capability rather
-	// than hide the command.
-	if (name == "pair" || name == "unpair") && !t.commandAvailable(name) {
-		return t.answerUnknownCommand(ctx, sid, name), nil
-	}
-
 	reportErr, _, end := t.tracker().Start(ctx, "command", "acp_session", "session_id", string(sid), "command", name)
 	defer end()
 

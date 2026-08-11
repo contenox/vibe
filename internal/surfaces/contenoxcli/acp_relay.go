@@ -97,11 +97,6 @@ func routedAskApproval(router approvalRouter, local func() *acpsvc.Transport) lo
 // remote client before the loopback, engine and database they are served by go
 // away.
 //
-// optInBeta gates it because /pair mints the credential it reads, and /pair is
-// gated. Gating the command that produces a thing but not the thing itself
-// would leave an operator who turned the opt-in off still dialing on a file
-// they can no longer see or remove.
-//
 // factory must be the raw transport factory — `contenox acp`'s
 // transportFactory, or [enginebridge.Bridge.AgentFactory] for beam — never the
 // wrapper a surface builds to capture its own connection's transport: an
@@ -113,15 +108,11 @@ func routedAskApproval(router approvalRouter, local func() *acpsvc.Transport) lo
 // else — and "not paired" is not a failure at all.
 func serveRemoteAttachments(
 	ctx context.Context,
-	optInBeta bool,
 	contenoxDir string,
 	factory libacp.AgentFactory,
 	tracker libtracker.ActivityTracker,
 	warn io.Writer,
 ) func() {
-	if !optInBeta {
-		return func() {}
-	}
 	stop, err := startRelayTunnel(ctx, contenoxDir, factory, tracker)
 	if err != nil {
 		fmt.Fprintf(warn, "contenox: remote attachments are unavailable: %v\n", err)

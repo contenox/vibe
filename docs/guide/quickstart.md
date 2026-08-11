@@ -132,4 +132,5 @@ If you're not sure, start with [Ollama](/docs/integrations/providers/ollama/) fo
 - [How contenox compares](/docs/guide/comparison/) — what it shares with the coding agents, and the three things that are built differently
 - [MCP integration](/docs/integrations/tools/mcp/) — connect external tools
 - [Workspace index & search](/docs/guide/search/) — ask the repo a question, get file:line citations back
+- [Pairing a machine with a relay](/docs/guide/pairing/) — reach a running session from your phone: one typed key, optional always, free for you and three teammates (one machine each)
 - [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/) — hosting, state, and oversight controls you own
