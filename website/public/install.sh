@@ -152,7 +152,7 @@ fi
 
 echo "✓ checksum verified (sha256:${ACTUAL})"
 
-chmod +x "${TMP}"
+chmod 0755 "${TMP}"
 
 # ── macOS: strip quarantine flag (defensive; curl downloads usually don't get it) ──
 if [ "${GOOS}" = "darwin" ]; then
@@ -171,6 +171,10 @@ if [ -w "${INSTALL_DIR}" ]; then
   mv "${TMP}" "${INSTALL_DIR}/${BIN}"
 elif command -v sudo >/dev/null 2>&1; then
   echo "Moving to ${INSTALL_DIR} (sudo required)..."
+  INSTALL_GROUP="root"
+  [ "${GOOS}" = "darwin" ] && INSTALL_GROUP="wheel"
+  sudo chown "root:${INSTALL_GROUP}" "${TMP}"
+  sudo chmod 0755 "${TMP}"
   sudo mv "${TMP}" "${INSTALL_DIR}/${BIN}"
 else
   INSTALL_DIR="${HOME}/.local/bin"
