@@ -1,18 +1,26 @@
 package contenoxcli
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 
 	"github.com/contenox/contenox/internal/services/updatecheck"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
+
+const releasesURL = "https://github.com/contenox/contenox/releases"
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
@@ -122,21 +130,7 @@ func downloadAndReplace(ctx context.Context, cmd *cobra.Command, tag string) err
 		ext = ".exe"
 	}
 	asset := fmt.Sprintf("contenox-%s-%s%s", goruntime.GOOS, goruntime.GOARCH, ext)
-	url := fmt.Sprintf("https://github.com/contenox/contenox/releases/download/%s/%s", tag, asset)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("download failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed: server returned %d for %s\nPlease download manually from https://github.com/contenox/contenox/releases", resp.StatusCode, url)
-	}
+	url := fmt.Sprintf("%s/download/%s/%s", releasesURL, tag, asset)
 
 	exe, err := os.Executable()
 	if err != nil {
@@ -146,40 +140,113 @@ func downloadAndReplace(ctx context.Context, cmd *cobra.Command, tag string) err
 	if err != nil {
 		return fmt.Errorf("could not resolve binary symlinks: %w", err)
 	}
+	installDir := filepath.Dir(exe)
 
-	// Write to a temp file in the same directory so the final rename is atomic
-	// (same filesystem, no cross-device move).
-	tmp, err := os.CreateTemp(filepath.Dir(exe), ".contenox-update-*"+ext)
+	tmp, err := os.CreateTemp(installDir, ".contenox-update-*"+ext)
 	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return fmt.Errorf("cannot write to %s, which is required to install the update.\n\n%s\n\nOr download it manually from %s", installDir, elevateHint(), releasesURL)
+		}
 		return fmt.Errorf("could not create temp file for download: %w", err)
 	}
 	tmpPath := tmp.Name()
 	defer func() {
-		tmp.Close()
-		_ = os.Remove(tmpPath) // no-op after successful rename
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath) // no-op after a successful rename
 	}()
 
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "contenox-selfupdate")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed: server returned %d for %s\nPlease download manually from %s", resp.StatusCode, url, releasesURL)
+	}
+
+	sum := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmp, sum), resp.Body); err != nil {
 		return fmt.Errorf("download interrupted: %w", err)
 	}
+
+	expected, err := fetchExpectedSum(ctx, tag, asset)
+	if err != nil {
+		return err
+	}
+	if actual := hex.EncodeToString(sum.Sum(nil)); actual != expected {
+		return fmt.Errorf("CHECKSUM MISMATCH for %s.\n  expected: %s\n  actual:   %s\n\nThe downloaded file does not match the published release. This could be a\ncorrupted download or a tampered artifact. Nothing was installed.\nReport it at https://github.com/contenox/contenox/security/advisories", asset, expected, actual)
+	}
+
 	if err := tmp.Chmod(0o755); err != nil {
 		return fmt.Errorf("chmod failed: %w", err)
 	}
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("could not finalize downloaded file: %w", err)
+	}
 
 	if goruntime.GOOS == "windows" {
 		// Windows cannot replace a running .exe; rename it aside first.
 		old := exe + ".old"
 		_ = os.Remove(old) // discard any leftover from a previous update attempt
 		if err := os.Rename(exe, old); err != nil {
-			return fmt.Errorf("could not move existing binary (try running as Administrator): %w\nDownload manually from https://github.com/contenox/contenox/releases", err)
+			return fmt.Errorf("could not move existing binary: %w\n\n%s\n\nOr download it manually from %s", err, elevateHint(), releasesURL)
 		}
 	}
 
 	if err := os.Rename(tmpPath, exe); err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return fmt.Errorf("could not install update to %s: %w\n\n%s\n\nOr download it manually from %s", exe, err, elevateHint(), releasesURL)
+		}
 		return fmt.Errorf("could not install update to %s: %w", exe, err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "contenox updated to %s — restart any running instances.\n", tag)
 	return nil
+}
+
+func elevateHint() string {
+	if goruntime.GOOS == "windows" {
+		return "Re-run `contenox update` from an Administrator prompt."
+	}
+	return "Re-run with elevated privileges:\n    sudo contenox update"
+}
+
+func fetchExpectedSum(ctx context.Context, tag, asset string) (string, error) {
+	url := fmt.Sprintf("%s/download/%s/SHA256SUMS", releasesURL, tag)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "contenox-selfupdate")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("could not download SHA256SUMS for %s: %w\nRefusing to install an unverified binary.", tag, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("could not download SHA256SUMS for %s: server returned %d.\nRefusing to install an unverified binary.\n  expected: %s\nReleases published before checksums existed do not carry this file. Update to\na newer release, or download and verify manually from %s", tag, resp.StatusCode, url, releasesURL)
+	}
+
+	scanner := bufio.NewScanner(io.LimitReader(resp.Body, 1<<20))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) != 2 {
+			continue
+		}
+		if strings.TrimPrefix(fields[1], "*") == asset {
+			return strings.ToLower(fields[0]), nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("could not read SHA256SUMS for %s: %w", tag, err)
+	}
+	return "", fmt.Errorf("SHA256SUMS for %s has no entry for %s.\nRefusing to install an unverified binary.", tag, asset)
 }
