@@ -12,7 +12,9 @@ type PromptRequest struct {
 	SessionID string
 	Input     string
 	// Images are attachments riding this turn's user message (vision).
-	Images         []taskengine.ImagePart
+	Images []taskengine.ImagePart
+	// Audio are attachments riding this turn's user message (audio input).
+	Audio          []taskengine.AudioPart
 	InputType      taskengine.DataType
 	InputValue     any
 	Chain          *taskengine.TaskChainDefinition
@@ -50,16 +52,13 @@ const (
 	// StopSuspended: parked on approval and checkpointed; not a failure.
 	StopSuspended StopReason = "suspended"
 	// StopFailed: a task errored and the chain's on_failure handler answered in
-	// its place. The turn carries that handler's output, so it is not a budget
-	// stop; [RecoveredFailure] names what actually went wrong.
+	// its place; [RecoveredFailure] names what went wrong.
 	StopFailed StopReason = "failed"
 )
 
-// FailureSummaryTaskID is the terminal task a chain reaches both by spending
-// its loop budget and by any task erroring into on_failure. The two arrive
-// identically, so the task id alone cannot tell them apart — a provider 404 was
-// reported for months as "used up its budget of model requests", advising a
-// /clear that could not help and hiding the error entirely.
+// FailureSummaryTaskID is the terminal task a chain reaches either by
+// spending its loop budget or by any task erroring into on_failure; the two
+// arrive identically and cannot be told apart by task id alone.
 const FailureSummaryTaskID = "summarise_failure"
 
 type SessionInfo struct {
@@ -84,9 +83,8 @@ type AgentCapabilities struct {
 }
 
 // RecoveredFailure reports the error a chain's on_failure handler answered in
-// place of, empty when the turn reached [FailureSummaryTaskID] by spending its
-// loop budget instead. The step before the summary decides: it errored on the
-// failure path and succeeded on the budget path.
+// place of, or empty when the turn reached [FailureSummaryTaskID] by spending
+// its loop budget instead.
 func RecoveredFailure(steps []taskengine.CapturedStateUnit) string {
 	for i := len(steps) - 1; i >= 0; i-- {
 		if steps[i].TaskID == FailureSummaryTaskID {
@@ -117,7 +115,6 @@ func InferStopReason(err error, steps []taskengine.CapturedStateUnit) StopReason
 		return StopMaxTurnRequests
 	}
 
-	// A truncated last model step is a max-tokens stop, not end_turn.
 	for i := len(steps) - 1; i >= 0; i-- {
 		fr := steps[i].FinishReason
 		if fr == "" {

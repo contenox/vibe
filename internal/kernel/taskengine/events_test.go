@@ -186,8 +186,7 @@ func TestTaskEvents_ChatStreamingPublishesChunks(t *testing.T) {
 			ch <- &libmodelprovider.StreamParcel{Thinking: "think-1"}
 			ch <- &libmodelprovider.StreamParcel{Data: "hello "}
 			ch <- &libmodelprovider.StreamParcel{Data: "world"}
-			// Raw-delta contract: a successful stream ends with a typed
-			// terminal parcel.
+			// Raw-delta contract: a successful stream ends with a typed terminal parcel.
 			ch <- &libmodelprovider.StreamParcel{Terminal: &libmodelprovider.StreamTerminal{FinishReason: "stop"}}
 			close(ch)
 			return ch, llmrepo.Meta{
@@ -255,14 +254,7 @@ func TestTaskEvents_ChatStreamingPublishesChunks(t *testing.T) {
 	assert.Equal(t, "test-model", chunks[2].ModelName)
 }
 
-// TestTaskEvents_ChatStreamingWithToolsParsesToolCalls locks in the streaming
-// path for tool-bearing chat_completion tasks, fixture-driven end to end: a
-// recorded chat-completions SSE transcript (tool-call fragments split across
-// chunks) is served over HTTP, decoded by the REAL openai stream adapter, and
-// assembled by the engine — visible content still streams token-by-token,
-// tool calls are assembled engine-side onto the assistant message (never
-// leaked into the transcript as prose), and the full reply is never
-// re-published as a duplicate chunk after streaming.
+// TestTaskEvents_ChatStreamingWithToolsParsesToolCalls locks in the streaming path for tool-bearing chat_completion tasks end to end via a recorded SSE transcript decoded by the real openai adapter.
 func TestTaskEvents_ChatStreamingWithToolsParsesToolCalls(t *testing.T) {
 	sink := &captureTaskEventSink{}
 	constructorCtx := taskengine.WithTaskEventSink(context.Background(), sink)

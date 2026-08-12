@@ -24,11 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── fakeManager: a hand-rolled agentinstance.Manager double ───────────────
-//
-// It records every call fleetservice.Dispatch/Stop/Cancel makes so a test can
-// assert the orchestration without spawning a real subprocess.
-
 type cancelCall struct {
 	instanceID string
 	sessionID  libacp.SessionID
@@ -185,8 +180,6 @@ func (m *fakeManager) List(context.Context) ([]agentinstance.FleetEntry, error) 
 	return []agentinstance.FleetEntry{{AgentName: "runner", Instances: instances}}, nil
 }
 
-// setListStates swaps the states List reports live instances in — the hook the
-// admission tests use to make a "unit" conclude between two dispatches.
 func (m *fakeManager) setListStates(states ...string) {
 	m.mu.Lock()
 	m.listStates = states
@@ -238,10 +231,6 @@ func (m *fakeManager) cancels() []cancelCall {
 
 var _ agentinstance.Manager = (*fakeManager)(nil)
 
-// ─── setup helpers ──────────────────────────────────────────────────────────
-
-// setupRegistryDB gives a test a real sqlite-backed agentregistryservice /
-// missionservice pair.
 func setupRegistryDB(t *testing.T) (context.Context, libdb.DBManager) {
 	t.Helper()
 	ctx := context.Background()
@@ -251,8 +240,6 @@ func setupRegistryDB(t *testing.T) (context.Context, libdb.DBManager) {
 	return ctx, db
 }
 
-// registerAgent declares an external_acp agent named name with the given
-// enabled flag, via the real registry service.
 func registerAgent(t *testing.T, ctx context.Context, agents agentregistryservice.Service, name string, enabled bool) {
 	t.Helper()
 	agent := &runtimetypes.Agent{Name: name, Enabled: enabled}
@@ -263,20 +250,15 @@ func registerAgent(t *testing.T, ctx context.Context, agents agentregistryservic
 	require.NoError(t, agents.Create(ctx, agent))
 }
 
-// waitMissionSettled blocks until the detached dispatch goroutine has run to
-// completion for a bare unit (one that files no mission fact): the runtime
-// blocker it files is the goroutine's last durable write, so its appearance
-// means the goroutine is done and t.Cleanup's db close cannot race it.
 func waitMissionSettled(t *testing.T, missions missionservice.Service, missionID string) {
 	t.Helper()
+	// waits for the runtime blocker (the goroutine's last write) so t.Cleanup's db close cannot race it.
 	require.Eventually(t, func() bool {
 		reps, err := missions.ListReports(context.Background(), missionID, 5)
 		return err == nil && len(reps) > 0
 	}, 5*time.Second, 20*time.Millisecond, "dispatch goroutine never settled (no runtime blocker filed)")
 }
 
-// countingRegistry wraps a real agentregistryservice.Service and counts
-// GetByName calls.
 type countingRegistry struct {
 	agentregistryservice.Service
 	mu     sync.Mutex
@@ -295,8 +277,6 @@ func (r *countingRegistry) reads() int {
 	defer r.mu.Unlock()
 	return r.byName
 }
-
-// ─── Dispatch: Enabled policy ───────────────────────────────────────────────
 
 func TestFleetService_Dispatch_DisabledAgentRefused(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
@@ -326,8 +306,6 @@ func TestFleetService_Dispatch_UnknownAgentPropagatesNotFound(t *testing.T) {
 	require.Empty(t, man.starts())
 }
 
-// ─── Dispatch: happy path ───────────────────────────────────────────────────
-
 // TestFleetService_Dispatch_HappyPath: an instance comes up, a session opens,
 // the mission is created bound to both fresh ids, and the intent runs as the
 // unit's first turn.
@@ -338,7 +316,6 @@ func TestFleetService_Dispatch_HappyPath(t *testing.T) {
 	missions := missionservice.New(db)
 
 	man := &fakeManager{startID: "inst-7", openID: "sess-7"}
-	// A unit that files a report on its first turn: the happy path, no nudge.
 	man.onPrompt = func(call int) {
 		if call != 1 {
 			return
@@ -414,8 +391,6 @@ func TestFleetService_Dispatch_ResolvesTheAgentExactlyOnce(t *testing.T) {
 	require.Equal(t, "runner", spawned.Name)
 	require.True(t, spawned.Enabled, "the bytes that were judged are the bytes that are spawned")
 
-	// Shepherding a mute unit reads only the mission store, never the
-	// registry; settle it so its writes do not race t.Cleanup.
 	waitMissionSettled(t, missions, result.MissionID)
 	require.Equal(t, 1, counting.reads(), "shepherding a mute unit adds no registry read")
 }
@@ -458,8 +433,6 @@ func TestFleetService_Dispatch_EnvelopeRequiredRejected(t *testing.T) {
 	require.Empty(t, man.starts(), "rejected before any instance is brought up")
 }
 
-// ─── Dispatch: teardown-on-failure ──────────────────────────────────────────
-
 func TestFleetService_Dispatch_TeardownOnOpenSessionFailure(t *testing.T) {
 	ctx, db := setupRegistryDB(t)
 	agents := agentregistryservice.New(db)
@@ -487,8 +460,6 @@ func TestFleetService_Dispatch_TeardownOnMissionBindFailure(t *testing.T) {
 	require.Equal(t, []string{"inst-11"}, man.stops(), "a failed mission Bind must tear the fresh instance back down")
 }
 
-// bindFailingMissions wraps a real missionservice.Service but makes Bind
-// always fail.
 type bindFailingMissions struct {
 	missionservice.Service
 }
@@ -496,8 +467,6 @@ type bindFailingMissions struct {
 func (b *bindFailingMissions) Bind(context.Context, string, string, string) (*missionservice.Mission, error) {
 	return nil, context.DeadlineExceeded
 }
-
-// ─── Dispatch: cwd envelope ─────────────────────────────────────────────────
 
 func TestFleetService_Dispatch_InvalidCwdRejected(t *testing.T) {
 	allowed := t.TempDir()
@@ -538,8 +507,6 @@ func TestFleetService_Dispatch_RelativeCwdRejectedWithoutAllowlist(t *testing.T)
 	require.Empty(t, man.openSpecs, "no session is ever opened with a relative cwd")
 }
 
-// ─── Stop ────────────────────────────────────────────────────────────────────
-
 func TestFleetService_Stop_DelegatesAndIsIdempotent(t *testing.T) {
 	man := &fakeManager{}
 	svc := New(man, agentregistryservice.New(mustDB(t)), nil, nil, "", nil)
@@ -549,8 +516,6 @@ func TestFleetService_Stop_DelegatesAndIsIdempotent(t *testing.T) {
 	require.NoError(t, svc.Stop(context.Background(), "never-existed"), "Stop of an unknown id is a no-op, per kernel contract")
 	require.Equal(t, []string{"inst-1", "inst-1", "never-existed"}, man.stops())
 }
-
-// ─── Cancel ──────────────────────────────────────────────────────────────────
 
 func TestFleetService_Cancel_WithSessionIDCancelsExactlyThatSession(t *testing.T) {
 	man := &fakeManager{}
@@ -600,16 +565,6 @@ func TestFleetService_Cancel_UnknownInstancePropagatesNotFound(t *testing.T) {
 	require.ErrorIs(t, err, agentinstance.ErrNotFound)
 }
 
-// ─── Cancel: the fan-out against a real kernel (fan-out set is the kernel's
-//     own answer, not a fake's) ──────────────────────────────────────────────
-
-// buildStubAgentBin compiles libacp/cmd/acp-stub-agent, the hermetic in-repo
-// ACP agent with no LLM backend, into t.TempDir() and returns its path.
-//
-// The caller spawns this binary through the sandbox, which is Landlock-based
-// and Linux-only (see internal/libsandbox/isolation_other.go) — off Linux the
-// spawn always fails with ErrIsolation before the binary is even exec'd, so
-// there is nothing meaningful left to test.
 func buildStubAgentBin(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -621,9 +576,6 @@ func buildStubAgentBin(t *testing.T) string {
 	return binPath
 }
 
-// cancelRecordingManager wraps a real agentinstance.Manager and records the
-// Cancel calls fleetservice makes, delegating every other method (Get
-// included) to the wrapped kernel.
 type cancelRecordingManager struct {
 	agentinstance.Manager
 
@@ -661,20 +613,16 @@ func TestFleetService_Cancel_EmptySessionIDReachesSilentSession(t *testing.T) {
 	t.Cleanup(func() { _ = kernel.Close() })
 	man := &cancelRecordingManager{Manager: kernel}
 
-	// Every dispatch is a mission, so this test needs a real mission registry.
 	missions := missionservice.New(db)
 	svc := New(man, agents, missions, nil, t.TempDir(), libtracker.NoopTracker{})
 
-	// The stub agent's first turn resolves quickly and leaves the session
-	// open and quiet, with no viewer attached.
 	result, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName: "silent-runner", Intent: "do the thing", HITLPolicyName: "default",
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, result.SessionID)
 
-	// Wait for the nudge-then-blocker to settle: it leaves the session open
-	// but idle, and keeps the detached goroutine from racing t.Cleanup.
+	// settle before assertions: the detached goroutine would otherwise race them.
 	require.Eventually(t, func() bool {
 		reps, lerr := missions.ListReports(ctx, result.MissionID, 5)
 		return lerr == nil && len(reps) > 0
@@ -686,21 +634,16 @@ func TestFleetService_Cancel_EmptySessionIDReachesSilentSession(t *testing.T) {
 		"an open-but-silent session must be visible on the fleet board")
 	require.Zero(t, st.Viewers, "nothing is watching it — the condition that used to hide it")
 
-	// A session-less Cancel must reach that session, not skip it.
 	require.NoError(t, svc.Cancel(ctx, result.InstanceID, ""))
 	require.Equal(t,
 		[]cancelCall{{instanceID: result.InstanceID, sessionID: libacp.SessionID(result.SessionID)}},
 		man.cancels(),
 		"cancel-everything must cancel the silent session")
 
-	// Closing the session removes it from the fan-out set: a second Cancel is
-	// a no-op.
 	require.NoError(t, kernel.CloseSession(result.InstanceID, libacp.SessionID(result.SessionID)))
 	require.NoError(t, svc.Cancel(ctx, result.InstanceID, ""))
 	require.Len(t, man.cancels(), 1, "a closed session is not cancelled again")
 }
-
-// ─── small local helpers (used only by the Stop/Cancel tests) ──────────────
 
 func mustDB(t *testing.T) libdb.DBManager {
 	t.Helper()
@@ -710,8 +653,6 @@ func mustDB(t *testing.T) libdb.DBManager {
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
-
-// ─── the supervision edge ──────────────────────────────────────────────────
 
 // TestFleetService_Dispatch_RecordsParentSession: Dispatch records who fired
 // the mission when known, and leaves ParentSessionID empty otherwise.
@@ -738,7 +679,6 @@ func TestFleetService_Dispatch_RecordsParentSession(t *testing.T) {
 	require.Equal(t, "sess-9", m.SessionID, "the spawned session is a different fact from the parent")
 	waitMissionSettled(t, missions, fired.MissionID)
 
-	// A second unit, fired without a parent, on its own fakeManager.
 	man2 := &fakeManager{startID: "inst-10", openID: "sess-10"}
 	svc2 := New(man2, agents, missions, nil, "/project/root", libtracker.NoopTracker{})
 
@@ -754,11 +694,6 @@ func TestFleetService_Dispatch_RecordsParentSession(t *testing.T) {
 	require.Empty(t, m2.ParentSessionID, "an operator-fired mission has no parent session")
 	waitMissionSettled(t, missions, direct.MissionID)
 }
-
-// ─── the unattended-turn cure: heartbeat, one nudge, then a runtime blocker ──
-//
-// These are the fast (no-subprocess) siblings of the acceptance e2e
-// (e2e_unattended_nudge_test.go).
 
 // TestUnit_missionShowsUnitReached: exhaustive over the facts the nudge loop
 // keys on.
@@ -791,14 +726,12 @@ func TestUnit_silentTurnBlocker(t *testing.T) {
 	require.Contains(t, det, "I need to know which\nbranch to target.", "the detail keeps the full text verbatim")
 	require.Contains(t, det, "sess-1")
 
-	// Without recoverable text: a clear generic pointing at the session.
 	sum, det = silentTurnBlocker("   ", "sess-2")
 	require.NotEmpty(t, sum)
 	require.NotContains(t, sum, "\n")
 	require.Contains(t, sum, "sess-2")
 	require.Contains(t, det, "sess-2")
 
-	// A pathological long single line still yields a bounded single-line summary.
 	sum, _ = silentTurnBlocker(strings.Repeat("x", 5000), "sess-3")
 	require.NotContains(t, sum, "\n")
 	require.LessOrEqual(t, len([]rune(sum)), 241, "the excerpt is truncated (max runes + ellipsis)")
@@ -858,8 +791,6 @@ func TestFleetService_Dispatch_ReportingUnitGetsNoNudge(t *testing.T) {
 	missions := missionservice.New(db)
 
 	man := &fakeManager{startID: "inst-rep", openID: "sess-rep"}
-	// The "unit" files a report on its first turn, so missionReached() is
-	// true and no nudge follows.
 	man.onPrompt = func(call int) {
 		if call != 1 {
 			return
@@ -877,13 +808,11 @@ func TestFleetService_Dispatch_ReportingUnitGetsNoNudge(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// The unit's single report lands and nothing else is added.
 	require.Eventually(t, func() bool {
 		reps, lerr := missions.ListReports(ctx, res.MissionID, 5)
 		return lerr == nil && len(reps) == 1
 	}, 5*time.Second, 20*time.Millisecond)
 
-	// Give any (erroneous) nudge a chance to happen, then prove it did not.
 	require.Never(t, func() bool {
 		return man.prompts() > 1
 	}, 300*time.Millisecond, 50*time.Millisecond, "a unit that reported must not be nudged")
@@ -902,7 +831,7 @@ func TestFleetService_Dispatch_EmptyCwdResolvesToAllowlistDefault(t *testing.T) 
 	allowed := t.TempDir()
 	roots, err := vfs.NewFactory(allowed)
 	require.NoError(t, err)
-	resolvedAllowed, err := vfs.ResolveRoot(allowed) // the symlink-resolved form the Factory stores
+	resolvedAllowed, err := vfs.ResolveRoot(allowed)
 	require.NoError(t, err)
 
 	ctx, db := setupRegistryDB(t)
@@ -911,13 +840,10 @@ func TestFleetService_Dispatch_EmptyCwdResolvesToAllowlistDefault(t *testing.T) 
 	missions := missionservice.New(db)
 
 	man := &fakeManager{startID: "inst-cwd", openID: "sess-cwd"}
-	// projectRoot deliberately diverges from the allowlist default; it must
-	// resolve to the allowlist regardless.
 	svc := New(man, agents, missions, roots, "/some/other/home", libtracker.NoopTracker{})
 
 	res, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName: "runner", Intent: "do the thing", HITLPolicyName: "default",
-		// Cwd omitted.
 	})
 	require.NoError(t, err)
 
@@ -928,14 +854,6 @@ func TestFleetService_Dispatch_EmptyCwdResolvesToAllowlistDefault(t *testing.T) 
 
 	waitMissionSettled(t, missions, res.MissionID)
 }
-
-// ─── a turn that errors: the mission comes to rest, the unit is reaped ──────
-//
-// The drive loop is the only thing prompting a dispatched unit, so a turn
-// error is the moment nobody is driving the mission any more. Returning there
-// left a StateRunning instance holding fleet width against maxParallel until
-// its host exited — and stamped a fresh heartbeat, hiding the dead mission
-// from the sweep for a further StaleHeartbeatAfter. These pin both halves.
 
 func TestUnit_DriveLoop_TurnErrorFinishesDerailedAndReapsTheUnit(t *testing.T) {
 	mgr := &fakeManager{openID: "sess-1", promptErr: fmt.Errorf("backend refused the turn")}
@@ -967,7 +885,6 @@ func TestUnit_DriveLoop_TurnErrorFinishesDerailedAndReapsTheUnit(t *testing.T) {
 // other.
 func TestUnit_DriveLoop_NudgeTurnErrorTakesTheSamePath(t *testing.T) {
 	mgr := &fakeManager{openID: "sess-1", agentText: "still thinking"}
-	// Turn 1 succeeds mute, so the nudge runs; the backend dies under it.
 	mgr.onPrompt = func(call int) {
 		if call >= 2 {
 			mgr.promptErr = fmt.Errorf("backend died mid-mission")
@@ -987,9 +904,7 @@ func TestUnit_DriveLoop_NudgeTurnErrorTakesTheSamePath(t *testing.T) {
 	require.NotNil(t, got.LastHeartbeat, "turn 1 completed, so its liveness stands; only the failed turn stamps nothing")
 }
 
-// TestUnit_DriveLoop_TurnErrorOnAnAlreadyStoppedMissionOnlyReapsTheUnit pins
-// the common case: an operator's `mission stop` reaps the subprocess, which is
-// itself how the in-flight turn errored. That mission owns its own verdict.
+// TestUnit_DriveLoop_TurnErrorOnAnAlreadyStoppedMissionOnlyReapsTheUnit pins the common case: an operator's `mission stop` reaps the subprocess (itself how the in-flight turn errored), and that mission owns its own verdict.
 func TestUnit_DriveLoop_TurnErrorOnAnAlreadyStoppedMissionOnlyReapsTheUnit(t *testing.T) {
 	mgr := &fakeManager{openID: "sess-1"}
 	svc, missions, run := driveFixture(t, hitlservice.ComputeBounds{}, mgr)

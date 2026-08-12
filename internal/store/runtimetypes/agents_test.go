@@ -13,8 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
 func newExternalACPAgent(name string) *runtimetypes.Agent {
 	agent := &runtimetypes.Agent{
 		ID:      uuid.New().String(),
@@ -36,8 +34,6 @@ func must(err error) {
 		panic(err)
 	}
 }
-
-// ─── CRUD ──────────────────────────────────────────────────────────────────────
 
 func TestUnit_Agents_CreateAndGet(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
@@ -128,7 +124,6 @@ func TestUnit_Agents_Provenance_RoundTrip(t *testing.T) {
 	require.NotNil(t, got.RegistryVersion)
 	require.Equal(t, "1.43.0", *got.RegistryVersion)
 
-	// Provenance also survives a round-trip through List and update.
 	items, err := s.ListAgents(ctx, nil, 100)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
@@ -191,8 +186,6 @@ func TestUnit_Agents_Delete(t *testing.T) {
 	require.True(t, errors.Is(err, libdb.ErrNotFound))
 }
 
-// ─── List & Pagination ─────────────────────────────────────────────────────────
-
 func TestUnit_Agents_ListEmpty(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
@@ -217,7 +210,6 @@ func TestUnit_Agents_List(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 3)
 
-	// Reverse-chronological order (newest first)
 	require.Equal(t, agents[2].ID, items[0].ID)
 	require.Equal(t, agents[1].ID, items[1].ID)
 	require.Equal(t, agents[0].ID, items[2].ID)
@@ -266,8 +258,6 @@ func TestUnit_Agents_ListPagination(t *testing.T) {
 	require.Equal(t, created[0].ID, received[4].ID)
 }
 
-// ─── Constraints ───────────────────────────────────────────────────────────────
-
 func TestUnit_Agents_UniqueNameConstraint(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
@@ -297,8 +287,6 @@ func TestUnit_Agents_DeleteAndRecreate(t *testing.T) {
 	require.Equal(t, newAgent.ID, got.ID)
 }
 
-// ─── Not-found cases ───────────────────────────────────────────────────────────
-
 func TestUnit_Agents_NotFoundCases(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
@@ -326,8 +314,6 @@ func TestUnit_Agents_NotFoundCases(t *testing.T) {
 	})
 }
 
-// ─── Estimate count ───────────────────────────────────────────────────────────
-
 func TestUnit_Agents_EstimateCount(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
@@ -338,8 +324,6 @@ func TestUnit_Agents_EstimateCount(t *testing.T) {
 	_, err := s.EstimateAgentCount(ctx)
 	require.NoError(t, err)
 }
-
-// ─── Kind mismatch ─────────────────────────────────────────────────────────────
 
 func TestUnit_Agents_ExternalACPConfig_WrongKindErrors(t *testing.T) {
 	agent := &runtimetypes.Agent{

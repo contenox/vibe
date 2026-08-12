@@ -47,7 +47,6 @@ func TestFleetE2E_UnattendedNudge_MuteUnitHeartbeatsNudgedAndBlocked(t *testing.
 
 	contenoxDir := filepath.Join(home, ".contenox")
 	require.DirExists(t, contenoxDir)
-	// The print-only fixture never touches a mission tool.
 	writeChainAgentFixture(t, contenoxDir)
 
 	ctx := context.Background()
@@ -56,8 +55,6 @@ func TestFleetE2E_UnattendedNudge_MuteUnitHeartbeatsNudgedAndBlocked(t *testing.
 	t.Cleanup(func() { _ = db.Close() })
 
 	agents := agentregistryservice.New(db)
-	// missionservice publishes on AddReport, so the runtime-filed blocker
-	// rides the same report machinery a unit's own report would.
 	bus := libbus.NewInMem()
 	t.Cleanup(func() { _ = bus.Close() })
 	missions := missionservice.New(db, missionservice.WithEventPublisher(bus))
@@ -74,8 +71,6 @@ func TestFleetE2E_UnattendedNudge_MuteUnitHeartbeatsNudgedAndBlocked(t *testing.
 	)
 	t.Cleanup(func() { _ = instances.Close() })
 
-	// Wired as serve wires it: the Manager is the SessionDeliverer, the
-	// operator inbox the fallback.
 	router, err := reportrouter.New(reportrouter.Deps{
 		Bus:      bus,
 		Sessions: instances,
@@ -90,8 +85,6 @@ func TestFleetE2E_UnattendedNudge_MuteUnitHeartbeatsNudgedAndBlocked(t *testing.
 	workDir := t.TempDir()
 	svc := New(instances, agents, missions, nil, workDir, libtracker.NoopTracker{})
 
-	// Fired by an operator (no ParentSessionID): the blocker must route to
-	// the operator inbox.
 	dispatched, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName:      "agent-fleet-fixture",
 		Intent:         "do the mission and report in",
@@ -100,13 +93,10 @@ func TestFleetE2E_UnattendedNudge_MuteUnitHeartbeatsNudgedAndBlocked(t *testing.
 	require.NoError(t, err, "dispatch stderr:\n%s", stderr.String())
 	require.NotEmpty(t, dispatched.MissionID)
 
-	// The fixture prints its reply once per turn, so counting occurrences
-	// counts turns.
 	viewer := &recordingViewer{id: "nudge-observer"}
 	_, err = instances.Attach(ctx, dispatched.InstanceID, libacp.SessionID(dispatched.SessionID), viewer)
 	require.NoError(t, err)
 
-	// (1)+(2): the first turn stamps liveness, and a second nudged turn runs.
 	require.Eventually(t, func() bool {
 		return strings.Count(viewer.messageText(), chainFixtureReply) >= 2
 	}, 120*time.Second, 100*time.Millisecond,
@@ -117,7 +107,6 @@ func TestFleetE2E_UnattendedNudge_MuteUnitHeartbeatsNudgedAndBlocked(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, m.LastHeartbeat, "turn completion is liveness: the mission must carry a heartbeat")
 
-	// (3): a blocker lands on the mission and reaches the operator inbox.
 	require.Eventually(t, func() bool {
 		reps, lerr := missions.ListReports(ctx, dispatched.MissionID, 5)
 		return lerr == nil && len(reps) == 1 && reps[0].Kind == missionservice.ReportKindBlocker
@@ -141,12 +130,10 @@ func TestFleetE2E_UnattendedNudge_MuteUnitHeartbeatsNudgedAndBlocked(t *testing.
 	}, 30*time.Second, 100*time.Millisecond,
 		"the runtime blocker never reached the operator inbox")
 
-	// (5): the mission is blocked, not done.
 	m, err = missions.Get(ctx, dispatched.MissionID)
 	require.NoError(t, err)
 	require.Equal(t, missionservice.StatusOpen, m.Status, "a nudged-then-blocked mission stays open, not terminal")
 
-	// (4): no third prompt; the transcript must hold the reply exactly twice.
 	require.Never(t, func() bool {
 		return strings.Count(viewer.messageText(), chainFixtureReply) > 2
 	}, 2*time.Second, 100*time.Millisecond,

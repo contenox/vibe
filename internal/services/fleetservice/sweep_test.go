@@ -1,8 +1,5 @@
 package fleetservice
 
-// The startup seam: a fleet host coming up collects the missions a dead host
-// left behind, because every unit it opened died with it.
-
 import (
 	"context"
 	"path/filepath"
@@ -16,8 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// orphanedMission creates an open mission whose liveness stopped long enough
-// ago to be collectable, the way a killed host leaves one.
 func orphanedMission(t *testing.T, ctx context.Context, missions missionservice.Service, intent string) *missionservice.Mission {
 	t.Helper()
 	m := &missionservice.Mission{Intent: intent, AgentName: "unit", HITLPolicyName: "p.json"}

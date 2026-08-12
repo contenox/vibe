@@ -10,9 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These are the analyzer's own properties; the behavioral half lives in
-// policy_shell_structural_test.go.
-
 func shArgs(cmd string) map[string]any { return map[string]any{"command": cmd} }
 
 // TestUnit_ShellAnalyzer_RedirectTargetIsCaptured pins that the walker sees a
@@ -74,8 +71,6 @@ func TestUnit_ShellAnalyzer_EnumeratesEveryCommand(t *testing.T) {
 	}
 }
 
-// commandBases is the reading's enumeration as the blacklist compares it,
-// dropping the unnameable entries a reveal leaves behind.
 func commandBases(r shellReading) []string {
 	var out []string
 	for _, c := range r.commands {
@@ -86,10 +81,9 @@ func commandBases(r shellReading) []string {
 	return out
 }
 
-// TestUnit_ShellAnalyzer_NormalizationRevealsHiddenCommands is the reveal
-// rule's table: each line names a program the written words do not, and the
-// normalization must surface it. Reveals are ADDITIVE, so every case also
-// keeps the wrapper it peeled.
+// TestUnit_ShellAnalyzer_NormalizationRevealsHiddenCommands pins that each
+// line's normalization surfaces the program the written words do not,
+// keeping the wrapper it peeled.
 func TestUnit_ShellAnalyzer_NormalizationRevealsHiddenCommands(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -125,9 +119,8 @@ func TestUnit_ShellAnalyzer_NormalizationRevealsHiddenCommands(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellAnalyzer_NormalizationStopsWhereItCannotRead pins the other
-// half: a payload that exists only at run time reveals nothing, rather than a
-// guess. Nothing here is a denial — the wrapper itself is still named.
+// TestUnit_ShellAnalyzer_NormalizationStopsWhereItCannotRead pins that a
+// payload existing only at run time reveals nothing rather than a guess.
 func TestUnit_ShellAnalyzer_NormalizationStopsWhereItCannotRead(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -152,10 +145,9 @@ func TestUnit_ShellAnalyzer_NormalizationStopsWhereItCannotRead(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellAnalyzer_RevealNeverClearsAnUpgrade is the monotonicity proof
-// the reveal rule rests on: every trigger word is in unclearedCommandNames, so
-// a line carrying one can never be upgradable — a revealed command can only
-// ever refuse an allow, never grant one.
+// TestUnit_ShellAnalyzer_RevealNeverClearsAnUpgrade pins that every
+// reveal-trigger word is in unclearedCommandNames, so a line carrying one
+// can never be upgradable.
 func TestUnit_ShellAnalyzer_RevealNeverClearsAnUpgrade(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"sh", "bash", "dash", "ash", "ksh", "zsh", "fish", "xargs", "eval", "source"} {
@@ -163,8 +155,7 @@ func TestUnit_ShellAnalyzer_RevealNeverClearsAnUpgrade(t *testing.T) {
 			"%q triggers a reveal, so it MUST be uncleared or a reveal could reach the upgrade path", name)
 	}
 
-	// Every verb below is on the safe list, so only the wrapper stands between
-	// these lines and an allow — and it must keep standing there.
+	// Every verb below is on the safe list; only the wrapper stands between these lines and an allow.
 	for _, src := range []string{
 		`sh -c "git status"`,
 		`sh -c "git status" && go build`,
@@ -186,8 +177,7 @@ func TestUnit_ShellAnalyzer_RevealNeverClearsAnUpgrade(t *testing.T) {
 // one evaluation into unbounded parsing.
 func TestUnit_ShellAnalyzer_RevealIsBounded(t *testing.T) {
 	t.Parallel()
-	// Deeper than maxRevealDepth: the innermost payload is never reached, and
-	// the analyzer still returns.
+	// Deeper than maxRevealDepth: the innermost payload is never reached, and the analyzer still returns.
 	src := `rm -rf /`
 	for i := 0; i < maxRevealDepth+4; i++ {
 		src = `sh -c ` + strconv.Quote(src)
@@ -223,8 +213,7 @@ func TestUnit_ShellAnalyzer_EscapeDecoding(t *testing.T) {
 // TestUnit_ShellAnalyzer_BashOnlyLineNeverUpgrades pins that the wider second parse only ever tightens.
 func TestUnit_ShellAnalyzer_BashOnlyLineNeverUpgrades(t *testing.T) {
 	t.Parallel()
-	// Every verb here is harmless, yet the line still cannot upgrade: sh
-	// itself would not accept this reading.
+	// Every verb here is harmless, yet the line cannot upgrade: sh itself would not accept this reading.
 	r := analyzeShellArgs(ShellKindPOSIX, shArgs(`cat <(ls) && ls`))
 	require.True(t, r.parsed, "the bash parser accepts it")
 	assert.False(t, r.upgradable, "a reading sh would reject can never admit anything")
@@ -270,8 +259,7 @@ func TestUnit_ShellAnalyzer_LiteralWordsRule(t *testing.T) {
 		r := analyzeShellArgs(ShellKindPOSIX, shArgs(src))
 		require.Truef(t, r.parsed, "%q", src)
 		require.NotEmptyf(t, r.commands, "%q", src)
-		// commands[0] is the outer command; a substitution contributes its own
-		// inner commands after it.
+		// commands[0] is the outer command; a substitution contributes its own inner commands after it.
 		assert.Falsef(t, r.commands[0].literal, "%q carries a run-time value and must not be literal", src)
 		assert.Falsef(t, r.upgradable, "%q must never be upgradable", src)
 	}
@@ -303,8 +291,8 @@ func TestUnit_ShellAnalyzer_LenientNameResolvesEvasions(t *testing.T) {
 	assert.False(t, r.upgradable)
 }
 
-// TestUnit_ShellAnalyzer_ClearedNodeSet is the node audit as an executable
-// table: the cleared shapes, and each cleared kind's sibling that must not be.
+// TestUnit_ShellAnalyzer_ClearedNodeSet pins the node audit as an executable
+// table: cleared shapes upgrade, their uncleared siblings do not.
 func TestUnit_ShellAnalyzer_ClearedNodeSet(t *testing.T) {
 	t.Parallel()
 
@@ -416,8 +404,8 @@ func TestUnit_ShellAnalyzer_OnlyShellLinesAreRead(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// TestUnit_ShellAnalyzer_PowerShellNeverReachesTheParser is A1's pin: a
-// powershell-kind call must never even enter the parser.
+// TestUnit_ShellAnalyzer_PowerShellNeverReachesTheParser pins that a
+// powershell-kind call must never enter the parser.
 func TestUnit_ShellAnalyzer_PowerShellNeverReachesTheParser(t *testing.T) {
 	// Not parallel: it reads a process-wide counter.
 	powershellLines := []string{
@@ -443,8 +431,8 @@ func TestUnit_ShellAnalyzer_PowerShellNeverReachesTheParser(t *testing.T) {
 	assert.Greater(t, structuralParses.Load(), before)
 }
 
-// TestUnit_ShellAnalyzer_ShellKindGuardTable is A1's decision table: the
-// no-declaration fallback follows the host's own shape, failing closed on Windows.
+// TestUnit_ShellAnalyzer_ShellKindGuardTable pins that the no-declaration
+// fallback follows the host's own shape, failing closed on Windows.
 func TestUnit_ShellAnalyzer_ShellKindGuardTable(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -467,8 +455,7 @@ func TestUnit_ShellAnalyzer_ShellKindGuardTable(t *testing.T) {
 }
 
 // TestUnit_ShellAnalyzer_CallArgsCannotDisableTheAnalyzer pins that the shell
-// kind is a construction-time declaration: a "shell_kind" (or any other) call
-// argument is not a channel into the guard.
+// kind is a construction-time declaration a call argument cannot override.
 func TestUnit_ShellAnalyzer_CallArgsCannotDisableTheAnalyzer(t *testing.T) {
 	t.Parallel()
 	hostile := map[string]any{"command": "git status && rm -rf /", "shell_kind": "powershell"}

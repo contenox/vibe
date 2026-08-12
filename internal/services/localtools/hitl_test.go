@@ -17,8 +17,6 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// ── mocks ─────────────────────────────────────────────────────────────────────
-
 type mockPolicyEval struct {
 	result hitlservice.EvaluationResult
 	err    error
@@ -83,8 +81,6 @@ func alwaysApprove(_ context.Context, _ hitlservice.ApprovalRequest) (bool, erro
 func alwaysDeny(_ context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
 	return false, nil
 }
-
-// ── HITLWrapper.Exec ──────────────────────────────────────────────────────────
 
 func TestUnit_HITLWrapper_Allow_PassesThrough(t *testing.T) {
 	inner := &mockInnerTools{}
@@ -184,7 +180,7 @@ func TestUnit_HITLWrapper_Approve_HumanApproves_CallsInner(t *testing.T) {
 	if res != "ok" {
 		t.Errorf("expected ok, got %v", res)
 	}
-	// inner called twice: once for read_file (diff), once for write_file (actual)
+	// inner is called twice: once for read_file (diff), once for write_file (actual).
 	if len(inner.calls) < 1 || inner.calls[len(inner.calls)-1] != "write_file" {
 		t.Errorf("expected write_file as last inner call, got %v", inner.calls)
 	}
@@ -236,7 +232,7 @@ func TestUnit_HITLWrapper_NonMapInput_ReportsAndContinues(t *testing.T) {
 	inner := &mockInnerTools{}
 	w := localtools.NewHITLWrapper(inner, alwaysApprove, allowPolicy(), nil)
 
-	// non-map input: policy evaluates with empty args, allow passes through
+	// Non-map input: policy evaluates with empty args, allow passes through.
 	_, _, err := w.Exec(context.Background(), time.Now(),
 		"not-a-map", false,
 		&taskengine.ToolsCall{Name: "echo", ToolName: "echo"})
@@ -320,8 +316,6 @@ func TestUnit_HITLWrapper_ParentCancellation_ReturnsError(t *testing.T) {
 	}
 }
 
-// ── diff via inner tools ────────────────────────────────────────────────────────
-
 func TestUnit_HITLWrapper_DiffWriteFile_ExistingFile(t *testing.T) {
 	oldContent := "line1\nline2\nline3\n"
 	newContent := "line1\nchanged\nline3\n"
@@ -380,7 +374,6 @@ func TestUnit_HITLWrapper_DiffWriteFile_NewFile(t *testing.T) {
 				toolName = tools.Name
 			}
 			if toolName == "read_file" {
-				// Simulate file not existing.
 				return nil, taskengine.DataTypeAny, fmt.Errorf("local_fs: failed to read file: %w", os.ErrNotExist)
 			}
 			return "ok", taskengine.DataTypeString, nil
@@ -489,18 +482,12 @@ func TestUnit_HITLWrapper_DiffReadError_ApprovalStillShown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Diff is empty but the approval request was still sent.
 	if capturedReq.ToolsName != "local_fs" {
 		t.Errorf("approval request was not sent, got toolsName=%q", capturedReq.ToolsName)
 	}
 }
 
-// TestUnit_HITLWrapper_Detail_SurvivesToApprovalflowMeta traces the matched
-// rule's human-readable cause across all three hops: the policy evaluator's
-// EvaluationResult.Detail, onto the ApprovalRequest the wrapper builds, and
-// finally onto approvalflow.Meta -- the shape that reaches the wire. A prior
-// gap left Detail computed but never copied past EvaluationResult, so a
-// gated card could only say "rule 41", not what rule 41 actually caught.
+// TestUnit_HITLWrapper_Detail_SurvivesToApprovalflowMeta pins that EvaluationResult.Detail reaches ApprovalRequest.Detail and then approvalflow.Meta.Detail on the wire.
 func TestUnit_HITLWrapper_Detail_SurvivesToApprovalflowMeta(t *testing.T) {
 	const wantDetail = `shell command "rm" matched command_ask_always`
 	rule := 4
@@ -548,8 +535,6 @@ func TestUnit_HITLWrapper_Detail_SurvivesToApprovalflowMeta(t *testing.T) {
 	}
 }
 
-// capturingPolicyEval records the args the wrapper hands the policy, so
-// tests can pin the evaluated view rather than only the verdict.
 type capturingPolicyEval struct {
 	result hitlservice.EvaluationResult
 	args   map[string]any
@@ -560,11 +545,7 @@ func (m *capturingPolicyEval) Evaluate(_ context.Context, _, _ string, args map[
 	return m.result, nil
 }
 
-// TestUnit_HITLWrapper_StaticToolsArgsVisibleToPolicy pins policyEvalArgs:
-// a tools-handler task's chain-authored static tools.Args reach the policy,
-// a plain-string input is exposed as "stdin", and static args win over
-// input keys — the same precedence the executing tool applies. The inner
-// tool still receives the original input untouched.
+// TestUnit_HITLWrapper_StaticToolsArgsVisibleToPolicy pins that a tools-handler task's static tools.Args reach the policy (a plain-string input as "stdin", static args winning over input keys), while the inner tool still receives the original input untouched.
 func TestUnit_HITLWrapper_StaticToolsArgsVisibleToPolicy(t *testing.T) {
 	policy := &capturingPolicyEval{result: hitlservice.EvaluationResult{Action: hitlservice.ActionAllow}}
 	var gotInput any
@@ -598,7 +579,6 @@ func TestUnit_HITLWrapper_StaticToolsArgsVisibleToPolicy(t *testing.T) {
 		t.Fatalf("inner tool must receive the original input unchanged, got %v", gotInput)
 	}
 
-	// Static args win over same-named input keys, mirroring execution.
 	policy.args = nil
 	_, _, err = w.Exec(context.Background(), time.Now(),
 		map[string]any{"command": "rm", "note": "dynamic"}, false,

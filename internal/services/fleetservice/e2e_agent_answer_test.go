@@ -25,7 +25,6 @@ func TestFleetE2E_AgentAnswerBounds(t *testing.T) {
 	store := runtimetypes.New(db.WithoutTransaction())
 	hitl := hitlservice.New(hitlservice.NewFSPolicySource(policyDir), runtimetypes.LocalTenantID, store, libtracker.NoopTracker{})
 
-	// Two envelopes: the default posture, and one that opts in with a cap of two.
 	humanOnly := writePolicy(t, policyDir, "human-only.json", map[string]any{
 		"default_action": "approve",
 		"rules":          []any{},
@@ -36,13 +35,10 @@ func TestFleetE2E_AgentAnswerBounds(t *testing.T) {
 		"attention":      map[string]any{"allowAgentAnswers": true, "maxAgentAnswers": 2},
 	})
 
-	// The default envelope keeps questions human-only — the whole point of the
-	// escalation the unit performed.
 	bounds, err := hitl.AttentionBoundsFor(ctx, humanOnly)
 	require.NoError(t, err)
 	require.False(t, bounds.AllowAgentAnswers, "an envelope that says nothing must not let a model answer")
 
-	// The opt-in envelope carries its own cap.
 	bounds, err = hitl.AttentionBoundsFor(ctx, agentOK)
 	require.NoError(t, err)
 	require.True(t, bounds.AllowAgentAnswers)
@@ -59,8 +55,6 @@ func TestFleetE2E_AgentAnswerBounds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, hitlservice.DefaultMaxAgentAnswers, bounds.EffectiveMaxAgentAnswers())
 
-	// The count the cap is enforced against is durable and actor-aware: two
-	// agent answers and one human answer on the same mission read as two.
 	const missionID = "m-cap"
 	for i := 0; i < 2; i++ {
 		askID := raisePendingAsk(t, ctx, hitl, missionID)
@@ -74,8 +68,6 @@ func TestFleetE2E_AgentAnswerBounds(t *testing.T) {
 	require.Equal(t, 2, used, "a human's answer must not consume the agent budget")
 }
 
-// raisePendingAsk parks a question on missionID and returns its id, so a test can
-// answer it as whichever actor it is exercising.
 func raisePendingAsk(t *testing.T, ctx context.Context, hitl hitlservice.Service, missionID string) string {
 	t.Helper()
 	raised := make(chan string, 1)

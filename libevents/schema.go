@@ -7,14 +7,8 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// InitSchema creates the package's tables and indexes if they are absent.
-// Idempotent, and additive against tables that already exist with these
-// columns — an importer whose earlier schema already carries a compatible
-// {prefix}cursors/{prefix}firings pair (the shapes this package was extracted
-// from) passes through unchanged.
-//
-// The SQL is the portable subset both supported drivers accept: no
-// INSERT OR IGNORE, no partial indexes, timestamps as driver-native TIMESTAMP.
+// InitSchema creates the package's tables and indexes if absent; idempotent
+// and safe to call against an already-compatible schema.
 func InitSchema(ctx context.Context, exec libdb.Exec, cfg Config) error {
 	if err := cfg.Validate(); err != nil {
 		return err

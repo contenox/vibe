@@ -60,7 +60,6 @@ func TestUnit_TimeoutSurvivesSerializationRoundTrip(t *testing.T) {
 	assert.True(t, libacp.IsRetryableError(remote))
 }
 
-// timingOutAgent's Prompt fails on its own deadline, not on session/cancel.
 type timingOutAgent struct {
 	libacp.UnimplementedAgent
 	started chan struct{}

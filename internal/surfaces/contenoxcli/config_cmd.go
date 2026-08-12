@@ -16,7 +16,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// validConfigKeys lists the keys users can set via `contenox config set`.
 var validConfigKeys = map[string]string{
 	"default-model":                 "Default LLM model name (e.g. qwen3:8b)",
 	"default-provider":              "Default LLM provider type (e.g. ollama, openai, gemini)",
@@ -26,6 +25,8 @@ var validConfigKeys = map[string]string{
 	"default-autocomplete-provider": "Optional editor autocomplete provider type, independent from default-provider.",
 	"default-embed-model":           "Embedding model for 'contenox index' / 'contenox search' (e.g. nomic-embed-text). Unset falls back to default-model, which embeds only on some providers.",
 	"default-embed-provider":        "Optional embedding provider type, independent from default-provider. Unset uses default-provider.",
+	"default-audio-model":           "Optional model preferred for requests carrying audio attachments. Unset falls back to default-model; audio requests resolve only to audio-capable models either way.",
+	"default-audio-provider":        "Optional provider type for the audio model, independent from default-provider. Unset uses default-provider.",
 	"default-max-tokens":            "Optional default response token cap. Used by chains referencing {{var:max_tokens}}.",
 	"default-think":                 "Default reasoning level: auto, off, minimal, low, medium, high, xhigh.",
 	"default-chain":                 "Default chain file path (relative to .contenox/ or absolute)",
@@ -43,7 +44,7 @@ var configCmd = &cobra.Command{
 	Short: "Manage persistent CLI settings (default model, provider, chain, HITL policy).",
 	Long: `Store and retrieve persistent CLI defaults backed by SQLite.
 
-Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, default-mission-agent, default-mission-policy
+Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, default-mission-agent, default-mission-policy
 Workspace keys (scoped to current project): default-chain, hitl-policy-name
 
 Supported keys:
@@ -55,6 +56,8 @@ Supported keys:
   default-autocomplete-provider  Optional editor autocomplete provider, separate from chat
   default-embed-model            Embedding model for 'contenox index' / 'contenox search'
   default-embed-provider         Optional embedding provider, separate from default-provider
+  default-audio-model            Optional model preferred for requests carrying audio
+  default-audio-provider         Optional provider for the audio model, separate from default-provider
   default-max-tokens             Optional response token cap (chains using {{var:max_tokens}})
   default-think                  Default reasoning level: auto, off, minimal, low, medium, high, xhigh
   telemetry-enabled              Enable local telemetry logs (true/false)
@@ -71,7 +74,7 @@ var configSetCmd = &cobra.Command{
 	Short: "Set a persistent config value.",
 	Long: `Set a persistent CLI default stored in the SQLite database.
 
-Global keys (default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta) are shared across all projects.
+Global keys (default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta) are shared across all projects.
 Workspace keys (default-chain, hitl-policy-name) are scoped to the current project
 workspace and fall back to the global value when not set locally.
 
@@ -207,7 +210,6 @@ func validConfigKeyNames() []string {
 	return keys
 }
 
-// getConfigKV retrieves a CLI setting from the KV store, returning "" if not set.
 func getConfigKV(ctx context.Context, store runtimetypes.Store, key string) (string, error) {
 	return clikv.Read(ctx, store, key), nil
 }

@@ -102,6 +102,11 @@ func (p *OpenAIProvider) CanVision() bool {
 	return p.canVision
 }
 
+// CanAudio always reports false; audio input is refused, not dropped.
+func (p *OpenAIProvider) CanAudio() bool {
+	return false
+}
+
 func (p *OpenAIProvider) GetChatConnection(ctx context.Context, backendID string) (modelrepo.LLMChatClient, error) {
 	if !p.CanChat() {
 		return nil, fmt.Errorf("model %s does not support chat interactions", p.modelName)

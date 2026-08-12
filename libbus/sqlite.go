@@ -429,8 +429,6 @@ func (b *SQLiteBus) runCleanup(ctx context.Context) {
 	}
 }
 
-// ── subscription ──────────────────────────────────────────────────────────
-
 type sqliteSubscription struct {
 	cancel  context.CancelFunc
 	drain   chan struct{}

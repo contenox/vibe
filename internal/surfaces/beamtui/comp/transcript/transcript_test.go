@@ -477,6 +477,67 @@ func TestUnit_ToolCardStatusGlyphs(t *testing.T) {
 	}
 }
 
+// TestUnit_DeniedToolCardShowsCrossAndReason pins the forensic regression
+// (beam-fe7fa151): a policy-denied call settles as ✗ with the denial reason,
+// never ✓.
+func TestUnit_DeniedToolCardShowsCrossAndReason(t *testing.T) {
+	const denial = "User denied the operation. Please ask for clarification or try a different, less destructive approach."
+	tr := apply(
+		toolOpen("t1", "git.git_restore", libacp.ToolKindExecute, libacp.ToolCallStatusPending),
+		enginebridge.ToolCallUpdated{
+			SessionID:  sess,
+			ToolCallID: "t1",
+			Status:     libacp.ToolCallStatusFailed,
+			ErrorText:  denial,
+		},
+	)
+	got := texts(tr.TakeAppends(200, false))
+	if len(got) != 2 || got[0] != "✗ git.git_restore" || got[1] != "  "+denial {
+		t.Fatalf("settled %q, want the failed card then its reason", got)
+	}
+	for _, l := range got {
+		if strings.Contains(l, "✓") {
+			t.Fatalf("denied call rendered a checkmark: %q", l)
+		}
+	}
+}
+
+// TestUnit_FailedToolCardShowsErrorReason pins that a genuine tool error's
+// message renders under the ✗ card.
+func TestUnit_FailedToolCardShowsErrorReason(t *testing.T) {
+	tr := apply(
+		toolOpen("t1", "local_shell: make build", libacp.ToolKindExecute, libacp.ToolCallStatusInProgress),
+		enginebridge.ToolCallUpdated{
+			SessionID:  sess,
+			ToolCallID: "t1",
+			Status:     libacp.ToolCallStatusFailed,
+			ErrorText:  "exit status 2",
+		},
+	)
+	got := texts(tr.TakeAppends(120, false))
+	if len(got) != 2 || got[0] != "✗ local_shell: make build" || got[1] != "  exit status 2" {
+		t.Fatalf("settled %q, want the failed card then its error", got)
+	}
+}
+
+// TestUnit_CompletedToolCardHasNoReasonLine pins that a stray error text on a
+// completed card renders nothing extra.
+func TestUnit_CompletedToolCardHasNoReasonLine(t *testing.T) {
+	tr := apply(
+		toolOpen("t1", "Read frame.go", libacp.ToolKindRead, libacp.ToolCallStatusPending),
+		enginebridge.ToolCallUpdated{
+			SessionID:  sess,
+			ToolCallID: "t1",
+			Status:     libacp.ToolCallStatusCompleted,
+			ErrorText:  "leftover",
+		},
+	)
+	got := texts(tr.TakeAppends(80, false))
+	if len(got) != 1 || got[0] != "✓ Read frame.go" {
+		t.Fatalf("settled %q, want exactly the completed card line", got)
+	}
+}
+
 // TestUnit_OpenToolCallNeverDangles pins that a call the turn ended
 // underneath settles as unfinished instead of spinning forever.
 func TestUnit_OpenToolCallNeverDangles(t *testing.T) {

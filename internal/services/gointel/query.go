@@ -13,16 +13,6 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// Names-first resolution. Every query here starts from one of:
-//
-//	Ident                bare, resolved across every package of the module
-//	pkg.Ident            package-qualified (name, path suffix, or full path)
-//	Type.Member          bare type, field or method
-//	pkg.Type.Member      fully qualified member
-//
-// Ambiguity is refused, never guessed: a name matching two declarations comes back as an error listing both qualified names, so the next call is exact.
-
-// symbolRef is a resolved symbol: the object plus the package it was found in and, for a member, the named type that owns it.
 type symbolRef struct {
 	pkg  *packages.Package
 	obj  types.Object
@@ -39,7 +29,6 @@ func (r symbolRef) qualified() string {
 	return r.pkg.PkgPath + "." + r.obj.Name()
 }
 
-// splitSymbol separates an optional package qualifier from the dotted name parts. A slash anywhere means everything up to the last one is an import-path prefix, so "a/b/c.T.M" is package "a/b/c", type T, member M.
 func splitSymbol(name string) (pkgQual string, parts []string, err error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -67,7 +56,6 @@ func splitSymbol(name string) (pkgQual string, parts []string, err error) {
 	return pkgQual, parts, nil
 }
 
-// candidates gathers every declaration a name could mean, without deciding.
 func (s *Snapshot) candidates(name string) ([]symbolRef, error) {
 	pkgQual, parts, err := splitSymbol(name)
 	if err != nil {
@@ -96,7 +84,6 @@ func (s *Snapshot) candidates(name string) ([]symbolRef, error) {
 			out = append(out, scopeRefs(p, parts[0])...)
 		}
 	case len(parts) == 2:
-		// "a.b" is genuinely two shapes — package.Ident and Type.Member — and both are searched; if both hit, that is one reported ambiguity.
 		for _, p := range s.matchPackages(parts[0]) {
 			out = append(out, scopeRefs(p, parts[1])...)
 		}
@@ -117,7 +104,6 @@ func tooManyParts(name string) error {
 	return recoverablef("gointel: %s has too many dotted parts; the deepest form gointel resolves is \"pkg.Type.Member\"", echoArg(name))
 }
 
-// resolve narrows candidates to exactly one, or explains why it cannot.
 func (s *Snapshot) resolve(name string) (symbolRef, error) {
 	cands, err := s.candidates(name)
 	if err != nil {
@@ -186,7 +172,6 @@ func dedupeRefs(in []symbolRef) []symbolRef {
 	return out
 }
 
-// notFound builds the teaching error for a name that resolved to nothing: the name lives in a dependency, something close exists (suggest, never act), or the name is simply absent.
 func (s *Snapshot) notFound(name string) error {
 	pkgQual, parts, err := splitSymbol(name)
 	if err != nil {
@@ -217,7 +202,6 @@ func (s *Snapshot) notFound(name string) error {
 		echoArg(name), len(s.pkgs))
 }
 
-// dependencyFor reports the import path a qualifier names among this module's dependencies, or "".
 func (s *Snapshot) dependencyFor(qual string) string {
 	if _, ok := s.importPaths[qual]; ok {
 		return qual
@@ -233,7 +217,6 @@ func (s *Snapshot) dependencyFor(qual string) string {
 	return best
 }
 
-// suggest returns up to limit qualified names resembling ident; the caller never resolves to a suggestion.
 func (s *Snapshot) suggest(ident string, limit int) []string {
 	if ident == "" {
 		return nil
@@ -262,8 +245,6 @@ func (s *Snapshot) suggest(ident string, limit int) []string {
 	}
 	return out
 }
-
-// Result payloads: every payload is structured, hard-capped, and anchored with workspace-relative file:line. No payload ever carries a whole file; that is what the read tools are for.
 
 // DefinitionResult is where a symbol is declared.
 type DefinitionResult struct {
@@ -299,21 +280,21 @@ type DescribeResult struct {
 	Toolchain  string   `json:"toolchain"`
 }
 
-// RefLine is one location that uses a symbol. Uses is set only when the same line mentions the symbol more than once.
+// RefLine is one location that uses a symbol; Uses is set only when the line mentions it more than once.
 type RefLine struct {
 	Line int    `json:"line"`
 	Text string `json:"text,omitempty"`
 	Uses int    `json:"uses,omitempty"`
 }
 
-// RefFile groups locations by the file they occur in. Count is the number of distinct lines in that file.
+// RefFile groups locations by the file they occur in; Count is the number of distinct lines.
 type RefFile struct {
 	File  string    `json:"file"`
 	Count int       `json:"count"`
 	Lines []RefLine `json:"lines"`
 }
 
-// ReferencesResult is every use of a symbol in this module. Total counts distinct file:line locations (what the caps apply to); Uses counts raw identifier occurrences.
+// ReferencesResult is every use of a symbol in this module; Total counts distinct file:line locations and Uses counts raw identifier occurrences.
 type ReferencesResult struct {
 	Symbol     string    `json:"symbol"`
 	Definition string    `json:"definition"`
@@ -388,13 +369,10 @@ func (ix *index) Definition(ctx context.Context, req Request) (*DefinitionResult
 	return out, nil
 }
 
-// maxMembers caps the fields and the methods a describe result lists. A struct with 300 fields is a real thing; 300 fields in one tool result is not useful.
 const maxMembers = 60
 
-// maxDocRunes caps a doc comment; the first paragraphs are what carries the contract.
 const maxDocRunes = 1200
 
-// maxMemberDocRunes caps a per-member doc to its first line.
 const maxMemberDocRunes = 120
 
 func (ix *index) Describe(ctx context.Context, req Request) (*DescribeResult, error) {
@@ -473,7 +451,7 @@ func (s *Snapshot) describe(ref symbolRef) *DescribeResult {
 		return res
 	}
 
-	// The pointer method set carries value-receiver and pointer-receiver methods plus everything promoted from embedded types. typeutil.MethodSetCache is not used: it is not safe for concurrent use, and a Snapshot is read from several goroutines at once.
+	// typeutil.MethodSetCache is not used: it is not safe for concurrent use, and a Snapshot is read from several goroutines at once.
 	mset := types.NewMethodSet(types.NewPointer(named))
 	total := mset.Len()
 	for i := 0; i < total && len(res.Methods) < maxMembers; i++ {
@@ -497,7 +475,6 @@ func (s *Snapshot) describe(ref symbolRef) *DescribeResult {
 	return res
 }
 
-// defaultRefCap and maxRefCap bound a references result; the ceiling exists so a per-call override cannot turn one tool result into the whole context window.
 const (
 	defaultRefCap = 50
 	maxRefCap     = 200
@@ -518,7 +495,6 @@ func (ix *index) References(ctx context.Context, req Request) (*ReferencesResult
 			return nil, err
 		}
 		out = s.references(ref, limit)
-		// nil: a references answer depends on every package in the module.
 		return nil, nil
 	})
 	if err != nil {
@@ -528,7 +504,6 @@ func (ix *index) References(ctx context.Context, req Request) (*ReferencesResult
 }
 
 func (s *Snapshot) references(ref symbolRef, limit int) *ReferencesResult {
-	// file -> line -> occurrences on that line.
 	byFile := map[string]map[int]int{}
 	uses := 0
 	for _, p := range s.pkgs {
@@ -615,7 +590,6 @@ func (ix *index) Implementations(ctx context.Context, req Request) (*Implementat
 		if err != nil {
 			return nil, err
 		}
-		// Every named type in the module took part in the answer.
 		return nil, nil
 	})
 	if err != nil {
@@ -630,7 +604,6 @@ type namedType struct {
 	named *types.Named
 }
 
-// namedTypes enumerates every package-scope named type in the module, sorted so results are deterministic. Function-local types are out of scope: they cannot be named in a query.
 func (s *Snapshot) namedTypes() []namedType {
 	var out []namedType
 	for _, p := range s.pkgs {
@@ -700,7 +673,6 @@ func (s *Snapshot) implementations(ref symbolRef) (*ImplementationsResult, error
 		}
 	}
 
-	// Both directions: an interface can itself satisfy other interfaces, so this runs for interfaces too rather than as an else-branch.
 	for _, nt := range all {
 		if nt.named == target {
 			continue
@@ -729,7 +701,6 @@ func (s *Snapshot) implEntry(nt namedType, recv string) ImplEntry {
 	}
 }
 
-// defaultSymbolCap and maxSymbolCap bound an outline.
 const (
 	defaultSymbolCap = 200
 	maxSymbolCap     = 1000
@@ -800,7 +771,6 @@ func (s *Snapshot) absFile(target string) string {
 	return ""
 }
 
-// outline walks the package's own syntax rather than its type scope, so entries come out with source attribution and methods appear as "Type.Method" without a second pass over every named type.
 func (s *Snapshot) outline(p *packages.Package, file, target string, limit int) *SymbolsResult {
 	kind := "package"
 	if file != "" {
@@ -912,7 +882,6 @@ func receiverTypeName(expr ast.Expr) string {
 
 func isExportedSymbol(name string) bool {
 	if i := strings.IndexByte(name, '.'); i >= 0 {
-		// A method is API only if both its receiver and its own name are exported.
 		return isExportedSymbol(name[:i]) && isExportedSymbol(name[i+1:])
 	}
 	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
@@ -955,7 +924,6 @@ func kindOf(obj types.Object) string {
 	return "object"
 }
 
-// declPath returns the AST path enclosing an object's declaration, or nil when the object was not declared in this module's syntax.
 func (s *Snapshot) declPath(ref symbolRef) []ast.Node {
 	pos := ref.obj.Pos()
 	if !pos.IsValid() || ref.pkg == nil {
@@ -970,7 +938,6 @@ func (s *Snapshot) declPath(ref symbolRef) []ast.Node {
 	return nil
 }
 
-// docFor returns the doc comment attached to an object's declaration. The innermost carrier wins (a field's own comment beats the struct's), with the enclosing GenDecl as the fallback so `// Foo does X` above a single-spec `var Foo = ...` is still found.
 func (s *Snapshot) docFor(ref symbolRef) string {
 	var fallback *ast.CommentGroup
 	for _, n := range s.declPath(ref) {
@@ -1003,7 +970,6 @@ func (s *Snapshot) docFor(ref symbolRef) string {
 	return ""
 }
 
-// signatureSource renders a function's declaration exactly as written, minus the body — the form an agent would type at a call site.
 func (s *Snapshot) signatureSource(ref symbolRef) string {
 	for _, n := range s.declPath(ref) {
 		fd, ok := n.(*ast.FuncDecl)

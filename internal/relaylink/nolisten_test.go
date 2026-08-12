@@ -7,22 +7,10 @@ import (
 	"testing"
 )
 
-// TestUnit_ConnectorNeverListens enforces the rule that this package dials out
-// and never accepts, by reading its own source.
-//
-// A test is the right enforcement, not a comment: nothing in Go stops a later
-// edit adding a listener to a package that already imports net, and by the time
-// one is noticed in review it is in a release. The scan covers the test files
-// too, so the rule cannot be evaded by putting the listener behind a helper
-// that only tests call.
-//
-// This file is the one exemption, because it necessarily contains every
-// forbidden spelling.
+// TestUnit_ConnectorNeverListens checks the package source contains no
+// listening or accept call.
 func TestUnit_ConnectorNeverListens(t *testing.T) {
 	t.Parallel()
-	// The standard library's whole inbound surface reachable from a
-	// package that speaks TCP or TLS, plus the accept calls a listener
-	// would need to be useful.
 	forbidden := []string{
 		"net.Listen", "net.ListenTCP", "net.ListenUDP", "net.ListenUnix",
 		"net.ListenIP", "net.ListenPacket", "net.ListenMulticastUDP",

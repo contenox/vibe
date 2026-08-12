@@ -13,15 +13,12 @@ import (
 	"github.com/contenox/contenox/librelay"
 )
 
-// dials counts the connections the connector asked this dialer for. It is how
-// a test tells "gave up" from "kept retrying quietly".
 func (d *relayDialer) dials() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return len(d.links)
 }
 
-// helloOf reads the hello a connector sent on l and returns its payload.
 func helloOf(t *testing.T, l *relaytest.Link) librelay.Hello {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
@@ -40,9 +37,8 @@ func helloOf(t *testing.T, l *relaytest.Link) librelay.Hello {
 	return h
 }
 
-// TestUnit_PinnedRelayKeyVerifiesAndConnects is the happy path of relay
-// authentication: the relay signs the connector's nonce, the connector checks
-// it against the key it pinned at pairing, and the link is held.
+// TestUnit_PinnedRelayKeyVerifiesAndConnects checks the connector verifies a
+// welcome signed by the pinned key and holds the link.
 func TestUnit_PinnedRelayKeyVerifiesAndConnects(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -68,8 +64,8 @@ func TestUnit_PinnedRelayKeyVerifiesAndConnects(t *testing.T) {
 	}
 }
 
-// TestUnit_NonceIsFreshPerConnection proves a signature captured from one
-// session cannot be replayed into the next: the challenge changes every dial.
+// TestUnit_NonceIsFreshPerConnection checks the challenge changes every dial,
+// so a captured signature cannot be replayed into the next session.
 func TestUnit_NonceIsFreshPerConnection(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -100,15 +96,12 @@ func TestUnit_NonceIsFreshPerConnection(t *testing.T) {
 	}
 }
 
-// TestUnit_WrongRelayKeyIsFatalAndNotRetried is the failure the pinning exists
-// for: something answered the dial and signed the handshake, but not with the
-// key this machine paired with. Retrying cannot change that answer, so the
-// connector must stop rather than redial forever.
+// TestUnit_WrongRelayKeyIsFatalAndNotRetried checks a welcome signed by the
+// wrong key is refused fatally, without a redial storm.
 func TestUnit_WrongRelayKeyIsFatalAndNotRetried(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
 	defer r.Close()
-	// A second relay is a second identity; nothing else about it differs.
 	impostorKey := relaytest.New().PublicKey()
 	d := &relayDialer{relay: r}
 
@@ -131,18 +124,14 @@ func TestUnit_WrongRelayKeyIsFatalAndNotRetried(t *testing.T) {
 	if got := c.Status().Connections; got != 0 {
 		t.Fatalf("Connections = %d: an unverified relay is not a connection", got)
 	}
-	// The whole point of fatal: no redial storm against a peer that cannot
-	// prove itself.
 	time.Sleep(50 * time.Millisecond)
 	if got := d.dials(); got != 1 {
 		t.Fatalf("dials = %d after an identity failure, want 1", got)
 	}
 }
 
-// TestUnit_UnsignedWelcomeIsFatalWhenAKeyIsPinned covers the case a wrong-key
-// test does not: a relay that signs nothing at all reaches the verifier by a
-// different path, and "no signature" must be as fatal as a bad one — otherwise
-// omitting the signature would be a way around the check.
+// TestUnit_UnsignedWelcomeIsFatalWhenAKeyIsPinned checks an unsigned welcome
+// is refused as fatally as a bad signature.
 func TestUnit_UnsignedWelcomeIsFatalWhenAKeyIsPinned(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New(relaytest.NoSignature())
@@ -171,10 +160,8 @@ func TestUnit_UnsignedWelcomeIsFatalWhenAKeyIsPinned(t *testing.T) {
 	}
 }
 
-// TestUnit_NoCredentialsBehavesExactlyAsBefore is the regression guard for
-// every runtime that has never run `contenox login`: with nothing pinned there
-// is nothing to verify, an unsigned welcome is accepted, and the connector
-// behaves as it did before relay authentication existed.
+// TestUnit_NoCredentialsBehavesExactlyAsBefore checks that with nothing
+// pinned, an unsigned welcome is accepted.
 func TestUnit_NoCredentialsBehavesExactlyAsBefore(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New(relaytest.NoSignature())
@@ -183,7 +170,6 @@ func TestUnit_NoCredentialsBehavesExactlyAsBefore(t *testing.T) {
 
 	cfg := baseConfig()
 	cfg.Dial = d.dial
-	// The zero Credentials: no token, no pinned key.
 	c, err := relaylink.New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -198,9 +184,8 @@ func TestUnit_NoCredentialsBehavesExactlyAsBefore(t *testing.T) {
 	}
 }
 
-// TestUnit_NewRejectsAnUnusableRelayKey keeps a key that cannot be parsed a
-// configuration error the caller sees at construction, rather than a fatal
-// state the retry loop discovers later and attributes to the relay.
+// TestUnit_NewRejectsAnUnusableRelayKey checks an unparsable key fails at
+// construction rather than as a retry-loop fatal.
 func TestUnit_NewRejectsAnUnusableRelayKey(t *testing.T) {
 	t.Parallel()
 	cfg := baseConfig()

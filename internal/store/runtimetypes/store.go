@@ -97,7 +97,7 @@ type InjectionArg struct {
 	In    string `json:"in" example:"body"`
 }
 
-// RemoteTools represents a remote tools configuration
+// AuthFlow describes how to authenticate before calling a remote tool.
 type AuthFlow struct {
 	Type            string `json:"type" example:"http_handshake"`
 	LoginMethod     string `json:"loginMethod" example:"POST"`
@@ -125,7 +125,8 @@ type RemoteTools struct {
 	UpdatedAt          time.Time         `json:"updatedAt" example:"2023-11-15T14:30:45Z"`
 }
 
-type Store interface {
+// BackendStore defines persistence operations for LLM backend configurations.
+type BackendStore interface {
 	CreateBackend(ctx context.Context, backend *Backend) error
 	GetBackend(ctx context.Context, id string) (*Backend, error)
 	UpdateBackend(ctx context.Context, backend *Backend) error
@@ -134,7 +135,10 @@ type Store interface {
 	ListBackends(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Backend, error)
 	GetBackendByName(ctx context.Context, name string) (*Backend, error)
 	EstimateBackendCount(ctx context.Context) (int64, error)
+}
 
+// ModelStore defines persistence operations for declared model configurations.
+type ModelStore interface {
 	AppendModel(ctx context.Context, model *Model) error
 	GetModel(ctx context.Context, id string) (*Model, error)
 	GetModelByName(ctx context.Context, name string) (*Model, error)
@@ -143,6 +147,23 @@ type Store interface {
 	UpdateModel(ctx context.Context, data *Model) error
 	ListModels(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Model, error)
 	EstimateModelCount(ctx context.Context) (int64, error)
+}
+
+// ModelRegistryStore defines persistence operations for registered downloaded model metadata.
+type ModelRegistryStore interface {
+	CreateModelRegistryEntry(ctx context.Context, e *ModelRegistryEntry) error
+	GetModelRegistryEntry(ctx context.Context, id string) (*ModelRegistryEntry, error)
+	GetModelRegistryEntryByName(ctx context.Context, name string) (*ModelRegistryEntry, error)
+	UpdateModelRegistryEntry(ctx context.Context, e *ModelRegistryEntry) error
+	DeleteModelRegistryEntry(ctx context.Context, id string) error
+	ListModelRegistryEntries(ctx context.Context, cursor *time.Time, limit int) ([]*ModelRegistryEntry, error)
+	EstimateModelRegistryEntryCount(ctx context.Context) (int64, error)
+}
+
+type Store interface {
+	BackendStore
+	ModelStore
+	ModelRegistryStore
 
 	CreateAffinityGroup(ctx context.Context, group *AffinityGroup) error
 	GetAffinityGroup(ctx context.Context, id string) (*AffinityGroup, error)
@@ -195,14 +216,6 @@ type Store interface {
 	ListRemoteTools(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*RemoteTools, error)
 	EstimateRemoteToolsCount(ctx context.Context) (int64, error)
 
-	CreateModelRegistryEntry(ctx context.Context, e *ModelRegistryEntry) error
-	GetModelRegistryEntry(ctx context.Context, id string) (*ModelRegistryEntry, error)
-	GetModelRegistryEntryByName(ctx context.Context, name string) (*ModelRegistryEntry, error)
-	UpdateModelRegistryEntry(ctx context.Context, e *ModelRegistryEntry) error
-	DeleteModelRegistryEntry(ctx context.Context, id string) error
-	ListModelRegistryEntries(ctx context.Context, cursor *time.Time, limit int) ([]*ModelRegistryEntry, error)
-	EstimateModelRegistryEntryCount(ctx context.Context) (int64, error)
-
 	CreateMCPServer(ctx context.Context, srv *MCPServer) error
 	GetMCPServer(ctx context.Context, id string) (*MCPServer, error)
 	GetMCPServerByName(ctx context.Context, name string) (*MCPServer, error)
@@ -210,9 +223,8 @@ type Store interface {
 	DeleteMCPServer(ctx context.Context, id string) error
 	ListMCPServers(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*MCPServer, error)
 	EstimateMCPServerCount(ctx context.Context) (int64, error)
-	// UpsertMCPServerByName inserts or updates an MCP server record keyed by name.
-	// If a server with the same name already exists it is updated in place (same ID).
-	// Used by the CLI to register config-file MCP servers into SQLite at startup.
+	// UpsertMCPServerByName inserts or updates an MCP server record keyed by
+	// name, updating in place (same ID) when one already exists.
 	UpsertMCPServerByName(ctx context.Context, srv *MCPServer) error
 
 	CreateAgent(ctx context.Context, agent *Agent) error
@@ -247,8 +259,8 @@ type Store interface {
 	ListChainCheckpoints(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*ChainCheckpoint, error)
 
 	// Workspace semantic index: an immutable index-config generation plus its
-	// chunks and their FTS5 lexical mirror (see workspaceindex.go). Note the
-	// absent UpdateWorkspaceIndexConfig — a config is create-once.
+	// chunks and their FTS5 lexical mirror; UpdateWorkspaceIndexConfig is
+	// absent because a config is create-once.
 	CreateWorkspaceIndexConfig(ctx context.Context, cfg *WorkspaceIndexConfig) error
 	GetWorkspaceIndexConfig(ctx context.Context, id string) (*WorkspaceIndexConfig, error)
 	GetActiveWorkspaceIndexConfig(ctx context.Context, workspaceID string) (*WorkspaceIndexConfig, error)
@@ -282,7 +294,6 @@ func New(exec libdb.Exec) Store {
 
 const MaxRowsCount = 100000
 
-// sqliteCountableTables is the whitelist for SELECT COUNT(*) fallback when estimate_row_count is not available (e.g. SQLite).
 var sqliteCountableTables = map[string]bool{
 	"job_queue_v2": true, "kv": true, "remote_tools": true,
 	"ollama_models": true, "llm_affinity_group": true, "llm_backends": true,

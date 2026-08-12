@@ -18,10 +18,7 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// StopMission abandons a running mission: finishes it (a terminal mission
-// returns a conflict instead), then closes every pending ask it filed and
-// deletes their checkpoints. The subprocess itself is reaped by the host's
-// StatusChanged subscriber (see BuildInProcess).
+// StopMission abandons a running mission — finishes it (a terminal mission returns a conflict instead), closes every pending ask it filed, and deletes their checkpoints; the subprocess itself is reaped separately by the host's StatusChanged subscriber.
 func StopMission(ctx context.Context, missions missionservice.Service, hitl hitlservice.Service, store runtimetypes.Store, missionID, reason string) error {
 	if reason == "" {
 		reason = "stopped by operator"
@@ -41,10 +38,6 @@ func StopMission(ctx context.Context, missions missionservice.Service, hitl hitl
 	return nil
 }
 
-// runStatusTeardown stops a hosted unit's subprocess when its mission
-// reaches a terminal status. Cross-process: the bus broadcasts to every
-// subscriber, and a kernel not hosting the instance gets a harmless
-// not-found from Stop. Returns an unsubscribe func.
 func runStatusTeardown(ctx context.Context, bus libbus.Messenger, missions missionservice.Service, kernel agentinstance.Manager) (func(), error) {
 	ch := make(chan []byte, 16)
 	sub, err := bus.Stream(ctx, missionservice.StatusChangedSubject, ch)

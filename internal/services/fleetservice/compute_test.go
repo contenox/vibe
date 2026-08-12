@@ -16,14 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Tests the compute bounds enforcement seams in isolation: the pure
-// predicates and counter, the unattended answerer's maxToolCalls refusal,
-// and the drive loop's maxTurns/maxTokens stuck landing. Subprocess
-// acceptance is e2e_compute_bounds_test.go.
-
-// ─── test doubles ───────────────────────────────────────────────────────────
-
-// fakeBoundsReader returns a fixed compute ceiling for any policy name.
 type fakeBoundsReader struct {
 	bounds hitlservice.ComputeBounds
 	err    error
@@ -33,8 +25,6 @@ func (f fakeBoundsReader) ComputeBoundsFor(context.Context, string) (hitlservice
 	return f.bounds, f.err
 }
 
-// boundedHITL is a fakeHITL (see unattended_test.go) that also implements
-// ComputeBoundsReader, the shape the answerer type-asserts for maxToolCalls.
 type boundedHITL struct {
 	*fakeHITL
 	bounds hitlservice.ComputeBounds
@@ -60,12 +50,10 @@ func usageNote(used int) libacp.SessionNotification {
 	}
 }
 
-// ─── pure predicates + counter ──────────────────────────────────────────────
-
 func TestUnit_Compute_TurnBudgetExceeded(t *testing.T) {
 	t.Parallel()
-	unbounded := hitlservice.ComputeBounds{}      // MaxTurns 0
-	one := hitlservice.ComputeBounds{MaxTurns: 1} // only the intent turn
+	unbounded := hitlservice.ComputeBounds{}
+	one := hitlservice.ComputeBounds{MaxTurns: 1}
 	require.False(t, turnBudgetExceeded(1, unbounded), "an absent bound never exceeds — today's behavior")
 	require.False(t, turnBudgetExceeded(99, unbounded))
 	require.False(t, turnBudgetExceeded(1, one), "the intent turn is within a budget of 1")
@@ -88,10 +76,7 @@ func TestUnit_Compute_TokenBudgetExceeded(t *testing.T) {
 	require.True(t, tokenBudgetExceeded(101, hitlservice.ComputeBounds{MaxTokens: 100}))
 }
 
-// TestUnit_Compute_ReasonsNameTheBound: every exhaustion reason carries the
-// stable lead and names the bound that was crossed. pause_ask no longer
-// exists (rejected at policy validation), so no reason ever appends a
-// deferral note.
+// TestUnit_Compute_ReasonsNameTheBound: every exhaustion reason carries the stable lead and names the bound it crossed.
 func TestUnit_Compute_ReasonsNameTheBound(t *testing.T) {
 	t.Parallel()
 	for _, b := range []hitlservice.ComputeBounds{
@@ -114,14 +99,12 @@ func TestUnit_Compute_JournalTokenUsage(t *testing.T) {
 	require.False(t, present, "no usage_update means no reported usage — maxTokens stays inert")
 	require.Zero(t, used)
 
-	// A non-usage update contributes nothing.
 	notes := []libacp.SessionNotification{
 		{SessionID: "s", Update: libacp.SessionUpdate{SessionUpdate: libacp.SessionUpdateAgentMessageChunk}},
 	}
 	_, present = journalTokenUsage(notes)
 	require.False(t, present)
 
-	// The max Used across usage_updates is the latest figure regardless of order.
 	notes = []libacp.SessionNotification{usageNote(120), usageNote(4000), usageNote(900)}
 	used, present = journalTokenUsage(notes)
 	require.True(t, present)
@@ -142,12 +125,10 @@ func TestUnit_Compute_MissionCallCounter_EvictsOldestWhenFull(t *testing.T) {
 	c := newMissionCallCounter(2)
 	c.increment("m1")
 	c.increment("m2")
-	c.increment("m3") // evicts m1 (oldest)
+	c.increment("m3")
 	require.Len(t, c.counts, 2, "the tally stays bounded")
 	require.Equal(t, 1, c.increment("m1"), "an evicted mission restarts its count — a benign degradation")
 }
-
-// ─── the answerer: maxToolCalls refuses the crossing call + finishes stuck ──
 
 func TestUnit_Compute_Answerer_RefusesCallOverBudgetAndFinishesStuck(t *testing.T) {
 	ctx, db := computeTestDB(t)
@@ -171,7 +152,6 @@ func TestUnit_Compute_Answerer_RefusesCallOverBudgetAndFinishesStuck(t *testing.
 
 	req := namedRequest(t, "local_fs", "write_file", map[string]any{"path": "/x"})
 
-	// Call 1 is within budget: allowed.
 	resp1, err := answer(ctx, unattended(req))
 	require.NoError(t, err)
 	require.Equal(t, "yes", resp1.Outcome.OptionID, "the first gated call is inside the budget and is allowed")
@@ -179,7 +159,6 @@ func TestUnit_Compute_Answerer_RefusesCallOverBudgetAndFinishesStuck(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, missionservice.StatusOpen, m1.Status, "one gated call must not finish the mission")
 
-	// Call 2 crosses the budget: refused, mission lands stuck.
 	resp2, err := answer(ctx, unattended(req))
 	require.NoError(t, err)
 	require.Equal(t, "no", resp2.Outcome.OptionID, "the call that crosses maxToolCalls gets the teaching refusal")
@@ -219,10 +198,6 @@ func TestUnit_Compute_Answerer_NoBoundNeverRefuses(t *testing.T) {
 	require.Equal(t, missionservice.StatusOpen, got.Status, "an unbounded mission is never finished by the answerer")
 }
 
-// ─── the drive loop: maxTurns + maxTokens land the mission stuck ────────────
-
-// journalManager is a fakeManager that also serves a session journal, for
-// the drive loop's maxTokens read.
 type journalManager struct {
 	*fakeManager
 	journal []libacp.SessionNotification
@@ -302,7 +277,6 @@ func TestUnit_Compute_DriveLoop_NoReaderIsUnbounded(t *testing.T) {
 	require.NoError(t, err)
 
 	mgr := &fakeManager{openID: "sess-1", agentText: "hello"}
-	// No WithComputeBounds: every mission is unbounded.
 	svc := New(mgr, nil, missions, nil, t.TempDir(), libtracker.NoopTracker{}).(*service)
 	run := missionRun{instanceID: "inst-1", sessionID: "sess-1", missionID: m.ID, agentName: "unit", intent: m.Intent}
 

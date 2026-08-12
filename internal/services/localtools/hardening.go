@@ -1,18 +1,5 @@
 package localtools
 
-// hardening.go implements model-diversity hardening for the local tools:
-//
-//   - fatal-vs-recoverable severity: a terse, greppable marker appended to
-//     error text so a model can decide whether a corrected retry is worth
-//     attempting. Error-string craft, not a type system — kept distinct from
-//     toolguidance's "[harness] " prefix so the two never collide.
-//   - did-you-mean suggestions on missing paths and sed no-matches: tools may
-//     search fuzzily and tell, but must never act on a fuzzy match —
-//     everything here only suggests.
-//   - streamRange: the bounded, size-cap-agnostic line reader that lets
-//     read_file page a file larger than the read cap and name the exact next
-//     line to resume from.
-
 import (
 	"bufio"
 	"errors"
@@ -24,31 +11,15 @@ import (
 	"syscall"
 )
 
-// --- Fatal-vs-recoverable severity convention ---
-//
-// The convention is a suffix on the error text, consistent across every local
-// tool so a model (or a human grepping a transcript) can key on it:
-//
-//   - severityRecoverable — the default for everything a correction can fix:
-//     not-found, boundary/escape refusals, denied paths, size/output caps, binary
-//     refusals, missing/unknown args, read-before-write denials, no-match.
-//   - "(fatal: <reason>)" — the environment is broken and no parameter change
-//     helps: disk full, spool file unwritable. Only these are marked fatal,
-//     applied at the source via fatalf.
 const (
 	severityRecoverable = "(recoverable: adjust parameters and retry)"
 	severityFatalToken  = "(fatal:"
 )
 
-// hasSeverityMarker reports whether s already carries a severity marker, so
-// markSeverity never double-tags and never downgrades a fatal to recoverable.
 func hasSeverityMarker(s string) bool {
 	return strings.Contains(s, severityRecoverable) || strings.Contains(s, severityFatalToken)
 }
 
-// markSeverity tags err recoverable-by-correction unless it is already tagged.
-// The wrap preserves the error chain (errors.Is still works) while appending the
-// marker to the rendered text.
 func markSeverity(err error) error {
 	if err == nil {
 		return nil
@@ -59,32 +30,20 @@ func markSeverity(err error) error {
 	return fmt.Errorf("%w %s", err, severityRecoverable)
 }
 
-// recoverablef builds a recoverable-by-correction error with the marker suffix.
 func recoverablef(format string, a ...any) error {
 	return errors.New(fmt.Sprintf(format, a...) + " " + severityRecoverable)
 }
 
-// fatalf builds a fatal error: "<msg> (fatal: <reason>)". Reserved for genuinely
-// unrecoverable conditions (disk full, spool unwritable).
 func fatalf(reason, format string, a ...any) error {
 	return fmt.Errorf("%s (fatal: %s)", fmt.Sprintf(format, a...), reason)
 }
 
-// isDiskFull reports whether err is (or wraps) a no-space-left-on-device
-// condition — the canonical fatal I/O failure.
 func isDiskFull(err error) bool {
 	return errors.Is(err, syscall.ENOSPC)
 }
 
-// --- Did-you-mean over sibling filenames ---
-
-// maxSuggestions caps how many "did you mean" candidates are surfaced (5).
-// Enough to be useful, few enough to stay terse.
 const maxSuggestions = 5
 
-// didYouMean renders a " Did you mean: a, b, c?" clause for a missing entry named
-// `missing` inside `dir`, or "" when nothing in dir resembles it. Pure
-// suggestion: the caller never acts on the result.
 func didYouMean(dir, missing string) string {
 	s := suggestSiblings(dir, missing, maxSuggestions)
 	if len(s) == 0 {
@@ -93,10 +52,6 @@ func didYouMean(dir, missing string) string {
 	return " Did you mean: " + strings.Join(s, ", ") + "?"
 }
 
-// suggestSiblings returns up to `limit` entries in dir whose names resemble
-// `missing`: case-insensitive substring matches first (either direction), then
-// small edit-distance matches (Levenshtein within editThreshold). Returns nil
-// when dir is unreadable or nothing resembles `missing`.
 func suggestSiblings(dir, missing string, limit int) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -105,7 +60,7 @@ func suggestSiblings(dir, missing string, limit int) []string {
 	lowMiss := strings.ToLower(missing)
 	type cand struct {
 		name string
-		rank int // lower is better
+		rank int
 	}
 	var subs, dists []cand
 	maxDist := editThreshold(missing)
@@ -139,8 +94,6 @@ func suggestSiblings(dir, missing string, limit int) []string {
 	return out
 }
 
-// editThreshold scales the allowed edit distance with name length: tight for
-// short names (a 1-char typo), a little looser for long ones, never sloppy.
 func editThreshold(s string) int {
 	switch n := len([]rune(s)); {
 	case n <= 4:
@@ -152,8 +105,6 @@ func editThreshold(s string) int {
 	}
 }
 
-// levenshtein is the standard edit distance between two strings (rune-based, so
-// multibyte names compare correctly). Bounded work: O(len(a)*len(b)).
 func levenshtein(a, b string) int {
 	ra, rb := []rune(a), []rune(b)
 	if len(ra) == 0 {
@@ -192,21 +143,10 @@ func min3(a, b, c int) int {
 	return m
 }
 
-// --- Nearest-line suggestion for sed no-match ---
-
-// suggestNearestLinesMaxScan bounds how many lines suggestNearestLines will
-// scan, keeping the best-window search cheap on a large file.
 const suggestNearestLinesMaxScan = 5000
 
-// suggestLineCompareLen caps the number of characters compared per line so the
-// similarity scan stays cheap on files with very long lines.
 const suggestLineCompareLen = 256
 
-// suggestNearestLines returns the window of `content` most similar to `pattern`,
-// with ±contextLines of surrounding lines, rendered as "N: text" lines (1-based).
-// It slides a window the size of the pattern's line count across the file,
-// scores each by similarity, and keeps the best. Suggestion-only — the caller
-// never applies it. Returns "" when content is empty.
 func suggestNearestLines(content, pattern string, contextLines int) string {
 	if strings.TrimSpace(content) == "" {
 		return ""
@@ -260,7 +200,6 @@ func clampCompare(s string) string {
 	return s
 }
 
-// similarity is a normalized edit-distance ratio in [0,1]: 1.0 is identical.
 func similarity(a, b string) float64 {
 	if a == "" && b == "" {
 		return 1.0
@@ -275,19 +214,6 @@ func similarity(a, b string) float64 {
 	return 1.0 - float64(levenshtein(a, b))/float64(maxLen)
 }
 
-// --- Bounded streaming line reader ---
-
-// streamRange reads lines [start,end] (1-based inclusive) from r, honoring the
-// same line model as strings.Split(content,"\n"): a trailing newline yields a
-// final empty line and an empty input is a single empty line. The returned text
-// is the selected lines joined by "\n" (no trailing newline appended). Collection
-// stops early when adding the next line would push the returned bytes past
-// byteBudget (byteBudget<=0 disables the cap); the first in-range line is always
-// returned so a paging loop always makes progress.
-//
-// Returns lastLine (1-based number of the last line returned, 0 if none) and
-// nextLine (the 1-based line to resume from, or 0 when the file ended within the
-// requested range so there is nothing left to page).
 func streamRange(r io.Reader, start, end int, byteBudget int64) (text string, lastLine, nextLine int, err error) {
 	if start < 1 {
 		start = 1
@@ -311,8 +237,7 @@ func streamRange(r io.Reader, start, end int, byteBudget int64) (text string, la
 			hasLine = true
 			seg = strings.TrimSuffix(chunk, "\n")
 		} else if rerr != nil {
-			// EOF with an empty final read: strings.Split emits one trailing empty
-			// segment (covers both the empty file and a file ending in '\n').
+			// EOF with an empty final read: strings.Split emits one trailing empty segment (covers both an empty file and a file ending in '\n').
 			hasLine = true
 			seg = ""
 		}
@@ -322,15 +247,12 @@ func streamRange(r io.Reader, start, end int, byteBudget int64) (text string, la
 			if lineNo >= start && lineNo <= end {
 				sep := int64(0)
 				if collected > 0 {
-					sep = 1 // newline separator
+					sep = 1
 				}
 				need := sep + int64(len(seg))
 				if byteBudget > 0 && used+need > byteBudget {
 					if collected == 0 {
-						// First in-range line alone exceeds the budget: return a
-						// byte-truncated prefix so output stays bounded even for a file
-						// that is one enormous line. Line-based paging cannot resume
-						// mid-line, so this is a bounded best-effort for that edge case.
+						// First in-range line alone exceeds the budget: truncated to a byte prefix so output stays bounded; line-based paging cannot resume mid-line, so this is best-effort.
 						if room := byteBudget - used; room > 0 {
 							b.WriteString(seg[:int(room)])
 							used += room

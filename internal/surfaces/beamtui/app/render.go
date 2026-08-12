@@ -32,6 +32,10 @@ func (a *app) buildFrame() frame.Frame {
 			Model:    a.model,
 			Provider: a.provider,
 			Session:  a.sessionLabel(),
+			// The editor hint prints only when the chord actually works:
+			// Deps.Editor nil means openEditor has nothing to hand the draft
+			// to, and a hint must never advertise what is not enforced.
+			Editor: a.deps.Editor != nil,
 		})...)
 	}
 	scrollback = append(scrollback, a.tr.TakeAppends(a.width, a.ascii)...)

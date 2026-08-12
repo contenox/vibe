@@ -1,4 +1,3 @@
-// cli.go holds the contenox CLI entrypoint (Main), default constants, flags, and merge logic.
 package contenoxcli
 
 import (
@@ -28,9 +27,7 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Version is an optional link-time override via
-// -ldflags "-X github.com/contenox/contenox/internal/surfaces/contenoxcli.Version=…"
-// (e.g. distro packagers). When empty, CLIVersion uses runtime/version/version.txt.
+// Version optionally overrides the CLI version via -ldflags; empty uses runtime/version/version.txt.
 var Version string
 
 // CLIVersion returns the effective CLI version string (embedded file or link override).
@@ -51,28 +48,16 @@ const (
 	defaultOllama  = "http://127.0.0.1:11434"
 	defaultModel   = "qwen3:8b"
 	defaultContext = 0
-	// defaultTimeout is a total wall clock over an entire one-shot run, not a
-	// per-call bound: at 5m any `contenox "..."` or `contenox run` turn longer
-	// than five minutes was cancelled outright and reported as cancelled by the
-	// user. The interactive surfaces (beam, acp) never applied it, so the same
-	// turn survived in the TUI and died from the CLI. Sized above the turn
-	// deadline that is meant to be the real ceiling; --timeout still narrows it.
 	defaultTimeout = 2 * time.Hour
 )
 
-// reservedSubcommands are first-arg names never treated as run input. Retired
-// names stay reserved so typing one gets an unknown-command error rather than
-// being injected as a chat prompt.
-var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true, "new": true, "resume": true, "index": true, "search": true, "events": true, "hitl": true, "login": true, "logout": true,
-	// cobra's shell-completion protocol: every TAB press invokes these; treated
-	// as chat input they would run a live model call per keystroke.
+var reservedSubcommands = map[string]bool{"init": true, "chat": true, "help": true, "completion": true, "session": true, "run": true, "tools": true, "mcp": true, "backend": true, "agent": true, "config": true, "model": true, "models": true, "doctor": true, "version": true, "state": true, "acp": true, "acpx": true, "setup": true, "cache": true, "update": true, "workspace": true, "sandbox": true, "shell-env": true, "vet": true, "serve": true, "fleet": true, "mission": true, "approvals": true, "inbox": true, "code": true, "vscode-agent": true, "modeld": true, "beam": true, "new": true, "resume": true, "index": true, "search": true, "events": true, "hitl": true, "login": true, "logout": true, "autocomplete": true,
+	// cobra's shell-completion protocol: every TAB press invokes these; treated as chat input they would run a live model call per keystroke.
 	"__complete": true, "__completeNoDesc": true}
 
 // Main runs the contenox CLI: init subcommand or run (default) with optional positional input.
 func Main() {
 	args := os.Args[1:]
-	// Only inject "run" when no reserved subcommand was given, and not when
-	// args are help/version-only.
 	onlyHelp := len(args) == 0
 	if !onlyHelp {
 		allRootFlags := true
@@ -87,29 +72,22 @@ func Main() {
 	if sub := dispatchSubcommand(args, onlyHelp); sub != "" {
 		rootCmd.SetArgs(append([]string{sub}, args...))
 	}
-	// The beta agent-roster and event-dispatch surfaces are absent from help
-	// without the opt-in; Hidden gates visibility only, never execution.
+	// Hidden gates visibility only, never execution.
 	betaHidden := !betaEnabledGlobal()
 	agentCmd.Hidden = betaHidden
 	eventsCmd.Hidden = betaHidden
-	// Beta flags on stable commands are absent, not hidden: an unregistered
-	// --as-agent or --oracle neither shows in help nor parses.
+	// Beta flags on stable commands are absent, not hidden: an unregistered flag neither shows in help nor parses.
 	if !betaHidden {
 		registerApprovalsRespondFlags(true)
 		registerMissionFireFlags(true)
 	}
-	// Seeded with the inherited event hop so a CLI spawned by a fired chain can
-	// forward it to its own spawns: the publisher reads the env var directly,
-	// but only a context carries it onward (see eventlog.InheritHop).
+	// Seeded with the inherited event hop so a CLI spawned by a fired chain can forward it to its own spawns.
 	err := rootCmd.ExecuteContext(eventlog.InheritHop(context.Background()))
-	// Flush warm-session KV snapshots before exit so the next start restores
-	// warm instead of cold-prefilling. Best-effort.
+	// Best-effort: flushes warm-session KV snapshots so the next start restores warm.
 	_ = modelrepo.Shutdown()
 	if err != nil {
 		recordStartupFailure(err)
-		// A command with its own exit status (*exitError) has already printed
-		// what it wanted the operator to see, so skip the generic "Error:"
-		// prefix — a deliberate non-zero exit reads as a status, not a crash.
+		// A command with its own exit status (*exitError) has already printed what it wanted shown; skip the generic "Error:" prefix.
 		var ee *exitError
 		if errors.As(err, &ee) {
 			os.Exit(ee.code)
@@ -123,9 +101,6 @@ func containsExperimentalACPFlag(args []string) bool {
 	return slices.Contains(args, "--experimental-acp")
 }
 
-// dispatchSubcommand decides which subcommand a bare invocation is routed to:
-// bare input is session-backed chat; 'contenox run' is the explicit stateless
-// path. Returns "" when args already name a subcommand or are help/version-only.
 func dispatchSubcommand(args []string, onlyHelp bool) string {
 	switch {
 	case containsExperimentalACPFlag(args) && !firstNonFlagIsReserved(args):
@@ -160,12 +135,8 @@ func recordStartupFailure(execErr error) {
 	end()
 }
 
-// firstNonFlagIsReserved scans args, skipping flags and their values, and returns
-// true if the first positional argument is a reserved subcommand name.
 func firstNonFlagIsReserved(args []string) bool {
-	// Boolean flags that do NOT consume the next token as their value.
-	// Without this list, `contenox --trace chat` would mistake "chat" for the
-	// value of --trace and then forward it to the chat command as text input.
+	// Flags here do NOT consume the next token; without this, `contenox --trace chat` would treat "chat" as --trace's value.
 	boolFlags := map[string]bool{
 		"--shell": true, "--trace": true, "--steps": true, "--raw": true,
 		"--no-delete-models": true, "--editor": true,
@@ -174,28 +145,24 @@ func firstNonFlagIsReserved(args []string) bool {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
-			// Explicit end of flags; next arg would be positional.
 			if i+1 < len(args) {
 				return reservedSubcommands[args[i+1]]
 			}
 			return false
 		}
 		if strings.HasPrefix(a, "--") {
-			// Long flag: boolean flags and flag=value forms don't consume next token.
 			if strings.Contains(a, "=") || boolFlags[a] {
 				continue
 			}
-			i++ // this flag consumes the next token as its value
+			i++
 			continue
 		}
 		if strings.HasPrefix(a, "-") && len(a) > 1 {
-			// Short flag: skip (simplified: assume it consumes next token if no value attached).
 			if len(a) == 2 {
-				i++ // skip value
+				i++
 			}
 			continue
 		}
-		// First non-flag argument found.
 		return reservedSubcommands[a]
 	}
 	return false
@@ -373,8 +340,6 @@ chains, config and sessions alone, unlike --force.`,
 	RunE: runInitCmd,
 }
 
-// versionCmd prints the same line as `contenox --version` so `contenox version`
-// is not mistaken for chat input (the default run command).
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the contenox CLI version",
@@ -391,10 +356,8 @@ func init() {
 	v := cliVersion()
 	rootCmd.Version = v
 	rootCmd.Short = fmt.Sprintf("Local AI workflow runtime v%s: run versioned chains with your tools and models.", v)
-	// Cobra prints Long for --help when set; include version so it matches runtime/version/version.txt.
 	rootCmd.Long = fmt.Sprintf("Version: %s\n\n%s", v, rootCmd.Long)
 
-	// Run flags on root so "contenox --input x" and "contenox hi" both work.
 	f := rootCmd.PersistentFlags()
 	f.String("db", "", "SQLite database path (default: ~/.contenox/local.db)")
 	f.String("data-dir", "", "Override the .contenox data directory path")
@@ -417,7 +380,7 @@ func init() {
 	f.Bool("steps", false, "Print execution steps after the result")
 	f.Bool("raw", false, "Print full output (e.g. entire chat JSON)")
 	f.String("think", "", "Set reasoning level for supported models: auto, off, minimal, low, medium, high, xhigh (default: config default-think, then high)")
-	f.BoolP("editor", "e", false, "Open $EDITOR (or $VISUAL, fallback nano) to compose the prompt; piped stdin is preloaded as reference")
+	f.BoolP("editor", "e", false, "Open $VISUAL or $EDITOR (VS Code terminal: code --wait; fallback nano) to compose the prompt; piped stdin is preloaded as reference")
 
 	rootCmd.AddCommand(initCmd, chatCmd, sessionCmd, runCmd, toolsCmd, doctorCmd, versionCmd)
 	rootCmd.AddCommand(mcpCmd)
@@ -440,7 +403,7 @@ func init() {
 	rootCmd.AddCommand(eventsCmd)
 	rootCmd.AddCommand(hitlCmd)
 
-	rootCmd.InitDefaultHelpCmd() // so "contenox help" is handled by Cobra, not passed as run input
+	rootCmd.InitDefaultHelpCmd()
 	initCmd.Flags().BoolP("force", "f", false, "Overwrite existing files")
 	initCmd.Flags().Bool("update", false, "Update unchanged default files to the latest version; also renames shipped chain files still under a pre-v0.38 name to the chain-<role>-<variant>.json convention (content kept byte-for-byte)")
 	initCmd.Flags().Bool("refresh-policies", false, "Rewrite ONLY the HITL policy presets from this build, in ~/.contenox and any workspace .contenox copy that shadows it (chains, config and sessions are untouched; your edits to those policy files are replaced)")
@@ -448,7 +411,6 @@ func init() {
 	initCmd.Flags().Bool("project", false, "Create a project marker in the CURRENT directory (a fresh workspace id), instead of reusing an ancestor's .contenox")
 	initCmd.Flags().String("name", "", "Friendly project name for the marker (default: the directory name)")
 
-	// Chat-specific local flags (not exposed globally).
 	chatCmd.Flags().Int("trim", 0, "Only send the last N messages from session history to the model (0 = send all)")
 	chatCmd.Flags().StringArray("attach", nil, "Attach an image to this message (repeatable). Routes to a vision-capable model.")
 	chatCmd.Flags().Int("last", 0, "Print last N user/assistant turns after the reply (0 = only print new reply)")
@@ -456,9 +418,6 @@ func init() {
 
 }
 
-// setupTelemetryLogging points slog at both stderr and telemetry.log when the
-// operator has enabled it, returning a cleanup func. Sink wiring only: nothing
-// else in this package's command logic may call slog as an API.
 func setupTelemetryLogging(ctx context.Context, store runtimetypes.Store, contenoxDir string) (func(), error) {
 	enabledStr := clikv.Read(ctx, store, "telemetry-enabled")
 	if enabledStr != "true" {
@@ -476,17 +435,12 @@ func setupTelemetryLogging(ctx context.Context, store runtimetypes.Store, conten
 	return func() { f.Close() }, nil
 }
 
-// warnTelemetryLoggingUnavailable reports a failed setupTelemetryLogging on
-// the command's own stderr, not through the tracker — whose sink is the
-// logging that just failed to come up.
 func warnTelemetryLoggingUnavailable(w io.Writer, err error) {
 	fmt.Fprintf(w, "warning: telemetry-enabled is set but its log file could not be opened, continuing without it: %v\n"+
 		"         turn it off with: contenox config set telemetry-enabled false\n", err)
 }
 
-// ResolveContenoxDir finds the closest .contenox directory by walking up from
-// cwd, or returns --data-dir directly when set. Falls back to cwd/.contenox
-// if it hits the root without finding one.
+// ResolveContenoxDir finds the closest .contenox by walking up from cwd, or --data-dir if set; falls back to cwd/.contenox.
 func ResolveContenoxDir(cmd *cobra.Command) (string, error) {
 	if cmd != nil {
 		dataDir, _ := cmd.Root().PersistentFlags().GetString("data-dir")
@@ -518,12 +472,6 @@ func ResolveContenoxDir(cmd *cobra.Command) (string, error) {
 	}
 }
 
-// controlPlaneDirs is the single definition of the runtime's control plane for
-// a command: contenoxDir plus the home global ~/.contenox. No session, browse
-// root, or agent fs tool may reach these (runtime/vfs/controlplane.go); serve
-// and the `workspace add` grant guard both derive their denylist from here so
-// the two never disagree. A database relocated by --db is not auto-denied:
-// denying its parent could swallow a legitimate workspace root.
 func controlPlaneDirs(contenoxDir string) []string {
 	dirs := []string{contenoxDir}
 	if home, err := globalContenoxDir(); err == nil {
@@ -541,9 +489,7 @@ func ResolveWorkspaceID(contenoxDir string) string {
 }
 
 func runInitCmd(cmd *cobra.Command, args []string) error {
-	// Narrower than --force: presets only, no chains, marker, or config. The
-	// policy loader is workspace-first, so the refresh needs the resolved
-	// workspace dir, not just ~/.contenox.
+	// Narrower than --force: presets only. The policy loader is workspace-first, so this needs the resolved workspace dir.
 	if refresh, _ := cmd.Flags().GetBool("refresh-policies"); refresh {
 		contenoxDir, err := ResolveContenoxDir(cmd)
 		if err != nil {
@@ -567,7 +513,6 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 
 	var contenoxDir string
 	if projectMode {
-		// A local project marker in cwd, bypassing the ancestor walk-up.
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("failed to resolve current directory: %w", err)
@@ -580,8 +525,7 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 		} else if err := RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, update, provider, contenoxDir, projectName); err != nil {
 			return err
 		}
-		// Marking a project doesn't grant it as a workspace root; that's a
-		// separate decision, made with this verb.
+		// Marking a project doesn't grant it as a workspace root; that's a separate decision (contenox workspace add).
 		fmt.Fprintf(cmd.OutOrStdout(),
 			"To let sessions open it (the beam picker): contenox workspace add %s\n", cwd)
 		return nil
@@ -596,10 +540,6 @@ func runInitCmd(cmd *cobra.Command, args []string) error {
 	return RunInit(cmd.OutOrStdout(), cmd.ErrOrStderr(), force, update, provider, contenoxDir, projectName)
 }
 
-// resolveProjectInit computes the target .contenox dir and effective marker name
-// for `init --project`: a LOCAL marker in cwd (bypassing the ancestor walk-up in
-// ResolveContenoxDir), always named — defaulting to the project directory's
-// basename when no explicit --name is given.
 func resolveProjectInit(cwd, name string) (contenoxDir, projectName string) {
 	contenoxDir = filepath.Join(cwd, project.ContenoxDirName)
 	projectName = name
@@ -618,7 +558,6 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// No subcommand, no input, no editor, and no piped stdin: show help and exit 0.
 	if len(args) == 0 && !flags.Changed("input") && !useEditor {
 		if stat, err := os.Stdin.Stat(); err != nil || (stat.Mode()&os.ModeCharDevice) != 0 {
 			_ = cmd.Usage()
@@ -631,7 +570,6 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to resolve .contenox dir: %w", err)
 	}
 
-	// Resolve DB path (needed for KV reads below).
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
 		return err
@@ -701,8 +639,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 
 	effectiveChain, _ := flags.GetString("chain")
 	if effectiveChain == "" && !changed("chain") {
-		// Workspace-scoped: read at the same scope `contenox config set
-		// default-chain` writes, not the global row alone.
+		// Workspace-scoped: read at the same scope `contenox config set default-chain` writes.
 		if kv, _ := clikv.ReadConfig(dbCtx, store, ResolveWorkspaceID(contenoxDir), clikv.KeyDefaultChain); kv != "" {
 			effectiveChain = kv
 			if !filepath.IsAbs(effectiveChain) {
@@ -766,8 +703,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	timeoutCtx, timeoutCancel := context.WithTimeout(libtracker.WithNewRequestID(context.Background()), timeout)
 	defer timeoutCancel()
 
-	// Use signal.NotifyContext so cleanup is automatic when the cmd returns;
-	// avoids leaking a goroutine blocked forever on <-sigCh.
+	// signal.NotifyContext makes cleanup automatic; avoids leaking a goroutine blocked forever on <-sigCh.
 	ctx, stop := signal.NotifyContext(timeoutCtx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -808,8 +744,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		AttachPaths:                  attachPaths,
 		ContenoxDir:                  contenoxDir,
 		WarnW:                        cmd.ErrOrStderr(),
-		// A terminal gets the answer as it is produced; a pipe keeps the single
-		// buffered payload its consumer parses.
+		// A terminal gets the answer as it is produced; a pipe keeps the single buffered payload its consumer parses.
 		EffectiveStreamOutput: stdoutIsTerminal(),
 	}
 	return execChat(ctx, db, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
@@ -856,7 +791,6 @@ func shouldPrintThinking(level string) bool {
 	return reasoning.DisplayEnabled(level)
 }
 
-// Sentinel errors so RunE can return and main can os.Exit(1).
 var (
 	errChainRequired = &exitError{1}
 	errPromptAborted = &exitError{1}

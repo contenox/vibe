@@ -12,13 +12,7 @@ import (
 	"github.com/contenox/contenox/internal/services/missionservice"
 )
 
-// The supervisor half of this package's tool surface: what a session that
-// fired missions may see and do about them. Distinct from the unit's own
-// tools (report/ask/plan/finish) and gated on a different fact — unit tools
-// unlock for a session that IS a mission, these unlock for a session that
-// HAS missions. It exists because `/mission` dispatches without the firing
-// session seeing it happen, leaving it unable to check status or answer a
-// unit's question without these tools.
+// ToolNameListMissions and ToolNameAnswer are the supervisor tools, unlocked for a session that HAS missions rather than IS one.
 const (
 	// ToolNameListMissions lists the missions this session fired.
 	ToolNameListMissions = "mission_list"
@@ -46,33 +40,20 @@ type PendingAsk struct {
 	AskedAt   string `json:"askedAt,omitempty"`
 }
 
-// AttentionResolver is the answering half of the supervisor surface: find
-// what a mission is waiting on, and answer it. Kept separate from
-// SupervisorStore since the two live in different services.
-//
-// AnswerAsAgent must enforce the mission envelope's agent-answer bounds: a
-// session agent can reach a live askId without ever being offered the
-// question, so the write is where the bound has to hold. An
-// *AnswerRefusedError says the envelope held; any other error is plumbing.
+// AttentionResolver is the answering half of the supervisor surface — find what a mission is waiting on, and answer it — kept separate from SupervisorStore since the two live in different services.
 type AttentionResolver interface {
 	// PendingAsks returns the unanswered questions for missionID.
 	PendingAsks(ctx context.Context, missionID string) ([]PendingAsk, error)
-	// AnswerAsAgent resolves askID with text, recorded as answered by an
-	// agent rather than a human — a distinction the envelope's cap counts on.
+	// AnswerAsAgent resolves askID with text as an agent answer rather than a human one; an *AnswerRefusedError means the envelope declined it, any other error is plumbing.
 	AnswerAsAgent(ctx context.Context, askID, text string) error
 }
 
-// AnswerRefusedError is the mission envelope declining an agent answer — a
-// refusal, not broken plumbing. This package discards Reason (the model sees
-// the plain denial only), so the resolver must state it on the operator's
-// trace at the refusal point or the denial is invisible.
+// AnswerRefusedError is the mission envelope declining an agent answer, a refusal rather than broken plumbing; this package discards Reason, so the resolver must log it itself or the denial is invisible.
 type AnswerRefusedError struct{ Reason string }
 
 func (e *AnswerRefusedError) Error() string { return e.Reason }
 
-// WithParentSessionID marks ctx as belonging to a session that may supervise
-// its own missions. The mirror of WithMissionID: that says "you ARE a
-// mission", this says "you HAVE missions" — a session is never both.
+// WithParentSessionID marks ctx as belonging to a session that may supervise its own missions — the mirror of WithMissionID: that says you ARE a mission, this says you HAVE missions.
 func WithParentSessionID(ctx context.Context, contenoxSessionID string) context.Context {
 	if strings.TrimSpace(contenoxSessionID) == "" {
 		return ctx
@@ -89,7 +70,6 @@ func ParentSessionIDFromContext(ctx context.Context) string {
 	return id
 }
 
-// supervisorTools are the schemas offered to a firing session.
 func supervisorTools() []taskengine.Tool {
 	return []taskengine.Tool{listMissionsToolSchema(), answerToolSchema()}
 }
@@ -134,9 +114,6 @@ func answerToolSchema() taskengine.Tool {
 	}
 }
 
-// execListMissions answers "what did I dispatch, and does anything need me?"
-// for the calling session, folding in pending questions rather than
-// requiring a second call.
 func (p *provider) execListMissions(ctx context.Context, parentSessionID string) (any, taskengine.DataType, error) {
 	if p.supervisor == nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: mission supervision is not wired in this process")
@@ -185,9 +162,6 @@ const (
 	supervisorReportLimit  = 5
 )
 
-// execAnswer resolves one of the caller's own units' questions. Ownership is
-// checked, not assumed: the ask must belong to a mission this session fired,
-// since an answer is an instruction the unit acts on immediately, not a read.
 func (p *provider) execAnswer(ctx context.Context, parentSessionID string, input any, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	if p.resolver == nil || p.supervisor == nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: mission supervision is not wired in this process")
@@ -214,9 +188,7 @@ func (p *provider) execAnswer(ctx context.Context, parentSessionID string, input
 			if err := p.resolver.AnswerAsAgent(ctx, askID, answer); err != nil {
 				var refused *AnswerRefusedError
 				if errors.As(err, &refused) {
-					// The envelope holding, nothing more: a plain result, so
-					// the model stops rather than retrying a denial that
-					// cannot change. The reason stays on the operator's trace.
+					// A plain result, not an error, so the model stops rather than retrying a denial that cannot change.
 					return fmt.Sprintf("answer denied per policy for ask %s.", askID), taskengine.DataTypeString, nil
 				}
 				return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: answer %s: %w", askID, err)
@@ -224,7 +196,6 @@ func (p *provider) execAnswer(ctx context.Context, parentSessionID string, input
 			return fmt.Sprintf("answered %s — unit %q has your reply and continues", askID, m.AgentName), taskengine.DataTypeString, nil
 		}
 	}
-	// Not found among the caller's own pending asks: not theirs, or already
-	// resolved. Both get one honest message — stop trying.
+	// Not found among the caller's own pending asks: not theirs, or already resolved — one honest message either way.
 	return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: %q is not a question your missions are currently waiting on (already answered, expired, or not yours)", askID)
 }

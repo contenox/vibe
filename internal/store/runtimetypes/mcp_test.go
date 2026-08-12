@@ -13,8 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
 func newSSE(name string) *runtimetypes.MCPServer {
 	return &runtimetypes.MCPServer{
 		ID:                    uuid.New().String(),
@@ -35,8 +33,6 @@ func newStdio(name string) *runtimetypes.MCPServer {
 		ConnectTimeoutSeconds: 30,
 	}
 }
-
-// ─── CRUD ──────────────────────────────────────────────────────────────────────
 
 func TestUnit_MCPServers_CreateAndGet(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
@@ -85,7 +81,6 @@ func TestUnit_MCPServers_NilArgs(t *testing.T) {
 
 	got, err := s.GetMCPServer(ctx, srv.ID)
 	require.NoError(t, err)
-	// nil args should round-trip as nil (or empty slice — both acceptable)
 	require.True(t, len(got.Args) == 0, "expected empty/nil args")
 }
 
@@ -125,8 +120,6 @@ func TestUnit_MCPServers_Delete(t *testing.T) {
 	require.True(t, errors.Is(err, libdb.ErrNotFound))
 }
 
-// ─── List & Pagination ─────────────────────────────────────────────────────────
-
 func TestUnit_MCPServers_ListEmpty(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
@@ -151,7 +144,6 @@ func TestUnit_MCPServers_List(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 3)
 
-	// Reverse-chronological order (newest first)
 	require.Equal(t, servers[2].ID, items[0].ID)
 	require.Equal(t, servers[1].ID, items[1].ID)
 	require.Equal(t, servers[0].ID, items[2].ID)
@@ -188,21 +180,17 @@ func TestUnit_MCPServers_ListPagination(t *testing.T) {
 	require.Len(t, page3, 1)
 	received = append(received, page3...)
 
-	// Fourth page must be empty
 	page4, err := s.ListMCPServers(ctx, &page3[0].CreatedAt, limit)
 	require.NoError(t, err)
 	require.Empty(t, page4)
 
 	require.Len(t, received, 5)
-	// Newest first → created[4] is first received
 	require.Equal(t, created[4].ID, received[0].ID)
 	require.Equal(t, created[3].ID, received[1].ID)
 	require.Equal(t, created[2].ID, received[2].ID)
 	require.Equal(t, created[1].ID, received[3].ID)
 	require.Equal(t, created[0].ID, received[4].ID)
 }
-
-// ─── Constraints ───────────────────────────────────────────────────────────────
 
 func TestUnit_MCPServers_UniqueNameConstraint(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
@@ -234,8 +222,6 @@ func TestUnit_MCPServers_DeleteAndRecreate(t *testing.T) {
 	require.Equal(t, newSrv.ID, got.ID)
 }
 
-// ─── Not-found cases ───────────────────────────────────────────────────────────
-
 func TestUnit_MCPServers_NotFoundCases(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
@@ -262,8 +248,6 @@ func TestUnit_MCPServers_NotFoundCases(t *testing.T) {
 		require.Error(t, err)
 	})
 }
-
-// ─── Concurrent updates ───────────────────────────────────────────────────────
 
 func TestUnit_MCPServers_ConcurrentUpdates(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
@@ -299,8 +283,6 @@ func TestUnit_MCPServers_ConcurrentUpdates(t *testing.T) {
 	require.True(t, final.UpdatedAt.After(srv.UpdatedAt))
 }
 
-// ─── Estimate count ───────────────────────────────────────────────────────────
-
 func TestUnit_MCPServers_EstimateCount(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
@@ -308,18 +290,10 @@ func TestUnit_MCPServers_EstimateCount(t *testing.T) {
 		require.NoError(t, s.CreateMCPServer(ctx, newSSE(fmt.Sprintf("count-%d", i))))
 	}
 
-	// EstimateMCPServerCount uses pg_class.reltuples on Postgres (may return -1
-	// for freshly-created tables before ANALYZE runs) and COUNT(*) on SQLite.
-	// We just verify the call completes without error.
+	// EstimateMCPServerCount can return -1 on Postgres before ANALYZE runs; just verify no error.
 	_, err := s.EstimateMCPServerCount(ctx)
 	require.NoError(t, err)
 }
-
-// ─── headers_json / inject_params_json round-trips ───────────────────────────
-// These tests specifically cover the fields that were silently absent from the
-// SELECT queries in GetMCPServer and GetMCPServerByName before the fix, causing
-// a runtime "sql: expected 12 destination arguments in Scan, not 14" error.
-// Any future field added to MCPServer must be tested here.
 
 func TestUnit_MCPServers_HeadersAndInjectParams_GetByID(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
@@ -399,7 +373,6 @@ func TestUnit_MCPServers_EmptyMapsRoundTrip(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
 	srv := newStdio("empty-maps-" + uuid.New().String()[:8])
-	// No Headers or InjectParams — verify no crash and empty result.
 	require.NoError(t, s.CreateMCPServer(ctx, srv))
 
 	got, err := s.GetMCPServer(ctx, srv.ID)
@@ -407,8 +380,6 @@ func TestUnit_MCPServers_EmptyMapsRoundTrip(t *testing.T) {
 	require.Empty(t, got.InjectParams)
 	require.Empty(t, got.Headers)
 }
-
-// ─── RemoteTools inject_params_json round-trips ────────────────────────────────
 
 func newTools(name string) *runtimetypes.RemoteTools {
 	return &runtimetypes.RemoteTools{

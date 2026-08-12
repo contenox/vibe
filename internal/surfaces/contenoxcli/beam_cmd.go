@@ -1,8 +1,3 @@
-// beam_cmd.go is beam's composition root: it opens the DB, builds the
-// engine, gates on setup, embeds the mission fleet, opens the in-process ACP
-// loopback, resolves the session, and runs the app-shell loop, owning
-// teardown of each step it started. It renders nothing itself; UI lives in
-// beamtui/app and beamtui/comp.
 package contenoxcli
 
 import (
@@ -39,37 +34,14 @@ import (
 )
 
 const (
-	// beamChainFile / beamChainEnv are beam's own defaults, seeded to
-	// chain-agent-beam.json and overridable independently of `contenox
-	// acp`'s CONTENOX_ACP_CHAIN_PATH — the same per-profile pattern
-	// acpProfileACP/acpProfileACPX use (acp_cmd.go). beam still drives the
-	// same in-process ACP Transport an editor does; only the default chain
-	// content and its override var are its own.
 	beamChainFile = chainAgentBeamFilename
 	beamChainEnv  = "CONTENOX_BEAM_CHAIN_PATH"
 
-	// beamHITLPolicy is beam's own default HITL envelope — an attended
-	// coding session, tuned like hitl-policy-acp.json (see hitl-policy-beam.json)
-	// — and the policy name beam reports for `/policy`.
 	beamHITLPolicy = "hitl-policy-beam.json"
 
-	// acpSessionIdentity is the identity acpsvc stores beam's ACP sessions
-	// under (acpsvc/session.go), separate from the CLI's local-user identity.
 	acpSessionIdentity = "acp-client"
 )
 
-// The terminal UI is one implementation behind two verbs that differ only in
-// which session they open. Splitting them is a correctness fix, not a
-// preference: a command called "new" that silently continued the last
-// conversation was the single most surprising thing the CLI did, and no flag
-// spelling makes "new" mean "resume".
-//
-//	new      always starts a fresh session
-//	resume   opens the last active session (or --session NAME), and starts a
-//	         fresh one only when there is nothing to resume
-//
-// tuiLong is shared because everything below the first paragraph is identical
-// for both; only the session sentence differs.
 const tuiLong = `
 The transcript flows into your terminal's own scrollback (so copy and paste work
 exactly as they always have), the composer takes / for commands, ! for a shell
@@ -108,8 +80,6 @@ would.
 }
 
 func init() {
-	// --session belongs to resume alone: naming a session to open is the
-	// opposite of starting a new one, so 'new' does not accept it.
 	resumeCmd.Flags().String("session", "", "Open the named session instead of the last active one (see 'contenox resume --session' errors for the known names)")
 	for _, c := range []*cobra.Command{newCmd, resumeCmd} {
 		c.Flags().Bool("light", false, "Render for a light terminal background (overrides detection)")
@@ -119,9 +89,6 @@ func init() {
 	}
 }
 
-// runBeam drives the terminal UI. freshSession is the only difference between
-// the 'new' and 'resume' verbs: it skips session resolution entirely, so no
-// active-session pointer can pull a previous transcript into a new one.
 func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	errW := cmd.ErrOrStderr()
 
@@ -134,16 +101,14 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	// SIGINT only matters pre-raw-mode: once the terminal is raw, ctrl+c
-	// arrives as a keystroke, not a signal.
+	// SIGINT only matters pre-raw-mode: once the terminal is raw, ctrl+c arrives as a keystroke, not a signal.
 	ctx, stop := signal.NotifyContext(parentCtx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	// Deferred before the engine is built so it runs after engine teardown.
 	defer func() { _ = modelrepo.Shutdown() }()
 
-	// Same $HOME/.contenox the ACP runtime reads from — a cwd-walk would
-	// diverge from where the chain and policy loaders resolve.
+	// Same $HOME/.contenox the ACP runtime reads from; a cwd-walk would diverge from where the loaders resolve.
 	contenoxDir, err := globalContenoxDir()
 	if err != nil {
 		return fmt.Errorf("resolve contenox dir: %w", err)
@@ -175,12 +140,9 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 		defer closeLogs()
 	}
 
-	// Unlike every other surface, beam's stderr IS the screen it draws the
-	// transcript into, so slog must move to a file (beam.log) before beam
-	// takes the terminal, or a log line would corrupt the scrollback.
+	// beam's stderr IS the screen it draws into, so slog must move to a file before beam takes the terminal or a log line corrupts the scrollback.
 	beamLogPath, beamTracker, closeBeamLog, logErr := redirectBeamLogsToFile(dbPath)
 	if logErr != nil {
-		// Not fatal: slog stays on stderr, which is ugly but not silent.
 		fmt.Fprintf(errW, "beam: file logging unavailable, logs stay on stderr: %v\n", logErr)
 	} else {
 		defer closeBeamLog()
@@ -190,62 +152,45 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	if err != nil {
 		return err
 	}
-	// A stale policy falls through unnoticed inside the TUI, so it's named
-	// here and printed later beside the "logs:" line. Beta-gated toolsets are
-	// skipped: an invisible toolset cannot make an envelope stale.
+	// Beta-gated toolsets are skipped: an invisible toolset cannot make an envelope stale.
 	policyNotice := stalePolicyNotice(beamHITLPolicy, policyDirs(contenoxDir), betaGatedToolsets(opts.EffectiveOptInBeta))
 	if beamTracker == nil {
 		beamTracker = libtracker.NoopTracker{}
 	}
 	opts.EffectiveTracker = beamTracker
 	opts.EffectiveDB = dbPath
-	// beam ships with the shell on, unlike `contenox chat`'s scripted default:
-	// the tiered hitl-policy gates it instead of the tool's absence. An
-	// explicit `--shell=false` is still honored.
+	// beam ships with the shell on; the tiered hitl-policy gates it instead of the tool's absence. --shell=false is still honored.
 	if !cmd.Root().Flags().Changed("shell") {
 		opts.EffectiveEnableLocalExec = true
 	}
 	beamHITL := newHITLService(contenoxDir, runtimetypes.New(db.WithoutTransaction()), beamTracker, beamHITLPolicy)
 	opts.EffectiveHITLService = beamHITL
 
-	// Late-bound: the fleet's report deliverer and the HITL gate both need
-	// the transport, which doesn't exist until the loopback is built below.
+	// Late-bound: the fleet's report deliverer and the HITL gate both need the transport, which doesn't exist until the loopback is built below.
 	var bridge *enginebridge.Bridge
 	transportOf := func() *acpsvc.Transport { return bridge.Transport() } // nil-safe on a nil *Bridge
 
 	sessionRouter := acpsvc.NewSessionRouter()
 	opts.EffectiveAskApproval = routedAskApproval(sessionRouter, transportOf)
 
-	// Set only when the zero-config path below fires; printed once.
 	var zeroConfigNotice string
 
-	// Built exactly as chat builds it, so beam inherits chat's model
-	// resolution, tools and HITL wiring rather than a second setup.
 	engine, err := BuildEngine(ctx, db, opts)
 	if err != nil {
 		return fmt.Errorf("failed to build engine: %w", err)
 	}
-	// A closure, not `defer engine.Stop()`: the zero-config path below may
-	// replace `engine` with a rebuilt one, and a bare method-value defer
-	// would capture today's pointer, leaking the replacement.
+	// A closure, not `defer engine.Stop()`: the zero-config path below may replace `engine` with a rebuilt one, and a bare method-value defer would capture today's pointer.
 	defer func() { engine.Stop() }()
 
-	// Zero-keystroke first run: TryZeroConfig only probes on the virgin-install
-	// shape and registers nothing unless a chat-capable model is found.
 	if !engine.SetupCheck.Ready() {
 		decision, zcErr := onboarding.TryZeroConfig(ctx, db, engine.SetupCheck)
 		if zcErr != nil {
-			// Best-effort: falls through to the same gate a virgin install
-			// always got. Recorded via the tracker rather than surfaced,
-			// since the operator already gets the setup gate's own text.
 			reportErr, _, end := engine.Tracker.Start(ctx, "register", "zero_config_ollama")
 			reportErr(zcErr)
 			end()
 		}
 		if decision.Fire {
-			// The already-built engine resolved against the pre-registration
-			// (empty) config, so it must be rebuilt with the defaults
-			// onboarding.Apply just persisted.
+			// The already-built engine resolved against the pre-registration (empty) config, so it must be rebuilt with the persisted defaults.
 			engine.Stop()
 			opts.EffectiveDefaultModel = decision.Model
 			opts.EffectiveDefaultProvider = "ollama"
@@ -276,9 +221,7 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	if err != nil {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
-	// `contenox new .` (or any directory) sets the workspace, like an
-	// editor's "open here" — every downstream consumer (session cwd, the `!`
-	// shell, @ completion) flows from this one variable.
+	// Every downstream consumer (session cwd, the `!` shell, @ completion) flows from this one variable.
 	if len(args) > 0 {
 		dir, err := filepath.Abs(args[0])
 		if err != nil {
@@ -291,40 +234,31 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 		cwd = dir
 	}
 
-	// The machine's workspace-root allowlist, with this launch directory as its
-	// default root. It is what makes a client's proposed cwd checkable, and the
-	// reason a remote client that sends no workspace (or the "/" sentinel) is
-	// rooted here instead of at the filesystem root.
+	// Default root for a client's proposed cwd; a client that sends no workspace (or "/") is rooted here instead of the filesystem root.
 	workspaceRoots, err := buildWorkspaceFactory(cmd, cwd, runtimetypes.New(db.WithoutTransaction()))
 	if err != nil {
 		return err
 	}
 
-	// Same SANDBOX_* scrub composition local_shell gets (see sandbox_scrub.go):
-	// the "!" PTY is an agent-reachable shell too.
+	// Same SANDBOX_* scrub composition local_shell gets (see sandbox_scrub.go): the "!" PTY is an agent-reachable shell too.
 	shellScrub, _, err := resolvedSandboxEnv(db, engine.Tracker, errW)
 	if err != nil {
 		return fmt.Errorf("resolve sandbox env: %w", err)
 	}
 
-	// The warm per-session PTY behind `!`: runs in beam's launch directory and
-	// is HITL-exempt by existing precedent.
+	// HITL-exempt by existing precedent.
 	shells := shellsession.NewManager(shellsession.Config{
 		CwdResolver: func(context.Context) string { return cwd },
 		ScrubEnv:    shellScrub,
 	})
 	defer shells.Shutdown()
 
-	// The in-process mission fleet: a mission fired from beam is a subagent
-	// of this process, with reports arriving live in the firing session.
 	// Skipped when this process is itself a dispatched unit (beamChainEnv set).
 	var (
 		missionFleet  acpsvc.MissionDispatcher
 		missionAgents acpsvc.MissionAgentResolver
 	)
 	if strings.TrimSpace(os.Getenv(beamChainEnv)) == "" {
-		// The engine exists here, so the in-process trigger hook wires
-		// directly (nil when beta is off or no triggers load).
 		missions := missionservice.New(db, missionservice.WithEventPublisher(missionEventPublisher(ctx, db, engine.Bus, workspaceID, beamTracker,
 			buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, opts, errW))))
 		fleet, agents, stopFleet, buildErr := fleetboot.BuildInProcessFleet(ctx, fleetboot.Deps{
@@ -336,12 +270,10 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 			HITL:         beamHITL,
 			PolicySource: hitlPolicySource(contenoxDir),
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-				// engine.Tracker, not the Noop this fleet is built with: a
-				// discovery pass is what `--trace` exists to see.
+				// engine.Tracker, not the Noop this fleet is built with: a discovery pass is what --trace shows.
 				discoverChainAgents(dctx, agents, contenoxDir, engine.Tracker, opts.EffectiveOptInBeta)
 			},
-			// The workspace this process's mission publisher stamps; a
-			// dispatched unit's own publisher must stamp the same one.
+			// The workspace this process's mission publisher stamps; a dispatched unit's own publisher must stamp the same one.
 			WorkspaceID:    workspaceID,
 			WorkspaceRoots: workspaceRoots,
 		})
@@ -353,11 +285,7 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 		missionFleet, missionAgents = fleet, agents
 	}
 
-	// The in-process ACP loopback. It serves this process's own terminal client
-	// AND every relay attachment (serveRemoteAttachments below), so
-	// WorkspaceRoots is set rather than nil: a browser client reaching this
-	// loopback holds only a session cookie, and the directories it may root a
-	// session in are the operator's decision, taken at launch.
+	// Serves this process's own terminal client AND every relay attachment, so WorkspaceRoots is set rather than nil.
 	bridge, err = enginebridge.New(ctx, beamBridgeDeps(opts, enginebridge.Deps{
 		Engine:         engine,
 		DB:             db,
@@ -371,9 +299,7 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	if err != nil {
 		return fmt.Errorf("open engine bridge: %w", err)
 	}
-	// A non-nil Close error means the loopback didn't fully join, so
-	// goroutines may still touch the bus/database the deferred teardown
-	// above would pull out from under them — exit rather than continue.
+	// A non-nil Close error means the loopback didn't fully join; exit rather than let teardown pull the bus/database out from under live goroutines.
 	defer func() {
 		if closeErr := bridge.Close(); closeErr != nil {
 			fmt.Fprintf(errW, "beam: %v\n", closeErr)
@@ -381,15 +307,15 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 		}
 	}()
 
-	stopRelay := serveRemoteAttachments(ctx, contenoxDir, bridge.AgentFactory(), beamTracker, errW)
+	stopRelay := serveRemoteAttachments(ctx, contenoxDir, bridge.AgentFactory(),
+		buildRelayChainTriggers(db, contenoxDir, workspaceID, engine, opts), beamTracker, errW)
 	defer stopRelay()
 
 	if _, err := bridge.Initialize(ctx); err != nil {
 		return fmt.Errorf("acp handshake: %w", err)
 	}
 
-	// Loading replays the session's transcript as updates from the same
-	// event stream a live turn uses; beam has no separate rendering path.
+	// Replays the session's transcript as updates from the same event stream a live turn uses; beam has no separate rendering path.
 	sessionName, sessionFlag, err := resolveBeamSession(ctx, db, workspaceID, cmd, freshSession)
 	if err != nil {
 		return err
@@ -413,8 +339,7 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	sessionID := libacp.SessionID(sessionName)
 	bridge.SetActiveSession(sessionID)
 
-	// Terminal detection runs exactly once; every component below takes the
-	// resulting Caps as data.
+	// Terminal detection runs exactly once; every component below takes the resulting Caps as data.
 	caps := style.DetectFromOS(true)
 	if light, _ := cmd.Flags().GetBool("light"); light {
 		caps.Dark = false
@@ -422,22 +347,16 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	if plain, _ := cmd.Flags().GetBool("plain"); plain {
 		caps.Profile = style.ProfileMono
 	}
-	// Printed after Caps is final but before term.New enters raw mode: beam
-	// has no alt-screen, so this becomes the first content in the real
-	// scrollback.
+	// Printed after Caps is final but before term.New enters raw mode: beam has no alt-screen, so this becomes the first content in the real scrollback.
 	if zeroConfigNotice != "" || policyNotice != "" || beamLogPath != "" {
 		prefix, suffix := style.New(caps).SGR(frame.StyleMuted)
 		if zeroConfigNotice != "" {
 			fmt.Fprintf(os.Stdout, "%s%s%s\n", prefix, zeroConfigNotice, suffix)
 		}
 		if policyNotice != "" {
-			// One line, not a wall: the toolsets, what happens to them, and the
-			// verb that fixes it.
 			fmt.Fprintf(os.Stdout, "%s%s%s\n", prefix, policyNotice, suffix)
 		}
 		if beamLogPath != "" {
-			// Warnings now land in a file instead of the screen, so it names
-			// itself once, on the way in.
 			fmt.Fprintf(os.Stdout, "%slogs: %s%s\n", prefix, beamLogPath, suffix)
 		}
 		fmt.Fprintln(os.Stdout)
@@ -449,8 +368,7 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 
 	files, err := fileaddr.NewSource(nil, cwd)
 	if err != nil {
-		// A refused cwd is not an error (fileaddr returns a rootless Source);
-		// this is the genuinely broken case, and @ is the only casualty.
+		// A refused cwd is not an error (fileaddr returns a rootless Source); this is the genuinely broken case, and @ is the only casualty.
 		fmt.Fprintf(errW, "beam: @ file completion unavailable: %v\n", err)
 		files = nil
 	}
@@ -472,29 +390,6 @@ func runBeam(cmd *cobra.Command, args []string, freshSession bool) error {
 	})
 }
 
-// beamBridgeDeps completes the enginebridge.Deps beam's in-process ACP
-// loopback — and every relay attachment served from its factory — is built
-// from. built carries what runBeam constructed for itself (the engine, the
-// database, the chain registry, the workspace allowlist, the shells, the
-// mission fleet, the session router); every other field is derived here from
-// opts, so it cannot be forgotten at the one call site that matters.
-//
-// It is a named constructor rather than a literal inside runBeam because
-// runBeam needs a terminal and no test can drive it. A Deps field nothing
-// fills is a capability that is real everywhere except on the surface the
-// operator uses — which is exactly how a working re-offer of a parked approval
-// stayed dark on beam — so what is wired is asserted here rather than only
-// behind the seam.
-//
-// Two fields are worth naming. MissionEnvelopes offers what the loader would
-// actually read, so an operator-authored envelope is selectable and a typo is
-// refused before a unit is spawned under a fallback nobody chose. Asks is the
-// durable ask inbox a re-attaching client's parked approvals come back
-// through: THE process's hitlservice.Service, the instance BuildEngine gated
-// this engine through and registered the resume hook on. It is left nil
-// exactly when no gate was built (--auto), because a card answered through an
-// unhooked service records a verdict that resumes nothing — worse than no card
-// at all, since it reads as an answered question.
 func beamBridgeDeps(opts chatOpts, built enginebridge.Deps) enginebridge.Deps {
 	deps := built
 	if deps.Engine != nil {
@@ -520,16 +415,8 @@ func beamBridgeDeps(opts chatOpts, built enginebridge.Deps) enginebridge.Deps {
 	return deps
 }
 
-// beamLogFileName is the log beam redirects slog into. It sits beside the
-// database rather than os.UserCacheDir() so a scratch run (`--db /tmp/x.db`)
-// keeps its warnings with its own state, and a default run lands in
-// ~/.contenox next to telemetry.log.
 const beamLogFileName = "beam.log"
 
-// redirectBeamLogsToFile points the default slog handler at a file next to
-// dbPath (level WARN and up) and returns its path plus a closer. The path is
-// returned rather than printed here so the caller can style it like every
-// other pre-TUI line once terminal capabilities are known.
 func redirectBeamLogsToFile(dbPath string) (string, libtracker.ActivityTracker, func(), error) {
 	logPath := filepath.Join(filepath.Dir(dbPath), beamLogFileName)
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -537,24 +424,16 @@ func redirectBeamLogsToFile(dbPath string) (string, libtracker.ActivityTracker, 
 		return "", nil, nil, fmt.Errorf("open %s: %w", logPath, err)
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	// The lifecycle tracker writes Info-level, redacted spans to the same
-	// file; the Warn floor above only guards stray direct slog records.
+	// The lifecycle tracker writes Info-level spans to the same file; the Warn floor above only guards stray direct slog records.
 	return logPath, libtracker.NewTextActivityTracker(f), func() { _ = f.Close() }, nil
 }
 
-// beamSession is what session resolution learned about the session beam is
-// about to open.
 type beamSession struct {
 	messages int
 }
 
-// resolveBeamSession picks the ACP session beam attaches to, reporting "" when
-// a fresh one should be created. --session names a known session by name; an
-// unknown name errors and lists the known ones rather than auto-creating.
 func resolveBeamSession(ctx context.Context, db libdb.DBManager, workspaceID string, cmd *cobra.Command, freshSession bool) (string, beamSession, error) {
-	// 'contenox new' resolves nothing: an empty name is the caller's contract
-	// for "mint one". Returning before the roster read also means a fresh
-	// session costs no query.
+	// Empty name is the caller's contract for "mint one"; returning early also means a fresh session costs no query.
 	if freshSession {
 		return "", beamSession{}, nil
 	}
@@ -584,14 +463,10 @@ func resolveBeamSession(ctx context.Context, db libdb.DBManager, workspaceID str
 			return s.Name, beamSession{messages: s.MessageCount}, nil
 		}
 	}
-	// The active pointer names a session beam cannot load (a CLI chat session,
-	// or one from another workspace): start a fresh one rather than fail.
+	// The active pointer names a session beam cannot load: start a fresh one rather than fail.
 	return "", beamSession{}, nil
 }
 
-// knownSessionHint lists the sessions --session could have named, newest
-// first and bounded, so a typo is answered with the answer instead of a
-// second lookup.
 func knownSessionHint(roster []*sessionservice.SessionInfo) string {
 	const maxListed = 8
 	if len(roster) == 0 {

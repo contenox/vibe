@@ -9,13 +9,6 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// --- Tool schemas ------------------------------------------------------------
-// Descriptions are terse by default: most limits (deadline, output cap,
-// call-depth, JSON-only) are taught by their error at the moment they bite.
-// The completion value, host.tool's existence and address form, and the
-// absence of ambient I/O are stated up front instead, since nothing would
-// ever teach those.
-
 const evalDescription = "Run JavaScript (ES2023) in a sandbox and get its value back as JSON. " +
 	"The result is the last expression evaluated — end with the value you want, or an explicit `x` on its own line; a program that ends on a statement returns null. " +
 	"There is NO network, NO filesystem, NO require/import and NO async: the only way out is host.tool(\"provider.tool_name\", {args}), which runs that tool under the same approval rules as your own tool calls and returns its result. " +
@@ -46,9 +39,7 @@ func evalSchema() taskengine.Tool {
 	}
 }
 
-// GetToolsForToolsByName returns the provider's tool list, or one tool by name.
-// Script tools carry the description and schema their FILE declares: the
-// operator who wrote the script owns what the model is told about it.
+// GetToolsForToolsByName returns the provider's tool list, or one tool by name; a script tool's description and schema are exactly what its file declares.
 func (t *Toolset) GetToolsForToolsByName(_ context.Context, name string) ([]taskengine.Tool, error) {
 	all := make([]taskengine.Tool, 0, len(t.scripts)+1)
 	all = append(all, evalSchema())
@@ -74,15 +65,7 @@ func (t *Toolset) GetToolsForToolsByName(_ context.Context, name string) ([]task
 	return nil, fmt.Errorf("goja: unknown tool %s", echoArg(name))
 }
 
-// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
-// one request/response pair per tool the provider declares — goja_eval and
-// every loaded script tool alike. Request schemas are converted from the
-// descriptors GetToolsForToolsByName hands the model, which for a script tool
-// is the schema its own FILE declares, so the published contract cannot drift
-// from what the provider accepts and no operator-owned script schema is
-// paraphrased here. Components are keyed by the tool name verbatim (not a
-// camel-cased form), since a script may declare any name and two names must
-// never collapse onto one key.
+// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract: one request/response pair per declared tool, keyed by the tool name verbatim.
 func (t *Toolset) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
 	declared, err := t.GetToolsForToolsByName(ctx, ToolsProviderName)
 	if err != nil {
@@ -112,10 +95,6 @@ func (t *Toolset) GetSchemasForSupportedTools(ctx context.Context) (map[string]*
 	return map[string]*openapi3.T{ToolsProviderName: schema}, nil
 }
 
-// schemaFromParameters converts a tool descriptor's JSON Schema parameters
-// into an OpenAPI schema. The descriptor stays the single source of truth: the
-// published contract is a rendering of it, never a second copy that could
-// disagree.
 func schemaFromParameters(params any) (*openapi3.SchemaRef, error) {
 	raw, err := json.Marshal(params)
 	if err != nil {
@@ -128,9 +107,6 @@ func schemaFromParameters(params any) (*openapi3.SchemaRef, error) {
 	return &openapi3.SchemaRef{Value: &s}, nil
 }
 
-// resultSchema declares the Result envelope every goja tool returns as
-// DataTypeJSON — goja_eval and script tools alike. A refused or failed
-// execution returns an error instead, so nothing here is a failure marker.
 func resultSchema() *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type: &openapi3.Types{openapi3.TypeObject},

@@ -16,10 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// missionPlanChain is a deterministic, model-free chain: a `tools` task
-// calls the unit's mission_plan tool with a full-snapshot plan (entries
-// carried as a JSON string), then a noop terminator. It never resolves a
-// model, proving the plan grant reaches a real unit, not inference.
 const missionPlanChain = `{
   "id": "e2e-mission-plan",
   "tasks": [
@@ -96,8 +92,6 @@ func TestFleetService_E2E_MissionPlanFromDispatchedUnit(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result.MissionID)
 
-	// The intent-driven first turn runs detached; poll for the plan the unit
-	// writes onto its own mission over the shared DB.
 	var m *missionservice.Mission
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
@@ -117,11 +111,8 @@ func TestFleetService_E2E_MissionPlanFromDispatchedUnit(t *testing.T) {
 	require.Equal(t, missionservice.PlanEntryPriorityHigh, m.Plan.Entries[0].Priority)
 	require.Equal(t, "port the hot loop", m.Plan.Entries[1].Content)
 	require.Equal(t, "first cut from the field", m.Plan.Explanation)
-	// SetPlan assigned ids to the id-less entries — the id echo the projection and
-	// the next revision both rely on.
 	require.NotEmpty(t, m.Plan.Entries[0].ID)
 	require.NotEmpty(t, m.Plan.Entries[1].ID)
 
-	// Writing the plan stamped mission liveness.
 	require.NotNil(t, m.LastHeartbeat, "a written plan is proof of life and heartbeats the mission")
 }

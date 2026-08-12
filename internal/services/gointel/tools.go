@@ -13,7 +13,7 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
-// Tool names. The provider ("gointel") exposes six function tools, each a pure read of an in-memory type-checked snapshot: no process spawned, no write, nothing leaves the workspace. Expected to sit at allow tier.
+// Tool names the gointel provider exposes; each is a pure read of an in-memory type-checked snapshot at allow tier.
 const (
 	ToolDescribe        = "go_describe"
 	ToolDefinition      = "go_definition"
@@ -23,7 +23,6 @@ const (
 	ToolDiagnostics     = "go_diagnostics"
 )
 
-// toolNames is the declaration order used by Supports and the tool list.
 var toolNames = []string{
 	ToolDescribe,
 	ToolDefinition,
@@ -33,12 +32,11 @@ var toolNames = []string{
 	ToolDiagnostics,
 }
 
-// tools implements taskengine.ToolsRepo over an Index. Dispatch accepts args from the chain input map or from the declarative ToolsCall.Args, rejects unknown argument names per tool, then hands off to a typed handler.
 type tools struct {
 	ix Index
 }
 
-// NewTools returns the gointel ToolsRepo. Register it in the engine's local tools map under ToolsProviderName so it is HITL-wrapped like every other toolset.
+// NewTools returns the gointel ToolsRepo; register it under ToolsProviderName in the engine's local tools map.
 func NewTools(ix Index) taskengine.ToolsRepo {
 	return &tools{ix: ix}
 }
@@ -108,7 +106,6 @@ func (h *tools) Exec(ctx context.Context, _ time.Time, input any, _ bool, call *
 	}
 }
 
-// jsonResult adapts a typed query result to the engine's (any, DataType, error) shape, so the payload the model sees is exactly the declared schema.
 func jsonResult[T any](res *T, err error) (any, taskengine.DataType, error) {
 	if err != nil {
 		return nil, taskengine.DataTypeAny, err
@@ -120,9 +117,6 @@ func (h *tools) Supports(context.Context) ([]string, error) {
 	return append([]string{ToolsProviderName}, toolNames...), nil
 }
 
-// Argument decoding: small models routinely emit JSON scalars as strings ({"max": "20"}), and a strict type assertion would silently answer a different question than the one asked. Argument names stay strict — rejectUnknownArgs is the guard.
-
-// callArgs assembles the argument map from the chain input or, for declarative `tools` tasks that carry arguments on the call itself, from ToolsCall.Args.
 func callArgs(input any, call *taskengine.ToolsCall) (map[string]any, error) {
 	if m, ok := input.(map[string]any); ok && len(m) > 0 {
 		return m, nil
@@ -186,7 +180,6 @@ func argString(args map[string]any, key string) string {
 	return ""
 }
 
-// argStrings accepts a JSON array, a Go []string, or a comma-separated string — the three shapes a model actually emits for a list argument.
 func argStrings(args map[string]any, key string) []string {
 	x, ok := args[key]
 	if !ok || x == nil {
@@ -220,7 +213,6 @@ func argStrings(args map[string]any, key string) []string {
 	return nil
 }
 
-// intFromFloat converts a JSON number to an int without Go's undefined float→int behavior outside the integer range. Out-of-range saturates; NaN reads as "no value" (documented default). Callers clamp again to their own ceiling.
 func intFromFloat(f float64) (int, bool) {
 	switch {
 	case f != f: // NaN

@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeMissions resolves every mission id to one fixed envelope name.
 type fakeMissions struct {
 	policy string
 	err    error
@@ -61,9 +60,7 @@ func TestUnit_EnforceAgentAnswerBounds_GrantWithBudgetPasses(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestUnit_EnforceAgentAnswerBounds_RefusalsAreTyped pins every refusal as
-// *AgentAnswerBoundsError — the branch both surfaces (CLI respond and the
-// oracle driver) share.
+// TestUnit_EnforceAgentAnswerBounds_RefusalsAreTyped pins every refusal as *AgentAnswerBoundsError.
 func TestUnit_EnforceAgentAnswerBounds_RefusalsAreTyped(t *testing.T) {
 	t.Run("no mission on the ask", func(t *testing.T) {
 		svc, _, policy := boundsFixture(t, `{"default_action":"deny","rules":[],"attention":{"allowAgentAnswers":true}}`)

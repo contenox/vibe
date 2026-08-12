@@ -20,14 +20,13 @@ type vertexClient struct {
 	modelName       string
 	contextLength   int
 	maxOutputTokens int
-	credJSON        string // service account JSON; empty → ADC
+	credJSON        string
 	httpClient      *http.Client
 	canThink        bool
 	tracker         libtracker.ActivityTracker
-	tokenFn         func(context.Context) (string, error) // test tools; overrides credJSON when set
+	tokenFn         func(context.Context) (string, error)
 }
 
-// endpoint builds the full Vertex AI API URL for a given method (e.g. "generateContent").
 func (c *vertexClient) endpoint(method string) string {
 	return strings.TrimRight(c.baseURL, "/") +
 		"/publishers/" + c.publisher +
@@ -35,9 +34,6 @@ func (c *vertexClient) endpoint(method string) string {
 		":" + method
 }
 
-// bearer returns an OAuth2 access token using the provider's cached source
-// (the per-call BearerTokenWithCreds fallback only fires in tests, where
-// tokenFn is unset).
 func (c *vertexClient) bearer(ctx context.Context) (string, error) {
 	tokenFn := c.tokenFn
 	if tokenFn == nil {
@@ -48,7 +44,6 @@ func (c *vertexClient) bearer(ctx context.Context) (string, error) {
 	return tokenFn(ctx)
 }
 
-// authHeaders sets the bearer token and the quota-project header on req.
 func (c *vertexClient) authHeaders(ctx context.Context, req *http.Request) error {
 	token, err := c.bearer(ctx)
 	if err != nil {
@@ -61,8 +56,6 @@ func (c *vertexClient) authHeaders(ctx context.Context, req *http.Request) error
 	return nil
 }
 
-// postJSON POSTs request as JSON to endpoint with ADC bearer auth and returns
-// the raw response body. Used by the Gemini path via sendRequest.
 func (c *vertexClient) postJSON(ctx context.Context, endpoint string, request any) ([]byte, error) {
 	reportErr, reportChange, end := c.tracker.Start(
 		ctx,
@@ -85,8 +78,7 @@ func (c *vertexClient) postJSON(ctx context.Context, endpoint string, request an
 		payload = b
 	}
 
-	// Non-streaming call: bounded end-to-end, retried on 429/5xx with
-	// Retry-After honored.
+	// Bounded end-to-end; retried on 429/5xx with Retry-After honored.
 	ctx, cancel := modelrepo.NonStreamingContext(ctx)
 	defer cancel()
 	resp, err := modelrepo.DoWithRetry(ctx, c.httpClient, func() (*http.Request, error) {
@@ -121,8 +113,6 @@ func (c *vertexClient) postJSON(ctx context.Context, endpoint string, request an
 	if resp.StatusCode != http.StatusOK {
 		var eresp vertexErrorResponse
 		if jsonErr := json.Unmarshal(body, &eresp); jsonErr == nil && eresp.Error.Message != "" {
-			// Same documented shapes as Gemini: RESOURCE_EXHAUSTED → rate
-			// limit, INVALID_ARGUMENT with token phrasing → context overflow.
 			err = fmt.Errorf("vertex API error: %d %s - %s (model=%s url=%s)",
 				resp.StatusCode, eresp.Error.Status, eresp.Error.Message, c.modelName, endpoint)
 			err = modelrepo.ClassifyProviderError(err, resp.StatusCode, eresp.Error.Status, eresp.Error.Message)
@@ -139,8 +129,6 @@ func (c *vertexClient) postJSON(ctx context.Context, endpoint string, request an
 	return body, nil
 }
 
-// sendRequest POSTs to the given Vertex AI endpoint and decodes the JSON
-// response into response. Pattern mirrors gemini/client.go sendRequest.
 func (c *vertexClient) sendRequest(ctx context.Context, endpoint string, request interface{}, response interface{}) error {
 	body, err := c.postJSON(ctx, endpoint, request)
 	if err != nil {
@@ -154,9 +142,12 @@ func (c *vertexClient) sendRequest(ctx context.Context, endpoint string, request
 	return nil
 }
 
-// buildVertexRequest converts modelrepo messages and args to a vertexRequest.
-// Free function matching OpenAI/Gemini convention.
 func buildVertexRequest(modelName string, messages []modelrepo.Message, args []modelrepo.ChatArgument, canThink ...bool) (vertexRequest, error) {
+	// Raw-byte cap enforced under the generateContent 20 MB total-request limit before the wire.
+	if err := modelrepo.ValidateAudioParts("vertex", modelName, messages); err != nil {
+		return vertexRequest{}, err
+	}
+
 	cfg := &modelrepo.ChatConfig{}
 	for _, a := range args {
 		a.Apply(cfg)
@@ -299,8 +290,6 @@ func vertexThinkingBudget(level string) (int, bool) {
 	}
 }
 
-// convertToVertexContents maps modelrepo messages to Vertex AI content format.
-// Mirrors convertToGeminiMessages in the gemini package.
 func convertToVertexContents(messages []modelrepo.Message) []vertexContent {
 	out := make([]vertexContent, 0, len(messages))
 	toolCallNameByID := make(map[string]string)
@@ -324,14 +313,20 @@ func convertToVertexContents(messages []modelrepo.Message) []vertexContent {
 			parts = append(parts, vertexPart{Text: m.Content})
 		}
 
-		// Image attachments: append one inlineData part per image, after the
-		// text part, mirroring the OpenAI content-parts ordering. The resolver
-		// only routes image-bearing requests to vision-capable providers.
 		for _, img := range m.Images {
 			parts = append(parts, vertexPart{
 				InlineData: &vertexInlineData{
 					MimeType: img.MimeType,
 					Data:     img.Data,
+				},
+			})
+		}
+
+		for _, a := range m.Audio {
+			parts = append(parts, vertexPart{
+				InlineData: &vertexInlineData{
+					MimeType: a.MimeType,
+					Data:     a.Data,
 				},
 			})
 		}
@@ -437,8 +432,6 @@ func vertexContainsSchemaReference(v any) bool {
 	return false
 }
 
-// sanitizeVertexSchema converts arbitrary JSON Schema to Vertex AI's accepted format.
-// Vertex AI uses the same schema constraints as Gemini AI Studio.
 func sanitizeVertexSchema(params any) (*vertexSchema, error) {
 	if params == nil {
 		return nil, nil
@@ -494,11 +487,7 @@ func sanitizeSchemaMap(schema map[string]any) map[string]any {
 			if typeStr == "" {
 				typeStr = "string"
 			}
-			// A union carrying its own items ("one path, or an array of them")
-			// must collapse to the ARRAY branch, not merely the first one:
-			// Vertex rejects a declaration whose schema has items while its
-			// type is anything else. Widening to array loses nothing, because
-			// every such argument's Go side already accepts a one-element list.
+			// Vertex rejects items under a non-array type; a union with items collapses to array.
 			if _, hasItems := schema["items"]; hasItems && unionHasArray {
 				typeStr = "array"
 			}
@@ -515,10 +504,7 @@ func sanitizeSchemaMap(schema map[string]any) map[string]any {
 		}
 	}
 
-	// items rides along ONLY on an array. Vertex refuses the whole
-	// functionDeclaration when it sees items under any other type, which takes
-	// down every tool in the request rather than the one bad property — so a
-	// stray items is dropped here instead of forwarded.
+	// Vertex refuses the whole functionDeclaration if items appears under a non-array type; drop stray items instead.
 	if items, ok := schema["items"]; ok && result["type"] == "array" {
 		if itemsMap, ok := items.(map[string]any); ok {
 			result["items"] = sanitizeSchemaMap(itemsMap)

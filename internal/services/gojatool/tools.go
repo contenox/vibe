@@ -15,27 +15,18 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// ToolsProviderName is the tools-provider key this package registers under.
-// Policy addressing is `tools: "goja", tool: <name>`.
+// ToolsProviderName is the tools-provider key this package registers under, addressed as `tools: "goja", tool: <name>`.
 const ToolsProviderName = "goja"
 
-// ToolEval is the sandbox tool the model drives directly. Script tools are
-// registered beside it under their own declared names, unprefixed — the
-// provider is the namespace.
+// ToolEval is the sandbox tool the model drives directly; script tools register beside it under their own unprefixed names, since the provider is the namespace.
 const ToolEval = "goja_eval"
 
-// Config configures a Toolset. Zero values fall back to the documented
-// defaults, so Config{} is a valid, safe configuration with no script tools.
+// Config configures a Toolset; zero values fall back to the documented defaults, so Config{} is a valid, safe configuration with no script tools.
 type Config struct {
-	// ScriptDir is the directory scanned for `*.js` script tools. Empty, or
-	// absent on disk, means no script tools — goja_eval is still registered.
-	// Anything else that goes wrong while reading it is a fail-fast startup
-	// error.
+	// ScriptDir is the directory scanned for `*.js` script tools; empty or absent means no script tools (goja_eval still registers), and any other read failure is a fail-fast startup error.
 	ScriptDir string
 
-	// Host is the engine's real tool path — see HostToolCaller. May be nil
-	// at construction and supplied later with SetHost; until set, host.tool
-	// throws ErrHostUnavailable and scripts can only compute.
+	// Host is the engine's tool path (see HostToolCaller); may be nil at construction and supplied later via SetHost, until when host.tool throws ErrHostUnavailable.
 	Host HostToolCaller
 
 	// Deadline is the default per-execution budget (default DefaultDeadline).
@@ -52,19 +43,14 @@ type Config struct {
 	// MaxCallStackSize bounds JS call depth (default defaultMaxCallStack).
 	MaxCallStackSize int
 
-	// ReservedNames are additional tool names a script may not claim.
-	// goja_eval is always reserved.
+	// ReservedNames are additional tool names a script may not claim; goja_eval is always reserved.
 	ReservedNames []string
 
-	// Tracker is where load-time diagnostics are reported (see
-	// reportUndeclaredReach). Nil degrades to libtracker.NoopTracker.
+	// Tracker is where load-time diagnostics are reported (see reportUndeclaredReach); nil degrades to libtracker.NoopTracker.
 	Tracker libtracker.ActivityTracker
 }
 
-// Toolset is the taskengine.ToolsRepo for the goja provider: goja_eval plus
-// one tool per loaded script. New returns the concrete type, rather than the
-// interface, because the registration site needs SetHost and Shutdown, which
-// the interface cannot carry.
+// Toolset is the taskengine.ToolsRepo for the goja provider: goja_eval plus one tool per loaded script; New returns this concrete type since the registration site needs SetHost and Shutdown.
 type Toolset struct {
 	sb      *sandbox
 	scripts []*Script
@@ -74,8 +60,7 @@ type Toolset struct {
 
 var _ taskengine.ToolsRepo = (*Toolset)(nil)
 
-// New builds the goja toolset, loading and validating every script tool. A
-// single bad script fails construction.
+// New builds the goja toolset, loading and validating every script tool; a single bad script fails construction.
 func New(cfg Config) (*Toolset, error) {
 	sb := newSandbox(cfg.Deadline, cfg.MaxDeadline, cfg.OutputCap, cfg.MaxCallStackSize)
 	sb.host = cfg.Host
@@ -106,10 +91,6 @@ func New(cfg Config) (*Toolset, error) {
 	return t, nil
 }
 
-// reportUndeclaredReach says once, at startup, which scripts declare no
-// `tools` list — a diagnostic, not an error, since the field is optional.
-// Reported through the tracker rather than a log call of its own, since the
-// tracker is this repo's single instrumentation seam.
 func reportUndeclaredReach(ctx context.Context, tracker libtracker.ActivityTracker, scripts []*Script) {
 	var undeclared []string
 	for _, sc := range scripts {
@@ -128,14 +109,10 @@ func reportUndeclaredReach(ctx context.Context, tracker libtracker.ActivityTrack
 	end()
 }
 
-// Shutdown refuses further executions and joins in-flight ones. Chain it onto
-// engine.Stop. Safe to call more than once.
+// Shutdown refuses further executions and joins in-flight ones; safe to call more than once.
 func (t *Toolset) Shutdown() { t.sb.shutdown() }
 
-// Scripts returns the loaded script tools, in load order. An approval
-// surface uses Script.Tools together with Script.ToolsDeclared to answer what
-// a script will touch — read both, since "declares it reaches nothing" and
-// "declares nothing" both present as an empty list.
+// Scripts returns the loaded script tools, in load order; read Script.Tools together with Script.ToolsDeclared, since both "declares nothing" and "declares it reaches nothing" present as an empty list.
 func (t *Toolset) Scripts() []*Script {
 	out := make([]*Script, len(t.scripts))
 	copy(out, t.scripts)
@@ -154,9 +131,6 @@ func (t *Toolset) Exec(ctx context.Context, startTime time.Time, input any, debu
 	return res, dt, markSeverity(err)
 }
 
-// execDispatch resolves the tool and runs it. Argument names are strict
-// (rejectUnknownArgs); argument values are coerced, since small models
-// routinely emit JSON scalars as strings.
 func (t *Toolset) execDispatch(ctx context.Context, _ time.Time, input any, _ bool, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	if call == nil {
 		return nil, taskengine.DataTypeAny, errors.New("goja: tools required")
@@ -192,7 +166,6 @@ func (t *Toolset) execDispatch(ctx context.Context, _ time.Time, input any, _ bo
 	}
 }
 
-// evalTool runs goja_eval.
 func (t *Toolset) evalTool(ctx context.Context, args map[string]any) (*Result, error) {
 	if err := rejectUnknownArgs(ToolEval, args, "code", "deadline_ms"); err != nil {
 		return nil, err
@@ -214,9 +187,6 @@ func (t *Toolset) evalTool(ctx context.Context, args map[string]any) (*Result, e
 	return t.sb.runSource(ctx, ToolEval, code, t.sb.clampDeadline(deadline))
 }
 
-// checkScriptArgs enforces the script's own declared schema at the boundary:
-// unknown names are refused (unless the schema opts into
-// additionalProperties) and missing required names are named.
 func (t *Toolset) checkScriptArgs(sc *Script, args map[string]any) error {
 	if !sc.allowExtra {
 		if err := rejectUnknownArgs(sc.Name, args, sc.properties...); err != nil {
@@ -237,14 +207,6 @@ func (t *Toolset) checkScriptArgs(sc *Script, args map[string]any) error {
 	return nil
 }
 
-// --- Argument decoding -------------------------------------------------------
-// Accepts args from the chain input map or from the declarative
-// ToolsCall.Args, rejects unknown argument names per tool, coerces values
-// generously.
-
-// callArgs assembles the argument map from the chain input or, for
-// declarative `tools` tasks that carry arguments on the call itself, from
-// ToolsCall.Args.
 func callArgs(input any, call *taskengine.ToolsCall) map[string]any {
 	if m, ok := input.(map[string]any); ok && len(m) > 0 {
 		return m
@@ -273,8 +235,7 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 	var unknown []string
 	for key := range args {
 		if _, ok := allowedSet[key]; !ok {
-			// The key is model-supplied too, so it is clamped like any other
-			// echoed argument.
+			// The key is model-supplied too, so it's clamped like any other echoed argument.
 			unknown = append(unknown, echoName(key))
 		}
 	}
@@ -292,8 +253,6 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 		toolName, strings.Join(unknown, ", "), shown, severityRecoverable)
 }
 
-// echoName renders a model-supplied argument name for an error message:
-// clamped, non-printable runes replaced rather than embedded.
 func echoName(s string) string {
 	var b strings.Builder
 	for i, r := range []rune(s) {
@@ -337,9 +296,6 @@ const (
 	minInt = -maxInt - 1
 )
 
-// intFromFloat converts a JSON number to an int without the undefined
-// behaviour Go's float-to-int conversion has outside the integer range.
-// Out-of-range saturates; NaN reads as "no value".
 func intFromFloat(f float64) (int, bool) {
 	switch {
 	case f != f:

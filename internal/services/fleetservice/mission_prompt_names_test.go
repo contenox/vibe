@@ -15,7 +15,6 @@ import (
 // (preamble, nudge) must name tools exactly as taskengine qualifies and
 // offers them to the model, never the bare form.
 func TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem(t *testing.T) {
-	// The names taskengine puts in the model's tool list (see taskenv.go).
 	tools, err := missiontools.New(schemaOnlyStore{}, nil).GetToolsForToolsByName(
 		missiontools.WithMissionID(context.Background(), "m-1"),
 		missiontools.ToolsProviderName,
@@ -54,7 +53,6 @@ func TestUnit_MissionPrompts_NameToolsAsTheModelSeesThem(t *testing.T) {
 	}
 }
 
-// mentionsBare reports whether text names tool without its provider prefix.
 func mentionsBare(text, tool string) bool {
 	prefix := missiontools.ToolsProviderName + "."
 	for i := 0; ; {
@@ -78,8 +76,6 @@ func keys(m map[string]bool) []string {
 	return out
 }
 
-// schemaOnlyStore satisfies missiontools.MissionStore for a test that only
-// reads tool schemas; no method is ever called.
 type schemaOnlyStore struct{}
 
 func (schemaOnlyStore) AddReport(context.Context, string, *missionservice.Report) error {
@@ -98,4 +94,4 @@ func (schemaOnlyStore) Finish(context.Context, string, missionservice.Status, st
 	return nil, nil
 }
 
-var _ taskengine.Tool // the tool shape these names are derived from
+var _ taskengine.Tool

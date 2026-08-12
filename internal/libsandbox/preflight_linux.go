@@ -4,15 +4,7 @@ package libsandbox
 
 import "fmt"
 
-// Preflight reports whether the confinement floor (the Landlock filesystem/exec
-// wall applied to every spawned agent) can be built on this host, without
-// attempting a spawn. nil means an agent can be confined here; a non-nil error
-// (wrapping ErrIsolation) names why not.
-//
-// Checks only the floor (Landlock) on purpose: the default wall needs nothing
-// else, so it builds even where unprivileged userns is disabled. The opt-in
-// network wall's extra userns requirement is preflighted separately at spawn
-// (preflightUserns). See Spec.NetworkWall.
+// Preflight reports whether the Landlock confinement floor can be built on this host without attempting a spawn; nil means yes, a non-nil error (wrapping ErrIsolation) says why not.
 func Preflight() error {
 	abi, err := landlockABI()
 	if err != nil {

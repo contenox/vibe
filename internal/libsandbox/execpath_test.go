@@ -9,10 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// absTestPath turns a Unix-style absolute literal into a real absolute path
-// on the host running the test: unchanged on Unix, prefixed with a drive
-// letter and converted to backslashes on Windows (a bare leading "/" is not
-// absolute there per filepath.IsAbs).
 func absTestPath(p string) string {
 	if runtime.GOOS != "windows" {
 		return p

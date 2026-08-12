@@ -17,13 +17,10 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.anthropic.com"
-	// anthropicAPIVersion is the direct-API version header value (Vertex uses a
-	// different value placed in the body; that path lives in the vertex package).
+	defaultBaseURL      = "https://api.anthropic.com"
 	anthropicAPIVersion = "2023-06-01"
 )
 
-// anthropicClient is the shared transport for the direct Anthropic API.
 type anthropicClient struct {
 	baseURL         string
 	apiKey          string
@@ -80,9 +77,6 @@ func (c *anthropicClient) post(ctx context.Context, path string, request any) ([
 	return body, nil
 }
 
-// anthropicAPIError classifies the response into a typed sentinel: 429 and 529
-// (overloaded_error) are rate/capacity limits; a 400 invalid_request_error
-// mentioning the context window is a context-length overflow.
 func anthropicAPIError(status int, body []byte, modelName string) error {
 	err := fmt.Errorf("anthropic API error: %d - %s (model=%s)", status, strings.TrimSpace(string(body)), modelName)
 	var payload struct {
@@ -139,7 +133,7 @@ func applyAnthropicThinking(req *msgcodec.Request, modelName string, cfg *modelr
 		if effort := anthropicEffort(modelName, level); effort != "" && effort != reasoning.High {
 			req.OutputConfig = &msgcodec.OutputConfig{Effort: effort}
 		} else if effort == reasoning.High {
-			// high is the API default; omit output_config to keep the payload smaller.
+			// high is the API default; omit output_config.
 			req.OutputConfig = nil
 		}
 		return
@@ -152,9 +146,6 @@ func applyAnthropicThinking(req *msgcodec.Request, modelName string, cfg *modelr
 	req.Thinking = &msgcodec.ThinkingConfig{Type: "enabled", BudgetTokens: budget}
 }
 
-// stripThinkingUnlessEnabled drops replayed thinking blocks whenever the
-// outgoing request does not turn thinking on: Anthropic rejects history
-// thinking blocks unless the request enables thinking (enabled/adaptive).
 func stripThinkingUnlessEnabled(req *msgcodec.Request) {
 	if req.Thinking == nil || req.Thinking.Type == "disabled" {
 		msgcodec.StripThinkingBlocks(req)
@@ -241,6 +232,12 @@ func (c *anthropicChatClient) Chat(ctx context.Context, messages []modelrepo.Mes
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "anthropic", "model", c.modelName)
 	defer end()
 
+	// No audio encoding on this wire format; refuse instead of dropping silently.
+	if err := modelrepo.RefuseAudioInput("anthropic", c.modelName, messages); err != nil {
+		reportErr(err)
+		return modelrepo.ChatResult{}, err
+	}
+
 	cfg := chatConfigFromArgs(args)
 	req, nameMap := msgcodec.Build(messages, cfg)
 	req.Model = c.modelName // direct: model in body, version via header
@@ -271,6 +268,11 @@ func (c *anthropicChatClient) Chat(ctx context.Context, messages []modelrepo.Mes
 type anthropicStreamClient struct{ anthropicClient }
 
 func (c *anthropicStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
+	// No audio encoding on this wire format; refuse instead of dropping silently.
+	if err := modelrepo.RefuseAudioInput("anthropic", c.modelName, messages); err != nil {
+		return nil, err
+	}
+
 	cfg := chatConfigFromArgs(args)
 	req, nameMap := msgcodec.Build(messages, cfg)
 	req.Model = c.modelName
@@ -323,8 +325,7 @@ func (c *anthropicStreamClient) Stream(ctx context.Context, messages []modelrepo
 			}
 			ps, derr := dec.DecodeLine([]byte(payload))
 			if derr != nil {
-				// In-stream `error` events (overloaded_error etc.) surface here;
-				// swallowing them would let the stream end looking successful.
+				// In-stream `error` events (overloaded_error etc.) surface here; don't swallow them.
 				derr = fmt.Errorf("anthropic stream failed for model %s: %w", c.modelName, derr)
 				reportErr(derr)
 				send(&modelrepo.StreamParcel{Error: derr})

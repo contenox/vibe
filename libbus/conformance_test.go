@@ -27,8 +27,6 @@ import (
 // silently passed) when Docker is unavailable; set LIBBUS_REQUIRE_NATS=1 to
 // turn that skip into a hard failure in CI.
 
-// ── backend registry ───────────────────────────────────────────────────────
-
 // newBusFunc builds a fresh Messenger. It registers its own cleanup on t and
 // skips the test if the backend's infrastructure is unavailable.
 type newBusFunc func(t *testing.T) libbus.Messenger
@@ -95,8 +93,6 @@ func uniqueSubject(t *testing.T) string {
 	return fmt.Sprintf("conformance.s%d", subjectCounter.Add(1))
 }
 
-// ── shared NATS container ──────────────────────────────────────────────────
-
 var (
 	natsOnce    sync.Once
 	natsURL     string
@@ -134,8 +130,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// ── helpers ────────────────────────────────────────────────────────────────
-
 // receive waits for one message, failing the test rather than hanging forever.
 func receive(t *testing.T, ch <-chan []byte, within time.Duration) []byte {
 	t.Helper()
@@ -160,8 +154,6 @@ func expectNoMessage(t *testing.T, ch <-chan []byte, within time.Duration) {
 }
 
 const settle = 250 * time.Millisecond
-
-// ── the matrix ─────────────────────────────────────────────────────────────
 
 func TestConformance_PublishStreamDelivery(t *testing.T) {
 	runConformance(t, "publish_is_delivered_to_subscriber", func(t *testing.T, newBus newBusFunc) {
@@ -574,7 +566,6 @@ func TestConformance_CloseIsIdempotent(t *testing.T) {
 	})
 }
 
-// ── documented divergences ─────────────────────────────────────────────────
 //
 // These assert the differences documented on the Messenger interface. They
 // exist so that a backend which quietly changes behaviour breaks a test

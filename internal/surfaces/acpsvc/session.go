@@ -207,7 +207,7 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 			}
 			update := libacp.NewUserMessageChunk(m.Content)
 			update.MessageID = messageID
-			t.sendUpdate(ctx, libacp.SessionNotification{
+			t.sendUpdateLocal(ctx, libacp.SessionNotification{
 				SessionID: sessionID,
 				Update:    update,
 			})
@@ -216,7 +216,7 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 			if m.Thinking != "" {
 				update := libacp.NewAgentThoughtChunk(m.Thinking)
 				update.MessageID = messageID
-				t.sendUpdate(ctx, libacp.SessionNotification{
+				t.sendUpdateLocal(ctx, libacp.SessionNotification{
 					SessionID: sessionID,
 					Update:    update,
 				})
@@ -224,7 +224,7 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 			if m.Content != "" {
 				update := libacp.NewAgentMessageChunk(m.Content)
 				update.MessageID = messageID
-				t.sendUpdate(ctx, libacp.SessionNotification{
+				t.sendUpdateLocal(ctx, libacp.SessionNotification{
 					SessionID: sessionID,
 					Update:    update,
 				})
@@ -232,7 +232,7 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 			}
 			for _, tc := range m.CallTools {
 				status := replayStatusFor(statuses, tc.ID)
-				t.sendUpdate(ctx, libacp.SessionNotification{
+				t.sendUpdateLocal(ctx, libacp.SessionNotification{
 					SessionID: sessionID,
 					Update:    toolCallUpdateFromCall(tc, status),
 				})
@@ -250,7 +250,7 @@ func (t *Transport) replayMessages(ctx context.Context, sessionID libacp.Session
 					update = u
 				}
 			}
-			t.sendUpdate(ctx, libacp.SessionNotification{
+			t.sendUpdateLocal(ctx, libacp.SessionNotification{
 				SessionID: sessionID,
 				Update:    update,
 			})
@@ -329,6 +329,10 @@ func replayToolStatus(content string) libacp.ToolCallStatus {
 		if err := json.Unmarshal([]byte(s), &unquoted); err == nil {
 			s = strings.TrimSpace(unquoted)
 		}
+	}
+	// A persisted policy denial replays as failed, matching the live wire.
+	if _, denied := policyDenialReason(s); denied {
+		return libacp.ToolCallStatusFailed
 	}
 	if strings.HasPrefix(s, "{") {
 		var obj map[string]json.RawMessage

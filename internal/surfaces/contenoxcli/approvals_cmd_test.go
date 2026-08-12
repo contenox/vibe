@@ -57,8 +57,6 @@ func TestUnit_RenderApprovalsTable(t *testing.T) {
 	}
 }
 
-// ─── --as-agent (beta) ──────────────────────────────────────────────────────
-
 // TestUnit_ApprovalsRespond_AsAgentFlagIsBetaGated pins the registration
 // seam: without opt-in-beta the flag does not exist — absent from help and
 // unparseable — exactly as Main resolves it; with the opt-in it registers.

@@ -12,8 +12,6 @@ import (
 	"github.com/contenox/contenox/internal/libsandbox"
 )
 
-// requireBash skips a test that needs the real bash semantics (rc files,
-// PROMPT_COMMAND) on a machine that does not have it.
 func requireBash(t *testing.T) string {
 	t.Helper()
 	for _, p := range []string{"/bin/bash", "/usr/bin/bash"} {
@@ -110,7 +108,7 @@ func TestPromptSuppressionEnv_ShapePerShell(t *testing.T) {
 		return out
 	}
 
-	bash := env("/usr/local/bin/bash") // non-standard path, classified by base name
+	bash := env("/usr/local/bin/bash")
 	if bash["PS1"] != "" || bash["PS2"] != "" {
 		t.Fatalf("bash: PS1/PS2 must be cleared, got %#v", bash)
 	}
@@ -152,13 +150,11 @@ func TestShellSpawnArgs_KeepsInteractiveDropsLineEditor(t *testing.T) {
 	if other := shellSpawnArgs("/bin/sh", false); len(other) != 0 {
 		t.Fatalf("an unrecognized shell keeps its default argv, got %q", other)
 	}
-	// A human's terminal keeps readline: line editing and history are the point.
 	if hbash := strings.Join(shellSpawnArgs("/bin/bash", true), " "); strings.Contains(hbash, "--noediting") {
 		t.Fatalf("an interactive bash must keep readline, got %q", hbash)
 	}
 }
 
-// withHome returns a ScrubEnv that redirects HOME to a test's own rc file.
 func withHome(home string) func([]string) []string {
 	return func(env []string) []string {
 		out := make([]string, 0, len(env)+1)

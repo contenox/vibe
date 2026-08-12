@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// shellPolicy writes a local_shell policy with the given rules and returns an Evaluator.
 func shellPolicy(t *testing.T, rulesJSON string) hitlservice.PolicyEvaluator {
 	t.Helper()
 	dir := t.TempDir()
@@ -170,8 +169,6 @@ func TestUnit_Evaluate_NoCommandSubstitution_CleanCommandPasses(t *testing.T) {
 	}
 }
 
-// prefixAllowPolicy writes the shipped envelopes' safe-verb shape: an allow
-// rule over a prefix list, default_action approve, so a fired allow is a real signal.
 func prefixAllowPolicy(t *testing.T, prefixes string) hitlservice.PolicyEvaluator {
 	t.Helper()
 	dir := t.TempDir()
@@ -194,7 +191,6 @@ func TestUnit_Evaluate_CommandPrefixAllowlist_MatchesSafeVerbs(t *testing.T) {
 		{"command": "ls"},
 		{"command": "ls", "args": "-la internal"},
 		{"command": "cat", "args": []any{"go.mod"}},
-		// The command string may carry its own arguments.
 		{"command": "git status"},
 	}
 	for _, args := range allowed {

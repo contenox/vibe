@@ -131,7 +131,7 @@ func TestUnit_envNameMatches(t *testing.T) {
 		{"*_TOKEN", "TOKEN_SUFFIX", false},
 		{"*", "ANYTHING", true},
 		{"", "PATH", false},
-		{"path", "PATH", false}, // case-sensitive
+		{"path", "PATH", false},
 	}
 	for _, c := range cases {
 		require.Equalf(t, c.want, envNameMatches(c.pattern, c.name),

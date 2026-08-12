@@ -3,6 +3,7 @@ package acpsvc
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	libacp "github.com/contenox/contenox/libacp"
@@ -17,9 +18,11 @@ import (
 const droppedContentMetaKey = "contenox.droppedContent"
 
 // droppedContentReport is the operator-facing form of the prompt content that
-// never reached the model. libacp.FlattenContent already computes the kinds
-// (its text projection cannot carry an image, an audio block, or a binary
-// resource) and the native driver adds the image kind when the turn is a slash
+// never reached the model. libacp.FlattenContent already computes the kinds:
+// its text projection cannot carry a binary resource, an unknown block type,
+// or an image or audio block that extraction refused (see extractImageParts
+// and extractAudioParts — blocks they accept never reach the projection). The
+// native driver adds the image and audio kinds when the turn is a slash
 // command, which has no use for an attachment. Until this envelope existed the
 // list went only to the tracker, so a client that attached a photo got a
 // successful turn answered as if nothing had been sent — a loss shaped like a
@@ -37,16 +40,38 @@ type droppedContentReport struct {
 // ok is false for an empty set, which is what makes absence meaningful: a turn
 // that dropped nothing emits no envelope at all, so a client can read presence
 // alone as "something was lost" without inspecting the payload.
-func explainDroppedContent(kinds []string) (droppedContentReport, bool) {
+//
+// audioReason is the specific sentence naming why audio was refused, when the
+// refusing site knows it (the pre-flight capability gate does — see
+// sessionAudioRefusal); "" renders the generic audio bounds-and-remedy
+// sentence instead. Dropped audio always gets one or the other: the bounds
+// and the remedy are knowable here, so they are named, never left for the
+// operator to guess.
+func explainDroppedContent(kinds []string, audioReason string) (droppedContentReport, bool) {
 	if len(kinds) == 0 {
 		return droppedContentReport{}, false
 	}
-	return droppedContentReport{
-		Kinds: kinds,
-		Explanation: "Part of the prompt never reached the model and had no effect on the answer: " +
-			strings.Join(kinds, ", ") +
-			". The turn ran on the remaining text alone. Either this path takes text only (a slash command does), the attachment could not be decoded, or the session's model does not accept it — so the reply will keep ignoring it until it is resent somewhere that does.",
-	}, true
+	explanation := "Part of the prompt never reached the model and had no effect on the answer: " +
+		strings.Join(kinds, ", ") +
+		". The turn ran on the rest of the prompt alone. Either this path takes text only (a slash command does), the attachment could not be decoded, or the session's model does not accept it — so the reply will keep ignoring it until it is resent somewhere that does."
+	if slices.Contains(kinds, string(libacp.ContentKindAudio)) {
+		if audioReason == "" {
+			audioReason = audioAcceptanceSentence()
+		}
+		explanation += " " + audioReason
+	}
+	return droppedContentReport{Kinds: kinds, Explanation: explanation}, true
+}
+
+// appendDroppedKind records kind in the dropped set, preserving the report's
+// deduplicated first-seen order when the same kind is dropped twice for
+// different reasons (one attachment refused by extraction, another discarded
+// by a command path): to the client both are one fact, "this kind was lost".
+func appendDroppedKind(kinds []string, kind string) []string {
+	if slices.Contains(kinds, kind) {
+		return kinds
+	}
+	return append(kinds, kind)
 }
 
 // droppedContentMessage renders the report as the one line a client shows in
@@ -63,9 +88,10 @@ func droppedContentMessage(r droppedContentReport) string {
 // every ACP client already renders an agent message, so an editor that reads
 // nothing custom still shows the loss. The kinds are repeated on the update's
 // own `_meta` so a client can act on them without parsing prose. ok is false
-// when nothing was dropped, and nothing is announced.
-func droppedContentNotice(kinds []string) (libacp.SessionUpdate, bool) {
-	report, ok := explainDroppedContent(kinds)
+// when nothing was dropped, and nothing is announced. audioReason is passed
+// through to explainDroppedContent.
+func droppedContentNotice(kinds []string, audioReason string) (libacp.SessionUpdate, bool) {
+	report, ok := explainDroppedContent(kinds, audioReason)
 	if !ok {
 		return libacp.SessionUpdate{}, false
 	}
@@ -79,9 +105,11 @@ func droppedContentNotice(kinds []string) (libacp.SessionUpdate, bool) {
 // the survival path (see runNativeTurn), so a reattaching client reads it too.
 // Called before the turn runs, so the operator learns the attachment is gone
 // ahead of the answer that ignores it rather than after. A no-op when nothing
-// was dropped.
-func announceDroppedContent(ctx context.Context, sid libacp.SessionID, kinds []string, emit func(context.Context, libacp.SessionNotification)) {
-	notice, ok := droppedContentNotice(kinds)
+// was dropped. audioReason (see explainDroppedContent) rides the notice only:
+// it is the human-facing surface, and threading it further would demand a
+// kernel change (nativeturn.Result carries kinds alone).
+func announceDroppedContent(ctx context.Context, sid libacp.SessionID, kinds []string, audioReason string, emit func(context.Context, libacp.SessionNotification)) {
+	notice, ok := droppedContentNotice(kinds, audioReason)
 	if !ok || emit == nil {
 		return
 	}
@@ -91,9 +119,13 @@ func announceDroppedContent(ctx context.Context, sid libacp.SessionID, kinds []s
 // withDroppedContentMeta attaches the report to a prompt response's `_meta`,
 // preserving anything already there — a parked turn's contenox.stopReason in
 // particular. Returns resp untouched when nothing was dropped, which is what
-// lets a client treat the key's presence as the whole signal.
+// lets a client treat the key's presence as the whole signal. The explanation
+// here is always the generic one: on the survival path this is rebuilt from a
+// nativeturn.Result, which carries only the kinds — and the generic audio
+// sentence still names the bounds and the default-audio-model remedy, so no
+// surface loses them.
 func withDroppedContentMeta(resp libacp.PromptResponse, kinds []string) libacp.PromptResponse {
-	report, ok := explainDroppedContent(kinds)
+	report, ok := explainDroppedContent(kinds, "")
 	if !ok {
 		return resp
 	}

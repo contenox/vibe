@@ -1,9 +1,5 @@
 package agentservice_test
 
-// A chain suspends past the fast window on a gated call, and a verdict
-// delivered to a completely fresh instance (same on-disk database) completes
-// it end to end, exactly once.
-
 import (
 	"context"
 	"errors"
@@ -28,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stubModelRepo satisfies llmrepo.ModelRepo for chains that never reach a model.
 type stubModelRepo struct{}
 
 func (stubModelRepo) Tokenize(context.Context, string, string) ([]int, error) { return []int{1}, nil }
@@ -48,7 +43,6 @@ func (stubModelRepo) Stream(context.Context, llmrepo.Request, []libmodelprovider
 	return nil, llmrepo.Meta{}, errors.New("stub: no model")
 }
 
-// e2eInnerTools is the raw tool provider under the HITL wrapper.
 type e2eInnerTools struct {
 	mu    sync.Mutex
 	execs []string
@@ -72,10 +66,6 @@ func (e *e2eInnerTools) GetToolsForToolsByName(_ context.Context, name string) (
 	return []taskengine.Tool{{Type: "function", Function: taskengine.FunctionTool{Name: "write"}}}, nil
 }
 
-// approveAllPolicy gates every call and delegates the durable recorder half
-// (RecordPendingApproval/ResolveApprovalInline, via the embedded
-// ApprovalRecorder) and the late-answer half (Respond, via Service) to the
-// same real hitlservice instance.
 type approveAllPolicy struct {
 	hitlservice.ApprovalRecorder
 	Service hitlservice.Service
@@ -85,9 +75,6 @@ func (approveAllPolicy) Evaluate(context.Context, string, string, map[string]any
 	return hitlservice.EvaluationResult{Action: hitlservice.ActionApprove}, nil
 }
 
-// Respond satisfies localtools' approvalResponder so a verdict delivered
-// after the park window (through the SAME ask() callback, not a separate
-// out-of-process call) still resumes the checkpointed run.
 func (p approveAllPolicy) Respond(ctx context.Context, approvalID string, approved bool) error {
 	return p.Service.Respond(ctx, approvalID, approved)
 }
@@ -115,7 +102,6 @@ func (s *recordingSink) kinds() []taskengine.TaskEventKind {
 	return out
 }
 
-// e2eInstance is one "process": engine + hitlservice + agent over a shared DB file.
 type e2eInstance struct {
 	db    libdb.DBManager
 	store runtimetypes.Store
@@ -126,11 +112,6 @@ type e2eInstance struct {
 	sink  *recordingSink
 }
 
-// awayAsk simulates a human who never answers within this process's
-// lifetime: the ask blocks only until its context ends, then reports that
-// context error. It forces every verdict through Respond, as if delivered by
-// a restarted process or a separate `contenox approvals answer` invocation —
-// the shape newE2EInstance's original callers exercise.
 func awayAsk(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
 	<-ctx.Done()
 	return false, ctx.Err()
@@ -206,7 +187,6 @@ func e2eInput() taskengine.ChatHistory {
 	}}
 }
 
-// createSession registers the session's message index, as sessionservice's SessionNew does.
 func createSession(t *testing.T, db libdb.DBManager, sessionID string) {
 	t.Helper()
 	require.NoError(t, runtimetypes.NewMessageStore(db.WithoutTransaction(), "").CreateMessageIndex(context.Background(), sessionID, "e2e"))
@@ -269,7 +249,6 @@ func TestSystem_S6Gate_ApprovalOutlivesEngine_VerdictAfterRestartCompletesChain(
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalApproved, row.State)
 
-	// History must persist once: no stubs, no duplicates.
 	msgs := loadSessionMessages(t, b.db, sessionID)
 	var roles []string
 	resultCount := map[string]int{}
@@ -314,7 +293,6 @@ func TestSystem_S6Gate_DenyAfterRestart_CompletesWithDenySemantics(t *testing.T)
 	defer b.close()
 	require.NoError(t, b.hitl.Respond(ctx, "call-w1", false))
 
-	// Deny completes the chain with the standard deny message as the result.
 	require.Empty(t, b.inner.execs, "a denied call must never execute")
 	msgs := loadSessionMessages(t, b.db, sessionID)
 	var toolResults []string

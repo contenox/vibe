@@ -13,7 +13,6 @@ func TestUnit_Diagnostics_VetPassSetIsTheCuratedOne(t *testing.T) {
 	if got, want := strings.Join(VetPasses(), ","), "printf,unusedresult,unreachable,nilfunc,shadow"; got != want {
 		t.Fatalf("VetPasses() = %s, want %s", got, want)
 	}
-	// shadow is deliberately not in the default set.
 	if got, want := strings.Join(DefaultVetPasses(), ","), "printf,unusedresult,unreachable,nilfunc"; got != want {
 		t.Fatalf("DefaultVetPasses() = %s, want %s", got, want)
 	}
@@ -170,8 +169,6 @@ func TestUnit_Diagnostics_ScopeChangedFollowsObservedEdits(t *testing.T) {
 	ix := newTestIndex(t, root)
 	ctx := context.Background()
 
-	// Nothing has been observed to change yet: an empty result that names the
-	// next call, rather than a silent zero.
 	res, err := ix.Diagnostics(ctx, Request{Scope: ScopeChanged})
 	if err != nil {
 		t.Fatalf("diagnostics: %v", err)
@@ -210,7 +207,6 @@ func TestUnit_Diagnostics_ScopeChangedSeesAFreshEdit(t *testing.T) {
 		t.Fatalf("warm-up: %v", err)
 	}
 
-	// Fix the printf mistake and announce it; the finding must be gone.
 	vet := filepath.Join(root, "vetpkg", "vet.go")
 	fixed := "package vetpkg\n\nimport \"fmt\"\n\n// PrintfMistake is now correct.\nfunc PrintfMistake() string {\n\treturn fmt.Sprintf(\"%d\", 1)\n}\n\n// Unreachable still has dead code.\nfunc Unreachable() int {\n\treturn 1\n\tfmt.Println(\"dead\")\n\treturn 2\n}\n"
 	writeFixtureFile(t, vet, fixed)
@@ -279,8 +275,6 @@ func TestUnit_Diagnostics_AlwaysNamesTheToolchainView(t *testing.T) {
 
 func TestUnit_Diagnostics_LoadErrorWhenTheModuleIsBroken(t *testing.T) {
 	root := newFixture(t, "fixture")
-	// A go.mod the go tool cannot parse: the driver fails rather than returning
-	// packages, and the error must teach rather than leak a driver dump.
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("this is not a go.mod\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

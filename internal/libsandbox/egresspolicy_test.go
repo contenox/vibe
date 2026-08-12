@@ -8,8 +8,6 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-// Build-tag-free: the egress allow-list/DNS core is pure Go, verified here without a Linux namespace, TUN, or netstack.
-
 func mkAQuery(t *testing.T, host string) []byte {
 	t.Helper()
 	name, err := dnsmessage.NewName(host + ".")
@@ -161,11 +159,11 @@ func TestUnit_EgressPolicy_PortRestriction(t *testing.T) {
 // isPublicEgressIP refuses every SSRF-relevant address class and passes public ones.
 func TestUnit_isPublicEgressIP(t *testing.T) {
 	refused := []string{
-		"127.0.0.1", "::1", // loopback
-		"169.254.169.254", "fe80::1", // link-local (incl. cloud metadata)
-		"10.0.0.1", "172.16.0.1", "192.168.1.1", "fc00::1", // private / ULA
-		"0.0.0.0", "::", // unspecified
-		"224.0.0.1", "ff02::1", // multicast
+		"127.0.0.1", "::1",
+		"169.254.169.254", "fe80::1",
+		"10.0.0.1", "172.16.0.1", "192.168.1.1", "fc00::1",
+		"0.0.0.0", "::",
+		"224.0.0.1", "ff02::1",
 	}
 	for _, s := range refused {
 		if isPublicEgressIP(net.ParseIP(s)) {
@@ -189,9 +187,9 @@ func TestUnit_MustIP4(t *testing.T) {
 		"10.192.0.0":      {10, 192, 0, 0},
 		"255.255.255.255": {255, 255, 255, 255},
 		"0.0.0.0":         {0, 0, 0, 0},
-		"1.2.3":           {0, 0, 0, 0}, // malformed -> zeros
-		"1.2.3.999":       {0, 0, 0, 0}, // out of range -> zeros
-		"a.b.c.d":         {0, 0, 0, 0}, // non-numeric -> zeros
+		"1.2.3":           {0, 0, 0, 0},
+		"1.2.3.999":       {0, 0, 0, 0},
+		"a.b.c.d":         {0, 0, 0, 0},
 	}
 	for in, want := range cases {
 		got := mustIP4(in)

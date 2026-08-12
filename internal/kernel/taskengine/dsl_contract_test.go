@@ -9,9 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestUnit_TransitionTokens_FrozenValues pins the transition-eval token strings.
-// These are a de-facto public API: chains branch on them via TransitionBranch.When.
-// Changing a value here silently breaks every chain that branches on it.
+// TestUnit_TransitionTokens_FrozenValues pins the transition-eval token strings that chains branch on via TransitionBranch.When.
 func TestUnit_TransitionTokens_FrozenValues(t *testing.T) {
 	require.Equal(t, "tool_call", TransitionToolCall, "snake_case, aligned with the tool_call task-event kind (was the hyphenated tool-call pre-1.0)")
 	require.Equal(t, "executed", TransitionExecuted)
@@ -21,9 +19,7 @@ func TestUnit_TransitionTokens_FrozenValues(t *testing.T) {
 	require.Equal(t, "failed", TransitionFailed)
 }
 
-// TestUnit_DataType_RoundTrips guards C1/C2: every DataType must survive a
-// JSON and YAML round-trip via its string name, including DataTypeNil and
-// DataTypeAny (which previously diverged / failed).
+// TestUnit_DataType_RoundTrips guards C1/C2: every DataType must round-trip through JSON and YAML via its string name.
 func TestUnit_DataType_RoundTrips(t *testing.T) {
 	for _, dt := range []DataType{DataTypeAny, DataTypeString, DataTypeInt, DataTypeJSON, DataTypeChatHistory, DataTypeNil} {
 		jb, err := json.Marshal(dt)
@@ -40,8 +36,7 @@ func TestUnit_DataType_RoundTrips(t *testing.T) {
 	}
 }
 
-// TestUnit_EmptyBranches_CleanEnd guards E2: a leaf task (no branches) ends the
-// chain cleanly instead of erroring with "no matching transition found".
+// TestUnit_EmptyBranches_CleanEnd guards E2: a leaf task (no branches) ends the chain cleanly instead of erroring.
 func TestUnit_EmptyBranches_CleanEnd(t *testing.T) {
 	next, branch, err := SimpleEnv{}.evaluateTransitions(context.TODO(), "leaf", TaskTransition{Branches: nil}, "anything", nil)
 	require.NoError(t, err, "a task with no branches must end the chain, not error")
@@ -49,8 +44,7 @@ func TestUnit_EmptyBranches_CleanEnd(t *testing.T) {
 	require.Nil(t, branch)
 }
 
-// TestUnit_ValidateChain_Tightening guards A1–A5: malformed chains that used to
-// pass validation and fail opaquely at runtime are now rejected up front.
+// TestUnit_ValidateChain_Tightening guards A1-A5: malformed chains are rejected at validation instead of failing opaquely at runtime.
 func TestUnit_ValidateChain_Tightening(t *testing.T) {
 	end := []TransitionBranch{{Operator: OpDefault, When: "", Goto: TermEnd}}
 	ok := func(id string) TaskDefinition {
@@ -75,8 +69,7 @@ func TestUnit_ValidateChain_Tightening(t *testing.T) {
 	}
 }
 
-// TestUnit_TemperatureValue guards E1's nullability: nil means "do not send a
-// temperature" (provider default), a set value is forwarded.
+// TestUnit_TemperatureValue guards E1's nullability: nil means "do not send a temperature", a set value is forwarded.
 func TestUnit_TemperatureValue(t *testing.T) {
 	_, ok := temperatureValue(nil)
 	require.False(t, ok, "nil temperature must not be sent so the provider default applies")

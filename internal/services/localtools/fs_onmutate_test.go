@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupFSMutateGuard is setupFSReadGuard plus a recorder wired via WithOnFileMutated.
 func setupFSMutateGuard(t *testing.T) (context.Context, taskengine.ToolsRepo, string, *[]string) {
 	t.Helper()
 	ctx := context.Background()

@@ -12,13 +12,6 @@ import (
 	"time"
 )
 
-// The upgrade exchange is driven over a net.Pipe rather than a real server,
-// because this package must never open a listening socket — not in production
-// and not in a test. Both ends of a pipe give the same coverage with nothing
-// bound.
-
-// upgradeOver runs upgrade against a hand-written peer. answer is given the
-// request the connector sent and returns the raw bytes to reply with.
 func upgradeOver(t *testing.T, creds Credentials, answer func(*http.Request) string) (net.Conn, error) {
 	t.Helper()
 	peer, mine := net.Pipe()
@@ -45,9 +38,8 @@ const okUpgrade = "HTTP/1.1 101 Switching Protocols\r\n" +
 	"Upgrade: " + UpgradeProtocol + "\r\n" +
 	"Connection: Upgrade\r\n\r\n"
 
-// TestUnit_UpgradePresentsTheInstanceTokenAsBearer is the instance's half of
-// the mutual authentication: the credential rides on the upgrade request and
-// nowhere else, so nothing that routes a frame ever sees it.
+// TestUnit_UpgradePresentsTheInstanceTokenAsBearer checks the credential
+// rides on the upgrade request only, never in a frame.
 func TestUnit_UpgradePresentsTheInstanceTokenAsBearer(t *testing.T) {
 	t.Parallel()
 	var seen *http.Request
@@ -70,8 +62,8 @@ func TestUnit_UpgradePresentsTheInstanceTokenAsBearer(t *testing.T) {
 	}
 }
 
-// TestUnit_UpgradeWithoutATokenStillTries keeps "may I connect" the relay's
-// decision. A dialer that refused to ask would take it away.
+// TestUnit_UpgradeWithoutATokenStillTries checks an empty token still
+// attempts the upgrade, leaving admission to the relay.
 func TestUnit_UpgradeWithoutATokenStillTries(t *testing.T) {
 	t.Parallel()
 	var seen *http.Request
@@ -88,9 +80,8 @@ func TestUnit_UpgradeWithoutATokenStillTries(t *testing.T) {
 	}
 }
 
-// TestUnit_UpgradeRefusalIsUnauthorized maps a refused credential onto the
-// connector's fatal set: a revoked instance that kept dialing would be a
-// reconnect storm from a machine that has been taken away.
+// TestUnit_UpgradeRefusalIsUnauthorized checks a refused credential maps to
+// ErrUnauthorized and the connector's fatal set.
 func TestUnit_UpgradeRefusalIsUnauthorized(t *testing.T) {
 	t.Parallel()
 	_, err := upgradeOver(t, Credentials{Token: "revoked"}, func(*http.Request) string {
@@ -104,8 +95,8 @@ func TestUnit_UpgradeRefusalIsUnauthorized(t *testing.T) {
 	}
 }
 
-// TestUnit_UpgradeToAnotherProtocolIsRefused: the token versions the framing,
-// and a peer that switched to something else has not agreed to speak librelay.
+// TestUnit_UpgradeToAnotherProtocolIsRefused checks an Upgrade response
+// naming a different protocol is refused.
 func TestUnit_UpgradeToAnotherProtocolIsRefused(t *testing.T) {
 	t.Parallel()
 	_, err := upgradeOver(t, Credentials{}, func(*http.Request) string {
@@ -116,9 +107,8 @@ func TestUnit_UpgradeToAnotherProtocolIsRefused(t *testing.T) {
 	}
 }
 
-// TestUnit_UpgradeKeepsBytesPipelinedBehindTheResponse guards the subtle one: a
-// relay that writes the 101 and its first frame in one flush must not lose the
-// frame to the response parser's buffer.
+// TestUnit_UpgradeKeepsBytesPipelinedBehindTheResponse checks bytes flushed
+// right after the 101 are not lost to the response parser's buffer.
 func TestUnit_UpgradeKeepsBytesPipelinedBehindTheResponse(t *testing.T) {
 	t.Parallel()
 	const trailing = "{\"t\":\"relay.welcome\"}\n"
@@ -141,8 +131,8 @@ func TestUnit_UpgradeKeepsBytesPipelinedBehindTheResponse(t *testing.T) {
 	}
 }
 
-// TestUnit_ParseEndpointRefusesCleartext keeps the bearer credential off a
-// plaintext connection. Configuration must not be able to make that mistake.
+// TestUnit_ParseEndpointRefusesCleartext checks a bare endpoint defaults to
+// https and rejects cleartext schemes.
 func TestUnit_ParseEndpointRefusesCleartext(t *testing.T) {
 	t.Parallel()
 	for _, bad := range []string{"", "http://relay.invalid", "ws://relay.invalid", "https:///nohost"} {

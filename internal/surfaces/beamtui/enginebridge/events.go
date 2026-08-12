@@ -66,6 +66,9 @@ type ToolCallOpened struct {
 	Contents   []libacp.ToolCallContent
 	Locations  []libacp.ToolCallLocation
 	RawInput   json.RawMessage
+	// ErrorText is the `_meta` error field: tool-error message or policy
+	// denial text; empty on success.
+	ErrorText string
 }
 
 // ToolCallUpdated is a state change for an already-opened tool call
@@ -83,6 +86,9 @@ type ToolCallUpdated struct {
 	Locations  []libacp.ToolCallLocation
 	RawInput   json.RawMessage
 	RawOutput  json.RawMessage
+	// ErrorText is patch-shaped like every other field: empty means
+	// unchanged, never cleared. See ToolCallOpened.ErrorText.
+	ErrorText string
 }
 
 // PlanUpdated carries the agent's whole current plan (plan). Entries replace
@@ -543,6 +549,18 @@ func metaEnvelope(raw json.RawMessage) map[string]json.RawMessage {
 	return m
 }
 
+func metaErrorText(raw json.RawMessage) string {
+	v, ok := metaEnvelope(raw)["error"]
+	if !ok {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(v, &s); err != nil {
+		return ""
+	}
+	return s
+}
+
 // translate turns one inbound session/update into exactly one Event. It is a
 // pure function of the notification — no Bridge state, no I/O — which is what
 // makes the whole vocabulary table-testable without a running engine.
@@ -641,6 +659,7 @@ func translate(n libacp.SessionNotification) Event {
 			Contents:   u.ToolContent,
 			Locations:  u.Locations,
 			RawInput:   u.RawInput,
+			ErrorText:  metaErrorText(u.Meta),
 		}
 
 	case libacp.SessionUpdateToolCallUpdate:
@@ -654,6 +673,7 @@ func translate(n libacp.SessionNotification) Event {
 			Locations:  u.Locations,
 			RawInput:   u.RawInput,
 			RawOutput:  u.RawOutput,
+			ErrorText:  metaErrorText(u.Meta),
 		}
 
 	case libacp.SessionUpdatePlan:

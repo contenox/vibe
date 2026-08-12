@@ -1,7 +1,3 @@
-// mission_cmd.go holds the `contenox mission` verbs: durable reads over the
-// mission store (list/show/reports) and the blocking in-process fire (`mission
-// fire --wait`). Reads go straight through missionservice; fire composes the
-// fleet through fleetservice.BuildInProcess. No orchestration lives here.
 package contenoxcli
 
 import (
@@ -91,9 +87,6 @@ fired from here or from an editor session.`,
 		}
 		defer db.Close()
 
-		// The operator's own read reconciles the fleet it reports on: missions
-		// whose host died are finished abandoned before the table renders (the
-		// same seam approvals list uses for expired asks). Best-effort.
 		if reclaimed, sweepErr := missions.SweepAbandoned(ctx); sweepErr == nil {
 			printReclaimedMissions(cmd.OutOrStdout(), reclaimed)
 		}
@@ -123,8 +116,6 @@ Use 'contenox mission reports <id>' for full report detail.`,
 		}
 		defer db.Close()
 
-		// Same reconciling read as mission list: an operator looking at one
-		// mission sees its true status, not a dead host's last word. Best-effort.
 		if reclaimed, sweepErr := missions.SweepAbandoned(ctx); sweepErr == nil {
 			printReclaimedMissions(cmd.OutOrStdout(), reclaimed)
 		}
@@ -137,9 +128,6 @@ Use 'contenox mission reports <id>' for full report detail.`,
 		if err != nil {
 			return fmt.Errorf("failed to read reports for mission %q: %w", m.ID, err)
 		}
-		// Best-effort: the pending-asks line is a discoverability nudge toward
-		// 'mission asks'/'approvals respond', not core content — a read failure
-		// here must not fail the whole show.
 		asks, _ := hitl.PendingAttentionAsks(ctx, m.ID)
 		renderMissionShow(cmd.OutOrStdout(), m, reports, asks, time.Now().UTC())
 		return nil
@@ -231,13 +219,8 @@ See declared agents with 'contenox agent list'.`,
 	RunE: runMissionFire,
 }
 
-// missionWaitPollInterval is how often `mission fire --wait` re-reads the
-// mission record. Polling, not the bus: a durable fact, and read latency is
-// invisible next to a mission's runtime.
 const missionWaitPollInterval = 2 * time.Second
 
-// missionReportsReadLimit bounds how many reports the read verbs fetch — ample
-// for a single mission (units file a handful; the runtime files one blocker).
 const missionReportsReadLimit = 200
 
 func runMissionFire(cmd *cobra.Command, args []string) error {
@@ -272,8 +255,6 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// Best-effort, never overwriting: seeds default envelopes on a box that
-	// has not run `contenox acp` yet.
 	if home, herr := globalContenoxDir(); herr == nil {
 		_ = writeEmbeddedHITLPolicies(home, false)
 	}
@@ -293,21 +274,12 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		tracker = libtracker.NewTextActivityTracker(os.Stderr)
 	}
 
-	// Shared between the mission store's publisher and the fleet's report
-	// router, so a unit's report falls through to the operator inbox — this
-	// operator-fired mission has no parent session. Under opt-in-beta the
-	// publisher also appends each event to the durable log, and the trigger
-	// holder fires matching triggers live in this process once an engine
-	// exists below (the standalone dispatcher stays the catch-up consumer).
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
 	workspaceID := ResolveWorkspaceID(contenoxDir)
 	trigHook := eventlog.NewTriggerHolder()
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)))
 
-	// An engine in this host serves two beta features: the oracle attention
-	// driver (--oracle) and live in-process trigger dispatch. Built only when
-	// one of them is on; a plain mission fire stays engine-free.
 	oracleOn := oracleFlagSet(cmd)
 	optInBeta := betaEnabled(ctx, store)
 	wantTriggers := false
@@ -324,25 +296,12 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		}
 		opts.EffectiveDB = dbPath
 		if wantTriggers && !cmd.Root().Flags().Changed("shell") {
-			// The standalone dispatcher's posture: trigger chains actuate
-			// through local_shell under their trigger-pinned envelopes.
 			opts.EffectiveEnableLocalExec = true
 		}
 		var driverHITL hitlservice.Service
 		if oracleOn {
-			// This host registers a resume hook below, so its engine keeps the
-			// HITL gate unconditionally: the gate is what gives its mission
-			// tools an attention asker, and a resumed unit's next question has
-			// nowhere to go without one.
 			opts.EffectiveHITL = true
-			// The driver's durable-ask service. Its answers ride the same
-			// store the unit polls; the resume hook (set once the engine
-			// exists) covers a past-window answer landing on a checkpointed ask.
 			driverHITL = newHITLService(contenoxDir, store, tracker, "")
-			// The oracle provider registers ONLY in this host's engine, and
-			// its one tool lists only inside a bound oracle-chain execution.
-			// out is the driver's own trace stream, so a refusal's reason
-			// lands beside the review lines it belongs to.
 			opts.EffectiveExtraTools = map[string]taskengine.ToolsRepo{
 				oracletools.ToolsProviderName: oracletools.New(oracleAnswerer{
 					hitl: driverHITL, missions: missions, store: store, out: cmd.ErrOrStderr(),
@@ -355,9 +314,7 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		}
 		defer engine.Stop()
 		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, opts, cmd.ErrOrStderr()))
-		// Deferred AFTER engine.Stop so LIFO drains in-flight firings first: a
-		// mission's terminal-status event fires triggers on the way out, and
-		// this command returns the moment it sees that durable fact.
+		// Deferred after engine.Stop so LIFO drains in-flight firings first.
 		defer trigHook.Drain(eventlog.DefaultDrainTimeout)
 		if oracleOn {
 			hitlservice.SetResumeHook(driverHITL, agentservice.ResumeHook(agentservice.Deps{
@@ -386,26 +343,18 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// A dispatched mission's cwd defaults to this command's working directory
-	// when the request names none — the same default the editor uses.
 	projectRoot, _ := os.Getwd()
 	fleet, _, stopFleet, err := fleetservice.BuildInProcess(ctx, fleetservice.InProcessDeps{
-		DB:          db,
-		Bus:         bus,
-		Missions:    missions,
-		ProjectRoot: projectRoot,
-		// The dispatched unit's own publisher stamps this same workspace, so
-		// its events land where this command's dispatcher drains.
+		DB:           db,
+		Bus:          bus,
+		Missions:     missions,
+		ProjectRoot:  projectRoot,
 		WorkspaceID:  workspaceID,
 		Tracker:      tracker,
 		PolicySource: hitlPolicySource(contenoxDir),
 		DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
 			discoverChainAgents(dctx, agents, contenoxDir, tracker, betaEnabled(dctx, store))
 		},
-		// No SessionDeliverer: this process hosts no chat sessions, so every
-		// report lands in the operator inbox / durable store. AgentSupervisor
-		// is the oracle attention driver under --oracle, else nil (every
-		// question waits for a human).
 		AgentSupervisor: supervisor,
 		Stderr:          os.Stderr,
 	})
@@ -420,15 +369,11 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		AgentName:      agentName,
 		Intent:         intent,
 		HITLPolicyName: policy,
-		// ParentSessionID empty: an operator fired this directly, so reports route
-		// to the durable store and operator inbox rather than a chat session.
 	})
 	if err != nil {
 		return err
 	}
-	// The oracle reviews only what this host dispatched: every host's
-	// reportrouter reads the same shared bus, so without this it would spend a
-	// model call on another terminal's mission.
+	// Restricts the driver to this host's own dispatched mission; every host shares the same bus.
 	if d, ok := supervisor.(*oracleAttentionDriver); ok {
 		d.own(res.MissionID)
 	}
@@ -462,13 +407,8 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// oracleFlagName is the beta flag mounting the oracle attention driver on
-// `mission fire`. Registered only under opt-in-beta (see
-// registerMissionFireFlags): a stable invocation neither shows nor parses it.
 const oracleFlagName = "oracle"
 
-// oracleFlagSet reads the beta --oracle flag; false when unregistered (beta
-// off) or not given.
 func oracleFlagSet(cmd *cobra.Command) bool {
 	f := cmd.Flags().Lookup(oracleFlagName)
 	if f == nil || !f.Changed {
@@ -477,10 +417,6 @@ func oracleFlagSet(cmd *cobra.Command) bool {
 	return f.Value.String() == "true"
 }
 
-// registerMissionFireFlags installs fire's flag set. --oracle joins only
-// under opt-in-beta — absent from a stable help and refused as an unknown
-// flag, matching registerApprovalsRespondFlags. Idempotent via ResetFlags so
-// Main may re-resolve the gate after init's stable default.
 func registerMissionFireFlags(beta bool) {
 	missionFireCmd.ResetFlags()
 	missionFireCmd.Flags().String("policy", "", "Mission envelope: the HITL policy bounding the unattended unit (default: the default-mission-policy config)")
@@ -491,13 +427,8 @@ func registerMissionFireFlags(beta bool) {
 	}
 }
 
-// errMissionWaitTimeout is a branchable sentinel for the wait budget running
-// out while the mission is still open.
 var errMissionWaitTimeout = errors.New("mission wait timed out")
 
-// waitForTerminalMission polls the mission store until id reaches a terminal
-// status, the timeout elapses, or ctx is cancelled. A transient read error
-// does not abort the wait; the next tick retries.
 func waitForTerminalMission(ctx context.Context, missions missionservice.Service, id string, interval, timeout time.Duration) (*missionservice.Mission, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
@@ -518,8 +449,6 @@ func waitForTerminalMission(ctx context.Context, missions missionservice.Service
 	}
 }
 
-// missionOutcomeLine renders the one-line terminal verdict `mission fire
-// --wait` prints: the status, and the reason when the mission recorded one.
 func missionOutcomeLine(m *missionservice.Mission) string {
 	line := fmt.Sprintf("Mission %s finished: %s", m.ID, m.Status)
 	if reason := strings.TrimSpace(m.StatusReason); reason != "" {
@@ -527,8 +456,6 @@ func missionOutcomeLine(m *missionservice.Mission) string {
 	}
 	return line
 }
-
-// ─── rendering ──────────────────────────────────────────────────────────────
 
 func renderMissionTable(w io.Writer, missions []*missionservice.Mission, now time.Time) error {
 	if len(missions) == 0 {
@@ -601,9 +528,6 @@ func renderMissionShow(w io.Writer, m *missionservice.Mission, reports []*missio
 	renderReportSummaries(w, reports)
 }
 
-// renderReportSummaries prints one line per report (oldest first), its refs,
-// and — the honesty surface — the verification-gate warning when the gate
-// downgraded the report because a claimed artifact did not exist.
 func renderReportSummaries(w io.Writer, reports []*missionservice.Report) {
 	for _, r := range chronological(reports) {
 		fmt.Fprintf(w, "  [%s] %s\n", r.Kind, r.Summary)
@@ -649,9 +573,6 @@ func renderMissionReports(w io.Writer, m *missionservice.Mission, reports []*mis
 	}
 }
 
-// renderMissionPlan prints a mission's living plan in full — every entry,
-// ordered as stored, with its status and priority — plus the durable revision
-// history ('mission show' prints only the one-line summary of this).
 func renderMissionPlan(w io.Writer, m *missionservice.Mission) {
 	if m.Plan.Revision == 0 {
 		fmt.Fprintf(w, "Mission %s has no plan yet (revision 0) — no resident planner has run for this mission.\n", m.ID)
@@ -682,10 +603,6 @@ func renderMissionPlan(w io.Writer, m *missionservice.Mission) {
 	}
 }
 
-// renderMissionAsksTable prints one row per pending attention ask. missions is
-// keyed by mission id — populated by the caller so the AGENT column can be
-// filled without a second read when an ask's own AgentName is unset — and may
-// be empty when the caller only had ids to hand.
 func renderMissionAsksTable(w io.Writer, missions map[string]*missionservice.Mission, asks []*runtimetypes.HITLApproval, now time.Time) error {
 	if len(asks) == 0 {
 		fmt.Fprintln(w, "No pending attention asks. A mission's unit raises one when it needs a human's own words, not a yes/no — answer with 'contenox approvals respond <id> --answer \"...\"'.")
@@ -718,9 +635,6 @@ func renderMissionAsksTable(w io.Writer, missions map[string]*missionservice.Mis
 	return nil
 }
 
-// chronological returns reports oldest-first for reading. ListReports hands
-// them back newest-first (the store's scan order); a mission reads honestly in
-// the order its unit filed.
 func chronological(reports []*missionservice.Report) []*missionservice.Report {
 	out := make([]*missionservice.Report, len(reports))
 	for i, r := range reports {
@@ -729,16 +643,8 @@ func chronological(reports []*missionservice.Report) []*missionservice.Report {
 	return out
 }
 
-// verificationWarningLead mirrors the stable, greppable lead the conclusion
-// verification gate (missiontools' verify.go, verificationWarningLead) appends
-// to a downgraded report's detail. Matched by string here because the gate's
-// constant is unexported and the lead is contracted stable — "greppable" is its
-// documented purpose, and missiontools' verify tests pin the literal.
 const verificationWarningLead = "claimed artifacts not found"
 
-// verificationWarningLine extracts the verification-gate warning from a
-// report's detail, or "" when the gate never touched it — so `mission show`
-// surfaces a downgraded result's warning without printing full detail.
 func verificationWarningLine(detail string) string {
 	for _, line := range strings.Split(detail, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), verificationWarningLead) {
@@ -748,8 +654,6 @@ func verificationWarningLine(detail string) string {
 	return ""
 }
 
-// formatMissionAge renders a compact single-unit age ("45s", "12m", "3h",
-// "2d") for the mission table and liveness lines.
 func formatMissionAge(now, t time.Time) string {
 	d := now.Sub(t)
 	if d < 0 {
@@ -793,13 +697,8 @@ func runMissionStop(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// Publisher-wired: the terminal-status event reaches the unit's live host
-	// over the shared bus and makes it reap the subprocess. Under opt-in-beta
-	// the publisher also appends the event to the durable log.
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
-	// No trigger hook: stop runs no engine; the catch-up dispatcher covers
-	// any triggers listening on the terminal-status event.
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionEventPublisher(ctx, db, bus, ResolveWorkspaceID(contenoxDir), libtracker.NoopTracker{}, nil)))
 	store := runtimetypes.New(db.WithoutTransaction())
 	hitl := newHITLService(contenoxDir, store, libtracker.NoopTracker{}, "")
@@ -862,7 +761,7 @@ func runMissionAsks(cmd *cobra.Command, args []string) error {
 	var asks []*runtimetypes.HITLApproval
 	for _, m := range ms {
 		if m.Status != missionservice.StatusOpen {
-			continue // a finished mission's asks are already closed (mission stop) or answered
+			continue
 		}
 		got, err := hitl.PendingAttentionAsks(ctx, m.ID)
 		if err != nil {
@@ -877,11 +776,6 @@ func runMissionAsks(cmd *cobra.Command, args []string) error {
 	return renderMissionAsksTable(cmd.OutOrStdout(), byID, asks, now)
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-
-// openMissionService opens the shared database the way every other read verb
-// does (OpenDBAt over resolveDBPath) and returns a missionservice over it. The
-// read verbs need no bus: they consume durable facts, not events.
 func openMissionService(cmd *cobra.Command) (io.Closer, missionservice.Service, error) {
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -896,34 +790,20 @@ func openMissionService(cmd *cobra.Command) (io.Closer, missionservice.Service, 
 	return closer, missions, nil
 }
 
-// publisherWiredMissions builds the mission service every mission read verb
-// shares, wired with the same dual-write publisher runMissionStop uses — a
-// sweep reclaim from a read verb must reach the bus (so a live host reaps the
-// zombie unit), the durable event log, and inbox routing, exactly like an
-// operator's stop. No trigger hook: these verbs run no engine; the catch-up
-// dispatcher covers listening triggers. The returned closer closes the bus
-// before the db beneath it.
 func publisherWiredMissions(ctx context.Context, cmd *cobra.Command, db libdbexec.DBManager) (missionservice.Service, io.Closer) {
 	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {
-		// Workspace resolution failing is not a reason to refuse a read: fall
-		// back to a publisher-less service, losing only reclaim signaling.
 		return missionservice.New(db), db
 	}
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	pub := missionEventPublisher(ctx, db, bus, ResolveWorkspaceID(contenoxDir), libtracker.NoopTracker{}, nil)
 	missions := missionservice.New(db, missionservice.WithEventPublisher(pub))
-	// closerFunc is index_cmd.go's io.Closer adapter.
 	return missions, closerFunc(func() error {
 		bus.Close()
 		return db.Close()
 	})
 }
 
-// openMissionAndHitlServices opens the shared database and builds a
-// missionservice and hitlservice over it, matching openApprovalsService's
-// construction so a mission-side read of pending asks agrees byte-for-byte
-// with 'contenox approvals'.
 func openMissionAndHitlServices(cmd *cobra.Command) (io.Closer, missionservice.Service, hitlservice.Service, error) {
 	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {

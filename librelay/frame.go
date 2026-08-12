@@ -8,268 +8,163 @@ import (
 	"unicode/utf8"
 )
 
-// ProtocolVersion is the envelope version this build speaks. It is exchanged
-// once in [Hello] / [Welcome] and never appears on a frame; see the package
-// doc for why.
+// ProtocolVersion is the envelope version this build speaks; exchanged once in Hello/Welcome, never on a frame.
 const ProtocolVersion = 1
 
-// Envelope limits. They bound what a decoder will allocate for a single frame
-// before it gives up, so they are a memory contract and not merely a style
-// rule. MaxFrameBytes sits below libacp's 64 MiB NDJSON ceiling on purpose: an
-// ACP frame crosses a local pipe with one peer on it, whereas a relay
-// multiplexes many instances and pays this buffer per connection.
+// Envelope limits bound what a decoder will allocate for a single frame before it gives up.
 const (
 	MaxFrameBytes = 16 << 20
 	MaxTypeBytes  = 128
 	MaxIDBytes    = 256
 )
 
-// ControlPrefix marks a type as relay-level control traffic, addressed to the
-// peer that receives it rather than to something behind it. It is the whole of
-// the routing decision: a relay handles a frame whose type has this prefix and
-// forwards every frame whose type does not, without ever looking at the
-// payload.
+// ControlPrefix marks a type as relay-level control traffic; a relay handles frames with this prefix and forwards everything else.
 const ControlPrefix = "relay."
 
-// Control message types. Every one of these is part of the protocol floor and
-// may never be removed, because [Unsupported] answers with [TypeError] and a
-// peer that did not understand TypeError could not learn that it had failed.
+// Control message types; part of the protocol floor and may never be removed.
 const (
-	// TypeHello is the connector's opening frame, payload [Hello]. It is a
-	// request: the relay answers TypeWelcome or TypeError.
+	// TypeHello is the connector's opening frame, payload [Hello]; a request answered with TypeWelcome or TypeError.
 	TypeHello = ControlPrefix + "hello"
 	// TypeWelcome is the relay's answer to TypeHello, payload [Welcome].
 	TypeWelcome = ControlPrefix + "welcome"
-	// TypeHeartbeat is a liveness probe with no payload, sent by either end.
-	// It is a request; the peer answers TypeAck. Correlation matters here:
-	// an ack that does not name the probe it answers cannot distinguish a
-	// live peer from a stalled one that is one round behind.
+	// TypeHeartbeat is a liveness probe with no payload, sent by either end; a request answered with TypeAck.
 	TypeHeartbeat = ControlPrefix + "heartbeat"
 	// TypeAck answers TypeHeartbeat, carrying no payload.
 	TypeAck = ControlPrefix + "ack"
-	// TypeError reports a failure, payload [Error]. As a response it never
-	// induces a response, which is what keeps two disagreeing peers from
-	// exchanging errors forever.
+	// TypeError reports a failure, payload [Error]; as a response it never induces a response.
 	TypeError = ControlPrefix + "error"
 )
 
-// TypeACPMessage tunnels one ACP JSON-RPC message. The payload is whatever
-// libacp put on the wire, byte for byte; a relay does not parse it and does
-// not need libacp linked to route it.
+// TypeACPMessage tunnels one ACP JSON-RPC message, byte for byte; a relay routes it without parsing or linking libacp.
 const TypeACPMessage = "acp.message"
 
-// TypeACPDetach reports that the client behind one attachment is gone: the
-// [Frame.Session] it names will send nothing more and expects nothing more. It
-// carries no payload, because the identifier is the whole message.
-//
-// It closes the one thing [TypeACPMessage] cannot say. A tunnel learns that an
-// attachment began, from the first frame carrying a new Session, and otherwise
-// never learns that it ended — so an abandoned attachment is indistinguishable
-// from a silent one and is reclaimed only by a cap evicting the least recently
-// addressed, which can take a live but idle attachment with it. A detach makes
-// the ordinary ending deterministic; the cap remains the backstop for a client
-// that vanished without sending one.
-//
-// It is a new Type value and NOT a new [Frame] field, which is a compatibility
-// requirement rather than a preference. A relay forwards a frame by decoding
-// and re-encoding it, so a field its own librelay build does not know is not
-// ignored — it is destroyed in transit, silently, with nothing on either side
-// able to observe that it went missing. Type is a field both ends already
-// carry, so an unrecognized value of it survives the round trip intact and is
-// dropped only by a receiver that has decided to drop it.
-//
-// A relay built against a librelay that predates this constant emits none, and
-// that costs nothing: a detach is a hint that an ending has happened, never a
-// prerequisite for one. Nothing waits on it, no answer is owed to it, and the
-// eviction cap covers the whole interval until a deployed relay's pin moves.
+// TypeACPDetach reports that the client behind one attachment is gone; it carries no payload, and is a hint rather than a prerequisite for anything.
 const TypeACPDetach = "acp.detach"
 
-// Resumption types. Not control traffic: a relay routes them to the producer,
-// which is the side holding the content to replay. See [Resume].
+// Chain-trigger types are cargo, not control traffic: a relay addresses a trigger to one instance and the machine answers with the result type.
 const (
-	// TypeResume asks a session's producer to continue after a cursor. Always
-	// a request, so it is always answered exactly once.
+	// TypeChainTrigger asks the machine behind [Frame.Instance] to run a named task chain, payload [ChainTrigger]; relay→machine only.
+	TypeChainTrigger = "chain_trigger"
+	// TypeChainTriggerResult reports a chain trigger's outcome, payload [ChainTriggerResult]; machine→relay only, exactly one per [ChainTrigger.RequestID].
+	TypeChainTriggerResult = "chain_trigger_result"
+)
+
+// [ChainTrigger.SessionMode] values.
+const (
+	// ChainSessionNew runs the chain in a fresh session; the mode every machine implements.
+	ChainSessionNew = "new"
+	// ChainSessionReused asks the machine to reuse a session across triggers; unsupported machines refuse rather than silently downgrading to new.
+	ChainSessionReused = "reused"
+)
+
+// [ChainTriggerResult.Status] values.
+const (
+	// ChainTriggerStatusOK: the chain ran to completion.
+	ChainTriggerStatusOK = "ok"
+	// ChainTriggerStatusError: the chain started and failed.
+	ChainTriggerStatusError = "error"
+	// ChainTriggerStatusRefused: the machine declined before any chain ran; a clean answer, not a run failure.
+	ChainTriggerStatusRefused = "refused"
+)
+
+// ChainTrigger is the [TypeChainTrigger] payload: run this chain with this input.
+type ChainTrigger struct {
+	// RequestID correlates the [ChainTriggerResult] with this trigger; minted by the relay, echoed by the machine verbatim.
+	RequestID string `json:"request_id"`
+	// Chain names the chain file on the machine's own configuration path; what it resolves to is the machine's decision.
+	Chain string `json:"chain"`
+	// SessionMode is [ChainSessionNew] or [ChainSessionReused].
+	SessionMode string `json:"session_mode"`
+	// Input is the event envelope the chain receives, raw; the relay never parses it.
+	Input json.RawMessage `json:"input"`
+	// Policy optionally names the HITL policy envelope for the run; empty applies the machine's own default.
+	Policy string `json:"policy,omitempty"`
+}
+
+// ChainTriggerResult is the [TypeChainTriggerResult] payload.
+type ChainTriggerResult struct {
+	// RequestID is [ChainTrigger.RequestID], echoed verbatim.
+	RequestID string `json:"request_id"`
+	// Status is one of the ChainTriggerStatus constants.
+	Status string `json:"status"`
+	// Error says why, for [ChainTriggerStatusError] and [ChainTriggerStatusRefused]; empty on ok.
+	Error string `json:"error,omitempty"`
+}
+
+// Resumption types are not control traffic: a relay routes them to the producer holding the content to replay. See [Resume].
+const (
+	// TypeResume asks a session's producer to continue after a cursor; always a request, answered exactly once.
 	TypeResume = "session.resume"
 	// TypeResumed answers [TypeResume] and precedes the replayed frames.
 	TypeResumed = "session.resumed"
 )
 
-// Error codes carried by [Error]. They are strings rather than integers so an
-// unrecognized code degrades to something legible in a log.
+// Error codes carried by [Error]; strings rather than integers so an unrecognized code degrades to something legible in a log.
 const (
 	CodeUnsupportedType = "unsupported_type"
 	CodeMalformedFrame  = "malformed_frame"
 	CodeUnknownInstance = "unknown_instance"
 	CodeUnauthorized    = "unauthorized"
 	CodeVersion         = "unsupported_version"
-	// CodeCursorEvicted answers a [Resume] whose cursor the producer no
-	// longer retains, when it cannot replay at all. A producer that can
-	// replay part of the stream answers [Resumed] with Evicted set instead.
+	// CodeCursorEvicted answers a [Resume] whose cursor the producer no longer retains at all; a partial replay sets [Resumed].Evicted instead.
 	CodeCursorEvicted = "cursor_evicted"
 )
 
-// Frame is the transport envelope. Field names on the wire are short because
-// every ACP message pays for them.
-//
-// Instance and Session are the routing key and are direction-independent: they
-// name the instance and session a frame concerns, not its sender. (instance,
-// session) is the general case — one account may hold many instances, and a
-// session identifier is only unique within its instance, so Session without
-// Instance does not address anything.
+// Frame is the transport envelope; wire field names are short because every ACP message pays for them. Instance and Session form the routing key and are direction-independent.
 type Frame struct {
-	// Type discriminates the frame. Control types carry ControlPrefix; any
-	// other value is opaque to a relay and gets routed.
+	// Type discriminates the frame; control types carry ControlPrefix, everything else is routed opaquely.
 	Type string `json:"type"`
-	// Instance is the runtime instance this frame concerns. Empty only on
-	// frames that precede identification.
+	// Instance is the runtime instance this frame concerns; empty only on frames that precede identification.
 	Instance string `json:"instance,omitempty"`
-	// Session names the stream within Instance that this frame concerns.
-	// What that stream is belongs to the traffic rather than to the
-	// envelope: for cargo the two ACP endpoints exchange it is an ACP
-	// session, and for traffic a relay multiplexes per connected client
-	// (see [TypeACPMessage]) it is one client's attachment to the instance.
-	// A relay routes on the value without interpreting it, which is exactly
-	// what lets the two meanings share one field. Empty on control traffic
-	// and on anything instance-scoped.
+	// Session names the stream within Instance that this frame concerns; a relay routes on the value without interpreting it. Empty on control traffic and anything instance-scoped.
 	Session string `json:"session,omitempty"`
-	// ID marks this frame as a request and correlates the reply. Its
-	// presence, not the type, is what obliges the receiver to answer
-	// exactly once — which is why an unknown type is still answerable.
+	// ID marks this frame as a request and correlates the reply; its presence, not the type, obliges exactly one answer.
 	ID string `json:"id,omitempty"`
-	// ReplyTo carries the ID of the request being answered and marks this
-	// frame as a response. Requests and responses use separate fields
-	// rather than one shared id so direction is on the wire: a receiver
-	// never has to guess whether it owes an answer, and therefore never
-	// answers an answer.
+	// ReplyTo carries the ID of the request being answered and marks this frame as a response.
 	ReplyTo string `json:"re,omitempty"`
-	// Seq is the producer's per-(Instance, Session) cursor for this frame,
-	// monotonically increasing and gap-free within a session.
-	//
-	// It exists so a dropped connection costs latency rather than content:
-	// the receiver remembers the last Seq it saw, and on reconnect asks the
-	// producer to continue from there ([Resume]). That is SSE's model — a
-	// cursor the receiver states once per connection, not an acknowledgement
-	// per message — and it is the reason nothing here carries delivery
-	// guarantees.
-	//
-	// Zero means unsequenced and is the correct value for control traffic and
-	// for any producer that does not replay. A receiver must not infer
-	// ordering from an unsequenced frame.
-	//
-	// Opaque to a relay, which routes on (Instance, Session) and never reads
-	// this. Replay is the producer's, because the producer is the side that
-	// still holds the content.
+	// Seq is the producer's per-(Instance, Session) cursor for this frame, monotonically increasing and gap-free within a session; zero means unsequenced.
 	Seq uint64 `json:"seq,omitempty"`
-	// Trace is the correlation key for the one human action this frame
-	// belongs to, carried so that the records both ends write about that
-	// action share a field. Without it a request that crossed the relay and
-	// the work it caused on the machine are two unrelated piles of logs, and
-	// "did this reach the instance" is answerable only by reading every
-	// package on the path.
-	//
-	// Per action, never per connection. The side where an action begins mints
-	// one ([NewTraceID]) — one browser message, one prompt — and it lives
-	// exactly as long as that action's consequences. A value pinned to the
-	// socket instead would file a day's work under a single key and correlate
-	// nothing.
-	//
-	// Correlation only, and this bound is load-bearing rather than defensive.
-	// The value is peer-supplied text that nothing signs and nothing checks
-	// against anything, so it may be logged and joined on and must never be
-	// authorized on, looked up, or read back as an identifier for something.
-	// [MaxTraceBytes] and [TraceAlphabet] bound what a peer can put here, and
-	// [Frame.Validate] enforces both.
-	//
-	// Empty means untraced, which is ordinary and never repaired here: a
-	// machine-initiated frame has no action behind it, and a peer built before
-	// this field emits none. Minting a substitute at this layer would invent a
-	// key that correlates one hop with nothing.
+	// Trace is the correlation key for the one human action this frame belongs to; peer-supplied text that must never be authorized on, only logged and joined. [MaxTraceBytes]/[TraceAlphabet] bound it; empty means untraced.
 	Trace string `json:"trace,omitempty"`
-	// Payload is the message body, left as raw JSON so intermediaries do
-	// not parse it. Empty is legal: heartbeat and ack carry nothing.
+	// Payload is the message body, left as raw JSON so intermediaries do not parse it; empty is legal.
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-// Hello is the [TypeHello] payload: what the connector claims to be, before
-// the relay has agreed to any of it.
+// Hello is the [TypeHello] payload: what the connector claims to be, before the relay has agreed to any of it.
 type Hello struct {
-	// ProtocolVersion is the highest envelope version the connector
-	// speaks.
+	// ProtocolVersion is the highest envelope version the connector speaks.
 	ProtocolVersion int `json:"protocol_version"`
-	// Instance identifies the runtime. It is also set on the frame, since
-	// routing must not require reading a payload; the copy here is what a
-	// relay checks the frame against.
+	// Instance identifies the runtime; also set on the frame since routing must not require reading a payload.
 	Instance string `json:"instance"`
-	// Agent names the implementation and version, for operator diagnosis
-	// only. Nothing may branch on it — that is what ProtocolVersion is for.
+	// Agent names the implementation and version, for operator diagnosis only; nothing may branch on it.
 	Agent string `json:"agent,omitempty"`
-	// Nonce is a fresh random challenge the relay signs into
-	// [Welcome.Signature], so the connector can tell the relay it paired
-	// with from anything else that answered the dial. It is generated per
-	// connection by [NewNonce] and is never a secret — it is only ever
-	// useful once. Empty means the connector is not asking to be convinced,
-	// which a relay may still answer by signing nothing.
+	// Nonce is a fresh random challenge the relay signs into [Welcome.Signature]; generated per connection, never a secret, useful once.
 	Nonce []byte `json:"nonce,omitempty"`
 }
 
 // Welcome is the [TypeWelcome] payload: the relay's acceptance.
 type Welcome struct {
-	// ProtocolVersion is the version the relay has selected, which is
-	// min(peer, self). The connector must check it against its own floor
-	// and close if the relay chose lower than it can speak; a connection
-	// held open on an unspeakable version is worse than no connection,
-	// because it looks healthy.
+	// ProtocolVersion is the version the relay selected, min(peer, self); the connector must close if it's lower than it can speak.
 	ProtocolVersion int `json:"protocol_version"`
 	// Relay names the relay implementation and version, diagnostics only.
 	Relay string `json:"relay,omitempty"`
-	// Signature is Ed25519 over [SigningInput] of the connector's
-	// [Hello.Nonce], the ProtocolVersion selected above and the instance —
-	// the relay's half of a mutual authentication whose other half is a
-	// bearer credential on the transport. It is omitempty because a
-	// connector that pinned no key does not require one; a connector that
-	// did treats its absence as fatal. See [VerifyWelcome].
+	// Signature is Ed25519 over [SigningInput] of Hello.Nonce, ProtocolVersion and instance; omitempty since only a connector pinning a key requires it.
 	Signature []byte `json:"sig,omitempty"`
-	// RetryAfterSeconds hints how long to wait before redialling if this
-	// connection ends, so a draining relay can stagger a fleet's return
-	// instead of taking the whole of it back at once. SSE's `retry:` field,
-	// and it is a hint: a connector clamps it to its own bounds and never
-	// lets a relay set an unbounded delay on itself.
-	//
-	// Zero means the connector's own backoff applies.
+	// RetryAfterSeconds hints how long to wait before redialling; a connector clamps it to its own bounds. Zero means the connector's own backoff applies.
 	RetryAfterSeconds int `json:"retry_after,omitempty"`
 }
 
-// Resume is the [TypeResume] payload: continue a session's stream after a
-// cursor.
-//
-// It is NOT relay control traffic. The producer replays, so this is addressed
-// end to end and a relay routes it like any other cargo — a relay that answered
-// it would have to buffer session content, which is the design it does not
-// have.
-//
-// One direction only, deliberately. Replaying commands is not resumption: a
-// re-delivered "approve" is a second approval. Traffic that changes state
-// carries its own idempotency and is never replayed by this mechanism.
+// Resume is the [TypeResume] payload: continue a session's stream after a cursor; not relay control traffic, routed end to end like cargo.
 type Resume struct {
-	// AfterSeq is the last [Frame.Seq] the requester saw. Zero asks for the
-	// whole retained stream, which is what a receiver that has seen nothing
-	// sends.
+	// AfterSeq is the last [Frame.Seq] the requester saw; zero asks for the whole retained stream.
 	AfterSeq uint64 `json:"after_seq"`
 }
 
 // Resumed is the [TypeResumed] payload: what the producer is about to send.
 type Resumed struct {
-	// FromSeq is the first [Frame.Seq] that follows. Greater than
-	// Resume.AfterSeq+1 only when Evicted is set.
+	// FromSeq is the first [Frame.Seq] that follows; greater than Resume.AfterSeq+1 only when Evicted is set.
 	FromSeq uint64 `json:"from_seq"`
-	// Evicted reports that the requested cursor is older than what the
-	// producer retains, so frames between it and FromSeq are gone.
-	//
-	// Answered explicitly rather than by silently resuming from the oldest
-	// retained frame. SSE does the latter and it is its one real defect: the
-	// receiver cannot tell a continuous stream from one with a hole in it, so
-	// a transcript silently loses turns. A receiver seeing this must refetch
-	// state rather than append.
+	// Evicted reports the requested cursor is older than what the producer retains; a receiver seeing this must refetch state rather than append.
 	Evicted bool `json:"evicted,omitempty"`
 }
 
@@ -281,8 +176,7 @@ type Error struct {
 	Message string `json:"message,omitempty"`
 }
 
-// Validation failures. They are all "this frame is not addressable", which a
-// receiver treats as a bad message rather than a bad connection.
+// Validation failures: all "this frame is not addressable", treated as a bad message rather than a bad connection.
 var (
 	ErrEmptyType    = errors.New("librelay: frame type is empty")
 	ErrTypeTooLong  = errors.New("librelay: frame type exceeds MaxTypeBytes")
@@ -293,32 +187,16 @@ var (
 	ErrNotUTF8      = errors.New("librelay: identifier is not valid UTF-8")
 )
 
-// IsControl reports whether a type is relay-level control traffic. A relay
-// handles these and forwards everything else, including types it has never
-// heard of.
+// IsControl reports whether a type is relay-level control traffic; a relay handles these and forwards everything else.
 func IsControl(msgType string) bool { return strings.HasPrefix(msgType, ControlPrefix) }
 
-// IsRequest reports whether f obliges the receiver to send exactly one
-// response. Requests are identified by carrying an ID, not by their type, so
-// this stays true for types this build does not know.
+// IsRequest reports whether f obliges the receiver to send exactly one response.
 func (f Frame) IsRequest() bool { return f.ID != "" }
 
-// IsResponse reports whether f answers an earlier request. A response is never
-// answered.
+// IsResponse reports whether f answers an earlier request; a response is never answered.
 func (f Frame) IsResponse() bool { return f.ReplyTo != "" }
 
-// Validate reports whether f is structurally addressable. It rejects only what
-// makes a frame unroutable or unsafe to log; it deliberately says nothing
-// about whether Type is known, since rejecting unknown types is the
-// forward-compatibility failure the protocol is built to avoid.
-//
-// A malformed [Frame.Trace] fails the whole frame under the "unsafe to log"
-// half of that rule rather than being quietly stripped. Stripping would put a
-// receiver in the position of having handled a frame whose sender believes it
-// is traced, which is the one state that makes a correlation key worse than no
-// key. It costs nothing in practice: this same check runs in [Writer.WriteFrame],
-// so a peer using this package can never emit one, and only a peer that built
-// the value some other way can lose a frame to it.
+// Validate reports whether f is structurally addressable; it rejects only what makes a frame unroutable or unsafe to log, never an unknown Type.
 func (f Frame) Validate() error {
 	switch {
 	case f.Type == "":
@@ -340,19 +218,11 @@ func (f Frame) Validate() error {
 		if name != "type" && len(v) > MaxIDBytes {
 			return fmt.Errorf("%w: %s is %d bytes", ErrIDTooLong, name, len(v))
 		}
-		// Control characters cannot break NDJSON framing (JSON escapes
-		// them inside strings) but they do corrupt logs and routing
-		// keys, and an identifier has no legitimate use for one.
+		// Control characters cannot break NDJSON framing (JSON escapes them inside strings) but they do corrupt logs and routing keys.
 		if i := strings.IndexFunc(v, func(r rune) bool { return r < 0x20 || r == 0x7f }); i >= 0 {
 			return fmt.Errorf("%w: %s at byte %d", ErrControlChar, name, i)
 		}
-		// Invalid UTF-8 is rejected rather than carried, because JSON
-		// encoding silently rewrites it to U+FFFD: a routing key that
-		// survives one hop as one value and the next as another is not
-		// an identifier. Decoded frames always pass this — the decoder
-		// has already done the substitution — so the rule costs nothing
-		// on the receive path and only stops a local caller minting an
-		// identifier that will not survive being sent.
+		// Invalid UTF-8 is rejected rather than carried: JSON encoding silently rewrites it to U+FFFD, so a routing key would not survive a hop intact.
 		if !utf8.ValidString(v) {
 			return fmt.Errorf("%w: %s", ErrNotUTF8, name)
 		}
@@ -360,9 +230,7 @@ func (f Frame) Validate() error {
 	return nil
 }
 
-// WithPayload returns f carrying v as its payload, encoded as compact JSON.
-// It is the only way to build a payload that is guaranteed newline-free, and
-// therefore the only way callers should build one.
+// WithPayload returns f carrying v as its payload, encoded as compact JSON; the only way to guarantee a newline-free payload.
 func (f Frame) WithPayload(v any) (Frame, error) {
 	b, err := marshalCompact(v)
 	if err != nil {
@@ -372,9 +240,7 @@ func (f Frame) WithPayload(v any) (Frame, error) {
 	return f, nil
 }
 
-// DecodePayload unmarshals f's payload into v. An absent payload decodes to
-// nothing and is not an error, so a peer may add a payload to a frame that
-// previously had none without breaking older readers.
+// DecodePayload unmarshals f's payload into v; an absent payload decodes to nothing and is not an error.
 func (f Frame) DecodePayload(v any) error {
 	if len(f.Payload) == 0 {
 		return nil
@@ -385,16 +251,7 @@ func (f Frame) DecodePayload(v any) error {
 	return nil
 }
 
-// Unsupported returns the reply owed to a frame this build cannot handle, and
-// whether one is owed at all. It lives here rather than in either endpoint
-// because the compatibility rule is only worth anything if both ends implement
-// the same one.
-//
-// A request is answered with [TypeError]/[CodeUnsupportedType] so its sender
-// fails immediately instead of waiting out a timeout — a timeout is how a
-// version mismatch turns into a hang. A notification or a response is dropped:
-// nothing is waiting on it, and answering a response is how two peers deadlock
-// each other into an error loop.
+// Unsupported returns the reply owed to a frame this build cannot handle, and whether one is owed at all.
 func Unsupported(f Frame) (Frame, bool) {
 	if !f.IsRequest() {
 		return Frame{}, false
@@ -405,9 +262,7 @@ func Unsupported(f Frame) (Frame, bool) {
 		Session:  f.Session,
 		ReplyTo:  f.ID,
 	}
-	// Marshaling a struct of strings cannot fail; the error is dropped
-	// rather than propagated so callers are not forced to handle an
-	// impossible case in their read loop.
+	// Marshaling a struct of strings cannot fail; the error is dropped rather than forcing callers to handle an impossible case.
 	reply, _ = reply.WithPayload(Error{
 		Code:    CodeUnsupportedType,
 		Message: "unsupported message type " + clampType(f.Type),
@@ -415,18 +270,13 @@ func Unsupported(f Frame) (Frame, bool) {
 	return reply, true
 }
 
-// NewError builds a response carrying code and message, correlated to req when
-// req is a request. It returns a notification-shaped error frame otherwise,
-// which a peer logs rather than routes.
+// NewError builds a response carrying code and message, correlated to req when req is a request.
 func NewError(req Frame, code, message string) Frame {
 	f := Frame{Type: TypeError, Instance: req.Instance, Session: req.Session, ReplyTo: req.ID}
 	f, _ = f.WithPayload(Error{Code: code, Message: message})
 	return f
 }
 
-// clampType bounds an untrusted type before it is echoed into a message, so a
-// peer cannot use the error path to make this end emit a frame larger than the
-// one it received.
 func clampType(t string) string {
 	if len(t) > MaxTypeBytes {
 		return t[:MaxTypeBytes] + "…"

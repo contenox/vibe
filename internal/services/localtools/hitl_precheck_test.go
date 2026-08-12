@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// shellCall builds the local_shell call shape the engine emits.
 func shellCall(command string) *taskengine.ToolsCall {
 	return &taskengine.ToolsCall{
 		Name:     "local_shell",
@@ -23,18 +22,13 @@ func shellCall(command string) *taskengine.ToolsCall {
 	}
 }
 
-// withAllowedCommands injects a chain's _allowed_commands the way ExecEnv does.
 func withAllowedCommands(ctx context.Context, list string) context.Context {
 	return taskengine.WithToolsArgs(ctx, "local_shell", map[string]string{
 		"_allowed_commands": list,
 	})
 }
 
-// TestUnit_HITLWrapper_UnrunnableCommandIsNeverAsked is the invariant this seam
-// exists for: a command the tool will refuse must be refused BEFORE a human is
-// asked. The failure it guards is a gate that reverses itself — an operator
-// approves a card and the call is refused anyway — which spends human attention
-// on a decision that changes nothing.
+// TestUnit_HITLWrapper_UnrunnableCommandIsNeverAsked pins that a command the tool will refuse is refused before a human is asked, not after an approval that changes nothing.
 func TestUnit_HITLWrapper_UnrunnableCommandIsNeverAsked(t *testing.T) {
 	inner := localtools.NewLocalExecToolsWith(refusingRunner{t: t})
 
@@ -57,9 +51,7 @@ func TestUnit_HITLWrapper_UnrunnableCommandIsNeverAsked(t *testing.T) {
 		"the refusal must say that approving again cannot help")
 }
 
-// TestUnit_HITLWrapper_RunnableCommandIsStillAsked is the other half: the
-// precheck must not swallow the gate. A command that passes the allowlist still
-// reaches the human exactly as before.
+// TestUnit_HITLWrapper_RunnableCommandIsStillAsked pins that the precheck does not swallow the gate: a command that passes the allowlist still reaches the human.
 func TestUnit_HITLWrapper_RunnableCommandIsStillAsked(t *testing.T) {
 	inner := localtools.NewLocalExecToolsWith(okRunner{})
 
@@ -77,8 +69,7 @@ func TestUnit_HITLWrapper_RunnableCommandIsStillAsked(t *testing.T) {
 	assert.Equal(t, 1, asked, "an allowed command must still be gated by the human")
 }
 
-// TestUnit_HITLWrapper_PrecheckIsOptional pins that an inner repo without the
-// seam is gated exactly as it was. Absent means absent.
+// TestUnit_HITLWrapper_PrecheckIsOptional pins that an inner repo without the precheck seam is gated exactly as it was.
 func TestUnit_HITLWrapper_PrecheckIsOptional(t *testing.T) {
 	inner := &mockInnerTools{}
 	asked := 0
@@ -96,9 +87,7 @@ func TestUnit_HITLWrapper_PrecheckIsOptional(t *testing.T) {
 	assert.Len(t, inner.calls, 1)
 }
 
-// TestUnit_LocalExecTools_ExecStillEnforcesTheAllowlist pins the check as
-// defense in depth. Precheck is an early copy; the tool must hold its own
-// boundary when nothing wraps it.
+// TestUnit_LocalExecTools_ExecStillEnforcesTheAllowlist pins the check as defense in depth: the tool must hold its own boundary when nothing wraps it.
 func TestUnit_LocalExecTools_ExecStillEnforcesTheAllowlist(t *testing.T) {
 	h := localtools.NewLocalExecToolsWith(refusingRunner{t: t})
 
@@ -109,7 +98,6 @@ func TestUnit_LocalExecTools_ExecStillEnforcesTheAllowlist(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "kubectl"))
 }
 
-// refusingRunner fails the test if anything actually executes.
 type refusingRunner struct{ t *testing.T }
 
 func (r refusingRunner) Run(_ context.Context, spec localtools.CommandSpec, _, _ io.Writer) (int, error) {
@@ -117,7 +105,6 @@ func (r refusingRunner) Run(_ context.Context, spec localtools.CommandSpec, _, _
 	return 0, nil
 }
 
-// okRunner succeeds without doing anything.
 type okRunner struct{}
 
 func (okRunner) Run(_ context.Context, _ localtools.CommandSpec, _, _ io.Writer) (int, error) {

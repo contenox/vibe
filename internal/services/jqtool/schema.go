@@ -1,17 +1,5 @@
 package jqtool
 
-// Tool schema. Kept terse: the deadline, caps, containment boundary and
-// exactly-one-source rule all have errors that state them precisely when they
-// bite, so they aren't spelled out here. The description does state the
-// things no error would ever teach: that the tool never writes, that it isn't
-// goja_eval, that its input is one file or one string, and that YAML is
-// accepted — each a case where a model would otherwise succeed at the wrong
-// thing rather than get a correcting error.
-//
-// The argument set is declared once (queryProperties) and rendered twice: into
-// the model-facing descriptor and into the published OpenAPI contract, so the
-// two cannot drift.
-
 import (
 	"context"
 	"fmt"
@@ -27,26 +15,15 @@ const queryDescription = "Run a jq program over ONE JSON or YAML document and ge
 	"It is not goja_eval — reach for jq for declarative shape-work over one document (select, project, map, group_by, keys, length), and for goja_eval when you need imperative logic or to call another tool. " +
 	"The input is one file or one document, not a pipe: never paste large tool output into `input`."
 
-// queryProperty is one jq_query argument, declared once and rendered into both
-// the descriptor and the OpenAPI components.
 type queryProperty struct {
-	name string
-	// types is the JSON Schema type set: one entry for an ordinary argument,
-	// several when Exec accepts a union (see input, which resolveInput takes
-	// either as a document string or as an already-decoded JSON value).
-	types []string
-	// itemType is the element type of the array branch, required whenever
-	// types includes "array": an OpenAPI 3.1 document whose array declares no
-	// items is not a valid document. Empty means "any JSON value".
+	name        string
+	types       []string
 	itemType    string
 	description string
-	// enum, when set, is the closed value set — declared, never left to prose.
-	enum     []string
-	required bool
+	enum        []string
+	required    bool
 }
 
-// jsonType renders the type as the bare string a single type spells and the
-// list a union spells — the two shapes a JSON Schema "type" takes.
 func (p queryProperty) jsonType() any {
 	if len(p.types) == 1 {
 		return p.types[0]
@@ -58,8 +35,6 @@ func (p queryProperty) jsonType() any {
 	return out
 }
 
-// hasArray reports whether the type set carries an array branch, which must
-// declare items in both renderings.
 func (p queryProperty) hasArray() bool {
 	for _, t := range p.types {
 		if t == openapi3.TypeArray {
@@ -69,7 +44,6 @@ func (p queryProperty) hasArray() bool {
 	return false
 }
 
-// queryProperties is the single source of truth for jq_query's arguments.
 func queryProperties() []queryProperty {
 	return []queryProperty{
 		{
@@ -84,11 +58,7 @@ func queryProperties() []queryProperty {
 			description: "Document to query, relative to the workspace root. Mutually exclusive with input.",
 		},
 		{
-			// The union is the one resolveInput really accepts: a string is
-			// parsed as a JSON or YAML document, any other JSON value is taken
-			// as the already-decoded document it is. "null" is left out
-			// deliberately — a null input reads as no input at all, and the
-			// call is refused for having no source.
+			// "null" is deliberately excluded: a null input reads as no input, so the call is refused for having no source.
 			name:        "input",
 			types:       []string{"string", "object", "array", "number", "integer", "boolean"},
 			description: "The document itself: a JSON or YAML string, or an already-decoded JSON value (object, array, number, boolean). Mutually exclusive with path. For small documents you already have — not for large pasted output.",
@@ -112,7 +82,6 @@ func queryProperties() []queryProperty {
 	}
 }
 
-// queryRequired renders the table's required set, in table order.
 func queryRequired() []string {
 	var out []string
 	for _, p := range queryProperties() {
@@ -123,8 +92,6 @@ func queryRequired() []string {
 	return out
 }
 
-// queryToolParameters renders the table as the descriptor's JSON Schema — what
-// actually reaches the provider.
 func queryToolParameters() map[string]any {
 	props := make(map[string]any, len(queryProperties()))
 	for _, p := range queryProperties() {
@@ -148,7 +115,6 @@ func queryToolParameters() map[string]any {
 	}
 }
 
-// queryRequestSchemaProperties renders the same table as OpenAPI schema refs.
 func queryRequestSchemaProperties() map[string]*openapi3.SchemaRef {
 	out := make(map[string]*openapi3.SchemaRef, len(queryProperties()))
 	for _, p := range queryProperties() {
@@ -169,9 +135,6 @@ func queryRequestSchemaProperties() map[string]*openapi3.SchemaRef {
 	return out
 }
 
-// queryResponseSchema declares what a successful jq_query actually returns
-// (Result, as DataTypeJSON). A refused or failed call returns an error rather
-// than this payload, so nothing here is optional-on-failure.
 func queryResponseSchema() *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type: &openapi3.Types{openapi3.TypeObject},
@@ -215,7 +178,6 @@ func queryResponseSchema() *openapi3.SchemaRef {
 	}}
 }
 
-// queryRequestSchema is the declared request contract for jq_query.
 func queryRequestSchema() *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:       &openapi3.Types{openapi3.TypeObject},
@@ -224,10 +186,7 @@ func queryRequestSchema() *openapi3.SchemaRef {
 	}}
 }
 
-// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
-// jq_query's request and response. The request schema is rendered from the
-// same property table the descriptor renders (queryProperties), so the
-// declared contract and what the model receives cannot drift.
+// GetSchemasForSupportedTools publishes jq_query's OpenAPI 3.1 request/response contract, rendered from the same property table as the descriptor so the two cannot drift.
 func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
 	schema := &openapi3.T{
 		OpenAPI: "3.1.0",

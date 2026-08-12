@@ -170,13 +170,13 @@ func (tr *nativeEventTranslator) publish(ctx context.Context, sid libacp.Session
 // cancel, reaching the turn through Transport.Cancel -> Registry.Cancel
 // independent of this connection — hence keying the drop case on connCtx
 // rather than the request context.
-func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, images []taskengine.ImagePart, droppedContentKinds []string) (libacp.PromptResponse, error) {
+func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, images []taskengine.ImagePart, audio []taskengine.AudioPart, audioRefusal string, droppedContentKinds []string) (libacp.PromptResponse, error) {
 	t := d.t
 	_ = ctx // the turn owns its own serve-rooted context
 
 	viewer := newNativeTurnViewer(t, req.SessionID)
 	turnFn := func(turnCtx context.Context, emit func(context.Context, libacp.SessionNotification)) nativeturn.Result {
-		return d.runNativeTurn(turnCtx, req, sess, input, images, droppedContentKinds, emit)
+		return d.runNativeTurn(turnCtx, req, sess, input, images, audio, audioRefusal, droppedContentKinds, emit)
 	}
 
 	turn, _, err := t.deps.NativeTurns.Start(req.SessionID, turnFn, viewer)
@@ -184,6 +184,8 @@ func (d *nativeDriver) promptViaRegistry(ctx context.Context, req libacp.PromptR
 		// Registry closed (serve shutting down): resolve as a clean cancel.
 		return libacp.PromptResponse{StopReason: libacp.StopReasonCancelled}, nil
 	}
+	t.markNativeViewing(req.SessionID)
+	defer t.unmarkNativeViewing(req.SessionID)
 
 	select {
 	case <-turn.Done():
@@ -235,7 +237,7 @@ func nativeResultToResponse(res nativeturn.Result) (libacp.PromptResponse, error
 // Discarded prompt content is announced the same way, before the turn runs,
 // and carried out on every Result — failure, cancellation and clean end alike
 // — so reconnecting cannot be what makes an attachment's loss disappear.
-func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, images []taskengine.ImagePart, droppedContentKinds []string, emit func(context.Context, libacp.SessionNotification)) nativeturn.Result {
+func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptRequest, sess *sessionEntry, input string, images []taskengine.ImagePart, audio []taskengine.AudioPart, audioRefusal string, droppedContentKinds []string, emit func(context.Context, libacp.SessionNotification)) nativeturn.Result {
 	t := d.t
 
 	turnCtx = libtracker.WithNewRequestID(turnCtx)
@@ -248,7 +250,7 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 	// Journaled ahead of anything the turn produces, so a client reattaching
 	// after the fact reads the loss in the same order the live one saw it —
 	// before the answer that ignored the attachment.
-	announceDroppedContent(turnCtx, req.SessionID, droppedContentKinds, emit)
+	announceDroppedContent(turnCtx, req.SessionID, droppedContentKinds, audioRefusal, emit)
 
 	// Same per-session HITL/mission context injection as prompt.go, riding
 	// turnCtx instead of the request ctx.
@@ -345,6 +347,7 @@ func (d *nativeDriver) runNativeTurn(turnCtx context.Context, req libacp.PromptR
 		SessionID:      sess.InternalSessionID,
 		Input:          input,
 		Images:         images,
+		Audio:          audio,
 		Chain:          t.deps.ChainRegistry.Default(),
 		TemplateVars:   templateVars,
 		ToolsAllowlist: toolsAllowlist,
@@ -444,11 +447,13 @@ func (t *Transport) reattachNativeTurn(ctx context.Context, sid libacp.SessionID
 	if err != nil || !ok {
 		return
 	}
+	t.markNativeViewing(sid)
 	go func() {
 		select {
 		case <-t.connCtx.Done():
 		case <-turn.Done():
 		}
 		turn.Detach(viewer.ID())
+		t.unmarkNativeViewing(sid)
 	}()
 }

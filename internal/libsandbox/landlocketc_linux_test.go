@@ -38,9 +38,6 @@ func TestIntegration_EtcNarrowed_DeniesUngrantedEtcFile(t *testing.T) {
 		"an ungranted /etc file (%s) must be unreadable under the narrowed /etc grant", target)
 }
 
-// findUngrantedWorldReadableEtcFile returns a regular, non-symlink,
-// world-readable /etc file outside the grant set, or skips if none exists.
-// Symlinks are excluded since one might resolve into a granted directory.
 func findUngrantedWorldReadableEtcFile(t *testing.T) string {
 	t.Helper()
 	granted := map[string]bool{

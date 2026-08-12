@@ -41,12 +41,9 @@ func TestUnit_TrimHistoryChunked_BudgetHonoredAndChunked(t *testing.T) {
 	if len(got) > 20 {
 		t.Fatalf("budget is an upper bound: got %d > 20", len(got))
 	}
-	// Trims below budget (20 - 20/4 = 15), so several turns can append before
-	// the next cold cut.
 	if len(got) != 15 {
 		t.Fatalf("expected trim to 15 (budget 20 minus 25%% chunk), got %d", len(got))
 	}
-	// Newest messages survive.
 	if got[len(got)-1].Content != "m29" {
 		t.Fatalf("newest message must survive the trim, got %s", got[len(got)-1].Content)
 	}
@@ -57,8 +54,6 @@ func TestUnit_TrimHistoryChunked_BoundaryStableAcrossTurns(t *testing.T) {
 	trimmed := trimHistoryChunked(h, 20)
 	first := trimmed[0].Content
 
-	// Append two messages per turn; the prefix must not move until the budget
-	// is exceeded again.
 	for turn := 0; turn < 2; turn++ {
 		trimmed = append(trimmed, msg("user", fmt.Sprintf("u%d", turn)), msg("assistant", fmt.Sprintf("a%d", turn)))
 		next := trimHistoryChunked(trimmed, 20)
@@ -85,7 +80,6 @@ func TestUnit_TrimHistoryChunked_PinsLeadingSystemMessages(t *testing.T) {
 
 func TestUnit_TrimHistoryChunked_NeverOpensTailOnToolResult(t *testing.T) {
 	h := chatHistory(40)
-	// Place a tool-result exactly where the naive cut (budget 20) would land.
 	h[len(h)-15] = msg("tool", "orphaned-tool-result")
 	got := trimHistoryChunked(h, 20)
 	if got[0].Role == "tool" {

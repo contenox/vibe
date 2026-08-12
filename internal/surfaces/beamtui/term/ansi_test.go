@@ -526,6 +526,137 @@ func TestUnit_EventSinkCloseDropsAPendingResize(t *testing.T) {
 	}
 }
 
+// TestUnit_EventSinkGestureStartFiresOncePerGesture pins the hook contract
+// the region take-down depends on: exactly one fire when a debounced gesture
+// begins, none for the drag's later reports, none for the immediate path, and
+// a fresh fire once the previous gesture has settled.
+func TestUnit_EventSinkGestureStartFiresOncePerGesture(t *testing.T) {
+	const settle = 60 * time.Millisecond
+	s := newEventSink(8, settle)
+	fired := 0
+	s.gestureStart = func() { fired++ }
+
+	for _, w := range []int{70, 60, 50} {
+		s.sendResize(input.ResizeEvent{Width: w, Height: 24})
+	}
+	if fired != 1 {
+		t.Fatalf("gestureStart fired %d times during one drag, want once", fired)
+	}
+	if !s.resizePending() {
+		t.Fatal("a drag in its settle window must report a pending resize")
+	}
+
+	select {
+	case <-s.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the settled size never arrived")
+	}
+	if s.resizePending() {
+		t.Fatal("a released resize must not stay pending")
+	}
+
+	s.sendResize(input.ResizeEvent{Width: 90, Height: 24})
+	if fired != 2 {
+		t.Fatalf("a new gesture after a settle fired %d times total, want 2", fired)
+	}
+	select {
+	case <-s.ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the second settled size never arrived")
+	}
+
+	// The immediate path (first size, post-Suspend) is not a gesture: there
+	// is no drag coming and nothing on screen worth taking down for it.
+	s.sendResizeNow(input.ResizeEvent{Width: 100, Height: 30})
+	if fired != 2 {
+		t.Fatalf("sendResizeNow fired the gesture hook (%d fires total), want none", fired)
+	}
+	s.close()
+}
+
+// TestUnit_CommitDuringAGestureWithholdsTheLiveRegion drives the engine's
+// Commit against the reflowing screen model across a whole gesture: the hook
+// takes the region down the moment the drag's first size is reported, a
+// streaming commit mid-drag prints its scrollback and nothing else, and the
+// settle's release repaints exactly one region at the new width.
+func TestUnit_CommitDuringAGestureWithholdsTheLiveRegion(t *testing.T) {
+	scr := newScreen(72)
+	e := &ANSI{
+		done:   make(chan struct{}),
+		events: newEventSink(8, time.Hour),
+		width:  72,
+		height: 20,
+		painter: &painter{
+			out:    scr,
+			styles: plainStyles{},
+			width:  72,
+			height: 20,
+		},
+	}
+	e.events.release = e.applySize
+	e.events.gestureStart = e.onResizeGesture
+
+	if err := e.Commit(realFrame(true)); err != nil {
+		t.Fatalf("initial commit: %v", err)
+	}
+	if n := scr.count(hintMark); n != 1 {
+		t.Fatalf("initial commit painted the hint %d times, want once", n)
+	}
+
+	// The drag's first report: the hook erases the region synchronously,
+	// before the terminal reflows through the rest of the drag.
+	e.events.sendResize(input.ResizeEvent{Width: 50, Height: 20})
+	for _, mark := range []string{tailMark, hintMark, statusMark} {
+		if n := scr.count(mark); n != 0 {
+			t.Fatalf("gesture start left %q on screen (%d times)\nscreen:\n%s", mark, n, scr.text())
+		}
+	}
+	scr.resize(50)
+
+	// A turn streaming mid-drag: scrollback lands, the live region stays
+	// withheld until the size is settled.
+	streamed := "assistant: streamed while the drag was in flight"
+	mid := realFrame(false)
+	mid.Scrollback = lines(streamed)
+	if err := e.Commit(mid); err != nil {
+		t.Fatalf("mid-gesture commit: %v", err)
+	}
+	if n := scr.count(streamed); n != 1 {
+		t.Fatalf("mid-gesture scrollback printed %d times, want once", n)
+	}
+	if n := scr.count(hintMark); n != 0 {
+		t.Fatalf("a mid-gesture commit painted the withheld region\nscreen:\n%s", scr.text())
+	}
+
+	// The drag comes to rest; force the settle window to lapse and release.
+	scr.resize(30)
+	e.events.sendResize(input.ResizeEvent{Width: 30, Height: 20})
+	e.events.resizeMu.Lock()
+	e.events.releaseAt = time.Time{}
+	e.events.resizeMu.Unlock()
+	e.events.flushResize()
+	if ev := nextEvent(t, e.events.ch); ev != input.Event(input.ResizeEvent{Width: 30, Height: 20}) {
+		t.Fatalf("released %#v, want the settled size", ev)
+	}
+	if w, h := e.Size(); w != 30 || h != 20 {
+		t.Fatalf("engine adopted %dx%d, want the released 30x20", w, h)
+	}
+
+	if err := e.Commit(realFrame(false)); err != nil {
+		t.Fatalf("settle commit: %v", err)
+	}
+	for _, mark := range []string{tailMark, hintMark, statusMark} {
+		if n := scr.count(mark); n != 1 {
+			t.Fatalf("%q appears %d times after the settle, want once\nscreen:\n%s", mark, n, scr.text())
+		}
+	}
+	if n := scr.count(streamed); n != 1 {
+		t.Fatalf("the streamed line appears %d times after the settle, want once", n)
+	}
+	assertHistoryIntact(t, scr)
+	e.events.close()
+}
+
 func TestUnit_EngineRejectsNonTerminals(t *testing.T) {
 	f, err := os.Open(os.DevNull)
 	if err != nil {

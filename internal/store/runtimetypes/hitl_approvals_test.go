@@ -14,10 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupHITLApprovalsStore opens a fresh SQLite-backed Store (the production
-// "Contenox Local" backend, and the one runtime/hitlservice's own tests use)
-// rather than the Postgres-testcontainer SetupStore other _test.go files in
-// this package use, so this file's tests need no Docker.
 func setupHITLApprovalsStore(t *testing.T) (context.Context, runtimetypes.Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -95,8 +91,6 @@ func TestUnit_HITLApprovals_GetUnknownReturnsNotFound(t *testing.T) {
 	require.True(t, errors.Is(err, libdb.ErrNotFound))
 }
 
-// ─── ResolveHITLApproval: the compare-and-swap ─────────────────────────────
-
 func TestUnit_ResolveHITLApproval_TransitionsPendingRow(t *testing.T) {
 	t.Parallel()
 	ctx, s := setupHITLApprovalsStore(t)
@@ -139,11 +133,7 @@ func TestUnit_ResolveHITLApproval_UnknownIDReturnsNotFound(t *testing.T) {
 	require.True(t, errors.Is(err, libdb.ErrNotFound))
 }
 
-// TestUnit_ResolveHITLApproval_AlreadyResolvedIsRejected is the compare-and-
-// swap guarantee itself: a second resolve attempt against a row that is no
-// longer 'pending' must not succeed and must not change the row — this is
-// what lets hitlservice's sweeper and Respond race safely against each
-// other, whichever gets there first wins and the other sees ErrNotFound.
+// TestUnit_ResolveHITLApproval_AlreadyResolvedIsRejected verifies a second resolve on a non-pending row neither succeeds nor changes the row.
 func TestUnit_ResolveHITLApproval_AlreadyResolvedIsRejected(t *testing.T) {
 	t.Parallel()
 	ctx, s := setupHITLApprovalsStore(t)
@@ -158,15 +148,12 @@ func TestUnit_ResolveHITLApproval_AlreadyResolvedIsRejected(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, libdb.ErrNotFound))
 
-	// The first resolution must stand, untouched by the rejected second call.
 	got, err := s.GetHITLApproval(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalApproved, got.State)
 	require.JSONEq(t, `{"approved":true}`, string(got.Resolution))
 	require.WithinDuration(t, firstResolvedAt, *got.ResolvedAt, time.Second)
 }
-
-// ─── ListExpiredHITLApprovals ───────────────────────────────────────────────
 
 func TestUnit_ListExpiredHITLApprovals_ReturnsOnlyPastDeadlinePendingRows(t *testing.T) {
 	t.Parallel()
@@ -202,8 +189,6 @@ func TestUnit_ListExpiredHITLApprovals_EmptyIsNonNil(t *testing.T) {
 	require.Empty(t, got)
 }
 
-// ─── ListHITLApprovals ──────────────────────────────────────────────────────
-
 func TestUnit_ListHITLApprovals_FiltersByStateNewestFirst(t *testing.T) {
 	t.Parallel()
 	ctx, s := setupHITLApprovalsStore(t)
@@ -223,7 +208,6 @@ func TestUnit_ListHITLApprovals_FiltersByStateNewestFirst(t *testing.T) {
 	got, err := s.ListHITLApprovals(ctx, runtimetypes.HITLApprovalPending, nil, 100)
 	require.NoError(t, err)
 	require.Len(t, got, 3)
-	// newest first
 	require.Equal(t, pendingIDs[2], got[0].ID)
 	require.Equal(t, pendingIDs[0], got[2].ID)
 
@@ -246,12 +230,7 @@ func TestUnit_EstimateHITLApprovalCount(t *testing.T) {
 	require.Equal(t, int64(3), count)
 }
 
-// ─── restart durability at the store layer ─────────────────────────────────
-
-// TestUnit_HITLApprovals_RowSurvivesReopeningTheDatabase pins durability: a
-// pending row written by one DBManager instance is visible, unchanged, to a
-// separate DBManager instance opened later against the same file, simulating
-// a `contenox serve` restart with no in-memory state carried over.
+// TestUnit_HITLApprovals_RowSurvivesReopeningTheDatabase verifies a pending row survives being reopened by a separate DBManager instance against the same file.
 func TestUnit_HITLApprovals_RowSurvivesReopeningTheDatabase(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "restart.db")
@@ -275,18 +254,11 @@ func TestUnit_HITLApprovals_RowSurvivesReopeningTheDatabase(t *testing.T) {
 	require.Equal(t, a.ToolsName, got.ToolsName)
 	require.Equal(t, a.ToolName, got.ToolName)
 
-	// And it is resolvable from the "restarted" instance.
 	require.NoError(t, store2.ResolveHITLApproval(ctx, a.ID, runtimetypes.HITLApprovalApproved, json.RawMessage(`{"approved":true}`), time.Now().UTC()))
 	resolved, err := store2.GetHITLApproval(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalApproved, resolved.State)
 }
-
-// ─── attribution ───────────────────────────────────────────────────────────
-//
-// The attribution columns name who is asking, not just which tool was
-// called. These pin that they round-trip through every read path, and that
-// MissionID stays nullable — no mission must be distinguishable from unknown.
 
 func TestUnit_HITLApprovals_AttributionRoundTrips(t *testing.T) {
 	t.Parallel()
@@ -308,8 +280,6 @@ func TestUnit_HITLApprovals_AttributionRoundTrips(t *testing.T) {
 	require.NotNil(t, got.MissionID)
 	require.Equal(t, missionID, *got.MissionID)
 
-	// The LIST paths project the same columns — the inbox reads through these,
-	// not through Get.
 	listed, err := s.ListHITLApprovals(ctx, runtimetypes.HITLApprovalPending, nil, 10)
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
@@ -329,9 +299,6 @@ func TestUnit_HITLApprovals_UnattributedRowIsEmptyNotNull(t *testing.T) {
 	t.Parallel()
 	ctx, s := setupHITLApprovalsStore(t)
 
-	// An ask raised by a native chain turn with no fleet unit behind it: no
-	// attribution at all, which must store and read back cleanly rather than
-	// failing a NOT NULL constraint or scanning into a nil string.
 	a := newPendingApproval()
 	require.NoError(t, s.CreateHITLApproval(ctx, a))
 
@@ -343,8 +310,6 @@ func TestUnit_HITLApprovals_UnattributedRowIsEmptyNotNull(t *testing.T) {
 	require.Nil(t, got.MissionID, "no mission must read back as NULL, not as an empty string")
 }
 
-// attentionAsk builds a pending attention ask on missionID, in the shape
-// hitlservice writes them (the marks ResolveHITLApprovalWithinBound counts on).
 func attentionAsk(missionID string) *runtimetypes.HITLApproval {
 	a := newPendingApproval()
 	a.ToolsName, a.ToolName = "mission", "mission_ask_attention"
@@ -353,7 +318,6 @@ func attentionAsk(missionID string) *runtimetypes.HITLApproval {
 	return a
 }
 
-// agentAnswerBound is the predicate hitlservice passes for missionID.
 func agentAnswerBound(missionID string, max int) runtimetypes.AgentAnswerBound {
 	return runtimetypes.AgentAnswerBound{
 		MissionID:      missionID,
@@ -364,10 +328,7 @@ func agentAnswerBound(missionID string, max int) runtimetypes.AgentAnswerBound {
 	}
 }
 
-// TestUnit_HITLApprovals_ResolveWithinBoundStopsAtTheCap pins the count-and-write
-// as one statement: the write itself refuses once the mission holds Max
-// agent-answered asks, so a caller that counted before any of them landed
-// cannot spend budget that is gone.
+// TestUnit_HITLApprovals_ResolveWithinBoundStopsAtTheCap verifies the write refuses once the mission holds Max agent-answered asks.
 func TestUnit_HITLApprovals_ResolveWithinBoundStopsAtTheCap(t *testing.T) {
 	t.Parallel()
 	ctx, s := setupHITLApprovalsStore(t)
@@ -398,9 +359,7 @@ func TestUnit_HITLApprovals_ResolveWithinBoundStopsAtTheCap(t *testing.T) {
 	require.Equal(t, max, landed)
 }
 
-// TestUnit_HITLApprovals_ResolveWithinBoundCountsOnlyAgentAnswers pins the two
-// halves of the predicate: a human's answer on the same mission spends no
-// budget, and another mission's agent answers spend none of this one's.
+// TestUnit_HITLApprovals_ResolveWithinBoundCountsOnlyAgentAnswers verifies a human's answer spends no budget and another mission's agent answers spend none of this one's.
 func TestUnit_HITLApprovals_ResolveWithinBoundCountsOnlyAgentAnswers(t *testing.T) {
 	t.Parallel()
 	ctx, s := setupHITLApprovalsStore(t)
@@ -430,9 +389,7 @@ func TestUnit_HITLApprovals_ResolveWithinBoundCountsOnlyAgentAnswers(t *testing.
 		libdb.ErrNotFound, "the one agent answer that does count spends the cap")
 }
 
-// TestUnit_HITLApprovals_ResolveWithinBoundKeepsThePendingCAS pins that the
-// bound is an EXTRA predicate, not a replacement: a row already resolved stays
-// single-winner even with budget to spare.
+// TestUnit_HITLApprovals_ResolveWithinBoundKeepsThePendingCAS verifies a row already resolved stays single-winner even with budget to spare.
 func TestUnit_HITLApprovals_ResolveWithinBoundKeepsThePendingCAS(t *testing.T) {
 	t.Parallel()
 	ctx, s := setupHITLApprovalsStore(t)

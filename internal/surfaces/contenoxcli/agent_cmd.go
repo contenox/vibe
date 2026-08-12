@@ -168,8 +168,6 @@ func setAgentEnabled(cmd *cobra.Command, name string, enabled bool) error {
 	return nil
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-
 func openAgentService(cmd *cobra.Command) (libdb.DBManager, agentregistryservice.Service, error) {
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {

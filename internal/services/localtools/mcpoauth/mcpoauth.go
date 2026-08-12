@@ -173,8 +173,6 @@ func StartCallbackServer(port int) (net.Listener, string, <-chan CallbackResult,
 	return ln, redirectURI, ch, nil
 }
 
-// ── internal helpers ──────────────────────────────────────────────────────────
-
 func fetchJSON[T any](ctx context.Context, rawURL string) (*T, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {

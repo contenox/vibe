@@ -19,25 +19,21 @@ const (
 	ListenerKindWake = "wake"
 )
 
-// Listener-listing bounds, shared with the firing limits' rationale.
+// Listener-listing bounds.
 const (
 	DefaultListenerLimit = 50
 	MaxListenerLimit     = 1000
 )
 
 // Listener is one durable subscription: which event types, filtered how,
-// doing what to which target. It is a row rather than configuration because
-// waits are registered and consumed at runtime — a waiting consumer creates
-// its listener mid-run and the firing that wakes it deletes it in the same
-// transaction.
+// doing what to which target.
 type Listener struct {
 	ID    string
 	Scope string
 	// Kind is ListenerKindStart or ListenerKindWake.
 	Kind string
-	// Target is opaque to this package: a chain reference, a delivery
-	// address, an instance to wake. The dispatcher that owns the listener
-	// interprets it.
+	// Target is opaque to this package; the dispatcher that owns the
+	// listener interprets it.
 	Target string
 	// Owner keys bulk cleanup: every listener registered by one instance,
 	// session, or configuration unit dies with it via DeleteListenersByOwner.
@@ -45,13 +41,10 @@ type Listener struct {
 	// OneShot listeners are deleted by their consumer when they fire; the
 	// store carries the flag, the dispatcher enforces it.
 	OneShot bool
-	// Types are the exact event types subscribed. Each becomes a topic row,
-	// so fan-out is an indexed lookup rather than a scan of all listeners.
+	// Types are the exact event types subscribed.
 	Types []string
 	// ContextFilters narrows matching beyond the type: per event type, a map
-	// of event context attribute to glob pattern, every entry of which must
-	// match. Correlation — this session's event, not any event of the type —
-	// lives here, as data on the subscription.
+	// of attribute to glob pattern, all of which must match.
 	ContextFilters map[string]map[string]string
 	// Metadata is opaque JSON for the importer's extensions.
 	Metadata  string
@@ -59,9 +52,8 @@ type Listener struct {
 	UpdatedAt time.Time
 }
 
-// ListenerStore is the durable subscription registry, scoped at construction.
-// Mutators take the caller's Exec so a registration or a one-shot consumption
-// shares the transaction of the work that caused it.
+// ListenerStore is the durable subscription registry, scoped at construction;
+// mutators take the caller's Exec to share its transaction.
 type ListenerStore struct {
 	cfg   Config
 	scope string
@@ -76,8 +68,8 @@ func NewListenerStore(cfg Config, scope string) (*ListenerStore, error) {
 	return &ListenerStore{cfg: cfg, scope: scope, now: time.Now}, nil
 }
 
-// AppendListener stores l and its topic rows in the caller's transaction.
-// l.ID and at least one type are required; the scope is the store's own.
+// AppendListener stores l and its topic rows in the caller's transaction;
+// l.ID and at least one type are required.
 func (s *ListenerStore) AppendListener(ctx context.Context, exec libdb.Exec, l *Listener) error {
 	if l.ID == "" {
 		return fmt.Errorf("libevents: listener requires an id")
@@ -129,8 +121,7 @@ func (s *ListenerStore) GetListener(ctx context.Context, exec libdb.Exec, id str
 }
 
 // DeleteListener removes one listener and its topic rows in the caller's
-// transaction — the one-shot consumption path when that transaction is the
-// firing's own.
+// transaction.
 func (s *ListenerStore) DeleteListener(ctx context.Context, exec libdb.Exec, id string) error {
 	res, err := exec.ExecContext(ctx, fmt.Sprintf(
 		`DELETE FROM %s WHERE %s = $1 AND id = $2`,
@@ -152,8 +143,7 @@ func (s *ListenerStore) DeleteListener(ctx context.Context, exec libdb.Exec, id 
 }
 
 // DeleteListenersByOwner removes every listener owner registered, returning
-// the ids removed — the cleanup that keeps a dead instance's waits from
-// matching forever.
+// the ids removed.
 func (s *ListenerStore) DeleteListenersByOwner(ctx context.Context, exec libdb.Exec, owner string) ([]string, error) {
 	rows, err := exec.QueryContext(ctx, fmt.Sprintf(
 		`SELECT id FROM %s WHERE %s = $1 AND owner = $2`,
@@ -182,8 +172,8 @@ func (s *ListenerStore) DeleteListenersByOwner(ctx context.Context, exec libdb.E
 	return ids, nil
 }
 
-// ListListenersByType returns every listener subscribed to eventType, via the
-// topic index. The caller applies context filters; this is the fan-out read.
+// ListListenersByType returns every listener subscribed to eventType; the
+// caller applies context filters.
 func (s *ListenerStore) ListListenersByType(ctx context.Context, exec libdb.Exec, eventType string) ([]*Listener, error) {
 	rows, err := exec.QueryContext(ctx, fmt.Sprintf(`
 		SELECT l.id, l.%[1]s, l.kind, l.target, l.owner, l.one_shot, l.context_filters, l.metadata, l.created_at, l.updated_at

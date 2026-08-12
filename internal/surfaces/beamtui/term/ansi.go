@@ -50,13 +50,20 @@ type eventParser interface {
 // raw and lets the terminal soft-wrap it (painter.renderRaw).
 //
 // Every method except Events and Restore must be called from the single
-// app-shell loop goroutine: one writer means interleaved escape sequences
-// cannot corrupt a frame. Restore is the exception, so a deferred panic
-// handler on any goroutine can hand the terminal back.
+// app-shell loop goroutine. There is one internal exception: the resize
+// watcher erases the live region the moment a gesture begins (see
+// onResizeGesture), so every painter access is serialized under paintMu —
+// whole frames at a time, which keeps escape sequences uninterleaved, the
+// property the single-writer rule exists for. Restore stays lock-free, so a
+// deferred panic handler on any goroutine can hand the terminal back.
 type ANSI struct {
 	in, out *os.File
 	painter *painter
 	parser  eventParser
+
+	// paintMu serializes painter writes between the app-shell loop (Commit,
+	// Suspend, Close) and the resize watcher's gesture-start erase.
+	paintMu sync.Mutex
 
 	events    *eventSink
 	done      chan struct{}
@@ -130,9 +137,10 @@ func New(in, out *os.File, styles StyleResolver) (*ANSI, error) {
 		wakeW.Close()
 		return nil, err
 	}
-	// Set before any goroutine exists, so the sink's release hook is visible to
+	// Set before any goroutine exists, so the sink's hooks are visible to
 	// every one of them without further synchronization.
 	e.events.release = e.applySize
+	e.events.gestureStart = e.onResizeGesture
 	e.winch = notifyResize()
 	e.events.sendResizeNow(input.ResizeEvent{Width: width, Height: height})
 	go e.readLoop()
@@ -144,11 +152,40 @@ func New(in, out *os.File, styles StyleResolver) (*ANSI, error) {
 func (e *ANSI) Events() <-chan input.Event { return e.events.ch }
 
 // Commit renders one frame into the terminal (see painter.commit); the
-// engine's only addition is picking up a size change the resize goroutine
-// observed.
+// engine's additions are picking up a size change the resize goroutine
+// observed, and withholding the live region while a resize gesture is still
+// settling. Mid-gesture the terminal's real geometry is not the one the frame
+// was laid out for — painting the region would put rows on screen that the
+// drag's next width rewraps, which is exactly the desync onResizeGesture just
+// erased its way out of — so only scrollback (raw, width-independent) goes
+// out, and the settle's ResizeEvent triggers the full repaint.
 func (e *ANSI) Commit(f frame.Frame) error {
+	e.paintMu.Lock()
+	defer e.paintMu.Unlock()
+	if e.events.resizePending() {
+		f = frame.Frame{Scrollback: f.Scrollback, Cursor: frame.Cursor{Hidden: true}}
+	}
 	e.painter.resize(e.Size())
 	return e.painter.commit(f)
+}
+
+// onResizeGesture runs the moment a debounced resize gesture begins — before
+// the drag's later widths reflow the live region — and erases the region while
+// the painter's row counts still describe the screen. This is the only painter
+// write outside the app-shell loop (see paintMu). During Suspend the child
+// owns the screen and there is no region to take down, so the hook declines.
+func (e *ANSI) onResizeGesture() {
+	if e.paused.Load() {
+		return
+	}
+	select {
+	case <-e.done:
+		return
+	default:
+	}
+	e.paintMu.Lock()
+	defer e.paintMu.Unlock()
+	e.painter.disown()
 }
 
 // Size reports the terminal size the engine has adopted — the last one whose
@@ -188,7 +225,9 @@ func (e *ANSI) Suspend(fn func() error) (err error) {
 	// Erase the live region before handover: resume cannot know what the
 	// child drew, so anything left on screen would become permanent,
 	// duplicated scrollback.
+	e.paintMu.Lock()
 	_ = e.painter.clear()
+	e.paintMu.Unlock()
 	if rerr := e.Restore(); rerr != nil {
 		e.paused.Store(false)
 		return fmt.Errorf("beam term: suspend: %w", rerr)
@@ -220,8 +259,11 @@ func (e *ANSI) Close() error {
 		case <-time.After(readerStopWait):
 		}
 		// Erase the live region so the shell's next prompt lands on a
-		// clean line, never beside leftover chrome.
+		// clean line, never beside leftover chrome. The watcher is already
+		// down, so paintMu is only honesty here, not a contested lock.
+		e.paintMu.Lock()
 		_ = e.painter.clear()
+		e.paintMu.Unlock()
 		err = e.Restore()
 		e.events.close()
 		e.wakeR.Close()
@@ -311,7 +353,9 @@ func (e *ANSI) resume() error {
 	e.mu.Lock()
 	err := e.enterRawLocked()
 	e.mu.Unlock()
+	e.paintMu.Lock()
 	e.painter.reset()
+	e.paintMu.Unlock()
 	width, height := e.probeSize()
 	// Not debounced: a child process just repainted the screen, so the app must
 	// be told to redraw now rather than after a settle window it has no reason
@@ -472,6 +516,13 @@ type eventSink struct {
 	// release, if set, adopts a size at the instant it is handed to the app.
 	// Assigned once before the sink is shared with any goroutine.
 	release func(input.ResizeEvent)
+	// gestureStart, if set, runs when a debounced resize gesture begins — the
+	// first report while none is pending, never on sendResizeNow's immediate
+	// path — so the engine can take the live region down while its row counts
+	// still describe the screen (see ANSI.onResizeGesture). It fires once per
+	// gesture: later reports of the same drag find the slot occupied.
+	// Assigned once before the sink is shared with any goroutine.
+	gestureStart func()
 
 	resizeMu  sync.Mutex
 	resize    input.ResizeEvent
@@ -531,13 +582,31 @@ func (s *eventSink) sendResizeNow(ev input.ResizeEvent) {
 
 func (s *eventSink) pendResize(ev input.ResizeEvent, wait time.Duration) {
 	s.resizeMu.Lock()
+	fresh := !s.hasResize
 	s.resize, s.hasResize = ev, true
 	s.releaseAt = time.Now().Add(wait)
 	if wait > 0 {
 		s.armLocked(wait)
 	}
+	gesture := s.gestureStart
 	s.resizeMu.Unlock()
+	// Outside the lock: the hook writes to the terminal, and nothing here
+	// races it — the pending slot is already occupied, so a settle elapsing
+	// concurrently only releases the size the hook is erasing ahead of.
+	if fresh && wait > 0 && gesture != nil {
+		gesture()
+	}
 	s.flushResize()
+}
+
+// resizePending reports whether a resize gesture is still in flight: a size
+// has been reported that the app has not yet been handed. While true, the
+// terminal's real geometry and the app's layout width cannot be assumed to
+// agree, which is what ANSI.Commit's live-region withholding keys off.
+func (s *eventSink) resizePending() bool {
+	s.resizeMu.Lock()
+	defer s.resizeMu.Unlock()
+	return s.hasResize
 }
 
 // armLocked schedules the wakeup that releases a pending resize when nothing

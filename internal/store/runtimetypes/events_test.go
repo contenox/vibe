@@ -1,10 +1,5 @@
 package runtimetypes_test
 
-// event_log_YYYYMMDD / event_partitions store tests, over the production
-// SQLite backend (same no-Docker idiom as hitl_approvals_test.go). The event
-// store takes a DBManager rather than an Exec — AppendEvent needs a
-// transaction — so these open the manager instead of calling SetupStore.
-
 import (
 	"context"
 	"encoding/json"
@@ -29,7 +24,6 @@ func setupEventDB(t *testing.T) libdb.DBManager {
 	return db
 }
 
-// movableClock is a settable time source for period-boundary tests.
 type movableClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -47,7 +41,6 @@ func (c *movableClock) Set(t time.Time) {
 	c.mu.Unlock()
 }
 
-// errFromList adapts a (value, error) return for ErrorIs assertions.
 func errFromList[T any](_ T, err error) error { return err }
 
 func TestUnit_Events_AppendAssignsOrderedNIDsAndDefaults(t *testing.T) {
@@ -148,8 +141,7 @@ func TestUnit_Events_ListEventsSinceSpansPartitionsInNIDOrder(t *testing.T) {
 	clock := &movableClock{now: time.Date(2026, 8, 1, 23, 55, 0, 0, time.UTC)}
 	store := runtimetypes.NewEventStore(db, runtimetypes.WithEventClock(clock.Now))
 
-	// Straddle the boundary: nid 2 lands in day 2, then nid 3 lands back in
-	// day 1 (a time just inside the window's reach into the previous period).
+	// e3's Time falls back into day 1 despite being appended after the clock moved to day 2.
 	e1 := &runtimetypes.Event{WorkspaceID: testEventWS, Type: "test.events.span"}
 	require.NoError(t, store.AppendEvent(ctx, e1))
 	clock.Set(time.Date(2026, 8, 2, 0, 5, 0, 0, time.UTC))
@@ -227,10 +219,7 @@ func TestUnit_Events_PruneDropsOldPeriodsAndKeepsNewer(t *testing.T) {
 	require.Empty(t, again, "pruning is idempotent")
 }
 
-// TestUnit_Events_ConcurrentAppendsAcrossPeriodBoundary pins the store's
-// concurrency contract now that it caches nothing: racing appenders on both
-// sides of a period boundary converge on one partition per period (idempotent
-// DDL) and never share an NID.
+// TestUnit_Events_ConcurrentAppendsAcrossPeriodBoundary asserts racing appenders across a period boundary converge on one partition per period and never share an NID.
 func TestUnit_Events_ConcurrentAppendsAcrossPeriodBoundary(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
@@ -245,8 +234,7 @@ func TestUnit_Events_ConcurrentAppendsAcrossPeriodBoundary(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			// Both times sit inside the acceptance window of the frozen clock,
-			// so half the appenders race on each period's creation.
+			// Both times sit inside the acceptance window, so half the appenders race on each period's creation.
 			ts := time.Date(2026, 8, 1, 23, 59, 30, 0, time.UTC)
 			if i%2 == 1 {
 				ts = time.Date(2026, 8, 2, 0, 0, 30, 0, time.UTC)
@@ -282,9 +270,6 @@ func TestUnit_Events_ConcurrentAppendsAcrossPeriodBoundary(t *testing.T) {
 	}
 }
 
-// seedEventQueryFixture writes two workspaces' events across two partitions:
-// ws-test gets four events (two per day, mixed sources/subjects), ws-other
-// gets one per day — the isolation foil.
 func seedEventQueryFixture(t *testing.T, db libdb.DBManager, clock *movableClock) (day1, day2 time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -414,8 +399,6 @@ func TestUnit_Events_DeleteEventsByTypeInRangeIsSurgical(t *testing.T) {
 	require.Len(t, status, 1, "other types in the same range survive")
 }
 
-// TestUnit_Events_WorkspaceIsolation pins the scoping invariant: workspace A's
-// reads never return workspace B's events, on every query path.
 func TestUnit_Events_WorkspaceIsolation(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)

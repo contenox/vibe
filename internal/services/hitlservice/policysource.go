@@ -8,20 +8,18 @@ import (
 	"path/filepath"
 )
 
-// PolicySource reads a named HITL policy document for a tenant. Any error
+// PolicySource reads a named HITL policy document for a tenant; any error
 // (including not-found) makes the evaluator fall back to the built-in default
-// policy, so implementations need not special-case absence.
+// policy.
 type PolicySource interface {
 	ReadPolicy(ctx context.Context, tenantID, name string) ([]byte, error)
 }
 
-// fsPolicySource reads policies from a list of directories, trying each in
-// order. It replaces the layered local-filesystem VFS that previously fed HITL.
 type fsPolicySource struct{ dirs []string }
 
 // NewFSPolicySource returns a PolicySource that looks up "<dir>/<name>" in
-// each dir in order, returning the first hit. tenantID is ignored (the OSS
-// runtime is single-tenant); empty dirs are skipped.
+// each dir in order, returning the first hit; tenantID is ignored and empty
+// dirs are skipped.
 func NewFSPolicySource(dirs ...string) PolicySource {
 	return &fsPolicySource{dirs: dirs}
 }

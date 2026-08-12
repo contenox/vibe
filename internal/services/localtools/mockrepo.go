@@ -53,7 +53,6 @@ func (m *MockToolsRepo) Exec(
 ) (int, any, taskengine.DataType, string, error) {
 	m.callCount++
 
-	// Record call details
 	call := ToolsCallRecord{
 		Args:       *args,
 		Input:      input,
@@ -62,7 +61,6 @@ func (m *MockToolsRepo) Exec(
 	}
 	m.Calls = append(m.Calls, call)
 
-	// Determine error (if any)
 	var err error
 	if len(m.ErrorSequence) > 0 {
 		err = m.ErrorSequence[0]
@@ -73,7 +71,6 @@ func (m *MockToolsRepo) Exec(
 		}
 	}
 
-	// Get response from map or use default
 	var resp ToolsResponse
 	if specificResp, ok := m.ResponseMap[args.Name]; ok {
 		resp = specificResp

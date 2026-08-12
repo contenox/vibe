@@ -29,13 +29,6 @@ const (
 	ScopeAll = "all"
 )
 
-// The curated go/analysis set. A pass earns a place only if it catches a bug class the compiler accepts, fires rarely enough that a finding is worth reading, and needs no cross-package fact propagation.
-//
-// Default (defaultVetPasses): printf, unusedresult, unreachable, nilfunc.
-//
-// Optional (optionalVetPasses): shadow — real signal (a re-declared err in an inner scope), but noisy enough on idiomatic `if err := f(); err != nil` to drown a clean result; request it via passes=["shadow"] or ["all"].
-//
-// Excluded: fieldalignment and composites (high false-positive rate without project config), and anything needing cross-package facts, since this driver runs single-package and factless (see passRunner).
 var (
 	defaultVetPasses = []*analysis.Analyzer{
 		printf.Analyzer,
@@ -63,7 +56,6 @@ func analyzerNames(list []*analysis.Analyzer) []string {
 	return out
 }
 
-// resolvePasses turns the requested pass names into analyzers. Empty means the default set; "all" means every curated pass; an unknown name is refused with the available names listed rather than silently dropped.
 func resolvePasses(requested []string) ([]*analysis.Analyzer, error) {
 	if len(requested) == 0 {
 		return defaultVetPasses, nil
@@ -108,7 +100,7 @@ func resolvePasses(requested []string) ([]*analysis.Analyzer, error) {
 // Diagnostic is one finding.
 type Diagnostic struct {
 	Location string `json:"location"`
-	// Severity is "type-error" (the load's own parse/type errors) or "vet" (a curated analysis pass). A type error is nearly always real; a vet finding is advice.
+	// Severity is "type-error" (the load's own parse/type errors) or "vet" (a curated analysis pass).
 	Severity string `json:"severity"`
 	// Category is the analyzer name, or "type" for a load error.
 	Category string `json:"category"`
@@ -128,7 +120,7 @@ type DiagnosticsResult struct {
 	Shown       int          `json:"shown"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 	Note        string       `json:"note,omitempty"`
-	// Toolchain names the build context these findings were produced under; a repo on a newer toolchain can see errors its own compiler would not raise. `go build` is the arbiter.
+	// Toolchain names the build context these findings were produced under.
 	Toolchain string `json:"toolchain"`
 }
 
@@ -186,7 +178,6 @@ func (ix *index) Diagnostics(ctx context.Context, req Request) (*DiagnosticsResu
 		all = append(all, typeErrs...)
 		res.TypeErrors += len(typeErrs)
 		if len(typeErrs) > 0 {
-			// A package that does not type-check gives the analyzers garbage to reason about; running them there manufactures noise on top of a real error.
 			continue
 		}
 		vet := snap.vet(p, passes)
@@ -200,7 +191,7 @@ func (ix *index) Diagnostics(ctx context.Context, req Request) (*DiagnosticsResu
 
 	sort.SliceStable(all, func(i, j int) bool {
 		if all[i].Severity != all[j].Severity {
-			// Type errors first: they are facts, vet findings are advice.
+			// Type errors sort before vet findings.
 			return all[i].Severity == "type-error"
 		}
 		return all[i].Location < all[j].Location
@@ -221,7 +212,6 @@ func (ix *index) Diagnostics(ctx context.Context, req Request) (*DiagnosticsResu
 	return res, nil
 }
 
-// diagnosticTargets resolves a scope to the packages to sweep.
 func (ix *index) diagnosticTargets(e *entry, snap *Snapshot, scope string, req Request) ([]*packages.Package, string, error) {
 	switch scope {
 	case ScopeAll:
@@ -274,7 +264,6 @@ func (ix *index) diagnosticTargets(e *entry, snap *Snapshot, scope string, req R
 	}
 }
 
-// typeErrors converts the load's own parse and type errors. go/packages reports a broken package twice: a positioned TypeError/ParseError, and an unpositioned ListError repeating the same text. The ListError is dropped whenever a positioned error exists for the package; kept only when it is the sole error.
 func (s *Snapshot) typeErrors(p *packages.Package) []Diagnostic {
 	if len(p.Errors) == 0 {
 		return nil
@@ -303,10 +292,8 @@ func (s *Snapshot) typeErrors(p *packages.Package) []Diagnostic {
 	return out
 }
 
-// importErrorPrefix is how go/types opens the one type error whose real cause is never in the file it points at.
 const importErrorPrefix = "could not import "
 
-// enrichTypeError adds a hint go/types cannot: an undownloaded dependency in go.mod fails with `could not import example.com/x (invalid package name: "")` anchored at the import line, which is a trap since that line is correct — the real cause is go.mod. The toolchain's own text is preserved verbatim in front.
 func (s *Snapshot) enrichTypeError(msg string) string {
 	if !strings.HasPrefix(msg, importErrorPrefix) {
 		return msg
@@ -321,13 +308,11 @@ func (s *Snapshot) enrichTypeError(msg string) string {
 		return msg
 	}
 	if _, own := s.byPath[path]; own {
-		// A package of this module that failed to build: the position is honest and the sibling package's own diagnostics say why.
 		return msg
 	}
 	return msg + " — " + path + " is a dependency, not a package of this module, so this is a module-resolution failure rather than a problem with the import line; check that go.mod requires it and that it has been downloaded (`go mod download`)"
 }
 
-// positionFromString renders a packages.Error position ("/abs/file.go:12:5") the way every other gointel anchor is rendered: workspace-relative, with the offending source line quoted.
 func (s *Snapshot) positionFromString(pos string) (string, string) {
 	if pos == "" || pos == "-" {
 		return displayPath(s.Base, s.Root), ""
@@ -350,7 +335,6 @@ func (s *Snapshot) positionFromString(pos string) (string, string) {
 	return displayPath(s.Base, file) + ":" + strings.Join(rest, ":"), text
 }
 
-// vet runs the requested pass set over one package.
 func (s *Snapshot) vet(p *packages.Package, passes []*analysis.Analyzer) []Diagnostic {
 	if p.Types == nil || p.TypesInfo == nil || len(p.Syntax) == 0 {
 		return nil
@@ -385,8 +369,6 @@ func (s *Snapshot) vet(p *packages.Package, passes []*analysis.Analyzer) []Diagn
 	}
 	return out
 }
-
-// A minimal, single-package, factless go/analysis driver: gointel already holds the whole module type-checked in memory and re-runs a handful of passes per package at tool-call cadence, so it skips the full unitchecker/checker's cross-package fact propagation and result caching. Limitation: printf's wrapper detection (a local logf forwarding to fmt) needs facts from the declaring package; direct fmt.* calls are unaffected. Facts exported during a run are kept for the rest of that package's run.
 
 type objFactKey struct {
 	obj  types.Object
@@ -443,7 +425,6 @@ func (r *passRunner) run(a *analysis.Analyzer) (result any, ok bool) {
 		AllPackageFacts:   r.allPackageFacts,
 	}
 
-	// A panicking analyzer must degrade this one pass, never the tool call.
 	res, err := func() (res any, err error) {
 		defer func() {
 			if p := recover(); p != nil {
@@ -460,7 +441,6 @@ func (r *passRunner) run(a *analysis.Analyzer) (result any, ok bool) {
 	return res, true
 }
 
-// copyFact copies the stored fact into the caller's *T, the contract ImportObjectFact/ImportPackageFact are defined by.
 func copyFact(stored, ptr analysis.Fact) bool {
 	src := reflect.ValueOf(stored)
 	dst := reflect.ValueOf(ptr)

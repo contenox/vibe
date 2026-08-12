@@ -26,7 +26,6 @@ func TestUnit_MockTaskExecutor_ReturnsMockOutput(t *testing.T) {
 	require.Equal(t, "mock-result", output)
 }
 
-// stubEnvExecutor is a minimal EnvExecutor that records the chain it received.
 type stubEnvExecutor struct {
 	receivedPrompt string
 }
@@ -95,7 +94,6 @@ func TestUnit_MacroEnv_Var_NoVarsInContext(t *testing.T) {
 	env, err := taskengine.NewMacroEnv(inner, nil)
 	require.NoError(t, err)
 
-	// Deliberately use a plain context with no vars attached.
 	_, _, _, err = env.ExecEnv(libtracker.WithNewRequestID(context.Background()), singleTaskChain("{{var:anything}}"), "in", taskengine.DataTypeString)
 	require.Error(t, err)
 }

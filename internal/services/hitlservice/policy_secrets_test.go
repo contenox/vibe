@@ -53,9 +53,7 @@ func TestUnit_Evaluate_ArrayArgIsCheckedElementwise(t *testing.T) {
 
 func TestUnit_Evaluate_MalformedBraceGlobFailsClosed(t *testing.T) {
 	t.Parallel()
-	// Unbalanced brace: the policy must be rejected at load, falling back to
-	// the built-in default rather than running with a deny rule that
-	// path.Match would silently never fire.
+	// Unbalanced brace: the policy must be rejected at load, not run with a deny rule path.Match would silently never fire.
 	svc := seedAndService(t, `{"default_action":"allow","rules":[
 		{"tools":"local_fs","tool":"*","when":[{"key":"path","op":"glob","value":"**/{.ssh,.gnupg/**"}],"action":"deny"}]}`)
 	r, err := svc.Evaluate(context.Background(), "local_fs", "read_file", map[string]any{"path": "/home/u/.ssh/id_rsa"})
@@ -65,8 +63,7 @@ func TestUnit_Evaluate_MalformedBraceGlobFailsClosed(t *testing.T) {
 
 func TestUnit_RequestApproval_FailsFastWhenEventSinkErrors(t *testing.T) {
 	t.Parallel()
-	// A durable store is required: RequestApproval persists the pending row
-	// before it reaches the publish call this test means to exercise.
+	// RequestApproval persists the pending row before it reaches the publish call this test exercises.
 	_, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)
 

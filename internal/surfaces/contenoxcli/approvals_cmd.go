@@ -40,10 +40,6 @@ var approvalsRespondCmd = &cobra.Command{
 	RunE:  runApprovalsRespond,
 }
 
-// openApprovalsService opens the shared database and builds the durable-ask
-// service over it, using the one constructor the whole codebase uses. The
-// returned DBManager is both the closer and, for the --as-agent path, the
-// handle a missionservice reads the ask's envelope through.
 func openApprovalsService(cmd *cobra.Command) (libdbexec.DBManager, hitlservice.Service, runtimetypes.Store, error) {
 	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {
@@ -74,16 +70,10 @@ func runApprovalsList(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	// The inbox read is the sweeper's tick: an expired ask must resolve
-	// rather than sit pending forever.
 	if swept, err := svc.SweepExpired(ctx); err == nil && swept > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Swept %d expired ask(s) to their on-timeout verdict.\n\n", swept)
 	}
 
-	// The same read reconciles stranded resumes: an answered checkpoint with
-	// no live claim (a resumer crashed mid-run, or a failed resume whose claim
-	// went stale) is carried to completion here. The engine is built only when
-	// a strand actually exists.
 	if ids, serr := agentservice.StrandedCheckpoints(ctx, store, strandedSweepLimit); serr == nil && len(ids) > 0 {
 		deps, cleanup, buildErr := buildResumeDeps(cmd, ctx)
 		if buildErr != nil {
@@ -173,23 +163,13 @@ func runApprovalsRespond(cmd *cobra.Command, args []string) error {
 	return respondToAsk(cmd, args[0], approve, answer, asAgent, asAgentSet)
 }
 
-// strandedSweepLimit bounds checkpoints examined per reconciling read, the
-// same idea as hitlservice's sweepBatchLimit; the next read picks up the rest.
 const strandedSweepLimit = 200
 
-// askRefusalError wraps a respond outcome that is a bound or durable record
-// holding — ask missing, already resolved, expired, or the mission envelope
-// refusing an agent answer — as distinct from broken plumbing. Error text is
-// the wrapped error's, unchanged.
 type askRefusalError struct{ err error }
 
 func (e askRefusalError) Error() string { return e.err.Error() }
 func (e askRefusalError) Unwrap() error { return e.err }
 
-// respondToAsk records one verdict for askID — approve/deny for a permission
-// ask, answer (optionally agent-attributed) for a question — and resumes the
-// suspended run in-process when a checkpoint and an engine exist. Refusals
-// that are bounds or records holding come back as askRefusalError.
 func respondToAsk(cmd *cobra.Command, askID string, approve bool, answer, asAgent string, asAgentSet bool) error {
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -213,25 +193,16 @@ func respondToAsk(cmd *cobra.Command, askID string, approve bool, answer, asAgen
 		return fmt.Errorf("ask %s is a permission ask (%s.%s) — it takes --approve or --deny, not text", askID, row.ToolsName, row.ToolName)
 	}
 	if asAgentSet {
-		// The envelope always wins: a refusal here is the mission's own bounds
-		// holding, checked before any engine is built or verdict recorded. The
-		// bound is held for real by the atomic write below; this pre-check only
-		// spares an engine build for an answer the envelope was never going to
-		// take.
+		// Pre-check only: the mission's bound is enforced for real by the atomic write below.
 		if err := hitlservice.EnforceAgentAnswerBounds(ctx, missionservice.New(db), svc, row); err != nil {
 			return askRefusalError{err}
 		}
 	}
 
-	// With a checkpoint the verdict resumes the run in this process; without
-	// one it is only recorded.
 	_, checkpointErr := store.GetChainCheckpoint(ctx, askID)
 	hasCheckpoint := checkpointErr == nil
 
-	// Ordering, not degradation: the verdict for a checkpointed run is
-	// one-shot, so capability is proven BEFORE anything is recorded. Refusal
-	// leaves the ask pending and answerable elsewhere; hitlservice enforces
-	// the same rule (ErrVerdictNeedsResumer) for any surface that skips this.
+	// Capability to resume is proven before anything is recorded; a checkpointed verdict is one-shot.
 	if hasCheckpoint {
 		deps, cleanup, buildErr := buildResumeDeps(cmd, ctx)
 		if buildErr != nil {
@@ -280,10 +251,6 @@ func respondToAsk(cmd *cobra.Command, askID string, approve bool, answer, asAgen
 	return nil
 }
 
-// buildResumeDeps assembles the engine-bearing Deps this process needs to
-// resume a suspended run, with a cleanup closing the engine and its own db
-// handle. An error means this process cannot resume (usually: no usable model
-// configuration); callers refuse or report rather than degrade silently.
 func buildResumeDeps(cmd *cobra.Command, ctx context.Context) (agentservice.Deps, func(), error) {
 	contenoxDir, err := ResolveContenoxDir(cmd)
 	if err != nil {
@@ -298,10 +265,7 @@ func buildResumeDeps(cmd *cobra.Command, ctx context.Context) (agentservice.Deps
 		db.Close()
 		return agentservice.Deps{}, nil, err
 	}
-	// The resume engine keeps its HITL gate unconditionally: the gate is what
-	// gives its mission tools an attention asker, and the run being resumed is
-	// one that suspended at that very machinery. Ungated, the resumed unit's
-	// next question would have nowhere to go and would self-answer as a blocker.
+	// HITL gate stays on unconditionally: without it, the resumed unit's next question has nowhere to go and self-answers as a blocker.
 	opts.EffectiveHITL = true
 	engine, err := BuildEngine(ctx, db, opts)
 	if err != nil {
@@ -319,8 +283,6 @@ func buildResumeDeps(cmd *cobra.Command, ctx context.Context) (agentservice.Deps
 	}, cleanup, nil
 }
 
-// reopenForEngine opens a second handle for the engine build. The engine owns
-// backend sync and tool wiring over it; the inbox service keeps its own.
 func reopenForEngine(cmd *cobra.Command) (libdbexec.DBManager, error) {
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -329,14 +291,8 @@ func reopenForEngine(cmd *cobra.Command) (libdbexec.DBManager, error) {
 	return OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath)
 }
 
-// asAgentFlagName is the beta flag attributing a question's answer to an
-// agent. Registered only under opt-in-beta (see registerApprovalsRespondFlags):
-// a stable invocation neither shows nor parses it.
 const asAgentFlagName = "as-agent"
 
-// asAgentFlagValue reads the beta --as-agent flag. set is false when the flag
-// is unregistered (beta off) or not given; a given-but-blank name is an error,
-// never a silent fall-through to the human path.
 func asAgentFlagValue(cmd *cobra.Command) (name string, set bool, err error) {
 	f := cmd.Flags().Lookup(asAgentFlagName)
 	if f == nil || !f.Changed {
@@ -349,10 +305,6 @@ func asAgentFlagValue(cmd *cobra.Command) (name string, set bool, err error) {
 	return name, true, nil
 }
 
-// registerApprovalsRespondFlags installs respond's flag set. --as-agent joins
-// only under opt-in-beta — absent from a stable help and refused as an
-// unknown flag, matching how Main visibility-gates agentCmd. Idempotent via
-// ResetFlags so Main may re-resolve the gate after init's stable default.
 func registerApprovalsRespondFlags(beta bool) {
 	approvalsRespondCmd.ResetFlags()
 	approvalsRespondCmd.Flags().Bool("approve", false, "Approve a pending permission ask")

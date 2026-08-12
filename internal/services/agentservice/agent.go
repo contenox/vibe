@@ -186,7 +186,6 @@ func (a *agent) Prompt(ctx context.Context, req PromptRequest) (*PromptResponse,
 		}
 	}
 
-	// Lets a run that parks on approval suspend instead of blocking.
 	ctx = taskengine.WithCheckpointSaver(ctx, a.checkpointSaver(req.SessionID, req.ChainRef))
 
 	output, outputType, stateUnits, execErr := a.deps.Engine.TaskService.Execute(ctx, chain, inputVal, inputType)
@@ -208,10 +207,8 @@ func (a *agent) Prompt(ctx context.Context, req PromptRequest) (*PromptResponse,
 	}
 
 	if req.SessionID != "" {
-		// An overflowing input is not saved, or it would poison the session.
 		isPoisonPill := false
 		if execErr != nil && errors.Is(execErr, taskengine.ErrContextLengthExceeded) {
-			// If it failed before any real LLM steps could execute, it's an input failure
 			if len(stateUnits) <= 1 {
 				isPoisonPill = true
 				promptReportErr(fmt.Errorf("input rejected to protect session: %w", execErr))
@@ -332,7 +329,7 @@ func (a *agent) buildChatInput(ctx context.Context, req PromptRequest) (any, tas
 
 	inputContent := ComposeUserInput(req.Input, req.Context)
 
-	userMsg := taskengine.Message{ID: uuid.NewString(), Role: "user", Content: inputContent, Images: req.Images, Timestamp: time.Now().UTC()}
+	userMsg := taskengine.Message{ID: uuid.NewString(), Role: "user", Content: inputContent, Images: req.Images, Audio: req.Audio, Timestamp: time.Now().UTC()}
 	chatInput := taskengine.ChatHistory{
 		Messages: append(history, userMsg),
 	}
@@ -340,8 +337,6 @@ func (a *agent) buildChatInput(ctx context.Context, req PromptRequest) (any, tas
 	return chatInput, taskengine.DataTypeChatHistory, nil
 }
 
-// stampTurnProvenance sets RequestID/ChainRef on messages without
-// provenance yet, so PersistDiff's dedupe can drop stale ones safely.
 func stampTurnProvenance(msgs []taskengine.Message, requestID, chainRef string) {
 	for i := range msgs {
 		if msgs[i].RequestID != "" {

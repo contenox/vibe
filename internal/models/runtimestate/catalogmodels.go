@@ -38,18 +38,12 @@ func observedModelFromPullStatus(model ModelPullStatus) modelrepo.ObservedModel 
 			CanStream:       model.CanStream,
 			CanThink:        model.CanThink,
 			CanVision:       model.CanVision,
+			CanAudio:        model.CanAudio,
 		},
 		Meta: meta,
 	}
 }
 
-// mergeDeclaredOverObserved builds the runtime entry for a declared model from
-// the observed catalog entry, overlaying admin intent: identity fields come
-// from the declaration, a declared context length > 0 wins over the observed
-// one, and declared capability trues merge in additively. Capabilities the
-// declared row cannot express (CanVision, CanThink) always survive from
-// observation; a declared false never suppresses an observed true — manual
-// suppression goes through capability overrides instead.
 func mergeDeclaredOverObserved(declared *runtimetypes.Model, observed modelrepo.ObservedModel) ModelPullStatus {
 	lmr := pullStatusFromObservedModel(observed)
 	lmr.Name = declared.ID
@@ -95,5 +89,6 @@ func pullStatusFromObservedModel(model modelrepo.ObservedModel) ModelPullStatus 
 		CanStream:       model.CanStream,
 		CanThink:        model.CanThink,
 		CanVision:       model.CanVision,
+		CanAudio:        model.CanAudio,
 	}
 }

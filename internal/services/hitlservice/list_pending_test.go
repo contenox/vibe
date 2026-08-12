@@ -1,8 +1,5 @@
 package hitlservice_test
 
-// These tests use the setupHITLDB/newDurableService/seedPendingRow
-// scaffolding durable_approval_test.go defines.
-
 import (
 	"context"
 	"testing"
@@ -36,7 +33,6 @@ func TestUnit_ListPending_ReturnsOnlyPendingNewestFirst(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 3, "the resolved row must not appear in the pending inbox")
 
-	// newest first
 	require.Equal(t, pendingIDs[2], got[0].ID)
 	require.Equal(t, pendingIDs[1], got[1].ID)
 	require.Equal(t, pendingIDs[0], got[2].ID)
@@ -46,12 +42,9 @@ func TestUnit_ListPending_ReturnsOnlyPendingNewestFirst(t *testing.T) {
 	}
 }
 
-// TestUnit_ListPendingForSession_ScopesToOneSessionsOpenAsks pins the query a
-// client attaching to a session needs to find the approval a parked run is
-// waiting on: this session's rows only, still-pending only, newest first. It
-// is the half of the repair path that was impossible while the durable row
-// carried no session id. A quiet session and the unattributed rows a pre-fix
-// database still holds both answer empty rather than everything.
+// TestUnit_ListPendingForSession_ScopesToOneSessionsOpenAsks pins that
+// ListPendingForSession returns only this session's still-pending rows,
+// newest first, and empty for a quiet or unattributed session.
 func TestUnit_ListPendingForSession_ScopesToOneSessionsOpenAsks(t *testing.T) {
 	t.Parallel()
 	ctx, store, _ := setupHITLDB(t)
@@ -82,7 +75,6 @@ func TestUnit_ListPendingForSession_ScopesToOneSessionsOpenAsks(t *testing.T) {
 	require.Empty(t, unattributed)
 }
 
-// seedPendingRowForSession writes one pending row attributed to sessionID.
 func seedPendingRowForSession(t *testing.T, ctx context.Context, store runtimetypes.Store, sessionID string, createdAt time.Time) *runtimetypes.HITLApproval {
 	t.Helper()
 	row := &runtimetypes.HITLApproval{

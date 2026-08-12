@@ -9,16 +9,7 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// Instance lifecycle states — the vocabulary of InstanceStatus.State.
-//
-//   - StateStarting: transient, while a subprocess is (re)spawning.
-//   - StateRunning: a live downstream connection.
-//   - StateStopped: torn down intentionally (Stop/Close); the watchDog never
-//     restarts out of this state.
-//   - StateError: the downstream died unexpectedly. Terminal if restart is
-//     disabled, else transient (leads back to StateStarting).
-//   - StateWarning: restart was enabled but exhausted its limit, or a
-//     re-spawn itself failed.
+// Instance lifecycle states, the vocabulary of InstanceStatus.State.
 const (
 	StateStarting = "starting"
 	StateRunning  = "running"
@@ -35,28 +26,18 @@ type InstanceStatus struct {
 	AgentName string `json:"agentName"`
 	Kind      string `json:"kind"`
 	State     string `json:"state"`
-	// Sessions is how many downstream sessions are open on the instance —
-	// always len(SessionIDs), read from the same snapshot.
+	// Sessions is how many downstream sessions are open on the instance, always
+	// len(SessionIDs).
 	Sessions int `json:"sessions"`
-	// Viewers is how many viewers are attached across those sessions,
-	// independent of Sessions: an open session with nobody watching still
-	// counts toward Sessions but not Viewers.
+	// Viewers is how many viewers are attached across those sessions, independent of
+	// Sessions.
 	Viewers   int       `json:"viewers"`
 	StartedAt time.Time `json:"startedAt"`
-	// SessionIDs lists every session currently open on the instance, sorted
-	// for a deterministic snapshot. A session nobody is watching, or that
-	// has emitted no update yet, is still listed.
+	// SessionIDs lists every session currently open on the instance, sorted for a
+	// deterministic snapshot; an unwatched or silent session is still listed.
 	SessionIDs []string `json:"sessionIds"`
 }
 
-// journalingHarness is the instance's internal libacp.Client, wired into the
-// downstream connection. On each session/update it first folds the update
-// into the session's captured driving surface (via the driver), then
-// journals and fans it out to viewers (via the hub) — that order guarantees
-// an accessor read right after a viewer observes an update sees the same
-// value. Permission requests and terminal/* route to the session's
-// controller viewer (terminal/* only if it implements TerminalServer,
-// else MethodNotFound); fs/* is left to UnimplementedClient.
 type journalingHarness struct {
 	libacp.UnimplementedClient
 	hub    *viewerHub
@@ -108,19 +89,12 @@ func (h *journalingHarness) ReleaseTerminal(ctx context.Context, req libacp.Rele
 	return libacp.ReleaseTerminalResponse{}, libacp.MethodNotFound(libacp.MethodTerminalRelease)
 }
 
-// instanceConfig is the fully-resolved input to newInstance. The Manager
-// builds it from a declared agent; the instance primitive itself never
-// touches the registry.
 type instanceConfig struct {
 	id        string
 	agentID   string
 	agentName string
 	kind      string
 
-	// rootCtx is the long-lived context the subprocess is bound to (the
-	// Manager's root), so the instance outlives the caller ctx that started
-	// it. spawner (re)establishes the downstream connection; nil marks a
-	// process-less instance.
 	rootCtx context.Context
 	spawner agenthost.Agent
 
@@ -128,19 +102,13 @@ type instanceConfig struct {
 	restartEnabled bool
 	restartLimit   int
 
-	onState            func(state string)
-	onAttach           func(sessionID libacp.SessionID, viewerID string, controller bool)
-	onDetach           func(sessionID libacp.SessionID, viewerID string)
-	onUnsupervisedDeny func(sessionID libacp.SessionID)
-	// onUnsupervisedRequest is the Manager's injected permission fallback
-	// with this instance's identity already closed over (see
-	// Manager.WithPermissionFallback). Nil keeps the hub's built-in deny.
+	onState               func(state string)
+	onAttach              func(sessionID libacp.SessionID, viewerID string, controller bool)
+	onDetach              func(sessionID libacp.SessionID, viewerID string)
+	onUnsupervisedDeny    func(sessionID libacp.SessionID)
 	onUnsupervisedRequest func(ctx context.Context, req libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error)
 }
 
-// instance is one running agent instance. Its lifecycle state is guarded by
-// mu; its per-session viewer/journal state lives in hub under its own lock,
-// so a status read never contends with the fan-out.
 type instance struct {
 	id        string
 	agentID   string
@@ -160,14 +128,12 @@ type instance struct {
 
 	mu           sync.Mutex
 	state        string
-	handle       *agenthost.Handle // nil until connected; reassigned on restart
-	manualStop   bool              // set by stop(): the watchDog must never restart
+	handle       *agenthost.Handle
+	manualStop   bool
 	restartCount int
 	closed       bool
 }
 
-// newInstance builds the instance and its internal harness/hub but does not
-// spawn — call start for that.
 func newInstance(cfg instanceConfig) *instance {
 	hub := newViewerHub(cfg.id, cfg.journalSize)
 	hub.onAttach = cfg.onAttach
@@ -193,10 +159,6 @@ func newInstance(cfg instanceConfig) *instance {
 	}
 }
 
-// start brings the instance up: a spawner-less instance transitions straight
-// to Running; an external one spawns the subprocess wired to the internal
-// journaling harness and arms the watchDog. A spawn failure leaves the
-// instance in StateError and returns the error.
 func (i *instance) start() error {
 	if i.spawner == nil {
 		i.setState(StateRunning)
@@ -215,9 +177,6 @@ func (i *instance) start() error {
 	return nil
 }
 
-// setState checks preds under mu and, if all pass, sets the state and fires
-// onState outside the lock (so a callback into the Manager cannot deadlock).
-// Returns whether the transition happened.
 func (i *instance) setState(s string, preds ...func() bool) bool {
 	i.mu.Lock()
 	for _, p := range preds {
@@ -235,14 +194,6 @@ func (i *instance) setState(s string, preds ...func() bool) bool {
 	return true
 }
 
-// watchDog watches one downstream connection and applies the restart policy
-// when it closes. It runs once per live handle and re-arms itself on the
-// fresh handle after a restart.
-//
-// A restart re-spawns a fresh subprocess that must be re-Initialized; the
-// downstream agent's conversation/session context is lost. Viewers and the
-// journal survive (they belong to the instance, not the process), but now
-// describe a conversation the new process has never heard of.
 func (i *instance) watchDog(h *agenthost.Handle) {
 	<-h.Conn.Closed()
 
@@ -267,17 +218,17 @@ func (i *instance) watchDog(h *agenthost.Handle) {
 	limit := i.restartLimit
 	i.mu.Unlock()
 	if raced || !enabled {
-		return // crash-terminal: stays StateError when restart is disabled
+		return
 	}
 	if count >= limit {
-		i.setState(StateWarning) // restart budget exhausted
+		i.setState(StateWarning)
 		return
 	}
 
 	i.setState(StateStarting, func() bool { return i.state == StateError })
 	newHandle, err := i.spawner.Connect(i.rootCtx, i.harness)
 	if err != nil {
-		i.setState(StateWarning) // could not re-spawn
+		i.setState(StateWarning)
 		return
 	}
 
@@ -296,10 +247,6 @@ func (i *instance) watchDog(h *agenthost.Handle) {
 	go i.watchDog(newHandle)
 }
 
-// stop transitions the instance to Stopped and tears down its subprocess (if
-// external). manualStop is set before the handle is closed so the watchDog,
-// woken by the resulting Closed signal, sees an intentional stop and neither
-// mislabels it Error nor restarts it. Idempotent.
 func (i *instance) stop() error {
 	i.mu.Lock()
 	if i.closed {
@@ -322,11 +269,6 @@ func (i *instance) stop() error {
 	return nil
 }
 
-// conn returns the instance's live downstream connection, or nil for a
-// spawner-less or not-yet-started instance. Internal: drive.go's
-// session-driving methods issue their ACP calls on it; the Manager exposes
-// no raw-connection accessor. After a watchDog restart this returns a
-// different connection, since the downstream's session context was lost.
 func (i *instance) conn() *libacp.ClientSideConnection {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -336,11 +278,6 @@ func (i *instance) conn() *libacp.ClientSideConnection {
 	return i.handle.Conn
 }
 
-// status snapshots the instance, reading session facts from the driver
-// (authoritative for what is open) and the viewer count from the hub
-// (authoritative for who is watching) as two separate snapshots under
-// separate locks — a session opening or a viewer attaching concurrently may
-// land on either side, which is fine for a point-in-time report.
 func (i *instance) status() InstanceStatus {
 	i.mu.Lock()
 	state := i.state
@@ -368,14 +305,6 @@ func (i *instance) detach(sessionID libacp.SessionID, viewerID string) error {
 	return i.hub.detach(sessionID, viewerID)
 }
 
-// deliverToSession injects n into sid's fan-out iff this instance currently
-// owns sid, per the driver (the authoritative "session is open here" fact,
-// not the hub, whose per-session state materializes lazily). Reports whether
-// it owned and delivered, so the Manager's scan can find the owning
-// instance. Ownership-gating matters because hub.deliver get-or-creates
-// session state — delivering to an unowned session would journal it into a
-// phantom session on the wrong instance. SessionID is forced to sid so a
-// caller cannot misroute it within the owning instance.
 func (i *instance) deliverToSession(ctx context.Context, sid libacp.SessionID, n libacp.SessionNotification) bool {
 	if !i.driver.owns(sid) {
 		return false
@@ -385,10 +314,6 @@ func (i *instance) deliverToSession(ctx context.Context, sid libacp.SessionID, n
 	return true
 }
 
-// agentText returns the concatenated agent-message-chunk text retained in
-// sid's journal, and whether this instance owns sid. The journal captures
-// every downstream update whether or not a viewer is attached, so an
-// owned-but-silent session yields ("", true).
 func (i *instance) agentText(sid libacp.SessionID) (string, bool) {
 	if !i.driver.owns(sid) {
 		return "", false
@@ -396,9 +321,6 @@ func (i *instance) agentText(sid libacp.SessionID) (string, bool) {
 	return i.hub.agentText(sid), true
 }
 
-// sessionJournal returns a raw snapshot of sid's replay journal together
-// with the session's working directory, and whether this instance owns sid.
-// An owned-but-empty session yields (nil, cwd, true).
 func (i *instance) sessionJournal(sid libacp.SessionID) ([]libacp.SessionNotification, string, bool) {
 	if !i.driver.owns(sid) {
 		return nil, "", false

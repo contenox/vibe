@@ -19,6 +19,9 @@ func resolveEditor() string {
 	if e := strings.TrimSpace(os.Getenv("EDITOR")); e != "" {
 		return e
 	}
+	if os.Getenv("TERM_PROGRAM") == "vscode" {
+		return "code --wait"
+	}
 	return "nano"
 }
 
@@ -66,14 +69,8 @@ func captureFromEditor(seed []byte, modelHint string) (string, error) {
 	return prompt, nil
 }
 
-// templateBannerRule is the horizontal-rule comment line that fences the
-// instructional banner, top and bottom.
 const templateBannerRule = "# ---------------------------------------------------------"
 
-// buildEditorTemplate lays out the scratch file handed to $EDITOR. A seed is
-// placed above the banner so the cursor lands on it; with no seed, a blank
-// line above the banner is where typing starts. stripCommentLines is this
-// function's exact inverse for the scaffolding it inserts, so keep them in sync.
 func buildEditorTemplate(seed []byte, modelHint string) []byte {
 	var b strings.Builder
 	if len(seed) > 0 {
@@ -94,10 +91,6 @@ func buildEditorTemplate(seed []byte, modelHint string) []byte {
 	return []byte(b.String())
 }
 
-// stripCommentLines drops the template's scaffolding from an edited buffer:
-// every '#'-prefixed banner line, plus exactly the one blank line directly
-// adjacent to a comment block. Any other blank line is indistinguishable
-// from real content and must survive untouched.
 func stripCommentLines(s string) string {
 	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))

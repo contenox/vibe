@@ -10,11 +10,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// TestUnit_recvOneFD_ReceivedFDIsCloexec pins that an fd received over
-// SCM_RIGHTS comes back close-on-exec (via recvOneFD's MSG_CMSG_CLOEXEC), so
-// the long-lived parent cannot leak one agent's fd into a later-spawned
-// sibling; SCM_RIGHTS fds are not cloexec by default, so a plain ReadMsgUnix
-// would fail this test.
+// TestUnit_recvOneFD_ReceivedFDIsCloexec asserts recvOneFD returns an fd already close-on-exec (SCM_RIGHTS fds are not cloexec by default).
 func TestUnit_recvOneFD_ReceivedFDIsCloexec(t *testing.T) {
 	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {

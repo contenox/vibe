@@ -8,19 +8,6 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// suspendRun turns an in-flight ApprovalPendingError into a durable
-// suspension: it assembles the checkpoint from the live run state, persists
-// it through the context-installed CheckpointSaver, and returns the partial
-// history with a typed ChainSuspendedError. The deferred chain-event
-// publisher in ExecEnv sees that error and emits chain_suspended (after the
-// checkpoint is durable) instead of chain_failed.
-//
-// Ordering invariant: the durable approval row was created by the HITL
-// wrapper BEFORE it parked (row first); the checkpoint is persisted here
-// (checkpoint second); only then does the run release (release third). A
-// missing or failing saver fails the run with a teaching error instead of
-// suspending — a suspension without a checkpoint is a lost run, and the
-// pending approval row is then closed out by hitlservice's expiry sweeper.
 func (env SimpleEnv) suspendRun(
 	ctx context.Context,
 	stack StackTrace,

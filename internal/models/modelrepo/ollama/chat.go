@@ -19,9 +19,6 @@ type OllamaChatClient struct {
 	tracker         libtracker.ActivityTracker
 }
 
-// toOllamaImages maps image attachments to the Ollama image list. Ollama
-// carries raw image bytes (base64-encoded on the wire) and sniffs the format
-// itself, so MimeType is not sent.
 func toOllamaImages(images []modelrepo.ImagePart) []ImageData {
 	if len(images) == 0 {
 		return nil
@@ -37,8 +34,13 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "ollama", "model", c.modelName)
 	defer end()
 
-	// Prior ToolCalls must be mapped too, or Ollama has no record of what
-	// tools were already called.
+	// No audio encoding on this wire format; refuse instead of dropping silently.
+	if err := modelrepo.RefuseAudioInput("ollama", c.modelName, messages); err != nil {
+		reportErr(err)
+		return modelrepo.ChatResult{}, err
+	}
+
+	// Prior ToolCalls must be mapped too, or Ollama has no record of tools already called.
 	apiMessages := make([]Message, 0, len(messages))
 	for _, msg := range messages {
 		var apiToolCalls []ToolCall
@@ -113,8 +115,7 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	if err != nil {
 		reportErr(err)
 		wrapped := fmt.Errorf("ollama API chat request failed for model %s: %w", c.modelName, err)
-		// Ollama reports context overflow only as an error string; classify it
-		// so callers get the typed sentinel.
+		// Ollama reports context overflow only as an error string; classify it into the typed sentinel.
 		return modelrepo.ChatResult{}, modelrepo.ClassifyProviderError(wrapped, 0, "", err.Error())
 	}
 
@@ -130,11 +131,9 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		reportErr(err)
 		return modelrepo.ChatResult{}, err
 	case "length":
-		// Truncated but successful, same contract as the streaming assembler:
-		// partial content is real and the finish reason surfaces the truncation.
+		// Truncated but successful; partial content is real.
 	case "stop":
-		// Empty content is allowed with tool calls (model wants to call tools)
-		// or without (some models, e.g. qwen2.5, use this as an end-of-tool-loop signal).
+		// Empty content is allowed with or without tool calls.
 	default:
 		err := fmt.Errorf("unexpected completion reason %q for model %s", finalResponse.DoneReason, c.modelName)
 		reportErr(err)
@@ -149,8 +148,7 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 
 	var toolCalls []modelrepo.ToolCall
 	for _, tc := range finalResponse.Message.ToolCalls {
-		// Arguments is an ordered map; String() renders it as the JSON string
-		// modelrepo.ToolCall expects.
+		// Arguments is an ordered map; String() renders it as the JSON string modelrepo.ToolCall expects.
 		argsJSON := tc.Function.Arguments.String()
 
 		toolCalls = append(toolCalls, modelrepo.ToolCall{
@@ -169,9 +167,7 @@ func (c *OllamaChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	result := modelrepo.ChatResult{
 		Message:   message,
 		ToolCalls: toolCalls,
-		// Ollama reports no cache dimension: prompt_eval_count already includes
-		// tokens reused from the per-slot KV cache, so PromptTokens is the
-		// total and the cache fields stay zero.
+		// Ollama reports no cache dimension: prompt_eval_count is already the total.
 		Usage: &modelrepo.TokenUsage{
 			PromptTokens:     finalResponse.Metrics.PromptEvalCount,
 			CompletionTokens: finalResponse.Metrics.EvalCount,

@@ -1,11 +1,5 @@
 package contenoxcli
 
-// The oracle chain executed end to end against a scripted model: the shipped
-// chain-oracle-default.json runs on the real task engine with the real
-// oracletools provider, and the script drives every failure mode the loop
-// must recover from — chat text, wrong askId, malformed shape, a policy
-// denial — plus the budget-exhaustion WAIT-equivalent ending.
-
 import (
 	"context"
 	"errors"

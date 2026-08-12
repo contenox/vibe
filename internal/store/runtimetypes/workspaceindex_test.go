@@ -1,8 +1,5 @@
 package runtimetypes_test
 
-// workspace index store tests, over the production SQLite backend (same
-// no-Docker idiom as checkpoints_test.go / hitl_approvals_test.go).
-
 import (
 	"context"
 	"path/filepath"
@@ -79,9 +76,7 @@ func TestUnit_WorkspaceIndexConfig_CreateGetActive(t *testing.T) {
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }
 
-// A config is create-once: re-creating the same id is refused, and the live
-// config cannot be deleted; changing the embed model means a new config that
-// becomes active by being newest — cutover, not mutation.
+// TestUnit_WorkspaceIndexConfig_CreateOnceAndCutover asserts a config is create-once, the live config cannot be deleted, and a newer config becomes active by cutover, not mutation.
 func TestUnit_WorkspaceIndexConfig_CreateOnceAndCutover(t *testing.T) {
 	ctx, store, _ := setupWorkspaceIndexStore(t)
 
@@ -97,7 +92,6 @@ func TestUnit_WorkspaceIndexConfig_CreateOnceAndCutover(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "nomic-embed-text", stored.EmbedModel, "the refused create must not have mutated the row")
 
-	// Deleting the live config is refused; a superseded generation is reapable.
 	require.ErrorIs(t, store.DeleteWorkspaceIndexConfig(ctx, "cfg-1"), runtimetypes.ErrWorkspaceIndexConfigLive)
 
 	second := newIndexConfig("cfg-2", "ws-1")
@@ -109,7 +103,6 @@ func TestUnit_WorkspaceIndexConfig_CreateOnceAndCutover(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "cfg-2", active.ID, "the newest config is the active one — that is the cutover")
 
-	// cfg-1 is now superseded, so reaping it (and its chunks) is allowed.
 	require.NoError(t, store.AppendWorkspaceChunks(ctx, newChunk("c1", "cfg-1", "a.md", 1, 3, "old generation", []float32{1, 0, 0, 0})))
 	require.NoError(t, store.DeleteWorkspaceIndexConfig(ctx, "cfg-1"))
 	_, err = store.GetWorkspaceIndexConfig(ctx, "cfg-1")
@@ -118,7 +111,6 @@ func TestUnit_WorkspaceIndexConfig_CreateOnceAndCutover(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n, "reaping a config must take its chunks with it")
 
-	// Two configs for two workspaces do not see each other.
 	other := newIndexConfig("cfg-other", "ws-2")
 	require.NoError(t, store.CreateWorkspaceIndexConfig(ctx, other))
 	activeOther, err := store.GetActiveWorkspaceIndexConfig(ctx, "ws-2")
@@ -179,8 +171,7 @@ func TestUnit_WorkspaceChunks_RoundTripAndDeletes(t *testing.T) {
 	require.Zero(t, n)
 }
 
-// FTS5 is a hard prerequisite of the search design; this proves it works in
-// the driver the product actually ships (modernc.org/sqlite).
+// TestUnit_WorkspaceIndex_FTS5IsAvailable asserts FTS5 works in the driver the product ships (modernc.org/sqlite).
 func TestUnit_WorkspaceIndex_FTS5IsAvailable(t *testing.T) {
 	ctx, store, _ := setupWorkspaceIndexStore(t)
 	require.NoError(t, store.CreateWorkspaceIndexConfig(ctx, newIndexConfig("cfg-1", "ws-1")))
@@ -222,9 +213,7 @@ func TestUnit_WorkspaceIndex_FTS5IsAvailable(t *testing.T) {
 	require.Empty(t, hits)
 }
 
-// A dimension-0 generation is the lexical-only mode: no embedding model, no
-// vectors, but the FTS5 mirror is written and searchable. This is what a
-// workspace with no `default-embed-model` gets instead of nothing.
+// TestUnit_WorkspaceIndex_LexicalOnlyGenerationIsSearchable asserts a dimension-0 generation has no vectors but its FTS5 mirror is searchable.
 func TestUnit_WorkspaceIndex_LexicalOnlyGenerationIsSearchable(t *testing.T) {
 	ctx, store, _ := setupWorkspaceIndexStore(t)
 
@@ -250,8 +239,7 @@ func TestUnit_WorkspaceIndex_LexicalOnlyGenerationIsSearchable(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, all, 2, "an empty vector blob must round-trip, not read back as NULL")
 
-	// The dimension check still holds in the other direction: a vector cannot
-	// be smuggled into a lexical-only generation.
+	// The dimension check also holds in reverse: a vector cannot be smuggled into a lexical-only generation.
 	err = store.AppendWorkspaceChunks(ctx, newChunk("l3", "cfg-lex", "docs/x.md", 1, 5, "with a vector", []float32{1, 0, 0, 0}))
 	require.ErrorIs(t, err, runtimetypes.ErrVectorDimensionMismatch)
 
@@ -261,8 +249,7 @@ func TestUnit_WorkspaceIndex_LexicalOnlyGenerationIsSearchable(t *testing.T) {
 	require.Error(t, store.CreateWorkspaceIndexConfig(ctx, bad))
 }
 
-// The dimension pinned on the config is enforced on both sides: refused at
-// write, and a row that somehow carries one fails to load rather than score.
+// TestUnit_WorkspaceChunks_DimensionMismatchIsRefused asserts the config's dimension is enforced both on write and on load.
 func TestUnit_WorkspaceChunks_DimensionMismatchIsRefused(t *testing.T) {
 	ctx, store, exec := setupWorkspaceIndexStore(t)
 	require.NoError(t, store.CreateWorkspaceIndexConfig(ctx, newIndexConfig("cfg-1", "ws-1")))
@@ -273,8 +260,7 @@ func TestUnit_WorkspaceChunks_DimensionMismatchIsRefused(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n, "a rejected batch must write nothing at all")
 
-	// A batch spanning two configs is refused: it would smuggle vectors past the
-	// single-config dimension check.
+	// A batch spanning two configs is refused: it would smuggle vectors past the single-config dimension check.
 	require.NoError(t, store.CreateWorkspaceIndexConfig(ctx, newIndexConfig("cfg-2", "ws-2")))
 	err = store.AppendWorkspaceChunks(ctx,
 		newChunk("m1", "cfg-1", "a.md", 1, 5, "ok", []float32{1, 0, 0, 0}),

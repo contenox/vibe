@@ -30,7 +30,6 @@ func (f fixedKVReader) GetKV(_ context.Context, _ string, out any) error {
 	return nil
 }
 
-// writePolicy writes a policy document where the FS PolicySource will find it.
 func writePolicy(t *testing.T, dir, name string, data []byte) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name), data, 0o644))
@@ -194,9 +193,8 @@ func TestUnit_Evaluate_DefaultPolicyOverrideSelectsACPPolicyWhenKVUnset(t *testi
 	assert.Equal(t, hitlservice.ActionAllow, r.Action, "an explicit hitl-policy-name KV must still override the per-process ACP default")
 }
 
-// TestUnit_PolicyVersion_AbsentIsCurrentAndLoadsUnchanged pins the migration
-// contract's floor: every shipped preset and every operator-authored policy
-// predates the version field, so its absence must load exactly as before.
+// TestUnit_PolicyVersion_AbsentIsCurrentAndLoadsUnchanged pins that a policy
+// with no version field loads and evaluates identically to one declaring version 1.
 func TestUnit_PolicyVersion_AbsentIsCurrentAndLoadsUnchanged(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -217,14 +215,13 @@ func TestUnit_PolicyVersion_AbsentIsCurrentAndLoadsUnchanged(t *testing.T) {
 		assert.Equalf(t, hitlservice.ActionApprove, r.Action, "%s must evaluate identically", name)
 	}
 
-	// The declared version is validated where it is authored, too.
 	require.NoError(t, hitlservice.VetPolicy([]byte(`{`+rules+`}`)))
 	require.NoError(t, hitlservice.VetPolicy([]byte(`{"version":1,`+rules+`}`)))
 }
 
 // TestUnit_PolicyVersion_UnloadableVersionIsRefused pins that a version this
-// binary cannot load fails the policy to load — the fail-closed default gate,
-// not a best-effort decode of fields whose meaning may have changed.
+// binary cannot load fails the policy to load, falling back to the
+// fail-closed default.
 func TestUnit_PolicyVersion_UnloadableVersionIsRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -241,8 +238,7 @@ func TestUnit_PolicyVersion_UnloadableVersionIsRefused(t *testing.T) {
 		require.Errorf(t, err, "%s must not vet", name)
 		assert.ErrorIsf(t, err, hitlservice.ErrPolicyVersion, "%s", name)
 
-		// The load path falls back to the built-in fail-closed policy, so an
-		// unreadable version can never leave a run less gated than before.
+		// The load path falls back to the built-in fail-closed policy: an unreadable version never leaves a run less gated.
 		svc := hitlservice.New(src, testTenant, fixedKVReader{name}, libtracker.NoopTracker{})
 		r, err := svc.Evaluate(ctx, "local_shell", "local_shell", nil)
 		require.NoError(t, err)

@@ -1,9 +1,5 @@
 package fleetservice
 
-// Tests for the fleet-width admission gate (admission.go) and the process
-// counters (counters.go). Counters are shared package atomics, so assertions
-// read deltas, never absolute values.
-
 import (
 	"context"
 	"testing"
@@ -61,7 +57,7 @@ func TestFleetService_Dispatch_DefaultCapEnforcedWithoutWiring(t *testing.T) {
 	}
 	man := &fakeManager{startID: "inst-def", openID: "sess-def"}
 	man.setListStates(states...)
-	svc := New(man, agents, nil, nil, "/project/root", nil) // no WithMaxParallel
+	svc := New(man, agents, nil, nil, "/project/root", nil)
 
 	_, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName: "runner", Intent: "past the default", HITLPolicyName: "default",
@@ -115,7 +111,6 @@ func TestFleetService_Dispatch_CapClearsAsUnitsConclude(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, errdefs.ErrConflict)
 
-	// The open unit concludes; the same gate now admits.
 	man.setListStates()
 	res, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName: "runner", Intent: "admitted after the wall cleared", HITLPolicyName: "default",
@@ -133,7 +128,6 @@ func TestFleetService_Dispatch_CapCountsOnlyLiveStates(t *testing.T) {
 	registerAgent(t, ctx, agents, "runner", true)
 	missions := missionservice.New(db)
 
-	// A board full of wreckage: crashed and restart-exhausted instances.
 	man := &fakeManager{startID: "inst-wreck", openID: "sess-wreck"}
 	man.setListStates(agentinstance.StateError, agentinstance.StateWarning)
 	svc := New(man, agents, missions, nil, "/project/root", libtracker.NoopTracker{}, WithMaxParallel(1))
@@ -144,7 +138,6 @@ func TestFleetService_Dispatch_CapCountsOnlyLiveStates(t *testing.T) {
 	require.NoError(t, err, "error/warning instances are wreckage, not open units")
 	waitMissionSettled(t, missions, res.MissionID)
 
-	// A unit still mid-spawn holds a slot: spend is committed at starting.
 	man2 := &fakeManager{startID: "inst-starting", openID: "sess-starting"}
 	man2.setListStates(agentinstance.StateStarting)
 	svc2 := New(man2, agents, missions, nil, "/project/root", libtracker.NoopTracker{}, WithMaxParallel(1))

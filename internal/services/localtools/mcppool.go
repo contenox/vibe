@@ -62,7 +62,7 @@ type MCPAuthConfig struct {
 	// Type is "bearer" or "" (none).
 	Type MCPAuthType
 
-	// Token is a literal bearer token. Prefer APIKeyFromEnv for security.
+	// Token is a literal bearer token; prefer APIKeyFromEnv for security.
 	Token string
 
 	// APIKeyFromEnv is the name of an environment variable holding the bearer token.
@@ -85,18 +85,13 @@ func (a *MCPAuthConfig) ResolveToken() string {
 
 // MCPOAuthConfig holds parameters for the OAuth 2.1 PKCE authorization code flow.
 type MCPOAuthConfig struct {
-	// ClientName is registered with the authorization server (RFC 7591).
-	// Defaults to "contenox".
+	// ClientName is registered with the authorization server (RFC 7591); defaults to "contenox".
 	ClientName string
 
-	// ClientID is a pre-registered client ID. When empty, dynamic registration
-	// (RFC 7591) is attempted using the server's registration endpoint.
+	// ClientID is a pre-registered client ID; when empty, dynamic registration (RFC 7591) is attempted using the server's registration endpoint.
 	ClientID string
 
-	// ClientSecret is the pre-registered client secret, used for confidential-client
-	// flows (token_endpoint_auth_methods_supported includes client_secret_post).
-	// Resolved by the caller from an env var; never persisted in clear text outside
-	// the caller's environment.
+	// ClientSecret is the pre-registered client secret for confidential-client flows (token_endpoint_auth_methods_supported includes client_secret_post), resolved by the caller from an env var and never persisted in clear text outside it.
 	ClientSecret string
 
 	// Scopes to request during authorization.
@@ -108,8 +103,7 @@ type MCPOAuthConfig struct {
 	// TokenStore persists and retrieves OAuth tokens.
 	TokenStore mcpoauth.TokenStore
 
-	// OpenBrowser is called with the authorization URL. Defaults to launching
-	// the system browser via xdg-open / open.
+	// OpenBrowser is called with the authorization URL; defaults to launching the system browser via xdg-open / open.
 	OpenBrowser func(url string) error
 }
 
@@ -188,8 +182,7 @@ type MCPServerConfig struct {
 	// Auth for remote transports (optional).
 	Auth *MCPAuthConfig
 
-	// OAuth holds parameters for the OAuth 2.1 PKCE flow.
-	// Only used when Auth.Type == MCPAuthOAuth.
+	// OAuth holds parameters for the OAuth 2.1 PKCE flow; only used when Auth.Type == MCPAuthOAuth.
 	OAuth *MCPOAuthConfig
 
 	// ConnectTimeout for the initial handshake (default 30s).
@@ -205,17 +198,13 @@ type MCPServerConfig struct {
 	Tracker libtracker.ActivityTracker
 }
 
-// MCPSessionPool manages a single MCP client session with reconnect support.
-// Mirrors the SSHClientCache pattern: mutex-protected, reconnects on failure.
+// MCPSessionPool manages a single MCP client session with reconnect support, mirroring the SSHClientCache pattern (mutex-protected, reconnects on failure).
 type MCPSessionPool struct {
 	mu      sync.RWMutex
 	session *mcp.ClientSession
 	cfg     MCPServerConfig
 	tracker libtracker.ActivityTracker
 
-	// sidMu guards mcpSessionID independently of mu so the sessionRoundTripper
-	// can update the live session ID (e.g. on 404 auto-heal) without deadlocking
-	// against the pool-level read/write lock.
 	sidMu        sync.RWMutex
 	mcpSessionID string
 }
@@ -233,12 +222,12 @@ func NewMCPSessionPool(cfg MCPServerConfig) *MCPSessionPool {
 	}
 }
 
-// Connect establishes the MCP session. Safe to call multiple times (idempotent).
+// Connect establishes the MCP session; safe to call multiple times (idempotent).
 func (p *MCPSessionPool) Connect(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.session != nil {
-		return nil // already connected
+		return nil
 	}
 	return p.connectLocked(ctx)
 }
@@ -247,10 +236,7 @@ func (p *MCPSessionPool) connectLocked(ctx context.Context) error {
 	reportErr, reportChange, end := p.tracker.Start(ctx, "connect", "mcp_server", "name", p.cfg.Name, "transport", string(p.cfg.Transport))
 	defer end()
 
-	// Per MCP spec and required by Notion: initialization requests MUST NOT
-	// include an Mcp-Session-Id header. Clear any persisted session ID so the
-	// sessionRoundTripper starts fresh. A new session ID will be received from
-	// the server in the initialize response and persisted via OnSessionID.
+	// Per MCP spec (required by Notion): init requests must not include Mcp-Session-Id, so any persisted session ID is cleared here and refreshed via OnSessionID from the initialize response.
 	p.sidMu.Lock()
 	p.mcpSessionID = ""
 	p.sidMu.Unlock()
@@ -287,8 +273,7 @@ func (p *MCPSessionPool) connectLocked(ctx context.Context) error {
 }
 
 func (p *MCPSessionPool) buildTransport() (mcp.Transport, error) {
-	// Closures let sessionRoundTripper safely read/write the live session ID
-	// without holding the pool-level lock (which would deadlock).
+	// Closures let sessionRoundTripper safely read/write the live session ID without holding the pool-level lock (which would deadlock).
 	getSessionID := func() string {
 		p.sidMu.RLock()
 		defer p.sidMu.RUnlock()
@@ -365,7 +350,6 @@ func (p *MCPSessionPool) Session(ctx context.Context) (*mcp.ClientSession, error
 	if s != nil {
 		return s, nil
 	}
-	// Not yet connected; connect now.
 	if err := p.Connect(ctx); err != nil {
 		return nil, err
 	}
@@ -374,8 +358,7 @@ func (p *MCPSessionPool) Session(ctx context.Context) (*mcp.ClientSession, error
 	return p.session, nil
 }
 
-// Reconnect tears down the current session and re-connects.
-// Called automatically by MCPToolsRepo.Exec on transport errors.
+// Reconnect tears down the current session and re-connects; called automatically by MCPToolsRepo.Exec on transport errors.
 func (p *MCPSessionPool) Reconnect(ctx context.Context) error {
 	reportErr, reportChange, end := p.tracker.Start(ctx, "reconnect", "mcp_server", "name", p.cfg.Name)
 	defer end()
@@ -406,7 +389,6 @@ func (p *MCPSessionPool) Close() error {
 	return nil
 }
 
-// bearerRoundTripper injects Authorization: Bearer <token> on every request.
 type bearerRoundTripper struct {
 	base  http.RoundTripper
 	token string
@@ -418,9 +400,6 @@ func (b *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return b.base.RoundTrip(req2)
 }
 
-// sessionRoundTripper intercepts and injects the Mcp-Session-Id header.
-// It auto-heals stale sessions: if we injected a token and the server responds
-// with HTTP 404, the dead token is wiped and the request is replayed fresh.
 type sessionRoundTripper struct {
 	base         http.RoundTripper
 	getSessionID func() string
@@ -431,8 +410,7 @@ func (srt *sessionRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 	req2 := req.Clone(req.Context())
 	sid := srt.getSessionID()
 
-	// Only inject if the go-sdk didn't already supply it.
-	// Track whether we added it so we only auto-heal errors we caused.
+	// Injected only if the go-sdk didn't already supply it, so auto-heal below only reacts to errors this wrapper caused.
 	injected := false
 	if sid != "" && req2.Header.Get("Mcp-Session-Id") == "" {
 		req2.Header.Set("Mcp-Session-Id", sid)
@@ -441,8 +419,7 @@ func (srt *sessionRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 
 	resp, err := srt.base.RoundTrip(req2)
 
-	// Auto-heal: a 404 means the server no longer knows this session (e.g. it
-	// restarted). Wipe the token and replay the original request without it.
+	// Auto-heal: a 404 means the server no longer knows this session (e.g. restarted); wipe the token and replay without it.
 	if err == nil && resp != nil && resp.StatusCode == http.StatusNotFound && injected {
 		// Only replay if the body is replayable (nil body or GetBody available).
 		if req.Body == nil || req.GetBody != nil {
@@ -473,8 +450,7 @@ func (srt *sessionRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 	return resp, err
 }
 
-// CallTool calls a tool on the persistent session, reconnecting once if the
-// session appears to have been lost. The pool must be connected first.
+// CallTool calls a tool on the persistent session, reconnecting once if the session appears to have been lost; the pool must be connected first.
 func (p *MCPSessionPool) CallTool(ctx context.Context, toolName string, args map[string]any) (any, error) {
 	reportErr, reportChange, end := p.tracker.Start(ctx, "call_tool", "mcp_server", "name", p.cfg.Name, "tool", toolName)
 	defer end()
@@ -592,7 +568,6 @@ func (p *MCPSessionPool) listTools(ctx context.Context) ([]*mcp.Tool, error) {
 	return result.Tools, nil
 }
 
-// mcpCollectText concatenates all TextContent entries from an MCP content slice.
 func mcpCollectText(contents []mcp.Content) string {
 	var sb []byte
 	for _, c := range contents {
@@ -606,8 +581,6 @@ func mcpCollectText(contents []mcp.Content) string {
 	return string(sb)
 }
 
-// reportReconnectCascade logs the original transport error and reconnect failure on the
-// activity tracker so callers can still receive a shorter named error.
 func (p *MCPSessionPool) reportReconnectCascade(ctx context.Context, originalErr, reconnectErr error, toolName string) {
 	kv := []any{
 		"name", p.cfg.Name,
@@ -626,8 +599,6 @@ func (p *MCPSessionPool) reportReconnectCascade(ctx context.Context, originalErr
 	})
 }
 
-// isAppError determines if the error returned by the MCP SDK is an application-level
-// JSON-RPC rejection (like invalid schema) or context cancellation, rather than a network drop.
 func isAppError(err error) bool {
 	if err == nil {
 		return false
@@ -655,11 +626,6 @@ func shouldReconnectAfterMCPError(err error) bool {
 	return !errors.Is(err, ErrMCPSessionUnavailable)
 }
 
-// buildOAuthRoundTripper constructs a non-interactive oauth2.Transport that
-// only injects a previously-stored token and auto-refreshes it — it never
-// opens a browser or binds a port. With no valid stored token it returns
-// ErrMCPOAuthNotAuthenticated so the caller can tell the user to run
-// `contenox mcp auth <name>`.
 func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.RoundTripper, error) {
 	reportErr, reportChange, end := p.tracker.Start(
 		context.Background(), "build_oauth_transport", "mcp_server",
@@ -680,7 +646,6 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 		return nil, err
 	}
 
-	// Discover the authorization server (needed for token refresh endpoint).
 	_, discoverReport, discoverEnd := p.tracker.Start(ctx, "oauth_discover", "mcp_server", "name", p.cfg.Name)
 	meta, err := mcpoauth.DiscoverAuthServer(ctx, p.cfg.URL)
 	if err != nil {
@@ -723,8 +688,7 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 		"expiry":      stored.Expiry.String(),
 	})
 
-	// Redirect URI is only needed to satisfy oauth2.Config for refresh; no
-	// callback is ever received here.
+	// Redirect URI is only needed to satisfy oauth2.Config for refresh; no callback is ever received here.
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", cfg.ResolveCallbackPort())
 
 	o2cfg := &oauth2.Config{
@@ -738,11 +702,9 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 		},
 	}
 
-	// ReuseTokenSource transparently refreshes via o2cfg when the access token
-	// has expired.
+	// ReuseTokenSource transparently refreshes via o2cfg when the access token has expired.
 	src := oauth2.ReuseTokenSource(stored, o2cfg.TokenSource(ctx, stored))
 
-	// Persist every newly-refreshed token so it survives process restarts.
 	persistingSrc := &persistingTokenSource{
 		inner:   src,
 		store:   cfg.TokenStore,
@@ -751,9 +713,7 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 		baseCtx: ctx,
 	}
 
-	// Wrap the base transport with a logging layer that reports non-2xx
-	// response bodies through the activity tracker. This surfaces things like
-	// Notion's 400 Bad Request body without any changes to the user workflow.
+	// Logging layer surfaces non-2xx response bodies (e.g. Notion's 400 Bad Request) through the activity tracker.
 	logged := &loggingRoundTripper{
 		base:    base,
 		tracker: p.tracker,
@@ -763,9 +723,6 @@ func (p *MCPSessionPool) buildOAuthRoundTripper(base http.RoundTripper) (http.Ro
 	return &oauth2.Transport{Source: persistingSrc, Base: logged}, nil
 }
 
-// loggingRoundTripper logs non-2xx response bodies via the activity tracker
-// so failures in oauth-protected requests (e.g. "Bad Request" from Notion)
-// are visible through the tracing system.
 type loggingRoundTripper struct {
 	base    http.RoundTripper
 	tracker libtracker.ActivityTracker
@@ -798,9 +755,7 @@ func (l *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 			defer end()
 			reportErr(fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, req.URL.Host, strings.TrimSpace(string(body))))
 		} else {
-			// 4xx: diagnostic — logged at INFO level as a state change so it's
-			// visible in --trace output but doesn't look like a fatal error.
-			// (e.g. Notion returns 405 on GET SSE stream, which the SDK handles.)
+			// 4xx: diagnostic only, logged as a state change (e.g. Notion returns 405 on GET SSE stream, which the SDK handles) — not necessarily a fatal error.
 			_, reportChange, end := l.tracker.Start(req.Context(), "mcp_http_response", "mcp_server", "name", l.name)
 			defer end()
 			reportChange("4xx", detail)
@@ -809,10 +764,7 @@ func (l *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	return resp, err
 }
 
-// RunOAuthFlow performs the full PKCE authorization code flow interactively:
-// opens a browser at the authorization URL, waits for the callback, and
-// exchanges the code for a token set. It is also used by the `mcp auth` CLI
-// command when re-authenticating.
+// RunOAuthFlow performs the full PKCE authorization code flow interactively (opens a browser, waits for the callback, exchanges the code for a token set); also used by the `mcp auth` CLI command when re-authenticating.
 func RunOAuthFlow(ctx context.Context, o2cfg *oauth2.Config, oauthCfg *MCPOAuthConfig, meta *mcpoauth.ServerMetadata) (*oauth2.Token, error) {
 	port := 0
 	if oauthCfg != nil {
@@ -860,8 +812,6 @@ func RunOAuthFlow(ctx context.Context, o2cfg *oauth2.Config, oauthCfg *MCPOAuthC
 	}
 }
 
-// persistingTokenSource wraps an oauth2.TokenSource and persists every newly-
-// issued token back to the KV store, so tokens survive process restarts.
 type persistingTokenSource struct {
 	inner   oauth2.TokenSource
 	store   mcpoauth.TokenStore
@@ -879,7 +829,6 @@ func (s *persistingTokenSource) Token() (*oauth2.Token, error) {
 	return tok, nil
 }
 
-// openBrowserDefault opens the given URL in the system default browser.
 func openBrowserDefault(rawURL string) error {
 	var cmd *exec.Cmd
 	switch {

@@ -21,16 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---------------------------------------------------------------------------
-// goja on the engine path: asserts a script's host.tool call meets the same
-// envelope a model call would, as wired by BuildEngine into SetHost.
-// Assertions read the engine's hitl_decision events rather than green
-// results, since a bypass here is invisible to every other test in the tree.
-// ---------------------------------------------------------------------------
-
-// gojaAsker answers approval requests by rule and records every one it saw. The
-// recording is the evidence; the answer is what lets a test drive both sides of
-// a gate.
 type gojaAsker struct {
 	mu     sync.Mutex
 	asks   []hitlservice.ApprovalRequest
@@ -47,7 +37,6 @@ func (a *gojaAsker) ask(_ context.Context, req hitlservice.ApprovalRequest) (boo
 	return a.answer(req), nil
 }
 
-// seen returns the "<provider>.<tool>" of every ask since the last reset.
 func (a *gojaAsker) seen() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -64,9 +53,6 @@ func (a *gojaAsker) reset() {
 	a.asks = nil
 }
 
-// gojaSink captures the engine's HITL decisions — the only honest evidence of
-// which envelope evaluated a call and what it decided. A green tool result
-// cannot tell an allow from a gate that was never consulted.
 type gojaSink struct {
 	mu     sync.Mutex
 	events []taskengine.TaskEvent
@@ -91,8 +77,6 @@ func (s *gojaSink) drain() []taskengine.TaskEvent {
 	return out
 }
 
-// decisions reduces the captured events to "<provider>.<tool>=<action>" pairs,
-// in order. This is the shape every assertion in this file reads.
 func (s *gojaSink) decisions() []string {
 	out := []string{}
 	for _, ev := range s.drain() {
@@ -103,11 +87,6 @@ func (s *gojaSink) decisions() []string {
 	}
 	return out
 }
-
-// --- the example scripts -----------------------------------------------------
-//
-// Written as an operator would write them, into $CONTENOX_DIR/tools: a
-// descriptor, a run function, no ceremony.
 
 const scriptStatsSummary = `// A pure-compute script tool: no host.tool, no I/O, just arithmetic the model
 // should never be doing token-by-token.
@@ -234,8 +213,6 @@ function run(args) {
 }
 `
 
-// --- harness -----------------------------------------------------------------
-
 type gojaHarness struct {
 	engine      *Engine
 	asker       *gojaAsker
@@ -245,13 +222,9 @@ type gojaHarness struct {
 	scriptDir   string
 }
 
-// newGojaHarness builds a real engine through BuildEngine with HITL on, the
-// shipped policy presets seeded into an isolated .contenox dir, and the
-// example scripts in the tools/ directory BuildEngine loads from.
 func newGojaHarness(t *testing.T, scripts map[string]string, answer func(hitlservice.ApprovalRequest) bool) *gojaHarness {
 	t.Helper()
 
-	// A gate that reaches for a TTY must fail at once, not park the test.
 	devnull, err := os.Open(os.DevNull)
 	require.NoError(t, err)
 	realStdin := os.Stdin
@@ -270,7 +243,6 @@ func newGojaHarness(t *testing.T, scripts map[string]string, answer func(hitlser
 		require.NoError(t, os.WriteFile(filepath.Join(scriptDir, name), []byte(body), 0o644))
 	}
 
-	// The workspace the tools are scoped to; note_append writes into it.
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "README.md"),
 		[]byte("# fixture\n\nsome text\n\n## second heading\n\nmore text\n"), 0o644))
@@ -309,8 +281,6 @@ func (h *gojaHarness) stop() {
 	}
 }
 
-// call runs one goja tool through the engine's chain executor — real dispatch,
-// real HITL wrapper, shipped policy on disk.
 func (h *gojaHarness) call(ctx context.Context, tool string, args map[string]string) (any, error) {
 	chain := &taskengine.TaskChainDefinition{
 		ID:          "goja-e2e",
@@ -332,7 +302,6 @@ func (h *gojaHarness) call(ctx context.Context, tool string, args map[string]str
 	return out, err
 }
 
-// eval is the goja_eval shorthand, returning the decoded value.
 func (h *gojaHarness) eval(t *testing.T, ctx context.Context, code string) (*gojatool.Result, any) {
 	t.Helper()
 	out, err := h.call(ctx, gojatool.ToolEval, map[string]string{"code": code})
@@ -340,8 +309,6 @@ func (h *gojaHarness) eval(t *testing.T, ctx context.Context, code string) (*goj
 	return decodeGojaResult(t, out)
 }
 
-// decodeGojaResult normalises whatever the chain hands back into the Result the
-// tool returned plus its decoded Value.
 func decodeGojaResult(t *testing.T, out any) (*gojatool.Result, any) {
 	t.Helper()
 	res, ok := out.(*gojatool.Result)
@@ -356,7 +323,6 @@ func decodeGojaResult(t *testing.T, out any) (*gojatool.Result, any) {
 	return res, value
 }
 
-// exampleScripts is the set every test that is not about loading itself uses.
 func exampleScripts() map[string]string {
 	return map[string]string{
 		"stats_summary.js":   scriptStatsSummary,
@@ -367,10 +333,6 @@ func exampleScripts() map[string]string {
 		"denied_probe.js":    scriptDeniedRead,
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Row 1 — registration: the provider exists, and it gates the way it was seeded
-// ---------------------------------------------------------------------------
 
 // TestSystem_Goja_RegisteredAndGatedUnderShippedPolicies asserts goja_eval is reachable through a real engine, computes correctly, and raises exactly one approval card naming itself per the seeded rule.
 func TestSystem_Goja_RegisteredAndGatedUnderShippedPolicies(t *testing.T) {
@@ -386,7 +348,6 @@ func TestSystem_Goja_RegisteredAndGatedUnderShippedPolicies(t *testing.T) {
 			h.sink.drain()
 			h.asker.reset()
 
-			// The compute a model is bad at and a sandbox is trivially good at.
 			_, value := h.eval(t, ctx, `
 				function fib(n) { let a = 0, b = 1; for (let i = 0; i < n; i++) { [a, b] = [b, a + b]; } return a; }
 				let squares = 0; for (let i = 1; i <= 100; i++) squares += i * i;
@@ -414,7 +375,6 @@ func TestSystem_Goja_ScriptToolsAreRegisteredAndFallToDefaultAction(t *testing.T
 	h := newGojaHarness(t, exampleScripts(), nil)
 	ctx := context.Background()
 
-	// The provider is registered on the engine, beside the built-in toolsets.
 	require.Contains(t, h.engine.LocalTools, gojatool.ToolsProviderName)
 
 	h.sink.drain()
@@ -432,10 +392,6 @@ func TestSystem_Goja_ScriptToolsAreRegisteredAndFallToDefaultAction(t *testing.T
 		"a script tool must fall to default_action (approve), not to some rule meant for goja_eval")
 	require.Equal(t, []string{"goja.stats_summary"}, h.asker.seen())
 }
-
-// ---------------------------------------------------------------------------
-// Row 2 — the one boundary rule
-// ---------------------------------------------------------------------------
 
 // TestSystem_Goja_HostToolMeetsTheSameEnvelopeAModelWould asserts an allow-tier inner call (local_fs.read_file) produces a decision event with no card, and an approve-tier inner call (local_fs.write_file) raises a card naming that tool — approving the script does not approve what it reaches.
 func TestSystem_Goja_HostToolMeetsTheSameEnvelopeAModelWould(t *testing.T) {
@@ -486,7 +442,6 @@ func TestSystem_Goja_HostToolMeetsTheSameEnvelopeAModelWould(t *testing.T) {
 		require.Equal(t, []string{"goja.note_append", "local_fs.write_file"}, h.asker.seen(),
 			"two cards, in order: the script, then the tool it reached")
 
-		// And the write actually happened, through the real tool.
 		body, rerr := os.ReadFile(filepath.Join(h.root, "notes.md"))
 		require.NoError(t, rerr)
 		require.Contains(t, string(body), "written by a script tool")
@@ -536,7 +491,6 @@ func TestSystem_Goja_DeniedInnerCallDoesNotBecomeData(t *testing.T) {
 		t.Skip("skipping goja engine e2e: builds a real engine")
 	}
 
-	// Deny the inner write; approve the script itself so the run reaches it.
 	h := newGojaHarness(t, exampleScripts(), func(req hitlservice.ApprovalRequest) bool {
 		return req.ToolsName != "local_fs"
 	})
@@ -554,7 +508,6 @@ func TestSystem_Goja_DeniedInnerCallDoesNotBecomeData(t *testing.T) {
 	require.Containsf(t, msg, "denied", "the error does not say the call was denied: %q", msg)
 	require.Containsf(t, msg, "recoverable", "the refusal carries no severity marker: %q", msg)
 
-	// Nothing was written.
 	_, statErr := os.Stat(filepath.Join(h.root, "denied.md"))
 	require.True(t, os.IsNotExist(statErr), "a denied write created the file anyway")
 }
@@ -596,15 +549,11 @@ func TestUnit_Goja_EvalTierMatchesInEveryPolicySource(t *testing.T) {
 			"%s must allow goja_eval: no filesystem, no network, no require, no process — an approval there protects nothing and every host.tool call it makes is gated on its own rule", name)
 	}
 
-	// No policy file anywhere: fail-closed, no allow tier, goja_eval asks like
-	// everything else. The allow rule above exists only in seeded files.
 	svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()), testTenant, nopKV{}, libtracker.NoopTracker{}, "hitl-policy-default.json")
 	r, err := svc.Evaluate(ctx, gojatool.ToolsProviderName, gojatool.ToolEval, args)
 	require.NoError(t, err)
 	require.Equal(t, hitlservice.ActionApprove, r.Action, "the no-file fallback must ask — allow tiers live only in seeded, readable policy files")
 
-	// A script tool must match nothing, in every source: unreviewed
-	// operator-authored code falls to default_action by design.
 	for _, name := range []string{"hitl-policy-default.json", "hitl-policy-acp.json"} {
 		svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(fresh), testTenant, nopKV{}, libtracker.NoopTracker{}, name)
 		r, err := svc.Evaluate(ctx, gojatool.ToolsProviderName, "some_operator_script", args)
@@ -640,10 +589,6 @@ func TestSystem_Goja_ADeniedCallIsCatchableByAScriptThatMeantIt(t *testing.T) {
 	require.Truef(t, ok, "value is %T", value)
 	require.Contains(t, m["outcome"], "refused", "a caught denial must reach the script's own handler")
 }
-
-// ---------------------------------------------------------------------------
-// Row 3 — the refusals, through the whole stack
-// ---------------------------------------------------------------------------
 
 // TestSystem_Goja_RefusalsHoldOnTheEnginePath asserts each documented sandbox limit, run through real dispatch, surfaces as a readable error rather than a panic, a hang, or a chain abort.
 func TestSystem_Goja_RefusalsHoldOnTheEnginePath(t *testing.T) {
@@ -721,7 +666,6 @@ func TestSystem_Goja_RefusalsHoldOnTheEnginePath(t *testing.T) {
 		})
 	}
 
-	// The output cap truncates rather than errors, with an explicit marker.
 	t.Run("the output cap truncates with a notice", func(t *testing.T) {
 		h.sink.drain()
 		res, _ := h.eval(t, ctx, `"x".repeat(200000)`)
@@ -731,8 +675,6 @@ func TestSystem_Goja_RefusalsHoldOnTheEnginePath(t *testing.T) {
 		require.LessOrEqual(t, len(res.Value), gojatool.DefaultOutputCap+len(res.Notice)+16)
 	})
 
-	// console.log is captured, not ambient, so a model's reflexive use of it
-	// doesn't hit a ReferenceError.
 	t.Run("console output comes back with the result", func(t *testing.T) {
 		h.sink.drain()
 		res, value := h.eval(t, ctx, `console.log("step", 1); console.warn("careful"); ({ ok: true })`)
@@ -740,10 +682,6 @@ func TestSystem_Goja_RefusalsHoldOnTheEnginePath(t *testing.T) {
 		require.Equal(t, []string{"step 1", "warn: careful"}, res.Logs)
 	})
 }
-
-// ---------------------------------------------------------------------------
-// Row 4 — startup and teardown
-// ---------------------------------------------------------------------------
 
 // TestSystem_Goja_ABadScriptIsAStartupErrorNamingTheFile asserts BuildEngine fails startup and names the file for a bad script, rather than silently skipping it.
 func TestSystem_Goja_ABadScriptIsAStartupErrorNamingTheFile(t *testing.T) {
@@ -862,7 +800,6 @@ func TestSystem_Goja_ScriptsAreIsolatedFromEachOther(t *testing.T) {
 	_, second := h.eval(t, ctx, `typeof globalThis.leaked`)
 	require.Equal(t, "undefined", second, "state survived a call — the runtime is being reused")
 
-	// And no ambient I/O exists to reach for in the first place.
 	for _, probe := range []string{"require", "process", "fetch", "XMLHttpRequest", "setTimeout", "Deno"} {
 		_, v := h.eval(t, ctx, fmt.Sprintf("typeof %s", probe))
 		require.Equalf(t, "undefined", v, "%s is defined inside the sandbox", probe)

@@ -190,8 +190,6 @@ func TestUnit_RequestAttention_ParkWindowReturnsTypedPending(t *testing.T) {
 	require.Equal(t, runtimetypes.HITLApprovalPending, row.State, "parking must leave the question answerable")
 }
 
-// parkAsk seeds a pending attention ask for missionID via the real
-// RequestAttention park path, so the row is exactly what production writes.
 func parkAsk(t *testing.T, ctx context.Context, svc hitlservice.Service, missionID, askID, summary string) {
 	t.Helper()
 	_, err := svc.RequestAttention(ctx, hitlservice.AttentionRequest{
@@ -204,10 +202,9 @@ func parkAsk(t *testing.T, ctx context.Context, svc hitlservice.Service, mission
 	require.ErrorAs(t, err, &pending, "the park window must leave the row pending and answerable")
 }
 
-// TestUnit_AnswerAsAgentNamed_RecordsNameAndCountsAgainstBound pins the
-// attribution invariant: the durable record shows WHO answered — a named
-// agent, the generic agent marker, or (by absence) a human — and
-// AgentAnswerCount counts exactly the non-human answers.
+// TestUnit_AnswerAsAgentNamed_RecordsNameAndCountsAgainstBound pins that the
+// durable record shows WHO answered, and AgentAnswerCount counts exactly the
+// non-human answers.
 func TestUnit_AnswerAsAgentNamed_RecordsNameAndCountsAgainstBound(t *testing.T) {
 	ctx, store, _ := setupHITLDB(t)
 	svc := newDurableService(t, store)

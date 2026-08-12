@@ -17,9 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testSignature is an explicit author on every fixture commit: the tests must
-// not depend on whatever user.name the machine running them happens to have
-// configured (a CI box usually has none at all).
 func testSignature() *object.Signature {
 	return &object.Signature{
 		Name:  "Test Author",
@@ -28,8 +25,6 @@ func testSignature() *object.Signature {
 	}
 }
 
-// newTestRepo builds a repository in dir with one commit of the given files and
-// returns its worktree.
 func newTestRepo(t *testing.T, dir string, files map[string]string) *git.Worktree {
 	t.Helper()
 	repo, err := git.PlainInit(dir, false)
@@ -53,17 +48,6 @@ func writeRepoFile(t *testing.T, dir, name, content string) {
 	require.NoError(t, os.WriteFile(full, []byte(content), 0o644))
 }
 
-// gitExec calls one tool of the git toolset and renders the result THE WAY THE
-// ENGINE DOES.
-//
-// The rendering is not a convenience: it is the assertion. Some git tools return
-// a typed value now (GitStatusResult and friends), so that a PROGRAM reading the
-// result gets fields instead of prose to guess at — and the whole safety of that
-// change rests on the model still seeing the identical bytes. The engine renders
-// a DataTypeString result with fmt.Sprintf("%v", …)
-// (taskengine/taskexec.go, serializeToolResultContent), so this helper does the
-// same, and every existing expectation in this file goes on asserting the exact
-// model-facing text.
 func gitExec(t *testing.T, tools taskengine.ToolsRepo, tool string, args map[string]any) (string, error) {
 	t.Helper()
 	if args == nil {
@@ -103,8 +87,6 @@ func TestUnit_GitTools_ReadOpsRoundTrip(t *testing.T) {
 		"docs/x.md":   "# docs\n",
 		"untouched.t": "same\n",
 	})
-	// One tracked modification and one brand-new file, so status/diff have both
-	// kinds of change to report.
 	writeRepoFile(t, dir, "main.go", "package main\n\nfunc main() { println(\"hi\") }\n")
 	writeRepoFile(t, dir, "notes.txt", "scratch\n")
 
@@ -164,7 +146,6 @@ func TestUnit_GitTools_StatusOnCleanTree(t *testing.T) {
 
 func TestUnit_GitTools_NoRepositoryIsAnHonestError(t *testing.T) {
 	t.Parallel()
-	// A temp dir with no repository anywhere above it inside the boundary.
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "workspace")
 	require.NoError(t, os.MkdirAll(sub, 0o755))
@@ -175,10 +156,7 @@ func TestUnit_GitTools_NoRepositoryIsAnHonestError(t *testing.T) {
 	assert.Contains(t, err.Error(), "not under version control")
 }
 
-// TestUnit_GitTools_RepoOutsideAllowedDirIsRefused is the containment
-// invariant: local_fs refuses paths outside the allowed dir, and the git tools
-// refuse a REPOSITORY outside it — otherwise a workspace scoped to one
-// subdirectory would quietly operate on the whole enclosing checkout.
+// TestUnit_GitTools_RepoOutsideAllowedDirIsRefused asserts the git tools refuse a repository outside the allowed dir, mirroring local_fs's path containment.
 func TestUnit_GitTools_RepoOutsideAllowedDirIsRefused(t *testing.T) {
 	t.Parallel()
 	outer := t.TempDir()
@@ -194,9 +172,7 @@ func TestUnit_GitTools_RepoOutsideAllowedDirIsRefused(t *testing.T) {
 	}
 }
 
-// TestUnit_GitTools_UnboundedFallsBackToEnclosingRepo documents the other half
-// of the boundary rule: with no declared allowed dir there is nothing to
-// enforce, so the enclosing repository is found by walking up, like git does.
+// TestUnit_GitTools_UnboundedFallsBackToEnclosingRepo asserts that with no declared allowed dir, the enclosing repository is found by walking up, like git does.
 func TestUnit_GitTools_UnboundedFallsBackToEnclosingRepo(t *testing.T) {
 	t.Parallel()
 	outer := t.TempDir()
@@ -234,7 +210,6 @@ func TestUnit_GitTools_CommitRefusesEmptyStaging(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	newTestRepo(t, dir, map[string]string{"a.txt": "a\n"})
-	// An unstaged modification is still nothing to commit.
 	writeRepoFile(t, dir, "a.txt", "a modified\n")
 
 	tools := localtools.NewGitTools(dir)
@@ -251,8 +226,7 @@ func TestUnit_GitTools_AddThenCommit(t *testing.T) {
 	writeRepoFile(t, dir, "a.txt", "a modified\n")
 	writeRepoFile(t, dir, "b.txt", "b\n")
 
-	// go-git reads the commit identity from the repository's own config, so the
-	// fixture repo gets one exactly as `git config user.name` would.
+	// go-git reads the commit identity from the repository's own config, so the fixture gets one set exactly as `git config user.name` would.
 	repo, err := git.PlainOpen(dir)
 	require.NoError(t, err)
 	cfg, err := repo.Config()
@@ -281,7 +255,6 @@ func TestUnit_GitTools_AddThenCommit(t *testing.T) {
 	clean := mustGitExec(t, tools, "git_status", nil)
 	assert.Contains(t, clean, "working tree clean")
 
-	// A commit with a parent shows a real patch, not the root-commit listing.
 	show := mustGitExec(t, tools, "git_show", map[string]any{"ref": "HEAD"})
 	assert.Contains(t, show, "second commit")
 	assert.Contains(t, show, "a modified")
@@ -303,7 +276,6 @@ func TestUnit_GitTools_CheckoutBranch(t *testing.T) {
 	branches := mustGitExec(t, tools, "git_branch_list", nil)
 	assert.Contains(t, branches, "* feature/x")
 
-	// Creating it twice is a mistake the error must name a fix for.
 	_, err := gitExec(t, tools, "git_checkout_branch", map[string]any{"branch": "feature/x", "create": true})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
@@ -319,7 +291,6 @@ func TestUnit_GitTools_RestoreDiscardsAndUnstages(t *testing.T) {
 	newTestRepo(t, dir, map[string]string{"a.txt": "original\n"})
 	tools := localtools.NewGitTools(dir)
 
-	// Staged-only restore leaves the file contents alone.
 	writeRepoFile(t, dir, "a.txt", "changed\n")
 	mustGitExec(t, tools, "git_add", map[string]any{"paths": "a.txt"})
 	out := mustGitExec(t, tools, "git_restore", map[string]any{"paths": "a.txt", "staged": true})
@@ -328,25 +299,18 @@ func TestUnit_GitTools_RestoreDiscardsAndUnstages(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "changed\n", string(content), "staged=true must not touch file contents")
 
-	// The destructive form throws the change away.
 	out = mustGitExec(t, tools, "git_restore", map[string]any{"paths": []any{"a.txt"}})
 	assert.Contains(t, out, "discarded")
 	content, err = os.ReadFile(filepath.Join(dir, "a.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "original\n", string(content))
 
-	// Restoring the whole repository at once is refused, not silently expanded.
 	_, err = gitExec(t, tools, "git_restore", map[string]any{"paths": "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "restoring the whole repository")
 }
 
-// TestUnit_GitTools_PathsStringIsOnePath pins the paths contract of git_add and
-// git_restore: ONE string is ONE path. The argument used to be shell-split, so
-// "my notes.txt" staged neither "my" nor "notes.txt", and a backslash or a quote
-// in a name was interpreted rather than used. BREAKING for any caller that
-// passed "a b" meaning two paths — that spelling now names a single file, and
-// two paths need the array form.
+// TestUnit_GitTools_PathsStringIsOnePath pins that one string is one path for git_add/git_restore, never shell-split.
 func TestUnit_GitTools_PathsStringIsOnePath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -361,29 +325,22 @@ func TestUnit_GitTools_PathsStringIsOnePath(t *testing.T) {
 	assert.Contains(t, status, "staged for commit")
 	assert.Contains(t, status, "my notes.txt")
 
-	// The same name survives a round trip through git_restore.
 	out := mustGitExec(t, tools, "git_restore", map[string]any{"paths": "my notes.txt", "staged": true})
 	assert.Contains(t, out, "unstaged my notes.txt")
 	content, err := os.ReadFile(filepath.Join(dir, "my notes.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "spaced\n", string(content), "staged=true must not touch file contents")
 
-	// Two paths in one string are no longer two paths: the call fails naming the
-	// path it looked for, instead of silently staging something else.
 	_, err = gitExec(t, tools, "git_add", map[string]any{"paths": "a.txt my notes.txt"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "a.txt my notes.txt")
 
-	// A blank string is "no paths", the same missing-argument error as no paths.
 	_, err = gitExec(t, tools, "git_add", map[string]any{"paths": "   "})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "paths is required")
 }
 
-// TestUnit_GitTools_PathsDeclaredAsStringOrArray pins the other half of that
-// fix: the descriptor and the published schema say what repoRelPaths accepts.
-// The descriptor used to declare paths a plain "string" while the code took an
-// array too.
+// TestUnit_GitTools_PathsDeclaredAsStringOrArray pins that the descriptor and published schema both declare paths as the string-or-array union repoRelPaths accepts.
 func TestUnit_GitTools_PathsDeclaredAsStringOrArray(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -479,20 +436,7 @@ func TestUnit_GitTools_SchemaSurface(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ---------------------------------------------------------------------------
-// The program-facing half: readable AND parseable
-// ---------------------------------------------------------------------------
-
-// TestUnit_GitTools_ModelFacingTextIsUnchangedByStructuredResults is the safety
-// rail under the typed results. git_status, git_log and git_branch_list return a
-// Go value now so that a PROGRAM (a goja script, an approval surface) gets
-// fields instead of prose to guess at — and the entire safety of that change is
-// that the MODEL sees the identical bytes it always did.
-//
-// The engine renders a DataTypeString result with fmt.Sprintf("%v", …), which
-// calls String(). This test asserts the rendered text against a full golden
-// string, not a substring: a partial assertion would pass while a field it
-// didn't mention quietly disappeared from the model's view.
+// TestUnit_GitTools_ModelFacingTextIsUnchangedByStructuredResults asserts the model-facing rendered text is unchanged (golden, not substring) even though git_status/git_log/git_branch_list now also return typed fields for a program.
 func TestUnit_GitTools_ModelFacingTextIsUnchangedByStructuredResults(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -503,9 +447,7 @@ func TestUnit_GitTools_ModelFacingTextIsUnchangedByStructuredResults(t *testing.
 	tools := localtools.NewGitTools(dir)
 	status := mustGitExec(t, tools, "git_status", nil)
 
-	// The header lines carry a hash and a branch name, so they are asserted by
-	// shape; everything below them is the part a script used to try to parse,
-	// and it is pinned exactly.
+	// Header lines carry a hash and branch name, asserted by shape; everything below is pinned exactly.
 	lines := strings.Split(strings.TrimRight(status, "\n"), "\n")
 	require.GreaterOrEqual(t, len(lines), 2)
 	assert.True(t, strings.HasPrefix(lines[0], "branch "), "first line: %q", lines[0])
@@ -525,11 +467,7 @@ func TestUnit_GitTools_ModelFacingTextIsUnchangedByStructuredResults(t *testing.
 		"the model-facing log rendering changed")
 }
 
-// TestUnit_GitTools_StructuredResultsCarryTheSameFacts is the other side: what a
-// program gets must be the same repository state the prose describes, in fields
-// it cannot mis-read. This is the regression test for the live failure that
-// started all of this — a script that read "4 staged, 2 other, no untracked" off
-// a tree with one modified and one untracked file.
+// TestUnit_GitTools_StructuredResultsCarryTheSameFacts asserts the typed fields a program reads carry the same repository state as the prose, in fields it cannot misread.
 func TestUnit_GitTools_StructuredResultsCarryTheSameFacts(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -557,11 +495,9 @@ func TestUnit_GitTools_StructuredResultsCarryTheSameFacts(t *testing.T) {
 	assert.Equal(t, []localtools.GitStatusEntry{{Path: "tracked.txt", Code: "M"}}, st.Unstaged)
 	assert.Equal(t, []string{"brand_new.txt"}, st.Untracked)
 
-	// And the rendering of that same value is still the prose the model reads.
 	assert.Contains(t, st.String(), "staged for commit:")
 	assert.Contains(t, st.String(), "  M staged.txt")
 
-	// git_log and git_branch_list carry their facts the same way.
 	res, _, err = tools.Exec(context.Background(), time.Now(), map[string]any{"n": 5}, false,
 		&taskengine.ToolsCall{Name: "git", ToolName: "git_log"})
 	require.NoError(t, err)

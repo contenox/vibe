@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// The program-facing result contract: a script must never be able to hold a
-// tool's answer and be wrong about what it is without an error saying so.
-
-// textHost answers every call with prose, like most tools do.
 func textHost(t *testing.T, text string) *sandbox {
 	t.Helper()
 	return sandboxWithHost(t, HostFunc(func(context.Context, string, string, map[string]any) (any, error) {
@@ -135,10 +131,6 @@ func TestUnit_HostResult_StructuredDataArrivesAsData(t *testing.T) {
 	}
 }
 
-// --- the stand-in results ---------------------------------------------------
-
-// stubResult is a value whose model-facing rendering stands in for something
-// a program actually needs.
 type stubResult struct {
 	Unchanged bool `json:"unchanged"`
 	content   string
@@ -147,7 +139,6 @@ type stubResult struct {
 func (s stubResult) String() string              { return "File unchanged since last read — …" }
 func (s stubResult) ProgramText() (string, bool) { return s.content, true }
 
-// refusalResult is a stand-in with no program-facing equivalent.
 type refusalResult struct{ reason string }
 
 func (r refusalResult) String() string          { return r.reason }

@@ -19,18 +19,22 @@ func sampleInfo(ascii bool) Info {
 		Model:    "qwen3-coder:30b",
 		Provider: "ollama",
 		Session:  "sess-7f3a",
+		Editor:   true,
 	}
 }
 
-// TestUnit_WelcomeGoldens pins the header's exact shape at every width and variant.
+// TestUnit_WelcomeGoldens pins the header's exact shape at every width and
+// variant. Every variant sets Editor, matching the shipped CLI where an
+// editor always resolves; the editor-less hint shape is pinned by
+// TestUnit_WelcomeEditorHintOnlyWhenWired rather than a golden per width.
 func TestUnit_WelcomeGoldens(t *testing.T) {
 	variants := []struct {
 		name string
 		info Info
 	}{
-		{"unicode", Info{}},
+		{"unicode", Info{Editor: true}},
 		{"unicode_info", sampleInfo(false)},
-		{"ascii", Info{ASCII: true}},
+		{"ascii", Info{ASCII: true, Editor: true}},
 		{"ascii_info", sampleInfo(true)},
 	}
 
@@ -152,6 +156,31 @@ func TestUnit_WelcomeUsesOnlyClosedStyleIDs(t *testing.T) {
 	for _, id := range []frame.StyleID{frame.StyleBrandRamp1, frame.StyleBrandRamp2, frame.StyleBrandRamp3, frame.StyleBrand} {
 		if !used[id] {
 			t.Fatalf("full welcome header never uses %q", id)
+		}
+	}
+}
+
+// TestUnit_WelcomeEditorHintOnlyWhenWired pins hint honesty: the Ctrl+X,
+// Ctrl+E chord appears in the welcome hints — full and compact, unicode and
+// ASCII — exactly when the caller wired an editor, and the other affordances
+// stay regardless.
+func TestUnit_WelcomeEditorHintOnlyWhenWired(t *testing.T) {
+	for _, ascii := range []bool{false, true} {
+		for _, w := range []int{CompactWidth - 6, 80, 120} {
+			for _, editor := range []bool{false, true} {
+				got := lineTexts(Welcome(w, Info{ASCII: ascii, Editor: editor}))
+				hasFull := strings.Contains(got, "Ctrl+X Ctrl+E")
+				hasCompact := strings.Contains(got, "^X^E")
+				if advertised := hasFull || hasCompact; advertised != editor {
+					t.Fatalf("ascii=%v width %d editor=%v: hint advertised=%v, want the chord shown exactly when wired:\n%s",
+						ascii, w, editor, advertised, got)
+				}
+				for _, always := range []string{"shell", "files", "keys"} {
+					if !strings.Contains(got, always) {
+						t.Fatalf("ascii=%v width %d editor=%v: %q hint missing:\n%s", ascii, w, editor, always, got)
+					}
+				}
+			}
 		}
 	}
 }

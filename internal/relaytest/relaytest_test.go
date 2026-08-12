@@ -12,11 +12,10 @@ import (
 	"github.com/contenox/contenox/librelay"
 )
 
-// testTimeout keeps a failing assertion a failure rather than a hung `go test`.
 const testTimeout = 10 * time.Second
 
-// TestUnit_RelayDoubleRoundTripsBothDirections is 2.1's exit condition: frames
-// cross the double in both directions with the envelope intact.
+// TestUnit_RelayDoubleRoundTripsBothDirections checks frames cross the
+// double in both directions with the envelope intact.
 func TestUnit_RelayDoubleRoundTripsBothDirections(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
@@ -27,7 +26,6 @@ func TestUnit_RelayDoubleRoundTripsBothDirections(t *testing.T) {
 	link := r.Dial()
 	w, rd := librelay.NewWriter(link.Conn()), librelay.NewReader(link.Conn())
 
-	// Connector -> relay: hello, answered with welcome.
 	hello, err := librelay.Frame{Type: librelay.TypeHello, Instance: "inst-a", ID: "1"}.
 		WithPayload(librelay.Hello{ProtocolVersion: librelay.ProtocolVersion, Instance: "inst-a", Agent: "contenox/test"})
 	if err != nil {
@@ -51,7 +49,6 @@ func TestUnit_RelayDoubleRoundTripsBothDirections(t *testing.T) {
 		t.Fatalf("link bound instance %q, want inst-a", link.Instance())
 	}
 
-	// Relay -> connector: cargo routed by instance alone.
 	cargo, err := librelay.Frame{Type: librelay.TypeACPMessage, Instance: "inst-a", Session: "sess-1", ID: "9"}.
 		WithPayload(json.RawMessage(`{"jsonrpc":"2.0","method":"session/request_permission"}`))
 	if err != nil {
@@ -68,7 +65,6 @@ func TestUnit_RelayDoubleRoundTripsBothDirections(t *testing.T) {
 		t.Fatalf("payload = %s", got.Payload)
 	}
 
-	// Connector -> relay: the answer, correlated, queued for the test.
 	answer := librelay.Frame{Type: librelay.TypeACPMessage, Instance: "inst-a", Session: "sess-1", ReplyTo: "9"}
 	answer, _ = answer.WithPayload(json.RawMessage(`{"jsonrpc":"2.0","result":{"outcome":"selected"}}`))
 	if err := w.WriteFrame(answer); err != nil {
@@ -80,7 +76,7 @@ func TestUnit_RelayDoubleRoundTripsBothDirections(t *testing.T) {
 			t.Fatalf("Recv: %v", err)
 		}
 		if f.Type == librelay.TypeHello {
-			continue // the hello the relay already answered
+			continue
 		}
 		if f.ReplyTo != "9" || f.Session != "sess-1" {
 			t.Fatalf("received frame = %+v", f)
@@ -89,9 +85,8 @@ func TestUnit_RelayDoubleRoundTripsBothDirections(t *testing.T) {
 	}
 }
 
-// TestUnit_RelayDoubleRoutesByInstance asserts (instance, session) is the key:
-// two instances on one relay never see each other's traffic, and the relay
-// picks the destination from the envelope without opening the payload.
+// TestUnit_RelayDoubleRoutesByInstance checks two instances on one relay
+// never see each other's traffic, routed by envelope alone.
 func TestUnit_RelayDoubleRoutesByInstance(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
@@ -116,15 +111,14 @@ func TestUnit_RelayDoubleRoutesByInstance(t *testing.T) {
 		t.Fatal("Route to an unbound instance succeeded")
 	}
 
-	// a must have received nothing beyond its welcome.
 	_ = a.Conn().SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	if _, err := librelay.NewReader(a.Conn()).ReadFrame(); err == nil {
 		t.Fatal("a received a frame addressed to b")
 	}
 }
 
-// TestUnit_RelayDoubleHeartbeatCorrelates covers the control path a connector's
-// hold loop depends on in 2.4.
+// TestUnit_RelayDoubleHeartbeatCorrelates checks heartbeat probes are
+// answered with correlated acks.
 func TestUnit_RelayDoubleHeartbeatCorrelates(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -144,9 +138,9 @@ func TestUnit_RelayDoubleHeartbeatCorrelates(t *testing.T) {
 	}
 }
 
-// TestUnit_RelayDoubleAnswersUnknownTypes is the compatibility rule end to end:
-// a runtime newer than the relay must fail fast, not block, and must not be
-// answered when it was not asking.
+// TestUnit_RelayDoubleAnswersUnknownTypes checks an unknown control request
+// gets an error reply, a notification gets none, and unknown cargo is
+// routed untouched.
 func TestUnit_RelayDoubleAnswersUnknownTypes(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -155,7 +149,6 @@ func TestUnit_RelayDoubleAnswersUnknownTypes(t *testing.T) {
 	rd := sayHello(t, link, "inst-a")
 	w := librelay.NewWriter(link.Conn())
 
-	// An unknown control request is refused, with correlation.
 	if err := w.WriteFrame(librelay.Frame{Type: "relay.invented.in.2027", Instance: "inst-a", ID: "z1"}); err != nil {
 		t.Fatalf("WriteFrame: %v", err)
 	}
@@ -171,8 +164,6 @@ func TestUnit_RelayDoubleAnswersUnknownTypes(t *testing.T) {
 		t.Fatalf("code = %q, want %q", e.Code, librelay.CodeUnsupportedType)
 	}
 
-	// An unknown control notification draws no reply; a heartbeat after it
-	// proves the connection still works and that nothing was queued behind.
 	if err := w.WriteFrame(librelay.Frame{Type: "relay.invented.in.2027", Instance: "inst-a"}); err != nil {
 		t.Fatalf("WriteFrame: %v", err)
 	}
@@ -184,8 +175,6 @@ func TestUnit_RelayDoubleAnswersUnknownTypes(t *testing.T) {
 		t.Fatalf("expected only an ack, got %+v", got)
 	}
 
-	// Unknown cargo is not the relay's business: it is routed, never
-	// refused. Nothing comes back on this link.
 	if err := w.WriteFrame(librelay.Frame{Type: "acp.invented.in.2027", Instance: "inst-a", Session: "s1", ID: "z2"}); err != nil {
 		t.Fatalf("WriteFrame: %v", err)
 	}
@@ -204,8 +193,8 @@ func TestUnit_RelayDoubleAnswersUnknownTypes(t *testing.T) {
 	}
 }
 
-// TestUnit_RelayDoubleDropIsVisible gives 2.4 the disconnect it must recover
-// from, and asserts the double stays usable for assertions afterwards.
+// TestUnit_RelayDoubleDropIsVisible checks Drop ends reads immediately, is
+// idempotent, and leaves the double usable for assertions afterward.
 func TestUnit_RelayDoubleDropIsVisible(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -217,7 +206,7 @@ func TestUnit_RelayDoubleDropIsVisible(t *testing.T) {
 	if _, err := rd.ReadFrame(); err == nil {
 		t.Fatal("reads succeeded after Drop")
 	}
-	link.Drop() // idempotent
+	link.Drop()
 
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
 	defer cancel()
@@ -235,8 +224,8 @@ func TestUnit_RelayDoubleDropIsVisible(t *testing.T) {
 	}
 }
 
-// TestUnit_RelayDoubleNoAutoControl leaves everything to the test, which is how
-// a connector's timeout behavior gets exercised without killing the link.
+// TestUnit_RelayDoubleNoAutoControl checks NoAutoControl leaves hello and
+// heartbeat unanswered.
 func TestUnit_RelayDoubleNoAutoControl(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
@@ -262,8 +251,8 @@ func TestUnit_RelayDoubleNoAutoControl(t *testing.T) {
 	}
 }
 
-// TestUnit_RelayDoubleRecordsMalformedFrames: a connector that emits garbage
-// must not take the link down, but the test must be able to find out.
+// TestUnit_RelayDoubleRecordsMalformedFrames checks a malformed frame is
+// recorded in Errors without ending the link.
 func TestUnit_RelayDoubleRecordsMalformedFrames(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -273,7 +262,7 @@ func TestUnit_RelayDoubleRecordsMalformedFrames(t *testing.T) {
 	if _, err := link.Conn().Write([]byte("{\"type\":\n")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	sayHello(t, link, "inst-a") // the link still works afterwards
+	sayHello(t, link, "inst-a")
 	if len(link.Errors()) == 0 {
 		t.Fatal("malformed frame was not recorded")
 	}
@@ -306,9 +295,8 @@ func mustRead(t *testing.T, rd *librelay.Reader) librelay.Frame {
 	return f
 }
 
-// TestUnit_RelayDoubleSignsTheWelcome is what makes the connector's
-// verification path testable without a real relay: the double holds an
-// identity and proves it the way the contract says a relay must.
+// TestUnit_RelayDoubleSignsTheWelcome checks the double signs a welcome
+// that verifies against its public key.
 func TestUnit_RelayDoubleSignsTheWelcome(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -341,9 +329,8 @@ func TestUnit_RelayDoubleSignsTheWelcome(t *testing.T) {
 	}
 }
 
-// TestUnit_RelayDoubleCanRefuseToSign is the relay that was never given a key.
-// A connector that pinned one must be able to see that case in a test, and it
-// reaches the verifier by a different path from a wrong signature.
+// TestUnit_RelayDoubleCanRefuseToSign checks a NoSignature relay answers
+// welcome unsigned.
 func TestUnit_RelayDoubleCanRefuseToSign(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New(relaytest.NoSignature())
@@ -369,8 +356,8 @@ func TestUnit_RelayDoubleCanRefuseToSign(t *testing.T) {
 	}
 }
 
-// TestUnit_RelayDoubleSignsOnlyWhenChallenged: a connector that offers no
-// nonce is not asking to be convinced, and there is nothing to sign over.
+// TestUnit_RelayDoubleSignsOnlyWhenChallenged checks a hello with no nonce
+// gets an unsigned welcome.
 func TestUnit_RelayDoubleSignsOnlyWhenChallenged(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()

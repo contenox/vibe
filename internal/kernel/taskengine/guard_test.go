@@ -13,17 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_DanglingToolCallGuard_FlushesAndFallsThrough verifies that when
-// HandleChatCompletion receives a ChatHistory whose last message is an unanswered
-// assistant tool_call (the state-machine "budget handoff" scenario), the guard:
-//  1. executes the pending tool inline (via the toolsProvider),
-//  2. appends the tool result to history,
-//  3. falls through to executeLLM so the task's SystemInstruction is still
-//     injected and the LLM gets a real turn with the tool result in context.
-//
-// This is the regression test for the bug where a budget transition shunted the
-// chain to a new chat task whose recovery_chat ran for ~2ms (just the tool flush)
-// and the BUDGET system_instruction never reached the model.
+// TestUnit_DanglingToolCallGuard_FlushesAndFallsThrough verifies HandleChatCompletion flushes a dangling assistant tool_call inline and falls through to executeLLM with the tool result in context.
 func TestUnit_DanglingToolCallGuard_FlushesAndFallsThrough(t *testing.T) {
 	toolsRepo := tools.NewMockToolsRegistry().
 		WithResponse("echo", tools.ToolsResponse{Output: "ECHOED"})
@@ -112,9 +102,7 @@ func TestUnit_DanglingToolCallGuard_FlushesAndFallsThrough(t *testing.T) {
 	require.Equal(t, "all good", last.Content, "the LLM's recovery response should be the final message")
 }
 
-// TestUnit_DanglingToolCallGuard_NoOpWhenNoToolCalls verifies the guard does NOT
-// trigger when the last message is a normal user/assistant text — i.e. the normal
-// chat completion path is unaffected by the new guard logic.
+// TestUnit_DanglingToolCallGuard_NoOpWhenNoToolCalls verifies the guard does not trigger when the last message is normal user/assistant text.
 func TestUnit_DanglingToolCallGuard_NoOpWhenNoToolCalls(t *testing.T) {
 	toolsRepo := tools.NewMockToolsRegistry()
 

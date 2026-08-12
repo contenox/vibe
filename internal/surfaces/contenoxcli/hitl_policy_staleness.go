@@ -17,33 +17,17 @@ import (
 // file in ~/.contenox.
 const RefreshPoliciesCommand = "contenox init --refresh-policies"
 
-// catchAllToolset is the value a rule uses to match every toolset. The
-// evaluator treats an EMPTY tools field the same way (policy.go: `r.Tools == ""
-// || r.Tools == "*"`), so both map onto this marker here.
 const catchAllToolset = "*"
 
-// stalePolicyPreset is a policy file on disk that carries no rule for a
-// toolset the same-named preset in this build rules on — i.e. the envelope
-// predates that toolset. The file itself is never rewritten; this record lets
-// a surface say so instead of the operator discovering it one approval card
-// at a time.
 type stalePolicyPreset struct {
 	Name string
 	Path string
 	// Toolsets are the shipped toolset names this file never mentions, sorted.
 	Toolsets []string
-	// DefaultAction is the on-disk file's default_action, i.e. what those
-	// unmentioned toolsets actually get. Empty means the loader's fail-closed
-	// default (approve).
+	// DefaultAction is the on-disk file's default_action; empty means the loader's fail-closed default (approve).
 	DefaultAction string
 }
 
-// policyToolsets returns the set of toolset names a policy document's rules
-// mention, and whether the document could be read at all. Parsing is
-// deliberately tolerant (minimal shape, per-rule error skipping) rather than
-// the strict loader's: a file that fails to parse reports ok=false, so every
-// caller stays silent rather than risk a wrong warning about someone's
-// security boundary.
 func policyToolsets(raw []byte) (map[string]bool, bool) {
 	var doc struct {
 		Rules []map[string]json.RawMessage `json:"rules"`
@@ -51,9 +35,7 @@ func policyToolsets(raw []byte) (map[string]bool, bool) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, false
 	}
-	// An unexpected field shape means this rule isn't understood, and it might
-	// be the very rule covering the toolset in question — so the whole
-	// document reports "no claim" rather than guessing.
+	// An unrecognized field shape reports "no claim" for the whole document rather than guessing.
 	field := func(rule map[string]json.RawMessage, key string) (string, bool) {
 		v, present := rule[key]
 		if !present {
@@ -88,8 +70,6 @@ func policyToolsets(raw []byte) (map[string]bool, bool) {
 	return out, true
 }
 
-// policyDefaultAction reads a policy file's default_action, "" when absent or
-// unreadable.
 func policyDefaultAction(raw []byte) string {
 	var doc struct {
 		DefaultAction string `json:"default_action"`
@@ -100,11 +80,6 @@ func policyDefaultAction(raw []byte) string {
 	return strings.TrimSpace(doc.DefaultAction)
 }
 
-// missingPolicyToolsets returns the toolsets `shipped` writes rules for that
-// `onDisk` mentions nowhere at all — a rule that denies a toolset, or a
-// catch-all rule, still counts as mentioning it. An unparseable file reports
-// no claim. Names in gated are skipped: a toolset invisible this invocation
-// (betaGatedToolsets) cannot make an envelope stale.
 func missingPolicyToolsets(shipped, onDisk []byte, gated map[string]bool) []string {
 	want, ok := policyToolsets(shipped)
 	if !ok {
@@ -125,10 +100,6 @@ func missingPolicyToolsets(shipped, onDisk []byte, gated map[string]bool) []stri
 	return missing
 }
 
-// policyDirs mirrors the policy search path hitlPolicySource builds (engine.go):
-// the resolved .contenox dir first, then $HOME/.contenox, first match wins.
-// Duplicated here on purpose so the staleness check needs no engine — and
-// deduplicated because beam resolves both to the same directory.
 func policyDirs(primaryDir string) []string {
 	var dirs []string
 	seen := map[string]bool{}
@@ -146,8 +117,6 @@ func policyDirs(primaryDir string) []string {
 	return dirs
 }
 
-// readPolicyFile returns the file the policy loader would actually read for
-// name: the first one that exists along dirs.
 func readPolicyFile(dirs []string, name string) (path string, raw []byte, ok bool) {
 	for _, dir := range dirs {
 		if dir == "" {
@@ -163,8 +132,6 @@ func readPolicyFile(dirs []string, name string) (path string, raw []byte, ok boo
 	return "", nil, false
 }
 
-// stalePolicyPresetNamed reports whether the policy file that WOULD BE LOADED
-// for name predates this build's toolsets, ignoring gated (invisible) ones.
 func stalePolicyPresetNamed(name string, dirs []string, gated map[string]bool) (stalePolicyPreset, bool) {
 	var shipped string
 	for _, p := range HITLPolicyPresets {
@@ -178,8 +145,6 @@ func stalePolicyPresetNamed(name string, dirs []string, gated map[string]bool) (
 	}
 	path, raw, ok := readPolicyFile(dirs, name)
 	if !ok {
-		// Not on disk yet: the seeder writes this build's copy, so there is
-		// nothing stale to report.
 		return stalePolicyPreset{}, false
 	}
 	missing := missingPolicyToolsets([]byte(shipped), raw, gated)
@@ -194,8 +159,6 @@ func stalePolicyPresetNamed(name string, dirs []string, gated map[string]bool) (
 	}, true
 }
 
-// stalePolicyPresets checks every preset this build ships against the copy the
-// loader would read for it.
 func stalePolicyPresets(dirs []string, gated map[string]bool) []stalePolicyPreset {
 	var out []stalePolicyPreset
 	for _, p := range HITLPolicyPresets {
@@ -206,13 +169,10 @@ func stalePolicyPresets(dirs []string, gated map[string]bool) []stalePolicyPrese
 	return out
 }
 
-// staleFallthrough says what actually happens to a call to an unmentioned
-// toolset, in the operator's terms — the approval-card-per-read symptom is the
-// "approve" case, and it is the one that made this whole check necessary.
 func staleFallthrough(defaultAction string) string {
 	switch defaultAction {
 	case "", "approve":
-		// Empty is the loader's fail-closed default (hitlservice policy.go).
+		// Empty is the loader's fail-closed default.
 		return "every call stops for approval"
 	case "deny":
 		return "every call is denied"
@@ -223,12 +183,6 @@ func staleFallthrough(defaultAction string) string {
 	}
 }
 
-// stalePolicyNotice renders the ONE muted line a surface prints on the way in,
-// or "" when there is nothing to say. It stops the moment the file gains the
-// rules — by refresh, or by the operator's own hand. The line names the file
-// by full path and states the effect as that file's default_action
-// fall-through; a policy never gates tool visibility (the chain's tools
-// allowlist does).
 func stalePolicyNotice(name string, dirs []string, gated map[string]bool) string {
 	stale, ok := stalePolicyPresetNamed(name, dirs, gated)
 	if !ok {
@@ -238,9 +192,6 @@ func stalePolicyNotice(name string, dirs []string, gated map[string]bool) string
 		stale.Path, strings.Join(stale.Toolsets, ", "), staleFallthrough(stale.DefaultAction), RefreshPoliciesCommand)
 }
 
-// stalePolicyPresetIssues adapts the detector to setupcheck's issue vocabulary
-// for `contenox doctor`. Callers pass the same search path the engine's policy
-// loader uses (policyDirs).
 func stalePolicyPresetIssues(dirs []string, gated map[string]bool) []setupcheck.StalePolicyPreset {
 	stale := stalePolicyPresets(dirs, gated)
 	if len(stale) == 0 {
@@ -258,12 +209,6 @@ func stalePolicyPresetIssues(dirs []string, gated map[string]bool) []setupcheck.
 	return out
 }
 
-// refreshPoliciesOnSearchPath rewrites the shipped presets in every directory
-// the policy loader consults for primaryDir (policyDirs): ~/.contenox gets
-// every preset; a dir ahead of it only the presets it already holds, so a
-// shadowing copy is refreshed without widening the shadow. Each written path
-// is printed to out. A non-home write failure is a warning, not an abort:
-// home must still refresh, and stalePolicyPresets names the survivor.
 func refreshPoliciesOnSearchPath(out io.Writer, primaryDir string) error {
 	home, err := globalContenoxDir()
 	if err != nil {
@@ -291,18 +236,10 @@ func refreshPoliciesOnSearchPath(out io.Writer, primaryDir string) error {
 	return nil
 }
 
-// runRefreshPolicies rewrites the HITL policy presets along the loader's whole
-// search path and touches nothing else — no chains, no config, no database. It
-// is the only path that replaces a policy file that cannot be proven
-// untouched. primaryDir is the resolved workspace .contenox, whose copies
-// shadow ~/.contenox (policyDirs order). gated toolsets are skipped in the
-// residual report, as everywhere the detector runs.
 func runRefreshPolicies(out io.Writer, primaryDir string, gated map[string]bool) error {
 	if err := refreshPoliciesOnSearchPath(out, primaryDir); err != nil {
 		return err
 	}
-	// The detector, not the writer, earns the closing line: a copy that
-	// survived the rewrite is still the one the loader reads.
 	if stale := stalePolicyPresets(policyDirs(primaryDir), gated); len(stale) > 0 {
 		for _, s := range stale {
 			fmt.Fprintf(out, "  Still stale: %s predates %s — %s\n",

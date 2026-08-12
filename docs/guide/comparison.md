@@ -21,7 +21,7 @@ Concretely, the overlap:
 | MCP servers | `contenox mcp add <name> <url>` — [MCP integration](/docs/integrations/tools/mcp/) |
 | Provider switching | `contenox backend add` for Ollama, vLLM, OpenAI, Anthropic, Gemini, Vertex AI, Bedrock; routing is config, not code |
 | Editor sessions | `contenox acp` over stdio — [Zed](/docs/integrations/editors/zed/), [JetBrains](/docs/integrations/editors/jetbrains/), [AionUi](/docs/integrations/editors/aionui/), [OpenClaw](/docs/integrations/editors/openclaw/) |
-| Local session state | SQLite at `~/.contenox/local.db`; no account, no hosted service |
+| Local session state | SQLite at `~/.contenox/local.db`; no account — the [relay](/docs/guide/pairing/) is opt-in and never contacted unpaired |
 | Terminal UI | `contenox new` (fresh session) and `contenox resume` (the last one, transcript replayed) — chat, plan, and shell in one persistent full-screen session |
 
 `contenox new` is a real coding session, not a demo shell: it routes coding turns into their own loop with its own budget, `local_shell` is on by default there, and the filesystem tools are editor-grade — `read_file`, `read_file_range`, `write_file`, `edit_file`, `sed`, `grep`, `list_dir`, `stat_file`, `delete_file`, with a read-before-write gate that refuses to mutate a file the model has not read. The `/mission` slash command works the same way it does in an editor.

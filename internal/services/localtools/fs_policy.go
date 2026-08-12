@@ -9,17 +9,6 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
-// ---------------------------------------------------------------------------
-// Argument coercion
-//
-// Small local models routinely emit JSON-encoded scalars as strings, e.g.
-// {"start_line": "5"}. Coercion here is deliberately generous so those calls
-// are not silently dropped to defaults; rejectUnknownArgs still guards the
-// argument *names*.
-// ---------------------------------------------------------------------------
-
-// argString returns a string value for key, accepting a real string or any
-// scalar that has an unambiguous string form.
 func argString(args map[string]any, key string) (string, bool) {
 	x, exists := args[key]
 	if !exists || x == nil {
@@ -43,8 +32,6 @@ func argString(args map[string]any, key string) (string, bool) {
 	}
 }
 
-// argBool returns the boolean value for key. Accepts real JSON booleans, the
-// strings "true"/"false"/"1"/"0"/"yes"/"no" in any case, and numeric 0/1.
 func argBool(args map[string]any, key string) (v bool, ok bool) {
 	x, exists := args[key]
 	if !exists || x == nil {
@@ -77,8 +64,6 @@ func argBool(args map[string]any, key string) (v bool, ok bool) {
 	}
 }
 
-// argFloat returns a float64 for key. Accepts JSON numbers (which decode as
-// float64), json.Number, Go integer types, and numeric strings.
 func argFloat(args map[string]any, key string) (v float64, ok bool) {
 	x, exists := args[key]
 	if !exists || x == nil {
@@ -112,7 +97,6 @@ func argFloat(args map[string]any, key string) (v float64, ok bool) {
 	}
 }
 
-// argInt is argFloat narrowed to int, for line numbers and offsets.
 func argInt(args map[string]any, key string) (int, bool) {
 	f, ok := argFloat(args, key)
 	if !ok {
@@ -121,36 +105,15 @@ func argInt(args map[string]any, key string) (int, bool) {
 	return int(f), true
 }
 
-// ---------------------------------------------------------------------------
-// Policy keys
-//
-// All keys live under tools_policies.local_fs and arrive as strings via
-// taskengine.ToolsArgsFromContext.
-// ---------------------------------------------------------------------------
-
 const (
-	// defaultMaxOutputBytes is the ceiling on any single tool result: ~8k
-	// tokens, large enough for real listings but small enough that one result
-	// cannot dominate a small model's context. Prefer setting
-	// _model_context_tokens and letting the budget be derived (see
-	// maxOutputBytesFromPolicy) over overriding this directly.
 	defaultMaxOutputBytes = 32 * 1024
 
-	// defaultMaxReadBytes caps a whole-file read. Files above this must be
-	// paged with start_line/end_line.
 	defaultMaxReadBytes = 1024 * 1024
 
-	// contextBytesPerToken is a deliberately conservative bytes-per-token
-	// estimate for deriving an output budget from a model's context window.
-	// Real English prose runs ~4 B/token; source code and path listings run
-	// closer to 3. Under-estimating here means a smaller budget, which is the
-	// safe direction.
+	defaultMaxAudioBytes = 14 * 1024 * 1024
+
 	contextBytesPerToken = 3.0
 
-	// contextBudgetFraction is the share of a model's total context window
-	// that any single tool result may consume. One result taking a quarter of
-	// the window still leaves room for the system prompt, tool schemas,
-	// conversation history, and the model's own reply.
 	contextBudgetFraction = 0.25
 )
 
@@ -170,8 +133,6 @@ func (h *LocalFSTools) policyString(ctx context.Context, key string) (string, bo
 	return strings.TrimSpace(v), true
 }
 
-// policyInt reads an integer policy key, clamping to [min, max] and falling
-// back to def when absent or unparseable.
 func (h *LocalFSTools) policyInt(ctx context.Context, key string, def, min, max int) int {
 	s, ok := h.policyString(ctx, key)
 	if !ok || s == "" {
@@ -201,67 +162,34 @@ func (h *LocalFSTools) policyBool(ctx context.Context, key string, def bool) boo
 	return def
 }
 
-// maxListDepthFromPolicy caps recursion depth for list_dir(recursive).
-// Policy key: _max_list_depth — default 6, hard ceiling 32.
 func (h *LocalFSTools) maxListDepthFromPolicy(ctx context.Context) int {
 	return h.policyInt(ctx, "_max_list_depth", 6, 1, 32)
 }
 
-// maxListEntriesScannedFromPolicy bounds how many filesystem entries a single
-// recursive list_dir will visit, independent of how many it returns. Without
-// this, paging through a pathological tree with a large offset re-walks the
-// whole tree on every call.
-// Policy key: _max_list_scan — default 100000.
 func (h *LocalFSTools) maxListEntriesScannedFromPolicy(ctx context.Context) int {
 	return h.policyInt(ctx, "_max_list_scan", 100000, 100, 10000000)
 }
 
-// maxGrepMatchesFromPolicy caps the number of grep matches returned.
-// Policy key: _max_grep_matches — default 500. Matches up to the cap are
-// still returned, with a truncation notice, rather than erroring.
 func (h *LocalFSTools) maxGrepMatchesFromPolicy(ctx context.Context) int {
 	return h.policyInt(ctx, "_max_grep_matches", 500, 1, 500000)
 }
 
-// maxFindResultsFromPolicy caps find_files results.
-// Policy key: _max_find_results — default 200.
 func (h *LocalFSTools) maxFindResultsFromPolicy(ctx context.Context) int {
 	return h.policyInt(ctx, "_max_find_results", 200, 1, 5000)
 }
 
-// maxFindDepthFromPolicy bounds how deep find_files descends.
-// Policy key: _max_find_depth — default 24.
 func (h *LocalFSTools) maxFindDepthFromPolicy(ctx context.Context) int {
 	return h.policyInt(ctx, "_max_find_depth", 24, 1, 128)
 }
 
-// verboseToolDescriptions reports whether the long-form tool descriptions
-// should be emitted. Off by default: the terse schema costs a few hundred
-// tokens per turn instead of a few thousand, and every behaviour the long form
-// pre-teaches is re-taught by the error messages at the moment it matters,
-// with concrete values filled in.
-// Policy key: _verbose_tool_descriptions — default false.
 func (h *LocalFSTools) verboseToolDescriptions(ctx context.Context) bool {
 	return h.policyBool(ctx, "_verbose_tool_descriptions", false)
 }
 
-// useGitignoreFromPolicy reports whether .gitignore should be consulted when
-// filtering directory listings and file searches.
-// Policy key: _use_gitignore — default true.
 func (h *LocalFSTools) useGitignoreFromPolicy(ctx context.Context) bool {
 	return h.policyBool(ctx, "_use_gitignore", true)
 }
 
-// maxOutputBytesFromPolicy returns the ceiling on a single tool result.
-//
-// Resolution order:
-//  1. _max_output_bytes, when set (non-positive means unlimited)
-//  2. derived from _model_context_tokens, when set
-//  3. defaultMaxOutputBytes
-//
-// The derived path is the one to prefer: whoever assembles the chain knows
-// which model was resolved, and injecting _model_context_tokens lets the cap
-// track the actual window instead of a constant chosen years earlier.
 func (h *LocalFSTools) maxOutputBytesFromPolicy(ctx context.Context) (limit int64, unlimited bool) {
 	if s, ok := h.policyString(ctx, "_max_output_bytes"); ok && s != "" {
 		n, err := strconv.ParseInt(s, 10, 64)
@@ -276,9 +204,8 @@ func (h *LocalFSTools) maxOutputBytesFromPolicy(ctx context.Context) (limit int6
 	if s, ok := h.policyString(ctx, "_model_context_tokens"); ok && s != "" {
 		if tokens, err := strconv.ParseInt(s, 10, 64); err == nil && tokens > 0 {
 			derived := int64(float64(tokens) * contextBytesPerToken * contextBudgetFraction)
-			// Floor: a budget so small that no useful result fits is worse
-			// than a slightly oversized one, because the model cannot make
-			// progress at all.
+			// Floor: a budget too small for any useful result is worse than a
+			// slightly oversized one.
 			if derived < 4096 {
 				derived = 4096
 			}
@@ -288,8 +215,6 @@ func (h *LocalFSTools) maxOutputBytesFromPolicy(ctx context.Context) (limit int6
 	return defaultMaxOutputBytes, false
 }
 
-// maxReadBytesFromPolicy returns the max bytes for a full-file read.
-// Policy key: _max_read_bytes — default 1 MiB. Non-positive means unlimited.
 func (h *LocalFSTools) maxReadBytesFromPolicy(ctx context.Context) (limit int64, unlimited bool) {
 	s, ok := h.policyString(ctx, "_max_read_bytes")
 	if !ok || s == "" {
@@ -305,10 +230,21 @@ func (h *LocalFSTools) maxReadBytesFromPolicy(ctx context.Context) (limit int64,
 	return n, false
 }
 
-// defaultSkipDirNames is the fallback set of directory basenames omitted from
-// listings when .gitignore is unavailable or disabled. Basename matching alone
-// misses project-specific noise directories that .gitignore would catch; this
-// list is only the backstop for non-git trees.
+func (h *LocalFSTools) maxAudioBytesFromPolicy(ctx context.Context) (limit int64, unlimited bool) {
+	s, ok := h.policyString(ctx, "_max_audio_bytes")
+	if !ok || s == "" {
+		return defaultMaxAudioBytes, false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return defaultMaxAudioBytes, false
+	}
+	if n <= 0 {
+		return 0, true
+	}
+	return n, false
+}
+
 var defaultSkipDirNames = []string{
 	".git", ".hg", ".svn",
 	"node_modules", "bower_components", "Pods",
@@ -321,10 +257,6 @@ var defaultSkipDirNames = []string{
 	".idea", ".vscode",
 }
 
-// skipDirNamesFromPolicy returns the set of directory basenames that listings
-// silently omit.
-// Policy key: _skip_dir_names — comma-separated basenames. Absent uses the
-// default set; an explicit empty string disables basename filtering entirely.
 func (h *LocalFSTools) skipDirNamesFromPolicy(ctx context.Context) map[string]bool {
 	raw, keyPresent := h.policyString(ctx, "_skip_dir_names")
 	if !keyPresent {
@@ -353,9 +285,6 @@ func skipDirNameSet(names []string) map[string]bool {
 	return m
 }
 
-// listExtensionsFromPolicy returns the set of lower-cased file extensions that
-// listings include. Absent or empty means all files.
-// Policy key: _list_extensions — comma-separated, leading dot optional.
 func (h *LocalFSTools) listExtensionsFromPolicy(ctx context.Context) map[string]bool {
 	raw, ok := h.policyString(ctx, "_list_extensions")
 	if !ok || raw == "" {
@@ -378,8 +307,6 @@ func (h *LocalFSTools) listExtensionsFromPolicy(ctx context.Context) map[string]
 	return m
 }
 
-// deniedSubstringsFromPolicy returns the configured denied path substrings.
-// Policy key: _denied_path_substrings — comma-separated.
 func (h *LocalFSTools) deniedSubstringsFromPolicy(ctx context.Context) []string {
 	raw, ok := h.policyString(ctx, "_denied_path_substrings")
 	if !ok || raw == "" {

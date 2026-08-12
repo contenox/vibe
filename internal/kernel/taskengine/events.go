@@ -25,12 +25,7 @@ const (
 
 	TaskEventChainCompleted TaskEventKind = "chain_completed"
 	TaskEventChainFailed    TaskEventKind = "chain_failed"
-	// TaskEventChainSuspended terminates a run segment that parked on a human
-	// approval past the fast window: the checkpoint is persisted, the
-	// goroutine is released, and answering the approval resumes the chain as
-	// a fresh run segment under the same request ID. Carries the hierarchical
-	// address of the interrupt point ({chain, task, tool_call}) and
-	// approval_id (== the checkpoint key).
+	// TaskEventChainSuspended terminates a run segment parked on a human approval past the fast window; carries the interrupt address ({chain, task, tool_call}) and approval_id.
 	TaskEventChainSuspended TaskEventKind = "chain_suspended"
 
 	TaskEventApprovalRequested TaskEventKind = "approval_requested"
@@ -41,9 +36,7 @@ const (
 	TaskEventTokenUsage        TaskEventKind = "token_usage"
 )
 
-// AllTaskEventKinds enumerates every kind the engine can emit. Contract
-// tests iterate it so that adding a kind without updating the documented
-// matrix and its consumers fails CI rather than drifting silently.
+// AllTaskEventKinds enumerates every kind the engine can emit.
 func AllTaskEventKinds() []TaskEventKind {
 	return []TaskEventKind{
 		TaskEventChainStarted,
@@ -64,14 +57,7 @@ func AllTaskEventKinds() []TaskEventKind {
 	}
 }
 
-// EventScope is the hierarchical address of an event or captured state unit:
-// which chain / which task / which tool call produced it. It is the address
-// contract checkpoints and nested consumers name positions with —
-// structured, never re-parsed out of loose strings. Fields are filled
-// top-down: Chain is set on every event of a run, Task on every event emitted
-// inside a task attempt, ToolCall only on events attributable to one tool
-// invocation. The legacy flat TaskEvent fields (ChainID, TaskID) remain
-// populated for wire compatibility; Scope is the additive, authoritative form.
+// EventScope is the hierarchical address (chain/task/tool_call) of an event or captured state unit.
 type EventScope struct {
 	Chain    string `json:"chain,omitempty"`
 	Task     string `json:"task,omitempty"`
@@ -82,9 +68,7 @@ type TaskEvent struct {
 	Kind      TaskEventKind `json:"kind"`
 	Timestamp time.Time     `json:"timestamp"`
 	RequestID string        `json:"request_id,omitempty"`
-	// Scope is the event's hierarchical address (chain/task/tool-call). It is
-	// additive on the wire: consumers that predate it keep reading the flat
-	// ChainID/TaskID fields below, which stay populated identically.
+	// Scope is the event's hierarchical address (chain/task/tool-call); additive on the wire alongside the legacy flat fields below.
 	Scope        EventScope `json:"scope,omitzero"`
 	ChainID      string     `json:"chain_id,omitempty"`
 	TaskID       string     `json:"task_id,omitempty"`
@@ -122,13 +106,7 @@ type TaskEvent struct {
 	TokenUsed int `json:"token_used,omitempty"`
 	TokenSize int `json:"token_size,omitempty"`
 
-	// For step_stream_end: the terminal bracket of one model stream.
-	// ChunkCount is the number of parcels that carried visible content or
-	// thinking (i.e. the number of step_chunk events a subscribed sink saw —
-	// counted independently of Wants, so the bracket is truthful even when no
-	// sink consumed chunks). FinishReason is the provider's verbatim finish
-	// reason ("" on the non-streaming fallback, which reports none). Usage is
-	// provider-reported token usage when available.
+	// step_stream_end bracket: ChunkCount counts step_chunk parcels seen, FinishReason is the provider's verbatim reason, Usage is provider-reported token usage.
 	ChunkCount   int         `json:"chunk_count,omitempty"`
 	FinishReason string      `json:"finish_reason,omitempty"`
 	Usage        *TokenUsage `json:"usage,omitempty"`
@@ -141,11 +119,7 @@ type TaskEventScope struct {
 	Retry       int
 }
 
-// TaskEventSink receives engine observation events. Wants is per-kind so a
-// sink can decline event kinds it does not consume — and ONLY gates whether
-// events are built and published. It must never select an execution path:
-// execution semantics are identical whether every Wants returns true or false
-// (streaming is observation, not a mode).
+// TaskEventSink receives engine observation events; Wants gates whether events are built and published but must never select an execution path.
 type TaskEventSink interface {
 	PublishTaskEvent(ctx context.Context, event TaskEvent) error
 	Wants(kind TaskEventKind) bool
@@ -176,8 +150,7 @@ func TaskEventRequestSubject(requestID string) string {
 	return TaskEventSubjectAll + ".request." + requestID
 }
 
-// Wants accepts every kind while a bus is attached (the pre-Wants Enabled()
-// behavior: bus sinks consumed all kinds).
+// Wants accepts every kind while a bus is attached.
 func (s *BusTaskEventSink) Wants(TaskEventKind) bool {
 	return s != nil && s.bus != nil
 }
@@ -242,13 +215,7 @@ func taskEventScopeFromContext(ctx context.Context) (TaskEventScope, bool) {
 	return scope, ok
 }
 
-// NewTaskEvent builds an event of the given kind addressed from ctx: the
-// request ID, the chain/task scope installed by the executor (ExecEnv wraps
-// the whole run in a chain-level scope; each task attempt overrides it with
-// the full task scope), and — when the emission site runs inside one tool
-// invocation (ContextKeyToolCallID) — the tool-call address. Emission sites
-// that know a more precise tool-call ID than the context carries set
-// Scope.ToolCall explicitly after construction.
+// NewTaskEvent builds an event of the given kind addressed from ctx (request ID, chain/task scope, and tool-call address when present).
 func NewTaskEvent(ctx context.Context, kind TaskEventKind) TaskEvent {
 	event := TaskEvent{
 		Kind:      kind,

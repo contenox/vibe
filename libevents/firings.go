@@ -16,8 +16,8 @@ const (
 	FiringStatusRefused = "refused"
 )
 
-// Firing-listing bounds. A caller that names no limit gets
-// DefaultFiringLimit; one that asks for more than MaxFiringLimit is clamped.
+// Firing-listing bounds: unset defaults to DefaultFiringLimit, over
+// MaxFiringLimit is clamped.
 const (
 	DefaultFiringLimit = 50
 	MaxFiringLimit     = 1000
@@ -35,18 +35,13 @@ type Firing struct {
 	UpdatedAt   time.Time
 }
 
-// Stranded reports whether f is a running claim no live host can still hold
-// at now, given the store's stale-claim bound — the operator-visible state
-// between "running" and any outcome. A stranded firing's host died between
-// the claim and the outcome, so nothing was ever recorded about it.
+// Stranded reports whether f is a running claim older than staleClaim as of now.
 func (f Firing) Stranded(now time.Time, staleClaim time.Duration) bool {
 	return f.Status == FiringStatusRunning && now.UTC().Sub(f.UpdatedAt) > staleClaim
 }
 
-// FiringFilter narrows a ListFirings read. Every field is optional: the zero
-// value lists the store's whole scope, newest first, up to
-// DefaultFiringLimit. The scope is never a filter field — it is fixed by the
-// store, so no filter can widen a read past it.
+// FiringFilter narrows a ListFirings read; the zero value lists the whole
+// scope, newest first, up to DefaultFiringLimit.
 type FiringFilter struct {
 	// SinceNID keeps firings whose event nid is greater than it; 0 keeps all.
 	SinceNID int64
@@ -61,12 +56,6 @@ type FiringFilter struct {
 
 // FiringStore is the durable record of which (trigger, event) pairs ran and
 // how they ended, scoped at construction.
-//
-// A claim held inside a caller's transaction releases itself on rollback —
-// the claim style for effects that are themselves database writes, which
-// need no staleness machinery at all. The stale-claim bound exists for the
-// other style: a claim committed before work that runs outside any
-// transaction, whose host can die holding it.
 type FiringStore struct {
 	cfg        Config
 	scope      string
@@ -77,8 +66,7 @@ type FiringStore struct {
 // FiringStoreOption configures a firing store at construction.
 type FiringStoreOption func(*FiringStore)
 
-// WithClock overrides the store's time source, so a test can age a claim
-// past the stale bound instead of sleeping through it.
+// WithClock overrides the store's time source.
 func WithClock(now func() time.Time) FiringStoreOption {
 	return func(s *FiringStore) {
 		if now != nil {
@@ -87,14 +75,8 @@ func WithClock(now func() time.Time) FiringStoreOption {
 	}
 }
 
-// NewFiringStore builds a firing store for one scope. staleClaim bounds how
-// long a running claim keeps its (trigger, event) pair from being retried,
-// and is required with no default: it must be derived from the caller's own
-// longest legitimate run — an SMTP send's timeout, an agent chain's turn
-// ceiling — because a bound copied from another workload silently rots when
-// that workload changes. Overshooting costs only how long a dead host's
-// firing waits for its retry; undershooting steals a slow but living firing
-// and executes it twice.
+// NewFiringStore builds a firing store for one scope; staleClaim must be
+// positive and bounds how long a running claim withstands takeover.
 func NewFiringStore(cfg Config, scope string, staleClaim time.Duration, opts ...FiringStoreOption) (*FiringStore, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -109,21 +91,11 @@ func NewFiringStore(cfg Config, scope string, staleClaim time.Duration, opts ...
 	return s, nil
 }
 
-// StaleClaim returns the bound the store was constructed with, for callers
-// that compute Stranded over listed firings.
+// StaleClaim returns the bound the store was constructed with.
 func (s *FiringStore) StaleClaim() time.Duration { return s.staleClaim }
 
-// BeginFiring claims (triggerName, nid) with status running. Returns false
-// when the pair is already claimed — the at-least-once dedup. The claim is
-// one conflict-ignoring INSERT against the primary key, never a
-// select-then-insert: at-most-once is the primary key's guarantee, not a
-// race the caller wins.
-//
-// A claim already held is reclaimable in exactly one case: a running row
-// untouched past the store's stale-claim bound, whose host died before it
-// could record an outcome. That takeover is a second conditional UPDATE,
-// equally structural — the freshness predicate is re-evaluated under the
-// row's write lock, so of two racing hosts only one can observe it true.
+// BeginFiring claims (triggerName, nid) with status running, returning false
+// if already claimed by a live host, or taking over a stale claim.
 func (s *FiringStore) BeginFiring(ctx context.Context, exec libdb.Exec, triggerName string, nid int64, requestID string) (bool, error) {
 	now := s.now().UTC()
 	res, err := exec.ExecContext(ctx, fmt.Sprintf(`
@@ -145,10 +117,6 @@ func (s *FiringStore) BeginFiring(ctx context.Context, exec libdb.Exec, triggerN
 	return s.reclaimFiring(ctx, exec, triggerName, nid, requestID, now)
 }
 
-// reclaimFiring takes over a running claim untouched past the stale bound.
-// created_at is deliberately kept: it dates the first attempt, so the retry
-// is visible as a retry rather than as a fresh firing. Every other
-// already-claimed row fails the predicate and stays claimed.
 func (s *FiringStore) reclaimFiring(ctx context.Context, exec libdb.Exec, triggerName string, nid int64, requestID string, now time.Time) (bool, error) {
 	res, err := exec.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s SET request_id = $4, error = '', updated_at = $5
@@ -179,11 +147,8 @@ func (s *FiringStore) FinishFiring(ctx context.Context, exec libdb.Exec, trigger
 	return nil
 }
 
-// ResetFiring is the operator's retry verb: it turns one settled firing back
-// into a running row whose updated_at is backdated past the stale bound, so
-// the next BeginFiring reclaims it immediately while created_at keeps dating
-// the first attempt. It refuses to touch a running row still inside the
-// bound, so a live run cannot be stolen by an impatient retry.
+// ResetFiring forces a settled firing back to running, immediately
+// reclaimable by BeginFiring; it refuses to touch a still-live running row.
 func (s *FiringStore) ResetFiring(ctx context.Context, exec libdb.Exec, triggerName string, nid int64) (bool, error) {
 	now := s.now().UTC()
 	res, err := exec.ExecContext(ctx, fmt.Sprintf(`
@@ -203,9 +168,8 @@ func (s *FiringStore) ResetFiring(ctx context.Context, exec libdb.Exec, triggerN
 	return affected == 1, nil
 }
 
-// ListFirings returns the scope's firings matching f, newest first.
-// Read-only: nothing that observes firings may append an event, or an
-// incident amplifies itself.
+// ListFirings returns the scope's firings matching f, newest first;
+// read-only, callers must not append events from within it.
 func (s *FiringStore) ListFirings(ctx context.Context, exec libdb.Exec, f FiringFilter) ([]Firing, error) {
 	limit := f.Limit
 	if limit <= 0 {

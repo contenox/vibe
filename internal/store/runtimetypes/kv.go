@@ -45,13 +45,7 @@ func (s *store) UpdateKV(ctx context.Context, key string, value json.RawMessage)
 	return checkRowsAffected(result)
 }
 
-// UpdateKVIfUnchanged is UpdateKV under a compare-and-swap predicate: the
-// write lands only while the stored value is still byte-for-byte expected. A
-// KV row is an opaque document with no status column to name in a WHERE
-// clause, so the snapshot it was read from IS the predicate — the equivalent
-// of the pending-state CAS hitl_approvals resolves verdicts under. Returns
-// libdb.ErrNotFound when the key is gone or its value has moved on; callers
-// tell those apart by re-reading with GetKVRaw.
+// UpdateKVIfUnchanged is UpdateKV under a compare-and-swap predicate on the stored value; returns libdb.ErrNotFound if the key is gone or the value has moved on.
 func (s *store) UpdateKVIfUnchanged(ctx context.Context, key string, expected, value json.RawMessage) error {
 	now := time.Now().UTC()
 	result, err := s.Exec.ExecContext(ctx, `
@@ -70,9 +64,7 @@ func (s *store) GetKV(ctx context.Context, key string, out interface{}) error {
 	return s.getKVScoped(ctx, "", key, out)
 }
 
-// GetKVRaw returns key's stored value verbatim instead of decoding it into a
-// caller type — the exact bytes UpdateKVIfUnchanged's predicate is taken
-// against, which a re-marshalled equivalent would not reliably reproduce.
+// GetKVRaw returns key's stored value verbatim instead of decoding it into a caller type.
 func (s *store) GetKVRaw(ctx context.Context, key string) (json.RawMessage, error) {
 	var rawValue []byte
 	err := s.Exec.QueryRowContext(ctx, `
@@ -96,9 +88,7 @@ func (s *store) GetWorkspaceKV(ctx context.Context, workspaceID string, key stri
 
 func (s *store) getKVScoped(ctx context.Context, workspaceID string, key string, out interface{}) error {
 	var kv KV
-	// Scan value into a plain []byte so that both Postgres (returns []byte for JSONB)
-	// and SQLite (returns string for TEXT, auto-converted to []byte by database/sql)
-	// work correctly. Scanning directly into json.RawMessage fails on SQLite.
+	// Scan into []byte, not json.RawMessage: works for both Postgres JSONB and SQLite TEXT.
 	var rawValue []byte
 	err := s.Exec.QueryRowContext(ctx, `
 		SELECT key, value, created_at, updated_at

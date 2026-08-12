@@ -13,8 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// blockingAgent's Prompt parks on its context and returns ctx.Err() when
-// cancelled, signalling each start on `started`.
 type blockingAgent struct {
 	libacp.UnimplementedAgent
 	started chan libacp.SessionID
@@ -145,7 +143,7 @@ func TestUnit_OverlappingPrompts_CancelStillReachesSecondPrompt(t *testing.T) {
 		t.Fatal("second prompt never started")
 	}
 
-	// Prompt #1's cleanup has run by now (its response is on the wire). The
+	// Prompt #1's cleanup has run by now (its response is on the wire), but the
 	// registry must still hold prompt #2, so this cancel must end it.
 	h.notify(libacp.MethodSessionCancel, libacp.CancelNotification{SessionID: "sess-1"})
 	requireCancelledStop(t, h.expectResponse(2))
@@ -186,8 +184,6 @@ func TestUnit_CancelRequest_AbortsInFlightPromptByRequestID(t *testing.T) {
 	require.Nil(t, resp.Error)
 }
 
-// permissionAgent's Prompt blocks on an agent→client RequestPermission call;
-// used to observe outbound $/cancel_request when the turn dies mid-approval.
 type permissionAgent struct {
 	libacp.UnimplementedAgent
 	conn    *libacp.AgentSideConnection

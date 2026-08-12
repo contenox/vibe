@@ -286,8 +286,6 @@ func TestUnit_ToolGuidance_OffSwitch(t *testing.T) {
 	}
 }
 
-// --- helpers ---
-
 // errString is a tiny error type so the sentinel-error identity check is exact.
 type errString string
 

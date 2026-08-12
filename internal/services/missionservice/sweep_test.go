@@ -1,10 +1,5 @@
 package missionservice
 
-// What the mission garbage collector must and must not touch. A mission unit
-// dies with the process that fired it; these pin that the row follows, that a
-// live-but-slow mission does not, and that a reclaim and a normal Finish
-// racing on one mission produce exactly one terminal state.
-
 import (
 	"context"
 	"strings"
@@ -18,8 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// staleMission creates an open mission whose liveness stopped silence ago —
-// both stamps backdated, since lastLiveness takes the later of the two.
 func staleMission(t *testing.T, ctx context.Context, svc Service, intent string, silence time.Duration) *Mission {
 	t.Helper()
 	m := newMission(intent)
@@ -195,11 +188,7 @@ func TestUnit_SweepAbandoned_LeavesEveryOtherTerminalStatusAlone(t *testing.T) {
 	}
 }
 
-// TestUnit_SweepAbandoned_RacesFinishToExactlyOneTerminalState is the -race
-// test for the conditional write: a unit landing its mission at the same
-// moment the collector reclaims it. Whoever wins, the row ends in exactly one
-// terminal state, with the reason that matches it — never a reclaim reason
-// over a landed status, and never a reclaim blocker on a mission that landed.
+// TestUnit_SweepAbandoned_RacesFinishToExactlyOneTerminalState is the -race test for the conditional write: whoever wins between a landing unit and the collector reclaiming it, the row ends in exactly one terminal state with a matching reason.
 func TestUnit_SweepAbandoned_RacesFinishToExactlyOneTerminalState(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		ctx, db := setupMissionDB(t)
@@ -301,28 +290,10 @@ func TestUnit_StaleHeartbeatAfter_HasHeadroomOverTheLongestLegitimateSilence(t *
 	require.Equal(t, staleHeartbeatMultiple*heartbeatCeiling, StaleHeartbeatAfter)
 }
 
-// ─── the bound a mission's own park widens ─────────────────────────────────
-//
-// The serve-level ceiling is not the only thing that parks a unit. A policy
-// rule may set its own timeout_s, and nothing heartbeats while a unit waits on
-// an ask — the last stamp is the end of the turn that raised it. A flat bound
-// would therefore reap a live, correctly-parked mission, making the
-// mission_finish its resumed run eventually calls a permanent conflict: a
-// durable verdict wrong forever.
-
-// maxRuleTimeout mirrors hitlservice's own seven-day ceiling on a policy
-// rule's timeout_s (hitlservice.maxRuleTimeoutS — named in prose, not
-// imported, since hitlservice imports this package). It is the longest an
-// envelope may legitimately park a unit on one ask.
 const maxRuleTimeout = 7 * 24 * time.Hour
 
-// serveCeiling mirrors hitlservice.DefaultApprovalCeiling, the window an
-// attention ask carries when no rule bounds it — the case StaleHeartbeatAfter
-// was already sized for.
 const serveCeiling = time.Hour
 
-// parkedAsk writes one durable ask attributed to missionID: raised raisedAgo
-// ago, in state, configured to wait window before its deadline.
 func parkedAsk(t *testing.T, ctx context.Context, db libdb.DBManager, missionID string, state runtimetypes.HITLApprovalState, raisedAgo, window time.Duration) string {
 	t.Helper()
 	raised := time.Now().UTC().Add(-raisedAgo)

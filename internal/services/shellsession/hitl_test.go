@@ -13,10 +13,6 @@ import (
 	"github.com/contenox/contenox/internal/services/localtools"
 )
 
-// fakePolicy mirrors the intended default policy shape: shell_session_read is
-// always allowed (reference-only reads are never gated), while shell_session_run
-// takes the configured action so a test can flip between "strict" (approve) and
-// "permissive" (allow).
 type fakePolicy struct{ runAction hitlservice.Action }
 
 func (f fakePolicy) Evaluate(_ context.Context, _, toolName string, _ map[string]any) (hitlservice.EvaluationResult, error) {
@@ -34,7 +30,6 @@ func TestShellTools_RunIsHITLGated(t *testing.T) {
 	m := newTestManager(t, time.Minute)
 	ctx := ctxWithSession("hitl-sess")
 
-	// Strict policy: run requires approval. A denied approval must NOT execute.
 	var asked int
 	deny := func(context.Context, hitlservice.ApprovalRequest) (bool, error) { asked++; return false, nil }
 	strict := localtools.NewHITLWrapper(NewTools(m), deny, fakePolicy{runAction: hitlservice.ActionApprove}, nil)
@@ -49,7 +44,6 @@ func TestShellTools_RunIsHITLGated(t *testing.T) {
 	if s, _ := out.(string); s != localtools.DenyMessage {
 		t.Fatalf("denied run must return the deny message, got %T %v", out, out)
 	}
-	// Nothing should have been typed into a shell.
 	if r := m.Read("hitl-sess", 0, 0); r.Exists && strings.Contains(r.Content, "denied-line") {
 		t.Fatalf("denied command must not have executed; scrollback=%q", r.Content)
 	}
@@ -70,7 +64,6 @@ func TestShellTools_PermissiveRunsAndReadReturnsOutput(t *testing.T) {
 		t.Fatalf("permissive policy must not ask for approval, asked=%d", asked)
 	}
 
-	// The read tool is ungated and returns what the run wrote.
 	var content string
 	ok := waitFor(t, 3*time.Second, func() bool {
 		out, _, err := permissive.Exec(ctx, time.Now(), map[string]any{}, false, runCall(ToolRead))

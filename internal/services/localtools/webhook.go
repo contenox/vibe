@@ -24,20 +24,14 @@ import (
 // and the key used to look up tools_policies entries.
 const WebToolsName = "webtools"
 
-// WebCaller exposes per-verb HTTP tools (web_get, web_head, web_post, web_put,
-// web_patch, web_delete) under the "webtools" namespace. Each call is gated
-// by tools_policies.webtools (host allow/deny, scheme allowlist, size limits,
-// timeout, retry, redirects), tracked through libtracker, and — for mutating
-// verbs — gated by HITL approval per the default policy.
+// WebCaller exposes per-verb HTTP tools (web_get, web_head, web_post, web_put, web_patch, web_delete) under the "webtools" namespace, each gated by tools_policies.webtools (host allow/deny, scheme allowlist, size limits, timeout, retry, redirects), tracked through libtracker, and — for mutating verbs — gated by HITL approval.
 type WebCaller struct {
 	client         *http.Client
 	defaultHeaders map[string]string
 	tracker        libtracker.ActivityTracker
 }
 
-// NewWebCaller creates a new WebCaller. Pass nil for tracker to disable
-// tracing; the constructor swaps it for a NoopTracker so the call sites stay
-// uniform.
+// NewWebCaller creates a new WebCaller; pass nil for tracker to disable tracing, since the constructor swaps it for a NoopTracker so call sites stay uniform.
 func NewWebCaller(tracker libtracker.ActivityTracker, options ...WebtoolsOption) taskengine.ToolsRepo {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
@@ -65,8 +59,6 @@ func WithHTTPClient(client *http.Client) WebtoolsOption {
 func WithDefaultHeader(key, value string) WebtoolsOption {
 	return func(h *WebCaller) { h.defaultHeaders[key] = value }
 }
-
-// ── policy readers ────────────────────────────────────────────────────────────
 
 func (h *WebCaller) policyArgs(ctx context.Context) map[string]string {
 	return taskengine.ToolsArgsFromContext(ctx, WebToolsName)
@@ -117,12 +109,6 @@ func (h *WebCaller) policyBool(args map[string]string, key string, fallback bool
 	return fallback
 }
 
-// ── URL / host validation ─────────────────────────────────────────────────────
-
-// validateURL parses raw and enforces scheme + host policies. Returns the
-// parsed URL on success or a soft denial string (with denial=true) on policy
-// violation. denial=true means "return this string to the model as a tool
-// result"; denial=false with err set means a hard error (malformed URL).
 func (h *WebCaller) validateURL(args map[string]string, raw string) (*url.URL, string, bool, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -137,8 +123,7 @@ func (h *WebCaller) validateURL(args map[string]string, raw string) (*url.URL, s
 	if host == "" {
 		return nil, "webtools: URL must include a host", true, nil
 	}
-	// No host is denied by default; host policy is opt-in, either via this
-	// _denied_hosts knob or — preferably — an HITL policy rule with op:"host".
+	// No host is denied by default; host policy is opt-in, via this _denied_hosts knob or (preferably) an HITL policy rule with op:"host".
 	denied := h.policyCSV(args, "_denied_hosts", "")
 	if hostMatches(host, denied) {
 		return nil, fmt.Sprintf("webtools: host %q is denied by tools_policies.webtools._denied_hosts", host), true, nil
@@ -150,9 +135,6 @@ func (h *WebCaller) validateURL(args map[string]string, raw string) (*url.URL, s
 	return u, "", false, nil
 }
 
-// hostMatches checks whether host equals or is a subdomain of any pattern in
-// patterns. A pattern of "example.com" matches "example.com" and "api.example.com".
-// IP literals match exactly. Empty list = no match.
 func hostMatches(host string, patterns []string) bool {
 	host = strings.ToLower(host)
 	if ip := net.ParseIP(host); ip != nil {
@@ -185,8 +167,6 @@ func contains(list []string, v string) bool {
 	}
 	return false
 }
-
-// ── arg extraction ────────────────────────────────────────────────────────────
 
 func (h *WebCaller) extractURL(input map[string]any, toolsCall *taskengine.ToolsCall) (string, error) {
 	if v, ok := input["url"].(string); ok && v != "" {
@@ -250,11 +230,6 @@ func (h *WebCaller) extractQuery(input map[string]any, toolsCall *taskengine.Too
 	return ""
 }
 
-// extractBody reads the request body, falling back to the call's own arguments
-// the way extractURL, extractHeaders and extractQuery do — without that
-// fallback a declarative `tools` task, whose arguments sit on the ToolsCall
-// rather than in the input map, could never send one. A body arriving that way
-// is a string and is sent as-is.
 func (h *WebCaller) extractBody(input map[string]any, toolsCall *taskengine.ToolsCall, maxBytes int) (io.Reader, int, error) {
 	v, ok := input["body"]
 	if !ok {
@@ -284,13 +259,6 @@ func (h *WebCaller) extractBody(input map[string]any, toolsCall *taskengine.Tool
 	return bytes.NewReader(raw), len(raw), nil
 }
 
-// ── core request loop ─────────────────────────────────────────────────────────
-
-// doRequest is the per-verb dispatch. It validates the URL, builds the
-// request, runs the retry/backoff loop, reads the size-limited response, and
-// closes the tracker span. On a soft policy denial (host/scheme/size) it
-// returns (denialString, DataTypeString, nil) so the model sees a tool result.
-// HEAD is the one verb that answers with WebHeadResult rather than the body.
 func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, input any, toolsCall *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	dynArgs, _ := input.(map[string]any)
 	if dynArgs == nil {
@@ -355,8 +323,7 @@ func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, inpu
 	reportErr, reportChange, end := h.tracker.Start(ctx, "exec", toolName, "url", u.String(), "host", host, "method", method)
 	defer end()
 
-	// Build a per-call client so timeout and redirect policy come from
-	// tools_policies, not the shared default client.
+	// Per-call client so timeout and redirect policy come from tools_policies, not the shared default client.
 	client := *h.client
 	client.Timeout = time.Duration(timeoutSec) * time.Second
 	if disallowRedirects {
@@ -365,8 +332,7 @@ func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, inpu
 		}
 	}
 
-	// GET and HEAD declare no body argument (readVerbProps), so none is read for
-	// them even when the call carries one.
+	// GET and HEAD declare no body argument (readVerbProps), so none is read even when the call carries one.
 	sendsBody := method != http.MethodGet && method != http.MethodHead
 
 	var (
@@ -435,14 +401,11 @@ func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, inpu
 
 	if statusCode >= 200 && statusCode < 300 {
 		reportChange(fmt.Sprintf("status_%d", statusCode), nil)
-		// HEAD is asked for the status and the headers; its body is empty by
-		// definition, so returning the body would return nothing at all.
+		// HEAD's body is empty by definition, so returning the body would return nothing at all; it gets status and headers instead.
 		if method == http.MethodHead {
 			return WebHeadResult{Status: statusCode, Headers: flattenHeaders(respHeaders)}, taskengine.DataTypeJSON, nil
 		}
-		// A 204 carries no body by definition either — common on DELETE/PUT/
-		// PATCH — so it answers the same shape rather than an empty string
-		// that reads as a missing result.
+		// A 204 carries no body by definition either (common on DELETE/PUT/PATCH), so it answers the same WebHeadResult shape rather than an empty string that reads as missing.
 		if statusCode == http.StatusNoContent {
 			return WebHeadResult{Status: statusCode, Headers: flattenHeaders(respHeaders)}, taskengine.DataTypeJSON, nil
 		}
@@ -467,19 +430,12 @@ func (h *WebCaller) doRequest(ctx context.Context, method, toolName string, inpu
 	return nil, taskengine.DataTypeAny, failure
 }
 
-// WebHeadResult is what web_head returns on a 2xx, and what every verb
-// returns on a 204 No Content: the status code and the response headers — the
-// two cases where the body is empty by definition, so there is nothing else
-// to return. The shape is not a public API; it lives beside the tool that
-// produces it.
+// WebHeadResult is what web_head returns on a 2xx, and what every verb returns on a 204 No Content: the status code and headers, the two cases where the body is empty by definition.
 type WebHeadResult struct {
 	Status  int               `json:"status"`
 	Headers map[string]string `json:"headers"`
 }
 
-// flattenHeaders renders response headers as one string per name, keyed by Go's
-// canonical casing (Content-Type). A header sent more than once is joined with
-// ", " so the result is shaped like the headers argument the same toolset takes.
 func flattenHeaders(h http.Header) map[string]string {
 	out := make(map[string]string, len(h))
 	for name, values := range h {
@@ -551,8 +507,6 @@ func jitter(d time.Duration) time.Duration {
 	return d + time.Duration(float64(d)*r)
 }
 
-// ── ToolsRepo surface ─────────────────────────────────────────────────────────
-
 // Exec dispatches to one of the verb-specific handlers based on toolsCall.ToolName.
 func (h *WebCaller) Exec(ctx context.Context, _ time.Time, input any, _ bool, toolsCall *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	if toolsCall == nil {
@@ -584,9 +538,6 @@ func (h *WebCaller) Supports(_ context.Context) ([]string, error) {
 	return []string{WebToolsName, "web_get", "web_head", "web_post", "web_put", "web_patch", "web_delete"}, nil
 }
 
-// webSchemaSpecs is every verb tool this toolset declares, in Supports order.
-// All six run the same doRequest, and five of them answer with the same shape;
-// HEAD answers with the status and headers, since it has no body to answer with.
 func webSchemaSpecs() []toolSchemaSpec {
 	return []toolSchemaSpec{
 		{tool: "web_get", component: "WebGet", response: webResponseSchema},
@@ -598,12 +549,7 @@ func webSchemaSpecs() []toolSchemaSpec {
 	}
 }
 
-// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
-// one request/response pair per verb. Requests are converted from the
-// descriptors GetToolsForToolsByName hands the model — readVerbProps and
-// writeVerbProps are the single declaration of those arguments, and they carry
-// shapes (headers' additionalProperties, body's type union) a flat property
-// table could not hold.
+// GetSchemasForSupportedTools publishes one OpenAPI 3.1 request/response pair per verb, converted from the descriptors GetToolsForToolsByName hands the model (readVerbProps/writeVerbProps), preserving shapes a flat property table could not hold.
 func (h *WebCaller) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
 	declared, err := h.GetToolsForToolsByName(ctx, WebToolsName)
 	if err != nil {
@@ -618,8 +564,6 @@ func (h *WebCaller) GetSchemasForSupportedTools(ctx context.Context) (map[string
 	return map[string]*openapi3.T{WebToolsName: doc}, nil
 }
 
-// webTruncatedEnvelopeSchema is wrapTruncated's envelope: a JSON body that hit
-// the response cap is wrapped rather than silently shortened.
 func webTruncatedEnvelopeSchema() *openapi3.SchemaRef {
 	return objectSchema("A JSON body that hit _max_response_bytes, wrapped so the cut is visible.",
 		map[string]*openapi3.SchemaRef{
@@ -630,15 +574,10 @@ func webTruncatedEnvelopeSchema() *openapi3.SchemaRef {
 		}, "_truncated", "_bytes_read", "_max_bytes", "body")
 }
 
-// webPolicyDenialSchema is the soft denial validateURL produces: returned as a
-// tool result so the model can correct the URL, not as an error.
 func webPolicyDenialSchema() *openapi3.SchemaRef {
 	return strSchema("A policy denial, returned as a result rather than an error: the scheme is not in _allowed_schemes, the URL carries no host, or the host is denied by _denied_hosts or missing from _allowed_hosts. No request was sent.")
 }
 
-// webResponseSchema is what doRequest returns on a 2xx. A non-2xx status, a
-// transport failure that outlived the retries, and an oversized request body
-// are all errors instead, so nothing here is a failure marker.
 func webResponseSchema() *openapi3.SchemaRef {
 	return anyOfSchema("What the call returns on a 2xx status.",
 		&openapi3.SchemaRef{Value: &openapi3.Schema{
@@ -650,17 +589,12 @@ func webResponseSchema() *openapi3.SchemaRef {
 		webPolicyDenialSchema())
 }
 
-// webHeadResponseSchema is webResponseSchema for HEAD, the one verb that
-// always answers with metadata instead of a body: WebHeadResult. The other
-// five return what they read, except on a 204 (see webResponseSchema).
 func webHeadResponseSchema() *openapi3.SchemaRef {
 	return anyOfSchema("What the call returns on a 2xx status.",
 		webHeadResultSchema("WebHeadResult: the status code and the response headers. A HEAD response carries no body, so none is returned."),
 		webPolicyDenialSchema())
 }
 
-// webHeadResultSchema is the WebHeadResult shape, declared once for the two
-// places it appears: every HEAD 2xx, and any verb's 204 No Content.
 func webHeadResultSchema(desc string) *openapi3.SchemaRef {
 	return objectSchema(desc,
 		map[string]*openapi3.SchemaRef{
@@ -671,7 +605,6 @@ func webHeadResultSchema(desc string) *openapi3.SchemaRef {
 		}, "status", "headers")
 }
 
-// readVerbProps returns the JSON schema parameters for read-only verbs (GET, HEAD).
 func readVerbProps() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -684,7 +617,6 @@ func readVerbProps() map[string]any {
 	}
 }
 
-// writeVerbProps returns the schema for verbs that may carry a request body.
 func writeVerbProps() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -701,15 +633,6 @@ func writeVerbProps() map[string]any {
 	}
 }
 
-// Two facts every verb's description states, because neither is discoverable
-// from a successful call and neither has an error that teaches it:
-//
-//   - nonSuccessNote: a non-2xx comes back as an ERROR, not a result. Without
-//     it a model cannot tell a 404 from a transport failure by contract, only
-//     by guessing at the text.
-//   - truncationNote: an oversized body changes the result's SHAPE rather than
-//     being silently shortened. A model reading only the description would
-//     otherwise take the envelope for the document.
 const (
 	nonSuccessNote = " A non-2xx status is returned as an ERROR naming the status, so a result always means the call succeeded."
 	truncationNote = " A body over _max_response_bytes comes back wrapped as {_truncated,_bytes_read,_max_bytes,body} when it is JSON, or with a trailing truncation marker when it is text."

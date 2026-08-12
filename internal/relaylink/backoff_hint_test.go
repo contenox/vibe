@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// A relay's retry hint moves the fleet's return without synchronising it, and
-// cannot be used to park or to spin a connector: it is clamped to the policy's
-// own bounds and drawn with jitter rather than applied as a fixed delay.
+// TestUnit_Backoff_RetryHintIsClampedAndJittered checks a relay's retry hint
+// is clamped to the policy's bounds and drawn with jitter, not applied as a
+// fixed delay.
 func TestUnit_Backoff_RetryHintIsClampedAndJittered(t *testing.T) {
 	policy := Backoff{Initial: time.Second, Max: 30 * time.Second, Factor: 2, ResetAfter: time.Minute}
 
@@ -38,8 +38,8 @@ func TestUnit_Backoff_RetryHintIsClampedAndJittered(t *testing.T) {
 	}
 }
 
-// No hint means the ordinary schedule, so a relay that says nothing cannot
-// accidentally reset a connector that is backing off.
+// TestUnit_Backoff_NoHintFallsThrough checks a non-positive hint falls
+// through to the ordinary schedule.
 func TestUnit_Backoff_NoHintFallsThrough(t *testing.T) {
 	policy := Backoff{Initial: time.Second, Max: 8 * time.Second, Factor: 2, ResetAfter: time.Minute}
 	b := newBackoffState(policy)
@@ -50,8 +50,8 @@ func TestUnit_Backoff_NoHintFallsThrough(t *testing.T) {
 	}
 }
 
-// A relay hinting on every attempt must not hold a failing connector at its
-// initial delay: the schedule advances underneath the hint.
+// TestUnit_Backoff_HintDoesNotStallTheSchedule checks the schedule keeps
+// advancing under a hint given on every attempt.
 func TestUnit_Backoff_HintDoesNotStallTheSchedule(t *testing.T) {
 	policy := Backoff{Initial: time.Second, Max: 30 * time.Second, Factor: 2, ResetAfter: time.Minute}
 	b := newBackoffState(policy)

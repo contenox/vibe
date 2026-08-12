@@ -16,8 +16,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// seccompUserNotifSupported mirrors the library's own capability probe so the
-// tap tests skip gracefully on a kernel without SECCOMP_RET_USER_NOTIF (~5.0+).
 func seccompUserNotifSupported() bool {
 	action := uint32(unix.SECCOMP_RET_USER_NOTIF)
 	_, _, e := unix.Syscall(unix.SYS_SECCOMP,
@@ -25,8 +23,6 @@ func seccompUserNotifSupported() bool {
 	return e == 0
 }
 
-// runTapExecProbe (layer 2) execs the path in probePathEnv; a return means
-// exec failed, and classify maps a permission error to exitDenied.
 func runTapExecProbe() int {
 	path := os.Getenv(probePathEnv)
 	if path == "" {
@@ -36,7 +32,6 @@ func runTapExecProbe() int {
 	return classify(err)
 }
 
-// kvString extracts a string value for key from a flat kvArgs slice.
 func kvString(kv []any, key string) string {
 	for i := 0; i+1 < len(kv); i += 2 {
 		if k, ok := kv[i].(string); ok && k == key {
@@ -48,8 +43,6 @@ func kvString(kv []any, key string) string {
 	return ""
 }
 
-// hasSyscall reports whether a "sandbox-syscall" event was recorded for
-// syscallName whose reported path contains pathSubstr ("" matches any path).
 func (t *recTracker) hasSyscall(syscallName, pathSubstr string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -67,8 +60,6 @@ func (t *recTracker) hasSyscall(syscallName, pathSubstr string) bool {
 	return false
 }
 
-// findAllowedExecutable returns a stock executable Landlock permits (under
-// systemRuntimePaths), or skips if the host has none.
 func findAllowedExecutable(t *testing.T) string {
 	t.Helper()
 	for _, p := range []string{"/bin/true", "/usr/bin/true", "/bin/echo", "/usr/bin/echo"} {
@@ -138,8 +129,7 @@ func TestIntegration_SyscallTap_RecordsDeniedExec(t *testing.T) {
 	secret := t.TempDir() // outside the wall, not carved out
 
 	deniedProg := filepath.Join(secret, "prog")
-	// Deliberately not a valid executable: a leaked wall would fail ENOEXEC
-	// (exitOther) instead of the expected Landlock EACCES.
+	// Deliberately not a valid executable, so a leaked wall would fail ENOEXEC (exitOther) instead of the expected Landlock EACCES.
 	require.NoError(t, os.WriteFile(deniedProg, []byte("x"), 0o755))
 
 	tracker := &recTracker{}

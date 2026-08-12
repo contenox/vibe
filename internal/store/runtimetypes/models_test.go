@@ -13,7 +13,7 @@ import (
 
 func TestUnit_Models_AppendAndGetAllModels(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
-	limit := 100 // Use a large limit to fetch all models
+	limit := 100
 
 	models, err := s.ListModels(ctx, nil, limit)
 	require.NoError(t, err)
@@ -185,7 +185,7 @@ func TestUnit_Models_ListHandlesPagination(t *testing.T) {
 		model := &runtimetypes.Model{
 			ID:            uuid.New().String(),
 			Model:         fmt.Sprintf("model%d", i),
-			ContextLength: 1024 + i*1024, // Vary context length
+			ContextLength: 1024 + i*1024,
 			CanChat:       i%2 == 0,
 			CanEmbed:      i%3 == 0,
 			CanPrompt:     i%4 == 0,
@@ -229,7 +229,7 @@ func TestUnit_Models_ListHandlesPagination(t *testing.T) {
 	require.Len(t, receivedModels, 5)
 
 	for i, received := range receivedModels {
-		expected := createdModels[4-i] // Reverse order (newest first)
+		expected := createdModels[4-i]
 		require.Equal(t, expected.Model, received.Model)
 		require.Equal(t, expected.ContextLength, received.ContextLength)
 		require.Equal(t, expected.CanChat, received.CanChat)
@@ -239,13 +239,10 @@ func TestUnit_Models_ListHandlesPagination(t *testing.T) {
 	}
 }
 
-// TestUnit_Models_ZeroContextLength verifies that context_length=0 is accepted
-// as an auto-detect placeholder (capabilities will be filled by the backend cycle
-// via Ollama /api/show). Only the model name is required.
+// TestUnit_Models_ZeroContextLength verifies that context_length=0 is accepted as an auto-detect placeholder.
 func TestUnit_Models_ZeroContextLength(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
-	// Zero context length is now valid — backend cycle will populate it via Show.
 	model := &runtimetypes.Model{
 		ID:            uuid.New().String(),
 		Model:         "auto-detect-model",
@@ -255,7 +252,6 @@ func TestUnit_Models_ZeroContextLength(t *testing.T) {
 	err := s.AppendModel(ctx, model)
 	require.NoError(t, err)
 
-	// Model name is still required.
 	noName := &runtimetypes.Model{
 		ID:            uuid.New().String(),
 		ContextLength: 0,

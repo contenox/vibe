@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeTracker counts ActivityTracker lifecycle calls for assertions below.
 type fakeTracker struct {
 	starts, ends, changes int
 	errs                  []error
@@ -25,7 +24,7 @@ func (f *fakeTracker) Start(ctx context.Context, operation, subject string, kvAr
 
 var _ libtracker.ActivityTracker = (*fakeTracker)(nil)
 
-// A minimal valid spec assembles a command with env scrubbed, HOME forced, cwd pinned. Linux-only: off Linux Command fails closed (see TestUnit_Command_FailsClosedOffLinux).
+// A minimal valid spec assembles a command with env scrubbed, HOME forced, cwd pinned (Linux-only).
 func TestUnit_Command_AssemblesMinimalValidSpec(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Command assembles a runnable command only on Linux; off Linux it fails closed")
@@ -52,7 +51,7 @@ func TestUnit_Command_AssemblesMinimalValidSpec(t *testing.T) {
 	}
 }
 
-// The confined PATH keeps a carved toolchain dir (so e.g. node resolves) and drops an uncarved profile dir. Linux-only.
+// The confined PATH keeps a carved toolchain dir and drops an uncarved profile dir (Linux-only).
 func TestUnit_Command_ConfinedPathKeepsCarvedToolchainDropsUncarved(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Command assembles a runnable command only on Linux")
@@ -91,7 +90,7 @@ func TestUnit_Command_RejectsRelativePathEntry(t *testing.T) {
 	require.ErrorIs(t, err, libsandbox.ErrInvalidSpec)
 }
 
-// An EnvSet PATH override is admitted when the directory is covered by a matching FS carve-out. Linux-only.
+// An EnvSet PATH override is admitted when the directory is covered by a matching FS carve-out (Linux-only).
 func TestUnit_Command_AllowsPathWithinCarveout(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("a successful Command assembly is only reachable on Linux")
@@ -138,7 +137,7 @@ func TestUnit_Command_RejectsInvalidCarveout(t *testing.T) {
 	require.ErrorIs(t, err, libsandbox.ErrInvalidCarveout)
 }
 
-// The tracker sees a full Start→change→end lifecycle on success, with no error reported. Linux-only.
+// The tracker sees a full Start→change→end lifecycle on success, with no error reported (Linux-only).
 func TestUnit_Command_EmitsTrackerLifecycleOnSuccess(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("a successful Command assembly is only reachable on Linux")
@@ -176,14 +175,7 @@ func TestUnit_Command_FailsClosedOffLinux(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		t.Skip("on Linux the wall is built; the off-Linux fail-closed path does not apply")
 	}
-	// SystemExecDirs (and so canonicalPATH/confinedPATH's fallback) is a
-	// Linux-only exec surface of hardcoded Unix paths; on a non-Linux host
-	// none of it — nor the real ambient PATH Command would otherwise read
-	// via os.Getenv — resolves to something validatePATH accepts. That is
-	// orthogonal to what this test pins (the fail-closed isolation seam), so
-	// PATH is explicitly overridden to empty: validatePATH treats an empty
-	// PATH as inert (see validatePATH's doc comment), letting assembly reach
-	// applyIsolation, which is the off-Linux path under test.
+	// PATH is set to "" so a non-Linux host's unresolvable exec surface doesn't mask the fail-closed isolation path under test.
 	cmd, err := libsandbox.Command(context.Background(), libsandbox.Spec{
 		WorkspaceRoot: t.TempDir(),
 		Home:          t.TempDir(),

@@ -1,10 +1,5 @@
 package localtools
 
-// Internal tests for the before-side of an approval diff. They live
-// in-package so the things that must never reach a human as a file's current
-// contents (fileUnchangedStub, severityRecoverable) are named by their own
-// identifiers, not a stale copy.
-
 import (
 	"context"
 	"strings"
@@ -17,24 +12,14 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// fsFake stands in for the local_fs toolset, reproducing read_file's session
-// dedup branch exactly as fs.go writes it:
-//
-//	if !force && !readTrackingDisabled(ctx) && hasCurrentFullRead(...) { stub }
-//
-// warm means this session has already read the file at its current version —
-// the state a real conversation is in by the time it asks to write, because
-// write_file's own read-before-write rule made the model read it first.
 type fsFake struct {
 	content string
 	warm    bool
-	// notice, when set, is returned instead of the content: the shape read_file
-	// takes when the answer is a message rather than a file.
-	notice string
+	notice  string
 
 	reads    []fsRead
 	writes   []string
-	recorded bool // a read marker would have been written for the session
+	recorded bool
 }
 
 type fsRead struct {
@@ -61,8 +46,7 @@ func (f *fsFake) Exec(ctx context.Context, _ time.Time, input any, _ bool, tools
 		return fileUnchangedStub, taskengine.DataTypeString, nil
 	}
 	if session != "" {
-		// recordFullRead: the read that answers with content records that this
-		// session has now seen this version of the file.
+		// recordFullRead: a read that answers with content records that this session has now seen this version of the file.
 		f.recorded = true
 	}
 	return f.content, taskengine.DataTypeString, nil
@@ -88,12 +72,7 @@ func sessionCtx(id string) context.Context {
 
 const onDisk = "package app\n\nfunc main() {\n\trun()\n}\n"
 
-// TestUnit_DiffBaseIsTheFileNotTheReadCache is defect 3.
-//
-// With the session's read cache warm, read_file answers "File unchanged since
-// last read…" — a sentence addressed to the model — and that sentence reached
-// the diff builder as the prior content. The operator was then shown, and
-// approved, a diff whose entire left side was a status message.
+// TestUnit_DiffBaseIsTheFileNotTheReadCache pins that the diff's before-side is the file on disk, never the session read-cache stub sentence.
 func TestUnit_DiffBaseIsTheFileNotTheReadCache(t *testing.T) {
 	const proposed = "package app\n\nfunc main() {\n\trun(ctx)\n}\n"
 
@@ -120,7 +99,6 @@ func TestUnit_DiffBaseIsTheFileNotTheReadCache(t *testing.T) {
 		t.Fatalf("after-side = %q, want the proposed content", newContent)
 	}
 
-	// And it is a real diff of the real change, not of a status message.
 	rendered := unifiedDiff("app.go", oldContent, newContent)
 	if !strings.Contains(rendered, "-\trun()") || !strings.Contains(rendered, "+\trun(ctx)") {
 		t.Fatalf("rendered diff does not describe the change:\n%s", rendered)
@@ -137,10 +115,7 @@ func TestUnit_DiffBaseIsTheFileNotTheReadCache(t *testing.T) {
 	}
 }
 
-// TestUnit_DiffBaseReadLeavesNoReadMarker: the gate's own read must not count
-// as the model's. A marker recorded here would satisfy write_file's
-// read-before-write rule — and clear a stale-read denial — for the very write
-// being gated, so approving would hand the model a precondition it never met.
+// TestUnit_DiffBaseReadLeavesNoReadMarker pins that the gate's own read must not count as the model's, since a marker recorded here would satisfy write_file's read-before-write rule for the very write being gated.
 func TestUnit_DiffBaseReadLeavesNoReadMarker(t *testing.T) {
 	fs := &fsFake{content: onDisk}
 	h := &HITLWrapper{inner: fs}
@@ -162,9 +137,7 @@ func TestUnit_DiffBaseReadLeavesNoReadMarker(t *testing.T) {
 	}
 }
 
-// TestUnit_ApprovedWriteStillCarriesTheSession: stripping the identity is
-// scoped to the diff read. The call being approved runs with the caller's own
-// context, untouched.
+// TestUnit_ApprovedWriteStillCarriesTheSession pins that stripping the identity is scoped to the diff read; the approved call itself runs with the caller's own context, untouched.
 func TestUnit_ApprovedWriteStillCarriesTheSession(t *testing.T) {
 	fs := &fsFake{content: onDisk, warm: true}
 	var got hitlservice.ApprovalRequest
@@ -187,10 +160,7 @@ func TestUnit_ApprovedWriteStillCarriesTheSession(t *testing.T) {
 	}
 }
 
-// TestUnit_DiffBaseRefusesARenderedNotice: over the output cap, read_file
-// answers with a head plus "read_file truncated …". Diffing that would show the
-// file's tail as deleted. No diff is shown instead — the ask still goes to the
-// human, without a picture of a change that is not the one being made.
+// TestUnit_DiffBaseRefusesARenderedNotice pins that a truncated read_file answer refuses to become a diff base (it would show the file's tail as falsely deleted), though the approval ask still goes to the human without a diff.
 func TestUnit_DiffBaseRefusesARenderedNotice(t *testing.T) {
 	head := "package app\nfunc main() {}"
 	fs := &fsFake{
@@ -214,8 +184,7 @@ func TestUnit_DiffBaseRefusesARenderedNotice(t *testing.T) {
 		t.Fatalf("a refused read still produced a diff: %q → %q", oldContent, newContent)
 	}
 
-	// The ask is still raised, just without a diff: a missing picture is
-	// recoverable, a wrong one is not.
+	// A missing picture is recoverable, a wrong one is not: the ask still goes to the human without a diff.
 	fs2 := &fsFake{content: onDisk, notice: fs.notice}
 	var got hitlservice.ApprovalRequest
 	h2 := NewHITLWrapper(fs2, func(_ context.Context, req hitlservice.ApprovalRequest) (bool, error) {
@@ -235,9 +204,7 @@ func TestUnit_DiffBaseRefusesARenderedNotice(t *testing.T) {
 	}
 }
 
-// TestUnit_DiffBaseAcceptsAFileQuotingTheMarker: the notice check reads the
-// TAIL, because a notice is appended. A file that merely contains the severity
-// marker — such as the file that defines it — is still a file.
+// TestUnit_DiffBaseAcceptsAFileQuotingTheMarker pins that a file merely containing the severity marker text is still accepted as a file, since the notice check reads only the tail.
 func TestUnit_DiffBaseAcceptsAFileQuotingTheMarker(t *testing.T) {
 	content := "const severityRecoverable = \"" + severityRecoverable + "\"\n" +
 		strings.Repeat("// padding\n", 80)

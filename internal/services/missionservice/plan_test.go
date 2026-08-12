@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// planRevisedEvents decodes every PlanRevisedEvent this publisher captured.
 func (p *fakePublisher) planRevisedEvents(t *testing.T) []PlanRevisedEvent {
 	t.Helper()
 	p.mu.Lock()
@@ -25,12 +24,9 @@ func (p *fakePublisher) planRevisedEvents(t *testing.T) []PlanRevisedEvent {
 	return out
 }
 
-// entry is a terse PlanEntry builder for the tests below.
 func entry(id, content string, status PlanEntryStatus, priority PlanEntryPriority) PlanEntry {
 	return PlanEntry{ID: id, Content: content, Status: status, Priority: priority}
 }
-
-// ─── validatePlan() shape matrix ────────────────────────────────────────────
 
 func TestUnit_ValidatePlan(t *testing.T) {
 	ok := func(content string) []PlanEntry {
@@ -84,8 +80,6 @@ func TestUnit_PlanContentCorruptionHeuristic(t *testing.T) {
 	heavy := strings.Repeat(`\`, planEscapeMinLen)
 	require.True(t, planContentLooksCorrupted(heavy), "a long, mostly-backslash blob is a stream leak")
 }
-
-// ─── SetPlan: full-snapshot replace ─────────────────────────────────────────
 
 // TestUnit_MissionService_SetPlanFirstRevisionAssignsIDsAndPersists pins that the first SetPlan assigns ids, sets revision 1, and persists.
 func TestUnit_MissionService_SetPlanFirstRevisionAssignsIDsAndPersists(t *testing.T) {
@@ -251,8 +245,6 @@ func TestUnit_MissionService_FreshMissionHasZeroPlan(t *testing.T) {
 	require.Empty(t, got.Plan.Entries)
 }
 
-// ─── plan_revised events ────────────────────────────────────────────────────
-
 // TestUnit_MissionService_SetPlanPublishesPlanRevisedEvent pins that SetPlan publishes a self-contained PlanRevisedEvent.
 func TestUnit_MissionService_SetPlanPublishesPlanRevisedEvent(t *testing.T) {
 	ctx, db := setupMissionDB(t)
@@ -361,8 +353,6 @@ func TestUnit_MissionService_SetPlanNoPublisherStillStores(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, persisted.Plan.Revision)
 }
-
-// ─── plan-revision history ring (Mission.PlanRevisions) ─────────────────────
 
 // TestUnit_MissionService_PlanRevisionsAccrueOnGet pins that each SetPlan appends one oldest-first summary, durable without a bus.
 func TestUnit_MissionService_PlanRevisionsAccrueOnGet(t *testing.T) {

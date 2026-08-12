@@ -1,13 +1,5 @@
 package llmrepo
 
-// bounds.go enforces the envelope's model/backend allowlist
-// (hitlservice.ComputeBounds.ModelAllowlist / BackendAllowlist) at the one
-// place a model and backend are actually chosen — every generative or
-// embedding call funnels through llmresolver here. The check is a refusal
-// before the call: it runs after resolution and before the provider call, so
-// a refusal costs nothing but the resolution itself. Absent bounds are
-// unbounded; bounds only ever restrict.
-
 import (
 	"context"
 	"errors"
@@ -18,35 +10,16 @@ import (
 	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
 )
 
-// ErrResolutionOutOfBounds is the sentinel every allowlist refusal wraps, so a
-// caller can tell an envelope refusal apart from a resolution failure or a
-// provider error: the resolver did its job and found a usable model — the
-// envelope is what says no.
+// ErrResolutionOutOfBounds is the sentinel every allowlist refusal wraps.
 var ErrResolutionOutOfBounds = errors.New("resolution outside the mission envelope")
 
-// resolutionBoundLead is the stable, greppable lead of every allowlist refusal
-// reason. It mirrors fleetservice's computeBoundLead for the ceilings, so a
-// compute-bound refusal reads the same way whichever bound produced it.
 const resolutionBoundLead = "compute bound refused"
 
-// ResolutionBounds is the envelope's model/backend allowlist as it travels to
-// the resolution seam: the same two lists hitlservice.ComputeBounds declares,
-// carried as a neutral value so this layer never imports a service.
-//
-// Both lists are opt-in allowlists: an empty list is unbounded for that
-// dimension. Matching is exact after trimming, case-insensitively —
-// deliberately not the resolver's NormalizeModelName, which strips version
-// tags ("llama2:7b" and "llama2:70b" both collapse to "llama2"); a security
-// boundary must not silently widen.
-//
-// The allowlist is total, not per-kind: it bounds chat, prompt, stream, and
-// embed alike, since an embedding call spends the mission's compute too.
+// ResolutionBounds is the envelope's model/backend allowlist enforced at the resolution seam; matching is exact and case-insensitive, and applies across chat, prompt, stream, and embed alike.
 type ResolutionBounds struct {
-	// Models bounds which model names may be resolved. Empty means unbounded.
+	// Models bounds which model names may be resolved; empty means unbounded.
 	Models []string
-	// Backends bounds which backends may serve them. An entry matches a
-	// backend's operator-facing name (what `contenox backend list` shows) or
-	// its id. Empty means unbounded.
+	// Backends bounds which backends may serve them, matched by operator-facing name or id; empty means unbounded.
 	Backends []string
 }
 
@@ -56,18 +29,11 @@ func (b ResolutionBounds) IsZero() bool {
 	return len(b.Models) == 0 && len(b.Backends) == 0
 }
 
-// resolutionBoundsContextKeyType is unexported so no other package can collide
-// with the key; the only way in or out is WithResolutionBounds /
-// ResolutionBoundsFromContext.
 type resolutionBoundsContextKeyType struct{}
 
 var resolutionBoundsContextKey resolutionBoundsContextKeyType
 
-// WithResolutionBounds binds an envelope's model/backend allowlist to ctx, so
-// every resolution made under it is held to the bound. Bounds that restrict
-// nothing are not stored at all, keeping the unbounded path allocation-free.
-// A second call replaces the bound rather than intersecting with it, since a
-// silent merge would make the effective bound depend on call order.
+// WithResolutionBounds binds an envelope's model/backend allowlist to ctx, replacing any bound already present.
 func WithResolutionBounds(ctx context.Context, b ResolutionBounds) context.Context {
 	if b.IsZero() {
 		return ctx
@@ -82,10 +48,6 @@ func ResolutionBoundsFromContext(ctx context.Context) ResolutionBounds {
 	return b
 }
 
-// enforceResolutionBounds holds one resolved model/backend pair to the
-// envelope bound on ctx. It runs after resolution and before the provider
-// call, so a refusal costs nothing but the resolution itself. op names the
-// operation in the refusal ("chat", "stream", "prompt", "embed").
 func (e *modelManager) enforceResolutionBounds(ctx context.Context, op string, provider libmodelprovider.Provider, backendID string) error {
 	bounds := ResolutionBoundsFromContext(ctx)
 	if bounds.IsZero() {
@@ -105,11 +67,6 @@ func (e *modelManager) enforceResolutionBounds(ctx context.Context, op string, p
 	return nil
 }
 
-// backendAllowed reports whether backendID names a backend the envelope
-// permits, matching either its operator-facing name or its id. A backend the
-// runtime state cannot name (an id with no state row) matches only by id —
-// fail closed for a name-based allowlist, so a removed backend never silently
-// slips through.
 func (e *modelManager) backendAllowed(ctx context.Context, allowed []string, backendID string) bool {
 	if allowlistContains(allowed, backendID) {
 		return true
@@ -118,8 +75,6 @@ func (e *modelManager) backendAllowed(ctx context.Context, allowed []string, bac
 	return name != "" && allowlistContains(allowed, name)
 }
 
-// backendName resolves a backend id to its operator-facing name from runtime
-// state, or "" when the state has no row for it.
 func (e *modelManager) backendName(ctx context.Context, backendID string) string {
 	if backendID == "" || e.runtime == nil {
 		return ""
@@ -135,9 +90,6 @@ func (e *modelManager) backendName(ctx context.Context, backendID string) string
 	return ""
 }
 
-// backendLabel is what a refusal calls the backend it refused: its name when the
-// runtime can name it, with the id alongside so the record is unambiguous, and
-// the bare id otherwise.
 func (e *modelManager) backendLabel(ctx context.Context, backendID string) string {
 	if name := e.backendName(ctx, backendID); name != "" {
 		return fmt.Sprintf("%s (%s)", name, backendID)
@@ -145,9 +97,6 @@ func (e *modelManager) backendLabel(ctx context.Context, backendID string) strin
 	return backendID
 }
 
-// allowlistContains is the matching rule, in one place so models and backends
-// cannot drift apart: trim, compare case-insensitively, require the whole
-// string to match. No globs, no normalization, no prefixes.
 func allowlistContains(allowed []string, value string) bool {
 	v := strings.ToLower(strings.TrimSpace(value))
 	if v == "" {
@@ -161,9 +110,6 @@ func allowlistContains(allowed []string, value string) bool {
 	return false
 }
 
-// outOfBoundsError builds the refusal. It names the bound, what the envelope
-// permits, and what resolution actually picked — the three facts an operator
-// needs to either widen the envelope or fix the pin, without opening a log.
 func outOfBoundsError(op, bound, picked string, allowed []string) error {
 	if picked == "" {
 		picked = "(unidentified)"
@@ -172,9 +118,6 @@ func outOfBoundsError(op, bound, picked string, allowed []string) error {
 		resolutionBoundLead, bound, quotedList(allowed), op, picked, ErrResolutionOutOfBounds)
 }
 
-// quotedList renders an allowlist for a human, sorted so the same envelope
-// always produces the same refusal text (the reason lands in a durable
-// mission record and must not churn with upstream ordering).
 func quotedList(entries []string) string {
 	cleaned := make([]string, 0, len(entries))
 	for _, e := range entries {

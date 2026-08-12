@@ -8,8 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── typed handover on reports ──────────────────────────────────────────────
-
 // TestUnit_AddReport_StoresTypedHandover pins that AddReport/ListReports round-trip a typed hand-off verbatim.
 func TestUnit_AddReport_StoresTypedHandover(t *testing.T) {
 	ctx, db := setupMissionDB(t)
@@ -95,8 +93,6 @@ func TestUnit_AddReport_HandoverRidesTheEvent(t *testing.T) {
 	require.Equal(t, "shipped the board", evs[0].Report.Handover.Outcome)
 	require.Equal(t, "wire the inbox next", evs[0].Report.Handover.HandoverForNext)
 }
-
-// ─── validateHandover shape matrix ──────────────────────────────────────────
 
 func TestUnit_ValidateHandover(t *testing.T) {
 	tests := []struct {

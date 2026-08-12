@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// statusChangedEvents decodes every StatusChangedEvent this publisher captured.
 func (p *fakePublisher) statusChangedEvents(t *testing.T) []StatusChangedEvent {
 	t.Helper()
 	p.mu.Lock()
@@ -27,8 +26,6 @@ func (p *fakePublisher) statusChangedEvents(t *testing.T) []StatusChangedEvent {
 	}
 	return out
 }
-
-// ─── Finish: the guarded terminal transition ───────────────────────────────
 
 func TestUnit_MissionService_FinishMovesOpenToTerminal(t *testing.T) {
 	for _, status := range []Status{StatusLanded, StatusDerailed, StatusStuck, StatusAbandoned} {
@@ -109,8 +106,6 @@ func TestUnit_MissionService_FinishUnknownReturnsNotFound(t *testing.T) {
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }
 
-// ─── status_changed events ─────────────────────────────────────────────────
-
 // TestUnit_MissionService_FinishPublishesStatusChangedEvent pins that Finish publishes a self-contained StatusChangedEvent.
 func TestUnit_MissionService_FinishPublishesStatusChangedEvent(t *testing.T) {
 	ctx, db := setupMissionDB(t)
@@ -187,21 +182,6 @@ func TestUnit_MissionService_FinishNoPublisherStillStores(t *testing.T) {
 	require.Equal(t, StatusLanded, persisted.Status)
 }
 
-// ─── no whole-record write may resurrect a terminal mission ────────────────
-//
-// SetPlan and Bind carry the whole record, so a write built on a read taken
-// before a terminal decision restores the status that read saw. The concrete
-// failure: a unit calls mission_plan while an operator runs `mission stop`;
-// the reclaim lands and the host reaps the subprocess, then the in-flight plan
-// write resurrects the row to open — a stopped mission listed as running with
-// no unit behind it. Both go through the snapshot/CAS/re-judge loop Finish
-// uses; Update stays the documented unguarded override.
-
-// interposingDB wraps a DBManager so a hook fires exactly once, after a
-// read-decide-write path's read and before the write it decided on. A
-// wall-clock race can only hope to hit that window; this pins it open, so the
-// tests below fail deterministically against an unguarded write rather than
-// on an unlucky schedule.
 type interposingDB struct {
 	libdb.DBManager
 	once      sync.Once
@@ -217,9 +197,7 @@ type interposingExec struct {
 	owner *interposingDB
 }
 
-// QueryRowContext intercepts GetKVRaw's read — the one whose bytes become
-// putIfUnchanged's predicate. Matched on its projection, which no other kv
-// read shares.
+// QueryRowContext intercepts GetKVRaw's read — the one whose bytes become putIfUnchanged's predicate — matched on its projection, which no other kv read shares.
 func (e interposingExec) QueryRowContext(ctx context.Context, query string, args ...any) libdb.QueryRower {
 	row := e.Exec.QueryRowContext(ctx, query, args...)
 	if !strings.Contains(query, "SELECT value") {
@@ -241,12 +219,7 @@ func (r interposingRow) Scan(dest ...any) error {
 	return err
 }
 
-// TestUnit_SetPlan_CannotResurrectAMissionStoppedUnderIt pins the plan write's
-// conditional predicate: a unit calls mission_plan while an operator runs
-// `mission stop`, the reclaim lands, the host reaps the subprocess, and the
-// in-flight plan write arrives microseconds later. An unguarded put would
-// restore the status its read saw — a stopped mission listed as open with no
-// unit behind it and its asks already closed.
+// TestUnit_SetPlan_CannotResurrectAMissionStoppedUnderIt pins the plan write's conditional predicate: a unit calls mission_plan while an operator's `mission stop` reclaims the mission microseconds earlier, and an unguarded put must not restore the status its read saw.
 func TestUnit_SetPlan_CannotResurrectAMissionStoppedUnderIt(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	stopper := New(db) // unwrapped: the operator's own `mission stop`

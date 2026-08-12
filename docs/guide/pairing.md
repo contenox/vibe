@@ -16,7 +16,7 @@ command, and until you run it **nothing about your machine leaves it**.
 
 You need the contenox app, signed in, and a running contenox session — the TUI
 (`contenox new`) or any ACP editor. The app lives at
-[relay.contenox.com](https://relay.contenox.com). An account is free — for you
+[app.contenox.com](https://app.contenox.com). An account is free — for you
 and up to three teammates, one machine each.
 
 1. In the app, tap **Pair device**. It shows a six-character key and a
@@ -34,6 +34,10 @@ failure rather than a convenience. A typed key works the same everywhere.
 
 The key is short-lived and can be redeemed exactly once. If it expires while you
 are walking to the machine, mint another — they cost nothing.
+
+From then on the app lists this machine and its sessions; `/link` typed into a
+session prints the direct link that opens that same session in the app, so
+picking it up on a phone does not start with hunting through the list.
 
 ### Why it is typed into a session rather than a shell command
 

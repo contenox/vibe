@@ -12,8 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testAgent is a configurable libacp.Agent that plays the agent side of the
-// wire so a real ClientSideConnection can be exercised end to end.
 type testAgent struct {
 	libacp.UnimplementedAgent
 
@@ -24,8 +22,6 @@ type testAgent struct {
 	promptErr  *libacp.Error
 	cancelSeen chan libacp.CancelNotification
 
-	// When set, Prompt calls back into the client (fs/read_text_file,
-	// session/request_permission) instead of streaming session/update chunks.
 	callClientRPCs bool
 	rpcResult      struct {
 		readResp libacp.ReadTextFileResponse
@@ -103,9 +99,6 @@ func (a *testAgent) Cancel(_ context.Context, req libacp.CancelNotification) err
 	return nil
 }
 
-// testClient is a configurable libacp.Client used to answer agent->client
-// requests and to record session/update notifications delivered to
-// SessionUpdate, in the order they were received.
 type testClient struct {
 	libacp.UnimplementedClient
 
@@ -131,9 +124,6 @@ func (c *testClient) RequestPermission(_ context.Context, _ libacp.RequestPermis
 	return c.permResp, nil
 }
 
-// wireUpTestConnections starts an AgentSideConnection and a ClientSideConnection
-// back to back over an in-memory pipe, each running its own Run loop, and
-// returns a cleanup func that closes the pipe and waits for both to exit.
 func wireUpTestConnections(t *testing.T, ctx context.Context, agent *testAgent, client libacp.Client) (*libacp.AgentSideConnection, *libacp.ClientSideConnection, func()) {
 	t.Helper()
 

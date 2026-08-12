@@ -13,12 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_HandlerSignatures_MatchRealExecutor drives the REAL SimpleExec
-// against every (handler × concrete DataType) pair and asserts that acceptance
-// and the produced output type match the frozen table in handler_signatures.go.
-// This is the behavioral half of the registry invariant: if taskexec.go's
-// switch drifts (a handler starts tolerating a new type, or stops), this test
-// fails in the package that owns the contract.
+// TestUnit_HandlerSignatures_MatchRealExecutor drives SimpleExec against every (handler × concrete DataType) pair and asserts acceptance and output type match the frozen table in handler_signatures.go.
 func TestUnit_HandlerSignatures_MatchRealExecutor(t *testing.T) {
 	repo := &mockModelRepo{
 		chatFunc: func(_ context.Context, _ llmrepo.Request, _ []libmodelprovider.Message, _ ...libmodelprovider.ChatArgument) (libmodelprovider.ChatResult, llmrepo.Meta, error) {
@@ -35,8 +30,6 @@ func TestUnit_HandlerSignatures_MatchRealExecutor(t *testing.T) {
 	exec, err := taskengine.NewExec(context.Background(), repo, toolsRepo, libtracker.NoopTracker{})
 	require.NoError(t, err)
 
-	// One representative runtime value per concrete DataType. DataTypeAny is
-	// deliberately absent: Any is "unknown at load", not a value shape.
 	inputs := map[taskengine.DataType]any{
 		taskengine.DataTypeString: "boom",
 		taskengine.DataTypeInt:    7,
@@ -87,10 +80,6 @@ func TestUnit_HandlerSignatures_MatchRealExecutor(t *testing.T) {
 					&taskengine.ChainContext{}, taskFor(handler), value, dt)
 
 				if handler == taskengine.HandleRaiseError {
-					// raise_error never succeeds. The registry's accept set
-					// distinguishes WHOSE error is raised: an accepted input
-					// becomes the author's message, a rejected one surfaces
-					// getPrompt's type complaint.
 					require.Error(t, execErr)
 					if sig.AcceptsInput(dt) {
 						require.NotContains(t, execErr.Error(), "unsupported input type")
@@ -118,7 +107,6 @@ func TestUnit_HandlerSignatures_MatchRealExecutor(t *testing.T) {
 					require.Equal(t, value, out,
 						"registry says %s passes its input through unchanged", handler)
 				case taskengine.HandlerOutputDynamic:
-					// The output type is the tool's to decide; nothing to pin.
 				}
 
 				if sig.SuccessEvals != nil {

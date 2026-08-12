@@ -17,20 +17,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// defaultKillGrace bounds how long an external instance's teardown waits for
-// its subprocess to exit on stdin-close before killing it. Persistent ACP
-// agents never exit on stdin-close, so this keeps Stop/Close from stalling.
 const defaultKillGrace = 2 * time.Second
 
-// ChainACPSubcommand, ChainPathEnvVar, ChainHopEnvVar, and ChainWorkspaceFlag
-// describe this binary's own ACP server for a chain-kind spawn: the subcommand
-// that serves ACP over stdio, the env var naming which chain file to run, the
-// env var carrying the dispatch hop of the context that spawned it, and the
-// flag (bare name, no dashes) carrying the dispatching host's workspace id so
-// the child stamps mission events with the firing workspace instead of its own
-// default. Declared here rather than imported to avoid an import cycle with
-// the packages that own them; kept exported so those packages can assert the
-// definitions still agree.
+// ChainACPSubcommand, ChainPathEnvVar, ChainHopEnvVar, and ChainWorkspaceFlag describe
+// this binary's own ACP server for a chain-kind spawn: its ACP subcommand, the env var
+// naming the chain file, the env var carrying the dispatch hop, and the flag carrying the
+// dispatching host's workspace id.
 const (
 	ChainACPSubcommand = "acp"
 	ChainPathEnvVar    = "CONTENOX_ACP_CHAIN_PATH"
@@ -38,8 +30,8 @@ const (
 	ChainWorkspaceFlag = "workspace-id"
 )
 
-// ErrNotFound is returned for an unknown instance id. It is a sentinel so callers
-// can branch on errors.Is(err, ErrNotFound).
+// ErrNotFound is returned for an unknown instance id; a sentinel for
+// errors.Is(err, ErrNotFound).
 var ErrNotFound = errors.New("agentinstance: instance not found")
 
 // EventKind classifies a lifecycle Event.
@@ -54,16 +46,14 @@ const (
 	EventAttach EventKind = "attach"
 	// EventDetach fires when a viewer detaches from a session.
 	EventDetach EventKind = "detach"
-	// EventUnsupervisedDeny fires when a downstream permission request
-	// reaches a session with no controller and is refused — by the built-in
-	// headless deny or an injected PermissionFallback. It does not fire when
-	// a fallback permits the request, so the audit trail never claims a
-	// refusal that didn't happen.
+	// EventUnsupervisedDeny fires when a downstream permission request reaches a
+	// session with no controller and is refused (built-in deny or an injected
+	// PermissionFallback); it never fires for a permitted request.
 	EventUnsupervisedDeny EventKind = "unsupervised_permission"
 )
 
-// Event is one instance-lifecycle event, self-contained so a sink can react
-// without calling back into the Manager. Subscribe via WithEventSink.
+// Event is one instance-lifecycle event, self-contained so a sink can react without
+// calling back into the Manager; subscribe via WithEventSink.
 type Event struct {
 	Kind       EventKind        `json:"kind"`
 	InstanceID string           `json:"instanceId"`
@@ -88,16 +78,13 @@ type UnattendedPermission struct {
 	Request   libacp.RequestPermissionRequest
 }
 
-// PermissionFallback answers a permission request that arrived at an
-// unattended session — the kernel's only human-in-the-loop concession. It
-// may block (runs on the request's own goroutine); ctx is the downstream
-// request's context. Returning an error falls back to the built-in headless
-// deny.
+// PermissionFallback answers a permission request that arrived at an unattended
+// session; it may block (runs on the request's own goroutine), and an error falls
+// back to the built-in deny.
 type PermissionFallback func(ctx context.Context, req UnattendedPermission) (libacp.RequestPermissionResponse, error)
 
-// EventSink receives every lifecycle Event, called synchronously on the
-// goroutine that produced it. It must not block or call back into the
-// Manager.
+// EventSink receives every lifecycle Event synchronously on the producing goroutine;
+// it must not block or call back into the Manager.
 type EventSink func(Event)
 
 // FleetEntry joins one declared agent with its live instances (empty when
@@ -112,25 +99,21 @@ type FleetEntry struct {
 // Running reports whether this declared agent has at least one live instance.
 func (e FleetEntry) Running() bool { return len(e.Instances) > 0 }
 
-// Manager owns the lifecycle of running agent instances. Every method is
-// safe for concurrent use, and every method taking an instanceID returns
-// ErrNotFound when it is unknown.
+// Manager owns the lifecycle of running agent instances; every method is safe for
+// concurrent use and returns ErrNotFound for an unknown instanceID.
 type Manager interface {
-	// Start resolves agentName via the registry and brings up an instance
-	// bound to the Manager's root context, not ctx, so it outlives the
-	// request. cwd is the sandbox workspace. Prefer StartResolved if the
-	// agent is already resolved.
+	// Start resolves agentName via the registry and brings up an instance bound to the
+	// Manager's root context (cwd is the sandbox workspace); prefer StartResolved if
+	// already resolved.
 	Start(ctx context.Context, agentName, cwd string) (instanceID string, err error)
 
-	// StartResolved spawns an instance from an already-resolved agent with
-	// no registry read of its own, so a caller enforcing a policy decision
-	// (e.g. Enabled) spawns exactly the record it judged. cwd is the sandbox
-	// workspace root, overridden by the agent's own declared Cwd if set.
+	// StartResolved spawns an instance from an already-resolved agent with no registry
+	// read of its own; cwd is the sandbox workspace root, overridden by the agent's own
+	// declared Cwd if set.
 	StartResolved(ctx context.Context, agent *runtimetypes.Agent, cwd string) (instanceID string, err error)
 
-	// Attach registers viewer against (instanceID, sessionID), replaying the
-	// journal then joining the live fan-out. The first viewer of a session
-	// becomes its controller (controllerGranted true).
+	// Attach registers viewer against (instanceID, sessionID), replaying the journal
+	// then joining the live fan-out; the first viewer of a session becomes its controller.
 	Attach(ctx context.Context, instanceID string, sessionID libacp.SessionID, viewer Viewer) (controllerGranted bool, err error)
 
 	// Detach removes viewerID from (instanceID, sessionID)'s fan-out,
@@ -149,28 +132,26 @@ type Manager interface {
 	// session id that Attach and the other session methods use.
 	OpenSession(ctx context.Context, instanceID string, spec SessionSpec) (libacp.SessionID, error)
 
-	// Prompt drives one downstream session/prompt turn and returns its stop
-	// reason. A ctx cancellation or concurrent Cancel resolves as
-	// StopReasonCancelled with a nil error.
+	// Prompt drives one downstream session/prompt turn and returns its stop reason; a
+	// ctx cancellation or concurrent Cancel resolves as StopReasonCancelled with a nil
+	// error.
 	Prompt(ctx context.Context, instanceID string, sessionID libacp.SessionID, prompt []libacp.ContentBlock) (libacp.StopReason, error)
 
-	// DeliverToSession injects n into sessionID's fan-out on whichever live
-	// instance owns that session, as if it were a downstream update; the
-	// kernel adds nothing to n. ErrNotFound when no instance owns sessionID.
+	// DeliverToSession injects n into sessionID's fan-out on whichever live instance
+	// owns that session, as if it were a downstream update; ErrNotFound when no instance
+	// owns it.
 	DeliverToSession(ctx context.Context, sessionID libacp.SessionID, n libacp.SessionNotification) error
 
 	// Cancel cancels sessionID's in-flight prompt turn. Safe with no turn in flight.
 	Cancel(instanceID string, sessionID libacp.SessionID) error
 
-	// CloseSession ends sessionID and drops its kernel state, without
-	// stopping the instance. Only the consumer that called OpenSession
-	// should call this.
+	// CloseSession ends sessionID and drops its kernel state without stopping the
+	// instance; only the consumer that called OpenSession should call this.
 	CloseSession(instanceID string, sessionID libacp.SessionID) error
 
-	// SetConfigOption forwards a config-option change downstream and adopts
-	// the confirmed value. The synthetic mode/model ids map to
-	// session/set_mode and session/set_model; every other id forwards to
-	// session/set_config_option.
+	// SetConfigOption forwards a config-option change downstream and adopts the
+	// confirmed value; the synthetic mode/model ids map to session/set_mode and
+	// session/set_model, every other id forwards to session/set_config_option.
 	SetConfigOption(ctx context.Context, instanceID string, sessionID libacp.SessionID, configID string, value libacp.SessionConfigOptionValue) error
 
 	// SessionConfigOptions returns sessionID's captured config-option
@@ -181,20 +162,20 @@ type Manager interface {
 	// AvailableCommands returns sessionID's captured slash-command menu, or nil for an unknown session.
 	AvailableCommands(instanceID string, sessionID libacp.SessionID) ([]libacp.AvailableCommand, error)
 
-	// Stop tears an instance down and removes it from the registry,
-	// preventing any watchDog restart. Idempotent.
+	// Stop tears an instance down and removes it from the registry, preventing any
+	// watchDog restart. Idempotent.
 	Stop(instanceID string) error
 
-	// Close stops every instance and cancels the Manager's root context.
-	// After Close, Start returns an error. Idempotent.
+	// Close stops every instance and cancels the Manager's root context, after which
+	// Start returns an error. Idempotent.
 	Close() error
 }
 
 // Option configures a Manager.
 type Option func(*manager)
 
-// WithStderr forwards each spawned external instance's subprocess stderr to w.
-// Defaults to io.Discard.
+// WithStderr forwards each spawned external instance's subprocess stderr to w; defaults
+// to io.Discard.
 func WithStderr(w io.Writer) Option { return func(m *manager) { m.stderr = w } }
 
 // WithKillGrace overrides how long an external instance's teardown waits for its
@@ -205,10 +186,9 @@ func WithKillGrace(d time.Duration) Option { return func(m *manager) { m.killGra
 // defaultJournalSize).
 func WithJournalSize(n int) Option { return func(m *manager) { m.journalSize = n } }
 
-// WithRestart enables the watchDog restart policy: an external instance
-// whose subprocess dies unexpectedly is re-spawned up to limit times before
-// parking in StateWarning. Default: disabled (unexpected death is terminal
-// StateError). A restart loses the downstream agent's conversation context.
+// WithRestart enables the watchDog restart policy: a dying external instance is
+// re-spawned up to limit times before parking in StateWarning (default: disabled,
+// terminal StateError); a restart loses the downstream conversation context.
 func WithRestart(limit int) Option {
 	return func(m *manager) {
 		m.restartEnabled = true
@@ -219,24 +199,21 @@ func WithRestart(limit int) Option {
 // WithEventSink installs sink as the lifecycle event sink (see EventSink).
 func WithEventSink(sink EventSink) Option { return func(m *manager) { m.sink = sink } }
 
-// WithPermissionFallback installs fn as the answerer for permission requests
-// that reach a session with no controller viewer (see PermissionFallback).
-// Default: unset, which keeps the built-in headless deny.
+// WithPermissionFallback installs fn as the answerer for permission requests reaching a
+// session with no controller viewer; default unset keeps the built-in deny.
 func WithPermissionFallback(fn PermissionFallback) Option {
 	return func(m *manager) { m.permissionFallback = fn }
 }
 
-// WithSelfExecutable overrides the program a chain-kind agent is spawned
-// from (default os.Executable()). Lets a test point the spawn at a built
-// fixture binary, since the compiled test binary itself has no ACP server.
+// WithSelfExecutable overrides the program a chain-kind agent is spawned from (default
+// os.Executable()), letting a test point the spawn at a built fixture binary.
 func WithSelfExecutable(path string) Option {
 	return func(m *manager) { m.selfExecutable = path }
 }
 
-// WithWorkspaceID passes id to every chain-kind spawn via ChainWorkspaceFlag,
-// so the child's mission-event publisher stamps the dispatching host's
-// workspace rather than resolving its own default. Empty (the default) adds
-// no flag and leaves the child to its own resolution.
+// WithWorkspaceID passes id to every chain-kind spawn via ChainWorkspaceFlag so the
+// child's mission-event publisher stamps the dispatching host's workspace; empty
+// (default) adds no flag.
 func WithWorkspaceID(id string) Option {
 	return func(m *manager) { m.workspaceID = id }
 }
@@ -247,24 +224,15 @@ type manager struct {
 	killGrace   time.Duration
 	journalSize int
 
-	// selfExecutable is the program a chain-kind agent re-executes. Empty means
-	// "resolve os.Executable() at spawn time"; see WithSelfExecutable.
 	selfExecutable string
 
-	// workspaceID is the dispatching host's workspace, forwarded to chain-kind
-	// children via ChainWorkspaceFlag. Empty adds no flag; see WithWorkspaceID.
 	workspaceID string
 
-	restartEnabled bool
-	restartLimit   int
-	sink           EventSink
-	// permissionFallback answers unattended permission requests; nil keeps the
-	// kernel's built-in headless deny. See WithPermissionFallback.
+	restartEnabled     bool
+	restartLimit       int
+	sink               EventSink
 	permissionFallback PermissionFallback
 
-	// rootCtx is the context every external instance's subprocess is bound
-	// to, so instances outlive the caller ctx passed to Start. Close cancels
-	// it.
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
 
@@ -273,8 +241,8 @@ type manager struct {
 	closed    bool
 }
 
-// New returns a Manager that resolves declared agents via agents. The Manager
-// owns a fresh root context; call Close to tear everything down at shutdown.
+// New returns a Manager that resolves declared agents via agents, owning a fresh root
+// context; call Close to tear everything down at shutdown.
 func New(agents agentregistryservice.Service, opts ...Option) Manager {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	m := &manager{
@@ -304,7 +272,6 @@ func (m *manager) Start(ctx context.Context, agentName, cwd string) (string, err
 	if agentName == "" {
 		return "", fmt.Errorf("agentinstance: agentName is required")
 	}
-	// ctx governs only this lookup, not the instance that follows.
 	agent, err := m.agents.GetByName(ctx, agentName)
 	if err != nil {
 		return "", fmt.Errorf("agentinstance: resolve agent %q: %w", agentName, err)
@@ -322,9 +289,6 @@ func (m *manager) StartResolved(ctx context.Context, agent *runtimetypes.Agent, 
 		if err != nil {
 			return "", fmt.Errorf("agentinstance: agent %q: %w", agent.Name, err)
 		}
-		// A declared cwd wins; otherwise seed from the caller's resolved cwd
-		// so the agent isn't confined by the wall's fail-closed empty-cwd
-		// default.
 		if cfg.Cwd == "" {
 			cfg.Cwd = cwd
 		}
@@ -335,8 +299,8 @@ func (m *manager) StartResolved(ctx context.Context, agent *runtimetypes.Agent, 
 		}
 		return m.bringUp(agent, spawner)
 	case runtimetypes.AgentKindChain:
-		// ctx, not the Manager's root: the hop the child inherits is a property
-		// of the dispatch that asked for this spawn, not of the Manager.
+		// ctx, not the Manager's root: the hop rides with the dispatch that asked for
+		// this spawn.
 		spawner, err := m.chainSpawner(ctx, agent, cwd)
 		if err != nil {
 			return "", err
@@ -347,19 +311,6 @@ func (m *manager) StartResolved(ctx context.Context, agent *runtimetypes.Agent, 
 	}
 }
 
-// chainSpawner builds the agenthost primitive for a chain-kind agent: this
-// binary's own ACP server, bound to the declared chain file, spawned as an
-// ordinary ExternalACPAgent whose command happens to be this process. The
-// child inherits this process's environment (plus ChainPathEnvVar) so it
-// shares the one global runtime state (HOME, DB, workspace). HITL is not
-// disabled: gated tool calls still route through session/request_permission
-// to the session's controller, the same as an external agent.
-//
-// ctx's dispatch hop (runtimetypes.EventHopFromContext) rides along in
-// ChainHopEnvVar when set. The hop is an in-process context value, so without
-// this the events the child appends would all read hop 0 and a trigger chain
-// dispatching units that emit the events it listens for would never exhaust the
-// dispatch budget.
 func (m *manager) chainSpawner(ctx context.Context, agent *runtimetypes.Agent, cwd string) (agenthost.Agent, error) {
 	cfg, err := agent.ChainConfig()
 	if err != nil {
@@ -377,14 +328,11 @@ func (m *manager) chainSpawner(ctx context.Context, agent *runtimetypes.Agent, c
 	}
 	args := []string{ChainACPSubcommand}
 	if m.workspaceID != "" {
-		// The child's own workspace resolution is anchored to ~/.contenox, not
-		// the mission's; the flag makes it stamp the firing workspace.
 		args = append(args, "--"+ChainWorkspaceFlag, m.workspaceID)
 	}
 	env := map[string]string{ChainPathEnvVar: cfg.Path}
-	// Verbatim, not incremented: the child is this chain's actuation, one more
-	// producer inside the same generation, so its events belong at the same hop
-	// the dispatcher already stamped on the firing context.
+	// Verbatim, not incremented: this child's events belong at the same hop the
+	// dispatcher already stamped.
 	if hop := runtimetypes.EventHopFromContext(ctx); hop > 0 {
 		env[ChainHopEnvVar] = strconv.Itoa(hop)
 	}
@@ -393,26 +341,17 @@ func (m *manager) chainSpawner(ctx context.Context, agent *runtimetypes.Agent, c
 			Transport: runtimetypes.ExternalACPTransportStdio,
 			Command:   self,
 			Args:      args,
-			// A chain unit declares no cwd of its own, so it runs in the
-			// caller's resolved cwd (the mission/session root).
-			Cwd: cwd,
-			Env: env,
+			Cwd:       cwd,
+			Env:       env,
 		},
-		// This is contenox spawning contenox, not a foreign agent, so it
-		// runs outside the sandbox (see agenthost.ExternalACPAgent.SelfSpawn);
-		// what governs it is the in-process capability grants and the HITL
-		// gate its tool calls already run through.
+		// Contenox spawning contenox runs outside the sandbox (SelfSpawn); the in-process
+		// capability grants and the HITL gate still govern it.
 		SelfSpawn: true,
 		Stderr:    m.stderr,
 		KillGrace: m.killGrace,
 	}, nil
 }
 
-// bringUp builds and starts an instance for agent, then registers it — the
-// one path both external and chain spawns take, so journal, viewers,
-// controller promotion, and restart semantics are identical for both. start
-// runs outside the registry lock, so a slow subprocess never blocks other
-// instances; only a successful start is registered.
 func (m *manager) bringUp(agent *runtimetypes.Agent, spawner agenthost.Agent) (string, error) {
 	id := uuid.NewString()
 	inst := newInstance(instanceConfig{
@@ -437,9 +376,6 @@ func (m *manager) bringUp(agent *runtimetypes.Agent, spawner agenthost.Agent) (s
 		onUnsupervisedDeny: func(sessionID libacp.SessionID) {
 			m.emit(Event{Kind: EventUnsupervisedDeny, InstanceID: id, AgentID: agent.ID, AgentName: agent.Name, SessionID: sessionID, Time: time.Now().UTC()})
 		},
-		// The injected answerer for an unattended permission request, with
-		// the same identity the hooks above close over. Nil when no
-		// fallback is wired.
 		onUnsupervisedRequest: m.unattendedPermissionAnswerer(id, agent),
 	})
 
@@ -458,10 +394,6 @@ func (m *manager) bringUp(agent *runtimetypes.Agent, spawner agenthost.Agent) (s
 	return id, nil
 }
 
-// unattendedPermissionAnswerer adapts the Manager's PermissionFallback to
-// the hub's request-only hook by closing this instance's identity over it.
-// Returns nil when no fallback is configured, so the hub keeps its built-in
-// deny.
 func (m *manager) unattendedPermissionAnswerer(instanceID string, agent *runtimetypes.Agent) func(context.Context, libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error) {
 	fn := m.permissionFallback
 	if fn == nil {
@@ -509,8 +441,6 @@ func (m *manager) Get(instanceID string) (InstanceStatus, error) {
 	return inst.status(), nil
 }
 
-// instance resolves instanceID to its live instance, or ErrNotFound. It is the shared
-// lookup the session-driving methods use before delegating to the instance primitive.
 func (m *manager) instance(instanceID string) (*instance, error) {
 	m.mu.Lock()
 	inst, ok := m.instances[instanceID]
@@ -537,10 +467,8 @@ func (m *manager) Prompt(ctx context.Context, instanceID string, sessionID libac
 	return inst.promptSession(ctx, sessionID, prompt)
 }
 
-// DeliverToSession scans for the instance that owns sessionID and injects n
-// into its fan-out. Snapshots the instance set under mu (never held across
-// per-instance delivery), then stops at the first owner. No owner is
-// ErrNotFound.
+// DeliverToSession scans for the instance that owns sessionID and injects n into its
+// fan-out; ErrNotFound if none does.
 func (m *manager) DeliverToSession(ctx context.Context, sessionID libacp.SessionID, n libacp.SessionNotification) error {
 	if sessionID == "" {
 		return fmt.Errorf("agentinstance: sessionID is required")
@@ -600,13 +528,8 @@ func (m *manager) AvailableCommands(instanceID string, sessionID libacp.SessionI
 	return inst.availableCommands(sessionID), nil
 }
 
-// SessionAgentText returns the concatenated agent-message text retained in
-// sessionID's replay journal on instanceID, recoverable without attaching a
-// viewer. ok is false for an unknown instance or an unowned session; text is
-// "" for an owned session with no agent text yet.
-//
-// Deliberately not part of the Manager interface: an optional, policy-free
-// read reached by type assertion, so a Manager double need not implement it.
+// SessionAgentText returns the concatenated agent-message text retained in sessionID's
+// replay journal on instanceID; ok is false for an unknown instance or unowned session.
 func (m *manager) SessionAgentText(instanceID string, sessionID libacp.SessionID) (string, bool) {
 	inst, err := m.instance(instanceID)
 	if err != nil {
@@ -615,10 +538,9 @@ func (m *manager) SessionAgentText(instanceID string, sessionID libacp.SessionID
 	return inst.agentText(sessionID)
 }
 
-// SessionJournal returns a raw snapshot of sessionID's replay journal on
-// instanceID together with its working directory. ok is false for an
-// unknown instance or an unowned session. Like SessionAgentText, this is
-// deliberately not part of the Manager interface.
+// SessionJournal returns a raw snapshot of sessionID's replay journal on instanceID
+// together with its working directory; ok is false for an unknown instance or unowned
+// session.
 func (m *manager) SessionJournal(instanceID string, sessionID libacp.SessionID) ([]libacp.SessionNotification, string, bool) {
 	inst, err := m.instance(instanceID)
 	if err != nil {
@@ -628,7 +550,6 @@ func (m *manager) SessionJournal(instanceID string, sessionID libacp.SessionID) 
 }
 
 func (m *manager) List(ctx context.Context) ([]FleetEntry, error) {
-	// Snapshot the live side, grouped by declared-agent id.
 	m.mu.Lock()
 	live := make([]*instance, 0, len(m.instances))
 	for _, inst := range m.instances {
@@ -642,7 +563,6 @@ func (m *manager) List(ctx context.Context) ([]FleetEntry, error) {
 		byAgent[st.AgentID] = append(byAgent[st.AgentID], st)
 	}
 
-	// Join with the declared (config) side.
 	declared, err := m.listDeclared(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("agentinstance: list declared agents: %w", err)
@@ -656,11 +576,9 @@ func (m *manager) List(ctx context.Context) ([]FleetEntry, error) {
 			AgentID:   a.ID,
 			AgentName: a.Name,
 			Kind:      a.Kind,
-			Instances: byAgent[a.ID], // nil (not running) or the live set
+			Instances: byAgent[a.ID],
 		})
 	}
-	// Orphan instances (agent deleted after start) still surface, so the fleet
-	// view never silently hides a running subprocess.
 	for agentID, insts := range byAgent {
 		if seen[agentID] {
 			continue
@@ -675,10 +593,6 @@ func (m *manager) List(ctx context.Context) ([]FleetEntry, error) {
 	return entries, nil
 }
 
-// listDeclared pages through every declared agent via the registry service.
-// The store filters created_at < cursor (DESC), so each page's oldest row
-// seeds the next cursor; a non-decreasing cursor breaks the loop to guard
-// against an identical-timestamp storm.
 func (m *manager) listDeclared(ctx context.Context) ([]*runtimetypes.Agent, error) {
 	const page = 200
 	var all []*runtimetypes.Agent
@@ -709,7 +623,7 @@ func (m *manager) Stop(instanceID string) error {
 	}
 	m.mu.Unlock()
 	if !ok {
-		return nil // idempotent
+		return nil
 	}
 	return inst.stop()
 }
@@ -728,9 +642,6 @@ func (m *manager) Close() error {
 	}
 	m.mu.Unlock()
 
-	// Stop every instance, then cancel the root context as a backstop.
-	// Aggregate teardown errors rather than stopping at the first, so one
-	// wedged subprocess cannot hide the rest.
 	var errs []error
 	for _, inst := range insts {
 		if err := inst.stop(); err != nil {

@@ -28,8 +28,6 @@ const (
 	askFixtureEchoLead = "UNIT HEARD:"
 )
 
-// writeAskChainAgentFixture writes a chain that asks its operator a
-// question, then echoes the answer via its print template.
 func writeAskChainAgentFixture(t *testing.T, contenoxDir string) string {
 	t.Helper()
 	chain := map[string]any{
@@ -57,7 +55,6 @@ func writeAskChainAgentFixture(t *testing.T, contenoxDir string) string {
 				},
 			},
 			{
-				// Reporting ends the drive loop's interest, so the nudge never fires.
 				"id":      "report",
 				"handler": "tools",
 				"tools": map[string]any{
@@ -147,8 +144,6 @@ func TestFleetE2E_AttentionAsk_OperatorAnswerReachesTheUnit(t *testing.T) {
 	_, err = instances.Attach(ctx, dispatched.InstanceID, libacp.SessionID(dispatched.SessionID), viewer)
 	require.NoError(t, err)
 
-	// (1) The unit's question reaches the operator's queue, attributed to
-	// its mission.
 	var ask *runtimetypes.HITLApproval
 	require.Eventually(t, func() bool {
 		rows, err := operatorHITL.ListPending(ctx, 20)
@@ -169,18 +164,14 @@ func TestFleetE2E_AttentionAsk_OperatorAnswerReachesTheUnit(t *testing.T) {
 	require.NotNil(t, ask.MissionID, "the question must name the mission it came from")
 	require.Equal(t, dispatched.MissionID, *ask.MissionID)
 
-	// (2) The operator answers with words — from this process, not the unit's.
 	require.NoError(t, operatorHITL.Answer(ctx, ask.ID, askFixtureAnswer))
 
-	// (3) The answer comes back to the unit as its tool result.
 	require.Eventually(t, func() bool {
 		return strings.Contains(viewer.messageText(), askFixtureEchoLead+" "+askFixtureAnswer)
 	}, 120*time.Second, 100*time.Millisecond,
 		"the operator's answer never reached the asking unit; transcript=%q\nstderr:\n%s",
 		viewer.messageText(), stderr.String())
 
-	// (4) The mission carries on: the unit reported a result after being
-	// answered.
 	require.Eventually(t, func() bool {
 		reports, err := missions.ListReports(ctx, dispatched.MissionID, 10)
 		if err != nil {

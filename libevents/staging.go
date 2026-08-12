@@ -8,17 +8,13 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// Staging bounds, matching the listing rationale of the other stores.
+// Staging bounds.
 const (
 	DefaultStagingLimit = 100
 	MaxStagingLimit     = 1000
 )
 
-// StagedEvent is an event payload held back until DelayedUntil. Delay is a
-// property of the event itself, which is what puts schedules and timeouts on
-// the event rails instead of growing a second scheduler: a drain pass moves
-// due payloads into the importer's ordinary append path and deletes the
-// staged row in the same transaction.
+// StagedEvent is an event payload held back until DelayedUntil.
 type StagedEvent struct {
 	ID           string
 	Scope        string
@@ -42,8 +38,8 @@ func NewStagingStore(cfg Config, scope string) (*StagingStore, error) {
 	return &StagingStore{cfg: cfg, scope: scope, now: time.Now}, nil
 }
 
-// AppendStagedEvent stores e in the caller's transaction. ID and Payload are
-// required; a zero DelayedUntil means due immediately.
+// AppendStagedEvent stores e in the caller's transaction; ID and Payload are
+// required, and a zero DelayedUntil means due immediately.
 func (s *StagingStore) AppendStagedEvent(ctx context.Context, exec libdb.Exec, e *StagedEvent) error {
 	if e.ID == "" {
 		return fmt.Errorf("libevents: staged event requires an id")
@@ -68,9 +64,9 @@ func (s *StagingStore) AppendStagedEvent(ctx context.Context, exec libdb.Exec, e
 	return nil
 }
 
-// ListDueStagedEvents returns staged events due at now, oldest due first, up
-// to limit (clamped like every listing here). The drain deletes what it
-// appended onward, in the same transaction, via DeleteStagedEvents.
+// ListDueStagedEvents returns staged events due at now, oldest first, up to
+// limit; callers delete what they drain via DeleteStagedEvents in the same
+// transaction.
 func (s *StagingStore) ListDueStagedEvents(ctx context.Context, exec libdb.Exec, now time.Time, limit int) ([]*StagedEvent, error) {
 	if limit <= 0 {
 		limit = DefaultStagingLimit
@@ -102,8 +98,7 @@ func (s *StagingStore) ListDueStagedEvents(ctx context.Context, exec libdb.Exec,
 }
 
 // DeleteStagedEvents removes the named staged rows in the caller's
-// transaction, so a drain that fails to append rolls back its deletes and
-// the payloads stay due.
+// transaction.
 func (s *StagingStore) DeleteStagedEvents(ctx context.Context, exec libdb.Exec, ids ...string) error {
 	for _, id := range ids {
 		if _, err := exec.ExecContext(ctx, fmt.Sprintf(

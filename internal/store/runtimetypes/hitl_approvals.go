@@ -11,11 +11,7 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// HITLApprovalState is the lifecycle state of one durable human-in-the-loop
-// approval ask (table hitl_approvals in schema.sql/schema_sqlite.sql).
-// pending is the only non-terminal state; a row ends exactly once, at
-// approved/denied (a human's Respond) or expired (the sweeper, once
-// expires_at passes with nobody having answered).
+// HITLApprovalState is the lifecycle state of one durable human-in-the-loop approval ask; pending is the only non-terminal state.
 type HITLApprovalState string
 
 const (
@@ -25,27 +21,7 @@ const (
 	HITLApprovalExpired  HITLApprovalState = "expired"
 )
 
-// HITLApproval is a durable row for one runtime/hitlservice approval ask. It
-// is written before the ask is published (see hitlservice.RequestApproval)
-// so a `contenox serve` restart mid-ask still finds it pending rather than
-// losing it, and is resolved by exactly one of Respond (approved/denied) or
-// the expiry sweeper (expired, applying OnTimeout).
-//
-// OnTimeout is stored as a plain string (not hitlservice.Action) so this
-// package does not import hitlservice — runtimetypes sits below the service
-// layer; hitlservice converts to/from its own Action type at the boundary.
-//
-// Resolution is deliberately opaque JSON, not a bare boolean: a permission
-// ask is yes/no, but a later mission-mode ask may answer with data ("which of
-// these three?"). runtimetypes does not interpret its shape — that is
-// hitlservice's concern; this column is nil while State is pending and set
-// exactly once when it becomes terminal.
-//
-// InstanceID, SessionID, AgentName and MissionID name who is asking, needed
-// to tell otherwise-identical rows apart once more than one fleet unit is
-// asking. All four are best-effort — a native chain turn with no fleet unit
-// carries none of them — and MissionID is a pointer because not every ask
-// has one. Empty/nil means "not applicable", never "unknown but exists".
+// HITLApproval is a durable row for one runtime/hitlservice approval ask, resolved by exactly one of Respond or the expiry sweeper.
 type HITLApproval struct {
 	ID          string            `json:"id" example:"3f9c6e2a-1b4d-4e8f-9a2c-7d5e6f8a9b0c"`
 	ToolsName   string            `json:"toolsName" example:"local_fs"`
@@ -57,10 +33,7 @@ type HITLApproval struct {
 	OnTimeout   string            `json:"onTimeout,omitempty" example:"deny"`
 	State       HITLApprovalState `json:"state" example:"pending"`
 	Resolution  json.RawMessage   `json:"resolution,omitempty" example:"{\"approved\":true}"`
-	// InstanceID, SessionID, AgentName and MissionID are the attribution set —
-	// see the type doc. InstanceID/SessionID are the fleet unit and the
-	// downstream session the ask was raised on; AgentName is the declared agent
-	// that unit runs; MissionID is the mission whose envelope escalated it.
+	// InstanceID, SessionID, AgentName and MissionID are the attribution set: which fleet unit, session, agent, and mission raised the ask.
 	InstanceID string     `json:"instanceId,omitempty" example:"7c1f9e4a-2b3d-4c5e-8f90-a1b2c3d4e5f6"`
 	SessionID  string     `json:"sessionId,omitempty" example:"sess_01H8XGJWBWBAQ4Z8"`
 	AgentName  string     `json:"agentName,omitempty" example:"reviewer"`
@@ -70,10 +43,6 @@ type HITLApproval struct {
 	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
 }
 
-// hitlApprovalColumns is the column list every HITLApproval read projects, in
-// the exact order scanHITLApproval / scanHITLApprovalRows bind. It is spelled
-// once so a column added to the table cannot be added to one query and
-// forgotten in another — the drift a hand-copied SELECT list invites.
 const hitlApprovalColumns = `id, tools_name, tool_name, args_summary, diff, policy_name, matched_rule, on_timeout, state, resolution, ` +
 	`instance_id, session_id, agent_name, mission_id, created_at, expires_at, resolved_at`
 
@@ -100,8 +69,7 @@ func (s *store) GetHITLApproval(ctx context.Context, id string) (*HITLApproval, 
 func (s *store) scanHITLApproval(ctx context.Context, query string, arg any) (*HITLApproval, error) {
 	var a HITLApproval
 	var state string
-	// []byte round-trips on both Postgres (JSONB) and SQLite (TEXT); scanning
-	// directly into json.RawMessage fails on SQLite (see kv.go's getKVScoped).
+	// []byte round-trips on both Postgres and SQLite; scanning directly into json.RawMessage fails on SQLite.
 	var rawResolution []byte
 	err := s.Exec.QueryRowContext(ctx, query, arg).Scan(
 		&a.ID, &a.ToolsName, &a.ToolName, &a.ArgsSummary, &a.Diff, &a.PolicyName, &a.MatchedRule, &a.OnTimeout, &state, &rawResolution,
@@ -120,11 +88,7 @@ func (s *store) scanHITLApproval(ctx context.Context, query string, arg any) (*H
 	return &a, nil
 }
 
-// ResolveHITLApproval atomically transitions id from pending to state via an
-// UPDATE ... WHERE state = 'pending' compare-and-swap, so a human's Respond
-// racing the sweeper's timeout-expiry can never both win. Returns
-// libdb.ErrNotFound when id does not exist or is no longer pending; callers
-// that need to tell those apart follow up with GetHITLApproval.
+// ResolveHITLApproval atomically transitions id from pending to state via a compare-and-swap, returning libdb.ErrNotFound when id does not exist or is no longer pending.
 func (s *store) ResolveHITLApproval(ctx context.Context, id string, state HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE hitl_approvals
@@ -138,10 +102,7 @@ func (s *store) ResolveHITLApproval(ctx context.Context, id string, state HITLAp
 	return checkRowsAffected(result)
 }
 
-// AgentAnswerBound is the count predicate an agent-attributed resolution is
-// written under (see ResolveHITLApprovalWithinBound). Every field is supplied
-// by the caller: runtimetypes sits below hitlservice and so cannot name that
-// package's attention marks or its resolution payload shape.
+// AgentAnswerBound is the count predicate an agent-attributed resolution is written under, supplied entirely by the caller.
 type AgentAnswerBound struct {
 	// MissionID scopes the count to one mission's asks.
 	MissionID string
@@ -157,14 +118,7 @@ type AgentAnswerBound struct {
 	Max int
 }
 
-// ResolveHITLApprovalWithinBound is ResolveHITLApproval's pending-state CAS
-// with bound's count predicate carried in the same WHERE clause, so the
-// database — not the caller — decides which of several concurrent
-// agent-attributed answers fit under a mission's cap. A caller that counts and
-// then writes cannot: every racer reads the same count before any of them
-// writes, and they all pass. Returns libdb.ErrNotFound when id does not exist,
-// is no longer pending, or the bound is already spent; callers tell those
-// apart by re-reading with GetHITLApproval.
+// ResolveHITLApprovalWithinBound is ResolveHITLApproval's pending-state CAS with bound's count predicate carried in the same WHERE clause, returning libdb.ErrNotFound when id does not exist, is no longer pending, or the bound is already spent.
 func (s *store) ResolveHITLApprovalWithinBound(ctx context.Context, id string, bound AgentAnswerBound, state HITLApprovalState, resolution json.RawMessage, resolvedAt time.Time) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE hitl_approvals
@@ -184,10 +138,6 @@ func (s *store) ResolveHITLApprovalWithinBound(ctx context.Context, id string, b
 	return checkRowsAffected(result)
 }
 
-// nullableJSON returns raw as a string for binding, or untyped nil (SQL
-// NULL) when raw is empty — mirrors how *string/*int fields elsewhere in
-// this package (e.g. Agent.HarnessID) bind nil as NULL, since json.RawMessage
-// has no pointer-nilability of its own to rely on.
 func nullableJSON(raw json.RawMessage) any {
 	if len(raw) == 0 {
 		return nil
@@ -239,10 +189,7 @@ func (s *store) ListHITLApprovals(ctx context.Context, state HITLApprovalState, 
 	return scanHITLApprovalRows(rows)
 }
 
-// ListHITLApprovalsForMission returns every ask raised by missionID's unit,
-// newest first, in any state — deliberately no state filter, since a mission
-// raises few asks and the caller filters in Go rather than pushing a
-// resolution-shape query into SQL written twice for the two dialects supported.
+// ListHITLApprovalsForMission returns every ask raised by missionID's unit, newest first, in any state.
 func (s *store) ListHITLApprovalsForMission(ctx context.Context, missionID string, limit int) ([]*HITLApproval, error) {
 	if limit > MAXLIMIT {
 		return nil, ErrLimitParamExceeded
@@ -262,13 +209,7 @@ func (s *store) ListHITLApprovalsForMission(ctx context.Context, missionID strin
 	return scanHITLApprovalRows(rows)
 }
 
-// ListPendingHITLApprovalsForSession returns sessionID's unanswered asks,
-// newest first — the rows a client attaching to that session must be re-shown
-// so a run parked on an approval can be answered instead of looking dead.
-// State-filtered in SQL, unlike ListHITLApprovalsForMission: a long-lived
-// session accumulates resolved rows, and the caller wants exactly the open
-// ones. An empty sessionID matches nothing and returns no rows rather than
-// every unattributed ask.
+// ListPendingHITLApprovalsForSession returns sessionID's unanswered asks, newest first; an empty sessionID matches nothing rather than every unattributed ask.
 func (s *store) ListPendingHITLApprovalsForSession(ctx context.Context, sessionID string, limit int) ([]*HITLApproval, error) {
 	if limit > MAXLIMIT {
 		return nil, ErrLimitParamExceeded

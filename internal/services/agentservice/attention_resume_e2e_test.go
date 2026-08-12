@@ -1,9 +1,5 @@
 package agentservice_test
 
-// A mission unit asks for attention, the park window elapses unanswered, the
-// run suspends and its process dies; the answer, given to a fresh instance,
-// resumes the chain and becomes the tool's result exactly once.
-
 import (
 	"context"
 	"errors"
@@ -24,8 +20,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// hitlAttentionAsker forwards to the real hitlservice, translating the
-// park-window pending error into the engine's typed suspend error.
 type hitlAttentionAsker struct {
 	hitl hitlservice.Service
 }
@@ -61,9 +55,6 @@ func newAttentionInstance(t *testing.T, dbPath string) *attentionInstance {
 	})
 }
 
-// newAttentionInstanceWithAsker builds an instance whose mission_ask_attention
-// goes through a caller-chosen asker, so a test can drive the exact moment an
-// answer lands relative to the park window.
 func newAttentionInstanceWithAsker(t *testing.T, dbPath string, newAsker func(hitlservice.Service) missiontools.AttentionAsker) *attentionInstance {
 	t.Helper()
 	ctx := context.Background()
@@ -170,7 +161,6 @@ func TestSystem_AttentionDetach_AnswerAfterRestartResumesWithOperatorsWords(t *t
 	require.NoError(t, b.hitl.Answer(ctx, callID, "the contenox runtime repo, /home/x/src"),
 		"Answer runs the resume synchronously via the registered hook")
 
-	// The operator's words must reach the tool result, not just "chain completed".
 	row, err = b.store.GetHITLApproval(ctx, callID)
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalApproved, row.State)

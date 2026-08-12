@@ -11,18 +11,14 @@ import (
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
-// Tool names. The provider ("shell_session") is one ToolsRepo exposing two
-// function tools. Run is gated by the same HITL machinery that wraps every tool
-// (default policy → approve); Read is ungated by policy (reference-only reads).
+// Tool names: shell_session is one ToolsRepo exposing two function tools — Run gated by HITL (default policy approve), Read ungated (reference-only).
 const (
 	ToolsProviderName = "shell_session"
 	ToolRun           = "shell_session_run"
 	ToolRead          = "shell_session_read"
 )
 
-// RunResultJSON is the structured result the agent receives from a run: a marker
-// and the initial output snapshot. The agent polls shell_session_read with the
-// returned offset to follow long-running commands.
+// RunResultJSON is the structured result the agent receives from a run: a marker and the initial output snapshot, followed up via shell_session_read with the returned offset.
 type RunResultJSON struct {
 	Offset  int64  `json:"offset"`
 	Output  string `json:"output"`
@@ -39,16 +35,11 @@ type ReadResultJSON struct {
 	Note       string `json:"note,omitempty"`
 }
 
-// tools implements taskengine.ToolsRepo backed by a Manager. It resolves the
-// session id from the execution context (set by the engine per turn), so the
-// same shared tool instance drives the right per-session shell.
 type tools struct {
 	mgr Manager
 }
 
-// NewTools returns the shell_session ToolsRepo. Register it in the engine's
-// LocalTools map under ToolsProviderName exactly like local_shell/local_fs, so
-// it is HITL-wrapped and reachable to the agent only when shell tooling is on.
+// NewTools returns the shell_session ToolsRepo, registered in the engine's LocalTools map under ToolsProviderName like local_shell/local_fs so it is HITL-wrapped and reachable only when shell tooling is on.
 func NewTools(mgr Manager) taskengine.ToolsRepo {
 	return &tools{mgr: mgr}
 }
@@ -129,8 +120,6 @@ func sessionIDFromCtx(ctx context.Context) string {
 	return v
 }
 
-// stringArg reads a string parameter from either the declared tools.Args map or
-// the dynamic input map (execute_tool_calls).
 func stringArg(input any, call *taskengine.ToolsCall, key string) string {
 	if call != nil && call.Args != nil {
 		if v := call.Args[key]; v != "" {
@@ -145,8 +134,6 @@ func stringArg(input any, call *taskengine.ToolsCall, key string) string {
 	return ""
 }
 
-// intArg reads an integer parameter from tools.Args or the dynamic input map,
-// tolerating a JSON number or a numeric string.
 func intArg(input any, call *taskengine.ToolsCall, key string) (int64, bool) {
 	if call != nil && call.Args != nil {
 		if v := call.Args[key]; v != "" {

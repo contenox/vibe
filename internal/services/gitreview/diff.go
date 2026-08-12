@@ -17,24 +17,14 @@ import (
 )
 
 const (
-	// maxDiffFiles bounds how many files one Diff renders. Past it the result
-	// is flagged truncated; a reviewer narrows with paths.
 	maxDiffFiles = 300
 
-	// maxDiffBytes is the per-side content bound. A file larger than this is
-	// reported truncated with no hunks rather than shipped down the bus.
 	maxDiffBytes = 2 << 20
 
-	// binarySniff is how much of a file is inspected for a NUL byte.
 	binarySniff = 8000
 )
 
-// FileDiff is one file's change. Path and OldPath are workspace-relative.
-//
-// FromHash and ToHash are content hashes of the two sides, taken WITH the
-// diff. StageHunk and UnstageHunk require them back and refuse when the file
-// has moved on, which is what stops a hunk being applied to shifted line
-// numbers. An absent side (added or deleted file) hashes to "".
+// FileDiff is one file's change; Path/OldPath are workspace-relative, and FromHash/ToHash (content hashes, "" for an absent side) let StageHunk/UnstageHunk refuse a hunk that has moved on.
 type FileDiff struct {
 	Path      string `json:"path"`
 	OldPath   string `json:"oldPath,omitempty"`
@@ -48,8 +38,7 @@ type FileDiff struct {
 	Hunks     []Hunk `json:"hunks"`
 }
 
-// DiffResult is one ref-to-ref comparison. Truncated reports that the FILE LIST
-// was cut at maxDiffFiles; a per-file truncation is on the file itself.
+// DiffResult is one ref-to-ref comparison; Truncated reports the file list was cut at maxDiffFiles, a per-file truncation lives on the file itself.
 type DiffResult struct {
 	From      string     `json:"from"`
 	To        string     `json:"to"`
@@ -57,7 +46,6 @@ type DiffResult struct {
 	Truncated bool       `json:"truncated"`
 }
 
-// sideKind distinguishes the three places content can come from.
 type sideKind int
 
 const (
@@ -66,18 +54,12 @@ const (
 	sideCommit
 )
 
-// side is one resolved end of a comparison. A commit side with a nil commit is
-// the empty tree — the state of a repository with no commits, which is a normal
-// starting point rather than an error.
 type side struct {
 	kind   sideKind
 	name   string
 	commit *object.Commit
 }
 
-// resolveSide maps a ref onto a side. The three pseudo-refs are matched
-// case-sensitively on their documented spelling; everything else goes to
-// go-git's revision parser, so branches, tags, hashes and `HEAD~2` all work.
 func (s *scope) resolveSide(ref string) (*side, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -109,15 +91,12 @@ func (s *scope) resolveSide(ref string) (*side, error) {
 	return &side{kind: sideCommit, name: ref, commit: commit}, nil
 }
 
-// blob is one side's view of one path.
 type blob struct {
 	exists  bool
 	content string
 	hash    string
 }
 
-// contentHash is the stale-diff guard's currency: sha256 of the content, or ""
-// for a side where the file does not exist.
 func contentHash(exists bool, content string) string {
 	if !exists {
 		return ""
@@ -126,7 +105,6 @@ func contentHash(exists bool, content string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// read fetches one repo-relative path from one side.
 func (s *scope) read(sd *side, repoPath string) (blob, error) {
 	switch sd.kind {
 	case sideWorktree:
@@ -156,8 +134,6 @@ func (s *scope) read(sd *side, repoPath string) (blob, error) {
 	}
 }
 
-// readIndex fetches the STAGED content of a path: the blob the index entry
-// names, not the file on disk.
 func (s *scope) readIndex(repoPath string) (blob, error) {
 	idx, err := s.repo.Storer.Index()
 	if err != nil {
@@ -183,20 +159,11 @@ func (s *scope) readIndex(repoPath string) (blob, error) {
 	return blob{exists: true, content: string(data), hash: contentHash(true, string(data))}, nil
 }
 
-// candidate is one path to compare, carrying its pre-rename name when a tree
-// diff reported one.
 type candidate struct {
 	path    string
 	oldPath string
 }
 
-// candidates is the union of paths the two sides could differ on.
-//
-// It never walks a whole tree: a commit-to-commit comparison uses the tree
-// diff, and any comparison involving the index or worktree starts from
-// Worktree.Status(), widened by the tree diff between a non-HEAD commit side
-// and HEAD. That is exactly the set of paths that can differ, computed from
-// what git already tracks.
 func (s *scope) candidates(ctx context.Context, from, to *side, filter string) ([]candidate, error) {
 	seen := map[string]candidate{}
 	add := func(path, oldPath string) {
@@ -251,9 +218,6 @@ func (s *scope) candidates(ctx context.Context, from, to *side, filter string) (
 	return out, nil
 }
 
-// addTreeDiff feeds every path a tree diff touches to add, carrying rename
-// pairs through so a moved file renders as one entry rather than a delete and
-// an add.
 func (s *scope) addTreeDiff(ctx context.Context, from, to *object.Commit, add func(path, oldPath string)) error {
 	fromTree, err := commitTree(from)
 	if err != nil {
@@ -282,7 +246,6 @@ func (s *scope) addTreeDiff(ctx context.Context, from, to *object.Commit, add fu
 	return nil
 }
 
-// commitTree is a commit's tree, or the empty tree for the nil commit.
 func commitTree(c *object.Commit) (*object.Tree, error) {
 	if c == nil {
 		return &object.Tree{}, nil
@@ -294,8 +257,6 @@ func commitTree(c *object.Commit) (*object.Tree, error) {
 	return t, nil
 }
 
-// isBinary reports whether content should be treated as binary. A NUL byte in
-// the first binarySniff bytes is the same heuristic git uses.
 func isBinary(content string) bool {
 	if len(content) > binarySniff {
 		content = content[:binarySniff]
@@ -303,13 +264,7 @@ func isBinary(content string) bool {
 	return bytes.IndexByte([]byte(content), 0) >= 0
 }
 
-// Diff compares two refs over the workspace subtree at root.
-//
-// from and to each accept WORKTREE, INDEX, HEAD, or any revision go-git can
-// resolve. The five cases a review UI needs are all this one call: unstaged is
-// INDEX→WORKTREE, staged is HEAD→INDEX, everything-uncommitted is
-// HEAD→WORKTREE, and commit-to-commit and branch-to-branch are the refs
-// themselves. paths, when non-empty, narrows to those files or directories.
+// Diff compares two refs (WORKTREE, INDEX, HEAD, or any revision go-git can resolve) over the workspace subtree at root, narrowed to paths when given.
 func Diff(ctx context.Context, root, from, to string, paths ...string) (*DiffResult, error) {
 	sc, err := open(root)
 	if err != nil {
@@ -361,9 +316,6 @@ func Diff(ctx context.Context, root, from, to string, paths ...string) (*DiffRes
 	return out, nil
 }
 
-// pathFilters contains every caller-supplied path and returns the
-// repository-relative prefixes to match against. No paths means one empty
-// filter: the whole workspace subtree.
 func (s *scope) pathFilters(paths []string) ([]string, error) {
 	filters := make([]string, 0, len(paths))
 	for _, p := range paths {
@@ -382,8 +334,6 @@ func (s *scope) pathFilters(paths []string) ([]string, error) {
 	return filters, nil
 }
 
-// fileDiff builds one file's entry. ok is false when the two sides are
-// identical, which happens routinely: the candidate set is a superset.
 func (s *scope) fileDiff(from, to *side, c candidate) (FileDiff, bool, error) {
 	fromPath := c.oldPath
 	if fromPath == "" {
@@ -456,8 +406,6 @@ func (s *scope) fileDiff(from, to *side, c candidate) (FileDiff, bool, error) {
 	return fd, true, nil
 }
 
-// tracked reports whether the index knows the path, which is what separates an
-// added-and-staged file from an untracked one.
 func (s *scope) tracked(repoPath string) bool {
 	idx, err := s.repo.Storer.Index()
 	if err != nil {

@@ -2,9 +2,6 @@ package shellsession
 
 import "sync"
 
-// subscriber delivers output chunks to one consumer from a dedicated goroutine,
-// so a slow sink (e.g. a stalled WebSocket write) can never block the PTY read
-// loop or the flush ticker. Chunks are buffered; the pump preserves order.
 type subscriber struct {
 	fn       func(Chunk)
 	ch       chan Chunk

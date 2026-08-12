@@ -13,8 +13,6 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// recordingHost is a fake HostToolCaller for testing the bridge without an
-// engine.
 type recordingHost struct {
 	mu    sync.Mutex
 	calls []hostCall
@@ -247,8 +245,6 @@ func TestUnit_Bridge_NoHostWiredIsTyped(t *testing.T) {
 	}
 }
 
-// stubRepo is a minimal taskengine.ToolsRepo standing in for the engine's
-// aggregate repo.
 type stubRepo struct {
 	got *taskengine.ToolsCall
 	in  any
@@ -331,9 +327,7 @@ func TestUnit_Bridge_HostCallLoopIsBounded(t *testing.T) {
 	t.Logf("%d host calls in %s before the budget refused the next one", made, elapsed.Round(time.Millisecond))
 }
 
-// The deadline pauses while a script is parked inside one host.tool call, and
-// resumes to bound compute afterward, so a slow (e.g. human-gated) call does
-// not exhaust it.
+// The deadline pauses while a script is parked inside one host.tool call.
 func TestUnit_Bridge_ADeadlineDoesNotRunWhileAHumanIsReadingACard(t *testing.T) {
 	const deadline = 150 * time.Millisecond
 	const humanTime = 750 * time.Millisecond

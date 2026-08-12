@@ -15,10 +15,7 @@ type StackTrace interface {
 }
 
 type CapturedStateUnit struct {
-	// Scope is the unit's hierarchical address (chain + task); the same
-	// address contract TaskEvent carries, so checkpoints and replay name the
-	// position of captured state without re-deriving it from loose IDs.
-	// Additive JSON field; TaskID below stays populated identically.
+	// Scope is the unit's hierarchical address (chain + task), matching the address contract TaskEvent carries.
 	Scope       EventScope    `json:"scope,omitzero"`
 	TaskID      string        `json:"taskID" example:"validate_input"`
 	TaskHandler string        `json:"taskHandler" example:"chat_completion"`
@@ -38,9 +35,7 @@ type CapturedStateUnit struct {
 	ModelName    string      `json:"modelName,omitempty"`
 	ToolNames    []string    `json:"toolNames,omitempty"`
 	TokenUsage   *TokenUsage `json:"tokenUsage,omitempty"`
-	// FinishReason is the provider's verbatim finish reason for the model call
-	// this step captured, when its output was a chat history ("length"-class
-	// values mean truncation). Consumers normalize; the engine records.
+	// FinishReason is the provider's verbatim finish reason for the model call this step captured, when the output was a chat history.
 	FinishReason string `json:"finishReason,omitempty"`
 }
 

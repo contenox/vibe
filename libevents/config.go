@@ -5,23 +5,17 @@ import (
 	"regexp"
 )
 
-// Config names the identifiers this package interpolates into SQL. Values are
-// validated by Validate before any DDL or statement is built; everything else
-// in a statement is a bound parameter.
+// Config names the SQL identifiers this package interpolates; every other
+// value in a statement is bound, not interpolated.
 type Config struct {
 	// TablePrefix prefixes every table this package owns:
 	// {prefix}cursors, {prefix}firings, {prefix}listeners,
 	// {prefix}listener_topics, {prefix}staging.
 	TablePrefix string
-	// ScopeColumn is the tenancy column present on every table — the
-	// importer's own dimension (a workspace, an account). The column exists
-	// even for importers that pass empty scope values, so the schema never
-	// depends on how it is used.
+	// ScopeColumn is the tenancy column present on every table.
 	ScopeColumn string
 }
 
-// identRx admits lower_snake SQL identifiers and nothing else — the guard that
-// keeps interpolated table and column names from carrying SQL.
 var identRx = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // Validate rejects identifiers that could not be safely interpolated.

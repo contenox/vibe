@@ -21,7 +21,7 @@ The filesystem root is set when Contenox registers the local tool:
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `read_file` | `path` | Read the full content of a file. Also satisfies the read-before-mutate prerequisite for `write_file` / `edit_file` / `sed` against the same path. |
+| `read_file` | `path` | Read the full content of a file. An audio file (wav, mp3, m4a, ogg, flac) returns a transcript from the configured audio model instead of raw bytes — see [audio files](#audio-files-read_file-returns-a-transcript) below. Also satisfies the read-before-mutate prerequisite for `write_file` / `edit_file` / `sed` against the same path. |
 | `write_file` | `path`, `content` | Write content to a file (creates parent dirs, overwrites). For *existing* files, requires a prior full `read_file` against the same current file version in this session. |
 | `edit_file` | `path`, `old_string`, `new_string`, `replace_all` (optional) | Replace an exact, byte-for-byte occurrence of `old_string` with `new_string` in an existing file — the targeted alternative to `write_file`'s full overwrite. See [`edit_file`](#edit_file-exact-string-replacement) below. |
 | `list_dir` | `path` (optional) | List entries in a directory (dirs marked with `/`) |
@@ -40,6 +40,18 @@ The filesystem root is set when Contenox registers the local tool:
 - **`replace_all`.** Set `replace_all: true` to replace every occurrence instead of requiring exactly one (e.g. renaming an identifier throughout the file).
 - **Read-before-write.** Same contract as `sed`: a prior `read_file` or `read_file_range` of the current file version in this session is required before `edit_file` may run; the file's hash is re-verified immediately before writing, and a change since the read (by anyone) refuses the edit rather than clobbering it.
 - Returns compact JSON (`path`, `written`, `replacements`, `old_bytes`, `new_bytes`, `old_sha256`, `new_sha256`) — not the full file bodies.
+
+### Audio files: `read_file` returns a transcript
+
+`read_file` understands audio the same way image attachments are understood elsewhere: the format is detected from the file's bytes, never trusted from its extension. A supported audio file — WAV, MP3, M4A, OGG, or FLAC — is consumed by the tool, routed through the configured audio model (`contenox config set default-audio-model <model>`), and answered with the **transcript** as the tool result, prefixed with a one-line notice naming the file, its detected type, and its size. The agent model itself stays text-only: the audio never enters the conversation, only the transcript does.
+
+Refusals are classified, never a silent drop:
+
+- **No audio model configured** — the refusal names the `default-audio-model` config key to set.
+- **File too large** — audio over `_max_audio_bytes` (default 14 MiB, matching the provider-side inline audio limit) is refused with the cap named, before any bytes are read or sent.
+- **Unsupported format** — content that is recognizably audio but outside the supported set (e.g. AIFF, MIDI), or a binary file wearing an audio extension whose content matches no supported format, is refused naming what was detected and the formats that would work.
+
+Two deliberate boundaries: a text file with an audio extension is still read as text (detection is by content), and a transcript does **not** satisfy the read-before-write prerequisite for overwriting the audio file — the model saw the audio model's text, not the file's bytes. Long transcripts honor `_max_output_bytes` like every other result, truncating with a notice rather than silently.
 
 ### `grep` directory search
 
@@ -75,6 +87,7 @@ Set per-task read/output limits and denied path substrings by adding a `tools_po
 |---|---|---|---|
 | `_allowed_dir` | path | registration root | Override the allowed filesystem root for this task. Relative paths resolve against the active workspace/cwd where available. |
 | `_max_read_bytes` | int | `1048576` (1 MiB) | Max file size for a whole-file `read_file`. `0` or negative = unlimited. Larger files return an error so the model can narrow with `read_file_range`. |
+| `_max_audio_bytes` | int | `14680064` (14 MiB) | Max file size for an audio file `read_file` will transcribe — replaces `_max_read_bytes` on the audio path. The default matches the provider-side inline audio limit. `0` or negative = unlimited. |
 | `_max_output_bytes` | int | `32768` (32 KiB) | Max byte size of any tool result returned to the model. Prevents listing a huge directory or grepping a large file from blowing up context. `0` or negative = unlimited. Prefer setting `_model_context_tokens` (below) over overriding this directly. |
 | `_model_context_tokens` | int | unset | When set (and `_max_output_bytes` is not), derives the output cap as a fraction of the model's context window instead of using the fixed default. |
 | `_max_list_depth` | int | `6` | Cap on `list_dir(recursive=true)`. Hard-capped at 32 regardless of policy. |

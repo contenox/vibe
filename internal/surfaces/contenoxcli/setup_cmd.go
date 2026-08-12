@@ -46,19 +46,11 @@ type setupProvider struct {
 	defaultModel string
 	envKey       string
 	needsAPIKey  bool
-	// needsBaseURL marks providers whose endpoint is account-specific and cannot
-	// be defaulted (e.g. Vertex, whose URL carries the GCP project + region).
 	needsBaseURL bool
 	baseURLHint  string
-	// fixedBaseURL is registered verbatim without prompting; it also
-	// distinguishes hosted variants sharing a key with a local entry
-	// (Ollama Cloud vs. the local Ollama daemon).
 	fixedBaseURL string
 }
 
-// setupProviders is the terminal wizard's provider menu; it duplicates
-// providerservice.providerDefaultsByType (minus the internal-only "local"
-// type), so keep the two in sync.
 var setupProviders = []setupProvider{
 	{key: "ollama", label: "Ollama (local daemon)", defaultModel: "qwen3:8b", needsAPIKey: false},
 	{key: "ollama", label: "Ollama Cloud", defaultModel: "gpt-oss:20b", envKey: "OLLAMA_API_KEY", needsAPIKey: true, fixedBaseURL: "https://ollama.com/api"},
@@ -70,8 +62,6 @@ var setupProviders = []setupProvider{
 	{key: "vllm", label: "vLLM (self-hosted)", needsAPIKey: false, needsBaseURL: true, baseURLHint: "http://localhost:8000"},
 }
 
-// setupProviderKeys returns the wizard's provider keys, deduplicated in menu
-// order (the local Ollama daemon and Ollama Cloud entries share key "ollama").
 func setupProviderKeys() []string {
 	keys := make([]string, 0, len(setupProviders))
 	seen := make(map[string]bool, len(setupProviders))
@@ -85,12 +75,8 @@ func setupProviderKeys() []string {
 	return keys
 }
 
-// errSetupNoInput is returned when the interactive provider prompt hits EOF, so
-// setup exits non-zero instead of silently committing a default.
 var errSetupNoInput = errors.New("setup: no input received (interactive); nothing changed")
 
-// ollamaModelListTimeout bounds the wizard's enumeration of a local daemon's
-// models (probe plus one /api/show per model).
 const ollamaModelListTimeout = 10 * time.Second
 
 func runSetup(cmd *cobra.Command, out io.Writer) error {
@@ -102,7 +88,6 @@ func runSetup(cmd *cobra.Command, out io.Writer) error {
 		return fmt.Errorf("global init: %w", err)
 	}
 
-	// Show current configuration status.
 	alreadyConfigured := false
 	if dbPath, gpErr := globalDBPath(); gpErr == nil {
 		if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
@@ -177,7 +162,6 @@ func runSetup(cmd *cobra.Command, out io.Writer) error {
 		if apiKey != "" {
 			fmt.Fprintf(out, "  ✓ Found %s in environment.\n\n", sp.envKey)
 		} else {
-			// Check if a key is already stored in the database.
 			if dbPath, gpErr := globalDBPath(); gpErr == nil {
 				if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
 					store := runtimetypes.New(db.WithoutTransaction())
@@ -239,7 +223,6 @@ func runSetup(cmd *cobra.Command, out io.Writer) error {
 	case sp.key == "ollama" && sp.fixedBaseURL == "":
 		model = promptOllamaModel(out, scanner, model)
 	case model == "":
-		// No fixed default (vllm): the server decides what it serves.
 		fmt.Fprintln(out, "  Enter the model id your server exposes (verify with `contenox model list` after setup):")
 		model = promptLine(out, scanner, "  Model", "")
 	default:
@@ -281,8 +264,6 @@ func runSetup(cmd *cobra.Command, out io.Writer) error {
 	return nil
 }
 
-// reportSetupReadiness runs the same read-only reachability check as
-// `contenox doctor` and prints the verdict; it never mutates saved config.
 func reportSetupReadiness(ctx context.Context, cmd *cobra.Command, db libdb.DBManager, out io.Writer, provider, model string) {
 	contenoxDir, _ := ResolveContenoxDir(cmd)
 	opts, err := buildRunOpts(cmd, db, contenoxDir)
@@ -321,11 +302,6 @@ func reportSetupReadiness(ctx context.Context, cmd *cobra.Command, db libdb.DBMa
 	fmt.Fprintln(out, "")
 }
 
-// printSetupNextCommand names the command that follows a successful wizard run.
-// The terminal UI is the flagship surface but needs a terminal, so it is only
-// offered when the wizard itself is writing to one; a piped or redirected run
-// gets the one-shot form instead. Same register as the failure branch:
-// a command the operator can type, not a gesture.
 func printSetupNextCommand(out io.Writer, tty bool) {
 	if tty {
 		fmt.Fprintln(out, "  Next: run `contenox new` for the terminal UI, or `contenox \"your first prompt\"`.")
@@ -334,10 +310,6 @@ func printSetupNextCommand(out io.Writer, tty bool) {
 	fmt.Fprintln(out, "  Next: run `contenox \"your first prompt\"` (the terminal UI, `contenox new`, needs a terminal).")
 }
 
-// stdoutIsTerminal reports whether this process's stdout is a terminal. It
-// reads os.Stdout rather than a command's writer because cobra's OutOrStdout
-// is a buffer under test and a pipe under redirection — the question here is
-// about the process, not the writer.
 func stdoutIsTerminal() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
@@ -347,7 +319,6 @@ func registerSetupBackend(ctx context.Context, db libdb.DBManager, providerType,
 
 	backendURL := strings.TrimSpace(baseURL)
 	if backendURL == "" {
-		// Account-specific providers (vertex-google) supply baseURL from the wizard.
 		switch providerType {
 		case "ollama":
 			if base, ok := setupcheck.ProbeLocalOllamaAPI(ctx); ok {
@@ -379,7 +350,6 @@ func registerSetupBackend(ctx context.Context, db libdb.DBManager, providerType,
 		if !strings.EqualFold(b.Type, providerType) {
 			continue
 		}
-		// Only touch the record when the URL actually changed.
 		if backendURL != "" && b.BaseURL != backendURL {
 			b.BaseURL = backendURL
 			if err := svc.Update(ctx, b); err != nil {
@@ -401,16 +371,7 @@ func registerSetupBackend(ctx context.Context, db libdb.DBManager, providerType,
 	return nil
 }
 
-// promptOllamaModel asks which local model to make the default. The daemon
-// already knows what it serves, so a successful probe answers with a numbered
-// menu of the pulled chat-capable models (preselectOllamaModel decides the
-// entry Enter accepts) instead of asking the operator to retype a name. A
-// probe that fails, or one reporting no chat-capable model, falls back to the
-// free-text prompt.
 func promptOllamaModel(out io.Writer, scanner *bufio.Scanner, defaultModel string) string {
-	// Bounded well under modelrepo.DefaultCallTimeout: enumerating a local
-	// daemon happens between two keystrokes of an interactive wizard, and a
-	// slow /api/show must degrade to the free-text prompt, not stall it.
 	ctx, cancel := context.WithTimeout(context.Background(), ollamaModelListTimeout)
 	defer cancel()
 	probe := onboarding.ProbeOllamaModels(ctx)
@@ -435,9 +396,6 @@ func promptOllamaModel(out io.Writer, scanner *bufio.Scanner, defaultModel strin
 	return promptOllamaModelMenu(out, scanner, models, preselectOllamaModel(models, defaultModel))
 }
 
-// preselectOllamaModel picks the menu entry Enter accepts: the suggested
-// default when the daemon actually serves it, otherwise the first pulled
-// chat model — never a name that is not on the menu.
 func preselectOllamaModel(models []string, defaultModel string) string {
 	for _, m := range models {
 		if m == defaultModel {
@@ -447,8 +405,6 @@ func preselectOllamaModel(models []string, defaultModel string) string {
 	return models[0]
 }
 
-// promptOllamaModelMenu renders the pulled chat models as a numbered list with
-// preselected marked, and resolves the answer via resolveOllamaModelChoice.
 func promptOllamaModelMenu(out io.Writer, scanner *bufio.Scanner, models []string, preselected string) string {
 	fmt.Fprintln(out, "  Chat models pulled on this daemon:")
 	fmt.Fprintln(out, "")
@@ -472,12 +428,6 @@ func promptOllamaModelMenu(out io.Writer, scanner *bufio.Scanner, models []strin
 	}
 }
 
-// resolveOllamaModelChoice maps a menu answer to a model id: an empty answer
-// (also EOF) keeps preselected, an in-range 1-based number picks that entry,
-// and any non-numeric answer is taken literally so a model the probe could not
-// classify — or one pulled after the probe — is still reachable. An
-// out-of-range number resolves to no model (ok false) rather than silently
-// committing the preselected one.
 func resolveOllamaModelChoice(answer string, models []string, preselected string) (string, bool) {
 	answer = strings.TrimSpace(answer)
 	if answer == "" {
@@ -492,13 +442,8 @@ func resolveOllamaModelChoice(answer string, models []string, preselected string
 	return answer, true
 }
 
-// promptEOF signals the input stream ended before an answer was given,
-// distinct from -1 (an intentional "q" quit).
 const promptEOF = -2
 
-// promptChoiceOrQuit reads a 1-based menu choice, returning its zero-based
-// index, -1 for an intentional "q" (always accepted), or promptEOF when input
-// ends first. keepCurrent only selects the quit hint's wording.
 func promptChoiceOrQuit(out io.Writer, scanner *bufio.Scanner, label string, max int, keepCurrent bool) int {
 	for {
 		fmt.Fprintf(out, "%s (1-%d, q to quit): ", label, max)

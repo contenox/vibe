@@ -1,9 +1,5 @@
 package localtools_test
 
-// Tests, driven through LocalExecTools.Exec, that when a command's output
-// exceeds the context budget, the full stream is spooled to a durable file
-// and the inline result carries a head/tail split naming the spool.
-
 import (
 	"context"
 	"fmt"
@@ -18,8 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// linesRunner writes `n` numbered lines ("LINE0000\n"...) to stdout, one Write
-// per line, so the spool writer's head/tail ring is exercised across many writes.
 type linesRunner struct{ n int }
 
 func (r linesRunner) Run(_ context.Context, _ localtools.CommandSpec, stdout, _ io.Writer) (int, error) {
@@ -50,9 +44,7 @@ func TestUnit_LocalShell_SpoolsFullOutputAndNamesIt(t *testing.T) {
 	require.Contains(t, res.Error, "full output:")
 	require.Contains(t, res.Error, "(recoverable:")
 
-	// The inline result is a 20%-head/80%-tail split: it contains BOTH an early
-	// line and a late line (the tail, where errors cluster), with an omission
-	// marker between them.
+	// The inline result is a 20%-head/80%-tail split: both an early and a late line, with an omission marker between them.
 	require.Contains(t, res.Stdout, "LINE0000", "head must retain the start of the stream")
 	require.Contains(t, res.Stdout, "LINE0199", "tail must retain the end of the stream")
 	require.Contains(t, res.Stdout, "omitted")

@@ -10,11 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestIntegration_DeviceFloor proves the /dev character-device floor grants a
-// confined process write to /dev/null and read to /dev/zero/urandom — the
-// nodes every POSIX toolchain assumes exist. The complementary guarantee (that
-// this grant does not reopen device-node creation) is asserted separately at
-// the bitmask level by TestUnit_llWrite_NoDeviceNodeCreation.
+// TestIntegration_DeviceFloor asserts a confined process can write /dev/null and read /dev/zero and /dev/urandom.
 func TestIntegration_DeviceFloor(t *testing.T) {
 	if !landlockSupported() {
 		t.Skip("landlock filesystem ABI unavailable on this kernel")

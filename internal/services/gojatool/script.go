@@ -14,29 +14,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// script.go is the script-tool loader: *.js files in a configured directory
-// become ordinary tools at engine build time.
-//
-// File convention:
-//
-//	const tool = {
-//	  name: "changelog_entry",              // unprefixed tool name
-//	  description: "One line telling the model when to use this.",
-//	  schema: { type: "object", properties: { version: { type: "string" } }, required: ["version"] },
-//	  tools: ["local_fs.read_file"],        // optional declared reach
-//	  deadline_ms: 5000,                    // optional, capped at MaxDeadline
-//	};
-//
-//	function run(args) {
-//	  const notes = host.tool("local_fs.read_file", { path: "CHANGELOG.md" });
-//	  return { version: args.version, lines: notes.text.split("\n").length };
-//	}
-//
-// `tools: []` declares that the script reaches nothing; omitting `tools`
-// leaves it unrestricted. Every validation failure is a startup error naming
-// the file — nothing is silently skipped — except an absent script
-// directory, which is not an error.
-
 // Script is one loaded script tool.
 type Script struct {
 	// File is the path the script was loaded from — the identity every error
@@ -54,16 +31,9 @@ type Script struct {
 	// deadline_ms clamped to MaxDeadline, or the sandbox default).
 	Deadline time.Duration
 
-	// Tools is the script's declared reach: every "<provider>.<tool>"
-	// address it may pass to host.tool, in declaration order.
-	//
-	// Read together with ToolsDeclared: an empty Tools with ToolsDeclared
-	// true means the script declared it reaches nothing (host.tool refuses
-	// every call); ToolsDeclared false means no list was declared and the
-	// script may reach anything the envelope allows.
+	// Tools is the script's declared reach, in declaration order; read together with ToolsDeclared since an empty Tools means either nothing declared or an explicit empty allowlist.
 	Tools []string
-	// ToolsDeclared reports whether the script's descriptor carried a
-	// `tools` field. See Tools.
+	// ToolsDeclared reports whether the script's descriptor carried a `tools` field (see Tools).
 	ToolsDeclared bool
 
 	prog       *goja.Program
@@ -73,23 +43,13 @@ type Script struct {
 	reach      *declaredReach
 }
 
-// toolNamePattern is what a script may call itself. No dots: the engine
-// addresses every tool as "<provider>.<tool>", so a dot in the name would
-// produce an address nothing can resolve.
 var toolNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,63}$`)
 
 const (
-	// maxDescriptionBytes bounds a script's description; descriptions are
-	// paid on every turn.
 	maxDescriptionBytes = 4 << 10
-	// maxSchemaBytes bounds the marshaled schema, for the same reason.
-	maxSchemaBytes = 16 << 10
+	maxSchemaBytes      = 16 << 10
 )
 
-// toolDescriptor is the JSON projection of a script's `tool` export. Tools is
-// a RawMessage rather than a []string so an absent declaration and an empty
-// one stay distinguishable — decoding straight into []string would collapse
-// both to nil.
 type toolDescriptor struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -98,13 +58,8 @@ type toolDescriptor struct {
 	DeadlineMS  json.RawMessage `json:"deadline_ms"`
 }
 
-// maxDeclaredTools bounds the declared reach.
 const maxDeclaredTools = 64
 
-// loadScripts reads dir and returns its script tools in a deterministic
-// order. reserved holds names the caller has already committed to, so a
-// collision is caught here rather than discovered as a shadowed tool at
-// runtime.
 func (s *sandbox) loadScripts(ctx context.Context, dir string, reserved []string) ([]*Script, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, nil
@@ -152,7 +107,6 @@ func (s *sandbox) loadScripts(ctx context.Context, dir string, reserved []string
 	return scripts, nil
 }
 
-// loadScript compiles, executes and validates ONE file.
 func (s *sandbox) loadScript(ctx context.Context, file string) (*Script, error) {
 	src, err := os.ReadFile(file)
 	if err != nil {
@@ -167,10 +121,7 @@ func (s *sandbox) loadScript(ctx context.Context, file string) (*Script, error) 
 	}
 
 	label := "load " + filepath.Base(file)
-	// The file's top level runs here under the same deadline, stack cap and
-	// panic recovery as a real execution, so a script that loops at load
-	// time fails the build rather than hanging it. host.tool is refused
-	// during load (see installHost).
+	// Load-time execution runs under the same deadline/stack/panic recovery as a real run; host.tool is refused here (see installHost).
 	res, err := s.run(ctx, execSpec{
 		label:       label,
 		deadline:    s.deadline,
@@ -199,8 +150,6 @@ func (s *sandbox) loadScript(ctx context.Context, file string) (*Script, error) 
 	return s.validateDescriptor(file, prog, desc)
 }
 
-// validateDescriptor turns a parsed descriptor into a Script or a teaching
-// error. Each check names the file and the exact repair.
 func (s *sandbox) validateDescriptor(file string, prog *goja.Program, desc toolDescriptor) (*Script, error) {
 	name := strings.TrimSpace(desc.Name)
 	switch {
@@ -242,8 +191,6 @@ func (s *sandbox) validateDescriptor(file string, prog *goja.Program, desc toolD
 		if err := json.Unmarshal(desc.DeadlineMS, &ms); err != nil || ms <= 0 {
 			return nil, wrapRecoverable(ErrScriptLoad, "%s: tool.deadline_ms must be a positive number of milliseconds (ceiling %d), got %s", file, MaxDeadline.Milliseconds(), clampText(string(desc.DeadlineMS), 64))
 		}
-		// Clamped, not refused: a script asking for more gets the most the
-		// sandbox has.
 		deadline = s.clampDeadline(time.Duration(ms) * time.Millisecond)
 	}
 
@@ -266,8 +213,6 @@ func (s *sandbox) validateDescriptor(file string, prog *goja.Program, desc toolD
 	return sc, nil
 }
 
-// normaliseDeclaredTools validates the optional `tools` declaration. Every
-// failure is a load-time error naming the file.
 func normaliseDeclaredTools(file string, raw json.RawMessage) (names []string, declared bool, err error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, false, nil
@@ -294,8 +239,6 @@ func normaliseDeclaredTools(file string, raw json.RawMessage) (names []string, d
 				file, echoArg(entry))
 		}
 		if provider == ToolsProviderName {
-			// Refused at load rather than at the call: the recursion guard
-			// would refuse it anyway.
 			return nil, false, wrapRecoverable(ErrScriptLoad,
 				"%s: tool.tools declares %s, but scripts may not invoke %q-provider tools — sandbox depth is exactly one. Inline the computation instead",
 				file, echoArg(addr), ToolsProviderName)
@@ -309,8 +252,6 @@ func normaliseDeclaredTools(file string, raw json.RawMessage) (names []string, d
 	return names, true, nil
 }
 
-// normaliseSchema validates the declared schema and fills in the parts every
-// provider expects, so a script author writes only the interesting half.
 func normaliseSchema(file string, raw map[string]any) (schema map[string]any, props, required []string, allowExtra bool, err error) {
 	if raw == nil {
 		return nil, nil, nil, false, wrapRecoverable(ErrScriptLoad, "%s: tool.schema is missing. Declare the arguments: schema: { type: \"object\", properties: { … } } (use an empty properties object for a tool that takes none)", file)
@@ -379,8 +320,6 @@ func normaliseSchema(file string, raw map[string]any) (schema map[string]any, pr
 	return schema, props, required, allowExtra, nil
 }
 
-// exec runs one script tool: fresh VM, program re-evaluated (from the cached
-// compilation), then run(args) with JSON-only arguments.
 func (s *sandbox) execScript(ctx context.Context, sc *Script, args map[string]any) (*Result, error) {
 	encoded, err := json.Marshal(args)
 	if err != nil {
@@ -401,8 +340,7 @@ func (s *sandbox) execScript(ctx context.Context, sc *Script, args map[string]an
 			}
 			runFn, ok := goja.AssertFunction(vm.Get("run"))
 			if !ok {
-				// Load-time validation already proved this; a file edited on disk
-				// after startup is the only way here, and it still must not panic.
+				// Load-time validation already proved this; only a file edited on disk after startup reaches here, and it must not panic.
 				return nil, fmt.Errorf("%s no longer defines `function run(args)`", sc.File)
 			}
 			argVal, aerr := codec.toJS(encoded)
@@ -414,9 +352,6 @@ func (s *sandbox) execScript(ctx context.Context, sc *Script, args map[string]an
 	})
 }
 
-// stripLabel removes the sandbox's own label from an execution error, so a load
-// failure reads "<file>: threw: …" rather than
-// "<file>: goja: load <file> threw: …".
 func stripLabel(msg, label string) string {
 	msg = strings.TrimPrefix(msg, "goja: "+label)
 	msg = strings.TrimPrefix(msg, ":")

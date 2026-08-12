@@ -22,18 +22,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file is the acceptance for chains-as-agents: a task chain declared by
-// convention (a chain-agent-* file) is dispatched as a fleet unit and answers,
-// through the real fleetservice → agentinstance kernel → agenthost spawn
-// path, with determinism from a single noop-handler task. HOME is isolated
-// per test; the kernel sets no HOME on the child, so a reply proves
-// environment inheritance.
-
-// chainFixtureReply must match writeChainAgentFixture's noop task print.
 const chainFixtureReply = "contenox chain unit fixture reply"
 
-// buildContenoxBinary compiles cmd/contenox into t.TempDir() and returns its
-// path; the go build cache makes reruns cheap.
 func buildContenoxBinary(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "contenox")
@@ -45,9 +35,6 @@ func buildContenoxBinary(t *testing.T) string {
 	return binPath
 }
 
-// runContenoxCLI seeds state through the real CLI — the same surface a user
-// configures with. Cwd is pinned to home so no cwd-walking code can escape into
-// the repo's own .contenox.
 func runContenoxCLI(t *testing.T, bin, home string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
@@ -59,9 +46,6 @@ func runContenoxCLI(t *testing.T, bin, home string, args ...string) {
 	}
 }
 
-// writeChainAgentFixture writes the deterministic no-model chain under a name
-// that declares it as an agent (the chain-agent-* filename convention), and
-// returns its path.
 func writeChainAgentFixture(t *testing.T, contenoxDir string) string {
 	t.Helper()
 	chain := map[string]any{
@@ -81,8 +65,6 @@ func writeChainAgentFixture(t *testing.T, contenoxDir string) string {
 	return path
 }
 
-// recordingViewer is a Viewer that records the session stream. Deliver must not
-// block (kernel contract), so it only appends under a mutex.
 type recordingViewer struct {
 	id string
 
@@ -93,6 +75,7 @@ type recordingViewer struct {
 func (v *recordingViewer) ID() string { return v.id }
 
 func (v *recordingViewer) Deliver(_ context.Context, n libacp.SessionNotification) error {
+	// Deliver must not block: kernel contract.
 	v.mu.Lock()
 	v.updates = append(v.updates, n)
 	v.mu.Unlock()
@@ -100,15 +83,12 @@ func (v *recordingViewer) Deliver(_ context.Context, n libacp.SessionNotificatio
 }
 
 func (v *recordingViewer) RequestPermission(_ context.Context, _ libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error) {
-	// The fixture chain calls no tools, so nothing is ever gated here. Denying
-	// is the safe answer if that ever changes.
+	// Fail-closed: this fixture never triggers a gated tool, but deny is the safe default if that changes.
 	return libacp.RequestPermissionResponse{
 		Outcome: libacp.RequestPermissionOutcome{Outcome: libacp.PermissionOutcomeCancelled},
 	}, nil
 }
 
-// messageText concatenates the text of every agent_message_chunk observed: the
-// unit's streamed reply as one string.
 func (v *recordingViewer) messageText() string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -135,12 +115,7 @@ func TestFleetE2E_ChainAgent_DiscoveredDispatchedAndAnswers(t *testing.T) {
 	bin := buildContenoxBinary(t)
 	home := t.TempDir()
 
-	// The kernel sets no HOME on the child; it inherits this process's, so
-	// setting it here redirects the child and proves inheritance when the
-	// unit answers.
 	t.Setenv("HOME", home)
-	// Neutralize ambient overrides from the invoking environment: empty reads
-	// as unset, falling through to the seeded DB configuration.
 	for _, k := range []string{
 		"CONTENOX_DEFAULT_MODEL", "CONTENOX_DEFAULT_PROVIDER",
 		"CONTENOX_DEFAULT_ALT_MODEL", "CONTENOX_DEFAULT_ALT_PROVIDER",
@@ -150,10 +125,6 @@ func TestFleetE2E_ChainAgent_DiscoveredDispatchedAndAnswers(t *testing.T) {
 		t.Setenv(k, "")
 	}
 
-	// The engine hard-requires a configured default model even though the
-	// noop fixture chain never resolves one; the name is deliberately fake so
-	// any accidental model resolution fails loudly. update-check=false keeps
-	// startup off the network.
 	runContenoxCLI(t, bin, home, "config", "set", "default-model", "chain-unit-fixture-model")
 	runContenoxCLI(t, bin, home, "config", "set", "update-check", "false")
 
@@ -161,7 +132,6 @@ func TestFleetE2E_ChainAgent_DiscoveredDispatchedAndAnswers(t *testing.T) {
 	require.DirExists(t, contenoxDir, "the CLI seeding run must have created the isolated state directory")
 	chainPath := writeChainAgentFixture(t, contenoxDir)
 
-	// The fleet's own registry DB, separate from the unit's.
 	ctx := context.Background()
 	db, err := libdb.NewSQLiteDBManager(ctx, filepath.Join(t.TempDir(), "fleet-e2e.db"), runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
@@ -169,7 +139,6 @@ func TestFleetE2E_ChainAgent_DiscoveredDispatchedAndAnswers(t *testing.T) {
 	agents := agentregistryservice.New(db)
 	missions := missionservice.New(db)
 
-	// Declared by convention: no hand-registration anywhere in this test.
 	res, err := chainagents.Discover(ctx, agents, contenoxDir)
 	require.NoError(t, err)
 	require.Equal(t, []string{"agent-fleet-fixture"}, res.Created,
@@ -211,15 +180,11 @@ func TestFleetE2E_ChainAgent_DiscoveredDispatchedAndAnswers(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, controller, "the first viewer of an unattended dispatched session becomes its controller")
 
-	// This fixture calls no mission tool, so it gets nudged once and prints
-	// its reply again (the nudge cure itself is asserted in
-	// e2e_unattended_nudge_test.go).
 	require.Eventually(t, func() bool {
 		return strings.Contains(viewer.messageText(), chainFixtureReply)
 	}, 120*time.Second, 100*time.Millisecond,
 		"chain unit never streamed its reply; got %q\nstderr:\n%s", viewer.messageText(), stderr.String())
 
-	// The board sees it as a running unit of kind chain, with the session open.
 	status, err := svc.Get(ctx, result.InstanceID)
 	require.NoError(t, err)
 	require.Equal(t, agentinstance.StateRunning, status.State)
@@ -231,8 +196,6 @@ func TestFleetE2E_ChainAgent_DiscoveredDispatchedAndAnswers(t *testing.T) {
 	require.ErrorIs(t, err, agentinstance.ErrNotFound)
 }
 
-// lockedBuffer is a concurrency-safe sink for the spawned unit's stderr, so a
-// failure message can quote it without racing the subprocess's writer.
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf strings.Builder

@@ -1,17 +1,4 @@
-// Package gitreview projects a repository's changes as STRUCTURED data for a
-// human review surface.
-//
-// It is a second projection over the same in-process go-git core the
-// agent-facing toolset uses (services/localtools), not a replacement. That
-// surface answers a language model with unified-diff TEXT and only ever looks
-// at the worktree; this one answers a renderer with hunks it never has to
-// re-parse, between any two of WORKTREE, INDEX, HEAD, or a named revision.
-//
-// Containment is the caller's workspace root, not the repository root. The
-// repository may sit ABOVE the workspace root (a project folder inside a
-// monorepo); everything this package reports or touches is still restricted to
-// the subtree under the root it was given, so a diff can never become a way to
-// read outside it.
+// Package gitreview projects a repository's changes as structured data for a human review surface, diffing between any two of WORKTREE, INDEX, HEAD, or a named revision. Containment is the caller's workspace root, not the repository root: everything reported or touched stays inside that subtree even when the repository sits above it.
 package gitreview
 
 import (
@@ -30,15 +17,14 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// Pseudo-refs. Diff accepts these three names in either position alongside any
-// revision go-git can resolve (a branch, a tag, a hash, `HEAD~2`).
+// Pseudo-refs accepted by Diff in either position, alongside any revision go-git can resolve (branch, tag, hash, HEAD~2).
 const (
 	RefWorktree = "WORKTREE"
 	RefIndex    = "INDEX"
 	RefHead     = "HEAD"
 )
 
-// File statuses. Fixed spellings; a renderer switches on them.
+// File statuses: fixed spellings a renderer switches on.
 const (
 	StatusAdded     = "added"
 	StatusDeleted   = "deleted"
@@ -47,12 +33,9 @@ const (
 	StatusUntracked = "untracked"
 )
 
-// maxRefCommits bounds the commit list Refs returns.
 const maxRefCommits = 100
 
-// Refusal is a caller-fixable rejection: a bad ref, a path outside the root, a
-// stale hunk. The bus maps it onto invalid-params so the operator is told which
-// rule they broke; anything else is an internal error.
+// Refusal is a caller-fixable rejection — a bad ref, a path outside the root, a stale hunk — mapped by the bus onto invalid-params; anything else is an internal error.
 type Refusal struct{ msg string }
 
 func (e *Refusal) Error() string { return e.msg }
@@ -67,14 +50,9 @@ func IsRefusal(err error) bool {
 	return errors.As(err, &r)
 }
 
-// ErrNoRepository is the refusal for a workspace root that is not under version
-// control. It is a Refusal so the surface can say so plainly instead of showing
-// an internal failure.
+// ErrNoRepository is the refusal for a workspace root that is not under version control, surfaced as a Refusal rather than an internal failure.
 var ErrNoRepository = &Refusal{msg: "this workspace is not inside a git repository"}
 
-// scope is one opened repository together with the workspace subtree the caller
-// is confined to. repoRel is the repository-relative prefix of that subtree,
-// slash-separated and "" when the workspace root IS the repository root.
 type scope struct {
 	repo     *git.Repository
 	repoRoot string
@@ -82,9 +60,6 @@ type scope struct {
 	repoRel  string
 }
 
-// open resolves root, finds the repository containing it, and computes the
-// containment prefix. root must already be an allowlisted workspace root — this
-// package never widens what it is given.
 func open(root string) (*scope, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
@@ -113,8 +88,6 @@ func open(root string) (*scope, error) {
 	return &scope{repo: repo, repoRoot: repoRoot, root: resolved, repoRel: prefix}, nil
 }
 
-// findRepoRoot walks up from start looking for a .git entry (a directory in an
-// ordinary clone, a file in a linked worktree or submodule).
 func findRepoRoot(start string) (string, bool) {
 	dir := start
 	for {
@@ -129,9 +102,6 @@ func findRepoRoot(start string) (string, bool) {
 	}
 }
 
-// inScope reports whether a repository-relative path lies inside the workspace
-// subtree, and returns it as the workspace-relative path the caller addresses
-// it by. The one containment door for everything this package emits.
 func (s *scope) inScope(repoPath string) (string, bool) {
 	if s.repoRel == "" {
 		return repoPath, true
@@ -146,10 +116,6 @@ func (s *scope) inScope(repoPath string) (string, bool) {
 	return strings.TrimPrefix(repoPath, prefix), true
 }
 
-// toRepoPath contains a caller-supplied workspace-relative path and returns it
-// in the slash-separated, repository-relative form git uses. An absolute path,
-// or one that escapes the root by any route including a symlink, is refused
-// rather than re-anchored.
 func (s *scope) toRepoPath(p string) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" || p == "." {
@@ -179,8 +145,6 @@ func (s *scope) toRepoPath(p string) (string, error) {
 	return cleaned, nil
 }
 
-// underPath reports whether repoPath is at or under filter (a repo-relative
-// prefix). An empty filter matches everything.
 func underPath(repoPath, filter string) bool {
 	if filter == "" {
 		return true
@@ -188,8 +152,6 @@ func underPath(repoPath, filter string) bool {
 	return repoPath == filter || strings.HasPrefix(repoPath, filter+"/")
 }
 
-// headCommit returns the commit HEAD points at. A repository with no commits is
-// a normal state, not an error: ok is false and err is nil.
 func headCommit(repo *git.Repository) (c *object.Commit, ok bool, err error) {
 	ref, err := repo.Head()
 	if err != nil {
@@ -220,10 +182,6 @@ func subjectOf(msg string) string {
 	return strings.TrimSpace(msg)
 }
 
-// ---------------------------------------------------------------------------
-// Status
-// ---------------------------------------------------------------------------
-
 // StatusEntry is one changed path as the review surface addresses it: Path is
 // workspace-relative, Code is git's own single letter.
 type StatusEntry struct {
@@ -231,9 +189,7 @@ type StatusEntry struct {
 	Code string `json:"code"`
 }
 
-// StatusResult is the review surface's status. Staged, Unstaged and Untracked
-// are the three lists a review pane renders as sections; Clean is the whole
-// answer when all three are empty.
+// StatusResult is the review surface's status: Staged, Unstaged and Untracked are the three section lists a review pane renders, and Clean is true when all three are empty.
 type StatusResult struct {
 	Branch    string        `json:"branch"`
 	Head      string        `json:"head,omitempty"`
@@ -319,10 +275,6 @@ func (s *scope) worktreeStatus() (git.Status, error) {
 	return st, nil
 }
 
-// ---------------------------------------------------------------------------
-// Refs
-// ---------------------------------------------------------------------------
-
 // Branch is one local branch as a ref picker lists it.
 type Branch struct {
 	Name    string `json:"name"`
@@ -351,8 +303,7 @@ type RefsResult struct {
 	Commits    []Commit `json:"commits"`
 }
 
-// Refs lists the branches and recent commits of the repository containing root.
-// limit bounds the commit list (0 means a sensible default).
+// Refs lists the branches and recent commits of the repository containing root; limit bounds the commit list (0 means a sensible default).
 func Refs(ctx context.Context, root string, limit int) (*RefsResult, error) {
 	sc, err := open(root)
 	if err != nil {
@@ -410,6 +361,7 @@ func Refs(ctx context.Context, root string, limit int) (*RefsResult, error) {
 	count := 0
 	err = logIter.ForEach(func(c *object.Commit) error {
 		if count >= limit {
+			// go-git's ForEach stops on any non-nil error; this is the stop signal, not a real failure.
 			return errStopIteration
 		}
 		count++
@@ -429,6 +381,4 @@ func Refs(ctx context.Context, root string, limit int) (*RefsResult, error) {
 	return out, nil
 }
 
-// errStopIteration ends a go-git ForEach early: any non-nil error stops it, so
-// a sentinel is the documented way to take just the first n.
 var errStopIteration = errors.New("stop iteration")

@@ -15,7 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// stubToolsRepo is a minimal ToolsRepo for macro expansion tests.
 type stubToolsRepo struct {
 	names map[string][]taskengine.Tool
 }
@@ -69,14 +68,12 @@ func newMacroChain(template string, tools []string) *taskengine.TaskChainDefinit
 
 func runMacroExpand(t *testing.T, repo taskengine.ToolsRepo, sysInstruction string, tools []string) string {
 	t.Helper()
-	// We only test macro expansion; wrap a noop inner executor.
 	inner := &noopEnv{}
 	env, err := taskengine.NewMacroEnv(inner, repo)
 	if err != nil {
 		t.Fatalf("NewMacroEnv: %v", err)
 	}
 	chain := newMacroChain(sysInstruction, tools)
-	// ExecEnv expands macros then delegates to noopEnv which returns the expanded system_instruction.
 	raw, _, _, err := env.ExecEnv(libtracker.WithNewRequestID(context.Background()), chain, "", taskengine.DataTypeString)
 	if err != nil {
 		t.Fatalf("ExecEnv: %v", err)
@@ -88,7 +85,6 @@ func runMacroExpand(t *testing.T, repo taskengine.ToolsRepo, sysInstruction stri
 	return s
 }
 
-// noopEnv captures the expanded system_instruction from the first task and returns it.
 type noopEnv struct{}
 
 func (n *noopEnv) ExecEnv(_ context.Context, chain *taskengine.TaskChainDefinition, input any, _ taskengine.DataType) (any, taskengine.DataType, []taskengine.CapturedStateUnit, error) {
@@ -107,7 +103,6 @@ func stubRepo() *stubToolsRepo {
 }
 
 func TestUnit_MacroEnv_Tools_NoAllowlist(t *testing.T) {
-	// nil allowlist = no tools exposed; use ["*"] to expose all tools
 	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools}}", nil)
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
@@ -119,7 +114,6 @@ func TestUnit_MacroEnv_Tools_NoAllowlist(t *testing.T) {
 }
 
 func TestUnit_MacroEnv_Tools_StarAllowlist(t *testing.T) {
-	// ["*"] = explicit all
 	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools}}", []string{"*"})
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
@@ -131,7 +125,6 @@ func TestUnit_MacroEnv_Tools_StarAllowlist(t *testing.T) {
 }
 
 func TestUnit_MacroEnv_Tools_EmptyAllowlist(t *testing.T) {
-	// [] = explicitly no tools
 	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools}}", []string{})
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
@@ -191,7 +184,6 @@ func TestUnit_MacroEnv_Tools_Allowed(t *testing.T) {
 
 func TestUnit_MacroEnv_Tools_NotAllowed(t *testing.T) {
 	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools tools_b}}", []string{"tools_a"})
-	// tools_b is not in allowlist → should return empty array
 	var names []string
 	if err := json.Unmarshal([]byte(out), &names); err != nil {
 		t.Fatalf("not JSON: %v — got: %s", err, out)
@@ -202,10 +194,9 @@ func TestUnit_MacroEnv_Tools_NotAllowed(t *testing.T) {
 }
 
 func TestUnit_MacroEnv_Tools_NoAllowlist_Allowed(t *testing.T) {
-	// nil allowlist → no tools exposed; ["*"] is the explicit all-tools opt-in
 	out := runMacroExpand(t, stubRepo(), "{{toolservice:tools tools_b}}", []string{"*"})
 	if strings.Contains(out, "tool_b1") {
-		return // good
+		return
 	}
 	t.Errorf("expected tool_b1 when [*] allowlist, got: %s", out)
 }
@@ -218,7 +209,6 @@ func keys(m map[string][]string) []string {
 	return ks
 }
 
-// sysInstrEnv captures the expanded system_instruction from the first task.
 type sysInstrEnv struct{}
 
 func (n *sysInstrEnv) ExecEnv(_ context.Context, chain *taskengine.TaskChainDefinition, input any, _ taskengine.DataType) (any, taskengine.DataType, []taskengine.CapturedStateUnit, error) {

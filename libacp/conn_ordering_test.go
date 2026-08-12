@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// cmdStubAgent advertises an available-commands update while handling
-// session/new, scheduled via AfterResponse so it is written after the result.
 type cmdStubAgent struct {
 	libacp.UnimplementedAgent
 	conn *libacp.AgentSideConnection

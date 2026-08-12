@@ -1,23 +1,13 @@
 package localtools
 
-// Tests for the diff readability annotations (FIX 4): a rendered diff line
-// that a human cannot visually distinguish from its neighbour — because it's
-// a byte-identical duplicate, or differs only in tabs/trailing spaces — must
-// say so inline, since approving what you can't actually see the shape of is
-// exactly the failure mode reported live: a model-inserted duplicate
-// a.noticef line that "both lines look the same" on the approval card.
-
 import (
 	"strings"
 	"testing"
 )
 
-// TestUnit_UnifiedDiff_AnnotatesDuplicateInsertion pins the live repro: an
-// added line byte-identical to the adjacent (unchanged) context line must be
-// called out, not left to look like a no-op insertion.
+// TestUnit_UnifiedDiff_AnnotatesDuplicateInsertion pins that an added line byte-identical to the adjacent context line is called out, not left to look like a no-op insertion.
 func TestUnit_UnifiedDiff_AnnotatesDuplicateInsertion(t *testing.T) {
 	old := "func f() {\n\ta.noticef(\"start\")\n\tdoWork()\n}\n"
-	// The model inserted a second, identical a.noticef call above doWork().
 	next := "func f() {\n\ta.noticef(\"start\")\n\ta.noticef(\"start\")\n\tdoWork()\n}\n"
 
 	rendered := unifiedDiff("f.go", old, next)
@@ -25,17 +15,12 @@ func TestUnit_UnifiedDiff_AnnotatesDuplicateInsertion(t *testing.T) {
 	if !strings.Contains(rendered, "+\ta.noticef(\"start\")  (inserts duplicate of adjacent line)") {
 		t.Fatalf("added duplicate line was not annotated:\n%s", rendered)
 	}
-	// The unchanged context line beside it must NOT carry the note — only the
-	// added line is the duplicate.
 	if strings.Count(rendered, "(inserts duplicate of adjacent line)") != 1 {
 		t.Fatalf("expected exactly one duplicate annotation, got:\n%s", rendered)
 	}
 }
 
-// TestUnit_UnifiedDiff_AnnotatesWhitespaceOnlyChange pins that a line whose
-// only difference from its neighbour is tabs/spaces is called out, and that
-// the offending whitespace is made visible on the line itself rather than
-// only mentioned in the note.
+// TestUnit_UnifiedDiff_AnnotatesWhitespaceOnlyChange pins that a whitespace-only difference from a neighbour is called out, with the whitespace made visible on the line itself, not just in the note.
 func TestUnit_UnifiedDiff_AnnotatesWhitespaceOnlyChange(t *testing.T) {
 	old := "func f() {\n    return 1\n}\n"
 	// Re-indented with a tab instead of four spaces: same bytes otherwise.
@@ -46,16 +31,12 @@ func TestUnit_UnifiedDiff_AnnotatesWhitespaceOnlyChange(t *testing.T) {
 	if !strings.Contains(rendered, "(whitespace-only change)") {
 		t.Fatalf("whitespace-only change was not annotated:\n%s", rendered)
 	}
-	// The tab must render as a visible glyph, not blank space indistinguishable
-	// from the four spaces on the removed side.
 	if !strings.Contains(rendered, "+→return 1  (whitespace-only change)") {
 		t.Fatalf("tab was not made visible on the added line:\n%s", rendered)
 	}
 }
 
-// TestUnit_UnifiedDiff_AnnotatesTrailingWhitespaceChange pins the trailing-
-// space variant: invisible at end of line in a terminal, so it must render
-// as a visible glyph plus the same terse note.
+// TestUnit_UnifiedDiff_AnnotatesTrailingWhitespaceChange pins that trailing whitespace (invisible in a terminal) renders as a visible glyph plus the same note.
 func TestUnit_UnifiedDiff_AnnotatesTrailingWhitespaceChange(t *testing.T) {
 	old := "line one\nline two\n"
 	next := "line one\nline two   \n"
@@ -70,10 +51,7 @@ func TestUnit_UnifiedDiff_AnnotatesTrailingWhitespaceChange(t *testing.T) {
 	}
 }
 
-// TestUnit_UnifiedDiff_OrdinaryChangeIsNeverAnnotated pins that a genuine,
-// unambiguous change carries no note at all — the annotations are for the
-// specific case where a diff line is visually indistinguishable from a
-// neighbour, not a general commentary feature.
+// TestUnit_UnifiedDiff_OrdinaryChangeIsNeverAnnotated pins that a genuine, unambiguous change carries no annotation at all.
 func TestUnit_UnifiedDiff_OrdinaryChangeIsNeverAnnotated(t *testing.T) {
 	old := "func f() {\n\treturn 1\n}\n"
 	next := "func f() {\n\treturn 2\n}\n"

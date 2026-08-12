@@ -396,15 +396,22 @@ func splitSourceLines(text string) []string {
 }
 
 // cardUnit is a tool call's settled one-liner: the same shape the live region
-// showed while it ran, so the card does not visibly jump when it settles.
+// showed while it ran, so the card does not visibly jump when it settles. A
+// failed card renders its reason as an indented line under the card.
 type cardUnit struct {
 	title     string
 	status    libacp.ToolCallStatus
 	abandoned bool
+	reason    string
 }
 
 func (u cardUnit) render(width int, g glyphs) []frame.Line {
-	return []frame.Line{cardLine(u.title, u.status, u.abandoned, "", width, g)}
+	out := []frame.Line{cardLine(u.title, u.status, u.abandoned, "", width, g)}
+	if u.status == libacp.ToolCallStatusFailed && !u.abandoned && u.reason != "" {
+		indent := frame.S(frame.StyleNone, "  ")
+		out = append(out, wrapWithPrefix([]frame.Span{frame.S(frame.StyleMuted, u.reason)}, width, indent, indent)...)
+	}
+	return out
 }
 
 // stopUnit annotates a turn that ended for any reason other than a normal

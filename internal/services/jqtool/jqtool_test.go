@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// chainFixture is a miniature contenox chain file, queried by every semantics assertion below.
 const chainFixture = `{
   "id": "acp-session",
   "description": "the coding chain",
@@ -66,7 +65,6 @@ func mustExec(t *testing.T, tools taskengine.ToolsRepo, args map[string]any) *jq
 	return res
 }
 
-// values renders the emitted values as the compact-JSON lines a reader sees.
 func values(res *jqtool.Result) []string {
 	out := make([]string, 0, len(res.Values))
 	for _, v := range res.Values {
@@ -75,8 +73,6 @@ func values(res *jqtool.Result) []string {
 	return out
 }
 
-// declaredTypes reads a descriptor's "type", which JSON Schema spells as a bare
-// string for one type and as a list for a union.
 func declaredTypes(v any) []string {
 	switch t := v.(type) {
 	case string:
@@ -182,16 +178,12 @@ func TestUnit_JQTool_BothInputSources(t *testing.T) {
 	assert.Equal(t, `["plan","read","edit","respond"]`, values(fromPath)[0])
 	assert.Contains(t, fromInline.Source, "inline")
 
-	// An already-decoded object rather than a string is accepted too.
 	asValue := mustExec(t, tools, map[string]any{
 		"input":  map[string]any{"tasks": []any{map[string]any{"id": "plan"}}},
 		"filter": `[.tasks[].id]`,
 	})
 	assert.Equal(t, []string{`["plan"]`}, values(asValue))
 
-	// Every non-string branch the descriptor declares for input is one Exec
-	// really takes; a branch the schema promised but loadValue refused would be
-	// a contract wider than the code.
 	for _, tc := range []struct {
 		name  string
 		input any
@@ -208,7 +200,6 @@ func TestUnit_JQTool_BothInputSources(t *testing.T) {
 		})
 	}
 
-	// null is not one of the declared branches: it reads as no source at all.
 	_, err := exec(t, tools, map[string]any{"input": nil, "filter": "."})
 	require.Error(t, err, "a null input must be refused for having no source, not queried")
 	assert.Contains(t, err.Error(), "input source is required")
@@ -308,8 +299,7 @@ func TestUnit_JQTool_EmptyResultIsAnAnswer(t *testing.T) {
 	assert.False(t, res.Truncated, "an empty result is not a truncated one")
 	assert.Contains(t, res.Note, "matched nothing")
 
-	// The zero-value Values field must marshal as [] and not null: a consumer
-	// iterating the result should not have to special-case a missing array.
+	// Values must marshal as [] not null, so a consumer need not special-case a missing array.
 	blob, err := json.Marshal(res)
 	require.NoError(t, err)
 	assert.Contains(t, string(blob), `"values":[]`)
@@ -382,7 +372,6 @@ func TestUnit_JQTool_DeadlineBoundsNonTerminatingFilters(t *testing.T) {
 				"the message must name the two ways a filter fails to terminate")
 			assert.GreaterOrEqual(t, elapsed, budget/2,
 				"stopping far too early would mean the deadline is not what stopped it")
-			// Generous upper bound: this asserts bounded, not precise.
 			assert.Less(t, elapsed, 10*time.Second,
 				"the %v deadline must bound %s; it took %v", budget, tc.name, elapsed)
 		})
@@ -393,7 +382,6 @@ func TestUnit_JQTool_DeadlineIsClampedNotRefused(t *testing.T) {
 	t.Parallel()
 	tools := newTools(t, t.TempDir())
 
-	// A huge value clamps to the ceiling; a nonsense one takes the default.
 	res := mustExec(t, tools, map[string]any{"input": `{"a":1}`, "filter": `.a`, "deadline_ms": 600000})
 	assert.Equal(t, []string{`1`}, values(res))
 
@@ -433,14 +421,12 @@ func TestUnit_JQTool_UnboundedEmissionIsCappedWithAMarker(t *testing.T) {
 	t.Parallel()
 	tools := newTools(t, t.TempDir())
 
-	// range(100000) emits far more values than the default cap.
 	res := mustExec(t, tools, map[string]any{"input": `null`, "filter": `range(100000)`})
 	assert.Equal(t, 200, res.Count, "the default results cap must hold")
 	assert.True(t, res.Truncated)
 	assert.Contains(t, res.Note, "TRUNCATED")
 	assert.Contains(t, res.Note, "value cap")
 
-	// `max` raises it, and is itself clamped to the ceiling rather than refused.
 	res = mustExec(t, tools, map[string]any{"input": `null`, "filter": `range(100000)`, "max": 10})
 	assert.Equal(t, 10, res.Count)
 	assert.True(t, res.Truncated)
@@ -454,7 +440,6 @@ func TestUnit_JQTool_OutputCapTruncatesWithAMarker(t *testing.T) {
 	t.Parallel()
 	tools := newTools(t, t.TempDir())
 
-	// ~1 KB per value: the byte cap bites well before the 200-value count cap.
 	res := mustExec(t, tools, map[string]any{
 		"input":  `null`,
 		"filter": `range(100) | ("x" * 1000)`,
@@ -490,13 +475,11 @@ func TestUnit_JQTool_ContainmentRefusesEscapes(t *testing.T) {
 	inner := filepath.Join(root, "workspace")
 	require.NoError(t, os.MkdirAll(inner, 0o755))
 	writeFixture(t, inner, "chain.json", chainFixture)
-	// A secret OUTSIDE the workspace, reachable only by escaping it.
 	outside := filepath.Join(root, "secrets.json")
 	require.NoError(t, os.WriteFile(outside, []byte(`{"token":"leaked"}`), 0o644))
 
 	tools := newTools(t, inner)
 
-	// The in-bounds control: containment is a boundary, not a lockout.
 	res := mustExec(t, tools, map[string]any{"path": "chain.json", "filter": `.id`})
 	assert.Equal(t, []string{`"acp-session"`}, values(res))
 
@@ -541,7 +524,6 @@ func TestUnit_JQTool_NoWorkspaceRootRefusesPathButNotInline(t *testing.T) {
 	assert.Contains(t, err.Error(), "--local-exec-allowed-dir")
 	assert.Contains(t, err.Error(), "`input`", "and it must name the source that still works")
 
-	// Inline still answers: the tool is degraded, not dead.
 	res := mustExec(t, tools, map[string]any{"input": `{"a":1}`, "filter": `.a`})
 	assert.Equal(t, []string{`1`}, values(res))
 }
@@ -815,12 +797,7 @@ func TestUnit_JQTool_ToolsRepoContract(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor pins the declared
-// OpenAPI contract and its agreement with what actually reaches the provider:
-// the request schema and the descriptor's parameters are rendered from one
-// property table, so they must agree property for property — types,
-// descriptions, enums and the required set — and the response schema must
-// describe the payload Exec really returns.
+// TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor pins that the OpenAPI contract, the tool descriptor, and Exec's actual output all agree property for property.
 func TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
 	t.Parallel()
 	tools := newTools(t, t.TempDir())
@@ -845,9 +822,6 @@ func TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
 	require.ElementsMatch(t, []any{"json", "yaml"}, req.Value.Properties["format"].Value.Enum,
 		"the accepted parsers are declared as an enum, not prose")
 
-	// input is the union resolveInput really accepts: a document string, or an
-	// already-decoded JSON value. null is deliberately absent — it reads as no
-	// input at all.
 	require.ElementsMatch(t,
 		[]string{"string", "object", "array", "number", "integer", "boolean"},
 		[]string(*req.Value.Properties["input"].Value.Type),
@@ -855,8 +829,6 @@ func TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
 	require.NotNil(t, req.Value.Properties["input"].Value.Items,
 		"a union carrying an array branch must declare items or the document is invalid")
 
-	// The descriptor is what reaches the provider: it must not drift from the
-	// declaration above.
 	declared, err := tools.GetToolsForToolsByName(ctx, jqtool.ToolsProviderName)
 	require.NoError(t, err)
 	require.Len(t, declared, 1)
@@ -873,8 +845,7 @@ func TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
 		require.Truef(t, ok, "descriptor declares %s", name)
 		require.Equalf(t, declaredTypes(prop["type"]), []string(*published.Value.Type),
 			"%s: descriptor and published schema must declare the same type set", name)
-		// An array branch must declare items in both places, or the published
-		// document is not a valid OpenAPI document.
+		// An array branch must declare items in both places, or the OpenAPI document is invalid.
 		_, wantItems := prop["items"]
 		require.Equalf(t, wantItems, published.Value.Items != nil, "%s: items declared in only one of the two", name)
 		require.NotEmptyf(t, published.Value.Description, "%s is described", name)
@@ -894,7 +865,6 @@ func TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
 			"%s: descriptor and published schema must declare the same values", name)
 	}
 
-	// The response contract is the Result payload Exec returns.
 	resp := doc.Components.Schemas["JqQueryResponse"]
 	require.NotNil(t, resp)
 	require.ElementsMatch(t, []string{"filter", "source", "format", "documents", "values", "count"}, resp.Value.Required)
@@ -902,7 +872,6 @@ func TestUnit_JQTool_PublishedSchemaMatchesToolDescriptor(t *testing.T) {
 		require.NotEmptyf(t, published.Value.Description, "%s is described", name)
 	}
 
-	// Declared against what a call actually produces, field for field.
 	dir := t.TempDir()
 	writeFixture(t, dir, "chain.json", chainFixture)
 	res, err := exec(t, newTools(t, dir), map[string]any{"filter": ".tasks[].id", "path": "chain.json"})
@@ -924,7 +893,6 @@ func TestUnit_JQTool_DeclarativeArgsOnTheCall(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, dir, "chain.json", chainFixture)
 
-	// Arguments carried on the ToolsCall rather than in the chain input.
 	res, _, err := jqtool.NewTools(dir).Exec(context.Background(), time.Now(), "some chat history", false,
 		&taskengine.ToolsCall{
 			Name:     jqtool.ToolsProviderName,

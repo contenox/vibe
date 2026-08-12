@@ -321,9 +321,7 @@ func TestUnit_TaskExec_ChatCompletionRetriesWithoutToolsWhenToolsOverflowContext
 	require.Equal(t, "hello", hist.Messages[len(hist.Messages)-1].Content)
 }
 
-// Regression: an early break in the execute_tool_calls batch (invalid
-// arguments on the first call) must not leave the remaining calls without a
-// result — strict providers reject transcripts with unanswered tool calls.
+// TestUnit_TaskExec_ExecuteToolCallsAnswersWholeBatchOnEarlyBreak guards against an early break in the tool-call batch leaving remaining calls without a result.
 func TestUnit_TaskExec_ExecuteToolCallsAnswersWholeBatchOnEarlyBreak(t *testing.T) {
 	repo := &mockModelRepo{}
 	toolsRepo := tools.NewMockToolsRegistry().
@@ -369,9 +367,7 @@ func TestUnit_TaskExec_ExecuteToolCallsAnswersWholeBatchOnEarlyBreak(t *testing.
 	require.True(t, answered["call-2"], "call after the break must carry a stub result")
 }
 
-// Regression: recovery/summarise tasks receive an earlier task's output via
-// input_var, which can end mid tool-call protocol (unanswered call, orphaned
-// result). chat_completion must reconcile before the provider sees it.
+// TestUnit_TaskExec_ChatCompletionRepairsDanglingToolProtocol guards against chat_completion forwarding a mid-protocol history (unanswered call, orphaned result) to the provider.
 func TestUnit_TaskExec_ChatCompletionRepairsDanglingToolProtocol(t *testing.T) {
 	var seenMessages []libmodelprovider.Message
 	repo := &mockModelRepo{

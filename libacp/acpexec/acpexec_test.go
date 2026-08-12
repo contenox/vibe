@@ -14,9 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests exercise acpexec.Spawn/Process against trivial subprocesses
-// (cat, echo, sleep), validating the transport in isolation from ACP itself.
-
 func TestSpawn_EchoesStdinToStdout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

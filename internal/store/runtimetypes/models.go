@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
+// AppendModel inserts a new model configuration into the database.
 func (s *store) AppendModel(ctx context.Context, model *Model) error {
 	now := time.Now().UTC()
 	model.CreatedAt = now
@@ -41,6 +42,7 @@ func (s *store) AppendModel(ctx context.Context, model *Model) error {
 	return err
 }
 
+// GetModel retrieves a model configuration by its ID.
 func (s *store) GetModel(ctx context.Context, id string) (*Model, error) {
 	var model Model
 	err := s.Exec.QueryRowContext(ctx, `
@@ -66,6 +68,7 @@ func (s *store) GetModel(ctx context.Context, id string) (*Model, error) {
 	return &model, err
 }
 
+// GetModelByName fetches a model configuration by its name.
 func (s *store) GetModelByName(ctx context.Context, name string) (*Model, error) {
 	var model Model
 	err := s.Exec.QueryRowContext(ctx, `
@@ -91,6 +94,7 @@ func (s *store) GetModelByName(ctx context.Context, name string) (*Model, error)
 	return &model, err
 }
 
+// DeleteModel removes a model configuration by model name.
 func (s *store) DeleteModel(ctx context.Context, modelName string) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		DELETE FROM ollama_models
@@ -105,6 +109,7 @@ func (s *store) DeleteModel(ctx context.Context, modelName string) error {
 	return checkRowsAffected(result)
 }
 
+// ListAllModels returns all configured models ordered by creation date descending.
 func (s *store) ListAllModels(ctx context.Context) ([]*Model, error) {
 	rows, err := s.Exec.QueryContext(ctx, `
         SELECT id, model, context_length, can_chat, can_embed, can_prompt, can_stream, created_at, updated_at
@@ -142,6 +147,7 @@ func (s *store) ListAllModels(ctx context.Context) ([]*Model, error) {
 	return models, nil
 }
 
+// UpdateModel updates an existing model configuration.
 func (s *store) UpdateModel(ctx context.Context, data *Model) error {
 	now := time.Now().UTC()
 	data.UpdatedAt = now
@@ -180,6 +186,7 @@ func (s *store) UpdateModel(ctx context.Context, data *Model) error {
 	return checkRowsAffected(result)
 }
 
+// ListModels returns a paginated list of models created before the given cursor.
 func (s *store) ListModels(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*Model, error) {
 	cursor := time.Now().UTC()
 	if createdAtCursor != nil {
@@ -226,6 +233,7 @@ func (s *store) ListModels(ctx context.Context, createdAtCursor *time.Time, limi
 	return models, nil
 }
 
+// EstimateModelCount estimates the total number of model records.
 func (s *store) EstimateModelCount(ctx context.Context) (int64, error) {
 	return s.estimateCount(ctx, "ollama_models")
 }

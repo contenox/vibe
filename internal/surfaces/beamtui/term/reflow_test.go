@@ -24,6 +24,9 @@ const (
 	// counting them counts residue rather than accidents of truncation.
 	hintMark   = "type / for commands"
 	statusMark = "beam-629a9e4f"
+	// tailMark identifies the transcript tail without matching histB, whose
+	// text also starts with "assistant:".
+	tailMark = "...and that is"
 )
 
 func realFrame(withHistory bool) frame.Frame {
@@ -171,6 +174,131 @@ func TestUnit_ScreenRepeatedDragsDoNotAccumulate(t *testing.T) {
 	for _, mark := range []string{hintMark, statusMark} {
 		if n := scr.count(mark); n != 1 {
 			t.Fatalf("%q appears %d times after six drags, want once\nscreen:\n%s", mark, n, scr.text())
+		}
+	}
+	assertHistoryIntact(t, scr)
+}
+
+// The gesture-protocol tests below drive the painter the way the engine now
+// does (see ANSI.onResizeGesture): disown at the moment the drag's first size
+// is reported — while the counts still describe the screen — then the terminal
+// reflows through the drag with no live region on it, then the debounced
+// settle adopts the size and repaints. This is the protocol that makes a
+// shrink-then-widen leave nothing behind, where the settle-time erase alone
+// strands whatever rewrapped above the caret.
+
+// TestUnit_ScreenGestureShrinkPauseWidenLeavesNoResidue is the maintainer's
+// live repro: drag big to small, pause long enough for the debounce to settle,
+// then drag back out. Two settles, two erases — and with the region taken down
+// at each gesture start, both erases land on geometry the counts describe, so
+// no copy of the transcript tail, the composer hint, the input line or the
+// status bar survives anywhere but the freshly painted region.
+func TestUnit_ScreenGestureShrinkPauseWidenLeavesNoResidue(t *testing.T) {
+	scr := newScreen(72)
+	p := &painter{out: scr, styles: plainStyles{}, width: 72, height: 20}
+	if err := p.commit(realFrame(true)); err != nil {
+		t.Fatalf("initial commit: %v", err)
+	}
+
+	// Gesture one: big -> small. The hook fires on the first report, before
+	// the drag's widths can rewrap the region.
+	p.disown()
+	for _, w := range []int{60, 47, 33, 30} {
+		scr.resize(w)
+	}
+	p.resize(30, 20)
+	if err := p.commit(realFrame(false)); err != nil {
+		t.Fatalf("repaint at width 30: %v", err)
+	}
+	for _, mark := range []string{tailMark, hintMark, statusMark} {
+		if n := scr.count(mark); n != 1 {
+			t.Fatalf("%q appears %d times while shrunk, want once\nscreen:\n%s", mark, n, scr.text())
+		}
+	}
+	assertHistoryIntact(t, scr)
+
+	// Gesture two: small -> big, after the pause that let gesture one settle.
+	p.disown()
+	for _, w := range []int{40, 55, 72} {
+		scr.resize(w)
+	}
+	p.resize(72, 20)
+	if err := p.commit(realFrame(false)); err != nil {
+		t.Fatalf("repaint at width 72: %v", err)
+	}
+
+	for _, mark := range []string{tailMark, hintMark, statusMark} {
+		if n := scr.count(mark); n != 1 {
+			t.Fatalf("%q appears %d times after shrink-pause-widen, want once\nscreen:\n%s", mark, n, scr.text())
+		}
+	}
+	assertHistoryIntact(t, scr)
+
+	// The whole screen, exactly: committed history, then the region, nothing
+	// stranded between or above.
+	want := []string{histA, histB, tail, "", hint, typing, status[:72]}
+	if got := strings.Split(scr.text(), "\n"); !equalLines(got, want) {
+		t.Fatalf("screen after the gesture = %q, want exactly %q", got, want)
+	}
+}
+
+// TestUnit_ScreenGestureRepeatedDragsLeaveNoResidue pins that the gesture
+// protocol stays exact over a session's worth of resizing, in both directions,
+// including a drag that returns to the width it started at.
+func TestUnit_ScreenGestureRepeatedDragsLeaveNoResidue(t *testing.T) {
+	scr := newScreen(72)
+	p := &painter{out: scr, styles: plainStyles{}, width: 72, height: 20}
+	if err := p.commit(realFrame(true)); err != nil {
+		t.Fatalf("initial commit: %v", err)
+	}
+	for _, settled := range []int{40, 72, 34, 90, 28, 72} {
+		p.disown()
+		for _, w := range []int{settled + 9, settled + 4, settled} {
+			scr.resize(w)
+		}
+		p.resize(settled, 20)
+		if err := p.commit(realFrame(false)); err != nil {
+			t.Fatalf("repaint at width %d: %v", settled, err)
+		}
+		for _, mark := range []string{tailMark, hintMark, statusMark} {
+			if n := scr.count(mark); n != 1 {
+				t.Fatalf("%q appears %d times at settled width %d, want once\nscreen:\n%s", mark, n, settled, scr.text())
+			}
+		}
+		assertHistoryIntact(t, scr)
+	}
+}
+
+// TestUnit_ScreenGestureStreamingCommitPrintsHistoryOnly covers a turn
+// streaming through a drag: with the region disowned and the live rows
+// withheld (the shape ANSI.Commit hands down mid-gesture), scrollback still
+// lands — raw, width-independent — and no chrome is painted for the drag's
+// next width to rewrap.
+func TestUnit_ScreenGestureStreamingCommitPrintsHistoryOnly(t *testing.T) {
+	scr := newScreen(72)
+	p := &painter{out: scr, styles: plainStyles{}, width: 72, height: 20}
+	if err := p.commit(realFrame(true)); err != nil {
+		t.Fatalf("initial commit: %v", err)
+	}
+
+	p.disown()
+	scr.resize(50)
+	streamed := "assistant: a line streamed mid-drag"
+	if err := p.commit(frame.Frame{
+		Scrollback: lines(streamed),
+		Cursor:     frame.Cursor{Hidden: true},
+	}); err != nil {
+		t.Fatalf("mid-gesture commit: %v", err)
+	}
+	scr.resize(30)
+	p.resize(30, 20)
+	if err := p.commit(realFrame(false)); err != nil {
+		t.Fatalf("repaint at width 30: %v", err)
+	}
+
+	for _, mark := range []string{streamed, tailMark, hintMark, statusMark} {
+		if n := scr.count(mark); n != 1 {
+			t.Fatalf("%q appears %d times, want once\nscreen:\n%s", mark, n, scr.text())
 		}
 	}
 	assertHistoryIntact(t, scr)

@@ -1,4 +1,3 @@
-// chat_cmd.go implements contenox-runtime chat (session-backed chain execution).
 package contenoxcli
 
 import (
@@ -21,10 +20,8 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// chatOpts carries all effective config and flags needed by the run pipeline.
 type chatOpts struct {
-	// EffectiveTracker, when non-nil, overrides the engine's tracker (Noop, or
-	// the log tracker under --trace). Beam sets its beam.log-backed tracker.
+	// EffectiveTracker, when non-nil, overrides the engine's tracker (Noop, or the log tracker under --trace).
 	EffectiveTracker             libtracker.ActivityTracker
 	EffectiveDB                  string
 	EffectiveChain               string
@@ -44,9 +41,7 @@ type chatOpts struct {
 	EffectiveHITL                bool
 	EffectiveRaw                 bool
 	EffectiveThink               string
-	// EffectiveOptInBeta gates beta feature registration (betagate.go): off
-	// leaves goja unregistered and the agent-* discovery convention narrowed
-	// to the shipped planner.
+	// EffectiveOptInBeta gates beta feature registration: off leaves goja unregistered and the agent-* discovery convention narrowed to the shipped planner.
 	EffectiveOptInBeta bool
 	HistoryTrim        int
 	LastN              int
@@ -61,38 +56,19 @@ type chatOpts struct {
 	// EffectiveAskApproval lets editor integrations reuse BuildEngine while
 	// supplying their own HITL UI instead of the CLI tty prompt.
 	EffectiveAskApproval localtools.AskApproval
-	// EffectiveHITLService is the hitlservice.Service BuildEngine gates this
-	// engine through and registers the resume-on-verdict hook against, instead
-	// of the one it would otherwise mint. It is how a surface that also needs
-	// the service for itself — a mission fleet's attention channel, or the
-	// durable ask inbox an ACP transport re-offers a parked approval from —
-	// holds THE process's instance rather than a sibling over the same store:
-	// two instances share durable rows but no parked waiter, and only the
-	// hooked one can restart a checkpointed run, so a verdict recorded through
-	// the other resolves a row nothing is waiting on. Nil mints one, and the
-	// field is ignored when EffectiveHITL is false: no gate is built, so there
-	// is no hook to share.
+	// EffectiveHITLService is the hitlservice.Service BuildEngine gates this engine through instead of minting its own; nil mints one, and it is ignored when EffectiveHITL is false.
 	EffectiveHITLService hitlservice.Service
 	// EffectiveTaskEventSink lets editor integrations receive task events
 	// directly without subscribing to the engine bus.
 	EffectiveTaskEventSink taskengine.TaskEventSink
-	// EffectiveExtraTools are host-scoped tool providers merged into this
-	// engine's toolset and nowhere else — the oracle attention driver's
-	// provider registers here, never in the global registry.
+	// EffectiveExtraTools are host-scoped tool providers merged into this engine's toolset and nowhere else.
 	EffectiveExtraTools map[string]taskengine.ToolsRepo
-	// WarnW is where engine construction prints messages the operator must act
-	// on (e.g. the ungated-local_shell posture); it is the command's own
-	// stderr, not the tracker. A nil writer means tests and embedded callers
-	// get silence instead.
+	// WarnW is where engine construction prints messages the operator must act on; nil means silence.
 	WarnW io.Writer
-	// EffectiveStreamOutput renders assistant prose to stdout as it arrives
-	// instead of only at the end. Set exactly when stdout is a terminal: a pipe
-	// must keep receiving one buffered payload so `contenox "x" | jq` stays
-	// correct.
+	// EffectiveStreamOutput renders assistant prose to stdout as it arrives instead of only at the end.
 	EffectiveStreamOutput bool
 }
 
-// execChat runs the full chat pipeline against db, which the caller already opened.
 func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW io.Writer) error {
 	engine, err := BuildEngine(ctx, db, opts)
 	if err != nil {
@@ -113,7 +89,6 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 		return err
 	}
 
-	// Determine input: from flag, positional args (+optional stdin), or stdin alone.
 	in := opts.InputValue
 	if !opts.InputFlagPassed {
 		stdinData, ok, err := readStdinIfAvailable(maxCLIStdinBytes)
@@ -133,7 +108,6 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	if err != nil {
 		return err
 	}
-	// An image-only turn is valid; no input and no attachment is not.
 	if in == "" && len(images) == 0 {
 		return fmt.Errorf("no input for chain: pass input as args, --input, or pipe via stdin")
 	}
@@ -157,7 +131,6 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 		WorkspaceID: workspaceID,
 	})
 
-	// engine.Tracker is log-backed exactly when --trace is on, Noop otherwise.
 	_, _, chainEnd := engine.Tracker.Start(ctx, "execute", "chain", "chain", chainPathAbs)
 	defer chainEnd()
 	if !opts.EffectiveTracing {
@@ -175,10 +148,7 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 
 	agentsMD, agentsMDSource := loadAgentsMDFromCwd()
 
-	// This process's own cwd, so a run that parks on an approval and is
-	// resumed later — by a different process, from a different directory —
-	// still resolves a relative local_fs/git/jq path against where this
-	// session actually started, not against the resumer's cwd.
+	// The session's own cwd persists across resume, so relative paths resolve against where it started, not the resumer's directory.
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 		ctx = vfs.WithSessionCwd(ctx, cwd)
 	}
@@ -218,7 +188,6 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	}
 	printRemainingOutput(out, live.Written(), resp.Output, resp.OutputType, opts.EffectiveRaw)
 
-	// --last N: print last N non-system messages from the updated history.
 	if opts.LastN > 0 {
 		if hist, ok := resp.Output.(taskengine.ChatHistory); ok {
 			var visible []taskengine.Message
@@ -248,20 +217,8 @@ func execChat(ctx context.Context, db libdb.DBManager, opts chatOpts, out, errW 
 	return nil
 }
 
-// chatStreamDrainGrace is how long Stop keeps the subscription open after the
-// chain returns, so the SQLite bus poller (200ms cadence) can deliver the
-// turn's last chunks. Anything still in flight past it is not lost: whatever
-// the stream missed is printed by printRemainingOutput.
 const chatStreamDrainGrace = 250 * time.Millisecond
 
-// assistantStream renders assistant prose to stdout while the turn runs, and
-// remembers what it rendered so the buffered print afterwards prints only the
-// part the operator has not already read. The zero value is the disabled
-// stream: every method is safe on it, Written is empty, and the caller's
-// buffered path is unchanged.
-//
-// It consumes the same per-request task-event subject --think streams from —
-// there is one event pipeline, not a second one for output.
 type assistantStream struct {
 	mu      sync.Mutex
 	written strings.Builder
@@ -269,13 +226,6 @@ type assistantStream struct {
 	stop    func()
 }
 
-// startAssistantStream subscribes to the running request's task events and
-// renders every chat_completion content delta to w. Only assistant-prose
-// handlers reach w (taskengine.IsAssistantProseHandler), so a route task's
-// streamed control label never lands in the reply.
-//
-// Returns a disabled stream when enabled is false, or when there is nothing to
-// subscribe to: no engine bus, no request ID on ctx, or a failing subscription.
 func startAssistantStream(ctx context.Context, engine *Engine, w io.Writer, enabled bool) *assistantStream {
 	s := &assistantStream{}
 	if !enabled || engine == nil || engine.Bus == nil {
@@ -362,8 +312,7 @@ func (s *assistantStream) Stop() {
 	})
 }
 
-// Written is everything this stream rendered. Call after Stop: the render
-// goroutine has joined by then.
+// Written is everything this stream rendered; call after Stop, once the render goroutine has joined.
 func (s *assistantStream) Written() string {
 	if s == nil {
 		return ""
@@ -373,9 +322,6 @@ func (s *assistantStream) Written() string {
 	return s.written.String()
 }
 
-// printRemainingOutput is printRelevantOutput minus whatever a live stream
-// already put on screen. With no stream (piped, --raw, non-terminal) streamed
-// is empty and this is printRelevantOutput exactly.
 func printRemainingOutput(w io.Writer, streamed string, output any, outputType taskengine.DataType, raw bool) {
 	if streamed == "" || raw {
 		printRelevantOutput(w, output, outputType, raw)
@@ -395,8 +341,6 @@ func printRemainingOutput(w io.Writer, streamed string, output any, outputType t
 		}
 	}
 	if final == "" {
-		// Not prose (a structured chain output): the deltas were narration,
-		// and the payload still has to be printed in full.
 		fmt.Fprintln(w)
 		printRelevantOutput(w, output, outputType, raw)
 		return
@@ -404,12 +348,6 @@ func printRemainingOutput(w io.Writer, streamed string, output any, outputType t
 	fmt.Fprintln(w, final[streamOverlap(streamed, final):])
 }
 
-// streamOverlap returns how much of final the stream already ended with: the
-// length of the longest suffix of streamed that is a prefix of final. It is
-// the whole answer when the stream completed, a partial length when the drain
-// window closed mid-answer, and 0 when the deltas were a different message
-// (e.g. a tool-call preamble) — so the reply is printed once, never twice and
-// never half.
 func streamOverlap(streamed, final string) int {
 	n := min(len(streamed), len(final))
 	for ; n > 0; n-- {

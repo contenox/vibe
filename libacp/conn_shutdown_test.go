@@ -11,14 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// handlerJoinDelay is how long the slow handlers below keep working after
-// their context is cancelled, long enough that a Run which fails to join its
-// handler goroutines loses the race deterministically.
 const handlerJoinDelay = 250 * time.Millisecond
 
-// lingeringAgent's NewSession keeps running for handlerJoinDelay after its
-// context is cancelled, then records that it has returned (the strong
-// property beyond merely observing cancellation).
 type lingeringAgent struct {
 	libacp.UnimplementedAgent
 	entered  chan struct{}
@@ -73,7 +67,6 @@ func TestUnit_AgentSideRun_JoinsInFlightRequestHandlerBeforeReturning(t *testing
 		"Run returned while the NewSession handler goroutine was still executing")
 }
 
-// lingeringClient is the client-side mirror of lingeringAgent.
 type lingeringClient struct {
 	libacp.UnimplementedClient
 	entered  chan struct{}
@@ -124,8 +117,6 @@ func TestUnit_ClientSideRun_JoinsInFlightRequestHandlerBeforeReturning(t *testin
 		"Run returned while the ReadTextFile handler goroutine was still executing")
 }
 
-// lingeringNotifyAgent's Cancel lingers past cancellation the same way,
-// pinning that notification dispatch is joined too, not just requests.
 type lingeringNotifyAgent struct {
 	libacp.UnimplementedAgent
 	entered  chan struct{}

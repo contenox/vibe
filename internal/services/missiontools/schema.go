@@ -1,14 +1,5 @@
 package missiontools
 
-// The published OpenAPI contract for this package's tools. Request schemas are
-// converted from the very descriptors GetToolsForToolsByName hands the model
-// (schemaFromParameters), rather than restated here: the mission tools carry
-// nested argument shapes — a report's `handover` object, a plan's `entries`
-// array — that a flat property table could not hold without paraphrasing them
-// into a second copy that could disagree. Response schemas are written from
-// what Exec actually returns, which for every tool but mission_plan is a line
-// of text, not an object.
-
 import (
 	"context"
 	"encoding/json"
@@ -19,19 +10,12 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// missionToolSchema is one declared tool: the descriptor the request contract
-// is rendered from, the OpenAPI component prefix, and the response schema
-// describing what Exec returns for it.
 type missionToolSchema struct {
 	tool      taskengine.Tool
 	component string
 	response  func() *openapi3.SchemaRef
 }
 
-// missionToolSchemas is every tool this provider declares — the unit's four
-// (report, ask, plan, finish) and the supervisor's two (list, answer). Both
-// halves are published: which of them a given execution may see is a context
-// gate (GetToolsForToolsByName), not a difference in the contract.
 func missionToolSchemas() []missionToolSchema {
 	return []missionToolSchema{
 		{tool: reportToolSchema(), component: "MissionReport", response: reportResponseSchema},
@@ -74,10 +58,6 @@ func (p *provider) GetSchemasForSupportedTools(context.Context) (map[string]*ope
 	return map[string]*openapi3.T{ToolsProviderName: schema}, nil
 }
 
-// schemaFromParameters converts a tool descriptor's JSON Schema parameters
-// into an OpenAPI schema. The descriptor stays the single source of truth: the
-// published contract is a rendering of it, never a second copy that could
-// disagree.
 func schemaFromParameters(params any) (*openapi3.SchemaRef, error) {
 	raw, err := json.Marshal(params)
 	if err != nil {
@@ -90,8 +70,6 @@ func schemaFromParameters(params any) (*openapi3.SchemaRef, error) {
 	return &openapi3.SchemaRef{Value: &s}, nil
 }
 
-// textResponse is the response schema for a tool whose result is one line of
-// text (DataTypeString), which is all of them but mission_plan.
 func textResponse(description string) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:        &openapi3.Types{openapi3.TypeString},
@@ -119,7 +97,6 @@ func listMissionsResponseSchema() *openapi3.SchemaRef {
 	return textResponse("The MissionListPayload document, serialized as a JSON string: `{\"missions\":[…]}`, newest first, holding each mission's status, latest reports, and any question waiting on you.")
 }
 
-// planEntrySchema is one entry of the stored plan (missionservice.PlanEntry).
 func planEntrySchema() *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type: &openapi3.Types{openapi3.TypeObject},
@@ -147,8 +124,6 @@ func planEntrySchema() *openapi3.SchemaRef {
 	}}
 }
 
-// planResponseSchema is the stored plan mission_plan echoes back
-// (missionservice.Plan) — the only mission tool answering with structured data.
 func planResponseSchema() *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type: &openapi3.Types{openapi3.TypeObject},
@@ -171,7 +146,6 @@ func planResponseSchema() *openapi3.SchemaRef {
 	}}
 }
 
-// pendingAskSchema is one unanswered question from a unit (PendingAsk).
 func pendingAskSchema() *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type: &openapi3.Types{openapi3.TypeObject},
@@ -186,8 +160,6 @@ func pendingAskSchema() *openapi3.SchemaRef {
 	}}
 }
 
-// listMissionsPayloadSchema is the document mission_list serializes into its
-// string result.
 func listMissionsPayloadSchema() *openapi3.SchemaRef {
 	entry := &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type: &openapi3.Types{openapi3.TypeObject},

@@ -113,7 +113,6 @@ func convertToChatHistory(value interface{}) (ChatHistory, error) {
 	}
 }
 
-// Basic type conversions
 func convertToString(value interface{}) (string, error) {
 	switch v := value.(type) {
 	case string:
@@ -141,16 +140,14 @@ func convertToJSON(value interface{}) (interface{}, error) {
 	case map[string]interface{}, []interface{}:
 		return v, nil
 	case string:
-		// If it's a string that looks like JSON, try to unmarshal it
 		if strings.HasPrefix(v, "{") || strings.HasPrefix(v, "[") {
 			var result interface{}
 			if err := json.Unmarshal([]byte(v), &result); err == nil {
 				return result, nil
 			}
 		}
-		return v, nil // Keep as string if not valid JSON
+		return v, nil
 	default:
-		// Try to marshal to JSON and back to get proper structure
 		data, err := json.Marshal(v)
 		if err != nil {
 			return nil, err

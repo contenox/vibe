@@ -13,34 +13,13 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// Durable domain-event log, date-partitioned: one table per UTC day
-// (event_log_YYYYMMDD), so retention is an O(1) DROP of whole periods
-// (PruneEventPartitionsBefore) instead of DELETE+VACUUM on the operator's hot
-// database.
-//
-// schema_sqlite.sql holds only the partition registry (event_partitions) and
-// the global NID sequence (event_nid_seq); per-period tables are created at
-// runtime by EnsureEventPartitionExists — idempotent DDL, so the store holds
-// no partition state of its own and concurrent (even cross-process) callers
-// converge on one table per period. NIDs come from the single global sequence,
-// so ordering is monotonic ACROSS partitions, which is what makes
-// ListEventsSince a usable cursor.
-//
-// Events are WORKSPACE-scoped: every row carries workspace_id and every read
-// filters by it, so one workspace's consumers never see another's events.
-
 var (
 	ErrEventTypeRequired = errors.New("event_log: event type is required")
-	// ErrInvalidEventParameter rejects a malformed argument (nil event,
-	// negative hop, inverted time range, a registry row naming a table that
-	// does not match the partition-name grammar).
+	// ErrInvalidEventParameter rejects a malformed argument.
 	ErrInvalidEventParameter = errors.New("event_log: invalid parameter")
-	// ErrEventMissingRequiredField rejects an append or query without its
-	// workspace — the scoping invariant is load-bearing, never defaulted.
+	// ErrEventMissingRequiredField rejects an append or query without its workspace.
 	ErrEventMissingRequiredField = errors.New("event_log: missing required field")
-	// ErrEventTooOld / ErrEventTooNew reject event times outside the
-	// acceptance window, guarding the partition invariant: an accepted event
-	// always lands in the current or adjacent period.
+	// ErrEventTooOld / ErrEventTooNew reject event times outside the acceptance window.
 	ErrEventTooOld = errors.New("event_log: event is too old")
 	ErrEventTooNew = errors.New("event_log: event is too new")
 )
@@ -52,14 +31,9 @@ const EventAcceptanceWindow = 10 * time.Minute
 // MaxEventListLimit bounds one list/query page.
 const MaxEventListLimit = 1000
 
-// eventPartitionPrefix + a YYYYMMDD period names one per-day event table.
 const eventPartitionPrefix = "event_log_"
 
-// Event is one stored domain event, CloudEvents-ish: Type names what happened
-// (and doubles as the bus subject), Source names the producer, Subject the
-// entity concerned. WorkspaceID scopes the event; it is required on append.
-// Hop is the dispatch-loop guard: an event appended by a chain a trigger fired
-// carries its causing event's hop+1.
+// Event is one stored domain event, CloudEvents-ish; WorkspaceID scopes it and Hop guards dispatch-loop depth.
 type Event struct {
 	NID         int64           `json:"nid"`
 	WorkspaceID string          `json:"workspace_id"`
@@ -78,64 +52,34 @@ type EventPartition struct {
 	CreatedAt time.Time
 }
 
-// EventStore is the persistence surface over the partitioned event log. Every
-// read is workspace-scoped; AppendEvent reads the workspace from the event
-// itself.
+// EventStore is the persistence surface over the partitioned event log; every read is workspace-scoped.
 type EventStore interface {
-	// AppendEvent inserts event into its period's table, assigning the next
-	// global NID in the same transaction as the sequence bump. Defaults: zero
-	// Time becomes now (UTC), nil Data becomes {}, zero Hop is taken from the
-	// context (EventHopFromContext). Type and WorkspaceID are required; Time
-	// outside the acceptance window is rejected (ErrEventTooOld/ErrEventTooNew).
+	// AppendEvent inserts event into its period's table, assigning the next global NID; Type and WorkspaceID are required, and Time outside the acceptance window is rejected.
 	AppendEvent(ctx context.Context, event *Event) error
-	// ListEventsSince returns workspaceID's events with nid > afterNID in
-	// ascending nid order across every partition — the catch-up primitive.
-	// limit is clamped to [1, MaxEventListLimit].
+	// ListEventsSince returns workspaceID's events with nid > afterNID in ascending nid order, limit clamped to [1, MaxEventListLimit].
 	ListEventsSince(ctx context.Context, workspaceID string, afterNID int64, limit int) ([]Event, error)
-	// ListRecentEvents returns workspaceID's events in descending nid order —
-	// newest first, an operator activity view. beforeNID == 0 starts from the
-	// newest event; a positive beforeNID returns events with nid < beforeNID,
-	// so the smallest nid in a page is the cursor for the next (older) page.
+	// ListRecentEvents returns workspaceID's events newest first; beforeNID == 0 starts from the newest event, otherwise returns events with nid < beforeNID.
 	ListRecentEvents(ctx context.Context, workspaceID string, beforeNID int64, limit int) ([]Event, error)
 	// GetEventsByType returns workspaceID's events of eventType with time in
 	// [from, to], newest first.
 	GetEventsByType(ctx context.Context, workspaceID, eventType string, from, to time.Time, limit int) ([]Event, error)
 	// GetEventsBySource is GetEventsByType narrowed to one producer.
 	GetEventsBySource(ctx context.Context, workspaceID, eventType string, from, to time.Time, eventSource string, limit int) ([]Event, error)
-	// GetEventsBySubject returns one entity's history in a time range, newest
-	// first — the CloudEvents subject standing in for bob2's
-	// (aggregate_type, aggregate_id) pair.
+	// GetEventsBySubject returns one entity's history in a time range, newest first.
 	GetEventsBySubject(ctx context.Context, workspaceID, eventType string, from, to time.Time, subject string, limit int) ([]Event, error)
 	// GetEventTypesInRange returns the distinct event types workspaceID
 	// logged with time in [from, to], sorted.
 	GetEventTypesInRange(ctx context.Context, workspaceID string, from, to time.Time, limit int) ([]string, error)
-	// DeleteEventsByTypeInRange deletes workspaceID's events of eventType
-	// with time in [from, to]. The surgical path —
-	// PruneEventPartitionsBefore remains the O(1) retention mechanism; this
-	// exists for targeted removal within live periods.
+	// DeleteEventsByTypeInRange deletes workspaceID's events of eventType with time in [from, to].
 	DeleteEventsByTypeInRange(ctx context.Context, workspaceID, eventType string, from, to time.Time) error
-	// EnsureEventPartitionExists creates ts's period table, its indexes, and
-	// its registry row when absent. Plain idempotent DDL, holding no process
-	// state: it cannot go stale against a partition another process pruned,
-	// and concurrent callers are safe. AppendEvent calls it.
+	// EnsureEventPartitionExists creates ts's period table, its indexes, and its registry row when absent; idempotent DDL, safe for concurrent callers.
 	EnsureEventPartitionExists(ctx context.Context, ts time.Time) error
 	// ListEventPartitions returns the registered partitions in period order.
 	ListEventPartitions(ctx context.Context) ([]EventPartition, error)
-	// PruneEventPartitionsBefore drops every partition whose period is
-	// strictly before t's period — whole-table DROPs across ALL workspaces
-	// (partitions are shared; retention is a per-database decision), O(1) per
-	// period — and returns the dropped periods. t's own period always
-	// survives. Cursors and firings are untouched.
+	// PruneEventPartitionsBefore drops every partition whose period is strictly before t's period and returns the dropped periods; t's own period always survives.
 	PruneEventPartitionsBefore(ctx context.Context, t time.Time) ([]string, error)
 }
 
-// eventStore is pure persistence: no cached partition state, so every method
-// is safe to call concurrently and from other processes. Memoizing which
-// periods exist belongs to the service layer (eventlog's partitionCache).
-//
-// It takes a DBManager rather than the Exec the rest of this package's stores
-// share: AppendEvent must bump the NID sequence and insert the row in ONE
-// transaction, and Exec cannot open one.
 type eventStore struct {
 	db  libdb.DBManager
 	now func() time.Time
@@ -144,8 +88,7 @@ type eventStore struct {
 // EventStoreOption configures an event store at construction.
 type EventStoreOption func(*eventStore)
 
-// WithEventClock overrides the store's time source — tests crossing period
-// boundaries move "now" instead of writing out-of-window times.
+// WithEventClock overrides the store's time source.
 func WithEventClock(now func() time.Time) EventStoreOption {
 	return func(s *eventStore) {
 		if now != nil {
@@ -166,14 +109,9 @@ func NewEventStore(db libdb.DBManager, opts ...EventStoreOption) EventStore {
 	return s
 }
 
-// eventHopContextKey threads the current dispatch hop through execution
-// contexts, the same way request IDs travel (libtracker.ContextKeyRequestID):
-// the dispatcher stamps hop+1 on a fired chain's context, and every event that
-// chain's tools append inherits it.
 type eventHopContextKey struct{}
 
-// WithEventHop returns ctx carrying hop for events appended downstream.
-// hop <= 0 returns ctx unchanged.
+// WithEventHop returns ctx carrying hop for events appended downstream; hop <= 0 returns ctx unchanged.
 func WithEventHop(ctx context.Context, hop int) context.Context {
 	if hop <= 0 {
 		return ctx
@@ -187,8 +125,7 @@ func EventHopFromContext(ctx context.Context) int {
 	return hop
 }
 
-// EventPeriodKey derives an event time's partition period — UTC daily
-// (YYYYMMDD). Exported because the service layer's partition cache keys on it.
+// EventPeriodKey derives an event time's partition period, UTC daily (YYYYMMDD).
 func EventPeriodKey(t time.Time) string {
 	return t.UTC().Format("20060102")
 }
@@ -197,8 +134,6 @@ func eventPartitionTableName(period string) string {
 	return eventPartitionPrefix + period
 }
 
-// validEventPartitionTableName guards every identifier interpolated into
-// DDL/DML: exactly the prefix plus eight digits.
 func validEventPartitionTableName(name string) bool {
 	digits, ok := strings.CutPrefix(name, eventPartitionPrefix)
 	if !ok || len(digits) != 8 {
@@ -233,9 +168,6 @@ func (s *eventStore) EnsureEventPartitionExists(ctx context.Context, ts time.Tim
 	`, table)); err != nil {
 		return fmt.Errorf("event_log: create partition %s: %w", table, err)
 	}
-	// The two access paths every read uses: (workspace_id, nid) for cursor
-	// tailing and the recent-activity view, (workspace_id, type) for the
-	// query surface. Same pair bob2 indexed per tenant.
 	for _, stmt := range []string{
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_ws_nid ON %s(workspace_id, nid)`, table, table),
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_ws_type ON %s(workspace_id, type)`, table, table),
@@ -283,16 +215,12 @@ func (s *eventStore) AppendEvent(ctx context.Context, event *Event) error {
 	if event.Hop < 0 {
 		return fmt.Errorf("%w: hop must be non-negative", ErrInvalidEventParameter)
 	}
-	// Self-ensure keeps store-direct appenders (eventlog's DualPublisher)
-	// correct with no cached state: a period dropped since is recreated here,
-	// never appended into as if it still existed.
 	if err := s.EnsureEventPartitionExists(ctx, event.Time); err != nil {
 		return err
 	}
 	table := eventPartitionTableName(EventPeriodKey(event.Time))
 
-	// Sequence bump and row insert share one transaction, so concurrent
-	// appenders (including other processes) never mint a duplicate NID.
+	// Sequence bump and row insert share one transaction, so concurrent appenders never mint a duplicate NID.
 	exec, commit, release, err := s.db.WithTransaction(ctx)
 	if err != nil {
 		return fmt.Errorf("event_log: append tx: %w", err)
@@ -337,8 +265,6 @@ func (s *eventStore) ListEventPartitions(ctx context.Context) ([]EventPartition,
 	return parts, rows.Err()
 }
 
-// eventPartitionsInRange returns the registered partitions whose period falls
-// in [from, to] (inclusive, by day), in period order.
 func (s *eventStore) eventPartitionsInRange(ctx context.Context, from, to time.Time) ([]EventPartition, error) {
 	parts, err := s.ListEventPartitions(ctx)
 	if err != nil {
@@ -354,16 +280,9 @@ func (s *eventStore) eventPartitionsInRange(ctx context.Context, from, to time.T
 	return inRange, nil
 }
 
-// eventColumns is the single projection every event read binds, in scan order
-// — spelled once so a new column cannot be added to one query and forgotten in
-// another (same idiom as hitlApprovalColumns).
 const eventColumns = "nid, workspace_id, type, source, subject, time, data, hop"
 
-// ListEventsSince gathers up to limit rows past afterNID from every partition
-// that can still hold them (a MAX(nid) probe prunes cold periods), then merges
-// by NID. The merge, not period order, upholds the ascending-NID contract: an
-// event timed just inside the previous period may carry a higher NID than the
-// next period's first row.
+// ListEventsSince gathers up to limit rows past afterNID from every partition, merging by NID rather than period order to preserve ascending-NID order.
 func (s *eventStore) ListEventsSince(ctx context.Context, workspaceID string, afterNID int64, limit int) ([]Event, error) {
 	if err := requireEventWorkspace(workspaceID); err != nil {
 		return nil, err
@@ -411,8 +330,7 @@ func (s *eventStore) ListEventsSince(ctx context.Context, workspaceID string, af
 	return events, nil
 }
 
-// ListRecentEvents is the descending-nid sibling of ListEventsSince: newest
-// first, for an operator activity view.
+// ListRecentEvents is the descending-nid sibling of ListEventsSince: newest first, for an operator activity view.
 func (s *eventStore) ListRecentEvents(ctx context.Context, workspaceID string, beforeNID int64, limit int) ([]Event, error) {
 	if err := requireEventWorkspace(workspaceID); err != nil {
 		return nil, err
@@ -452,9 +370,6 @@ func (s *eventStore) ListRecentEvents(ctx context.Context, workspaceID string, b
 	return events, nil
 }
 
-// queryEventRange runs one filtered SELECT per partition in [from, to] and
-// merges newest-first (time DESC, nid DESC tiebreak) — bob2's query ordering
-// over the partition set.
 func (s *eventStore) queryEventRange(ctx context.Context, from, to time.Time, limit int, where string, args ...any) ([]Event, error) {
 	if limit <= 0 || limit > MaxEventListLimit {
 		limit = MaxEventListLimit
@@ -609,8 +524,7 @@ func (s *eventStore) PruneEventPartitionsBefore(ctx context.Context, t time.Time
 		if !validEventPartitionTableName(p.TableName) {
 			return dropped, fmt.Errorf("%w: registry names invalid table %q", ErrInvalidEventParameter, p.TableName)
 		}
-		// Registry delete and table drop commit together: no window where a
-		// registered period points at a missing table.
+		// Registry delete and table drop commit together, so no registered period ever points at a missing table.
 		exec, commit, release, err := s.db.WithTransaction(ctx)
 		if err != nil {
 			return dropped, fmt.Errorf("event_log: prune tx: %w", err)
@@ -645,8 +559,7 @@ func scanEventRows(rows *sql.Rows) ([]Event, error) {
 	events := []Event{}
 	for rows.Next() {
 		var e Event
-		// data scans via string, not json.RawMessage, for SQLite TEXT
-		// compatibility (see kv.go's getKVScoped).
+		// data scans via string, not json.RawMessage, for SQLite TEXT compatibility.
 		var data string
 		if err := rows.Scan(&e.NID, &e.WorkspaceID, &e.Type, &e.Source, &e.Subject, &e.Time, &data, &e.Hop); err != nil {
 			return nil, fmt.Errorf("event_log: scan row: %w", err)

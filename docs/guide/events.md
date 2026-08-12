@@ -97,7 +97,7 @@ A trigger grants timing, never capability — the fired chain runs under an oper
 
 ## In-process firing: the live path
 
-No command turns the live path on — it is part of running a host. When an engine-running host (`contenox acp`, `contenox beam`, or a `contenox mission fire` that built an engine for `--oracle` or for loaded triggers) appends an event under opt-in-beta, it fires matching triggers immediately, in its own process, on its own engine. The firing is asynchronous to the append: a chain failure is recorded on the firing record and never fails or delays the event's append. A host that stops mid-firing leaves that firing claimed, exactly like a dispatcher crash would — at-most-once holds either way.
+No command turns the live path on — it is part of running a host. When an engine-running host (`contenox acp`, `contenox beam`, or a `contenox mission fire` that built an engine for `--oracle` or for loaded triggers) appends an event under opt-in-beta, it fires matching triggers immediately, in its own process, on its own engine. The firing is asynchronous to the append: a chain failure is recorded on the firing record and never fails or delays the event's append. A host that stops mid-firing leaves that firing claimed, exactly like a dispatcher crash would — and the same stale-claim takeover (see [inspecting firings](#inspecting-firings-events-firings)) recovers both.
 
 Events appended by a process that runs no engine (`contenox mission stop`, a bare read verb) fire nothing live; they wait in the log for the catch-up dispatcher.
 
@@ -150,11 +150,11 @@ NID  TRIGGER    STATUS   REQUEST               TIME                  ERROR
 118  on-report  ok       evt-4b1c9a02f7e3d551  2026-08-04T20:23:43Z
 ```
 
-`ok`, `error`, and `refused` are outcomes; `running` is a claim whose host died mid-chain — claimed, unfinished, and never retried, which is the at-most-once guarantee showing its flip side. The listing is workspace-scoped like every read of the log, and `--limit` caps the page (default 50, ceiling 1000). No match prints `(no firings)` and exits 0 — an empty answer, not a failure.
+`ok`, `error`, and `refused` are outcomes; `running` is a claim with no outcome yet — a chain still executing, or one whose host died before it could record how things ended. A dead host's claim does not hold the pair forever: a `running` row untouched for two hours is stale, and the next claim attempt for that (trigger, event) pair takes it over and fires again — a crash costs a wait, not the firing. The takeover is a recovery path, not a schedule: nothing walks the table hunting stale claims, so a stranded firing that no path ever re-claims stays `running`, which is exactly what `contenox doctor` counts (below). The listing is workspace-scoped like every read of the log, and `--limit` caps the page (default 50, ceiling 1000). No match prints `(no firings)` and exits 0 — an empty answer, not a failure.
 
 > **Note:** the typo case leaves no error row to find. A trigger whose `listen_for.type` matches nothing records *nothing at all*: `contenox doctor` still lists it as loaded, and `events firings --trigger <name>` comes back empty. Compare the trigger's type against the types in `contenox events list` — a type that never appears there is the bug.
 
-`contenox doctor` adds one line under its beta section when the recent window went wrong (`Event firings: 2 of the last 50 ended in error/refused`) and stays silent when it did not.
+`contenox doctor` adds one line under its beta section when the recent window went wrong (`Event firings: 2 of the last 50 ended in error/refused or are stranded mid-run — contenox events firings`) and stays silent when it did not.
 
 ### Retention: `events prune`
 
@@ -183,7 +183,7 @@ There is no published firing feed, and there must never be one.
 
 The dispatch tier guarantees:
 
-- **At most one firing per (trigger, event) — across restarts, across the in-process/catch-up split, and across the live/catch-up overlap inside the dispatcher.** Every firing, on every path, is claimed in one durable table before the chain runs, and the claim is what dedups. The flip side is stated too: this is at-most-once, not exactly-once — a crash mid-chain (host or dispatcher) leaves that firing claimed but unfinished, and the pair is not retried.
+- **At most one live firing per (trigger, event) — across restarts, across the in-process/catch-up split, and across the live/catch-up overlap inside the dispatcher.** Every firing, on every path, is claimed in one durable table before the chain runs, and the claim is what dedups. A crash mid-chain (host or dispatcher) leaves that firing claimed but unfinished; a claim untouched for two hours is stale, and the next claim attempt for the pair takes it over and fires again. The bound sits above the longest run a live firing can legitimately reach, so a slow but living chain is not stolen and run twice. The flip side is stated too: a retried chain starts from the beginning, and whatever the dead attempt already did is not undone — the price of not losing the firing.
 - **Firings happen live, in-process, while an engine-running host is up.** An event such a host appends fires its triggers immediately in that process; the standalone dispatcher exists for everything appended while nothing ran.
 - **The cursor advances only after an event is handled.** A killed dispatcher resumes at exactly the event it stopped on. (The in-process path keeps no cursor — it is live-only; the cursor belongs to catch-up.)
 - **Events appended while no engine-running host and no dispatcher ran are fired on the next dispatcher start.** The durable log is the truth; the live bus is only a nudge. A missed live delivery delays a firing, it never loses one.
@@ -205,6 +205,7 @@ Each firing executes its chain through the same path `contenox run` uses, under 
 
 ## Next
 
+- [Event-driven chains: three stories (beta)](/docs/use-cases/event-driven-chains/) — the trigger tier in use: a phone buzz on `attention_asked`, a completion summary on `status_changed`, and the firing record as an audit trail
 - [The attention oracle (beta)](/docs/use-cases/auto-attention/) — `mission fire --oracle`: an in-process driver answers routine mission questions (no trigger, no dispatcher involved)
 - [HITL policies](/docs/guide/hitl/) — the envelopes fired chains run under
 - [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) — how the referenced files resolve

@@ -7,14 +7,10 @@ import (
 	"time"
 )
 
-// terminalDetachedTimeout bounds the out-of-band calls (release, kill, output)
-// RunTerminal makes on a context deliberately not the caller's, since those
-// calls happen precisely when the caller's context is already dead.
 const terminalDetachedTimeout = 5 * time.Second
 
-// TerminalPeer is the subset of the ACP client side that RunTerminal drives.
-// *AgentSideConnection satisfies it; tests and alternative transports can supply
-// their own implementation.
+// TerminalPeer is the subset of the ACP client side that RunTerminal drives;
+// *AgentSideConnection satisfies it.
 type TerminalPeer interface {
 	CreateTerminal(context.Context, CreateTerminalRequest) (CreateTerminalResponse, error)
 	TerminalOutput(context.Context, TerminalOutputRequest) (TerminalOutputResponse, error)
@@ -27,10 +23,9 @@ type TerminalPeer interface {
 var _ TerminalPeer = (*AgentSideConnection)(nil)
 
 // TerminalResult is the reconciled outcome of one command run over a peer
-// terminal. Cancelled and TimedOut are kept distinct: a deadline means the
-// command ran out of budget, a cancellation means something (usually
-// session/cancel) stopped the turn. Either way the terminal was killed before
-// the result was read.
+// terminal; Cancelled and TimedOut are kept distinct (deadline vs. an
+// external stop, usually session/cancel), and either way the terminal was
+// killed before the result was read.
 type TerminalResult struct {
 	Output    string
 	Truncated bool
@@ -41,20 +36,8 @@ type TerminalResult struct {
 }
 
 // RunTerminal creates a terminal on the peer, waits for it to exit, collects
-// its output and releases it, returning the reconciled result.
-//
-// onCreated, when non-nil, is invoked after the terminal exists but before
-// the wait begins — the seam for callers that need to surface the live
-// terminal (e.g. attaching it to a tool call in a UI).
-//
-// ctx governs only create and wait; release, kill and the output fetch run on
-// detached contexts since they matter most exactly when ctx is already dead.
-// The terminal is always released before returning.
-//
-// A non-nil error means the protocol exchange itself failed (create, a
-// non-ctx wait failure, or output read); the result still carries the
-// Cancelled/TimedOut flags established so far. Policy decisions (Truncated as
-// a budget error, banners, exit-status mapping) belong to the caller.
+// its output, and always releases it before returning, invoking onCreated
+// (if non-nil) once the terminal exists but before the wait begins.
 func RunTerminal(ctx context.Context, p TerminalPeer, req CreateTerminalRequest, onCreated func(terminalID string)) (TerminalResult, error) {
 	createResp, err := p.CreateTerminal(ctx, req)
 	if err != nil {

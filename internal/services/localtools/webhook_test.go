@@ -19,8 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// recTracker is a minimal tracker that records the operations it sees so tests
-// can assert webtools opens a span per call.
 type recTracker struct {
 	starts atomic.Int64
 }
@@ -74,8 +72,6 @@ func TestUnit_WebTools_WriteBodySchemaDeclaresType(t *testing.T) {
 	}
 }
 
-// ── happy path ──────────────────────────────────────────────────────────────
-
 func TestUnit_WebTools_Get_ReturnsJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "GET", r.Method)
@@ -124,12 +120,9 @@ func TestUnit_WebTools_RejectsUnknownArgs(t *testing.T) {
 	require.Contains(t, err.Error(), "unexpected")
 }
 
-// ── SSRF / host policy ──────────────────────────────────────────────────────
-
 func TestUnit_WebTools_Get_DeniedHostBlocked(t *testing.T) {
 	tools := newWebTools(t, &recTracker{})
-	// No host is denied by default — host policy is opt-in. Setting _denied_hosts
-	// blocks the call before the URL is ever contacted.
+	// No host is denied by default — host policy is opt-in; setting _denied_hosts blocks the call before the URL is ever contacted.
 	ctx := ctxWithPolicy(map[string]string{"_denied_hosts": "localhost"})
 	res, dt, err := execWeb(t, ctx, tools, "web_get", map[string]any{"url": "http://localhost/"})
 	require.NoError(t, err, "soft denial must be a string result, not an error")
@@ -151,7 +144,6 @@ func TestUnit_WebTools_Get_AllowedHostsExclusive(t *testing.T) {
 	})
 	tools := newWebTools(t, &recTracker{})
 
-	// Allowed host: passes.
 	_, _, err := execWeb(t, ctx, tools, "web_get", map[string]any{"url": srv.URL})
 	require.NoError(t, err)
 
@@ -170,8 +162,6 @@ func TestUnit_WebTools_Get_SchemeBlocked(t *testing.T) {
 	msg, _ := res.(string)
 	require.Contains(t, msg, "not in allowed schemes")
 }
-
-// ── size limits ─────────────────────────────────────────────────────────────
 
 func TestUnit_WebTools_Post_RequestBodyTooLarge(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
@@ -211,11 +201,8 @@ func TestUnit_WebTools_Get_ResponseTruncatedAtCap(t *testing.T) {
 	require.Equal(t, taskengine.DataTypeString, dt)
 	out := res.(string)
 	require.Contains(t, out, "truncated to 100 bytes")
-	// First 100 bytes should be the 'a's.
 	require.True(t, strings.HasPrefix(out, strings.Repeat("a", 100)))
 }
-
-// ── retry / status handling ─────────────────────────────────────────────────
 
 func TestUnit_WebTools_Get_RetriesOn5xx(t *testing.T) {
 	var hits atomic.Int64
@@ -264,8 +251,6 @@ func TestUnit_WebTools_Get_NoRetryOn4xx(t *testing.T) {
 	require.EqualValues(t, 1, hits.Load(), "4xx must not retry")
 }
 
-// ── headers shape ──────────────────────────────────────────────────────────
-
 func TestUnit_WebTools_Get_HeadersAsObject(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "bar", r.Header.Get("X-Foo"))
@@ -299,8 +284,6 @@ func TestUnit_WebTools_Get_HeadersAsJSONString(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
-
-// ── verb dispatch & body ────────────────────────────────────────────────────
 
 func TestUnit_WebTools_Post_BodyMarshalsAndSends(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -375,11 +358,7 @@ func TestUnit_WebTools_Get_SendsNoCallArgsBody(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// ── HEAD answers with metadata, not with a body ─────────────────────────────
-
-// TestUnit_WebTools_Head_ReturnsStatusAndHeaders pins what web_head promises:
-// the status code and the response headers. It used to return the response
-// body, which for HEAD is the empty string.
+// TestUnit_WebTools_Head_ReturnsStatusAndHeaders pins that web_head answers with the status code and response headers, never the (always-empty) response body.
 func TestUnit_WebTools_Head_ReturnsStatusAndHeaders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "HEAD", r.Method)
@@ -404,8 +383,7 @@ func TestUnit_WebTools_Head_ReturnsStatusAndHeaders(t *testing.T) {
 	require.Equal(t, `"abc123"`, head.Headers["Etag"], "names are canonical, so ETag is keyed Etag")
 	require.Equal(t, "one, two", head.Headers["X-Multi"], "a repeated header is joined with \", \"")
 
-	// The engine hands DataTypeJSON to json.Marshal, so this is the text the
-	// model reads — and it has to be the shape the published schema declares.
+	// The engine hands DataTypeJSON to json.Marshal, so this is the text the model reads, and it must match the published schema.
 	raw, err := json.Marshal(head)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"status":200`)
@@ -425,8 +403,6 @@ func TestUnit_WebTools_UnknownToolErrors(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown tool")
 }
-
-// ── tools surface ───────────────────────────────────────────────────────────
 
 func TestUnit_WebTools_SupportsListsAllVerbs(t *testing.T) {
 	tools := newWebTools(t, &recTracker{})

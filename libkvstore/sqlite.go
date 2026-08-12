@@ -53,8 +53,6 @@ type sqliteExecutor struct {
 	db   libdbexec.DBManager
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
 func translateSQLiteKVError(err error) error {
 	if err == nil {
 		return nil
@@ -132,8 +130,6 @@ func expiresAt(ttl time.Duration) *int64 {
 	ns := time.Now().Add(ttl).UnixNano()
 	return &ns
 }
-
-// ── KVExecutor: basic operations ─────────────────────────────────────────────
 
 func (e *sqliteExecutor) Get(ctx context.Context, key Key) (json.RawMessage, error) {
 	var value string
@@ -214,7 +210,6 @@ func (e *sqliteExecutor) Keys(ctx context.Context, pattern string) ([]Key, error
 	return keys, translateSQLiteKVError(rows.Err())
 }
 
-// ── KVExecutor: list operations ───────────────────────────────────────────────
 //
 // Lists are stored as a JSON array in a single kv_store row.
 
@@ -331,7 +326,6 @@ func (e *sqliteExecutor) ListRPop(ctx context.Context, key Key) (json.RawMessage
 	return popped, nil
 }
 
-// ── KVExecutor: set operations ────────────────────────────────────────────────
 //
 // Sets are stored as a JSON array without duplicates in a single kv_store row.
 
@@ -380,8 +374,6 @@ func (e *sqliteExecutor) SetRemove(ctx context.Context, key Key, member json.Raw
 		return txe.setSave(ctx, key, out)
 	})
 }
-
-// ── utilities ─────────────────────────────────────────────────────────────────
 
 // globToLike converts a glob-style pattern (*, ?) to an SQL LIKE pattern (%, _),
 // escaping literal %, _, and \. Only correct paired with ESCAPE '\' — see Keys.

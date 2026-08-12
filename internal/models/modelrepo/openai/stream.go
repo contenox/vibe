@@ -18,13 +18,17 @@ type OpenAIStreamClient struct {
 	openAIClient
 }
 
-// Stream emits raw deltas per the modelrepo.StreamParcel contract: content /
-// thinking / tool-call fragments as they arrive on the wire, then one typed
-// terminal parcel (finish reason + usage). Assembly belongs to the engine-side
-// modelrepo.StreamAssembler, never to this client.
+// Stream emits raw StreamParcel deltas as they arrive, ending in exactly one terminal parcel.
 func (c *OpenAIStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "openai", "model", c.modelName)
 	// end() is not deferred here; ownership passes to the goroutine below since the stream is asynchronous.
+
+	// No audio encoding on this wire format; refuse instead of dropping silently.
+	if err := modelrepo.RefuseAudioInput("openai", c.modelName, messages); err != nil {
+		reportErr(err)
+		end()
+		return nil, err
+	}
 
 	streamCh := make(chan *modelrepo.StreamParcel)
 	usesResponses := openAIUsesResponsesEndpoint(c.modelName)
@@ -151,29 +155,20 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// responsesSSEEvent covers the subset of Responses API SSE event types we handle.
 type responsesSSEEvent struct {
-	Type string `json:"type"`
-	// response.output_text.delta / response.reasoning_summary_text.delta
-	Delta string `json:"delta"`
-	// output slot of the item the event belongs to; groups tool-call fragments.
-	OutputIndex int `json:"output_index"`
-	// response.output_item.added / .done — the (partial) item
-	Item *openAIResponseOutputItem `json:"item"`
-	// response.completed — the full response (usage + reasoning summary)
-	Response *openAIResponse `json:"response"`
-	// error — code/message are top-level per the Responses API spec, but some
-	// gateways nest them under an "error" object instead.
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Error   *struct {
+	Type        string                    `json:"type"`
+	Delta       string                    `json:"delta"`
+	OutputIndex int                       `json:"output_index"`
+	Item        *openAIResponseOutputItem `json:"item"`
+	Response    *openAIResponse           `json:"response"`
+	Code        string                    `json:"code"`
+	Message     string                    `json:"message"`
+	Error       *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
 }
 
-// errorText resolves the error detail from either encoding, falling back to
-// the raw payload so a stream failure never surfaces as an empty error.
 func (ev responsesSSEEvent) errorText(rawPayload string) string {
 	code, msg := ev.Code, ev.Message
 	if ev.Error != nil {
@@ -198,11 +193,6 @@ func (ev responsesSSEEvent) errorText(rawPayload string) string {
 	return code + ": " + msg
 }
 
-// streamResponsesSSE reads a Responses API SSE stream and forwards raw-delta
-// parcels to out: text/reasoning deltas as they arrive, tool-call fragments as
-// ToolCallDelta parcels keyed by output_index (id/name from
-// response.output_item.added, args from response.function_call_arguments.delta),
-// and a typed terminal parcel from response.completed.
 func streamResponsesSSE(
 	ctx context.Context,
 	body io.ReadCloser,
@@ -260,8 +250,7 @@ func streamResponsesSSE(
 			}
 
 		case "response.output_item.added":
-			// A function_call item opens a tool-call slot: id + name arrive
-			// here, the argument fragments follow as separate delta events.
+			// A function_call item opens a tool-call slot; argument fragments follow as separate delta events.
 			if ev.Item == nil || strings.ToLower(ev.Item.Type) != "function_call" {
 				continue
 			}
@@ -337,8 +326,7 @@ func streamResponsesSSE(
 		return
 	}
 
-	// The stream ended without response.completed/failed — surface it instead
-	// of letting a truncated connection read as success.
+	// Surface a stream that ended without response.completed/failed instead of reading as success.
 	err := fmt.Errorf("responses: stream ended without response.completed")
 	reportErr(err)
 	send(&modelrepo.StreamParcel{Error: err})

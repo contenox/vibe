@@ -10,19 +10,7 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// Command assembles the confined command for name (with args): validates
-// spec, pins the working directory to spec.WorkspaceRoot, scrubs the
-// environment (HOME forced to spec.Home, PATH emulated to the confined exec
-// dirs, see scrubEnv/validatePATH), and applies the platform's isolation
-// before returning the ready-to-run *exec.Cmd. If isolation fails to build,
-// Command returns an error rather than a runnable-but-unconfined *exec.Cmd.
-//
-// It does not start the process and does not bind the command's lifetime to
-// ctx — the caller owns start/stop/teardown; ctx only scopes the assembly
-// (drives the ActivityTracker and is available to the isolation seam).
-//
-// Errors wrap ErrInvalidSpec (missing name/workspace/home) or
-// ErrInvalidCarveout (a malformed hole), and are reported to spec.Tracker.
+// Command assembles the confined *exec.Cmd for name and args (validated spec, scrubbed env, applied isolation) without starting it; errors wrap ErrInvalidSpec or ErrInvalidCarveout.
 func Command(ctx context.Context, spec Spec, name string, args ...string) (*exec.Cmd, error) {
 	tracker := spec.Tracker
 	if tracker == nil {
@@ -46,9 +34,7 @@ func Command(ctx context.Context, spec Spec, name string, args ...string) (*exec
 	cmd.Dir = spec.WorkspaceRoot
 	cmd.Env = scrubEnv(os.Environ(), spec.EnvAllow, spec.EnvSet, spec.Home)
 
-	// Refine the canonical PATH floor into the wall-filtered PATH (confinedPATH)
-	// so the agent finds its real toolchain, not just the stock dirs. An
-	// explicit EnvSet["PATH"] is left untouched as the caller's own override.
+	// Only applied when EnvSet doesn't already set PATH — an explicit override bypasses the confined PATH floor.
 	if _, set := spec.EnvSet["PATH"]; !set {
 		cmd.Env = OverlayEnv(cmd.Env, map[string]string{
 			"PATH": confinedPATH(os.Getenv("PATH"), spec.Home, spec.FS),

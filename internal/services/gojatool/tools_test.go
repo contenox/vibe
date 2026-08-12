@@ -83,9 +83,7 @@ func TestUnit_Tools_SupportsNamesTheProviderAndItsTools(t *testing.T) {
 	}
 }
 
-// goja_eval's schema states what no error would teach; a script tool's
-// schema is exactly what its file declares, and every tool is individually
-// addressable.
+// Each tool's schema matches its declaration and is individually addressable.
 func TestUnit_Tools_SchemaShape(t *testing.T) {
 	ts, _ := newTestToolset(t)
 	ctx := context.Background()
@@ -153,11 +151,7 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 	}
 }
 
-// TestUnit_Tools_PublishedSchemaMatchesToolDescriptors pins the declared
-// OpenAPI contract: every tool the provider lists — goja_eval and each script
-// tool — has a request schema converted from its own descriptor and a response
-// schema for the result envelope. A script tool's contract is the schema its
-// FILE declares, so publishing it can never paraphrase the operator's schema.
+// TestUnit_Tools_PublishedSchemaMatchesToolDescriptors pins the declared OpenAPI contract: every tool has a request schema converted from its own descriptor and a response schema for the result envelope.
 func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	ts, _ := newTestToolset(t)
 	ctx := context.Background()
@@ -198,7 +192,6 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		if req == nil || req.Value == nil {
 			t.Fatalf("%s: no request schema is published", name)
 		}
-		// The published request is the descriptor, rendered — not a second copy.
 		if !sameJSON(t, tool.Function.Parameters, req.Value) {
 			t.Errorf("%s: published request schema and tool descriptor disagree", name)
 		}
@@ -225,7 +218,6 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		}
 	}
 
-	// The script's own declaration is what got published.
 	echo := doc.Components.Schemas["echo_upperRequest"]
 	if echo == nil {
 		t.Fatal("the script tool's request schema is missing")
@@ -238,8 +230,6 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	}
 }
 
-// sameJSON reports whether a tool descriptor's parameters and a published
-// schema encode the same JSON Schema.
 func sameJSON(t *testing.T, params any, schema *openapi3.Schema) bool {
 	t.Helper()
 	decode := func(v any) any {
@@ -256,9 +246,7 @@ func sameJSON(t *testing.T, params any, schema *openapi3.Schema) bool {
 	return reflect.DeepEqual(decode(params), decode(schema))
 }
 
-// Exec dispatches goja_eval and script tools alike, accepts arguments from
-// either the chain input or ToolsCall.Args, coerces a string-encoded scalar,
-// and falls back to Name when ToolName is empty.
+// Exec dispatches goja_eval and script tools alike, from either input source.
 func TestUnit_Tools_ExecDispatch(t *testing.T) {
 	ts, host := newTestToolset(t)
 	ctx := context.Background()
@@ -384,10 +372,7 @@ func TestUnit_Tools_ExecRefusals(t *testing.T) {
 	}
 }
 
-// EVERY error leaving Exec carries a severity marker, so a model can decide
-// whether a corrected retry is worth attempting. Asserted over the whole
-// refusal surface rather than case by case, because the value of the
-// convention is that it has no holes.
+// EVERY error leaving Exec carries a severity marker, asserted over the whole refusal surface rather than case by case since the convention's value is that it has no holes.
 func TestUnit_Tools_EveryExecErrorCarriesASeverityMarker(t *testing.T) {
 	ts, _ := newTestToolset(t)
 	ctx := context.Background()

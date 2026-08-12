@@ -8,21 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// SynthesizeHistory rebuilds a conversation transcript from a chain run's
-// captured step stream (units, from Inspector.GetExecutionHistory), so
-// hard-failed turns (errors, timeouts, cancellations, denied HITL gates)
-// make it into the persisted ChatHistory — unlike the chain's returned
-// ChatHistory, which only contains messages from steps that completed
-// successfully. prior is the session history sent into the chain; chainErr
-// is the chain runner's error, if any.
-//
-// Messages are deduped by identity (Message.ID, or a content hash for
-// pre-ID messages), never by index, since handlers legitimately mutate the
-// message list between a unit's input and output. Engine-injected system
-// messages are excluded, since task system instructions are re-applied from
-// the task definition on every run. The result satisfies the tool-call
-// pairing invariant (see repairToolCallPairing) and is a candidate
-// []Message ready for chatservice.PersistDiff, which dedupes by ID.
+// SynthesizeHistory rebuilds a persisted-ready transcript from prior history and a chain run's captured step stream, including hard-failed turns and deduped by message identity.
 func SynthesizeHistory(prior []Message, units []CapturedStateUnit, chainErr error) []Message {
 	out := make([]Message, 0, len(prior)+len(units))
 	out = append(out, prior...)
@@ -76,9 +62,6 @@ func SynthesizeHistory(prior []Message, units []CapturedStateUnit, chainErr erro
 	return repairToolCallPairing(out)
 }
 
-// messageIdentity returns a stable identity key for dedupe. Messages created
-// by the engine carry a creation-time ID; the fallback hash covers messages
-// from sessions persisted before IDs were assigned at creation.
 func messageIdentity(m Message) string {
 	if m.ID != "" {
 		return "id:" + m.ID

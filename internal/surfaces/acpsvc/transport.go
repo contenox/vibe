@@ -236,6 +236,12 @@ type Transport struct {
 	permMu      sync.Mutex
 	permPending map[string]struct{}
 
+	// nativeViewMu guards nativeViewing: sessions whose in-flight native
+	// turn this connection watches via an attached viewer; the mirror skips
+	// them (one delivery path per connection).
+	nativeViewMu  sync.Mutex
+	nativeViewing map[libacp.SessionID]int
+
 	toolCallMu     sync.Mutex
 	toolCallStatus map[string]libacp.ToolCallStatus
 	// toolCallSeq / toolCallOpen disambiguate repeated invocations of a tool
@@ -341,6 +347,31 @@ func (t *Transport) isPermissionPending(sid libacp.SessionID, toolCallID string)
 	defer t.permMu.Unlock()
 	_, pending := t.permPending[permKey(sid, toolCallID)]
 	return pending
+}
+
+func (t *Transport) markNativeViewing(sid libacp.SessionID) {
+	t.nativeViewMu.Lock()
+	if t.nativeViewing == nil {
+		t.nativeViewing = make(map[libacp.SessionID]int)
+	}
+	t.nativeViewing[sid]++
+	t.nativeViewMu.Unlock()
+}
+
+func (t *Transport) unmarkNativeViewing(sid libacp.SessionID) {
+	t.nativeViewMu.Lock()
+	if n := t.nativeViewing[sid]; n <= 1 {
+		delete(t.nativeViewing, sid)
+	} else {
+		t.nativeViewing[sid] = n - 1
+	}
+	t.nativeViewMu.Unlock()
+}
+
+func (t *Transport) isNativeViewing(sid libacp.SessionID) bool {
+	t.nativeViewMu.Lock()
+	defer t.nativeViewMu.Unlock()
+	return t.nativeViewing[sid] > 0
 }
 
 func New(deps Deps) libacp.AgentFactory {
@@ -774,6 +805,15 @@ func (t *Transport) sendUpdate(ctx context.Context, notif libacp.SessionNotifica
 	}
 }
 
+// sendUpdateLocal writes to this connection only, never the mirror: re-sync
+// traffic (replay, usage gauges) is addressed to one connection.
+func (t *Transport) sendUpdateLocal(ctx context.Context, notif libacp.SessionNotification) {
+	if t.conn == nil {
+		return
+	}
+	t.writeUpdate(ctx, t.normalizeToolCallNotification(notif))
+}
+
 // writeUpdate writes one already-normalized notification to this connection.
 // It is the only place a session update reaches a socket, reached both by the
 // turn that produced it and by the mirror pump carrying another connection's.
@@ -942,7 +982,7 @@ func sessionIDFromCtx(ctx context.Context) string {
 // sendUsageUpdate instead.
 func (t *Transport) sendInitialUsageUpdate(ctx context.Context, sid libacp.SessionID) {
 	if size := t.sessionTokenSize(ctx, sid); size > 0 {
-		t.sendUpdate(ctx, libacp.SessionNotification{
+		t.sendUpdateLocal(ctx, libacp.SessionNotification{
 			SessionID: sid,
 			Update: libacp.SessionUpdate{
 				SessionUpdate: libacp.SessionUpdateUsageUpdate,
@@ -960,7 +1000,7 @@ func (t *Transport) sendUsageUpdate(ctx context.Context, sid libacp.SessionID, u
 	if size <= 0 && used <= 0 {
 		return
 	}
-	t.sendUpdate(ctx, libacp.SessionNotification{
+	t.sendUpdateLocal(ctx, libacp.SessionNotification{
 		SessionID: sid,
 		Update: libacp.SessionUpdate{
 			SessionUpdate: libacp.SessionUpdateUsageUpdate,

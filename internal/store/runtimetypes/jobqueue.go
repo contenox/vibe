@@ -46,7 +46,6 @@ func (s *store) AppendJobs(ctx context.Context, jobs ...*Job) error {
 	for i, job := range jobs {
 		job.CreatedAt = now
 
-		// Build placeholders like ($1, $2, ..., $7)
 		startIdx := i*7 + 1
 		placeholders := make([]string, 7)
 		for j := 0; j < 7; j++ {
@@ -54,7 +53,6 @@ func (s *store) AppendJobs(ctx context.Context, jobs ...*Job) error {
 		}
 		valueStrings = append(valueStrings, "("+strings.Join(placeholders, ", ")+")")
 
-		// Append values in the same order as columns
 		valueArgs = append(valueArgs,
 			job.ID,
 			job.TaskType,

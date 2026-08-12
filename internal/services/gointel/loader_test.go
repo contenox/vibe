@@ -13,8 +13,6 @@ import (
 	"time"
 )
 
-// Fixture plumbing: fixture modules live under testdata/ without a go.mod (go.mod.txt instead, so `go list`/`go vet` on this repo ignore them), and each test copies one into its own t.TempDir with go.mod materialised so edits never touch checked-in testdata. Stdlib-only, so no network needed.
-
 func copyFixtureInto(t *testing.T, name, dst string) string {
 	t.Helper()
 	src := filepath.Join("testdata", name)
@@ -74,7 +72,6 @@ func (ix *index) testEntry(t *testing.T, root string) *entry {
 	return e
 }
 
-// writeFixtureFile rewrites a fixture file and pushes its mtime forward, so a coarse filesystem clock cannot hand two writes the same timestamp.
 func writeFixtureFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -192,7 +189,6 @@ func TestUnit_ModuleRoot_RefusesDirEscapingAllowedDir(t *testing.T) {
 
 func TestUnit_ModuleRoot_RefusesModuleRootAboveAllowedDir(t *testing.T) {
 	module := newFixture(t, "fixture")
-	// The workspace is a subdirectory of the module, so the go.mod walk-up leaves the allowed directory.
 	ix := newTestIndex(t, filepath.Join(module, "shapes"))
 
 	_, err := ix.Definition(context.Background(), Request{Symbol: "shapes.Rect"})
@@ -220,7 +216,6 @@ func TestUnit_ModuleRoot_ResolvesFromASubdirectory(t *testing.T) {
 	root := newFixture(t, "fixture")
 	ix := newTestIndex(t, root)
 
-	// A query rooted deep in the tree must still find the module root above it.
 	if _, err := ix.Definition(context.Background(), Request{Dir: "report", Symbol: "shapes.Rect"}); err != nil {
 		t.Fatalf("definition from subdirectory: %v", err)
 	}
@@ -326,7 +321,6 @@ func TestUnit_Invalidate_MtimeSweepCatchesAnUnannouncedEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// No Invalidate call: this is the human-in-an-editor / git-checkout path the sweep exists to cover.
 	writeFixtureFile(t, file, string(original)+addedSymbol)
 
 	if _, err := ix.Definition(ctx, Request{Symbol: "shapes.Added"}); err != nil {
@@ -346,7 +340,7 @@ func TestUnit_Invalidate_MtimeSweepCatchesANewFileInAnExistingPackage(t *testing
 		t.Fatalf("warm-up: %v", err)
 	}
 
-	// A brand-new file is invisible to every per-file stat: only the package directory's mtime moves. No Invalidate call.
+	// A brand-new file only moves the package directory's mtime, not any file's; no Invalidate call needed.
 	writeFixtureFile(t, filepath.Join(root, "shapes", "extra.go"),
 		"package shapes\n\n// Extra was added after the snapshot was built.\nfunc Extra() float64 { return Unit }\n")
 
@@ -373,7 +367,6 @@ func TestUnit_Invalidate_RemovedSymbolStopsResolving(t *testing.T) {
 	writeFixtureFile(t, file, trimmed)
 	ix.Invalidate(file)
 
-	// A deletion must not keep answering from the old snapshot.
 	if _, err := ix.Definition(ctx, Request{Symbol: "report.Doubled"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("post-delete lookup = %v, want ErrNotFound", err)
 	}
@@ -482,7 +475,6 @@ func TestUnit_Invalidate_GoModRewriteForcesARebuild(t *testing.T) {
 	e := ix.testEntry(t, root)
 	base := e.builds.Load()
 
-	// go.mod is swept on every query, since it invalidates the whole graph.
 	writeFixtureFile(t, filepath.Join(root, "go.mod"), "module example.com/fixture\n\ngo 1.21\n\n// touched\n")
 
 	if _, err := ix.Definition(ctx, Request{Symbol: "shapes.Rect"}); err != nil {

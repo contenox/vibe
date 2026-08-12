@@ -15,9 +15,7 @@ const (
 	capturedErrorMaxBytes       = 8 * 1024
 )
 
-// CapturedPayloadSummary replaces oversized or non-JSON-marshallable captured
-// payloads in persisted/streamed state. In-memory execution history keeps the
-// original values; this type is for observability storage only.
+// CapturedPayloadSummary replaces oversized or non-JSON-marshallable payloads in persisted/streamed state; in-memory execution history keeps the originals.
 type CapturedPayloadSummary struct {
 	Truncated         bool   `json:"truncated"`
 	Reason            string `json:"reason"`

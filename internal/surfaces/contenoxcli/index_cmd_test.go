@@ -27,8 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── the rig ────────────────────────────────────────────────────────────────
-
 // fakeEmbedder is a deterministic bag-of-words embedder: no model, no
 // network, no provider. The counter is mutex-guarded because the code under
 // test embeds concurrently (workspaceindex.embedBatch's bounded pool), so an
@@ -118,8 +116,6 @@ func indexTestCmd(t *testing.T, stdin string) (*cobra.Command, *bytes.Buffer, *b
 	return cmd, out, errOut
 }
 
-// ─── registration ───────────────────────────────────────────────────────────
-
 func TestUnit_IndexAndSearchCommandsAreReserved(t *testing.T) {
 	// Reserved so `contenox index` dispatches as a subcommand instead of being
 	// injected as chat input. Kept in lockstep with scripts/verify_cli_help.sh.
@@ -180,8 +176,6 @@ func TestUnit_SeededPolicies_AllowWorkspaceSearch(t *testing.T) {
 	require.Equal(t, hitlservice.ActionApprove, r.Action, "the no-file fallback must ask — allow tiers live only in seeded, readable policy files")
 }
 
-// ─── directory resolution ───────────────────────────────────────────────────
-
 func TestUnit_ResolveWorkspaceDir(t *testing.T) {
 	dir := t.TempDir()
 	got, err := resolveWorkspaceDir(dir)
@@ -234,8 +228,6 @@ func TestUnit_ContenoxDirForWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, explicit, got)
 }
-
-// ─── rendering ──────────────────────────────────────────────────────────────
 
 func TestUnit_Commafy(t *testing.T) {
 	for in, want := range map[int]string{0: "0", 7: "7", 999: "999", 1000: "1,000", 7065: "7,065", 1270: "1,270", 1234567: "1,234,567", -4321: "-4,321"} {
@@ -353,8 +345,6 @@ func TestUnit_ConfirmSpend(t *testing.T) {
 	_, err := confirmSpend(cmd, "spend?")
 	require.ErrorContains(t, err, "--yes")
 }
-
-// ─── the flow, against a real store ─────────────────────────────────────────
 
 func TestUnit_IndexCmd_PlanThenBuildWithYes(t *testing.T) {
 	ctx := context.Background()

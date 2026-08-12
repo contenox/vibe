@@ -1,11 +1,5 @@
 package taskengine_test
 
-// Engine-side suspend/resume contract: a gated tool call that parks past the
-// fast window suspends the run (checkpoint persisted before release, chain_suspended as
-// the segment terminal, no stub results over the pending calls), and a resume
-// re-enters through the execute_tool_calls repair path, executes exactly the
-// unanswered calls, and completes with no duplicated work.
-
 import (
 	"context"
 	"errors"
@@ -19,13 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// gatedToolsRepo executes "gate.read" immediately and, while gated, answers
-// "gate.write" with the wrapper's third outcome (ApprovalPendingError keyed
-// by the engine-minted call ID it finds on the context — the same ID the
-// production HITL wrapper uses as approval/checkpoint key).
 type gatedToolsRepo struct {
 	gated bool
-	execs []string // "<toolName>:<callID>" in execution order
+	execs []string
 }
 
 func (g *gatedToolsRepo) Exec(ctx context.Context, _ time.Time, _ any, _ bool, args *taskengine.ToolsCall) (any, taskengine.DataType, error) {
@@ -53,7 +43,6 @@ func (g *gatedToolsRepo) GetToolsForToolsByName(_ context.Context, name string) 
 	}, nil
 }
 
-// captureCheckpointSaver records what the engine persists on suspension.
 type captureCheckpointSaver struct {
 	saved []*taskengine.Checkpoint
 	err   error
@@ -129,21 +118,17 @@ func TestContract_SuspendThenResume_ExecutesPendingWithoutDuplication(t *testing
 
 	out, outType, _, err := env.ExecEnv(ctx, suspendTestChain(), suspendTestHistory(), taskengine.DataTypeChatHistory)
 
-	// The suspension terminal
 	var susp *taskengine.ChainSuspendedError
 	require.ErrorAs(t, err, &susp, "a parked approval must suspend the run, not fail it")
 	require.Equal(t, "c2", susp.ApprovalID, "the approval ID IS the engine-minted call ID")
 	require.Equal(t, taskengine.EventScope{Chain: "chain.suspend", Task: "exec", ToolCall: "c2"}, susp.Scope)
 
-	// The partial history is returned: c1's real result present, no stub
-	// results for the pending c2/c3 (the checkpointed transcript must end
-	// with them unanswered for the repair path to re-enter).
+	// No stub results for pending c2/c3: the checkpointed transcript must end with them unanswered for the repair path to re-enter.
 	require.Equal(t, taskengine.DataTypeChatHistory, outType)
 	hist, ok := out.(taskengine.ChatHistory)
 	require.True(t, ok)
 	require.Equal(t, map[string]int{"c1": 1}, toolResultCounts(hist.Messages))
 
-	// The checkpoint (persisted before release)
 	require.Len(t, saver.saved, 1)
 	cp := saver.saved[0]
 	assert.Equal(t, "c2", cp.ApprovalID)
@@ -162,7 +147,6 @@ func TestContract_SuspendThenResume_ExecutesPendingWithoutDuplication(t *testing
 	require.NotNil(t, cp.Chain)
 	assert.Equal(t, "chain.suspend", cp.Chain.ID)
 
-	// The event contract
 	var kinds []taskengine.TaskEventKind
 	for _, ev := range sink.events {
 		kinds = append(kinds, ev.Kind)
@@ -170,22 +154,20 @@ func TestContract_SuspendThenResume_ExecutesPendingWithoutDuplication(t *testing
 	require.Equal(t, []taskengine.TaskEventKind{
 		taskengine.TaskEventChainStarted,
 		taskengine.TaskEventStepStarted,
-		taskengine.TaskEventToolCallPending, // c1
-		taskengine.TaskEventToolCall,        // c1
-		taskengine.TaskEventToolCallPending, // c2 — left unbracketed by design
-		taskengine.TaskEventChainSuspended,  // segment terminal, after the checkpoint write
+		taskengine.TaskEventToolCallPending,
+		taskengine.TaskEventToolCall,
+		taskengine.TaskEventToolCallPending, // c2, left unbracketed by design
+		taskengine.TaskEventChainSuspended,  // after the checkpoint write
 	}, kinds)
 	suspEv := sink.events[len(sink.events)-1]
 	assert.Equal(t, "c2", suspEv.ApprovalID)
 	assert.Equal(t, susp.Scope, suspEv.Scope)
 
-	// Round-trip through the wire format, as the real resume path does
 	raw, err := taskengine.MarshalCheckpoint(cp)
 	require.NoError(t, err)
 	restored, err := taskengine.UnmarshalCheckpoint(raw)
 	require.NoError(t, err)
 
-	// Resume: verdict approved, gate released
 	repo.gated = false
 	repo.execs = nil
 	resumeSink := &captureTaskEventSink{}
@@ -198,7 +180,6 @@ func TestContract_SuspendThenResume_ExecutesPendingWithoutDuplication(t *testing
 	require.NoError(t, rerr)
 	require.Equal(t, taskengine.DataTypeChatHistory, routType)
 
-	// Only the unanswered calls executed — c1 was not re-run.
 	require.Equal(t, []string{"write:c2", "read:c3"}, repo.execs)
 
 	final, ok := rout.(taskengine.ChatHistory)
@@ -206,8 +187,6 @@ func TestContract_SuspendThenResume_ExecutesPendingWithoutDuplication(t *testing
 	require.Equal(t, map[string]int{"c1": 1, "c2": 1, "c3": 1}, toolResultCounts(final.Messages),
 		"every call answered exactly once across suspend + resume")
 
-	// Resumed segment closes with chain_completed and re-emits the pending/
-	// call pair for the calls it executed.
 	require.Equal(t, taskengine.TaskEventChainCompleted, resumeSink.events[len(resumeSink.events)-1].Kind)
 }
 
@@ -215,8 +194,6 @@ func TestContract_Suspend_NoSaverFailsTeaching(t *testing.T) {
 	repo := &gatedToolsRepo{gated: true}
 	env := newSuspendEnv(t, repo, &captureTaskEventSink{})
 
-	// No CheckpointSaver on the context: the run must fail with a teaching
-	// error, never suspend into nowhere or hang.
 	_, _, _, err := env.ExecEnv(context.Background(), suspendTestChain(), suspendTestHistory(), taskengine.DataTypeChatHistory)
 	require.Error(t, err)
 	var susp *taskengine.ChainSuspendedError
@@ -238,11 +215,7 @@ func TestContract_Suspend_SaverFailureFailsRun(t *testing.T) {
 	require.Contains(t, err.Error(), "disk full")
 }
 
-// TestContract_ResumeAfterDeny: a denied verdict resumes the run with the
-// existing deny semantics — here modeled at the engine seam: the wrapper
-// (exercised in localtools' own tests) turns the injected false verdict into
-// its deny-message result, so from the engine's perspective the call simply
-// yields a result and the chain completes.
+// TestContract_ResumeAfterDeny_CompletesWithDenyResult verifies a denied verdict resumes the run and completes with the wrapper's deny-message result.
 func TestContract_ResumeAfterDeny_CompletesWithDenyResult(t *testing.T) {
 	repo := &gatedToolsRepo{gated: true}
 	sink := &captureTaskEventSink{}
@@ -255,9 +228,6 @@ func TestContract_ResumeAfterDeny_CompletesWithDenyResult(t *testing.T) {
 	require.ErrorAs(t, err, &susp)
 	require.Len(t, saver.saved, 1)
 
-	// Deny: the wrapper (simulated by the un-gated repo returning a plain
-	// result) answers the pending call; the chain must run to completion and
-	// answer every call of the batch.
 	repo.gated = false
 	rctx := taskengine.WithResumeCheckpoint(context.Background(), saver.saved[0])
 	rctx = taskengine.WithApprovalVerdicts(rctx, map[string]bool{"c2": false})

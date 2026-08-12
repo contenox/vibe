@@ -145,8 +145,6 @@ func runInboxAck(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ─── rendering ──────────────────────────────────────────────────────────────
-
 func renderInboxTable(w io.Writer, items []*operatorinbox.Item, all bool, now time.Time) error {
 	if len(items) == 0 {
 		if all {

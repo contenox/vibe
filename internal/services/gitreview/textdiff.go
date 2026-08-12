@@ -11,40 +11,21 @@ const (
 )
 
 const (
-	// hunkContext is the number of unchanged lines kept either side of a
-	// change, matching git's own default so hunk boundaries land where a
-	// reviewer expects them.
 	hunkContext = 3
 
-	// maxEditDistance bounds the Myers search. Past it the two sides are more
-	// rewrite than edit, and a hunk list would be noise: the diff reports
-	// truncated instead. Cost is O(D^2) ints of scratch, so this bound is also
-	// the memory bound.
 	maxEditDistance = 6000
 
-	// maxHunkLines bounds the total rendered lines across all hunks of ONE
-	// file. Reached, the file keeps the hunks built so far and reports
-	// truncated — a review surface pages, it does not stream.
 	maxHunkLines = 20000
 )
 
-// Line is one rendered diff line. Text never carries its newline: the kind
-// carries the meaning the leading character used to. NoNewline marks the line
-// as the last of its side with no terminating newline — git's
-// "\ No newline at end of file", modelled as a property of the line so adding
-// or removing a final newline is a real, applicable change rather than a
-// difference the hunk list cannot express.
+// Line is one rendered diff line: Text never carries its newline, and NoNewline marks a line as the last of its side with no terminating newline (git's "\ No newline at end of file").
 type Line struct {
 	Kind      string `json:"kind"`
 	Text      string `json:"text"`
 	NoNewline bool   `json:"noNewline,omitempty"`
 }
 
-// Hunk is one contiguous change region with its context, addressed in git's own
-// 1-based coordinates: OldStart/OldLines index the `from` side, NewStart/NewLines
-// the `to` side. A pure insertion reports OldLines 0 with OldStart naming the
-// line it follows (0 at the start of the file), exactly as `@@ -0,0 +1,3 @@`
-// does; applyHunk relies on that convention.
+// Hunk is one contiguous change region in git's 1-based coordinates (OldStart/OldLines for the `from` side, NewStart/NewLines for the `to` side); a pure insertion reports OldLines 0 with OldStart naming the preceding line, as `@@ -0,0 +1,3 @@` does.
 type Hunk struct {
 	OldStart int    `json:"oldStart"`
 	OldLines int    `json:"oldLines"`
@@ -53,15 +34,11 @@ type Hunk struct {
 	Lines    []Line `json:"lines"`
 }
 
-// editOp is one line of the edit script before it is grouped into hunks.
 type editOp struct {
 	kind string
 	text string
 }
 
-// splitLines splits content into lines without their terminators and reports
-// whether the content ended with a newline. splitLines and joinLines round-trip
-// any byte string, which is what makes hunk application content-preserving.
 func splitLines(s string) (lines []string, trailingNewline bool) {
 	if s == "" {
 		return nil, false
@@ -73,7 +50,6 @@ func splitLines(s string) (lines []string, trailingNewline bool) {
 	return strings.Split(s, "\n"), trailingNewline
 }
 
-// joinLines is splitLines' inverse.
 func joinLines(lines []string, trailingNewline bool) string {
 	if len(lines) == 0 {
 		return ""
@@ -85,14 +61,8 @@ func joinLines(lines []string, trailingNewline bool) string {
 	return s
 }
 
-// noNewlineMark decorates the last line of a side that does not end in a
-// newline, so the line comparison sees it as a DIFFERENT line from the same
-// text with a terminator. NUL cannot occur in content this package diffs —
-// isBinary rejects it first — so the marker cannot collide with real text.
 const noNewlineMark = "\x00"
 
-// decompose splits content into the marked line vector everything downstream
-// compares and splices.
 func decompose(content string) []string {
 	lines, trailing := splitLines(content)
 	if len(lines) > 0 && !trailing {
@@ -104,7 +74,6 @@ func decompose(content string) []string {
 	return lines
 }
 
-// recompose is decompose's inverse.
 func recompose(lines []string) string {
 	if len(lines) == 0 {
 		return ""
@@ -120,7 +89,6 @@ func recompose(lines []string) string {
 	return joinLines(lines, trailing)
 }
 
-// markLine turns a marked line into its rendered form.
 func markLine(kind, text string) Line {
 	if strings.HasSuffix(text, noNewlineMark) {
 		return Line{Kind: kind, Text: strings.TrimSuffix(text, noNewlineMark), NoNewline: true}
@@ -128,7 +96,6 @@ func markLine(kind, text string) Line {
 	return Line{Kind: kind, Text: text}
 }
 
-// unmarkLine is markLine's inverse: back to the comparison form.
 func unmarkLine(l Line) string {
 	if l.NoNewline {
 		return l.Text + noNewlineMark
@@ -136,20 +103,11 @@ func unmarkLine(l Line) string {
 	return l.Text
 }
 
-// diffHunks renders the change from one content to another as hunks. truncated
-// reports that the result is INCOMPLETE — either the edit distance exceeded
-// maxEditDistance (no hunks at all) or the rendered line budget ran out (the
-// hunks present are correct, the tail is missing). A truncated diff must never
-// be applied; StageHunk re-derives its own hunks and refuses what it cannot
-// find.
 func diffHunks(from, to string) (hunks []Hunk, truncated bool) {
 	return diffLineVectors(decompose(from), decompose(to))
 }
 
 func diffLineVectors(oldLines, newLines []string) (hunks []Hunk, truncated bool) {
-	// Common prefix and suffix are context by construction. Trimming them
-	// keeps the Myers search proportional to the CHANGE rather than the file,
-	// which is what makes a large file with a small edit cheap.
 	prefix := 0
 	for prefix < len(oldLines) && prefix < len(newLines) && oldLines[prefix] == newLines[prefix] {
 		prefix++
@@ -176,9 +134,6 @@ func diffLineVectors(oldLines, newLines []string) (hunks []Hunk, truncated bool)
 	return groupHunks(ops)
 }
 
-// myersOps is the O(ND) Myers edit script. It returns nil when the edit
-// distance exceeds maxEditDistance rather than growing without bound; every
-// caller treats nil as "too different to render".
 func myersOps(a, b []string) []editOp {
 	n, m := len(a), len(b)
 	switch {
@@ -204,9 +159,7 @@ func myersOps(a, b []string) []editOp {
 	}
 	offset := n + m
 	v := make([]int, 2*(n+m)+1)
-	// trace[d] is V as it stood BEFORE step d, windowed to k in [-d, d] with
-	// offset d. Storing the window rather than the whole vector keeps the
-	// backtrack table at O(D^2) instead of O(D*(n+m)).
+	// trace[d] is V before step d, windowed to k in [-d, d]: this keeps the backtrack table O(D^2) instead of O(D*(n+m)).
 	trace := make([][]int, 0, maxD+1)
 
 	for d := 0; d <= maxD; d++ {
@@ -232,11 +185,10 @@ func myersOps(a, b []string) []editOp {
 			}
 		}
 	}
+	// Exceeded maxEditDistance: nil is the "too different to render" signal every caller checks for.
 	return nil
 }
 
-// myersBacktrack walks the saved V windows backwards from (n, m) to (0, 0),
-// emitting the edit script in order.
 func myersBacktrack(a, b []string, trace [][]int, d int) []editOp {
 	ops := make([]editOp, 0, len(a)+len(b))
 	prepend := func(kind, text string) {
@@ -281,8 +233,6 @@ func myersBacktrack(a, b []string, trace [][]int, d int) []editOp {
 	return ops
 }
 
-// groupHunks slices an edit script into hunks, keeping hunkContext unchanged
-// lines around every change and dropping the runs between them.
 func groupHunks(ops []editOp) (hunks []Hunk, truncated bool) {
 	include := make([]bool, len(ops))
 	for i, op := range ops {
@@ -312,8 +262,7 @@ func groupHunks(ops []editOp) (hunks []Hunk, truncated bool) {
 		if !open {
 			return
 		}
-		// git's convention for an empty side: the start names the line the
-		// change follows, which is 0 at the head of the file.
+		// git's convention for an empty side: the start names the line the change follows (0 at the head of the file).
 		if cur.OldLines == 0 {
 			cur.OldStart--
 		}
@@ -360,11 +309,6 @@ func groupHunks(ops []editOp) (hunks []Hunk, truncated bool) {
 	return hunks, false
 }
 
-// applyLineVectorHunk replaces the hunk's old-side region of fromLines with its
-// new side. It is the ONE place partial application happens, and it verifies the
-// hunk's own old side against the content line by line first: a partial apply
-// landing on shifted lines corrupts a file silently, which is the one failure
-// this package must never have.
 func applyLineVectorHunk(fromLines []string, h Hunk) (lines []string, ok bool) {
 	at := h.OldStart - 1
 	if h.OldLines == 0 {
@@ -394,6 +338,7 @@ func applyLineVectorHunk(fromLines []string, h Hunk) (lines []string, ok bool) {
 	if len(verify) != h.OldLines {
 		return nil, false
 	}
+	// Verified line by line before any mutation: a shifted apply must refuse, never silently corrupt content.
 	for i, want := range verify {
 		if fromLines[at+i] != want {
 			return nil, false
@@ -407,7 +352,6 @@ func applyLineVectorHunk(fromLines []string, h Hunk) (lines []string, ok bool) {
 	return out, true
 }
 
-// applyHunk applies one hunk to content and returns the new content.
 func applyHunk(from string, h Hunk) (string, bool) {
 	lines, ok := applyLineVectorHunk(decompose(from), h)
 	if !ok {

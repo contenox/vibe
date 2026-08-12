@@ -1,14 +1,4 @@
-// Package missiontools is the per-mission tool grant a dispatched unit holds
-// while running unattended: report progress, ask for attention, maintain a
-// living plan, and end the mission with a verdict, plus the heartbeat that
-// lets an operator tell a working unit from a dead one. The mission id is
-// never an argument the agent passes — it rides the request context
-// (WithMissionID), bound once by the transport at session construction, so
-// the grant is unforgeable and scoped to exactly the caller's own mission.
-//
-// This package's responsibility ends at the missionservice write succeeding;
-// it does not route reports, deliver them to an inbox, or project the plan
-// onto any transport stream — those are downstream slices.
+// Package missiontools is the per-mission tool grant a dispatched unit holds while running unattended: report progress, ask for attention, maintain a living plan, end with a verdict, and heartbeat. The mission id rides the request context (WithMissionID) rather than being a model argument, so the grant is unforgeable and scoped to the caller's own mission. The package's responsibility ends at the missionservice write succeeding; it does not route reports or project the plan onto any transport stream.
 package missiontools
 
 import (
@@ -23,9 +13,7 @@ import (
 	"github.com/contenox/contenox/internal/services/missionservice"
 )
 
-// ToolsProviderName is the tools-provider key this package registers under.
-// The tools it exposes are ToolNameReport, ToolNameAskAttention,
-// ToolNamePlan and ToolNameFinish.
+// ToolsProviderName is the tools-provider key this package registers under, exposing ToolNameReport, ToolNameAskAttention, ToolNamePlan, and ToolNameFinish.
 const ToolsProviderName = "mission"
 
 const (
@@ -47,12 +35,9 @@ const (
 	ToolNameFinish = "mission_finish"
 )
 
-// missionCtxKey is an unexported context key for the caller's mission id.
 type missionCtxKey struct{}
 
-// WithMissionID binds missionID to ctx as the caller's mission. The
-// transport calls this once when it builds a dispatched unit's session. An
-// empty id returns ctx unchanged.
+// WithMissionID binds missionID to ctx as the caller's mission, called once by the transport when it builds a dispatched unit's session; an empty id returns ctx unchanged.
 func WithMissionID(ctx context.Context, missionID string) context.Context {
 	if strings.TrimSpace(missionID) == "" {
 		return ctx
@@ -67,10 +52,7 @@ func MissionIDFromContext(ctx context.Context) string {
 	return id
 }
 
-// MissionStore is the narrow slice of missionservice.Service these tools
-// need: file a report, revise the plan, finish, plus liveness. Deliberately
-// not the full Service — a unit's back-channel has no business creating,
-// listing, binding, or deleting missions.
+// MissionStore is the narrow slice of missionservice.Service these tools need (report, plan, finish, liveness), deliberately not the full Service since a unit's back-channel must not create, list, bind, or delete missions.
 type MissionStore interface {
 	AddReport(ctx context.Context, missionID string, report *missionservice.Report) error
 	Heartbeat(ctx context.Context, id string, lastErr string) (*missionservice.Mission, error)
@@ -82,23 +64,13 @@ type MissionStore interface {
 	Finish(ctx context.Context, id string, status missionservice.Status, reason string) (*missionservice.Mission, error)
 }
 
-// AttentionAsker is the durable-ask machinery mission_ask_attention hands a
-// request to, kept as a one-method seam so this package doesn't depend on
-// hitlservice directly. When nil, mission_ask_attention degrades to filing a
-// durable blocker report (see New).
+// AttentionAsker is the durable-ask machinery mission_ask_attention hands a request to, kept as a one-method seam so this package doesn't depend on hitlservice directly; when nil, mission_ask_attention degrades to filing a durable blocker report (see New).
 type AttentionAsker interface {
-	// RaiseAttention puts the unit's question to a human and blocks until
-	// answered, returning the operator's words. An error means no answer is
-	// coming — the caller's fallback, not a failure to surface — except when
-	// ask.ParkWindow elapsed unanswered, where the error is a
-	// *taskengine.ApprovalPendingError and the caller must let the run
-	// suspend rather than file a blocker.
+	// RaiseAttention puts the unit's question to a human and blocks until answered, returning the operator's words; an error means no answer is coming, except when ask.ParkWindow elapses unanswered, in which case the error is a *taskengine.ApprovalPendingError and the caller must let the run suspend rather than file a blocker.
 	RaiseAttention(ctx context.Context, ask AttentionAsk) (string, error)
 }
 
-// AttentionAsk is one unit's question, plus the identity/parking knobs the
-// checkpoint-and-release path needs. Zero values of AskID/ParkWindow mean
-// the pre-detach behavior: fresh row ID, block to the ceiling.
+// AttentionAsk is one unit's question plus the identity/parking knobs the checkpoint-and-release path needs; zero AskID/ParkWindow means the pre-detach behavior (fresh row ID, block to the ceiling).
 type AttentionAsk struct {
 	MissionID string
 	Summary   string
@@ -112,16 +84,11 @@ type AttentionAsk struct {
 }
 
 type provider struct {
-	missions MissionStore
-	asker    AttentionAsker
-	// supervisor is the SUPERVISOR half (see supervisor.go), optional: unwired,
-	// a firing session simply gets no mission tools rather than broken ones.
-	supervisor SupervisorStore
-	resolver   AttentionResolver
-	// parkWindow bounds a suspendable ask's block before checkpoint-and-release.
-	parkWindow time.Duration
-	// recordDowngrade is the verification gate's telemetry hook (see
-	// WithDowngradeRecorder). Never nil: New installs a no-op.
+	missions        MissionStore
+	asker           AttentionAsker
+	supervisor      SupervisorStore
+	resolver        AttentionResolver
+	parkWindow      time.Duration
 	recordDowngrade func()
 }
 
@@ -138,8 +105,7 @@ func WithAttentionParkWindow(d time.Duration) Option {
 	}
 }
 
-// WithSupervision wires the tools a session that fired missions gets: list
-// your missions, answer a unit's question. Both deps are required together.
+// WithSupervision wires the tools a session that fired missions gets (list your missions, answer a unit's question); both deps are required together.
 func WithSupervision(store SupervisorStore, resolver AttentionResolver) Option {
 	return func(p *provider) {
 		p.supervisor = store
@@ -147,11 +113,7 @@ func WithSupervision(store SupervisorStore, resolver AttentionResolver) Option {
 	}
 }
 
-// New returns the mission-tools provider. missions is required — a mission
-// tool with no mission store is a wiring defect, so New panics rather than
-// degrading. asker is optional: nil means mission_ask_attention files a
-// durable blocker report instead of a durable ask (full unattended-ask
-// delivery is a separate, later slice).
+// New returns the mission-tools provider; missions is required and New panics on nil rather than degrade, while asker is optional and nil means mission_ask_attention files a durable blocker report instead of a durable ask.
 func New(missions MissionStore, asker AttentionAsker, opts ...Option) taskengine.ToolsRepo {
 	if missions == nil {
 		panic("missiontools: mission store is required")
@@ -184,23 +146,19 @@ func (p *provider) GetToolsForToolsByName(ctx context.Context, name string) ([]t
 			finishToolSchema(),
 		}, nil
 	}
-	// Not a mission, but possibly a session that fired some: a smaller
-	// supervisor surface (see what you dispatched, answer what it asks).
+	// Not a mission: maybe a session that fired some, so offer the smaller supervisor surface.
 	if p.supervisor != nil && p.resolver != nil && ParentSessionIDFromContext(ctx) != "" {
 		return supervisorTools(), nil
 	}
 	return []taskengine.Tool{}, nil
 }
 
-// Exec runs one mission-tool call. It refuses off-mission (the backstop for
-// the deterministic `tools` path). A successful report or ask also stamps a
-// heartbeat: filing anything is proof of life.
+// Exec runs one mission-tool call, refusing off-mission as the backstop for the deterministic `tools` path; a successful report or ask also stamps a heartbeat as proof of life.
 func (p *provider) Exec(ctx context.Context, _ time.Time, input any, _ bool, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	if call == nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: missing tools call")
 	}
-	// Supervisor tools are authorized by the session having fired missions,
-	// checked first so its call is never rejected by the unit-only gate below.
+	// Supervisor tools are checked first so they aren't rejected by the unit-only gate below.
 	switch call.ToolName {
 	case ToolNameListMissions, ToolNameAnswer:
 		parentSessionID := ParentSessionIDFromContext(ctx)
@@ -233,8 +191,7 @@ func (p *provider) Exec(ctx context.Context, _ time.Time, input any, _ bool, cal
 func (p *provider) execReport(ctx context.Context, missionID string, input any, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	kind := missionservice.ReportKind(argString(input, call, "kind"))
 	if strings.TrimSpace(string(kind)) == "" {
-		// No kind named: default to progress rather than erroring; a
-		// malformed kind still fails loudly in AddReport's validation.
+		// No kind named defaults to progress; a malformed kind still fails loudly in AddReport's validation.
 		kind = missionservice.ReportKindProgress
 	}
 	handover, err := parseHandover(input, call)
@@ -248,10 +205,7 @@ func (p *provider) execReport(ctx context.Context, missionID string, input any, 
 		Refs:     argStrings(input, call, "refs"),
 		Handover: handover,
 	}
-	// Conclusion verification gate (see verify.go): a result whose claimed
-	// artifacts include a positively missing local path is downgraded to
-	// progress and annotated, before the write, so the durable row already
-	// tells the truth; the tool's own reply names the downgrade too.
+	// A result whose claimed artifacts include a missing path is downgraded to progress before the write.
 	downgradeNote := ""
 	if report.Kind == missionservice.ReportKindResult {
 		claims := reportClaims{refs: report.Refs}
@@ -272,8 +226,6 @@ func (p *provider) execReport(ctx context.Context, missionID string, input any, 
 	return fmt.Sprintf("recorded %s report %q%s", report.Kind, report.ID, downgradeNote), taskengine.DataTypeString, nil
 }
 
-// appendWarning attaches the verification warning to a report's detail, on
-// its own paragraph.
 func appendWarning(detail, warning string) string {
 	if strings.TrimSpace(detail) == "" {
 		return warning
@@ -289,8 +241,7 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 	}
 	callID, _ := ctx.Value(taskengine.ContextKeyToolCallID).(string)
 
-	// Resume path first: a run resumed after checkpoint-and-release carries
-	// the operator's answer (or its absence) injected under this call's ID.
+	// Resume path: a run resumed after checkpoint-and-release carries the operator's answer under this call's ID.
 	if ans, ok := taskengine.AttentionAnswerFromContext(ctx, callID); ok {
 		p.heartbeat(ctx, missionID)
 		if ans.Answered && strings.TrimSpace(ans.Text) != "" {
@@ -298,12 +249,10 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 		}
 		detail = withUnansweredNote(detail, fmt.Errorf("the ask was resolved without an answer while the run was suspended"))
 	} else if p.asker != nil {
-		// Heartbeat before the wait: asking is proof of life, and a unit
-		// blocked on an operator must not look dead while it waits.
+		// Heartbeat before the wait so a unit blocked on an operator doesn't look dead.
 		p.heartbeat(ctx, missionID)
 		ask := AttentionAsk{MissionID: missionID, Summary: summary, Detail: detail}
-		// Park-and-release only where a suspend can land: the model-batch
-		// execution site with a durable checkpoint saver installed.
+		// Park-and-release only where a suspend can land: model-batch execution with a checkpoint saver installed.
 		if callID != "" && taskengine.ToolCallSuspendable(ctx) && taskengine.HasCheckpointSaver(ctx) {
 			ask.AskID = callID
 			ask.ParkWindow = p.parkWindow
@@ -316,15 +265,13 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 		}
 		var pending *taskengine.ApprovalPendingError
 		if errors.As(err, &pending) {
-			// The park window elapsed with the question still open: hand the
-			// typed error up unwrapped so the engine suspends the run.
+			// Park window elapsed: hand the typed error up unwrapped so the engine suspends the run.
 			return nil, taskengine.DataTypeAny, pending
 		}
 		// No answer coming: fall through to the blocker below rather than failing.
 		detail = withUnansweredNote(detail, err)
 	}
-	// Fallback: no answer channel wired, or nobody answered. Record the need
-	// for attention as a durable blocker report, same store.
+	// Fallback: no answer channel wired, or nobody answered — record as a durable blocker report.
 	report := &missionservice.Report{Kind: missionservice.ReportKindBlocker, Summary: summary, Detail: detail}
 	if err := p.missions.AddReport(ctx, missionID, report); err != nil {
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: record attention request: %w", err)
@@ -333,7 +280,6 @@ func (p *provider) execAskAttention(ctx context.Context, missionID string, input
 	return "attention requested (recorded as blocker — no operator answered)", taskengine.DataTypeString, nil
 }
 
-// withUnansweredNote appends why the question fell back to a blocker.
 func withUnansweredNote(detail string, err error) string {
 	note := fmt.Sprintf("(the unit asked for an operator and got no answer: %v)", err)
 	if strings.TrimSpace(detail) == "" {
@@ -342,12 +288,6 @@ func withUnansweredNote(detail string, err error) string {
 	return detail + "\n\n" + note
 }
 
-// execPlan replaces the caller's mission plan with a full snapshot and
-// echoes the stored snapshot back: SetPlan assigns ids to id-less entries
-// and returns them, so echoing that Plan is what lets the planner carry ids
-// forward — the identity SetPlan's added/removed diff and completed-work
-// immutability guard both key on. Shape validation is missionservice's; this
-// tool stays hard on parsing arguments and soft on planning discipline.
 func (p *provider) execPlan(ctx context.Context, missionID string, input any, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	entries, err := parsePlanEntries(input, call)
 	if err != nil {
@@ -359,15 +299,10 @@ func (p *provider) execPlan(ctx context.Context, missionID string, input any, ca
 		return nil, taskengine.DataTypeAny, fmt.Errorf("missiontools: set plan: %w", err)
 	}
 	p.heartbeat(ctx, missionID)
-	// The stored Plan (with assigned ids) is also what the transport's
-	// projection reads off this tool event to emit the ACP snapshot update.
+	// The returned Plan is also what the transport reads to emit the ACP snapshot update.
 	return m.Plan, taskengine.DataTypeJSON, nil
 }
 
-// execFinish brings the caller's mission to rest in a terminal state via the
-// guarded missionservice.Finish (terminal target required, immutable once
-// finished, same-status retry is a no-op, different-status is a conflict) —
-// every case surfaces to the model as a readable error.
 func (p *provider) execFinish(ctx context.Context, missionID string, input any, call *taskengine.ToolsCall) (any, taskengine.DataType, error) {
 	status := missionservice.Status(strings.TrimSpace(argString(input, call, "status")))
 	if status == "" {
@@ -382,9 +317,6 @@ func (p *provider) execFinish(ctx context.Context, missionID string, input any, 
 	return fmt.Sprintf("mission finished as %s", m.Status), taskengine.DataTypeString, nil
 }
 
-// heartbeat stamps the mission's liveness on a successful tool call.
-// Best-effort and swallowed: a heartbeat error here is a transient storage
-// hiccup that must not fail the tool call that already committed its write.
 func (p *provider) heartbeat(ctx context.Context, missionID string) {
 	_, _ = p.missions.Heartbeat(ctx, missionID, "")
 }
@@ -543,8 +475,6 @@ func finishToolSchema() taskengine.Tool {
 	}
 }
 
-// handoverArg is the wire shape a report's optional typed hand-off arrives
-// in, mirroring missionservice.Handover field for field.
 type handoverArg struct {
 	Outcome         string   `json:"outcome"`
 	Artifacts       []string `json:"artifacts"`
@@ -552,10 +482,6 @@ type handoverArg struct {
 	Caveats         string   `json:"caveats"`
 }
 
-// parseHandover reads the optional `handover` object off a mission_report
-// call, from either call shape (nested object, or a JSON-encoded string for
-// the deterministic Args path). Absent returns (nil, nil) — a legacy report,
-// not an error; malformed returns a model-readable error.
 func parseHandover(input any, call *taskengine.ToolsCall) (*missionservice.Handover, error) {
 	var arg handoverArg
 	if m, ok := input.(map[string]any); ok {
@@ -580,8 +506,6 @@ func parseHandover(input any, call *taskengine.ToolsCall) (*missionservice.Hando
 	return nil, nil
 }
 
-// decodeHandover folds the model-shape `handover` value (a JSON object, or a
-// JSON-encoded string) into a typed handoverArg.
 func decodeHandover(v any, out *handoverArg) error {
 	if s, ok := v.(string); ok {
 		if strings.TrimSpace(s) == "" {
@@ -611,7 +535,6 @@ func toHandover(a handoverArg) *missionservice.Handover {
 	}
 }
 
-// trimStrings drops empty/whitespace-only artifact refs.
 func trimStrings(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, s := range in {
@@ -625,9 +548,6 @@ func trimStrings(in []string) []string {
 	return out
 }
 
-// planEntryArg is the wire shape one plan entry arrives in. Status and
-// Priority are read as plain strings and cast to the missionservice enums,
-// which SetPlan then validates.
 type planEntryArg struct {
 	ID       string `json:"id"`
 	Content  string `json:"content"`
@@ -635,10 +555,6 @@ type planEntryArg struct {
 	Priority string `json:"priority"`
 }
 
-// parsePlanEntries reads the full-snapshot `entries` list from either call
-// shape (a JSON array under `input`, or a JSON-encoded string for the
-// deterministic Args path) into typed PlanEntry values. SetPlan owns all
-// further validation.
 func parsePlanEntries(input any, call *taskengine.ToolsCall) ([]missionservice.PlanEntry, error) {
 	var args []planEntryArg
 	if m, ok := input.(map[string]any); ok {
@@ -660,8 +576,6 @@ func parsePlanEntries(input any, call *taskengine.ToolsCall) ([]missionservice.P
 	return nil, fmt.Errorf("missiontools: mission_plan requires an 'entries' array (a full snapshot of the plan)")
 }
 
-// decodePlanEntries folds the model-shape `entries` value (a JSON array, or
-// a JSON-encoded string) into typed entry args.
 func decodePlanEntries(v any, out *[]planEntryArg) error {
 	if s, ok := v.(string); ok {
 		if err := json.Unmarshal([]byte(s), out); err != nil {
@@ -692,9 +606,6 @@ func toPlanEntries(args []planEntryArg) []missionservice.PlanEntry {
 	return entries
 }
 
-// argString reads a string argument by key from either call shape: the
-// model-driven map[string]any `input`, or the deterministic Args map. The
-// model shape wins when present.
 func argString(input any, call *taskengine.ToolsCall, key string) string {
 	if m, ok := input.(map[string]any); ok {
 		if v, ok := m[key]; ok {
@@ -709,9 +620,6 @@ func argString(input any, call *taskengine.ToolsCall, key string) string {
 	return ""
 }
 
-// argStrings reads a string-list argument: a JSON array or single string
-// from the model shape, a comma/newline-separated value from the
-// deterministic Args (which cannot carry a list). Empty entries are dropped.
 func argStrings(input any, call *taskengine.ToolsCall, key string) []string {
 	if m, ok := input.(map[string]any); ok {
 		if v, ok := m[key]; ok {

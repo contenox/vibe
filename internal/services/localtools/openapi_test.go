@@ -16,20 +16,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// schemaRepo is the surface these tests exercise: a toolset that both declares
-// tools to the model and publishes their contract.
 type schemaRepo interface {
 	GetToolsForToolsByName(context.Context, string) ([]taskengine.Tool, error)
 	GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error)
 }
 
-// assertPublishedDoc pins one toolset's published document against the
-// descriptors it hands the model: the document is described and valid, it
-// carries a request and a response for every declared tool and for nothing
-// else, and each request schema agrees with the descriptor property for
-// property. Request schemas are CONVERTED from those descriptors, so a
-// disagreement here means the conversion lost something, not that two tables
-// drifted.
 func assertPublishedDoc(t *testing.T, repo schemaRepo, provider string, components map[string]string) *openapi3.T {
 	t.Helper()
 	ctx := context.Background()
@@ -85,8 +76,7 @@ func assertPublishedDoc(t *testing.T, repo schemaRepo, provider string, componen
 				require.NotNilf(t, published.Value.Type, "%s.%s is published without a type", name, prop)
 				assert.Truef(t, published.Value.Type.Is(want), "%s.%s: published type %v, descriptor type %v", name, prop, published.Value.Type, want)
 			case []any:
-				// A type union: "null" is rendered as nullable, since an
-				// OpenAPI validator knows no "null" type.
+				// A type union: "null" is rendered as nullable, since an OpenAPI validator knows no "null" type.
 				require.NotNilf(t, published.Value.Type, "%s.%s is published without a type", name, prop)
 				for _, one := range want {
 					if one == "null" {
@@ -104,8 +94,6 @@ func assertPublishedDoc(t *testing.T, repo schemaRepo, provider string, componen
 	return doc
 }
 
-// describedSchema returns whatever description a response schema carries, its
-// own or its variants'.
 func describedSchema(s *openapi3.Schema) string {
 	if s.Description != "" {
 		return s.Description
@@ -136,11 +124,6 @@ func asAnySlice(v any) []any {
 	return nil
 }
 
-// assertEveryPropertyDescribed walks a response schema and its variants: every
-// property is described, and every property that declares a shape declares a
-// type with it. An untyped property is allowed only when it declares nothing
-// else either — the deliberate "any JSON value" hole (a parsed HTTP body),
-// never a half-declared object.
 func assertEveryPropertyDescribed(t *testing.T, where string, s *openapi3.Schema) {
 	t.Helper()
 	if s == nil {
@@ -170,9 +153,6 @@ func assertEveryPropertyDescribed(t *testing.T, where string, s *openapi3.Schema
 	}
 }
 
-// assertResultIsDeclared marshals a payload Exec really returned and checks it
-// against the published response schema, both ways: no key the schema does not
-// declare, no required key the payload omits.
 func assertResultIsDeclared(t *testing.T, where string, schema *openapi3.Schema, result any) {
 	t.Helper()
 	raw, err := json.Marshal(result)
@@ -189,8 +169,6 @@ func assertResultIsDeclared(t *testing.T, where string, schema *openapi3.Schema,
 	}
 }
 
-// variantByRequired picks the oneOf/anyOf variant that declares key as
-// required — the shape a result carrying that key must satisfy.
 func variantByRequired(t *testing.T, s *openapi3.Schema, key string) *openapi3.Schema {
 	t.Helper()
 	for _, group := range [][]*openapi3.SchemaRef{s.OneOf, s.AnyOf} {
@@ -208,10 +186,6 @@ func variantByRequired(t *testing.T, s *openapi3.Schema, key string) *openapi3.S
 	t.Fatalf("no published variant requires %q", key)
 	return nil
 }
-
-// ---------------------------------------------------------------------------
-// local_fs
-// ---------------------------------------------------------------------------
 
 var fsComponents = map[string]string{
 	"read_file":       "LocalFsReadFile",
@@ -235,7 +209,6 @@ func TestUnit_LocalFSTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		assertEveryPropertyDescribed(t, component, doc.Components.Schemas[component+"Response"].Value)
 	}
 
-	// Declared against what a call actually produces, field for field.
 	ctx := context.Background()
 	now := time.Now()
 	exec := func(tool string, args map[string]any) any {
@@ -261,11 +234,7 @@ func TestUnit_LocalFSTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	assertResultIsDeclared(t, "find_files", doc.Components.Schemas["LocalFsFindFilesResponse"].Value, foundGot)
 }
 
-// TestUnit_LocalFSTools_MutatingResultsCarryTheDisplayPath pins the one form a
-// local_fs result addresses a file in: workspace-relative, the same form every
-// read result and every error message uses and the only one the model can paste
-// back. The absolute path survives on AbsPath, which is not serialized and
-// exists for ToolDiff alone — ACP tool-call locations are absolute by protocol.
+// TestUnit_LocalFSTools_MutatingResultsCarryTheDisplayPath pins that a local_fs result addresses a file as workspace-relative Path, while AbsPath (unserialized) survives for ToolDiff alone, since ACP tool-call locations are absolute by protocol.
 func TestUnit_LocalFSTools_MutatingResultsCarryTheDisplayPath(t *testing.T) {
 	dir := t.TempDir()
 	repo := localtools.NewLocalFSTools(dir, nil)
@@ -300,27 +269,23 @@ func TestUnit_LocalFSTools_MutatingResultsCarryTheDisplayPath(t *testing.T) {
 		assert.Equalf(t, rel, tc.path, "%s: the result path must be workspace-relative like every other one", tc.tool)
 		assert.NotContainsf(t, tc.path, dir, "%s: the host-absolute path must not reach the model", tc.tool)
 
-		// Serialized — what the model and the published schema actually see.
 		raw, err := json.Marshal(tc.result)
 		require.NoError(t, err)
 		var got map[string]any
 		require.NoError(t, json.Unmarshal(raw, &got))
 		assert.Equalf(t, rel, got["path"], "%s: the serialized path is the display form", tc.tool)
 
-		// ToolDiff still names the file the way ACP requires.
 		diffPath, _, _, ok := tc.result.ToolDiff()
 		require.Truef(t, ok, "%s: a write that changed the file produces a diff", tc.tool)
 		assert.Equalf(t, abs, diffPath, "%s: ToolDiff must stay absolute — ACP locations are", tc.tool)
 	}
 
-	// A result built outside this package has no AbsPath; ToolDiff falls back to
-	// Path rather than losing the diff.
+	// A result built outside this package has no AbsPath; ToolDiff falls back to Path rather than losing the diff.
 	fallback := localtools.FsWriteResult{Path: abs, Written: true, OldText: "a", NewText: "b"}
 	diffPath, _, _, ok := fallback.ToolDiff()
 	require.True(t, ok)
 	assert.Equal(t, abs, diffPath)
 
-	// The published contract says the same thing.
 	docs, err := repo.(schemaRepo).GetSchemasForSupportedTools(ctx)
 	require.NoError(t, err)
 	for _, component := range []string{"LocalFsWriteFile", "LocalFsEditFile", "LocalFsSed"} {
@@ -330,10 +295,7 @@ func TestUnit_LocalFSTools_MutatingResultsCarryTheDisplayPath(t *testing.T) {
 	}
 }
 
-// TestUnit_LocalFSTools_PublishedSchemaTracksVerboseDescriptions is why the
-// request schemas are converted from the descriptors rather than restated: the
-// descriptions are context-dependent, so a hand-written table could not follow
-// them.
+// TestUnit_LocalFSTools_PublishedSchemaTracksVerboseDescriptions pins that context-dependent descriptions (verbose mode) still match between the descriptor and the published schema.
 func TestUnit_LocalFSTools_PublishedSchemaTracksVerboseDescriptions(t *testing.T) {
 	repo := localtools.NewLocalFSTools(t.TempDir(), nil).(schemaRepo)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_fs",
@@ -355,10 +317,6 @@ func TestUnit_LocalFSTools_PublishedSchemaTracksVerboseDescriptions(t *testing.T
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// git
-// ---------------------------------------------------------------------------
 
 var gitComponents = map[string]string{
 	"git_status":          "GitStatus",
@@ -384,8 +342,7 @@ func TestUnit_GitTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		assertEveryPropertyDescribed(t, component, doc.Components.Schemas[component+"Response"].Value)
 	}
 
-	// The three tools that answer with a typed value are declared against what
-	// that value actually carries.
+	// The three tools that answer with a typed value are declared against what that value actually carries.
 	ctx := context.Background()
 	now := time.Now()
 	exec := func(tool string, args map[string]any) any {
@@ -407,10 +364,6 @@ func TestUnit_GitTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// webtools
-// ---------------------------------------------------------------------------
-
 var webComponents = map[string]string{
 	"web_get":    "WebGet",
 	"web_head":   "WebHead",
@@ -425,8 +378,7 @@ func TestUnit_WebCaller_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	repo := localtools.NewWebCaller(nil).(schemaRepo)
 	doc := assertPublishedDoc(t, repo, "webtools", webComponents)
 
-	// The two argument shapes a flat property table could not have held survive
-	// the conversion.
+	// The two argument shapes a flat property table could not have held survive the conversion.
 	post := doc.Components.Schemas["WebPostRequest"].Value
 	headers := post.Properties["headers"].Value
 	require.NotNil(t, headers.AdditionalProperties.Schema, "headers keeps its additionalProperties")
@@ -438,7 +390,7 @@ func TestUnit_WebCaller_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	}
 	require.NotNil(t, body.Items, "an array branch needs an item schema to be a valid document")
 
-	// GET/HEAD take no body; the other four do. That difference is the contract.
+	// GET/HEAD take no body; the other four do — that difference is the contract.
 	assert.NotContains(t, doc.Components.Schemas["WebGetRequest"].Value.Properties, "body")
 	assert.NotContains(t, doc.Components.Schemas["WebHeadRequest"].Value.Properties, "body")
 
@@ -452,11 +404,7 @@ func TestUnit_WebCaller_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		assert.Containsf(t, envelope.Properties, key, "the truncation envelope declares %s", key)
 	}
 
-	// The two facts a model reading only the DESCRIPTION would otherwise have to
-	// guess at: that a non-2xx arrives as an error rather than a result, and
-	// that an oversized body changes the result's shape. Both are declared in
-	// the response schemas above; the descriptor must say them too, since that
-	// is all a model is given at call time.
+	// The descriptor must also say what only the schema declares (non-2xx is an error, an oversized body changes the shape), since that is all a model has at call time.
 	declared, err := repo.GetToolsForToolsByName(context.Background(), "webtools")
 	require.NoError(t, err)
 	require.Len(t, declared, len(webComponents))
@@ -465,7 +413,6 @@ func TestUnit_WebCaller_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		assert.Containsf(t, desc, "non-2xx status is returned as an ERROR",
 			"%s: a model cannot tell a 404 from a transport failure unless the descriptor says so", tool.Function.Name)
 		if tool.Function.Name == "web_head" {
-			// A HEAD response has no body, so there is no envelope to warn about.
 			assert.NotContains(t, desc, "_truncated", "web_head has no body to truncate")
 			continue
 		}
@@ -473,10 +420,6 @@ func TestUnit_WebCaller_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 			"%s: the truncation envelope changes the result shape, so the descriptor must name it", tool.Function.Name)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// echo / print
-// ---------------------------------------------------------------------------
 
 func TestUnit_EchoAndPrint_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	t.Parallel()
@@ -491,8 +434,7 @@ func TestUnit_EchoAndPrint_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	printDoc := assertPublishedDoc(t, print, "print", map[string]string{"print": "Print"})
 	assertEveryPropertyDescribed(t, "Print", printDoc.Components.Schemas["PrintResponse"].Value)
 
-	// Both answer a string for an argument-map call, which is one of the
-	// declared shapes.
+	// Both answer a string for an argument-map call, one of the declared shapes.
 	for _, tc := range []struct {
 		repo taskengine.ToolsRepo
 		tool string

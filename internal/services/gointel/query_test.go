@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// Ground truth below is fixed by testdata/fixture (example.com/fixture,
-// packages shapes and report); a fixture edit moves these numbers with it.
-
 func TestUnit_Definition_KnownGroundTruth(t *testing.T) {
 	ix := newTestIndex(t, newFixture(t, "fixture"))
 	ctx := context.Background()
@@ -119,7 +116,6 @@ func TestUnit_Describe_MethodCarriesTheSourceSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("describe: %v", err)
 	}
-	// The source form, receiver name included, not go/types' canonical rendering.
 	if res.Signature != "func (r Rect) Area() float64" {
 		t.Errorf("signature = %q", res.Signature)
 	}
@@ -184,8 +180,6 @@ func TestUnit_References_KnownGroundTruth(t *testing.T) {
 	})
 
 	t.Run("a same-named symbol in another package is not counted", func(t *testing.T) {
-		// report.Unit and shapes.Unit share a name; identity is by types.Object,
-		// so neither result may contain the other's use sites.
 		reportUnit, err := ix.References(ctx, Request{Symbol: "report.Unit"})
 		if err != nil {
 			t.Fatalf("references: %v", err)
@@ -251,13 +245,11 @@ func TestUnit_Implementations_BothDirections(t *testing.T) {
 				t.Errorf("%s receiver = %q, want value", e.Name, e.Receiver)
 			}
 		}
-		// notShape has Area but no Name: the negative case must stay out.
 		for _, name := range got {
 			if strings.HasSuffix(name, ".notShape") {
 				t.Error("notShape was reported as a Shape implementer")
 			}
 		}
-		// Both directions: Shape itself satisfies the narrower Named.
 		if names := implNames(res.Interfaces); strings.Join(names, ",") != "example.com/fixture/shapes.Named" {
 			t.Fatalf("interfaces = %v, want [shapes.Named]", names)
 		}
@@ -441,7 +433,6 @@ func TestUnit_Resolve_NotFoundVariants(t *testing.T) {
 	})
 
 	t.Run("did-you-mean over the module", func(t *testing.T) {
-		// "report.Scale" does not exist; shapes.Scale does. Suggest, never resolve.
 		_, err := ix.Definition(ctx, Request{Symbol: "report.Scale"})
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("error = %v", err)

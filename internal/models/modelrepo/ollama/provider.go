@@ -95,6 +95,11 @@ func (p *OllamaProvider) CanVision() bool {
 	return p.SupportsVision
 }
 
+// CanAudio always reports false; audio input is refused, not dropped.
+func (p *OllamaProvider) CanAudio() bool {
+	return false
+}
+
 func (p *OllamaProvider) GetChatConnection(ctx context.Context, backendID string) (modelrepo.LLMChatClient, error) {
 	if !p.CanChat() {
 		return nil, fmt.Errorf("provider %s (model %s) does not support chat", p.GetID(), p.ModelName())

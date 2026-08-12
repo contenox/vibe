@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// note builds a session/update notification for one session id.
 func note(sid libacp.SessionID, u libacp.SessionUpdate) libacp.SessionNotification {
 	return libacp.SessionNotification{SessionID: sid, Update: u}
 }

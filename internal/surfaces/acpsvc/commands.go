@@ -46,6 +46,7 @@ func allACPCommands() []libacp.AvailableCommand {
 		{Name: "sessions", Description: "List the sessions in this workspace, newest first."},
 		{Name: "pair", Description: "Attach this machine to a relay with a key from the app; alone, shows what it is attached to.", Input: &libacp.AvailableCommandInput{Hint: "[key] [relay-endpoint]"}},
 		{Name: "unpair", Description: "Forget this machine's relay pairing (local only — revoke in the app)."},
+		{Name: "link", Description: "Print the app link that opens this session on another device (sign-in required)."},
 	}
 }
 
@@ -201,6 +202,8 @@ func (t *Transport) dispatchCommand(ctx context.Context, sid libacp.SessionID, s
 		out, err = t.handlePair(ctx, args)
 	case "unpair":
 		out, err = t.handleUnpair(ctx)
+	case "link":
+		out, err = t.handleLink(sid)
 	case "clear":
 		out, err = t.handleClear(ctx, sid, sess)
 	case "compact":

@@ -12,10 +12,7 @@ import (
 	"github.com/dop251/goja"
 )
 
-// HostToolCaller is the one seam through which sandboxed code reaches the
-// world. The implementation injected must be the engine's real, HITL-wrapped
-// tool path. provider.tool addresses the call; args and the return value are
-// plain JSON-marshalable data.
+// HostToolCaller is the seam through which sandboxed code reaches the world; the implementation injected must be the engine's HITL-wrapped tool path, addressed as provider.tool with JSON-marshalable args and return value.
 type HostToolCaller interface {
 	CallTool(ctx context.Context, provider, tool string, args map[string]any) (any, error)
 }
@@ -27,9 +24,7 @@ func (f HostFunc) CallTool(ctx context.Context, provider, tool string, args map[
 	return f(ctx, provider, tool, args)
 }
 
-// HostFromRepo adapts the engine's aggregate tools repo to HostToolCaller.
-// Pass the HITL-wrapped repo: a script calling local_fs.write_file must meet
-// the same envelope a model call would.
+// HostFromRepo adapts the engine's aggregate tools repo to HostToolCaller; pass the HITL-wrapped repo so a script call meets the same envelope a model call would.
 func HostFromRepo(repo taskengine.ToolsRepo) HostToolCaller {
 	if repo == nil {
 		return nil
@@ -50,19 +45,12 @@ func HostFromRepo(repo taskengine.ToolsRepo) HostToolCaller {
 	})
 }
 
-// denyResults are the exact strings the engine's HITL gate returns in place
-// of a tool result when a call is refused. Mirrored here since this package
-// does not import the gate; the registration site's e2e test pins these
-// against the engine's own constants.
 var denyResults = []string{
 	"User denied the operation. Please ask for clarification or try a different, less destructive approach.",
 	"Approval timed out. The operation was automatically denied.",
 }
 
-// IsDenyMessage reports whether a host tool result is the envelope's refusal
-// rather than data, so it can be thrown instead of handed to a script as
-// content. A tool legitimately returning this exact sentence is an accepted
-// false positive.
+// IsDenyMessage reports whether a host tool result is the envelope's refusal rather than data; a tool returning this exact sentence is an accepted false positive.
 func IsDenyMessage(v any) bool {
 	s, ok := v.(string)
 	if !ok {
@@ -77,9 +65,7 @@ func IsDenyMessage(v any) bool {
 	return false
 }
 
-// SetHost binds (or rebinds) the host tool path. Safe to call while
-// executions are in flight: a script that calls host.tool mid-rebind sees
-// either the old or the new caller, never a torn one.
+// SetHost binds (or rebinds) the host tool path; safe to call while executions are in flight, since a mid-rebind call sees either the old or the new caller, never a torn one.
 func (t *Toolset) SetHost(h HostToolCaller) {
 	t.sb.hostMu.Lock()
 	t.sb.host = h
@@ -92,22 +78,14 @@ func (s *sandbox) currentHost() HostToolCaller {
 	return s.host
 }
 
-// hostToolUsage is the one-line teaching text every bridge refusal ends with.
 const hostToolUsage = `Call it as host.tool("provider.tool_name", {arg: value}) — for example host.tool("local_fs.read_file", {path: "README.md"}).`
 
-// hostCallOptions is the third argument to host.tool: explicit opt-outs from
-// a guard, kept deliberately small.
 type hostCallOptions struct {
-	// raw returns the tool's value exactly as it came, so a text result
-	// arrives as a bare JS string rather than a ToolText wrapper.
 	raw bool
 }
 
-// hostOptionNames is the allowed key set of the options object, named in the
-// refusal.
 var hostOptionNames = []string{"raw"}
 
-// hostOptions decodes the optional third argument.
 func hostOptions(codec jsonCodec, fc goja.FunctionCall) (hostCallOptions, error) {
 	var opts hostCallOptions
 	if len(fc.Arguments) < 3 || goja.IsUndefined(fc.Arguments[2]) || goja.IsNull(fc.Arguments[2]) {
@@ -136,15 +114,10 @@ func hostOptions(codec jsonCodec, fc goja.FunctionCall) (hostCallOptions, error)
 	return opts, nil
 }
 
-// installHost defines the `host` global, with exactly one method on it.
-// Refusals are thrown as ordinary JS exceptions rather than returned as
-// values, so a script that ignores a refused call cannot silently continue
-// with `undefined`; a script that wants to continue can try/catch.
 func (s *sandbox) installHost(ctx context.Context, vm *goja.Runtime, codec jsonCodec, enabled bool, label string, hs *hostState) error {
 	obj := vm.NewObject()
 
-	// refuse throws msg into JS and records the sentinel, so an uncaught
-	// refusal still satisfies errors.Is on the way out (see execError).
+	// refuse's sentinel lets errors.Is see through the JS exception boundary (see execError).
 	refuse := func(sentinel error, msg string) {
 		hs.refusal = sentinel
 		panic(jsError(vm, msg))
@@ -159,9 +132,7 @@ func (s *sandbox) installHost(ctx context.Context, vm *goja.Runtime, codec jsonC
 		if len(fc.Arguments) > 0 && !goja.IsUndefined(fc.Arguments[0]) && !goja.IsNull(fc.Arguments[0]) {
 			name = strings.TrimSpace(fc.Arguments[0].String())
 		}
-		// The recursion guard: a script may reach the world but not reach back
-		// into this sandbox. Checked by provider prefix, since the engine
-		// addresses every tool as "<provider>.<tool>".
+		// Recursion guard: sandbox depth is exactly one, checked by provider prefix ("<provider>.<tool>").
 		refuseRecursion := func() {
 			refuse(ErrRecursionRefused, fmt.Sprintf(
 				"%s: %s tried to call %s, but scripts may not invoke %q-provider tools — sandbox depth is exactly one. Inline the computation you wanted to delegate; you are already inside the sandbox.",
@@ -170,8 +141,6 @@ func (s *sandbox) installHost(ctx context.Context, vm *goja.Runtime, codec jsonC
 
 		provider, tool, err := splitToolName(name)
 		if err != nil {
-			// An unqualified attempt at this provider's own tools gets the
-			// real reason rather than a lecture about the address form.
 			if name == ToolsProviderName || name == ToolEval || strings.HasPrefix(name, ToolsProviderName+"_") {
 				refuseRecursion()
 			}
@@ -181,15 +150,12 @@ func (s *sandbox) installHost(ctx context.Context, vm *goja.Runtime, codec jsonC
 			refuseRecursion()
 		}
 
-		// The declared reach: a script that listed its tools may call those
-		// and nothing else. Defence in depth, not the policy boundary — the
-		// envelope still evaluates every call that gets past it.
+		// Declared reach is defence in depth, not the policy boundary — the envelope still evaluates every call that passes it.
 		if reach := hs.reach; reach != nil && !reach.permits(name) {
 			refuse(ErrToolUndeclared, reach.refusal(label, name))
 		}
 
-		// The budget on reaching the world, checked before the host is
-		// consulted.
+		// Budget checked before the host is consulted.
 		if hs.calls >= maxHostCalls {
 			refuse(ErrHostBudget, fmt.Sprintf(
 				"%s: %s has already made %d host.tool calls, the limit for one execution. A tool call that needs to reach the world more times than this is a pipeline, not a tool — fetch less, or split the work across separate calls.",
@@ -211,8 +177,7 @@ func (s *sandbox) installHost(ctx context.Context, vm *goja.Runtime, codec jsonC
 			panic(jsError(vm, oerr.Error()))
 		}
 
-		// The deadline clock stops for the duration of this call: what is on
-		// the other side may be an approval card with a human in front of it.
+		// The deadline clock stops for this call: the other side may be a human-gated approval.
 		result, cerr := hs.stopClock(func() (any, error) {
 			return host.CallTool(ctx, provider, tool, args)
 		})
@@ -223,14 +188,12 @@ func (s *sandbox) installHost(ctx context.Context, vm *goja.Runtime, codec jsonC
 					"%s: %s.%s was refused by the approval envelope, so it produced no result — the gate answers a denial with a sentence meant for a human, which is not data this script can use. If %s should carry on without that call, wrap it in try/catch.",
 					ErrToolDenied, provider, tool, label))
 			}
-			// Otherwise the host's message is preserved verbatim.
 			panic(jsError(vm, clampText(cerr.Error(), maxErrorTextBytes)))
 		}
 
 		value, jerr := hostResult(codec, provider, tool, opts.raw, result)
 		if jerr != nil {
-			// A stand-in with no program-facing meaning is a refusal like any
-			// other guard's: it keeps its sentinel.
+			// A stand-in with no program-facing meaning refuses like any other guard, keeping its sentinel.
 			var unusable *unusableResultError
 			if errors.As(jerr, &unusable) {
 				refuse(ErrToolNotData, unusable.Error())
@@ -246,8 +209,6 @@ func (s *sandbox) installHost(ctx context.Context, vm *goja.Runtime, codec jsonC
 	return vm.Set("host", obj)
 }
 
-// splitToolName parses the "<provider>.<tool>" address, the same spelling the
-// model sees in its tool list.
 func splitToolName(name string) (provider, tool string, err error) {
 	if name == "" {
 		return "", "", fmt.Errorf("goja: host.tool needs a tool name. %s", hostToolUsage)
@@ -259,9 +220,6 @@ func splitToolName(name string) (provider, tool string, err error) {
 	return name[:idx], name[idx+1:], nil
 }
 
-// hostArgs converts the JS arguments object into plain Go data through JSON,
-// so nothing live (a function, a closure, a getter) can cross into the
-// engine's tool path.
 func hostArgs(codec jsonCodec, fc goja.FunctionCall) (map[string]any, error) {
 	if len(fc.Arguments) < 2 || goja.IsUndefined(fc.Arguments[1]) || goja.IsNull(fc.Arguments[1]) {
 		return map[string]any{}, nil
@@ -280,8 +238,6 @@ func hostArgs(codec jsonCodec, fc goja.FunctionCall) (map[string]any, error) {
 	return args, nil
 }
 
-// jsError builds a JS Error object to panic with; goja converts a panicked
-// Value into a catchable JS exception.
 func jsError(vm *goja.Runtime, msg string) goja.Value {
 	ctor := vm.Get("Error")
 	if ctor == nil {
@@ -294,15 +250,8 @@ func jsError(vm *goja.Runtime, msg string) goja.Value {
 	return obj
 }
 
-// declaredReach is a script's `tools: [...]` declaration, resolved once at
-// load. A nil *declaredReach means the script declared nothing, which is
-// unrestricted; an empty declaration (`tools: []`) means the script reaches
-// nothing and is enforced as written.
 type declaredReach struct {
-	// file is the script the declaration lives in; the refusal names it.
-	file string
-	// names is the declared set, in declaration order for the message and as
-	// a set for the check.
+	file  string
 	names []string
 	set   map[string]struct{}
 }
@@ -320,7 +269,6 @@ func (d *declaredReach) permits(name string) bool {
 	return ok
 }
 
-// refusal is the teaching error for an undeclared call.
 func (d *declaredReach) refusal(label, name string) string {
 	declared := "tools: [] (this script declares that it reaches nothing)"
 	if len(d.names) > 0 {
@@ -339,56 +287,32 @@ func quoteAll(names []string) []string {
 	return out
 }
 
-// hostState carries what the bridge learned during one execution back to the
-// exec boundary, and carries the deadline clock's pause signal out to the
-// watchdog. Only the executing goroutine touches `refusal` (the VM is
-// single-threaded by construction), so it needs no lock.
 type hostState struct {
-	// reach is the declared tool allowlist for this execution, or nil for an
-	// unrestricted one.
 	reach *declaredReach
 
-	// refusal is the sentinel for the last guard this bridge tripped. It
-	// exists because a refusal leaves Go, becomes a JS exception, and comes
-	// back as a *goja.Exception, a form errors.Is can no longer see through.
 	refusal error
 
-	// paused/resumed bracket every host.tool call, stopping and restarting
-	// the deadline clock. See stopClock.
 	paused  chan struct{}
 	resumed chan struct{}
 
-	// calls counts host.tool dispatches, bounded by maxHostCalls. Executing
-	// goroutine only.
 	calls int
 
-	// hostWait is the total time this execution spent parked in host.tool,
-	// written and read on the executing goroutine only. Lets a deadline error
-	// report compute time rather than wall time.
 	hostWait time.Duration
 }
 
 func newHostState() *hostState {
-	// Buffered so the bridge's send always lands even if the watchdog is
-	// momentarily between selects.
+	// Buffered so the bridge's send always lands even when the watchdog is between selects.
 	return &hostState{
 		paused:  make(chan struct{}, 1),
 		resumed: make(chan struct{}, 1),
 	}
 }
 
-// stopClock pauses the execution deadline for the duration of fn, which is
-// one host.tool call — the deadline bounds compute, not waiting on a human
-// approval. The wait remains bounded by the approval machinery's own timeout,
-// the caller's context, and Shutdown, each of which still interrupts the VM
-// through the same watchdog.
 func (hs *hostState) stopClock(fn func() (any, error)) (any, error) {
 	if hs == nil || hs.paused == nil {
 		return fn()
 	}
-	// Best-effort in both directions: a watchdog that has already fired or
-	// returned leaves nobody to receive, and a stuck bridge would be worse
-	// than an unpaused clock.
+	// Best-effort: a fired/returned watchdog leaves nobody to receive, and blocking would be worse than an unpaused clock.
 	paused := false
 	select {
 	case hs.paused <- struct{}{}:

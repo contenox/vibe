@@ -93,20 +93,11 @@ func (acpStdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
 func (acpStdio) Close() error                { return os.Stdin.Close() }
 
 type acpProfile struct {
-	hitlPolicy string
-	chainFile  string
-	chainEnv   string
-	seedChain  func(contenoxDir string) error
-	// embedFleet gives this profile the `/mission` slash command, running the
-	// fleet in-process. Disabled for acpx: an untrusted driver must not get a
-	// lever to dispatch fleet units at all.
-	embedFleet bool
-	// seedFIMChain seeds the chain-fim-default.json preset consumed by
-	// _contenox/autocomplete. Nil disables autocomplete for this profile
-	// entirely (no seed, no load): acpx serves non-editor drivers (OpenClaw
-	// and friends) with no code buffer to complete into, so the method would
-	// only ever be a dead lever there. IDE clients (Zed, GoLand, AionUi) run
-	// under acp and are the only consumers.
+	hitlPolicy   string
+	chainFile    string
+	chainEnv     string
+	seedChain    func(contenoxDir string) error
+	embedFleet   bool
 	seedFIMChain func(contenoxDir string) error
 }
 
@@ -129,11 +120,6 @@ var acpProfileACPX = acpProfile{
 func runACP(cmd *cobra.Command, _ []string) error  { return runACPProfile(cmd, acpProfileACP) }
 func runACPX(cmd *cobra.Command, _ []string) error { return runACPProfile(cmd, acpProfileACPX) }
 
-// seedOptionalFIMChain seeds the FIM chain preset for profiles that offer
-// autocomplete. Unlike profile.seedChain (the chat chain, which fails
-// startup on a seed error), this is best-effort: autocomplete is optional,
-// so a seed failure (e.g. an unwritable ~/.contenox) is logged and swallowed
-// rather than blocking `contenox acp`/`acpx` from serving chat.
 func seedOptionalFIMChain(profile acpProfile, contenoxDir string) {
 	if profile.seedFIMChain == nil {
 		return
@@ -143,12 +129,6 @@ func seedOptionalFIMChain(profile acpProfile, contenoxDir string) {
 	}
 }
 
-// loadOptionalFIMChain resolves the _contenox/autocomplete FIM chain for
-// profiles that support it, or nil for profiles that don't (acpx) or on any
-// load error. Unlike acpsvc.LoadChainRegistryFrom for the chat chain (fails
-// closed: a missing/invalid file is a hard error), a missing or unparseable
-// FIM chain here must not break startup — Transport.handleAutocomplete
-// already degrades a nil FIMChainRegistry to a clean method-not-found.
 func loadOptionalFIMChain(ctx context.Context, tracker libtracker.ActivityTracker, profile acpProfile) *acpsvc.ChainRegistry {
 	if profile.seedFIMChain == nil {
 		return nil
@@ -175,8 +155,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	ctx, stop := signal.NotifyContext(parentCtx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Deferred before the engine is built so it runs after engine teardown:
-	// drain registered model-backend shutdown hooks. No-op if none registered.
+	// Deferred before the engine is built so it runs after engine teardown.
 	defer func() { _ = modelrepo.Shutdown() }()
 
 	autoMode, _ := cmd.Flags().GetBool("auto")
@@ -184,7 +163,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	workspaceFlag, _ := cmd.Flags().GetString("workspace-id")
 
-	// Created early so phase timings and errors on a freeze are visible.
 	var tracker libtracker.ActivityTracker = libtracker.NewTextActivityTracker(os.Stderr)
 
 	reportErr, reportChange, endStartup := tracker.Start(ctx, "startup", "acp")
@@ -206,9 +184,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	defer db.Close()
 	reportChange("phase", "open_db")
 
-	// Anchored to $HOME/.contenox, the same directory the DB, chain and HITL
-	// policy loaders resolve to — a cwd-walk here would seed presets into a
-	// directory the loaders never look in.
+	// Must match the directory the DB, chain and HITL policy loaders resolve to.
 	contenoxDir, err := globalContenoxDir()
 	if err != nil {
 		reportErr(err)
@@ -244,9 +220,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	var transport *acpsvc.Transport
 
-	// When nothing is configured yet but the launch environment names a
-	// provider/model, persist it as the interactive wizard would. Not fatal
-	// on failure: falls through to setup-only mode.
 	if acpsvc.ReadConfigValue(ctx, db, "default-model") == "" &&
 		(os.Getenv(envDefaultProvider) != "" || os.Getenv(envDefaultModel) != "") {
 		if err := completeEnvSetup(ctx, db); err != nil {
@@ -256,8 +229,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		}
 	}
 
-	// Config reads are environment-first: a CONTENOX_DEFAULT_* variable
-	// overrides the stored value for this process without persisting.
+	// Config reads are environment-first: CONTENOX_DEFAULT_* overrides the stored value without persisting.
 	optInBeta := betaEnabled(ctx, runtimetypes.New(db.WithoutTransaction()))
 	defaultModel := configValueWithEnv(ctx, db, "default-model", envDefaultModel)
 	defaultProvider := configValueWithEnv(ctx, db, "default-provider", envDefaultProvider)
@@ -284,47 +256,28 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	end()
 	fimChains := loadOptionalFIMChain(ctx, tracker, profile)
 
-	// Created before the tools and engine so both share one bus instead of
-	// minting their own; the engine doesn't own it, so this defer closes it.
+	// Shared bus: the engine doesn't own it, so this defer closes it.
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
-	// Publisher-wired so AddReport emits a ReportAddedEvent: the dispatcher's
-	// embedded report router consumes it, and a dispatched unit's publisher
-	// carries its report across the process boundary the same way. Under
-	// opt-in-beta the publisher also appends each event to the durable log;
-	// the trigger holder fires matching triggers live once the engine exists
-	// below (the standalone dispatcher stays the catch-up consumer).
 	trigHook := eventlog.NewTriggerHolder()
 	missionPub := missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionPub))
 
-	// One durable-ask service for this process: the unit half raises
-	// questions through it, the supervisor half answers them through it.
 	acpHITL := hitlservice.NewWithDefaultPolicy(acpPolicySource(), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, profile.hitlPolicy)
-	// /policy and `contenox config set hitl-policy-name` both write this
-	// workspace's row; the evaluator must read the same one.
+	// /policy and `contenox config set hitl-policy-name` both write this workspace's row; the evaluator must read the same one.
 	hitlservice.SetWorkspaceID(acpHITL, workspaceID)
 
-	// Same SANDBOX_* scrub composition BuildEngine wires for local_shell (see
-	// sandbox_scrub.go): this profile builds its own toolset rather than going
-	// through BuildEngine, so the wiring is repeated here.
+	// Same SANDBOX_* scrub composition BuildEngine wires for local_shell (see sandbox_scrub.go).
 	shellScrub, _, err := resolvedSandboxEnv(db, tracker, os.Stderr)
 	if err != nil {
 		return fmt.Errorf("resolve sandbox env: %w", err)
 	}
 
-	// The index owns a reaper goroutine, so it needs a lifecycle: it rides
-	// engine.Stop below once an engine is built (toolsOwned=true), and the
-	// guard here covers the setup-only path (no engine at all) and error
-	// returns before that. CwdResolver, not a fixed AllowedDir: an ACP
-	// session's workspace is whatever cwd the live Transport reports.
+	// The index owns a reaper goroutine; it rides engine.Stop once built, and the guard here covers the setup-only/error paths before that.
 	goIndex := gointel.NewIndex(gointel.Config{
 		CwdResolver: acpsvc.NewACPCwdResolver(func() *acpsvc.Transport { return transport }),
 	})
-	// The goja sandbox: goja_eval plus one tool per operator-authored script in
-	// $CONTENOX_DIR/tools, exactly as BuildEngine constructs it for the CLI —
-	// including the opt-in-beta gate: without it the scripts are never loaded
-	// and acpToolset leaves the provider unregistered.
+	// Opt-in-beta gated: without it the scripts are never loaded and the provider stays unregistered.
 	gojaScriptDir := filepath.Join(contenoxDir, "tools")
 	if !optInBeta {
 		gojaScriptDir = ""
@@ -344,11 +297,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	tools := acpToolset(db, tracker, goIndex, gt, workspaceID, func() *acpsvc.Transport { return transport }, shellScrub, missions, acpHITL, missionPub, optInBeta)
 
-	// One registry for every connection this process serves: the stdio
-	// transport built below and each remote attachment the relay tunnel
-	// creates from the same factory. Without it a permission request raised by
-	// work a phone started would be answered on the desk, because a single
-	// engine has only ever had one place to send an approval.
+	// One registry for every connection: without it, an approval raised by remote work would be answered on the local desk instead.
 	sessionRouter := acpsvc.NewSessionRouter()
 
 	var askApproval localtools.AskApproval
@@ -356,10 +305,21 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		askApproval = routedAskApproval(sessionRouter, func() *acpsvc.Transport { return transport })
 	}
 
-	// enginesvc.Build requires a configured model. When none is set, serve a
-	// setup-only transport instead of hard-exiting: initialize/authenticate
-	// still work, so a client can run the "Setup Contenox" auth method.
+	// enginesvc.Build requires a configured model; with none set, serve setup-only so "Setup Contenox" still works.
 	var engine *enginesvc.Engine
+	// Shared by the in-process dispatch hook and the relay chain-trigger runner so a chain fires identically either way.
+	triggerOpts := chatOpts{
+		EffectiveDefaultModel:       defaultModel,
+		EffectiveDefaultProvider:    defaultProvider,
+		EffectiveConfiguredModel:    defaultModel,
+		EffectiveConfiguredProvider: defaultProvider,
+		EffectiveAltDefaultModel:    defaultAltModel,
+		EffectiveAltDefaultProvider: defaultAltProvider,
+		EffectiveMaxTokens:          defaultMaxTokens,
+		EffectiveThink:              defaultThink,
+		EffectiveOptInBeta:          optInBeta,
+		ContenoxDir:                 contenoxDir,
+	}
 	if err := acpsvc.CleanupStaleACPManagedMCPServers(ctx, db); err != nil {
 		return fmt.Errorf("cleanup stale ACP MCP servers: %w", err)
 	}
@@ -375,9 +335,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			Tracker:            tracker,
 			WorkspaceID:        workspaceID,
 			Bus:                bus, // reuse the one bus, not a second
-			// Closes the goja sandbox's construction cycle: host.tool needs
-			// the aggregate repo the sandbox is itself registered inside (see
-			// engine.go's BuildEngine, which wires the same callback).
+			// Closes the goja sandbox's construction cycle: host.tool needs the aggregate repo the sandbox is itself registered inside.
 			OnToolsRepoReady: func(repo taskengine.ToolsRepo) {
 				gt.SetHost(gojatool.HostFromRepo(repo))
 			},
@@ -387,8 +345,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			cfg.AskApproval = askApproval
 			cfg.HITLPolicySource = acpPolicySource()
 			cfg.HITLDefaultPolicyName = profile.hitlPolicy
-			// Inject the process's one durable-ask service: two instances
-			// cannot wake each other's parked waiters.
+			// The process's one durable-ask service: two instances cannot wake each other's parked waiters.
 			cfg.HITLService = acpHITL
 		}
 
@@ -396,8 +353,9 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		if err != nil {
 			return fmt.Errorf("build engine: %w", err)
 		}
-		// Rides the engine's chainable stop so the index's reaper and the
-		// goja sandbox join on shutdown, same as engine.go's BuildEngine.
+		// Needs the engine's chat path, which now exists (same post-construction ordering as engine.go).
+		bindAudioTranscriber(tools, engine)
+		// Rides the engine's chainable stop so the index's reaper and the goja sandbox join on shutdown.
 		toolsOwned = true
 		oldStop := engine.Stop
 		engine.Stop = func() {
@@ -406,44 +364,23 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			oldStop()
 		}
 		defer engine.Stop()
-		// A verdict landing with no waiter parked (asking process died, or the
-		// ask outlived its park window) resumes the suspended run here.
+		// A verdict landing with no waiter parked resumes the suspended run here.
 		hitlservice.SetResumeHook(acpHITL, agentservice.ResumeHook(agentservice.Deps{
 			Engine:      engine,
 			DB:          db,
 			WorkspaceID: workspaceID,
 		}))
-		// Live in-process trigger dispatch on this host's appends (beta; nil
-		// when no triggers load). Minimal opts: what buildTemplateVars and the
-		// firing runner consume.
-		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, chatOpts{
-			EffectiveDefaultModel:       defaultModel,
-			EffectiveDefaultProvider:    defaultProvider,
-			EffectiveConfiguredModel:    defaultModel,
-			EffectiveConfiguredProvider: defaultProvider,
-			EffectiveAltDefaultModel:    defaultAltModel,
-			EffectiveAltDefaultProvider: defaultAltProvider,
-			EffectiveMaxTokens:          defaultMaxTokens,
-			EffectiveThink:              defaultThink,
-			EffectiveOptInBeta:          optInBeta,
-			ContenoxDir:                 contenoxDir,
-		}, os.Stderr))
-		// Deferred AFTER engine.Stop so LIFO drains in-flight firings first: an
-		// editor closing the session tears this host down, and a firing killed
-		// between its claim and its finish is never retried by the catch-up
-		// dispatcher.
+		// Live in-process trigger dispatch on this host's appends (beta; nil when no triggers load).
+		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, triggerOpts, os.Stderr))
+		// Deferred AFTER engine.Stop so LIFO drains in-flight firings before teardown.
 		defer trigHook.Drain(eventlog.DefaultDrainTimeout)
 	}
 
 	updateBanner := acpUpdateBanner(dbCtx, db, contenoxDir)
 
-	// Shared-SQLite presence store: serve registers its address here, this
-	// process self-registers below; board-only telemetry, harmless if unused.
 	presenceStore := presence.NewStore(libkvstore.NewSQLiteManager(db))
 
-	// The `/mission` slash command: embedFleet gates it to the editor profile
-	// (acpx gets no lever), and a dispatched unit must not host its own fleet
-	// or it would double-route its own report and recursively spawn fleets.
+	// embedFleet gates the mission fleet to the editor profile; a dispatched unit must not host its own fleet or it would double-route its report and recursively spawn fleets.
 	var (
 		missionFleet      acpsvc.MissionDispatcher
 		missionAgents     acpsvc.MissionAgentResolver
@@ -452,25 +389,20 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	isDispatchedUnit := strings.TrimSpace(os.Getenv(profile.chainEnv)) != ""
 	switch {
 	case !profile.embedFleet || isDispatchedUnit:
-		// No mission capability in this process (acpx, or this process is a unit).
 	case engine != nil:
-		// The default editor journey, needing a configured model since the
-		// dispatched unit resolves the same $HOME state this editor runs on.
 		fleet, agents, stop, buildErr := fleetboot.BuildInProcessFleet(ctx, fleetboot.Deps{
 			DB:       db,
 			Bus:      bus,
 			Missions: missions,
 			Tracker:  tracker,
-			// Late-binds this connection's live Transport (nil until the conn
-			// factory runs below), so the deliverer reaches the firing session.
+			// Late-binds this connection's live Transport (nil until the conn factory runs below).
 			Transport:    func() *acpsvc.Transport { return transport },
 			HITL:         acpHITL,
 			PolicySource: hitlPolicySource(contenoxDir),
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
 				discoverChainAgents(dctx, agents, contenoxDir, tracker, optInBeta)
 			},
-			// The workspace missionPub stamps; a dispatched unit's own
-			// publisher must stamp the same one.
+			// The workspace missionPub stamps; a dispatched unit's own publisher must stamp the same one.
 			WorkspaceID: workspaceID,
 		})
 		if buildErr != nil {
@@ -479,8 +411,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		missionFleet, missionAgents, stopFleetTeardown = fleet, agents, stop
 	}
 	if stopFleetTeardown != nil {
-		// Children die with the parent: stops the report router and kills
-		// every dispatched child subprocess on shutdown.
+		// Children die with the parent: stops the report router and kills every dispatched child subprocess.
 		defer stopFleetTeardown()
 	}
 
@@ -497,25 +428,18 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		DefaultThink:       defaultThink,
 		WorkspaceID:        workspaceID,
 		ContenoxDir:        contenoxDir,
-		// Every transport this factory builds registers here, so an approval
-		// goes to the connection driving the session rather than to the one
-		// this process bound at startup.
+		// Every transport this factory builds registers here, so an approval goes to the connection driving the session.
 		SessionRouter:         sessionRouter,
 		KnownPolicies:         embeddedPolicyNames(),
 		HITLDefaultPolicyName: profile.hitlPolicy,
 		UpdateBanner:          updateBanner,
-		// The in-process fleet, or nil (acpx, a dispatched unit, or a
-		// setup-only editor) — nil-safe throughout acpsvc when unwired.
+		// Nil-safe throughout acpsvc when unwired (acpx, a dispatched unit, or a setup-only editor).
 		Fleet:  missionFleet,
 		Agents: missionAgents,
-		// /answer's two seams: the durable ask store it reads and resolves
-		// through, and the ownership check that confines it to asks raised by
-		// missions this session fired. Same values the mission toolset uses,
-		// so the command and the tool cannot disagree about who owns an ask.
+		// Same values the mission toolset uses, so the command and the tool cannot disagree about who owns an ask.
 		Asks:        acpHITL,
 		Supervision: missionSupervision{missions: missions, hitl: acpHITL, db: db, tracker: tracker},
-		// The envelopes /mission --policy offers and validates against, read
-		// from the same search path the unit's policy loader reads.
+		// Read from the same search path the unit's policy loader reads.
 		MissionEnvelopes: newMissionEnvelopes(contenoxDir),
 		OptInBeta:        optInBeta,
 		EnvSetup: &acpsvc.EnvSetupSpec{
@@ -526,11 +450,11 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		},
 	})
 
-	stopRelay := serveRemoteAttachments(ctx, contenoxDir, transportFactory, tracker, os.Stderr)
+	stopRelay := serveRemoteAttachments(ctx, contenoxDir, transportFactory,
+		buildRelayChainTriggers(db, contenoxDir, workspaceID, engine, triggerOpts), tracker, os.Stderr)
 	defer stopRelay()
 
-	// Makes this process visible on the fleet board: self-registers and
-	// heartbeats, entirely best-effort (never blocks or fails serving).
+	// Best-effort: never blocks or fails serving.
 	acpCwd, _ := os.Getwd()
 	presenceReporter := presence.StartReporter(ctx, presenceStore, presence.Record{
 		Kind: presence.KindACP,
@@ -554,26 +478,17 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	return nil
 }
 
-// missionAttentionAsker adapts the durable-ask machinery to
-// missiontools.AttentionAsker: a unit's question becomes a pending ask, the
-// wait blocks until an operator answers or the ceiling expires it, and the
-// answer is returned to the unit as its tool result.
 type missionAttentionAsker struct {
 	hitl     hitlservice.Service
 	missions missionservice.Service
-	// bus is the narrow publish seam (libbus.Messenger satisfies it); wired
-	// with the mission event publisher so an attention_asked announce follows
-	// the same dual-write path the other mission events take.
-	bus missionservice.EventPublisher
+	bus      missionservice.EventPublisher
 }
 
 var _ missiontools.AttentionAsker = missionAttentionAsker{}
 
 func (a missionAttentionAsker) RaiseAttention(ctx context.Context, ask missiontools.AttentionAsk) (string, error) {
 	missionID, summary, detail := ask.MissionID, ask.Summary, ask.Detail
-	// Read for attribution only, so the question is announced where the
-	// operator is looking; a mission that can't be read still asks, with
-	// less context.
+	// Read for attribution only; a mission that can't be read still asks, with less context.
 	var parentSessionID, agentName, intent string
 	if a.missions != nil {
 		if m, err := a.missions.Get(ctx, missionID); err == nil && m != nil {
@@ -588,8 +503,7 @@ func (a missionAttentionAsker) RaiseAttention(ctx context.Context, ask missionto
 		AskID:      ask.AskID,
 		ParkWindow: ask.ParkWindow,
 		OnRaised: func(askID string) {
-			// With no listener this changes nothing: the ask is already
-			// durable and answerable from the queue.
+			// With no listener this changes nothing: the ask is already durable and answerable from the queue.
 			a.publishAsked(ctx, missionservice.AttentionAskedEvent{
 				MissionID:       missionID,
 				AskID:           askID,
@@ -601,8 +515,7 @@ func (a missionAttentionAsker) RaiseAttention(ctx context.Context, ask missionto
 			})
 		},
 	}, taskengine.NoopTaskEventSink{})
-	// Park window elapsed: the engine checkpoints under this ask's ID, the
-	// same pattern tool-call approvals use.
+	// Park window elapsed: the engine checkpoints under this ask's ID, the same pattern tool-call approvals use.
 	var pending *hitlservice.AttentionPendingError
 	if errors.As(err, &pending) {
 		return "", &taskengine.ApprovalPendingError{ApprovalID: pending.AskID, ToolName: missiontools.ToolNameAskAttention}
@@ -610,8 +523,6 @@ func (a missionAttentionAsker) RaiseAttention(ctx context.Context, ask missionto
 	return answer, err
 }
 
-// publishAsked emits the attention-asked event, best-effort: a publish
-// failure must never fail the ask, since it's still answerable from the queue.
 func (a missionAttentionAsker) publishAsked(ctx context.Context, ev missionservice.AttentionAskedEvent) {
 	if a.bus == nil {
 		return
@@ -631,9 +542,6 @@ func acpPolicySource() hitlservice.PolicySource {
 	return hitlservice.NewFSPolicySource(filepath.Join(home, ".contenox"))
 }
 
-// acpUpdateBanner returns a one-line update banner, or "" if none is
-// available or the operator opted out. Non-blocking: waits at most 500ms,
-// so a slow network call is silently skipped and retried next session.
 func acpUpdateBanner(ctx context.Context, db libdb.DBManager, contenoxDir string) string {
 	if acpsvc.ReadConfigValue(ctx, db, "update-check") == "false" {
 		return ""

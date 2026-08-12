@@ -24,21 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---------------------------------------------------------------------------
-// workspace_search on the engine path: a call through BuildEngine, the
-// aggregate tools repo, the real HITL wrapper and the shipped policy file,
-// which neither searchtool nor workspaceindex alone can exercise. The control
-// is the same call and tool under a no-rule envelope (falls to
-// default_action) and an explicit deny (denied), proving the file decides
-// rather than a built-in fallback.
-//
-// Hermetic by construction: with no index, Query returns ErrNoIndex before it
-// embeds anything, so the allow path needs no model or network. The live-model
-// half is the ollama-gated test at the bottom.
-// ---------------------------------------------------------------------------
-
-// wsearchAsker is the approval callback an allow-tier toolset must never
-// reach; it denies rather than prompting so a regression fails loudly.
 type wsearchAsker struct {
 	mu   sync.Mutex
 	asks []hitlservice.ApprovalRequest
@@ -63,9 +48,6 @@ func (a *wsearchAsker) reset() {
 	a.asks = nil
 }
 
-// wsearchSink captures hitl_decision and approval_requested events — the only
-// evidence of which envelope evaluated a call, since a green result alone
-// cannot distinguish an allow from a policy never consulted.
 type wsearchSink struct {
 	mu     sync.Mutex
 	events []taskengine.TaskEvent
@@ -99,14 +81,9 @@ type wsearchHarness struct {
 	workspaceID string
 }
 
-// newWSearchHarness builds a real engine with HITL on and the shipped policy
-// presets seeded into an isolated .contenox dir, so tests evaluate the
-// envelopes this binary ships. prepare runs before the engine is built.
 func newWSearchHarness(t *testing.T, prepare func(*testing.T, libdb.DBManager), opts ...func(*chatOpts)) *wsearchHarness {
 	t.Helper()
 
-	// No interactive answer is obtainable here, so any route to one other
-	// than the injected asker fails at once rather than parking the test.
 	devnull, err := os.Open(os.DevNull)
 	require.NoError(t, err)
 	realStdin := os.Stdin
@@ -167,8 +144,6 @@ func (h *wsearchHarness) stop() {
 	}
 }
 
-// call runs one workspace_search through the engine's chain executor — the real
-// dispatch, the real HITL wrapper and the shipped policy included.
 func (h *wsearchHarness) call(ctx context.Context, args map[string]string) (any, error) {
 	chain := &taskengine.TaskChainDefinition{
 		ID:          "workspace-search-e2e",
@@ -190,9 +165,6 @@ func (h *wsearchHarness) call(ctx context.Context, args map[string]string) (any,
 	return out, err
 }
 
-// decisionFor returns the single hitl_decision event recorded for the workspace
-// toolset, failing when there is not exactly one: zero means the gate was
-// skipped entirely, two means it ran twice.
 func (h *wsearchHarness) decisionFor(t *testing.T, events []taskengine.TaskEvent) taskengine.TaskEvent {
 	t.Helper()
 	var decisions []taskengine.TaskEvent
@@ -206,16 +178,10 @@ func (h *wsearchHarness) decisionFor(t *testing.T, events []taskengine.TaskEvent
 	return decisions[0]
 }
 
-// writePolicy drops a hand-written envelope into the harness's .contenox dir so
-// a test can pin it by name, the same way an operator adds one.
 func writeWSearchPolicy(t *testing.T, contenoxDir, name, body string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(contenoxDir, name), []byte(body), 0o644))
 }
-
-// ---------------------------------------------------------------------------
-// (a) the shipped envelopes: allow, no approval, the asker never invoked
-// ---------------------------------------------------------------------------
 
 // TestSystem_WorkspaceSearch_EnginePathAllowedWithoutAskingUnderShippedPolicies asserts every shipped interactive envelope allows workspace_search unasked, and a missing index answers with a result naming `contenox index`, not an error.
 func TestSystem_WorkspaceSearch_EnginePathAllowedWithoutAskingUnderShippedPolicies(t *testing.T) {
@@ -228,9 +194,6 @@ func TestSystem_WorkspaceSearch_EnginePathAllowedWithoutAskingUnderShippedPolici
 	for _, policy := range []string{"hitl-policy-default.json", "hitl-policy-acp.json"} {
 		policy := policy
 		t.Run(policy, func(t *testing.T) {
-			// The per-request pin is the production mechanism an ACP session uses
-			// to choose its envelope (acpsvc/prompt.go). Pinning it here means the
-			// decision event below names the file that was actually consulted.
 			ctx := hitlservice.WithPolicyName(context.Background(), policy)
 			h.sink.drain()
 			h.asker.reset()
@@ -255,8 +218,6 @@ func TestSystem_WorkspaceSearch_EnginePathAllowedWithoutAskingUnderShippedPolici
 			}
 			require.Emptyf(t, h.asker.seen(), "%s: the approval callback was invoked", policy)
 
-			// The call reached the TOOL: what came back is the tool's own payload,
-			// carrying the runnable instruction rather than a policy verdict.
 			res, ok := out.(*searchtool.Result)
 			require.Truef(t, ok, "%s: result is %T, not the tool's payload — the call may have been answered by the policy", policy, out)
 			require.Empty(t, res.Hits)
@@ -265,10 +226,6 @@ func TestSystem_WorkspaceSearch_EnginePathAllowedWithoutAskingUnderShippedPolici
 		})
 	}
 }
-
-// ---------------------------------------------------------------------------
-// (b) no workspace rule: the call falls to default_action
-// ---------------------------------------------------------------------------
 
 // TestSystem_WorkspaceSearch_NoRuleFallsToDefaultActionAndAsks asserts an envelope with no workspace rule raises an approval rather than silently allowing.
 func TestSystem_WorkspaceSearch_NoRuleFallsToDefaultActionAndAsks(t *testing.T) {
@@ -302,19 +259,12 @@ func TestSystem_WorkspaceSearch_NoRuleFallsToDefaultActionAndAsks(t *testing.T) 
 	require.Equal(t, searchtool.ToolsProviderName, asks[0].ToolsName)
 	require.Equal(t, searchtool.ToolSearch, asks[0].ToolName)
 
-	// The decision event records that an approval was raised; the CLI's
-	// inline asker publishes no separate approval_requested event.
+	// The decision event records that an approval was raised; the CLI's inline asker publishes no separate approval_requested event.
 	require.NotNil(t, d.HITLApprovalRequested, "the decision does not record whether an approval was raised")
 	require.True(t, *d.HITLApprovalRequested, "the decision says no approval was raised, but the call was held at one")
 
-	// The asker denied, so the model gets the refusal — as a value it can read,
-	// never as a chain error that ends the turn.
 	require.IsTypef(t, "", out, "a refused call must return the denial message, got %T", out)
 }
-
-// ---------------------------------------------------------------------------
-// (c) an explicit deny rule: denied, and the model gets the soft denial
-// ---------------------------------------------------------------------------
 
 // TestSystem_WorkspaceSearch_ExplicitDenyRuleIsHonoured asserts an explicit deny rule denies the toolset without consulting the asker or failing the turn.
 func TestSystem_WorkspaceSearch_ExplicitDenyRuleIsHonoured(t *testing.T) {
@@ -377,16 +327,10 @@ func TestSystem_WorkspaceSearch_ShippedDenyFloorEnvelopesWithdrawTheToolset(t *t
 	}
 }
 
-// ---------------------------------------------------------------------------
-// The preset UPGRADE path — an EXISTING install must receive the workspace rule
-// ---------------------------------------------------------------------------
-
 // TestSystem_WorkspaceSearch_PresetUpgradeDeliversTheWorkspaceRule asserts the upgrade path adds the workspace rule to an existing install's untouched preset.
 func TestSystem_WorkspaceSearch_PresetUpgradeDeliversTheWorkspaceRule(t *testing.T) {
 	contenoxDir := filepath.Join(t.TempDir(), ".contenox")
 
-	// An install from before this toolset shipped: the presets on disk are a
-	// previous build's, recorded as such in the state file.
 	previous := `{"default_action":"approve","rules":[{"tools":"local_fs","tool":"read_file","action":"allow"}]}`
 	require.NoError(t, os.MkdirAll(contenoxDir, 0o750))
 	state := map[string]string{}
@@ -396,12 +340,10 @@ func TestSystem_WorkspaceSearch_PresetUpgradeDeliversTheWorkspaceRule(t *testing
 	}
 	writePresetState(contenoxDir, state)
 
-	// The upgrade an ordinary run performs — NOT the wizard's --force.
 	stale, err := upgradeEmbeddedHITLPolicies(contenoxDir, false)
 	require.NoError(t, err)
 	require.Emptyf(t, stale, "untouched presets were treated as hand-edited and held back: %v", stale)
 
-	// The two INTERACTIVE envelopes must now carry the workspace rule.
 	for _, name := range []string{"hitl-policy-default.json", "hitl-policy-acp.json"} {
 		raw, err := os.ReadFile(filepath.Join(contenoxDir, name))
 		require.NoError(t, err)
@@ -431,8 +373,6 @@ func TestSystem_WorkspaceSearch_PreStateFileInstallIsNamedNotSilentlyRewritten(t
 	contenoxDir := filepath.Join(t.TempDir(), ".contenox")
 	require.NoError(t, os.MkdirAll(contenoxDir, 0o750))
 
-	// An install from before the workspace toolset and before
-	// .preset-state.json: nothing recorded having written this preset.
 	previous := `{"default_action":"approve","rules":[{"tools":"local_fs","tool":"read_file","action":"allow"}]}`
 	require.NoError(t, os.WriteFile(filepath.Join(contenoxDir, "hitl-policy-default.json"), []byte(previous), 0o644))
 	require.NoFileExists(t, filepath.Join(contenoxDir, presetStateFile))
@@ -447,8 +387,6 @@ func TestSystem_WorkspaceSearch_PreStateFileInstallIsNamedNotSilentlyRewritten(t
 	require.Equal(t, previous, string(raw),
 		"an unprovable envelope must survive the upgrade byte for byte")
 
-	// The toolset is named precisely, from the rules the file lacks, instead
-	// of the install discovering it one approval card at a time.
 	detected := stalePolicyPresets([]string{contenoxDir}, nil)
 	require.Len(t, detected, 1)
 	require.Equal(t, "hitl-policy-default.json", detected[0].Name)
@@ -460,17 +398,13 @@ func TestSystem_WorkspaceSearch_PreStateFileInstallIsNamedNotSilentlyRewritten(t
 	require.Contains(t, notice, "stops for approval")
 	require.Contains(t, notice, RefreshPoliciesCommand)
 
-	// Until the operator acts, the envelope still decides what it decides —
-	// unchanged, and now explained rather than mysterious.
 	svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(contenoxDir), testTenant, nopKV{}, libtracker.NoopTracker{}, "hitl-policy-default.json")
 	r, err := svc.Evaluate(context.Background(), searchtool.ToolsProviderName, searchtool.ToolSearch,
 		map[string]any{"question": "where is retry backoff configured"})
 	require.NoError(t, err)
 	require.Equal(t, hitlservice.ActionApprove, r.Action)
 
-	// And the verb the notice names actually ends it — the search runs
-	// unattended, and the notice never fires again.
-	require.NoError(t, writeEmbeddedHITLPolicies(contenoxDir, true)) // contenox init --refresh-policies
+	require.NoError(t, writeEmbeddedHITLPolicies(contenoxDir, true))
 	require.Empty(t, stalePolicyNotice("hitl-policy-default.json", []string{contenoxDir}, nil))
 	require.Empty(t, stalePolicyPresets([]string{contenoxDir}, nil))
 
@@ -487,7 +421,6 @@ func TestSystem_WorkspaceSearch_HandEditedPresetIsNeverOverwritten(t *testing.T)
 	contenoxDir := filepath.Join(t.TempDir(), ".contenox")
 	require.NoError(t, os.MkdirAll(contenoxDir, 0o750))
 
-	// Shipped once (so the state file records it), then hand-edited.
 	_, err := upgradeEmbeddedHITLPolicies(contenoxDir, false)
 	require.NoError(t, err)
 	edited := `{"default_action":"deny","rules":[]}`
@@ -502,12 +435,6 @@ func TestSystem_WorkspaceSearch_HandEditedPresetIsNeverOverwritten(t *testing.T)
 	require.Equal(t, edited, string(raw), "the operator's envelope was overwritten by the upgrade")
 }
 
-// ---------------------------------------------------------------------------
-// The live half: a REAL index, a REAL embedding model, through the engine path
-// ---------------------------------------------------------------------------
-
-// ollamaReachable reports whether a local ollama daemon is listening, so the
-// live test SKIPS rather than fails on a machine without one.
 func ollamaReachable() bool {
 	conn, err := net.DialTimeout("tcp", "127.0.0.1:11434", 750*time.Millisecond)
 	if err != nil {
@@ -526,7 +453,6 @@ func TestSystem_WorkspaceSearch_LiveIndexAnswersWithCitationsUnderTheShippedPoli
 		t.Skip("skipping live workspace_search e2e: no ollama daemon on 127.0.0.1:11434")
 	}
 
-	// A workspace this test owns, with content whose right answer is known.
 	root := t.TempDir()
 	files := map[string]string{
 		"docs/retry.md": "# Retry policy\n\nWhen a request fails we wait before trying again.\n" +
@@ -546,8 +472,6 @@ func TestSystem_WorkspaceSearch_LiveIndexAnswersWithCitationsUnderTheShippedPoli
 	h := newWSearchHarness(t, func(t *testing.T, db libdb.DBManager) {
 		ctx := context.Background()
 		store := runtimetypes.New(db.WithoutTransaction())
-		// The KV keys `contenox config set default-embed-model` writes — the
-		// only reachable way to select an embedding model.
 		require.NoError(t, clikv.SetString(ctx, store, "default-embed-model", "nomic-embed-text"))
 		require.NoError(t, clikv.SetString(ctx, store, "default-embed-provider", "ollama"))
 		// Must exist before the backend cycle runs, or no model resolves.
@@ -569,7 +493,6 @@ func TestSystem_WorkspaceSearch_LiveIndexAnswersWithCitationsUnderTheShippedPoli
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	// Same seam the CLI composes (index_cmd.go's openWorkspaceIndex).
 	svc := workspaceindex.New(
 		store,
 		workspaceindex.NewLLMRepoEmbedder(h.engine.Models, h.engine.EmbeddingModel.Name, h.engine.EmbeddingModel.Provider),
@@ -600,7 +523,6 @@ func TestSystem_WorkspaceSearch_LiveIndexAnswersWithCitationsUnderTheShippedPoli
 	require.Truef(t, ok, "result is %T, not the tool's payload", out)
 	require.NotEmpty(t, res.Hits, "a live index returned no hits for a question its corpus answers")
 
-	// The top hit is a citation: a path and line range, not a floating blob.
 	top := res.Hits[0]
 	require.Equalf(t, "docs/retry.md", top.Path,
 		"the top hit is %s, not the document that answers the question (scores: %s)", top.Path, wsearchScores(res))
@@ -609,7 +531,6 @@ func TestSystem_WorkspaceSearch_LiveIndexAnswersWithCitationsUnderTheShippedPoli
 	require.Contains(t, strings.ToLower(top.Text), "backoff")
 	require.False(t, top.Stale, "nothing was edited, so no hit may be stale")
 
-	// Edit the indexed file: the same hit must come back flagged stale.
 	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "retry.md"),
 		[]byte("# Retry policy\n\nRewritten after indexing: the backoff ceiling is now sixty seconds.\n"), 0o644))
 
@@ -622,8 +543,6 @@ func TestSystem_WorkspaceSearch_LiveIndexAnswersWithCitationsUnderTheShippedPoli
 	require.Containsf(t, res.Note, "stale", "the payload does not tell the model its citations moved: %q", res.Note)
 }
 
-// wsearchScores renders the ranking for a failure message, so a quality
-// regression reports WHAT it ranked instead of only that it was wrong.
 func wsearchScores(res *searchtool.Result) string {
 	var b strings.Builder
 	for i, h := range res.Hits {

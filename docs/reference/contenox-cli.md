@@ -19,7 +19,7 @@ Persistent flags on the root command (also shown under **Global Flags** on subco
 | `--provider <type>`              | Provider override for this invocation. See `contenox backend add --help` for supported backend types. |
 | `--db <path>`                    | SQLite DB path (default: `~/.contenox/local.db`). The one global database is shared by every workspace. |
 | `--data-dir <path>`              | Override the `.contenox` data directory (skips walk-up search). Used to locate the workspace's `workspace.id` and chain files; does not change the database location. |
-| `--timeout`                      | Max execution time per invocation (default `5m`)                                                                                  |
+| `--timeout`                      | Max execution time per invocation (default `2h`)                                                                                  |
 | `--context`                      | Context length hint for the tokenizer                                                                                             |
 | `--ollama`                       | Ollama base URL (default `http://127.0.0.1:11434`)                                                                                |
 | `--no-delete-models`             | Legacy compatibility flag; a no-op in the OSS runtime (model deletion is disabled). Defaults to **true**.                          |
@@ -34,7 +34,7 @@ Persistent flags on the root command (also shown under **Global Flags** on subco
 | `--alt-model <name>`             | Alt model name (for chains referencing `{{var:alt_model}}`). Overrides `default-alt-model` config.                                  |
 | `--alt-provider <type>`          | Alt provider type (for chains referencing `{{var:alt_provider}}`). Overrides `default-alt-provider` config.                          |
 | `--max-tokens <N>`               | Response token cap (for chains referencing `{{var:max_tokens}}`). Overrides `default-max-tokens` config.                             |
-| `-e, --editor`                   | Open `$EDITOR` (or `$VISUAL`, fallback `nano`) to compose the prompt.                                                             |
+| `-e, --editor`                   | Open `$VISUAL`, then `$EDITOR`, then (inside VS Code's integrated terminal) `code --wait`, then `nano` to compose the prompt.     |
 
 ## Subcommands
 
@@ -415,6 +415,8 @@ contenox config set default-autocomplete-model qwen2.5-coder:7b
 contenox config set default-autocomplete-provider ollama
 contenox config set default-embed-model nomic-embed-text
 contenox config set default-embed-provider ollama
+contenox config set default-audio-model gemini-2.5-flash
+contenox config set default-audio-provider gemini
 contenox config set default-max-tokens 8192
 contenox config set default-think high
 contenox config set default-chain    .contenox/chain-agent-contenox.json
@@ -424,7 +426,7 @@ contenox config get default-model
 contenox config list
 ```
 
-Valid global keys: `default-model`, `default-provider`, `default-alt-model`, `default-alt-provider`, `default-autocomplete-model`, `default-autocomplete-provider`, `default-embed-model`, `default-embed-provider`, `default-max-tokens`, `default-think`, `telemetry-enabled`, `update-check`, `opt-in-beta`, `default-mission-agent`, `default-mission-policy`, `fleet-max-parallel`. `opt-in-beta` (`true`/`false`) enables the beta features — the `goja` and `shell_session` toolsets and the agent roster — which are otherwise absent entirely.
+Valid global keys: `default-model`, `default-provider`, `default-alt-model`, `default-alt-provider`, `default-autocomplete-model`, `default-autocomplete-provider`, `default-embed-model`, `default-embed-provider`, `default-audio-model`, `default-audio-provider`, `default-max-tokens`, `default-think`, `telemetry-enabled`, `update-check`, `opt-in-beta`, `default-mission-agent`, `default-mission-policy`, `fleet-max-parallel`. `opt-in-beta` (`true`/`false`) enables the beta features — the `goja` and `shell_session` toolsets, the agent roster, and the [event tier](/docs/guide/events/) — which are otherwise absent entirely.
 
 Valid workspace keys: `default-chain`, `hitl-policy-name`.
 
@@ -432,6 +434,8 @@ Valid workspace keys: `default-chain`, `hitl-policy-name`.
 |---|---|
 | `default-embed-model` | Embedding model used by `contenox index` / `contenox search`. Unset falls back to `default-model`, which embeds only on some providers. |
 | `default-embed-provider` | Provider type for the embedding model, independent from `default-provider`. Unset uses `default-provider`. |
+| `default-audio-model` | Model preferred for requests carrying audio attachments, independent from `default-model`. Unset falls back to `default-model`; audio requests resolve only to audio-capable models either way. |
+| `default-audio-provider` | Provider type for the audio model, independent from `default-provider`. Unset uses `default-provider`. |
 | `default-mission-agent` | Declared agent the ACP `/mission <intent>` slash command falls back to when none is named. `contenox mission fire` always requires the agent name as a positional argument, so this key does not affect it. |
 | `default-mission-policy` | Envelope (HITL policy) name that both `/mission` and `contenox mission fire --policy` fall back to when none is named. `/mission --policy <envelope>` overrides it for one mission. |
 | `fleet-max-parallel` | Fleet-wide admission cap: max concurrently open mission units (integer; `0` = unlimited; default 8). |
@@ -581,6 +585,7 @@ Operate the durable event-dispatch tier: internal domain events (mission reports
 contenox events dispatch                  # foreground: catch up, then follow live; Ctrl-C stops
 contenox events dispatch --auto           # unattended: no terminal approval prompts
 contenox events list --since 41           # events with nid > 41, in append order
+contenox events firings --status error    # recorded firings: what dispatched, failed, or was refused
 contenox events prune --keep-days 30      # drop whole day-partitions older than 30 days
 ```
 
@@ -589,10 +594,14 @@ contenox events prune --keep-days 30      # drop whole day-partitions older than
 | `--auto` (`dispatch`)       | Non-interactive mode: no terminal approval prompts; fired chains route through the trigger's policy (or the default) without a terminal ask |
 | `--since` (`list`)          | List events with nid greater than this cursor (default 0: from the start of the log)             |
 | `--limit` (`list`)          | Maximum events to list (default 50)                                                              |
+| `--since` (`firings`)       | List firings for events with nid greater than this cursor (default 0)                            |
+| `--status` (`firings`)      | Filter by status: `ok`, `error`, `refused`, or `running`                                         |
+| `--trigger` (`firings`)     | Filter by trigger name                                                                           |
+| `--limit` (`firings`)       | Maximum firings to list (default 50, ceiling 1000)                                               |
 | `--keep-days` (`prune`)     | Keep partitions from the last N days; older ones are dropped (default 30)                        |
 | `--yes` (`prune`)           | Skip the confirmation prompt                                                                     |
 
-`dispatch` runs in the foreground and prints one line per firing; there is no daemon — keep it alive with tmux, systemd, or `nohup`. Each (trigger, event) pair fires at most once, including across restarts; a chain failure is recorded on the firing and never stops the loop; events past hop 4 are refused so triggers cannot loop forever. `prune` is never automatic: retention runs only when you invoke it, as an O(1) table drop per day, leaving the dispatch cursor and firing records untouched.
+`dispatch` runs in the foreground and prints one line per firing; there is no daemon — keep it alive with tmux, systemd, or `nohup`. Each (trigger, event) pair fires at most once, including across restarts — with one recovery: a claim left `running` for two hours by a dead host is taken over on the next claim attempt and fired again. A chain failure is recorded on the firing and never stops the loop; events past hop 4 are refused so triggers cannot loop forever. `firings` lists the durable claim records both firing paths write — [the guide](/docs/guide/events/#inspecting-firings-events-firings) reads the statuses. `prune` is never automatic: retention runs only when you invoke it, as an O(1) table drop per day, leaving the dispatch cursor and firing records untouched.
 
 ### `contenox index [dir]` / `contenox search <question>`
 
@@ -698,7 +707,7 @@ The dispatch runs **in-process**: the fired unit is a child subprocess of the ca
 
 ### The `/pair` and `/unpair` slash commands
 
-Pairing attaches the machine to a relay, so the sessions this process serves can be reached from somewhere else — the [contenox app](https://relay.contenox.com) on a phone, typically. It is a session command, not a CLI verb, on purpose: the process you type it into is the one that holds the connection, so a `contenox pair` run anywhere else would store a credential with nothing running to use it.
+Pairing attaches the machine to a relay, so the sessions this process serves can be reached from somewhere else — the [contenox app](https://app.contenox.com) on a phone, typically. It is a session command, not a CLI verb, on purpose: the process you type it into is the one that holds the connection, so a `contenox pair` run anywhere else would store a credential with nothing running to use it.
 
 From inside a session (`contenox new`, or an ACP editor):
 
@@ -706,6 +715,7 @@ From inside a session (`contenox new`, or an ACP editor):
 - `/pair <key> <endpoint>` — redeem against a relay you run yourself; the `CONTENOX_RELAY_ENDPOINT` environment variable sets the same thing for every `/pair` without an inline endpoint.
 - `/pair` — report what this machine is attached to (relay, instance, account), changing nothing. It never prints the credential.
 - `/unpair` — delete the stored credential, so this machine stops dialling. Local only: revoking the instance is done in the app, and a revoked machine is refused at its next dial whether or not it still holds the file.
+- `/link` — print the link that opens **this session** in the app, so a session started at the desk can be picked up on a phone. It is just a URL — opening it still requires signing in to the account this machine is paired to. On an unpaired machine it points you at `/pair` instead.
 
 What is sent when a key is redeemed (the key and this machine's hostname, nothing else), what lands in `~/.contenox/relay.json`, and how the relay's identity is verified from then on: [Pairing a machine with a relay](/docs/guide/pairing/).
 
@@ -754,6 +764,25 @@ contenox acpx                # headless / untrusted-driver profile
 | `--workspace-id <id>` | Workspace ID for new ACP sessions (default: the stable workspace from `~/.contenox/workspace.id`, same as the CLI) |
 
 The chain each profile loads is overridable via `CONTENOX_ACP_CHAIN_PATH` (acp) and `CONTENOX_ACPX_CHAIN_PATH` (acpx). See the [editor integration guides](/docs/integrations/editors/zed/) for client setup.
+
+### `contenox autocomplete --stdio`
+
+Serve fill-in-the-middle code completions over a JSON-lines stdio protocol, for editor integrations that want completions without a full ACP session. Uses the `default-autocomplete-model` / `default-autocomplete-provider` config role — the same keys the ACP editor surface reads — and refuses to start (nonzero exit, error naming the key) when no autocomplete model is configured.
+
+```bash
+contenox config set default-autocomplete-model qwen2.5-coder:7b
+contenox config set default-autocomplete-provider ollama
+contenox autocomplete --stdio
+```
+
+One JSON object per line, requests on stdin, responses on stdout. Responses may arrive out of order — match by `id`; a client that moved on simply ignores stale ids (there is no cancellation):
+
+```json
+{"id": "1", "path": "main.go", "language": "go", "prefix": "func main() {\n\t", "suffix": "\n}", "max_tokens": 64}
+{"id": "1", "completion": "fmt.Println(\"hello\")"}
+```
+
+A failed or invalid request answers `{"id": "...", "error": "..."}` on the same stream (a malformed line answers with an empty `id`). `path` and `language` are accepted but do not change the prompt. `prefix`/`suffix` should be caller-truncated; the server accepts up to 16 KiB per side and truncates longer sides toward the cursor position, noting it on stderr. `max_tokens` defaults to 128; each completion is bounded by a 20-second budget.
 
 ### `contenox version`
 

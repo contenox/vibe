@@ -7,15 +7,13 @@ import (
 )
 
 // AttentionBounds is the envelope's say over who may answer a unit's
-// question. The zero value means only a human may — a model answering in
-// the human's place would quietly delete the escalation the unit performed.
+// question; the zero value means only a human may.
 type AttentionBounds struct {
 	// AllowAgentAnswers lets the session that fired the mission answer its
 	// unit's questions with its own model instead of waiting for a human.
 	AllowAgentAnswers bool `json:"allowAgentAnswers,omitempty"`
 	// MaxAgentAnswers caps how many of this mission's questions an agent may
-	// answer; further questions wait for a human. Zero means the default
-	// cap (DefaultMaxAgentAnswers), never unlimited.
+	// answer; zero means the default cap (DefaultMaxAgentAnswers), never unlimited.
 	MaxAgentAnswers int `json:"maxAgentAnswers,omitempty"`
 }
 
@@ -23,7 +21,6 @@ type AttentionBounds struct {
 // the envelope allows them but names no cap.
 const DefaultMaxAgentAnswers = 3
 
-// maxAgentAnswersCeiling rejects an absurd cap, the way compute bounds reject theirs.
 const maxAgentAnswersCeiling = 1_000
 
 // EffectiveMaxAgentAnswers resolves the cap actually enforced.
@@ -34,7 +31,7 @@ func (b AttentionBounds) EffectiveMaxAgentAnswers() int {
 	return b.MaxAgentAnswers
 }
 
-// AttentionBoundsFor reads an envelope's attention half. A policy that
+// AttentionBoundsFor reads an envelope's attention half; a policy that
 // declares none, or fails to load, yields the zero (human-only) bounds.
 func (s *service) AttentionBoundsFor(ctx context.Context, policyName string) (AttentionBounds, error) {
 	policyPath := strings.TrimSpace(policyName)
@@ -54,8 +51,6 @@ func (s *service) AttentionBoundsFor(ctx context.Context, policyName string) (At
 	return *p.Attention, nil
 }
 
-// validateAttentionBounds rejects a nonsense cap at policy-load time rather
-// than silently at the moment a unit is waiting on an answer.
 func validateAttentionBounds(b *AttentionBounds) error {
 	if b == nil {
 		return nil
