@@ -415,8 +415,6 @@ func (m *Manager) WatchEvents(ctx context.Context) error {
 	return nil
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
 func mcpServerToConfig(srv *runtimetypes.MCPServer, store runtimetypes.Store) localtools.MCPServerConfig {
 	cfg := localtools.MCPServerConfig{
 		Name:           srv.Name,

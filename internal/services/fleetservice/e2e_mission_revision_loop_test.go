@@ -21,9 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// missionRevisionChain is a deterministic planner chain: `gate` writes the
-// initial plan on turn 1 and ends there; any later turn falls through to
-// `revise`, which writes the revised plan with a new `bench` entry.
 const missionRevisionChain = `{
   "id": "e2e-mission-revision-loop",
   "tasks": [
@@ -67,10 +64,7 @@ const missionRevisionChain = `{
   ]
 }`
 
-// TestFleetService_E2E_MissionRevisionLoop: a planner revises its living plan
-// on the turn after a child mission's report is delivered into its
-// supervising session. The next turn is driven explicitly, since a
-// delivered message does not itself start one.
+// TestFleetService_E2E_MissionRevisionLoop: a planner revises its living plan on the turn after a child mission's report is delivered into its supervising session, driven explicitly since a delivered message does not itself start one.
 func TestFleetService_E2E_MissionRevisionLoop(t *testing.T) {
 	if testing.Short() {
 		t.Skip("e2e: builds the contenox binary and spawns a real ACP subprocess")
@@ -108,15 +102,11 @@ func TestFleetService_E2E_MissionRevisionLoop(t *testing.T) {
 	kernel := agentinstance.New(agents, agentinstance.WithStderr(stderr))
 	t.Cleanup(func() { _ = kernel.Close() })
 
-	// The mission store is publisher-wired (the bus serve uses), so a report added
-	// to any mission publishes a ReportAddedEvent the router consumes.
 	bus := libbus.NewInMem()
 	t.Cleanup(func() { _ = bus.Close() })
 	missions := missionservice.New(db, missionservice.WithEventPublisher(bus))
 	inbox := operatorinbox.New(db)
 
-	// The routing service under test, wired exactly as serve wires it: the kernel
-	// is the SessionDeliverer, the inbox is the fallback.
 	router, err := reportrouter.New(reportrouter.Deps{
 		Bus:      bus,
 		Sessions: kernel,
@@ -130,7 +120,6 @@ func TestFleetService_E2E_MissionRevisionLoop(t *testing.T) {
 
 	svc := New(kernel, agents, missions, nil, tmpHome, libtracker.NoopTracker{})
 
-	// ── Turn 1: dispatch the planner; it sets the initial plan (revision 1) ──────
 	planner, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName:      "planner",
 		Intent:         "plan the migration and hold the plan",
@@ -153,15 +142,10 @@ func TestFleetService_E2E_MissionRevisionLoop(t *testing.T) {
 	require.Equal(t, "port", m.Plan.Entries[1].ID)
 	require.False(t, planHasEntry(m.Plan, "bench"), "the initial plan has no benchmark step yet")
 
-	// Observe the planner's stream so the delivered report can be seen
-	// landing in the supervising session.
 	viewer := &recordingViewer{id: "planner-observer"}
 	_, err = kernel.Attach(ctx, planner.InstanceID, libacp.SessionID(planner.SessionID), viewer)
 	require.NoError(t, err)
 
-	// ── Deliver a worker's report into the planner's session (reportrouter) ─────
-	// A child mission supervised by the planner's session, whose report
-	// carries a typed hand-off riding the real publish→route path.
 	child := &missionservice.Mission{
 		Intent:          "the worker sub-unit that reports back",
 		AgentName:       "worker",
@@ -182,27 +166,21 @@ func TestFleetService_E2E_MissionRevisionLoop(t *testing.T) {
 		},
 	}))
 
-	// The hand-off round-tripped through the real store (scope A, end to end).
 	childReports, err := missions.ListReports(ctx, child.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, childReports, 1)
 	require.NotNil(t, childReports[0].Handover, "the typed hand-off survives the real AddReport")
 	require.Equal(t, "hot loop ported; benchmarks pending", childReports[0].Handover.Outcome)
 
-	// The report reached the planner session's transcript.
 	require.Eventuallyf(t, func() bool {
 		return strings.Contains(viewer.messageText(), workerSummary)
 	}, 30*time.Second, 50*time.Millisecond,
 		"the worker report never reached the planner session; transcript=%q\nstderr:\n%s", viewer.messageText(), stderr.String())
 
-	// ── Turn 2: drive the next turn explicitly; the planner revises its plan ────
 	_, err = kernel.Prompt(ctx, planner.InstanceID, libacp.SessionID(planner.SessionID),
 		[]libacp.ContentBlock{libacp.NewTextContent("A worker reported in. Reconcile your plan with what has landed.")})
 	require.NoError(t, err, "turn 2 prompt stderr:\n%s", stderr.String())
 
-	// The revised plan persists: the revision advanced and the new benchmark
-	// entry is now on the plan, durably observable across the subprocess
-	// boundary.
 	require.Eventuallyf(t, func() bool {
 		m, err = missions.Get(ctx, planner.MissionID)
 		return err == nil && m.Plan.Revision > 1 && planHasEntry(m.Plan, "bench")
@@ -216,20 +194,13 @@ func TestFleetService_E2E_MissionRevisionLoop(t *testing.T) {
 	require.NotNil(t, survey, "the carried-forward survey entry kept its id")
 	require.Equal(t, missionservice.PlanEntryCompleted, survey.Status, "the revision advanced survey to completed")
 
-	// The plan_revised event's added/removed shape is asserted separately by
-	// missionservice's own unit tests; the planner's writes happen inside the
-	// dispatched subprocess, whose bus is not shared with this parent test,
-	// so only the durable delta is cross-process observable here.
-
 	require.NoError(t, svc.Stop(ctx, planner.InstanceID))
 }
 
-// planHasEntry reports whether the plan carries an entry with the given id.
 func planHasEntry(plan missionservice.Plan, id string) bool {
 	return planEntryByID(plan, id) != nil
 }
 
-// planEntryByID returns the plan entry with the given id, or nil.
 func planEntryByID(plan missionservice.Plan, id string) *missionservice.PlanEntry {
 	for i := range plan.Entries {
 		if plan.Entries[i].ID == id {

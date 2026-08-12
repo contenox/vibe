@@ -17,9 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// clientCancelHarness drives a ClientSideConnection directly over the wire,
-// playing the agent role with raw requests/notifications (mirrors
-// cancelHarness in conn_cancel_test.go, from the opposite side).
 type clientCancelHarness struct {
 	t          *testing.T
 	writer     func(v any) error
@@ -196,8 +193,6 @@ func TestUnit_ClientSideConnection_PromptCtxCancel_EmitsCancelRequestAndReturnsC
 	}
 }
 
-// permissionTurnAgent's Prompt asks the client for permission and translates
-// a "cancelled" outcome into the turn's own stop reason.
 type permissionTurnAgent struct {
 	libacp.UnimplementedAgent
 	conn     *libacp.AgentSideConnection
@@ -238,9 +233,6 @@ func (a *permissionTurnAgent) Prompt(ctx context.Context, req libacp.PromptReque
 	return libacp.PromptResponse{StopReason: libacp.StopReasonEndTurn}, nil
 }
 
-// countingPermClient's RequestPermission blocks on its context, modelling a UI
-// permission dialog, and counts invocations so tests can assert whether
-// CancelPrompt's forced resolution bypassed it or raced an already-invoked call.
 type countingPermClient struct {
 	libacp.UnimplementedClient
 	calls   atomic.Int32
@@ -379,8 +371,6 @@ func TestUnit_FullPromptTurnCancellation_PendingPermissionAutoResolved(t *testin
 	assert.Equal(t, int32(1), client.calls.Load(), "the application handler was invoked once (it was already in flight when cancelled) but its own answer must never reach the wire")
 }
 
-// gatedPermissionAgent only asks for permission once told to proceed, so a
-// test can cancel the turn strictly before the request is sent.
 type gatedPermissionAgent struct {
 	libacp.UnimplementedAgent
 	conn     *libacp.AgentSideConnection
@@ -400,10 +390,8 @@ func (a *gatedPermissionAgent) NewSession(_ context.Context, _ libacp.NewSession
 func (a *gatedPermissionAgent) Prompt(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
 	close(a.started)
 	<-a.proceed
-	// Spec: the agent may still have in-flight activity after session/cancel
-	// as long as it resolves before responding. A fresh, untied context here
-	// models that, so the request reaches the wire instead of being aborted
-	// locally by the turn's own cancelled context.
+	// Spec: the agent may still have in-flight activity after session/cancel as
+	// long as it resolves before responding; a fresh, untied context here models that.
 	resp, err := a.conn.RequestPermission(context.Background(), libacp.RequestPermissionRequest{
 		SessionID: req.SessionID,
 		ToolCall:  libacp.PermissionToolCall{ToolCallID: "tc-1"},
@@ -485,8 +473,6 @@ func TestUnit_CancelPrompt_AutoResolvesNewPermissionRequest_WithoutInvokingHandl
 	assert.Equal(t, int32(0), client.calls.Load(), "a permission request arriving after CancelPrompt must never reach the application handler")
 }
 
-// stressAgent/stressClient exercise inbound and outbound cancellation
-// concurrently: random permission requests and turn timeouts/cancellations.
 type stressAgent struct {
 	libacp.UnimplementedAgent
 	conn *libacp.AgentSideConnection
@@ -612,8 +598,6 @@ func TestUnit_ConcurrentCancellationStress(t *testing.T) {
 	wg.Wait()
 }
 
-// closeAwareClient signals cancelled once its in-flight ReadTextFile handler
-// observes ctx.Done(), confirming shutdown propagates to running handlers.
 type closeAwareClient struct {
 	libacp.UnimplementedClient
 	entered   chan struct{}

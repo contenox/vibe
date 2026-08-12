@@ -5,10 +5,9 @@ import (
 	"time"
 )
 
-// TestUnit_BackoffIsExponentialJitteredAndCapped pins the schedule's three
-// properties. The jitter is asserted as variance rather than as a
-// distribution: the requirement is only that a fleet does not redial in
-// lockstep, and identical delays are the sole failure that matters.
+// TestUnit_BackoffIsExponentialJitteredAndCapped checks the schedule is
+// exponential, capped, and jittered enough that a fleet does not redial in
+// lockstep.
 func TestUnit_BackoffIsExponentialJitteredAndCapped(t *testing.T) {
 	t.Parallel()
 	p := Backoff{Initial: 10 * time.Millisecond, Max: 200 * time.Millisecond, Factor: 2, ResetAfter: time.Second}
@@ -33,8 +32,7 @@ func TestUnit_BackoffIsExponentialJitteredAndCapped(t *testing.T) {
 }
 
 // TestUnit_BackoffResetsAfterAHealthyLink checks the schedule returns to its
-// initial ceiling once a connection proved it could stay up, which is what
-// keeps an ordinary relay restart from being followed by a slow reconnect.
+// initial ceiling once a connection proved it could stay up.
 func TestUnit_BackoffResetsAfterAHealthyLink(t *testing.T) {
 	t.Parallel()
 	p := Backoff{Initial: 10 * time.Millisecond, Max: 200 * time.Millisecond, Factor: 2, ResetAfter: time.Second}
@@ -48,9 +46,8 @@ func TestUnit_BackoffResetsAfterAHealthyLink(t *testing.T) {
 	}
 }
 
-// TestUnit_BackoffCannotOverflowIntoABusyLoop guards the growth arithmetic: a
-// duration that wrapped negative would turn backoff into an unthrottled redial
-// loop, which is the one failure mode worse than being slow to reconnect.
+// TestUnit_BackoffCannotOverflowIntoABusyLoop checks the growth arithmetic
+// cannot wrap a duration negative and turn backoff into a busy loop.
 func TestUnit_BackoffCannotOverflowIntoABusyLoop(t *testing.T) {
 	t.Parallel()
 	b := newBackoffState(Backoff{Initial: time.Second, Max: 30 * time.Second, Factor: 1e9, ResetAfter: time.Minute})

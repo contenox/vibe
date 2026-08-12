@@ -19,8 +19,6 @@ func newTestManager(t *testing.T, idle time.Duration) *manager {
 	return newTestManagerWith(t, Config{IdleTimeout: idle})
 }
 
-// newTestManagerWith builds a manager from a partial Config, filling in a
-// real one-root workspace allowlist unless the caller supplied one.
 func newTestManagerWith(t *testing.T, cfg Config) *manager {
 	t.Helper()
 	if cfg.CwdResolver == nil || cfg.Workspace == nil {
@@ -70,7 +68,6 @@ func ctxWithSession(id string) context.Context {
 	return context.WithValue(context.Background(), runtimetypes.SessionIDContextKey, id)
 }
 
-// waitFor polls until cond is true or the deadline elapses.
 func waitFor(t *testing.T, d time.Duration, cond func() bool) bool {
 	t.Helper()
 	deadline := time.Now().Add(d)

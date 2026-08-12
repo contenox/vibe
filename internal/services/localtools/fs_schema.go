@@ -8,24 +8,6 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// ---------------------------------------------------------------------------
-// Tool schemas
-//
-// Descriptions are terse by default. The long-form versions previously shipped
-// here ran to ~200 words each across nine tools — plausibly 1,500-2,500 tokens
-// serialised, or 8-13% of a 20k-token context window consumed before a single
-// byte of file content. That is paid on every single turn.
-//
-// Almost everything the long form taught (truncation semantics, did-you-mean
-// suggestions, severity markers, the read-before-write contract) is re-taught
-// by the corresponding error message at the moment it fires, with the concrete
-// path and line number filled in. Teaching in the error costs tokens once,
-// when relevant; teaching in the schema costs them always.
-//
-// Set _verbose_tool_descriptions=true in tools_policies.local_fs to restore the
-// long form for large-context models.
-// ---------------------------------------------------------------------------
-
 type fsToolDoc struct {
 	terse   string
 	verbose string
@@ -40,9 +22,10 @@ func (d fsToolDoc) pick(verbose bool) string {
 
 var fsToolDocs = map[string]fsToolDoc{
 	"read_file": {
-		terse: "Read a text file. Omit start_line/end_line for the whole file; supply them to page through a large one. Refuses binaries. Oversized results are truncated to a head with a notice naming the exact resume line. A full read is required before write_file on an existing file.",
+		terse: "Read a text file. Omit start_line/end_line for the whole file; supply them to page through a large one. An audio file (wav, mp3, m4a, ogg, flac) returns a transcript from the configured audio model instead of raw bytes. Refuses other binaries. Oversized results are truncated to a head with a notice naming the exact resume line. A full read is required before write_file on an existing file.",
 		verbose: "Read a text file. With no start_line/end_line, reads the whole file and returns the raw text. " +
-			"Refuses with an error for files that sniff as binary (a NUL byte or a high fraction of invalid UTF-8 in the first ~512 bytes) instead of dumping raw bytes into your context — call stat_file first if unsure, or use shell tools for binaries. " +
+			"An audio file (wav, mp3, m4a, ogg, flac — detected from its bytes, not its extension) is consumed by the tool and answered with a transcript from the configured audio model (config key: default-audio-model), prefixed with a one-line notice; without a configured audio model, or over the _max_audio_bytes cap, audio is refused with the key or cap named. " +
+			"Refuses with an error for other files that sniff as binary (a NUL byte or a high fraction of invalid UTF-8 in the first ~512 bytes) instead of dumping raw bytes into your context — call stat_file first if unsure, or use shell tools for binaries. " +
 			"If you have already read this exact file version this session and it is unchanged on disk, you get a short stub instead of the full content; pass force=true to get the content again. " +
 			"NEVER TRUNCATED SILENTLY: if the file is larger than the read/output cap, the result is a line-based HEAD followed by a notice naming the exact next step — 'call read_file with start_line: N'. " +
 			"A truncated or ranged read does NOT satisfy the full-file read-before-write prerequisite; only a complete read does. " +
@@ -133,10 +116,6 @@ func (h *LocalFSTools) Supports(ctx context.Context) ([]string, error) {
 	}, nil
 }
 
-// fsSchemaSpecs is every tool local_fs declares, in Supports order, with the
-// OpenAPI component prefix and the response schema for each. The prefixes are
-// fixed even though the toolset NAME is configurable (NewLocalFSToolsWith), so
-// a second instance under another name publishes the same component names.
 func fsSchemaSpecs() []toolSchemaSpec {
 	return []toolSchemaSpec{
 		{tool: "read_file", component: "LocalFsReadFile", response: fsReadFileResponse},
@@ -153,11 +132,7 @@ func fsSchemaSpecs() []toolSchemaSpec {
 }
 
 // GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
-// one request/response pair per declared tool. Requests are converted from the
-// descriptors GetToolsForToolsByName produces for THIS ctx, so a document
-// published under _verbose_tool_descriptions carries the same descriptions the
-// model was given. Responses describe what Exec returns, including the
-// refusals and no-match messages it returns as results rather than errors.
+// one request/response pair per declared tool.
 func (h *LocalFSTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
 	declared, err := h.GetToolsForToolsByName(ctx, h.name)
 	if err != nil {
@@ -172,13 +147,6 @@ func (h *LocalFSTools) GetSchemasForSupportedTools(ctx context.Context) (map[str
 	return map[string]*openapi3.T{h.name: doc}, nil
 }
 
-// --- Response schemas ---------------------------------------------------------
-// One per tool, written from what its handler in fs.go returns. Where a
-// handler answers a refusal or a no-match with a RESULT rather than an error,
-// that shape is declared too: it is part of the contract.
-
-// fsUnchangedSchema is FsUnchangedResult, the stub read_file returns instead of
-// re-sending content this session has already seen.
 func fsUnchangedSchema() *openapi3.SchemaRef {
 	return objectSchema(
 		"The dedup stub: this session already read this exact version, so the content was not re-sent. Pass force=true to get it again. Reaches the model as a short stub line.",
@@ -191,8 +159,8 @@ func fsUnchangedSchema() *openapi3.SchemaRef {
 }
 
 func fsReadFileResponse() *openapi3.SchemaRef {
-	return oneOfSchema("What read_file returns: the file's text, or the dedup stub.",
-		strSchema("The file's text. When the output cap bit, a line-based HEAD followed by a notice naming the exact line to resume from — never a silent cut."),
+	return oneOfSchema("What read_file returns: the file's text, an audio transcript, or the dedup stub.",
+		strSchema("The file's text. When the output cap bit, a line-based HEAD followed by a notice naming the exact line to resume from — never a silent cut. For a supported audio file (wav, mp3, m4a, ogg, flac), a transcript from the configured audio model instead, prefixed with a one-line notice naming the file, its type, and its size."),
 		fsUnchangedSchema())
 }
 

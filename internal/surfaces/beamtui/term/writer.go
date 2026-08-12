@@ -87,6 +87,14 @@ type painter struct {
 // the composer and the status bar scrolled into permanent history, one copy per
 // resize.
 //
+// On the debounced gesture path this erase is a trivial backstop: disown
+// already took the region down at gesture start, while the counts still
+// described the screen, and at most one blank suppressed-commit row remains
+// (see ANSI.onResizeGesture and ANSI.Commit). The full erase-under-reflow
+// reasoning in eraseRegion matters for the sizes that arrive without a gesture
+// start — the first size, the one after Suspend, and a hook that lost the race
+// to a commit.
+//
 // The cursor is left at column 0 of the region's origin, which is a blank row
 // the next frame paints straight onto: that is why reset()'s p.row = 0 is the
 // correct anchor afterwards and no further state has to survive.
@@ -96,6 +104,20 @@ func (p *painter) resize(width, height int) {
 	}
 	p.eraseRegion()
 	p.width, p.height = width, height
+	p.reset()
+}
+
+// disown erases the live region and forgets it, without adopting a size. It is
+// the resize-gesture entry point (see ANSI.onResizeGesture): called the moment
+// a debounced resize gesture begins, while the painter's row counts still
+// describe the screen — the terminal has reflowed at most the gesture's first
+// small step by then — so the erase lands exactly where the region is, on
+// reflowing and non-reflowing terminals alike. Erasing here instead of at the
+// settle is what stops a shrink-then-grow from stranding rewrapped copies of
+// the composer, hint and status rows above the origin, where no later erase
+// may safely reach (see eraseRegion on why the origin is a hard ceiling).
+func (p *painter) disown() {
+	p.eraseRegion()
 	p.reset()
 }
 
@@ -131,9 +153,11 @@ func (p *painter) resize(width, height int) {
 // Rows that reflowed above the caret are therefore the residue this cannot
 // reach. Widening never produces any — each live row is its own logical line no
 // wider than the width it was painted at, so a growing screen has nothing to
-// rejoin — and the engine's resize debounce (see resizeSettleWait) collapses a
-// drag to its resting size, so the common gesture of narrowing and widening
-// back settles on geometry the counts describe exactly.
+// rejoin. Shrinking is disarmed one step earlier: disown erases the region the
+// moment a resize gesture begins, before the drag's later widths can rewrap it,
+// so by the time the debounced settle arrives here there is at most one blank
+// row to reclaim. What remains for this reasoning is the undebounced residue —
+// a size the terminal had already reflowed before the engine heard about it.
 func (p *painter) eraseRegion() {
 	if !p.painted || p.prevRows == 0 {
 		return

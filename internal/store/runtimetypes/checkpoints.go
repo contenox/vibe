@@ -11,18 +11,7 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// ChainCheckpoint is one suspended chain run, keyed by the approval ID whose
-// verdict resumes it (table chain_checkpoints). Payload is the engine's
-// versioned JSON envelope (taskengine.Checkpoint) and is opaque here;
-// runtimetypes only stores, claims, deletes, and annotates it. SchemaVersion
-// is mirrored out as a queryable column so stranded old-version checkpoints
-// are spottable without parsing payloads.
-//
-// Lifecycle: created when a run suspends; claimed by exactly one resumer via
-// compare-and-swap on claimed_at, so a racing hook-triggered and inline
-// post-suspend resume cannot both run the chain; deleted on success, or
-// retained with a failure annotation so a run is never silently lost. A claim
-// older than the staleness bound passed to ClaimChainCheckpoint is reclaimable.
+// ChainCheckpoint is one suspended chain run, keyed by the approval ID whose verdict resumes it; Payload is an opaque engine-owned envelope.
 type ChainCheckpoint struct {
 	ID            string          `json:"id"`
 	SchemaVersion int             `json:"schemaVersion"`
@@ -35,9 +24,6 @@ type ChainCheckpoint struct {
 	UpdatedAt     time.Time       `json:"updatedAt"`
 }
 
-// chainCheckpointColumns is the single projection every read binds, in scan
-// order — spelled once so a new column cannot be added to one query and
-// forgotten in another (same idiom as hitlApprovalColumns).
 const chainCheckpointColumns = `id, schema_version, payload, session_id, request_id, failure, claimed_at, created_at, updated_at`
 
 func (s *store) CreateChainCheckpoint(ctx context.Context, cp *ChainCheckpoint) error {
@@ -72,20 +58,14 @@ func (s *store) GetChainCheckpoint(ctx context.Context, id string) (*ChainCheckp
 		}
 		return nil, fmt.Errorf("chain_checkpoints: get %s: %w", id, err)
 	}
-	// Scan via []byte, not json.RawMessage, for SQLite TEXT compatibility
-	// (see kv.go's getKVScoped).
+	// Scan via []byte, not json.RawMessage, for SQLite TEXT compatibility.
 	if rawPayload != nil {
 		cp.Payload = json.RawMessage(rawPayload)
 	}
 	return &cp, nil
 }
 
-// ClaimChainCheckpoint marks id as being resumed by this caller: an atomic
-// compare-and-swap that succeeds only when the checkpoint is unclaimed OR its
-// claim is older than staleBefore (a resumer that died mid-run relinquishes
-// by staleness, never by cooperation). Returns libdb.ErrNotFound when the id
-// does not exist or another live resumer holds the claim — the two cases are
-// deliberately indistinct, since the caller's move is the same: do nothing.
+// ClaimChainCheckpoint atomically claims id if unclaimed or claimed_at is older than staleBefore; returns libdb.ErrNotFound otherwise.
 func (s *store) ClaimChainCheckpoint(ctx context.Context, id string, now, staleBefore time.Time) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE chain_checkpoints
@@ -99,11 +79,7 @@ func (s *store) ClaimChainCheckpoint(ctx context.Context, id string, now, staleB
 	return checkRowsAffected(result)
 }
 
-// TouchChainCheckpointClaim refreshes id's claim timestamp — the live
-// resumer's heartbeat. Wall-clock staleness (see ClaimChainCheckpoint) must
-// only ever reclaim a dead resumer, never a slow one still executing; the
-// periodic touch is what makes that distinction real. Only refreshes an
-// existing claim, never creates one.
+// TouchChainCheckpointClaim refreshes id's claim timestamp as a liveness heartbeat; it only updates an existing claim, never creates one.
 func (s *store) TouchChainCheckpointClaim(ctx context.Context, id string, now time.Time) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		UPDATE chain_checkpoints
@@ -117,10 +93,7 @@ func (s *store) TouchChainCheckpointClaim(ctx context.Context, id string, now ti
 	return checkRowsAffected(result)
 }
 
-// UpdateChainCheckpointPayload replaces id's payload — the claiming resumer's
-// own bookkeeping write (recording a completed gate call's result inside the
-// agentservice envelope). The claim CAS makes the live resumer the row's only
-// writer, so no compare is needed here; the payload stays opaque to this layer.
+// UpdateChainCheckpointPayload replaces id's payload; the payload stays opaque to this layer.
 func (s *store) UpdateChainCheckpointPayload(ctx context.Context, id string, payload json.RawMessage) error {
 	now := time.Now().UTC()
 	result, err := s.Exec.ExecContext(ctx, `
@@ -135,9 +108,7 @@ func (s *store) UpdateChainCheckpointPayload(ctx context.Context, id string, pay
 	return checkRowsAffected(result)
 }
 
-// SetChainCheckpointFailure annotates id with why its resume failed, keeping
-// the row: a run whose resume errored must stay findable (and re-claimable
-// once the claim goes stale) rather than vanishing.
+// SetChainCheckpointFailure annotates id with a failure reason without deleting the row.
 func (s *store) SetChainCheckpointFailure(ctx context.Context, id string, failure string) error {
 	now := time.Now().UTC()
 	result, err := s.Exec.ExecContext(ctx, `
@@ -152,10 +123,7 @@ func (s *store) SetChainCheckpointFailure(ctx context.Context, id string, failur
 	return checkRowsAffected(result)
 }
 
-// DeleteChainCheckpoint removes id — the successful-terminal path. Deleting a
-// row that is already gone returns libdb.ErrNotFound (checkRowsAffected), so
-// double-deletes are visible to callers that care and ignorable by those that
-// do not.
+// DeleteChainCheckpoint removes id, returning libdb.ErrNotFound if already gone.
 func (s *store) DeleteChainCheckpoint(ctx context.Context, id string) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		DELETE FROM chain_checkpoints WHERE id = $1`, id)
@@ -165,9 +133,7 @@ func (s *store) DeleteChainCheckpoint(ctx context.Context, id string) error {
 	return checkRowsAffected(result)
 }
 
-// ListChainCheckpoints returns suspended runs newest first — the substrate
-// `approvals list` can join against, and the operator's view of
-// stranded runs (non-nil Failure) awaiting a retry.
+// ListChainCheckpoints returns suspended runs newest first, paginated by createdAtCursor and limit.
 func (s *store) ListChainCheckpoints(ctx context.Context, createdAtCursor *time.Time, limit int) ([]*ChainCheckpoint, error) {
 	cursor := time.Now().UTC()
 	if createdAtCursor != nil {

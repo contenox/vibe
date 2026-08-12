@@ -1,4 +1,3 @@
-// init.go implements the contenox init subcommand (scaffold .contenox/).
 package contenoxcli
 
 import (
@@ -52,9 +51,6 @@ var initOracleDefaultChain string
 //go:embed chain-oracle-conservative.json
 var initOracleConservativeChain string
 
-// Seeded chain-file basenames, chain-<role>-<variant>.json. One name
-// everywhere: the embedded source, the seeded disk file, and the docs all use
-// the same string.
 const (
 	chainAgentContenoxFilename      = "chain-agent-contenox.json"
 	chainAgentRunFilename           = "chain-agent-run.json"
@@ -68,16 +64,8 @@ const (
 	chainOracleConservativeFilename = "chain-oracle-conservative.json"
 )
 
-// blessedChainHashes maps CURRENT seeded basenames to known-good SHA256
-// checksums from previous builds; --update overwrites a file whose checksum
-// matches. The --update rename migration (migrateLegacyChainNames) runs first,
-// so a blessed pre-rename file is refreshed under its new name.
 var blessedChainHashes = map[string][]string{}
 
-// legacyChainRenames maps every pre-convention seeded basename to its
-// chain-<role>-<variant>.json successor. `contenox init --update` renames
-// these on disk (see migrateLegacyChainNames); resolution never consults the
-// legacy names. User-authored files are outside this map and never touched.
 var legacyChainRenames = map[string]string{
 	"default-chain.json":      chainAgentContenoxFilename,
 	"default-run-chain.json":  chainAgentRunFilename,
@@ -89,11 +77,6 @@ var legacyChainRenames = map[string]string{
 	"agent-planner.json":      chainPlannerDefaultFilename,
 }
 
-// migrateLegacyChainNames renames the shipped legacy-named chain files in dir
-// to their chain-<role>-<variant>.json names. A rename is byte-for-byte, never
-// a rewrite, so hand-edited files survive; the normal --update checksum
-// refresh then applies under the new name. When both names exist the new file
-// wins and the legacy file is left in place with a one-line note. Idempotent.
 func migrateLegacyChainNames(out io.Writer, dir string) error {
 	if dir == "" {
 		return nil
@@ -121,9 +104,6 @@ func migrateLegacyChainNames(out io.Writer, dir string) error {
 	return nil
 }
 
-// migrateLegacyChainNamesOnSearchPath runs the --update rename in ~/.contenox
-// and, when distinct, the workspace contenoxDir: a workspace shadow copy left
-// under its legacy name would silently stop shadowing its home counterpart.
 func migrateLegacyChainNamesOnSearchPath(out io.Writer, contenoxDir string) error {
 	homeDir, err := globalContenoxDir()
 	if err != nil {
@@ -138,10 +118,6 @@ func migrateLegacyChainNamesOnSearchPath(out io.Writer, contenoxDir string) erro
 	return nil
 }
 
-// seedHeadlessACPChainIfMissing writes the embedded acpx chain to contenoxDir
-// only when absent. It never overwrites a user-edited file, and a failure here
-// leaves the file absent so LoadChainRegistryFrom still fails closed rather
-// than the acpx profile silently running a different chain.
 func seedHeadlessACPChainIfMissing(contenoxDir string) error {
 	dst := filepath.Join(contenoxDir, chainAgentACPXFilename)
 	if _, err := os.Stat(dst); err == nil {
@@ -153,11 +129,6 @@ func seedHeadlessACPChainIfMissing(contenoxDir string) error {
 	return os.WriteFile(dst, []byte(initACPXChain), 0644)
 }
 
-// seedACPChainIfMissing writes the chain-agent-acp.json preset when it is
-// absent, so the `acp` profile is self-sufficient on a fresh install, the
-// same way `acpx` is via seedHeadlessACPChainIfMissing. Without this, a
-// clean environment that never ran `contenox init`/`--setup` hard-errors at
-// launch in LoadChainRegistryFrom.
 func seedACPChainIfMissing(contenoxDir string) error {
 	dst := filepath.Join(contenoxDir, chainAgentACPFilename)
 	if _, err := os.Stat(dst); err == nil {
@@ -169,12 +140,6 @@ func seedACPChainIfMissing(contenoxDir string) error {
 	return os.WriteFile(dst, []byte(initACPChain), 0644)
 }
 
-// seedFIMChainIfMissing writes the chain-fim-default.json preset when it is
-// absent, so `contenox acp` autocomplete (_contenox/autocomplete) works on a
-// fresh install, the same self-sufficiency seedACPChainIfMissing gives the
-// chat chain. Callers must treat a failure here as non-fatal: autocomplete
-// is optional and a missing/unwritable FIM chain must not block `acp`
-// startup (see loadOptionalFIMChain / acpsvc's nil FIMChainRegistry check).
 func seedFIMChainIfMissing(contenoxDir string) error {
 	dst := filepath.Join(contenoxDir, chainFIMDefaultFilename)
 	if _, err := os.Stat(dst); err == nil {
@@ -186,10 +151,6 @@ func seedFIMChainIfMissing(contenoxDir string) error {
 	return os.WriteFile(dst, []byte(initFIMChain), 0644)
 }
 
-// seedBeamChainIfMissing writes the embedded beam chain to contenoxDir only
-// when absent, the same self-sufficiency seedACPChainIfMissing gives the
-// editor profile: a clean environment that never ran `contenox init` still
-// gets a working `contenox beam` rather than a hard-error in LoadChainRegistryFrom.
 func seedBeamChainIfMissing(contenoxDir string) error {
 	dst := filepath.Join(contenoxDir, chainAgentBeamFilename)
 	if _, err := os.Stat(dst); err == nil {
@@ -201,9 +162,6 @@ func seedBeamChainIfMissing(contenoxDir string) error {
 	return os.WriteFile(dst, []byte(initBeamChain), 0644)
 }
 
-// initChainFiles pairs every chain-file basename init seeds with its embedded
-// content, in write order. RunInit/RunGlobalInit keep their explicit write
-// calls; this list backs RunLocalInit and the doctor shadow report.
 var initChainFiles = []struct {
 	Name    string
 	Content string
@@ -220,18 +178,11 @@ var initChainFiles = []struct {
 	{chainOracleConservativeFilename, initOracleConservativeChain},
 }
 
-// initTriggerFiles pairs every trigger-file basename init seeds with its
-// embedded content, mirroring initChainFiles. Currently empty: the generic
-// trigger tier stays operator-authored (no seeded example trigger); the
-// oracle no longer rides a trigger — `mission fire --oracle` mounts it as an
-// in-process attention driver.
 var initTriggerFiles = []struct {
 	Name    string
 	Content string
 }{}
 
-// initSystemFileNames returns every system-file basename init seeds: the chain
-// files, the trigger files, then the HITL policy presets.
 func initSystemFileNames() []string {
 	names := make([]string, 0, len(initChainFiles)+len(initTriggerFiles)+len(HITLPolicyPresets))
 	for _, f := range initChainFiles {
@@ -246,7 +197,6 @@ func initSystemFileNames() []string {
 	return names
 }
 
-// providerConfig holds the provider-specific values used during init.
 type providerConfig struct {
 	name         string
 	defaultModel string
@@ -286,8 +236,6 @@ var providerConfigs = map[string]providerConfig{
 	},
 }
 
-// hasBackendOfType returns true when the local DB already contains at least one
-// backend whose Type matches the given provider string.
 func hasBackendOfType(providerType string) bool {
 	dbPath, err := globalDBPath()
 	if err != nil {
@@ -311,8 +259,7 @@ func hasBackendOfType(providerType string) bool {
 	return false
 }
 
-// RunGlobalInit ensures ~/.contenox/ has chain files and HITL policies.
-// Unlike RunInit it does NOT create a workspace-scoped .contenox/ directory.
+// RunGlobalInit ensures ~/.contenox/ has chain files and HITL policies, without creating a workspace-scoped .contenox/ directory.
 func RunGlobalInit(out io.Writer) error {
 	homeDir, err := globalContenoxDir()
 	if err != nil {
@@ -352,13 +299,9 @@ func RunGlobalInit(out io.Writer) error {
 	if err := writeFile(filepath.Join(homeDir, chainAgentBeamFilename), initBeamChain); err != nil {
 		return err
 	}
-	// Discovered as a fleet-dispatchable agent by its shipped chain id
-	// (agent-planner); its envelope grants only mission tools.
 	if err := writeFile(filepath.Join(homeDir, chainPlannerDefaultFilename), initPlannerChain); err != nil {
 		return err
 	}
-	// Oracle attention-driver chains: inert until `mission fire --oracle`
-	// (opt-in-beta) mounts the driver.
 	if err := writeFile(filepath.Join(homeDir, chainOracleDefaultFilename), initOracleDefaultChain); err != nil {
 		return err
 	}
@@ -371,11 +314,7 @@ func RunGlobalInit(out io.Writer) error {
 	return nil
 }
 
-// writeInitFile writes one init preset with init's flag semantics: create when
-// absent, overwrite on force, on update overwrite only a file whose checksum
-// matches a blessed prior build, otherwise leave the file and report it.
 func writeInitFile(out io.Writer, force, update bool, path, content string) error {
-	// If the file doesn't exist, we always write it.
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 			return fmt.Errorf("failed to write %s: %w", path, err)
@@ -384,7 +323,6 @@ func writeInitFile(out io.Writer, force, update bool, path, content string) erro
 		return nil
 	}
 
-	// If we're forcing, we always overwrite.
 	if force {
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 			return fmt.Errorf("failed to write %s: %w", path, err)
@@ -393,7 +331,6 @@ func writeInitFile(out io.Writer, force, update bool, path, content string) erro
 		return nil
 	}
 
-	// If --update is passed, we check the checksum and overwrite if it's a known-good, unmodified file.
 	if update {
 		basename := filepath.Base(path)
 		if knownHashes, ok := blessedChainHashes[basename]; ok {
@@ -406,7 +343,6 @@ func writeInitFile(out io.Writer, force, update bool, path, content string) erro
 
 			for _, knownHash := range knownHashes {
 				if currentHash == knownHash {
-					// Checksum matches, safe to overwrite.
 					if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 						return fmt.Errorf("failed to write %s: %w", path, err)
 					}
@@ -415,23 +351,15 @@ func writeInitFile(out io.Writer, force, update bool, path, content string) erro
 				}
 			}
 		}
-		// If we're here, the file was either not in the blessed list or the checksum didn't match.
-		// We don't overwrite it, but we also don't print a scary "already exists" message.
 		fmt.Fprintf(out, "  Skipped %s (has been modified)\n", path)
 		return nil
 	}
 
-	// Default case: file exists, no --force, no --update. Do nothing.
 	fmt.Fprintf(out, "  %s already exists (use --force to overwrite or --update to refresh)\n", path)
 	return nil
 }
 
-// RunLocalInit seeds the chain files and HITL policy presets RunInit writes to
-// ~/.contenox into contenoxDir itself — deliberate workspace-local overrides
-// that shadow the global copies via the loaders' workspace-first resolution.
-// Chain files follow writeInitFile's --force/--update semantics; policy
-// presets follow the provenance-tracked upgrade (hand-edited files are kept
-// unless force).
+// RunLocalInit seeds contenoxDir with the same chain files and HITL policy presets RunInit writes to ~/.contenox, as workspace-local overrides that shadow the global copies.
 func RunLocalInit(out io.Writer, force, update bool, contenoxDir, projectName string) error {
 	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
 		return fmt.Errorf("failed to create .contenox directory: %w", err)
@@ -479,15 +407,10 @@ func RunLocalInit(out io.Writer, force, update bool, contenoxDir, projectName st
 	return nil
 }
 
-// RunInit scaffolds .contenox/ with default chain files.
-// provider is "" (defaults to the configured provider or "ollama") or one of providerConfigs.
-// contenoxDir is the target data directory. projectName, if non-empty, renames
-// an already-named project's marker; "" leaves the marker's name alone.
+// RunInit scaffolds contenoxDir with default chain files for provider ("" defaults to the configured provider or "ollama") and, if projectName is non-empty, renames the project marker.
 func RunInit(out, errOut io.Writer, force, update bool, provider string, contenoxDir string, projectName string) error {
 	provider = modelrepo.CanonicalBackendType(provider)
 	if provider == "" {
-		// Default to the provider already configured in the database so that
-		// re-running init doesn't show irrelevant setup steps.
 		if dbPath, gpErr := globalDBPath(); gpErr == nil {
 			if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
 				store := runtimetypes.New(db.WithoutTransaction())
@@ -525,17 +448,13 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	if hdErr != nil {
 		return fmt.Errorf("could not resolve ~/.contenox: %w", hdErr)
 	}
-	// The one-time convention migration: rename shipped legacy-named files to
-	// their chain-<role>-<variant>.json names before the refresh below, so a
-	// blessed pre-rename file is refreshed under its new name.
+	// Renames legacy-named files first so a blessed pre-rename file refreshes under its new name.
 	if update {
 		if err := migrateLegacyChainNamesOnSearchPath(out, contenoxDir); err != nil {
 			return err
 		}
 	}
-	// Loaders resolve workspace-first (lookupSystemFile, hitlPolicySource): a
-	// same-named file in contenoxDir wins over the home copies written below.
-	// Plain init never overwrites workspace files.
+	// Loaders resolve workspace-first, so a same-named file in contenoxDir wins over the home copies written here; plain init never overwrites workspace files.
 	noteShadowed := func(name string) {
 		if contenoxDir == homeDir {
 			return
@@ -577,13 +496,9 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	if err := writeFile(filepath.Join(homeDir, chainAgentBeamFilename), initBeamChain); err != nil {
 		return err
 	}
-	// Discovered as a fleet-dispatchable agent by its shipped chain id
-	// (agent-planner); its envelope grants only mission tools.
 	if err := writeFile(filepath.Join(homeDir, chainPlannerDefaultFilename), initPlannerChain); err != nil {
 		return err
 	}
-	// Oracle attention-driver chains: inert until `mission fire --oracle`
-	// (opt-in-beta) mounts the driver.
 	if err := writeFile(filepath.Join(homeDir, chainOracleDefaultFilename), initOracleDefaultChain); err != nil {
 		return err
 	}
@@ -591,8 +506,6 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 		return err
 	}
 	if force {
-		// The same search-path refresh as `init --refresh-policies`: forcing
-		// only the home copy would leave a workspace copy shadowing it.
 		if err := refreshPoliciesOnSearchPath(out, contenoxDir); err != nil {
 			return err
 		}
@@ -608,8 +521,6 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 	fmt.Fprintln(out, "Done.")
 	fmt.Fprintln(out, "")
 
-	// Surface the currently configured model so users immediately know
-	// if they have a stale entry from a previous install.
 	if dbPath, gpErr := globalDBPath(); gpErr == nil {
 		if db, openErr := OpenDBAt(libtracker.WithNewRequestID(context.Background()), dbPath); openErr == nil {
 			store := runtimetypes.New(db.WithoutTransaction())
@@ -637,8 +548,6 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 		}
 	}
 
-	// Resolve API key status (env or KV store) — used both for the status line and to
-	// suppress the "register backend" step when the backend is already configured.
 	var envVal string
 	var kvHasKey bool
 	if pc.envKey != "" {

@@ -10,21 +10,28 @@ import (
 
 func TestUnit_ResolveEditor(t *testing.T) {
 	cases := []struct {
-		name   string
-		visual string
-		editor string
-		want   string
+		name        string
+		visual      string
+		editor      string
+		termProgram string
+		want        string
 	}{
-		{"VISUAL wins", "code --wait", "nano", "code --wait"},
-		{"EDITOR fallback", "", "nano", "nano"},
-		{"nano default", "", "", "nano"},
-		{"VISUAL trims whitespace", "  helix  ", "nano", "helix"},
-		{"empty VISUAL ignored", "  ", "nano", "nano"},
+		{"VISUAL wins", "code --wait", "nano", "", "code --wait"},
+		{"EDITOR fallback", "", "nano", "", "nano"},
+		{"nano default", "", "", "", "nano"},
+		{"VISUAL trims whitespace", "  helix  ", "nano", "", "helix"},
+		{"empty VISUAL ignored", "  ", "nano", "", "nano"},
+		// The environment default: VS Code's integrated terminal gets the surrounding editor, only when the operator expressed no choice.
+		{"vscode default when neither set", "", "", "vscode", "code --wait"},
+		{"VISUAL outranks the vscode default", "helix", "", "vscode", "helix"},
+		{"EDITOR outranks the vscode default", "", "vim", "vscode", "vim"},
+		{"other TERM_PROGRAM keeps nano", "", "", "iTerm.app", "nano"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("VISUAL", tc.visual)
 			t.Setenv("EDITOR", tc.editor)
+			t.Setenv("TERM_PROGRAM", tc.termProgram)
 			if got := resolveEditor(); got != tc.want {
 				t.Fatalf("resolveEditor() = %q, want %q", got, tc.want)
 			}
@@ -159,7 +166,6 @@ func TestUnit_BuildEditorTemplate_SeedWithoutTrailingNewline(t *testing.T) {
 	}
 }
 
-// writeNoopEditor points $EDITOR at a script that exits without touching the file, simulating an immediate quit.
 func writeNoopEditor(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "noop-editor.sh")
@@ -169,7 +175,6 @@ func writeNoopEditor(t *testing.T) string {
 	return path
 }
 
-// writeReplaceEditor points $EDITOR at a script that overwrites the buffer with finalContent, which must end in "\n".
 func writeReplaceEditor(t *testing.T, finalContent string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "replace-editor.sh")

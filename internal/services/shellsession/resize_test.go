@@ -9,9 +9,6 @@ import (
 	"time"
 )
 
-// sttySize asks the shell for the PTY's geometry and waits for the answer. It
-// reads back through the scrollback rather than trusting Run's snapshot, which
-// is a best-effort window and may return before the command has written.
 func sttySize(t *testing.T, m *manager, sessionID string) (rows, cols int) {
 	t.Helper()
 	ctx := ctxWithSession(sessionID)
@@ -109,7 +106,6 @@ func TestManager_ResizeIsTotal(t *testing.T) {
 			t.Fatalf("Resize(%q) must not create a shell", id)
 		}
 	}
-	// A rejected dimension must not be remembered either.
 	rows, cols := sttySize(t, m, "sess-bad")
 	if rows != defaultRows || cols != defaultCols {
 		t.Fatalf("a rejected size must not be stored; want the default %dx%d, got %dx%d",

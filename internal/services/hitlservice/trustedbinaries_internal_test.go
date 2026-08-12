@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// writeAt writes content and stamps a fixed mtime, so the cache's change
-// signal is controlled rather than observed.
 func writeAt(t *testing.T, path, content string, mtime time.Time) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
@@ -45,12 +43,8 @@ func TestUnit_BinaryHashCache_RehashesOnChange(t *testing.T) {
 	assert.Equal(t, mustHash(t, path), resized, "a size change must be re-hashed even at an unchanged mtime")
 }
 
-// TestUnit_BinaryHashCache_TrustsSizeAndMtime pins the cache's stated trust
-// assumption rather than pretending it away: someone who can rewrite the
-// binary can also restore its size and mtime, and the cache will then serve
-// the stale digest. That is inside the properly-set-up-system assumption —
-// write access to a trusted directory is already past this control — and is
-// documented in docs/guide/trusted-binaries.md.
+// TestUnit_BinaryHashCache_TrustsSizeAndMtime pins that the cache trusts
+// (size, mtime): a rewrite that restores both mtime and size serves a stale digest.
 func TestUnit_BinaryHashCache_TrustsSizeAndMtime(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tool")
 	stamp := time.Now().Add(-time.Hour).Truncate(time.Second)

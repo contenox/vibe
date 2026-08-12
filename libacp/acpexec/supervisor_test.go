@@ -13,8 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// trueCmd returns a cheap, always-present subprocess; the Supervisor tests care
-// about the session callback's result, not the process's own behavior.
 func trueCmd(context.Context) *exec.Cmd { return exec.Command("cat") }
 
 func TestSupervisor_SucceedsFirstAttemptNoRestart(t *testing.T) {

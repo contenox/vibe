@@ -8,18 +8,10 @@ import (
 )
 
 // IsNotFound reports whether err is a peer's answer of "that resource does
-// not exist" (file/resource sense, not lifecycle). Only a typed *Error
-// counts — a raw error's text is never classified here, so a startup failure
-// like exec.ErrNotFound can't be misread as a missing file.
-//
-// Code == ErrResourceNotFound is the canonical signal. As a fallback, some
-// agents answer fs/read_text_file with a generic ErrInternalError whose
-// message just says "not found", so the message is also checked — but only
-// for codes describing the request's subject. Protocol-level codes (parse,
-// invalid request/params, method not found, auth required) and
-// ErrRequestTimeout describe the request itself and are excluded, since
-// message-sniffing them would misclassify an unimplemented method or a
-// timeout as a missing file.
+// not exist" (file/resource sense, not lifecycle): only a typed *Error with
+// Code == ErrResourceNotFound, or a subject-describing code whose message
+// says "not found", counts — a raw error's text and protocol-level codes are
+// never classified here.
 func IsNotFound(err error) bool {
 	if err == nil {
 		return false
@@ -39,9 +31,8 @@ func IsNotFound(err error) bool {
 }
 
 // AsNotExist normalizes a not-found failure (per IsNotFound) into an error
-// satisfying errors.Is(err, os.ErrNotExist), so fs/* callers can branch with
-// the same predicate as local I/O. Any other error, including nil, is
-// returned unchanged.
+// satisfying errors.Is(err, os.ErrNotExist); any other error, including nil,
+// is returned unchanged.
 func AsNotExist(err error) error {
 	if err == nil {
 		return nil

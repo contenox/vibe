@@ -20,6 +20,7 @@ type ModelRegistryEntry struct {
 	UpdatedAt time.Time `json:"updatedAt" example:"2023-11-15T14:30:45Z"`
 }
 
+// CreateModelRegistryEntry inserts a new model registry entry into the database.
 func (s *store) CreateModelRegistryEntry(ctx context.Context, e *ModelRegistryEntry) error {
 	now := time.Now().UTC()
 	e.CreatedAt = now
@@ -36,6 +37,7 @@ func (s *store) CreateModelRegistryEntry(ctx context.Context, e *ModelRegistryEn
 	return err
 }
 
+// GetModelRegistryEntry retrieves a model registry entry by its ID.
 func (s *store) GetModelRegistryEntry(ctx context.Context, id string) (*ModelRegistryEntry, error) {
 	var e ModelRegistryEntry
 	err := s.Exec.QueryRowContext(ctx, `
@@ -49,6 +51,7 @@ func (s *store) GetModelRegistryEntry(ctx context.Context, id string) (*ModelReg
 	return &e, err
 }
 
+// GetModelRegistryEntryByName fetches a model registry entry by its name.
 func (s *store) GetModelRegistryEntryByName(ctx context.Context, name string) (*ModelRegistryEntry, error) {
 	var e ModelRegistryEntry
 	err := s.Exec.QueryRowContext(ctx, `
@@ -62,6 +65,7 @@ func (s *store) GetModelRegistryEntryByName(ctx context.Context, name string) (*
 	return &e, err
 }
 
+// UpdateModelRegistryEntry updates an existing model registry entry.
 func (s *store) UpdateModelRegistryEntry(ctx context.Context, e *ModelRegistryEntry) error {
 	e.UpdatedAt = time.Now().UTC()
 	result, err := s.Exec.ExecContext(ctx, `
@@ -76,6 +80,7 @@ func (s *store) UpdateModelRegistryEntry(ctx context.Context, e *ModelRegistryEn
 	return checkRowsAffected(result)
 }
 
+// DeleteModelRegistryEntry removes a model registry entry by ID.
 func (s *store) DeleteModelRegistryEntry(ctx context.Context, id string) error {
 	result, err := s.Exec.ExecContext(ctx, `
 		DELETE FROM llm_model_registry WHERE id = $1`, id,
@@ -86,6 +91,7 @@ func (s *store) DeleteModelRegistryEntry(ctx context.Context, id string) error {
 	return checkRowsAffected(result)
 }
 
+// ListModelRegistryEntries returns a paginated list of model registry entries.
 func (s *store) ListModelRegistryEntries(ctx context.Context, cursor *time.Time, limit int) ([]*ModelRegistryEntry, error) {
 	t := time.Now().UTC()
 	if cursor != nil {
@@ -119,6 +125,7 @@ func (s *store) ListModelRegistryEntries(ctx context.Context, cursor *time.Time,
 	return out, nil
 }
 
+// EstimateModelRegistryEntryCount estimates the total number of model registry records.
 func (s *store) EstimateModelRegistryEntryCount(ctx context.Context) (int64, error) {
 	return s.estimateCount(ctx, "llm_model_registry")
 }

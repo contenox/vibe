@@ -15,9 +15,6 @@ var (
 	ErrConnectionClosed = errors.New("libacp: connection closed")
 )
 
-// afterResponseSink collects callbacks scheduled by a request handler to run
-// once its result is written to the wire, so its notifications are ordered
-// after the response. handleRequest installs one per request and flushes it.
 type afterResponseSink struct {
 	mu      sync.Mutex
 	flushed bool
@@ -51,9 +48,9 @@ func (s *afterResponseSink) run() {
 type afterResponseKey struct{}
 
 // AfterResponse schedules fn to run once the current request's result is on
-// the wire — use it to emit a session/update that must reach the client only
-// after it can resolve the session (e.g. available_commands_update after
-// session/new). Outside a request handler, fn runs immediately.
+// the wire (fn runs immediately outside a request handler) — use it to emit a
+// session/update that must reach the client only after it can resolve the
+// session (e.g. available_commands_update after session/new).
 func AfterResponse(ctx context.Context, fn func()) {
 	if sink, ok := ctx.Value(afterResponseKey{}).(*afterResponseSink); ok {
 		sink.add(fn)
@@ -77,21 +74,12 @@ type AgentSideConnection struct {
 	cancelMu       sync.Mutex
 	sessionCancels map[SessionID]*promptCancel
 
-	// requestCancels tracks every in-flight incoming request's cancelable
-	// context by JSON-RPC id, so "$/cancel_request" can abort it.
 	reqCancelMu    sync.Mutex
 	requestCancels map[string]context.CancelFunc
 
-	// extRequest/extNotification, if set via SetExtRequestHandler /
-	// SetExtNotificationHandler before Run starts reading, handle inbound
-	// extension methods and notifications (see IsExtensionMethod). Nil means
-	// MethodNotFound for requests, silent drop for notifications.
 	extRequest      ExtRequestHandler
 	extNotification ExtNotificationHandler
 
-	// handlerMu makes "is shutdown running?" and "register one more handler
-	// goroutine" a single atomic step, so handlers.Add can never race
-	// handlers.Wait.
 	handlerMu sync.Mutex
 	draining  bool
 	handlers  sync.WaitGroup
@@ -101,9 +89,6 @@ type AgentSideConnection struct {
 	closeErr  error
 }
 
-// goHandler spawns fn as a tracked handler goroutine and reports whether it
-// was started; it refuses once shutdown has begun, since the transport is
-// already closed and admitting it would race the join in waitHandlers.
 func (c *AgentSideConnection) goHandler(fn func()) bool {
 	c.handlerMu.Lock()
 	if c.draining {
@@ -119,11 +104,6 @@ func (c *AgentSideConnection) goHandler(fn func()) bool {
 	return true
 }
 
-// waitHandlers blocks until every handler goroutine spawned by goHandler
-// returns. Call only after shutdown, since every Agent handler must return
-// once its context is cancelled (the caller tears down shared state the
-// moment Run returns). Bounded by HandlerDrainTimeout as a last resort,
-// reporting ErrHandlerDrainTimeout instead of pretending a stuck handler drained.
 func (c *AgentSideConnection) waitHandlers() error {
 	c.handlerMu.Lock()
 	// Assert draining here too, in case a caller reaches the join first.
@@ -145,15 +125,10 @@ func (c *AgentSideConnection) waitHandlers() error {
 	}
 }
 
-// requestCancelKey disambiguates the JSON-RPC id namespace: a string id "1"
-// and a numeric id 1 render identically via String_().
 func requestCancelKey(id RequestID) string {
 	return fmt.Sprintf("%d:%s", id.Kind, id.String_())
 }
 
-// promptCancel tracks the cancelable context of one in-flight session/prompt.
-// Compared by pointer identity (context.CancelFunc values aren't comparable),
-// so a prompt's cleanup can never remove a successor prompt's registration.
 type promptCancel struct {
 	sessionID SessionID
 	ctx       context.Context
@@ -174,25 +149,23 @@ func NewAgentSideConnection(rw io.ReadWriteCloser, factory AgentFactory) *AgentS
 	return c
 }
 
-// SetExtRequestHandler installs h to handle inbound extension requests
-// (method names starting with ExtensionMethodPrefix). Call it from the
-// AgentFactory before Run starts reading. Nil (the default) answers
-// extension requests with MethodNotFound.
+// SetExtRequestHandler installs h, called from the AgentFactory before Run
+// starts reading, to handle inbound extension requests (method names
+// starting with ExtensionMethodPrefix); nil (the default) answers them with
+// MethodNotFound.
 func (c *AgentSideConnection) SetExtRequestHandler(h ExtRequestHandler) {
 	c.extRequest = h
 }
 
-// SetExtNotificationHandler installs h to handle inbound extension
-// notifications. Call it from the AgentFactory before Run starts reading.
-// Nil (the default) silently ignores extension notifications.
+// SetExtNotificationHandler installs h, called from the AgentFactory before
+// Run starts reading, to handle inbound extension notifications; nil (the
+// default) silently ignores them.
 func (c *AgentSideConnection) SetExtNotificationHandler(h ExtNotificationHandler) {
 	c.extNotification = h
 }
 
 func (c *AgentSideConnection) Run(ctx context.Context) (err error) {
-	// Deferred first so it runs last: shutdown must unblock everything before
-	// the join. By the time Run returns, no handler goroutine is still
-	// executing.
+	// Deferred first so it runs last: shutdown must unblock everything before the join.
 	defer func() {
 		if derr := c.waitHandlers(); derr != nil {
 			err = errors.Join(err, derr)
@@ -307,8 +280,7 @@ func (c *AgentSideConnection) dispatch(ctx context.Context, line []byte) {
 			defer release()
 			c.handleRequest(reqCtx, msg.Request, pc)
 		}) {
-			// Shutdown already under way; no response could reach the peer
-			// anyway. Drop the request and undo dispatch's registrations.
+			// Shutdown already under way: drop the request and undo dispatch's registrations.
 			release()
 			if pc != nil {
 				c.unregisterPromptCancel(pc)
@@ -330,8 +302,6 @@ func (c *AgentSideConnection) dispatch(ctx context.Context, line []byte) {
 	}
 }
 
-// applyCancelRequest aborts the in-flight request the peer no longer awaits.
-// Unknown ids are ignored: the request may simply have completed already.
 func (c *AgentSideConnection) applyCancelRequest(params json.RawMessage) {
 	var p CancelRequestNotification
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil {
@@ -345,9 +315,6 @@ func (c *AgentSideConnection) applyCancelRequest(params json.RawMessage) {
 	}
 }
 
-// respondToMalformed answers input the dispatcher could not parse, per
-// JSON-RPC 2.0: -32700 for invalid JSON, -32600 for a structurally invalid
-// message (id null when it cannot be salvaged).
 func (c *AgentSideConnection) respondToMalformed(line []byte, parseErr error) {
 	if !json.Valid(line) {
 		_ = c.writer.Write(NewErrorResponse(NewRequestIDNull(), ParseError(parseErr.Error())))
@@ -366,10 +333,6 @@ func (c *AgentSideConnection) respondToMalformed(line []byte, parseErr error) {
 	_ = c.writer.Write(NewErrorResponse(id, InvalidRequest(parseErr.Error())))
 }
 
-// registerPromptCancel creates and registers the cancelable context for a
-// session/prompt request at dispatch time, before the handler goroutine is
-// spawned, so a later session/cancel is guaranteed to observe it. Returns nil
-// when params carry no usable sessionId.
 func (c *AgentSideConnection) registerPromptCancel(ctx context.Context, params json.RawMessage) *promptCancel {
 	var probe struct {
 		SessionID SessionID `json:"sessionId"`
@@ -389,8 +352,6 @@ func (c *AgentSideConnection) registerPromptCancel(ctx context.Context, params j
 	return pc
 }
 
-// unregisterPromptCancel removes pc's registration only if it is still the
-// current one for its session (pointer identity), then cancels its context.
 func (c *AgentSideConnection) unregisterPromptCancel(pc *promptCancel) {
 	c.cancelMu.Lock()
 	if existing, ok := c.sessionCancels[pc.sessionID]; ok && existing == pc {
@@ -433,8 +394,6 @@ func (c *AgentSideConnection) handleRequest(ctx context.Context, req Request, pc
 	sink.run()
 }
 
-// safeCallMethod converts a panicking Agent handler into an InternalError
-// response instead of tearing down the whole process.
 func (c *AgentSideConnection) safeCallMethod(ctx context.Context, req Request, pc *promptCancel) (result any, rpcErr *Error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -795,10 +754,8 @@ func (c *AgentSideConnection) ReleaseTerminal(ctx context.Context, req ReleaseTe
 }
 
 // CallExtMethod sends a custom extension request (method must satisfy
-// IsExtensionMethod) to the client and returns its raw result. Outbound half
-// of the extension-method seam; SetExtRequestHandler installs the inbound
-// half. A canceled ctx aborts the wait and best-effort notifies the client
-// with "$/cancel_request".
+// IsExtensionMethod) to the client and returns its raw result; a canceled ctx
+// aborts the wait and best-effort notifies the client with "$/cancel_request".
 func (c *AgentSideConnection) CallExtMethod(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	if !IsExtensionMethod(method) {
 		return nil, fmt.Errorf("libacp: %q is not an extension method (must start with %q)", method, ExtensionMethodPrefix)

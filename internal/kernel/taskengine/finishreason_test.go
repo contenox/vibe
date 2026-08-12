@@ -1,11 +1,5 @@
 package taskengine_test
 
-// A truncated model response ("length"-class finish reason) must stay visible
-// all the way to the captured step: provider terminal → stream assembly →
-// ChatHistory.FinishReason → CapturedStateUnit.FinishReason. Before this
-// existed, the finish reason died in the step_stream_end event and a truncated
-// success reached every client as a normal end of turn.
-
 import (
 	"context"
 	"testing"

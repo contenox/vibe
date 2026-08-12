@@ -1,25 +1,5 @@
 package localtools
 
-// The published OpenAPI contract for this package's toolsets. Request schemas
-// are CONVERTED from the very descriptors GetToolsForToolsByName hands the
-// model (schemaFromParameters) rather than restated in a property table, for
-// three reasons that hold across every provider here:
-//
-//   - local_fs and git already declare their arguments once, through the
-//     shared fsTool/fsProp builders; a table beside them would be a second
-//     copy of a declaration that is already single.
-//   - local_fs's descriptors are CONTEXT-DEPENDENT (_verbose_tool_descriptions
-//     picks a different description per call), so a hand-written table could
-//     not track them at all.
-//   - webtools' arguments carry shapes a flat {name,type,description} table
-//     cannot hold: headers is an object with additionalProperties, body is a
-//     type union.
-//
-// Response schemas are written from what each Exec actually returns — the
-// typed results (FsWriteResult, GitStatusResult, …), the plain strings, and
-// the soft-refusal and no-match payloads that are returned as RESULTS rather
-// than errors and are therefore part of the contract.
-
 import (
 	"encoding/json"
 	"fmt"
@@ -28,21 +8,12 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-// toolSchemaSpec binds one declared tool to its OpenAPI component prefix and
-// the response schema describing what Exec returns for it. The request schema
-// is not here: it is converted from the descriptor.
 type toolSchemaSpec struct {
 	tool      string
 	component string
 	response  func() *openapi3.SchemaRef
 }
 
-// buildToolsetDoc renders one provider's OpenAPI 3.1 document: a request and a
-// response component per declared tool. declared must be the descriptors the
-// provider hands the model, so the published request contract is a rendering
-// of them and never a second copy that could disagree. A declared tool with no
-// spec, or a spec naming no declared tool, is an error rather than a document
-// that silently covers less than the toolset does.
 func buildToolsetDoc(provider, title, description string, declared []taskengine.Tool, specs []toolSchemaSpec) (*openapi3.T, error) {
 	byName := make(map[string]taskengine.Tool, len(declared))
 	for _, t := range declared {
@@ -82,10 +53,6 @@ func buildToolsetDoc(provider, title, description string, declared []taskengine.
 	}, nil
 }
 
-// schemaFromParameters converts a tool descriptor's JSON Schema parameters
-// into an OpenAPI schema. The descriptor stays the single source of truth: the
-// published contract is a rendering of it, never a second copy that could
-// disagree.
 func schemaFromParameters(params any) (*openapi3.SchemaRef, error) {
 	raw, err := json.Marshal(params)
 	if err != nil {
@@ -99,17 +66,6 @@ func schemaFromParameters(params any) (*openapi3.SchemaRef, error) {
 	return &openapi3.SchemaRef{Value: &s}, nil
 }
 
-// renderForOpenAPI rewrites the two JSON Schema spellings a tool descriptor is
-// allowed to use but an OpenAPI document validator rejects, without changing
-// what either one means:
-//
-//   - a "null" member of a type union becomes nullable, since the validator
-//     knows no "null" type;
-//   - an array with no declared items gets the empty (any-item) schema, which
-//     is what an undeclared item type already means.
-//
-// Applied to the converted copy only — the descriptor the model receives is
-// untouched.
 func renderForOpenAPI(s *openapi3.Schema) {
 	if s == nil {
 		return
@@ -151,9 +107,6 @@ func renderForOpenAPI(s *openapi3.Schema) {
 	}
 }
 
-// --- Response schema builders -------------------------------------------------
-
-// strSchema is a described string.
 func strSchema(description string) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:        &openapi3.Types{openapi3.TypeString},
@@ -161,7 +114,6 @@ func strSchema(description string) *openapi3.SchemaRef {
 	}}
 }
 
-// intSchema is a described integer.
 func intSchema(description string) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:        &openapi3.Types{openapi3.TypeInteger},
@@ -169,7 +121,6 @@ func intSchema(description string) *openapi3.SchemaRef {
 	}}
 }
 
-// boolSchema is a described boolean.
 func boolSchema(description string) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:        &openapi3.Types{openapi3.TypeBoolean},
@@ -177,7 +128,6 @@ func boolSchema(description string) *openapi3.SchemaRef {
 	}}
 }
 
-// arraySchema is a described array of items.
 func arraySchema(description string, items *openapi3.SchemaRef) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:        &openapi3.Types{openapi3.TypeArray},
@@ -186,8 +136,6 @@ func arraySchema(description string, items *openapi3.SchemaRef) *openapi3.Schema
 	}}
 }
 
-// stringMapSchema is a described object with no fixed keys and string values —
-// a header set, or anything else keyed by a name the schema cannot enumerate.
 func stringMapSchema(description, value string) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:                 &openapi3.Types{openapi3.TypeObject},
@@ -196,7 +144,6 @@ func stringMapSchema(description, value string) *openapi3.SchemaRef {
 	}}
 }
 
-// objectSchema assembles one described object.
 func objectSchema(description string, props map[string]*openapi3.SchemaRef, required ...string) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:        &openapi3.Types{openapi3.TypeObject},
@@ -206,8 +153,6 @@ func objectSchema(description string, props map[string]*openapi3.SchemaRef, requ
 	}}
 }
 
-// oneOfSchema is a result that comes back in exactly one of several disjoint
-// shapes — a typed success payload, a soft refusal, a plain message.
 func oneOfSchema(description string, variants ...*openapi3.SchemaRef) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Description: description,
@@ -215,8 +160,6 @@ func oneOfSchema(description string, variants ...*openapi3.SchemaRef) *openapi3.
 	}}
 }
 
-// anyOfSchema is a result whose shapes are not disjoint, so a payload may match
-// more than one variant.
 func anyOfSchema(description string, variants ...*openapi3.SchemaRef) *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Description: description,
@@ -224,9 +167,6 @@ func anyOfSchema(description string, variants ...*openapi3.SchemaRef) *openapi3.
 	}}
 }
 
-// refusalSchema is FsRefusalResult, the soft denial the mutating local_fs tools
-// return as a RESULT rather than an error. It reaches the model as its Reason
-// text.
 func refusalSchema() *openapi3.SchemaRef {
 	return objectSchema(
 		"A refusal: the file was NOT written. Returned as a tool result, not an error, and reaches the model as the reason text alone.",
@@ -236,9 +176,6 @@ func refusalSchema() *openapi3.SchemaRef {
 		}, "refused", "reason")
 }
 
-// chatHistorySchema is the taskengine chat history echo and print return when
-// the task input is a history rather than an argument map: the same history,
-// with one message appended.
 func chatHistorySchema(description string) *openapi3.SchemaRef {
 	return objectSchema(description, map[string]*openapi3.SchemaRef{
 		"messages": arraySchema(

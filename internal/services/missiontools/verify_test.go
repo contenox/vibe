@@ -1,8 +1,5 @@
 package missiontools_test
 
-// Tests for the conclusion verification gate (verify.go), driven through the
-// real Exec path against the real sqlite-backed mission store.
-
 import (
 	"fmt"
 	"os"
@@ -17,8 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// resultCall builds a model-shape mission_report input claiming kind=result
-// with the given refs.
 func resultInput(summary string, refs []string) (any, *taskengine.ToolsCall) {
 	refsAny := make([]any, len(refs))
 	for i, r := range refs {
@@ -119,9 +114,7 @@ func TestUnit_Verify_AbsoluteMissingPathNeedsNoWorkdir(t *testing.T) {
 
 	rep := storedReport(t, svc, missionID)
 	require.Equal(t, missionservice.ReportKindProgress, rep.Kind)
-	// verificationWarning renders each missing ref via %q (see quoteList in
-	// verify.go), which escapes backslashes — on Windows, gone's raw form
-	// (single backslashes) is never a literal substring of that quoted text.
+	// %q escapes backslashes, so on Windows gone's raw form is never a literal substring of the quoted text.
 	require.Contains(t, rep.Detail, fmt.Sprintf("%q", gone))
 }
 

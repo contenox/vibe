@@ -15,11 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---------------------------------------------------------------------------
 // `contenox index` / `contenox search`: hardening cases index_cmd_test.go
 // leaves open — --force correctness, incremental cost, embed-failure
 // recovery, and progress-output discipline. Same rig as index_cmd_test.go.
-// ---------------------------------------------------------------------------
 
 // TestUnit_IndexCmd_ForceReEmbedsTheWholeTreeInPlace asserts --force re-embeds every chunk exactly once and refills what it drops, rather than silently reusing chunks or emptying the table without refilling it.
 func TestUnit_IndexCmd_ForceReEmbedsTheWholeTreeInPlace(t *testing.T) {

@@ -159,6 +159,47 @@ func TestUnit_ToolCallUpdate_ErrorMarksFailed(t *testing.T) {
 	require.Equal(t, libacp.ToolKindExecute, note.Update.Kind)
 }
 
+// TestUnit_ToolCallUpdate_PolicyDenialMarksFailed pins the denial wire shape:
+// status failed, denial text as meta error and raw output.
+func TestUnit_ToolCallUpdate_PolicyDenialMarksFailed(t *testing.T) {
+	for _, denial := range []string{localtools.DenyMessage, localtools.DenyTimeoutMessage} {
+		ev := taskengine.TaskEvent{
+			Kind:       taskengine.TaskEventToolCall,
+			ToolName:   "git.git_restore",
+			ApprovalID: "call-denied-1",
+			Content:    denial,
+		}
+		note := toolCallUpdateNotification(libacp.SessionID("sess-1"), ev, fallbackToolCallID(ev))
+		upd := note.Update
+
+		require.Equal(t, libacp.ToolCallStatusFailed, upd.Status,
+			"a policy-denied call must never report successful completion")
+		require.JSONEq(t, `{"error":`+jsonString(denial)+`}`, string(upd.Meta))
+		require.JSONEq(t, jsonString(denial), string(upd.RawOutput))
+
+		wire, err := json.Marshal(upd)
+		require.NoError(t, err)
+		var generic map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(wire, &generic))
+		require.JSONEq(t, `"failed"`, string(generic["status"]),
+			"wire status must be the ACP spec's failed token")
+	}
+}
+
+// TestUnit_ToolCallUpdate_OrdinaryResultStaysCompleted guards the inverse:
+// an ordinary result stays completed.
+func TestUnit_ToolCallUpdate_OrdinaryResultStaysCompleted(t *testing.T) {
+	ev := taskengine.TaskEvent{
+		Kind:       taskengine.TaskEventToolCall,
+		ToolName:   "git.git_status",
+		ApprovalID: "call-ok-1",
+		Content:    "clean working tree",
+	}
+	note := toolCallUpdateNotification(libacp.SessionID("sess-1"), ev, fallbackToolCallID(ev))
+	require.Equal(t, libacp.ToolCallStatusCompleted, note.Update.Status)
+	require.Empty(t, note.Update.Meta)
+}
+
 func TestUnit_NormalizeToolCallNotification_PromotesUnknownUpdate(t *testing.T) {
 	tr := &Transport{}
 	note := libacp.SessionNotification{
@@ -302,6 +343,11 @@ func TestUnit_ReplayToolStatus(t *testing.T) {
 			content: `{"error":"tool call was interrupted before a result was recorded"}`,
 			want:    libacp.ToolCallStatusFailed,
 		},
+
+		// Policy denials replay as failed, matching the live wire.
+		{name: "HITL denial", content: localtools.DenyMessage, want: libacp.ToolCallStatusFailed},
+		{name: "HITL denial persisted as a JSON string", content: `"` + localtools.DenyMessage + `"`, want: libacp.ToolCallStatusFailed},
+		{name: "HITL timeout denial", content: localtools.DenyTimeoutMessage, want: libacp.ToolCallStatusFailed},
 
 		// Successes, including the ones a looser rule would get wrong.
 		{name: "plain text result", content: "hello world", want: libacp.ToolCallStatusCompleted},

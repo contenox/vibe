@@ -19,22 +19,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests validate libacp's client-side wire dispatch against testy, the
-// Rust reference SDK's deterministic ACP test agent, over a real subprocess
-// (acpexec.Spawn). Opt-in: every test skips unless the caller points at a
-// local testy build via env var (see `make acp-client-e2e`).
-//
-// testy has one known bug relevant here: initialize echoes back whatever
-// protocolVersion it is sent instead of negotiating, so these tests always
-// send libacp.ProtocolVersion and never exercise negotiation against it.
 const (
 	acpTestyBinEnv   = "ACP_TESTY_BIN"
 	acpMcpEchoBinEnv = "ACP_MCP_ECHO_BIN"
 )
 
-// fakeTerminal is one CreateTerminal call's real, running child process: the
-// e2e Client actually executes the requested command rather than faking
-// output, so the terminal/* family has real process state to report.
 type fakeTerminal struct {
 	cmd *exec.Cmd
 
@@ -53,11 +42,6 @@ func (w termWriter) Write(p []byte) (int, error) {
 	return w.t.output.Write(p)
 }
 
-// e2eClient is the libacp.Client this file's tests wire a real
-// ClientSideConnection to: it records every agent-initiated call, serves
-// fs/read_text_file and fs/write_text_file from an in-memory map, answers
-// session/request_permission with the first offered option (unless held open,
-// see permissionEntered), and serves terminal/* against real child processes.
 type e2eClient struct {
 	libacp.UnimplementedClient
 
@@ -76,9 +60,6 @@ type e2eClient struct {
 	terminals map[string]*fakeTerminal
 	termSeq   int
 
-	// permissionEntered, when set before a call begins, is closed the moment
-	// RequestPermission is invoked; the call then blocks on ctx instead of
-	// answering, so a test can exercise CancelPrompt while it is pending.
 	permissionEntered chan struct{}
 }
 
@@ -309,9 +290,6 @@ func (c *e2eClient) snapshotReleaseCalls() []libacp.ReleaseTerminalRequest {
 	return append([]libacp.ReleaseTerminalRequest(nil), c.releaseCalls...)
 }
 
-// testyHarness spawns a fresh testy process per test (avoiding any shared,
-// cross-test session state) and wires a real ClientSideConnection to it over
-// acpexec.Spawn.
 type testyHarness struct {
 	t      *testing.T
 	conn   *libacp.ClientSideConnection
@@ -364,8 +342,6 @@ func (h *testyHarness) cleanup() {
 	}
 }
 
-// fatalf fails the test, always including testy's captured stderr so a
-// protocol mismatch is diagnosable without rerunning by hand.
 func (h *testyHarness) fatalf(format string, args ...any) {
 	h.t.Helper()
 	h.t.Fatalf("%s\ntesty stderr:\n%s", fmt.Sprintf(format, args...), h.stderr.String())
@@ -387,9 +363,6 @@ func (h *testyHarness) initialize(t *testing.T) libacp.InitializeResponse {
 	return resp
 }
 
-// newSession creates a session rooted at a fresh temp dir with one additional
-// directory activated, exercising testy's advertised
-// sessionCapabilities.additionalDirectories.
 func (h *testyHarness) newSession(t *testing.T, mcpServers []libacp.McpServer) (sessionID libacp.SessionID, cwd string, extraDir string) {
 	t.Helper()
 	cwd = t.TempDir()
@@ -409,8 +382,6 @@ func (h *testyHarness) newSession(t *testing.T, mcpServers []libacp.McpServer) (
 	return resp.SessionID, cwd, extraDir
 }
 
-// testyPrompt JSON-serializes v (a TestyCommand-shaped value): testy's
-// prompt text is a JSON command, per testy.rs's TestyCommand.
 func testyPrompt(v any) []libacp.ContentBlock {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -662,10 +633,9 @@ func TestTesty_RunScenarioToolCalls(t *testing.T) {
 
 // TestTesty_RunScenarioCallbacks pins that testy's callbacks scenario drives
 // every stable agent-to-client request this Client serves (permission, fs
-// read/write, terminal/*). The prebuilt binary's "unstable" feature then goes
-// on to attempt elicitation/create, which this client never advertises, so
-// the turn ends in an expected InvalidParams error rather than cleanly; the
-// test judges the calls actually observed, not the turn's outcome.
+// read/write, terminal/*), judging the calls actually observed rather than
+// the turn's outcome, since the binary's "unstable" feature then ends the
+// turn in an expected InvalidParams error.
 func TestTesty_RunScenarioCallbacks(t *testing.T) {
 	h := newTestyHarness(t)
 	h.initialize(t)
@@ -762,7 +732,7 @@ func TestTesty_CancelPromptMidScenario(t *testing.T) {
 
 // TestTesty_McpPassDown pins session/new's MCP server pass-through: testy's
 // list_tools/call_tool commands spawn their own short-lived MCP client
-// against the real stdio server this test wires in. Gated on ACP_MCP_ECHO_BIN.
+// against the real stdio server this test wires in (gated on ACP_MCP_ECHO_BIN).
 func TestTesty_McpPassDown(t *testing.T) {
 	mcpBin := os.Getenv(acpMcpEchoBinEnv)
 	if mcpBin == "" {

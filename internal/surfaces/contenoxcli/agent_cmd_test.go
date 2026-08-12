@@ -43,15 +43,11 @@ func seedChainAgent(t *testing.T, dbPath, name, path string) {
 	require.NoError(t, svc.Create(ctx, a))
 }
 
-// ─── dispatch / reservation ─────────────────────────────────────────────────
-
 func TestUnit_agentIsReservedSubcommand(t *testing.T) {
 	require.True(t, reservedSubcommands["agent"], `"agent" must be reserved so it dispatches as a subcommand`)
 	require.True(t, firstNonFlagIsReserved([]string{"agent", "list"}))
 	require.True(t, firstNonFlagIsReserved([]string{"--db", "/tmp/x", "agent", "show"}))
 }
-
-// ─── list / show ────────────────────────────────────────────────────────────
 
 func TestUnit_AgentList_And_Show(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "agents.db")
@@ -79,8 +75,6 @@ func TestUnit_AgentList_And_Show(t *testing.T) {
 	require.Contains(t, out, "config_json")
 }
 
-// ─── remove ─────────────────────────────────────────────────────────────────
-
 func TestUnit_AgentRemove(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "agents.db")
 	seedChainAgent(t, dbPath, "gone-agent", "/home/user/.contenox/x.json")
@@ -97,8 +91,6 @@ func TestUnit_AgentRemove(t *testing.T) {
 	_, err := svc.GetByName(ctx, "gone-agent")
 	require.Error(t, err)
 }
-
-// ─── enable / disable ───────────────────────────────────────────────────────
 
 func TestUnit_AgentEnableDisable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "agents.db")
@@ -118,8 +110,6 @@ func TestUnit_AgentEnableDisable(t *testing.T) {
 	require.False(t, got.Enabled)
 	done()
 }
-
-// ─── pure helpers ───────────────────────────────────────────────────────────
 
 func TestUnit_AgentHelpers(t *testing.T) {
 	require.Equal(t, "-", derefOr(nil, "-"))

@@ -1,8 +1,5 @@
 package hitlservice_test
 
-// Regression tests for the dual-inbox wart: a caller-supplied ToolCallID is
-// the ask's durable identity, adopted rather than duplicated.
-
 import (
 	"context"
 	"testing"

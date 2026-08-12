@@ -26,10 +26,6 @@ func setupSQLiteStore(t *testing.T) (context.Context, libdb.DBManager, runtimety
 	return ctx, db, store
 }
 
-// ---------------------------------------------------------------------------
-// setProviderConfigKV
-// ---------------------------------------------------------------------------
-
 func TestUnit_setProviderConfigKV(t *testing.T) {
 	ctx, _, store := setupSQLiteStore(t)
 
@@ -71,10 +67,6 @@ func TestUnit_setProviderConfigKV_valueRoundTrip(t *testing.T) {
 	require.Equal(t, pc.APIKey, out.APIKey)
 	require.Equal(t, pc.Type, out.Type)
 }
-
-// ---------------------------------------------------------------------------
-// backendservice CRUD (replaces the old ensureBackendsFromConfig tests)
-// ---------------------------------------------------------------------------
 
 func TestUnit_backendService_create(t *testing.T) {
 	ctx, db, _ := setupSQLiteStore(t)
@@ -158,10 +150,6 @@ func TestUnit_backendService_differentType_sameURL_allowed(t *testing.T) {
 	require.NoError(t, svc.Create(ctx, b1))
 	require.NoError(t, svc.Create(ctx, b2))
 }
-
-// ---------------------------------------------------------------------------
-// getConfigKV / clikv.Prefix (new config cmd helpers)
-// ---------------------------------------------------------------------------
 
 func TestUnit_getConfigKV_emptyIfNotSet(t *testing.T) {
 	ctx, _, store := setupSQLiteStore(t)

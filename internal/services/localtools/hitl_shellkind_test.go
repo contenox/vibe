@@ -13,14 +13,6 @@ import (
 	"github.com/contenox/contenox/internal/services/localtools"
 )
 
-// H1: the structural shell reader only runs on a grammar someone positively
-// established. hitlservice cannot establish it — it would have to infer the
-// shell from GOOS and from a model-supplied "shell_kind" argument — so this
-// package, which spawns the shell, declares it. These tests exercise the
-// declaration through the real wrapper and a real policy, not a ctx shortcut.
-
-// shellKindKV is the process-global active-policy reader hitlservice.New
-// needs; the tests pin one policy file.
 type shellKindKV struct{ name string }
 
 func (k shellKindKV) GetKV(_ context.Context, _ string, out interface{}) error {
@@ -32,8 +24,6 @@ func (k shellKindKV) GetKV(_ context.Context, _ string, out interface{}) error {
 
 const shellKindSafeVerbs = "git status,git log,go build,go test,ls,cat,echo"
 
-// compoundLinePolicy is the shipped tier shape reduced to what this case
-// needs: an allow tier over safe verbs, an approve floor.
 func compoundLinePolicy(t *testing.T) hitlservice.PolicyEvaluator {
 	t.Helper()
 	dir := t.TempDir()
@@ -47,8 +37,6 @@ func compoundLinePolicy(t *testing.T) hitlservice.PolicyEvaluator {
 		shellKindKV{"hitl-policy.json"}, nil)
 }
 
-// runShellCall drives one local_shell call through the wrapper and reports
-// whether the human was asked.
 func runShellCall(t *testing.T, w *localtools.HITLWrapper, inner *mockInnerTools, args map[string]any) (asked bool) {
 	t.Helper()
 	before := len(inner.calls)
@@ -61,10 +49,7 @@ func runShellCall(t *testing.T, w *localtools.HITLWrapper, inner *mockInnerTools
 	return len(inner.calls) == before
 }
 
-// TestUnit_HITLWrapper_DeclaresPOSIXShell_CompoundLineStopsAsking is the H1
-// win as an operator experiences it: two allowlisted verbs joined by && no
-// longer raise an approval card. Platform-independent because the shell is
-// declared explicitly rather than inferred.
+// TestUnit_HITLWrapper_DeclaresPOSIXShell_CompoundLineStopsAsking pins that two allowlisted verbs joined by && or | do not raise an approval card, since the shell is declared explicitly rather than inferred.
 func TestUnit_HITLWrapper_DeclaresPOSIXShell_CompoundLineStopsAsking(t *testing.T) {
 	inner := &mockInnerTools{}
 	w := localtools.NewHITLWrapper(inner, alwaysDeny, compoundLinePolicy(t), nil)
@@ -77,9 +62,7 @@ func TestUnit_HITLWrapper_DeclaresPOSIXShell_CompoundLineStopsAsking(t *testing.
 	}
 }
 
-// TestUnit_HITLWrapper_DeclaredShellBeatsAModelSuppliedHint pins why the
-// declaration has to come from here: without it, a "shell_kind" argument in
-// the call decides whether the security analyzer runs at all.
+// TestUnit_HITLWrapper_DeclaredShellBeatsAModelSuppliedHint pins that a model-supplied "shell_kind" argument never decides whether the structural security analyzer runs.
 func TestUnit_HITLWrapper_DeclaredShellBeatsAModelSuppliedHint(t *testing.T) {
 	inner := &mockInnerTools{}
 	w := localtools.NewHITLWrapper(inner, alwaysDeny, compoundLinePolicy(t), nil)
@@ -90,10 +73,7 @@ func TestUnit_HITLWrapper_DeclaredShellBeatsAModelSuppliedHint(t *testing.T) {
 	}
 }
 
-// TestUnit_HITLWrapper_NonPOSIXShellNeverUpgrades is A1 through the real
-// wiring: mvdan parses POSIX, not PowerShell or cmd, so a host that spawns
-// either keeps the tokenizer's verdict and the compound-line win does not
-// reach it.
+// TestUnit_HITLWrapper_NonPOSIXShellNeverUpgrades pins that mvdan parses POSIX only, so a host spawning PowerShell or cmd keeps the single-command tokenizer's verdict and never gets the compound-line allowlist win.
 func TestUnit_HITLWrapper_NonPOSIXShellNeverUpgrades(t *testing.T) {
 	for name, shell := range map[string]localtools.PlatformShell{
 		"powershell": localtools.NewPowerShellShell(""),
@@ -105,7 +85,6 @@ func TestUnit_HITLWrapper_NonPOSIXShellNeverUpgrades(t *testing.T) {
 		if !runShellCall(t, w, inner, map[string]any{"command": "git status && go build"}) {
 			t.Errorf("%s: a non-POSIX line must never be read as POSIX shell", name)
 		}
-		// The single-command tokenizer verdict is unchanged there.
 		if runShellCall(t, w, inner, map[string]any{"command": "git", "args": []any{"status"}}) {
 			t.Errorf("%s: a plain argv call keeps today's allow", name)
 		}

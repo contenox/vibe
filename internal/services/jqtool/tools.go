@@ -1,11 +1,5 @@
 package jqtool
 
-// tools.go is the taskengine.ToolsRepo surface: arguments come from the chain
-// input map or from ToolsCall.Args, unknown argument names are rejected, and
-// values are coerced generously (a model routinely emits {"max": "20"})
-// while names stay strict — a silently dropped argument answers a different
-// question than the one asked.
-
 import (
 	"context"
 	"encoding/json"
@@ -20,18 +14,13 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
-// tools implements taskengine.ToolsRepo: a constructor-supplied allowed
-// directory, the toolset name policy rules address it by, and a per-call cwd
-// resolver for surfaces whose workspace is a property of the session.
 type tools struct {
 	allowedDir  string
 	name        string
 	cwdResolver func(context.Context) string
 }
 
-// NewTools creates the jq toolset scoped to allowedDir. An empty allowedDir
-// means no declared boundary: `path` arguments are refused and inline `input`
-// still works.
+// NewTools creates the jq toolset scoped to allowedDir; an empty allowedDir declares no boundary, so `path` is refused but inline `input` still works.
 func NewTools(allowedDir string) taskengine.ToolsRepo {
 	return NewToolsWith(allowedDir, ToolsProviderName, nil)
 }
@@ -80,7 +69,6 @@ func (h *tools) Exec(ctx context.Context, _ time.Time, input any, _ bool, call *
 	}
 }
 
-// query resolves the one input source, runs the filter, and returns the payload.
 func (h *tools) query(ctx context.Context, args map[string]any) (*Result, error) {
 	format, err := normalizeFormat(argString(args, "format"))
 	if err != nil {
@@ -102,10 +90,6 @@ func (h *tools) query(ctx context.Context, args map[string]any) (*Result, error)
 	})
 }
 
-// resolveInput enforces the exactly-one-source rule: a call carrying both
-// `path` and `input` is refused rather than resolved by precedence, since
-// silently picking one would answer a question about a document nobody asked
-// about and look like a success.
 func (h *tools) resolveInput(ctx context.Context, args map[string]any, format string) (*loaded, error) {
 	path := argString(args, "path")
 	raw, hasInput := args["input"]
@@ -133,16 +117,12 @@ func (h *tools) resolveInput(ctx context.Context, args map[string]any, format st
 		return h.loadPath(ctx, path, format)
 	}
 
-	// Inline. A model that passes an object or array rather than a string is
-	// being helpful; take it as the value it already is.
 	if s, ok := raw.(string); ok {
 		return loadInline(s, format)
 	}
 	return loadValue(raw)
 }
 
-// normalizeFormat validates an explicit format argument. Empty means "decide it
-// from the extension, then from the content" (see input.go's candidates).
 func normalizeFormat(format string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "":
@@ -160,12 +140,6 @@ func (h *tools) Supports(context.Context) ([]string, error) {
 	return append([]string{ToolsProviderName}, toolNames...), nil
 }
 
-// ---------------------------------------------------------------------------
-// Argument decoding (mirrors gointel/tools.go)
-// ---------------------------------------------------------------------------
-
-// callArgs assembles the argument map from the chain input or, for declarative
-// `tools` tasks that carry arguments on the call itself, from ToolsCall.Args.
 func callArgs(input any, call *taskengine.ToolsCall) (map[string]any, error) {
 	if m, ok := input.(map[string]any); ok && len(m) > 0 {
 		return m, nil
@@ -194,8 +168,6 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 	var unknown []string
 	for key := range args {
 		if _, ok := allowedSet[key]; !ok {
-			// The key is model-supplied too, so it's clamped like any other
-			// echoed argument.
 			unknown = append(unknown, echoName(key))
 		}
 	}
@@ -208,8 +180,6 @@ func rejectUnknownArgs(toolName string, args map[string]any, allowed ...string) 
 		toolName, strings.Join(unknown, ", "), strings.Join(allowed, ", "), severityRecoverable)
 }
 
-// argRaw returns a string argument without trimming. Used for `filter` only,
-// so an echoed error reports exactly the program that was sent.
 func argRaw(args map[string]any, key string) string {
 	if s, ok := args[key].(string); ok {
 		return s
@@ -263,7 +233,6 @@ func argInt(args map[string]any, key string) (int, bool) {
 		if n, err := strconv.Atoi(s); err == nil {
 			return n, true
 		}
-		// A model that writes "20.0" means twenty.
 		if f, err := strconv.ParseFloat(s, 64); err == nil {
 			return intFromFloat(f)
 		}

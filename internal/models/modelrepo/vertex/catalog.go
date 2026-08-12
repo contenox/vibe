@@ -18,13 +18,11 @@ func init() {
 	modelrepo.RegisterCatalogProvider("vertex-google", newGoogleCatalog)
 }
 
-// googleCatalogProvider lists models via the Vertex AI publisher Model Garden API
-// (same regional host as the backend URL; ADC or stored service account JSON as for inference).
 type googleCatalogProvider struct {
 	spec       modelrepo.BackendSpec
 	httpClient *http.Client
 	tracker    libtracker.ActivityTracker
-	tokenFn    func(context.Context) (string, error) // test tools; nil → BearerTokenWithCreds
+	tokenFn    func(context.Context) (string, error)
 }
 
 func newGoogleCatalog(spec modelrepo.BackendSpec, opts modelrepo.CatalogOptions) (modelrepo.CatalogProvider, error) {
@@ -70,7 +68,6 @@ func (p *googleCatalogProvider) listGoogleModelsFromVertexPublisher(ctx context.
 	return out, nil
 }
 
-// enrichGooglePublisherModel sets coarse capabilities when only the publisher model ID is known.
 func enrichGooglePublisherModel(name string) modelrepo.ObservedModel {
 	n := strings.ToLower(name)
 	om := modelrepo.ObservedModel{Name: name}
@@ -79,22 +76,17 @@ func enrichGooglePublisherModel(name string) modelrepo.ObservedModel {
 		om.CanEmbed = true
 	case strings.Contains(n, "imagen") || strings.Contains(n, "veo-") || strings.Contains(n, "tts") ||
 		strings.Contains(n, "lyria") || strings.Contains(n, "nano-banana") || strings.Contains(n, "aqa"):
-		// Media / non-chat; leave capabilities off — user can register overrides.
 	default:
 		om.CanChat = true
 		om.CanPrompt = true
 		om.CanStream = true
-		// The Vertex publisher API reports no input modalities, so vision comes
-		// from the hand-maintained Google allowlist rather than runtime detection.
+		// The Vertex publisher API reports no input modalities; vision/audio come from hand-maintained allowlists.
 		om.CanVision = modelrepo.GeminiModelSupportsVision(name)
+		om.CanAudio = modelrepo.GeminiModelSupportsAudio(name)
 	}
 	return om
 }
 
-// vertexRegionalPublisherListURL builds the REST URL for listing Model Garden publisher models.
-// The API is GET https://{service-endpoint}/v1beta1/publishers/{publisher}/models (regional host
-// such as us-central1-aiplatform.googleapis.com), not under .../v1/projects/.../locations/...
-// (that path is for inference and returns 404 for list).
 func vertexRegionalPublisherListURL(vertexLocationBaseURL, publisher string) (string, error) {
 	base := strings.TrimSpace(vertexLocationBaseURL)
 	if base == "" {
@@ -114,9 +106,6 @@ func vertexRegionalPublisherListURL(vertexLocationBaseURL, publisher string) (st
 	return fmt.Sprintf("%s://%s/v1beta1/publishers/%s/models", scheme, u.Host, publisher), nil
 }
 
-// listVertexPublisherModelNames returns model IDs from the Vertex AI publisher
-// list using the regional hostname from the backend URL (same host used for
-// generateContent).
 func listVertexPublisherModelNames(ctx context.Context, vertexLocationBaseURL, publisher string, httpClient *http.Client, tokenFn func(context.Context) (string, error)) ([]string, error) {
 	listURLPrefix, err := vertexRegionalPublisherListURL(vertexLocationBaseURL, publisher)
 	if err != nil {

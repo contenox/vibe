@@ -11,10 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// wireExtConnections wires an AgentSideConnection to a ClientSideConnection
-// over an in-memory pipe, running each side's Run loop. configureAgent/
-// configureClient (either may be nil) run inside that connection's factory,
-// before Run starts reading, matching SetExtRequestHandler's contract.
 func wireExtConnections(t *testing.T, ctx context.Context, configureAgent func(*libacp.AgentSideConnection), configureClient func(*libacp.ClientSideConnection)) (*libacp.AgentSideConnection, *libacp.ClientSideConnection, func()) {
 	t.Helper()
 
@@ -53,10 +49,6 @@ func wireExtConnections(t *testing.T, ctx context.Context, configureAgent func(*
 	}
 	return agentConn, clientConn, cleanup
 }
-
-// Wire-shape tests below drive a bare AgentSideConnection directly over the
-// pipe (no real ClientSideConnection), so JSON-RPC frames can be inspected
-// byte-for-byte.
 
 func TestUnit_AgentSide_ExtRequest_WireShape(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -166,8 +158,6 @@ func TestUnit_AgentSide_UnknownNonExtensionMethod_StillMethodNotFound(t *testing
 	assert.Equal(t, libacp.ErrMethodNotFound, in.Response.Error.Code)
 }
 
-// The same wire-shape checks mirrored for a bare ClientSideConnection.
-
 func TestUnit_ClientSide_ExtRequest_WireShape(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -274,9 +264,6 @@ func TestUnit_ClientSide_UnknownNonExtensionMethod_StillMethodNotFound(t *testin
 	require.NotNil(t, in.Response.Error, "a non-\"_\" method must never reach the ext handler, wire: %s", line)
 	assert.Equal(t, libacp.ErrMethodNotFound, in.Response.Error.Code)
 }
-
-// Loopback tests below run both connections for real, driven through the
-// exported CallExtMethod/SendExtNotification API in both directions.
 
 func TestUnit_ExtRequest_AgentToClient_Loopback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

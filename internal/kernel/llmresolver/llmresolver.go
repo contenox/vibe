@@ -8,12 +8,11 @@ type Request struct {
 	ProviderTypes []string
 	ModelNames    []string
 	ContextLength int
-	// RequiresVision restricts chat/stream resolution to vision-capable
-	// providers. Callers derive it from the presence of image attachments in
-	// the request's messages (see modelrepo.MessagesHaveImages) rather than
-	// setting it by hand.
+	// RequiresVision restricts chat/stream resolution to vision-capable providers.
 	RequiresVision bool
-	Tracker        libtracker.ActivityTracker
+	// RequiresAudio restricts chat/stream resolution to audio-capable providers.
+	RequiresAudio bool
+	Tracker       libtracker.ActivityTracker
 }
 
 type EmbedRequest struct {

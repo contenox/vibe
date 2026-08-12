@@ -1,9 +1,5 @@
 package localtools_test
 
-// Wrapper tests for the third HITL outcome (park-then-release). Timing is
-// injected by shrinking the park window (SetParkWindow), a plain context
-// deadline, so a short window exercises the production code path exactly.
-
 import (
 	"context"
 	"errors"
@@ -18,14 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// recordingApprovePolicy is a PolicyEvaluator that ALSO implements
-// hitlservice.ApprovalRecorder — the capability that switches the wrapper
-// onto the durable park path.
 type recordingApprovePolicy struct {
 	result hitlservice.EvaluationResult
 
 	mu        sync.Mutex
-	recorded  []string // approval IDs, in call order
+	recorded  []string
 	requests  []hitlservice.ApprovalRequest
 	resolved  map[string]bool
 	recordErr error
@@ -62,8 +55,6 @@ func newRecordingApprovePolicy() *recordingApprovePolicy {
 
 var _ hitlservice.ApprovalRecorder = (*recordingApprovePolicy)(nil)
 
-// blockUntilCtxDone is an ask that honors its context (like the ACP
-// permission RPC): no verdict ever arrives, the park window decides.
 func blockUntilCtxDone(ctx context.Context, _ hitlservice.ApprovalRequest) (bool, error) {
 	<-ctx.Done()
 	return false, ctx.Err()
@@ -100,13 +91,7 @@ func TestUnit_HITLWrapper_ParkThenRelease(t *testing.T) {
 	require.GreaterOrEqual(t, elapsed, 25*time.Millisecond, "the fast-path park must actually wait its window")
 }
 
-// TestUnit_HITLWrapper_RecordedAskCarriesItsSession is the regression for a
-// parked approval that could not be found again: the durable row was written
-// with an empty session_id while the checkpoint beside it carried the session,
-// so the ask could neither be listed for its session nor re-offered to a
-// client attaching to it. The run context is where the session lives, and the
-// ask must copy it as it is recorded — and a run with no session must record
-// none rather than invent one.
+// TestUnit_HITLWrapper_RecordedAskCarriesItsSession pins that a parked approval's durable row carries the run context's session ID (or none, if the run has none), never inventing one.
 func TestUnit_HITLWrapper_RecordedAskCarriesItsSession(t *testing.T) {
 	inner := &mockInnerTools{}
 	policy := newRecordingApprovePolicy()
@@ -146,7 +131,6 @@ func TestUnit_HITLWrapper_FastPathVerdictInsideWindow(t *testing.T) {
 	require.Equal(t, []string{"run_command"}, inner.calls)
 	require.Equal(t, map[string]bool{"call-1": true}, policy.resolved)
 
-	// Deny inside the window: the standard soft denial, row closed as denied.
 	inner2 := &mockInnerTools{}
 	policy2 := newRecordingApprovePolicy()
 	w2 := localtools.NewHITLWrapper(inner2, alwaysDeny, policy2, nil)
@@ -178,7 +162,6 @@ func TestUnit_HITLWrapper_InjectedVerdict(t *testing.T) {
 	require.False(t, askCalled, "the human already answered this exact invocation")
 	require.Empty(t, policy.recorded, "no second durable row for an answered call")
 
-	// Denied verdict.
 	ctx2 := context.WithValue(context.Background(), taskengine.ContextKeyToolCallID, "call-8")
 	ctx2 = taskengine.WithApprovalVerdicts(ctx2, map[string]bool{"call-8": false})
 	res2, _, err := w.Exec(ctx2, time.Now(), map[string]any{}, false,
@@ -188,8 +171,7 @@ func TestUnit_HITLWrapper_InjectedVerdict(t *testing.T) {
 	require.False(t, askCalled)
 	require.Len(t, inner.calls, 1, "only the approved call reached the inner repo")
 
-	// A verdict for a DIFFERENT call must not leak onto this one: the gate
-	// asks normally (and, blocking ask answering false, denies).
+	// A verdict for a DIFFERENT call must not leak onto this one.
 	ctx3 := context.WithValue(context.Background(), taskengine.ContextKeyToolCallID, "call-other")
 	ctx3 = taskengine.WithApprovalVerdicts(ctx3, map[string]bool{"call-7": true})
 	res3, _, err := w.Exec(ctx3, time.Now(), map[string]any{}, false,

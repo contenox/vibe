@@ -5,21 +5,6 @@ import (
 	"strings"
 )
 
-// resolveToolsNames returns the effective set of tools names for a task based on its allowlist.
-//
-// Semantics:
-//   - nil / []        → empty set (field absent, null, or explicitly empty; no registry tools)
-//   - ["*"]          → all names from provider.Supports()
-//   - ["a","b"]      → intersection of the named entries with Supports()
-//   - ["*","!name"]  → all from Supports() minus the excluded names
-//
-// Entries starting with "!" are exclusions and may only be combined with "*".
-// Unknown exact names (not returned by Supports) are silently ignored.
-//
-// If a runtime allowlist is attached to ctx via WithRuntimeToolsAllowlist, the
-// task-resolved set is intersected with the runtime-resolved set (stricter
-// wins). Exclusions on either side are honored. Absent runtime allowlist keeps
-// the task allowlist unchanged (fully backward compatible).
 func resolveToolsNames(ctx context.Context, allowlist []string, provider ToolsProvider) ([]string, error) {
 	all, err := provider.Supports(ctx)
 	if err != nil {
@@ -32,14 +17,12 @@ func resolveToolsNames(ctx context.Context, allowlist []string, provider ToolsPr
 	if !runtimeAttached {
 		return taskSet, nil
 	}
-	// A nil runtime allowlist means "no restriction from the runtime side";
-	// see context.go: absent key == nil list == no restriction.
+	// nil runtime allowlist means no restriction; an empty slice denies all — see WithRuntimeToolsAllowlist.
 	if runtime == nil {
 		return taskSet, nil
 	}
 	runtimeSet := applyAllowlist(runtime, all)
 
-	// Intersect: a tools is available iff both sides permit it.
 	permitted := make(map[string]struct{}, len(runtimeSet))
 	for _, n := range runtimeSet {
 		permitted[n] = struct{}{}
@@ -53,8 +36,6 @@ func resolveToolsNames(ctx context.Context, allowlist []string, provider ToolsPr
 	return result, nil
 }
 
-// applyAllowlist resolves a single allowlist against the full set of supported
-// tools names per the grammar documented on resolveToolsNames.
 func applyAllowlist(allowlist []string, all []string) []string {
 	if len(allowlist) == 0 {
 		return []string{}

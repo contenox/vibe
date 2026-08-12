@@ -1,14 +1,7 @@
 package fleetservice
 
-// counters.go is the fleet's telemetry ledger: process-lifetime tallies of
-// units admitted, units refused at the width cap, and result reports the
-// conclusion gate downgraded. Package-level atomics (nil-safe, reachable
-// without a service handle), not durable, and reset on restart.
-
 import "sync/atomic"
 
-// fleetCounters is the ledger itself. Zero value ready; atomics only, so every
-// bump is safe from any goroutine with no lock.
 var fleetCounters struct {
 	dispatches             atomic.Uint64
 	capRefusals            atomic.Uint64
@@ -29,8 +22,7 @@ type CountersSnapshot struct {
 	VerificationDowngrades uint64 `json:"verificationDowngrades"`
 }
 
-// Counters returns the current fleet counter snapshot. Requires no service
-// handle and never fails.
+// Counters returns the current fleet counter snapshot; requires no service handle and never fails.
 func Counters() CountersSnapshot {
 	return CountersSnapshot{
 		Dispatches:             fleetCounters.dispatches.Load(),
@@ -39,9 +31,7 @@ func Counters() CountersSnapshot {
 	}
 }
 
-// RecordVerificationDowngrade bumps the verification-downgrade tally. Exported
-// because the gate that observes downgrades lives in missiontools, which
-// fleetservice imports, so missiontools cannot import this package back.
+// RecordVerificationDowngrade bumps the verification-downgrade tally.
 func RecordVerificationDowngrade() { fleetCounters.verificationDowngrades.Add(1) }
 
 func recordDispatch() { fleetCounters.dispatches.Add(1) }

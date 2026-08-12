@@ -10,22 +10,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_EdgeTraversedAtLeast_BoundsCyclicWorkflow verifies that an
-// edge_traversed_at_least branch placed ahead of a normal loop branch
-// intercepts the loop after exactly N traversals of the named edge.
-//
-// Chain shape: chat <-> run_tools loop, with a budget branch out to
-// summariser when chat->run_tools has fired the threshold many times.
+// TestUnit_EdgeTraversedAtLeast_BoundsCyclicWorkflow verifies an edge_traversed_at_least branch ahead of a normal loop branch intercepts after exactly N traversals of the named edge.
 func TestUnit_EdgeTraversedAtLeast_BoundsCyclicWorkflow(t *testing.T) {
 	const threshold = 3
 
 	mockExec := &taskengine.MockTaskExecutor{
 		MockTransitionValueSequence: []string{
-			"tool_call", "", // round 1: chat -> run_tools, run_tools -> chat
-			"tool_call", "", // round 2
-			"tool_call", "", // round 3 (chat->run_tools count reaches 3)
-			"tool_call", // round 4: chat re-enters; budget branch should win regardless of this value
-			"",          // summariser default-branches to end
+			"tool_call", "",
+			"tool_call", "",
+			"tool_call", "",
+			"tool_call",
+			"",
 		},
 		MockOutput: "stub",
 	}
@@ -75,21 +70,17 @@ func TestUnit_EdgeTraversedAtLeast_BoundsCyclicWorkflow(t *testing.T) {
 	_, _, _, err = env.ExecEnv(libtracker.WithNewRequestID(context.Background()), chain, "go", taskengine.DataTypeString)
 	require.NoError(t, err)
 
-	// chat: enters at rounds 1, 2, 3, 4 (4×). run_tools: 3×. summariser: 1×.
-	// Total task invocations = 8.
 	require.Equal(t, 8, mockExec.CallCount(), "expected 8 task invocations: 4×chat + 3×run_tools + 1×summariser")
 	_ = threshold
 }
 
-// TestUnit_EdgeTraversedAtLeast_DoesNotFireBelowThreshold verifies that
-// a budget branch with threshold N does NOT intercept when the count is N-1.
-// The chain should terminate naturally via the default branch.
+// TestUnit_EdgeTraversedAtLeast_DoesNotFireBelowThreshold verifies a budget branch with threshold N does not intercept when the count is N-1.
 func TestUnit_EdgeTraversedAtLeast_DoesNotFireBelowThreshold(t *testing.T) {
 	mockExec := &taskengine.MockTaskExecutor{
 		MockTransitionValueSequence: []string{
-			"tool_call", "", // round 1
-			"tool_call", "", // round 2
-			"done", // round 3: chat returns non-tool-call, default branch -> end
+			"tool_call", "",
+			"tool_call", "",
+			"done",
 		},
 		MockOutput: "stub",
 	}
@@ -108,7 +99,7 @@ func TestUnit_EdgeTraversedAtLeast_DoesNotFireBelowThreshold(t *testing.T) {
 						{
 							Operator: taskengine.OpEdgeTraversedAtLeast,
 							Edge:     "chat->run_tools",
-							When:     "10", // never reached
+							When:     "10",
 							Goto:     "summariser",
 						},
 						{Operator: taskengine.OpEquals, When: "tool_call", Goto: "run_tools"},
@@ -139,12 +130,10 @@ func TestUnit_EdgeTraversedAtLeast_DoesNotFireBelowThreshold(t *testing.T) {
 
 	_, _, _, err = env.ExecEnv(libtracker.WithNewRequestID(context.Background()), chain, "go", taskengine.DataTypeString)
 	require.NoError(t, err)
-	// chat enters at rounds 1, 2, 3 (3×); run_tools at 1, 2 (2×); summariser never. Total 5.
 	require.Equal(t, 5, mockExec.CallCount(), "expected 5 invocations: chain ends via default branch before budget reached")
 }
 
-// TestUnit_EdgeTraversedAtLeast_RejectedByValidator verifies that malformed
-// edge fields are caught by validateChain before execution.
+// TestUnit_EdgeTraversedAtLeast_RejectedByValidator verifies malformed edge fields are caught by validateChain before execution.
 func TestUnit_EdgeTraversedAtLeast_RejectedByValidator(t *testing.T) {
 	cases := []struct {
 		name string

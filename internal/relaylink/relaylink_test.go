@@ -19,12 +19,8 @@ import (
 	"github.com/contenox/contenox/librelay"
 )
 
-// testTimeout keeps a failing assertion a failure rather than a hung `go test`.
 const testTimeout = 10 * time.Second
 
-// fastBackoff makes the retry loop observable inside a test without changing
-// its shape: the same exponential-with-jitter policy, three orders of magnitude
-// down.
 var fastBackoff = relaylink.Backoff{
 	Initial:    2 * time.Millisecond,
 	Max:        20 * time.Millisecond,
@@ -32,8 +28,6 @@ var fastBackoff = relaylink.Backoff{
 	ResetAfter: 5 * time.Millisecond,
 }
 
-// fastHeartbeat probes often enough that a silent peer is detected within a
-// test's patience.
 var fastHeartbeat = relaylink.Heartbeat{
 	Interval: 20 * time.Millisecond,
 	Timeout:  50 * time.Millisecond,
@@ -50,9 +44,6 @@ func baseConfig() relaylink.Config {
 	}
 }
 
-// waitFor polls cond until it holds or the deadline passes. Polling rather than
-// signalling is deliberate: the connector exposes no "wait until connected"
-// call, because nothing in the runtime is allowed to have one.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(testTimeout)
@@ -65,8 +56,6 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// relayDialer wires a connector to a relaytest double and records every link it
-// hands out.
 type relayDialer struct {
 	relay *relaytest.Relay
 
@@ -91,9 +80,8 @@ func (d *relayDialer) link(i int) *relaytest.Link {
 	return d.links[i]
 }
 
-// TestUnit_HandshakeNegotiatesAndHoldsTheConnection is the happy path: hello is
-// sent with this build's version, welcome is accepted, and the relay considers
-// the instance bound.
+// TestUnit_HandshakeNegotiatesAndHoldsTheConnection checks hello is sent with
+// this build's version and an accepted welcome binds the instance.
 func TestUnit_HandshakeNegotiatesAndHoldsTheConnection(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -138,9 +126,8 @@ func TestUnit_HandshakeNegotiatesAndHoldsTheConnection(t *testing.T) {
 	}
 }
 
-// TestUnit_HeartbeatProbesArePairedWithAcks proves the liveness probe is on the
-// wire and correlated, which is what distinguishes a live peer from one a round
-// behind.
+// TestUnit_HeartbeatProbesArePairedWithAcks checks heartbeat probes are on
+// the wire and correlated by ID.
 func TestUnit_HeartbeatProbesArePairedWithAcks(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -183,16 +170,13 @@ func TestUnit_HeartbeatProbesArePairedWithAcks(t *testing.T) {
 	if len(seen) < 2 {
 		t.Fatalf("saw %d heartbeats, want at least 2", len(seen))
 	}
-	// The relay double answered every probe; the connection must still be
-	// the one it started on.
 	if got := c.Status().Connections; got != 1 {
 		t.Fatalf("Connections = %d after healthy heartbeats, want 1", got)
 	}
 }
 
-// TestUnit_ReconnectsAfterTheRelayIsKilled covers a relay restart: the link is
-// slammed shut with no close frame and the connector comes back on its own,
-// without anybody being told.
+// TestUnit_ReconnectsAfterTheRelayIsKilled checks the connector redials on
+// its own after the link is dropped with no close frame.
 func TestUnit_ReconnectsAfterTheRelayIsKilled(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -223,9 +207,6 @@ func TestUnit_ReconnectsAfterTheRelayIsKilled(t *testing.T) {
 	}
 }
 
-// rawRelay is a hand-driven peer for the cases relaytest deliberately cannot
-// produce: raw bytes on the wire, and a peer that completes a handshake and
-// then goes silent without hanging up.
 type rawRelay struct {
 	mu    sync.Mutex
 	conns []net.Conn
@@ -259,7 +240,6 @@ func (p *rawRelay) closeAll() {
 	}
 }
 
-// accept waits for the next dial and returns the peer side.
 func (p *rawRelay) accept(t *testing.T) net.Conn {
 	t.Helper()
 	select {
@@ -271,8 +251,6 @@ func (p *rawRelay) accept(t *testing.T) net.Conn {
 	}
 }
 
-// welcome reads the connector's hello and answers with version. It returns the
-// reader and writer so the caller can keep driving the same connection.
 func welcome(t *testing.T, conn net.Conn, version int) (*librelay.Reader, *librelay.Writer) {
 	t.Helper()
 	rd, w := librelay.NewReader(conn), librelay.NewWriter(conn)
@@ -296,10 +274,8 @@ func welcome(t *testing.T, conn net.Conn, version int) (*librelay.Reader, *libre
 	return rd, w
 }
 
-// TestUnit_SilentRelayIsDetectedByHeartbeat is the failure a disconnect test
-// misses: the peer holds the TCP connection open and answers nothing. Only the
-// heartbeat can notice, and the connector must redial rather than sit on a dead
-// link that looks healthy.
+// TestUnit_SilentRelayIsDetectedByHeartbeat checks a peer that holds the
+// connection open but answers nothing is redialed via heartbeat timeout.
 func TestUnit_SilentRelayIsDetectedByHeartbeat(t *testing.T) {
 	t.Parallel()
 	p := newRawRelay()
@@ -319,9 +295,8 @@ func TestUnit_SilentRelayIsDetectedByHeartbeat(t *testing.T) {
 	welcome(t, conn, librelay.ProtocolVersion)
 	waitFor(t, "connected", func() bool { return c.Status().Connections == 1 })
 
-	// From here the peer never reads and never writes. Draining is
-	// required only so the connector's writes are not what blocks; the
-	// point is that nothing is ever answered.
+	// Drained so the connector's own writes never block; the peer answers
+	// nothing regardless.
 	go func() { _, _ = io.Copy(io.Discard, conn) }()
 
 	waitFor(t, "the silent peer to be redialed", func() bool { return p.count() >= 2 })
@@ -329,15 +304,13 @@ func TestUnit_SilentRelayIsDetectedByHeartbeat(t *testing.T) {
 		t.Fatalf("LastError = %v, want a heartbeat timeout", err)
 	}
 
-	// And it keeps trying: a silent relay is not fatal.
 	conn2 := p.accept(t)
 	welcome(t, conn2, librelay.ProtocolVersion)
 	waitFor(t, "reconnection", func() bool { return c.Status().Connections >= 2 })
 }
 
-// TestUnit_MalformedFrameDoesNotDropTheConnection holds the codec's error
-// split: one garbled line is per-frame, and the link keeps carrying everything
-// else. Dropping the connection here would take down every session riding it.
+// TestUnit_MalformedFrameDoesNotDropTheConnection checks a garbled line is
+// dropped per-frame without ending the connection.
 func TestUnit_MalformedFrameDoesNotDropTheConnection(t *testing.T) {
 	t.Parallel()
 	p := newRawRelay()
@@ -347,8 +320,6 @@ func TestUnit_MalformedFrameDoesNotDropTheConnection(t *testing.T) {
 	cfg := baseConfig()
 	cfg.Dial = p.dial
 	cfg.Handler = func(_ context.Context, f librelay.Frame) { routed <- f }
-	// Liveness is not what is under test, and a probe arriving mid-assertion
-	// would be a second reason for the connection to end.
 	cfg.Heartbeat = relaylink.Heartbeat{Interval: time.Minute, Timeout: time.Minute}
 	c, err := relaylink.New(cfg)
 	if err != nil {
@@ -363,9 +334,8 @@ func TestUnit_MalformedFrameDoesNotDropTheConnection(t *testing.T) {
 	_, w := welcome(t, conn, librelay.ProtocolVersion)
 	waitFor(t, "connected", func() bool { return c.Status().Connections == 1 })
 
-	// Three kinds of bad frame, each of which the reader survives: broken
-	// JSON, a valid JSON object that is not an addressable frame, and a
-	// frame whose session names no instance.
+	// Three kinds the reader must survive: broken JSON, a non-addressable
+	// object, and a frame whose session names no instance.
 	for _, bad := range []string{
 		`{"type":`,
 		`{"type":""}`,
@@ -403,19 +373,14 @@ func TestUnit_MalformedFrameDoesNotDropTheConnection(t *testing.T) {
 	}
 }
 
-// TestUnit_OversizedFrameEndsTheConnection is the other half of the split.
-// [librelay.ErrFrameTooLarge] leaves the offending line unconsumed, so there is
-// no safe place to resume: the connector must hang up and redial rather than
-// resynchronize on a newline the peer chose.
+// TestUnit_OversizedFrameEndsTheConnection checks an oversized frame ends and
+// redials the connection rather than resynchronizing.
 func TestUnit_OversizedFrameEndsTheConnection(t *testing.T) {
 	t.Parallel()
 	p := newRawRelay()
 	defer p.closeAll()
 	cfg := baseConfig()
 	cfg.Dial = p.dial
-	// The heartbeat is disarmed so that ending the connection can only be
-	// the oversized frame's doing, not a probe that went unanswered while
-	// the peer was busy writing it.
 	cfg.Heartbeat = relaylink.Heartbeat{Interval: time.Minute, Timeout: time.Minute}
 	c, err := relaylink.New(cfg)
 	if err != nil {
@@ -451,9 +416,8 @@ func TestUnit_OversizedFrameEndsTheConnection(t *testing.T) {
 	}
 }
 
-// TestUnit_UnsupportedVersionIsRefusedAndFatal proves the connector will not
-// hold a connection on a version it cannot speak. A link that looks healthy and
-// is not is worse than no link.
+// TestUnit_UnsupportedVersionIsRefusedAndFatal checks the connector refuses
+// fatally on a welcome naming an unsupported version.
 func TestUnit_UnsupportedVersionIsRefusedAndFatal(t *testing.T) {
 	t.Parallel()
 	p := newRawRelay()
@@ -479,17 +443,14 @@ func TestUnit_UnsupportedVersionIsRefusedAndFatal(t *testing.T) {
 	if got := c.Status().Connections; got != 0 {
 		t.Fatalf("Connections = %d: a refused negotiation is not a connection", got)
 	}
-	// Fatal means the loop stopped; it must not keep hammering the relay.
 	time.Sleep(50 * time.Millisecond)
 	if got := p.count(); got != 1 {
 		t.Fatalf("dials = %d after a fatal refusal, want 1", got)
 	}
 }
 
-// TestUnit_UnknownControlTypeIsAnsweredWithUnsupported checks the connector
-// applies librelay's compatibility rule rather than inventing its own: an
-// unknown control request gets exactly one error reply, and an unknown control
-// notification gets none.
+// TestUnit_UnknownControlTypeIsAnsweredWithUnsupported checks an unknown
+// control request gets exactly one error reply and a notification gets none.
 func TestUnit_UnknownControlTypeIsAnsweredWithUnsupported(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -509,9 +470,8 @@ func TestUnit_UnknownControlTypeIsAnsweredWithUnsupported(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
 	defer cancel()
-	// A notification first, then a request: if the connector wrongly
-	// answered the notification, its reply would arrive before the one
-	// owed to the request and the assertion below would catch it.
+	// Notification first, then request: a wrongly-answered notification
+	// would arrive before the reply owed to the request.
 	if err := r.Route(ctx, librelay.Frame{Type: "relay.from-the-future", Instance: "inst-a"}); err != nil {
 		t.Fatalf("Route notification: %v", err)
 	}
@@ -542,9 +502,8 @@ func TestUnit_UnknownControlTypeIsAnsweredWithUnsupported(t *testing.T) {
 	t.Fatal("no unsupported-type reply")
 }
 
-// TestUnit_SendReachesTheRelayAndFailsFastWithout is the caller-facing
-// contract: Send works when a link is held and refuses immediately when it is
-// not.
+// TestUnit_SendReachesTheRelayAndFailsFastWithout checks Send works when a
+// link is held and refuses immediately when it is not.
 func TestUnit_SendReachesTheRelayAndFailsFastWithout(t *testing.T) {
 	t.Parallel()
 	r := relaytest.New()
@@ -558,8 +517,6 @@ func TestUnit_SendReachesTheRelayAndFailsFastWithout(t *testing.T) {
 	}
 	defer c.Close()
 
-	// Before Start there is no link, and asking is not an error worth
-	// waiting for.
 	if err := c.Send(librelay.Frame{Type: librelay.TypeACPMessage, Instance: "inst-a"}); !errors.Is(err, relaylink.ErrNotConnected) {
 		t.Fatalf("Send before Start = %v, want ErrNotConnected", err)
 	}
@@ -596,9 +553,8 @@ func TestUnit_SendReachesTheRelayAndFailsFastWithout(t *testing.T) {
 	t.Fatal("the sent frame never reached the relay")
 }
 
-// TestUnit_LifecycleIsCleanAndLeaksNothing is the -race companion to the leak
-// requirement: everything the connector started is gone once Close returns, and
-// Close is idempotent.
+// TestUnit_LifecycleIsCleanAndLeaksNothing checks every goroutine the
+// connector started is gone once Close returns, and Close is idempotent.
 func TestUnit_LifecycleIsCleanAndLeaksNothing(t *testing.T) {
 	r := relaytest.New()
 	d := &relayDialer{relay: r}
@@ -627,8 +583,7 @@ func TestUnit_LifecycleIsCleanAndLeaksNothing(t *testing.T) {
 	}
 	r.Close()
 
-	// Goroutines exit asynchronously; the assertion is that the count
-	// settles, not that it is instantaneous.
+	// Goroutines exit asynchronously; polled until the count settles.
 	deadline := time.Now().Add(testTimeout)
 	for time.Now().Before(deadline) {
 		if runtime.NumGoroutine() <= before+2 {
@@ -639,8 +594,8 @@ func TestUnit_LifecycleIsCleanAndLeaksNothing(t *testing.T) {
 	t.Fatalf("goroutines: %d before, %d after five connect/close cycles", before, runtime.NumGoroutine())
 }
 
-// TestUnit_CloseWithoutStartIsSafe covers the connector a runtime constructs
-// and never starts, which is what a configuration with no relay looks like.
+// TestUnit_CloseWithoutStartIsSafe checks Close is safe on a connector that
+// was never started.
 func TestUnit_CloseWithoutStartIsSafe(t *testing.T) {
 	t.Parallel()
 	c, err := relaylink.New(baseConfig())
@@ -655,9 +610,8 @@ func TestUnit_CloseWithoutStartIsSafe(t *testing.T) {
 	}
 }
 
-// TestUnit_NewRequiresAnEndpointAndInstance keeps configuration failures at
-// construction, where a caller can see them, rather than in a background loop
-// where they would be invisible.
+// TestUnit_NewRequiresAnEndpointAndInstance checks New fails at construction
+// when Endpoint or Instance is missing.
 func TestUnit_NewRequiresAnEndpointAndInstance(t *testing.T) {
 	t.Parallel()
 	if _, err := relaylink.New(relaylink.Config{Instance: "i"}); err == nil {
@@ -678,11 +632,9 @@ func TestUnit_NewRequiresAnEndpointAndInstance(t *testing.T) {
 	}
 }
 
-// TestUnit_RuntimeIsUnaffectedWhenTheRelayIsDown is the property the whole
-// package is judged on. With a relay that never answers a dial, a caller that
-// knows nothing about relays must be unaffected: constructing, starting,
-// sending and querying all return promptly, work in flight completes on time,
-// and the connector keeps retrying in the background.
+// TestUnit_RuntimeIsUnaffectedWhenTheRelayIsDown checks that with a relay
+// that never answers a dial, calls return promptly and work in flight
+// completes on time while the connector keeps retrying in the background.
 func TestUnit_RuntimeIsUnaffectedWhenTheRelayIsDown(t *testing.T) {
 	t.Parallel()
 	var dials atomic.Int64
@@ -697,15 +649,11 @@ func TestUnit_RuntimeIsUnaffectedWhenTheRelayIsDown(t *testing.T) {
 	}
 	defer c.Close()
 
-	// A "mission": work with a deadline of its own that must not slip
-	// because a relay is missing.
 	mission := make(chan int, 1)
 	go func() {
 		n := 0
 		for range 1000 {
 			n++
-			// The mission touches the connector the way real code
-			// would, and must never be parked by it.
 			_ = c.Send(librelay.Frame{Type: librelay.TypeACPMessage, Instance: "inst-a"})
 			_ = c.Status()
 		}
@@ -729,14 +677,9 @@ func TestUnit_RuntimeIsUnaffectedWhenTheRelayIsDown(t *testing.T) {
 		t.Fatal("a mission was blocked by an unreachable relay")
 	}
 
-	// Meanwhile the connector is quietly still trying, and says so only if
-	// asked.
-	//
-	// Gate on the counter this then asserts, not on the dial count. A dial is
-	// counted when it is ENTERED and an attempt is recorded when it FAILS, so
-	// waiting for dials >= 3 admits a state where the third dial is still in
-	// flight and Attempts is 2 — a flake that needs a loaded machine to show
-	// itself, which means CI and not here.
+	// Gate on Attempts, not dial count: a dial is counted on entry but an
+	// attempt only on failure, so gating on dials risks the third still
+	// being in flight.
 	waitFor(t, "retries in the background", func() bool { return c.Status().Attempts >= 3 })
 	st := c.Status()
 	if st.State != relaylink.StateConnecting {
@@ -750,10 +693,8 @@ func TestUnit_RuntimeIsUnaffectedWhenTheRelayIsDown(t *testing.T) {
 	}
 }
 
-// TestUnit_HangingDialDoesNotBlockTheRuntime covers the dial that neither fails
-// nor succeeds — a relay whose host accepts packets and answers nothing. Close
-// must still return promptly, since a shutdown that waits on a hung relay is
-// the same liability as a call path that does.
+// TestUnit_HangingDialDoesNotBlockTheRuntime checks Close returns promptly
+// even while a dial is hanging forever.
 func TestUnit_HangingDialDoesNotBlockTheRuntime(t *testing.T) {
 	t.Parallel()
 	entered := make(chan struct{}, 1)
@@ -790,9 +731,9 @@ func TestUnit_HangingDialDoesNotBlockTheRuntime(t *testing.T) {
 	}
 }
 
-// TestUnit_HangingHandshakeIsBoundedAndRetried covers a peer that completes the
-// TCP connection and never answers hello. The handshake deadline is what turns
-// that from a permanent silent failure into another retry.
+// TestUnit_HangingHandshakeIsBoundedAndRetried checks a peer that never
+// answers hello is abandoned and redialed once the handshake deadline
+// expires.
 func TestUnit_HangingHandshakeIsBoundedAndRetried(t *testing.T) {
 	t.Parallel()
 	p := newRawRelay()
@@ -819,15 +760,13 @@ func TestUnit_HangingHandshakeIsBoundedAndRetried(t *testing.T) {
 	if c.Status().State == relaylink.StateFatal {
 		t.Fatal("a stalled handshake must not be fatal")
 	}
-	// And a relay that eventually starts answering is picked up.
 	conn2 := p.accept(t)
 	welcome(t, conn2, librelay.ProtocolVersion)
 	waitFor(t, "connection once the relay answers", func() bool { return c.Status().Connections == 1 })
 }
 
-// TestUnit_UnauthorizedIsFatal proves a refusal the connector cannot repair
-// stops the retry loop instead of hammering the relay with a credential it has
-// already been told is no good.
+// TestUnit_UnauthorizedIsFatal checks an unauthorized refusal stops the
+// retry loop instead of hammering the relay.
 func TestUnit_UnauthorizedIsFatal(t *testing.T) {
 	t.Parallel()
 	p := newRawRelay()

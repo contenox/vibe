@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/libacp"
 )
 
@@ -150,8 +151,16 @@ func toolCallPendingNotification(sid libacp.SessionID, ev taskengine.TaskEvent, 
 }
 
 func toolCallUpdateNotification(sid libacp.SessionID, ev taskengine.TaskEvent, toolCallID string) libacp.SessionNotification {
+	// INVARIANT: a call whose tool never ran is never "completed"; ACP's
+	// closed status set maps a policy denial to "failed".
 	status := libacp.ToolCallStatusCompleted
-	if ev.Error != "" {
+	errText := ev.Error
+	if errText == "" {
+		if reason, denied := policyDenialReason(ev.Content); denied {
+			errText = reason
+		}
+	}
+	if errText != "" {
 		status = libacp.ToolCallStatusFailed
 	}
 
@@ -178,11 +187,19 @@ func toolCallUpdateNotification(sid libacp.SessionID, ev taskengine.TaskEvent, t
 		update.Locations = locs
 	}
 
-	if ev.Error != "" {
-		update.Meta = json.RawMessage(`{"error":` + jsonString(ev.Error) + `}`)
+	if errText != "" {
+		update.Meta = json.RawMessage(`{"error":` + jsonString(errText) + `}`)
 	}
 
 	return libacp.SessionNotification{SessionID: sid, Update: update}
+}
+
+func policyDenialReason(content string) (string, bool) {
+	switch content {
+	case localtools.DenyMessage, localtools.DenyTimeoutMessage:
+		return content, true
+	}
+	return "", false
 }
 
 func toolCallIDFromCtx(ctx context.Context) string {

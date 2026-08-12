@@ -15,17 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fsRefusalText renders a soft REFUSAL the way the engine renders it for the
-// model: a DataTypeString result goes through fmt.Sprintf("%v", …)
-// (taskengine/taskexec.go, serializeToolResultContent), so a typed refusal whose
-// String() is the denial sentence reaches the model as exactly the bytes it
-// always did.
-//
-// The type exists so a PROGRAM cannot read the apology as a receipt: a
-// FsRefusalResult declares itself unusable, and the goja bridge throws instead of
-// handing a script a sentence about a write that never happened. This helper
-// asserts both halves — the text is unchanged, and the value is the typed
-// refusal rather than a bare string.
 func fsRefusalText(t *testing.T, res any) string {
 	t.Helper()
 	refusal, ok := res.(localtools.FsRefusalResult)
@@ -238,9 +227,6 @@ func TestUnit_ReadBeforeWrite_DeniedWhenFileChangedAfterRead(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Simulate the filesystem changing after the agent read the file.
-	// A guard that only stores "this path was read" will incorrectly allow
-	// the next write and overwrite this external change.
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "a.txt"),
 		[]byte("external change\n"),
@@ -282,8 +268,6 @@ func TestUnit_ReadBeforeWrite_RangeReadDoesNotAuthorizeFullFileWrite(t *testing.
 	})
 	require.NoError(t, err)
 
-	// A range read should not authorize replacing the whole file.
-	// Otherwise the agent can inspect two lines and then destroy unseen content.
 	res, err := execTool(t, ctx, tools, "write_file", map[string]any{
 		"path":    "a.txt",
 		"content": "collapsed rewrite\n",
@@ -303,7 +287,6 @@ func TestUnit_ReadBeforeWrite_InvalidationAfterMutation(t *testing.T) {
 	ctx, tools, dir := setupFSReadGuard(t)
 	writeFile(t, dir, "a.txt", "line1\nline2\n")
 
-	// 1) Read, then write – allowed
 	_, err := execTool(t, ctx, tools, "read_file", map[string]any{"path": "a.txt"})
 	require.NoError(t, err)
 
@@ -316,7 +299,6 @@ func TestUnit_ReadBeforeWrite_InvalidationAfterMutation(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, fw.Written)
 
-	// 2) Immediately try another write without a new read – should be denied
 	res, err = execTool(t, ctx, tools, "write_file", map[string]any{
 		"path":    "a.txt",
 		"content": "changed again\n",
@@ -325,7 +307,6 @@ func TestUnit_ReadBeforeWrite_InvalidationAfterMutation(t *testing.T) {
 	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "without reading it first")
 
-	// File should still contain the first mutation, not the second
 	got, err := os.ReadFile(filepath.Join(dir, "a.txt"))
 	require.NoError(t, err)
 	require.Equal(t, "changed\n", string(got))
@@ -335,7 +316,6 @@ func TestUnit_ReadBeforeWrite_SedInvalidation(t *testing.T) {
 	ctx, tools, dir := setupFSReadGuard(t)
 	writeFile(t, dir, "a.txt", "alpha bravo\n")
 
-	// read then sed – allowed
 	_, err := execTool(t, ctx, tools, "read_file", map[string]any{"path": "a.txt"})
 	require.NoError(t, err)
 
@@ -350,7 +330,6 @@ func TestUnit_ReadBeforeWrite_SedInvalidation(t *testing.T) {
 	require.True(t, sed.Written)
 	require.Equal(t, 1, sed.Replacements)
 
-	// Second sed without re-read – denied
 	res, err = execTool(t, ctx, tools, "sed", map[string]any{
 		"path":        "a.txt",
 		"pattern":     "bravo",
@@ -360,23 +339,12 @@ func TestUnit_ReadBeforeWrite_SedInvalidation(t *testing.T) {
 	msg := fsRefusalText(t, res)
 	require.Contains(t, msg, "without reading it first")
 
-	// Content unchanged from first sed
 	got, err := os.ReadFile(filepath.Join(dir, "a.txt"))
 	require.NoError(t, err)
 	require.Equal(t, "ALPHA bravo\n", string(got))
 }
 
-// TestUnit_ReadFile_UnchangedStubIsAStandInForAReaderOnly is the regression test
-// for the second live failure (2026-07-27): a goja script called read_file, got
-// the session-dedup stub, and treated "File unchanged since last read — the
-// content from your earlier read_file call in this conversation is still
-// current." as the file's content.
-//
-// The sentence is TRUE of a model, whose earlier read is still in its context.
-// It is false of every caller that never made that read. So the stub is now a
-// typed value: it renders to the model as the identical sentence (the dedup is
-// untouched, and those tokens still never leave), and it hands a PROGRAM the
-// content it was standing in for.
+// TestUnit_ReadFile_UnchangedStubIsAStandInForAReaderOnly asserts the session-dedup stub renders the same sentence to a model but hands a program the file's actual content, never a bare sentence indistinguishable from content.
 func TestUnit_ReadFile_UnchangedStubIsAStandInForAReaderOnly(t *testing.T) {
 	ctx, tools, dir := setupFSReadGuard(t)
 	writeFile(t, dir, "a.txt", "line one\nline two\n")
@@ -391,13 +359,11 @@ func TestUnit_ReadFile_UnchangedStubIsAStandInForAReaderOnly(t *testing.T) {
 	stub, ok := second.(localtools.FsUnchangedResult)
 	require.Truef(t, ok, "a repeat read answered %T; a bare sentence is indistinguishable from content to a program", second)
 
-	// The MODEL still sees exactly the sentence it always did — the dedup is the
-	// point, and the engine renders a DataTypeString result with %v.
+	// The model sees exactly this sentence: the engine renders a DataTypeString result with %v.
 	require.Equal(t,
 		"File unchanged since last read — the content from your earlier read_file call in this conversation is still current. Pass force=true if you need the content re-sent.",
 		stub.String(), "the model-facing dedup message changed")
 
-	// A PROGRAM gets the file.
 	text, available := stub.ProgramText()
 	require.True(t, available, "the stub must be redeemable for the content it stands in for")
 	require.Equal(t, "line one\nline two\n", text,
@@ -407,8 +373,6 @@ func TestUnit_ReadFile_UnchangedStubIsAStandInForAReaderOnly(t *testing.T) {
 	require.Equal(t, len("line one\nline two\n"), stub.Bytes)
 	require.NotEmpty(t, stub.SHA256)
 
-	// force still works, unchanged, for the caller that wants the bytes resent
-	// into the model's context.
 	forced, err := execTool(t, ctx, tools, "read_file", map[string]any{"path": "a.txt", "force": true})
 	require.NoError(t, err)
 	require.Equal(t, "line one\nline two\n", forced)

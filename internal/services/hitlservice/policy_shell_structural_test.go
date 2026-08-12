@@ -10,13 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests cover the shell operators' structural reading
-// (mvdan.cc/sh/v3/syntax) layered on top of the tokenizer they already had.
-// Every cleared node kind needs a would-have-widened test proving the floor
-// still catches its uncleared siblings.
-
-// structuralTiers writes the tier shape the shipped envelopes use — deny,
-// ask-always, allow-prefixes, approve floor — so a verdict here matches production.
 func structuralTiers(t *testing.T, blacklist, askAlways, prefixes string) hitlservice.PolicyEvaluator {
 	t.Helper()
 	dir := t.TempDir()
@@ -31,11 +24,6 @@ func structuralTiers(t *testing.T, blacklist, askAlways, prefixes string) hitlse
 
 const structuralSafeVerbs = "git status,git log,git diff,go build,go test,ls,cat,head,wc,echo,grep"
 
-// evalShell evaluates through a POSIX-shell-pinned context: these tests
-// exercise the mvdan-based structural parser itself, not host shell
-// detection, so they must not depend on the test runner's GOOS (see A1 in
-// shellstructure.go — structural analysis is otherwise disabled on Windows,
-// where local_shell's real shell is not POSIX sh).
 func evalShell(t *testing.T, svc hitlservice.PolicyEvaluator, args map[string]any) hitlservice.EvaluationResult {
 	t.Helper()
 	ctx := hitlservice.WithShellKind(context.Background(), "sh")
@@ -44,8 +32,6 @@ func evalShell(t *testing.T, svc hitlservice.PolicyEvaluator, args map[string]an
 	return r
 }
 
-// line is the one-line call form: a whole command line in "command" with no
-// separate argv, as shell_session_run submits it.
 func line(cmd string) map[string]any { return map[string]any{"command": cmd} }
 
 // TestUnit_ShellStructural_CompoundAllowlistedLineStopsAsking pins that two
@@ -66,7 +52,6 @@ func TestUnit_ShellStructural_CompoundAllowlistedLineStopsAsking(t *testing.T) {
 			"%q is entirely allowlisted verbs and must not interrupt", cmd)
 	}
 
-	// The same line through shell mode.
 	assert.Equal(t, hitlservice.ActionAllow,
 		evalShell(t, svc, map[string]any{"command": "git status && go build", "shell": true}).Action)
 }
@@ -82,8 +67,7 @@ func TestUnit_ShellStructural_CompoundLineWithOneUnlistedVerbStillAsks(t *testin
 		`curl https://example.com && git status`,
 		`git status && git push`,
 		`git status | python3`,
-		// Flow-insensitive on purpose: the right side prices even though it
-		// may never run.
+		// Flow-insensitive on purpose: the right side prices even though it may never run.
 		`git status || curl https://example.com`,
 	} {
 		assert.Equalf(t, hitlservice.ActionApprove, evalShell(t, svc, line(cmd)).Action,
@@ -237,15 +221,13 @@ func TestUnit_ShellStructural_NonLiteralWordPoisonsItsCommand(t *testing.T) {
 	assert.Equal(t, hitlservice.ActionAllow, evalShell(t, svc, line(`git status && ca't' go.mod`)).Action)
 }
 
-// TestUnit_ShellStructural_UnclearedNodeKindsKeepTodaysAnswer is the node-set
-// audit's review checklist: each case is a line whose verbs are all
-// allowlisted, so it would be allowed if its node kind were cleared, and each must still ask.
+// TestUnit_ShellStructural_UnclearedNodeKindsKeepTodaysAnswer pins that every
+// uncleared node kind keeps today's answer even when its verbs are all allowlisted.
 func TestUnit_ShellStructural_UnclearedNodeKindsKeepTodaysAnswer(t *testing.T) {
 	t.Parallel()
 	svc := structuralTiers(t, "mkfs,shred", "sudo,dd", structuralSafeVerbs)
 
 	cases := map[string]string{
-		// Stmt flags.
 		"background job (Stmt.Background)": `git status & go build`,
 		"trailing background":              `git status && go build &`,
 		"negation (Stmt.Negated)":          `! git status && go build`,
@@ -253,8 +235,7 @@ func TestUnit_ShellStructural_UnclearedNodeKindsKeepTodaysAnswer(t *testing.T) {
 		"here-doc (Redirect.Hdoc)":         "cat <<EOF && go build\nhi\nEOF\n",
 		"here-string":                      `cat <<< hello && go build`,
 
-		// File: more than one top-level statement (';' is not in A2's operator
-		// set); see TestUnit_ShellStructural_NewlineListHole for the newline case.
+		// More than one top-level statement; ';' is not in A2's operator set.
 		"semicolon list":        `git status; go build`,
 		"trailing semicolons":   `git status; go build;`,
 		"leading subshell list": `(git status); go build`,
@@ -262,7 +243,6 @@ func TestUnit_ShellStructural_UnclearedNodeKindsKeepTodaysAnswer(t *testing.T) {
 		// BinaryCmd operators outside {&& || |}.
 		"pipe-all (|&)": `git status |& cat`,
 
-		// Compound commands: every one uncleared.
 		"subshell":          `(git status && go build)`,
 		"block":             `{ git status; go build; }`,
 		"if clause":         `if git status; then go build; fi`,
@@ -307,10 +287,9 @@ func TestUnit_ShellStructural_UnclearedNodeKindsKeepTodaysAnswer(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellStructural_NormalizedEvasionsAreCaught pins the reveal rule
-// at the policy boundary: a blacklisted command reached through a wrapper,
-// a reconstructed argument list, a decoded escape, or a variable is the same
-// command, and the verdict must name it.
+// TestUnit_ShellStructural_NormalizedEvasionsAreCaught pins that a
+// blacklisted command reached through a wrapper, reconstructed arglist,
+// decoded escape, or variable is still named and denied.
 func TestUnit_ShellStructural_NormalizedEvasionsAreCaught(t *testing.T) {
 	t.Parallel()
 	svc := structuralTiers(t, "rm,mkfs,shred", "sudo,dd", structuralSafeVerbs)
@@ -336,16 +315,14 @@ func TestUnit_ShellStructural_NormalizedEvasionsAreCaught(t *testing.T) {
 	}
 }
 
-// TestUnit_ShellStructural_NormalizationOnlyEverTightens pins the direction
-// of the reveal rule. A wrapper around allowlisted verbs must keep today's
-// answer — never become an allow — and a wrapper the analyzer cannot read
-// through must not become a denial either.
+// TestUnit_ShellStructural_NormalizationOnlyEverTightens pins that a wrapper
+// around allowlisted verbs must keep today's answer, and an unreadable
+// wrapper must not become a denial either.
 func TestUnit_ShellStructural_NormalizationOnlyEverTightens(t *testing.T) {
 	t.Parallel()
 	svc := structuralTiers(t, "rm,mkfs,shred", "sudo,dd", structuralSafeVerbs)
 
-	// Every verb inside is on the safe list; the wrapper is the only reason
-	// to ask, and revealing what it runs must not remove that reason.
+	// Every verb inside is on the safe list; revealing what the wrapper runs must not remove the reason to ask.
 	for _, cmd := range []string{
 		`sh -c "git status"`,
 		`sh -c "git status && go build"`,
@@ -391,9 +368,8 @@ func TestUnit_ShellStructural_RevealedCommandIsJudgedByTheSamePolicy(t *testing.
 		"the same peel, a blacklisted payload, denies")
 }
 
-// TestUnit_ShellStructural_NewlineListHole pins a hole the tokenizer has:
-// strings.Fields eats a newline, so `git status\ncurl http://x` reads as one
-// covered line — the structural reading revokes that allow.
+// TestUnit_ShellStructural_NewlineListHole pins that strings.Fields eating a
+// newline cannot smuggle a second command in on the first one's covered prefix.
 func TestUnit_ShellStructural_NewlineListHole(t *testing.T) {
 	t.Parallel()
 	svc := structuralTiers(t, "mkfs,shred", "rm,sudo,dd", structuralSafeVerbs)
@@ -494,9 +470,8 @@ func TestUnit_ShellStructural_EmptyAllowlistNeverUpgrades(t *testing.T) {
 	assert.Equal(t, hitlservice.ActionApprove, evalShell(t, svc, line(`git status && go build`)).Action)
 }
 
-// TestUnit_ShellStructural_PowerShellKindNeverUpgrades is A1 at the policy
-// boundary: a powershell-kind call keeps the tokenizer's verdict. That the
-// parser is never entered is pinned in shellstructure_internal_test.go.
+// TestUnit_ShellStructural_PowerShellKindNeverUpgrades pins that a
+// powershell-kind call keeps the tokenizer's verdict.
 func TestUnit_ShellStructural_PowerShellKindNeverUpgrades(t *testing.T) {
 	t.Parallel()
 	svc := structuralTiers(t, "mkfs,shred", "rm,sudo,dd", structuralSafeVerbs)

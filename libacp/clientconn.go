@@ -12,11 +12,9 @@ import (
 )
 
 // ClientSideConnection is the editor-side mirror of AgentSideConnection
-// (conn.go): it dispatches incoming agent->client requests (session/request_
-// permission, fs/*, terminal/*) and the session/update notification to a
-// Client, and exposes the client->agent methods (initialize, session/new,
-// session/prompt, ...) as outbound calls. Wire framing, id correlation, and
-// shutdown behavior follow the same design as AgentSideConnection.
+// (conn.go): it dispatches incoming agent->client requests and the
+// session/update notification to a Client, and exposes the client->agent
+// methods as outbound calls.
 type ClientSideConnection struct {
 	reader *ndjsonReader
 	writer *ndjsonWriter
@@ -29,33 +27,18 @@ type ClientSideConnection struct {
 
 	nextID atomic.Int64
 
-	// requestCancels tracks every in-flight incoming (agent->client) request's
-	// cancelable context by JSON-RPC id, so "$/cancel_request" can abort it.
 	reqCancelMu    sync.Mutex
 	requestCancels map[string]context.CancelFunc
 
-	// turnMu guards promptTurns: one entry per session with an outstanding
-	// outbound session/prompt call, so CancelPrompt knows which
-	// session/request_permission requests (pendingPerms below) belong to a
-	// turn it is cancelling.
 	turnMu      sync.Mutex
 	promptTurns map[SessionID]*clientPromptTurn
 
-	// permsMu guards pendingPerms: every in-flight inbound
-	// session/request_permission request by JSON-RPC id, so CancelPrompt can
-	// force-resolve the ones belonging to a session it cancels.
 	permsMu      sync.Mutex
 	pendingPerms map[string]*pendingPerm
 
-	// extRequest/extNotification: optional inbound handlers for extension
-	// methods and notifications (IsExtensionMethod), installed via
-	// SetExtRequestHandler / SetExtNotificationHandler from the ClientFactory
-	// before Run starts reading.
 	extRequest      ExtRequestHandler
 	extNotification ExtNotificationHandler
 
-	// handlerMu makes admission of a new handler goroutine and "shutdown has
-	// begun" a single atomic step, so handlers.Add can never race handlers.Wait.
 	handlerMu sync.Mutex
 	draining  bool
 	handlers  sync.WaitGroup
@@ -65,8 +48,6 @@ type ClientSideConnection struct {
 	closeErr  error
 }
 
-// goHandler spawns fn as a tracked handler goroutine and reports whether it
-// was started; refuses once shutdown has begun (see AgentSideConnection.goHandler).
 func (c *ClientSideConnection) goHandler(fn func()) bool {
 	c.handlerMu.Lock()
 	if c.draining {
@@ -82,9 +63,6 @@ func (c *ClientSideConnection) goHandler(fn func()) bool {
 	return true
 }
 
-// waitHandlers blocks until every handler goroutine spawned by goHandler
-// returns. Call only after shutdown, so everything a handler could be parked
-// on has already been released (see AgentSideConnection.waitHandlers).
 func (c *ClientSideConnection) waitHandlers() error {
 	c.handlerMu.Lock()
 	c.draining = true
@@ -105,18 +83,10 @@ func (c *ClientSideConnection) waitHandlers() error {
 	}
 }
 
-// clientPromptTurn tracks whether CancelPrompt has marked a session's
-// outstanding session/prompt call for cancellation. Prompt's own cleanup
-// removes the entry only if it is still the current one for its session, so
-// a later session/prompt call on the same session never observes a stale mark.
 type clientPromptTurn struct {
 	cancelled atomic.Bool
 }
 
-// pendingPerm is one in-flight session/request_permission request.
-// CancelPrompt's forced cancellation (forceCancelSessionPermissions) and the
-// normal handler-completion path (writeResult) race to resolve it; resolve
-// guards that race so exactly one response reaches the wire.
 type pendingPerm struct {
 	id        RequestID
 	sessionID SessionID
@@ -138,24 +108,22 @@ func NewClientSideConnection(rw io.ReadWriteCloser, factory ClientFactory) *Clie
 	return c
 }
 
-// SetExtRequestHandler installs h to handle inbound extension requests
-// (method names starting with ExtensionMethodPrefix). Call it from the
-// ClientFactory before Run starts reading. Nil (the default) answers
-// extension requests with MethodNotFound.
+// SetExtRequestHandler installs h, called from the ClientFactory before Run
+// starts reading, to handle inbound extension requests; nil (the default)
+// answers them with MethodNotFound.
 func (c *ClientSideConnection) SetExtRequestHandler(h ExtRequestHandler) {
 	c.extRequest = h
 }
 
-// SetExtNotificationHandler installs h to handle inbound extension
-// notifications. Call it from the ClientFactory before Run starts reading.
-// Nil (the default) silently ignores extension notifications.
+// SetExtNotificationHandler installs h, called from the ClientFactory before
+// Run starts reading, to handle inbound extension notifications; nil (the
+// default) silently ignores them.
 func (c *ClientSideConnection) SetExtNotificationHandler(h ExtNotificationHandler) {
 	c.extNotification = h
 }
 
 func (c *ClientSideConnection) Run(ctx context.Context) (err error) {
-	// Deferred first so it runs last: shutdown must unblock everything before
-	// the join. By the time Run returns, no handler goroutine is executing.
+	// Deferred first so it runs last: shutdown must unblock everything before the join.
 	defer func() {
 		if derr := c.waitHandlers(); derr != nil {
 			err = errors.Join(err, derr)
@@ -240,9 +208,7 @@ func (c *ClientSideConnection) dispatch(ctx context.Context, line []byte) {
 		c.deliverResponse(msg.Response)
 	case IncomingKindRequest:
 		// Registered by JSON-RPC id before the handler goroutine spawns, so a
-		// later "$/cancel_request" is guaranteed to observe it. Running on its
-		// own goroutine means a slow handler (e.g. a session/request_permission
-		// dialog awaiting user input) never blocks the read loop.
+		// later "$/cancel_request" is guaranteed to observe it.
 		reqCtx, cancelReq := context.WithCancel(ctx)
 		key := requestCancelKey(msg.Request.ID)
 		c.reqCancelMu.Lock()
@@ -267,8 +233,7 @@ func (c *ClientSideConnection) dispatch(ctx context.Context, line []byte) {
 			defer release()
 			c.handleRequest(reqCtx, msg.Request, pp)
 		}) {
-			// Shutdown already under way; no response could reach the agent
-			// anyway. Drop the request and undo dispatch's registrations.
+			// Shutdown already under way: drop the request and undo dispatch's registrations.
 			release()
 		}
 	case IncomingKindNotification:
@@ -280,14 +245,10 @@ func (c *ClientSideConnection) dispatch(ctx context.Context, line []byte) {
 		// Notifications are handled inline, not spawned onto their own
 		// goroutine: session/update chunks must reach Client.SessionUpdate in
 		// the order sent, which only the single-threaded read loop guarantees.
-		// A slow handler delays the next line being read; acceptable here.
 		c.handleNotification(ctx, msg.Notification)
 	}
 }
 
-// registerPendingPerm records an in-flight session/request_permission request
-// by JSON-RPC id and session, so CancelPrompt can find and force-resolve it
-// later. Returns nil when params carry no usable sessionId.
 func (c *ClientSideConnection) registerPendingPerm(req Request) *pendingPerm {
 	var probe struct {
 		SessionID SessionID `json:"sessionId"`
@@ -308,8 +269,6 @@ func (c *ClientSideConnection) unregisterPendingPerm(pp *pendingPerm) {
 	c.permsMu.Unlock()
 }
 
-// applyCancelRequest aborts the in-flight request the agent no longer awaits.
-// Unknown ids are ignored: the request may simply have completed already.
 func (c *ClientSideConnection) applyCancelRequest(params json.RawMessage) {
 	var p CancelRequestNotification
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil {
@@ -323,12 +282,6 @@ func (c *ClientSideConnection) applyCancelRequest(params json.RawMessage) {
 	}
 }
 
-// forceCancelSessionPermissions resolves every in-flight
-// session/request_permission request for sessionID with the "cancelled"
-// outcome, per the spec's cancellation contract. Each request's context is
-// also cancelled, but the response is written unconditionally, racing (and
-// normally winning) against whatever the application eventually returns —
-// see pendingPerm and writeResult.
 func (c *ClientSideConnection) forceCancelSessionPermissions(sessionID SessionID) {
 	c.permsMu.Lock()
 	var matches []*pendingPerm
@@ -355,8 +308,6 @@ func (c *ClientSideConnection) forceCancelSessionPermissions(sessionID SessionID
 	}
 }
 
-// promptCancelling reports whether CancelPrompt has marked sessionID's
-// outstanding session/prompt call for cancellation.
 func (c *ClientSideConnection) promptCancelling(sessionID SessionID) bool {
 	c.turnMu.Lock()
 	pt, ok := c.promptTurns[sessionID]
@@ -364,9 +315,6 @@ func (c *ClientSideConnection) promptCancelling(sessionID SessionID) bool {
 	return ok && pt.cancelled.Load()
 }
 
-// respondToMalformed answers input the dispatcher could not parse, per
-// JSON-RPC 2.0: -32700 for invalid JSON, -32600 for a structurally invalid
-// message (id null when it cannot be salvaged).
 func (c *ClientSideConnection) respondToMalformed(line []byte, parseErr error) {
 	if !json.Valid(line) {
 		_ = c.writer.Write(NewErrorResponse(NewRequestIDNull(), ParseError(parseErr.Error())))
@@ -385,9 +333,6 @@ func (c *ClientSideConnection) respondToMalformed(line []byte, parseErr error) {
 	_ = c.writer.Write(NewErrorResponse(id, InvalidRequest(parseErr.Error())))
 }
 
-// handleNotification routes an inbound notification. Unknown methods
-// (including any not listed below) are ignored, per the JSON-RPC/ACP
-// convention that notifications never produce an error response.
 func (c *ClientSideConnection) handleNotification(ctx context.Context, n Notification) {
 	switch n.Method {
 	case MethodSessionUpdate:
@@ -405,17 +350,11 @@ func (c *ClientSideConnection) handleNotification(ctx context.Context, n Notific
 	}
 }
 
-// handleRequest runs the request's handler and writes its response. pp is
-// non-nil only for a session/request_permission request, whose response then
-// goes through writeResult's guard against a racing forced cancellation.
 func (c *ClientSideConnection) handleRequest(ctx context.Context, req Request, pp *pendingPerm) {
 	result, rpcErr := c.safeCallMethod(ctx, req)
 	c.writeResult(req.ID, pp, result, rpcErr)
 }
 
-// writeResult writes the JSON-RPC response for id. When pp is non-nil the
-// write goes through pp.resolve, so at most one of {this call,
-// forceCancelSessionPermissions' forced write} reaches the wire (see pendingPerm).
 func (c *ClientSideConnection) writeResult(id RequestID, pp *pendingPerm, result any, rpcErr *Error) {
 	write := func() {
 		if rpcErr != nil {
@@ -436,8 +375,6 @@ func (c *ClientSideConnection) writeResult(id RequestID, pp *pendingPerm, result
 	write()
 }
 
-// safeCallMethod converts a panicking Client handler into an InternalError
-// response instead of tearing down the whole process.
 func (c *ClientSideConnection) safeCallMethod(ctx context.Context, req Request) (result any, rpcErr *Error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -728,11 +665,10 @@ func (c *ClientSideConnection) SetSessionMode(ctx context.Context, req SetSessio
 	return resp, nil
 }
 
-// SetSessionModel switches a session to a different ModelInfo.ID, one of the
-// ids the session's SessionModelState.AvailableModels advertised. This is the
-// unstable Zed model-picker method (session/set_model), not part of the
-// stable ACP spec and subject to change. On success the requested model is
-// authoritative: no session/update kind reconfirms it.
+// SetSessionModel switches a session to a different ModelInfo.ID (one of the
+// ids SessionModelState.AvailableModels advertised) via the unstable Zed
+// model-picker method (session/set_model); on success the requested model is
+// authoritative, and no session/update kind reconfirms it.
 func (c *ClientSideConnection) SetSessionModel(ctx context.Context, req SetSessionModelRequest) (SetSessionModelResponse, error) {
 	var resp SetSessionModelResponse
 	if err := c.call(ctx, MethodSessionSetModel, req, &resp); err != nil {
@@ -750,9 +686,8 @@ func (c *ClientSideConnection) SetSessionConfigOption(ctx context.Context, req S
 }
 
 // Prompt registers req.SessionID's turn in promptTurns for the call's
-// duration, so CancelPrompt can mark it and promptCancelling can check
-// session/request_permission requests against it. Removed on return, only if
-// still this call's own entry, so it can't clobber a later overlapping call.
+// duration so CancelPrompt and promptCancelling can find it, removing only
+// its own entry on return so it can't clobber a later overlapping call.
 func (c *ClientSideConnection) Prompt(ctx context.Context, req PromptRequest) (PromptResponse, error) {
 	pt := &clientPromptTurn{}
 	c.turnMu.Lock()
@@ -774,9 +709,9 @@ func (c *ClientSideConnection) Prompt(ctx context.Context, req PromptRequest) (P
 }
 
 // CancelSession sends "session/cancel" — a notification, not a request, per
-// spec: the agent must resolve the in-flight session/prompt call with stop
-// reason "cancelled" rather than answering this call itself. Does not apply
-// the pending-permission auto-cancel rule; use CancelPrompt for that.
+// spec: the agent must resolve the in-flight session/prompt call itself with
+// stop reason "cancelled"; use CancelPrompt for the pending-permission
+// auto-cancel rule.
 func (c *ClientSideConnection) CancelSession(req CancelNotification) error {
 	return c.notify(MethodSessionCancel, req)
 }
@@ -784,11 +719,9 @@ func (c *ClientSideConnection) CancelSession(req CancelNotification) error {
 // CancelPrompt cancels sessionID's in-flight prompt turn: sends
 // "session/cancel" and, for as long as this session's Prompt call remains
 // outstanding, auto-resolves every session/request_permission request for
-// sessionID (new or in-flight) with the "cancelled" outcome, instead of
-// invoking or waiting on Client.RequestPermission — the client-side half of
-// the spec's prompt-turn cancellation contract. The auto-resolve mark clears
-// the moment the Prompt call for sessionID returns. With no outstanding
-// Prompt call for sessionID, behaves exactly like CancelSession.
+// sessionID with the "cancelled" outcome instead of invoking
+// Client.RequestPermission; with no outstanding Prompt call, behaves exactly
+// like CancelSession.
 func (c *ClientSideConnection) CancelPrompt(sessionID SessionID) error {
 	c.turnMu.Lock()
 	pt, ok := c.promptTurns[sessionID]
@@ -804,8 +737,7 @@ func (c *ClientSideConnection) CancelPrompt(sessionID SessionID) error {
 }
 
 // CallExtMethod sends a custom extension request (method must satisfy
-// IsExtensionMethod) to the agent and returns its raw result. Outbound half
-// of the extension-method seam; SetExtRequestHandler installs the inbound half.
+// IsExtensionMethod) to the agent and returns its raw result.
 func (c *ClientSideConnection) CallExtMethod(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	if !IsExtensionMethod(method) {
 		return nil, fmt.Errorf("libacp: %q is not an extension method (must start with %q)", method, ExtensionMethodPrefix)

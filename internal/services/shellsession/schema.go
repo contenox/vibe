@@ -1,12 +1,5 @@
 package shellsession
 
-// Tool schemas. Each tool's arguments are declared once, in shellToolSpecs,
-// and rendered twice: into the model-facing descriptor
-// (GetToolsForToolsByName) and into the published OpenAPI contract
-// (GetSchemasForSupportedTools), so the two cannot drift. The argument sets
-// are flat and hand-written, which is what a shared table fits; nothing here
-// is loaded from a file or shaped by policy.
-
 import (
 	"context"
 	"fmt"
@@ -24,8 +17,6 @@ const readToolDoc = "Read scrollback from this chat's persistent shell. Terminal
 	"Pass 'since' (an offset from a previous " + ToolRun + "/" + ToolRead + " result) to get only new output since that marker, or 'tail_bytes' to get the last N bytes. With neither, returns the full retained scrollback. " +
 	"Returns {content, from_offset, next_offset}; use next_offset as the next 'since'. This read is not gated by HITL."
 
-// shellProperty is one tool argument: name, JSON Schema type, the description
-// the model reads, and whether the tool refuses without it.
 type shellProperty struct {
 	name        string
 	typ         string
@@ -33,9 +24,6 @@ type shellProperty struct {
 	required    bool
 }
 
-// shellToolSpec is one tool's whole declaration — the argument table both
-// renderers walk, plus the OpenAPI component prefix and the response schema
-// describing what Exec returns for it.
 type shellToolSpec struct {
 	name        string
 	component   string
@@ -44,8 +32,6 @@ type shellToolSpec struct {
 	response    func() *openapi3.SchemaRef
 }
 
-// shellToolSpecs is the single source of truth for the two tools this provider
-// declares, in Supports order.
 func shellToolSpecs() []shellToolSpec {
 	return []shellToolSpec{
 		{
@@ -81,7 +67,6 @@ func shellToolSpecs() []shellToolSpec {
 	}
 }
 
-// required renders the spec's required set, in table order.
 func (s shellToolSpec) required() []string {
 	var out []string
 	for _, p := range s.props {
@@ -92,9 +77,6 @@ func (s shellToolSpec) required() []string {
 	return out
 }
 
-// parameters renders the table as the descriptor's JSON Schema — what actually
-// reaches the provider. A tool with no required argument declares no `required`
-// key at all rather than an empty list.
 func (s shellToolSpec) parameters() map[string]any {
 	props := make(map[string]any, len(s.props))
 	for _, p := range s.props {
@@ -110,7 +92,6 @@ func (s shellToolSpec) parameters() map[string]any {
 	return params
 }
 
-// requestSchema renders the same table as the published OpenAPI request schema.
 func (s shellToolSpec) requestSchema() *openapi3.SchemaRef {
 	props := make(map[string]*openapi3.SchemaRef, len(s.props))
 	for _, p := range s.props {
@@ -126,7 +107,6 @@ func (s shellToolSpec) requestSchema() *openapi3.SchemaRef {
 	}}
 }
 
-// tool renders the spec as the model-facing descriptor.
 func (s shellToolSpec) tool() taskengine.Tool {
 	return taskengine.Tool{
 		Type: "function",
@@ -138,12 +118,7 @@ func (s shellToolSpec) tool() taskengine.Tool {
 	}
 }
 
-// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
-// one request/response pair per declared tool. Requests are rendered from the
-// same table the descriptors are rendered from (shellToolSpecs), and responses
-// describe the payloads Exec actually returns (RunResultJSON, ReadResultJSON);
-// a failed call returns an error instead of a payload, so no response property
-// is a failure marker.
+// GetSchemasForSupportedTools publishes one OpenAPI 3.1 request/response pair per declared tool, rendered from the same table as the descriptors (shellToolSpecs).
 func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openapi3.T, error) {
 	specs := shellToolSpecs()
 	schemas := make(map[string]*openapi3.SchemaRef, 2*len(specs))
@@ -166,8 +141,6 @@ func (h *tools) GetSchemasForSupportedTools(context.Context) (map[string]*openap
 	return map[string]*openapi3.T{ToolsProviderName: schema}, nil
 }
 
-// runResponseSchema is RunResultJSON: the marker and the initial snapshot, not
-// the command's full output.
 func runResponseSchema() *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:        &openapi3.Types{openapi3.TypeObject},
@@ -194,7 +167,6 @@ func runResponseSchema() *openapi3.SchemaRef {
 	}}
 }
 
-// readResponseSchema is ReadResultJSON: a slice of retained scrollback.
 func readResponseSchema() *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type:        &openapi3.Types{openapi3.TypeObject},

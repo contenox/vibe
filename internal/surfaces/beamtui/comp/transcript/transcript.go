@@ -87,10 +87,10 @@ func (t *Transcript) Apply(ev enginebridge.Event) {
 		}
 
 	case enginebridge.ToolCallOpened:
-		t.tool(e.ToolCallID, sanitize.Line(e.Title), e.Kind, e.Status)
+		t.tool(e.ToolCallID, sanitize.Line(e.Title), e.Kind, e.Status, sanitize.Line(e.ErrorText))
 
 	case enginebridge.ToolCallUpdated:
-		t.tool(e.ToolCallID, sanitize.Line(e.Title), e.Kind, e.Status)
+		t.tool(e.ToolCallID, sanitize.Line(e.Title), e.Kind, e.Status, sanitize.Line(e.ErrorText))
 
 	case enginebridge.PlanUpdated:
 		// The wire replaces the whole list rather than patching it, so each
@@ -291,6 +291,7 @@ type card struct {
 	title   string
 	kind    libacp.ToolKind
 	status  libacp.ToolCallStatus
+	reason  string
 	settled bool
 	grp     group
 }
@@ -374,7 +375,7 @@ func (t *Transcript) closeMessage() {
 
 // tool opens or merges a tool call, settling its card once the status is
 // terminal.
-func (t *Transcript) tool(id, title string, kind libacp.ToolKind, status libacp.ToolCallStatus) {
+func (t *Transcript) tool(id, title string, kind libacp.ToolKind, status libacp.ToolCallStatus, reason string) {
 	if id == "" {
 		return
 	}
@@ -398,6 +399,9 @@ func (t *Transcript) tool(id, title string, kind libacp.ToolKind, status libacp.
 	if status != "" {
 		c.status = status
 	}
+	if reason != "" {
+		c.reason = reason
+	}
 	if c.status == libacp.ToolCallStatusCompleted || c.status == libacp.ToolCallStatusFailed {
 		t.settleCard(c, false)
 	}
@@ -415,7 +419,7 @@ func (t *Transcript) settleCard(c *card, abandoned bool) {
 		}
 	}
 	t.startGroup(c.grp)
-	t.push(cardUnit{title: c.displayTitle(), status: c.status, abandoned: abandoned})
+	t.push(cardUnit{title: c.displayTitle(), status: c.status, abandoned: abandoned, reason: c.reason})
 }
 
 // endTurn closes everything the finished turn owned.

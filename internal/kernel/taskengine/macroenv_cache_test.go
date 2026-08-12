@@ -1,9 +1,5 @@
 package taskengine_test
 
-// Prefix-determinism coverage for MacroEnv: system-instruction bytes must not
-// wobble with wall-clock time or tool-registry enumeration order, because
-// every provider prefix cache keys on those exact bytes.
-
 import (
 	"encoding/json"
 	"regexp"
@@ -16,8 +12,6 @@ import (
 
 func TestUnit_MacroEnv_NowMacro_DayGranularInSystemInstruction(t *testing.T) {
 	out := runSysInstrExpand(t, fsAndShellRepo(), "now={{now}} end", []string{})
-	// Default {{now}} in the stable prefix must degrade to day granularity:
-	// a date, not an RFC3339 timestamp (no time-of-day, no zone).
 	if !regexp.MustCompile(`now=\d{4}-\d{2}-\d{2} end`).MatchString(out) {
 		t.Fatalf("default {{now}} in system_instruction must expand at day granularity, got: %s", out)
 	}
@@ -27,8 +21,6 @@ func TestUnit_MacroEnv_NowMacro_DayGranularInSystemInstruction(t *testing.T) {
 }
 
 func TestUnit_MacroEnv_NowMacro_ExplicitLayoutRespectedInSystemInstruction(t *testing.T) {
-	// An author-provided layout is intent and stays untouched even in the
-	// stable prefix.
 	out := runSysInstrExpand(t, fsAndShellRepo(), "at={{now:15:04}} end", []string{})
 	if !regexp.MustCompile(`at=\d{2}:\d{2} end`).MatchString(out) {
 		t.Fatalf("explicit {{now:<layout>}} must be respected in system_instruction, got: %s", out)
@@ -36,8 +28,6 @@ func TestUnit_MacroEnv_NowMacro_ExplicitLayoutRespectedInSystemInstruction(t *te
 }
 
 func TestUnit_MacroEnv_NowMacro_FullPrecisionOutsideStablePrefix(t *testing.T) {
-	// Prompt templates are the volatile user-turn suffix; {{now}} keeps its
-	// documented RFC3339 default there.
 	out := runMacroExpand(t, fsAndShellRepo(), "now={{now}}", nil)
 	if !regexp.MustCompile(`now=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`).MatchString(out) {
 		t.Fatalf("{{now}} in prompt_template must stay RFC3339, got: %s", out)
@@ -45,9 +35,6 @@ func TestUnit_MacroEnv_NowMacro_FullPrecisionOutsideStablePrefix(t *testing.T) {
 }
 
 func TestUnit_MacroEnv_SystemInstruction_StableAcrossRegistryOrder(t *testing.T) {
-	// Same tools, opposite registry slice order: the rendered system
-	// instruction (including the auto-appended tools summary) must be
-	// byte-identical.
 	repoA := &stubToolsRepo{names: map[string][]taskengine.Tool{
 		"local_fs":    {tool("read_file"), tool("write_file"), tool("sed")},
 		"local_shell": {tool("local_shell")},

@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setup gives a test a real sqlite-backed mission service plus one open mission to report against.
 func setup(t *testing.T) (context.Context, missionservice.Service, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -132,9 +131,7 @@ func TestUnit_MissionTools_ReportDefaultsKind(t *testing.T) {
 	require.Len(t, reports, 1)
 	require.Equal(t, missionservice.ReportKindProgress, reports[0].Kind)
 
-	// Neither the enum nor the required set can carry a default, so the
-	// descriptor states it — and the published request schema, which is that
-	// descriptor rendered, therefore states it too.
+	// The default belongs in the descriptor's description since no enum/required field can carry it.
 	declared, err := tools.GetToolsForToolsByName(missiontools.WithMissionID(ctx, missionID), missiontools.ToolsProviderName)
 	require.NoError(t, err)
 	var params map[string]any
@@ -155,8 +152,7 @@ func TestUnit_MissionTools_ReportReadsModelArgs(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
 
-	// The absolute ref must genuinely exist: this test is about arg parsing, not
-	// the conclusion verification gate (verify_test.go's job).
+	// The absolute ref must genuinely exist: this test is about arg parsing, not the verification gate.
 	outLog := filepath.Join(t.TempDir(), "out.log")
 	require.NoError(t, os.WriteFile(outLog, []byte("all green"), 0o644))
 
@@ -271,16 +267,14 @@ func TestUnit_MissionTools_InvalidKindRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid report kind")
 }
 
-// fakeAsker records RaiseAttention calls so the wired attention path can be asserted without pulling in hitlservice.
 type fakeAsker struct {
 	missionID string
 	summary   string
 	detail    string
 	lastAsk   missiontools.AttentionAsk
 	calls     int
-	// answer is what the operator replies; err makes the ask go unanswered.
-	answer string
-	err    error
+	answer    string
+	err       error
 }
 
 func (f *fakeAsker) RaiseAttention(_ context.Context, ask missiontools.AttentionAsk) (string, error) {
@@ -360,7 +354,6 @@ func TestUnit_MissionTools_MetaRoundTrip(t *testing.T) {
 	require.Nil(t, missionservice.MarshalMissionMeta("  "), "a blank id marshals to no _meta")
 }
 
-// planModelCall builds a mission_plan call in the model-driven shape: entries as a []any under a map[string]any `input`.
 func planModelCall(explanation string, entries ...map[string]any) (*taskengine.ToolsCall, map[string]any) {
 	items := make([]any, len(entries))
 	for i, e := range entries {
@@ -518,8 +511,7 @@ func TestUnit_MissionTools_PlanCarriesIDsForwardAndGuardsCompleted(t *testing.T)
 	require.Equal(t, 2, out.(missionservice.Plan).Revision)
 	require.Equal(t, id, out.(missionservice.Plan).Entries[0].ID, "the entry keeps its identity across revisions")
 
-	// Rev 3: rewrite the COMPLETED entry's content (same id) — the immutability
-	// guard rejects it; corrections must be appended as new entries.
+	// Rev 3: rewrite the COMPLETED entry's content (same id) — the immutability guard rejects it.
 	call, input = planModelCall("oops", map[string]any{
 		"id": id, "content": "wire the seam differently", "status": "completed", "priority": "high",
 	})
@@ -528,7 +520,6 @@ func TestUnit_MissionTools_PlanCarriesIDsForwardAndGuardsCompleted(t *testing.T)
 	require.Contains(t, err.Error(), "already-completed work")
 }
 
-// finishCall builds a mission_finish call in the deterministic Args shape.
 func finishCall(status, reason string) *taskengine.ToolsCall {
 	return &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
@@ -537,11 +528,7 @@ func finishCall(status, reason string) *taskengine.ToolsCall {
 	}
 }
 
-// TestUnit_MissionTools_FinishSetsTerminalStatus pins that mission_finish
-// moves to the named terminal state and records the reason, and that the
-// heartbeat every tool call ends with leaves a terminal mission at rest —
-// liveness on a finished mission is meaningless, and stamping it would put an
-// at-rest row back in motion past the abandoned-mission sweep.
+// TestUnit_MissionTools_FinishSetsTerminalStatus pins that mission_finish moves to the named terminal state, records the reason, and leaves a terminal mission unheartbeated.
 func TestUnit_MissionTools_FinishSetsTerminalStatus(t *testing.T) {
 	ctx, svc, missionID := setup(t)
 	tools := missiontools.New(svc, nil)
@@ -644,7 +631,6 @@ func TestUnit_MissionTools_AskAttentionFallsBackWhenUnanswered(t *testing.T) {
 	require.Contains(t, reports[0].Detail, "got no answer", "…and says an answer was solicited and missed")
 }
 
-// marshalJSON renders a value as JSON for a schema-versus-descriptor comparison.
 func marshalJSON(t *testing.T, v any) string {
 	t.Helper()
 	raw, err := json.Marshal(v)
@@ -652,10 +638,6 @@ func marshalJSON(t *testing.T, v any) string {
 	return string(raw)
 }
 
-// decodedSchema renders a descriptor's parameters or a published schema as
-// plain JSON values, dropping an empty `properties` map: "declares no
-// properties" and "declares an empty property set" are the same statement, and
-// only the descriptor spells it out.
 func decodedSchema(t *testing.T, v any) map[string]any {
 	t.Helper()
 	var out map[string]any
@@ -666,11 +648,7 @@ func decodedSchema(t *testing.T, v any) map[string]any {
 	return out
 }
 
-// TestUnit_MissionTools_PublishedSchemaMatchesToolDescriptors pins the
-// declared OpenAPI contract and its agreement with what actually reaches the
-// model: every tool this provider declares — the unit's four and the
-// supervisor's two — carries a request schema that IS its descriptor rendered,
-// and a response schema describing what Exec returns for it.
+// TestUnit_MissionTools_PublishedSchemaMatchesToolDescriptors pins that the published OpenAPI contract matches what actually reaches the model for every declared tool.
 func TestUnit_MissionTools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	ctx, tools, _ := supervisorFixture(t)
 

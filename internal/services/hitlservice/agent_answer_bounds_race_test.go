@@ -1,12 +1,5 @@
 package hitlservice_test
 
-// The agent-answer bound is held by the write, not by the caller's check.
-// AnswerAsAgentWithinBounds resolves the envelope's cap and then delivers
-// through a single conditional statement that counts the mission's prior agent
-// answers in its own WHERE clause, so a check that went stale between reading
-// and writing cannot spend budget that is gone. These tests pin that the cap is
-// exact when answers serialize AND when they do not.
-
 import (
 	"context"
 	"sync"
@@ -17,16 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// answerAsAgentBounded is the exact delivery all three agent-answer surfaces
-// run: contenoxcli's `approvals respond --as-agent`, the oracle attention
-// driver, and the `mission_answer` supervision tool each call
-// AnswerAsAgentWithinBounds. Spelled here so a test exercises the real seam
-// rather than a paraphrase of it.
 func answerAsAgentBounded(ctx context.Context, svc hitlservice.Service, missions hitlservice.MissionEnvelopeSource, row *runtimetypes.HITLApproval, text string) error {
 	return hitlservice.AnswerAsAgentWithinBounds(ctx, missions, svc, row, "oracle", text)
 }
 
-// seedAsks persists n pending attention asks on missionID.
 func seedAsks(t *testing.T, ctx context.Context, store runtimetypes.Store, missionID string, n int) []*runtimetypes.HITLApproval {
 	t.Helper()
 	rows := make([]*runtimetypes.HITLApproval, 0, n)
@@ -70,11 +57,8 @@ func TestUnit_AgentAnswerBounds_SerialAnswersStopExactlyAtTheCap(t *testing.T) {
 }
 
 // TestUnit_AgentAnswerBounds_TheWriteHoldsTheBoundNotTheCheck exercises the
-// interleaving the check alone cannot survive: every caller reads the count
-// before any of them writes, so every check passes. Deterministic on purpose —
-// it drives the interleaving directly rather than hoping the scheduler
-// produces it. The bound still holds, because the conditional write re-counts
-// inside the same statement.
+// interleaving the check alone cannot survive: every caller reads a stale
+// zero count, but the conditional write re-counts inside the same statement.
 func TestUnit_AgentAnswerBounds_TheWriteHoldsTheBoundNotTheCheck(t *testing.T) {
 	const cap = 2
 	const racers = 5
@@ -85,16 +69,12 @@ func TestUnit_AgentAnswerBounds_TheWriteHoldsTheBoundNotTheCheck(t *testing.T) {
 	const missionID = "m-interleaved"
 	rows := seedAsks(t, ctx, store, missionID, racers)
 
-	// Phase one: every caller checks the envelope. Nobody has written yet, so
-	// the count each of them reads is zero and the advisory check passes for
-	// all five — exactly the stale read the bound must survive.
+	// Phase one: every caller checks the envelope while the count is still zero for all five — the stale read the bound must survive.
 	for _, row := range rows {
 		require.NoError(t, hitlservice.EnforceAgentAnswerBounds(ctx, missions, svc, row),
 			"the pre-check reads a count that is still zero for everyone")
 	}
-	// Phase two: every caller delivers on that stale grant. The cap rides the
-	// write, so only the first two statements find fewer than two prior agent
-	// answers.
+	// Phase two: every caller delivers on that stale grant; the cap rides the write, so only the first two find fewer than two prior answers.
 	delivered, spent := 0, 0
 	for _, row := range rows {
 		err := svc.AnswerAsAgentBounded(ctx, row.ID, "oracle", "agent reply", cap)
@@ -112,8 +92,7 @@ func TestUnit_AgentAnswerBounds_TheWriteHoldsTheBoundNotTheCheck(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, cap, used, "a mission capped at %d agent answers spent %d", cap, used)
 
-	// The composed surface path renders that same refusal in the operator's
-	// words, so a stale grant reads as the envelope holding, not as plumbing.
+	// The composed surface renders the same refusal in the operator's words: a stale grant reads as the envelope holding, not plumbing.
 	err = answerAsAgentBounded(ctx, svc, missions, rows[racers-1], "agent reply")
 	require.True(t, hitlservice.IsAgentAnswerRefusal(err))
 	require.Contains(t, err.Error(), "spent its agent-answer bound (2 of 2)")
@@ -121,9 +100,8 @@ func TestUnit_AgentAnswerBounds_TheWriteHoldsTheBoundNotTheCheck(t *testing.T) {
 }
 
 // TestUnit_AgentAnswerBounds_ConcurrentAnswersStopExactlyAtTheCap races the
-// real composition through goroutines. The cap is a database predicate, so the
-// outcome is schedule-independent: exactly the cap lands, every other racer is
-// refused by the envelope, and nothing fails for another reason.
+// real composition through goroutines; the cap is a database predicate, so
+// the outcome is schedule-independent.
 func TestUnit_AgentAnswerBounds_ConcurrentAnswersStopExactlyAtTheCap(t *testing.T) {
 	const cap = 2
 	const racers = 8
@@ -167,14 +145,11 @@ func TestUnit_AgentAnswerBounds_ConcurrentAnswersStopExactlyAtTheCap(t *testing.
 	require.Equal(t, cap, used, "the durable count matches the cap exactly")
 }
 
-// TestUnit_AgentAnswerBounds_AnswerAsAgentEnforcesNothingItself pins where the
-// bound does NOT live: the service's unbounded agent-answer entry points write
-// the durable row with no envelope check at all. They are not a surface's to
-// call — every surface goes through AnswerAsAgentWithinBounds — and this test
-// is what makes that a rule rather than a habit.
+// TestUnit_AgentAnswerBounds_AnswerAsAgentEnforcesNothingItself pins where
+// the bound does NOT live: the service's unbounded agent-answer entry points
+// write the durable row with no envelope check at all.
 func TestUnit_AgentAnswerBounds_AnswerAsAgentEnforcesNothingItself(t *testing.T) {
 	ctx := context.Background()
-	// An envelope that forbids agent answers outright.
 	svc, store, _ := boundsFixture(t, `{"default_action":"deny","rules":[]}`)
 
 	const missionID = "m-unbounded"

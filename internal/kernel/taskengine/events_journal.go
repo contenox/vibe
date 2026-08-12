@@ -10,25 +10,12 @@ import (
 )
 
 const (
-	kvEventsPrefix     = "taskevents:"
-	kvEventsMaxEntries = 500
-	// Large text fields are capped so a single run cannot bloat the KV store;
-	// the live SSE stream still carries the full values.
+	kvEventsPrefix      = "taskevents:"
+	kvEventsMaxEntries  = 500
 	journalTextFieldCap = 16 * 1024
 )
 
-// KVJournalTaskEventSink journals task events durably per request ID into the
-// KV store (alongside the CapturedStateUnit stream the KVInspector persists),
-// after forwarding them to the wrapped sink. This is what makes a run's work
-// log — tool calls, diffs, approvals — re-renderable after the 5-minute bus
-// TTL and across restarts.
-//
-// step_chunk events are deliberately not journaled: they are streaming detail
-// whose final text is already persisted with the chat history.
-// step_stream_end is journaled — the durable stream bracket (chunk count,
-// finish reason, usage) — so a replayed run can tell streaming happened and
-// how it ended even though the chunks themselves are gone. Every other kind
-// is journaled.
+// KVJournalTaskEventSink journals task events durably per request ID into the KV store after forwarding them to the wrapped sink.
 type KVJournalTaskEventSink struct {
 	inner   TaskEventSink
 	kv      libkv.KVManager
@@ -42,8 +29,7 @@ func NewKVJournalTaskEventSink(inner TaskEventSink, kv libkv.KVManager, tracker 
 	return &KVJournalTaskEventSink{inner: inner, kv: kv, tracker: tracker}
 }
 
-// Wants defers to the wrapped sink (matching the pre-Wants Enabled()
-// delegation); with no inner sink the journal itself consumes every kind.
+// Wants defers to the wrapped sink; with no inner sink it consumes every kind.
 func (s *KVJournalTaskEventSink) Wants(kind TaskEventKind) bool {
 	if s.inner != nil {
 		return s.inner.Wants(kind)
@@ -98,8 +84,7 @@ func (s *KVJournalTaskEventSink) PublishTaskEvent(ctx context.Context, event Tas
 	return innerErr
 }
 
-// GetJournaledEvents returns the durably journaled events of a run, in
-// arrival order. A request with no journal yields an empty slice.
+// GetJournaledEvents returns the durably journaled events of a run in arrival order, or an empty slice if none exist.
 func GetJournaledEvents(ctx context.Context, kv libkv.KVManager, reqID string) ([]TaskEvent, error) {
 	if reqID == "" {
 		return nil, nil

@@ -49,7 +49,7 @@ func TestUnit_KVJournalTaskEventSink_SkipsChunksAndAnonymousEvents(t *testing.T)
 	ctx := context.Background()
 
 	require.NoError(t, sink.PublishTaskEvent(ctx, TaskEvent{Kind: TaskEventStepChunk, RequestID: "req-j2", Content: "streaming"}))
-	require.NoError(t, sink.PublishTaskEvent(ctx, TaskEvent{Kind: TaskEventChainStarted /* no RequestID */}))
+	require.NoError(t, sink.PublishTaskEvent(ctx, TaskEvent{Kind: TaskEventChainStarted}))
 
 	replayed, err := GetJournaledEvents(ctx, kv, "req-j2")
 	require.NoError(t, err)

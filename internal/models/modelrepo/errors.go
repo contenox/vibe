@@ -6,22 +6,23 @@ import (
 	"strings"
 )
 
-// Typed provider-error sentinels. Providers translate their documented error
-// shapes into these via ClassifyProviderError, so callers can errors.Is on
-// the failure class instead of grepping message strings.
+// Typed provider-error sentinels; providers translate documented error shapes into these via ClassifyProviderError.
 var (
-	// ErrContextLengthExceeded means the request does not fit the model's
-	// context window. Retrying unchanged cannot succeed.
+	// ErrContextLengthExceeded means the request does not fit the model's context window.
 	ErrContextLengthExceeded = errors.New("request exceeds the model's context window")
-	// ErrRateLimited means the provider refused the request for rate or
-	// capacity reasons. Retrying after a backoff can succeed.
+	// ErrRateLimited means the provider refused the request for rate or capacity reasons.
 	ErrRateLimited = errors.New("provider rate limit or capacity limit hit")
+	// ErrModelNotFoundOnBackend means the backend does not serve the requested model; terminal for that backend, not for the request.
+	ErrModelNotFoundOnBackend = errors.New("backend does not serve the requested model")
+	// ErrModelAccessDenied means the backend refused access to the requested model; terminal for that backend, not for the request.
+	ErrModelAccessDenied = errors.New("backend denied access to the requested model")
 )
 
-// contextLimitMarkers are documented provider phrasings/codes for a
-// context-window overflow, lowercased (OpenAI context_length_exceeded,
-// Anthropic "prompt is too long", Gemini "exceeds the maximum number of
-// tokens", Bedrock "input is too long", ollama/vllm "context length"/"kv cache").
+// IsBackendTerminal reports whether err is terminal for the backend that produced it, not necessarily for the request.
+func IsBackendTerminal(err error) bool {
+	return errors.Is(err, ErrModelNotFoundOnBackend) || errors.Is(err, ErrModelAccessDenied)
+}
+
 var contextLimitMarkers = []string{
 	"context_length_exceeded",
 	"maximum context length",
@@ -54,9 +55,6 @@ func IsContextLimitMessage(s string) bool {
 	return false
 }
 
-// rateLimitMarkers are rate/capacity error codes that can arrive without a
-// matching HTTP status (Gemini RESOURCE_EXHAUSTED, Anthropic
-// rate_limit_error/overloaded_error, AWS throttling).
 var rateLimitMarkers = []string{
 	"resource_exhausted",
 	"rate_limit_error",
@@ -77,10 +75,26 @@ func isRateLimitCode(s string) bool {
 	return false
 }
 
-// ClassifyProviderError wraps err with the matching typed sentinel: HTTP
-// 429/529 -> ErrRateLimited; a context-overflow phrasing on a 4xx/unknown
-// status (a 5xx is a provider fault, not an overflow) -> ErrContextLengthExceeded.
-// Anything else returns err unchanged.
+var notFoundCodeMarkers = []string{"not_found"}
+
+var notFoundMessageMarkers = []string{"not found", "does not exist"}
+
+var accessDeniedCodeMarkers = []string{"permission_denied", "access_denied"}
+
+func containsMarker(s string, markers []string) bool {
+	s = strings.ToLower(s)
+	if s == "" {
+		return false
+	}
+	for _, m := range markers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// ClassifyProviderError wraps err with the matching typed sentinel based on HTTP status and provider code/message, or returns err unchanged.
 func ClassifyProviderError(err error, httpStatus int, code, message string) error {
 	if err == nil {
 		return nil
@@ -92,6 +106,13 @@ func ClassifyProviderError(err error, httpStatus int, code, message string) erro
 		if IsContextLimitMessage(code) || IsContextLimitMessage(message) {
 			return fmt.Errorf("%w: %w", ErrContextLengthExceeded, err)
 		}
+	}
+	if httpStatus == 404 || containsMarker(code, notFoundCodeMarkers) ||
+		(httpStatus == 0 && containsMarker(message, notFoundMessageMarkers)) {
+		return fmt.Errorf("%w: %w", ErrModelNotFoundOnBackend, err)
+	}
+	if httpStatus == 403 || containsMarker(code, accessDeniedCodeMarkers) {
+		return fmt.Errorf("%w: %w", ErrModelAccessDenied, err)
 	}
 	return err
 }

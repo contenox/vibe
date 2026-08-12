@@ -1,13 +1,5 @@
 package jqtool
 
-// query.go is the bounded execution of one jq program: the deadline bounds
-// time, the results cap bounds count, and the output cap bounds bytes — three
-// separate bounds because a filter can emit unboundedly many values, each
-// individually tiny. The context is only checked between VM instructions, so
-// a single native builtin (e.g. gojq's 2 GiB string-repetition ceiling) can
-// still run to completion; everything else is bounded by the input cap and
-// the deadline.
-
 import (
 	"context"
 	"encoding/json"
@@ -20,7 +12,6 @@ import (
 	"github.com/itchyny/gojq"
 )
 
-// request is one fully-resolved jq_query call.
 type request struct {
 	filter     string
 	in         *loaded
@@ -28,11 +19,6 @@ type request struct {
 	deadline   time.Duration
 }
 
-// clampDeadline turns a caller-supplied millisecond budget into a duration,
-// clamped rather than refused. The clamp is applied to the millisecond count
-// before multiplying: time.Duration is int64 nanoseconds, so multiplying an
-// unclamped large ms value overflows to a negative duration (an
-// already-expired context).
 func clampDeadline(ms int, ok bool) time.Duration {
 	if !ok || ms <= 0 {
 		return DefaultDeadline
@@ -43,7 +29,6 @@ func clampDeadline(ms int, ok bool) time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// clampResults bounds the requested value count the same way.
 func clampResults(max int, ok bool) int {
 	if !ok || max <= 0 {
 		return defaultMaxResults
@@ -54,10 +39,6 @@ func clampResults(max int, ok bool) int {
 	return max
 }
 
-// compile parses and compiles the filter. Parse and compile errors get
-// different messages on purpose: a parse error means the text isn't jq at
-// all, a compile error means it's valid jq naming something that doesn't
-// exist (an unbound $variable, a missing builtin).
 func compile(filter string) (*gojq.Code, error) {
 	if strings.TrimSpace(filter) == "" {
 		return nil, recoverablef(
@@ -71,10 +52,7 @@ func compile(filter string) (*gojq.Code, error) {
 			len(filter), maxFilterBytes)
 	}
 
-	// Refused before parsing: gojq's lexer treats a NUL as end-of-input, so a
-	// filter carrying one would parse cleanly as a truncated, different
-	// program with no error to notice. A bidi override is the display-side
-	// equivalent. Newlines and tabs remain legal.
+	// Refused before parsing: gojq's lexer treats NUL as end-of-input, silently truncating rather than erroring.
 	if r, bad := firstUnsafeRune(filter); bad {
 		return nil, recoverablef(
 			"jq: the filter contains the non-printing character U+%04X, which is refused: jq's lexer stops at a NUL, "+
@@ -90,11 +68,7 @@ func compile(filter string) (*gojq.Code, error) {
 			echoErr(err), echoArg(filter))
 	}
 
-	// The absent compile options are the capability boundary: WithEnvironLoader
-	// returning nil makes `env`/`$ENV` an empty object (otherwise `$ENV` would
-	// leak this process's environment, API keys included, into the model's
-	// context); no WithInputIter means `input`/`inputs` are refused at compile
-	// time; no WithModuleLoader means `import`/`include` cannot load a file.
+	// Security boundary: omitting WithEnvironLoader/WithInputIter/WithModuleLoader blocks $ENV leakage and input/import file access.
 	code, err := gojq.Compile(query, gojq.WithEnvironLoader(func() []string { return nil }))
 	if err != nil {
 		return nil, recoverablef(
@@ -106,8 +80,6 @@ func compile(filter string) (*gojq.Code, error) {
 	return code, nil
 }
 
-// execute runs the compiled filter over every input document and assembles
-// the capped result.
 func execute(ctx context.Context, req request) (*Result, error) {
 	code, err := compile(req.filter)
 	if err != nil {
@@ -145,14 +117,11 @@ func execute(ctx context.Context, req request) (*Result, error) {
 			}
 			raw, err := gojq.Marshal(v)
 			if err != nil {
-				// gojq.Marshal handles every value gojq can produce, so this
-				// is a "cannot happen" reported rather than swallowed.
 				return nil, recoverablef("jq: a value the filter emitted could not be rendered as JSON: %s", echoErr(err))
 			}
 			if spent+len(raw) > MaxOutputBytes {
 				if res.Count == 0 {
-					// One oversized value: return nothing with a concrete
-					// size rather than an unparseable truncated prefix.
+					// Returns nothing rather than an unparseable truncated JSON prefix.
 					return nil, recoverablef(
 						"jq: the first value the filter emitted is %d bytes, over the %d-byte output cap. "+
 							"Narrow the filter — `| keys` to see the shape, `| length` to count, `| .[0:5]` to sample, "+
@@ -183,18 +152,12 @@ func execute(ctx context.Context, req request) (*Result, error) {
 	}
 
 	if res.Count == 0 && res.Note == "" {
-		// An empty result is a real answer, most often a correct filter over
-		// the wrong shape — worth saying to save a repeat call.
 		res.Note = "The filter matched nothing. This is an answer, not an error: no value satisfied it. " +
 			"Check the document's actual shape with `keys` (objects), `length` (arrays), or `.` (everything)."
 	}
 	return res, nil
 }
 
-// runtimeError renders a failure that happened while the filter was running.
-// The deadline case is split out because its fix is never "correct the
-// filter's types": it names the two ways a filter fails to finish
-// (non-terminating recursion, materializing an unbounded sequence).
 func runtimeError(err error, req request, emitted int) error {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
@@ -224,9 +187,6 @@ func runtimeError(err error, req request, emitted int) error {
 		echoErr(err), echoArg(req.in.source), echoArg(req.filter))
 }
 
-// firstUnsafeRune returns the first rune that must not appear in a jq
-// program, and whether there was one. Newline, tab and carriage return are
-// allowed.
 func firstUnsafeRune(s string) (rune, bool) {
 	for _, r := range s {
 		switch r {
@@ -240,8 +200,6 @@ func firstUnsafeRune(s string) (rune, bool) {
 	return 0, false
 }
 
-// clampEcho renders the filter for the result (not an error): clamped but
-// unquoted, since it's already a JSON string field.
 func clampEcho(s string) string {
 	r := []rune(s)
 	if len(r) > maxEchoRunes {

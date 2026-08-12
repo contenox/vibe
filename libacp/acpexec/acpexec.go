@@ -15,8 +15,6 @@ import (
 	"time"
 )
 
-// defaultKillGrace is how long Close waits, after closing the subprocess's
-// stdin, for it to exit on its own before escalating to Process.Kill.
 const defaultKillGrace = 5 * time.Second
 
 // Option configures Spawn. See WithStderr and WithKillGrace.
@@ -28,23 +26,23 @@ type config struct {
 }
 
 // WithStderr forwards the subprocess's stderr to w as it's written, instead
-// of the default (io.Discard). Use a *LockedBuffer if the caller reads w's
+// of the default (io.Discard); use a *LockedBuffer if the caller reads w's
 // contents from a different goroutine than the one writing it.
 func WithStderr(w io.Writer) Option {
 	return func(c *config) { c.stderr = w }
 }
 
 // WithKillGrace overrides how long Close waits for the subprocess to exit on
-// its own (after closing its stdin) before it escalates to Process.Kill.
-// The default is 5 seconds.
+// its own (after closing its stdin) before it escalates to Process.Kill; the
+// default is 5 seconds.
 func WithKillGrace(d time.Duration) Option {
 	return func(c *config) { c.killGrace = d }
 }
 
 // Process is a spawned subprocess wired up as an io.ReadWriteCloser: Read
-// pulls from its stdout, Write pushes to its stdin, Close begins shutdown
-// (see Close). Spawn returns this concrete type, not a bare
-// io.ReadWriteCloser, so callers can still reach Wait's exit error.
+// pulls from its stdout, Write pushes to its stdin, Close begins shutdown;
+// Spawn returns this concrete type, not a bare io.ReadWriteCloser, so callers
+// can still reach Wait's exit error.
 type Process struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
@@ -60,12 +58,10 @@ type Process struct {
 
 var _ io.ReadWriteCloser = (*Process)(nil)
 
-// Spawn starts cmd and returns it as a Process. cmd's Stdin/Stdout are
-// claimed via exec.Cmd.StdinPipe/StdoutPipe — callers must not set them
-// already. Stderr is discarded unless WithStderr overrides it. If ctx is
-// cancelled before the subprocess exits, Spawn closes it down exactly as
-// Close would (grace period, then kill). A non-nil error means no process
-// was left running.
+// Spawn starts cmd (claiming its Stdin/Stdout via
+// exec.Cmd.StdinPipe/StdoutPipe, which callers must not set already) and
+// returns it as a Process, tearing it down exactly as Close would if ctx is
+// cancelled before the subprocess exits.
 func Spawn(ctx context.Context, cmd *exec.Cmd, opts ...Option) (*Process, error) {
 	cfg := config{stderr: io.Discard, killGrace: defaultKillGrace}
 	for _, opt := range opts {
@@ -120,22 +116,13 @@ func Spawn(ctx context.Context, cmd *exec.Cmd, opts ...Option) (*Process, error)
 	return p, nil
 }
 
-// Read reads from the subprocess's stdout. Once the subprocess exits (on its
-// own, or via Close/ctx cancellation), Read returns io.EOF like any closed
-// pipe.
+// Read reads from the subprocess's stdout, returning io.EOF like any closed
+// pipe once the subprocess exits (on its own, or via Close/ctx cancellation).
 func (p *Process) Read(b []byte) (int, error) { return p.stdout.Read(b) }
 
 // Write writes to the subprocess's stdin.
 func (p *Process) Write(b []byte) (int, error) { return p.stdin.Write(b) }
 
-// Close begins graceful shutdown: closes the subprocess's stdin, waits up to
-// the configured grace period (default 5s, see WithKillGrace) for it to exit
-// on its own, and kills it if it hasn't. Always waits for the process to be
-// reaped before returning. Idempotent (sync.Once): every call returns the
-// same result — the subprocess's exit error, or nil for a clean exit.
-// killReapTimeout bounds how long Close waits, after killing the process
-// group, for the Wait reaper to return — Wait can outlive the kill if
-// something outside the group still holds the subprocess's stderr pipe.
 const killReapTimeout = 5 * time.Second
 
 func (p *Process) Close() error {

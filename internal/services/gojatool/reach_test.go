@@ -11,11 +11,6 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// The declared reach: a script says what it touches via `tools: [...]`, and
-// is held to it. The field is optional; when absent, reach is unrestricted.
-
-// reachScript builds a one-tool script with the given `tools` declaration
-// literal (pass "" for no declaration at all) that calls each of `calls`.
 func reachScript(name, declaration string, calls ...string) string {
 	var body strings.Builder
 	for _, call := range calls {
@@ -217,7 +212,6 @@ func TestUnit_Reach_IsExposedForAnApprovalCard(t *testing.T) {
 	}
 }
 
-// recordingTracker records the (operation, subject, error) of every report.
 type recordingTracker struct {
 	mu     sync.Mutex
 	events []trackedEvent

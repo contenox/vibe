@@ -6,39 +6,15 @@ import (
 	"unicode"
 )
 
-// EnvPolicy is the operator-facing whitelist deciding which parent
-// environment variables a confined process may inherit. It sits above
-// scrubEnv: Spec.EnvAllow is the resolved exact-name list scrubEnv copies;
-// EnvPolicy is what an operator authors (exact names or simple globs), with
-// a Deny set that always wins so the control plane and obvious credential
-// shapes can never ride through even a careless-broad Allow. Resolve expands
-// the policy against a concrete parent environment into that exact list:
-//
-//	spec.EnvAllow = libsandbox.DefaultEnvPolicy().
-//		Allowing(libsandbox.ParseEnvList(os.Getenv("CONTENOX_SANDBOX_ENV_ALLOW"))...).
-//		Resolve(os.Environ())
-//
-// The default answer is still "no hole": DefaultEnvPolicy allows only the
-// handful of variables a POSIX shell needs, none carrying a secret.
+// EnvPolicy is the operator-facing whitelist (exact names or simple globs) deciding which parent environment variables a confined process may inherit, with Deny always winning over Allow.
 type EnvPolicy struct {
-	// Allow lists names or globs to pass through. A glob has a single
-	// leading or trailing "*" ("LC_*", "*_PROXY"); a bare "*" passes
-	// everything Deny does not veto.
+	// Allow lists names or globs to pass through (a glob has a single leading or trailing "*"; a bare "*" passes everything Deny does not veto).
 	Allow []string
-	// Deny lists names or globs that are never passed, even when Allow
-	// matches — Deny wins. Defaults to the control plane plus common
-	// credential shapes, so e.g. widening Allow to "AWS_*" still cannot
-	// leak AWS_SECRET_ACCESS_KEY.
+	// Deny lists names or globs that are never passed even when Allow matches — Deny always wins.
 	Deny []string
 }
 
-// DefaultEnvAllow is the sane baseline: what a POSIX shell and common
-// toolchains need, nothing that carries a secret. HOME is deliberately
-// absent — scrubEnv always forces the scoped HOME. Toolchain/deployment
-// specifics (GOCACHE, HTTP(S)_PROXY, …) are not defaulted; an operator adds
-// them knowingly. PATH is inherited on the native-shell path (EnvPolicy.Apply)
-// but neutralized on the confined path, where scrubEnv forces the emulated
-// canonical PATH over any inherited value.
+// DefaultEnvAllow is the sane baseline (POSIX-shell essentials, nothing that carries a secret); HOME is deliberately absent since scrubEnv always forces the scoped HOME.
 func DefaultEnvAllow() []string {
 	return []string{
 		"PATH",
@@ -62,10 +38,7 @@ func ControlPlaneEnvDeny() []string {
 	return []string{"CONTENOX_*"}
 }
 
-// SecretEnvDeny is the common credential name-shape veto, letting a loose
-// "pass everything" allow still strip obvious secrets (e.g. the suffix glob
-// catches AWS_SECRET_ACCESS_KEY while a sibling like AWS_REGION still
-// passes).
+// SecretEnvDeny is the common credential name-shape veto, letting a loose "pass everything" allow still strip obvious secrets.
 func SecretEnvDeny() []string {
 	return []string{
 		"*_TOKEN",
@@ -74,8 +47,6 @@ func SecretEnvDeny() []string {
 		"*_PASSWORD",
 		"*_PASSWD",
 		"*_CREDENTIALS",
-		// Named forms the suffix shapes above miss: a credential that ends in
-		// _ID, carries the secret inside a URL, or spells its own name.
 		"*_API_KEY_ID",
 		"AWS_ACCESS_KEY_ID",
 		"AWS_SESSION_TOKEN",
@@ -119,10 +90,7 @@ func (p EnvPolicy) Denying(names ...string) EnvPolicy {
 	return EnvPolicy{Allow: clone(p.Allow), Deny: concat(p.Deny, names)}
 }
 
-// Resolve expands the policy against a parent environment ("KEY=VALUE"
-// entries) into the sorted, de-duplicated names Spec.EnvAllow expects: every
-// name matching an Allow rule and no Deny rule. Only names present in
-// parentEnv appear. Malformed entries (no "=") are skipped.
+// Resolve expands the policy against a parent environment into the sorted, de-duplicated names (matching Allow, not Deny) that are present in parentEnv; malformed entries (no "=") are skipped.
 func (p EnvPolicy) Resolve(parentEnv []string) []string {
 	kept := make(map[string]struct{}, len(p.Allow))
 	for _, kv := range parentEnv {
@@ -138,12 +106,7 @@ func (p EnvPolicy) Resolve(parentEnv []string) []string {
 	return names
 }
 
-// Apply is the counterpart used by native shell-exec sites (local_shell tool,
-// the "!" PTY): where Resolve returns names, Apply returns the surviving
-// "KEY=VALUE" entries ready for exec.Cmd.Env. Unlike scrubEnv it does not
-// force a scoped HOME — these shells run in the operator's real environment.
-// Last occurrence of a name wins; result is sorted. Malformed entries (no
-// "=") are skipped.
+// Apply is Resolve's counterpart for native shell-exec sites, returning surviving "KEY=VALUE" entries (last occurrence wins, sorted) instead of names; unlike scrubEnv it does not force a scoped HOME.
 func (p EnvPolicy) Apply(parentEnv []string) []string {
 	kept := make(map[string]string, len(parentEnv))
 	for _, kv := range parentEnv {
@@ -167,16 +130,10 @@ func (p EnvPolicy) Apply(parentEnv []string) []string {
 	return out
 }
 
-// envNameVetoes is envNameMatches for the Deny side, matched case-folded.
-// The asymmetry is the point: a veto that misses `github_token` because it
-// was spelled for `GITHUB_TOKEN` fails OPEN, handing the shell the very
-// credential the rule names, while the same folding on Allow would only ever
-// widen a grant. Deny may over-match; Allow may not.
 func envNameVetoes(pattern, name string) bool {
 	return envNameMatches(strings.ToUpper(pattern), strings.ToUpper(name))
 }
 
-// vetoesAny reports whether name is vetoed by any Deny pattern.
 func vetoesAny(patterns []string, name string) bool {
 	for _, p := range patterns {
 		if envNameVetoes(p, name) {
@@ -186,16 +143,11 @@ func vetoesAny(patterns []string, name string) bool {
 	return false
 }
 
-// passes reports whether name matches an Allow rule and no Deny rule (Deny
-// wins).
 func (p EnvPolicy) passes(name string) bool {
 	return !vetoesAny(p.Deny, name) && matchesAny(p.Allow, name)
 }
 
-// ParseEnvList splits an operator-supplied allow/deny list (comma,
-// semicolon, or whitespace separated) into entries, trimming blanks. It does
-// not validate glob syntax, so a typo simply matches nothing and fails
-// closed. Returns nil for an empty or all-blank input.
+// ParseEnvList splits an operator-supplied allow/deny list (comma/semicolon/whitespace separated) into trimmed entries, returning nil for empty or all-blank input; it does not validate glob syntax, so a typo simply matches nothing.
 func ParseEnvList(s string) []string {
 	fields := strings.FieldsFunc(s, func(r rune) bool {
 		return r == ',' || r == ';' || unicode.IsSpace(r)
@@ -206,7 +158,6 @@ func ParseEnvList(s string) []string {
 	return fields
 }
 
-// matchesAny reports whether name matches any pattern (see envNameMatches).
 func matchesAny(patterns []string, name string) bool {
 	for _, pat := range patterns {
 		if envNameMatches(pat, name) {
@@ -216,12 +167,6 @@ func matchesAny(patterns []string, name string) bool {
 	return false
 }
 
-// envNameMatches reports whether name matches pattern: an exact name, or a
-// name with a single leading or trailing "*" (prefix/suffix match), or a
-// bare "*" matching everything. Case-sensitive — on Unix PATH and path are
-// genuinely different variables, so an Allow rule must not widen across
-// case. The Deny side is deliberately different: see envNameVetoes. An empty
-// pattern matches nothing.
 func envNameMatches(pattern, name string) bool {
 	switch {
 	case pattern == "":

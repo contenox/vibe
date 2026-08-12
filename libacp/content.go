@@ -14,8 +14,7 @@ const (
 
 type Annotations struct {
 	Audience []string `json:"audience,omitempty"`
-	// LastModified is an ISO 8601 timestamp indicating when the underlying
-	// resource was last modified.
+	// LastModified is an ISO 8601 timestamp of when the underlying resource was last modified.
 	LastModified string          `json:"lastModified,omitempty"`
 	Priority     *float64        `json:"priority,omitempty"`
 	Meta         json.RawMessage `json:"_meta,omitempty"`
@@ -50,6 +49,11 @@ func NewTextContent(text string) ContentBlock {
 
 func NewImageContent(data, mimeType string) ContentBlock {
 	return ContentBlock{Type: string(ContentKindImage), Data: data, MimeType: mimeType}
+}
+
+// NewAudioContent builds an audio content block; data is standard base64.
+func NewAudioContent(data, mimeType string) ContentBlock {
+	return ContentBlock{Type: string(ContentKindAudio), Data: data, MimeType: mimeType}
 }
 
 func NewResourceLink(uri, name string) ContentBlock {

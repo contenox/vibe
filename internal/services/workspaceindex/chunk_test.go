@@ -146,8 +146,6 @@ func TestUnit_ChunkTokensForContext(t *testing.T) {
 	require.Equal(t, 64, ChunkTokensForContext(8), "a tiny limit still yields a usable floor")
 }
 
-// --- File selection ---
-
 func writeFile(t *testing.T, root, rel, content string) {
 	t.Helper()
 	abs := filepath.Join(root, filepath.FromSlash(rel))

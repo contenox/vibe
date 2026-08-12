@@ -11,20 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnit_MessageIndices_AgentIDColumn_Reserved verifies the reserved,
-// nullable message_indices.agent_id column (session -> agent attribution,
-// not wired to any code path yet): it exists on a fresh install, is nullable,
-// round-trips a value when set, and re-applying the schema against an
-// already-migrated database (the "existing-row ALTER" path — the ALTER TABLE
-// ... ADD COLUMN hits "duplicate column name" and is silently skipped, per
-// NewSQLiteDBManager's incremental-migration behavior) neither errors nor
-// loses data.
+// TestUnit_MessageIndices_AgentIDColumn_Reserved verifies the reserved, nullable message_indices.agent_id column exists, is nullable, round-trips a value, and survives a re-applied schema migration.
 func TestUnit_MessageIndices_AgentIDColumn_Reserved(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "agent_id_migration.db")
 
-	// Fresh create: message_indices' CREATE TABLE has no agent_id column, so
-	// this exercises the ALTER actually adding it for the first time.
+	// Fresh create: message_indices has no agent_id column yet, so this exercises the ALTER adding it for the first time.
 	db1, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
 	require.NoError(t, err)
 
@@ -49,10 +41,7 @@ func TestUnit_MessageIndices_AgentIDColumn_Reserved(t *testing.T) {
 
 	require.NoError(t, db1.Close())
 
-	// Existing-row ALTER path: reopen the same (already migrated) database
-	// file and re-apply the full schema. The agent_id ALTER now hits
-	// "duplicate column name" and must be silently skipped rather than
-	// aborting the rest of the migration.
+	// Existing-row ALTER path: re-applying the schema must silently skip the duplicate-column ALTER rather than aborting.
 	db2, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
 	require.NoError(t, err, "re-applying the schema on an already-migrated db must not error")
 	t.Cleanup(func() { _ = db2.Close() })
@@ -62,7 +51,6 @@ func TestUnit_MessageIndices_AgentIDColumn_Reserved(t *testing.T) {
 	require.NoError(t, exec2.QueryRowContext(ctx, `SELECT agent_id FROM message_indices WHERE id = $1`, "idx-with-agent").Scan(&stillThere))
 	require.Equal(t, agentID, stillThere, "existing row data must survive the re-applied migration")
 
-	// The column must still be nullable post-migration too.
 	_, err = exec2.ExecContext(ctx, `INSERT INTO message_indices (id, identity) VALUES ($1, $2)`,
 		"idx-no-agent-2", "identity-3")
 	require.NoError(t, err)

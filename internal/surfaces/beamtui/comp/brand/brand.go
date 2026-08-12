@@ -86,31 +86,47 @@ const wordmarkRow = 2
 // literal keystrokes; the label carries the muted style.
 type hint struct{ key, label string }
 
-// fullHints is the welcome header's hint line: the affordances a first-run user cannot discover by typing.
+// fullHints is the welcome header's hint line: the affordances a first-run
+// user cannot discover by typing. The editor hint is not here — it renders
+// only when the caller wired an editor (see hintLine and Info.Editor), since
+// a hint may only advertise what the surface actually enforces.
 var fullHints = []hint{
 	{"/", "commands"},
 	{"@", "files"},
 	{"!", "shell"},
-	{"Ctrl+X Ctrl+E", "editor"},
 	{"?", "keys"},
 }
 
-// compactHints is the same set at narrow widths, abbreviated so every affordance survives.
-const compactHints = "/ cmds  @ files  ! shell  ^X^E editor  ? keys"
+// editorHint is the compose-in-editor affordance, spliced ahead of the keys
+// hint when Info.Editor says the chord actually does something.
+var editorHint = hint{"Ctrl+X Ctrl+E", "editor"}
+
+// compactHints/compactHintsNoEditor are the same sets at narrow widths,
+// abbreviated so every affordance survives.
+const (
+	compactHints         = "/ cmds  @ files  ! shell  ^X^E editor  ? keys"
+	compactHintsNoEditor = "/ cmds  @ files  ! shell  ? keys"
+)
 
 // identity is the status bar's wordmark: the product name, not the surface's.
 const identity = "contenox"
 
 // Info is the session context the welcome header may show. The zero value
-// renders the pure brand moment — no model, no provider, no session.
+// renders the pure brand moment — no model, no provider, no session, and no
+// editor hint.
 //
 // ASCII selects the character fallback and must be true exactly when the
 // caller's caps profile is Mono; this package never probes for it itself.
+//
+// Editor must be true exactly when the Ctrl+X, Ctrl+E handoff is wired (the
+// app-shell's Deps.Editor is non-nil): the hint line advertises the chord
+// only then, because nothing may be advertised that is not enforced.
 type Info struct {
 	ASCII    bool
 	Model    string
 	Provider string
 	Session  string
+	Editor   bool
 }
 
 // Welcome renders the fresh-session header for width, printed once into
@@ -186,7 +202,7 @@ func full(info Info) []frame.Line {
 		))
 	}
 
-	return append(lines, hintLine(g))
+	return append(lines, hintLine(g, info.Editor))
 }
 
 // compact is the narrow-width fallback: the wordmark still reads, the
@@ -194,6 +210,10 @@ func full(info Info) []frame.Line {
 // gap matches the full layout's, so the device reads as the same continuous
 // stroke at both sizes rather than a bullet on a list item.
 func compact(info Info) []frame.Line {
+	hints := compactHintsNoEditor
+	if info.Editor {
+		hints = compactHints
+	}
 	g := gutter(info.ASCII)
 	return []frame.Line{
 		frame.L(
@@ -205,19 +225,27 @@ func compact(info Info) []frame.Line {
 		frame.L(
 			frame.S(frame.StyleBrand, g),
 			frame.S(frame.StyleNone, gutterGap),
-			frame.S(frame.StyleMuted, compactHints),
+			frame.S(frame.StyleMuted, hints),
 		),
 	}
 }
 
 // hintLine lists the keys a first-run user cannot guess: keys unstyled (a
 // literal keystroke), labels muted, joined so the whole line dims as a unit.
-func hintLine(g string) frame.Line {
+// The editor chord joins the list only when the caller wired an editor,
+// keeping the line an inventory of what works rather than what could.
+func hintLine(g string, editor bool) frame.Line {
+	hints := fullHints
+	if editor {
+		// The chord slots ahead of the keys hint, mirroring compactHints.
+		last := len(fullHints) - 1
+		hints = append(append([]hint(nil), fullHints[:last]...), editorHint, fullHints[last])
+	}
 	l := frame.Line{
 		frame.S(frame.StyleBrand, g),
 		frame.S(frame.StyleNone, gutterGap),
 	}
-	for i, h := range fullHints {
+	for i, h := range hints {
 		if i > 0 {
 			l = append(l, frame.S(frame.StyleMuted, "   "))
 		}

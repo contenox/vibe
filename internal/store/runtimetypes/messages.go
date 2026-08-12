@@ -11,43 +11,19 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// Durable chat history over message_indices and messages: an index row is one
-// conversation (a CLI/ACP session), and every message row hangs off it by
-// idx_id under ON DELETE CASCADE, so dropping the index drops the thread.
-//
-// Index rows are WORKSPACE-scoped: workspace_id is fixed at construction, never
-// a filter argument, so no caller can widen a read past its own workspace.
-// Message rows carry no workspace_id of their own — they inherit it through the
-// idx_id foreign key, which is why the message-level methods take a stream ID
-// and no workspace.
-//
-// Payload is opaque to this layer: the service that writes it owns its shape
-// (taskengine.Message JSON today), and the store never parses it.
-
-// Message-page bounds. A caller that names no limit gets
-// DefaultMessagePageLimit; one that asks for more than MaxMessagePageLimit is
-// clamped, so no caller can turn a page read back into a whole-session read.
+// Message-page bounds: unset defaults to DefaultMessagePageLimit, and requests above MaxMessagePageLimit are clamped.
 const (
 	DefaultMessagePageLimit = 100
 	MaxMessagePageLimit     = 1000
 )
 
-// MessageStore is chat-history persistence, scoped to one workspace at
-// construction.
-//
-// It takes an Exec rather than a DBManager, like most of this package's stores:
-// every method is a single statement, and callers that need several to commit
-// together (sessionservice's create-and-activate, chatservice's persist path)
-// pass their own transaction's Exec in.
+// MessageStore is chat-history persistence scoped to one workspace at construction, taking an Exec so callers can compose it into their own transaction.
 type MessageStore interface {
 	// CreateMessageIndex creates an unnamed conversation index for identity.
 	CreateMessageIndex(ctx context.Context, id string, identity string) error
-	// CreateNamedMessageIndex creates a named conversation index. The name is
-	// unique per workspace (idx_message_indices_name), so a duplicate is a
-	// constraint error, not a silent second session.
+	// CreateNamedMessageIndex creates a named conversation index; the name must be unique per workspace.
 	CreateNamedMessageIndex(ctx context.Context, id string, identity string, name string) error
-	// DeleteMessageIndex removes identity's index, cascading to its messages.
-	// Returns libdb.ErrNotFound when no row matched.
+	// DeleteMessageIndex removes identity's index, cascading to its messages, and returns libdb.ErrNotFound when no row matched.
 	DeleteMessageIndex(ctx context.Context, id string, identity string) error
 	// ListMessageIndices returns identity's index IDs in this workspace.
 	ListMessageIndices(ctx context.Context, identity string) ([]string, error)
@@ -55,34 +31,20 @@ type MessageStore interface {
 	// and last-activity times, most recently active first; never-used sessions
 	// sort last, then by name and ID.
 	ListMessageSessions(ctx context.Context, identity string) ([]MessageSession, error)
-	// GetMessageSessionByName returns identity's session with that name.
-	// Returns libdb.ErrNotFound when none exists.
+	// GetMessageSessionByName returns identity's session with that name, or libdb.ErrNotFound when none exists.
 	GetMessageSessionByName(ctx context.Context, identity string, name string) (*MessageSession, error)
-	// GetMessageIndexName returns an index's human-readable name by ID, "" when
-	// the row exists but carries none. Returns libdb.ErrNotFound when no row
-	// matched. Keyed on the primary key alone, for the same reason
-	// RenameMessageSession is.
+	// GetMessageIndexName returns an index's name by ID (empty if unset), or libdb.ErrNotFound when no row matched.
 	GetMessageIndexName(ctx context.Context, id string) (string, error)
-	// RenameMessageSession sets a session's human-readable name. Returns
-	// libdb.ErrNotFound when no row matched.
+	// RenameMessageSession sets a session's name, returning libdb.ErrNotFound when no row matched.
 	RenameMessageSession(ctx context.Context, id string, name string) error
 
-	// AppendMessages inserts messages in one batch statement. A zero AddedAt is
-	// stamped with now (UTC) on the passed struct. Empty input is a no-op.
+	// AppendMessages inserts messages in one batch statement, stamping a zero AddedAt with now (UTC); empty input is a no-op.
 	AppendMessages(ctx context.Context, messages ...*Message) error
-	// DeleteMessages removes every message of stream, keeping the index row.
-	// Returns libdb.ErrNotFound when the stream held no messages.
+	// DeleteMessages removes every message of stream, keeping the index row, and returns libdb.ErrNotFound when the stream held no messages.
 	DeleteMessages(ctx context.Context, stream string) error
 	// ListMessages returns stream's messages oldest first.
 	ListMessages(ctx context.Context, stream string) ([]*Message, error)
-	// ListMessagesPage returns one keyset page of stream's messages in
-	// (added_at, id) order — the read to use instead of ListMessages when the
-	// caller wants a bounded prefix rather than a whole conversation.
-	//
-	// Keyset, not OFFSET: every page resumes from the previous page's last row
-	// (Message.Cursor), so a row appended between two page reads can only land
-	// past the boundary, never shift it and make a page drop or repeat a row.
-	// A page shorter than the effective limit is the end of the stream.
+	// ListMessagesPage returns one keyset page of stream's messages in (added_at, id) order; a page shorter than the limit is the end of the stream.
 	ListMessagesPage(ctx context.Context, stream string, f MessagePageFilter) ([]*Message, error)
 	// LastMessage returns stream's newest message, libdb.ErrNotFound when empty.
 	LastMessage(ctx context.Context, stream string) (*Message, error)
@@ -90,9 +52,7 @@ type MessageStore interface {
 	CountMessages(ctx context.Context, stream string) (int, error)
 }
 
-// Message is one stored conversation turn. IDX names its index (stream), and
-// (ID, IDX) is the primary key — re-appending the same ID to the same stream is
-// a constraint error, which is what makes the service layer's diff-append safe.
+// Message is one stored conversation turn; (ID, IDX) is the primary key, so re-appending the same ID to a stream is a constraint error.
 type Message struct {
 	ID      string    `json:"id"`
 	IDX     string    `json:"idx_id"`
@@ -106,26 +66,15 @@ func (m *Message) Cursor() MessageCursor {
 	return MessageCursor{AddedAt: m.AddedAt, ID: m.ID}
 }
 
-// MessageCursor is one page boundary: the (added_at, id) of the last row a
-// page returned.
-//
-// ID is not decoration. added_at is NOT unique — one AppendMessages batch
-// stamps every zero-timestamped message the same instant — so a boundary
-// expressed as a timestamp alone lands in the middle of a tie, and the next
-// page either re-reads the tied rows or skips them. (added_at, id) is total:
-// (id, idx_id) is the messages primary key, so within one stream id is unique.
+// MessageCursor is one page boundary: the (added_at, id) of the last row a page returned.
 type MessageCursor struct {
 	AddedAt time.Time
 	ID      string
 }
 
-// MessagePageFilter narrows a ListMessagesPage read. The zero value is the
-// stream's first page, oldest first, of DefaultMessagePageLimit rows. The
-// stream is never a filter field and the workspace is never either — one is a
-// method argument, the other fixed by the store.
+// MessagePageFilter narrows a ListMessagesPage read; the zero value is the stream's first page, oldest first, of DefaultMessagePageLimit rows.
 type MessagePageFilter struct {
-	// After resumes strictly after this boundary, or strictly before it when
-	// Backwards. A zero AddedAt starts at the stream's oldest (newest) message.
+	// After resumes strictly after this boundary (or before it when Backwards); zero starts at the stream's oldest/newest message.
 	After MessageCursor
 	// Backwards walks the stream newest first.
 	Backwards bool
@@ -134,8 +83,7 @@ type MessagePageFilter struct {
 	Limit int
 }
 
-// MessageSession is one conversation index row plus its aggregates. Name is
-// empty for an unnamed index; UpdatedAt is zero for one that holds no messages.
+// MessageSession is one conversation index row plus its aggregates; Name is empty when unnamed and UpdatedAt is zero when the index holds no messages.
 type MessageSession struct {
 	ID           string
 	Identity     string
@@ -144,9 +92,7 @@ type MessageSession struct {
 	UpdatedAt    time.Time
 }
 
-// MessageIndexRow is one index row with its message count, read across every
-// workspace at once — what operator tooling needs when it must report what the
-// database holds rather than what one workspace can see.
+// MessageIndexRow is one index row with its message count, read across every workspace at once.
 type MessageIndexRow struct {
 	ID           string
 	Identity     string
@@ -289,10 +235,6 @@ func (s *messageStore) GetMessageSessionByName(ctx context.Context, identity str
 	return &si, nil
 }
 
-// GetMessageIndexName keys on the primary key alone, for RenameMessageSession's
-// reason: session IDs are UUIDs, unique across workspaces. Callers hold an
-// internal ID they were already given; the lookup only turns it back into the
-// name the ACP/CLI surfaces address a session by.
 func (s *messageStore) GetMessageIndexName(ctx context.Context, id string) (string, error) {
 	var name string
 	err := s.exec.QueryRowContext(ctx, `
@@ -310,9 +252,6 @@ func (s *messageStore) GetMessageIndexName(ctx context.Context, id string) (stri
 	return name, nil
 }
 
-// RenameMessageSession keys on the primary key alone: session IDs are UUIDs,
-// unique across workspaces, so the workspace predicate the other index
-// statements carry would add nothing here.
 func (s *messageStore) RenameMessageSession(ctx context.Context, id string, name string) error {
 	result, err := s.exec.ExecContext(ctx, `
 		UPDATE message_indices
@@ -341,10 +280,7 @@ func (s *messageStore) AppendMessages(ctx context.Context, messages ...*Message)
 			msg.AddedAt = now
 		}
 		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d)", i*4+1, i*4+2, i*4+3, i*4+4))
-		// Bound as UTC on purpose: SQLite keeps added_at as the TEXT of the
-		// bound time's String(), so a value carrying a non-UTC zone would sort
-		// and compare by its local wall clock — breaking ORDER BY added_at and
-		// every keyset boundary in ListMessagesPage.
+		// UTC only: SQLite stores added_at as String() text, so a non-UTC zone would sort wrong and break every keyset boundary.
 		valueArgs = append(valueArgs, msg.ID, msg.IDX, msg.Payload, msg.AddedAt.UTC())
 	}
 
@@ -412,10 +348,7 @@ func (s *messageStore) ListMessagesPage(ctx context.Context, stream string, f Me
 	if f.Backwards {
 		cmp, order = "<", "DESC"
 	}
-	// The stream predicate is placeholder $1 and unconditional; the boundary
-	// appends after it so $N always matches len(args). The boundary is the
-	// row-comparison (added_at, id) > (cursor) spelled out, because SQLite has
-	// no row-value comparison and Postgres and it disagree on the sugar.
+	// (added_at, id) > (cursor) is spelled out by hand: SQLite has no row-value comparison syntax.
 	args := []any{stream}
 	where := "idx_id = $1"
 	if !f.After.AddedAt.IsZero() {
@@ -483,14 +416,7 @@ func (s *messageStore) CountMessages(ctx context.Context, stream string) (int, e
 	return count, nil
 }
 
-// ListAllMessageIndices returns every index row in the database, in no
-// particular order, each with its message count.
-//
-// Deliberately a function and not a MessageStore method: MessageStore fixes one
-// workspace at construction so that no read can widen past it, and this read is
-// whole-database BY INTENT — the CLI's cross-workspace session inventory, whose
-// entire job is showing rows the active workspace cannot see. Keeping it off the
-// interface is what keeps that intent visible at the call site.
+// ListAllMessageIndices returns every index row in the database, in no particular order, each with its message count.
 func ListAllMessageIndices(ctx context.Context, exec libdb.Exec) ([]MessageIndexRow, error) {
 	rows, err := exec.QueryContext(ctx, `
 		SELECT mi.id, mi.identity, mi.workspace_id, COALESCE(mi.name, ''),
@@ -515,15 +441,7 @@ func ListAllMessageIndices(ctx context.Context, exec libdb.Exec) ([]MessageIndex
 	return out, nil
 }
 
-// ResolveMessageIndexWorkspace returns the workspace owning identity's index
-// named name. The unique index on (name, workspace_id) makes the name unique
-// only WITHIN a workspace, so the same session name can exist in several: the
-// busiest one wins, then the highest id, so the answer is stable.
-// Returns libdb.ErrNotFound when no index carries that name.
-//
-// Deliberately a function and not a MessageStore method: it answers WHICH
-// workspace a session belongs to, so it is the call that picks a store's
-// workspace and cannot itself be scoped to one.
+// ResolveMessageIndexWorkspace returns the workspace owning identity's index named name, preferring the busiest then highest id when several match, or libdb.ErrNotFound when none does.
 func ResolveMessageIndexWorkspace(ctx context.Context, exec libdb.Exec, identity string, name string) (string, error) {
 	var workspaceID string
 	err := exec.QueryRowContext(ctx, `
@@ -543,8 +461,6 @@ func ResolveMessageIndexWorkspace(ctx context.Context, exec libdb.Exec, identity
 	return workspaceID, nil
 }
 
-// nullableMessageTime decodes MAX(added_at) from the aggregate read, where the
-// driver may hand back nil (no messages), a time, or a formatted string.
 func nullableMessageTime(value any) (time.Time, error) {
 	switch v := value.(type) {
 	case nil:
@@ -560,8 +476,6 @@ func nullableMessageTime(value any) (time.Time, error) {
 	}
 }
 
-// parseMessageTimeString tries the layouts SQLite TIMESTAMP columns come back
-// in, widest first.
 func parseMessageTimeString(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

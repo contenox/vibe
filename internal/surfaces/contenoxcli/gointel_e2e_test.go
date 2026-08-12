@@ -20,11 +20,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// realSystemDir returns a real, genuinely OS-absolute system directory
-// certainly outside any test fixture's workspace root — "/etc" on Unix, but
-// a bare leading "/" is not absolute on Windows (filepath.IsAbs needs a
-// drive letter there), so an absolute-outside-workspace escape attempt needs
-// an actual Windows system path to test the same containment rule.
 func realSystemDir(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "windows" {
@@ -36,14 +31,6 @@ func realSystemDir(t *testing.T) string {
 	return `C:\Windows`
 }
 
-// ---------------------------------------------------------------------------
-// gointel on the engine path: asserts a gointel call travelling through
-// BuildEngine, the aggregate tools repo, the real HITL wrapper, and the
-// shipped policy file comes back with a fact rather than an approval prompt.
-// An ask or a deny is a failure; only allow passes.
-// ---------------------------------------------------------------------------
-
-// gointelAsker is the approval callback an allow-tier toolset must never reach.
 type gointelAsker struct {
 	mu   sync.Mutex
 	asks []string
@@ -62,9 +49,6 @@ func (a *gointelAsker) seen() []string {
 	return append([]string(nil), a.asks...)
 }
 
-// gointelSink captures the engine's hitl_decision events: the only evidence
-// of which envelope evaluated a call, since a green result alone cannot tell
-// an allow from a policy that was never consulted.
 type gointelSink struct {
 	mu     sync.Mutex
 	events []taskengine.TaskEvent
@@ -89,8 +73,6 @@ func (s *gointelSink) drain() []taskengine.TaskEvent {
 	return out
 }
 
-// gointelRepoRoot walks up from the test's working directory to this
-// repository's module root — the workspace these tests index.
 func gointelRepoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -113,15 +95,9 @@ type gointelHarness struct {
 	contenoxDir string
 }
 
-// newGointelHarness builds a real engine through BuildEngine with HITL on and
-// the shipped policy presets seeded into an isolated .contenox dir, so these
-// tests evaluate the envelopes this binary ships, not whatever is on the
-// machine.
 func newGointelHarness(t *testing.T, allowedDir string) *gointelHarness {
 	t.Helper()
 
-	// No interactive answer is obtainable from this process: a prompt that
-	// tries to read one fails at once rather than parking the test.
 	devnull, err := os.Open(os.DevNull)
 	require.NoError(t, err)
 	realStdin := os.Stdin
@@ -167,8 +143,6 @@ func (h *gointelHarness) stop() {
 	}
 }
 
-// call runs one gointel tool through the engine's chain executor — the real
-// dispatch, HITL wrapper and shipped policy included.
 func (h *gointelHarness) call(ctx context.Context, tool string, args map[string]string) (any, error) {
 	chain := &taskengine.TaskChainDefinition{
 		ID:          "gointel-e2e",
@@ -190,7 +164,6 @@ func (h *gointelHarness) call(ctx context.Context, tool string, args map[string]
 	return out, err
 }
 
-// requireAllowedWithoutAsking is the headline assertion, applied to every call.
 func (h *gointelHarness) requireAllowedWithoutAsking(t *testing.T, policyName, tool string) {
 	t.Helper()
 	events := h.sink.drain()
@@ -221,10 +194,6 @@ func (h *gointelHarness) requireAllowedWithoutAsking(t *testing.T, policyName, t
 	require.Emptyf(t, h.asker.seen(), "%s: the approval callback was invoked for %s", policyName, tool)
 }
 
-// ---------------------------------------------------------------------------
-// Row 1 — the headline: real engine, real wrapper, shipped policies
-// ---------------------------------------------------------------------------
-
 // TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies asserts three gointel tools, run against this repository through a real engine under each shipped policy, return verifiable ground truth with an allow decision.
 func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *testing.T) {
 	if testing.Short() {
@@ -237,8 +206,6 @@ func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *te
 	for _, policy := range []string{"hitl-policy-default.json", "hitl-policy-acp.json"} {
 		policy := policy
 		t.Run(policy, func(t *testing.T) {
-			// Pinning the policy here means the decision events below name the
-			// file that was actually consulted.
 			ctx := hitlservice.WithPolicyName(context.Background(), policy)
 			h.sink.drain()
 
@@ -324,13 +291,8 @@ func TestSystem_GoIntel_EnginePathHonoursTheEnvelopeOnDisk(t *testing.T) {
 		"acpx has a deny floor and no gointel rule, so the identical call must be denied — if it is allowed, the pinned FILE is not what decided")
 	require.IsType(t, "", out, "a denied call returns the deny message")
 
-	// Nothing was asked: acpx is allow/deny only, there is no operator to prompt.
 	require.Empty(t, h.asker.seen())
 }
-
-// ---------------------------------------------------------------------------
-// Row 2 — hostile arguments through the engine's own dispatch
-// ---------------------------------------------------------------------------
 
 // TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping asserts hostile arguments, through the engine's own string-coerced argument marshalling, refuse as a task error rather than panic or escape containment.
 func TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping(t *testing.T) {
@@ -345,10 +307,9 @@ func TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping(t *test
 	huge := strings.Repeat("Aa0", 3500) // ~10 KB
 
 	cases := []struct {
-		name string
-		tool string
-		args map[string]string
-		// wantContained marks the cases whose refusal must name containment.
+		name          string
+		tool          string
+		args          map[string]string
 		wantContained bool
 	}{
 		{"symbol traversal", gointel.ToolDefinition, map[string]string{"symbol": "../../etc/passwd"}, false},
@@ -388,7 +349,6 @@ func TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping(t *test
 				require.Containsf(t, msg, "allowed directory",
 					"an escape attempt must be refused BY NAME, so the model learns the boundary exists: %q", msg)
 			}
-			// Whatever the message says, it never names a path outside the workspace.
 			require.NotContains(t, msg, "/etc/passwd:")
 		})
 	}
@@ -428,15 +388,10 @@ func TestSystem_GoIntel_EnginePathTolerantOfSloppyButHonestArguments(t *testing.
 		})
 	}
 
-	// The cap is honoured, not merely tolerated.
 	out, err := h.call(ctx, gointel.ToolReferences, map[string]string{"symbol": "frame.StyleBrand", "max": "5"})
 	require.NoError(t, err)
 	require.LessOrEqual(t, out.(*gointel.ReferencesResult).Shown, 5)
 }
-
-// ---------------------------------------------------------------------------
-// Rows 3 and 4 — teardown and freshness, on the engine path
-// ---------------------------------------------------------------------------
 
 // TestSystem_GoIntel_EngineStopClosesTheIndexForLateCalls asserts a gointel call arriving after engine.Stop is refused promptly and typed, not served into a cache whose reaper has already exited.
 func TestSystem_GoIntel_EngineStopClosesTheIndexForLateCalls(t *testing.T) {
@@ -484,8 +439,6 @@ func TestSystem_GoIntel_EnginePathConcurrentCallsStayCorrect(t *testing.T) {
 		t.Skip("skipping gointel engine e2e: builds a real engine and type-checks this repository")
 	}
 
-	// A throwaway module, not this repo: the writer edits source, and the only
-	// acceptable place to do that is a directory the test owns.
 	root := t.TempDir()
 	writeGointelModule(t, root)
 	h := newGointelHarness(t, root)
@@ -552,7 +505,6 @@ func TestSystem_GoIntel_EnginePathConcurrentCallsStayCorrect(t *testing.T) {
 		t.Fatal("concurrent engine-path calls did not drain within 120s — a deadlock between the rebuild lock and the query path")
 	}
 
-	// No call was ever gated, however many ran at once.
 	require.Empty(t, h.asker.seen())
 }
 
@@ -574,7 +526,6 @@ func TestSystem_GoIntel_EnginePathSeesAnEditImmediately(t *testing.T) {
 
 	corePath := filepath.Join(root, "core", "core.go")
 
-	// (1) An edit to an existing file, written exactly as write_file writes one.
 	src, err := os.ReadFile(corePath)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(corePath, append(src, []byte(
@@ -584,26 +535,21 @@ func TestSystem_GoIntel_EnginePathSeesAnEditImmediately(t *testing.T) {
 	require.NoError(t, err, "the mtime sweep did not see an edit made moments earlier")
 	require.Contains(t, out.(*gointel.DefinitionResult).Location, "core/core.go:")
 
-	// (2) A brand-new file in an existing package — invisible to every per-file
-	// stat, caught only by the package DIRECTORY's own stamp.
+	// A new file is invisible to every per-file stat, caught only by the package DIRECTORY's own stamp.
 	require.NoError(t, os.WriteFile(filepath.Join(root, "core", "extra.go"),
 		[]byte("package core\n\n// FromANewFile did not exist in any indexed file.\nfunc FromANewFile() int { return 1 }\n"), 0o644))
 	_, err = h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "core.FromANewFile"})
 	require.NoError(t, err, "a new file in an existing package was not seen")
 
-	// go_diagnostics reports on what it watched change, unprompted.
 	diag, err := h.call(ctx, gointel.ToolDiagnostics, map[string]string{"scope": "changed"})
 	require.NoError(t, err)
 	require.NotEmpty(t, diag.(*gointel.DiagnosticsResult).Packages,
 		"scope=changed saw nothing after two writes: %q", diag.(*gointel.DiagnosticsResult).Note)
 
-	// (3) A deletion. The dangerous direction: a confident file:line for a symbol
-	// that no longer exists is worse than a refusal.
 	require.NoError(t, os.Remove(filepath.Join(root, "core", "extra.go")))
 	_, err = h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "core.FromANewFile"})
 	require.Error(t, err, "a deleted symbol still resolved — the snapshot is stale in the one direction that lies")
 
-	// (4) go_references reflects a call site added seconds ago.
 	before, err := h.call(ctx, gointel.ToolReferences, map[string]string{"symbol": "core.Widget"})
 	require.NoError(t, err)
 	baseline := before.(*gointel.ReferencesResult).Uses
@@ -624,8 +570,6 @@ func TestSystem_GoIntel_EnginePathSeesAnEditImmediately(t *testing.T) {
 	require.Empty(t, h.asker.seen())
 }
 
-// writeGointelModule materialises the small stdlib-only module the
-// edit-and-teardown tests own and mutate.
 func writeGointelModule(t *testing.T, root string) {
 	t.Helper()
 	files := map[string]string{
@@ -646,10 +590,9 @@ func TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably(t *testing.T
 		t.Skip("skipping gointel engine e2e: builds a real engine")
 	}
 
-	h := newGointelHarness(t, "") // exactly what `contenox beam` passes today
+	h := newGointelHarness(t, "")
 
-	// go test sets cwd to this package dir — mid-module, with go.mod above it —
-	// so the cwd-rooted index must refuse with the boundary refusal.
+	// go test sets cwd to this package dir, so the cwd-rooted index must refuse with the boundary refusal.
 	_, err := h.call(context.Background(), gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand"})
 	require.Error(t, err, "an index rooted at a dir whose module root lies above it answered a query")
 	msg := err.Error()
@@ -657,7 +600,6 @@ func TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably(t *testing.T
 	require.Containsf(t, msg, "lies outside the allowed directory", "the refusal does not name the boundary: %q", msg)
 	require.Containsf(t, msg, "gointel only indexes modules rooted inside the workspace", "the refusal does not teach the rule: %q", msg)
 
-	// It still does not gate: an unusable tool that also interrupts would be the worst of both.
 	h.requireAllowedWithoutAsking(t, "hitl-policy-default.json", gointel.ToolDefinition)
 }
 

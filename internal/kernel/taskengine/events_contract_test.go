@@ -64,9 +64,7 @@ func TestContract_StreamedRun_SequenceFieldsAndAddresses(t *testing.T) {
 	_, _, captured, err := env.ExecEnv(context.Background(), chain, "world", taskengine.DataTypeString)
 	require.NoError(t, err)
 
-	// Ordering guarantees: chain bracket outermost, step bracket inside it,
-	// stream bracket innermost — stream_end after the LAST chunk and before
-	// step_completed.
+	// Ordering: chain bracket outermost, step bracket inside it, stream bracket innermost; stream_end after the LAST chunk, before step_completed.
 	var kinds []taskengine.TaskEventKind
 	for _, ev := range sink.events {
 		kinds = append(kinds, ev.Kind)
@@ -83,8 +81,6 @@ func TestContract_StreamedRun_SequenceFieldsAndAddresses(t *testing.T) {
 		taskengine.TaskEventChainCompleted,
 	}, kinds)
 
-	// step_stream_end field matrix: chunk count, verbatim finish reason,
-	// provider usage, and model identity.
 	streamEnd := sink.events[6]
 	assert.Equal(t, 3, streamEnd.ChunkCount)
 	assert.Equal(t, "stop", streamEnd.FinishReason)
@@ -94,9 +90,7 @@ func TestContract_StreamedRun_SequenceFieldsAndAddresses(t *testing.T) {
 	assert.Equal(t, "openai", streamEnd.ProviderType)
 	assert.Equal(t, "b1", streamEnd.BackendID)
 
-	// Address invariants: every event of the run names the chain; every event
-	// emitted inside the task attempt names the task; chain-level events name
-	// no task. No event of this run has a tool-call address.
+	// Address invariants: every event names the chain; task-scoped events also name the task; chain-level events do not; no event here carries a tool-call address.
 	for i, ev := range sink.events {
 		assert.Equal(t, "chain.contract", ev.Scope.Chain, "event %d (%s) must carry the chain address", i, ev.Kind)
 		assert.Empty(t, ev.Scope.ToolCall, "event %d (%s) is not tool-scoped", i, ev.Kind)
@@ -111,7 +105,6 @@ func TestContract_StreamedRun_SequenceFieldsAndAddresses(t *testing.T) {
 		}
 	}
 
-	// Captured state carries the same address contract.
 	require.Len(t, captured, 1)
 	assert.Equal(t, taskengine.EventScope{Chain: "chain.contract", Task: "task1"}, captured[0].Scope)
 }
@@ -185,8 +178,7 @@ func TestContract_MidStreamFailure_NoStreamEndBracket(t *testing.T) {
 		streamFunc: func(ctx context.Context, req llmrepo.Request, messages []libmodelprovider.Message, opts ...libmodelprovider.ChatArgument) (<-chan *libmodelprovider.StreamParcel, llmrepo.Meta, error) {
 			ch := make(chan *libmodelprovider.StreamParcel, 2)
 			ch <- &libmodelprovider.StreamParcel{Data: "partial"}
-			// Stream closes without a Terminal parcel: contract violation →
-			// mid-stream failure, final (no fallback re-run after publishing).
+			// No Terminal parcel: contract violation → mid-stream failure (no fallback re-run).
 			close(ch)
 			return ch, llmrepo.Meta{ModelName: "test-model", ProviderType: "openai"}, nil
 		},

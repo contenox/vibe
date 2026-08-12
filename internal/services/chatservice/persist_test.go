@@ -1,9 +1,5 @@
 package chatservice_test
 
-// PersistDiff unit tests, previously colocated with the message store they
-// wrote through (internal/services/messagestore). They test the manager's
-// diffing, not the store, so they live with the manager now.
-
 import (
 	"testing"
 	"time"

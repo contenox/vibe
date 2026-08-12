@@ -18,15 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Tests the answerer's decisions with the HITL service and mission store
-// faked out. Wire behavior is covered end to end in
-// e2e_unattended_permission_test.go.
-
-// ─── fakes ────────────────────────────────────────────────────────────────
-
-// fakeHITL records what it was asked to evaluate and what ask it was handed,
-// and answers from preset values. It implements only what the answerer calls;
-// the rest satisfies the interface.
 type fakeHITL struct {
 	mu sync.Mutex
 
@@ -125,7 +116,6 @@ func (f *fakeHITL) lastEval(t *testing.T) evalCall {
 	return f.evalCalls[len(f.evalCalls)-1]
 }
 
-// fakeMissions answers GetByInstance from a map; everything else is unused here.
 type fakeMissions struct {
 	missionservice.Service
 	byInstance map[string]*missionservice.Mission
@@ -142,8 +132,6 @@ func (f *fakeMissions) GetByInstance(_ context.Context, instanceID string) (*mis
 	}
 	return m, nil
 }
-
-// ─── helpers ──────────────────────────────────────────────────────────────
 
 func namedRequest(t *testing.T, toolsName, toolName string, args map[string]any) libacp.RequestPermissionRequest {
 	t.Helper()
@@ -192,8 +180,6 @@ func answerer(hitl *fakeHITL, missions missionservice.Service, defaultPolicy str
 func missionsWith(m *missionservice.Mission) *fakeMissions {
 	return &fakeMissions{byInstance: map[string]*missionservice.Mission{"inst-1": m}}
 }
-
-// ─── tests ────────────────────────────────────────────────────────────────
 
 func TestUnit_Unattended_EvaluatesTheMissionsEnvelope(t *testing.T) {
 	hitl := &fakeHITL{verdict: hitlservice.EvaluationResult{Action: hitlservice.ActionAllow}}
@@ -250,14 +236,11 @@ func TestUnit_Unattended_DeniedNeedsNoAsk(t *testing.T) {
 
 func TestUnit_Unattended_UnmappableRequestEscalates(t *testing.T) {
 	hitl := &fakeHITL{
-		// Deliberately hostile: an evaluator that would allow anything, so the
-		// test fails if the answerer ever consults it for an unnamed request.
 		verdict:  hitlservice.EvaluationResult{Action: hitlservice.ActionAllow},
 		approved: false,
 	}
 	missions := missionsWith(&missionservice.Mission{ID: "mission-1", InstanceID: "inst-1", HITLPolicyName: "envelope.json"})
 
-	// A foreign agent's request: a title and arguments, no contenox envelope.
 	req := libacp.RequestPermissionRequest{
 		SessionID: "sess-1",
 		ToolCall: libacp.PermissionToolCall{
@@ -287,7 +270,7 @@ func TestUnit_Unattended_AllowWithoutArgsEscalates(t *testing.T) {
 	hitl := &fakeHITL{verdict: hitlservice.EvaluationResult{Action: hitlservice.ActionAllow}, approved: true}
 	missions := missionsWith(&missionservice.Mission{ID: "mission-1", InstanceID: "inst-1", HITLPolicyName: "envelope.json"})
 
-	req := namedRequest(t, "local_fs", "read_file", nil) // no rawInput at all
+	req := namedRequest(t, "local_fs", "read_file", nil)
 	resp, err := answerer(hitl, missions, "")(context.Background(), unattended(req))
 	require.NoError(t, err)
 	require.Equal(t, 1, hitl.askCount(), "an allow that could not see the arguments must still ask")

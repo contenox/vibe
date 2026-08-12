@@ -69,6 +69,11 @@ func (t *Transport) mirrorUpdate(contenoxSessionID string, notif libacp.SessionN
 	if !ok {
 		return
 	}
+	// An attached viewer is already this connection's delivery path; a
+	// mirrored copy would be a second delivery on one wire.
+	if t.isNativeViewing(sid) {
+		return
+	}
 	notif.SessionID = sid
 	t.mirrorOnce.Do(t.startMirrorPump)
 	select {

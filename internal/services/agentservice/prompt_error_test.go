@@ -1,8 +1,5 @@
 package agentservice_test
 
-// Prompt must wrap a chain failure in "chain execution failed" exactly once,
-// leading with the root task's error when its on_failure handler also fails.
-
 import (
 	"context"
 	"errors"

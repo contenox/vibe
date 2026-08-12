@@ -132,7 +132,7 @@ func TestUnit_Autocomplete_ParamsDecode_BuildsFIMPrompt(t *testing.T) {
 }
 
 // TestUnit_Autocomplete_DefaultMaxTokens pins the 128-token default when the
-// client omits maxTokens, matching vscodeagent's autocomplete.
+// client omits maxTokens.
 func TestUnit_Autocomplete_DefaultMaxTokens(t *testing.T) {
 	agent := &recordingAgent{}
 	tr := autocompleteTestTransport(agent)

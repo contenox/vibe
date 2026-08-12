@@ -45,10 +45,6 @@ func (m McpServer) Kind() McpServerKind {
 	}
 }
 
-// mcpServerHttpWire and mcpServerStdioWire are McpServer's two wire shapes for
-// MarshalJSON: unlike McpServer itself, args/env and headers have no
-// omitempty, because the spec requires them always present (even as `[]`)
-// for their respective transport.
 type mcpServerHttpWire struct {
 	Type    string          `json:"type,omitempty"`
 	Name    string          `json:"name"`
@@ -66,9 +62,8 @@ type mcpServerStdioWire struct {
 }
 
 // MarshalJSON forces args/env (stdio) and headers (http/sse) onto the wire as
-// `[]` rather than omitting them when empty, since the spec declares them
-// always-serialized with no default and omitempty can't express that on the
-// flattened McpServer struct — hence the two per-transport wire shapes above.
+// `[]` rather than omitting them when empty, since the spec requires them
+// always present.
 func (m McpServer) MarshalJSON() ([]byte, error) {
 	switch m.Kind() {
 	case McpServerKindHTTP, McpServerKindSSE:

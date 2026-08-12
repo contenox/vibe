@@ -1,9 +1,5 @@
 package localtools
 
-// Internal-package tests exercising unexported building blocks directly: the
-// streaming line reader's parity with strings.Split, the spool retention
-// policy, and the fuzzy suggestion helpers.
-
 import (
 	"bytes"
 	"os"
@@ -29,7 +25,6 @@ func TestUnit_StreamRange_ParityWithStringsSplit(t *testing.T) {
 	}
 	for _, in := range cases {
 		lines := strings.Split(in, "\n")
-		// full range
 		got, lastLine, nextLine, err := streamRange(bytes.NewReader([]byte(in)), 1, 1<<30, 0)
 		if err != nil {
 			t.Fatalf("streamRange(%q): %v", in, err)
@@ -67,8 +62,7 @@ func TestUnit_StreamRange_BoundedRange(t *testing.T) {
 // paging loop is exact.
 func TestUnit_StreamRange_ByteBudgetPagesByLine(t *testing.T) {
 	in := "aaaa\nbbbb\ncccc\ndddd"
-	// budget large enough for two 4-char lines + one separator = 9 bytes, but not
-	// the third.
+	// budget large enough for two 4-char lines + one separator = 9 bytes, but not the third.
 	got, lastLine, nextLine, err := streamRange(bytes.NewReader([]byte(in)), 1, 1<<30, 9)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +74,6 @@ func TestUnit_StreamRange_ByteBudgetPagesByLine(t *testing.T) {
 		t.Fatalf("lastLine=%d nextLine=%d; want 2,3", lastLine, nextLine)
 	}
 
-	// Resume from nextLine yields the rest.
 	rest, _, next2, _ := streamRange(bytes.NewReader([]byte(in)), nextLine, 1<<30, 9)
 	if rest != "cccc\ndddd" {
 		t.Fatalf("resume = %q; want %q", rest, "cccc\ndddd")
@@ -134,7 +127,6 @@ func TestUnit_PruneToolOutput_CountCap(t *testing.T) {
 	if remaining != 2 {
 		t.Fatalf("count cap not honored: %d files remain, want 2", remaining)
 	}
-	// The two NEWEST (f-d, f-e) must survive; the three oldest are gone.
 	if _, err := os.Stat(paths[0]); !os.IsNotExist(err) {
 		t.Fatalf("oldest file should have been evicted: %v", err)
 	}
@@ -186,7 +178,6 @@ func TestUnit_SuggestSiblings_FuzzyAndCapped(t *testing.T) {
 	if len(got) == 0 {
 		t.Fatal("expected sibling suggestions for 'readme'")
 	}
-	// Case-insensitive substring matches must be present.
 	joined := strings.Join(got, ",")
 	if !strings.Contains(joined, "README.md") || !strings.Contains(joined, "readme.txt") {
 		t.Fatalf("expected README.md and readme.txt among suggestions: %v", got)
@@ -195,7 +186,6 @@ func TestUnit_SuggestSiblings_FuzzyAndCapped(t *testing.T) {
 		t.Fatalf("an unrelated name must not be suggested: %v", got)
 	}
 
-	// Cap is respected.
 	capped := suggestSiblings(dir, "readme", 2)
 	if len(capped) > 2 {
 		t.Fatalf("suggestion cap not honored: %v", capped)

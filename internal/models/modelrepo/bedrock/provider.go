@@ -15,7 +15,7 @@ import (
 type bedrockProvider struct {
 	id              string
 	region          string
-	credBlob        string // optional stored static-credentials JSON; empty → ambient chain
+	credBlob        string
 	modelName       string
 	httpClient      *http.Client
 	contextLength   int
@@ -27,15 +27,12 @@ type bedrockProvider struct {
 	canVision       bool
 	tracker         libtracker.ActivityTracker
 
-	// aws.Config / SDK client built once and reused (mirrors vertex tokenOnce).
 	once   sync.Once
 	api    *bedrockruntime.Client
 	apiErr error
 }
 
-// NewBedrockProvider returns a modelrepo.Provider for an AWS Bedrock model via
-// the Converse API. credBlob is optional static-credentials JSON; empty falls
-// back to the ambient AWS credential chain.
+// NewBedrockProvider returns a modelrepo.Provider for an AWS Bedrock model via the Converse API; credBlob is optional static-credentials JSON, empty falls back to the ambient AWS credential chain.
 func NewBedrockProvider(region, credBlob, modelName string, cap modelrepo.CapabilityConfig, httpClient *http.Client, tracker libtracker.ActivityTracker) modelrepo.Provider {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
@@ -69,6 +66,9 @@ func (p *bedrockProvider) CanStream() bool         { return p.canStream }
 func (p *bedrockProvider) CanPrompt() bool         { return p.canPrompt }
 func (p *bedrockProvider) CanThink() bool          { return p.canThink }
 func (p *bedrockProvider) CanVision() bool         { return p.canVision }
+
+// CanAudio always reports false; audio input is refused, not dropped.
+func (p *bedrockProvider) CanAudio() bool { return false }
 
 func (p *bedrockProvider) client(ctx context.Context) (bedrockClient, error) {
 	p.once.Do(func() {

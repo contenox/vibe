@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakePolicyValidator is a hitlservice.PolicyValidator double: it records the
-// name it was asked to validate and returns a preset error.
 type fakePolicyValidator struct {
 	err       error
 	validated []string

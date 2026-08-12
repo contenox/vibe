@@ -9,14 +9,12 @@ import (
 	"syscall"
 )
 
-// Client-side failure sentinels for a driver of a ClientSideConnection
-// (typically over an acpexec subprocess). libacp never returns these itself;
-// they are the vocabulary a driver wraps its own transport/lifecycle
-// failures in. Classify with IsStartupError / IsTimeoutError /
-// IsRetryableError rather than string-matching.
+// Client-side failure sentinels for a driver of a ClientSideConnection;
+// classify with IsStartupError / IsTimeoutError / IsRetryableError rather
+// than string-matching.
 var (
 	// ErrAgentStartFailed marks a failure to launch or initialize the agent
-	// subprocess. Not retryable (see IsStartupError).
+	// subprocess; not retryable (see IsStartupError).
 	ErrAgentStartFailed = errors.New("libacp: agent start failed")
 
 	// ErrIdleTimeout marks a turn that produced no session/update or result
@@ -24,7 +22,7 @@ var (
 	ErrIdleTimeout = errors.New("libacp: agent idle timeout")
 
 	// ErrNoDisplayableOutput marks a turn that stopped with a normal reason
-	// but never produced a renderable agent message. Detect via TurnTracker.
+	// but never produced a renderable agent message; detect via TurnTracker.
 	ErrNoDisplayableOutput = errors.New("libacp: prompt turn produced no displayable output")
 )
 
@@ -38,8 +36,8 @@ func IsStartupError(err error) bool {
 }
 
 // IsTimeoutError reports whether err is a context deadline or idle-watchdog
-// timeout. A remote-serialized deadline loses its Go identity crossing the
-// wire, so it is matched by its ErrRequestTimeout code instead of sentinel.
+// timeout, matched by ErrRequestTimeout code since a serialized deadline
+// loses its Go identity crossing the wire.
 func IsTimeoutError(err error) bool {
 	if err == nil {
 		return false
@@ -51,12 +49,9 @@ func IsTimeoutError(err error) bool {
 	return errors.As(err, &rpcErr) && rpcErr.Code == ErrRequestTimeout
 }
 
-// IsRetryableError reports whether retrying the turn (typically after
-// respawning the agent) might succeed: timeouts, a dropped transport
-// (ErrConnectionClosed / EOF / closed pipe / EPIPE / ECONNRESET), and an
-// empty turn are retryable; cancellation and startup failures are not. The
-// trailing string match is a cross-platform safety net for transport errors
-// that do not wrap into a recognizable sentinel.
+// IsRetryableError reports whether retrying the turn might succeed: timeouts,
+// a dropped transport, and an empty turn are retryable; cancellation and
+// startup failures are not.
 func IsRetryableError(err error) bool {
 	if err == nil {
 		return false

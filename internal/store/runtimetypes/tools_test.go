@@ -379,7 +379,7 @@ func TestUnit_RemoteTools_UpdateNonExistent(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
 	tools := &runtimetypes.RemoteTools{
-		ID:          uuid.New().String(), // Doesn't exist
+		ID:          uuid.New().String(),
 		Name:        "non-existent",
 		EndpointURL: "https://update.com",
 		TimeoutMs:   5000,
@@ -521,14 +521,12 @@ func TestUnit_RemoteTools_WithProperties(t *testing.T) {
 	})
 
 	t.Run("create with nil properties", func(t *testing.T) {
-		// Note: Properties is not a pointer, so it can't be nil.
-		// Instead, we can test with zero values.
 		tools := &runtimetypes.RemoteTools{
 			ID:          uuid.New().String(),
 			Name:        "tools-with-zero-props",
 			EndpointURL: "https://example.com/zero-tools",
 			TimeoutMs:   5000,
-			Properties:  runtimetypes.InjectionArg{}, // Zero value
+			Properties:  runtimetypes.InjectionArg{},
 		}
 
 		err := s.CreateRemoteTools(ctx, tools)

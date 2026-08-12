@@ -216,6 +216,62 @@ func TestUnit_SimpleEnv_ExecEnv_CapsInputForFailureSummaryTask(t *testing.T) {
 	require.Contains(t, got.Messages[0].Content, "truncated original_bytes=")
 }
 
+// A failure handler whose routed context is whittled to nothing usable must
+// still receive the failure as a non-empty user message it can report.
+func TestUnit_SimpleEnv_ExecEnv_FilteredEmptyFailureContextStillCarriesRootError(t *testing.T) {
+	rootErr := errors.New("stream failed (provider=vertex-google, model=gemini-3.6-flash): vertex API returned non-200 status for stream: 404")
+	chainInput := taskengine.ChatHistory{
+		Messages: []taskengine.Message{
+			{Role: "user", Content: "run the workflow"},
+			{Role: "assistant", CallTools: []taskengine.ToolCall{{ID: "call-1"}}},
+			{Role: "tool", ToolCallID: "call-1", Content: strings.Repeat("tool output ", 40)},
+		},
+	}
+	exec := &scriptedExecutor{
+		outputs:     []any{nil, "summary"},
+		outputTypes: []taskengine.DataType{taskengine.DataTypeAny, taskengine.DataTypeString},
+		errors:      []error{rootErr, nil},
+	}
+
+	tracker := libtracker.NoopTracker{}
+	env, err := taskengine.NewEnv(context.Background(), tracker, exec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
+	require.NoError(t, err)
+
+	chain := &taskengine.TaskChainDefinition{
+		Tasks: []taskengine.TaskDefinition{
+			{
+				ID:      "main",
+				Handler: taskengine.HandleNoop,
+				Transition: taskengine.TaskTransition{
+					OnFailure: "summarise_failure",
+				},
+			},
+			{
+				ID:            "summarise_failure",
+				Handler:       taskengine.HandleNoop,
+				InputMaxBytes: 64,
+				Transition: taskengine.TaskTransition{
+					Branches: []taskengine.TransitionBranch{
+						{Operator: taskengine.OpDefault, Goto: taskengine.TermEnd},
+					},
+				},
+			},
+		},
+	}
+
+	result, _, _, err := env.ExecEnv(libtracker.WithNewRequestID(context.Background()), chain, chainInput, taskengine.DataTypeChatHistory)
+	require.NoError(t, err, "the failure handler must be able to report instead of dying of its own prompt")
+	require.Equal(t, "summary", result)
+	require.Len(t, exec.calls, 2)
+	require.Equal(t, "summarise_failure", exec.calls[1].task)
+	got := exec.calls[1].input.(taskengine.ChatHistory)
+	require.NotEmpty(t, got.Messages)
+	last := got.Messages[len(got.Messages)-1]
+	require.Equal(t, "user", last.Role)
+	require.Contains(t, last.Content, rootErr.Error(), "the root failure must land as the handler's context")
+	require.Contains(t, last.Content, "main", "the notice names the failed task")
+}
+
 func TestUnit_SimpleEnv_ExecEnv_FailureHandlerFailureLeadsWithRootError(t *testing.T) {
 	rootErr := errors.New("chat stream failed: stream failed (provider=vertex-google, model=gemini-3.6-flash): 404")
 	handlerErr := errors.New("summariser also down")
@@ -478,7 +534,7 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_OriginalInput(t *testing.T) {
 			{
 				ID:             "task1",
 				Handler:        taskengine.HandleNoop,
-				InputVar:       "input", // Explicitly use original input
+				InputVar:       "input",
 				PromptTemplate: `Process this: {{.input}}`,
 				Transition: taskengine.TaskTransition{
 					Branches: []taskengine.TransitionBranch{
@@ -519,7 +575,7 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_PreviousTaskOutput(t *testing.T) {
 			{
 				ID:             "process",
 				Handler:        taskengine.HandleNoop,
-				InputVar:       "transform", // Use output from previous task
+				InputVar:       "transform",
 				PromptTemplate: `Process the number: {{.transform}}`,
 				Transition: taskengine.TaskTransition{
 					Branches: []taskengine.TransitionBranch{
@@ -561,7 +617,7 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_BranchRouting(t *testing.T) {
 			{
 				ID:       "store",
 				Handler:  taskengine.HandleTools,
-				InputVar: "input", // Use original input despite moderation
+				InputVar: "input",
 				Tools: &taskengine.ToolsCall{
 					Name: "store_message",
 				},
@@ -590,7 +646,7 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_BranchRouting(t *testing.T) {
 }
 
 func TestUnit_SimpleEnv_ExecEnv_InputVar_InvalidVariable(t *testing.T) {
-	mockExec := &taskengine.MockTaskExecutor{} // Shouldn't be called
+	mockExec := &taskengine.MockTaskExecutor{}
 
 	tracker := libtracker.NoopTracker{}
 	env, err := taskengine.NewEnv(context.Background(), tracker, mockExec, taskengine.NewSimpleInspector(), tools.NewMockToolsRegistry())
@@ -640,9 +696,8 @@ func TestUnit_SimpleEnv_ExecEnv_InputVar_DefaultBehavior(t *testing.T) {
 				},
 			},
 			{
-				ID:      "task2",
-				Handler: taskengine.HandleNoop,
-				// No InputVar specified - should use previous output
+				ID:             "task2",
+				Handler:        taskengine.HandleNoop,
 				PromptTemplate: `Second: {{.task1}}`,
 				Transition: taskengine.TaskTransition{
 					Branches: []taskengine.TransitionBranch{

@@ -9,16 +9,14 @@ import (
 )
 
 // CursorStore is a named consumer's durable position over an event log,
-// scoped at construction. Rewinding a cursor is the replay verb: a consumer
-// restarted behind its cursor re-reads exactly what it had not settled.
+// scoped at construction.
 type CursorStore struct {
 	cfg   Config
 	scope string
 	now   func() time.Time
 }
 
-// NewCursorStore builds a cursor store for one scope. The empty scope is a
-// valid scope of its own, for importers whose consumers read cross-scope.
+// NewCursorStore builds a cursor store for one scope; the empty scope is valid.
 func NewCursorStore(cfg Config, scope string) (*CursorStore, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -44,8 +42,8 @@ func (s *CursorStore) GetCursor(ctx context.Context, exec libdb.Exec, consumer s
 	return nid, rows.Err()
 }
 
-// SetCursor upserts consumer's position to nid. Setting a lower value than
-// the stored one is permitted deliberately: that is the rewind.
+// SetCursor upserts consumer's position to nid; a lower value than stored is
+// permitted (rewind).
 func (s *CursorStore) SetCursor(ctx context.Context, exec libdb.Exec, consumer string, nid int64) error {
 	_, err := exec.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s (consumer, %s, last_nid, updated_at)

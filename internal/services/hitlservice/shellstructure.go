@@ -10,59 +10,16 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-// Structural shell policy (phase A): the shell operators in policy.go match
-// a tokenized command line, which cannot read a shell line, only refuse one
-// (why `git status && go build` — two allowlisted verbs — interrupts an
-// operator today). This file gives them a second, structural reading
-// (mvdan.cc/sh/v3/syntax, parser only, no interpreter). The tokenizer's
-// answer is always the floor: structure may only tighten (name a command the
-// tokenizer could not) or, for the node set cleared below, upgrade an ask to
-// an allow — never widen an allow or narrow a deny. Unparseable input, an
-// uncleared node kind, a non-literal word, or any doubt yields today's verdict.
-//
-// The node-set audit: CLEARED means an ALLOW may be taken through this node;
-// UNCLEARED means the analyzer may still report a dangerous command inside
-// it (tightening), but its presence anywhere forbids an ask→allow upgrade.
-// The would-have-widened tests in policy_shell_structural_test.go are its proof.
-//
-//	NODE                          CLEARED?  NOTE
-//	File                          single*   exactly one top-level Stmt; `a; b` or a list is uncleared
-//	Stmt                          simple*   unnegated, foreground, no Redirs (`cmd &`, `! cmd`, `|&` uncleared)
-//	Redirect                      no        sibling of CallExpr, not an Arg; target collected, never dropped
-//	Assign                        no        unless name is in clearedAssignmentNames (starts empty)
-//	CallExpr                      yes*      literal words, no assigns, name not in unclearedCommandNames
-//	BinaryCmd                     yes*      && || | only (PipeAll uncleared), flow-insensitive
-//	Subshell/Block/If/While/For/
-//	  Case/FuncDecl/Time/Coproc/
-//	  Let/Decl/Test/Arithm        no        no control-flow/name resolution modeling; enumerated for deny only
-//	Word/Lit                     yes*      only when every part is literal (see wordLiteral)
-//	SglQuoted/DblQuoted          yes*      unless it carries a run-time expansion ($'…', "$X")
-//	ParamExp/CmdSubst/ArithmExp/
-//	  ProcSubst/ExtGlob/BraceExp/
-//	  ArrayExpr/WordIter/
-//	  CStyleLoop                 no        run-time or bash-only; CmdSubst/ArithmExp/ProcSubst also feed
-//	                                        no_command_substitution
-//
-// A1 (the shell guard): structural analysis runs only when the POSIX shell
-// is positively established (see structuralShellEnabled) — mvdan parses
-// POSIX/bash, not PowerShell, and a wrong reading could widen instead of fail
-// closed.
-//
-// A2 (the parser differential): an ask→allow upgrade is taken only for a
-// line built entirely of simple commands, && || |, and literal words — the
-// one corner of the grammar where mvdan and `sh -c` agree. Anything else
-// keeps today's answer.
-
-// ShellKind names the shell that will interpret a gated command line. It
-// mirrors localtools.ShellKind by value rather than by import (localtools
-// imports this package, so the dependency cannot run the other way).
+// ShellKind names the shell that will interpret a gated command line; it
+// mirrors localtools.ShellKind by value rather than import to avoid a
+// dependency cycle.
 type ShellKind string
 
 const (
 	// ShellKindPOSIX is the only kind structural analysis runs on: `sh -c`.
 	ShellKindPOSIX ShellKind = "sh"
 	// ShellKindPowerShell is what local_shell spawns on Windows; mvdan
-	// cannot parse it, so it never reaches the parser (see A1 above).
+	// cannot parse it, so it never reaches the parser.
 	ShellKindPowerShell ShellKind = "powershell"
 	// ShellKindCmd is cmd.exe — same treatment as powershell.
 	ShellKindCmd ShellKind = "cmd"
@@ -73,11 +30,8 @@ const (
 
 type shellKindContextKey struct{}
 
-// WithShellKind marks ctx with the shell that will actually interpret the
-// command lines evaluated under it — the trusted channel that can enable
-// structural analysis on a host whose default shell is not POSIX. Nothing
-// sets it today; until a caller adopts it, structuralShellEnabled falls back
-// to analyzing on non-Windows hosts only.
+// WithShellKind marks ctx with the shell that will interpret command lines
+// evaluated under it, enabling structural analysis when the shell is POSIX.
 func WithShellKind(ctx context.Context, kind string) context.Context {
 	return context.WithValue(ctx, shellKindContextKey{}, normalizeShellKind(kind))
 }
@@ -105,22 +59,11 @@ func normalizeShellKind(s string) ShellKind {
 	}
 }
 
-// structuralShellEnabled is the A1 guard. The shell kind is declared by the
-// caller that spawns the shell (HITLWrapper, at construction) and travels on
-// the context; call args never reach it, so no model-controlled input decides
-// whether the analyzer runs:
-//
-//	trusted kind (ctx)  | host GOOS | analyze?
-//	sh/bash/dash        | any       | yes — positively established
-//	powershell/cmd/other| any       | no  — mvdan reads a different program
-//	unset               | !windows  | yes — local_shell can only be sh here
-//	unset               | windows   | no  — fail closed
 func structuralShellEnabled(trusted ShellKind, goos string) bool {
 	switch normalizeShellKind(string(trusted)) {
 	case ShellKindPOSIX:
 		return true
 	case "":
-		// No trusted declaration: fall through to the host-shape fallback.
 	default:
 		return false
 	}
@@ -128,17 +71,8 @@ func structuralShellEnabled(trusted ShellKind, goos string) bool {
 	return goos != "windows"
 }
 
-// clearedAssignmentNames starts empty on purpose: a command carrying env
-// assignments falls to ask unless every name is listed here, and every
-// interesting name (PATH, LD_PRELOAD, GIT_SSH_COMMAND...) is a hijack channel.
 var clearedAssignmentNames = map[string]bool{}
 
-// unclearedCommandNames never carry an upgrade. Two classes: re-entry (eval,
-// source, a nested shell, or a wrapper like env/xargs/sudo/find that runs a
-// program named by a later word) and environment mutation (export, set,
-// alias, etc., which change what a later command resolves to). This only
-// restricts the upgrade path; a single-command line the tokenizer already
-// allows stays allowed.
 var unclearedCommandNames = map[string]bool{
 	// re-entry
 	"eval": true, "exec": true, "source": true, ".": true,
@@ -152,42 +86,25 @@ var unclearedCommandNames = map[string]bool{
 	"shift": true, "getopts": true, "ulimit": true, "umask": true,
 }
 
-// shellReading is the structural reading of one gated call.
 type shellReading struct {
-	// analyzed is false when A1 refused, or the call is not a shell line at all.
-	analyzed bool
-	// parsed is false when the parser rejected the source — the floor applies.
-	parsed bool
-	// commands are every simple command the line runs, anywhere in the tree;
-	// enumerating is always safe (tightening only).
-	commands []shellCommandView
-	// redirects are every redirection, target included; their presence
-	// blocks every upgrade.
+	analyzed     bool
+	parsed       bool
+	commands     []shellCommandView
 	redirects    []shellRedirect
 	hasCmdSubst  bool
 	hasProcSubst bool
 	hasArithmExp bool
-	// upgradable is A2: the whole line is inside the cleared node set.
-	upgradable bool
+	upgradable   bool
 }
 
-// shellCommandView is one simple command as the analyzer can name it.
 type shellCommandView struct {
-	// name is the program word resolved through quotes/escapes; empty if not
-	// statically knowable.
-	name string
-	// base is path.Base(name) — what the blacklist and ask-always lists compare.
-	base string
-	// words is the strict literal token line; nil unless every word is fully literal.
-	words []string
-	// literal mirrors "words != nil" for readability at the call sites.
-	literal bool
-	// argCount is how many words the command has, including unknowable ones.
+	name     string
+	base     string
+	words    []string
+	literal  bool
 	argCount int
-	// assigns are the env assignment names carried as a prefix.
-	assigns []string
-	// display is a short, human-readable rendering for the decision message.
-	display string
+	assigns  []string
+	display  string
 }
 
 type shellRedirect struct {
@@ -196,12 +113,8 @@ type shellRedirect struct {
 	heredoc bool
 }
 
-// structuralParses counts parser invocations, for the A1 test pinning that a
-// powershell-kind call never reaches the parser.
 var structuralParses atomic.Int64
 
-// analyzeShellArgs is the single entry point: the structural reading of a
-// call, or the zero reading (analyzed=false) when structure must not be consulted.
 func analyzeShellArgs(trusted ShellKind, args map[string]any) shellReading {
 	var r shellReading
 	if len(args) == 0 {
@@ -221,20 +134,13 @@ func analyzeShellArgs(trusted ShellKind, args map[string]any) shellReading {
 	}
 	r.parsed = true
 	collectShellNodes(f, &r, 0)
-	// A bash-only-accepted line is read for tightening only; the executor is
-	// `sh -c`, so a reading sh itself would reject must not be an allow's basis.
+	// bashOnly forces upgradable off: sh -c is the executor, so a reading sh itself would reject cannot ground an allow.
 	r.upgradable = !bashOnly && fileClearedForUpgrade(f)
 	return r
 }
 
-// maxShellLineBytes bounds what the parser is asked to read; a megabyte of
-// pasted script is not a command line.
 const maxShellLineBytes = 64 * 1024
 
-// shellLineFromArgs returns the source a shell will actually interpret, or
-// false when nothing will — an argv call's metacharacters are ordinary
-// bytes, so structure is consulted only for shell:true, or the one-line
-// "command"-only form a real shell would run.
 func shellLineFromArgs(args map[string]any) (string, bool) {
 	cmd, _ := args["command"].(string)
 	cmd = strings.TrimSpace(cmd)
@@ -262,10 +168,6 @@ func boundedLine(line string) (string, bool) {
 	return line, true
 }
 
-// parseShellLine parses POSIX first (the executor is `sh -c`); a rejected
-// line gets a second bash parse used for tightening only — bashOnly forces
-// upgradable off, so a wider reading can name a dangerous command but never
-// admit one.
 func parseShellLine(src string) (f *syntax.File, bashOnly bool, ok bool) {
 	structuralParses.Add(1)
 	f, err := syntax.NewParser(syntax.Variant(syntax.LangPOSIX)).Parse(strings.NewReader(src), "")
@@ -280,10 +182,6 @@ func parseShellLine(src string) (f *syntax.File, bashOnly bool, ok bool) {
 	return f, true, true
 }
 
-// collectShellNodes walks the whole tree by statement, not call expression,
-// since a redirect hangs off the Stmt — walking only calls would miss it. It
-// also runs the normalization pass (see the reveal rule below), which is why
-// it carries a depth: a revealed payload is collected by re-entering here.
 func collectShellNodes(f *syntax.File, r *shellReading, depth int) {
 	assigns := literalAssignments(f)
 	syntax.Walk(f, func(node syntax.Node) bool {
@@ -317,48 +215,16 @@ func collectShellNodes(f *syntax.File, r *shellReading, depth int) {
 	})
 }
 
-// THE REVEAL RULE (normalization to a fixed point). A tokenized reading sees
-// the words a line was written with; a shell runs the program those words
-// name after it has peeled wrappers, decoded escapes, and reconstructed
-// argument lists. Everything below closes that gap in exactly ONE direction:
-// a normalization may only ever ADD a shellCommandView, never remove or
-// rewrite one. That is what keeps it inside the monotonicity contract at the
-// top of this file, because every consumer of r.commands is monotone in the
-// set:
-//
-//   - structuralCommandInList  — more commands, more deny/ask catches
-//   - structuralPrefixAllowed  — EVERY command must be listed, so more
-//     commands can only refuse an upgrade, never grant one
-//   - structuralContradictsPrefix — more commands, more revoked allows
-//   - structuralProgramWords   — more names to vouch for, never fewer
-//
-// A reveal may therefore be wrong (a guessed reading of an ambiguous line)
-// without being unsafe: the worst outcome is an ask that could have been an
-// allow. Where a reading is ambiguous, EVERY candidate is revealed rather
-// than one being chosen.
-//
-// The reveal never reaches the upgrade path in practice either: every trigger
-// word below (sh/bash/dash/ash/ksh/zsh/fish, xargs, eval, source) is in
-// unclearedCommandNames, so a line carrying one is never upgradable — pinned
-// by TestUnit_ShellAnalyzer_RevealNeverClearsAnUpgrade.
 const (
-	// maxRevealDepth bounds wrapper peeling; `sh -c "xargs sh -c ..."` nests,
-	// and one evaluation must not become unbounded parsing.
-	maxRevealDepth = 4
-	// maxRevealedCommands bounds how far the enumeration may grow. Reveals
-	// only: a plain line's collection is unchanged.
+	maxRevealDepth      = 4
 	maxRevealedCommands = 256
 )
 
-// nestedShellNames take their program from a -c payload the outer parse can
-// only see as one opaque word.
 var nestedShellNames = map[string]bool{
 	"sh": true, "bash": true, "dash": true, "ash": true,
 	"ksh": true, "zsh": true, "fish": true,
 }
 
-// lenientWords resolves a call's words the way wordName does — the
-// deny-direction resolution — with "" standing for a word only run time knows.
 func lenientWords(call *syntax.CallExpr) []string {
 	out := make([]string, 0, len(call.Args))
 	for _, w := range call.Args {
@@ -371,8 +237,6 @@ func lenientWords(call *syntax.CallExpr) []string {
 	return out
 }
 
-// revealWords records one reconstructed command and keeps peeling it, so
-// `xargs sh -c 'rm -rf /'` names xargs, sh, AND rm.
 func revealWords(words []string, r *shellReading, depth int) {
 	if depth > maxRevealDepth || len(r.commands) >= maxRevealedCommands {
 		return
@@ -384,8 +248,6 @@ func revealWords(words []string, r *shellReading, depth int) {
 	peelWrapper(words, r, depth)
 }
 
-// peelWrapper reveals what a wrapper actually runs. Each arm is additive: the
-// wrapper's own command view was already recorded by the caller.
 func peelWrapper(words []string, r *shellReading, depth int) {
 	if depth >= maxRevealDepth || len(words) == 0 || words[0] == "" {
 		return
@@ -407,10 +269,6 @@ func peelWrapper(words []string, r *shellReading, depth int) {
 	}
 }
 
-// revealSource parses a payload and collects it into the same reading. A
-// payload that only the bash parser accepts is still collected: bashOnly is
-// dropped here because r.upgradable is computed from the TOP-LEVEL file alone
-// (see analyzeShellArgs), so a wider reading here can only tighten.
 func revealSource(src string, r *shellReading, depth int) {
 	if depth > maxRevealDepth || len(r.commands) >= maxRevealedCommands {
 		return
@@ -426,9 +284,6 @@ func revealSource(src string, r *shellReading, depth int) {
 	collectShellNodes(f, r, depth)
 }
 
-// viewFromWords renders a reconstructed command. literal is claimed only when
-// every word was statically knowable; otherwise tokens() falls back to the
-// name plus unknowable sentinels, which no prefix entry can equal.
 func viewFromWords(words []string) shellCommandView {
 	out := shellCommandView{
 		name:     words[0],
@@ -446,9 +301,6 @@ func viewFromWords(words []string) shellCommandView {
 	return out
 }
 
-// dashCPayload returns a nested shell's -c program text. It stops at the
-// first non-option word (a script filename, not a payload) and at any word it
-// could not read, rather than guessing which slot held the -c.
 func dashCPayload(words []string) (string, bool) {
 	for i := 1; i < len(words); i++ {
 		w := words[i]
@@ -465,9 +317,6 @@ func dashCPayload(words []string) (string, bool) {
 	return "", false
 }
 
-// xargsValueOptions take their value as a SEPARATE word, so the word after
-// them is not the command xargs reconstructs. An attached form (-n1, -I{})
-// carries its own value and needs no entry.
 var xargsValueOptions = map[string]bool{
 	"-a": true, "-d": true, "-E": true, "-I": true, "-L": true,
 	"-n": true, "-P": true, "-s": true,
@@ -476,9 +325,6 @@ var xargsValueOptions = map[string]bool{
 	"--max-chars": true, "--process-slot-var": true,
 }
 
-// xargsCommandWords returns the command line xargs reconstructs from its own
-// arguments — the program that actually runs, which the outer reading names
-// only as "xargs".
 func xargsCommandWords(words []string) ([]string, bool) {
 	for i := 1; i < len(words); i++ {
 		w := words[i]
@@ -501,9 +347,6 @@ func xargsCommandWords(words []string) ([]string, bool) {
 	return nil, false
 }
 
-// revealPipedPayload peels a literal payload piped into an evaluator:
-// `printf '\162\155 -rf /' | sh` runs rm, a name no reading of the written
-// words contains.
 func revealPipedPayload(pipe *syntax.BinaryCmd, r *shellReading, depth int) {
 	if depth >= maxRevealDepth {
 		return
@@ -528,8 +371,6 @@ func stmtCallWords(st *syntax.Stmt) ([]string, bool) {
 	return lenientWords(call), true
 }
 
-// consumerEvaluatesStdin reports whether the right side of a pipe runs its
-// standard input as a program.
 func consumerEvaluatesStdin(st *syntax.Stmt) bool {
 	words, ok := stmtCallWords(st)
 	if !ok || words[0] == "" {
@@ -539,11 +380,6 @@ func consumerEvaluatesStdin(st *syntax.Stmt) bool {
 	return nestedShellNames[base] || base == "eval" || base == "source" || base == "."
 }
 
-// printedPayloads is what a literal echo/printf writes to stdout, as the
-// candidate program texts a piped evaluator would then run. BOTH the raw join
-// and its escape-decoded form are returned: which one a given shell's echo
-// produces is exactly what this must not have to guess, and revealing both
-// only ever adds commands.
 func printedPayloads(words []string) []string {
 	base := path.Base(words[0])
 	if base != "echo" && base != "printf" {
@@ -577,9 +413,6 @@ func isEchoFlag(w string) bool {
 	return false
 }
 
-// joinKnown joins words back into one line, refusing when any of them exists
-// only at run time — a hole in the middle would make the join a different
-// program than the one that runs.
 func joinKnown(words []string) (string, bool) {
 	if len(words) == 0 {
 		return "", false
@@ -592,9 +425,6 @@ func joinKnown(words []string) (string, bool) {
 	return strings.Join(words, " "), true
 }
 
-// decodeShellEscapes applies printf/echo -e backslash decoding, which is how
-// a command name is spelled when it is meant not to be read as one
-// (`printf '\162\155'` is "rm"). Unknown escapes keep their backslash.
 func decodeShellEscapes(s string) string {
 	if !strings.Contains(s, `\`) {
 		return s
@@ -651,10 +481,6 @@ func decodeShellEscapes(s string) string {
 	return sb.String()
 }
 
-// parseEscapedNumber reads up to maxDigits digits of the given base,
-// returning the byte they encode and how many bytes were consumed. It stops
-// before overflowing a byte rather than rejecting the escape, matching what a
-// shell does with a too-large sequence: the extra digit is output text.
 func parseEscapedNumber(s string, base, maxDigits int) (value byte, width int, ok bool) {
 	n := 0
 	for width < len(s) && width < maxDigits {
@@ -688,11 +514,6 @@ func digitValue(c byte) int {
 	}
 }
 
-// literalAssignments collects NAME=value pairs whose value is statically
-// knowable, from anywhere in the tree. Flow-INSENSITIVE exactly as the A2
-// clearance rule is: reading the wrong branch's assignment can only reveal a
-// command that is not run, which asks where it could have allowed — never the
-// other way round.
 func literalAssignments(f *syntax.File) map[string]string {
 	out := map[string]string{}
 	syntax.Walk(f, func(node syntax.Node) bool {
@@ -708,9 +529,6 @@ func literalAssignments(f *syntax.File) map[string]string {
 	return out
 }
 
-// resolveAssignedWords substitutes collected assignments into a command's
-// words, so `CMD=rm; $CMD -rf /` names rm. ok is false when nothing resolved,
-// so a command with no variable in it is never recorded twice.
 func resolveAssignedWords(call *syntax.CallExpr, assigns map[string]string) ([]string, bool) {
 	if len(assigns) == 0 || len(call.Args) == 0 {
 		return nil, false
@@ -737,9 +555,6 @@ func resolveAssignedWords(call *syntax.CallExpr, assigns map[string]string) ([]s
 	return out, true
 }
 
-// soleParamName reports the variable a word consists of entirely — $X or
-// ${X}. Any modifier (length, slice, replacement, default) makes the value
-// something other than the assignment, so it resolves to nothing.
 func soleParamName(w *syntax.Word) (string, bool) {
 	if w == nil || len(w.Parts) != 1 {
 		return "", false
@@ -768,8 +583,6 @@ func redirectView(rd *syntax.Redirect) shellRedirect {
 	return out
 }
 
-// commandView renders one simple command. ok is false for an assignment-only
-// statement (`FOO=bar`), which runs no program.
 func commandView(call *syntax.CallExpr) (shellCommandView, bool) {
 	var out shellCommandView
 	for _, as := range call.Assigns {
@@ -807,8 +620,6 @@ func commandView(call *syntax.CallExpr) (shellCommandView, bool) {
 
 const maxDisplayRunes = 60
 
-// displayOf renders a command for a human-facing decision message, marking
-// what it cannot resolve rather than claiming a run-time-only value.
 func displayOf(call *syntax.CallExpr) string {
 	parts := make([]string, 0, len(call.Args))
 	for _, w := range call.Args {
@@ -821,8 +632,6 @@ func displayOf(call *syntax.CallExpr) string {
 	return flattenDisplay(parts)
 }
 
-// displayWords is displayOf for a reconstructed command (see viewFromWords),
-// where "" is the already-resolved form of an unknowable word.
 func displayWords(words []string) string {
 	parts := make([]string, 0, len(words))
 	for _, w := range words {
@@ -835,8 +644,7 @@ func displayWords(words []string) string {
 }
 
 func flattenDisplay(parts []string) string {
-	// Control characters are flattened: a decision message must not be able
-	// to forge a log line or a terminal escape.
+	// Control characters are flattened so a decision message cannot forge a log line or terminal escape.
 	s := strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
 			return ' '
@@ -849,15 +657,8 @@ func flattenDisplay(parts []string) string {
 	return s
 }
 
-// wordUnsafeMeta are characters that make an unquoted literal something else
-// at run time: glob/brace/tilde expansion, a backslash escape, and a bare
-// '$' the parser did not model as an expansion.
 const wordUnsafeMeta = "*?[]{}~\\$"
 
-// wordLiteral is the literal-words rule: a decision may consume a word only
-// when built entirely of literal parts (quote-splicing resolves statically,
-// closing the `r”m`-style evasion); anything that expands at run time
-// poisons the word, and its command falls to ask.
 func wordLiteral(w *syntax.Word) (string, bool) {
 	if w == nil || len(w.Parts) == 0 {
 		return "", false
@@ -893,9 +694,6 @@ func wordLiteral(w *syntax.Word) (string, bool) {
 	return sb.String(), true
 }
 
-// wordName is the lenient resolution for naming a command in the deny/ask
-// directions only — it resolves what wordLiteral refuses, but never a
-// run-time expansion, and is never the basis of an allow.
 func wordName(w *syntax.Word) (string, bool) {
 	if w == nil || len(w.Parts) == 0 {
 		return "", false
@@ -925,8 +723,6 @@ func wordName(w *syntax.Word) (string, bool) {
 	return sb.String(), true
 }
 
-// unescapeUnquoted applies POSIX unquoted backslash semantics: a backslash
-// preserves the next character literally, or continues a line before a newline.
 func unescapeUnquoted(s string) string {
 	if !strings.Contains(s, "\\") {
 		return s
@@ -949,8 +745,6 @@ func unescapeUnquoted(s string) string {
 	return sb.String()
 }
 
-// unescapeDoubleQuoted applies POSIX double-quoted backslash semantics: the
-// backslash is literal except before $ ` " \ or a newline.
 func unescapeDoubleQuoted(s string) string {
 	if !strings.Contains(s, "\\") {
 		return s
@@ -974,9 +768,6 @@ func unescapeDoubleQuoted(s string) string {
 	return sb.String()
 }
 
-// fileClearedForUpgrade is A2 in code: an upgrade is taken only for a line
-// built entirely of simple commands, && || |, and literal words. A file with
-// more than one top-level statement is never cleared.
 func fileClearedForUpgrade(f *syntax.File) bool {
 	if f == nil || len(f.Stmts) != 1 {
 		return false
@@ -988,8 +779,7 @@ func stmtClearedForUpgrade(st *syntax.Stmt) bool {
 	if st == nil || st.Cmd == nil {
 		return false
 	}
-	// `cmd &` detaches it from the approval that gated it; `! cmd` inverts the
-	// status a following && depends on; |& and &| are shell-specific.
+	// `cmd &` detaches from the gating approval; `! cmd` inverts && status; |&/&| are shell-specific.
 	if st.Negated || st.Background || st.Coprocess || st.Disown {
 		return false
 	}
@@ -1003,23 +793,20 @@ func stmtClearedForUpgrade(st *syntax.Stmt) bool {
 	case *syntax.BinaryCmd:
 		switch cmd.Op {
 		case syntax.AndStmt, syntax.OrStmt, syntax.Pipe:
-			// Flow-INSENSITIVE on purpose: `a || b` prices b even though it may
-			// never run. The worst path pays.
+			// Flow-insensitive on purpose: `a || b` prices b even though it may never run.
 			return stmtClearedForUpgrade(cmd.X) && stmtClearedForUpgrade(cmd.Y)
 		}
 		return false
 	default:
-		// Subshell, Block, If/While/For/Case, FuncDecl, Time, Coproc, Let,
-		// Decl, Test, Arithm — every one of them UNCLEARED by the audit.
 		return false
 	}
 }
 
 func callClearedForUpgrade(call *syntax.CallExpr) bool {
 	if len(call.Args) == 0 {
-		return false // an assignment-only statement: see the assignment rule
+		return false
 	}
-	// THE ASSIGNMENT-PREFIX RULE: a hijack channel, not decoration.
+	// Assignment prefixes are a hijack channel, not decoration.
 	for _, as := range call.Assigns {
 		if as.Name == nil || !clearedAssignmentNames[as.Name.Value] {
 			return false
@@ -1037,11 +824,6 @@ func callClearedForUpgrade(call *syntax.CallExpr) bool {
 	return !unclearedCommandNames[path.Base(name)]
 }
 
-// structuralCommandInList reports the first command in the line whose
-// basename is in a comma-separated list — the tightening half of the
-// blacklist/ask-always operators: it can see the rm in `git status && rm -rf
-// ~`, which the token matcher cannot. Commands inside uncleared constructs
-// still count.
 func structuralCommandInList(r shellReading, list string) (shellCommandView, bool) {
 	if !r.parsed || strings.TrimSpace(list) == "" {
 		return shellCommandView{}, false
@@ -1059,20 +841,10 @@ func structuralCommandInList(r shellReading, list string) (shellCommandView, boo
 	return shellCommandView{}, false
 }
 
-// structuralCommandSubstitution asks whether the AST contains a CmdSubst,
-// ProcSubst, or ArithmExp node, so creative quoting produces no false negatives.
 func structuralCommandSubstitution(r shellReading) bool {
 	return r.parsed && (r.hasCmdSubst || r.hasProcSubst || r.hasArithmExp)
 }
 
-// structuralPrefixAllowed is the combining rule and the one place structure
-// may admit anything: decompose the line and allow only when every command
-// is on the prefix list and the line clears A2 (`git status && go build`
-// upgrades; `git status > /tmp/x`, `PATH=/tmp git status`, `(git status)`,
-// and `git status; go build` keep today's verdict). It requires several
-// commands: a single command gains nothing from structure, since the
-// tokenizer already allows a plain one and the audit would not clear an
-// unplain one anyway.
 func structuralPrefixAllowed(r shellReading, prefixList string) bool {
 	if strings.TrimSpace(prefixList) == "" {
 		return false
@@ -1094,15 +866,12 @@ func structuralPrefixAllowed(r shellReading, prefixList string) bool {
 	return true
 }
 
-// tokens is the command's token line as the prefix list compares it: the
-// program basename followed by its arguments.
 func (c shellCommandView) tokens() []string {
 	var words []string
 	if c.literal && len(c.words) > 0 {
 		words = append([]string(nil), c.words...)
 	} else if c.name != "" {
-		// An unknowable argument still has a knowable name; later slots get
-		// a sentinel that can never equal a prefix word.
+		// An unknowable argument still has a knowable name; later slots get a sentinel no prefix word can equal.
 		words = []string{c.name}
 		for i := 1; i < c.argCount; i++ {
 			words = append(words, unknowableWord)
@@ -1110,22 +879,13 @@ func (c shellCommandView) tokens() []string {
 	} else {
 		return nil
 	}
-	// Same normalization as the tokenizer twin (allowlistProgramWord): a
-	// pathed program word keeps its path, so it cannot inherit a bare-name
-	// allow. Structure may only ever revoke, so keeping this in step means a
-	// pathed word the tokenizer refused is refused here too.
+	// Mirrors allowlistProgramWord: a pathed word keeps its path, so structure never grants what the tokenizer refused.
 	words[0] = allowlistProgramWord(words[0])
 	return words
 }
 
-// unknowableWord stands in for an argument whose value exists only at run
-// time; it contains a space, so no policy entry or prefix word can equal it.
 const unknowableWord = "\x00 not statically knowable"
 
-// structuralContradictsPrefix reports that the line runs a command the
-// prefix list does not cover — the tightening answer to strings.Fields
-// eating a newline (so "git status\ncurl x" reads as one covered line). It
-// only ever revokes an allow the tokenizer granted; it never narrows further.
 func structuralContradictsPrefix(r shellReading, prefixList string) bool {
 	if !r.parsed || strings.TrimSpace(prefixList) == "" || len(r.commands) == 0 {
 		return false

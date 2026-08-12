@@ -46,8 +46,6 @@ func TestManager_DeliverToSession_InjectsIntoSessionStream(t *testing.T) {
 	require.NoError(t, err)
 
 	const reportLine = "unit runner reported (result): shipped the board"
-	// SessionID left empty on purpose: the kernel forces it to the owning
-	// session, so a caller cannot misroute an injected update within the instance.
 	err = mgr.DeliverToSession(ctx, sid,
 		libacp.SessionNotification{Update: libacp.NewAgentMessageChunk(reportLine)})
 	require.NoError(t, err)
@@ -56,7 +54,6 @@ func TestManager_DeliverToSession_InjectsIntoSessionStream(t *testing.T) {
 		"the attached viewer receives the injected report update")
 	requireDeliveredWithSessionID(t, viewer, reportLine, sid)
 
-	// The injected update is journaled: a viewer attaching after it replays it.
 	late := newMockViewer("late-supervisor")
 	_, err = mgr.Attach(ctx, id, sid, late)
 	require.NoError(t, err)
@@ -64,9 +61,6 @@ func TestManager_DeliverToSession_InjectsIntoSessionStream(t *testing.T) {
 		"a later viewer replays the journaled report update")
 }
 
-// requireDeliveredWithSessionID asserts an agent_message_chunk containing substr
-// was delivered to v carrying the owning session id — proof the kernel stamped
-// n.SessionID rather than forwarding a caller's (here empty) one.
 func requireDeliveredWithSessionID(t *testing.T, v *mockViewer, substr string, sid libacp.SessionID) {
 	t.Helper()
 	v.mu.Lock()

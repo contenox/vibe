@@ -437,8 +437,6 @@ func TestUnit_groups_DuplicategroupName(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestUnit_groups_ListEmptyAssociations verifies that listing associations
-// for a new resource correctly returns an empty slice, not nil.
 func TestUnit_groups_ListEmptyAssociations(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 

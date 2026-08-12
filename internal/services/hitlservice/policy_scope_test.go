@@ -1,8 +1,3 @@
-// policy_scope_test.go pins the writer/reader scope agreement for the active
-// HITL policy: what `contenox config set hitl-policy-name` writes is what
-// Evaluate gates on. The bug it guards against was silent — the CLI wrote a
-// workspace row, the evaluator read the global one, and switching policies
-// did nothing.
 package hitlservice_test
 
 import (
@@ -19,8 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// policyScopeFixture writes an allow-policy and a deny-policy where the FS
-// source finds them, and returns a service over a real KV store.
 func policyScopeFixture(t *testing.T, workspaceID string) (context.Context, hitlservice.Service, runtimetypes.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -41,17 +34,12 @@ func policyScopeFixture(t *testing.T, workspaceID string) (context.Context, hitl
 	return ctx, svc, store
 }
 
-// TestUnit_Evaluate_ReadsThePolicyTheCLIWrote is the anti-regression test for
-// the scope split: write through the `contenox config set` path
-// (clikv.WriteConfig at the resolved workspace), read through the evaluator,
-// and assert they see one value. A reader re-scoped to the global row alone
-// fails here.
+// TestUnit_Evaluate_ReadsThePolicyTheCLIWrote pins that a write through the
+// config-set path is read by Evaluate at the same scope.
 func TestUnit_Evaluate_ReadsThePolicyTheCLIWrote(t *testing.T) {
 	const workspaceID = "ws-anti-regression"
 	ctx, svc, store := policyScopeFixture(t, workspaceID)
 
-	// Baseline: the fallback policy allows, so a change of verdict below can
-	// only come from the KV the CLI wrote.
 	result, err := svc.Evaluate(ctx, "local_fs", "write_file", nil)
 	require.NoError(t, err)
 	require.Equal(t, hitlservice.ActionAllow, result.Action)
@@ -66,15 +54,13 @@ func TestUnit_Evaluate_ReadsThePolicyTheCLIWrote(t *testing.T) {
 		"the evaluator must read the row the CLI wrote, not a differently-scoped one")
 	require.Equal(t, hitlservice.ActionDeny, result.Action)
 
-	// The same value through the reader the CLI's `config get` uses.
 	got, scope := clikv.ReadConfig(ctx, store, workspaceID, clikv.KeyHITLPolicyName)
 	require.Equal(t, "deny.json", got)
 	require.Equal(t, "workspace", scope)
 }
 
-// TestUnit_Evaluate_FallsBackToTheGlobalRow pins the inheritance leg: a
-// workspace that never set a policy of its own still sees an operator's
-// global default, so the fix adds a scope rather than hiding the old row.
+// TestUnit_Evaluate_FallsBackToTheGlobalRow pins that a workspace with no
+// policy override still falls back to the global row.
 func TestUnit_Evaluate_FallsBackToTheGlobalRow(t *testing.T) {
 	ctx, svc, store := policyScopeFixture(t, "ws-without-override")
 
@@ -86,9 +72,8 @@ func TestUnit_Evaluate_FallsBackToTheGlobalRow(t *testing.T) {
 	require.Equal(t, hitlservice.ActionDeny, result.Action)
 }
 
-// TestUnit_Evaluate_WorkspaceRowWinsOverTheGlobalRow pins the precedence one
-// operator with two projects depends on: a project's own policy is not
-// overridden by whatever the last global write happened to be.
+// TestUnit_Evaluate_WorkspaceRowWinsOverTheGlobalRow pins that a workspace's
+// own policy wins over the global row.
 func TestUnit_Evaluate_WorkspaceRowWinsOverTheGlobalRow(t *testing.T) {
 	const workspaceID = "ws-strict-project"
 	ctx, svc, store := policyScopeFixture(t, workspaceID)

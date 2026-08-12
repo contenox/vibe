@@ -16,6 +16,7 @@ type MockProvider struct {
 	CanStreamFlag   bool
 	CanPromptFlag   bool
 	CanVisionFlag   bool
+	CanAudioFlag    bool
 	Backends        []string
 }
 
@@ -61,6 +62,10 @@ func (m *MockProvider) CanThink() bool {
 
 func (m *MockProvider) CanVision() bool {
 	return m.CanVisionFlag
+}
+
+func (m *MockProvider) CanAudio() bool {
+	return m.CanAudioFlag
 }
 
 func (m *MockProvider) GetChatConnection(ctx context.Context, backendID string) (LLMChatClient, error) {

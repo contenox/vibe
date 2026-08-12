@@ -10,10 +10,8 @@ import (
 	"github.com/contenox/contenox/internal/libsandbox"
 )
 
-// TestMain makes this test binary a valid sandbox-shim host: spawning an
-// agent re-execs /proc/self/exe as the sandbox shim (libsandbox.Command),
-// which under `go test` is this binary. Without ShimMain here, the re-exec
-// would just re-run the suite instead of confining the agent.
+// TestMain makes this test binary a valid sandbox-shim host: spawning an agent re-execs
+// /proc/self/exe as the sandbox shim, which under `go test` is this binary.
 func TestMain(m *testing.M) {
 	if handled, err := libsandbox.ShimMain(); handled {
 		if err != nil {

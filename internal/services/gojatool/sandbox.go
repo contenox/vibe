@@ -21,12 +21,9 @@ import (
 )
 
 // --- Limits -----------------------------------------------------------------
-// Each limit below is asserted by a test in sandbox_test.go.
 
 const (
-	// DefaultDeadline bounds a single execution. goja has no memory cap, so
-	// this is also the de-facto memory bound: an allocation bomb grows the
-	// heap at roughly 150-200 MB/s until the deadline interrupts it.
+	// DefaultDeadline bounds a single execution; since goja has no memory cap, this is also the de-facto memory bound (an allocation bomb grows ~150-200 MB/s until interrupted).
 	DefaultDeadline = 2 * time.Second
 
 	// MaxDeadline is the ceiling on any per-call or per-script deadline
@@ -39,52 +36,30 @@ const (
 )
 
 const (
-	// minDeadline floors any override.
 	minDeadline = 10 * time.Millisecond
 
-	// maxOutputCap ceilings a configured OutputCap.
 	maxOutputCap = 1 << 20
 
-	// defaultMaxCallStack is the goja SetMaxCallStackSize value; goja's own
-	// default is unbounded.
 	defaultMaxCallStack = 512
 
-	// maxSourceBytes bounds one script file and one goja_eval `code` argument.
-	// Compilation is native Go work that the interrupt cannot preempt.
 	maxSourceBytes = 128 << 10
 
-	// programCacheEntries bounds the compiled-program LRU, keyed by source
-	// SHA-256.
 	programCacheEntries = 64
 
-	// Console capture bounds: console.log appends to a buffer returned with
-	// the result rather than performing ambient I/O.
 	maxLogLines     = 100
 	maxLogLineBytes = 1 << 10
 	maxLogBytes     = 8 << 10
 
-	// maxHostCalls bounds how many times one execution may reach the world
-	// through host.tool. The deadline stops while a host call is in flight
-	// (see hostState.stopClock), so it cannot bound a host.tool loop; this
-	// limit does instead.
 	maxHostCalls = 256
 
-	// maxErrorTextBytes clamps a model-facing error built from script-
-	// controlled text (a thrown message, a JS stack).
 	maxErrorTextBytes = 2 << 10
 
-	// maxEchoRunes bounds how much of a model-supplied string a teaching
-	// error quotes back.
 	maxEchoRunes = 120
 
-	// shutdownGrace bounds how long Shutdown waits for in-flight executions:
-	// an in-flight host.tool call may be parked on a human approval, and
-	// teardown must not hang on that.
 	shutdownGrace = 5 * time.Second
 )
 
 // --- Errors -----------------------------------------------------------------
-// Every error here is recoverable by a corrected call, so none is marked fatal.
 
 const (
 	severityRecoverable = "(recoverable: adjust parameters and retry)"
@@ -105,14 +80,13 @@ var (
 	// ErrRecursionRefused means a script tried to invoke a goja-provider tool;
 	// depth is exactly one, by design.
 	ErrRecursionRefused = errors.New("goja: recursive goja tool call refused")
-	// ErrToolDenied means a host.tool call was refused by the approval
-	// envelope. See IsDenyMessage.
+	// ErrToolDenied means a host.tool call was refused by the approval envelope (see IsDenyMessage).
 	ErrToolDenied = errors.New("goja: host tool call denied")
 	// ErrToolUndeclared means a script called a tool its descriptor does not
-	// list in `tools: [...]`. See declaredReach.
+	// list in `tools: [...]`.
 	ErrToolUndeclared = errors.New("goja: host tool not declared by this script")
 	// ErrToolNotData means a tool answered with a stand-in that has no
-	// meaning for a program — a stub, a notice, a refusal. See hostresult.go.
+	// meaning for a program — a stub, a notice, a refusal.
 	ErrToolNotData = errors.New("goja: host tool result is not data")
 	// ErrHostBudget means one execution exhausted its host.tool budget
 	// (maxHostCalls).
@@ -123,13 +97,10 @@ var (
 	ErrNotJSON = errors.New("goja: value is not JSON-representable")
 )
 
-// recoverablef builds a teaching error tagged recoverable-by-correction.
 func recoverablef(format string, a ...any) error {
 	return errors.New(fmt.Sprintf(format, a...) + " " + severityRecoverable)
 }
 
-// wrapRecoverable tags a sentinel-wrapping error recoverable unless it
-// already carries a severity marker.
 func wrapRecoverable(sentinel error, format string, a ...any) error {
 	msg := fmt.Sprintf(format, a...)
 	if strings.Contains(msg, severityRecoverable) || strings.Contains(msg, severityFatalToken) {
@@ -138,8 +109,6 @@ func wrapRecoverable(sentinel error, format string, a ...any) error {
 	return fmt.Errorf("%w: %s %s", sentinel, msg, severityRecoverable)
 }
 
-// markSeverity tags err recoverable-by-correction unless already tagged,
-// preserving the error chain while appending the marker to the rendered text.
 func markSeverity(err error) error {
 	if err == nil {
 		return nil
@@ -151,13 +120,10 @@ func markSeverity(err error) error {
 	return fmt.Errorf("%w %s", err, severityRecoverable)
 }
 
-// withoutSeverity strips a severity marker from text about to be embedded in
-// another error, so a nested message never carries two markers.
 func withoutSeverity(s string) string {
 	return strings.TrimSpace(strings.ReplaceAll(s, severityRecoverable, ""))
 }
 
-// clampText bounds script- or model-controlled text embedded in an error.
 func clampText(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -166,8 +132,6 @@ func clampText(s string, max int) string {
 	return cut + fmt.Sprintf("… (+%d more bytes)", len(s)-len(cut))
 }
 
-// echoArg renders a model-supplied argument for an error: clamped, then
-// Go-quoted so control characters, NULs and bidi overrides are escaped.
 func echoArg(s string) string {
 	r := []rune(s)
 	if len(r) > maxEchoRunes {
@@ -176,8 +140,6 @@ func echoArg(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 
-// truncateAtRune backs a byte-truncated string off to the last complete rune,
-// so a cap never emits half a code point.
 func truncateAtRune(s string) string {
 	for len(s) > 0 && !utf8.ValidString(s) {
 		s = s[:len(s)-1]
@@ -189,8 +151,7 @@ func truncateAtRune(s string) string {
 
 // Result is what every goja tool returns to the engine (DataTypeJSON).
 type Result struct {
-	// Value is the script's return value, marshaled as JSON. On truncation it
-	// becomes a JSON string holding the head of the original plus Notice.
+	// Value is the script's return value marshaled as JSON; on truncation it becomes a JSON string holding the head of the original plus Notice.
 	Value json.RawMessage `json:"value"`
 	// Truncated reports that Value hit the output cap.
 	Truncated bool `json:"truncated,omitempty"`
@@ -205,15 +166,8 @@ type Result struct {
 	DurationMS int64 `json:"duration_ms"`
 }
 
-// truncationNotice is the marker appended to a capped result, naming the cap
-// and the remedy.
 const truncationNotice = "… [truncated: result exceeded the %d-byte output cap, %d bytes dropped. Filter or aggregate inside the script and return less.]"
 
-// --- Program cache ----------------------------------------------------------
-
-// programCache is a bounded LRU of compiled programs keyed by source SHA-256.
-// A *goja.Program is safe to run in several runtimes at once, so the compiled
-// code is shared across executions while no state is.
 type programCache struct {
 	mu      sync.Mutex
 	entries map[string]*list.Element
@@ -239,9 +193,6 @@ func newProgramCache(max int) *programCache {
 	}
 }
 
-// compile returns the compiled program for src, compiling on a miss. Two
-// concurrent misses of the same source compile twice; the second insert wins,
-// which is a wasted compile, never a wrong answer.
 func (c *programCache) compile(name, src string) (*goja.Program, error) {
 	sum := sha256.Sum256([]byte(src))
 	key := hex.EncodeToString(sum[:])
@@ -257,8 +208,7 @@ func (c *programCache) compile(name, src string) (*goja.Program, error) {
 	c.misses++
 	c.mu.Unlock()
 
-	// Strict mode, always: an implicit global is a ReferenceError, not a
-	// silent write onto a globalThis that is discarded a moment later.
+	// Strict mode always: an implicit global is a ReferenceError, not a silent write onto a discarded globalThis.
 	prog, err := goja.Compile(name, src, true)
 	if err != nil {
 		return nil, err
@@ -289,10 +239,6 @@ func (c *programCache) stats() (hits, misses uint64, size int) {
 	return c.hits, c.misses, c.order.Len()
 }
 
-// --- Sandbox ----------------------------------------------------------------
-
-// sandbox owns the limits, the program cache, the host seam and the
-// lifecycle. Toolset (tools.go) is the engine-facing wrapper around it.
 type sandbox struct {
 	deadline    time.Duration
 	maxDeadline time.Duration
@@ -300,13 +246,9 @@ type sandbox struct {
 	maxStack    int
 	cache       *programCache
 
-	// host is late-bindable: the aggregate tools repo the bridge calls is
-	// built from the map this toolset is registered in. See SetHost.
 	hostMu sync.RWMutex
 	host   HostToolCaller
 
-	// Lifecycle: stopOnce guards the close, wg joins in-flight work, and live
-	// lets Shutdown interrupt VMs that are still running.
 	mu       sync.Mutex
 	live     map[*goja.Runtime]struct{}
 	stopped  bool
@@ -315,9 +257,6 @@ type sandbox struct {
 	wg       sync.WaitGroup
 }
 
-// begin admits an execution, joining it to the WaitGroup Shutdown waits on
-// and registering its VM so Shutdown can interrupt it. Returns false once the
-// sandbox is stopped.
 func (s *sandbox) begin(vm *goja.Runtime) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -372,9 +311,6 @@ func newSandbox(deadline, maxDeadline time.Duration, outputCap, maxStack int) *s
 	}
 }
 
-// clampDeadline resolves a requested per-call/per-script deadline against the
-// configured default and the hard ceiling. A non-positive request takes the
-// default; anything above the ceiling is clamped rather than refused.
 func (s *sandbox) clampDeadline(requested time.Duration) time.Duration {
 	if requested <= 0 {
 		return s.deadline
@@ -397,14 +333,10 @@ func (s *sandbox) shuttingDown() bool {
 	}
 }
 
-// shutdown refuses further executions, interrupts every live VM, and joins
-// in-flight work, bounded by shutdownGrace.
 func (s *sandbox) shutdown() {
 	s.stopOnce.Do(func() { close(s.stop) })
 
-	// stopped is set under the same lock that admits an execution, so an exec
-	// that got in has already joined the WaitGroup before this snapshot is
-	// taken — otherwise wg.Add could race wg.Wait.
+	// stopped is set under the same lock that admits an exec, so wg.Add can never race wg.Wait here.
 	s.mu.Lock()
 	s.stopped = true
 	vms := make([]*goja.Runtime, 0, len(s.live))
@@ -427,34 +359,14 @@ func (s *sandbox) shutdown() {
 	}
 }
 
-// execSpec is one unit of sandboxed work.
 type execSpec struct {
-	// label names the caller in errors: "goja_eval", a script's tool name, or
-	// "load <file>".
-	label string
-	// deadline is the already-clamped budget for this execution.
-	deadline time.Duration
-	// hostEnabled decides whether host.tool is callable. Load-time execution
-	// sets it false, since a file's top level runs before the tool exists.
+	label       string
+	deadline    time.Duration
 	hostEnabled bool
-	// reach is the script's declared `tools` allowlist, or nil for
-	// unrestricted. See declaredReach.
-	reach *declaredReach
-	// body runs inside the prepared VM and returns the value to marshal.
-	body func(vm *goja.Runtime, codec jsonCodec) (goja.Value, error)
+	reach       *declaredReach
+	body        func(vm *goja.Runtime, codec jsonCodec) (goja.Value, error)
 }
 
-// run executes spec in a fresh runtime under a watchdog and returns the
-// marshaled result: a new goja.Runtime per call so no state survives across
-// executions, a joined watchdog that interrupts at the deadline or on context
-// cancellation, recover() so a panic in a bridged host function becomes an
-// error instead of taking the process down, and JSON-only marshaling with an
-// output cap.
-//
-// goja's Interrupt only fires between VM instructions — it does not preempt
-// a native built-in (a catastrophic-backtracking regexp, a large
-// String.repeat), so such code can run past the deadline before this
-// function's watchdog takes effect.
 func (s *sandbox) run(ctx context.Context, spec execSpec) (res *Result, err error) {
 	if s.shuttingDown() {
 		return nil, fmt.Errorf("%w: %s cannot start %s", ErrShutdown, spec.label, severityRecoverable)
@@ -482,12 +394,7 @@ func (s *sandbox) run(ctx context.Context, spec execSpec) (res *Result, err erro
 	}
 	defer s.end(vm)
 
-	// One timer goroutine, joined unconditionally via the deferred
-	// close(fin)+Wait below, so nothing outlives this call even if body
-	// panics. The clock stops while the script is inside host.tool (see
-	// hostState.stopClock); the non-compute interrupts (caller context,
-	// shutdown) stay live throughout so a paused deadline never makes an
-	// execution unkillable.
+	// fin is always closed via defer, joining this goroutine even on panic; shutdown/cancel interrupts stay live through a paused deadline so execution is never unkillable.
 	fin := make(chan struct{})
 	var watchdog sync.WaitGroup
 	watchdog.Add(1)
@@ -541,8 +448,7 @@ func (s *sandbox) run(ctx context.Context, spec execSpec) (res *Result, err erro
 	defer func() {
 		close(fin)
 		watchdog.Wait()
-		// A panic from a bridged host function propagates out of RunProgram,
-		// so without this recover the whole process dies for one bad tool.
+		// Without this recover, a panic from a bridged host function crashes the whole process for one bad tool.
 		if r := recover(); r != nil {
 			res = nil
 			err = recoverablef("goja: %s: the host tool path panicked mid-call: %v. This is a defect in the tool that was called, not in the script; try a different tool or different arguments", spec.label, clampText(fmt.Sprint(r), maxErrorTextBytes))
@@ -580,9 +486,6 @@ func (s *sandbox) run(ctx context.Context, spec execSpec) (res *Result, err erro
 	return out, nil
 }
 
-// execError turns a goja failure into a teaching error, keeping the deadline,
-// throw, overflow and marshal-failure cases distinct rather than collapsing
-// them into one message.
 func (s *sandbox) execError(spec execSpec, hs *hostState, err error, elapsed time.Duration) error {
 	var interrupted *goja.InterruptedError
 	if errors.As(err, &interrupted) {
@@ -595,8 +498,7 @@ func (s *sandbox) execError(spec execSpec, hs *hostState, err error, elapsed tim
 				return fmt.Errorf("goja: %s was interrupted after %s because the caller's context ended: %w", spec.label, elapsed.Round(time.Millisecond), v)
 			}
 		}
-		// Compute time, not wall time: the difference is whatever the script
-		// spent parked in host.tool, which the deadline no longer counts.
+		// Compute time, not wall time: the difference is time spent parked in host.tool, uncounted by the deadline.
 		compute := elapsed
 		if hs != nil {
 			compute -= hs.hostWait
@@ -616,8 +518,7 @@ func (s *sandbox) execError(spec execSpec, hs *hostState, err error, elapsed tim
 	var ex *goja.Exception
 	if errors.As(err, &ex) {
 		thrown := recoverablef("goja: %s threw: %s", spec.label, clampText(exceptionText(ex), maxErrorTextBytes))
-		// An uncaught bridge refusal keeps its sentinel so a caller branching
-		// on ErrRecursionRefused need not string-match the crossed message.
+		// An uncaught bridge refusal keeps its sentinel so callers can errors.Is without string-matching.
 		if hs != nil && hs.refusal != nil && strings.Contains(thrown.Error(), hs.refusal.Error()) {
 			return &taggedError{msg: thrown.Error(), err: hs.refusal}
 		}
@@ -633,9 +534,6 @@ func (s *sandbox) execError(spec execSpec, hs *hostState, err error, elapsed tim
 	return recoverablef("goja: %s: %s", spec.label, clampText(err.Error(), maxErrorTextBytes))
 }
 
-// taggedError carries a clean model-facing message and a sentinel for
-// errors.Is, for an error that left Go, became a JS exception, and came back
-// with the sentinel no longer in the chain.
 type taggedError struct {
 	msg string
 	err error
@@ -644,8 +542,6 @@ type taggedError struct {
 func (e *taggedError) Error() string { return e.msg }
 func (e *taggedError) Unwrap() error { return e.err }
 
-// exceptionText renders a thrown JS value for a model-facing error, keeping
-// the JS source position but dropping a stack whose top frame is native Go.
 func exceptionText(ex *goja.Exception) string {
 	full := strings.TrimSpace(ex.Error())
 	if strings.Contains(full, "(native)") {
@@ -656,8 +552,6 @@ func exceptionText(ex *goja.Exception) string {
 	return full
 }
 
-// runSource compiles (or reuses) src and runs it, returning the program's
-// completion value — the goja_eval path.
 func (s *sandbox) runSource(ctx context.Context, label, src string, deadline time.Duration) (*Result, error) {
 	if len(src) > maxSourceBytes {
 		return nil, recoverablef("goja: %s: source is %d bytes, over the %d-byte limit. Send less code — build the data with a tool call and transform it here, rather than embedding it in the source", label, len(src), maxSourceBytes)
@@ -675,15 +569,6 @@ func (s *sandbox) runSource(ctx context.Context, label, src string, deadline tim
 		},
 	})
 }
-
-// --- JSON-only marshaling ---------------------------------------------------
-//
-// Both directions cross through the runtime's own JSON.parse / JSON.stringify
-// rather than goja's Go<->JS value mapping, because goja.ToValue on a Go map
-// produces a wrapper that shares the map with the host, while JSON.parse
-// produces a plain JS object that shares nothing. Cost: NaN and ±Infinity
-// become null, undefined becomes null at the top level, and an unrepresentable
-// value is refused with a teaching error rather than silently dropped.
 
 type jsonCodec struct {
 	vm        *goja.Runtime
@@ -707,7 +592,6 @@ func newJSONCodec(vm *goja.Runtime) (jsonCodec, error) {
 	return jsonCodec{vm: vm, parse: parse, stringify: stringify}, nil
 }
 
-// toJS turns Go-side JSON into a plain JS value.
 func (c jsonCodec) toJS(raw []byte) (goja.Value, error) {
 	if len(raw) == 0 {
 		raw = []byte("null")
@@ -715,7 +599,6 @@ func (c jsonCodec) toJS(raw []byte) (goja.Value, error) {
 	return c.parse(goja.Undefined(), c.vm.ToValue(string(raw)))
 }
 
-// marshal renders a JS value as JSON bytes, refusing what JSON cannot carry.
 func (c jsonCodec) marshal(v goja.Value) ([]byte, error) {
 	if v == nil || goja.IsUndefined(v) {
 		// A script that returns nothing returns null, not an error.
@@ -742,7 +625,6 @@ func (c jsonCodec) marshal(v goja.Value) ([]byte, error) {
 		}
 		var ex *goja.Exception
 		if errors.As(err, &ex) {
-			// Canonical case: a cycle, or a BigInt.
 			return nil, wrapRecoverable(ErrNotJSON, "could not be serialised: %s. Return a plain data structure — no cycles, no BigInt", clampText(exceptionText(ex), maxErrorTextBytes))
 		}
 		return nil, wrapRecoverable(ErrNotJSON, "could not be serialised: %s", clampText(err.Error(), maxErrorTextBytes))
@@ -757,10 +639,6 @@ func (c jsonCodec) marshal(v goja.Value) ([]byte, error) {
 	}
 	return []byte(text), nil
 }
-
-// --- console ----------------------------------------------------------------
-// console.log is not ambient I/O: it appends to a bounded buffer that travels
-// back in the Result.
 
 type consoleBuffer struct {
 	mu        sync.Mutex
@@ -820,8 +698,6 @@ func installConsole(vm *goja.Runtime, codec jsonCodec, buf *consoleBuffer) error
 	return vm.Set("console", obj)
 }
 
-// consoleFormat renders one console argument: strings verbatim, everything
-// else as JSON where possible, falling back to the value's own string form.
 func consoleFormat(codec jsonCodec, v goja.Value) string {
 	if v == nil || goja.IsUndefined(v) {
 		return "undefined"

@@ -330,9 +330,7 @@ func TestUnitKV(t *testing.T) {
 	})
 }
 
-// TestUnitKV_UpdateKVIfUnchanged pins the compare-and-swap a KV row's owner
-// writes a status decision under: the snapshot it read is the predicate, so a
-// write built on a read that has since moved on is refused rather than taken.
+// TestUnitKV_UpdateKVIfUnchanged verifies a write built on a stale snapshot is refused.
 func TestUnitKV_UpdateKVIfUnchanged(t *testing.T) {
 	ctx, s := runtimetypes.SetupStore(t)
 
@@ -352,7 +350,6 @@ func TestUnitKV_UpdateKVIfUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, string(reclaimed), string(stored))
 
-	// The same write replayed from the same stale snapshot no longer matches.
 	landed := json.RawMessage(`{"status":"landed"}`)
 	err = s.UpdateKVIfUnchanged(ctx, key, snapshot, landed)
 	require.ErrorIs(t, err, libdb.ErrNotFound, "a moved row refuses the write")

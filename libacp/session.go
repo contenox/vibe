@@ -73,18 +73,16 @@ type SetSessionModeResponse struct {
 
 // SessionModelState is the UNSTABLE model-picker surface: the wire shape of
 // the optional `models` field in session/new, session/load, and
-// session/resume responses, mirroring SessionModeState for modes. Not part of
-// the stable ACP spec and may change; dispatched over session/set_model (see
-// MethodSessionSetModel).
+// session/resume responses, mirroring SessionModeState for modes.
 type SessionModelState struct {
 	CurrentModelID  string          `json:"currentModelId"`
 	AvailableModels []ModelInfo     `json:"availableModels"`
 	Meta            json.RawMessage `json:"_meta,omitempty"`
 }
 
-// ModelInfo describes one selectable model in a SessionModelState. ID is the
-// stable identifier passed back in SetSessionModelRequest. Part of the
-// UNSTABLE model-picker surface; carries no effort/fast-mode facet.
+// ModelInfo describes one selectable model in a SessionModelState (UNSTABLE
+// model-picker surface); ID is the stable identifier passed back in
+// SetSessionModelRequest.
 type ModelInfo struct {
 	ID          string          `json:"modelId"`
 	Name        string          `json:"name"`
@@ -92,9 +90,9 @@ type ModelInfo struct {
 	Meta        json.RawMessage `json:"_meta,omitempty"`
 }
 
-// SetSessionModelRequest is session/set_model's params: switch a session to
-// one of the ids SessionModelState.AvailableModels advertised. Part of the
-// UNSTABLE model-picker surface (see MethodSessionSetModel).
+// SetSessionModelRequest is session/set_model's (UNSTABLE model-picker
+// surface) params: switch a session to one of the ids
+// SessionModelState.AvailableModels advertised.
 type SetSessionModelRequest struct {
 	SessionID SessionID       `json:"sessionId"`
 	ModelID   string          `json:"modelId"`
@@ -122,16 +120,11 @@ type SessionConfigOption struct {
 	Type        string `json:"type"`
 	// CurrentValue is always the Go-side string form: the selected
 	// SessionConfigValue.Value id for Select, "true"/"false" for Boolean.
-	// MarshalJSON renders Boolean as a JSON boolean on the wire; UnmarshalJSON
-	// accepts either wire shape back into this string.
 	CurrentValue string              `json:"currentValue"`
 	Options      SessionConfigValues `json:"options"`
 	Meta         json.RawMessage     `json:"_meta,omitempty"`
 }
 
-// sessionConfigOptionWire is SessionConfigOption's wire shape: CurrentValue is
-// deferred as raw JSON, and Options is a pointer so the "boolean" variant
-// (which has no options field) can omit it entirely.
 type sessionConfigOptionWire struct {
 	ID           string               `json:"id"`
 	Name         string               `json:"name"`
@@ -347,7 +340,7 @@ type SetSessionConfigOptionResponse struct {
 }
 
 // ResumeSessionRequest reconnects to an existing session without history
-// replay (the client kept its transcript). McpServers is optional here,
+// replay (the client kept its transcript); McpServers is optional here,
 // unlike session/new and session/load.
 type ResumeSessionRequest struct {
 	SessionID SessionID `json:"sessionId"`

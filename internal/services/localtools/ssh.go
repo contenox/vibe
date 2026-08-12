@@ -106,9 +106,7 @@ func (c *SSHClientCache) Clear() {
 	}
 }
 
-// IsAlive checks if a cached client is still connected.
-// The read lock is released before the network call so that concurrent
-// Put/Remove calls do not deadlock while SendRequest blocks.
+// IsAlive checks if a cached client is still connected; the read lock is released before the network call so concurrent Put/Remove calls do not deadlock while SendRequest blocks.
 func (c *SSHClientCache) IsAlive(key string) bool {
 	c.mu.RLock()
 	client, exists := c.clients[key]
@@ -124,9 +122,9 @@ func (c *SSHClientCache) IsAlive(key string) bool {
 // HostKeyVerifier handles host key verification
 type HostKeyVerifier struct {
 	mu         sync.RWMutex
-	knownHosts map[string][]string // host -> []public keys
+	knownHosts map[string][]string
 	strictMode bool
-	customKeys map[string]string // host -> expected key
+	customKeys map[string]string
 }
 
 // NewHostKeyVerifier creates a new host key verifier
@@ -144,7 +142,6 @@ func NewHostKeyVerifier(knownHostsFile string, strict bool) (*HostKeyVerifier, e
 	return verifier, nil
 }
 
-// loadKnownHosts parses the known_hosts file
 func (v *HostKeyVerifier) loadKnownHosts(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -233,8 +230,7 @@ func (v *HostKeyVerifier) VerifyHostKey(hostname string, remote net.Addr, key ss
 		return fmt.Errorf("host %s is not in known_hosts and strict mode is enabled", host)
 	}
 
-	// Unknown host and non-strict mode still rejects: there is no safe default
-	// accept for an unverified host key.
+	// Unknown host and non-strict mode still rejects: there is no safe default accept for an unverified host key.
 	return fmt.Errorf("host %s not in known_hosts (fingerprint: %s)", host, fingerprint)
 }
 
@@ -352,7 +348,6 @@ func (h *SSHTools) Exec(ctx context.Context, startTime time.Time, input any, deb
 	return result, taskengine.DataTypeJSON, nil
 }
 
-// parseSSHConfig extracts SSH configuration from tools arguments and input
 func (h *SSHTools) parseSSHConfig(tools *taskengine.ToolsCall, input any) (*SSHConfig, string, error) {
 	config := &SSHConfig{
 		Port:          h.defaultPort,
@@ -403,8 +398,7 @@ func (h *SSHTools) parseSSHConfig(tools *taskengine.ToolsCall, input any) (*SSHC
 			}
 		}
 	case string:
-		// A bare string input is the command; the rest of config comes from
-		// tools args.
+		// A bare string input is the command; the rest of config comes from tools args.
 		command = v
 	default:
 		return nil, "", fmt.Errorf("unsupported input type: %T", input)
@@ -490,7 +484,6 @@ func (h *SSHTools) applyToolsArgs(config *SSHConfig, args map[string]string) {
 	}
 }
 
-// executeCommand establishes SSH connection and runs the command
 func (h *SSHTools) executeCommand(ctx context.Context, config *SSHConfig, command string) (*SSHResult, error) {
 	start := time.Now()
 	result := &SSHResult{
@@ -539,8 +532,7 @@ func (h *SSHTools) executeCommand(ctx context.Context, config *SSHConfig, comman
 	cmdCtx, cancel := context.WithTimeout(ctx, config.Timeout)
 	defer cancel()
 
-	// session.Run blocks, so it runs in a goroutine and races against cmdCtx
-	// to enforce the timeout.
+	// session.Run blocks, so it runs in a goroutine and races against cmdCtx to enforce the timeout.
 	cmdDone := make(chan error, 1)
 	go func() {
 		cmdDone <- session.Run(command)
@@ -585,7 +577,6 @@ func (h *SSHTools) executeCommand(ctx context.Context, config *SSHConfig, comman
 	return result, nil
 }
 
-// createSSHConfig creates SSH client configuration with secure defaults
 func (h *SSHTools) createSSHConfig(config *SSHConfig) (*ssh.ClientConfig, error) {
 	sshConfig := &ssh.ClientConfig{
 		User:            config.User,
@@ -623,7 +614,6 @@ func (h *SSHTools) createSSHConfig(config *SSHConfig) (*ssh.ClientConfig, error)
 	return sshConfig, nil
 }
 
-// parsePrivateKeyFile reads and parses a private key from file with proper permissions check
 func (h *SSHTools) parsePrivateKeyFile(path string) (ssh.Signer, error) {
 	// Reject key files readable by group/other (must be 600 or 400 equivalent).
 	if info, err := os.Stat(path); err == nil {
@@ -648,16 +638,13 @@ func (h *SSHTools) parsePrivateKeyFile(path string) (ssh.Signer, error) {
 	return signer, nil
 }
 
-// createNewClient creates a new SSH client
 func (h *SSHTools) createNewClient(config *SSHConfig, sshConfig *ssh.ClientConfig) (*ssh.Client, error) {
 	address := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	return ssh.Dial("tcp", address, sshConfig)
 }
 
-// getCachedClient retrieves or creates a cached SSH client
 func (h *SSHTools) getCachedClient(config *SSHConfig, sshConfig *ssh.ClientConfig) (*ssh.Client, error) {
-	// Include auth credentials in the cache key so two connections to the same
-	// host with different keys/passwords never share a cached session.
+	// Auth credentials are part of the cache key so two connections to the same host with different keys/passwords never share a session.
 	authMaterial := config.Password + "|" + config.PrivateKey + "|" + config.PrivateKeyFile
 	authHash := sha256.Sum256([]byte(authMaterial))
 	cacheKey := fmt.Sprintf("%s@%s:%d|%x", config.User, config.Host, config.Port, authHash)

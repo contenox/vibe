@@ -1,8 +1,5 @@
 package agentservice_test
 
-// InferStopReason must distinguish a truncated success (finish reason in
-// the "length" class) from a normal end of turn.
-
 import (
 	"testing"
 
@@ -29,10 +26,7 @@ func TestUnit_InferStopReason_NormalFinishStaysEndTurn(t *testing.T) {
 	}
 }
 
-// A chain reaches summarise_failure both by spending its loop budget and by a
-// task erroring into on_failure. Only the first is max_turn_requests; reporting
-// the second that way told operators to /clear over a provider 404 and hid the
-// error behind the handler's progress summary.
+// A chain reaching summarise_failure via an on_failure error, not a spent budget, must report the underlying error rather than max_turn_requests.
 func TestUnit_InferStopReason_ErroredRecoveryIsNotABudgetStop(t *testing.T) {
 	const cause = "vertex API returned non-200 status for stream: 404"
 	steps := []taskengine.CapturedStateUnit{

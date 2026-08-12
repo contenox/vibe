@@ -1,10 +1,5 @@
 package fleetservice
 
-// The composition seam: an envelope's compute half is inert unless
-// BuildInProcess wires a reader over the host's PolicySource. These pin the
-// wiring itself; the enforcement seams it feeds are pinned in compute_test.go
-// and dispatch_resolution_bounds_test.go.
-
 import (
 	"context"
 	"path/filepath"
@@ -21,9 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// boundsFixture builds an in-process fleet over policyDir and returns it with
-// the mission store it shares. A nil-returning policyDir ("") means no
-// PolicySource at all.
 func boundsFixture(t *testing.T, policyDir string) (context.Context, *service, missionservice.Service) {
 	t.Helper()
 	ctx := context.Background()
@@ -45,7 +37,6 @@ func boundsFixture(t *testing.T, policyDir string) (context.Context, *service, m
 	return ctx, svc, missions
 }
 
-// boundedEnvelope is the compute half every case here reads back.
 func boundedEnvelope(t *testing.T, dir, name string) string {
 	t.Helper()
 	return writePolicy(t, dir, name, map[string]any{
@@ -106,10 +97,7 @@ func TestUnit_BuildInProcess_NoPolicySourceStaysUnbounded(t *testing.T) {
 	require.Equal(t, hitlservice.ComputeBounds{}, svc.dispatchResolutionBounds(ctx, "envelope-bounded.json"))
 }
 
-// TestUnit_BuildInProcess_UnknownEnvelopeStaysUnbounded: a bounds read that
-// cannot load its policy is unbounded, never a phantom ceiling. Dispatch
-// itself refuses such a name (the validator); this pins the reader's own
-// register.
+// TestUnit_BuildInProcess_UnknownEnvelopeStaysUnbounded: a bounds read that cannot load its policy is unbounded, never a phantom ceiling; Dispatch itself refuses such a name via the validator, and this pins the reader's own register.
 func TestUnit_BuildInProcess_UnknownEnvelopeStaysUnbounded(t *testing.T) {
 	policyDir := t.TempDir()
 	boundedEnvelope(t, policyDir, "envelope-bounded.json")
@@ -118,10 +106,7 @@ func TestUnit_BuildInProcess_UnknownEnvelopeStaysUnbounded(t *testing.T) {
 	require.Equal(t, hitlservice.ComputeBounds{}, svc.dispatchResolutionBounds(ctx, "nothing-here.json"))
 }
 
-// TestUnit_BuildInProcess_WiredBoundsLandMissionStuckOnMaxTokens drives a
-// mission through the reader BuildInProcess wired, over a real envelope on
-// disk: the token ceiling must bite rather than run unbounded. The kernel is
-// faked because the bound is read between turns, not inside one.
+// TestUnit_BuildInProcess_WiredBoundsLandMissionStuckOnMaxTokens drives a mission through the reader BuildInProcess wired, over a real envelope on disk, so the token ceiling must bite rather than run unbounded; the kernel is faked because the bound is read between turns, not inside one.
 func TestUnit_BuildInProcess_WiredBoundsLandMissionStuckOnMaxTokens(t *testing.T) {
 	policyDir := t.TempDir()
 	envelope := writePolicy(t, policyDir, "envelope-tokens.json", map[string]any{

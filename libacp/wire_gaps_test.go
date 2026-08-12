@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Added here rather than on testAgent (clientconn_test.go): both echo their
-// request back via the response Meta, which the loopback tests assert on.
 func (a *testAgent) SetSessionMode(_ context.Context, req libacp.SetSessionModeRequest) (libacp.SetSessionModeResponse, error) {
 	echo, err := json.Marshal(req)
 	if err != nil {
@@ -68,9 +66,6 @@ func TestUnit_ClientSideConnection_LogoutReachesAgent(t *testing.T) {
 	assert.JSONEq(t, `{"seen":true}`, string(resp.Meta))
 }
 
-// bareAgent exercises the MethodNotFound default path for session/set_mode
-// and logout end to end, through the real wire dispatch, not just the
-// in-process UnimplementedAgent unit.
 type bareAgent struct {
 	libacp.UnimplementedAgent
 }

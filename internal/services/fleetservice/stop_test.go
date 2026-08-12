@@ -51,7 +51,6 @@ func TestUnit_StopMission_AbandonsAsksAndDeletesCheckpoints(t *testing.T) {
 	pendingAskRow(t, ctx, store, "ask-question", m.ID, hitlservice.AttentionToolsName, hitlservice.AttentionToolName)
 	pendingAskRow(t, ctx, store, "ask-other-mission", "some-other-mission", "local_shell", "exec")
 
-	// A run suspended under the permission ask.
 	require.NoError(t, store.CreateChainCheckpoint(ctx, &runtimetypes.ChainCheckpoint{
 		ID: "ask-perm", SchemaVersion: 1, Payload: json.RawMessage(`{}`),
 	}))

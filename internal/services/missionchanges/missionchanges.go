@@ -17,55 +17,37 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// DOI (Degree-of-Interest) weights for Stage 1 scoring. These are tunable
-// hypotheses, not fixed constants; only the ordering edit > read > other is
-// load-bearing. The wire granularity is coarser than ideal: acpsvc folds
-// read_file/stat_file/list_dir/grep into one ToolKindRead before journaling,
-// so this layer cannot separate them. Decay and masking are deliberately not
-// applied yet — this is the additive Stage-1 stub.
 const (
-	weightEdit    = 4 // a write/sed mutation — the strongest attention signal
-	weightDelete  = 4 // a deletion is a mutation too
+	weightEdit    = 4
+	weightDelete  = 4
 	weightMove    = 3
-	weightRead    = 2 // read/stat/list/grep, folded to one kind at the wire
+	weightRead    = 2
 	weightFetch   = 2
 	weightExecute = 2
 	weightOther   = 1
 )
 
-// maxChangedFiles caps the changed-files list, applied after scoring and
-// sorting so the surviving entries are the highest-attention ones. When it
-// bites, Changes.Incomplete is set.
 const maxChangedFiles = 100
 
-// diffDisplayCap bounds the bytes of original/modified text one Diff
-// response returns; past this, Diff.Truncated is set. The kernel journal
-// already caps each diff field upstream (16KiB); this is a generous backstop.
 const diffDisplayCap = 128 * 1024
 
-// maxOutsidePaths bounds the sample of out-of-root paths reported on a scope
-// anomaly — a courtesy sample, not an exhaustive audit.
 const maxOutsidePaths = 20
 
-// ChangedFile is one file the mission's unit wrote. Score is its Stage-1
-// DOI (advice for review order, never a gate); Status is derived from the
-// first and last diff seen for the path.
+// ChangedFile is one file the mission's unit wrote, with Score its Stage-1 DOI and Status derived from the first and last diff seen.
 type ChangedFile struct {
 	Path   string `json:"path"`
 	Status string `json:"status"` // "added" | "modified" | "deleted"
 	Score  int    `json:"score"`
 }
 
-// The three status strings ChangedFile.Status draws from. Contracted values
-// — the Beam diff viewer keys its badges on them.
+// The three status strings ChangedFile.Status draws from.
 const (
 	StatusAdded    = "added"
 	StatusModified = "modified"
 	StatusDeleted  = "deleted"
 )
 
-// ScopeStats is the Stage-2 scope summary: how broadly the unit ranged and
-// whether it left its lane. All fields are advisory.
+// ScopeStats is the Stage-2 scope summary: how broadly the unit ranged and whether it left its lane; all fields are advisory.
 type ScopeStats struct {
 	Files        int      `json:"files"`
 	Dirs         int      `json:"dirs"`
@@ -73,51 +55,35 @@ type ScopeStats struct {
 	OutsidePaths []string `json:"outsidePaths,omitempty"`
 }
 
-// Changes is the GET /missions/{id}/changes response. Files is always
-// non-nil. Incomplete is true when the list was capped (maxChangedFiles).
+// Changes is the GET /missions/{id}/changes response, with Files always non-nil and Incomplete set when the list was capped.
 type Changes struct {
 	Files      []ChangedFile `json:"files"`
 	Incomplete bool          `json:"incomplete"`
 	Scope      ScopeStats    `json:"scope"`
 }
 
-// Diff is the GET /missions/{id}/changes/diff?path= response, fed straight
-// to Monaco's DiffEditor. Truncated is set when either side was clipped to
-// diffDisplayCap.
+// Diff is the GET /missions/{id}/changes/diff?path= response fed to Monaco's DiffEditor; Truncated is set when either side was clipped.
 type Diff struct {
 	Original  string `json:"original"`
 	Modified  string `json:"modified"`
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
-// missionGetter is the narrow slice of missionservice this package needs, so
-// a unit test can satisfy it with a stub. missionservice.Service implements it.
 type missionGetter interface {
 	Get(ctx context.Context, id string) (*missionservice.Mission, error)
 }
 
-// SessionJournalReader is the optional kernel capability this layer reads
-// through (reached by type assertion, since it's not on the Manager
-// lifecycle interface). The kernel returns the journal uninterpreted; all
-// attention/scope judgement lives here.
-//
-// ok is false for an unknown instance or a session the instance does not
-// own; the service then returns an empty Changes, not an error.
+// SessionJournalReader is the kernel capability, reached by type assertion, that returns a session's raw journal; ok is false for an unknown instance or session.
 type SessionJournalReader interface {
 	SessionJournal(instanceID string, sessionID libacp.SessionID) ([]libacp.SessionNotification, string, bool)
 }
 
-// Service answers the two attention-layer endpoints. Read-only by
-// construction: no method here mutates a mission.
+// Service answers the two attention-layer endpoints and is read-only by construction: no method here mutates a mission.
 type Service interface {
-	// Changes folds mission id's session journal into the ordered
-	// changed-files list plus the scope summary. A known mission whose unit
-	// left no recoverable journal yields an empty, non-error Changes.
+	// Changes folds mission id's session journal into the ordered changed-files list plus the scope summary; a mission whose unit left no recoverable journal yields an empty, non-error Changes.
 	Changes(ctx context.Context, missionID string) (*Changes, error)
 
-	// Diff returns the {original, modified} pair for one changed path in
-	// mission id, truncated to diffDisplayCap. A path the mission never
-	// wrote yields a not-found error.
+	// Diff returns the {original, modified} pair for one changed path in mission id, truncated to diffDisplayCap; a path the mission never wrote yields a not-found error.
 	Diff(ctx context.Context, missionID, filePath string) (*Diff, error)
 }
 
@@ -126,9 +92,7 @@ type service struct {
 	journal  SessionJournalReader
 }
 
-// New builds the service over a mission resolver and the kernel journal
-// reader. journal may be nil, in which case every mission reads as having no
-// recorded work rather than failing.
+// New builds the service over a mission resolver and the kernel journal reader; journal may be nil, in which case every mission reads as having no recorded work.
 func New(missions missionGetter, journal SessionJournalReader) Service {
 	return &service{missions: missions, journal: journal}
 }
@@ -156,9 +120,6 @@ func (s *service) Diff(ctx context.Context, missionID, filePath string) (*Diff, 
 	return &Diff{Original: original, Modified: modified, Truncated: truncated}, nil
 }
 
-// load resolves the mission and returns its session journal plus workspace
-// cwd. A mission with no bound session/instance, or a unit no longer live in
-// the kernel, returns (nil, "", nil) — an empty-but-valid input.
 func (s *service) load(ctx context.Context, missionID string) ([]libacp.SessionNotification, string, error) {
 	m, err := s.missions.Get(ctx, missionID)
 	if err != nil {
@@ -174,41 +135,27 @@ func (s *service) load(ctx context.Context, missionID string) ([]libacp.SessionN
 	return updates, cwd, nil
 }
 
-// fileFold is the accumulated diff state for one written path: the first
-// OldText and the last NewText, collapsing an arbitrary edit sequence to one
-// before/after pair.
 type fileFold struct {
 	firstOld    string
 	lastNew     string
 	haveFirst   bool
-	firstSeenAt int // journal index of the first diff — a stable secondary sort key
+	firstSeenAt int
 }
 
-// folded is the whole-journal fold: per-path diff state, per-path attention
-// score, and the full touched-path set for the scope summary.
 type folded struct {
 	files      map[string]*fileFold
 	scores     map[string]int
 	touched    map[string]struct{}
-	touchOrder []string // first-touch order, for deterministic output on score ties
+	touchOrder []string
 }
 
-// fold walks the session journal once. Scoring is deduped by tool-call id:
-// one invocation can be journaled as more than one notification (an
-// interactive approval flow emits a create-location then an update-diff; a
-// deterministic flow emits a single notification promoted to a create
-// carrying the diff), so each invocation contributes each path it touched
-// once, at that path's strongest weight across its own notifications. Two
-// separate writes of one file are two invocations (distinct ToolCallIDs) and
-// score twice.
 func fold(updates []libacp.SessionNotification) *folded {
 	f := &folded{
 		files:   make(map[string]*fileFold),
 		scores:  make(map[string]int),
 		touched: make(map[string]struct{}),
 	}
-	// callWeights[toolCallID][path] is the weight this invocation adds for the
-	// path — deduped across the invocation's create + update notifications.
+	// callWeights dedupes weight per (tool call, path) across an invocation's notifications.
 	callWeights := make(map[string]map[string]int)
 	for i, n := range updates {
 		u := n.Update
@@ -257,8 +204,6 @@ func fold(updates []libacp.SessionNotification) *folded {
 			}
 		}
 	}
-	// Flush each invocation's per-path weight into the additive DOI score, one
-	// invocation at a time.
 	for _, cw := range callWeights {
 		for p, w := range cw {
 			f.scores[p] += w
@@ -275,8 +220,6 @@ func (f *folded) markTouched(p string) {
 	f.touchOrder = append(f.touchOrder, p)
 }
 
-// weightForKind maps a journaled libacp.ToolKind to its DOI weight. Kinds
-// that never carry a path in practice fall through to weightOther harmlessly.
 func weightForKind(k libacp.ToolKind) int {
 	switch k {
 	case libacp.ToolKindEdit:
@@ -296,9 +239,6 @@ func weightForKind(k libacp.ToolKind) int {
 	}
 }
 
-// changes renders the fold into the endpoint response: files ordered by DOI
-// (Stage 1), ties broken by earliest first-diff then path for a stable
-// render; touched set summarized against the workspace root (Stage 2).
 func (f *folded) changes(cwd string) *Changes {
 	files := make([]ChangedFile, 0, len(f.files))
 	for p, ff := range f.files {
@@ -332,10 +272,6 @@ func (f *folded) changes(cwd string) *Changes {
 	}
 }
 
-// statusFor derives the git-shaped status from a path's first/last diff:
-// added if the first OldText was empty, else deleted if the last NewText is
-// empty, else modified. Checking added first means a file created and later
-// emptied still reads as added.
 func statusFor(ff *fileFold) string {
 	switch {
 	case ff.firstOld == "":
@@ -347,9 +283,6 @@ func statusFor(ff *fileFold) string {
 	}
 }
 
-// scope summarizes the touched-path set against the workspace root. An empty
-// root disables the anomaly check rather than guessing one, since a false
-// derailment alarm is worse than a missing one for an advisory signal.
 func (f *folded) scope(root string) ScopeStats {
 	root = filepath.Clean(root)
 	dirs := make(map[string]struct{})
@@ -371,9 +304,6 @@ func (f *folded) scope(root string) ScopeStats {
 	}
 }
 
-// isOutside reports whether p falls outside the workspace root. A relative p
-// is always inside by construction; only an absolute path outside root trips
-// the alarm.
 func isOutside(root, p string) bool {
 	if !filepath.IsAbs(p) {
 		return false
@@ -385,10 +315,6 @@ func isOutside(root, p string) bool {
 	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// topLevelDir names the top-level directory a path counts toward for the
-// breadth signal: under root, the first segment of the root-relative path
-// ("." for a file directly in root); outside root (or with no root), the
-// path's own leading segment.
 func topLevelDir(root, p string) string {
 	cp := filepath.Clean(p)
 	if root != "" && root != "." && filepath.IsAbs(cp) {
@@ -398,15 +324,12 @@ func topLevelDir(root, p string) string {
 		}
 	}
 	if filepath.IsAbs(cp) {
-		// e.g. /etc/hostname -> "/etc"; /home/x/y -> "/home"
 		trimmed := strings.TrimPrefix(filepath.ToSlash(cp), "/")
 		return "/" + firstSegment(trimmed)
 	}
 	return firstSegment(filepath.ToSlash(cp))
 }
 
-// firstSegment returns the first slash-separated element of a relative path,
-// or "." for a bare filename (the root-itself bucket).
 func firstSegment(rel string) string {
 	rel = strings.TrimPrefix(rel, "./")
 	if i := strings.IndexByte(rel, '/'); i >= 0 {
@@ -415,9 +338,6 @@ func firstSegment(rel string) string {
 	return "."
 }
 
-// capDiff clips original/modified to diffDisplayCap, reporting whether
-// either side was clipped. Clipping is on bytes and may split a multi-byte
-// rune at the boundary, acceptable for a "diff too large" fallback.
 func capDiff(original, modified string) (string, string, bool) {
 	truncated := false
 	if len(original) > diffDisplayCap {

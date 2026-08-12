@@ -29,8 +29,6 @@ func newMission(intent string) *Mission {
 	return &Mission{Intent: intent, AgentName: "runner", HITLPolicyName: testPolicy}
 }
 
-// ─── validate() table test ─────────────────────────────────────────────────
-
 func TestUnit_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -58,8 +56,6 @@ func TestUnit_Validate(t *testing.T) {
 		})
 	}
 }
-
-// ─── Create / lifecycle ─────────────────────────────────────────────────────
 
 func TestUnit_MissionService_CreateAssignsIDAndOpenStatus(t *testing.T) {
 	ctx, db := setupMissionDB(t)
@@ -175,8 +171,6 @@ func TestUnit_MissionService_MissionOutlivesSessionAndStaysListed(t *testing.T) 
 	require.Equal(t, StatusOpen, items[0].Status)
 }
 
-// ─── Status transitions ─────────────────────────────────────────────────────
-
 func TestUnit_MissionService_UpdateStatusTransitions(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -222,8 +216,6 @@ func TestUnit_MissionService_GetUnknownReturnsNotFound(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, libdb.ErrNotFound))
 }
-
-// ─── Bind ───────────────────────────────────────────────────────────────────
 
 func TestUnit_MissionService_BindSetsSessionAndInstance(t *testing.T) {
 	ctx, db := setupMissionDB(t)
@@ -322,8 +314,6 @@ func TestUnit_MissionService_BindUnknownReturnsNotFound(t *testing.T) {
 	require.True(t, errors.Is(err, libdb.ErrNotFound))
 }
 
-// ─── Heartbeat ──────────────────────────────────────────────────────────────
-
 func TestUnit_MissionService_HeartbeatUpdatesLastHeartbeatAndBumpsUpdatedAt(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -380,8 +370,6 @@ func TestUnit_MissionService_HeartbeatUnknownReturnsNotFound(t *testing.T) {
 	require.True(t, errors.Is(err, libdb.ErrNotFound))
 }
 
-// ─── validateReport() table test ───────────────────────────────────────────
-
 func TestUnit_ValidateReport(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -409,8 +397,6 @@ func TestUnit_ValidateReport(t *testing.T) {
 		})
 	}
 }
-
-// ─── AddReport / ListReports ────────────────────────────────────────────────
 
 func TestUnit_MissionService_AddReportAssignsIDAndCreatedAt(t *testing.T) {
 	ctx, db := setupMissionDB(t)
@@ -541,8 +527,6 @@ func TestUnit_MissionService_ListReportsScopedToOwnMission(t *testing.T) {
 	require.Len(t, missions, 2)
 }
 
-// ─── GetByInstance: the mission-from-instance lookup ───────────────────────
-
 func TestUnit_MissionService_GetByInstanceFindsTheBoundMission(t *testing.T) {
 	ctx, db := setupMissionDB(t)
 	svc := New(db)
@@ -627,8 +611,6 @@ func TestUnit_MissionService_GetByInstanceScansPastOnePage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, target.ID, got.ID)
 }
-
-// ─── the supervision edge ──────────────────────────────────────────────────
 
 // TestUnit_MissionService_ParentSessionIDRoundTrips pins that ParentSessionID (who fired it) survives and differs from SessionID (what it spawned).
 func TestUnit_MissionService_ParentSessionIDRoundTrips(t *testing.T) {

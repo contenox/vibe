@@ -17,8 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ── helpers ────────────────────────────────────────────────────────────────
-
 const schema = `
 CREATE TABLE IF NOT EXISTS bus_events (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,8 +69,6 @@ func newTestBus(t *testing.T) *libbus.SQLiteBus {
 	t.Cleanup(func() { _ = b.Close() })
 	return b
 }
-
-// ── TestUnit_SQLiteBus_Publish_Stream ─────────────────────────────────────
 
 func TestUnit_SQLiteBus_Publish_Stream(t *testing.T) {
 	ctx := t.Context()
@@ -134,8 +130,6 @@ func TestUnit_SQLiteBus_Publish_NoSubscriberIsNoError(t *testing.T) {
 	require.NoError(t, b.Publish(ctx, "ghost.subject", []byte("silent")))
 }
 
-// ── TestUnit_SQLiteBus_Serve_Request ──────────────────────────────────────
-
 func TestUnit_SQLiteBus_Serve_Request(t *testing.T) {
 	ctx := t.Context()
 
@@ -179,8 +173,6 @@ func TestUnit_SQLiteBus_Serve_ErrorReply(t *testing.T) {
 	assert.Contains(t, string(reply), "something went wrong")
 }
 
-// ── TestUnit_SQLiteBus_MultipleRequests ───────────────────────────────────
-
 func TestUnit_SQLiteBus_MultipleSequentialRequests(t *testing.T) {
 	ctx := t.Context()
 
@@ -201,8 +193,6 @@ func TestUnit_SQLiteBus_MultipleSequentialRequests(t *testing.T) {
 	}
 }
 
-// ── TestUnit_SQLiteBus_Close ───────────────────────────────────────────────
-
 func TestUnit_SQLiteBus_Publish_AfterClose_Returns_Error(t *testing.T) {
 	ctx := t.Context()
 	b := libbus.NewSQLite(newTestDB(t))
@@ -216,8 +206,6 @@ func TestUnit_SQLiteBus_Close_Idempotent(t *testing.T) {
 	require.NoError(t, b.Close())
 	require.NoError(t, b.Close()) // second close must not panic or error
 }
-
-// ── TestUnit_SQLiteBus_Unsubscribe ────────────────────────────────────────
 
 func TestUnit_SQLiteBus_Stream_UnsubscribeDrainsPendingEvents(t *testing.T) {
 	ctx := t.Context()

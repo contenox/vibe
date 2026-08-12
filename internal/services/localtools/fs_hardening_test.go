@@ -1,14 +1,5 @@
 package localtools_test
 
-// End-to-end tests, driven through the real LocalFSTools.Exec pipeline:
-//
-//   - read_file never truncates silently: it returns a bounded head plus a
-//     concrete "start_line: N" next step; paging from that number continues.
-//   - the recoverable/fatal severity marker rides on the matrix of
-//     correctable error paths.
-//   - missing paths suggest siblings; a sed no-match suggests the nearest
-//     lines and never mutates.
-
 import (
 	"context"
 	"os"
@@ -52,7 +43,6 @@ func TestUnit_ReadFile_TruncateNamesExactNextLineAndPages(t *testing.T) {
 	next, _ := strconv.Atoi(m[1])
 	require.Equal(t, 4, next, "next page must resume at the first unshown line")
 
-	// Page forward with the named number.
 	res2, err := execTool(t, ctx, h, "read_file", map[string]any{"path": "big.txt", "start_line": float64(next)})
 	require.NoError(t, err)
 	page2 := res2.(string)
@@ -76,7 +66,6 @@ func TestUnit_ReadFile_OverReadCapNamesNextStep(t *testing.T) {
 	require.Contains(t, err.Error(), "start_line")
 	require.Contains(t, err.Error(), "(recoverable:")
 
-	// The named next step actually works: a ranged read streams past the cap.
 	res, err := execTool(t, ctx, h, "read_file", map[string]any{"path": "huge.txt", "start_line": float64(1), "end_line": float64(2)})
 	require.NoError(t, err, "ranged read must stream past the read cap")
 	require.Equal(t, "abcdefgh\nabcdefgh", res.(string))
@@ -86,7 +75,6 @@ func TestUnit_ReadFile_OverReadCapNamesNextStep(t *testing.T) {
 func TestUnit_Severity_RecoverableMatrix(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "text.txt", "hello\n")
-	// A binary file for the binary-refusal path.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "blob.bin"), append([]byte("\x00\x01\x02"), make([]byte, 100)...), 0o644))
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
 
@@ -144,7 +132,6 @@ func TestUnit_DidYouMean_SuggestsSiblings(t *testing.T) {
 		require.Contains(t, err.Error(), "README.md", "%s should name the close sibling", tool)
 	}
 
-	// list_dir on a missing directory also suggests.
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "internal"), 0o755))
 	_, err := execTool(t, ctx, h, "list_dir", map[string]any{"path": "internl"})
 	require.Error(t, err)
@@ -158,7 +145,6 @@ func TestUnit_Sed_NoMatchSuggestsAndDoesNotMutate(t *testing.T) {
 	original := "func Alpha() {}\nfunc Bravo() {}\nfunc Charlie() {}\n"
 	writeFile(t, dir, "code.go", original)
 
-	// Satisfy the read-before-write contract first.
 	_, err := execTool(t, ctx, tools, "read_file", map[string]any{"path": "code.go"})
 	require.NoError(t, err)
 
@@ -174,7 +160,6 @@ func TestUnit_Sed_NoMatchSuggestsAndDoesNotMutate(t *testing.T) {
 	require.Contains(t, msg, "Bravo", "should suggest the nearest actual line")
 	require.Contains(t, msg, "(recoverable:")
 
-	// The fuzzy law: nothing was applied.
 	got, err := os.ReadFile(filepath.Join(dir, "code.go"))
 	require.NoError(t, err)
 	require.Equal(t, original, string(got), "a fuzzy no-match must never mutate the file")

@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-// A well-formed script tool, used as the base for the happy paths.
 const goodScript = `
 const tool = {
   name: "wordcount",

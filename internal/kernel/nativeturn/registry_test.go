@@ -12,8 +12,6 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// recViewer is a thread-safe Viewer that records every event it is delivered, so a
-// test can assert ordering, exactly-once replay, and post-detach survival.
 type recViewer struct {
 	id  string
 	mu  sync.Mutex
@@ -59,7 +57,6 @@ func (v *recViewer) texts() []string {
 	return out
 }
 
-// note builds a distinct agent-message-chunk notification for sid.
 func note(sid libacp.SessionID, text string) libacp.SessionNotification {
 	return libacp.SessionNotification{SessionID: sid, Update: libacp.NewAgentMessageChunk(text)}
 }
@@ -124,8 +121,6 @@ func TestTurnSurvivesViewerDetach(t *testing.T) {
 	if err != nil || !started {
 		t.Fatalf("Start: started=%v err=%v", started, err)
 	}
-	// A second viewer stays attached across the whole turn, proving the turn keeps
-	// producing after v1 leaves.
 	survivor := newRecViewer("survivor")
 	if _, ok, err := reg.AttachIfRunning(context.Background(), sid, survivor); err != nil || !ok {
 		t.Fatalf("AttachIfRunning survivor: ok=%v err=%v", ok, err)
@@ -133,7 +128,6 @@ func TestTurnSurvivesViewerDetach(t *testing.T) {
 
 	eventually(t, 2*time.Second, func() bool { return v1.count() == 1 && survivor.count() == 1 })
 
-	// Simulate the connection drop: detach v1. This must not cancel the turn.
 	turn.Detach(v1.ID())
 
 	close(gate) // let the turn produce its second event and finish
@@ -146,12 +140,9 @@ func TestTurnSurvivesViewerDetach(t *testing.T) {
 	if got := turn.Result().StopReason; got != libacp.StopReasonEndTurn {
 		t.Fatalf("Result.StopReason = %q, want end_turn", got)
 	}
-	// The survivor saw both events: the turn kept running and journaling
-	// after the drop.
 	if got := survivor.texts(); len(got) != 2 || got[0] != "e1" || got[1] != "e2" {
 		t.Fatalf("survivor events = %v, want [e1 e2]", got)
 	}
-	// v1 only ever saw the pre-detach event.
 	if got := v1.count(); got != 1 {
 		t.Fatalf("v1 count = %d, want 1 (nothing after detach)", got)
 	}
@@ -186,8 +177,6 @@ func TestReattachReplaysThenLive(t *testing.T) {
 	if _, ok, err := reg.AttachIfRunning(context.Background(), sid, v2); err != nil || !ok {
 		t.Fatalf("AttachIfRunning v2: ok=%v err=%v", ok, err)
 	}
-	// Replay under the lock happened synchronously in AttachIfRunning: v2 already has
-	// the two journaled events, in order, before any live event.
 	if got := v2.texts(); len(got) != 2 || got[0] != "e1" || got[1] != "e2" {
 		t.Fatalf("v2 replay = %v, want [e1 e2]", got)
 	}
@@ -199,7 +188,6 @@ func TestReattachReplaysThenLive(t *testing.T) {
 	if got := v2.texts(); len(got) != 3 || got[0] != "e1" || got[1] != "e2" || got[2] != "e3" {
 		t.Fatalf("v2 events = %v, want [e1 e2 e3] (exactly-once, ordered)", got)
 	}
-	// Monotonic, gapless sequence numbers across replay + live.
 	if got := v2.seqs(); !equalUint64(got, []uint64{1, 2, 3}) {
 		t.Fatalf("v2 seqs = %v, want [1 2 3]", got)
 	}
@@ -263,13 +251,11 @@ func TestReattachCancelsGrace(t *testing.T) {
 	}
 	turn.Detach(v1.ID()) // grace starts
 
-	// Reattach well inside the window.
 	v2 := newRecViewer("v2")
 	if _, ok, err := reg.AttachIfRunning(context.Background(), sid, v2); err != nil || !ok {
 		t.Fatalf("AttachIfRunning v2: ok=%v err=%v", ok, err)
 	}
 
-	// Wait past the original grace window; the turn must still be running.
 	time.Sleep(300 * time.Millisecond)
 	select {
 	case <-turn.Done():
@@ -333,7 +319,6 @@ func TestSessionCancelCancelsTurn(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// A viewer awaiting completion in the background must unblock on cancel.
 	awaited := make(chan Result, 1)
 	go func() {
 		res, _ := turn.Await(context.Background())
@@ -354,16 +339,14 @@ func TestSessionCancelCancelsTurn(t *testing.T) {
 	if _, ok := reg.Get(sid); ok {
 		t.Fatal("session should be torn down after cancel")
 	}
-	// A second cancel is a clean no-op.
 	if reg.Cancel(sid) {
 		t.Fatal("second Cancel should return false")
 	}
 }
 
 // TestConcurrentViewersReaperNeverReapsBusy runs many viewers churning against one
-// live, watched turn while the reaper sweeps — the turn must never be reaped, and
-// List/Get must reflect the live state. Exercises the concurrency invariants under
-// -race.
+// live, watched turn while the reaper sweeps — it must never be reaped and List/Get
+// must reflect live state, exercising the concurrency invariants under -race.
 func TestConcurrentViewersReaperNeverReapsBusy(t *testing.T) {
 	const sid = libacp.SessionID("s7")
 	reg := New(Config{TurnDeadline: 5 * time.Second, GraceWindow: 200 * time.Millisecond, JournalSize: 32})
@@ -392,7 +375,6 @@ func TestConcurrentViewersReaperNeverReapsBusy(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	// Churn: attach/detach transient viewers.
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func(n int) {
@@ -406,7 +388,6 @@ func TestConcurrentViewersReaperNeverReapsBusy(t *testing.T) {
 			}
 		}(i)
 	}
-	// Concurrent reaper sweeps and status reads.
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func() {
@@ -421,7 +402,6 @@ func TestConcurrentViewersReaperNeverReapsBusy(t *testing.T) {
 	}
 	wg.Wait()
 
-	// The anchored, busy turn was never reaped.
 	select {
 	case <-turn.Done():
 		t.Fatal("busy watched turn was reaped/cancelled during the churn")
@@ -474,14 +454,12 @@ func TestListAndStop(t *testing.T) {
 		t.Fatalf("status times invalid: started=%v deadline=%v", st.StartedAt, st.Deadline)
 	}
 
-	// Detach the last viewer: grace state, zero viewers.
 	turn.Detach(v1.ID())
 	eventually(t, 2*time.Second, func() bool {
 		s, ok := reg.Get(sid)
 		return ok && s.State == StateGrace && s.Viewers == 0
 	})
 
-	// Reattach: back to running.
 	v2 := newRecViewer("v2")
 	if _, ok, err := reg.AttachIfRunning(context.Background(), sid, v2); err != nil || !ok {
 		t.Fatalf("AttachIfRunning v2: ok=%v err=%v", ok, err)
@@ -490,7 +468,6 @@ func TestListAndStop(t *testing.T) {
 		t.Fatalf("after reattach status = %+v, want running/1", s)
 	}
 
-	// A background awaiter, then Stop.
 	done := make(chan struct{})
 	go func() { <-turn.Done(); close(done) }()
 	if !reg.Stop(sid) {
@@ -537,7 +514,6 @@ func TestStartAttachesToRunningTurn(t *testing.T) {
 	if started {
 		t.Fatal("second Start should have attached, not started a new turn")
 	}
-	// v2 replayed the running turn's journal.
 	if got := v2.texts(); len(got) != 1 || got[0] != "hello" {
 		t.Fatalf("v2 replay = %v, want [hello]", got)
 	}
@@ -571,8 +547,6 @@ func TestJournalRingEviction(t *testing.T) {
 	}
 	<-emittedAll
 
-	// A fresh viewer replays only the retained tail (last 2 of 4), with the original
-	// sequence numbers preserved.
 	v2 := newRecViewer("v2")
 	if _, ok, err := reg.AttachIfRunning(context.Background(), sid, v2); err != nil || !ok {
 		t.Fatalf("AttachIfRunning v2: ok=%v err=%v", ok, err)
@@ -633,7 +607,6 @@ func TestDuplicateViewerRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	// Same id attaching again is rejected.
 	if _, ok, err := reg.AttachIfRunning(context.Background(), sid, newRecViewer("dup")); err == nil || ok {
 		t.Fatalf("duplicate attach: ok=%v err=%v, want rejection", ok, err)
 	}

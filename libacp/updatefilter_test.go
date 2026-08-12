@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// recordingClient records every session/update it receives and can be made to
-// return an error from SessionUpdate to prove the wrapper forwards it.
 type recordingClient struct {
 	libacp.UnimplementedClient
 	seen   []libacp.SessionID

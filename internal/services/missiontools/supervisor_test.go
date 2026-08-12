@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeSupervisor is the supervising session's view: which missions it fired and what they reported.
 type fakeSupervisor struct {
 	missions []*missionservice.Mission
 	reports  map[string][]*missionservice.Report
@@ -32,7 +31,6 @@ func (f *fakeSupervisor) ListReports(_ context.Context, missionID string, _ int)
 	return f.reports[missionID], nil
 }
 
-// fakeResolver is the ask side: what is waiting, and what answering does.
 type fakeResolver struct {
 	pending  map[string][]missiontools.PendingAsk
 	answered map[string]string

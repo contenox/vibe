@@ -1,9 +1,5 @@
 package runtimetypes_test
 
-// message_indices / messages store tests, over the production SQLite backend
-// (same no-Docker idiom as event_firings_test.go). The store takes an Exec, so
-// these open a DBManager only to hand out WithoutTransaction / WithTransaction.
-
 import (
 	"context"
 	"fmt"
@@ -101,9 +97,7 @@ func TestUnit_Messages_DeleteMessages(t *testing.T) {
 	require.Empty(t, listed)
 }
 
-// TestUnit_Messages_WorkspaceIsolation pins the store's construction-time
-// scope: an index created in one workspace is invisible to another's reads,
-// with no filter argument anywhere in the call.
+// TestUnit_Messages_WorkspaceIsolation asserts an index created in one workspace is invisible to another's reads, with no filter argument in the call.
 func TestUnit_Messages_WorkspaceIsolation(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	storeA := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws-a")
@@ -128,8 +122,7 @@ func TestUnit_Messages_WorkspaceIsolation(t *testing.T) {
 		"a delete cannot reach across the workspace boundary")
 }
 
-// TestUnit_Messages_SessionsOrderedByActivity pins the listing contract the
-// session picker renders: most recently active first, never-used sessions last.
+// TestUnit_Messages_SessionsOrderedByActivity asserts sessions list most recently active first, with never-used sessions last.
 func TestUnit_Messages_SessionsOrderedByActivity(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws")
@@ -157,7 +150,7 @@ func TestUnit_Messages_SessionsOrderedByActivity(t *testing.T) {
 	require.Equal(t, 0, sessions[2].MessageCount)
 }
 
-// TestUnit_Messages_RenameSession pins the rename and its not-found signal.
+// TestUnit_Messages_RenameSession asserts the rename applies and a missing index returns libdb.ErrNotFound.
 func TestUnit_Messages_RenameSession(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws")
@@ -215,9 +208,7 @@ func TestUnit_Messages_WithTransaction(t *testing.T) {
 	})
 }
 
-// TestUnit_Messages_GetIndexName pins the id -> name lookup both the ACP serve
-// path and the CLI session resolver now share, including the unnamed case
-// (a row with no name is found, not missing) and the not-found signal.
+// TestUnit_Messages_GetIndexName asserts an unnamed row is found, not missing, and a missing row returns libdb.ErrNotFound.
 func TestUnit_Messages_GetIndexName(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws")
@@ -236,16 +227,14 @@ func TestUnit_Messages_GetIndexName(t *testing.T) {
 	_, err = store.GetMessageIndexName(ctx, "no-such-idx")
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 
-	// Documented as key-on-primary-key: session ids are UUIDs, unique across
-	// workspaces, so another workspace's store resolves the same id.
+	// GetMessageIndexName keys on primary key: session ids are UUIDs, unique across workspaces.
 	other, err := runtimetypes.NewMessageStore(db.WithoutTransaction(), "other-ws").
 		GetMessageIndexName(ctx, "idx-named")
 	require.NoError(t, err)
 	require.Equal(t, "zed-42", other)
 }
 
-// TestUnit_Messages_ListAllIndices pins the deliberately unscoped inventory the
-// CLI renders: every workspace, every identity, with message counts.
+// TestUnit_Messages_ListAllIndices asserts the CLI inventory lists every workspace and identity, with message counts, unscoped.
 func TestUnit_Messages_ListAllIndices(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	storeA := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws-a")
@@ -275,9 +264,7 @@ func TestUnit_Messages_ListAllIndices(t *testing.T) {
 	}, byID["idx-b"])
 }
 
-// TestUnit_Messages_ResolveIndexWorkspace pins the lookup that PICKS a
-// workspace (so it cannot be workspace-scoped): the same session name in two
-// workspaces resolves to the busier one, and identity still narrows.
+// TestUnit_Messages_ResolveIndexWorkspace asserts a repeated session name across workspaces resolves to the busier one, and identity still narrows the match.
 func TestUnit_Messages_ResolveIndexWorkspace(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	exec := db.WithoutTransaction()
@@ -303,8 +290,6 @@ func TestUnit_Messages_ResolveIndexWorkspace(t *testing.T) {
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }
 
-// appendProbeMessages fills stream with n messages whose ids sort in insert
-// order, stamped by clock(i) so a test can choose distinct or colliding times.
 func appendProbeMessages(t *testing.T, ctx context.Context, store runtimetypes.MessageStore, stream string, n int, clock func(int) time.Time) []string {
 	t.Helper()
 	ids := make([]string, 0, n)
@@ -320,9 +305,6 @@ func appendProbeMessages(t *testing.T, ctx context.Context, store runtimetypes.M
 	return ids
 }
 
-// drainPages walks every page of stream and returns the ids in page order.
-// The walk itself is the assertion subject: gaps and duplicates are detected
-// by the caller comparing this against the full listing.
 func drainPages(t *testing.T, ctx context.Context, store runtimetypes.MessageStore, stream string, f runtimetypes.MessagePageFilter) []string {
 	t.Helper()
 	var got []string
@@ -340,16 +322,13 @@ func drainPages(t *testing.T, ctx context.Context, store runtimetypes.MessageSto
 	}
 }
 
-// TestUnit_Messages_KeysetPaginationCoversEveryRowOnce pins the property the
-// whole feature exists for: walking pages yields the full stream, in order,
-// with no row dropped and none repeated.
+// TestUnit_Messages_KeysetPaginationCoversEveryRowOnce asserts walking pages yields the full stream in order, with no row dropped or repeated.
 func TestUnit_Messages_KeysetPaginationCoversEveryRowOnce(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws")
 	require.NoError(t, store.CreateMessageIndex(ctx, "idx-page", "alice"))
 
 	base := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
-	// 25 rows over a page size of 7: the last page is deliberately short.
 	want := appendProbeMessages(t, ctx, store, "idx-page", 25, func(i int) time.Time {
 		return base.Add(time.Duration(i) * time.Second)
 	})
@@ -357,7 +336,6 @@ func TestUnit_Messages_KeysetPaginationCoversEveryRowOnce(t *testing.T) {
 	got := drainPages(t, ctx, store, "idx-page", runtimetypes.MessagePageFilter{Limit: 7})
 	require.Equal(t, want, got, "every row exactly once, oldest first")
 
-	// Backwards is the same stream reversed, also exactly once.
 	gotBack := drainPages(t, ctx, store, "idx-page", runtimetypes.MessagePageFilter{Limit: 7, Backwards: true})
 	reversed := make([]string, 0, len(want))
 	for i := len(want) - 1; i >= 0; i-- {
@@ -366,19 +344,14 @@ func TestUnit_Messages_KeysetPaginationCoversEveryRowOnce(t *testing.T) {
 	require.Equal(t, reversed, gotBack, "every row exactly once, newest first")
 }
 
-// TestUnit_Messages_KeysetPaginationSurvivesTimestampCollisions is the reason
-// MessageCursor carries an ID. One AppendMessages batch stamps every
-// zero-timestamped message the same instant, so a page boundary landing inside
-// a tie is the NORMAL case, not an edge case: with a timestamp-only cursor the
-// tied rows are either re-read forever or skipped wholesale.
+// TestUnit_Messages_KeysetPaginationSurvivesTimestampCollisions asserts paging is exact across timestamp-tied rows, which a timestamp-only cursor would re-read or skip.
 func TestUnit_Messages_KeysetPaginationSurvivesTimestampCollisions(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws")
 	require.NoError(t, store.CreateMessageIndex(ctx, "idx-tie", "alice"))
 
 	base := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
-	// 12 rows in 3 timestamp groups of 4 — every page boundary at limit 3, 5
-	// and 7 lands inside a tie.
+	// 12 rows in 3 timestamp groups of 4: every boundary at limit 3, 5, 7 lands inside a tie.
 	appendProbeMessages(t, ctx, store, "idx-tie", 12, func(i int) time.Time {
 		return base.Add(time.Duration(i/4) * time.Second)
 	})
@@ -397,8 +370,7 @@ func TestUnit_Messages_KeysetPaginationSurvivesTimestampCollisions(t *testing.T)
 		require.Len(t, got, len(unique(got)), "limit %d: no duplicates", limit)
 	}
 
-	// A batch appended with no timestamps at all: every row shares one instant,
-	// so the whole stream is one tie group.
+	// A batch with no timestamps shares one instant, so the whole stream is one tie group.
 	require.NoError(t, store.CreateMessageIndex(ctx, "idx-same", "alice"))
 	same := make([]*runtimetypes.Message, 0, 9)
 	for i := range 9 {
@@ -427,9 +399,7 @@ func unique(ids []string) []string {
 	return out
 }
 
-// TestUnit_Messages_PageLimitDefaultAndCeiling pins the two bounds: an unnamed
-// limit is DefaultMessagePageLimit, and an oversized one is clamped to
-// MaxMessagePageLimit rather than degrading into a whole-session read.
+// TestUnit_Messages_PageLimitDefaultAndCeiling asserts an unnamed limit defaults to DefaultMessagePageLimit and an oversized one clamps to MaxMessagePageLimit.
 func TestUnit_Messages_PageLimitDefaultAndCeiling(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws")
@@ -455,7 +425,6 @@ func TestUnit_Messages_PageLimitDefaultAndCeiling(t *testing.T) {
 		})
 	}
 
-	// The ceiling: ask for more than the max and the page is still capped.
 	require.NoError(t, store.CreateMessageIndex(ctx, "idx-big", "alice"))
 	appendProbeMessages(t, ctx, store, "idx-big", runtimetypes.MaxMessagePageLimit+10, func(i int) time.Time {
 		return base.Add(time.Duration(i) * time.Millisecond)
@@ -465,9 +434,7 @@ func TestUnit_Messages_PageLimitDefaultAndCeiling(t *testing.T) {
 	require.Len(t, page, runtimetypes.MaxMessagePageLimit, "an oversized limit is clamped, not honoured")
 }
 
-// TestUnit_Messages_PageStreamIsolation pins that a page never leaks another
-// stream's rows — the messages-level scoping is the idx_id, since message rows
-// carry no workspace of their own.
+// TestUnit_Messages_PageStreamIsolation asserts a page never leaks another stream's rows; message rows are scoped by idx_id, not workspace.
 func TestUnit_Messages_PageStreamIsolation(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	execA := db.WithoutTransaction()
@@ -478,8 +445,7 @@ func TestUnit_Messages_PageStreamIsolation(t *testing.T) {
 	require.NoError(t, storeB.CreateMessageIndex(ctx, "idx-b", "alice"))
 
 	base := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
-	// Interleaved in time so a boundary in one stream sits between the other's
-	// rows: a query that forgot idx_id would splice them together.
+	// Interleaved so a boundary in one stream sits inside the other's rows; a query that forgot idx_id would splice them together.
 	clock := func(i int) time.Time { return base.Add(time.Duration(2*i) * time.Second) }
 	wantA := appendProbeMessages(t, ctx, storeA, "idx-a", 10, clock)
 	appendProbeMessages(t, ctx, storeB, "idx-b", 10, func(i int) time.Time { return clock(i).Add(time.Second) })
@@ -487,16 +453,12 @@ func TestUnit_Messages_PageStreamIsolation(t *testing.T) {
 	got := drainPages(t, ctx, storeA, "idx-a", runtimetypes.MessagePageFilter{Limit: 3})
 	require.Equal(t, wantA, got, "only this stream's rows, at every page boundary")
 
-	// The store's workspace is not what scopes a message read — the stream is —
-	// so the assertion above must hold from either workspace's store.
+	// The store's workspace does not scope a message read — the stream does — so this must hold from either store.
 	gotFromB := drainPages(t, ctx, storeB, "idx-a", runtimetypes.MessagePageFilter{Limit: 3})
 	require.Equal(t, wantA, gotFromB)
 }
 
-// TestUnit_Messages_AppendNormalizesToUTC pins that added_at is stored as UTC
-// regardless of the caller's zone. On SQLite added_at is the TEXT of the bound
-// time's String(), so a non-UTC zone would sort by local wall clock and every
-// keyset boundary comparison would be wrong.
+// TestUnit_Messages_AppendNormalizesToUTC asserts added_at is stored and sorted as UTC regardless of the caller's zone.
 func TestUnit_Messages_AppendNormalizesToUTC(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws")
@@ -506,8 +468,7 @@ func TestUnit_Messages_AppendNormalizesToUTC(t *testing.T) {
 	ahead := time.FixedZone("AHEAD", 9*60*60)
 	behind := time.FixedZone("BEHIND", -9*60*60)
 
-	// Written out of order, in three zones, with wall clocks that disagree with
-	// the instants: only a UTC-normalized column sorts these correctly.
+	// Out of order, in three zones, with wall clocks disagreeing with the instants: only UTC-normalized sorting is correct.
 	require.NoError(t, store.AppendMessages(ctx,
 		&runtimetypes.Message{ID: "second", IDX: "idx-tz", Payload: []byte(`"2"`), AddedAt: base.Add(time.Hour).In(behind)},
 		&runtimetypes.Message{ID: "third", IDX: "idx-tz", Payload: []byte(`"3"`), AddedAt: base.Add(2 * time.Hour)},
@@ -525,8 +486,7 @@ func TestUnit_Messages_AppendNormalizesToUTC(t *testing.T) {
 	require.True(t, listed[0].AddedAt.Equal(base), "the instant survives the zone normalization")
 }
 
-// TestUnit_Messages_PageResumeFromExplicitCursor pins that a cursor is
-// exclusive in both directions — the boundary row itself never reappears.
+// TestUnit_Messages_PageResumeFromExplicitCursor asserts a cursor is exclusive in both directions; the boundary row never reappears.
 func TestUnit_Messages_PageResumeFromExplicitCursor(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws")
@@ -553,8 +513,7 @@ func TestUnit_Messages_PageResumeFromExplicitCursor(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{ids[1], ids[0]}, []string{back[0].ID, back[1].ID}, "backwards is exclusive too")
 
-	// An appended row lands past the cursor, never behind it: keyset paging
-	// cannot be shifted by a concurrent write the way OFFSET can.
+	// A row appended after the cursor lands past it, never behind it: keyset paging can't be shifted by a concurrent write like OFFSET can.
 	require.NoError(t, store.AppendMessages(ctx, &runtimetypes.Message{
 		ID: "late", IDX: "idx-cur", Payload: []byte(`"late"`), AddedAt: base.Add(10 * time.Second),
 	}))
@@ -566,8 +525,7 @@ func TestUnit_Messages_PageResumeFromExplicitCursor(t *testing.T) {
 	require.Equal(t, "late", tail[0].ID)
 }
 
-// TestUnit_Messages_PageEmptyStream pins the terminating condition callers
-// loop on: an exhausted or never-written stream is an empty page, not an error.
+// TestUnit_Messages_PageEmptyStream asserts an exhausted or never-written stream returns an empty page, not an error.
 func TestUnit_Messages_PageEmptyStream(t *testing.T) {
 	ctx, db := setupMessageDB(t)
 	store := runtimetypes.NewMessageStore(db.WithoutTransaction(), "ws")

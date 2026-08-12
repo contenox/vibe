@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakePublisher captures every publish (subject, payload) and can be primed to fail.
 type fakePublisher struct {
 	mu       sync.Mutex
 	subjects []string
@@ -115,7 +114,6 @@ func TestUnit_AddReport_NoPublisherStillStores(t *testing.T) {
 	require.Len(t, reports, 1)
 }
 
-// recordingTracker records the (operation, subject, error) of every report.
 type recordingTracker struct {
 	mu     sync.Mutex
 	events []trackedEvent

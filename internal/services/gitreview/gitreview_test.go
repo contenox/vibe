@@ -13,14 +13,9 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// Every test builds its OWN repository in t.TempDir(). Nothing here reads or
-// writes the repository this package lives in.
-
 func newRepo(t *testing.T) (string, *git.Repository) {
 	t.Helper()
 	dir := t.TempDir()
-	// macOS and Windows temp dirs are reached through symlinks; resolving here
-	// keeps the assertions comparing the same spelling gitreview reports.
 	repo, err := git.PlainInit(dir, false)
 	if err != nil {
 		t.Fatalf("init: %v", err)
@@ -91,7 +86,6 @@ func pathsOf(res *DiffResult) []string {
 	return out
 }
 
-// numbered builds a file of n lines so hunk coordinates are readable.
 func numbered(lines ...string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -102,7 +96,6 @@ func TestDiffUnstagedHunkCoordinates(t *testing.T) {
 	write(t, dir, "f.txt", base)
 	commit(t, repo, []string{"f.txt"}, "base")
 
-	// One changed line in the middle: line 5.
 	changed := numbered("a", "b", "c", "d", "E", "f", "g", "h", "i", "j")
 	write(t, dir, "f.txt", changed)
 
@@ -118,7 +111,6 @@ func TestDiffUnstagedHunkCoordinates(t *testing.T) {
 		t.Fatalf("hunks = %d, want 1: %+v", len(fd.Hunks), fd.Hunks)
 	}
 	h := fd.Hunks[0]
-	// 3 context either side of line 5: -2,7 +2,7.
 	if h.OldStart != 2 || h.OldLines != 7 || h.NewStart != 2 || h.NewLines != 7 {
 		t.Fatalf("hunk = -%d,%d +%d,%d, want -2,7 +2,7", h.OldStart, h.OldLines, h.NewStart, h.NewLines)
 	}
@@ -193,7 +185,6 @@ func TestDiffCommitToCommitAndBranchToBranch(t *testing.T) {
 		t.Fatalf("an absent side must hash to \"\", got %q", added.FromHash)
 	}
 
-	// A second branch at the first commit: branch-to-branch is the same call.
 	wt, err := repo.Worktree()
 	if err != nil {
 		t.Fatalf("worktree: %v", err)
@@ -258,7 +249,6 @@ func TestStageHunkMovesOneHunkOnly(t *testing.T) {
 	write(t, dir, "f.txt", base)
 	commit(t, repo, []string{"f.txt"}, "base")
 
-	// Two far-apart edits, so they are two hunks.
 	edited := strings.Replace(base, "l3\n", "L3\n", 1)
 	edited = strings.Replace(edited, "l18\n", "L18\n", 1)
 	write(t, dir, "f.txt", edited)
@@ -285,7 +275,6 @@ func TestStageHunkMovesOneHunkOnly(t *testing.T) {
 		t.Fatal("status after staging must still show the remaining unstaged hunk")
 	}
 
-	// The worktree file is untouched.
 	onDisk, err := os.ReadFile(filepath.Join(dir, "f.txt"))
 	if err != nil {
 		t.Fatalf("read: %v", err)
@@ -294,7 +283,6 @@ func TestStageHunkMovesOneHunkOnly(t *testing.T) {
 		t.Fatal("StageHunk modified the worktree file; it must only move the index")
 	}
 
-	// The index now holds base + the first edit only.
 	staged, err := Diff(context.Background(), dir, RefHead, RefIndex)
 	if err != nil {
 		t.Fatalf("staged diff: %v", err)
@@ -307,7 +295,6 @@ func TestStageHunkMovesOneHunkOnly(t *testing.T) {
 		t.Fatalf("staged hunk moved to %d, want %d", sf.Hunks[0].NewStart, first.NewStart)
 	}
 
-	// And the remaining unstaged diff is the second hunk alone.
 	rest, err := Diff(context.Background(), dir, RefIndex, RefWorktree)
 	if err != nil {
 		t.Fatalf("rest: %v", err)
@@ -336,7 +323,6 @@ func TestStageHunkRefusesStaleHash(t *testing.T) {
 	fd := fileByPath(t, res, "f.txt")
 	h := fd.Hunks[0]
 
-	// The file moves on behind the caller's back.
 	write(t, dir, "f.txt", numbered("a", "B", "c", "d", "E"))
 
 	_, err = StageHunk(context.Background(), dir, HunkRef{
@@ -449,7 +435,6 @@ func TestUnstageHunkReturnsIndexTowardHead(t *testing.T) {
 			t.Fatalf("remaining staged hunk adds %q, want L18", l.Text)
 		}
 	}
-	// The worktree still holds both edits.
 	onDisk, err := os.ReadFile(filepath.Join(dir, "f.txt"))
 	if err != nil {
 		t.Fatalf("read: %v", err)

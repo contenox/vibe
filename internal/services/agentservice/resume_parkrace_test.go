@@ -1,18 +1,5 @@
 package agentservice_test
 
-// The park-window/checkpoint-save race. Between an ask's park window firing
-// (its waiter is deleted on the way out of RequestAttention) and the engine
-// persisting the suspension checkpoint, an answer finds NEITHER: no waiter to
-// wake, and no checkpoint for the resume hook to claim, so the hook's
-// ErrNoCheckpoint is swallowed as the benign no-op it usually is. Milliseconds
-// later the checkpoint lands with nothing left to drive it, and the answer
-// looked delivered — nothing prompts the operator to run the stranded-
-// checkpoint sweep that would recover it.
-//
-// raceAnswerAsker reproduces that window deterministically instead of racing
-// wall-clock: it answers from INSIDE the tool call, which is by construction
-// after the waiter is gone and before the checkpoint exists.
-
 import (
 	"context"
 	"errors"
@@ -30,12 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// raceAnswerAsker forwards to the real hitlservice and, for the asks named in
-// raceOn, delivers the operator's answer inside the park-window/checkpoint
-// gap before handing the typed suspend error up.
 type raceAnswerAsker struct {
 	hitl   hitlservice.Service
-	raceOn map[string]string // ask summary -> answer text
+	raceOn map[string]string
 
 	mu    sync.Mutex
 	raced []string
@@ -52,10 +36,7 @@ func (a *raceAnswerAsker) RaiseAttention(ctx context.Context, ask missiontools.A
 	var pending *hitlservice.AttentionPendingError
 	if err != nil && errors.As(err, &pending) {
 		if text, ok := a.raceOn[ask.Summary]; ok {
-			// THE WINDOW: RequestAttention's deferred delete already removed
-			// the waiter, and the checkpoint cannot exist yet because this
-			// tool call has not returned. The answer is recorded durably and
-			// its resume hook finds nothing to resume.
+			// THE WINDOW: the waiter is already gone (RequestAttention's deferred delete) and the checkpoint can't exist yet (this call hasn't returned), so the resume hook finds nothing
 			if answerErr := a.hitl.Answer(ctx, pending.AskID, text); answerErr == nil {
 				a.mu.Lock()
 				a.raced = append(a.raced, pending.AskID)
@@ -73,8 +54,6 @@ func (a *raceAnswerAsker) racedAsks() []string {
 	return append([]string(nil), a.raced...)
 }
 
-// attentionInputPair is one assistant turn asking two questions, so the second
-// one is raised by the RESUMED run rather than by the original Prompt.
 func attentionInputPair(callA, callB string) taskengine.ChatHistory {
 	return taskengine.ChatHistory{Messages: []taskengine.Message{
 		{ID: "m-user", Role: "user", Content: "do the mission", Timestamp: time.Now().UTC()},
@@ -102,11 +81,7 @@ func toolResultsFor(t *testing.T, db libdb.DBManager, sessionID, callID string) 
 	return out
 }
 
-// TestSystem_AttentionParkRace_AnswerInsideTheWindowStillResumesTheOriginalPrompt
-// pins the window on the Prompt path: the answer lands with no waiter and no
-// checkpoint, its resume hook is a no-op, and the run must still come back to
-// life once the checkpoint is durable — never wait for an operator to run the
-// stranded-checkpoint sweep.
+// TestSystem_AttentionParkRace_AnswerInsideTheWindowStillResumesTheOriginalPrompt pins that an answer landing in the park-window/checkpoint gap still resumes the run once the checkpoint is durable, without needing the stranded-checkpoint sweep.
 func TestSystem_AttentionParkRace_AnswerInsideTheWindowStillResumesTheOriginalPrompt(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "park-race-prompt.db")
 	ctx := context.Background()
@@ -148,14 +123,7 @@ func TestSystem_AttentionParkRace_AnswerInsideTheWindowStillResumesTheOriginalPr
 	require.Empty(t, stranded, "nothing may be left for the stranded-checkpoint sweep to find")
 }
 
-// TestSystem_AttentionParkRace_AnswerInsideTheWindowResumesARESUMEDRun is the
-// same window one level deeper, where the suspension is raised by
-// ResumeFromCheckpoint rather than by Prompt: the first question is answered
-// normally, its resume re-enters the batch, and the SECOND question's answer
-// lands inside the park-window/checkpoint gap. Nothing downstream re-reads that
-// ask, so before the fix its checkpoint was stranded with the answer already
-// recorded — the exact shape an oracle driver reports as "the durable respond
-// path resumed it" when it did not.
+// TestSystem_AttentionParkRace_AnswerInsideTheWindowResumesARESUMEDRun pins the same park-window race one level deeper, where the suspension is raised by ResumeFromCheckpoint and the second question's answer lands inside the gap.
 func TestSystem_AttentionParkRace_AnswerInsideTheWindowResumesARESUMEDRun(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "park-race-resume.db")
 	ctx := context.Background()
@@ -184,8 +152,7 @@ func TestSystem_AttentionParkRace_AnswerInsideTheWindowResumesARESUMEDRun(t *tes
 	require.Equal(t, callA, resp.SuspendedApprovalID)
 	require.Empty(t, asker.racedAsks(), "only the second question races the window")
 
-	// Answering the first question resumes the run, which re-enters the batch
-	// and raises the second question — whose answer lands inside the window.
+	// answering the first question resumes the run, which re-enters the batch and raises the second question, whose answer lands inside the window
 	require.NoError(t, inst.hitl.Answer(ctx, callA, "answer to the first"))
 	require.Equal(t, []string{callB}, asker.racedAsks(), "the resumed run's ask must have hit the window")
 

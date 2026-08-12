@@ -32,3 +32,4 @@ Several recipes below are one branch of a router rather than a standalone chain:
 - [Leads → HubSpot](/docs/use-cases/leads-to-hubspot/) — pipe a leads file into HubSpot CRM via an OpenAPI sub-spec
 - [HubSpot via MCP](/docs/use-cases/hubspot-mcp/) — OAuth + pre-issued client credentials, works for any vendor MCP without dynamic registration
 - [Auto-attention mode (beta)](/docs/use-cases/auto-attention/) — an oracle chain answers routine mission questions so unattended runs finish; consequential asks still wait for you
+- [Event-driven chains: three stories (beta)](/docs/use-cases/event-driven-chains/) — a trigger buzzes your phone when a mission asks for a human, another writes the completion summary, and `contenox events firings` keeps both honest

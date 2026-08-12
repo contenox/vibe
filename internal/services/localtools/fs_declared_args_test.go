@@ -22,7 +22,6 @@ func TestUnit_LocalFSTools_FallsBackToDeclaredArgs(t *testing.T) {
 		ToolName: "write_file",
 		Args:     map[string]string{"path": "declared.txt", "content": "from declared args"},
 	}
-	// Input is chat history (not a map) — the declared args must be used.
 	input := taskengine.ChatHistory{Messages: []taskengine.Message{{Role: "user", Content: "go"}}}
 
 	res, dataType, err := h.Exec(context.Background(), time.Now(), input, false, toolsCall)

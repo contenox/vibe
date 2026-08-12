@@ -24,6 +24,7 @@ type GeminiProvider struct {
 	canStream       bool
 	canThink        bool
 	canVision       bool
+	canAudio        bool
 	tracker         libtracker.ActivityTracker
 }
 
@@ -54,6 +55,7 @@ func NewGeminiProvider(apiKey string, modelName string, baseURLs []string, cap m
 		canStream:       cap.CanStream,
 		canThink:        cap.CanThink,
 		canVision:       cap.CanVision,
+		canAudio:        cap.CanAudio,
 		tracker:         tracker,
 	}
 }
@@ -70,6 +72,7 @@ func (p *GeminiProvider) CanStream() bool         { return p.canStream }
 func (p *GeminiProvider) CanPrompt() bool         { return p.canPrompt }
 func (p *GeminiProvider) CanThink() bool          { return p.canThink }
 func (p *GeminiProvider) CanVision() bool         { return p.canVision }
+func (p *GeminiProvider) CanAudio() bool          { return p.canAudio }
 
 func (p *GeminiProvider) GetChatConnection(ctx context.Context, backendID string) (modelrepo.LLMChatClient, error) {
 	if !p.CanChat() {

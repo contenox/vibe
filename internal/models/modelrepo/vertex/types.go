@@ -2,8 +2,6 @@ package vertex
 
 import "github.com/contenox/contenox/internal/models/modelrepo"
 
-// vertexRequest is the wire format for generateContent / streamGenerateContent.
-// The schema is identical to the Gemini AI Studio API.
 type vertexRequest struct {
 	SystemInstruction *vertexContent          `json:"system_instruction,omitempty"`
 	Contents          []vertexContent         `json:"contents"`
@@ -58,12 +56,6 @@ type vertexPart struct {
 	FunctionResponse *vertexFunctionResponse `json:"functionResponse,omitempty"`
 }
 
-// vertexInlineData is an inline binary blob part (e.g. an image) sent in a
-// content part. The Vertex generateContent wire format is identical to Gemini's
-// proto3-JSON and accepts the lowerCamelCase field names, matching the casing
-// this package already uses for functionCall / functionResponse /
-// thoughtSignature. encoding/json base64 (StdEncoding) encodes the Data []byte
-// on the wire.
 type vertexInlineData struct {
 	MimeType string `json:"mimeType"`
 	Data     []byte `json:"data"`
@@ -80,7 +72,6 @@ type vertexFunctionResponse struct {
 	Response map[string]interface{} `json:"response"`
 }
 
-// vertexResponse is the response from generateContent.
 type vertexResponse struct {
 	Candidates []struct {
 		Content      vertexContent `json:"content"`
@@ -92,11 +83,6 @@ type vertexResponse struct {
 	UsageMetadata *vertexUsageMetadata `json:"usageMetadata,omitempty"`
 }
 
-// vertexUsageMetadata is the API's token accounting, attached to (the last
-// chunk of) a generateContent / streamGenerateContent response.
-// promptTokenCount is already the TOTAL prompt count (cached included);
-// cachedContentTokenCount breaks out the tokens served from the context
-// cache.
 type vertexUsageMetadata struct {
 	PromptTokenCount        int `json:"promptTokenCount"`
 	CandidatesTokenCount    int `json:"candidatesTokenCount"`
@@ -104,11 +90,6 @@ type vertexUsageMetadata struct {
 	CachedContentTokenCount int `json:"cachedContentTokenCount"`
 }
 
-// neutralUsage maps usageMetadata onto the neutral TokenUsage. Like the
-// Gemini Developer API, Vertex context caching is implicit by default on
-// 2.5+ models — nothing is sent on the wire to activate it; byte-stable
-// prefixes plus session affinity are the whole client-side contract, and
-// this counter is where hits become visible.
 func (u *vertexUsageMetadata) neutralUsage() *modelrepo.TokenUsage {
 	if u == nil {
 		return nil
@@ -125,7 +106,6 @@ func (u *vertexUsageMetadata) neutralUsage() *modelrepo.TokenUsage {
 	}
 }
 
-// vertexErrorResponse is used to parse structured API errors.
 type vertexErrorResponse struct {
 	Error struct {
 		Code    int    `json:"code"`

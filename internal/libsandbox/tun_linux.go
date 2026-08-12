@@ -10,14 +10,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Egress network addressing. These addresses live only inside the agent's
-// fresh network namespace (never plumbed on the host); a 10.x range is used
-// so leaked log values read as clearly sandbox-local.
-//   - egressTunName: the L3 device the agent routes through.
-//   - egressAgentIP: the agent's own address on that device.
-//   - egressGatewayIP: the parent netstack's address (DNS resolver + nominal
-//     next hop); it answers for this and, in promiscuous mode, every other
-//     destination the agent tries to reach.
 const (
 	egressTunName   = "ctxsbx0"
 	egressAgentIP   = "10.191.0.2"
@@ -26,29 +18,15 @@ const (
 	egressMTU       = 1500
 	egressDNSPort   = 53
 
-	// egressResolverEnv names the resolver address (host:port) handed to the
-	// agent. Advisory only: the netstack intercepts every :53 datagram
-	// regardless of destination.
 	egressResolverEnv = "CONTENOX_SANDBOX_DNS"
 )
 
-// createEgressTun creates the agent's egress device inside the current (shim)
-// network namespace and returns an open fd referencing it. The shim holds
-// CAP_NET_ADMIN over its own userns (the same capability that raises "lo"), so
-// every step here is permitted without host root or CGo.
-//
-// It is an L3 TUN (IFF_TUN), not an L2 TAP: traffic is bare IP with no
-// Ethernet framing, so no ARP/neighbor state is needed. The device gets
-// egressAgentIP/egressPrefixLen, is brought up, and made the namespace's
-// default route (scope-link, no gateway — every packet is just written to
-// the fd). The parent attaches its netstack to the returned fd.
 func createEgressTun() (int, error) {
 	fd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return -1, fmt.Errorf("open /dev/net/tun: %w", err)
 	}
-	// TUNSETIFF binds the fd to a new L3 device. IFF_NO_PI drops the 4-byte
-	// packet-info prefix so what we read/write is exactly an IP datagram.
+	// TUNSETIFF binds the fd to a new L3 device; IFF_NO_PI drops the 4-byte packet-info prefix so reads/writes are exactly an IP datagram.
 	ifr, err := unix.NewIfreq(egressTunName)
 	if err != nil {
 		unix.Close(fd)
@@ -67,14 +45,6 @@ func createEgressTun() (int, error) {
 	return fd, nil
 }
 
-// establishEgress is the shim's egress step, run inside the fresh netns after
-// "lo" is up and before Landlock (which would deny /dev/net/tun) and before the
-// thread is pinned. Creates the TUN, hands its fd to the parent, and blocks
-// until the parent's stack is attached, so the agent never runs before its
-// only route is served. Closes every in-shim copy of both fds afterward.
-//
-// Fail-closed: any error is returned so ShimMain refuses to exec the agent
-// rather than run it with an unserved or absent route.
 func establishEgress(sockFD int) error {
 	tunFD, err := createEgressTun()
 	if err != nil {
@@ -89,10 +59,6 @@ func establishEgress(sockFD int) error {
 	return nil
 }
 
-// sendTunFD passes tunFD to the parent as SCM_RIGHTS, then blocks on a
-// one-byte readiness ack: the handshake that orders bring-up so the shim
-// doesn't exec the agent before the parent's stack is attached. A closed
-// socket surfaces as EOF, failing closed.
 func sendTunFD(sockFD, tunFD int) error {
 	if err := unix.Sendmsg(sockFD, []byte{'T'}, unix.UnixRights(tunFD), nil, 0); err != nil {
 		return fmt.Errorf("hand TUN fd to parent: %w", err)
@@ -108,9 +74,6 @@ func sendTunFD(sockFD, tunFD int) error {
 	return nil
 }
 
-// configureEgressTun assigns the device its address/netmask, raises it, and
-// installs the default route: the netns-side plumbing that sends everything
-// out the TUN. Needs CAP_NET_ADMIN, which the shim holds over its netns.
 func configureEgressTun() error {
 	ctl, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
@@ -162,10 +125,6 @@ func configureEgressTun() error {
 	return addDefaultRouteDev(int32(idxReq.Uint32()))
 }
 
-// addDefaultRouteDev installs "default dev <ifindex>" (scope link, no gateway)
-// via netlink RTM_NEWROUTE — what an L3 TUN wants, since there is no
-// next-hop to resolve. Netlink keeps this CGo-free and portable across
-// 32/64-bit, unlike the fixed-layout SIOCADDRT rtentry.
 func addDefaultRouteDev(ifindex int32) error {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)
 	if err != nil {
@@ -206,10 +165,6 @@ func addDefaultRouteDev(ifindex int32) error {
 	return readNetlinkAck(fd)
 }
 
-// readNetlinkAck reads the kernel's reply to an NLM_F_ACK request and turns a
-// non-zero errno into a Go error, so a rejected route fails the shim closed.
-// The reply is one NLMSG_ERROR message (NlMsghdr + int32 errno + echoed
-// header), decoded directly rather than via syscall.ParseNetlinkMessage.
 func readNetlinkAck(fd int) error {
 	buf := make([]byte, 4096)
 	n, err := unix.Read(fd, buf)
@@ -243,7 +198,6 @@ func nlMsghdrBytes(h unix.NlMsghdr) []byte {
 	return b
 }
 
-// prefixMask returns the 4-byte network mask for an IPv4 prefix length.
 func prefixMask(prefix int) []byte {
 	var m uint32
 	if prefix > 0 {

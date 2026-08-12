@@ -5,13 +5,7 @@ import (
 	"strings"
 )
 
-// OverlayEnv returns env ("KEY=VALUE" entries) with the pairs in set applied
-// on top, replacing or adding names; set values always win over inherited
-// ones. A set value of "" exports a defined-but-empty variable ("KEY=").
-//
-// Result is de-duplicated by name (last inherited value wins pre-overlay,
-// matching exec semantics) and sorted. Malformed env entries (no "=") are
-// dropped. An empty set returns env unchanged.
+// OverlayEnv returns env with the pairs in set applied on top (set always wins), de-duplicated by name and sorted; malformed entries (no "=") are dropped and an empty set returns env unchanged.
 func OverlayEnv(env []string, set map[string]string) []string {
 	if len(set) == 0 {
 		return env

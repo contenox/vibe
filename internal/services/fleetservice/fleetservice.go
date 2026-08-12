@@ -23,9 +23,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// DispatchRequest is the input to Dispatch. Intent and HITLPolicyName are
-// both required: every dispatch is a mission. fleetapi's wire DTO is a type
-// alias onto this.
+// DispatchRequest is the input to Dispatch; Intent and HITLPolicyName are required, and fleetapi's wire DTO is a type alias onto this.
 type DispatchRequest struct {
 	AgentName string `json:"agentName"`
 	// Intent is sent as the unit's first turn.
@@ -34,12 +32,11 @@ type DispatchRequest struct {
 	HITLPolicyName string `json:"hitlPolicyName"`
 	Cwd            string `json:"cwd,omitempty"`
 
-	// ParentSessionID names the upstream session firing this mission. Empty
-	// when an operator fires directly, routing reports to the inbox instead.
+	// ParentSessionID names the upstream session firing this mission; empty when an operator fires directly, routing reports to the inbox instead.
 	ParentSessionID string `json:"parentSessionId,omitempty"`
 }
 
-// DispatchResult is Dispatch's output. MissionID is always present.
+// DispatchResult is Dispatch's output; MissionID is always present.
 type DispatchResult struct {
 	InstanceID string `json:"instanceId"`
 	SessionID  string `json:"sessionId"`
@@ -56,13 +53,7 @@ type Service interface {
 	// Get returns one instance's status, or agentinstance.ErrNotFound.
 	Get(ctx context.Context, instanceID string) (agentinstance.InstanceStatus, error)
 
-	// Dispatch allocates a unit past the fleet-width cap (see admission.go),
-	// records a mission, and runs the intent as its first turn on a detached
-	// context, returning once the session is open. It also shepherds the
-	// turn's outcome: liveness on every completed turn, one nudge if mute,
-	// then a blocker; a turn that errors finishes the mission derailed and
-	// reaps its unit (see driveUnattendedMission). Any failure after Start
-	// tears the fresh instance back down.
+	// Dispatch allocates a unit past the fleet-width cap, records a mission, runs the intent as its first turn on a detached context, shepherds the turn's outcome to a nudge-then-blocker or derailed finish, and tears the fresh instance back down on any failure after Start.
 	Dispatch(ctx context.Context, req DispatchRequest) (DispatchResult, error)
 
 	// Stop tears instanceID down; idempotent, per kernel contract.
@@ -74,23 +65,16 @@ type Service interface {
 }
 
 type service struct {
-	instances      agentinstance.Manager
-	agents         agentregistryservice.Service
-	missions       missionservice.Service
-	workspaceRoots *vfs.Factory
-	projectRoot    string
-	tracker        libtracker.ActivityTracker
-	// computeBounds reads maxTurns/maxTokens for the drive loop. Nil leaves
-	// those seams unbounded.
-	computeBounds hitlservice.ComputeBoundsReader
-	// policyValidator refuses a dispatch naming a nonexistent HITL envelope.
-	// Nil skips the check.
+	instances       agentinstance.Manager
+	agents          agentregistryservice.Service
+	missions        missionservice.Service
+	workspaceRoots  *vfs.Factory
+	projectRoot     string
+	tracker         libtracker.ActivityTracker
+	computeBounds   hitlservice.ComputeBoundsReader
 	policyValidator hitlservice.PolicyValidator
-	// maxParallel is the fleet-width admission cap; 0 means unlimited.
-	maxParallel int
-	// admission serializes the cap's count-then-allocate window: held from
-	// admitUnit through StartResolved.
-	admission sync.Mutex
+	maxParallel     int
+	admission       sync.Mutex
 }
 
 // Option configures a fleet Service at construction.
@@ -101,15 +85,12 @@ func WithPolicyValidator(v hitlservice.PolicyValidator) Option {
 	return func(s *service) { s.policyValidator = v }
 }
 
-// WithComputeBounds wires the reader the drive loop consults for maxTurns
-// and maxTokens. maxToolCalls is enforced separately by the answerer.
+// WithComputeBounds wires the reader the drive loop consults for maxTurns and maxTokens; maxToolCalls is enforced separately by the answerer.
 func WithComputeBounds(r hitlservice.ComputeBoundsReader) Option {
 	return func(s *service) { s.computeBounds = r }
 }
 
-// New returns a Service driving instances (the kernel) and agents. An absent
-// cwd defaults to projectRoot (see resolveCwd). missions is not optional. A
-// nil tracker degrades to a Noop.
+// New returns a Service driving instances and agents; missions is required, a nil tracker degrades to a Noop, and an absent cwd defaults to projectRoot (see resolveCwd).
 func New(
 	instances agentinstance.Manager,
 	agents agentregistryservice.Service,
@@ -129,8 +110,7 @@ func New(
 		workspaceRoots: workspaceRoots,
 		projectRoot:    projectRoot,
 		tracker:        tracker,
-		// Enforced before any option runs; WithMaxParallel only changes it.
-		maxParallel: DefaultMaxParallel,
+		maxParallel:    DefaultMaxParallel,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -157,8 +137,6 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 	if strings.TrimSpace(req.HITLPolicyName) == "" {
 		return DispatchResult{}, errdefs.MissingParameter("hitlPolicyName", "hitlPolicyName is required: a mission must name its envelope")
 	}
-	// Validate the named policy loads before anything is brought up; the
-	// drive loop's own bounds read stays fail-to-unbounded.
 	if s.policyValidator != nil {
 		if err := s.policyValidator.ValidatePolicy(ctx, req.HITLPolicyName); err != nil {
 			return DispatchResult{}, errdefs.InvalidParameterValue("hitlPolicyName",
@@ -180,15 +158,10 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 		return DispatchResult{}, err
 	}
 
-	// Generated before the session is opened: the unit must hold it at
-	// construction (forwarded as session/new `_meta`). The mission row
-	// itself is written later, after the session opens.
+	// Generated before the session opens: the unit must hold it at construction (forwarded as session/new `_meta`); the mission row itself is written later.
 	missionID := uuid.NewString()
 
-	// StartResolved, not Start(agentName): Start would re-read the row, a
-	// TOCTOU window where an agent disabled between the two reads would
-	// still spawn. The lock spans the check and the allocation so concurrent
-	// dispatches cannot slip past the cap between counting and spawning.
+	// StartResolved (not Start): re-reading the row would open a TOCTOU window letting a newly disabled agent spawn; the lock spans admitUnit and StartResolved so concurrent dispatches cannot both pass the cap.
 	s.admission.Lock()
 	if err := s.admitUnit(ctx); err != nil {
 		s.admission.Unlock()
@@ -200,10 +173,7 @@ func (s *service) Dispatch(ctx context.Context, req DispatchRequest) (DispatchRe
 		return DispatchResult{}, err
 	}
 
-	// The mission id and the envelope's model/backend allowlist both ride
-	// session/new `_meta` (missionservice.ParseMissionMeta), since model
-	// choice happens inside the unit's own process. On failure tear the
-	// fresh instance down so a failed dispatch never leaks a subprocess.
+	// mission id and allowlist ride session/new `_meta`; on failure the fresh instance is torn down so a failed dispatch never leaks a subprocess.
 	dispatchBounds := s.dispatchResolutionBounds(ctx, req.HITLPolicyName)
 	sessionID, err := s.instances.OpenSession(ctx, instanceID, agentinstance.SessionSpec{
 		Cwd:  cwd,
@@ -259,11 +229,6 @@ type missionRun struct {
 	intent     string
 }
 
-// driveUnattendedMission runs a dispatched unit's turns and shepherds their
-// outcomes: liveness on every completed turn, one nudge if mute, then a
-// runtime-filed blocker. The nudge loop is hard-capped at one turn. Every exit
-// leaves the mission either reached, at rest, or blocker-reported — a turn
-// that errors goes through failTurn rather than returning silently.
 func (s *service) driveUnattendedMission(ctx context.Context, run missionRun) {
 	reportErr, reportChange, end := s.tracker.Start(ctx, "prompt", "fleet_dispatch",
 		"instance_id", run.instanceID, "session_id", string(run.sessionID), "agent_name", run.agentName)
@@ -271,7 +236,6 @@ func (s *service) driveUnattendedMission(ctx context.Context, run missionRun) {
 
 	bounds := s.computeBoundsFor(ctx, run.missionID)
 
-	// Turn 1: the mission preamble ahead of the clean intent.
 	firstTurn := []libacp.ContentBlock{
 		libacp.NewTextContent(missionPreamble),
 		libacp.NewTextContent(run.intent),
@@ -283,13 +247,12 @@ func (s *service) driveUnattendedMission(ctx context.Context, run missionRun) {
 	}
 	reportChange(string(run.sessionID), string(stop))
 	if s.missionReached(ctx, run.missionID) {
-		return // the unit's voice reached the operator; nothing to correct.
+		return
 	}
 	if s.enforceTokenBudget(ctx, run, bounds, reportChange) {
-		return // the mission spent its token budget on turn 1; finished stuck.
+		return
 	}
 
-	// The one bounded nudge runs only if the turn budget permits it.
 	if turnBudgetExceeded(2, bounds) {
 		s.finishComputeStuck(ctx, run.missionID, turnsExhaustedReason(bounds), reportChange)
 		return
@@ -301,19 +264,16 @@ func (s *service) driveUnattendedMission(ctx context.Context, run missionRun) {
 	}
 	reportChange(string(run.sessionID), string(stop))
 	if s.missionReached(ctx, run.missionID) {
-		return // the nudge worked.
+		return
 	}
 	if s.enforceTokenBudget(ctx, run, bounds, reportChange) {
-		return // spent its token budget across the two turns; finished stuck.
+		return
 	}
 
-	// Mute across both turns: the runtime files the blocker itself. No third
-	// prompt, ever.
+	// Mute across both turns: no third prompt, ever — the runtime files the blocker itself.
 	s.fileSilentTurnBlocker(ctx, run)
 }
 
-// computeBoundsFor reads the mission's compute ceiling, or zero (unbounded)
-// when no reader is wired or the read fails.
 func (s *service) computeBoundsFor(ctx context.Context, missionID string) hitlservice.ComputeBounds {
 	if s.computeBounds == nil {
 		return hitlservice.ComputeBounds{}
@@ -329,8 +289,6 @@ func (s *service) computeBoundsFor(ctx context.Context, missionID string) hitlse
 	return bounds
 }
 
-// dispatchResolutionBounds reads policyName's allowlists before the mission
-// row exists. Unbounded on any failure.
 func (s *service) dispatchResolutionBounds(ctx context.Context, policyName string) hitlservice.ComputeBounds {
 	if s.computeBounds == nil {
 		return hitlservice.ComputeBounds{}
@@ -342,8 +300,6 @@ func (s *service) dispatchResolutionBounds(ctx context.Context, policyName strin
 	return bounds
 }
 
-// enforceTokenBudget stops a mission that has spent its token budget. Runs
-// only between turns; never cancels a turn in flight.
 func (s *service) enforceTokenBudget(ctx context.Context, run missionRun, b hitlservice.ComputeBounds, reportChange func(string, any)) bool {
 	if b.MaxTokens <= 0 {
 		return false
@@ -360,9 +316,6 @@ func (s *service) enforceTokenBudget(ctx context.Context, run missionRun, b hitl
 	return true
 }
 
-// finishComputeStuck brings a mission to rest at StatusStuck, naming the
-// bound it crossed. A conflicting Finish (already terminal) is recorded and
-// dropped; the durable status is correct either way.
 func (s *service) finishComputeStuck(ctx context.Context, missionID, reason string, reportChange func(string, any)) {
 	reportChange("compute_bound", reason)
 	if _, err := s.missions.Finish(ctx, missionID, missionservice.StatusStuck, reason); err != nil {
@@ -370,8 +323,6 @@ func (s *service) finishComputeStuck(ctx context.Context, missionID, reason stri
 	}
 }
 
-// sessionJournalReader is the optional kernel capability the drive loop uses
-// to read reported token usage without attaching a viewer.
 type sessionJournalReader interface {
 	SessionJournal(instanceID string, sessionID libacp.SessionID) ([]libacp.SessionNotification, string, bool)
 }
@@ -385,13 +336,6 @@ func (s *service) sessionJournal(run missionRun) ([]libacp.SessionNotification, 
 	return notes, owned
 }
 
-// promptTurn drives one detached turn and stamps mission liveness on a
-// completed one. The heartbeat write's own error is deliberately dropped.
-//
-// A failed turn stamps nothing: liveness means "this mission is being driven",
-// and a turn error is the moment that stopped being true — refreshing the
-// stale clock there would hide a dead mission from the sweep for a further
-// StaleHeartbeatAfter. failTurn owns the failure instead.
 func (s *service) promptTurn(ctx context.Context, run missionRun, blocks []libacp.ContentBlock) (libacp.StopReason, error) {
 	stop, err := s.instances.Prompt(ctx, run.instanceID, run.sessionID, blocks)
 	if err != nil {
@@ -401,18 +345,6 @@ func (s *service) promptTurn(ctx context.Context, run missionRun, blocks []libac
 	return stop, nil
 }
 
-// failTurn brings a mission whose turn errored to rest and reaps its unit.
-// The drive loop is the only thing driving a dispatched unit, so returning on
-// a turn error without this leaves a StateRunning instance nobody prompts,
-// holding fleet width against maxParallel until its host exits.
-//
-// A mission already at rest owns its own verdict — an operator's `mission
-// stop` reaps the subprocess, which is itself how the in-flight turn errored —
-// so that case only stops the unit, filing no second story. Otherwise the
-// blocker records why (durable, and the half that reaches the operator inbox),
-// the derailed verdict is the terminal fact, and the unit is stopped directly
-// rather than through the status-teardown subscriber, which not every topology
-// wires. Stop is idempotent per the kernel contract.
 func (s *service) failTurn(ctx context.Context, run missionRun, turnErr error, reportErr func(error), reportChange func(string, any)) {
 	reportErr(turnErr)
 	defer func() {
@@ -440,12 +372,8 @@ func (s *service) failTurn(ctx context.Context, run missionRun, turnErr error, r
 	}
 }
 
-// turnErrorBlockerLead is the stable prefix of a failed turn's blocker and
-// StatusReason.
 const turnErrorBlockerLead = "unit turn failed"
 
-// turnErrorLine renders the one line both the blocker summary and the
-// StatusReason carry, single-line and bounded as AddReport requires.
 func turnErrorLine(turnErr error) string {
 	return singleLineExcerpt(fmt.Sprintf("%s: %v", turnErrorBlockerLead, turnErr), 240)
 }
@@ -457,12 +385,10 @@ func turnErrorDetail(turnErr error, sessionID string) string {
 		sessionID, turnErr, missionservice.StatusDerailed)
 }
 
-// missionReached reports whether the mission carries any fact a unit
-// produced through its mission tools, read off the durable mission store.
 func (s *service) missionReached(ctx context.Context, missionID string) bool {
 	m, err := s.missions.Get(ctx, missionID)
 	if err != nil {
-		m = nil // not evidence the unit reached anyone.
+		m = nil
 	}
 	reportCount := 0
 	if reports, rerr := s.missions.ListReports(ctx, missionID, 1); rerr == nil {
@@ -471,10 +397,6 @@ func (s *service) missionReached(ctx context.Context, missionID string) bool {
 	return missionShowsUnitReached(m, reportCount)
 }
 
-// missionShowsUnitReached reports whether the unit reached the operator: a
-// filed report, a terminal verdict, or a plan revision each count. It does
-// not see an attention ask raised through the approval store; the worst
-// case is one harmless extra nudge.
 func missionShowsUnitReached(m *missionservice.Mission, reportCount int) bool {
 	if reportCount > 0 {
 		return true
@@ -483,14 +405,11 @@ func missionShowsUnitReached(m *missionservice.Mission, reportCount int) bool {
 		return false
 	}
 	if m.Status != missionservice.StatusOpen {
-		return true // mission_finish recorded a terminal verdict
+		return true
 	}
-	return m.Plan.Revision > 0 // mission_plan revised the living plan
+	return m.Plan.Revision > 0
 }
 
-// fileSilentTurnBlocker files the runtime's own blocker for a unit that
-// ended two turns without reporting, quoting its last words when cheaply
-// recoverable (see sessionTextReader).
 func (s *service) fileSilentTurnBlocker(ctx context.Context, run missionRun) {
 	summary, detail := silentTurnBlocker(s.lastAgentText(run.instanceID, run.sessionID), string(run.sessionID))
 	_ = s.missions.AddReport(ctx, run.missionID, &missionservice.Report{
@@ -500,8 +419,6 @@ func (s *service) fileSilentTurnBlocker(ctx context.Context, run missionRun) {
 	})
 }
 
-// sessionTextReader is the optional capability used to quote a silent unit's
-// own words without attaching a viewer.
 type sessionTextReader interface {
 	SessionAgentText(instanceID string, sessionID libacp.SessionID) (string, bool)
 }
@@ -515,32 +432,22 @@ func (s *service) lastAgentText(instanceID string, sessionID libacp.SessionID) s
 	return text
 }
 
-// Derived from the tool package's own constants, qualified with the provider
-// name exactly as taskengine offers them to the model.
 var (
 	toolAskAttention = missiontools.ToolsProviderName + "." + missiontools.ToolNameAskAttention
 	toolReport       = missiontools.ToolsProviderName + "." + missiontools.ToolNameReport
 	toolFinish       = missiontools.ToolsProviderName + "." + missiontools.ToolNameFinish
 )
 
-// missionPreamble is prepended to a unit's first turn. Wire-only: never
-// persisted as Mission.Intent.
 var missionPreamble = fmt.Sprintf(`You are running as an UNATTENDED mission unit. No human is reading this conversation — replying in prose reaches no one. You reach your operator ONLY through your mission tools:
 - %s: ask a question, or flag a blocker you must not decide alone.
 - %s: record real progress, a finding, or a result.
 - %s: end the mission with a verdict, once the work is truly done.
 Do the work with your other tools. When you need the operator, or have something worth their attention, call a mission tool. Chat text alone will not be seen.`, toolAskAttention, toolReport, toolFinish)
 
-// missionNudge is the single follow-up turn a mute unit earns (see
-// driveUnattendedMission's hard cap).
 var missionNudge = fmt.Sprintf(`Your last turn ended without reaching your operator, and no human is reading this chat. To reach your operator now, call %s (a question or a blocker) or %s (progress, a finding, or a result); to end the mission, call %s. If you are not done, keep working with your other tools and report when you have something. Do not answer in prose alone — it will not be seen.`, toolAskAttention, toolReport, toolFinish)
 
-// silentTurnBlockerLead is the stable prefix of a mute unit's blocker.
 const silentTurnBlockerLead = "unit ended two turns without reporting"
 
-// silentTurnBlocker builds the (summary, detail) of the blocker filed on a
-// mute unit's behalf. summary is always single-line and non-empty, as
-// missionservice.AddReport requires.
 func silentTurnBlocker(lastAgentText, sessionID string) (summary, detail string) {
 	attach := fmt.Sprintf("The unit produced no mission report across two turns (its first turn and one runtime nudge). Attach to session %s to read its transcript and continue it.", sessionID)
 	lastAgentText = strings.TrimSpace(lastAgentText)
@@ -552,8 +459,6 @@ func silentTurnBlocker(lastAgentText, sessionID string) (summary, detail string)
 	return summary, detail
 }
 
-// singleLineExcerpt collapses all whitespace to single spaces and truncates
-// to max runes with an ellipsis.
 func singleLineExcerpt(s string, max int) string {
 	s = strings.Join(strings.Fields(s), " ")
 	r := []rune(s)
@@ -573,8 +478,6 @@ func (s *service) Cancel(ctx context.Context, instanceID, sessionID string) erro
 	if sessionID != "" {
 		return s.instances.Cancel(instanceID, libacp.SessionID(sessionID))
 	}
-	// No session named: cancel every session attached to the instance. Safe
-	// with no turn in flight; zero sessions is a no-op.
 	status, err := s.instances.Get(instanceID)
 	if err != nil {
 		return err
@@ -588,11 +491,6 @@ func (s *service) Cancel(ctx context.Context, instanceID, sessionID string) erro
 	return errors.Join(errs...)
 }
 
-// resolveCwd maps a requested session cwd onto the concrete root the
-// dispatched unit will run in, via vfs.ResolveSessionCwd. An absent cwd
-// defaults to the workspace Factory's default root; s.projectRoot is used
-// only as a fallback when no allowlist is configured. A relative cwd is
-// refused.
 func (s *service) resolveCwd(cwd string) (string, error) {
 	resolved, err := vfs.ResolveSessionCwd(s.workspaceRoots, cwd, s.projectRoot)
 	if err != nil {

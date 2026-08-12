@@ -15,14 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests cover identity (H2) and integrity (H3): a command_prefix_allowlist
-// pins a NAME, and PATH decides what that name is. Every case is a WITHDRAWN
-// allow — the gate can only refuse more, never allow more.
-
-// fakeTool writes an executable named `name` into dir and returns its path.
-// On Windows a bare name only resolves through PATHEXT, so the fixture is a
-// .cmd there — verified against where.exe, which lists foo.CMD before foo.JS
-// for PATHEXT ".COM;.EXE;.BAT;.CMD;...".
 func fakeTool(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(dir, 0o755))
@@ -37,9 +29,6 @@ func fakeTool(t *testing.T, dir, name, body string) string {
 	return file
 }
 
-// realPathOf is what the evaluator will compare against: the symlink-resolved
-// absolute path. Declaring anything else is the operator error the refusal
-// messages teach.
 func realPathOf(t *testing.T, path string) string {
 	t.Helper()
 	resolved, err := filepath.EvalSymlinks(path)
@@ -54,8 +43,6 @@ func sha256Of(t *testing.T, path string) string {
 	return sum
 }
 
-// trustPolicy writes a one-rule allow envelope gated by a trusted_binaries
-// block, mirroring the shape an operator authors.
 func trustPolicy(t *testing.T, prefixes string, tb map[string]any) hitlservice.PolicyEvaluator {
 	t.Helper()
 	dir := t.TempDir()
@@ -82,9 +69,8 @@ func evalTrust(t *testing.T, svc hitlservice.PolicyEvaluator, args map[string]an
 	return r
 }
 
-// TestUnit_TrustedBinaries_PathSubstitutionIsRefused is the headline case: a
-// writable directory earlier in PATH aliasing an allowlisted name must not
-// convert the allow rule into blessed arbitrary execution.
+// TestUnit_TrustedBinaries_PathSubstitutionIsRefused pins that a writable
+// directory earlier in PATH aliasing an allowlisted name must not inherit the allow.
 func TestUnit_TrustedBinaries_PathSubstitutionIsRefused(t *testing.T) {
 	root := t.TempDir()
 	trustedDir := filepath.Join(root, "trusted")
@@ -97,13 +83,10 @@ func TestUnit_TrustedBinaries_PathSubstitutionIsRefused(t *testing.T) {
 		"hashes": map[string]string{realPathOf(t, good): sha256Of(t, good)},
 	})
 
-	// Control: with only the trusted dir on PATH, the allow stands.
 	t.Setenv("PATH", trustedDir)
 	assert.Equal(t, hitlservice.ActionAllow, evalTrust(t, svc, map[string]any{"command": "mytool"}).Action,
 		"the declared binary on a clean PATH must still be allowed")
 
-	// The attack: the same name, resolved out of a writable directory placed
-	// earlier in PATH.
 	t.Setenv("PATH", evilDir+string(os.PathListSeparator)+trustedDir)
 	r := evalTrust(t, svc, map[string]any{"command": "mytool"})
 	assert.Equal(t, hitlservice.ActionApprove, r.Action,
@@ -112,13 +95,11 @@ func TestUnit_TrustedBinaries_PathSubstitutionIsRefused(t *testing.T) {
 		"the refusal must say the binary came from somewhere undeclared")
 	assert.Contains(t, r.Detail, "evil", "the refusal must name the binary it refused")
 
-	// The compound-line (structural) path is gated identically.
 	rc := evalTrust(t, svc, map[string]any{"command": "mytool && mytool"})
 	assert.Equal(t, hitlservice.ActionApprove, rc.Action,
 		"the structural upgrade path must be gated by the same declarations")
 
-	// Hashes ALONE stop the substitution too — the planted binary is at a
-	// different path, so it has no declared hash. Pinned because the docs say so.
+	// Hashes alone stop the substitution too: the planted binary is at a different path, so it has no declared hash.
 	hashesOnly := trustPolicy(t, "mytool", map[string]any{
 		"hashes": map[string]string{realPathOf(t, good): sha256Of(t, good)},
 	})
@@ -171,7 +152,6 @@ func TestUnit_TrustedBinaries_RefreshFixesAMismatch(t *testing.T) {
 	fakeTool(t, dir, "mytool", "v2 — a legitimate upgrade")
 	require.Equal(t, hitlservice.ActionApprove, evalTrust(t, stale, map[string]any{"command": "mytool"}).Action)
 
-	// The refresh path: re-read the binary, rewrite the declaration.
 	refreshedPath, refreshedSum, err := hitlservice.ResolveTrustedBinary("mytool")
 	require.NoError(t, err)
 	assert.Equal(t, real, refreshedPath, "the refresh must resolve to the same real path the evaluator does")
@@ -273,18 +253,15 @@ func TestUnit_TrustedBinaries_NeverUpgradesAnAsk(t *testing.T) {
 		"a declared binary that no rule allows must stay an ask")
 }
 
-// TestUnit_TrustedBinaries_GateOnlyWithdrawsAllows is the monotonicity gate's
-// sharpest edge: command_prefix_allowlist is named for allow rules but nothing
-// stops a policy pairing it with deny or approve. Withdrawing the match there
-// would let the call THROUGH — the one shape this layer may never have — so
-// the binary check applies to allow rules only.
+// TestUnit_TrustedBinaries_GateOnlyWithdrawsAllows pins that the binary check
+// applies to allow rules only — withdrawing the match on a deny or approve
+// rule would let the call through.
 func TestUnit_TrustedBinaries_GateOnlyWithdrawsAllows(t *testing.T) {
 	root := t.TempDir()
 	trustedDir := filepath.Join(root, "trusted")
 	evilDir := filepath.Join(root, "evil")
 	good := fakeTool(t, trustedDir, "mytool", "real")
 	fakeTool(t, evilDir, "mytool", "PWNED")
-	// The untrusted one is what resolves.
 	t.Setenv("PATH", evilDir+string(os.PathListSeparator)+trustedDir)
 
 	trusted, err := json.Marshal(map[string]any{
@@ -330,13 +307,8 @@ func TestUnit_TrustedBinaries_MalformedBlockFailsClosed(t *testing.T) {
 	}
 }
 
-// TestUnit_TrustedBinaries_VetRejectsMalformedDeclarations pins the
-// authoring-time half: the same defects are reported before anything runs.
-//
-// The absolute paths are built per platform on purpose. "/usr/bin" is NOT
-// absolute on Windows (verified: filepath.IsAbs is false without a volume),
-// so a declaration block carrying another platform's paths fails validation
-// there — which is correct, and is why declarations are host-specific.
+// TestUnit_TrustedBinaries_VetRejectsMalformedDeclarations pins that the same
+// defects VetPolicy catches at load time are reported before anything runs.
 func TestUnit_TrustedBinaries_VetRejectsMalformedDeclarations(t *testing.T) {
 	base := `{"default_action":"approve","rules":[],"trusted_binaries":`
 	absDir := "/usr/bin"

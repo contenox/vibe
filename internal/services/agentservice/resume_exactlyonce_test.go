@@ -1,10 +1,5 @@
 package agentservice_test
 
-// The flagship claim under adversarial conditions: fire, walk away, answer
-// from another process, and the resumed work runs EXACTLY ONCE. Every test
-// here measures that against a side effect on disk — one appended line per
-// gated tool execution — not against a log line, an event, or in-memory state.
-
 import (
 	"context"
 	"encoding/json"
@@ -30,10 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// sideEffectTools is the raw provider under the HITL wrapper. Each Exec
-// appends one line to a file: an effect that outlives the process, so
-// "exactly once" is counted on the world rather than on the runtime's own
-// bookkeeping.
 type sideEffectTools struct {
 	path string
 	mu   sync.Mutex
@@ -66,8 +57,6 @@ func (s *sideEffectTools) GetToolsForToolsByName(_ context.Context, name string)
 	return []taskengine.Tool{{Type: "function", Function: taskengine.FunctionTool{Name: "write"}}}, nil
 }
 
-// sideEffects counts the lines written so far — how many times the gated call
-// actually ran, across every process that has touched this run.
 func sideEffects(t *testing.T, path string) int {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -78,8 +67,6 @@ func sideEffects(t *testing.T, path string) int {
 	return len(strings.Fields(string(raw)))
 }
 
-// seInstance is one "process": engine, hitlservice, and agent over a shared
-// database file and a shared side-effect file.
 type seInstance struct {
 	db    libdb.DBManager
 	store runtimetypes.Store
@@ -90,10 +77,6 @@ type seInstance struct {
 
 func (i *seInstance) close() { _ = i.db.Close() }
 
-// newSEInstance builds a process over dbPath whose gated tool writes to
-// effectPath. withHook mirrors the composition-root choice: a process that
-// could build an engine registers the resume hook, one that could not
-// (contenoxcli's "no engine could be built" degradation) does not.
 func newSEInstance(t *testing.T, dbPath, effectPath string, withHook bool) *seInstance {
 	t.Helper()
 	ctx := context.Background()
@@ -108,7 +91,7 @@ func newSEInstance(t *testing.T, dbPath, effectPath string, withHook bool) *seIn
 	sink := &recordingSink{}
 	wrapper := localtools.NewHITLWrapper(&sideEffectTools{path: effectPath}, awayAsk,
 		approveAllPolicy{ApprovalRecorder: recorder, Service: hitl}, libtracker.NoopTracker{}, sink)
-	// Short enough that the ask parks and the run checkpoints within the test.
+	// short enough that the ask parks and the run checkpoints within the test
 	wrapper.SetParkWindow(20 * time.Millisecond)
 
 	cctx := taskengine.WithTaskEventSink(ctx, sink)
@@ -130,12 +113,8 @@ func newSEInstance(t *testing.T, dbPath, effectPath string, withHook bool) *seIn
 	return inst
 }
 
-// seChain is e2eChain: one gated tool call, then the chain ends.
 func seChain() *taskengine.TaskChainDefinition { return e2eChain() }
 
-// seChainFailingAfterTheTool ends the gated tool task in a raise_error task,
-// so a resume can complete the side effect and then fail — the partial
-// completion a retry has to reason about.
 func seChainFailingAfterTheTool() *taskengine.TaskChainDefinition {
 	return &taskengine.TaskChainDefinition{
 		ID:         "chain.se.boom",
@@ -160,10 +139,6 @@ func seChainFailingAfterTheTool() *taskengine.TaskChainDefinition {
 	}
 }
 
-// suspendOne fires a run that parks on its gated call and checkpoints,
-// returning the process it suspended in (already closed) via the caller's own
-// bookkeeping. It asserts the pre-conditions every test below builds on: the
-// ask is pending, the checkpoint exists, and nothing has happened in the world.
 func suspendOne(t *testing.T, inst *seInstance, effectPath, sessionID string, chain *taskengine.TaskChainDefinition) {
 	t.Helper()
 	ctx := context.Background()
@@ -186,10 +161,7 @@ func suspendOne(t *testing.T, inst *seInstance, effectPath, sessionID string, ch
 	require.Equal(t, 0, sideEffects(t, effectPath), "the gated call must not have run")
 }
 
-// TestSystem_Resume_ConcurrentResponds_ResolveOnceAndRunOnce is G4 and G3
-// together: many terminals answer the same ask at the same instant, exactly
-// one verdict is recorded, every loser gets ErrApprovalAlreadyResolved, and
-// the world is touched once.
+// TestSystem_Resume_ConcurrentResponds_ResolveOnceAndRunOnce pins that many terminals answering the same ask at once record exactly one verdict, every loser gets ErrApprovalAlreadyResolved, and the world is touched once.
 func TestSystem_Resume_ConcurrentResponds_ResolveOnceAndRunOnce(t *testing.T) {
 	dir := t.TempDir()
 	dbPath, effectPath := filepath.Join(dir, "race.db"), filepath.Join(dir, "effects.log")
@@ -248,10 +220,7 @@ func TestSystem_Resume_ConcurrentResponds_ResolveOnceAndRunOnce(t *testing.T) {
 	require.Equal(t, 1, results, "the tool result is persisted once")
 }
 
-// TestSystem_Resume_ConcurrentResumesOfOneVerdict_ClaimAdmitsExactlyOne is the
-// sharper half of G3: the verdict is already durable, so the row CAS cannot
-// serialize anything, and the checkpoint claim is the only thing standing
-// between one answer and N executions of the same work.
+// TestSystem_Resume_ConcurrentResumesOfOneVerdict_ClaimAdmitsExactlyOne pins that with the verdict already durable, the checkpoint claim alone (not the row CAS) admits exactly one resumer among N concurrent ones.
 func TestSystem_Resume_ConcurrentResumesOfOneVerdict_ClaimAdmitsExactlyOne(t *testing.T) {
 	dir := t.TempDir()
 	dbPath, effectPath := filepath.Join(dir, "claim.db"), filepath.Join(dir, "effects.log")
@@ -263,9 +232,7 @@ func TestSystem_Resume_ConcurrentResumesOfOneVerdict_ClaimAdmitsExactlyOne(t *te
 	suspendOne(t, a, effectPath, sessionID, seChain())
 	a.close()
 
-	// The verdict is durable with nothing driving it — the state a responder
-	// that died right after its CAS leaves behind. Written at the store, since
-	// the service verb refuses this composition (ErrVerdictNeedsResumer).
+	// the verdict is durable with nothing driving it, the state a responder that died right after its CAS leaves behind; written at the store since the service verb refuses this composition (ErrVerdictNeedsResumer)
 	b := newSEInstance(t, dbPath, effectPath, false)
 	defer b.close()
 	require.NoError(t, b.store.ResolveHITLApproval(ctx, "call-w1", runtimetypes.HITLApprovalApproved, json.RawMessage(`{"approved":true}`), time.Now().UTC()))
@@ -302,11 +269,7 @@ func TestSystem_Resume_ConcurrentResumesOfOneVerdict_ClaimAdmitsExactlyOne(t *te
 	require.Equal(t, 1, sideEffects(t, effectPath), "N concurrent resumers, one execution")
 }
 
-// TestSystem_Resume_VerdictWithoutAResumerIsRefusedBeforeRecording pins the
-// F1 ordering fix: a process that cannot resume (no waiter, no hook) is
-// refused BEFORE the one-shot verdict is recorded, so the ask stays pending
-// and a capable terminal later answers and resumes it — "from any terminal
-// that can reach your models", with the incapable terminal doing no harm.
+// TestSystem_Resume_VerdictWithoutAResumerIsRefusedBeforeRecording pins that a process unable to resume is refused before the one-shot verdict is recorded, leaving the ask pending for a capable terminal to answer later.
 func TestSystem_Resume_VerdictWithoutAResumerIsRefusedBeforeRecording(t *testing.T) {
 	dir := t.TempDir()
 	dbPath, effectPath := filepath.Join(dir, "strand.db"), filepath.Join(dir, "effects.log")
@@ -318,7 +281,6 @@ func TestSystem_Resume_VerdictWithoutAResumerIsRefusedBeforeRecording(t *testing
 	suspendOne(t, a, effectPath, sessionID, seChain())
 	a.close()
 
-	// The engine-less terminal: refused, and the world untouched.
 	blind := newSEInstance(t, dbPath, effectPath, false)
 	require.ErrorIs(t, blind.hitl.Respond(ctx, "call-w1", true), hitlservice.ErrVerdictNeedsResumer,
 		"an unresumable process must not spend the one-shot verdict")
@@ -333,7 +295,6 @@ func TestSystem_Resume_VerdictWithoutAResumerIsRefusedBeforeRecording(t *testing
 	require.Nil(t, cp.Failure)
 	blind.close()
 
-	// The capable terminal answers as if the refusal never happened.
 	capable := newSEInstance(t, dbPath, effectPath, true)
 	defer capable.close()
 	require.NoError(t, capable.hitl.Respond(ctx, "call-w1", true))
@@ -342,11 +303,7 @@ func TestSystem_Resume_VerdictWithoutAResumerIsRefusedBeforeRecording(t *testing
 	require.ErrorIs(t, err, libdb.ErrNotFound, "a completed resume deletes its checkpoint")
 }
 
-// TestSystem_Resume_CrashedClaimIsReclaimedByTheStrandedSweep pins the F2
-// fix: a resumer that dies holding the claim excludes everyone for the
-// staleness window — and after it, the production driver
-// (SweepStrandedCheckpoints, run by every `approvals list`) reclaims the run
-// and carries it to completion, exactly once.
+// TestSystem_Resume_CrashedClaimIsReclaimedByTheStrandedSweep pins that a resumer dying mid-claim excludes everyone until the claim goes stale, after which SweepStrandedCheckpoints reclaims and completes the run exactly once.
 func TestSystem_Resume_CrashedClaimIsReclaimedByTheStrandedSweep(t *testing.T) {
 	dir := t.TempDir()
 	dbPath, effectPath := filepath.Join(dir, "crash.db"), filepath.Join(dir, "effects.log")
@@ -360,20 +317,17 @@ func TestSystem_Resume_CrashedClaimIsReclaimedByTheStrandedSweep(t *testing.T) {
 
 	b := newSEInstance(t, dbPath, effectPath, false)
 	defer b.close()
-	// The crash, in two durable writes: a responder recorded the verdict, a
-	// resumer claimed the checkpoint, and neither came back.
+	// the crash, in two durable writes: a responder recorded the verdict, a resumer claimed the checkpoint, and neither came back
 	require.NoError(t, b.store.ResolveHITLApproval(ctx, "call-w1", runtimetypes.HITLApprovalApproved, json.RawMessage(`{"approved":true}`), time.Now().UTC()))
 	now := time.Now().UTC()
 	require.NoError(t, b.store.ClaimChainCheckpoint(ctx, "call-w1", now, now.Add(-10*time.Minute)))
 
-	// While the claim is live, the sweep must not touch the run.
 	resumed, failed, err := agentservice.SweepStrandedCheckpoints(ctx, b.deps, 100)
 	require.NoError(t, err)
 	require.Zero(t, resumed, "a live claim excludes the sweep")
 	require.Zero(t, failed)
 	require.Equal(t, 0, sideEffects(t, effectPath))
 
-	// Age the claim past the staleness bound, exactly as a wall clock would.
 	stale := now.Add(-11 * time.Minute)
 	require.NoError(t, b.store.ClaimChainCheckpoint(ctx, "call-w1", stale, now.Add(time.Minute)))
 
@@ -386,11 +340,7 @@ func TestSystem_Resume_CrashedClaimIsReclaimedByTheStrandedSweep(t *testing.T) {
 	require.ErrorIs(t, err, libdb.ErrNotFound)
 }
 
-// TestSystem_Resume_PartiallyCompletedResumeReplaysItsRecordedResult pins the
-// F3 fix: a resume that completes its gated call records the result on the
-// checkpoint before the chain continues, so a retry after a later failure
-// replays the record instead of re-executing — the approved side effect stays
-// exactly-once no matter how many retries the failing chain suffers.
+// TestSystem_Resume_PartiallyCompletedResumeReplaysItsRecordedResult pins that a resume recording its gated call's result before the chain continues lets a later retry replay that record instead of re-executing, keeping the side effect exactly-once.
 func TestSystem_Resume_PartiallyCompletedResumeReplaysItsRecordedResult(t *testing.T) {
 	dir := t.TempDir()
 	dbPath, effectPath := filepath.Join(dir, "partial.db"), filepath.Join(dir, "effects.log")
@@ -415,9 +365,7 @@ func TestSystem_Resume_PartiallyCompletedResumeReplaysItsRecordedResult(t *testi
 	require.NotNil(t, cp.Failure)
 	require.NotNil(t, cp.ClaimedAt)
 
-	// The documented recovery: once the claim goes stale, retry. The retry
-	// still fails (the chain still ends in raise_error) — but the gated call
-	// is replayed from its record, never run again.
+	// once the claim goes stale, retry still fails (raise_error), but the gated call is replayed from its record, never run again
 	stale := time.Now().UTC().Add(-11 * time.Minute)
 	require.NoError(t, b.store.ClaimChainCheckpoint(ctx, "call-w1", stale, time.Now().UTC().Add(time.Minute)))
 	_, err = agentservice.ResumeFromCheckpoint(ctx, b.deps, "call-w1")
@@ -425,7 +373,6 @@ func TestSystem_Resume_PartiallyCompletedResumeReplaysItsRecordedResult(t *testi
 	require.Equal(t, 1, sideEffects(t, effectPath),
 		"the retry replays the recorded result — the resume path is exactly-once for the gated call")
 
-	// And once more via the production driver, for the same answer.
 	stale = time.Now().UTC().Add(-11 * time.Minute)
 	require.NoError(t, b.store.ClaimChainCheckpoint(ctx, "call-w1", stale, time.Now().UTC().Add(time.Minute)))
 	resumed, failed, err := agentservice.SweepStrandedCheckpoints(ctx, b.deps, 100)

@@ -12,17 +12,11 @@ import (
 	"time"
 )
 
-// These tests validate libacp's agent-side wire dispatch against real,
-// independently-implemented ACP clients from the Rust reference SDK. Opt-in:
-// both tests skip unless the caller points at a local build of the reference
-// binary via environment variable (see `make acp-conformance`).
 const (
 	acpValidatorBinEnv = "ACP_VALIDATOR_BIN"
 	acpYopoBinEnv      = "ACP_YOPO_BIN"
 )
 
-// buildStubAgent compiles the hermetic libacp/cmd/acp-stub-agent (no LLM
-// backend needed) into t.TempDir() and returns its path.
 func buildStubAgent(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "acp-stub-agent")
@@ -34,8 +28,6 @@ func buildStubAgent(t *testing.T) string {
 	return binPath
 }
 
-// acpCheckResult mirrors one row of acp-validator --json's output
-// (acp-validator/src/report.rs: CheckResult).
 type acpCheckResult struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`

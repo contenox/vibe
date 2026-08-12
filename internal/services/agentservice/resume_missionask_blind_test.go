@@ -1,12 +1,5 @@
 package agentservice_test
 
-// A resumed mission run does not execute on the engine that fired it. The
-// process answering the ask builds its own — contenoxcli's BuildEngine — and
-// that engine must register the mission tools with a real attention asker, or
-// a resumed unit's SECOND question is silently downgraded to a blocker report
-// it answers itself. These tests pin what the second question costs, on an
-// engine wired the way the resume path now wires it.
-
 import (
 	"context"
 	"path/filepath"
@@ -26,12 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newAskerInstance is newAttentionInstance over a caller-chosen db path, with
-// the mission tools wired the way both the dispatch-path engine and
-// contenoxcli's resume-path engine wire them: a real attention asker over the
-// same durable store. It is one constructor because the two paths must not
-// differ — a resume that meets a different toolset than the run it resumes is
-// the defect these tests cover.
 func newAskerInstance(t *testing.T, dbPath string) *attentionInstance {
 	t.Helper()
 	ctx := context.Background()
@@ -55,9 +42,6 @@ func newAskerInstance(t *testing.T, dbPath string) *attentionInstance {
 	return inst
 }
 
-// twoAskInput is one assistant turn asking two questions. The first suspends
-// the run; the second is the batch's not-yet-started call that resume
-// re-enters through the normal path.
 func twoAskInput() taskengine.ChatHistory {
 	call := func(id, summary string) taskengine.ToolCall {
 		return taskengine.ToolCall{ID: id, Type: "function", Function: taskengine.FunctionCall{
@@ -74,8 +58,6 @@ func twoAskInput() taskengine.ChatHistory {
 	}}
 }
 
-// suspendOnFirstAsk fires the two-question run and asserts it parked on the
-// first, leaving the second untouched.
 func suspendOnFirstAsk(t *testing.T, inst *attentionInstance, missionID string) {
 	t.Helper()
 	ctx := missiontools.WithMissionID(context.Background(), missionID)
@@ -92,13 +74,7 @@ func suspendOnFirstAsk(t *testing.T, inst *attentionInstance, missionID string) 
 	require.ErrorIs(t, err, libdb.ErrNotFound, "the second question has not been asked yet")
 }
 
-// TestSystem_Resume_SecondQuestionOnTheResumePathEngine_ReachesAHuman is the
-// flagship claim held to the resume path. Answer the first question from a
-// terminal whose engine registers the mission tools the way contenoxcli's
-// BuildEngine now registers them — a real attention asker over the same
-// durable store — and the resumed unit's second question parks, checkpoints,
-// and becomes an answerable ask an operator can see. It is NOT downgraded to a
-// blocker report the unit answers itself.
+// TestSystem_Resume_SecondQuestionOnTheResumePathEngine_ReachesAHuman pins that a resumed unit's second question, on an engine that registers a real attention asker, parks and becomes an answerable ask rather than a self-answered blocker report.
 func TestSystem_Resume_SecondQuestionOnTheResumePathEngine_ReachesAHuman(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "blind.db")
 	ctx := context.Background()
@@ -108,7 +84,6 @@ func TestSystem_Resume_SecondQuestionOnTheResumePathEngine_ReachesAHuman(t *test
 	suspendOnFirstAsk(t, a, missionID)
 	a.close()
 
-	// The resume-path engine: a fresh process, answering an ask it never raised.
 	b := newAskerInstance(t, dbPath)
 	defer b.close()
 	require.NoError(t, b.hitl.Answer(ctx, "call-ask1", "the contenox runtime repo"))
@@ -126,7 +101,6 @@ func TestSystem_Resume_SecondQuestionOnTheResumePathEngine_ReachesAHuman(t *test
 	_, err = b.store.GetChainCheckpoint(ctx, "call-ask1")
 	require.ErrorIs(t, err, libdb.ErrNotFound, "the first checkpoint was consumed")
 
-	// The question is a question, not a blocker the unit filed against itself.
 	reports, err := b.missions.ListReports(ctx, missionID, 10)
 	require.NoError(t, err)
 	for _, r := range reports {
@@ -140,10 +114,7 @@ func TestSystem_Resume_SecondQuestionOnTheResumePathEngine_ReachesAHuman(t *test
 	require.Equal(t, "call-ask2", pending[0].ID)
 }
 
-// TestSystem_Resume_SecondQuestionOnAWiredEngine_SuspendsAgain is the control:
-// the same run resumed on an engine wired exactly as the dispatch-path one
-// closes the loop — answering the second question carries the run through from
-// this process and consumes its checkpoint.
+// TestSystem_Resume_SecondQuestionOnAWiredEngine_SuspendsAgain is the control: answering the second question on an engine wired like the dispatch path carries the run through and consumes its checkpoint.
 func TestSystem_Resume_SecondQuestionOnAWiredEngine_SuspendsAgain(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "wired.db")
 	ctx := context.Background()
@@ -165,7 +136,6 @@ func TestSystem_Resume_SecondQuestionOnAWiredEngine_SuspendsAgain(t *testing.T) 
 	_, err = b.store.GetChainCheckpoint(ctx, "call-ask2")
 	require.NoError(t, err, "and the run suspends again under its key")
 
-	// Answering it a second time carries the run through, from this process.
 	require.NoError(t, b.hitl.Answer(ctx, "call-ask2", "the main branch"))
 	_, err = b.store.GetChainCheckpoint(ctx, "call-ask2")
 	require.ErrorIs(t, err, libdb.ErrNotFound)

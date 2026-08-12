@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// The adversarial set: hostile inputs a model or operator can supply, each
-// asserting the process survives and the caller gets a typed, actionable error.
-
 func newTestSandbox(t *testing.T) *sandbox {
 	t.Helper()
 	ts, err := New(Config{})
@@ -103,10 +100,7 @@ func TestUnit_Sandbox_InfiniteLoopKilledAtDeadline(t *testing.T) {
 
 // --- Bomb 2: the allocation bomb --------------------------------------------
 
-// goja has no memory cap: an allocation bomb is bounded only by the deadline,
-// not by heap size, so this asserts the execution returns and the heap it
-// grabbed is transient. The growth is logged, not asserted, since this
-// package enforces no memory ceiling.
+// goja has no memory cap, so an allocation bomb is bounded only by the deadline; growth is logged, not asserted, since this package enforces no memory ceiling.
 func TestUnit_Sandbox_AllocationBombIsStoppedButNotCapped(t *testing.T) {
 	sb := newTestSandbox(t)
 

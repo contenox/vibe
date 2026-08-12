@@ -19,8 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── fire: the --wait requirement ───────────────────────────────────────────
-
 // TestUnit_MissionFireRequiresWait asserts fire-and-detach from a one-shot CLI is refused with a teaching error before anything is opened.
 func TestUnit_MissionFireRequiresWait(t *testing.T) {
 	require.NoError(t, missionFireCmd.Flags().Set("wait", "false"))
@@ -29,8 +27,6 @@ func TestUnit_MissionFireRequiresWait(t *testing.T) {
 	require.Contains(t, err.Error(), "--wait", "the refusal names the missing flag")
 	require.Contains(t, err.Error(), "child subprocess", "the refusal teaches WHY --wait is required")
 }
-
-// ─── the wait/terminal loop ─────────────────────────────────────────────────
 
 func setupMissionStore(t *testing.T) (context.Context, missionservice.Service) {
 	t.Helper()
@@ -98,8 +94,6 @@ func TestUnit_WaitForTerminalMission_AlreadyTerminal(t *testing.T) {
 	require.Less(t, time.Since(start), 10*time.Second, "an already-terminal mission must not wait a tick")
 }
 
-// ─── outcome + exit-code surface ────────────────────────────────────────────
-
 func TestUnit_MissionOutcomeLine(t *testing.T) {
 	landed := &missionservice.Mission{ID: "m-1", Status: missionservice.StatusLanded}
 	require.Equal(t, "Mission m-1 finished: landed", missionOutcomeLine(landed))
@@ -107,8 +101,6 @@ func TestUnit_MissionOutcomeLine(t *testing.T) {
 	stuck := &missionservice.Mission{ID: "m-2", Status: missionservice.StatusStuck, StatusReason: "compute spent"}
 	require.Equal(t, "Mission m-2 finished: stuck — compute spent", missionOutcomeLine(stuck))
 }
-
-// ─── rendering ──────────────────────────────────────────────────────────────
 
 func TestUnit_RenderMissionTable(t *testing.T) {
 	now := time.Now().UTC()
@@ -190,8 +182,6 @@ func TestUnit_RenderMissionReports_FullDetailAndHandover(t *testing.T) {
 	}
 }
 
-// ─── plan ────────────────────────────────────────────────────────────────
-
 func TestUnit_RenderMissionPlan_NoPlanSaysSo(t *testing.T) {
 	var buf bytes.Buffer
 	renderMissionPlan(&buf, &missionservice.Mission{ID: "m-plan-0"})
@@ -251,8 +241,6 @@ func TestUnit_MissionPlanCmd_PrintsFullPlanUnlikeShowsSummary(t *testing.T) {
 	require.Contains(t, got, "step one")
 	require.Contains(t, got, "revision 1")
 }
-
-// ─── asks ────────────────────────────────────────────────────────────────
 
 func TestUnit_RenderMissionAsksTable_Empty(t *testing.T) {
 	var buf bytes.Buffer
@@ -368,8 +356,6 @@ func TestUnit_FormatMissionAge(t *testing.T) {
 	require.Equal(t, "2d", formatMissionAge(now, now.Add(-49*time.Hour)))
 	require.Equal(t, "0s", formatMissionAge(now, now.Add(time.Minute)), "a future timestamp clamps to zero, never negative")
 }
-
-// ─── fire --wait end to end, against the in-process fleet ───────────────────
 
 // fireFinisherChain is the deterministic, model-free chain the dispatched
 // unit runs: file a result report, then mission_finish to the terminal

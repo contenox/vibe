@@ -1,8 +1,5 @@
 package runtimetypes_test
 
-// chain_checkpoints store tests, over the production SQLite backend (same
-// no-Docker idiom as hitl_approvals_test.go).
-
 import (
 	"context"
 	"encoding/json"
@@ -65,14 +62,10 @@ func TestUnit_ChainCheckpoints_ClaimIsExclusiveUntilStale(t *testing.T) {
 	now := time.Now().UTC()
 	stale := now.Add(-10 * time.Minute)
 
-	// First claimant wins.
 	require.NoError(t, store.ClaimChainCheckpoint(ctx, "cp-claim", now, stale))
-	// A second, concurrent claimant loses (claim is fresh).
 	require.ErrorIs(t, store.ClaimChainCheckpoint(ctx, "cp-claim", now.Add(time.Second), stale), libdb.ErrNotFound)
-	// Once the claim is STALE (resumer died mid-run), it is reclaimable.
 	later := now.Add(20 * time.Minute)
 	require.NoError(t, store.ClaimChainCheckpoint(ctx, "cp-claim", later, later.Add(-10*time.Minute)))
-	// A missing row claims as not-found, indistinguishable by design.
 	require.ErrorIs(t, store.ClaimChainCheckpoint(ctx, "no-such", now, stale), libdb.ErrNotFound)
 }
 

@@ -1,11 +1,3 @@
-// git.go exposes repository operations as individual tools rather than
-// local_shell git commands, so the HITL envelope can gate each operation
-// separately (reads are `allow`, mutations are `approve`) instead of one
-// policy decision for all of git. It runs in-process against go-git — no git
-// binary, no shell quoting. Network operations (push/pull/fetch/clone) are
-// deliberately out of scope; reach them through local_shell under its own
-// policy.
-
 package localtools
 
 import (
@@ -30,34 +22,22 @@ import (
 const GitToolsName = "git"
 
 const (
-	// gitMaxOutputBytes caps any single git tool result, same reasoning as
-	// local_fs (fs_policy.go). Truncation always names what to narrow.
 	gitMaxOutputBytes = 32 * 1024
 
-	// gitDefaultLogCount / gitMaxLogCount bound git_log.
 	gitDefaultLogCount = 10
 	gitMaxLogCount     = 200
 
-	// gitMaxDiffFiles bounds how many files a single git_diff renders before it
-	// reports the remainder by name only.
 	gitMaxDiffFiles = 25
 )
 
-// GitTools provides read and write access to the workspace git repository.
-//
-// Directory scoping matches local_fs (LocalFSTools.baseDir): the repository
-// root must lie inside the allowed directory when one is declared (policy
-// `_allowed_dir`, or the constructor's allowedDir); otherwise it is found by
-// walking up from the process working directory, as git itself does.
+// GitTools provides read and write access to the workspace git repository, scoped the same way as local_fs: the repository root must lie inside the allowed directory when one is declared, otherwise found by walking up from the process working directory.
 type GitTools struct {
 	allowedDir  string
 	name        string
 	cwdResolver func(context.Context) string
 }
 
-// NewGitTools creates the git toolset scoped to allowedDir. An empty allowedDir
-// means "no declared boundary": the repository is located from the process
-// working directory.
+// NewGitTools creates the git toolset scoped to allowedDir; an empty allowedDir means no declared boundary, so the repository is located from the process working directory.
 func NewGitTools(allowedDir string) taskengine.ToolsRepo {
 	return NewGitToolsWith(allowedDir, GitToolsName, nil)
 }
@@ -91,9 +71,7 @@ func (h *GitTools) execDispatch(ctx context.Context, input any, toolsCall *taske
 
 	args, ok := input.(map[string]any)
 	if !ok {
-		// Declarative `tools` tasks carry their arguments on the ToolsCall; the
-		// same fallback local_fs takes when chat history flows through a gated
-		// tool task.
+		// Declarative `tools` tasks carry arguments on the ToolsCall, the same fallback local_fs takes for a gated tool task.
 		if len(toolsCall.Args) > 0 {
 			args = make(map[string]any, len(toolsCall.Args))
 			for k, v := range toolsCall.Args {
@@ -165,21 +143,10 @@ func (h *GitTools) execDispatch(ctx context.Context, input any, toolsCall *taske
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Repository resolution and containment
-// ---------------------------------------------------------------------------
-
 func (h *GitTools) policyArgs(ctx context.Context) map[string]string {
 	return taskengine.ToolsArgsFromContext(ctx, h.name)
 }
 
-// cwd resolves the directory a relative allowed dir or repo search anchors
-// against. The session's own restored workspace root (see vfs.WithSessionCwd)
-// takes priority over the live per-process cwdResolver — it reflects what the
-// *session* established, not wherever this process (possibly a resumer
-// nowhere near the original session) happens to sit. Only when neither is
-// known does this fall back to the process's own working directory, same as
-// the real git CLI.
 func (h *GitTools) cwd(ctx context.Context) string {
 	if root := vfs.SessionCwdFromContext(ctx); root != "" {
 		return filepath.Clean(root)
@@ -196,9 +163,6 @@ func (h *GitTools) cwd(ctx context.Context) string {
 	return wd
 }
 
-// baseDir returns the directory the repository search starts from, and
-// whether that directory is a declared boundary (a policy `_allowed_dir` or a
-// constructor allowedDir) rather than wherever the process happens to be.
 func (h *GitTools) baseDir(ctx context.Context) (dir string, bounded bool, err error) {
 	if args := h.policyArgs(ctx); len(args) > 0 {
 		if policyDir := strings.TrimSpace(args["_allowed_dir"]); policyDir != "" {
@@ -220,9 +184,6 @@ func (h *GitTools) baseDir(ctx context.Context) (dir string, bounded bool, err e
 	return "", false, errors.New("git: no working directory could be resolved")
 }
 
-// findRepoRoot walks up from start looking for a .git entry (a directory in an
-// ordinary clone, a file in a linked worktree or submodule) and returns the
-// directory holding it.
 func findRepoRoot(start string) (string, bool) {
 	dir := start
 	for {
@@ -237,8 +198,6 @@ func findRepoRoot(start string) (string, bool) {
 	}
 }
 
-// openRepo locates and opens the workspace repository for this call, enforcing
-// allowed-dir containment when a boundary was declared.
 func (h *GitTools) openRepo(ctx context.Context, tool string) (*git.Repository, string, error) {
 	base, bounded, err := h.baseDir(ctx)
 	if err != nil {
@@ -264,9 +223,6 @@ func (h *GitTools) openRepo(ctx context.Context, tool string) (*git.Repository, 
 	return repo, root, nil
 }
 
-// repoRelPath contains a model-supplied path inside the repository and returns
-// it in the slash-separated, repository-relative form git itself uses. An empty
-// result means "the whole repository".
 func repoRelPath(root, tool, p string) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" || p == "." {
@@ -289,10 +245,6 @@ func repoRelPath(root, tool, p string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
-// repoRelPaths applies repoRelPath to a paths argument, which models supply
-// either as one string or as an array. A lone string is ONE path — it is not
-// split on whitespace, so "my notes.txt" names one file and two files need an
-// array.
 func repoRelPaths(root, tool string, raw any) ([]string, error) {
 	list, err := pathListArg(tool, "paths", raw)
 	if err != nil {
@@ -305,8 +257,7 @@ func repoRelPaths(root, tool string, raw any) ([]string, error) {
 			return nil, err
 		}
 		if rel == "" {
-			// "." — the whole repository. Kept as an explicit empty entry so
-			// callers can decide what "everything" means for their operation.
+			// Empty entry means "the whole repository" — kept explicit so callers can decide what "everything" means for their operation.
 			out = append(out, "")
 			continue
 		}
@@ -329,8 +280,6 @@ func truncateGitOutput(tool, s, hint string) string {
 	return cut + fmt.Sprintf("... (%s truncated at %d bytes — %s)\n", tool, gitMaxOutputBytes, hint)
 }
 
-// headCommit returns the commit HEAD points at. A repository with no commits
-// yet is a normal state, not an error: ok is false and err is nil.
 func headCommit(repo *git.Repository) (c *object.Commit, ok bool, err error) {
 	ref, err := repo.Head()
 	if err != nil {
@@ -361,7 +310,6 @@ func subjectOf(msg string) string {
 	return strings.TrimSpace(msg)
 }
 
-// currentBranch names the branch HEAD is on, or reports a detached HEAD.
 func currentBranch(repo *git.Repository) string {
 	ref, err := repo.Head()
 	if err != nil {
@@ -373,22 +321,7 @@ func currentBranch(repo *git.Repository) string {
 	return "(detached at " + shortHash(ref.Hash()) + ")"
 }
 
-// ---------------------------------------------------------------------------
-// Results that are readable and parseable
-//
-// GitStatusResult, GitLogResult and GitBranchListResult carry the prose a
-// model reads in String() (byte-for-byte what the plain-string tool result
-// used to return) alongside typed fields a program can read without
-// misinterpreting a sentence written for a reader. These shapes are not a
-// public API — they live beside the tool that produces them and change when
-// it does; pin the field you read, not the whole object.
-// ---------------------------------------------------------------------------
-
-// AppendGuidance lets a typed result carry text appended by a decorator
-// (services/toolguidance) without losing its structure — the decorator
-// otherwise only appends to string results and returns anything else
-// byte-for-byte. The method name is the whole contract, asserted
-// structurally so neither package imports the other.
+// AppendGuidance lets a typed result carry text appended by a decorator (services/toolguidance) without losing its structure, since the decorator otherwise only appends to string results; the method name alone is the contract, so neither package imports the other.
 func (r GitStatusResult) AppendGuidance(text string) any {
 	r.text += text
 	return r
@@ -417,13 +350,7 @@ type GitStatusEntry struct {
 	Code string `json:"code"`
 }
 
-// GitStatusResult is git_status. Staged, Unstaged and Untracked are the three
-// answers the prose sections spell out; Clean is the whole answer when there is
-// nothing in any of them.
-//
-// The lists are always complete even when the rendered text was truncated at
-// gitMaxOutputBytes: truncation bounds the model's context window, not the
-// repository.
+// GitStatusResult is git_status: Staged, Unstaged and Untracked are the three answer lists, Clean is true when all are empty, and the lists stay complete even when the rendered text is truncated.
 type GitStatusResult struct {
 	Branch    string           `json:"branch"`
 	Head      *GitCommitRef    `json:"head,omitempty"`
@@ -471,10 +398,6 @@ type GitBranchListResult struct {
 }
 
 func (r GitBranchListResult) String() string { return r.text }
-
-// ---------------------------------------------------------------------------
-// Read operations
-// ---------------------------------------------------------------------------
 
 func (h *GitTools) status(ctx context.Context) (any, taskengine.DataType, error) {
 	const tool = "git_status"
@@ -549,9 +472,6 @@ func sortedStatusPaths(st git.Status) []string {
 	return paths
 }
 
-// diff renders the worktree against HEAD — the state `git diff HEAD` shows, so
-// staged and unstaged changes appear together and the model sees the whole delta
-// it is about to be asked to commit.
 func (h *GitTools) diff(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	const tool = "git_diff"
 	repo, root, err := h.openRepo(ctx, tool)
@@ -633,10 +553,6 @@ func (h *GitTools) diff(ctx context.Context, args map[string]any) (any, taskengi
 	return truncateGitOutput(tool, sb.String(), "pass path to diff one file or directory"), taskengine.DataTypeString, nil
 }
 
-// gitFileDiff renders one file's unified diff. The hunk machinery is
-// unifiedDiff's (hitl.go) — the same LCS edit script that renders approval-card
-// diffs, so there is one diff implementation in this package, not two. Only the
-// two header lines are restated in git's a/ b/ form.
 func gitFileDiff(path, oldContent, newContent string) string {
 	body := unifiedDiff(path, oldContent, newContent)
 	if body == "(no changes)" {
@@ -686,6 +602,7 @@ func (h *GitTools) log(ctx context.Context, args map[string]any) (any, taskengin
 	count := 0
 	err = iter.ForEach(func(c *object.Commit) error {
 		if count >= n {
+			// go-git's ForEach stops on any non-nil error; this is the stop signal, not a real failure.
 			return storerStop
 		}
 		count++
@@ -711,9 +628,6 @@ func (h *GitTools) log(ctx context.Context, args map[string]any) (any, taskengin
 	return out, taskengine.DataTypeString, nil
 }
 
-// storerStop ends a commit iteration early. go-git's ForEach treats any non-nil
-// error as a stop signal and returns it, so a sentinel is the documented way to
-// take just the first n commits.
 var storerStop = errors.New("stop iteration")
 
 func (h *GitTools) show(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
@@ -843,10 +757,6 @@ func truncateField(s string, n int) string {
 	return s[:n]
 }
 
-// ---------------------------------------------------------------------------
-// Mutation operations — every one of these is `approve` in the seeded envelopes
-// ---------------------------------------------------------------------------
-
 func (h *GitTools) add(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	const tool = "git_add"
 	raw, ok := args["paths"]
@@ -904,9 +814,7 @@ func (h *GitTools) commit(ctx context.Context, args map[string]any) (any, tasken
 	if err != nil {
 		return nil, taskengine.DataTypeAny, recoverablef("%s: %v", tool, err)
 	}
-	// Refuse an empty staging area rather than minting an empty commit: a commit
-	// nobody staged anything for is always a mistake, and the model can only
-	// learn that from a message that names the fix.
+	// Refuses an empty staging area rather than minting an empty commit: nobody staged anything is always a mistake.
 	staged := 0
 	for _, path := range sortedStatusPaths(st) {
 		if fs := st[path]; fs.Staging != git.Unmodified && fs.Staging != git.Untracked {
@@ -963,9 +871,6 @@ func (h *GitTools) checkoutBranch(ctx context.Context, args map[string]any) (any
 	return fmt.Sprintf("%s branch %s\n", verb, branch), taskengine.DataTypeString, nil
 }
 
-// restore is the destructive one: it throws away work. With staged=true it only
-// unstages (index back to HEAD, file contents untouched); by default it also
-// discards the file's uncommitted changes, which nothing can recover.
 func (h *GitTools) restore(ctx context.Context, args map[string]any) (any, taskengine.DataType, error) {
 	const tool = "git_restore"
 	raw, ok := args["paths"]
@@ -991,9 +896,7 @@ func (h *GitTools) restore(ctx context.Context, args map[string]any) (any, taske
 	if err != nil {
 		return nil, taskengine.DataTypeAny, recoverablef("%s: %v", tool, err)
 	}
-	// go-git refuses a worktree-only restore (it cannot leave the index alone),
-	// so discarding changes is expressed as index+worktree back to HEAD — the
-	// same thing `git restore <path>` gives you after a `git add`.
+	// go-git refuses a worktree-only restore, so discarding changes is expressed as index+worktree back to HEAD (same as `git restore <path>` after `git add`).
 	opts := &git.RestoreOptions{Files: rels, Staged: true, Worktree: !stagedOnly}
 	if err := wt.Restore(opts); err != nil {
 		return nil, taskengine.DataTypeAny, recoverablef("%s: cannot restore %s: %v", tool, strings.Join(rels, ", "), err)
@@ -1004,10 +907,6 @@ func (h *GitTools) restore(ctx context.Context, args map[string]any) (any, taske
 	return fmt.Sprintf("restored %s to HEAD (uncommitted changes discarded)\n", strings.Join(rels, ", ")), taskengine.DataTypeString, nil
 }
 
-// ---------------------------------------------------------------------------
-// Schemas
-// ---------------------------------------------------------------------------
-
 func (h *GitTools) Supports(ctx context.Context) ([]string, error) {
 	return []string{
 		h.name,
@@ -1016,9 +915,6 @@ func (h *GitTools) Supports(ctx context.Context) ([]string, error) {
 	}, nil
 }
 
-// gitSchemaSpecs is every tool this toolset declares, in Supports order, with
-// the OpenAPI component prefix and the response schema for each. The prefixes
-// are fixed even though the toolset NAME is configurable (NewGitToolsWith).
 func gitSchemaSpecs() []toolSchemaSpec {
 	return []toolSchemaSpec{
 		{tool: "git_status", component: "GitStatus", response: gitStatusResponse},
@@ -1034,12 +930,7 @@ func gitSchemaSpecs() []toolSchemaSpec {
 	}
 }
 
-// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract:
-// one request/response pair per declared tool. Requests are converted from the
-// descriptors GetToolsForToolsByName hands the model; responses are what the
-// handlers above return. The three tools that answer with a typed result
-// (status, log, branch_list) declare that object; the rest answer with text,
-// and a failed call returns an error rather than any payload.
+// GetSchemasForSupportedTools publishes one OpenAPI 3.1 request/response pair per declared tool, converted from the descriptors GetToolsForToolsByName hands the model; status/log/branch_list declare a typed object, the rest answer with text.
 func (h *GitTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
 	declared, err := h.GetToolsForToolsByName(ctx, h.name)
 	if err != nil {
@@ -1054,11 +945,6 @@ func (h *GitTools) GetSchemasForSupportedTools(ctx context.Context) (map[string]
 	return map[string]*openapi3.T{h.name: doc}, nil
 }
 
-// --- Response schemas ---------------------------------------------------------
-
-// gitStatusEntrySchema is GitStatusEntry: one path and its status code. The
-// code set is git's own and is not closed here — the implementation copies
-// whatever go-git reports rather than mapping it to a fixed list.
 func gitStatusEntrySchema() *openapi3.SchemaRef {
 	return objectSchema("One changed path.", map[string]*openapi3.SchemaRef{
 		"path": strSchema("Path relative to the repository root."),
@@ -1087,7 +973,6 @@ func gitDiffResponse() *openapi3.SchemaRef {
 	return strSchema("The worktree against HEAD as a unified diff — staged and unstaged together — with a `diff --git a/<path> b/<path>` header per file and \"Binary files differ\" in place of a binary file's body. \"no changes against HEAD\" (or \"… under <path>\") when there is nothing to show. Past 25 changed files the remainder is named but not rendered; untracked paths are listed at the end without a diff, since they are not in the repository yet. Truncated at 32 KiB with a notice naming what to narrow.")
 }
 
-// gitLogEntrySchema is GitLogEntry: one commit as git_log renders it.
 func gitLogEntrySchema() *openapi3.SchemaRef {
 	return objectSchema("One commit.", map[string]*openapi3.SchemaRef{
 		"hash":    strSchema("Short commit hash."),
@@ -1144,10 +1029,6 @@ func gitRestoreResponse() *openapi3.SchemaRef {
 	return strSchema("\"unstaged <paths> (file contents left alone)\" when staged was set, otherwise \"restored <paths> to HEAD (uncommitted changes discarded)\" — the discarded changes are not recoverable.")
 }
 
-// gitPathsProp declares the paths argument of git_add and git_restore. The type
-// is the union repoRelPaths really accepts — one string or an array of them —
-// spelled the way webtools' body spells its own union, so the published schema
-// renders both branches instead of promising only the string one.
 func gitPathsProp() map[string]any {
 	return map[string]any{
 		"type":        []any{"string", "array"},
@@ -1156,9 +1037,7 @@ func gitPathsProp() map[string]any {
 	}
 }
 
-// GetToolsForToolsByName returns the git tool declarations. Descriptions are
-// terse for the same reason local_fs's are (fs_schema.go): they are paid on
-// every turn.
+// GetToolsForToolsByName returns the git tool declarations, kept terse like local_fs's since descriptions are paid on every turn.
 func (h *GitTools) GetToolsForToolsByName(ctx context.Context, name string) ([]taskengine.Tool, error) {
 	allTools := []taskengine.Tool{
 		fsTool("git_status", "Branch, HEAD commit, and what is staged, changed, or untracked in the workspace repository.", map[string]any{}),

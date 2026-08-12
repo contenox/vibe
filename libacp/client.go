@@ -4,10 +4,7 @@ import "context"
 
 // Client is the editor-side counterpart to Agent (agent.go): the set of
 // requests an agent may send to the client, plus the inbound session/update
-// notification. ClientSideConnection (clientconn.go) is the mirror image of
-// AgentSideConnection: it dispatches these methods for incoming JSON-RPC
-// requests/notifications, and exposes the agent-bound methods (Initialize,
-// session/new, session/prompt, ...) as outbound calls.
+// notification.
 type Client interface {
 	RequestPermission(ctx context.Context, req RequestPermissionRequest) (RequestPermissionResponse, error)
 	ReadTextFile(ctx context.Context, req ReadTextFileRequest) (ReadTextFileResponse, error)
@@ -17,18 +14,17 @@ type Client interface {
 	WaitForTerminalExit(ctx context.Context, req WaitForTerminalExitRequest) (WaitForTerminalExitResponse, error)
 	KillTerminal(ctx context.Context, req KillTerminalRequest) (KillTerminalResponse, error)
 	ReleaseTerminal(ctx context.Context, req ReleaseTerminalRequest) (ReleaseTerminalResponse, error)
-	// SessionUpdate handles an inbound "session/update" notification. It has no
-	// response on the wire (JSON-RPC notifications never do); the returned
-	// error is reported to the implementation only, e.g. for logging.
+	// SessionUpdate handles an inbound "session/update" notification; it has no
+	// wire response, and the returned error is reported to the implementation
+	// only (e.g. for logging).
 	SessionUpdate(ctx context.Context, n SessionNotification) error
 }
 
 type ClientFactory func(conn *ClientSideConnection) Client
 
 // UnimplementedClient rejects every request-shaped Client method with
-// MethodNotFound and treats SessionUpdate as a no-op, mirroring
-// UnimplementedAgent (agent.go). Embed it to implement only the methods a
-// particular client cares about.
+// MethodNotFound and treats SessionUpdate as a no-op; embed it to implement
+// only the methods a particular client cares about.
 type UnimplementedClient struct{}
 
 func (UnimplementedClient) RequestPermission(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error) {

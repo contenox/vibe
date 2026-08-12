@@ -10,14 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests pin WithPermissionFallback's three properties: unwired keeps
-// the built-in deny unchanged; wired, the fallback's answer (including a
-// grant) passes through untouched; and a fallback that errors falls back to
-// the deny rather than faulting the downstream turn. Most exercise the hub
-// directly rather than a spawned subprocess.
-
-// permissionRequest is the request shape the tests answer, offering both an
-// allow and a reject option so every outcome is expressible.
 func permissionRequest(sessionID libacp.SessionID) libacp.RequestPermissionRequest {
 	return libacp.RequestPermissionRequest{
 		SessionID: sessionID,
@@ -29,8 +21,6 @@ func permissionRequest(sessionID libacp.SessionID) libacp.RequestPermissionReque
 	}
 }
 
-// hubWithFallback builds a hub wired the way bringUp wires one, recording every
-// unsupervised-deny audit event.
 func hubWithFallback(fn func(context.Context, libacp.RequestPermissionRequest) (libacp.RequestPermissionResponse, error)) (*viewerHub, *[]libacp.SessionID, *sync.Mutex) {
 	hub := newViewerHub("inst-1", defaultJournalSize)
 	var mu sync.Mutex
@@ -154,9 +144,8 @@ func TestUnit_PermissionFallback_ControllerWins(t *testing.T) {
 	require.False(t, called, "an attached controller answers; the fallback is for unattended sessions only")
 }
 
-// The Manager closes the instance's identity over the fallback, so an
-// answerer knows which unit is asking without calling back into the Manager.
-// White-box check of the wiring bringUp builds.
+// The Manager closes the instance's identity over the fallback so an answerer knows
+// which unit is asking; white-box check of the wiring bringUp builds.
 func TestUnit_PermissionFallback_CarriesInstanceIdentity(t *testing.T) {
 	ctx, _, svc := setupRegistry(t)
 	stub := buildStubAgent(t)
@@ -179,7 +168,6 @@ func TestUnit_PermissionFallback_CarriesInstanceIdentity(t *testing.T) {
 	require.NoError(t, err)
 	sid := openSession(t, mgr, id)
 
-	// No viewer is ever attached: the fallback is the only answerer.
 	reason := promptText(t, mgr, id, sid, "gated_action")
 	require.Equal(t, libacp.StopReasonEndTurn, reason,
 		"a granted permission must let the turn finish instead of refusing it")

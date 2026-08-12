@@ -15,16 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---------------------------------------------------------------------------
-// The program-facing contract, on the engine path: a script that calls a
-// tool inherits that tool's model-facing output conventions and can
-// mis-parse them confidently wrong with nothing to catch it. Fixtures below
-// are written the way the wrong scripts were written, so each one must now
-// either get back data it cannot mis-read, or fail loudly at the guess.
-// ---------------------------------------------------------------------------
-
-// scriptStatusCount treats git_status as a record it can count, written
-// against the structured result the tool now hands a program.
 const scriptStatusCount = `const tool = {
   name: "status_count",
   description: "Count what git_status reports: staged, unstaged, untracked.",
@@ -46,8 +36,6 @@ function run() {
 }
 `
 
-// scriptStatusSurgery does string surgery on git_status; it must not be able
-// to answer at all.
 const scriptStatusSurgery = `const tool = {
   name: "status_surgery",
   description: "Test-only: the confidently-wrong script, preserved.",
@@ -62,8 +50,6 @@ function run() {
 }
 `
 
-// scriptReadTwice reads the same file twice; the second read is the one that
-// used to hand back the dedup stub sentence instead of content.
 const scriptReadTwice = `const tool = {
   name: "read_twice",
   description: "Test-only: reads the same file twice and reports both answers.",
@@ -87,7 +73,6 @@ function run(args) {
 }
 `
 
-// scriptUndeclared declares one tool and reaches for another.
 const scriptUndeclared = `const tool = {
   name: "undeclared_reach",
   description: "Test-only: calls a tool it did not declare.",
@@ -100,8 +85,6 @@ function run() {
 }
 `
 
-// scriptDeclaresNothing declares an EMPTY reach, which is a declaration and not
-// an omission: it says the script touches nothing at all.
 const scriptDeclaresNothing = `const tool = {
   name: "declares_nothing",
   description: "Test-only: declares an empty reach and then reaches anyway.",
@@ -114,8 +97,6 @@ function run() {
 }
 `
 
-// scriptRawEscape uses the {raw: true} escape hatch deliberately, so an
-// author who means to parse prose says so at the call site.
 const scriptRawEscape = `const tool = {
   name: "raw_escape",
   description: "Test-only: asks for the bare string on purpose.",
@@ -136,8 +117,6 @@ function run() {
 }
 `
 
-// scriptDiffSurgery splits git_diff's prose result, guessing at a format
-// nobody promised.
 const scriptDiffSurgery = `const tool = {
   name: "diff_surgery",
   description: "Test-only: string surgery on a prose result.",
@@ -162,9 +141,6 @@ func contractScripts() map[string]string {
 	}
 }
 
-// initRepo turns the harness workspace into a git repository with one
-// commit, a modified tracked file, and an untracked one (1 modified, 1
-// untracked, 0 staged). Built with go-git, so no git binary is required.
 func initRepo(t *testing.T, root string) {
 	t.Helper()
 	repo, err := git.PlainInitWithOptions(root, &git.PlainInitOptions{
@@ -206,7 +182,6 @@ func TestSystem_Goja_AProseResultCannotBeMisparsedSilently(t *testing.T) {
 		m, ok := value.(map[string]any)
 		require.Truef(t, ok, "value is %T: %#v", value, value)
 
-		// One modified tracked file, one untracked file, nothing staged.
 		require.Equal(t, float64(0), m["staged"], "nothing is staged in this tree")
 		require.Equal(t, float64(1), m["unstaged"], "tracked.txt is modified")
 		require.Equal(t, float64(2), m["untracked"], "brand_new.txt and the harness's README.md are untracked")
@@ -319,7 +294,6 @@ func TestSystem_Goja_DeclaredReachIsEnforced(t *testing.T) {
 	})
 
 	t.Run("a script with no declaration keeps working", func(t *testing.T) {
-		// Backward compatibility: these two predate the `tools` field.
 		h2 := newGojaHarness(t, map[string]string{"file_outline.js": scriptFileOutline, "stats_summary.js": scriptStatsSummary}, nil)
 		_, err := h2.call(context.Background(), "stats_summary", map[string]string{"numbers": "1,2,3"})
 		require.NoError(t, err)
@@ -332,7 +306,7 @@ func TestUnit_Goja_TheDeclaredReachIsVisibleToAnApprovalSurface(t *testing.T) {
 	for name, body := range map[string]string{
 		"status_count.js":     scriptStatusCount,
 		"declares_nothing.js": scriptDeclaresNothing,
-		"stats_summary.js":    scriptStatsSummary, // no `tools` field at all
+		"stats_summary.js":    scriptStatsSummary,
 	} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
 	}

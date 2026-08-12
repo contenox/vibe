@@ -17,23 +17,23 @@ import (
 // notice, and no `_meta` at all, so a client can treat presence alone as "the
 // prompt lost something" without decoding the payload.
 func TestUnit_ExplainDroppedContent_AbsenceIsTheSignal(t *testing.T) {
-	_, ok := explainDroppedContent(nil)
+	_, ok := explainDroppedContent(nil, "")
 	require.False(t, ok, "an intact prompt has nothing to explain")
-	_, ok = explainDroppedContent([]string{})
+	_, ok = explainDroppedContent([]string{}, "")
 	require.False(t, ok)
 
-	_, announced := droppedContentNotice(nil)
+	_, announced := droppedContentNotice(nil, "")
 	require.False(t, announced, "an intact prompt announces nothing")
 
 	bare := withDroppedContentMeta(libacp.PromptResponse{StopReason: libacp.StopReasonEndTurn}, nil)
 	require.Empty(t, bare.Meta, "an ordinary turn must stay bare on the wire")
 
-	report, ok := explainDroppedContent([]string{string(libacp.ContentKindImage)})
+	report, ok := explainDroppedContent([]string{string(libacp.ContentKindImage)}, "")
 	require.True(t, ok)
 	require.Equal(t, []string{string(libacp.ContentKindImage)}, report.Kinds)
 	require.Contains(t, report.Explanation, string(libacp.ContentKindImage))
 
-	notice, announced := droppedContentNotice([]string{string(libacp.ContentKindImage)})
+	notice, announced := droppedContentNotice([]string{string(libacp.ContentKindImage)}, "")
 	require.True(t, announced)
 	require.Equal(t, libacp.SessionUpdateAgentMessageChunk, notice.SessionUpdate)
 	require.Contains(t, notice.Content.Text, string(libacp.ContentKindImage),

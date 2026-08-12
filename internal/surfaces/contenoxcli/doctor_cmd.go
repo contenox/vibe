@@ -78,20 +78,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	o.EffectiveDB = dbPath
 	o.EffectiveSkipBackendCycle, _ = cmd.Flags().GetBool("skip-cycle")
 
-	// Built directly (instead of via ComputeReadiness) so the synced runtime
-	// state is readable for the vision summary without a second backend cycle.
+	// Built directly (instead of via ComputeReadiness) so the synced runtime state is readable for the vision summary without a second backend cycle.
 	engine, err := BuildEngine(ctx, db, o)
 	if err != nil {
 		return fmt.Errorf("failed to build engine: %w", err)
 	}
 	res := setupcheck.EnrichResultWithOllamaProbe(ctx, engine.SetupCheck)
-	// A policy predating a toolset is invisible from the inside (an approval
-	// card per read, not a failure), so doctor names it. Beta-gated toolsets
-	// are skipped: an invisible toolset cannot make an envelope stale.
 	res = setupcheck.AddStalePolicyPresetIssue(res, stalePolicyPresetIssues(policyDirs(contenoxDir), betaGatedToolsets(o.EffectiveOptInBeta)), RefreshPoliciesCommand)
-	// A trusted-binary declaration that stopped matching is equally invisible
-	// from the inside: the allow is withdrawn and the call asks a human, with
-	// no clue that a binary changed underneath it.
 	res = setupcheck.AddTrustedBinaryIssue(res, trustedBinaryDrift(policyDirs(contenoxDir)), TrustBinariesRefreshCommand)
 	vision := visionSummaryFromState(engine.State.Get(ctx), res.DefaultModel)
 	engine.Stop()
@@ -111,17 +104,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 		return writeDoctorBundleIfAsked(cmd, cmd.ErrOrStderr(), res, contenoxDir, dbPath)
 	}
-	// A mission unit is a child subprocess of the host that fired it, so a
-	// host that died left its row open with a heartbeat that will never
-	// advance. Doctor is an operator's own read of runtime health, so it
-	// reconciles the fleet it is about to report on.
 	reclaimedMissions := reclaimAbandonedMissions(ctx, db, ResolveWorkspaceID(contenoxDir))
 
 	printDoctorText(cmd.OutOrStdout(), res)
 	printReclaimedMissions(cmd.OutOrStdout(), reclaimedMissions)
 	printWorkspaceShadowNote(cmd.OutOrStdout(), contenoxDir, triggerShadowNames(o.EffectiveOptInBeta, contenoxDir))
 	printVisionSummary(cmd.OutOrStdout(), vision)
-	// One line, only when opted in; doctor says nothing about beta otherwise.
 	if o.EffectiveOptInBeta {
 		fmt.Fprintln(cmd.OutOrStdout(), "Beta features enabled (opt-in-beta): goja, shell_session, agent roster, event triggers")
 		printLoadedTriggers(ctx, cmd.OutOrStdout(), contenoxDir)
@@ -132,7 +120,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Advisory: warn when default-max-tokens exceeds the active provider's ceiling.
 	store := runtimetypes.New(db.WithoutTransaction())
 	maxTokStr := strings.TrimSpace(clikv.Read(ctx, store, "default-max-tokens"))
 	if maxTokStr != "" {
@@ -150,12 +137,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// reclaimAbandonedMissions finishes missions whose host process is gone and
-// returns how many (see missionservice.SweepAbandoned). Publisher-wired like
-// every other reclaim seam: the terminal-status event must reach the bus (a
-// live host reaps its zombie unit) and, under beta, the durable event log.
-// Best-effort: doctor diagnoses an LLM setup, so a sweep failure is not one
-// of the issues it reports.
 func reclaimAbandonedMissions(ctx context.Context, db libdb.DBManager, workspaceID string) int {
 	bus := libbus.NewSQLite(db.WithoutTransaction())
 	defer bus.Close()
@@ -167,9 +148,6 @@ func reclaimAbandonedMissions(ctx context.Context, db libdb.DBManager, workspace
 	return reclaimed
 }
 
-// printReclaimedMissions names what the sweep just did, so the count is never
-// a silent mutation behind a diagnostic. Prints nothing when it reclaimed
-// nothing.
 func printReclaimedMissions(w io.Writer, reclaimed int) {
 	if reclaimed <= 0 {
 		return
@@ -178,19 +156,13 @@ func printReclaimedMissions(w io.Writer, reclaimed int) {
 		reclaimed, missionservice.StatusAbandoned, missionservice.StaleHeartbeatAfter)
 }
 
-// visionSummary is doctor's compact view of vision-capable model availability,
-// derived from the synced runtime state (the same snapshot readiness used).
 type visionSummary struct {
-	// reachable is true when at least one backend synced without error; with
-	// none, a vision line would be noise on top of the connectivity errors.
 	reachable        bool
 	visionModels     []string
 	defaultHasVision bool
 	defaultKnown     bool
 }
 
-// visionSummaryFromState collects vision-capable chat models and whether the
-// configured default model is one of them.
 func visionSummaryFromState(state map[string]runtimestate.BackendRuntimeState, defaultModel string) visionSummary {
 	s := visionSummary{}
 	seen := map[string]bool{}
@@ -217,9 +189,6 @@ func visionSummaryFromState(state map[string]runtimestate.BackendRuntimeState, d
 	return s
 }
 
-// printVisionSummary keeps doctor's vision line compact and teaching: how many
-// vision-capable models exist, and whether an image request with the current
-// default model would be refused.
 func printVisionSummary(w io.Writer, v visionSummary) {
 	if !v.reachable {
 		return
@@ -238,12 +207,6 @@ func printVisionSummary(w io.Writer, v visionSummary) {
 	}
 }
 
-// printWorkspaceShadowNote lists the system files (init's chain files and HITL
-// policy presets, plus extra names such as the beta trigger-*.json set) whose
-// workspace copy shadows a ~/.contenox copy, following the loaders'
-// workspace-first resolution (lookupSystemFile, policyDirs). Informational,
-// not an issue: shadowing is a feature (init --local). Prints nothing when no
-// file is shadowed.
 func printWorkspaceShadowNote(w io.Writer, contenoxDir string, extra []string) {
 	home, err := globalContenoxDir()
 	if err != nil || contenoxDir == "" || contenoxDir == home {
@@ -270,15 +233,8 @@ func printWorkspaceShadowNote(w io.Writer, contenoxDir string, extra []string) {
 	}
 }
 
-// doctorFallbackCommand is the next step for a not-ready runtime whose blocking
-// issues carry no command of their own: the wizard registers a backend and sets
-// both defaults, which is every remaining way to be not ready.
 const doctorFallbackCommand = "contenox setup"
 
-// doctorVerdict answers the question doctor is actually run to answer — can I
-// chat right now — as a ready flag, the one blocking reason to name, and the
-// single command that moves the operator closest to yes. Pure: it reads the
-// already-computed Result and performs no I/O.
 func doctorVerdict(res setupcheck.Result) (ready bool, reason, next string) {
 	if res.Ready() {
 		return true, "", ""
@@ -306,9 +262,6 @@ func doctorVerdict(res setupcheck.Result) (ready bool, reason, next string) {
 	return false, reason, next
 }
 
-// printDoctorVerdict leads the text report with that verdict, before any
-// counts or per-backend detail. The --json payload is unchanged: its shape is
-// a contract, and Ready() is already derivable from issues.
 func printDoctorVerdict(w io.Writer, res setupcheck.Result) {
 	ready, reason, next := doctorVerdict(res)
 	if ready {

@@ -106,8 +106,35 @@ tasks:
     cmds:
       - ACP_TESTY_BIN={{.ACP_TESTY_BIN}} ACP_MCP_ECHO_BIN={{.ACP_MCP_ECHO_BIN}} go test -run '^TestTesty_' -v ./libacp/acpexec/...
 
+  # Invoked by name, the two Rust-backed suites above fail when their binary is
+  # unset — you asked for them. Inside test-all they are skipped instead, loudly:
+  # a missing external toolchain is not a failing gate, and a hard stop there
+  # makes the one-command gate unrunnable on a fresh clone. A suite that RUNS
+  # still fails the gate.
+  acp-suites:
+    desc: 'The ACP suites: self-loopback always, the Rust-backed ones when their binaries are set'
+    silent: true
+    cmds:
+      - |
+        set -e
+        skipped=""
+        if [ -n "{{.ACP_VALIDATOR_BIN}}" ]; then
+          task acp-conformance
+        else
+          skipped="${skipped}\n  - acp-conformance   set ACP_VALIDATOR_BIN (tools/acp-validator/README.md: needs Rust and a sibling rust-sdk checkout)"
+        fi
+        if [ -n "{{.ACP_TESTY_BIN}}" ]; then
+          task acp-client-e2e
+        else
+          skipped="${skipped}\n  - acp-client-e2e    set ACP_TESTY_BIN (the agentclientprotocol rust-sdk test agent)"
+        fi
+        task acp-host-e2e
+        if [ -n "$skipped" ]; then
+          printf "\n==> SKIPPED, not passed:%b\n\n" "$skipped"
+        fi
+
   acp-host-e2e:
-    desc: 'Registry→resolve→spawn→session host path, end to end (contenox self-loopback always; testy when built)'
+    desc: 'Registry→resolve→spawn→session host path, end to end (every case needs a binary or a non-sandboxed spawn path — all skip on a bare checkout)'
     cmds:
       - ACP_TESTY_BIN={{.ACP_TESTY_BIN}} ACP_MCP_ECHO_BIN={{.ACP_MCP_ECHO_BIN}} ACP_CLAUDE_ACP_BIN=$ACP_CLAUDE_ACP_BIN go test -run '^TestHostE2E_' -v ./internal/services/agenthost/...
 
@@ -121,11 +148,9 @@ tasks:
       - task: vuln
       - task: test-unit
       - task: test-cli-help
-      - task: acp-conformance
-      - task: acp-client-e2e
-      - task: acp-host-e2e
+      - task: acp-suites
       - task: test
-      - 'echo "==> test-all: all gates green"'
+      - 'echo "==> test-all: every gate that ran is green — re-read any SKIPPED notice above before releasing"'
 
   dev-install:
     desc: Build and put the CLI on your PATH (~/.local/bin, or %LOCALAPPDATA%\Programs\contenox on Windows)
@@ -181,6 +206,7 @@ tasks:
     dir: website
     cmds:
       - npm run preview
+
 
   version:set:
     desc: Stamp the version file (tools/version)

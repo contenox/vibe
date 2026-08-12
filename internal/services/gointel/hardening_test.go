@@ -16,13 +16,6 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 )
 
-// E2E hardening: hostile arguments cannot panic or escape the workspace, concurrent queries/edits/teardown do not race, and real-world module shapes answer rather than hang. Tests loading this repository are gated on -short.
-
-// realSystemDir returns a real, genuinely OS-absolute system directory that
-// is certainly outside any test fixture's workspace root — "/etc" on Unix,
-// but a bare leading "/" is not absolute on Windows (filepath.IsAbs needs a
-// drive letter there), so an absolute-path escape attempt needs an actual
-// Windows system path to be a meaningful test of the same containment rule.
 func realSystemDir(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "windows" {
@@ -34,7 +27,6 @@ func realSystemDir(t *testing.T) string {
 	return `C:\Windows`
 }
 
-// repoRootDir walks up to the module root of this repository.
 func repoRootDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -53,7 +45,6 @@ func repoRootDir(t *testing.T) string {
 	}
 }
 
-// repoIndex returns an index over this repository, the only workspace big enough for the budget and cross-package claims to mean anything.
 func repoIndex(t *testing.T) *index {
 	t.Helper()
 	if testing.Short() {
@@ -62,7 +53,6 @@ func repoIndex(t *testing.T) *index {
 	return newTestIndex(t, repoRootDir(t))
 }
 
-// writeModule materialises a throwaway Go module: go.mod plus the named files, paths relative to the module root. Stdlib-only content keeps `go list` off the network.
 func writeModule(t *testing.T, dir, modulePath string, files map[string]string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -84,7 +74,6 @@ func writeModule(t *testing.T, dir, modulePath string, files map[string]string) 
 	return dir
 }
 
-// exec runs one tool through the real ToolsRepo dispatch — the same entry point the engine calls, argument coercion and all.
 func execTool(t *testing.T, repo taskengine.ToolsRepo, tool string, args map[string]any) (out any, err error) {
 	t.Helper()
 	defer func() {
@@ -97,7 +86,6 @@ func execTool(t *testing.T, repo taskengine.ToolsRepo, tool string, args map[str
 	return out, err
 }
 
-// assertTeachingError checks a refusal names a severity, is bounded, and never leaks a raw control character.
 func assertTeachingError(t *testing.T, label string, err error) {
 	t.Helper()
 	if err == nil {
@@ -118,10 +106,8 @@ func assertTeachingError(t *testing.T, label string, err error) {
 	}
 }
 
-// maxErrorBytes is what a single teaching error may cost: generous enough for the ambiguity and diagnostics refusals, far below an unclamped echo.
 const maxErrorBytes = 4096
 
-// hostileStrings are the argument values a model can be talked into emitting; each is passed to every string argument of every tool.
 var hostileStrings = map[string]string{
 	"empty":            "",
 	"blank":            "   ",
@@ -140,7 +126,7 @@ var hostileStrings = map[string]string{
 	"dot":              ".",
 	"windows_absolute": `C:\Windows\System32`,
 	"url":              "https://example.com/pkg.Ident",
-	"huge":             strings.Repeat("Aa0", 3500), // ~10 KB
+	"huge":             strings.Repeat("Aa0", 3500),
 	"huge_dotted":      strings.Repeat("pkg.", 2600),
 	"nul_only":         "\x00",
 }
@@ -304,7 +290,6 @@ func TestSystem_GoIntel_HostilePassesAndScopesAreRefusedByName(t *testing.T) {
 		assertTeachingError(t, label, err)
 	}
 
-	// Pass sets that must be refused, including "all" mixed with an unknown name in both orders.
 	for name, passes := range map[string]string{
 		"unknown":         "notapass",
 		"unknown_first":   "notapass,all",
@@ -325,7 +310,6 @@ func TestSystem_GoIntel_HostilePassesAndScopesAreRefusedByName(t *testing.T) {
 		assertTeachingError(t, label, err)
 	}
 
-	// And the ones that must work, so the refusal above is not just strictness.
 	for name, passes := range map[string]string{
 		"all":        "all",
 		"all_spaced": " all ",
@@ -398,7 +382,6 @@ func shownOf(t *testing.T, out any) int {
 	return 0
 }
 
-// assertResultStaysInWorkspace fails when any location in a result is absolute or starts with "..", since every gointel anchor is workspace-relative.
 func assertResultStaysInWorkspace(t *testing.T, label, root string, out any) {
 	t.Helper()
 	var locations []string
@@ -448,7 +431,6 @@ func TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace(t *testi
 	repo := NewTools(ix)
 	ctx := context.Background()
 
-	// Warm one snapshot so queries exercise both the cached and rebuild paths.
 	if _, err := ix.Definition(ctx, Request{Symbol: "shapes.Rect"}); err != nil {
 		t.Fatalf("warm-up: %v", err)
 	}
@@ -529,7 +511,6 @@ func TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace(t *testi
 
 	time.Sleep(750 * time.Millisecond)
 
-	// Teardown mid-query: Shutdown must return promptly even with readers in flight and a rebuild possibly running.
 	done := make(chan struct{})
 	shutdownStart := time.Now()
 	go func() {
@@ -553,7 +534,6 @@ func TestSystem_GoIntel_ConcurrentQueriesEditsAndInvalidationsDoNotRace(t *testi
 	}
 }
 
-// isExpectedConcurrentError accepts the refusals the storm legitimately produces, including a transient load failure from a mid-rewrite source file.
 func isExpectedConcurrentError(err error) bool {
 	switch {
 	case errors.Is(err, ErrNotFound),
@@ -573,12 +553,7 @@ func atomicWrite(t *testing.T, path, body string) {
 		t.Errorf("write %s: %v", tmp, err)
 		return
 	}
-	// Windows refuses to rename onto a file another handle currently has
-	// open (unlike POSIX, where existing readers keep the old inode) — the
-	// concurrent readers this test deliberately races against can hold
-	// shapes.go open for the instant a rename lands. A short bounded retry
-	// rides out that transient sharing violation; it never masks a real
-	// failure since renaming the same tmp file repeatedly is idempotent.
+	// Windows can refuse a rename onto a file a concurrent reader still has open; a short bounded retry rides out that transient failure.
 	var err error
 	for attempt := 0; attempt < 20; attempt++ {
 		if err = os.Rename(tmp, path); err == nil {
@@ -628,7 +603,6 @@ func TestSystem_GoIntel_QueriesAfterShutdownFailTypedRatherThanRebuild(t *testin
 		}
 	}
 
-	// And nothing was resurrected behind the refusal.
 	ix.mu.Lock()
 	n := len(ix.entries)
 	ix.mu.Unlock()
@@ -657,7 +631,6 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// (1) An edit to an existing file, no chtimes bump.
 	if err := os.WriteFile(shapesFile, append(original, []byte(
 		"\n// Added lands via a plain write, the way write_file lands one.\nfunc Added() float64 { return Unit }\n")...), 0o644); err != nil {
 		t.Fatal(err)
@@ -670,7 +643,6 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 		t.Errorf("location = %q", loc)
 	}
 
-	// go_references must see the new call site through the same sweep.
 	reportFile := filepath.Join(root, "report", "report.go")
 	reportSrc, err := os.ReadFile(reportFile)
 	if err != nil {
@@ -694,7 +666,6 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 		t.Errorf("uses = %d, want %d — a stale snapshot would still say %d", got, baseline+2, baseline)
 	}
 
-	// (2) A brand-new file in an existing package, invisible to per-file stat.
 	newFile := filepath.Join(root, "shapes", "brandnew.go")
 	if err := os.WriteFile(newFile, []byte(
 		"package shapes\n\n// BrandNew arrived in a file that did not exist.\nfunc BrandNew() float64 { return Unit }\n"), 0o644); err != nil {
@@ -704,7 +675,6 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 		t.Fatalf("go_definition after a NEW file appeared: %v", err)
 	}
 
-	// go_diagnostics must report the changed package without being told which.
 	diag, err := execTool(t, repo, ToolDiagnostics, map[string]any{"scope": "changed"})
 	if err != nil {
 		t.Fatalf("go_diagnostics scope=changed: %v", err)
@@ -713,7 +683,6 @@ func TestSystem_GoIntel_FreshnessThroughTheToolPath(t *testing.T) {
 		t.Errorf("scope=changed saw no packages after three writes; note = %q", diag.(*DiagnosticsResult).Note)
 	}
 
-	// (3) A deletion.
 	if err := os.Remove(newFile); err != nil {
 		t.Fatal(err)
 	}
@@ -857,7 +826,6 @@ func TestSystem_GoIntel_MissingDependencyAnswersPromptlyAndNamesTheRealCause(t *
 		t.Errorf("the diagnostic points at the import line without saying the cause is module resolution — an agent will 'fix' correct source: %+v", res.Diagnostics)
 	}
 
-	// The module's own, resolvable symbol still answers.
 	if _, err := execTool(t, repo, ToolDefinition, map[string]any{"symbol": "main.main"}); err != nil {
 		t.Errorf("a symbol that DID resolve was refused because a dependency is missing: %v", err)
 	}
@@ -914,7 +882,6 @@ func TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot(t *testing.T) {
 	ix := newTestIndex(t, root)
 	repo := NewTools(ix)
 
-	// From the workspace root: the outer module.
 	out, err := execTool(t, repo, ToolDefinition, map[string]any{"symbol": "outerpkg.OuterOnly"})
 	if err != nil {
 		t.Fatalf("outer symbol from the workspace root: %v", err)
@@ -926,7 +893,6 @@ func TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot(t *testing.T) {
 		t.Errorf("the inner module's symbol resolved from the outer root: %v", err)
 	}
 
-	// From inside the nested module: the inner one, innermost-wins.
 	out, err = execTool(t, repo, ToolDefinition, map[string]any{"symbol": "innerpkg.InnerOnly", "dir": "tools/innerpkg"})
 	if err != nil {
 		t.Fatalf("inner symbol with dir inside the nested module: %v", err)
@@ -938,7 +904,6 @@ func TestSystem_GoIntel_NestedModuleResolvesToTheInnermostRoot(t *testing.T) {
 		t.Errorf("the outer module's symbol resolved from inside the nested one: %v", err)
 	}
 
-	// Both roots are cached independently, and the LRU bound still holds.
 	ix.mu.Lock()
 	n := len(ix.entries)
 	ix.mu.Unlock()
@@ -952,7 +917,6 @@ func TestSystem_GoIntel_ThisRepoExcludesTestFiles(t *testing.T) {
 	ix := repoIndex(t)
 	repo := NewTools(ix)
 
-	// Declared only in _test.go files of this repository.
 	for _, symbol := range []string{
 		"contenoxcli.TestReadinessDefaults",
 		"gointel.TestUnit_Tools_SchemaShape",
@@ -963,12 +927,10 @@ func TestSystem_GoIntel_ThisRepoExcludesTestFiles(t *testing.T) {
 		}
 	}
 
-	// The non-test declaration right next to them still resolves: the exclusion is about test files, not the package.
 	if _, err := execTool(t, repo, ToolDefinition, map[string]any{"symbol": "gointel.NewTools"}); err != nil {
 		t.Errorf("a non-test symbol in the same package did not resolve: %v", err)
 	}
 
-	// And a references answer over the repo counts no test-file call sites.
 	out, err := execTool(t, repo, ToolReferences, map[string]any{"symbol": "gointel.ToolsProviderName", "max": 200})
 	if err != nil {
 		t.Fatalf("go_references: %v", err)
@@ -980,18 +942,7 @@ func TestSystem_GoIntel_ThisRepoExcludesTestFiles(t *testing.T) {
 	}
 }
 
-// TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo is a regression fence, not a
-// benchmark. Every budget is set so that a cache-missing regression — a cold
-// packages.Load per query — is the only thing that can blow it: each sits
-// several times above the measured warm cost and more than an order of
-// magnitude below a cold load of this repo (tens of seconds; see the cold
-// timing this test logs).
-//
-// Per-query costs are not alike. Definition and describe answer from the
-// index and are flat in repo size. References scans every package for call
-// sites, so its cost grows with the tree — it is the one budget that must be
-// re-derived when the repo gains a package set, and it carries proportionally
-// less headroom than the flat queries for that reason.
+// TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo is a regression fence, not a benchmark, pinning warm per-query costs far below a cold packages.Load; references carries the least headroom since its cost scales with repo size.
 func TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo(t *testing.T) {
 	ix := repoIndex(t)
 	repo := NewTools(ix)
@@ -1010,12 +961,6 @@ func TestSystem_GoIntel_WarmQueryBudgetsOnThisRepo(t *testing.T) {
 	}{
 		{"warm definition", ToolDefinition, map[string]any{"symbol": "frame.StyleBrand"}, 50 * time.Millisecond},
 		{"warm describe", ToolDescribe, map[string]any{"symbol": "frame.StyleID"}, 50 * time.Millisecond},
-		// 3s: ~4x the warm cost measured after libacp joined the tree as a
-		// first-party package set (~700ms isolated, ~975ms under a loaded
-		// machine), matching the headroom the flat queries carry, and still
-		// well over an order of magnitude below a cold load. Re-derive this
-		// when the repo gains another package set; do not raise it to make a
-		// failing run pass.
 		{"references across the repo", ToolReferences, map[string]any{"symbol": "frame.StyleBrand", "max": 200}, 3 * time.Second},
 		{"diagnostics scope=all", ToolDiagnostics, map[string]any{"scope": "all"}, 2 * time.Second},
 	} {

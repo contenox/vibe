@@ -144,8 +144,6 @@ func TestUnit_LocalExecTools_GetToolsForToolsByName_Unknown(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_GetToolsForToolsByName_ContextPolicy_Description(t *testing.T) {
-	// Tools constructed with NO static policy.
-	// Context carries chain-level policy — description must reflect it.
 	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_shell", map[string]string{
 		"_allowed_commands": "git, ls",
@@ -171,7 +169,6 @@ func TestUnit_LocalExecTools_GetToolsForToolsByName_ContextPolicy_Description(t 
 }
 
 func TestUnit_LocalExecTools_Exec_ContextPolicy_Enforced(t *testing.T) {
-	// No static allowlist — context injects one. Command not in list must be rejected.
 	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_shell", map[string]string{
 		"_allowed_commands": "ls",
@@ -186,7 +183,6 @@ func TestUnit_LocalExecTools_Exec_ContextPolicy_Enforced(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_ContextPolicy_Allows(t *testing.T) {
-	// No static allowlist — context injects one that includes the command.
 	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
 	ctx := taskengine.WithToolsArgs(context.Background(), "local_shell", map[string]string{
 		"_allowed_commands": "echo",
@@ -204,7 +200,6 @@ func TestUnit_LocalExecTools_Exec_ContextPolicy_Allows(t *testing.T) {
 	assert.Equal(t, "ctx policy works", res.Stdout)
 }
 
-// testAllowedCommands allows the commands used by Exec tests (echo, cat, sleep, shell, exit for shell mode).
 var testAllowedCommands = []string{"echo", "cat", "sleep", "/bin/sh", "exit"}
 
 func TestUnit_LocalExecTools_Exec_Success(t *testing.T) {
@@ -287,8 +282,7 @@ func TestUnit_LocalExecTools_Exec_Success_InputAsStdin(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_NoPolicy_Allowed(t *testing.T) {
-	// Authorization is the responsibility of upstream layers (e.g. HITLWrapper);
-	// LocalExecTools without policy must not fail-close.
+	// Authorization is the responsibility of upstream layers (e.g. HITLWrapper); LocalExecTools without policy must not fail-close.
 	ctx := context.Background()
 	h := localtools.NewLocalExecTools().(*localtools.LocalExecTools)
 	start := time.Now().UTC()
@@ -308,8 +302,7 @@ func TestUnit_LocalExecTools_Exec_NoPolicy_Allowed(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_ShellMode_NoPolicy_Allowed(t *testing.T) {
-	// shell:true is allowed when no allowlist exists: the injection guard only
-	// triggers when there is a policy for shell mode to bypass.
+	// shell:true is allowed when no allowlist exists: the injection guard only triggers when there is a policy for shell mode to bypass.
 	if runtime.GOOS == "windows" {
 		t.Skip("shell:true dispatches to cmd.exe/PowerShell on Windows (see shell.go), not /bin/sh — the exact stdout framing this pins is POSIX-sh-specific")
 	}
@@ -332,8 +325,7 @@ func TestUnit_LocalExecTools_Exec_ShellMode_NoPolicy_Allowed(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_ShellMode_WithPolicyRejected(t *testing.T) {
-	// shell:true must be REJECTED when an allowlist policy is active to prevent
-	// command injection (e.g. "git status; rm -rf /" bypassing allowlist checks).
+	// shell:true must be REJECTED when an allowlist policy is active, to prevent command injection (e.g. "git status; rm -rf /" bypassing allowlist checks).
 	ctx := context.Background()
 	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
@@ -351,7 +343,6 @@ func TestUnit_LocalExecTools_Exec_ShellMode_WithPolicyRejected(t *testing.T) {
 
 func TestUnit_LocalExecTools_Exec_AllowlistReject(t *testing.T) {
 	ctx := context.Background()
-	// Only allow /usr/bin/env; echo should be rejected when we use allowedCommands.
 	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands([]string{"/usr/bin/env"})).(*localtools.LocalExecTools)
 	start := time.Now().UTC()
 	toolsCall := &taskengine.ToolsCall{
@@ -461,7 +452,6 @@ func TestUnit_LocalExecTools_Exec_NilTools(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_NonZeroExit(t *testing.T) {
-	// Run a script under allowedDir WITHOUT shell mode to capture a non-zero exit.
 	if runtime.GOOS == "windows" {
 		t.Skip("direct-execs a #!/bin/sh script by path; Windows's CreateProcess has no shebang interpretation")
 	}
@@ -483,11 +473,7 @@ func TestUnit_LocalExecTools_Exec_NonZeroExit(t *testing.T) {
 	assert.Equal(t, 3, res.ExitCode)
 }
 
-// TestUnit_LocalExecTools_ScrubEnv_StripsSecretKeepsToolchain pins the
-// credential-leak fix: with the default agent-shell posture (deny-secrets)
-// wired via WithLocalExecScrubEnv, a spawned command must not see a
-// credential-shaped variable from the process environment, while PATH/HOME
-// (needed by any real toolchain command) survive.
+// TestUnit_LocalExecTools_ScrubEnv_StripsSecretKeepsToolchain pins that the default deny-secrets scrub (via WithLocalExecScrubEnv) strips credential-shaped variables from a spawned command while PATH/HOME survive.
 func TestUnit_LocalExecTools_ScrubEnv_StripsSecretKeepsToolchain(t *testing.T) {
 	t.Setenv("TESTSECRET_API_KEY", "leaked-value")
 	t.Setenv("HOME", "/home/scrub-test")
@@ -511,7 +497,6 @@ func TestUnit_LocalExecTools_ScrubEnv_StripsSecretKeepsToolchain(t *testing.T) {
 }
 
 func TestUnit_LocalExecTools_Exec_NonZeroExit_WithPolicy_Rejected(t *testing.T) {
-	// shell:true + allowlist must be rejected (security fix).
 	ctx := context.Background()
 	h := localtools.NewLocalExecTools(localtools.WithLocalExecAllowedCommands(testAllowedCommands)).(*localtools.LocalExecTools)
 	toolsCall := &taskengine.ToolsCall{

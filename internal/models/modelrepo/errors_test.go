@@ -41,6 +41,38 @@ func TestUnit_ClassifyProviderError(t *testing.T) {
 	if err := ClassifyProviderError(base, 400, "", "invalid api key"); errors.Is(err, ErrContextLengthExceeded) || errors.Is(err, ErrRateLimited) {
 		t.Fatalf("unrelated errors must pass through unclassified")
 	}
+	if err := ClassifyProviderError(base, 404, "", "Publisher Model was not found or your project does not have access"); !errors.Is(err, ErrModelNotFoundOnBackend) {
+		t.Fatalf("404 must map to ErrModelNotFoundOnBackend, got %v", err)
+	}
+	if err := ClassifyProviderError(base, 0, "NOT_FOUND", ""); !errors.Is(err, ErrModelNotFoundOnBackend) {
+		t.Fatalf("NOT_FOUND code without a status must map to ErrModelNotFoundOnBackend, got %v", err)
+	}
+	if err := ClassifyProviderError(base, 0, "", "model 'gemma' not found, try pulling it first"); !errors.Is(err, ErrModelNotFoundOnBackend) {
+		t.Fatalf("ollama phrasing without a status must map to ErrModelNotFoundOnBackend, got %v", err)
+	}
+	if err := ClassifyProviderError(base, 500, "", "not found"); errors.Is(err, ErrModelNotFoundOnBackend) {
+		t.Fatalf("message phrasings are consulted only when no status is available")
+	}
+	if err := ClassifyProviderError(base, 403, "", ""); !errors.Is(err, ErrModelAccessDenied) {
+		t.Fatalf("403 must map to ErrModelAccessDenied, got %v", err)
+	}
+	if err := ClassifyProviderError(base, 400, "PERMISSION_DENIED", ""); !errors.Is(err, ErrModelAccessDenied) {
+		t.Fatalf("PERMISSION_DENIED code must map to ErrModelAccessDenied, got %v", err)
+	}
+
+	if !IsBackendTerminal(ClassifyProviderError(base, 404, "", "")) {
+		t.Fatalf("a model-not-found refusal is terminal for the backend")
+	}
+	if !IsBackendTerminal(ClassifyProviderError(base, 403, "", "")) {
+		t.Fatalf("an access-denied refusal is terminal for the backend")
+	}
+	if IsBackendTerminal(ClassifyProviderError(base, 429, "", "")) {
+		t.Fatalf("a rate limit is retriable, never terminal for the backend")
+	}
+	if IsBackendTerminal(ClassifyProviderError(base, 500, "", "")) {
+		t.Fatalf("a provider fault is not terminal for the backend")
+	}
+
 	if got := ClassifyProviderError(nil, 429, "", ""); got != nil {
 		t.Fatalf("nil error stays nil")
 	}

@@ -17,7 +17,7 @@ type vertexProvider struct {
 	publisher       string
 	modelName       string
 	baseURL         string
-	credJSON        string // service account JSON; empty → ADC
+	credJSON        string
 	httpClient      *http.Client
 	contextLength   int
 	maxOutputTokens int
@@ -27,18 +27,15 @@ type vertexProvider struct {
 	canStream       bool
 	canThink        bool
 	canVision       bool
+	canAudio        bool
 	tracker         libtracker.ActivityTracker
 
-	// Cached token source. Initialized once on first use and reused across all
-	// requests; oauth2 keeps the access token in memory until expiry, so
-	// steady-state requests don't hit the token endpoint at all.
 	tokenOnce sync.Once
 	tokenSrc  oauth2.TokenSource
 	tokenErr  error
 }
 
-// NewVertexProvider returns a modelrepo.Provider for a Vertex AI model.
-// credJSON is the service account key JSON; empty string falls back to ADC.
+// NewVertexProvider returns a modelrepo.Provider for a Vertex AI model; credJSON is the service account key JSON, empty falls back to ADC.
 func NewVertexProvider(publisher, modelName string, baseURLs []string, cap modelrepo.CapabilityConfig, credJSON string, httpClient *http.Client, tracker libtracker.ActivityTracker) modelrepo.Provider {
 	if httpClient == nil {
 		httpClient = modelrepo.SharedHTTPClient
@@ -69,6 +66,7 @@ func NewVertexProvider(publisher, modelName string, baseURLs []string, cap model
 		canStream:       cap.CanStream,
 		canThink:        cap.CanThink,
 		canVision:       cap.CanVision,
+		canAudio:        cap.CanAudio,
 		tracker:         tracker,
 	}
 }
@@ -85,10 +83,8 @@ func (p *vertexProvider) CanStream() bool         { return p.canStream }
 func (p *vertexProvider) CanPrompt() bool         { return p.canPrompt }
 func (p *vertexProvider) CanThink() bool          { return p.canThink }
 func (p *vertexProvider) CanVision() bool         { return p.canVision }
+func (p *vertexProvider) CanAudio() bool          { return p.canAudio }
 
-// tokenFn returns an access token using the provider's cached oauth2 source.
-// The source is built once on first use (with context.Background so it
-// outlives the request that triggered initialization) and reused thereafter.
 func (p *vertexProvider) tokenFn(_ context.Context) (string, error) {
 	p.tokenOnce.Do(func() {
 		p.tokenSrc, p.tokenErr = NewTokenSource(context.Background(), p.credJSON)

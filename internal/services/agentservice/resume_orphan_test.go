@@ -1,10 +1,5 @@
 package agentservice_test
 
-// What a mission's host process leaves behind when it dies. The mission
-// record, its unanswered ask, and its suspended run are three durable rows
-// with three different owners; this pins the state a fresh process actually
-// finds, and which of the three a fresh process reconciles.
-
 import (
 	"context"
 	"path/filepath"
@@ -20,14 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable pins the
-// split a fresh process finds after a host dies mid-ask. The mission row is
-// unreachable the moment its host is gone — a child subprocess cannot outlive
-// its parent — so the mission sweep collects it: abandoned, with the reason
-// and a blocker naming the silence. The other two rows are NOT garbage: the
-// ask is still pending and answerable at its own ceiling, and the run is
-// still checkpointed, so the reclaim costs the work nothing (see the
-// companion test).
+// TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable pins the split a fresh process finds after a host dies mid-ask: the mission sweep collects the now-unreachable mission row as abandoned, while the still-pending ask and still-checkpointed run are left untouched.
 func TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "orphan.db")
 	ctx := context.Background()
@@ -35,7 +23,6 @@ func TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable(t *testing
 	a := newAskerInstance(t, dbPath)
 	missionID := createMission(t, a.missions)
 
-	// The unit reports liveness, then asks and parks; the host dies here.
 	_, err := a.missions.Heartbeat(ctx, missionID, "")
 	require.NoError(t, err)
 	unitCtx := missiontools.WithMissionID(ctx, missionID)
@@ -48,7 +35,6 @@ func TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable(t *testing
 	require.Equal(t, agentservice.StopSuspended, resp.StopReason)
 	a.close()
 
-	// A fresh process, any time later.
 	b := newAskerInstance(t, dbPath)
 	defer b.close()
 
@@ -65,8 +51,7 @@ func TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable(t *testing
 	require.NoError(t, err)
 	require.Equal(t, 0, reclaimed, "and the mission's staleness bound has not either")
 
-	// Wind the frozen heartbeat past the bound: the silence a real orphan
-	// accumulates while the operator is away.
+	// winds the frozen heartbeat past the bound to simulate the silence a real orphan accumulates while the operator is away
 	m.CreatedAt = m.CreatedAt.Add(-missionservice.StaleHeartbeatAfter - time.Hour)
 	frozen := m.CreatedAt
 	m.LastHeartbeat = &frozen
@@ -88,8 +73,7 @@ func TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable(t *testing
 	require.Len(t, reports, 1, "the operator is not left guessing why it ended")
 	require.Equal(t, missionservice.ReportKindBlocker, reports[0].Kind)
 
-	// The reclaim collects the mission record only. The two rows that still
-	// carry work are untouched.
+	// the reclaim collects the mission record only; the two rows that still carry work are untouched
 	row, err := b.store.GetHITLApproval(ctx, "call-orphan")
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalPending, row.State, "the question outlives its asker, as designed")
@@ -97,10 +81,7 @@ func TestSystem_HostDeath_ReclaimsTheMissionAndKeepsItsWorkAnswerable(t *testing
 	require.NoError(t, err, "and so does the suspended run")
 }
 
-// TestSystem_HostDeath_AnsweringTheOrphanStillResumesIt pins the half that
-// does hold: the mission record going stale costs the run nothing. The ask is
-// still answerable from a fresh process days later, and answering it resumes
-// the suspended work — the flagship claim's core, independent of G8.
+// TestSystem_HostDeath_AnsweringTheOrphanStillResumesIt pins that a stale mission record costs the run nothing: the ask stays answerable from a fresh process, and answering it resumes the suspended work.
 func TestSystem_HostDeath_AnsweringTheOrphanStillResumesIt(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "orphan-answer.db")
 	ctx := context.Background()

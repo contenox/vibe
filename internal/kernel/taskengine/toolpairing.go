@@ -6,23 +6,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// interruptedToolCallResult is the stub content recorded for a tool call that
-// never received a result (interrupted execution, chain failure between the
-// call and its execution, or a history routed out of a failure state).
 const interruptedToolCallResult = "tool call was interrupted before a result was recorded"
 
-// repairToolCallPairing enforces the tool-call protocol invariant on a
-// transcript: every assistant tool call is answered by exactly one tool
-// result, and every tool result answers a preceding assistant tool call.
-// Providers with strict pairing (OpenAI Responses, Anthropic, Bedrock) reject
-// conversations that violate this with a 400, so any history that leaves the
-// engine — to a provider or to session persistence — must satisfy it.
-//
-// Repairs applied, in order:
-//   - tool results whose call ID matches no assistant tool call are dropped
-//   - duplicate tool results for the same call ID are dropped (first wins)
-//   - assistant tool calls with no result get a stub error result inserted
-//     directly after the contiguous tool-result block that follows them
 func repairToolCallPairing(msgs []Message) []Message {
 	callIDs := map[string]bool{}
 	for _, m := range msgs {
@@ -83,17 +68,6 @@ func repairToolCallPairing(msgs []Message) []Message {
 	return out
 }
 
-// resumableToolCallBatch locates the open tool-call batch at the tail of a
-// transcript: the last assistant message carrying tool calls, tolerating a
-// trailing block of tool results that answer some of them. It returns the
-// assistant message's index and the set of call IDs those trailing results
-// already answered, or (-1, nil) when the transcript does not end in a batch
-// with at least one unanswered call.
-//
-// This tolerance is what makes a suspended run's checkpoint re-enterable:
-// the interrupted batch persists as "assistant calls + partial results", and
-// resume re-runs execute_tool_calls over exactly that shape, executing only
-// the calls the trailing results have not answered.
 func resumableToolCallBatch(msgs []Message) (assistantIdx int, answered map[string]bool) {
 	i := len(msgs) - 1
 	answered = map[string]bool{}
@@ -107,12 +81,10 @@ func resumableToolCallBatch(msgs []Message) (assistantIdx int, answered map[stri
 		return -1, nil
 	}
 	for _, tc := range msgs[i].CallTools {
-		// An ID-less call can never be matched by a result, so it counts as
-		// unanswered (mirroring the execution loop, which runs it).
+		// An ID-less call can never be matched by a result, so it always counts as unanswered.
 		if tc.ID == "" || !answered[tc.ID] {
 			return i, answered
 		}
 	}
-	// Every call of the batch is already answered: nothing to execute.
 	return -1, nil
 }

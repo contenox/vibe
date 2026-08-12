@@ -36,20 +36,21 @@ func NewVLLMStreamClient(ctx context.Context, baseURL, modelName string, context
 	return client, nil
 }
 
-// streamErrorChunk detects vLLM's in-stream error frames, which arrive as a
-// chunk with a top-level "error" string instead of choices.
 type streamErrorChunk struct {
 	Error *string `json:"error"`
 }
 
-// Stream emits raw deltas per the modelrepo.StreamParcel contract via the
-// shared chat/completions codec: content / thinking / tool-call fragments as
-// they arrive, then one typed terminal parcel. Assembly belongs to the
-// engine-side modelrepo.StreamAssembler, never to this client.
+// Stream emits raw StreamParcel deltas as they arrive, ending in exactly one terminal parcel.
 func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "vllm", "model", c.modelName)
-	// end() is not deferred here; the stream is asynchronous, so it runs from
-	// the goroutine below instead.
+	// end() is not deferred here; ownership passes to the goroutine below since the stream is asynchronous.
+
+	// No audio encoding on this wire format; refuse instead of dropping silently.
+	if err := modelrepo.RefuseAudioInput("vllm", c.modelName, messages); err != nil {
+		reportErr(err)
+		end()
+		return nil, err
+	}
 
 	request, nameMap := buildChatRequest(c.modelName, messages, args, c.canThink)
 	c.clampChatRequest(&request)
@@ -108,8 +109,7 @@ func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Mess
 			}
 		}
 
-		// Tool names are sanitized on the way out; the decoder translates the
-		// sanitized names back to the caller's originals.
+		// Tool names are sanitized on the way out; the decoder translates them back to the caller's originals.
 		dec := chatcompletions.NewStreamDecoder(nameMap)
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -125,7 +125,6 @@ func (c *VLLMStreamClient) Stream(ctx context.Context, messages []modelrepo.Mess
 				continue
 			}
 
-			// Handle error chunks before delta decoding.
 			var errChunk streamErrorChunk
 			if json.Unmarshal([]byte(jsonData), &errChunk) == nil && errChunk.Error != nil {
 				err := fmt.Errorf("vLLM stream error: %s", *errChunk.Error)

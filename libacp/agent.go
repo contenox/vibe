@@ -13,10 +13,9 @@ type Agent interface {
 	DeleteSession(ctx context.Context, req DeleteSessionRequest) (DeleteSessionResponse, error)
 	ListSessions(ctx context.Context, req ListSessionsRequest) (ListSessionsResponse, error)
 	SetSessionMode(ctx context.Context, req SetSessionModeRequest) (SetSessionModeResponse, error)
-	// SetSessionModel switches a session's active model. This is the UNSTABLE Zed
-	// model-picker surface (session/set_model, see MethodSessionSetModel); an agent
-	// that advertises no `models` state returns MethodNotFound, matching the
-	// experimental method's optional-capability contract.
+	// SetSessionModel switches a session's active model; this UNSTABLE Zed
+	// model-picker method (session/set_model) returns MethodNotFound when the
+	// agent advertises no `models` state.
 	SetSessionModel(ctx context.Context, req SetSessionModelRequest) (SetSessionModelResponse, error)
 	SetSessionConfigOption(ctx context.Context, req SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error)
 	Prompt(ctx context.Context, req PromptRequest) (PromptResponse, error)

@@ -18,10 +18,9 @@ type PromptRequest struct {
 	Meta      json.RawMessage `json:"_meta,omitempty"`
 }
 
-// PromptResponse is the result of a "session/prompt" request. Per the ACP v1
-// schema it carries only stopReason and _meta; custom fields must not be
-// added at the root of a spec type. Per-turn usage/cost belongs on the
-// "usage_update" SessionUpdate (see SessionUpdateUsageUpdate) instead.
+// PromptResponse is the result of a "session/prompt" request; per the ACP v1
+// schema it carries only stopReason and _meta, with per-turn usage/cost
+// belonging on the "usage_update" SessionUpdate instead.
 type PromptResponse struct {
 	StopReason StopReason      `json:"stopReason"`
 	Meta       json.RawMessage `json:"_meta,omitempty"`
@@ -45,8 +44,7 @@ const (
 
 // AllSessionUpdateKinds returns every SessionUpdateKind the spec defines, in
 // declaration order, so a consumer's translation table can be tested for
-// completeness against the library instead of a hand-maintained copy. Adding
-// a const above requires adding it here too. Freshly built on every call.
+// completeness against the library.
 func AllSessionUpdateKinds() []SessionUpdateKind {
 	return []SessionUpdateKind{
 		SessionUpdateUserMessageChunk,
@@ -91,7 +89,7 @@ type SessionUpdate struct {
 	Cost *UsageCost `json:"cost,omitempty"`
 
 	// MessageID groups streamed chunks into messages: all chunks of one message
-	// share an id; a change marks a new message. Optional in the spec.
+	// share an id, and a change marks a new message.
 	MessageID string `json:"messageId,omitempty"`
 
 	// UpdatedAt is the session_info_update timestamp (ISO 8601); Title above is

@@ -10,9 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// absTestPath returns p as a genuinely OS-absolute path — a bare leading
-// separator is not absolute on Windows (filepath.IsAbs needs a drive
-// letter there), so fixtures exercising that check need a real root.
 func absTestPath(p string) string {
 	if runtime.GOOS != "windows" {
 		return p
@@ -112,10 +109,6 @@ func TestUnit_ChainConfig_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// The spawned unit's working directory is the SESSION's, not the
-			// declarer's, so a relative path would resolve somewhere neither
-			// intended. Rejected at declaration rather than surfacing as a
-			// mysterious missing-chain failure at spawn.
 			name:    "relative path is invalid",
 			cfg:     runtimetypes.ChainConfig{Path: filepath.Join("chains", "agent-reviewer.json")},
 			wantErr: true,
@@ -133,10 +126,7 @@ func TestUnit_ChainConfig_Validate(t *testing.T) {
 	}
 }
 
-// TestUnit_Agents_ChainConfig_Accessors pins the typed accessor pair for the
-// chain kind against the same contract the external one has: Set stamps the
-// kind, Get refuses a record of a different kind, and an empty ConfigJSON reads
-// as a zero config rather than an error.
+// TestUnit_Agents_ChainConfig_Accessors verifies Set stamps the kind, Get refuses a record of a different kind, and an empty ConfigJSON reads as a zero config.
 func TestUnit_Agents_ChainConfig_Accessors(t *testing.T) {
 	path := filepath.Join(string(filepath.Separator), "chains", "agent-reviewer.json")
 
@@ -149,7 +139,6 @@ func TestUnit_Agents_ChainConfig_Accessors(t *testing.T) {
 	assert.Equal(t, path, cfg.Path)
 	assert.Equal(t, "agent-reviewer", cfg.ChainID)
 
-	// Wrong kind: refused, not silently coerced.
 	external := &runtimetypes.Agent{Name: "ext"}
 	require.NoError(t, external.SetExternalACPConfig(runtimetypes.ExternalACPConfig{
 		Transport: runtimetypes.ExternalACPTransportStdio,
@@ -158,7 +147,6 @@ func TestUnit_Agents_ChainConfig_Accessors(t *testing.T) {
 	_, err = external.ChainConfig()
 	require.Error(t, err)
 
-	// Empty config on a chain-kind record reads as the zero value.
 	bare := &runtimetypes.Agent{Name: "bare", Kind: runtimetypes.AgentKindChain}
 	cfg, err = bare.ChainConfig()
 	require.NoError(t, err)

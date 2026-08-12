@@ -105,7 +105,12 @@ func newHarness(t *testing.T, mut ...func(*Deps)) *harness {
 		Model:        "qwen3:8b",
 		Provider:     "ollama",
 		SessionName:  "beam-0001",
-		Clock:        func() time.Time { return h.clock },
+		// A wired no-op editor mirrors the shipped CLI, where resolveEditor
+		// always yields one — it is what makes the welcome header's editor
+		// hint part of the canonical first frame. Editor tests override it;
+		// hint-honesty tests null it.
+		Editor: func(seed string) (string, error) { return seed, nil },
+		Clock:  func() time.Time { return h.clock },
 	}
 	for _, m := range mut {
 		m(&deps)
@@ -858,6 +863,26 @@ func TestUnit_Editor_AbortKeepsTheDraft(t *testing.T) {
 	requireContains(t, h.scrollback(), "aborted due to empty prompt", "abort notice")
 }
 
+// TestUnit_Editor_WelcomeHintTracksWiring pins hint honesty at the surface:
+// the fresh-session welcome advertises the Ctrl+X, Ctrl+E chord exactly when
+// Deps.Editor is wired, and the chord itself stays a no-op notice when it is
+// not.
+func TestUnit_Editor_WelcomeHintTracksWiring(t *testing.T) {
+	wired := newHarness(t).start()
+	requireContains(t, wired.scrollback(), "Ctrl+X Ctrl+E", "welcome hint with an editor wired")
+
+	bare := newHarness(t, func(d *Deps) { d.Editor = nil }).start()
+	requireNotContains(t, bare.scrollback(), "Ctrl+X Ctrl+E", "welcome hint with no editor")
+	// The encoded frame carries style tags between the key and its label.
+	requireContains(t, bare.scrollback(), "?[muted] keys", "the other affordances survive")
+
+	bare.openEditor()
+	requireContains(t, bare.scrollback(), "no editor configured", "unwired chord answers honestly")
+	if bare.term.suspends != 0 {
+		t.Fatalf("an unwired editor chord suspended the terminal %d times", bare.term.suspends)
+	}
+}
+
 // TestUnit_Resize_LeavesSettledScrollbackAlone pins that a resize re-wraps
 // the live region without touching a line already printed to scrollback.
 func TestUnit_Resize_LeavesSettledScrollbackAlone(t *testing.T) {
@@ -886,6 +911,49 @@ func TestUnit_Resize_LeavesSettledScrollbackAlone(t *testing.T) {
 	}
 	if got := h.scrollback(); got != settled {
 		t.Fatalf("resize disturbed settled scrollback:\nwant %q\ngot  %q", settled, got)
+	}
+}
+
+// TestUnit_Resize_BigSmallBigNeverDuplicatesChrome pins the frame-level half
+// of the resize-desync bug: across a big -> small -> big cycle every committed
+// frame carries exactly one input line and one status bar, and no resize ever
+// appends to scrollback — so any duplication on a real screen can only be a
+// painter/terminal desync, which term's reflow tests cover at the vt level.
+func TestUnit_Resize_BigSmallBigNeverDuplicatesChrome(t *testing.T) {
+	h := newHarness(t, func(d *Deps) { d.FreshSession = false }).start()
+	h.typeText("hello resize")
+
+	countLiveRows := func(f frame.Frame, mark string) int {
+		n := 0
+		for _, l := range f.Live {
+			if strings.Contains(l.Text(), mark) {
+				n++
+			}
+		}
+		return n
+	}
+
+	before := len(h.term.frames)
+	for _, size := range []input.ResizeEvent{
+		{Width: 100, Height: 24},
+		{Width: 60, Height: 12},
+		{Width: 100, Height: 24},
+	} {
+		h.input(size)
+		f := h.last()
+		if n := countLiveRows(f, "hello resize"); n != 1 {
+			t.Fatalf("at %dx%d the input line appears %d times, want once:\n%s",
+				size.Width, size.Height, n, testkit.EncodeLines(f.Live))
+		}
+		if n := countLiveRows(f, "beam-0001"); n != 1 {
+			t.Fatalf("at %dx%d the status bar appears %d times, want once:\n%s",
+				size.Width, size.Height, n, testkit.EncodeLines(f.Live))
+		}
+	}
+	for _, f := range h.term.frames[before:] {
+		if len(f.Scrollback) != 0 {
+			t.Fatalf("a resize appended to scrollback: %s", testkit.EncodeLines(f.Scrollback))
+		}
 	}
 }
 

@@ -1,9 +1,5 @@
 package eventlog_test
 
-// Service-tier tests. The store's own contracts (NID assignment, partition
-// creation, the acceptance window, workspace isolation, prune) live with the
-// store, in internal/store/runtimetypes/events_test.go.
-
 import (
 	"context"
 	"encoding/json"

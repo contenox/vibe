@@ -18,8 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupHITLDB opens a fresh SQLite-backed Store at a temp path. The path
-// lets reopenHITLDB simulate a `contenox serve` restart.
 func setupHITLDB(t *testing.T) (context.Context, runtimetypes.Store, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -30,8 +28,6 @@ func setupHITLDB(t *testing.T) (context.Context, runtimetypes.Store, string) {
 	return ctx, runtimetypes.New(db.WithoutTransaction()), dbPath
 }
 
-// reopenHITLDB opens a fresh DBManager/Store over the same on-disk file; no
-// in-memory state (including a service's pending map) survives.
 func reopenHITLDB(t *testing.T, dbPath string) (context.Context, runtimetypes.Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -41,15 +37,11 @@ func reopenHITLDB(t *testing.T, dbPath string) (context.Context, runtimetypes.St
 	return ctx, runtimetypes.New(db.WithoutTransaction())
 }
 
-// newDurableService builds a Service over a real Store so
-// RequestApproval/Respond/SweepExpired are durable.
 func newDurableService(t *testing.T, store runtimetypes.Store) hitlservice.Service {
 	t.Helper()
 	return hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()), testTenant, store, libtracker.NoopTracker{}, "")
 }
 
-// signalSink forwards each event's ApprovalID to a channel — a
-// synchronization point since the row is committed before publish.
 type signalSink struct {
 	ids chan<- string
 }
@@ -116,7 +108,6 @@ func TestUnit_RequestApproval_SurvivesRestartAndIsAnswerableAfterward(t *testing
 	require.NoError(t, err)
 	require.Equal(t, runtimetypes.HITLApprovalPending, pending.State)
 
-	// Simulate the old process exiting mid-ask before anyone answers.
 	cancel()
 	select {
 	case err := <-result:
@@ -125,7 +116,6 @@ func TestUnit_RequestApproval_SurvivesRestartAndIsAnswerableAfterward(t *testing
 		t.Fatal("RequestApproval did not return after its context was cancelled")
 	}
 
-	// "Restart": a fresh DBManager/Store/Service over the same on-disk file.
 	ctx2, store2 := reopenHITLDB(t, dbPath)
 	svc2 := newDurableService(t, store2)
 

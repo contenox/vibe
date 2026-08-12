@@ -2,12 +2,7 @@ package agentservice
 
 import "github.com/contenox/contenox/internal/kernel/taskengine"
 
-// trimHistoryChunked enforces the HistoryTrim message budget (never
-// exceeded) while keeping the kept prefix byte-identical across turns until
-// it must move, so provider prompt caches stay warm: over budget, it cuts to
-// budget minus one chunk (25%) rather than to the budget exactly. Leading
-// system messages (AGENTS.md project context) are pinned and dropped last;
-// the kept tail never opens on an orphaned "tool" message.
+// trimHistoryChunked enforces the HistoryTrim message budget, cutting to budget minus one chunk (25%) so the kept prefix stays byte-identical across turns until it must move; leading system messages are pinned and the kept tail never opens on an orphaned "tool" message.
 func trimHistoryChunked(history []taskengine.Message, budget int) []taskengine.Message {
 	if budget <= 0 || len(history) <= budget {
 		return history
@@ -18,8 +13,7 @@ func trimHistoryChunked(history []taskengine.Message, budget int) []taskengine.M
 		pinned++
 	}
 	if pinned >= budget {
-		// Degenerate: pinned alone fills the budget; fall back to the plain
-		// window so budget still wins and the newest turns survive.
+		// pinned alone fills the budget: fall back to the plain window so budget still wins
 		return history[len(history)-budget:]
 	}
 
@@ -33,7 +27,7 @@ func trimHistoryChunked(history []taskengine.Message, budget int) []taskengine.M
 	}
 
 	keepTail := target - pinned
-	// Shrink until the tail doesn't open on an orphaned tool-result.
+	// shrink until the tail doesn't open on an orphaned tool-result
 	for keepTail > 1 && history[len(history)-keepTail].Role == "tool" {
 		keepTail--
 	}

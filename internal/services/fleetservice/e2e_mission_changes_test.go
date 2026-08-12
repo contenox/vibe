@@ -19,8 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// missionChangesChain writes two files (root and a subdirectory) via
-// local_fs and files a mission_report so the turn is not silent.
 const missionChangesChain = `{
   "id": "e2e-mission-changes",
   "tasks": [
@@ -72,8 +70,6 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	// A model must be configured even though the chain resolves none; the
-	// fake name fails loudly on any accidental model call.
 	runContenox(t, bin, "config", "set", "default-model", "fake-e2e-model-does-not-exist")
 
 	chainPath := filepath.Join(contenoxDir, "mission-changes-chain.json")
@@ -95,10 +91,7 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	missions := missionservice.New(db)
 	svc := New(kernel, agents, missions, nil, tmpHome, libtracker.NoopTracker{})
 
-	// The unit's workspace: local_fs roots every write here. It is $HOME
-	// deliberately: this unit is an external agent, spawned inside the agent
-	// sandbox whose only writable root is this cwd, and it must also reach
-	// its own $HOME/.contenox/local.db to boot at all.
+	// missionCwd is $HOME deliberately: the agent sandbox's only writable root is this cwd, and the unit must also reach $HOME/.contenox/local.db here to boot.
 	missionCwd := tmpHome
 
 	result, err := svc.Dispatch(ctx, DispatchRequest{
@@ -110,13 +103,10 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.NoError(t, err, "dispatch stderr:\n%s", stderr.String())
 	require.NotEmpty(t, result.MissionID)
 
-	// The attention-layer service under test, reading the kernel journal via
-	// the SessionJournal accessor.
 	reader, ok := kernel.(missionchanges.SessionJournalReader)
 	require.True(t, ok, "the concrete kernel Manager must satisfy SessionJournalReader")
 	changesSvc := missionchanges.New(missions, reader)
 
-	// Poll until both files have been journaled (the first turn runs detached).
 	var changes *missionchanges.Changes
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
@@ -130,15 +120,12 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.GreaterOrEqualf(t, len(changes.Files), 2,
 		"the unit must have journaled two changed files.\nstderr:\n%s", stderr.String())
 
-	// --- Scenario 1: changed files, status, scope (all from real journaled diffs) ---
-
 	alpha := requireChangedFileWithSuffix(t, changes.Files, "/alpha.txt")
 	bravo := requireChangedFileWithSuffix(t, changes.Files, "/sub/bravo.txt")
 
 	require.Equal(t, missionchanges.StatusAdded, alpha.Status, "alpha.txt was created by the mission")
 	require.Equal(t, missionchanges.StatusAdded, bravo.Status, "bravo.txt was created by the mission")
 
-	// first OldText / last NewText for alpha's real write.
 	diff, err := changesSvc.Diff(ctx, result.MissionID, alpha.Path)
 	require.NoError(t, err)
 	require.Equal(t, "", diff.Original, "alpha.txt did not exist before the mission (first OldText empty)")
@@ -148,12 +135,8 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.GreaterOrEqual(t, changes.Scope.Files, 2, "at least alpha and bravo are touched")
 	require.GreaterOrEqual(t, changes.Scope.Dirs, 2, "root and sub/ are two distinct top-level dirs")
 
-	// Before the extra read, alpha and bravo are one edit each — equal DOI.
 	require.Equal(t, alpha.Score, bravo.Score, "one edit each until an interaction differentiates them")
 
-	// --- Scenario 1b: edit-weighted ordering via a real-shaped read of alpha ---
-	// Inject a read of alpha's path; alpha now carries edit+read and must
-	// lead the ordered changed-files list.
 	require.NoError(t, kernel.DeliverToSession(ctx,
 		libacp.SessionID(result.SessionID),
 		libacp.SessionNotification{Update: libacp.SessionUpdate{
@@ -173,10 +156,6 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.Equal(t, rankedAlpha.Path, ranked.Files[0].Path,
 		"the highest-DOI file must lead the ordered changed-files list")
 
-	// --- Scenario 2: scope anomaly from an out-of-cwd touch ---
-
-	// A path in a different tree than the mission cwd, the wander a
-	// derailed unit makes.
 	outsidePath := filepath.Join(t.TempDir(), "wander.txt")
 	require.NoError(t, kernel.DeliverToSession(ctx,
 		libacp.SessionID(result.SessionID),
@@ -192,13 +171,10 @@ func TestFleetService_E2E_MissionChanges(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, after.Scope.Anomaly, "a touched path outside the mission cwd must trip scopeAnomaly")
 	require.Contains(t, after.Scope.OutsidePaths, outsidePath, "the wander path must be sampled")
-	// The real changed files survive the anomaly — advice, not a gate.
 	requireChangedFileWithSuffix(t, after.Files, "/alpha.txt")
 	requireChangedFileWithSuffix(t, after.Files, "/sub/bravo.txt")
 }
 
-// requireChangedFileWithSuffix finds the one changed file whose absolute path ends
-// with suffix (the diff paths are cwd-absolute, so tests match by suffix).
 func requireChangedFileWithSuffix(t *testing.T, files []missionchanges.ChangedFile, suffix string) missionchanges.ChangedFile {
 	t.Helper()
 	for _, f := range files {

@@ -28,7 +28,7 @@ var ErrAttentionUnanswered = errors.New("hitlservice: attention ask went unanswe
 // AttentionRequest is one unit's question for a human — narrower than
 // ApprovalRequest: no policy verdict, diff, or args.
 type AttentionRequest struct {
-	// Summary is the one-line question. Required.
+	// Summary is the one-line question; required.
 	Summary string
 	// Detail is the optional longer form — context the operator needs to answer.
 	Detail string
@@ -39,12 +39,10 @@ type AttentionRequest struct {
 	AgentName  string
 
 	// OnRaised, when set, is called with the ask's id once the row exists and
-	// before the wait begins, so a caller can announce the question
-	// elsewhere. Runs inline: keep it cheap and non-blocking.
+	// before the wait begins; runs inline, so keep it cheap and non-blocking.
 	OnRaised func(askID string)
 
-	// AskID, when set, is the durable row's ID (mirrors the approval
-	// invariant row ID == tool-call ID). Empty generates a fresh uuid.
+	// AskID, when set, is the durable row's ID; empty generates a fresh uuid.
 	AskID string
 
 	// ParkWindow, when > 0, bounds how long RequestAttention blocks before
@@ -83,9 +81,7 @@ func AnswerOf(row *runtimetypes.HITLApproval) string {
 
 // RequestAttention records a unit's question as a durable ask and blocks
 // until an operator answers it, the serve-level ceiling expires it, or ctx
-// ends — returning the operator's own words. It reuses the permission ask's
-// machinery (same durable row, pending-waiter map, expiry sweep); the only
-// difference is that its answer is text.
+// ends, returning the operator's own words.
 func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, sink taskengine.TaskEventSink) (string, error) {
 	if s.approvals == nil {
 		return "", fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
@@ -100,7 +96,6 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		askID = uuid.NewString()
 	}
 	now := time.Now().UTC()
-	// No rule produced this ask, so it is bounded by the serve-level ceiling.
 	timeout := s.ceiling()
 
 	row := &runtimetypes.HITLApproval{
@@ -108,15 +103,13 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		ToolsName:   AttentionToolsName,
 		ToolName:    AttentionToolName,
 		ArgsSummary: summary,
-		// OnTimeout is "deny": nobody answered. The caller's own fallback
-		// (a blocker report) preserves the question.
-		OnTimeout:  string(ActionDeny),
-		State:      runtimetypes.HITLApprovalPending,
-		InstanceID: req.InstanceID,
-		SessionID:  req.SessionID,
-		AgentName:  req.AgentName,
-		CreatedAt:  now,
-		ExpiresAt:  now.Add(timeout),
+		OnTimeout:   string(ActionDeny),
+		State:       runtimetypes.HITLApprovalPending,
+		InstanceID:  req.InstanceID,
+		SessionID:   req.SessionID,
+		AgentName:   req.AgentName,
+		CreatedAt:   now,
+		ExpiresAt:   now.Add(timeout),
 	}
 	if detail := strings.TrimSpace(req.Detail); detail != "" {
 		// The long form rides the Diff column, the row's one free-text field.
@@ -145,7 +138,6 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 		s.mu.Unlock()
 	}()
 
-	// Same event a permission ask publishes, so a live client sees it immediately.
 	if sink != nil {
 		ev := taskengine.NewTaskEvent(ctx, taskengine.TaskEventApprovalRequested)
 		ev.ApprovalID = askID
@@ -158,16 +150,11 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// The wait watches the durable row as well as the in-process channel: the
-	// unit runs in a different process than the operator's API server,
-	// sharing only the store. The channel still wins when raiser and
-	// answerer are the same process.
+	// Watches the durable row as well as the in-process channel: the unit may run in a different process than the answerer.
 	poll := time.NewTicker(attentionPollInterval)
 	defer poll.Stop()
 
-	// After ParkWindow elapses unanswered, the caller gets the typed pending
-	// error instead of holding a goroutine for the whole ceiling. A nil
-	// channel arm never fires (ParkWindow unset).
+	// A nil channel arm never fires: unset ParkWindow disables the typed-pending-error path below.
 	var park <-chan time.Time
 	if req.ParkWindow > 0 {
 		park = time.After(req.ParkWindow)
@@ -210,21 +197,14 @@ func (s *service) RequestAttention(ctx context.Context, req AttentionRequest, si
 	}
 }
 
-// attentionPollInterval is how often a parked unit re-reads its ask row for
-// an answer written by another process.
 const attentionPollInterval = time.Second
 
 // Answer resolves an attention ask with the operator's text, waking the unit
-// parked on it. It refuses a permission ask by design.
+// parked on it; refuses a permission ask by design.
 func (s *service) Answer(ctx context.Context, askID, text string) error {
 	return s.answerAttention(ctx, askID, text, "", nil)
 }
 
-// answerAttention is the shared body of Answer and AnswerAsAgent, differing
-// only in the actor recorded on the durable row. bound, when non-nil, makes
-// the resolve conditional on the ask's mission still having budget left (see
-// AnswerAsAgentBounded); nil is the unconditional human path, byte-identical
-// to what it always did.
 func (s *service) answerAttention(ctx context.Context, askID, text, by string, bound *int) error {
 	if s.approvals == nil {
 		return fmt.Errorf("hitlservice: durable approval store not configured; pass a runtimetypes.Store-backed store to New/NewWithDefaultPolicy")
@@ -243,8 +223,7 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string, b
 		return fmt.Errorf("hitlservice: ask %s is a permission request (%s.%s), which is answered approve/deny, not with text",
 			askID, row.ToolsName, row.ToolName)
 	}
-	// Same ordering gate as resolve(): an answer for a checkpointed run is
-	// one-shot, so a process that cannot resume must not record it.
+	// Same ordering gate as resolve(): a process that cannot resume must not record a checkpointed run's one-shot answer.
 	if err := s.requireResumerForVerdict(ctx, askID); err != nil {
 		return err
 	}
@@ -275,8 +254,7 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string, b
 		if getErr != nil {
 			return fmt.Errorf("hitlservice: look up ask %s: %w", askID, getErr)
 		}
-		// Still pending means the row itself was writable and the count
-		// predicate is what refused — reachable only under a bound.
+		// Still pending means the row was writable and the count predicate is what refused — reachable only under a bound.
 		if current.State == runtimetypes.HITLApprovalPending {
 			return ErrAgentAnswerBoundSpent
 		}
@@ -298,8 +276,7 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string, b
 		return nil
 	}
 
-	// Waiter gone: the asking run parked past its window and released its
-	// process. Run the resume hook with resolve()'s same contract.
+	// Waiter gone: the asking run parked past its window; run the resume hook with resolve()'s same contract.
 	if hook != nil {
 		if err := hook(ctx, askID); err != nil && !errors.Is(err, ErrNoCheckpoint) {
 			return fmt.Errorf("hitlservice: answer for ask %s recorded, but resuming its suspended run failed: %w", askID, err)
@@ -308,43 +285,29 @@ func (s *service) answerAttention(ctx context.Context, askID, text, by string, b
 	return nil
 }
 
-// answeredByAgent marks a resolution written by a supervising agent rather than a human.
 const answeredByAgent = "agent"
 
-// agentResolutionLike is the SQL LIKE pattern matching a resolution that
-// records a non-human actor: approvalResolution.AnsweredBy is omitempty, so
-// the key exists only on an agent answer, and a human answer's text cannot
-// forge it (json.Marshal escapes an embedded quote to \", which the pattern's
-// literal quotes then miss). The Go-side twin is AnsweredByOf; both must agree
-// or the durable count and the conditional write would disagree.
 const agentResolutionLike = `%"answeredBy":%`
 
 // AnswerAsAgent resolves an attention ask exactly as Answer does, but
-// records that an agent answered — the actor AgentAnswerCount counts
-// against the envelope's cap. Enforces no cap itself; see
-// AnswerAsAgentWithinBounds.
+// records that an agent answered; enforces no cap itself.
 func (s *service) AnswerAsAgent(ctx context.Context, askID, text string) error {
 	return s.answerAttention(ctx, askID, text, answeredByAgent, nil)
 }
 
 // AnswerAsAgentNamed is AnswerAsAgent with the answering agent's name as the
-// recorded actor, so the durable row shows which agent answered, not only
-// that one did. A blank name degrades to the generic marker. Counts against
-// the envelope's cap exactly as AnswerAsAgent does.
+// recorded actor; a blank name degrades to the generic marker.
 func (s *service) AnswerAsAgentNamed(ctx context.Context, askID, agentName, text string) error {
 	return s.answerAttention(ctx, askID, text, agentActor(agentName), nil)
 }
 
 // AnswerAsAgentBounded implements Service: the same write AnswerAsAgentNamed
-// makes, but conditional on the ask's mission holding fewer than max
-// agent-answered asks — counted by the database inside the same statement, so
-// concurrent answers in this process or another cannot together overrun max.
+// makes, but conditional on the mission holding fewer than max
+// agent-answered asks, counted atomically.
 func (s *service) AnswerAsAgentBounded(ctx context.Context, askID, agentName, text string, max int) error {
 	return s.answerAttention(ctx, askID, text, agentActor(agentName), &max)
 }
 
-// agentActor is the recorded actor for an agent answer: the agent's name, or
-// the generic marker when it is blank.
 func agentActor(agentName string) string {
 	name := strings.TrimSpace(agentName)
 	if name == "" {
@@ -400,8 +363,6 @@ func (s *service) AgentAnswerCount(ctx context.Context, missionID string) (int, 
 		if !IsAttentionAsk(row) {
 			continue
 		}
-		// Any recorded non-human actor counts — the generic "agent" marker or
-		// a named agent; a human answer records no actor at all.
 		if AnsweredByOf(row) != "" {
 			count++
 		}
@@ -409,5 +370,4 @@ func (s *service) AgentAnswerCount(ctx context.Context, missionID string) (int, 
 	return count, nil
 }
 
-// missionAskScanLimit bounds the per-mission ask scan.
 const missionAskScanLimit = 200

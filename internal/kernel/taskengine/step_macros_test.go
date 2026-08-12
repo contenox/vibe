@@ -11,9 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stepRecordingExec records the SystemInstruction it sees on each TaskExec
-// invocation for the named task. It delegates the actual transition value to a
-// caller-supplied sequence so tests can drive multi-step loops.
 type stepRecordingExec struct {
 	watchTaskID string
 	seenSystem  []string
@@ -41,18 +38,14 @@ func (r *stepRecordingExec) TaskExec(
 	return input, dataType, trans, nil
 }
 
-// TestUnit_StepMacro_EdgeCountGrowsAcrossLoopIterations verifies that
-// {{edge_count:from->to}} is re-evaluated on each task step against the live
-// edge counters. This is the foundation for putting a dynamic budget readout
-// in a single chat task's system_instruction — eliminating the need for a
-// separate recovery_chat task with a frozen "10 of 20" string.
+// TestUnit_StepMacro_EdgeCountGrowsAcrossLoopIterations verifies {{edge_count:from->to}} is re-evaluated against live edge counters on each task step.
 func TestUnit_StepMacro_EdgeCountGrowsAcrossLoopIterations(t *testing.T) {
 	rec := &stepRecordingExec{
 		watchTaskID: "chat",
 		transitions: []string{
-			"tool_call", "", // round 1: chat -> run_tools, run_tools -> chat
-			"tool_call", "", // round 2
-			"done", // round 3: chat default-branches to end
+			"tool_call", "",
+			"tool_call", "",
+			"done",
 		},
 	}
 
@@ -101,9 +94,7 @@ func TestUnit_StepMacro_EdgeCountGrowsAcrossLoopIterations(t *testing.T) {
 	}, rec.seenSystem, "the macro must reflect the live edge count at each entry to chat — without this, a single-agent dynamic budget prompt is impossible and we are forced back into the recovery_chat split")
 }
 
-// TestUnit_StepMacro_NoMacroIsZeroCost is a sanity check that the fast-path
-// short-circuit kicks in for task strings that don't reference the macro, so
-// existing chains pay no per-step regex cost.
+// TestUnit_StepMacro_NoMacroIsZeroCost verifies the fast-path short-circuit skips the regex when the macro marker is absent.
 func TestUnit_StepMacro_NoMacroIsZeroCost(t *testing.T) {
 	rec := &stepRecordingExec{watchTaskID: "chat"}
 	env, err := taskengine.NewEnv(
@@ -138,10 +129,7 @@ func TestUnit_StepMacro_NoMacroIsZeroCost(t *testing.T) {
 	require.Equal(t, []string{original}, rec.seenSystem, "the macro pass must not mutate plain strings")
 }
 
-// TestUnit_StepMacro_UnknownEdgeIsZero verifies the macro resolves to 0 when
-// the referenced edge has never been traversed (e.g. a chain author typo, or a
-// branch that was about to be taken but isn't yet). Better to read "0" than
-// surface a hard error mid-prompt, which would derail the turn.
+// TestUnit_StepMacro_UnknownEdgeIsZero verifies the macro resolves to 0 when the referenced edge has never been traversed.
 func TestUnit_StepMacro_UnknownEdgeIsZero(t *testing.T) {
 	rec := &stepRecordingExec{watchTaskID: "chat"}
 	env, err := taskengine.NewEnv(

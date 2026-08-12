@@ -1,14 +1,5 @@
 package agentservice_test
 
-// A run that parks on a human approval and is later resumed must resolve a
-// gated tool's relative path against the SESSION's own workspace root, never
-// against whichever process happens to answer the approval. This reproduces
-// the walkaway bug end to end: instance "a" is the live session (its
-// cwdResolver stands in for the ACP transport reporting the VS Code
-// workspace); instance "b" is a completely different process — a different
-// cwdResolver standing in for e.g. `contenox approvals respond` run from an
-// unrelated shell — answering the same durable approval after "a" is gone.
-
 import (
 	"context"
 	"encoding/json"
@@ -30,10 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fsE2EInstance is newE2EInstance's local_fs twin: the gated tool is the real
-// LocalFSTools (allowedDir "", exactly how the ACP toolset builds it — see
-// acp_toolset.go), so this test exercises the actual path-resolution code a
-// resumed write_file runs through, not a stand-in.
 type fsE2EInstance struct {
 	db    libdb.DBManager
 	store runtimetypes.Store
@@ -53,9 +40,7 @@ func newFSE2EInstance(t *testing.T, dbPath string, parkWindow time.Duration, cwd
 	recorder, ok := hitl.(hitlservice.ApprovalRecorder)
 	require.True(t, ok)
 
-	// db=nil: no session, so the read-before-write guard degrades to a no-op
-	// (fs.go's documented behaviour) — irrelevant here since write_file
-	// targets a file that does not exist yet.
+	// db=nil degrades the read-before-write guard to a no-op; irrelevant here since write_file targets a file that does not exist yet
 	inner := localtools.NewLocalFSToolsWith("", nil, nil, localtools.LocalFSToolsName, cwdResolver)
 	wrapper := localtools.NewHITLWrapper(inner, awayAsk, approveAllPolicy{ApprovalRecorder: recorder, Service: hitl}, libtracker.NoopTracker{})
 	wrapper.SetParkWindow(parkWindow)
@@ -95,9 +80,6 @@ func fsE2EChain() *taskengine.TaskChainDefinition {
 	}
 }
 
-// fsE2EInput asks for write_file on a RELATIVE path — the exact shape of the
-// bug's reproduction (packages/vscode/scripts/run-walkaway-acceptance.sh):
-// artifacts/<file>, never an absolute path.
 func fsE2EInput(t *testing.T, relPath, content string) taskengine.ChatHistory {
 	t.Helper()
 	args, err := json.Marshal(map[string]string{"path": relPath, "content": content})
@@ -110,12 +92,7 @@ func fsE2EInput(t *testing.T, relPath, content string) taskengine.ChatHistory {
 	}}
 }
 
-// TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResumerCwd
-// is the walkaway regression: a write_file call gated past the fast window
-// suspends and checkpoints; the verdict lands in a DIFFERENT process (a
-// different cwdResolver, standing in for a different working directory) —
-// the resumed write must still land under the ORIGINAL session's workspace
-// root, never under whatever the resuming process's own cwdResolver reports.
+// TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResumerCwd verifies a write_file call gated past the fast window resumes in a different process yet still writes under the original session's workspace root, never the resumer's own cwd.
 func TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResumerCwd(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fs-walkaway.db")
 	sessionWorkspace := t.TempDir()
@@ -124,11 +101,6 @@ func TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResum
 	const content = "hello from across the restart"
 	ctx := context.Background()
 
-	// "a" is the live session: its cwdResolver reports the session's own
-	// workspace, exactly as acpsvc.NewACPCwdResolver does for a live ACP
-	// connection. The Prompt call carries the session's cwd on ctx too (see
-	// prompt.go / native_turn.go / chat_cmd.go), which is what the checkpoint
-	// persists.
 	a := newFSE2EInstance(t, dbPath, 20*time.Millisecond, func(context.Context) string { return sessionWorkspace })
 	promptCtx := vfs.WithSessionCwd(ctx, sessionWorkspace)
 	resp, err := a.agent.Prompt(promptCtx, agentservice.PromptRequest{
@@ -144,13 +116,6 @@ func TestSystem_S6Gate_ResumeAcrossProcesses_WritesUnderSessionWorkspaceNotResum
 	require.NoFileExists(t, filepath.Join(sessionWorkspace, relPath), "must not exist before the verdict lands")
 	a.close()
 
-	// "b" is a different process entirely: its own cwdResolver reports a
-	// DIFFERENT directory (standing in for e.g. a shell in
-	// packages/vscode answering `contenox approvals respond`), and it never
-	// put the session's workspace on ctx — exactly the CLI resume path
-	// (approvals_cmd.go / engine.go), which builds local_fs with no
-	// cwdResolver at all in the real code; a live one here only makes this
-	// assertion strictly harder to satisfy by accident.
 	b := newFSE2EInstance(t, dbPath, 20*time.Millisecond, func(context.Context) string { return resumerWrongDir })
 	defer b.close()
 

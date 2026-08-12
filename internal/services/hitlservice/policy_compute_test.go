@@ -10,13 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These cover the compute half of the envelope schema (ComputeBounds): a
-// well-formed block parses and reads back exactly, an absent one is
-// unbounded, and the validate/deny-unknown-fields matrix rejects malformed
-// input, falling back to the built-in default policy on Evaluate.
-
-// boundsReader constructs a service over dir and returns it as a
-// ComputeBoundsReader (the optional capability a fleet seam type-asserts).
 func boundsReader(t *testing.T, dir, fallback string) hitlservice.ComputeBoundsReader {
 	t.Helper()
 	svc := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(dir), testTenant, nopKVReader{}, libtracker.NoopTracker{}, fallback)
@@ -82,11 +75,9 @@ func TestUnit_ComputeBounds_PauseAskIsRejected(t *testing.T) {
 func TestUnit_ComputeBounds_ValidateMatrix_RejectsMalformed(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"negative maxTurns":     `{"rules":[],"compute":{"maxTurns":-1}}`,
-		"negative maxToolCalls": `{"rules":[],"compute":{"maxToolCalls":-5}}`,
-		"negative maxTokens":    `{"rules":[],"compute":{"maxTokens":-100}}`,
-		// Above 1 names a turn the dispatcher never takes; accepting it is how
-		// a shipped preset came to declare a ceiling nothing could reach.
+		"negative maxTurns":                    `{"rules":[],"compute":{"maxTurns":-1}}`,
+		"negative maxToolCalls":                `{"rules":[],"compute":{"maxToolCalls":-5}}`,
+		"negative maxTokens":                   `{"rules":[],"compute":{"maxTokens":-100}}`,
 		"maxTurns above the two-turn dispatch": `{"rules":[],"compute":{"maxTurns":2}}`,
 		"maxTurns far above":                   `{"rules":[],"compute":{"maxTurns":1000000}}`,
 		"maxToolCalls over cap":                `{"rules":[],"compute":{"maxToolCalls":999999999}}`,

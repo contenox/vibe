@@ -1,10 +1,5 @@
 package runtimetypes
 
-// Workspace semantic-index storage: the index config (one immutable
-// generation) and the chunks that belong to it, plus an FTS5 lexical mirror
-// that narrows a search before vectors rank it. Same store-interface style as
-// jobqueue.go/kv.go/checkpoints.go.
-
 import (
 	"context"
 	"database/sql"
@@ -18,39 +13,16 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// ErrWorkspaceIndexConfigLive refuses deletion of the config a workspace is
-// currently searching against. Superseded generations are reapable; the live one
-// is not, because dropping it silently turns every search into "no index".
+// ErrWorkspaceIndexConfigLive refuses deletion of the workspace's currently active index config.
 var ErrWorkspaceIndexConfigLive = errors.New("workspace index config is live; create a new config and cut over instead")
 
-// ErrVectorDimensionMismatch is returned when a vector's length disagrees with
-// the dimension recorded on its index config. Enforced on both write and read:
-// a vector from a different embedding model must never be scored silently.
+// ErrVectorDimensionMismatch is returned when a vector's length disagrees with its index config's dimension.
 var ErrVectorDimensionMismatch = errors.New("vector dimension does not match the index config")
 
-// ErrWorkspaceChunkConfigMixed refuses a batch whose chunks do not all belong to
-// one index config. The batch is validated against a single config's dimension,
-// so a mixed batch would smuggle unvalidated vectors past that check.
+// ErrWorkspaceChunkConfigMixed refuses a batch whose chunks do not all belong to one index config.
 var ErrWorkspaceChunkConfigMixed = errors.New("workspace chunk batch spans multiple index configs")
 
-// WorkspaceIndexConfig is one immutable generation of a workspace's retrieval
-// index (table workspace_index_configs): which embedding model produced its
-// vectors, how wide those vectors are, how the files were chunked, and which
-// resolved root was walked.
-//
-// Create-once: there is no Update method and no way to delete the live config.
-// Changing the embedding model creates a new config and cuts over (the newest
-// config for a workspace is the active one — see GetActiveWorkspaceIndexConfig),
-// which prevents vectors from two different models silently sharing one table.
-//
-// Root is recorded because an index is an index of a specific tree: search
-// needs it to resolve a hit's path back to a file for the staleness check, and
-// it makes "you indexed a different directory under this workspace id" visible.
-//
-// Dimension == 0 declares a LEXICAL-ONLY generation: built with no embedding
-// model, every chunk carries an empty vector and only the FTS5 mirror can be
-// ranked. It is a first-class state, not a broken index — a workspace with no
-// `default-embed-model` still gets keyword retrieval instead of nothing.
+// WorkspaceIndexConfig is one immutable generation of a workspace's retrieval index (table workspace_index_configs); Dimension 0 declares a lexical-only generation.
 type WorkspaceIndexConfig struct {
 	ID            string    `json:"id"`
 	WorkspaceID   string    `json:"workspaceId"`
@@ -63,14 +35,7 @@ type WorkspaceIndexConfig struct {
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
-// WorkspaceChunk is one indexed span of one file (table workspace_chunks).
-//
-// ContentSHA digests the whole file, not the chunk text, so one column answers
-// both "did this file change since indexing" and "is this hit still valid" — a
-// per-chunk digest would answer neither without re-chunking the file first.
-//
-// Vector is a little-endian float32 blob; its length must match the owning
-// config's Dimension (see ErrVectorDimensionMismatch).
+// WorkspaceChunk is one indexed span of one file (table workspace_chunks); Vector is a little-endian float32 blob whose length must match the owning config's Dimension.
 type WorkspaceChunk struct {
 	ID          string    `json:"id"`
 	ConfigID    string    `json:"configId"`
@@ -82,37 +47,24 @@ type WorkspaceChunk struct {
 	Text        string    `json:"text"`
 	Vector      []float32 `json:"-"`
 	CreatedAt   time.Time `json:"createdAt"`
-	// Score is the lexical prefilter's bm25 rank, populated by
-	// SearchWorkspaceChunks and zero elsewhere. It is NOT persisted: it is a
-	// property of a query, not of the chunk.
+	// Score is the lexical prefilter's bm25 rank, populated by SearchWorkspaceChunks and not persisted.
 	Score float64 `json:"score,omitempty"`
 }
 
-// WorkspaceIndexedFile is the (path, sha) pair the incremental re-index diffs
-// against the working tree — the smallest projection that answers "which files
-// moved", without loading a single vector.
+// WorkspaceIndexedFile is the (path, sha) pair the incremental re-index diffs against the working tree.
 type WorkspaceIndexedFile struct {
 	Path       string `json:"path"`
 	ContentSHA string `json:"contentSha"`
 	Chunks     int    `json:"chunks"`
 }
 
-// workspaceIndexConfigColumns / workspaceChunkColumns are the single projections
-// every read binds, in scan order — spelled once so a new column cannot be added
-// to one query and forgotten in another (same idiom as chainCheckpointColumns).
 const workspaceIndexConfigColumns = `id, workspace_id, root, embed_model, embed_provider, dimension, chunk_tokens, chunk_overlap_lines, created_at`
 
 const workspaceChunkColumns = `id, config_id, workspace_id, path, start_line, end_line, content_sha, text, vector, created_at`
 
-// workspaceChunkInsertBatchMax bounds one AppendWorkspaceChunks call. SQLite's
-// default host-parameter ceiling is 999; at 10 columns per chunk that is 99
-// rows, so 90 leaves headroom and keeps the multi-row INSERT one statement.
 const workspaceChunkInsertBatchMax = 90
 
-// EncodeVector serializes an embedding as a little-endian float32 blob. float32
-// halves the storage of float64 at a precision far below the noise floor of any
-// embedding model, and little-endian is fixed explicitly so a database file
-// stays readable if it is ever moved between architectures.
+// EncodeVector serializes an embedding as a little-endian float32 blob.
 func EncodeVector(vec []float32) []byte {
 	out := make([]byte, len(vec)*4)
 	for i, v := range vec {
@@ -121,9 +73,7 @@ func EncodeVector(vec []float32) []byte {
 	return out
 }
 
-// DecodeVector reverses EncodeVector, refusing any blob that is not exactly
-// dimension floats wide. dimension <= 0 means "do not check", used only where
-// the caller has no config in hand.
+// DecodeVector reverses EncodeVector, refusing any blob that is not exactly dimension floats wide; dimension <= 0 skips the check.
 func DecodeVector(blob []byte, dimension int) ([]float32, error) {
 	if len(blob)%4 != 0 {
 		return nil, fmt.Errorf("%w: blob of %d bytes is not a whole number of float32s", ErrVectorDimensionMismatch, len(blob))
@@ -143,8 +93,6 @@ func (s *store) CreateWorkspaceIndexConfig(ctx context.Context, cfg *WorkspaceIn
 	if cfg == nil {
 		return errors.New("workspace_index_configs: nil config")
 	}
-	// 0 is the lexical-only generation (see WorkspaceIndexConfig); negative is
-	// always a bug, never a mode.
 	if cfg.Dimension < 0 {
 		return fmt.Errorf("workspace_index_configs: create %s: dimension must not be negative, got %d", cfg.ID, cfg.Dimension)
 	}
@@ -181,9 +129,7 @@ func (s *store) GetWorkspaceIndexConfig(ctx context.Context, id string) (*Worksp
 	return &cfg, nil
 }
 
-// GetActiveWorkspaceIndexConfig returns the workspace's newest config, the one
-// searches run against: a rebuild under a different embedding model becomes
-// active the moment it's created, while prior generations stay readable until reaped.
+// GetActiveWorkspaceIndexConfig returns the workspace's newest config, the one searches run against.
 func (s *store) GetActiveWorkspaceIndexConfig(ctx context.Context, workspaceID string) (*WorkspaceIndexConfig, error) {
 	var cfg WorkspaceIndexConfig
 	err := s.Exec.QueryRowContext(ctx, `
@@ -267,12 +213,7 @@ func (s *store) DeleteWorkspaceIndexConfig(ctx context.Context, id string) error
 	return checkRowsAffected(result)
 }
 
-// AppendWorkspaceChunks inserts a batch of chunks and mirrors their text into
-// the FTS5 table in the same call, so the lexical index cannot drift from the
-// vector index. Every vector is checked against the owning config's dimension
-// before insert, refusing a vector from the wrong model at the store boundary;
-// under a lexical-only config (Dimension 0) that same check refuses any chunk
-// that carries a vector, so the two modes cannot be mixed in one generation.
+// AppendWorkspaceChunks inserts a batch of chunks and mirrors their text into the FTS5 table in the same call, checking every vector against the owning config's dimension.
 func (s *store) AppendWorkspaceChunks(ctx context.Context, chunks ...*WorkspaceChunk) error {
 	if len(chunks) == 0 {
 		return nil
@@ -332,9 +273,7 @@ func (s *store) AppendWorkspaceChunks(ctx context.Context, chunks ...*WorkspaceC
 	return nil
 }
 
-// ListWorkspaceIndexedFiles returns one row per indexed file with its recorded
-// content sha — the incremental re-index's whole input. Ordered by path so the
-// result is stable for tests and for progress output.
+// ListWorkspaceIndexedFiles returns one row per indexed file with its recorded content sha, ordered by path.
 func (s *store) ListWorkspaceIndexedFiles(ctx context.Context, configID string) ([]WorkspaceIndexedFile, error) {
 	rows, err := s.Exec.QueryContext(ctx, `
 		SELECT path, MIN(content_sha), COUNT(*)
@@ -361,8 +300,7 @@ func (s *store) ListWorkspaceIndexedFiles(ctx context.Context, configID string) 
 	return out, nil
 }
 
-// DeleteWorkspaceChunksForPaths drops every chunk of the named files, FTS mirror
-// included. This is what a changed file and a deleted file both go through.
+// DeleteWorkspaceChunksForPaths drops every chunk of the named files, FTS mirror included.
 func (s *store) DeleteWorkspaceChunksForPaths(ctx context.Context, configID string, paths ...string) error {
 	if len(paths) == 0 {
 		return nil
@@ -405,14 +343,7 @@ func (s *store) DeleteWorkspaceChunksForConfig(ctx context.Context, configID str
 	return nil
 }
 
-// SearchWorkspaceChunks is the lexical prefilter: FTS5 MATCH ordered by bm25,
-// capped at limit, so cosine ranking never has to scan the whole index. match
-// must be a valid FTS5 expression; callers quote every term from user input
-// (see workspaceindex.ftsMatchQuery) so nothing typed is query syntax.
-//
-// bm25() in SQLite returns a negative relevance (more negative = better), so
-// ascending order is best-first; Score carries it through unchanged for
-// diagnostics only — the vector stage does the real re-ranking.
+// SearchWorkspaceChunks is the lexical prefilter: FTS5 MATCH capped at limit, ordered ascending by bm25 since SQLite's bm25 is more-negative-is-better.
 func (s *store) SearchWorkspaceChunks(ctx context.Context, configID string, match string, limit int) ([]*WorkspaceChunk, error) {
 	if strings.TrimSpace(match) == "" {
 		return []*WorkspaceChunk{}, nil
@@ -441,9 +372,7 @@ func (s *store) SearchWorkspaceChunks(ctx context.Context, configID string, matc
 	return scanWorkspaceChunks(rows, cfg.Dimension, true)
 }
 
-// ScanWorkspaceChunks reads chunks in insertion order, capped at limit. It
-// backs the degraded path where the lexical prefilter matched nothing at all —
-// precisely the case semantic search exists for.
+// ScanWorkspaceChunks reads chunks in insertion order, capped at limit.
 func (s *store) ScanWorkspaceChunks(ctx context.Context, configID string, limit int) ([]*WorkspaceChunk, error) {
 	if limit > MAXLIMIT {
 		return nil, ErrLimitParamExceeded
@@ -478,10 +407,6 @@ func (s *store) CountWorkspaceChunks(ctx context.Context, configID string) (int6
 	return n, nil
 }
 
-// scanWorkspaceChunks materializes rows bound to workspaceChunkColumns,
-// optionally followed by a bm25 score. Every vector is decoded against the
-// config's dimension, so a row written under a different model surfaces as a
-// load error instead of a wrong answer.
 func scanWorkspaceChunks(rows *sql.Rows, dimension int, withScore bool) ([]*WorkspaceChunk, error) {
 	out := []*WorkspaceChunk{}
 	for rows.Next() {
@@ -510,9 +435,6 @@ func scanWorkspaceChunks(rows *sql.Rows, dimension int, withScore bool) ([]*Work
 	return out, nil
 }
 
-// placeholderGroup renders "($n, $n+1, ... $n+count-1)" for multi-row inserts —
-// the same construction AppendJobs uses, factored out because two statements
-// here need it.
 func placeholderGroup(start, count int) string {
 	holes := make([]string, count)
 	for i := range holes {
@@ -521,8 +443,6 @@ func placeholderGroup(start, count int) string {
 	return "(" + strings.Join(holes, ", ") + ")"
 }
 
-// prefixColumns qualifies a bare column projection with a table alias, so the
-// one canonical column list can also be used in a join.
 func prefixColumns(prefix, columns string) string {
 	parts := strings.Split(columns, ", ")
 	for i, p := range parts {

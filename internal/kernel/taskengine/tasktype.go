@@ -28,21 +28,14 @@ func (t TaskHandler) String() string {
 }
 
 // IsAssistantProseHandler reports whether a TaskEventStepChunk carrying this
-// handler's streamed output is user-visible assistant narration — text and
-// reasoning a chat surface should render into the reply — as opposed to
-// control flow that merely happens to stream (e.g. a route task's streamed
-// output is its routing label, not prose). A chunk this rejects is still
-// journaled, not dropped; every event translator consumes this judgement.
+// handler's streamed output is user-visible assistant narration.
 func IsAssistantProseHandler(handler string) bool {
 	return TaskHandler(handler) == HandleChatCompletion
 }
 
 // IsToolBearingHandler reports whether this handler already reports its own
-// work through the dedicated tool-call events (TaskEventToolCallPending /
-// TaskEventToolCall) or a chat surface's own tool rendering. Event
-// translators use it to suppress the generic step-lifecycle card
-// (TaskEventStepStarted / StepCompleted / StepFailed) for those handlers, so
-// one action is not double-rendered as both a step card and a tool card.
+// work through the dedicated tool-call events, so the generic step-lifecycle
+// card can be suppressed for it.
 func IsToolBearingHandler(handler string) bool {
 	switch TaskHandler(handler) {
 	case HandleExecuteToolCalls, HandleTools, HandleChatCompletion, HandleRoute:
@@ -53,22 +46,13 @@ func IsToolBearingHandler(handler string) bool {
 }
 
 // Transition-eval tokens are the control values a handler emits as its
-// transition "eval"; a TransitionBranch matches them via its When field (with
-// the default Operator, exact string equality). These are part of the DSL
-// contract — branch on these constants, not the model's free text:
-//
-//   - chat_completion        → TransitionToolCall (model requested tools) | TransitionExecuted (finished, no tool calls)
-//   - execute_tool_calls     → TransitionNoop (empty history) | TransitionNoCallsFound (model produced no tool calls) | TransitionToolsExecuted | TransitionFailed
-//   - tools                  → TransitionToolsExecuted | TransitionFailed (or, when OutputTemplate is set, its rendered text)
-//   - noop                   → TransitionNoop
-//
-// To branch on the model's actual text, use the `route` handler, whose eval IS
-// the model's chosen label.
+// transition eval, matched by a TransitionBranch's When field via exact
+// string equality; branch on these constants, not the model's free text (use
+// the `route` handler for that).
 const (
 	// TransitionExecuted: a chat_completion turn finished with no tool calls.
 	TransitionExecuted = "executed"
-	// TransitionToolCall: a chat_completion turn requested one or more tool
-	// calls. Snake_case to match the "tool_call" task-event kind.
+	// TransitionToolCall: a chat_completion turn requested one or more tool calls.
 	TransitionToolCall = "tool_call"
 	// TransitionNoop: the noop handler ran, or execute_tool_calls saw empty history.
 	TransitionNoop = "noop"
@@ -80,9 +64,8 @@ const (
 	TransitionFailed = "failed"
 )
 
-// DataType (un)marshals as its lowercase string name in both JSON and YAML.
-// All four methods route through String()/DataTypeFromString so the two
-// parsers never drift.
+// DataType (un)marshals as its lowercase string name in JSON and YAML,
+// routing through String()/DataTypeFromString.
 
 func (d DataType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.String())
@@ -131,32 +114,22 @@ type TaskTransition struct {
 // TransitionBranch defines a single possible path in the workflow,
 // selected when the task's output matches the specified condition.
 type TransitionBranch struct {
-	// Operator defines how to compare the task's transition eval to When. It is
-	// REQUIRED and must be one of SupportedOperators() — an empty or unknown
-	// operator is rejected at chain validation (at runtime it would never match,
-	// a silent dead branch). The comparison for equals/contains/starts_with/
-	// ends_with is byte-exact and CASE-SENSITIVE with no trimming — a trailing
-	// newline (common in multiline template literals) will not match. Only the
-	// `route` handler normalizes its answer.
+	// Operator defines how to compare the task's transition eval to When;
+	// required, must be one of SupportedOperators(), and is byte-exact and
+	// case-sensitive except for the `route` handler.
 	Operator OperatorTerm `yaml:"operator,omitempty" json:"operator,omitempty" example:"equals" openapi_include_type:"string"`
 
-	// When is the value this branch matches against the task's transition eval.
-	// What the eval is depends on the handler:
-	//   - chat_completion / execute_tool_calls / tools / noop → a control token,
-	//     one of the Transition* constants (e.g. "tool_call", "executed",
-	//     "tools_executed", "no_calls_found", "noop", "failed"). You CANNOT branch
-	//     on the model's free text here — use the `route` handler for that.
-	//   - route → the model's chosen label (one of the declared branch targets).
-	//   - edge_traversed_at_least → an integer threshold (see that operator).
+	// When is the value this branch matches against the task's transition
+	// eval; its meaning depends on the handler (a control token, or the
+	// `route` handler's chosen label).
 	When string `yaml:"when" json:"when" example:"tool_call"`
 
-	// Goto specifies the target task ID if this branch is taken.
-	// Leave empty or use taskengine.TermEnd to end the chain.
+	// Goto specifies the target task ID if this branch is taken; empty or
+	// taskengine.TermEnd ends the chain.
 	Goto string `yaml:"goto" json:"goto" example:"positive_response"`
 
-	// Edge identifies a graph edge "fromTaskID->toTaskID" whose traversal
-	// count is consulted by edge-state operators (e.g. edge_traversed_at_least).
-	// Required when Operator is one of those; ignored otherwise.
+	// Edge identifies a graph edge "fromTaskID->toTaskID" consulted by
+	// edge-state operators; required when Operator is one of those.
 	Edge string `yaml:"edge,omitempty" json:"edge,omitempty" example:"chat->run_tools"`
 }
 
@@ -169,16 +142,9 @@ const (
 	OpStartsWith OperatorTerm = "starts_with"
 	OpEndsWith   OperatorTerm = "ends_with"
 	OpDefault    OperatorTerm = "default"
-	// OpEdgeTraversedAtLeast fires when the edge specified by TransitionBranch.Edge
-	// (formatted "fromTaskID->toTaskID") has been traversed at least the integer
-	// in TransitionBranch.When times during the current chain run. Reads engine
-	// state, not task output. Use it to bound workflow loops:
-	//
-	//   { "operator": "edge_traversed_at_least",
-	//     "edge": "chat->run_tools", "when": "20", "goto": "summarise_failure" }
-	//
-	// Place this branch ahead of the normal loop branch so it intercepts before
-	// the next loop iteration fires.
+	// OpEdgeTraversedAtLeast fires when the edge in TransitionBranch.Edge has
+	// been traversed at least the TransitionBranch.When threshold times in the
+	// current chain run; reads engine state, not task output.
 	OpEdgeTraversedAtLeast OperatorTerm = "edge_traversed_at_least"
 )
 
@@ -218,11 +184,8 @@ func ToOperatorTerm(s string) (OperatorTerm, error) {
 
 // LLMExecutionConfig represents configuration for executing tasks using Large Language Models (LLMs).
 type LLMExecutionConfig struct {
-	// Model is the primary model: it is placed first in the candidate list and is
-	// the model used for token counting (see GetPrimaryModel). When both Model and
-	// Models are set, Model plus Models form the candidate set (Model first);
-	// the resolver then picks a reachable one — so set exactly Model for a single
-	// pinned model, or use Models for an explicit candidate pool.
+	// Model is the primary model, placed first in the candidate list and used
+	// for token counting; Model plus Models form the full candidate set.
 	Model string `yaml:"model" json:"model" example:"llama2:7b"`
 	// Models is an additional candidate pool, considered alongside Model.
 	Models []string `yaml:"models,omitempty" json:"models,omitempty" example:"[\"gpt-4\", \"gpt-3.5-turbo\"]"`
@@ -230,42 +193,34 @@ type LLMExecutionConfig struct {
 	// Providers supplies additional candidates.
 	Provider  string   `yaml:"provider,omitempty" json:"provider,omitempty" example:"ollama"`
 	Providers []string `yaml:"providers,omitempty" json:"providers,omitempty" example:"[\"ollama\", \"openai\"]"`
-	// Temperature is the sampling temperature; pointer so "unset" (nil) is
-	// distinguishable from an explicit 0.0. When set it is honored everywhere.
-	// When unset: chat_completion uses the provider default; the prompt/route
-	// handlers use 0.0 (route depends on deterministic single-label output).
+	// Temperature is the sampling temperature; nil means unset (provider
+	// default for chat_completion, 0.0 for prompt/route).
 	Temperature *float32 `yaml:"temperature,omitempty" json:"temperature,omitempty" example:"0.7"`
 	// Tools is the allowlist of registry tool names this task may invoke
-	// (client-passed tools are governed separately by PassClientsTools):
-	// absent/null/[] exposes none; ["*"] exposes all; ["a","b"] exposes only
-	// those names (unknown ones ignored); ["*","!name"] excludes name(s),
-	// meaningful only combined with "*".
+	// ("*" exposes all, "*","!name" excludes name(s)); client-passed tools are
+	// governed separately by PassClientsTools.
 	Tools []string `yaml:"tools,omitempty" json:"tools,omitempty" example:"[\"local_shell\", \"nws\"]"`
 	// HideTools suppresses specific tools by (namespaced) name from BOTH the
 	// registry tools selected via Tools and the client-passed tools.
 	HideTools []string `yaml:"hide_tools,omitempty" json:"hide_tools,omitempty" example:"[\"tool1\", \"tools_name1.tool1\"]"`
 	// ToolsPolicies carries per-tools policy overrides for this task (tools
-	// name -> policy key -> value), injected into the context before
-	// GetToolsForToolsByName so tools can render dynamic descriptions and
-	// enforce the policy at Exec time.
+	// name -> policy key -> value), injected into context before
+	// GetToolsForToolsByName.
 	ToolsPolicies    map[string]map[string]string `yaml:"tools_policies,omitempty" json:"tools_policies,omitempty"`
 	PassClientsTools bool                         `yaml:"pass_clients_tools" json:"pass_clients_tools"`
-	// Think controls reasoning mode: auto, off, minimal, low, medium, high,
-	// xhigh, or a boolean-style alias. Empty uses the provider default.
+	// Think controls reasoning mode (auto, off, minimal, low, medium, high,
+	// xhigh, or a boolean-style alias); empty uses the provider default.
 	Think string `yaml:"think,omitempty" json:"think,omitempty" example:"high"`
-	// MaxTokens caps the model's output tokens. Unset sends no explicit cap
-	// and never falls back to the chain's TokenLimit, which bounds the
-	// input+output window, not the output alone (conflating the two trips
-	// per-model output limits, e.g. Vertex Gemini 2.5 Pro's 65536 cap).
+	// MaxTokens caps the model's output tokens; unset sends no explicit cap
+	// and never falls back to the chain's TokenLimit, which bounds input+output.
 	MaxTokens *int `yaml:"max_tokens,omitempty" json:"max_tokens,omitempty" example:"8192"`
 	// MaxTokensTemplate stores a string max_tokens macro from chain JSON until
-	// MacroEnv expands it into MaxTokens. It is not emitted as a separate field.
+	// MacroEnv expands it into MaxTokens.
 	MaxTokensTemplate string `yaml:"-" json:"-"`
 	// Shift allows the context window to slide on overflow instead of erroring.
 	Shift bool `yaml:"shift,omitempty" json:"shift,omitempty"`
-	// RetryPolicy wraps the underlying chat/prompt call with classified retry
-	// (rate-limit / server-error / timeout) and an optional model fallback.
-	// Nil or zero-value disables retry — current default. See [llmretry.Do].
+	// RetryPolicy wraps the chat/prompt call with classified retry and an
+	// optional model fallback; nil disables retry.
 	RetryPolicy *llmretry.RetryPolicy `yaml:"retry_policy,omitempty" json:"retry_policy,omitempty"`
 }
 
@@ -419,12 +374,12 @@ func (c *LLMExecutionConfig) unmarshalMaxTokensYAML(value *yaml.Node) error {
 	return fmt.Errorf("max_tokens must be an integer or string macro")
 }
 
-// ToolsCall configures a `tools` task — a direct, deterministic call to one tool
-// of one registered tools-provider (e.g. an MCP server), distinct from the
-// model-driven tool calls of chat_completion/execute_tool_calls.
+// ToolsCall configures a `tools` task: a direct, deterministic call to one
+// tool of one registered tools-provider, distinct from the model-driven tool
+// calls of chat_completion/execute_tool_calls.
 type ToolsCall struct {
 	// Name is the registered tools-PROVIDER (the service/server, e.g. "slack"),
-	// not the tool. Required.
+	// not the tool; required.
 	Name string `yaml:"name" json:"name" example:"slack"`
 
 	// ToolName is the specific TOOL to invoke on that provider
@@ -446,8 +401,8 @@ type TaskDefinition struct {
 
 	ExecuteConfig *LLMExecutionConfig `yaml:"execute_config,omitempty" json:"execute_config,omitempty" openapi_include_type:"taskengine.LLMExecutionConfig"`
 
-	// Tools defines an external action to run: required for Tools tasks,
-	// must be nil/omitted for all other types.
+	// Tools defines an external action to run: required for Tools tasks, nil
+	// for all other types.
 	Tools *ToolsCall `yaml:"tools,omitempty" json:"tools,omitempty" openapi_include_type:"taskengine.ToolsCall"`
 
 	// Print optionally formats the output for display/logging, supporting
@@ -455,7 +410,7 @@ type TaskDefinition struct {
 	Print string `yaml:"print,omitempty" json:"print,omitempty" example:"Validation result: {{.validate_input}}"`
 
 	// PromptTemplate, when set, overrides the resolved input as the prompt
-	// sent to the LLM. Supports template variables from previous task outputs.
+	// sent to the LLM.
 	PromptTemplate string `yaml:"prompt_template,omitempty" json:"prompt_template,omitempty" example:"Is this input valid? {{.input}}"`
 
 	// OutputTemplate, when set, renders a tools task's JSON output through
@@ -466,9 +421,7 @@ type TaskDefinition struct {
 	// stores its own output in a variable named after its task id.
 	InputVar string `yaml:"input_var,omitempty" json:"input_var,omitempty" example:"input"`
 
-	// InputMaxBytes caps oversized string/chat-history inputs before this task
-	// runs, for recovery/summarization tasks that should explain a failure
-	// without re-feeding the huge input that caused it.
+	// InputMaxBytes caps oversized string/chat-history inputs before this task runs.
 	InputMaxBytes int `yaml:"input_max_bytes,omitempty" json:"input_max_bytes,omitempty" example:"8192"`
 
 	// Transition defines what to do after this task completes.
@@ -514,24 +467,24 @@ type ChatHistory struct {
 	InputTokens int `json:"inputTokens" example:"15"`
 	// OutputTokens will be filled by the engine and will hold the number of tokens used for the output.
 	OutputTokens int `json:"outputTokens" example:"10"`
-	// FinishReason is the provider's verbatim finish reason for the LAST model
-	// call that produced this history ("length"-class values mean the response
-	// was truncated). Filled by the engine; empty when no model call ran or
-	// the provider reported none.
+	// FinishReason is the provider's verbatim finish reason for the last model
+	// call ("length"-class means truncated); empty when none reported.
 	FinishReason string `json:"finishReason,omitempty" example:"stop"`
 }
 
 // Message represents a single message in a chat conversation.
 type Message struct {
-	// ID is not used by the engine; it is useful for tracking messages and
-	// computing differences of histories before storage.
+	// ID is not used by the engine; useful for tracking messages and diffing
+	// histories before storage.
 	ID      string `json:"id" example:"msg_123456"`
 	Role    string `json:"role" example:"user"`
 	Content string `json:"content,omitempty" example:"What is the capital of France?"`
-	// Images travel with Content to the model; requests with images
-	// resolve only to vision-capable models and fail with a typed error
-	// when none is available.
+	// Images travel with Content to the model; image-bearing requests resolve
+	// only to vision-capable models.
 	Images []ImagePart `json:"images,omitempty" openapi_include_type:"taskengine.ImagePart"`
+	// Audio travels with Content to the model; audio-bearing requests resolve
+	// only to audio-capable models.
+	Audio []AudioPart `json:"audio,omitempty" openapi_include_type:"taskengine.AudioPart"`
 	// Thinking is the model's internal reasoning trace, populated only when
 	// thinking is enabled; never sent back to the model as history.
 	Thinking   string     `json:"thinking,omitempty"`
@@ -550,6 +503,15 @@ type ImagePart struct {
 	Data []byte `json:"data"`
 	// MimeType is the image media type.
 	MimeType string `json:"mime_type" example:"image/png"`
+}
+
+// AudioPart is a binary audio attachment on a Message, shaped exactly like
+// ImagePart.
+type AudioPart struct {
+	// Data is the raw audio bytes. JSON encoding carries it as standard base64.
+	Data []byte `json:"data"`
+	// MimeType is the audio media type.
+	MimeType string `json:"mime_type" example:"audio/wav"`
 }
 
 // Tool represents a tool that can be called by the model.

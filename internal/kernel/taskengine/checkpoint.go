@@ -1,11 +1,5 @@
 package taskengine
 
-// This file defines the versioned checkpoint a suspended run is rebuilt
-// from, the typed errors the suspend path travels on, and the context
-// plumbing (saver, resume state, injected verdicts) the service layer wires
-// around a run. taskengine defines the shape and wire format but never
-// touches storage; a CheckpointSaver on the run context owns persistence.
-
 import (
 	"context"
 	"encoding/json"
@@ -15,23 +9,19 @@ import (
 	"time"
 )
 
-// CheckpointSchemaVersion is the wire version MarshalCheckpoint writes. Bump
-// it together with a migration entry in checkpointMigrations, never alone.
+// CheckpointSchemaVersion is the wire version MarshalCheckpoint writes; bump it
+// together with a migration entry in checkpointMigrations, never alone.
 const CheckpointSchemaVersion = 1
 
 // ErrCheckpointVersion reports a checkpoint whose schema version this binary
 // cannot load (newer than it knows, or older with no migration registered).
 var ErrCheckpointVersion = errors.New("taskengine: unsupported checkpoint schema version")
 
-// checkpointMigrations upgrades a checkpoint payload from version N to N+1.
-// A compile-time table, never mutated at runtime. UnmarshalCheckpoint
-// applies entries sequentially until the payload reaches the current version.
 var checkpointMigrations = map[int]func(raw []byte) ([]byte, error){}
 
-// ApprovalPendingError is the HITL wrapper's third outcome beside allow/deny:
-// the fast-path park elapsed with no human verdict. The durable approval row
-// exists before this is returned; the executor persists a checkpoint and
-// releases the run after.
+// ApprovalPendingError is the HITL wrapper's third outcome beside allow/deny: the
+// fast-path park elapsed with no human verdict, and the durable approval row already
+// exists when this returns.
 type ApprovalPendingError struct {
 	// ApprovalID is the durable approval row's ID and the checkpoint key.
 	ApprovalID string
@@ -42,9 +32,9 @@ func (e *ApprovalPendingError) Error() string {
 	return fmt.Sprintf("tool call %q is awaiting human approval (approval %s); the run suspends until the approval is answered", e.ToolName, e.ApprovalID)
 }
 
-// ChainSuspendedError is ExecEnv's terminal for a suspended run: the
-// checkpoint is persisted and answering the approval resumes the chain. It
-// is a typed outcome, not a failure.
+// ChainSuspendedError is ExecEnv's terminal for a suspended run — the checkpoint is
+// persisted and answering the approval resumes the chain — a typed outcome, not a
+// failure.
 type ChainSuspendedError struct {
 	ApprovalID string
 	// Scope is the hierarchical address of the interrupt point.
@@ -64,15 +54,10 @@ type PendingToolCall struct {
 	Arguments string `json:"arguments"`
 }
 
-// Checkpoint is everything a suspended run needs to resume in any process:
-// position, state (vars, edge counts, chat history), pending tool calls, and
-// the request-scoped identity the service layer re-injects.
-//
-// A checkpoint is keyed by the one call awaiting a verdict; PendingCalls
-// also lists the batch's not-yet-started calls. Resume injects that one
-// verdict and re-enters execute_tool_calls, which runs the remaining calls
-// through the normal path — each may gate again and suspend afresh under
-// its own key.
+// Checkpoint is everything a suspended run needs to resume in any process: position,
+// state, pending tool calls, and the request-scoped identity the service layer
+// re-injects; it is keyed by the one call awaiting a verdict, and PendingCalls lists
+// the batch's not-yet-started calls.
 type Checkpoint struct {
 	ApprovalID   string
 	PendingCalls []PendingToolCall
@@ -102,15 +87,11 @@ type Checkpoint struct {
 	CreatedAt         time.Time
 }
 
-// checkpointVarWire is one typed variable on the wire: the DataType name
-// plus the value's raw JSON.
 type checkpointVarWire struct {
 	Type  string          `json:"type"`
 	Value json.RawMessage `json:"value"`
 }
 
-// checkpointWireV1 is schema_version 1. Additive fields are fine within a
-// version; any change of meaning bumps CheckpointSchemaVersion with a migration.
 type checkpointWireV1 struct {
 	SchemaVersion     int                          `json:"schema_version"`
 	ApprovalID        string                       `json:"approval_id"`
@@ -133,9 +114,9 @@ type checkpointWireV1 struct {
 	CreatedAt         time.Time                    `json:"created_at"`
 }
 
-// MarshalCheckpoint encodes cp as the current schema version. A var that
-// cannot be marshalled fails the whole encode, rather than resuming a
-// different run than the one that suspended.
+// MarshalCheckpoint encodes cp as the current schema version; a var that cannot be
+// marshalled fails the whole encode rather than resuming a different run than the one
+// that suspended.
 func MarshalCheckpoint(cp *Checkpoint) ([]byte, error) {
 	if cp == nil {
 		return nil, fmt.Errorf("taskengine: cannot marshal a nil checkpoint")
@@ -177,9 +158,9 @@ func MarshalCheckpoint(cp *Checkpoint) ([]byte, error) {
 	return json.Marshal(wire)
 }
 
-// UnmarshalCheckpoint decodes raw, migrating older schema versions forward.
-// A version this binary cannot reach errors with ErrCheckpointVersion rather
-// than risking a mis-decoded, silently corrupted resume.
+// UnmarshalCheckpoint decodes raw, migrating older schema versions forward; a version
+// this binary cannot reach errors with ErrCheckpointVersion rather than risking a
+// silently corrupted resume.
 func UnmarshalCheckpoint(raw []byte) (*Checkpoint, error) {
 	var probe struct {
 		SchemaVersion int `json:"schema_version"`
@@ -238,8 +219,6 @@ func UnmarshalCheckpoint(raw []byte) (*Checkpoint, error) {
 	return cp, nil
 }
 
-// migrateCheckpointPayload walks raw from version up to target through
-// checkpointMigrations, one step at a time.
 func migrateCheckpointPayload(raw []byte, version, target int) ([]byte, int, error) {
 	for version < target {
 		migrate, ok := checkpointMigrations[version]
@@ -259,8 +238,6 @@ func migrateCheckpointPayload(raw []byte, version, target int) ([]byte, int, err
 	return raw, version, nil
 }
 
-// decodeCheckpointVar materializes a var through the closed DataType enum,
-// so e.g. a chat_history var decodes as ChatHistory, not a map.
 func decodeCheckpointVar(dt DataType, raw json.RawMessage) (any, error) {
 	switch dt {
 	case DataTypeNil:
@@ -294,19 +271,18 @@ func decodeCheckpointVar(dt DataType, raw json.RawMessage) (any, error) {
 	}
 }
 
-// CheckpointSaver persists a suspension checkpoint. The service layer
-// installs an implementation on the run context; Save must be atomic per
-// call — either the checkpoint is readable under its approval ID afterward,
-// or the run fails instead of suspending into a lost run.
+// CheckpointSaver persists a suspension checkpoint; Save must be atomic per call —
+// either the checkpoint is readable under its approval ID afterward, or the run fails
+// instead of suspending into a lost run.
 type CheckpointSaver interface {
 	SaveCheckpoint(ctx context.Context, cp *Checkpoint) error
 }
 
 type checkpointSaverContextKey struct{}
 
-// WithCheckpointSaver installs the durable checkpoint sink for runs under
-// ctx. Without one, a run that hits an approval park fails with a teaching
-// error instead of suspending, never a silent loss.
+// WithCheckpointSaver installs the durable checkpoint sink for runs under ctx; without
+// one, a run that hits an approval park fails with a teaching error instead of
+// suspending.
 func WithCheckpointSaver(ctx context.Context, saver CheckpointSaver) context.Context {
 	if saver == nil {
 		return ctx
@@ -327,9 +303,9 @@ func HasCheckpointSaver(ctx context.Context) bool {
 
 type approvalVerdictsContextKey struct{}
 
-// WithApprovalVerdicts pre-loads human verdicts keyed by approval ID for a
-// resumed run: the HITL wrapper executes (true) or denies (false) a call
-// whose verdict is already recorded, without gating it again. The map is copied.
+// WithApprovalVerdicts pre-loads human verdicts keyed by approval ID for a resumed run
+// so the HITL wrapper executes (true) or denies (false) an already-recorded call
+// without gating it again; the map is copied.
 func WithApprovalVerdicts(ctx context.Context, verdicts map[string]bool) context.Context {
 	if len(verdicts) == 0 {
 		return ctx
@@ -355,11 +331,10 @@ func ApprovalVerdictFromContext(ctx context.Context, approvalID string) (approve
 	return approved, ok
 }
 
-// GateResult is the durably recorded output of a resumed run's approved gate
-// call. A resume that executes the gated tool records its result before the
-// chain continues (WithGateResultRecorder); a retry of that same run replays
-// the record instead of executing again (WithRecordedGateResults) — the seam
-// that keeps the approved call exactly-once across partially completed resumes.
+// GateResult is the durably recorded output of a resumed run's approved gate call: a
+// resume records the result before continuing (WithGateResultRecorder), and a retry
+// replays it instead of re-executing (WithRecordedGateResults) — keeping the call
+// exactly-once across partial resumes.
 type GateResult struct {
 	Value any
 	Type  DataType
@@ -395,10 +370,9 @@ func UnmarshalGateResult(raw []byte) (GateResult, error) {
 
 type gateResultRecorderContextKey struct{}
 
-// GateResultRecorder persists the approved gate call's result under its
-// approval ID before the resumed chain continues past it. Installed only on
-// the resume path; recording failure fails the call rather than letting an
-// unrecorded side effect become repeatable on retry.
+// GateResultRecorder persists the approved gate call's result under its approval ID
+// before the resumed chain continues past it; installed only on the resume path, its
+// failure fails the call rather than letting an unrecorded side effect repeat on retry.
 type GateResultRecorder func(ctx context.Context, approvalID string, result GateResult) error
 
 // WithGateResultRecorder installs the durable gate-result sink for a resumed run.
@@ -415,20 +389,16 @@ func GateResultRecorderFromContext(ctx context.Context) GateResultRecorder {
 	return rec
 }
 
-// ErrGateRecordFailed marks a gated call that executed but whose
-// exactly-once record could not be persisted. execute_tool_calls treats it as
-// a hard task failure instead of the usual soft tool-error result: continuing
-// would tell the model the call failed and invite a re-issue of work the
-// world already saw.
+// ErrGateRecordFailed marks a gated call that executed but whose exactly-once record
+// could not be persisted; execute_tool_calls treats it as a hard task failure rather
+// than a soft tool-error result.
 var ErrGateRecordFailed = errors.New("taskengine: gated call executed but recording its result failed")
 
 type recordedGateResultsContextKey struct{}
 
-// GateResultStore is the mutable record/replay table a resumed run shares
-// between its recorder and the HITL wrapper's replay lookup. Mutable on
-// purpose: a record made during attempt N of a retrying task must replay in
-// attempt N+1 of the same Execute call — the durable row is not re-read
-// mid-run, so a snapshot map would leave same-process retries unprotected.
+// GateResultStore is the mutable record/replay table a resumed run shares between its
+// recorder and the HITL wrapper's replay lookup; mutable on purpose, since a
+// same-process retry within one Execute call must see a record made moments earlier.
 type GateResultStore struct {
 	mu sync.Mutex
 	m  map[string]GateResult
@@ -484,9 +454,8 @@ type AttentionAnswer struct {
 	Text     string
 }
 
-// WithAttentionAnswers pre-loads operator answers keyed by ask ID for a
-// resumed run, exactly as WithApprovalVerdicts pre-loads verdicts. The map
-// is copied.
+// WithAttentionAnswers pre-loads operator answers keyed by ask ID for a resumed run,
+// exactly as WithApprovalVerdicts pre-loads verdicts; the map is copied.
 func WithAttentionAnswers(ctx context.Context, answers map[string]AttentionAnswer) context.Context {
 	if len(answers) == 0 {
 		return ctx
@@ -514,10 +483,9 @@ func AttentionAnswerFromContext(ctx context.Context, askID string) (ans Attentio
 
 type suspendableToolCallContextKey struct{}
 
-// WithSuspendableToolCall marks the current tool call as one the engine can
-// suspend on. Set only at the model-batch execution site, whose task output
-// is the ChatHistory suspendRun requires; a tools-handler call never carries
-// it, so askers gate park-and-release behavior on this marker.
+// WithSuspendableToolCall marks the current tool call as one the engine can suspend
+// on; set only at the model-batch execution site, it is what askers gate
+// park-and-release behavior on.
 func WithSuspendableToolCall(ctx context.Context) context.Context {
 	return context.WithValue(ctx, suspendableToolCallContextKey{}, true)
 }
@@ -546,9 +514,6 @@ func resumeCheckpointFromContext(ctx context.Context) *Checkpoint {
 	return cp
 }
 
-// unansweredToolCalls derives the pending set from a transcript that ends
-// with a (possibly partially answered) tool-call batch. Empty when the
-// transcript does not end in an open batch.
 func unansweredToolCalls(msgs []Message) []PendingToolCall {
 	idx, answered := resumableToolCallBatch(msgs)
 	if idx < 0 {

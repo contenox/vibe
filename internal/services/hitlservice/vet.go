@@ -7,17 +7,9 @@ import (
 	"strings"
 )
 
-// vet.go is the authoring-time validator for hitl-policy documents. It is
-// deliberately stricter than loadPolicy: an unknown field is almost always a
-// typo that silently disarms a rule (e.g. "timeout" vs "timeout_s"). Keys
-// starting with "//" are annotations and accepted everywhere. All defects
-// are collected and joined; the result wraps ErrEnvelopeVet.
-
 // ErrEnvelopeVet marks every defect the envelope vet reports.
 var ErrEnvelopeVet = errors.New("hitl policy failed validation")
 
-// maxRuleTimeoutS caps a rule's approval timeout at 7 days; a longer wait is
-// a typo, not an intent.
 const maxRuleTimeoutS = 7 * 24 * 60 * 60
 
 // VetPolicy validates a hitl-policy document for authoring — JSON shape,
@@ -53,8 +45,6 @@ func VetPolicy(data []byte) error {
 	return fmt.Errorf("%w:\n%w", ErrEnvelopeVet, errors.Join(errs...))
 }
 
-// isCommentKey reports whether a JSON key is an annotation under the repo's
-// "//"-prefix convention (e.g. the presets' "//compute" note).
 func isCommentKey(k string) bool { return strings.HasPrefix(k, "//") }
 
 func vetUnknownKeys(where string, obj map[string]json.RawMessage, known []string) []error {
@@ -82,8 +72,6 @@ func vetUnknownKeys(where string, obj map[string]json.RawMessage, known []string
 	return errs
 }
 
-// vetRuleShapes strict-checks every rule object and its conditions for unknown
-// fields, since Rule is where the silent-typo hazard concentrates.
 func vetRuleShapes(rulesRaw json.RawMessage) []error {
 	if len(rulesRaw) == 0 {
 		return nil
@@ -124,9 +112,6 @@ func vetSubObjectShape(name string, raw json.RawMessage, known []string) []error
 	return vetUnknownKeys(name, obj, known)
 }
 
-// vetRuleSemantics adds the authoring-time checks the runtime load path does
-// not make: tool name patterns that can never match, and timeout values that
-// are dead or absurd.
 func vetRuleSemantics(p *Policy) []error {
 	var errs []error
 	for i, r := range p.Rules {

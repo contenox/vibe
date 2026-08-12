@@ -21,6 +21,13 @@ type OllamaStreamClient struct {
 func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Message, args ...modelrepo.ChatArgument) (<-chan *modelrepo.StreamParcel, error) {
 	reportErr, reportChange, end := c.tracker.Start(ctx, "stream", "ollama", "model", c.modelName)
 
+	// No audio encoding on this wire format; refuse instead of dropping silently.
+	if err := modelrepo.RefuseAudioInput("ollama", c.modelName, messages); err != nil {
+		reportErr(err)
+		end()
+		return nil, err
+	}
+
 	apiMessages := make([]Message, 0, len(messages))
 	for _, msg := range messages {
 		var apiToolCalls []ToolCall
@@ -80,10 +87,7 @@ func (c *OllamaStreamClient) Stream(ctx context.Context, messages []modelrepo.Me
 		req.Truncate = config.Truncate
 	}
 
-	// Raw-delta contract (modelrepo.StreamParcel): content/thinking/tool-call
-	// deltas are forwarded as-is — Ollama delivers each tool call whole, so
-	// each gets the next sequential index — and done=true becomes the typed
-	// terminal parcel. Assembly belongs to the engine-side StreamAssembler.
+	// Ollama delivers each tool call whole; each gets the next sequential index.
 	ch := make(chan *modelrepo.StreamParcel)
 	go func() {
 		defer close(ch)

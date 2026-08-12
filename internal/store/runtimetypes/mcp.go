@@ -18,16 +18,13 @@ type contextKey string
 
 const SessionIDContextKey contextKey = "contenox_session_id"
 
-// ACPMCPServerNamePrefix marks MCP servers supplied by an ACP client as
-// session-scoped runtime registrations. They may pass through the shared MCP
-// worker machinery, but they are not durable user configuration.
+// ACPMCPServerNamePrefix marks MCP servers supplied by an ACP client as session-scoped, non-durable runtime registrations.
 const ACPMCPServerNamePrefix = "acp-"
 
 func IsACPManagedMCPServerName(name string) bool {
 	return strings.HasPrefix(name, ACPMCPServerNamePrefix)
 }
 
-// orEmptyMap returns m if non-nil, otherwise an empty map.
 func orEmptyMap(m map[string]string) map[string]string {
 	if m == nil {
 		return map[string]string{}
@@ -63,14 +60,12 @@ func (srv *MCPServer) ResolveOAuthClientSecret() string {
 }
 
 // MCPTool is a minimal tool descriptor returned by mcpworker list-tools.
-// It avoids importing the MCP SDK in packages that only need the tool metadata.
 type MCPTool struct {
 	// Name is the tool identifier as advertised by the MCP server.
 	Name string `json:"name" example:"read_file"`
 	// Description is a human-readable description of the tool.
 	Description string `json:"description,omitempty" example:"Read a file from the filesystem"`
 	// InputSchema is the raw JSON schema for the tool's input parameters.
-	// Preserved as json.RawMessage so it survives NATS serialization unchanged.
 	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
 }
 
@@ -110,10 +105,7 @@ func (s *store) CreateMCPServer(ctx context.Context, srv *MCPServer) error {
 	return err
 }
 
-// UpsertMCPServerByName inserts or updates an MCP server keyed by name.
-// If a server with the same name already exists, its fields are updated in place
-// (preserving the original ID and created_at). If not, a new record is inserted.
-// Works on both SQLite and Postgres via the ON CONFLICT clause.
+// UpsertMCPServerByName inserts or updates an MCP server keyed by name, preserving the original ID and created_at on update.
 func (s *store) UpsertMCPServerByName(ctx context.Context, srv *MCPServer) error {
 	now := time.Now().UTC()
 	if srv.ID == "" {

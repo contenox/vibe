@@ -11,17 +11,11 @@ type OpenAIChatClient struct {
 	openAIClient
 }
 
-// openAIChatCompletionResponse matches the /v1/chat/completions JSON body.
-// reasoning_content is a best-effort field exposed by some OpenAI-compatible
-// backends; official OpenAI reasoning summaries live in the Responses API instead.
 type openAIChatCompletionResponse struct {
 	Choices []openAIChatCompletionChoice `json:"choices"`
 	Usage   *openAIChatCompletionUsage   `json:"usage"`
 }
 
-// openAIChatCompletionUsage is the chat-completions usage report. prompt_tokens
-// already includes cached tokens; the cached count is broken out separately
-// under prompt_tokens_details.cached_tokens.
 type openAIChatCompletionUsage struct {
 	PromptTokens        int `json:"prompt_tokens"`
 	CompletionTokens    int `json:"completion_tokens"`
@@ -71,6 +65,12 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 	reportErr, reportChange, end := c.tracker.Start(ctx, "chat", "openai", "model", c.modelName)
 	defer end()
 
+	// No audio encoding on this wire format; refuse instead of dropping silently.
+	if err := modelrepo.RefuseAudioInput("openai", c.modelName, messages); err != nil {
+		reportErr(err)
+		return modelrepo.ChatResult{}, err
+	}
+
 	if openAIUsesResponsesEndpoint(c.modelName) {
 		req, nameMap := buildOpenAIResponsesRequestWithCapabilities(c.modelName, messages, args, c.supportsThink)
 		c.clampResponsesMaxOutputTokens(&req)
@@ -116,7 +116,6 @@ func (c *OpenAIChatClient) Chat(ctx context.Context, messages []modelrepo.Messag
 		Thinking: choice.Message.ReasoningContent,
 	}
 
-	// Translate sanitized tool names back to what the caller originally provided.
 	var toolCalls []modelrepo.ToolCall
 	for _, tc := range choice.Message.ToolCalls {
 		name := tc.Function.Name

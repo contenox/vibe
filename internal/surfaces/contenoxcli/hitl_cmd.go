@@ -16,12 +16,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// hitl_cmd.go is `contenox hitl trust`: the first-class refresh path for the
-// envelope's trusted_binaries block. A declared hash is a fact about a file on
-// this machine, so it can never be shipped in a preset — it is recorded here,
-// from the same resolution the evaluator performs, and re-recorded here when a
-// legitimate upgrade changes it.
-
 var hitlCmd = &cobra.Command{
 	Use:   "hitl",
 	Short: "Work with the HITL envelope's host-specific declarations.",
@@ -126,9 +120,6 @@ func runHITLTrust(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// resolveTrustPolicyFile accepts either an explicit path or a preset name,
-// resolving a name along the same search path the policy loader uses so the
-// file edited is the file that governs.
 func resolveTrustPolicyFile(contenoxDir, nameOrPath string) (string, []byte, error) {
 	nameOrPath = strings.TrimSpace(nameOrPath)
 	if nameOrPath == "" {
@@ -149,8 +140,6 @@ func resolveTrustPolicyFile(contenoxDir, nameOrPath string) (string, []byte, err
 	return path, data, nil
 }
 
-// readTrustedBinaries extracts the block, returning an empty one when the
-// policy has none yet. It never rewrites anything it could not parse.
 func readTrustedBinaries(data []byte) (*hitlservice.TrustedBinaries, error) {
 	var probe struct {
 		TrustedBinaries *hitlservice.TrustedBinaries `json:"trusted_binaries"`
@@ -167,9 +156,6 @@ func readTrustedBinaries(data []byte) (*hitlservice.TrustedBinaries, error) {
 	return probe.TrustedBinaries, nil
 }
 
-// declareTrustedEntries resolves each name the way the evaluator will and
-// records the result, keeping the dirs list consistent so a newly declared
-// binary is not immediately refused by the identity half.
 func declareTrustedEntries(out io.Writer, tb *hitlservice.TrustedBinaries, names []string) error {
 	for _, name := range names {
 		real, sum, err := hitlservice.ResolveTrustedBinary(name)
@@ -189,10 +175,6 @@ func declareTrustedEntries(out io.Writer, tb *hitlservice.TrustedBinaries, names
 	return nil
 }
 
-// coverDirForBinary keeps an already-declared dirs list from silently
-// excluding a binary just declared. It never CREATES the list: an empty dirs
-// list means the operator opted out of the directory check, and adding one
-// entry would turn that off for everything else.
 func coverDirForBinary(out io.Writer, tb *hitlservice.TrustedBinaries, real string) {
 	if len(tb.Dirs) == 0 {
 		return
@@ -208,9 +190,6 @@ func coverDirForBinary(out io.Writer, tb *hitlservice.TrustedBinaries, real stri
 	fmt.Fprintf(out, "  added %s to trusted_binaries.dirs so this declaration can be reached\n", dir)
 }
 
-// refreshTrustedEntries re-reads every declared path — the legitimate-upgrade
-// path. A path that vanished is reported and kept: dropping it silently would
-// hide a binary that went missing.
 func refreshTrustedEntries(out io.Writer, tb *hitlservice.TrustedBinaries) error {
 	for _, path := range sortedTrustPaths(tb.Hashes) {
 		real, sum, err := hitlservice.ResolveTrustedBinary(path)
@@ -233,8 +212,6 @@ func refreshTrustedEntries(out io.Writer, tb *hitlservice.TrustedBinaries) error
 	return nil
 }
 
-// removeTrustedEntries drops declarations by real path or by the name that
-// resolves to one, so an operator can undeclare what they declared by name.
 func removeTrustedEntries(out io.Writer, tb *hitlservice.TrustedBinaries, names []string) error {
 	for _, name := range names {
 		target := name
@@ -251,8 +228,6 @@ func removeTrustedEntries(out io.Writer, tb *hitlservice.TrustedBinaries, names 
 	return nil
 }
 
-// printTrustedBinaries shows every declaration with its state on this host —
-// the same states `contenox vet` and `contenox doctor` report.
 func printTrustedBinaries(out io.Writer, path string, tb *hitlservice.TrustedBinaries) {
 	fmt.Fprintf(out, "%s\n", path)
 	if len(tb.Dirs) == 0 {
@@ -283,8 +258,6 @@ func printTrustedBinaries(out io.Writer, path string, tb *hitlservice.TrustedBin
 // stopped matching this host.
 const TrustBinariesRefreshCommand = "contenox hitl trust --refresh"
 
-// trustedBinaryDrift checks every shipped preset's on-disk copy — the file the
-// loader would actually read — against this host, for `contenox doctor`.
 func trustedBinaryDrift(dirs []string) []setupcheck.TrustedBinaryDrift {
 	var out []setupcheck.TrustedBinaryDrift
 	for _, p := range HITLPolicyPresets {
@@ -314,8 +287,6 @@ func sortedTrustPaths(hashes map[string]string) []string {
 	return out
 }
 
-// pathsEquivalent and isUnderDir mirror the evaluator's comparison closely
-// enough for the CLI's bookkeeping; the authoritative check is in hitlservice.
 func pathsEquivalent(a, b string) bool {
 	return normalizeTrustPath(a) == normalizeTrustPath(b)
 }
@@ -336,8 +307,6 @@ func normalizeTrustPath(p string) string {
 	return p
 }
 
-// writeTrustedBinaries splices the block back into the policy and refuses to
-// write anything the runtime would reject.
 func writeTrustedBinaries(path string, data []byte, tb *hitlservice.TrustedBinaries) error {
 	if len(tb.Dirs) == 0 {
 		tb.Dirs = nil
@@ -361,11 +330,6 @@ func writeTrustedBinaries(path string, data []byte, tb *hitlservice.TrustedBinar
 	return nil
 }
 
-// spliceTopLevelJSONMember replaces (or inserts) one member of a top-level
-// JSON object, leaving every other byte untouched. A decode/re-encode round
-// trip would reorder keys and lose the presets' "//" annotation ordering, so
-// the edit is surgical: the operator's file stays diffable against what they
-// wrote.
 func spliceTopLevelJSONMember(doc []byte, key string, value []byte) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(doc))
 	tok, err := dec.Token()
@@ -404,8 +368,6 @@ func spliceTopLevelJSONMember(doc []byte, key string, value []byte) ([]byte, err
 		buf.Write(doc[dec.InputOffset():])
 		return buf.Bytes(), nil
 	}
-	// Absent: insert as the first member, so a security declaration is visible
-	// at the top of the file rather than buried after the rules.
 	var buf bytes.Buffer
 	buf.Write(doc[:openEnd])
 	buf.WriteString("\n  " + strconv.Quote(key) + ": ")

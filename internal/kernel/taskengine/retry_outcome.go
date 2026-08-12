@@ -7,18 +7,13 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine/llmretry"
 )
 
-// RetryOutcomeSink collects per-call retry outcomes from chat_completion tasks
-// running inside one chain invocation. It is safe for concurrent appenders.
-//
-// A host attaches a sink via [WithRetryOutcomeSink] before running a chain so
-// it can observe whether any chat call retried, used fallback, or hit a
-// non-retryable class (e.g. capacity).
+// RetryOutcomeSink collects per-call retry outcomes from chat_completion tasks running inside one chain invocation; safe for concurrent appenders.
 type RetryOutcomeSink struct {
 	mu       sync.Mutex
 	outcomes []llmretry.Outcome
 }
 
-// Append records one outcome. Safe for concurrent use.
+// Append records one outcome; safe for concurrent use.
 func (s *RetryOutcomeSink) Append(o llmretry.Outcome) {
 	if s == nil {
 		return
@@ -65,14 +60,11 @@ func WithRetryOutcomeSink(ctx context.Context, sink *RetryOutcomeSink) context.C
 	return context.WithValue(ctx, retryOutcomeSinkKey{}, sink)
 }
 
-// retryOutcomeSinkFromContext returns the sink attached via WithRetryOutcomeSink, if any.
 func retryOutcomeSinkFromContext(ctx context.Context) *RetryOutcomeSink {
 	v, _ := ctx.Value(retryOutcomeSinkKey{}).(*RetryOutcomeSink)
 	return v
 }
 
-// appendRetryOutcome records o on the context-bound sink, if one is attached.
-// No-op when no sink is set so tests and direct taskengine callers are unaffected.
 func appendRetryOutcome(ctx context.Context, o llmretry.Outcome) {
 	if s := retryOutcomeSinkFromContext(ctx); s != nil {
 		s.Append(o)

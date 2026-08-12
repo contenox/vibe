@@ -18,7 +18,7 @@ func TestUnit_egressBridge_SSRFGuard(t *testing.T) {
 		name         string
 		host         string
 		allowPrivate bool
-		wantDenied   bool // resolveAndGuard returns errEgressDenied
+		wantDenied   bool
 	}{
 		{"loopback refused by default", "127.0.0.1", false, true},
 		{"private RFC1918 refused by default", "10.0.0.1", false, true},

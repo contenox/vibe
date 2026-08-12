@@ -154,9 +154,9 @@ func (p *catalogProvider) describeModel(ctx context.Context, modelName string) (
 			observed.CanEmbed = true
 		}
 	}
-	// Gemini's model API reports no input modalities, so vision comes from the
-	// hand-maintained Google allowlist rather than runtime detection.
+	// Gemini's model API reports no input modalities; vision/audio come from hand-maintained allowlists.
 	observed.CanVision = observed.CanChat && modelrepo.GeminiModelSupportsVision(observed.Name)
+	observed.CanAudio = observed.CanChat && modelrepo.GeminiModelSupportsAudio(observed.Name)
 
 	return observed, nil
 }

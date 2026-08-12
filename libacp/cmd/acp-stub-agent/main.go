@@ -2,28 +2,6 @@
 // agent-side wire dispatch against ACP conformance clients, without any LLM
 // backend. It speaks ACP v1 over stdio like the production `contenox
 // acp`/`acpx` commands, but every response is deterministic and in-memory.
-//
-// The trigger text in a session/prompt request selects the scenario:
-//
-//   - "session_updates": streams an agent message chunk, a tool_call, and a
-//     tool_call_update before resolving the turn.
-//   - "callbacks": requests a permission and, if granted, exercises
-//     fs/read_text_file and fs/write_text_file. A Cancelled outcome ends the
-//     turn gracefully; a session/cancel mid-call propagates context.Canceled
-//     so the turn resolves with stopReason "cancelled".
-//   - "gated_action": requests permission for a named tool call (identity in
-//     `_meta`, arguments in `rawInput`, from the ACP_STUB_GATED_* env vars)
-//     and reports what the client answered, so a client mapping the request
-//     onto an approval policy has something concrete to judge. Counterpart
-//     of "callbacks", which names nothing. See promptGatedAction.
-//   - anything else: acks with a single message chunk and ends the turn.
-//
-// A set of ACP_STUB_* env flags (default off, output byte-identical to a bare
-// agent) opt into advertising commands/config-options/modes/models in the
-// session/new response or a deferred session/update, and into driving a full
-// terminal/* round trip on prompts — exercising acpsvc's downstream
-// pass-through for each surface the way a real agent (e.g. claude-code-acp)
-// would. See the flag fields on stubAgent and their use sites for specifics.
 package main
 
 import (
@@ -38,8 +16,6 @@ import (
 	"github.com/contenox/contenox/libacp"
 )
 
-// stdio adapts the process's stdin/stdout to the io.ReadWriteCloser
-// NewAgentSideConnection wants, matching contenoxcli's acpStdio.
 type stdio struct{}
 
 func (stdio) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
@@ -74,12 +50,8 @@ type stubSession struct {
 	cwd                   string
 	additionalDirectories []string
 	modeID                string
-	// modelID is the current model, mutated by SetSessionModel; meaningful
-	// only when models are advertised.
-	modelID string
-	// verbosity is the current config-option value, mutated by
-	// SetSessionConfigOption; meaningful only when config options are advertised.
-	verbosity string
+	modelID               string
+	verbosity             string
 }
 
 type stubAgent struct {
@@ -95,36 +67,16 @@ type stubAgent struct {
 	authedOnce  atomic.Bool
 	loggedOutOK atomic.Bool
 
-	// advertiseCommands (ACP_STUB_ADVERTISE_COMMANDS=1) emits an
-	// available_commands_update after session/new. Default off.
 	advertiseCommands bool
 
-	// advertiseConfigOptions (ACP_STUB_ADVERTISE_CONFIG_OPTIONS=1) carries a
-	// configOptions set in the session/new response and honors
-	// session/set_config_option. advertiseConfigOptionsAfterNew
-	// (ACP_STUB_CONFIG_OPTIONS_AFTER_NEW=1) emits it as a deferred
-	// config_option_update instead. Both default off.
 	advertiseConfigOptions         bool
 	advertiseConfigOptionsAfterNew bool
 
-	// advertiseModes (ACP_STUB_ADVERTISE_MODES=1) carries a deterministic
-	// SessionModeState in the session/new response. Default off (no modes
-	// advertised); SetSessionMode stays registered regardless.
 	advertiseModes bool
 
-	// advertiseModels (ACP_STUB_ADVERTISE_MODELS=1) carries a deterministic
-	// SessionModelState (UNSTABLE model-picker surface) in the session/new
-	// response. Default off, in which case SetSessionModel reports
-	// MethodNotFound.
 	advertiseModels bool
 
-	// useTerminal (ACP_STUB_USE_TERMINAL=1) runs a full terminal/* round trip
-	// (create, wait, read output, release) on every plain prompt and reports
-	// the result as an agent_message_chunk. Default off.
-	useTerminal bool
-	// clientTerminal records whether the client advertised the terminal
-	// capability at initialize, so the round trip can be skipped gracefully
-	// when it was withheld.
+	useTerminal    bool
 	clientTerminal atomic.Bool
 }
 
@@ -141,13 +93,8 @@ func newStubAgent(c *libacp.AgentSideConnection) *stubAgent {
 	}
 }
 
-// stubTerminalMarker is the string the terminal scenario's shell command
-// computes (echo stub-terminal-$((6*7))) so it appears only in command
-// output, never in the echoed command text — proof the shell actually ran it.
 const stubTerminalMarker = "stub-terminal-42"
 
-// stubModeState is the deterministic SessionModeState advertised when
-// ACP_STUB_ADVERTISE_MODES=1 — a Code/Ask pair, Code current.
 func stubModeState() *libacp.SessionModeState {
 	return &libacp.SessionModeState{
 		CurrentModeID: stubModeCode,
@@ -158,8 +105,6 @@ func stubModeState() *libacp.SessionModeState {
 	}
 }
 
-// stubModelState is the deterministic SessionModelState advertised when
-// ACP_STUB_ADVERTISE_MODELS=1 — a Fast/Smart pair, Fast current.
 func stubModelState() *libacp.SessionModelState {
 	return &libacp.SessionModelState{
 		CurrentModelID: stubModelFast,
@@ -170,8 +115,6 @@ func stubModelState() *libacp.SessionModelState {
 	}
 }
 
-// stubConfigOptions is the deterministic config-option set advertised when
-// opted in — a single "verbosity" select. current becomes CurrentValue.
 func stubConfigOptions(current string) []libacp.SessionConfigOption {
 	if current == "" {
 		current = stubVerbosityLow
@@ -190,8 +133,6 @@ func stubConfigOptions(current string) []libacp.SessionConfigOption {
 	}}
 }
 
-// stubAdvertisedCommands is the deterministic slash-command menu advertised
-// when ACP_STUB_ADVERTISE_COMMANDS=1.
 func stubAdvertisedCommands() []libacp.AvailableCommand {
 	return []libacp.AvailableCommand{
 		{Name: "review", Description: "Stub: review the current changes."},
@@ -199,8 +140,6 @@ func stubAdvertisedCommands() []libacp.AvailableCommand {
 	}
 }
 
-// negotiateProtocolVersion echoes the requested version when supported,
-// otherwise falls back to the latest version this Agent implements.
 func negotiateProtocolVersion(client int) int {
 	if client >= 1 && client <= libacp.ProtocolVersion {
 		return client
@@ -312,9 +251,7 @@ func (a *stubAgent) NewSession(ctx context.Context, req libacp.NewSessionRequest
 }
 
 // SetSessionConfigOption honors the deterministic "verbosity" option when
-// advertised: validates id/value, updates the session, returns the updated
-// set, and emits a confirming config_option_update. Reports MethodNotFound
-// when config options were not advertised.
+// advertised, reporting MethodNotFound otherwise.
 func (a *stubAgent) SetSessionConfigOption(ctx context.Context, req libacp.SetSessionConfigOptionRequest) (libacp.SetSessionConfigOptionResponse, error) {
 	if !a.advertiseConfigOptions {
 		return libacp.SetSessionConfigOptionResponse{}, libacp.MethodNotFound(libacp.MethodSessionSetConfigOption)
@@ -376,10 +313,8 @@ func (a *stubAgent) SetSessionMode(ctx context.Context, req libacp.SetSessionMod
 	return libacp.SetSessionModeResponse{}, nil
 }
 
-// SetSessionModel honors the deterministic model picker when advertised:
-// validates id, updates the session, and returns an empty response — the ACP
-// stream has no model-update kind, so there is no confirming notification.
-// Reports MethodNotFound when models were not advertised.
+// SetSessionModel honors the deterministic model picker when advertised,
+// reporting MethodNotFound otherwise.
 func (a *stubAgent) SetSessionModel(_ context.Context, req libacp.SetSessionModelRequest) (libacp.SetSessionModelResponse, error) {
 	if !a.advertiseModels {
 		return libacp.SetSessionModelResponse{}, libacp.MethodNotFound(libacp.MethodSessionSetModel)
@@ -436,9 +371,6 @@ func (a *stubAgent) Prompt(ctx context.Context, req libacp.PromptRequest) (libac
 	}
 }
 
-// promptTerminal drives a full terminal/* round trip against the client and
-// reports the result as one agent_message_chunk. Reports termcap=false and
-// skips the round trip when the client withheld the terminal capability.
 func (a *stubAgent) promptTerminal(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
 	if !a.clientTerminal.Load() {
 		return a.terminalReport(req, "termcap=false")
@@ -491,9 +423,6 @@ func (a *stubAgent) promptTerminal(ctx context.Context, req libacp.PromptRequest
 	return a.terminalReport(req, report)
 }
 
-// promptTerminalKill starts a long-running command, kills it, then reports
-// the resolved exit — proving WaitForTerminalExit resolves promptly on kill
-// rather than blocking for the command's natural duration.
 func (a *stubAgent) promptTerminalKill(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
 	createResp, err := a.conn.CreateTerminal(ctx, libacp.CreateTerminalRequest{
 		SessionID: req.SessionID,
@@ -536,8 +465,6 @@ func (a *stubAgent) promptTerminalKill(ctx context.Context, req libacp.PromptReq
 	return a.terminalReport(req, "kill exit="+exitStr)
 }
 
-// terminalReport emits the scenario's outcome as one agent_message_chunk and
-// ends the turn.
 func (a *stubAgent) terminalReport(req libacp.PromptRequest, msg string) (libacp.PromptResponse, error) {
 	if err := a.conn.SessionUpdate(libacp.SessionNotification{
 		SessionID: req.SessionID,
@@ -548,11 +475,6 @@ func (a *stubAgent) terminalReport(req libacp.PromptRequest, msg string) (libacp
 	return libacp.PromptResponse{StopReason: libacp.StopReasonEndTurn}, nil
 }
 
-// The gated-action scenario: a permission request whose tool identity and
-// arguments are stated in the `_meta`/`rawInput` envelope, so a client
-// evaluating an approval policy has something concrete to match against.
-// Identity/arguments come from the environment so one built binary can be
-// pointed at any tool name a test needs. Opt-in via gatedActionTrigger.
 const (
 	gatedActionTrigger = "gated_action"
 
@@ -560,19 +482,11 @@ const (
 	envGatedToolName  = "ACP_STUB_GATED_TOOL_NAME"
 	envGatedArgsJSON  = "ACP_STUB_GATED_ARGS_JSON"
 
-	// envGatedReportPath, when set, additionally writes the outcome line to
-	// that file — a side channel for tests where nothing attaches to the
-	// session stream to read it.
 	envGatedReportPath = "ACP_STUB_GATED_REPORT_PATH"
 )
 
-// gatedActionReport is the prefix of the single agent_message_chunk the
-// scenario emits after the client answers the permission request.
 const gatedActionReport = "gated-action outcome="
 
-// promptGatedAction requests permission for a named tool call (identity via
-// `_meta`, arguments via `rawInput`) and reports what the client answered. A
-// cancelled outcome ends the turn with StopReasonRefusal rather than an error.
 func (a *stubAgent) promptGatedAction(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
 	toolsName := os.Getenv(envGatedToolsName)
 	toolName := os.Getenv(envGatedToolName)
@@ -640,9 +554,6 @@ func (a *stubAgent) promptPlain(_ context.Context, req libacp.PromptRequest) (li
 	return libacp.PromptResponse{StopReason: libacp.StopReasonEndTurn}, nil
 }
 
-// promptStreaming emits a message-chunk / tool_call / tool_call_update
-// sequence synchronously, so all updates reach the wire strictly before the
-// session/prompt response.
 func (a *stubAgent) promptStreaming(_ context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
 	toolCallID := fmt.Sprintf("stub-tool-%d", a.nextToolID.Add(1))
 
@@ -670,8 +581,6 @@ func (a *stubAgent) promptStreaming(_ context.Context, req libacp.PromptRequest)
 	return libacp.PromptResponse{StopReason: libacp.StopReasonEndTurn}, nil
 }
 
-// promptCallbacks requests a client permission and, once granted, drives an
-// fs/read_text_file + fs/write_text_file round trip.
 func (a *stubAgent) promptCallbacks(ctx context.Context, req libacp.PromptRequest) (libacp.PromptResponse, error) {
 	if err := a.conn.SessionUpdate(libacp.SessionNotification{
 		SessionID: req.SessionID,

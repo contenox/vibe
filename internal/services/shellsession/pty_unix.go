@@ -11,20 +11,11 @@ import (
 	"github.com/creack/pty"
 )
 
-// ptySession is a running shell attached to a pseudo-terminal master. Writing to
-// it feeds the shell's stdin (that is how an approved/user line is "typed"),
-// reading drains its combined output.
 type ptySession struct {
 	master *os.File
 	cmd    *exec.Cmd
 }
 
-// startPTY launches an interactive shell rooted at spec.cwd on a fresh PTY
-// sized rows x cols, becoming its controlling terminal. For an agent-facing
-// shell ECHO is cleared and the prompt suppressed before the child execs (via
-// pty.Open + an explicit Start, not pty.Start, to avoid a race where the child
-// could snapshot termios with ECHO still on). An interactive shell keeps both:
-// a human must see their own keystrokes and needs a prompt to orient by.
 func startPTY(spec spawnSpec) (*ptySession, error) {
 	shell := spec.shell
 	if shell == "" {
@@ -42,6 +33,7 @@ func startPTY(spec spawnSpec) (*ptySession, error) {
 		cmd.Env = append(cmd.Env, promptSuppressionEnv(shell)...)
 	}
 
+	// pty.Open + explicit Start (not pty.Start) avoids a race where the child could snapshot termios with ECHO still on.
 	master, tty, err := pty.Open()
 	if err != nil {
 		return nil, err
@@ -65,8 +57,6 @@ func startPTY(spec spawnSpec) (*ptySession, error) {
 	return &ptySession{master: master, cmd: cmd}, nil
 }
 
-// shellFamily classifies the shell by executable name so a non-standard install
-// path (/usr/local/bin/bash, a Nix store path, …) is treated like the usual one.
 func shellFamily(shell string) string {
 	switch filepath.Base(shell) {
 	case "bash":
@@ -78,13 +68,6 @@ func shellFamily(shell string) string {
 	}
 }
 
-// shellSpawnArgs picks the argv for a shell family. bash/zsh start
-// interactive (-i) so the user's rc file defines their aliases. An
-// agent-facing bash also gets --noediting: Run submits one complete line at a
-// time, so readline buys nothing while adding re-echoed input and
-// bracketed-paste escapes to the scrollback. A human's terminal keeps
-// readline — line editing and history are the point. rc files, aliases, job
-// control, and history still apply either way.
 func shellSpawnArgs(shell string, interactive bool) []string {
 	switch shellFamily(shell) {
 	case "bash":
@@ -99,13 +82,6 @@ func shellSpawnArgs(shell string, interactive bool) []string {
 	}
 }
 
-// promptSuppressionEnv returns environment additions that stop an
-// interactive shell from drawing a prompt into the scrollback (noise and a
-// privacy leak: the stock bash prompt embeds login, host, and cwd).
-// Clearing PS1 alone is not enough for bash, since an rc file can reassign
-// it after the environment loads; PROMPT_COMMAND re-clears it immediately
-// before each prompt. Best-effort: a shell owning its own prompt hook can
-// still draw one.
 func promptSuppressionEnv(shell string) []string {
 	switch shellFamily(shell) {
 	case "bash":
@@ -118,8 +94,6 @@ func promptSuppressionEnv(shell string) []string {
 	}
 }
 
-// winsize builds a pty.Winsize, falling back to the defaults for a
-// non-positive dimension so a caller that only knows one of the two is safe.
 func winsize(rows, cols int) *pty.Winsize {
 	if rows <= 0 {
 		rows = defaultRows
@@ -133,16 +107,14 @@ func winsize(rows, cols int) *pty.Winsize {
 func (p *ptySession) Read(b []byte) (int, error)  { return p.master.Read(b) }
 func (p *ptySession) Write(b []byte) (int, error) { return p.master.Write(b) }
 
-// resize applies a new window size to the live PTY. The kernel delivers SIGWINCH
-// to the foreground process group, so a running full-screen program reflows.
 func (p *ptySession) resize(rows, cols int) error {
 	if p.master == nil {
 		return nil
 	}
+	// pty.Setsize triggers SIGWINCH to the foreground process group, so a running full-screen program reflows.
 	return pty.Setsize(p.master, winsize(rows, cols))
 }
 
-// close kills the shell process and releases the PTY master.
 func (p *ptySession) close() {
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
@@ -150,7 +122,6 @@ func (p *ptySession) close() {
 	_ = p.master.Close()
 }
 
-// wait reaps the shell process (called from the read loop once output ends).
 func (p *ptySession) wait() {
 	if p.cmd != nil {
 		_ = p.cmd.Wait()

@@ -18,8 +18,6 @@ func TestUnit_InboxCommandIsReserved(t *testing.T) {
 	require.True(t, reservedSubcommands["inbox"], `"inbox" must be reserved so it dispatches as a subcommand, not chat input`)
 }
 
-// ─── rendering ──────────────────────────────────────────────────────────────
-
 func TestUnit_RenderInboxTable_Empty(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, renderInboxTable(&buf, nil, false, time.Now().UTC()))
@@ -91,8 +89,6 @@ func TestUnit_InboxReasonLabel(t *testing.T) {
 	require.Equal(t, "operator-fired (no session)", inboxReasonLabel(operatorinbox.ReasonOperatorFired))
 	require.Equal(t, "parent session gone", inboxReasonLabel(operatorinbox.ReasonParentGone))
 }
-
-// ─── CLI round trip against a real SQLite db ───────────────────────────────
 
 func TestUnit_InboxListShowAckCmd_Roundtrip(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "inbox-cli.db")

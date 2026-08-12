@@ -119,24 +119,54 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		return libacp.PromptResponse{}, err
 	}
 
-	// Images are extracted first (see extractImageParts): FlattenContent's
-	// lossy text projection would drop them. An image-only prompt is valid.
-	images, textBlocks := extractImageParts(req.Prompt)
+	// Images and audio are extracted first (see extractImageParts and
+	// extractAudioParts): FlattenContent's lossy text projection would drop
+	// them. An attachment-only prompt is valid.
+	images, nonImageBlocks := extractImageParts(req.Prompt)
+	audio, textBlocks := extractAudioParts(nonImageBlocks)
 	input, droppedContentKinds := libacp.FlattenContent(textBlocks)
-	if input == "" && len(images) == 0 {
+
+	// Pre-flight capability gate (see sessionAudioRefusal): audio the fleet is
+	// known unable to accept is refused here, like an extraction refusal — the
+	// turn proceeds on the rest of the prompt, and no audio-bearing user
+	// message reaches history to re-impose the audio requirement on every
+	// later turn of this session. The reason rides the announced notice.
+	var audioRefusal string
+	if len(audio) > 0 {
+		if reason := t.sessionAudioRefusal(ctx, sess); reason != "" {
+			audioRefusal = reason
+			audio = nil
+			droppedContentKinds = appendDroppedKind(droppedContentKinds, string(libacp.ContentKindAudio))
+		}
+	}
+
+	if input == "" && len(images) == 0 && len(audio) == 0 {
+		// An audio-only prompt whose audio the capability gate refused is no
+		// operator mistake: the refusal is the answer, announced into the
+		// conversation and carried on the error — never a bare "empty prompt".
+		if audioRefusal != "" {
+			announceDroppedContent(ctx, req.SessionID, droppedContentKinds, audioRefusal, t.sendUpdate)
+			err := libacp.NewError(libacp.ErrInvalidParams, audioRefusal)
+			reportErr(err)
+			return libacp.PromptResponse{}, err
+		}
 		err := libacp.NewError(libacp.ErrInvalidParams, "empty prompt")
 		reportErr(err)
 		return libacp.PromptResponse{}, err
 	}
 
 	if name, args, ok := parseCommand(input); ok {
-		// A slash command is a text verb; an attached image has no meaning
-		// here, so it's recorded as dropped rather than silently discarded.
+		// A slash command is a text verb; an attached image or audio clip has
+		// no meaning here, so it's recorded as dropped rather than silently
+		// discarded.
 		if len(images) > 0 {
-			droppedContentKinds = append(droppedContentKinds, string(libacp.ContentKindImage))
+			droppedContentKinds = appendDroppedKind(droppedContentKinds, string(libacp.ContentKindImage))
+		}
+		if len(audio) > 0 {
+			droppedContentKinds = appendDroppedKind(droppedContentKinds, string(libacp.ContentKindAudio))
 		}
 		cmdCtx := libtracker.WithNewRequestID(ctx)
-		announceDroppedContent(ctx, req.SessionID, droppedContentKinds, t.sendUpdate)
+		announceDroppedContent(ctx, req.SessionID, droppedContentKinds, audioRefusal, t.sendUpdate)
 		resp, err := t.dispatchCommand(cmdCtx, req.SessionID, sess, name, args)
 		if err != nil {
 			return resp, err
@@ -150,14 +180,17 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	// its downstream agent.
 	if name, ok := unknownCommandName(input); ok {
 		if len(images) > 0 {
-			droppedContentKinds = append(droppedContentKinds, string(libacp.ContentKindImage))
+			droppedContentKinds = appendDroppedKind(droppedContentKinds, string(libacp.ContentKindImage))
+		}
+		if len(audio) > 0 {
+			droppedContentKinds = appendDroppedKind(droppedContentKinds, string(libacp.ContentKindAudio))
 		}
 		reportChange(string(req.SessionID), map[string]any{
 			"stop_reason":           string(libacp.StopReasonEndTurn),
 			"unknown_command":       name,
 			"dropped_content_kinds": droppedContentKinds,
 		})
-		announceDroppedContent(ctx, req.SessionID, droppedContentKinds, t.sendUpdate)
+		announceDroppedContent(ctx, req.SessionID, droppedContentKinds, audioRefusal, t.sendUpdate)
 		return withDroppedContentMeta(t.answerUnknownCommand(ctx, req.SessionID, name), droppedContentKinds), nil
 	}
 
@@ -166,13 +199,13 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 	// stdio `contenox acp` leaves NativeTurns nil and uses the connection-
 	// bound turn below.
 	if t.deps.NativeTurns != nil {
-		return d.promptViaRegistry(ctx, req, sess, input, images, droppedContentKinds)
+		return d.promptViaRegistry(ctx, req, sess, input, images, audio, audioRefusal, droppedContentKinds)
 	}
 
 	// Announced before the turn runs, so the operator learns the attachment was
 	// discarded ahead of the answer that ignores it. The survival path announces
 	// it from inside runNativeTurn for the same reason; the two are exclusive.
-	announceDroppedContent(ctx, req.SessionID, droppedContentKinds, t.sendUpdate)
+	announceDroppedContent(ctx, req.SessionID, droppedContentKinds, audioRefusal, t.sendUpdate)
 
 	promptCtx := libtracker.WithNewRequestID(ctx)
 	reqID, _ := promptCtx.Value(libtracker.ContextKeyRequestID).(string)
@@ -282,6 +315,7 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		SessionID:      sess.InternalSessionID,
 		Input:          input,
 		Images:         images,
+		Audio:          audio,
 		Chain:          t.deps.ChainRegistry.Default(),
 		TemplateVars:   templateVars,
 		ToolsAllowlist: toolsAllowlist,

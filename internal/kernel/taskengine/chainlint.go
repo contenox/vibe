@@ -8,34 +8,11 @@ import (
 	"strings"
 )
 
-// chainlint.go is the load-time chain linter: a dataflow walk over every
-// goto and on_failure edge that propagates DataType sets from the entry task
-// to a fixpoint, checked against the closed handler contract table in
-// handler_signatures.go.
-//
-// The verdict per edge is tri-state: impossible (no type the source can
-// produce is accepted by the target, and DataTypeAny is not in play) is a
-// load error; maybe (DataTypeAny flows, or at least one produced type is
-// accepted) and fine are both silent, leaving ExecEnv's runtime checks as
-// the backstop. Type sets only ever over-approximate what can really flow,
-// so an "impossible" verdict is proof, not heuristic — the linter never
-// rejects a chain the runtime could execute.
-//
-// Beyond types it checks what validateChain (taskenv.go) cannot: input_var
-// references a variable some predecessor actually produces, template and
-// macro references name known variables/edges, route tasks declare a label
-// vocabulary, and branches that can never fire against a handler's closed
-// transition vocabulary. Structural checks are delegated to validateChain so
-// the two can never disagree.
-
 // ErrChainLint marks every defect the load-time chain linter reports, so
 // services can distinguish "this chain is invalid" (disable it, teach the
 // author) from I/O failures (retry, propagate).
 var ErrChainLint = errors.New("chain failed load-time validation")
 
-// dtSet is a set of DataTypes as a bitmask. DataTypeAny is a member like any
-// other: its presence means "a value of unknowable type can flow here", which
-// downgrades an impossible verdict to maybe.
 type dtSet uint16
 
 func dtBit(d DataType) dtSet { return 1 << uint(d) }
@@ -45,7 +22,6 @@ func (s dtSet) intersects(o dtSet) bool { return s&o != 0 }
 func (s dtSet) union(o dtSet) dtSet     { return s | o }
 func (s dtSet) isEmpty() bool           { return s == 0 }
 
-// lintOrderedDataTypes is the stable order teaching errors name types in.
 var lintOrderedDataTypes = []DataType{
 	DataTypeString, DataTypeInt, DataTypeJSON, DataTypeChatHistory, DataTypeNil, DataTypeAny,
 }
@@ -79,16 +55,15 @@ func acceptSet(sig HandlerSignature) dtSet {
 	return s
 }
 
-// LintChain vets a chain at load time. entryTypes are the DataTypes the caller
-// may feed the chain's entry task; when omitted the chain input is treated as
-// DataTypeAny (unknown, runtime-checked). All defects are collected and joined
-// so one vet run teaches everything at once; the result wraps ErrChainLint.
+// LintChain vets a chain at load time; entryTypes are the DataTypes the caller may
+// feed the entry task (omitted treated as DataTypeAny), and all defects are collected
+// and joined into one error wrapping ErrChainLint.
 func LintChain(chain *TaskChainDefinition, entryTypes ...DataType) error {
 	if chain == nil {
 		return fmt.Errorf("%w: chain is nil", ErrChainLint)
 	}
-	// Structural checks first: the dataflow walk assumes IDs are unique,
-	// handlers known, and every goto/on_failure target resolves.
+	// Structural checks first: the dataflow walk assumes unique IDs, known handlers,
+	// and resolvable goto/on_failure targets.
 	if err := validateChain(chain.Tasks); err != nil {
 		return fmt.Errorf("%w: chain[%s]: %w", ErrChainLint, chain.ID, err)
 	}
@@ -113,18 +88,13 @@ func LintChain(chain *TaskChainDefinition, entryTypes ...DataType) error {
 type chainLinter struct {
 	chain *TaskChainDefinition
 	tasks map[string]*TaskDefinition
-	order []string // definition order, for deterministic reports
+	order []string
 
 	entrySet dtSet
 
-	// inSets[t] is the union of type sets arriving at t via direct flow;
-	// input_var and prompt_template override it (see effectiveInput).
-	inSets map[string]dtSet
-	// varSets[name] is the union of types the engine variable can hold when read.
-	varSets map[string]dtSet
-	// avail[t] is the set of variable names some path reaching t has produced.
-	avail map[string]map[string]bool
-	// reachable[t]: some success/on_failure path from the entry reaches t.
+	inSets    map[string]dtSet
+	varSets   map[string]dtSet
+	avail     map[string]map[string]bool
 	reachable map[string]bool
 }
 
@@ -152,9 +122,6 @@ func newChainLinter(chain *TaskChainDefinition, entry dtSet) *chainLinter {
 	return l
 }
 
-// effectiveInput mirrors ExecEnv's input resolution: a prompt_template renders
-// to a string and replaces the input outright; otherwise input_var reads a
-// variable; otherwise the previous task's output flows through.
 func (l *chainLinter) effectiveInput(t *TaskDefinition) dtSet {
 	if strings.TrimSpace(t.PromptTemplate) != "" {
 		return dtBit(DataTypeString)
@@ -165,7 +132,6 @@ func (l *chainLinter) effectiveInput(t *TaskDefinition) dtSet {
 	return l.inSets[t.ID]
 }
 
-// successOut is the type set a task can hand to a success (branch) edge.
 func (l *chainLinter) successOut(t *TaskDefinition) dtSet {
 	sig := handlerSignatures[t.Handler]
 	switch sig.Mode {
@@ -184,15 +150,10 @@ func (l *chainLinter) successOut(t *TaskDefinition) dtSet {
 	return dtBit(DataTypeAny)
 }
 
-// failureOut is the type set an on_failure edge can carry: ExecEnv forwards
-// the failing task's typed input, or its output when that is a real typed
-// value, so the union of both over-approximates every case.
 func (l *chainLinter) failureOut(t *TaskDefinition) dtSet {
 	return l.effectiveInput(t).union(l.successOut(t))
 }
 
-// successTargets lists the distinct goto targets of a task's branches,
-// excluding chain termination.
 func successTargets(t *TaskDefinition) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -207,9 +168,6 @@ func successTargets(t *TaskDefinition) []string {
 	return out
 }
 
-// propagate runs the dataflow walk to a fixpoint. Type sets and availability
-// sets only grow, and both live in a finite lattice, so termination is
-// guaranteed; iteration order does not affect the fixpoint.
 func (l *chainLinter) propagate() {
 	for changed := true; changed; {
 		changed = false
@@ -242,7 +200,6 @@ func (l *chainLinter) propagate() {
 				}
 			}
 
-			// A handler that never succeeds has no live success edges.
 			if !sOut.isEmpty() {
 				for _, g := range successTargets(t) {
 					if l.growIn(g, sOut) {
@@ -311,8 +268,6 @@ func (l *chainLinter) growAvail(id string, from map[string]bool, extra ...string
 	return grew
 }
 
-// check runs every lint rule against the stabilized dataflow and collects all
-// defects, so one vet run teaches everything wrong with the chain at once.
 func (l *chainLinter) check() []error {
 	var errs []error
 	for _, id := range l.order {
@@ -325,7 +280,6 @@ func (l *chainLinter) check() []error {
 		errs = append(errs, l.checkDeadBranches(t, sig)...)
 
 		if !l.reachable[id] {
-			// Dataflow facts exist only for reachable tasks.
 			continue
 		}
 		errs = append(errs, l.checkInputVar(t)...)
@@ -334,8 +288,6 @@ func (l *chainLinter) check() []error {
 	return errs
 }
 
-// checkRouteVocabulary: the route handler errors at runtime when it has no
-// equals branches — its label vocabulary IS those branches.
 func (l *chainLinter) checkRouteVocabulary(t *TaskDefinition) []error {
 	if t.Handler != HandleRoute {
 		return nil
@@ -348,8 +300,6 @@ func (l *chainLinter) checkRouteVocabulary(t *TaskDefinition) []error {
 	return []error{fmt.Errorf("task[%s]: a route task needs at least one equals branch — the branch labels are the answer vocabulary the model routes between", t.ID)}
 }
 
-// checkInputVar: an input_var that no predecessor on any path produces fails
-// at runtime with "input variable not found"; teach it at load instead.
 func (l *chainLinter) checkInputVar(t *TaskDefinition) []error {
 	v := t.InputVar
 	if v == "" || v == "input" || l.avail[t.ID][v] {
@@ -364,13 +314,10 @@ func (l *chainLinter) checkInputVar(t *TaskDefinition) []error {
 		t.ID, v, strings.Join(known, ", "))}
 }
 
-// checkInputTypes is the tri-state edge check, the heart of the linter.
 func (l *chainLinter) checkInputTypes(t *TaskDefinition, sig HandlerSignature) []error {
 	accepts := acceptSet(sig)
 	acceptsAny := len(sig.Inputs) == 0
 
-	// A prompt_template replaces the input with its rendered string on
-	// every path, so the verdict is path-independent.
 	if strings.TrimSpace(t.PromptTemplate) != "" {
 		if !acceptsAny && !accepts.has(DataTypeString) {
 			return []error{fmt.Errorf("task[%s] handler %s cannot take a prompt_template: a rendered template is a string, and %s accepts %s",
@@ -395,8 +342,6 @@ func (l *chainLinter) checkInputTypes(t *TaskDefinition, sig HandlerSignature) [
 		return nil
 	}
 
-	// Check each incoming edge separately so the error names both endpoints
-	// of the exact edge that can never carry a valid value.
 	var errs []error
 	entryID := l.chain.Tasks[0].ID
 	if t.ID == entryID {
@@ -417,8 +362,6 @@ func (l *chainLinter) checkInputTypes(t *TaskDefinition, sig HandlerSignature) [
 	return errs
 }
 
-// checkEdge applies the tri-state verdict to one p→t edge, if such an edge
-// exists (a success branch goto or the on_failure target).
 func (l *chainLinter) checkEdge(p, t *TaskDefinition, sig HandlerSignature, accepts dtSet) error {
 	viaSuccess := false
 	for _, g := range successTargets(p) {
@@ -446,10 +389,6 @@ func (l *chainLinter) checkEdge(p, t *TaskDefinition, sig HandlerSignature, acce
 		t.ID, t.Handler, p.ID, carried.describe(), sig.acceptsDescription())
 }
 
-// checkDeadBranches proves a branch can never fire when the handler's
-// success transition vocabulary is closed and no entry can match — e.g. a
-// stale token spelling ("tool-call") or branching on model text where only
-// control tokens ever flow.
 func (l *chainLinter) checkDeadBranches(t *TaskDefinition, sig HandlerSignature) []error {
 	if sig.SuccessEvals == nil {
 		return nil
@@ -467,7 +406,7 @@ func (l *chainLinter) checkDeadBranches(t *TaskDefinition, sig HandlerSignature)
 		case OpEndsWith:
 			matches = func(tok string) bool { return strings.HasSuffix(tok, br.When) }
 		default:
-			continue // default / edge-state operators do not read the eval
+			continue
 		}
 		dead := true
 		for _, tok := range sig.SuccessEvals {
@@ -484,14 +423,8 @@ func (l *chainLinter) checkDeadBranches(t *TaskDefinition, sig HandlerSignature)
 	return errs
 }
 
-// lintVarMacroRe matches {{var:...}} macros so an empty name can be flagged;
-// the name itself is caller-supplied at run time and cannot be lint-checked.
 var lintVarMacroRe = regexp.MustCompile(`\{\{var:([^}]*)\}\}`)
 
-// checkMacros vets the macro forms MacroEnv/expandStepMacros will expand:
-// {{edge_count:from->to}} must name a real task-to-task edge (edges into 'end'
-// are never counted — the chain stops before the counter increments), and
-// {{var:}} must not be empty.
 func (l *chainLinter) checkMacros(t *TaskDefinition) []error {
 	var errs []error
 	fields := []struct{ name, text string }{
@@ -531,14 +464,8 @@ func (l *chainLinter) checkMacros(t *TaskDefinition) []error {
 	return errs
 }
 
-// lintTemplateRefRe matches the simple Go-template variable reference forms
-// ({{.name}}, {{ .name | pipe }}) in the two fields ExecEnv renders as Go
-// templates. Deliberately narrow: anything fancier is left to the runtime.
 var lintTemplateRefRe = regexp.MustCompile(`\{\{-?\s*\.([A-Za-z_][A-Za-z0-9_]*)[^}]*\}\}`)
 
-// checkTemplateRefs flags a {{.name}} reference that no task id or engine
-// variable can ever satisfy — a typo that renders as the literal "<no value>"
-// in the prompt at runtime (renderTemplate deliberately does not error).
 func (l *chainLinter) checkTemplateRefs(t *TaskDefinition) []error {
 	known := func(name string) bool {
 		switch name {

@@ -10,12 +10,7 @@ import (
 	"github.com/contenox/contenox/internal/libsandbox"
 )
 
-// TestMain makes this test binary a valid sandbox-shim host: a dispatched
-// agent instance re-exec's /proc/self/exe as the sandbox shim (Landlock, and
-// in NetworkWall mode the netns) before exec'ing the confined agent. Under
-// `go test`, /proc/self/exe is this binary, so without ShimMain the re-exec
-// would rerun the suite instead of confining the agent. Mirrors
-// cmd/contenox/main.go (see libsandbox.ShimMain).
+// TestMain makes this test binary a valid sandbox-shim host, since a dispatched instance re-execs /proc/self/exe as the sandbox shim before exec'ing the confined agent, and without it that re-exec would rerun the suite instead.
 func TestMain(m *testing.M) {
 	if handled, err := libsandbox.ShimMain(); handled {
 		if err != nil {

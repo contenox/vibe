@@ -31,7 +31,6 @@ func TestUnit_Tools_SupportsNamesTheProviderAndSixTools(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("Supports() = %v, want %v", got, want)
 	}
-	// The names are the HITL policy key.
 	if ToolsProviderName != "gointel" {
 		t.Fatalf("provider name = %q", ToolsProviderName)
 	}
@@ -63,8 +62,6 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 			t.Fatalf("%s missing from the tool list", name)
 		}
 		desc := tool.Function.Description
-		// Build-context defaults cannot be re-taught by an error that never
-		// fires, so they must be in the schema.
 		for _, want := range []string{"GOOS/GOARCH", "no build tags", "tests excluded"} {
 			if !strings.Contains(desc, want) {
 				t.Errorf("%s description does not state %q", name, want)
@@ -82,7 +79,6 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 			t.Errorf("%s does not take dir", name)
 		}
 
-		// Individually addressable, exactly like local_fs.
 		one, err := repo.GetToolsForToolsByName(ctx, name)
 		if err != nil || len(one) != 1 || one[0].Function.Name != name {
 			t.Errorf("GetToolsForToolsByName(%q) = %v, %v", name, one, err)
@@ -113,11 +109,7 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 	}
 }
 
-// TestUnit_Tools_PublishedSchemaMatchesToolDescriptors pins the declared
-// OpenAPI contract and its agreement with what actually reaches the provider:
-// every tool has a request and a response schema, and each request schema
-// carries exactly the descriptor's properties — same types, same descriptions,
-// same required set — since both are rendered from one table (goToolSpecs).
+// TestUnit_Tools_PublishedSchemaMatchesToolDescriptors pins that the published OpenAPI schema and the tool descriptors agree on types, descriptions, and required fields.
 func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	repo, _ := newTestTools(t)
 	ctx := context.Background()
@@ -143,7 +135,6 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		t.Errorf("the published document is not a valid OpenAPI document: %v", err)
 	}
 
-	// The component name is part of the contract: a rename is a breaking change.
 	components := map[string]string{
 		ToolDescribe:        "GoDescribe",
 		ToolDefinition:      "GoDefinition",
@@ -194,8 +185,6 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 			if published.Value.Description != declaredProp["description"] {
 				t.Errorf("%s.%s: descriptor and published schema disagree on the description", name, prop)
 			}
-			// A closed value set is part of the contract in both places, and a
-			// union's set sits on the array branch's items in both places.
 			if got, want := enumOf(published.Value), declaredEnum(declaredProp["enum"]); strings.Join(got, ",") != strings.Join(want, ",") {
 				t.Errorf("%s.%s: published enum %v, descriptor enum %v", name, prop, got, want)
 			}
@@ -214,13 +203,11 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 				t.Errorf("%s.%s items: published enum %v, descriptor enum %v", name, prop, got, want)
 			}
 		}
-		// A tool with no required argument declares none in either place.
 		wantRequired, _ := params["required"].([]string)
 		if strings.Join(wantRequired, ",") != strings.Join(req.Value.Required, ",") {
 			t.Errorf("%s: required = %v, descriptor requires %v", name, req.Value.Required, wantRequired)
 		}
 
-		// The response contract describes the payload Exec returns.
 		if len(resp.Value.Properties) == 0 {
 			t.Errorf("%s: the response schema declares no properties", name)
 		}
@@ -235,8 +222,6 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	}
 }
 
-// publishedTypes reads a published schema's type set, which is one entry for an
-// ordinary argument and several for a union.
 func publishedTypes(ref *openapi3.SchemaRef) []string {
 	if ref == nil || ref.Value == nil || ref.Value.Type == nil {
 		return nil
@@ -244,8 +229,6 @@ func publishedTypes(ref *openapi3.SchemaRef) []string {
 	return append([]string(nil), *ref.Value.Type...)
 }
 
-// declaredTypes reads the descriptor's "type", which JSON Schema spells as a
-// bare string for one type and a list for a union.
 func declaredTypes(v any) []string {
 	switch t := v.(type) {
 	case string:
@@ -279,12 +262,7 @@ func declaredEnum(v any) []string {
 	return append([]string(nil), values...)
 }
 
-// TestUnit_Tools_ClosedValueSetsAreDeclared pins the two go_diagnostics
-// arguments whose legal values the implementation closes: scope, refused by
-// Diagnostics outside its three, and passes, refused by resolvePasses outside
-// the curated set plus "all". passes also carries the type union argStrings
-// accepts, since a descriptor narrower than Exec is the same defect as a
-// value set stated only in prose.
+// TestUnit_Tools_ClosedValueSetsAreDeclared pins that go_diagnostics' scope and passes arguments declare the same closed value sets the implementation enforces.
 func TestUnit_Tools_ClosedValueSetsAreDeclared(t *testing.T) {
 	repo, _ := newTestTools(t)
 	ctx := context.Background()
@@ -316,8 +294,6 @@ func TestUnit_Tools_ClosedValueSetsAreDeclared(t *testing.T) {
 		t.Errorf("passes items enum = %v, want %v", got, wantPasses)
 	}
 
-	// The declared union is the one Exec honours: both branches reach the same
-	// pass set, and a name outside the enum is refused rather than dropped.
 	for _, form := range []any{"printf,unreachable", []any{"printf", "unreachable"}, []string{"printf", "unreachable"}} {
 		res, err := execTool(t, repo, ToolDiagnostics, map[string]any{"scope": "all", "passes": form})
 		if err != nil {
@@ -331,8 +307,6 @@ func TestUnit_Tools_ClosedValueSetsAreDeclared(t *testing.T) {
 		t.Error("a pass outside the declared enum was accepted")
 	}
 
-	// max stays an integer in the schema on every tool that takes one; the
-	// string tolerance argInt applies is stated in the description instead.
 	for _, tool := range []string{ToolReferences, ToolSymbols, ToolDiagnostics} {
 		one, err := repo.GetToolsForToolsByName(ctx, tool)
 		if err != nil {
@@ -349,7 +323,6 @@ func TestUnit_Tools_ClosedValueSetsAreDeclared(t *testing.T) {
 			t.Errorf("%s.max description does not state the string tolerance argInt applies: %q", tool, maxProp["description"])
 		}
 	}
-	// And Exec really honours it, so the sentence is not a promise the code breaks.
 	syms, err := execTool(t, repo, ToolSymbols, map[string]any{"target": "shapes", "max": "1"})
 	if err != nil {
 		t.Fatalf("max=\"1\": %v", err)
@@ -430,8 +403,6 @@ func TestUnit_Tools_ExecDispatchesEveryTool(t *testing.T) {
 func TestUnit_Tools_ExecReadsArgsFromTheToolsCall(t *testing.T) {
 	repo, _ := newTestTools(t)
 
-	// A declarative `tools` task carries its arguments on the call, not the
-	// chain input — the same fallback local_fs implements.
 	out, _, err := repo.Exec(context.Background(), time.Now(), "chat history not an args map", false,
 		&taskengine.ToolsCall{Name: ToolsProviderName, ToolName: ToolDefinition, Args: map[string]string{"symbol": "shapes.Rect"}})
 	if err != nil {
@@ -470,7 +441,6 @@ func TestUnit_Tools_ExecRefusals(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown tool") {
 		t.Fatalf("unknown tool error = %v", err)
 	}
-	// The refusal must list what is available.
 	for _, name := range toolNames {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("refusal %q does not offer %s", err, name)

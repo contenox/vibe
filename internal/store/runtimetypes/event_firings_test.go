@@ -1,8 +1,5 @@
 package runtimetypes_test
 
-// event_firings store tests, over the production SQLite backend (same
-// no-Docker idiom as hitl_approvals_test.go).
-
 import (
 	"context"
 	"testing"
@@ -12,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// seedFiring records one finished firing, the exact pair the dispatcher writes.
 func seedEventFiring(t *testing.T, s runtimetypes.EventFiringStore, trigger string, nid int64, status, errMsg string) {
 	t.Helper()
 	ctx := context.Background()
@@ -22,7 +18,6 @@ func seedEventFiring(t *testing.T, s runtimetypes.EventFiringStore, trigger stri
 	require.NoError(t, s.FinishEventFiring(ctx, trigger, nid, status, errMsg))
 }
 
-// eventFiringNIDs projects a listing to its nids, in listing order.
 func eventFiringNIDs(firings []runtimetypes.EventFiring) []int64 {
 	nids := make([]int64, 0, len(firings))
 	for _, f := range firings {
@@ -31,11 +26,7 @@ func eventFiringNIDs(firings []runtimetypes.EventFiring) []int64 {
 	return nids
 }
 
-// TestUnit_EventFirings_StaleRunningClaimIsReclaimable pins the bound: a
-// running claim is exclusive for exactly StaleEventFiringClaim, then a later
-// host takes it over. This is what keeps a firing whose host died mid-run from
-// being lost forever — the claim is INSERT OR IGNORE, so without the takeover a
-// stranded 'running' row refuses every retry for good.
+// TestUnit_EventFirings_StaleRunningClaimIsReclaimable asserts a running claim is exclusive for exactly StaleEventFiringClaim, then reclaimable by a later host.
 func TestUnit_EventFirings_StaleRunningClaimIsReclaimable(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
@@ -49,13 +40,10 @@ func TestUnit_EventFirings_StaleRunningClaimIsReclaimable(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 
-	// Inside the bound the claim is exclusive: a live host that is merely slow
-	// must never have its firing stolen and run a second time.
 	claimed, err = at(runtimetypes.StaleEventFiringClaim).BeginEventFiring(ctx, "on-report", 1, "evt-too-early")
 	require.NoError(t, err)
 	require.False(t, claimed, "the bound is exclusive at its own edge")
 
-	// Past it, the claim is taken over — the host is presumed dead.
 	claimed, err = at(runtimetypes.StaleEventFiringClaim+time.Second).BeginEventFiring(ctx, "on-report", 1, "evt-retry")
 	require.NoError(t, err)
 	require.True(t, claimed, "a claim nothing has touched for the bound is a dead host's, not a live one's")
@@ -68,15 +56,12 @@ func TestUnit_EventFirings_StaleRunningClaimIsReclaimable(t *testing.T) {
 	require.Equal(t, claimedAt.Truncate(time.Second), firings[0].CreatedAt.Truncate(time.Second),
 		"created_at still dates the first attempt, so a retry reads as a retry")
 
-	// And the retry's own claim is exclusive again from the moment it was taken.
 	claimed, err = at(runtimetypes.StaleEventFiringClaim+2*time.Second).BeginEventFiring(ctx, "on-report", 1, "evt-third")
 	require.NoError(t, err)
 	require.False(t, claimed, "the takeover restarts the clock; it does not inherit the dead host's age")
 }
 
-// TestUnit_EventFirings_FinishedClaimsAreNeverReclaimed pins the other half:
-// only a running row is reclaimable. An outcome already recorded is final at any
-// age — at-most-once is what the claim exists for.
+// TestUnit_EventFirings_FinishedClaimsAreNeverReclaimed asserts only a running row is reclaimable; a finished outcome is final at any age.
 func TestUnit_EventFirings_FinishedClaimsAreNeverReclaimed(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
@@ -97,9 +82,7 @@ func TestUnit_EventFirings_FinishedClaimsAreNeverReclaimed(t *testing.T) {
 	}
 }
 
-// TestUnit_EventFirings_StrandedNamesTheInvisibleFailure pins the operator-side
-// predicate: a stranded claim has neither failed nor succeeded, so a summary
-// counting only error/refused cannot see it.
+// TestUnit_EventFirings_StrandedNamesTheInvisibleFailure asserts a stranded claim has neither failed nor succeeded, invisible to an error/refused-only summary.
 func TestUnit_EventFirings_StrandedNamesTheInvisibleFailure(t *testing.T) {
 	now := time.Now().UTC()
 	fresh := runtimetypes.EventFiring{Status: runtimetypes.EventFiringStatusRunning, UpdatedAt: now.Add(-time.Minute)}
@@ -114,8 +97,6 @@ func TestUnit_EventFirings_StrandedNamesTheInvisibleFailure(t *testing.T) {
 	}
 }
 
-// TestUnit_EventFirings_NewestFirst pins the observability read's default
-// order: an operator asking "what just happened" reads down, not up.
 func TestUnit_EventFirings_NewestFirst(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
@@ -134,8 +115,6 @@ func TestUnit_EventFirings_NewestFirst(t *testing.T) {
 	require.False(t, firings[0].UpdatedAt.IsZero(), "the outcome time is what the table prints")
 }
 
-// TestUnit_EventFirings_EachFilterNarrows pins the three optional predicates
-// and their combination — each one narrows, none widens.
 func TestUnit_EventFirings_EachFilterNarrows(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
@@ -179,8 +158,7 @@ func TestUnit_EventFirings_EachFilterNarrows(t *testing.T) {
 	})
 }
 
-// TestUnit_EventFirings_LimitDefaultsAndCeiling pins the bound: no limit means
-// DefaultFiringLimit, an unbounded ask is clamped to MaxFiringLimit.
+// TestUnit_EventFirings_LimitDefaultsAndCeiling asserts no limit defaults to DefaultEventFiringLimit and an unbounded ask clamps to MaxEventFiringLimit.
 func TestUnit_EventFirings_LimitDefaultsAndCeiling(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
@@ -204,16 +182,12 @@ func TestUnit_EventFirings_LimitDefaultsAndCeiling(t *testing.T) {
 	require.Len(t, clamped, runtimetypes.DefaultEventFiringLimit+5, "the ceiling clamps the query, it never errors")
 }
 
-// TestUnit_EventFirings_WorkspaceIsolation pins the store's construction-time
-// scope on the read path too: one workspace's firings are invisible from
-// another's listing, filters included.
 func TestUnit_EventFirings_WorkspaceIsolation(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)
 	storeA := mustFiringStore(t, db.WithoutTransaction(), "ws-a")
 	storeB := mustFiringStore(t, db.WithoutTransaction(), "ws-b")
 
-	// Same trigger name, same nids, same statuses in both workspaces.
 	seedEventFiring(t, storeA, "iso", 1, runtimetypes.EventFiringStatusOK, "")
 	seedEventFiring(t, storeA, "iso", 2, runtimetypes.EventFiringStatusError, "a failed")
 	seedEventFiring(t, storeB, "iso", 1, runtimetypes.EventFiringStatusOK, "")
@@ -236,8 +210,7 @@ func TestUnit_EventFirings_WorkspaceIsolation(t *testing.T) {
 	require.Empty(t, empty, "a workspace that never fired sees nothing, not an error")
 }
 
-// TestUnit_EventFirings_EmptyIsNotAnError pins that no match is an answer: an
-// empty, non-nil slice and no error, whatever the filter.
+// TestUnit_EventFirings_EmptyIsNotAnError asserts no match returns an empty, non-nil slice with no error.
 func TestUnit_EventFirings_EmptyIsNotAnError(t *testing.T) {
 	ctx := context.Background()
 	db := setupEventDB(t)

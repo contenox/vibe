@@ -8,7 +8,6 @@ import (
 )
 
 func TestUnit_VetPolicy_AcceptsShippedShapes(t *testing.T) {
-	// The shape every shipped preset uses, including the "//"-comment convention.
 	good := `{
 		"//compute": "add a compute block to bound total spend",
 		"default_action": "approve",
@@ -71,7 +70,6 @@ func TestUnit_VetPolicy_UnknownFields(t *testing.T) {
 }
 
 func TestUnit_VetPolicy_InvalidRuleShapes(t *testing.T) {
-	// Comes from the runtime's own validatePolicy, reused by vet.
 	err := VetPolicy([]byte(`{"rules": [{"tools": "x", "tool": "y", "action": "permit"}]}`))
 	require.ErrorIs(t, err, ErrEnvelopeVet)
 	require.Contains(t, err.Error(), `unknown action "permit"`)

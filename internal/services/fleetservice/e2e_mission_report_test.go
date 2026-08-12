@@ -17,10 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// missionReportChain is a deterministic, model-free chain: a `tools` task
-// calls the unit's mission_report tool with static args, then a noop
-// terminator. It never resolves a model, so this proves the report path,
-// not inference.
 const missionReportChain = `{
   "id": "e2e-mission-report",
   "tasks": [
@@ -42,8 +38,6 @@ const missionReportChain = `{
   ]
 }`
 
-// buildContenoxBin compiles the full contenox binary into t.TempDir() so a
-// dispatched unit can be spawned as a real `contenox acp` subprocess.
 func buildContenoxBin(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "contenox")
@@ -63,9 +57,6 @@ func TestFleetService_E2E_MissionReportFromDispatchedUnit(t *testing.T) {
 
 	bin := buildContenoxBin(t)
 
-	// Isolate HOME so the unit's $HOME/.contenox and this test's DB handle
-	// are one and the same store; the spawned subprocess inherits this
-	// process's environment.
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	contenoxDir := filepath.Join(tmpHome, ".contenox")
@@ -77,16 +68,11 @@ func TestFleetService_E2E_MissionReportFromDispatchedUnit(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	// The name is deliberately fake: the unit needs a model configured to
-	// build its engine, but the mission chain resolves none, so an
-	// accidental model call would fail loudly.
 	runContenox(t, bin, "config", "set", "default-model", "fake-e2e-model-does-not-exist")
 
 	chainPath := filepath.Join(contenoxDir, "mission-chain.json")
 	require.NoError(t, os.WriteFile(chainPath, []byte(missionReportChain), 0o644))
 
-	// A `contenox acp --auto` subprocess (auto = no HITL, so the
-	// mission_report tool call runs unattended), sharing this HOME and DB.
 	agents := agentregistryservice.New(db)
 	agent := &runtimetypes.Agent{Name: "reporter", Enabled: true}
 	require.NoError(t, agent.SetExternalACPConfig(runtimetypes.ExternalACPConfig{
@@ -111,8 +97,6 @@ func TestFleetService_E2E_MissionReportFromDispatchedUnit(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result.MissionID)
 
-	// The intent-driven first turn runs detached; poll for the report the unit
-	// files against its own mission over the shared DB.
 	var reports []*missionservice.Report
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
@@ -131,16 +115,11 @@ func TestFleetService_E2E_MissionReportFromDispatchedUnit(t *testing.T) {
 	require.Equal(t, result.MissionID, reports[0].MissionID,
 		"the report is scoped to the unit's OWN mission, forwarded at session/new")
 
-	// Filing the report stamped mission liveness.
 	m, err := missions.Get(ctx, result.MissionID)
 	require.NoError(t, err)
 	require.NotNil(t, m.LastHeartbeat, "a filed report is proof of life and heartbeats the mission")
 }
 
-// runContenox runs the built binary with args and fails the test on a non-zero
-// exit, surfacing combined output. It inherits the process environment (so the
-// isolated HOME reaches it), which is how config/seed subcommands land in the
-// same $HOME/.contenox the unit reads.
 func runContenox(t *testing.T, bin string, args ...string) {
 	t.Helper()
 	out, err := exec.Command(bin, args...).CombinedOutput()

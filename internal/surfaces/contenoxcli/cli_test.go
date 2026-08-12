@@ -36,6 +36,15 @@ func TestUnit_newIsReservedSubcommand(t *testing.T) {
 	}
 }
 
+func TestUnit_autocompleteIsReservedSubcommand(t *testing.T) {
+	if !reservedSubcommands["autocomplete"] {
+		t.Fatal(`"autocomplete" must be reserved so 'contenox autocomplete --stdio' dispatches to the stdio server instead of being injected as a chat prompt`)
+	}
+	if !firstNonFlagIsReserved([]string{"autocomplete", "--stdio"}) {
+		t.Fatal(`expected "autocomplete" to be recognized as a reserved subcommand`)
+	}
+}
+
 func TestUnit_shellCompletionRequestsAreReserved(t *testing.T) {
 	for _, name := range []string{"__complete", "__completeNoDesc"} {
 		if !reservedSubcommands[name] {

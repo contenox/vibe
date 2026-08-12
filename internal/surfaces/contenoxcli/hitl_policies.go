@@ -46,8 +46,6 @@ var HITLPolicyPresets = []struct {
 	{"hitl-policy-oracle.json", hitlPolicyOracle},
 }
 
-// embeddedPolicyNames returns the preset file names in preset order, for the
-// ACP /policy listing.
 func embeddedPolicyNames() []string {
 	names := make([]string, len(HITLPolicyPresets))
 	for i, p := range HITLPolicyPresets {
@@ -56,10 +54,6 @@ func embeddedPolicyNames() []string {
 	return names
 }
 
-// presetStateFile records each preset's sha256 as last written, so
-// upgradeEmbeddedHITLPolicies can tell an untouched preset (safe to refresh)
-// from an operator-edited one (never overwritten). Installs that predate this
-// file have no provenance and are reported as stale instead (hitl_policy_staleness.go).
 const presetStateFile = ".preset-state.json"
 
 func presetSHA(s string) string {
@@ -82,14 +76,9 @@ func writePresetState(contenoxDir string, state map[string]string) {
 	if err != nil {
 		return
 	}
-	// Best-effort: losing the record costs a future upgrade, never correctness.
 	_ = os.WriteFile(filepath.Join(contenoxDir, presetStateFile), raw, 0644)
 }
 
-// writeEmbeddedHITLPolicies writes the embedded policy presets to contenoxDir,
-// refreshing any preset whose on-disk bytes still match a previous build's;
-// anything that looks hand-edited is left untouched. overwrite=true forces
-// every preset (the setup wizard's --force).
 func writeEmbeddedHITLPolicies(contenoxDir string, overwrite bool) error {
 	_, err := upgradeEmbeddedHITLPolicies(contenoxDir, overwrite)
 	return err
@@ -108,8 +97,6 @@ func upgradeEmbeddedHITLPolicies(contenoxDir string, overwrite bool) (stale []st
 			if onDisk, readErr := os.ReadFile(dst); readErr == nil {
 				current := presetSHA(string(onDisk))
 				if current == shipped {
-					// Byte-identical to what this build ships: record it so
-					// future upgrades treat it as ours.
 					if state[p.Name] != shipped {
 						state[p.Name] = shipped
 						changed = true
@@ -117,9 +104,7 @@ func upgradeEmbeddedHITLPolicies(contenoxDir string, overwrite bool) (stale []st
 					continue
 				}
 				if recorded, ok := state[p.Name]; !ok || recorded != current {
-					// Hand-edited or unrecorded: the operator's file wins and
-					// is left alone; hitl_policy_staleness.go computes what
-					// it's missing.
+					// Hand-edited or unrecorded: the operator's file wins and is left alone.
 					stale = append(stale, p.Name)
 					continue
 				}
@@ -137,10 +122,6 @@ func upgradeEmbeddedHITLPolicies(contenoxDir string, overwrite bool) (stale []st
 	return stale, nil
 }
 
-// refreshExistingHITLPolicies overwrites only the presets contenoxDir already
-// holds with this build's content, recording provenance the way
-// upgradeEmbeddedHITLPolicies does. Absent presets stay absent: seeding a
-// workspace dir would widen its shadow over ~/.contenox.
 func refreshExistingHITLPolicies(contenoxDir string) (written []string, err error) {
 	state := readPresetState(contenoxDir)
 	changed := false

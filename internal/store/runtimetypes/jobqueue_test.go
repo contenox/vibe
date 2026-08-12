@@ -245,9 +245,6 @@ func TestUnit_JobQueue_ListJobsPagination(t *testing.T) {
 		}
 	}
 
-	// Order of insertion (and expected increasing CreatedAt): jobs[0], jobs[1], jobs[2], jobs[3], jobs[4]
-	// Expected order from ListJobs (CreatedAt DESC): jobs[4], jobs[3], jobs[2], jobs[1], jobs[0]
-
 	limit := 2
 
 	t.Run("paginate_list_jobs_sequentially", func(t *testing.T) {
@@ -262,7 +259,7 @@ func TestUnit_JobQueue_ListJobsPagination(t *testing.T) {
 			currentPageJobs, err := s.ListJobs(ctx, nextCursor, limit)
 			require.NoError(t, err, "Failed to list jobs for page %d", pageCount)
 
-			if pageCount == 1 { // First page expectations
+			if pageCount == 1 {
 				require.NotEmpty(t, currentPageJobs, "First page should not be empty")
 				require.Equal(t, jobIDs[4], currentPageJobs[0].ID, "Page 1, Item 1 should be newest (jobs[4])")
 				if len(currentPageJobs) > 1 {
@@ -273,7 +270,7 @@ func TestUnit_JobQueue_ListJobsPagination(t *testing.T) {
 
 			if len(currentPageJobs) == 0 {
 				t.Logf("Finished fetching pages after page %d", pageCount-1)
-				break // No more items left
+				break
 			}
 
 			for _, job := range currentPageJobs {
@@ -299,7 +296,7 @@ func TestUnit_JobQueue_ListJobsPagination(t *testing.T) {
 	})
 
 	t.Run("list_with_past_cursor", func(t *testing.T) {
-		pastTime := jobs[0].CreatedAt.Add(-time.Hour) // Time definitely before the first job
+		pastTime := jobs[0].CreatedAt.Add(-time.Hour)
 		result, err := s.ListJobs(ctx, &pastTime, limit)
 		require.NoError(t, err)
 		require.Empty(t, result, "Should return no jobs for a cursor time before all jobs")

@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// permissive allows write_file outright; strict pauses it for approval, so a
-// test can prove which policy a given Evaluate call resolved.
 const (
 	permissivePolicyName = "hitl-policy-permissive.json"
 	strictPolicyName     = "hitl-policy-strict.json"

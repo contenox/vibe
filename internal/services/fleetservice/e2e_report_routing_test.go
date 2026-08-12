@@ -55,7 +55,6 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	agents := agentregistryservice.New(db)
-	// The bus wires the producer half; missionservice publishes on AddReport.
 	bus := libbus.NewInMem()
 	t.Cleanup(func() { _ = bus.Close() })
 	missions := missionservice.New(db, missionservice.WithEventPublisher(bus))
@@ -72,8 +71,6 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 	)
 	t.Cleanup(func() { _ = instances.Close() })
 
-	// The routing service under test, wired exactly as serve wires it: the
-	// Manager is the SessionDeliverer, the inbox is the fallback.
 	router, err := reportrouter.New(reportrouter.Deps{
 		Bus:      bus,
 		Sessions: instances,
@@ -88,8 +85,6 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 	workDir := t.TempDir()
 	svc := New(instances, agents, missions, nil, workDir, libtracker.NoopTracker{})
 
-	// The parent: a real live unit whose session supervises the sub-mission,
-	// observed with a viewer.
 	parent, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName:      "agent-fleet-fixture",
 		Intent:         "be the supervising session",
@@ -101,10 +96,6 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 	_, err = instances.Attach(ctx, parent.InstanceID, libacp.SessionID(parent.SessionID), viewer)
 	require.NoError(t, err)
 
-	// ── Case 1: edge set — the report reaches the supervising session ──────────
-
-	// The sub-mission carries the supervision edge pointing at the live
-	// parent session.
 	childMission := &missionservice.Mission{
 		Intent:          "be the sub-unit that reports back",
 		AgentName:       "agent-fleet-fixture",
@@ -119,13 +110,11 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 		Summary: deliveredSummary,
 	}))
 
-	// The report surfaces in the parent session's transcript (async talk-back).
 	require.Eventually(t, func() bool {
 		return strings.Contains(viewer.messageText(), deliveredSummary)
 	}, 30*time.Second, 50*time.Millisecond,
 		"the report never reached the supervising session; transcript=%q\nstderr:\n%s", viewer.messageText(), stderr.String())
 
-	// It did not also land in the operator inbox: a supervised report has a home.
 	inboxItems, err := inbox.List(ctx, 100)
 	require.NoError(t, err)
 	for _, it := range inboxItems {
@@ -133,13 +122,10 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 			"a report delivered to its supervisor must not also fall into the operator inbox")
 	}
 
-	// ── Case 2: edge empty — the report lands in the operator inbox ────────────
-
 	operatorMission := &missionservice.Mission{
 		Intent:         "operator fired this directly",
 		AgentName:      "agent-fleet-fixture",
 		HITLPolicyName: "default",
-		// ParentSessionID deliberately empty: no supervising session.
 	}
 	require.NoError(t, missions.Create(ctx, operatorMission))
 
@@ -164,6 +150,5 @@ func TestFleetE2E_ReportRouting_ParentSessionAndInbox(t *testing.T) {
 		return false
 	}, 15*time.Second, 50*time.Millisecond, "the operator-fired report never landed in the inbox")
 
-	// Tidy up the live unit.
 	require.NoError(t, svc.Stop(ctx, parent.InstanceID))
 }

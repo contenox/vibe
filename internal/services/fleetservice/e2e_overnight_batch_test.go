@@ -23,14 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestFleetE2E_OvernightBatch dispatches four deterministic units onto one
-// board over one isolated HOME: reporter (files a result, lands), mute
-// (nudged once, then blocked), gated (asks permission, blocks, then
-// continues once answered), and planner (revises its plan twice). Bring-ups
-// are serialized to avoid contention seeding one SQLite file concurrently.
-
-// obReporterChain files a result then finishes landed in one deterministic
-// turn; it is never nudged.
 const obReporterChain = `{
   "id": "e2e-overnight-reporter",
   "tasks": [
@@ -62,8 +54,6 @@ const obReporterChain = `{
   ]
 }`
 
-// obPlannerChain sets an initial plan then revises it in the same turn; a
-// plan revision counts as reaching the operator, so it is never nudged.
 const obPlannerChain = `{
   "id": "e2e-overnight-planner",
   "tasks": [
@@ -173,8 +163,6 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 
 	svc := New(kernel, agents, missions, nil, home, libtracker.NoopTracker{})
 
-	// ── Declare the four agents ─────────────────────────────────────────────────
-
 	writeChainAgentFixture(t, contenoxDir)
 	res, err := chainagents.Discover(ctx, agents, contenoxDir)
 	require.NoError(t, err)
@@ -188,9 +176,7 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 	require.NoError(t, os.WriteFile(plannerChainPath, []byte(obPlannerChain), 0o644))
 	obCreateAcpAgent(t, ctx, agents, "overnight-planner", contenoxBin, plannerChainPath)
 
-	// gated: the hermetic acp-stub-agent, told which tool call to ask about
-	// and where to write its outcome file — inside `home`, the only root the
-	// agent sandbox lets a unit write to (Landlock denies elsewhere).
+	// gated writes its outcome inside home: the sandbox's only writable root (Landlock denies elsewhere).
 	gatedReportPath := filepath.Join(home, "overnight-gated-outcome.txt")
 	gatedAgent := &runtimetypes.Agent{Name: "overnight-gated", Enabled: true}
 	require.NoError(t, gatedAgent.SetExternalACPConfig(runtimetypes.ExternalACPConfig{
@@ -206,9 +192,6 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 	}))
 	require.NoError(t, agents.Create(ctx, gatedAgent))
 
-	// ── Serialized bring-ups: settle each unit before dispatching the next ───────
-
-	// (1) reporter: result report + landed status.
 	reporter, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName: "overnight-reporter", Intent: "report and land", HITLPolicyName: "default",
 	})
@@ -220,7 +203,6 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 		return m.Status == missionservice.StatusLanded
 	})
 
-	// (2) mute: nudged once, then the runtime's silent-turn blocker.
 	mute, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName: "agent-fleet-fixture", Intent: "do the batch mission", HITLPolicyName: "default",
 	})
@@ -229,7 +211,6 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 		return r.Kind == missionservice.ReportKindBlocker && strings.Contains(r.Summary, silentTurnBlockerLead)
 	})
 
-	// (3) gated: durable ask lands and blocks; answering it releases the unit.
 	gated, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName: "overnight-gated", Intent: "run the gated_action scenario", HITLPolicyName: gatedEnvelope,
 	})
@@ -273,7 +254,6 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 		return r.Kind == missionservice.ReportKindBlocker && strings.Contains(r.Summary, silentTurnBlockerLead)
 	})
 
-	// (4) planner: the living plan revised past its initial snapshot.
 	planner, err := svc.Dispatch(ctx, DispatchRequest{
 		AgentName: "overnight-planner", Intent: "plan and revise", HITLPolicyName: "default",
 	})
@@ -281,8 +261,6 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 	obWaitMission(t, ctx, missions, planner.MissionID, stderr, 60*time.Second, func(m *missionservice.Mission) bool {
 		return m.Plan.Revision > 0 && planHasEntry(m.Plan, "bench")
 	})
-
-	// ── The board truth an operator wakes up to ─────────────────────────────────
 
 	ids := []string{reporter.MissionID, mute.MissionID, gated.MissionID, planner.MissionID}
 	require.Len(t, obUnique(ids), 4, "the four missions must be distinct — no board collision")
@@ -332,8 +310,6 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 	require.NotEqual(t, missionservice.StatusLanded, mMute.Status)
 	require.NotEqual(t, missionservice.StatusLanded, mPlanner.Status)
 
-	// ── The operator inbox ──────────────────────────────────────────────────────
-
 	require.Eventually(t, func() bool {
 		return obInboxHas(t, ctx, inbox, reporter.MissionID, missionservice.ReportKindResult)
 	}, 60*time.Second, 150*time.Millisecond,
@@ -355,7 +331,6 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 	require.Equal(t, missionservice.ReportKindBlocker, byMission[mute.MissionID][0].Report.Kind)
 	require.Equal(t, missionservice.ReportKindBlocker, byMission[gated.MissionID][0].Report.Kind)
 
-	// ── Teardown: stop every unit and prove no subprocess leaks ──────────────────
 	for _, id := range []string{reporter.InstanceID, mute.InstanceID, gated.InstanceID, planner.InstanceID} {
 		require.NoError(t, svc.Stop(ctx, id))
 		_, gerr := svc.Get(ctx, id)
@@ -363,9 +338,6 @@ func TestFleetE2E_OvernightBatch(t *testing.T) {
 	}
 }
 
-// obCreateAcpAgent declares a `contenox acp --auto` unit bound to a deterministic
-// mission chain, sharing the caller's HOME/DB. --auto disables HITL so the chain's
-// mission-tool calls run unattended.
 func obCreateAcpAgent(t *testing.T, ctx context.Context, agents agentregistryservice.Service, name, bin, chainPath string) {
 	t.Helper()
 	agent := &runtimetypes.Agent{Name: name, Enabled: true}
@@ -378,8 +350,6 @@ func obCreateAcpAgent(t *testing.T, ctx context.Context, agents agentregistryser
 	require.NoError(t, agents.Create(ctx, agent))
 }
 
-// obWaitReport blocks until missionID carries a report satisfying pred, quoting the
-// spawned units' stderr on timeout.
 func obWaitReport(t *testing.T, ctx context.Context, missions missionservice.Service, missionID string, stderr *lockedBuffer, timeout time.Duration, pred func(*missionservice.Report) bool) {
 	t.Helper()
 	require.Eventually(t, func() bool {
@@ -397,7 +367,6 @@ func obWaitReport(t *testing.T, ctx context.Context, missions missionservice.Ser
 		"mission %s never carried the expected report\nstderr:\n%s", missionID, stderr.String())
 }
 
-// obWaitMission blocks until missionID satisfies pred.
 func obWaitMission(t *testing.T, ctx context.Context, missions missionservice.Service, missionID string, stderr *lockedBuffer, timeout time.Duration, pred func(*missionservice.Mission) bool) {
 	t.Helper()
 	require.Eventually(t, func() bool {
@@ -410,7 +379,6 @@ func obWaitMission(t *testing.T, ctx context.Context, missions missionservice.Se
 		"mission %s never reached the expected state\nstderr:\n%s", missionID, stderr.String())
 }
 
-// obInboxHas reports whether the inbox holds an item for missionID of the given kind.
 func obInboxHas(t *testing.T, ctx context.Context, inbox operatorinbox.Service, missionID string, kind missionservice.ReportKind) bool {
 	t.Helper()
 	items, err := inbox.List(ctx, 100)
@@ -425,7 +393,6 @@ func obInboxHas(t *testing.T, ctx context.Context, inbox operatorinbox.Service, 
 	return false
 }
 
-// obPendingForMission returns the asks still pending for missionID.
 func obPendingForMission(t *testing.T, ctx context.Context, hitl hitlservice.Service, missionID string) []*runtimetypes.HITLApproval {
 	t.Helper()
 	rows, err := hitl.ListPending(ctx, 100)
@@ -439,7 +406,6 @@ func obPendingForMission(t *testing.T, ctx context.Context, hitl hitlservice.Ser
 	return out
 }
 
-// obReadFile returns the trimmed contents of path, or "" when it does not exist yet.
 func obReadFile(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -448,7 +414,6 @@ func obReadFile(path string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// obUnique returns the distinct values in ids.
 func obUnique(ids []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(ids))

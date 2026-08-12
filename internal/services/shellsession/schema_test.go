@@ -7,11 +7,7 @@ import (
 	"testing"
 )
 
-// TestUnit_Tools_PublishedSchemaMatchesToolDescriptors pins the declared
-// OpenAPI contract and its agreement with what actually reaches the provider:
-// every tool has a request and a response schema, and each request schema
-// carries exactly the descriptor's properties — same types, same descriptions,
-// same required set — since both are rendered from one table (shellToolSpecs).
+// TestUnit_Tools_PublishedSchemaMatchesToolDescriptors pins that the OpenAPI contract and the tool descriptors agree property for property, since both are rendered from one table (shellToolSpecs).
 func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 	repo := NewTools(nil)
 	ctx := context.Background()
@@ -37,7 +33,6 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		t.Errorf("the published document is not a valid OpenAPI document: %v", err)
 	}
 
-	// The component name is part of the contract: a rename is a breaking change.
 	components := map[string]string{
 		ToolRun:  "ShellSessionRun",
 		ToolRead: "ShellSessionRead",
@@ -81,12 +76,10 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 			if published.Value.Description != declaredProp["description"] {
 				t.Errorf("%s.%s: descriptor and published schema disagree on the description", name, prop)
 			}
-			// Neither argument has a closed value set, in either place.
 			if len(published.Value.Enum) != 0 {
 				t.Errorf("%s.%s: published an enum the descriptor does not declare", name, prop)
 			}
 		}
-		// A tool with no required argument declares none in either place.
 		wantRequired, _ := params["required"].([]string)
 		if strings.Join(wantRequired, ",") != strings.Join(req.Value.Required, ",") {
 			t.Errorf("%s: required = %v, descriptor requires %v", name, req.Value.Required, wantRequired)
@@ -105,9 +98,7 @@ func TestUnit_Tools_PublishedSchemaMatchesToolDescriptors(t *testing.T) {
 		}
 	}
 
-	// The response schemas are declared against the payloads Exec builds, field
-	// for field. Both are constructed here rather than driven through a real
-	// shell so the contract is pinned on every platform.
+	// Constructed here rather than run through a real shell, so the contract is pinned on every platform.
 	for _, tc := range []struct {
 		component string
 		payload   any
@@ -163,7 +154,6 @@ func TestUnit_Tools_DescriptorsAreAddressableByName(t *testing.T) {
 	if _, err := repo.GetToolsForToolsByName(ctx, "shell_session_kill"); err == nil {
 		t.Error("an unknown tool name resolved")
 	}
-	// shell_session_read takes no required argument, and must not declare one.
 	read, _ := repo.GetToolsForToolsByName(ctx, ToolRead)
 	if _, ok := read[0].Function.Parameters.(map[string]any)["required"]; ok {
 		t.Error("shell_session_read must declare no required key at all")

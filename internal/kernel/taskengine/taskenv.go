@@ -80,9 +80,8 @@ var ErrUnsupportedTaskType = errors.New("executor does not support the task type
 // ErrToolsNotFound is returned when a named tools is not registered in any repo.
 var ErrToolsNotFound = errors.New("tools not found")
 
-// ErrToolsToolsUnavailable is returned when a tools is registered but its tool
-// list cannot be loaded (e.g. MCP server unreachable or list-tools failed).
-// ExecEnv treats this like a missing tools for tool preload: skip tools, continue the chain.
+// ErrToolsToolsUnavailable is returned when a registered tools's tool list
+// cannot be loaded (e.g. MCP server unreachable).
 var ErrToolsToolsUnavailable = errors.New("tools tools unavailable")
 
 type toolsToolsUnavailableError struct {
@@ -178,8 +177,8 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 	_, reportChangeChain, endChain := env.tracker.Start(ctx, "chain_exec", chain.ID, "chain_id", chain.ID)
 	defer endChain()
 
-	// Address invariant: every event of this run carries at least the chain in
-	// its scope. Task attempts below override this with the full task scope.
+	// Invariant: every event of this run carries at least the chain in its
+	// scope; task attempts below override with the full task scope.
 	ctx = WithTaskEventScope(ctx, TaskEventScope{ChainID: chain.ID})
 
 	stack := env.inspector.Start(ctx)
@@ -191,10 +190,7 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 		if retErr != nil {
 			var susp *ChainSuspendedError
 			if errors.As(retErr, &susp) {
-				// A suspension is a typed terminal, not a failure: the
-				// segment ends with chain_suspended carrying the
-				// interrupt's address and the approval/checkpoint key,
-				// published after the checkpoint is persisted so a
+				// Published after the checkpoint is persisted, so a
 				// consumer reacting to it can already resume.
 				chainEvent.Kind = TaskEventChainSuspended
 				chainEvent.ApprovalID = susp.ApprovalID
@@ -236,21 +232,23 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 	var taskErr error
 	var inputVar string
 
-	// rootFailureErr is the first taskErr routed through an on_failure
-	// transition; cleared when a subsequent task succeeds. While non-nil, a
-	// terminal failure reports it before the failure handler's own error.
+	// rootFailureErr holds the first taskErr routed through on_failure,
+	// reported ahead of a later failure handler's own error; cleared on success.
 	var rootFailureErr error
 	var rootFailureTaskID string
 	var rootFailureRetries int
 
-	// edgeCounts tracks how many times each edge "fromTaskID->toTaskID" has been
-	// traversed during this chain run. Consulted by OpEdgeTraversedAtLeast to
-	// bound workflow loops and other cyclic chains. Per-Execute, no DB.
+	// enteredViaFailure marks that currentTask was reached over an on_failure
+	// edge, so input preparation guarantees a non-empty routed context (see
+	// ensureFailureContext); cleared once consumed.
+	var enteredViaFailure bool
+
+	// edgeCounts tracks traversal counts per "fromTaskID->toTaskID" edge for
+	// this run; consulted by OpEdgeTraversedAtLeast.
 	edgeCounts := map[string]int{}
 
 	// A checkpoint on the context re-enters the chain at the interrupted task
-	// with the suspended run's variable state, edge counts, and transcript
-	// restored. Everything after this block is the normal execution path.
+	// with the suspended run's state restored.
 	resumeFirstAttempt := false
 	if cp := resumeCheckpointFromContext(ctx); cp != nil {
 		currentTask, err = findTaskByID(chain.Tasks, cp.TaskID)
@@ -291,9 +289,7 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 				continue
 			}
 			// WithToolsArgs copies the map, so the stored value is immutable
-			// and safe to read concurrently without locks. execute_config's
-			// tools_policies is the primary mechanism; task.Tools.Args is
-			// the secondary one, for HandleTools tasks.
+			// and safe to read concurrently without locks.
 			toolCtx := ctx
 			if task.ExecuteConfig != nil {
 				if policy, ok := task.ExecuteConfig.ToolsPolicies[toolsName]; ok && len(policy) > 0 {
@@ -340,9 +336,8 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 		inputVar = currentTask.ID
 		if resumeFirstAttempt {
 			// The resumed task re-enters with the checkpointed transcript
-			// verbatim: no input_var redirection, no prompt-template render,
-			// no input cap — replacing or truncating it would resume a
-			// different run than the one that suspended.
+			// verbatim — no redirection, template render, or cap — or it
+			// would resume a different run than the one that suspended.
 			resumeFirstAttempt = false
 		} else {
 			if currentTask.InputVar != "" {
@@ -368,12 +363,20 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 				taskInputType = DataTypeString
 			}
 			taskInput, taskInputType = capTaskInputForExecution(taskInput, taskInputType, currentTask.InputMaxBytes)
+
+			// A failure handler must never die of its own prompt: an
+			// effectively empty post-cap context is replaced with the root
+			// failure as a user message (see failurecontext.go).
+			if enteredViaFailure {
+				taskInput, taskInputType = ensureFailureContext(taskInput, taskInputType, rootFailureTaskID, rootFailureErr)
+			}
 		}
+		enteredViaFailure = false
 		maxRetries := max(currentTask.RetryOnFailure, 0)
 
 		for retry := 0; retry <= maxRetries; retry++ {
-			// Keep task execution attached to the caller so cancellation from
-			// Ctrl+C, request shutdown, or parent timeouts stops in-flight work.
+			// taskCtx stays attached to ctx so parent cancellation stops
+			// in-flight work.
 			taskCtx := ctx
 
 			var cancel context.CancelFunc
@@ -410,9 +413,7 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 			taskCtx = WithEdgeCounts(taskCtx, edgeCounts)
 
 			// chain.TokenLimit is the base budget; a per-request context
-			// length attached to taskCtx (e.g. the model's declared
-			// ContextLength) is preferred, so usage indicators report the
-			// real model window instead of 0 or a chain default.
+			// length on taskCtx is preferred when present.
 			tokenLimit := int(chain.TokenLimit)
 			if requested := RequestedContextLengthFromContext(taskCtx); requested > 0 {
 				if tokenLimit <= 0 || requested < tokenLimit {
@@ -430,9 +431,8 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 				cancel()
 			}
 
-			// A parked approval is handled before the retry/on_failure
-			// machinery below: it is neither a failure to retry nor one to
-			// route around.
+			// A parked approval is handled before retry/on_failure: it is
+			// neither a failure to retry nor one to route around.
 			var pendErr *ApprovalPendingError
 			if errors.As(taskErr, &pendErr) {
 				return env.suspendRun(ctx, stack, chain, currentTask, retry, vars, varTypes, edgeCounts, output, pendErr)
@@ -510,10 +510,8 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 					rootFailureTaskID = currentTask.ID
 					rootFailureRetries = maxRetries
 				}
-				// Prefer the typed input that led to the failure. Only keep
-				// the task's output if it is a real, typed value. If the
-				// available type is DataTypeAny, infer a concrete type from the
-				// failure input so downstream handlers don't receive "any".
+				// Keep the task's output only if it is a real, typed value;
+				// otherwise fall back to the failure's typed input.
 				failedOutput := taskInput
 				failedOutputType := taskInputType
 				if output != nil && outputType != DataTypeAny && outputType != DataTypeNil {
@@ -540,6 +538,7 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 
 				previousTaskID := currentTask.ID
 				edgeCounts[previousTaskID+"->"+currentTask.Transition.OnFailure]++
+				enteredViaFailure = true
 				currentTask, err = findTaskByID(chain.Tasks, currentTask.Transition.OnFailure)
 				if err != nil {
 					return nil, DataTypeAny, stack.GetExecutionHistory(), fmt.Errorf("error transition target not found: %v", err)
@@ -619,10 +618,9 @@ func (env SimpleEnv) ExecEnv(ctx context.Context, chain *TaskChainDefinition, in
 }
 
 func renderTemplate(tmplStr string, vars any) (string, error) {
-	// missingkey=error is intentionally not set: a referenced-but-absent
-	// variable renders "<no value>" rather than erroring, since templates
-	// legitimately reference not-yet-populated keys (e.g. a task's Print
-	// referencing its own id, set only after Print renders).
+	// missingkey=error is intentionally not set: templates legitimately
+	// reference not-yet-populated keys (e.g. a task referencing its own id
+	// before Print sets it), which must render "<no value>", not error.
 	tmpl, err := template.New("prompt").Funcs(sprig.TxtFuncMap()).Parse(tmplStr)
 	if err != nil {
 		return "", err
@@ -635,9 +633,7 @@ func renderTemplate(tmplStr string, vars any) (string, error) {
 }
 
 func (exe SimpleEnv) evaluateTransitions(_ context.Context, _ string, transition TaskTransition, eval string, edgeCounts map[string]int) (string, *TransitionBranch, error) {
-	// A task with no branches is a leaf: end the chain cleanly with its output
-	// rather than erroring. (Authoring an explicit {operator: default, goto: ""}
-	// branch remains the way to end conditionally.)
+	// A task with no branches is a leaf: it ends the chain cleanly with its output.
 	if len(transition.Branches) == 0 {
 		return "", nil, nil
 	}
@@ -662,8 +658,7 @@ func (exe SimpleEnv) evaluateTransitions(_ context.Context, _ string, transition
 
 		match, err := compare(branch.Operator, eval, branch.When)
 		if err != nil {
-			// Treat parse errors as non-match so OpDefault can still fire,
-			// rather than bypassing the safe fallback branch entirely.
+			// Treat parse errors as non-match so OpDefault can still fire.
 			match = false
 		}
 		if match {
@@ -680,7 +675,6 @@ func (exe SimpleEnv) evaluateTransitions(_ context.Context, _ string, transition
 	return "", nil, fmt.Errorf("no matching transition found for eval: %s", eval)
 }
 
-// compare applies a logical operator to a model response and a target value.
 func compare(operator OperatorTerm, response, when string) (bool, error) {
 	switch operator {
 	case OpEquals:
@@ -696,7 +690,6 @@ func compare(operator OperatorTerm, response, when string) (bool, error) {
 	}
 }
 
-// findTaskByID returns the task with the given ID from the task list.
 func findTaskByID(tasks []TaskDefinition, id string) (*TaskDefinition, error) {
 	for i := range tasks {
 		if tasks[i].ID == id {

@@ -13,21 +13,16 @@ import (
 	"github.com/contenox/contenox/internal/models/modelrepo"
 )
 
-// buildConverseInput maps neutral messages + config into a Converse request.
-// Adjacent same-role messages are merged (Bedrock requires alternating roles).
-// Tool names are sanitized to match Bedrock's ^[a-zA-Z0-9_-]{1,64}$ before
-// sending; the returned map translates sanitized names back to the caller's
-// originals. A reasoning request (cfg.Think) the model cannot honor is a hard
-// error, never a silent drop.
 func buildConverseInput(modelName string, messages []modelrepo.Message, cfg *modelrepo.ChatConfig, maxOutputTokens int) (*bedrockruntime.ConverseInput, map[string]string, error) {
+	// No audio encoding on this wire format; refuse instead of dropping silently.
+	if err := modelrepo.RefuseAudioInput("bedrock", modelName, messages); err != nil {
+		return nil, nil, err
+	}
+
 	in := &bedrockruntime.ConverseInput{ModelId: aws.String(modelName)}
 	toOriginal := map[string]string{}
 
-	// Bedrock rejects toolUse/toolResult blocks unless the request also carries
-	// toolConfig. Tool-less tasks (e.g. recovery/summarise steps) can still
-	// receive histories from tool-using turns, so those blocks render as plain
-	// text instead — a synthetic toolConfig would invite the model to call
-	// tools this task cannot execute.
+	// Bedrock rejects toolUse/toolResult blocks unless the request also carries toolConfig.
 	hasTools := false
 	if cfg != nil {
 		for _, t := range cfg.Tools {
@@ -97,10 +92,7 @@ func buildConverseInput(modelName string, messages []modelrepo.Message, cfg *mod
 			if m.Content != "" {
 				blocks = append(blocks, &types.ContentBlockMemberText{Value: m.Content})
 			}
-			// Vision: append an image block per attachment after any text block.
-			// Bedrock takes raw bytes via the Bytes source (the SDK base64-encodes
-			// on the wire). Images with an unrecognised MIME type are skipped
-			// rather than sent with an invalid Format.
+			// Unrecognised MIME types are skipped rather than sent with an invalid Format.
 			for _, img := range m.Images {
 				format, ok := imageFormatFromMime(img.MimeType)
 				if !ok {
@@ -174,23 +166,11 @@ func buildConverseInput(modelName string, messages []modelrepo.Message, cfg *mod
 	return in, toOriginal, nil
 }
 
-// bedrockSupportsPromptCaching gates cachePoint insertion by model family.
-// AWS documents prompt caching for Anthropic Claude (3.5 Sonnet v2+) and
-// Amazon Nova on Converse; unsupported models get no cachePoints because
-// Bedrock rejects (rather than ignores) cachePoint blocks it doesn't support.
 func bedrockSupportsPromptCaching(modelName string) bool {
 	base := strings.ToLower(bedrockBaseModelID(modelName))
 	return strings.Contains(base, "anthropic.claude") || strings.Contains(base, "amazon.nova")
 }
 
-// applyBedrockCachePoints inserts Converse cachePoint blocks after the last
-// tool definition and after the last system block, where the hints assert
-// stability. Placement is metadata-only: cachePoint is its own union member
-// and never alters model-visible content. History breakpoints are not placed
-// on Bedrock (Claude manages caching server-side). The advisory TTL hint is
-// ignored — the 1h tier needs 4.5-class Claude models with ordering
-// constraints, so the 5m default is used. At most 2 of the 4 allowed
-// checkpoints are used.
 func applyBedrockCachePoints(in *bedrockruntime.ConverseInput, modelName string, hints *modelrepo.CacheHints) {
 	if in == nil || hints == nil || !bedrockSupportsPromptCaching(modelName) {
 		return
@@ -204,14 +184,6 @@ func applyBedrockCachePoints(in *bedrockruntime.ConverseInput, modelName string,
 	}
 }
 
-// applyBedrockThinking maps cfg.Think onto Bedrock's documented reasoning
-// config for Claude models: additionalModelRequestFields carrying
-// {"thinking": {"type": "enabled", "budget_tokens": N}} (the Anthropic-native
-// passthrough AWS documents for Claude on Converse). Models that cannot honor
-// the request refuse loudly:
-//   - non-Claude models have no reasoning config on Converse;
-//   - adaptive-thinking Claude generations reject an explicit enabled/disabled
-//     config (they always reason), so only "off" is refused for them.
 func applyBedrockThinking(in *bedrockruntime.ConverseInput, modelName string, cfg *modelrepo.ChatConfig) error {
 	if cfg == nil || cfg.Think == nil {
 		return nil
@@ -230,8 +202,7 @@ func applyBedrockThinking(in *bedrockruntime.ConverseInput, modelName string, cf
 		if level == reasoning.Off {
 			return fmt.Errorf("bedrock model %s always reasons adaptively and cannot disable thinking (think=off); drop the think setting or use a model with configurable thinking", modelName)
 		}
-		// Adaptive generations reason by default and reject an explicit
-		// thinking config; the request is already satisfied.
+		// Adaptive generations reason by default and reject an explicit thinking config.
 		return nil
 	}
 
@@ -257,8 +228,6 @@ func applyBedrockThinking(in *bedrockruntime.ConverseInput, modelName string, cf
 	return nil
 }
 
-// bedrockThinkingBudget mirrors the direct-Anthropic budget ladder
-// (anthropic/client.go); Bedrock documents a 1024-token minimum.
 func bedrockThinkingBudget(level string) int {
 	switch level {
 	case reasoning.Medium:
@@ -272,9 +241,6 @@ func bedrockThinkingBudget(level string) int {
 	}
 }
 
-// bedrockClaudeUsesAdaptiveThinking mirrors the direct-provider model split
-// (anthropic/client.go anthropicRequiresAdaptiveThinking): these generations
-// reject thinking.type enabled/disabled with a 400 and reason adaptively.
 func bedrockClaudeUsesAdaptiveThinking(base string) bool {
 	return strings.Contains(base, "claude-opus-4-7") ||
 		strings.Contains(base, "claude-opus-4-8") ||
@@ -283,9 +249,6 @@ func bedrockClaudeUsesAdaptiveThinking(base string) bool {
 		strings.Contains(base, "mythos")
 }
 
-// decodeConverse maps a Converse response into a neutral ChatResult. toOriginal
-// translates sanitized tool names (as sent to Bedrock) back to the caller's
-// original tool names; unknown names are passed through unchanged.
 func decodeConverse(out *bedrockruntime.ConverseOutput, toOriginal map[string]string) (modelrepo.ChatResult, error) {
 	if out == nil || out.Output == nil {
 		return modelrepo.ChatResult{}, fmt.Errorf("bedrock: empty converse output")
@@ -302,8 +265,7 @@ func decodeConverse(out *bedrockruntime.ConverseOutput, toOriginal map[string]st
 		case *types.ContentBlockMemberText:
 			text.WriteString(v.Value)
 		case *types.ContentBlockMemberReasoningContent:
-			// reasoningContent is a union; the readable form is
-			// reasoningText{text, signature}. Redacted content is skipped.
+			// Redacted reasoning content is skipped.
 			if rt, ok := v.Value.(*types.ReasoningContentBlockMemberReasoningText); ok {
 				thinking.WriteString(aws.ToString(rt.Value.Text))
 			}
@@ -331,11 +293,6 @@ func decodeConverse(out *bedrockruntime.ConverseOutput, toOriginal map[string]st
 	}, nil
 }
 
-// usageFromConverse maps the Converse usage report onto the neutral
-// TokenUsage. Bedrock's inputTokens counts only the uncached remainder;
-// cacheRead/cacheWriteInputTokens are separate, and per the normalization
-// rule PromptTokens is the sum of all three. TotalTokens is recomputed from
-// the normalized prompt count rather than trusted from the wire.
 func usageFromConverse(u *types.TokenUsage) *modelrepo.TokenUsage {
 	if u == nil {
 		return nil
@@ -360,10 +317,6 @@ func newToolCall(id, name, args string) modelrepo.ToolCall {
 	return tc
 }
 
-// imageFormatFromMime maps an image MIME type to the Bedrock Converse
-// ImageFormat enum. Only the formats Bedrock accepts (png, jpeg, gif, webp)
-// are recognised; any other type returns ok=false so the caller can skip the
-// attachment instead of sending a Format value Bedrock would reject.
 func imageFormatFromMime(mime string) (types.ImageFormat, bool) {
 	switch strings.ToLower(strings.TrimSpace(mime)) {
 	case "image/png":
@@ -379,8 +332,6 @@ func imageFormatFromMime(mime string) (types.ImageFormat, bool) {
 	}
 }
 
-// sanitizeToolName replaces invalid characters with '_' and trims leading/trailing separators.
-// Allowed: letters, digits, underscore, hyphen. Maximum length is 64 characters.
 func sanitizeToolName(in string) string {
 	if in == "" {
 		return "tool"
@@ -397,7 +348,6 @@ func sanitizeToolName(in string) string {
 		}
 	}
 	s := b.String()
-	// avoid leading/trailing separators
 	s = strings.Trim(s, "_-")
 	if len(s) > 64 {
 		s = s[:64]

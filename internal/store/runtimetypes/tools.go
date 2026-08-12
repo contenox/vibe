@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// encodeProperties serializes a map into a byte slice using gob.
 func encodeProperties(props InjectionArg) ([]byte, error) {
 	var buf bytes.Buffer
 	encoder := gob.NewEncoder(&buf)
@@ -24,7 +23,6 @@ func encodeProperties(props InjectionArg) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// decodeProperties deserializes a byte slice into a map using gob.
 func decodeProperties(data []byte) (InjectionArg, error) {
 	if len(data) == 0 {
 		return InjectionArg{}, nil
@@ -38,7 +36,6 @@ func decodeProperties(data []byte) (InjectionArg, error) {
 	return props, nil
 }
 
-// orEmptyStringMap returns m if non-nil, otherwise an empty map.
 func orEmptyStringMap(m map[string]string) map[string]string {
 	if m == nil {
 		return map[string]string{}
@@ -83,7 +80,6 @@ func (s *store) CreateRemoteTools(ctx context.Context, tools *RemoteTools) error
 		return fmt.Errorf("failed to marshal tools inject params: %w", err)
 	}
 
-	// Use gob encoding for body properties
 	bodyPropsBytes, err := encodeProperties(tools.Properties)
 	if err != nil {
 		return err
@@ -143,7 +139,6 @@ func (s *store) GetRemoteTools(ctx context.Context, id string) (*RemoteTools, er
 		return nil, fmt.Errorf("failed to unmarshal tools headers: %w", err)
 	}
 
-	// Use gob decoding for body properties
 	props, err := decodeProperties(bodyPropsBytes)
 	if err != nil {
 		return nil, err
@@ -199,7 +194,6 @@ func (s *store) GetRemoteToolsByName(ctx context.Context, name string) (*RemoteT
 		return nil, fmt.Errorf("failed to unmarshal tools headers: %w", err)
 	}
 
-	// Use gob decoding for body properties
 	props, err := decodeProperties(bodyPropsBytes)
 	if err != nil {
 		return nil, err
@@ -234,7 +228,6 @@ func (s *store) UpdateRemoteTools(ctx context.Context, tools *RemoteTools) error
 		return fmt.Errorf("failed to marshal tools inject params for update: %w", err)
 	}
 
-	// Use gob encoding for body properties
 	bodyPropsBytes, err := encodeProperties(tools.Properties)
 	if err != nil {
 		return err
@@ -311,7 +304,6 @@ func (s *store) ListRemoteTools(ctx context.Context, createdAtCursor *time.Time,
 			return nil, fmt.Errorf("failed to unmarshal tools headers from list: %w", err)
 		}
 
-		// Use gob decoding for body properties
 		props, err := decodeProperties(bodyPropsBytes)
 		if err != nil {
 			return nil, err

@@ -15,27 +15,17 @@ import (
 	"github.com/contenox/contenox/internal/services/vfs"
 )
 
-// ErrNoSession is returned by Write for a session with no live shell. Distinct
-// from a spawn failure: the caller addressed something that is not there.
+// ErrNoSession is returned by Write for a session with no live shell, distinct from a spawn failure: the caller addressed something that is not there.
 var ErrNoSession = errors.New("shellsession: no live shell for this session")
 
-// spawnKey carries a per-call spawn override. Unexported so the only way to
-// set one is WithSpawn — a context value cannot be forged by a caller that
-// does not import this package.
 type spawnKey struct{}
 
-// spawnOverride is the per-call half of Config: what THIS shell should be
-// rooted at and run, when the manager-wide defaults are not it.
 type spawnOverride struct {
 	cwd   string
 	shell string
 }
 
-// WithSpawn attaches a per-shell cwd and/or shell to ctx, honoured by the next
-// shell this manager creates for the session named in that call. Empty strings
-// fall back to the manager's CwdResolver and Config.Shell. The cwd is still
-// validated against the workspace allowlist — an override chooses among
-// permitted roots, it never escapes them.
+// WithSpawn attaches a per-shell cwd and/or shell to ctx, honoured by the next shell created for that session; empty strings fall back to CwdResolver/Config.Shell, and the cwd is still validated against the workspace allowlist.
 func WithSpawn(ctx context.Context, cwd, shell string) context.Context {
 	return context.WithValue(ctx, spawnKey{}, spawnOverride{cwd: cwd, shell: shell})
 }
@@ -49,29 +39,17 @@ func spawnFrom(ctx context.Context) spawnOverride {
 }
 
 const (
-	// defaultScrollbackBytes bounds the retained output per shell.
 	defaultScrollbackBytes = 64 * 1024
-	// defaultIdleTimeout kills a shell that has seen no activity for this long.
-	defaultIdleTimeout = 15 * time.Minute
-	// flushInterval coalesces PTY output before fanning it out to subscribers so
-	// a `yes`-style flood becomes a handful of batched updates per second rather
-	// than one wire frame per read.
-	flushInterval = 60 * time.Millisecond
-	// runCaptureWindow is how long Run waits for a submitted line's initial
-	// output before returning a snapshot; it never blocks until process exit.
-	runCaptureWindow = 250 * time.Millisecond
-	readChunkBytes   = 32 * 1024
-	subscriberBuffer = 1024
-	// defaultRows/defaultCols size a PTY whose client never reported a
-	// geometry; a wrong width wraps or truncates column-aware tool output.
-	defaultRows = 24
-	defaultCols = 120
+	defaultIdleTimeout     = 15 * time.Minute
+	flushInterval          = 60 * time.Millisecond
+	runCaptureWindow       = 250 * time.Millisecond
+	readChunkBytes         = 32 * 1024
+	subscriberBuffer       = 1024
+	defaultRows            = 24
+	defaultCols            = 120
 )
 
-// Chunk is one batch of terminal output delivered to a subscriber. Offset is the
-// absolute scrollback offset where Data begins. Reset marks the initial
-// snapshot a fresh subscriber receives (or a stream restart after the PTY was
-// recreated), signalling the consumer to replace rather than append.
+// Chunk is one batch of terminal output delivered to a subscriber: Offset is where Data begins in scrollback, and Reset marks a snapshot (initial or after PTY restart) the consumer should replace rather than append.
 type Chunk struct {
 	Offset int64
 	Data   string
@@ -96,33 +74,19 @@ type ReadResult struct {
 	Exists     bool
 }
 
-// Manager owns the process-global set of per-session shells. All methods are
-// safe for concurrent use and key on the internal chat-session id.
+// Manager owns the process-global set of per-session shells; all methods are safe for concurrent use and key on the internal chat-session id.
 type Manager interface {
-	// Run ensures a shell exists for sessionID (rooted via the cwd resolver
-	// against ctx) and submits one line to it. ctx is used only for cwd
-	// resolution at creation time.
+	// Run ensures a shell exists for sessionID (rooted via the cwd resolver against ctx, used only at creation time) and submits one line to it.
 	Run(ctx context.Context, sessionID, line string) (RunResult, error)
-	// Open ensures a shell exists for sessionID without submitting anything,
-	// so an interactive client can attach before the first keystroke.
-	// Idempotent: an already-live shell is returned as-is.
+	// Open ensures a shell exists for sessionID without submitting anything, so an interactive client can attach before the first keystroke; idempotent, an already-live shell is returned as-is.
 	Open(ctx context.Context, sessionID string) error
-	// Write feeds raw bytes to sessionID's shell stdin VERBATIM — unlike Run
-	// it appends no newline and imposes no line discipline, because the bytes
-	// are a human's keystrokes (arrow keys, ^C, partial lines). Never creates
-	// a shell: an unknown session is ErrNoSession.
+	// Write feeds raw bytes to sessionID's shell stdin VERBATIM (unlike Run, no newline or line discipline, since the bytes are a human's keystrokes); never creates a shell — an unknown session is ErrNoSession.
 	Write(sessionID string, data []byte) error
-	// Read returns scrollback for sessionID: bytes since `since` when since >= 0,
-	// otherwise the last `tailBytes`. Never creates a shell.
+	// Read returns scrollback for sessionID (bytes since `since` when since >= 0, otherwise the last `tailBytes`); never creates a shell.
 	Read(sessionID string, since int64, tailBytes int) ReadResult
-	// Resize records the terminal geometry for sessionID and applies it to
-	// the live shell when there is one. Total: an unknown session, a reaped
-	// shell, or a non-positive dimension are no-ops, not errors. The size is
-	// remembered even with no live shell, so the next one is born at it.
+	// Resize records the terminal geometry for sessionID and applies it to the live shell if any; total (unknown session, reaped shell, or non-positive dimension are no-ops), and remembered even with no live shell so the next one is born at it.
 	Resize(sessionID string, rows, cols int)
-	// Subscribe registers fn for live output of sessionID, invoked from a
-	// dedicated goroutine so a slow consumer cannot stall the PTY. The
-	// current scrollback is delivered immediately as a Reset chunk.
+	// Subscribe registers fn for live output of sessionID, invoked from a dedicated goroutine so a slow consumer cannot stall the PTY; the current scrollback is delivered immediately as a Reset chunk.
 	Subscribe(sessionID string, fn func(Chunk)) (cancel func())
 	// Kill terminates and forgets sessionID's shell (session close/delete).
 	Kill(sessionID string)
@@ -130,14 +94,11 @@ type Manager interface {
 	Shutdown()
 }
 
-// Config configures a Manager. Zero values fall back to sane defaults.
+// Config configures a Manager; zero values fall back to sane defaults.
 type Config struct {
-	// CwdResolver returns the workspace root a new shell should be rooted at,
-	// given the tool/request context (which carries the session id). Required.
+	// CwdResolver returns the workspace root a new shell should be rooted at, given the tool/request context (which carries the session id); required.
 	CwdResolver func(ctx context.Context) string
-	// Workspace is the operator's workspace-root allowlist, enforced against
-	// whatever CwdResolver returns; the only source of the default root.
-	// Nil means no allowlist, and an absolute cwd is taken as given.
+	// Workspace is the operator's workspace-root allowlist enforced against CwdResolver's output and the only source of the default root; nil means no allowlist, so an absolute cwd is taken as given.
 	Workspace *vfs.Factory
 	// Shell overrides the shell executable; empty picks a platform default.
 	Shell string
@@ -145,20 +106,11 @@ type Config struct {
 	ScrollbackBytes int
 	// IdleTimeout kills inactive shells (default 15m; <=0 disables reaping).
 	IdleTimeout time.Duration
-	// ScrubEnv, when set, maps the parent environment to the one a spawned
-	// shell inherits, so serve's own secrets never reach an agent-reachable
-	// PTY. Nil inherits the full environment.
+	// ScrubEnv, when set, maps the parent environment to the one a spawned shell inherits, so serve's own secrets never reach an agent-reachable PTY; nil inherits the full environment.
 	ScrubEnv func([]string) []string
-	// Interactive spawns shells for a HUMAN at a real terminal: ECHO stays on
-	// and the shell draws its own prompt, because the operator must see what
-	// they type. The default (false) is the agent-facing posture — echo off,
-	// prompt suppressed — where output is scrollback for a model to read and a
-	// prompt is noise plus a login/host/cwd leak.
+	// Interactive spawns shells for a HUMAN at a real terminal (ECHO on, shell draws its own prompt); the default (false) is the agent-facing posture — echo off, prompt suppressed — since output is scrollback for a model to read.
 	Interactive bool
-	// OnExit, when set, is invoked once per shell when it terminates, from a
-	// dedicated goroutine. Fires for every cause — process exit, Kill, idle
-	// reap, Shutdown — so a client can report the terminal as gone exactly
-	// once. Total: never called twice for the same shell.
+	// OnExit, when set, is invoked once per shell when it terminates, from a dedicated goroutine, for every cause (process exit, Kill, idle reap, Shutdown); total, never called twice for the same shell.
 	OnExit func(sessionID string)
 }
 
@@ -170,9 +122,7 @@ type manager struct {
 	mu     sync.Mutex
 	shells map[string]*shell
 	subs   map[string][]*subscriber
-	// sizes is the last geometry each session reported, kept independently
-	// of the shell so it survives idle reaping.
-	sizes map[string]ptySize
+	sizes  map[string]ptySize
 
 	stop     chan struct{}
 	stopOnce sync.Once
@@ -203,16 +153,12 @@ func NewManager(cfg Config) Manager {
 	return m
 }
 
-// resolveCwd decides which directory a new shell is rooted at. A PTY is a
-// live interactive foothold, so the result is validated through
-// vfs.ResolveSessionCwd — the same procedure the ACP session paths and
-// fleet dispatch use — rather than trusting CwdResolver's answer directly.
-// The fallback is "" since Workspace already carries the default root.
 func (m *manager) resolveCwd(ctx context.Context) (string, error) {
 	cwd := spawnFrom(ctx).cwd
 	if cwd == "" && m.cfg.CwdResolver != nil {
 		cwd = m.cfg.CwdResolver(ctx)
 	}
+	// A PTY is a live interactive foothold: validated through vfs.ResolveSessionCwd rather than trusted directly.
 	return vfs.ResolveSessionCwd(m.cfg.Workspace, cwd, "")
 }
 
@@ -337,7 +283,6 @@ func (m *manager) Shutdown() {
 	m.wg.Wait()
 }
 
-// ensureShell returns the live shell for sessionID, creating one when absent.
 func (m *manager) ensureShell(ctx context.Context, sessionID string) (*shell, bool, error) {
 	m.mu.Lock()
 	if sh, ok := m.shells[sessionID]; ok && !sh.closed.Load() {
@@ -350,7 +295,6 @@ func (m *manager) ensureShell(ctx context.Context, sessionID string) (*shell, bo
 	if err != nil {
 		return nil, false, err
 	}
-	// Born at the session's last known geometry, not the default.
 	m.mu.Lock()
 	size, ok := m.sizes[sessionID]
 	m.mu.Unlock()
@@ -459,14 +403,11 @@ func (m *manager) reap() {
 	}
 }
 
-// ptySize is a terminal geometry. Comparable on purpose: Resize uses equality to
-// skip a no-change ioctl.
 type ptySize struct {
 	rows int
 	cols int
 }
 
-// shell is one running PTY plus its scrollback and output pump.
 type shell struct {
 	id      string
 	pty     *ptySession
@@ -476,7 +417,7 @@ type shell struct {
 	once    sync.Once
 	closed  atomic.Bool
 	lastNs  atomic.Int64
-	emitted int64 // last offset fanned out (flushLoop-only)
+	emitted int64
 }
 
 func (s *shell) touch()                  { s.lastNs.Store(time.Now().UnixNano()) }
@@ -534,17 +475,13 @@ func (s *shell) shutdown() {
 		close(s.done)
 		s.pty.close()
 		go s.pty.wait()
-		// once guarantees exactly one notification per shell, whichever of the
-		// four teardown paths got here first.
+		// once guarantees exactly one notification per shell, whichever of the four teardown paths gets here first.
 		if fn := s.mgr.cfg.OnExit; fn != nil {
 			go fn(s.id)
 		}
 	})
 }
 
-// spawnSpec is everything startPTY needs for one shell: the already-validated
-// cwd, the shell to exec, the environment mapping, the initial geometry, and
-// whether this PTY faces a human (see Config.Interactive).
 type spawnSpec struct {
 	cwd         string
 	shell       string

@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// lintChain builds a minimal chain around the given tasks.
 func lintChain(tasks ...taskengine.TaskDefinition) *taskengine.TaskChainDefinition {
 	return &taskengine.TaskChainDefinition{ID: "lint-test", Tasks: tasks}
 }
@@ -16,10 +15,7 @@ func branchTo(op taskengine.OperatorTerm, when, goto_ string) taskengine.Transit
 	return taskengine.TransitionBranch{Operator: op, When: when, Goto: goto_}
 }
 
-// TestUnit_LintChain_GoodChainPasses exercises the shape every shipped agent
-// chain uses: a chat loop with a tool-execution task fed via input_var, a
-// recovery loop reached via on_failure, and a summarise task reading
-// previous_output. Nothing here may error.
+// TestUnit_LintChain_GoodChainPasses exercises the shape every shipped agent chain uses; nothing here may error.
 func TestUnit_LintChain_GoodChainPasses(t *testing.T) {
 	chain := lintChain(
 		taskengine.TaskDefinition{
@@ -47,7 +43,6 @@ func TestUnit_LintChain_GoodChainPasses(t *testing.T) {
 		},
 	)
 	require.NoError(t, taskengine.LintChain(chain))
-	// And with a concrete entry type the runtime actually uses.
 	require.NoError(t, taskengine.LintChain(chain, taskengine.DataTypeChatHistory))
 	require.NoError(t, taskengine.LintChain(chain, taskengine.DataTypeString))
 }
@@ -74,9 +69,7 @@ func TestUnit_LintChain_ImpossibleEdgeIsLoadError(t *testing.T) {
 		"task[summarize] handler execute_tool_calls cannot accept input from task[extract] (produces string; accepts chat_history)")
 }
 
-// TestUnit_LintChain_AnyFlowsStayRuntimeChecked: the eino tri-state's middle
-// value. A tools task's output type is unknowable at load, so an edge carrying
-// it must pass the linter and stay the runtime backstop's problem.
+// TestUnit_LintChain_AnyFlowsStayRuntimeChecked: a tools task's output type is unknowable at load, so an edge carrying it must pass the linter and stay the runtime backstop's problem.
 func TestUnit_LintChain_AnyFlowsStayRuntimeChecked(t *testing.T) {
 	chain := lintChain(
 		taskengine.TaskDefinition{
@@ -86,12 +79,10 @@ func TestUnit_LintChain_AnyFlowsStayRuntimeChecked(t *testing.T) {
 				Branches: []taskengine.TransitionBranch{branchTo(taskengine.OpDefault, "", "digest")},
 			},
 		},
-		// execute_tool_calls has the narrowest accept set; only Any keeps this legal.
 		taskengine.TaskDefinition{ID: "digest", Handler: taskengine.HandleExecuteToolCalls},
 	)
 	require.NoError(t, taskengine.LintChain(chain, taskengine.DataTypeString))
 
-	// An unknown chain entry type (default) likewise flows as Any.
 	chain2 := lintChain(taskengine.TaskDefinition{ID: "digest", Handler: taskengine.HandleExecuteToolCalls})
 	require.NoError(t, taskengine.LintChain(chain2))
 }
@@ -278,9 +269,6 @@ func TestUnit_LintChain_StructuralDefectsWrapErrChainLint(t *testing.T) {
 	require.Contains(t, err.Error(), `unknown handler "prompt"`)
 }
 
-// TestUnit_LintChain_RaiseErrorSuccessorsUnreachable: raise_error never
-// succeeds, so a goto branch from it must not make its target's dataflow
-// reachable through that edge — but the on_failure edge does flow.
 func TestUnit_LintChain_RaiseErrorFlowsOnlyThroughOnFailure(t *testing.T) {
 	chain := lintChain(
 		taskengine.TaskDefinition{
@@ -292,6 +280,5 @@ func TestUnit_LintChain_RaiseErrorFlowsOnlyThroughOnFailure(t *testing.T) {
 		},
 		taskengine.TaskDefinition{ID: "explain", Handler: taskengine.HandleChatCompletion, InputVar: "last_error"},
 	)
-	// last_error is a string, which chat_completion accepts: legal.
 	require.NoError(t, taskengine.LintChain(chain, taskengine.DataTypeString))
 }

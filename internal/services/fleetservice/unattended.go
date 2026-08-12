@@ -15,9 +15,7 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// UnattendedPermissionDeps is what an answerer needs to turn "a unit nobody is
-// watching wants to do something" into an answer. Every field is required
-// except Tracker (a nil one degrades to a Noop) and DefaultPolicyName.
+// UnattendedPermissionDeps configures NewUnattendedPermissionAnswerer; every field is required except Tracker (nil degrades to Noop) and DefaultPolicyName.
 type UnattendedPermissionDeps struct {
 	// HITL evaluates the envelope and owns the durable ask; must be backed
 	// by a runtimetypes.Store, or escalation refuses.
@@ -26,27 +24,16 @@ type UnattendedPermissionDeps struct {
 	// Missions resolves the mission from the instance that raised the request.
 	Missions missionservice.Service
 
-	// Sink publishes approval_requested. taskengine.NoopTaskEventSink{} is
-	// legitimate; nil is not (RequestApproval publishes unconditionally).
+	// Sink publishes approval_requested; taskengine.NoopTaskEventSink{} is legitimate but nil is not, since RequestApproval publishes unconditionally.
 	Sink taskengine.TaskEventSink
 
-	// DefaultPolicyName is the envelope for a session with no mission behind
-	// it. Empty means whatever the HITL service already defaults to.
+	// DefaultPolicyName is the envelope for a session with no mission behind it; empty means whatever the HITL service already defaults to.
 	DefaultPolicyName string
 
 	Tracker libtracker.ActivityTracker
 }
 
-// NewUnattendedPermissionAnswerer returns the agentinstance.PermissionFallback
-// that judges a viewer-less unit's request against its mission's envelope
-// (or DefaultPolicyName with no mission): allow answers immediately with no
-// durable ask, deny refuses, anything else escalates and blocks until
-// answered or expires.
-//
-// Gap handling never resolves to allow: a request whose tool identity
-// (approvalflow.MapRequest) could not be established is escalated without
-// evaluation; one whose arguments could not be established is evaluated but
-// an allow verdict from it is escalated too (deny is honored as-is).
+// NewUnattendedPermissionAnswerer returns the agentinstance.PermissionFallback that judges a viewer-less unit's request against its mission's envelope, answering allow/deny directly and escalating everything else (including any request whose tool identity or arguments could not be established, which never resolves to allow).
 func NewUnattendedPermissionAnswerer(deps UnattendedPermissionDeps) agentinstance.PermissionFallback {
 	if deps.Tracker == nil {
 		deps.Tracker = libtracker.NoopTracker{}
@@ -56,8 +43,7 @@ func NewUnattendedPermissionAnswerer(deps UnattendedPermissionDeps) agentinstanc
 }
 
 type unattendedAnswerer struct {
-	deps UnattendedPermissionDeps
-	// calls tallies each mission's gated tool dispatches against maxToolCalls.
+	deps  UnattendedPermissionDeps
 	calls *missionCallCounter
 }
 
@@ -113,8 +99,6 @@ func (a *unattendedAnswerer) answer(ctx context.Context, req agentinstance.Unatt
 	return approvalflow.Answer(req.Request, approved), nil
 }
 
-// envelope resolves the policy governing instanceID and its mission. No
-// mission, or a lookup failure, falls back to DefaultPolicyName.
 func (a *unattendedAnswerer) envelope(ctx context.Context, instanceID string) (policyName, missionID string) {
 	m, err := a.deps.Missions.GetByInstance(ctx, instanceID)
 	if err != nil {
@@ -126,10 +110,6 @@ func (a *unattendedAnswerer) envelope(ctx context.Context, instanceID string) (p
 	return m.HITLPolicyName, m.ID
 }
 
-// toolCallBudgetRefusal counts this gated dispatch against maxToolCalls and
-// returns refuse=true with the reason once the count crosses it. Never
-// writes to the mission store; the caller owns the Finish. No-op whenever a
-// bound cannot apply (no mission, no ComputeBoundsReader, no maxToolCalls).
 func (a *unattendedAnswerer) toolCallBudgetRefusal(ctx context.Context, policyName, missionID string) (string, bool) {
 	if missionID == "" {
 		return "", false
@@ -149,8 +129,6 @@ func (a *unattendedAnswerer) toolCallBudgetRefusal(ctx context.Context, policyNa
 	return toolCallsExhaustedReason(bounds), true
 }
 
-// judge evaluates the envelope against the mapped request and reports the
-// reason to escalate, if any (empty when the verdict stands).
 func (a *unattendedAnswerer) judge(ctx context.Context, policyName string, mapped approvalflow.Mapped) (hitlservice.EvaluationResult, string) {
 	if !mapped.Named {
 		return hitlservice.EvaluationResult{
@@ -181,11 +159,6 @@ func (a *unattendedAnswerer) judge(ctx context.Context, policyName string, mappe
 	return verdict, ""
 }
 
-// escalate creates the durable ask and blocks until answered or bounded
-// away. The matched rule's TimeoutS is applied as a deadline; an unanswered
-// ask resolves by the rule's OnTimeout. A rule with no timeout falls back to
-// hitlservice's serve-level ceiling; the expiry sweeper closes the row out
-// either way.
 func (a *unattendedAnswerer) escalate(
 	ctx context.Context,
 	req agentinstance.UnattendedPermission,
@@ -237,8 +210,6 @@ func (a *unattendedAnswerer) escalate(
 	return approved, nil
 }
 
-// unmappedToolsName marks an ask whose contenox tool identity could not be
-// established.
 const unmappedToolsName = "acp"
 
 func nonEmpty(v, fallback string) string {
@@ -248,10 +219,10 @@ func nonEmpty(v, fallback string) string {
 	return fallback
 }
 
-// maxToolColumn bounds the row's tool columns (VARCHAR(255) on Postgres).
 const maxToolColumn = 255
 
 func clampColumn(v string) string {
+	// maxToolColumn bounds the row's tool columns (VARCHAR(255) on Postgres).
 	r := []rune(v)
 	if len(r) <= maxToolColumn {
 		return v

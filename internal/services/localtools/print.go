@@ -63,9 +63,7 @@ func (h *Print) Supports(ctx context.Context) ([]string, error) {
 	return []string{"print"}, nil
 }
 
-// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract.
-// The request schema is converted from the descriptor GetToolsForToolsByName
-// hands the model, so the two cannot drift.
+// GetSchemasForSupportedTools publishes the toolset's OpenAPI 3.1 contract, converted from the descriptor GetToolsForToolsByName hands the model so the two cannot drift.
 func (h *Print) GetSchemasForSupportedTools(ctx context.Context) (map[string]*openapi3.T, error) {
 	declared, err := h.GetToolsForToolsByName(ctx, "print")
 	if err != nil {
@@ -80,8 +78,6 @@ func (h *Print) GetSchemasForSupportedTools(ctx context.Context) (map[string]*op
 	return map[string]*openapi3.T{"print": doc}, nil
 }
 
-// printResponseSchema is what Exec returns. An empty or missing message is an
-// error, not one of these shapes.
 func printResponseSchema() *openapi3.SchemaRef {
 	return oneOfSchema("What print returns, following the shape of its input.",
 		strSchema("The message, as given — a non-string argument is rendered with %v."),

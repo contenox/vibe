@@ -16,15 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// HunkRef names one hunk of one file, in the coordinates a Diff reported it.
-//
-// FromHash and ToHash are the FileDiff's hashes, taken with that diff. They are
-// not optional: they are the whole stale-diff guard. StageHunk re-reads both
-// sides, re-derives the hunks, and refuses unless the content still hashes to
-// what the caller saw AND a hunk with exactly these coordinates still exists.
-// Line numbers from a diff computed against different content would otherwise
-// silently corrupt the file, which is the one outcome this package must never
-// produce.
+// HunkRef names one hunk of one file in the coordinates a Diff reported, plus FromHash/ToHash so StageHunk/UnstageHunk can refuse a stale hunk rather than corrupt the file.
 type HunkRef struct {
 	Path     string `json:"path"`
 	OldStart int    `json:"oldStart"`
@@ -35,9 +27,7 @@ type HunkRef struct {
 	ToHash   string `json:"toHash"`
 }
 
-// ApplyResult is what an index mutation answers with. Status is re-read after
-// the write so a review pane re-renders from the response instead of racing a
-// refetch against its own mutation.
+// ApplyResult is what an index mutation answers with; Status is re-read after the write so a review pane can re-render from the response rather than racing a refetch.
 type ApplyResult struct {
 	Paths   []string      `json:"paths"`
 	Staged  bool          `json:"staged"`
@@ -45,11 +35,7 @@ type ApplyResult struct {
 	Status  *StatusResult `json:"status"`
 }
 
-// StageHunk applies ONE hunk of the INDEX→WORKTREE diff to the index, leaving
-// the rest of the file's worktree changes unstaged. It is `git add -p` for a
-// single hunk, done in-process: the new index content is written as a fresh
-// blob and the index entry re-pointed at it. The worktree file is never
-// touched.
+// StageHunk applies ONE hunk of the INDEX→WORKTREE diff to the index (`git add -p` for a single hunk, done in-process), leaving the rest of the file's worktree changes unstaged and the worktree file untouched.
 func StageHunk(ctx context.Context, root string, ref HunkRef) (*ApplyResult, error) {
 	sc, err := open(root)
 	if err != nil {
@@ -58,9 +44,7 @@ func StageHunk(ctx context.Context, root string, ref HunkRef) (*ApplyResult, err
 	return sc.applyHunkRef(ctx, ref, RefIndex, RefWorktree, true)
 }
 
-// UnstageHunk reverts ONE hunk of the HEAD→INDEX diff in the index, leaving the
-// file's other staged changes staged. `git reset -p` for a single hunk. The
-// worktree file is never touched.
+// UnstageHunk reverts ONE hunk of the HEAD→INDEX diff in the index (`git reset -p` for a single hunk), leaving the file's other staged changes staged and the worktree file untouched.
 func UnstageHunk(ctx context.Context, root string, ref HunkRef) (*ApplyResult, error) {
 	sc, err := open(root)
 	if err != nil {
@@ -69,11 +53,6 @@ func UnstageHunk(ctx context.Context, root string, ref HunkRef) (*ApplyResult, e
 	return sc.applyHunkRef(ctx, ref, RefHead, RefIndex, false)
 }
 
-// applyHunkRef is the shared body of StageHunk and UnstageHunk.
-//
-// stage=true rewrites the index toward the `to` side (the worktree); stage=false
-// rewrites it back toward the `from` side (HEAD). Either way the index is the
-// only thing that moves.
 func (s *scope) applyHunkRef(ctx context.Context, ref HunkRef, fromRef, toRef string, stage bool) (*ApplyResult, error) {
 	repoPath, err := s.toRepoPath(ref.Path)
 	if err != nil {
@@ -99,9 +78,7 @@ func (s *scope) applyHunkRef(ctx context.Context, ref HunkRef, fromRef, toRef st
 		return nil, err
 	}
 
-	// The stale guard. Both sides must still hash to what the caller was shown;
-	// an edit, a concurrent stage, or a checkout between the diff and the apply
-	// all land here as a refusal rather than as a shifted patch.
+	// Stale guard: both sides must still hash to what the caller was shown, or the apply is refused rather than silently shifted.
 	if fromBlob.hash != ref.FromHash {
 		return nil, refusef("%s changed since the diff was computed (%s side) — refresh the diff and try again", ref.Path, fromRef)
 	}
@@ -138,9 +115,6 @@ func (s *scope) applyHunkRef(ctx context.Context, ref HunkRef, fromRef, toRef st
 		return nil, refusef("the hunk does not match %s any more — refresh the diff and try again", ref.Path)
 	}
 
-	// An index entry whose content went to empty for a path that does not exist
-	// on the far side is a removal, not a zero-byte file: keeping it would stage
-	// an empty file nobody asked for.
 	remove := content == "" && ((stage && !toBlob.exists) || (!stage && !fromBlob.exists))
 	if err := s.writeIndexEntry(repoPath, content, remove); err != nil {
 		return nil, err
@@ -152,10 +126,6 @@ func (s *scope) applyHunkRef(ctx context.Context, ref HunkRef, fromRef, toRef st
 	return &ApplyResult{Paths: []string{ref.Path}, Staged: stage, Removed: remove, Status: st}, nil
 }
 
-// findHunk locates the hunk the caller named. Coordinates are an exact match:
-// with both content hashes already verified the hunk list is deterministic, so
-// a near-miss means the caller is describing a diff this repository never
-// produced.
 func findHunk(hunks []Hunk, ref HunkRef) (Hunk, bool) {
 	for _, h := range hunks {
 		if h.OldStart == ref.OldStart && h.OldLines == ref.OldLines &&
@@ -166,7 +136,6 @@ func findHunk(hunks []Hunk, ref HunkRef) (Hunk, bool) {
 	return Hunk{}, false
 }
 
-// reverseHunk turns a from→to hunk into the to→from hunk that undoes it.
 func reverseHunk(h Hunk) Hunk {
 	r := Hunk{
 		OldStart: h.NewStart,
@@ -188,12 +157,6 @@ func reverseHunk(h Hunk) Hunk {
 	return r
 }
 
-// writeIndexEntry points the index entry for repoPath at a blob holding
-// content, creating the entry if it is new. remove drops the entry instead.
-//
-// The blob is written to the repository's object store first: an index entry
-// naming an object that is not there would leave the repository unreadable, so
-// the object always exists before anything references it.
 func (s *scope) writeIndexEntry(repoPath, content string, remove bool) error {
 	idx, err := s.repo.Storer.Index()
 	if err != nil {
@@ -222,8 +185,7 @@ func (s *scope) writeIndexEntry(repoPath, content string, remove bool) error {
 	entry.Hash = hash
 	entry.Size = uint32(len(content))
 	entry.ModifiedAt = time.Now()
-	// An intent-to-add entry carries no content; writing one gives it content,
-	// so the flag has to go or git would keep reporting the path as unstaged.
+	// IntentToAdd must clear here: writing content to that entry without it, git would keep reporting the path unstaged.
 	entry.IntentToAdd = false
 	return s.setIndex(idx)
 }
@@ -235,7 +197,6 @@ func (s *scope) setIndex(idx *index.Index) error {
 	return nil
 }
 
-// writeBlob stores content as a blob object and returns its hash.
 func (s *scope) writeBlob(content string) (plumbing.Hash, error) {
 	obj := s.repo.Storer.NewEncodedObject()
 	obj.SetType(plumbing.BlobObject)
@@ -258,8 +219,6 @@ func (s *scope) writeBlob(content string) (plumbing.Hash, error) {
 	return hash, nil
 }
 
-// worktreeMode is the file mode to record for a path, read from the worktree
-// and defaulting to a regular file when it is not there.
 func (s *scope) worktreeMode(repoPath string) filemode.FileMode {
 	info, err := os.Lstat(filepath.Join(s.repoRoot, filepath.FromSlash(repoPath)))
 	if err != nil {
@@ -272,13 +231,7 @@ func (s *scope) worktreeMode(repoPath string) filemode.FileMode {
 	return mode
 }
 
-// ---------------------------------------------------------------------------
-// File-level staging
-// ---------------------------------------------------------------------------
-
-// Stage stages whole paths. A directory stages everything changed under it.
-// This is `git add`, and it is what a review surface falls back to for a binary
-// or oversized file.
+// Stage stages whole paths (a directory stages everything changed under it); it is `git add`, the review surface's fallback for a binary or oversized file.
 func Stage(ctx context.Context, root string, paths []string) (*ApplyResult, error) {
 	sc, err := open(root)
 	if err != nil {
@@ -298,9 +251,7 @@ func Stage(ctx context.Context, root string, paths []string) (*ApplyResult, erro
 			return nil, pErr
 		}
 		if repoPath == "" {
-			// The workspace root itself. AddWithOptions(All) would reach the
-			// whole repository, which may be wider than the root: stage the
-			// scoped subtree explicitly instead.
+			// AddWithOptions(All) would reach the whole repository, wider than the root; stage the scoped subtree explicitly instead.
 			if err := sc.stageAllInScope(wt); err != nil {
 				return nil, err
 			}
@@ -319,9 +270,6 @@ func Stage(ctx context.Context, root string, paths []string) (*ApplyResult, erro
 	return &ApplyResult{Paths: staged, Staged: true, Status: st}, nil
 }
 
-// stageAllInScope stages every changed path under the workspace subtree, one at
-// a time, so a workspace root inside a larger repository never stages its
-// siblings.
 func (s *scope) stageAllInScope(wt *git.Worktree) error {
 	st, err := s.worktreeStatus()
 	if err != nil {
@@ -342,9 +290,7 @@ func (s *scope) stageAllInScope(wt *git.Worktree) error {
 	return nil
 }
 
-// Unstage restores the index entry for whole paths back to HEAD, leaving the
-// worktree file untouched. A path HEAD does not know is dropped from the index
-// entirely, which is what `git reset` does to a newly added file.
+// Unstage restores the index entry for whole paths back to HEAD, leaving the worktree file untouched; a path HEAD does not know is dropped from the index entirely, matching `git reset` on a newly added file.
 func Unstage(ctx context.Context, root string, paths []string) (*ApplyResult, error) {
 	sc, err := open(root)
 	if err != nil {
@@ -416,8 +362,6 @@ func Unstage(ctx context.Context, root string, paths []string) (*ApplyResult, er
 	return &ApplyResult{Paths: out, Staged: false, Removed: removed, Status: st}, nil
 }
 
-// expandStaged turns caller paths into the concrete staged repo-relative paths
-// they cover: a file is itself, a directory is every staged path under it.
 func (s *scope) expandStaged(paths []string) ([]string, error) {
 	st, err := s.worktreeStatus()
 	if err != nil {

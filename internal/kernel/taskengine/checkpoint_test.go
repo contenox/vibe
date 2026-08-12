@@ -1,10 +1,5 @@
 package taskengine
 
-// Checkpoint wire-format tests. fullyPopulatedCheckpoint sets every field of
-// every struct the envelope carries; a reflection guard fails the moment a
-// new field is added without being covered, and equality is asserted
-// field-for-field after a marshal/unmarshal round trip.
-
 import (
 	"encoding/json"
 	"errors"
@@ -24,6 +19,9 @@ func fullyPopulatedMessage() Message {
 		Content: "content-1",
 		Images: []ImagePart{
 			{Data: []byte{0x01, 0x02, 0xFF}, MimeType: "image/png"},
+		},
+		Audio: []AudioPart{
+			{Data: []byte{0x03, 0x04, 0xFE}, MimeType: "audio/wav"},
 		},
 		Thinking:   "thinking-1",
 		ToolCallID: "call-prev",
@@ -97,9 +95,6 @@ func fullyPopulatedCheckpoint(t *testing.T) *Checkpoint {
 	}
 }
 
-// requireNoZeroFields walks v and fails on any zero-valued exported field —
-// the guard that forces a newly added field into the round-trip fixture (and
-// therefore into the wire format) before it can ship.
 func requireNoZeroFields(t *testing.T, name string, v reflect.Value) {
 	t.Helper()
 	switch v.Kind() {
@@ -125,18 +120,14 @@ func requireNoZeroFields(t *testing.T, name string, v reflect.Value) {
 	}
 }
 
-// TestUnit_Checkpoint_FixtureCoversEveryMessageField is the per-field guard:
-// every field of Message (and its nested ToolCall/FunctionCall/ImagePart)
-// must be populated in the fixture the round-trip test asserts on. Add a
-// field to Message without extending fullyPopulatedMessage and this fails.
+// TestUnit_Checkpoint_FixtureCoversEveryMessageField fails when a new Message
+// field is added without extending fullyPopulatedMessage.
 func TestUnit_Checkpoint_FixtureCoversEveryMessageField(t *testing.T) {
 	requireNoZeroFields(t, "Message", reflect.ValueOf(fullyPopulatedMessage()))
 }
 
-// TestUnit_Checkpoint_RoundTrip_EveryField marshals the fully populated
-// checkpoint and asserts the decoded result is identical: vars re-typed
-// through the closed DataType enum, history messages field-for-field
-// including ProviderMeta and Images.
+// TestUnit_Checkpoint_RoundTrip_EveryField marshals a fully populated
+// checkpoint and asserts the decoded result is field-for-field identical.
 func TestUnit_Checkpoint_RoundTrip_EveryField(t *testing.T) {
 	cp := fullyPopulatedCheckpoint(t)
 	raw, err := MarshalCheckpoint(cp)
@@ -145,7 +136,6 @@ func TestUnit_Checkpoint_RoundTrip_EveryField(t *testing.T) {
 	got, err := UnmarshalCheckpoint(raw)
 	require.NoError(t, err)
 
-	// Typed vars: a chat_history var materializes as ChatHistory, ints as int.
 	require.IsType(t, ChatHistory{}, got.Vars["input"])
 	require.Equal(t, 3, got.Vars["count"])
 	require.Equal(t, "route-a", got.Vars["label"])
@@ -153,12 +143,10 @@ func TestUnit_Checkpoint_RoundTrip_EveryField(t *testing.T) {
 	require.Equal(t, map[string]any{"k": "v"}, got.Vars["blob"])
 	require.Equal(t, cp.VarTypes, got.VarTypes)
 
-	// History round-trips every Message field.
 	require.Equal(t, cp.History, got.History)
 	require.Equal(t, cp.History.Messages[0].CallTools[0].ProviderMeta, got.History.Messages[0].CallTools[0].ProviderMeta)
 	require.Equal(t, cp.History.Messages[0].Images, got.History.Messages[0].Images)
 
-	// Everything else, field for field.
 	assert.Equal(t, cp.ApprovalID, got.ApprovalID)
 	assert.Equal(t, cp.PendingCalls, got.PendingCalls)
 	assert.Equal(t, cp.Chain, got.Chain)
@@ -176,18 +164,15 @@ func TestUnit_Checkpoint_RoundTrip_EveryField(t *testing.T) {
 	assert.Equal(t, cp.ChainRef, got.ChainRef)
 	assert.True(t, cp.CreatedAt.Equal(got.CreatedAt))
 
-	// And the aggregate, so a field this test forgot to spell still fails
-	// loudly (Vars compared per-key above because JSON numbers in the "blob"
-	// var legitimately decode as float64 inside DataTypeJSON values).
+	// Vars is nulled here: it was compared per-key above because JSON numbers
+	// in DataTypeJSON values legitimately decode as float64.
 	cpNoVars, gotNoVars := *cp, *got
 	cpNoVars.Vars, gotNoVars.Vars = nil, nil
 	require.Equal(t, cpNoVars, gotNoVars)
 }
 
-// TestUnit_Checkpoint_VersionGate pins the migration hook's refusal
-// semantics: no version, a future version, and a bygone version without a
-// registered migration all error with ErrCheckpointVersion — never a guessed
-// decode.
+// TestUnit_Checkpoint_VersionGate asserts a missing, future, or unmigratable
+// version all refuse with ErrCheckpointVersion.
 func TestUnit_Checkpoint_VersionGate(t *testing.T) {
 	_, err := UnmarshalCheckpoint([]byte(`{"approval_id":"x"}`))
 	require.ErrorIs(t, err, ErrCheckpointVersion, "a payload without schema_version must refuse")
@@ -204,12 +189,8 @@ func TestUnit_Checkpoint_VersionGate(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestUnit_Checkpoint_MigrationHookApplies proves the day-one migration
-// mechanism actually runs: registered steps are applied sequentially until
-// the payload reaches the target version, a missing step refuses, and a
-// failing step surfaces its error. Driven through migrateCheckpointPayload
-// (the engine UnmarshalCheckpoint delegates to) with synthetic version
-// numbers, since v1 is currently both floor and ceiling.
+// TestUnit_Checkpoint_MigrationHookApplies asserts migration steps apply
+// sequentially, a missing step refuses, and a failing step surfaces its error.
 func TestUnit_Checkpoint_MigrationHookApplies(t *testing.T) {
 	const from, target = 41, 43
 	for v := from; v < target; v++ {
@@ -239,19 +220,16 @@ func TestUnit_Checkpoint_MigrationHookApplies(t *testing.T) {
 	require.Equal(t, "a1", m["approval_id"])
 	require.Equal(t, fmt.Sprintf("migrated-%d", target), m["task_id"], "both migration steps must have applied in order")
 
-	// A gap in the chain refuses instead of guessing.
 	_, _, err = migrateCheckpointPayload([]byte(payload), from, target+1)
 	require.ErrorIs(t, err, ErrCheckpointVersion)
 
-	// A failing step surfaces its error.
 	checkpointMigrations[from] = func([]byte) ([]byte, error) { return nil, errors.New("bad step") }
 	_, _, err = migrateCheckpointPayload([]byte(payload), from, from+1)
 	require.ErrorContains(t, err, "bad step")
 }
 
-// TestUnit_Checkpoint_VarTypeMismatchRefuses: a var whose payload contradicts
-// its declared type refuses to decode — resuming with silently coerced state
-// is the corruption class this envelope exists to prevent.
+// TestUnit_Checkpoint_VarTypeMismatchRefuses asserts a var whose payload
+// contradicts its declared type refuses to decode.
 func TestUnit_Checkpoint_VarTypeMismatchRefuses(t *testing.T) {
 	payload := fmt.Sprintf(`{"schema_version":%d,"vars":{"x":{"type":"int","value":"\"not an int\""}}}`, CheckpointSchemaVersion)
 	_, err := UnmarshalCheckpoint([]byte(payload))

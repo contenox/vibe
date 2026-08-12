@@ -17,10 +17,10 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// extMethodAutocomplete is the FIM (fill-in-the-middle) extension method:
-// ported from vscodeagent/chat.go's autocomplete. It is read-only (a single
-// completion, no tools), so it never enters the HITL/permission path, and it
-// never sets PromptRequest.SessionID, so it never touches the session
+// extMethodAutocomplete is the FIM (fill-in-the-middle) extension method. It
+// is read-only (a single completion, no tools), so it never enters the
+// HITL/permission path, and it never sets PromptRequest.SessionID, so it
+// never touches the session
 // transcript.
 const extMethodAutocomplete = "_contenox/autocomplete"
 
@@ -80,8 +80,8 @@ func (t *Transport) handleAutocomplete(ctx context.Context, params json.RawMessa
 	return out, nil
 }
 
-// autocomplete runs one FIM completion, mirroring vscodeagent's
-// (*Server).autocomplete: build the fim_prefix/fim_suffix/fim_middle prompt,
+// autocomplete runs one FIM completion: build the
+// fim_prefix/fim_suffix/fim_middle prompt,
 // resolve the completion model (independent of the chat model), run it
 // through the FIM chain, and fall back to the chat-default model once if an
 // auto-routed guess failed.
@@ -119,8 +119,8 @@ func (t *Transport) autocompleteAgent() agentservice.Agent {
 	})
 }
 
-// promptAutocomplete runs the FIM chain once. Bounded by a 20s timeout
-// (matching vscodeagent's promptAutocomplete) on top of ctx, so a stuck
+// promptAutocomplete runs the FIM chain once. Bounded by a 20s timeout on
+// top of ctx, so a stuck
 // completion cannot outlive a reasonable keystroke-to-suggestion budget; ctx
 // cancellation (a superseded request) still wins immediately either way.
 func (t *Transport) promptAutocomplete(
@@ -189,8 +189,7 @@ func (t *Transport) defaultAutocompleteTemplateVars(maxTokens int) map[string]st
 }
 
 // configuredAutocompleteModel reads the operator-set autocomplete
-// model/provider, the same clikv keys vscodeagent's /autocomplete-model and
-// /autocomplete-provider commands write, so a setting made on one surface
+// model/provider from the shared clikv keys, so a setting made on one surface
 // carries over to the other.
 func (t *Transport) configuredAutocompleteModel(ctx context.Context) (string, string, bool) {
 	if t.deps.DB == nil {

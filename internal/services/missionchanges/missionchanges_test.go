@@ -14,20 +14,12 @@ import (
 	libdb "github.com/contenox/contenox/libdbexec"
 )
 
-// absTestPath returns p as a genuinely OS-absolute path so fixtures still
-// exercise filepath.IsAbs's real behavior on Windows, where a bare leading
-// "/" is not absolute (it needs a drive letter or a UNC prefix). On
-// non-Windows p is already an absolute Unix path and is returned unchanged.
 func absTestPath(p string) string {
 	if runtime.GOOS != "windows" {
 		return p
 	}
 	return `C:` + filepath.FromSlash(p)
 }
-
-// Notification builders construct the shapes acpsvc/events.go emits. Each
-// mints a unique tool-call id per call (two writes = two invocations, scored
-// twice); the *WithID variants model a shared-id create+update pair.
 
 var toolCallSeq int
 
@@ -36,8 +28,6 @@ func nextCallID(kind string) string {
 	return fmt.Sprintf("%s#%d", kind, toolCallSeq)
 }
 
-// edit builds the tool-call notification a file write produces: a diff plus
-// a location for the same path.
 func edit(path, oldText, newText string) libacp.SessionNotification {
 	return libacp.SessionNotification{
 		Update: libacp.SessionUpdate{
@@ -51,7 +41,6 @@ func edit(path, oldText, newText string) libacp.SessionNotification {
 	}
 }
 
-// touch builds a non-edit tool-call update carrying only a location.
 func touch(path string, kind libacp.ToolKind) libacp.SessionNotification {
 	return touchWithID(nextCallID(string(kind)), path, kind)
 }
@@ -68,8 +57,6 @@ func touchWithID(id, path string, kind libacp.ToolKind) libacp.SessionNotificati
 	}
 }
 
-// pendingWithID builds the create/pending notification that precedes an
-// interactive tool call, sharing an id with a later update.
 func pendingWithID(id, path string, kind libacp.ToolKind) libacp.SessionNotification {
 	return libacp.SessionNotification{
 		Update: libacp.SessionUpdate{
@@ -214,8 +201,7 @@ func TestUnit_Fold_ChangedListCap(t *testing.T) {
 	for i := 0; i < maxChangedFiles+50; i++ {
 		updates = append(updates, edit(fmt.Sprintf("/ws/f%03d.txt", i), "", "x"))
 	}
-	// Give one late file extra attention so it must survive the cap despite a high
-	// index (it would be dropped by any insertion-order cap).
+	// A late file with extra attention must survive the cap despite a high index.
 	hot := fmt.Sprintf("/ws/f%03d.txt", maxChangedFiles+40)
 	for i := 0; i < 5; i++ {
 		updates = append(updates, edit(hot, "x", fmt.Sprintf("x%d", i)))
@@ -234,16 +220,15 @@ func TestUnit_Fold_ChangedListCap(t *testing.T) {
 
 func TestUnit_Scope_DistinctFilesAndDirs(t *testing.T) {
 	updates := []libacp.SessionNotification{
-		edit(absTestPath("/ws/a.txt"), "", "1"),                 // top-level "."
-		edit(absTestPath("/ws/sub/b.txt"), "", "2"),             // top-level "sub"
-		edit(absTestPath("/ws/sub/c.txt"), "", "3"),             // top-level "sub" (same bucket)
-		touch(absTestPath("/ws/pkg/d.go"), libacp.ToolKindRead), // top-level "pkg"
+		edit(absTestPath("/ws/a.txt"), "", "1"),
+		edit(absTestPath("/ws/sub/b.txt"), "", "2"),
+		edit(absTestPath("/ws/sub/c.txt"), "", "3"),
+		touch(absTestPath("/ws/pkg/d.go"), libacp.ToolKindRead),
 	}
 	scope := fold(updates).changes(absTestPath("/ws")).Scope
 	if scope.Files != 4 {
 		t.Fatalf("files = %d, want 4 distinct", scope.Files)
 	}
-	// top-level dirs: ".", "sub", "pkg" = 3
 	if scope.Dirs != 3 {
 		t.Fatalf("dirs = %d, want 3 distinct top-level dirs", scope.Dirs)
 	}
@@ -287,14 +272,7 @@ func TestUnit_Scope_EmptyRootDisablesAnomaly(t *testing.T) {
 }
 
 func TestUnit_TopLevelDir(t *testing.T) {
-	// topLevelDir's outside-root fallback hardcodes "/" + firstSegment(...),
-	// assuming a bare leading "/" the way a Unix absolute path has one. Every
-	// genuine Windows absolute path instead carries a drive letter, so
-	// TrimPrefix(_, "/") in that fallback is a no-op and the bucket ends up
-	// keyed on the drive ("/C:") rather than the path's first directory.
-	// That's a real, traced difference in the function's own output on
-	// Windows, not a fixture problem, so the two outside-root cases below
-	// expect an OS-appropriate bucket name rather than the Unix one.
+	// On Windows the outside-root fallback keys on the drive letter ("/C:"), not the Unix-style leading segment.
 	outsideBucket := "/etc"
 	homeBucket := "/home"
 	if runtime.GOOS == "windows" {
@@ -334,8 +312,6 @@ func TestUnit_CapDiff(t *testing.T) {
 		t.Fatalf("modified must be untouched, got %q", m)
 	}
 }
-
-// --- Service-level tests over stubs ---
 
 type stubMissions struct {
 	m   *missionservice.Mission

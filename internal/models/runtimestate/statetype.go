@@ -21,8 +21,7 @@ type BackendRuntimeState struct {
 	ResolvedEndpoint string `json:"resolvedEndpoint,omitempty"`
 	ResolvedInstance string `json:"resolvedInstance,omitempty"`
 	LiveEngine       string `json:"liveEngine,omitempty"` // "llama" or "openvino"
-	// APIKey stores the API key used for authentication with the backend.
-	apiKey string
+	apiKey           string
 }
 
 type ModelPullStatus struct {
@@ -40,6 +39,7 @@ type ModelPullStatus struct {
 	CanStream       bool         `json:"canStream" example:"true"`
 	CanThink        bool         `json:"canThink,omitempty" example:"true"`
 	CanVision       bool         `json:"canVision,omitempty" example:"true"`
+	CanAudio        bool         `json:"canAudio,omitempty" example:"true"`
 }
 
 type ModelDetails struct {
@@ -59,9 +59,9 @@ func (s *BackendRuntimeState) SetAPIKey(key string) {
 	s.apiKey = key
 }
 
-// EnrichFromOllamaShow populates capability and context fields on a ModelPullStatus
-// using the response from Ollama's /api/show endpoint.
-// Only zero/false fields are written — callers may override afterwards.
+// EnrichFromOllamaShow populates capability and context fields on a
+// ModelPullStatus from Ollama's /api/show response; only zero/false fields
+// are written.
 func EnrichFromOllamaShow(m *ModelPullStatus, r *ollama.ShowResponse) {
 	for _, cap := range r.Capabilities {
 		switch cap {

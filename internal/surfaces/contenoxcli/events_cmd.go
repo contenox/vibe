@@ -1,6 +1,3 @@
-// events_cmd.go is the `contenox events` verb group — the beta event-dispatch
-// tier's operator surface. Hidden without opt-in-beta, exactly like the agent
-// roster: absent from help, never refused by name.
 package contenoxcli
 
 import (
@@ -130,9 +127,6 @@ func init() {
 	eventsCmd.AddCommand(eventsDispatchCmd, eventsListCmd, eventsFiringsCmd, eventsPruneCmd)
 }
 
-// triggerRoots is the trigger-file search path: the workspace .contenox
-// first, ~/.contenox as fallback — the same precedence lookupSystemFile and
-// chain-agent discovery use.
 func triggerRoots(contenoxDir string) []string {
 	roots := []string{contenoxDir}
 	if homeDir, err := globalContenoxDir(); err == nil {
@@ -141,10 +135,6 @@ func triggerRoots(contenoxDir string) []string {
 	return roots
 }
 
-// loadTriggersKept runs trigger discovery under the beta gate: without
-// opt-in-beta nothing is kept — the same keep-narrowing discoverChainAgents
-// applies to user-authored agent chains, except triggers have no stable
-// subset at all.
 func loadTriggersKept(ctx context.Context, tracker libtracker.ActivityTracker, contenoxDir string, optInBeta bool) (eventtrigger.LoadResult, error) {
 	var keep func(string) bool
 	if !optInBeta {
@@ -153,16 +143,6 @@ func loadTriggersKept(ctx context.Context, tracker libtracker.ActivityTracker, c
 	return eventtrigger.LoadKept(ctx, tracker, keep, triggerRoots(contenoxDir)...)
 }
 
-// missionEventPublisher is the mission producers' dual-write seam: without
-// opt-in-beta it returns bus unchanged (the exact pre-event-log path); with
-// it, the bus publish is preceded by a durable event-log append of the same
-// payload, so the dispatcher can consume what reportrouter already consumes
-// live — same subjects, same bytes, no second publish. workspaceID is the
-// producer's resolved workspace (ResolveWorkspaceID at the wiring site),
-// stamped on every appended row; the wire subject stays unscoped. trigger,
-// when non-nil, is the host's in-process dispatch hook (a TriggerHolder at
-// engine-owning wiring sites, nil where no engine can run a chain): every
-// appended event fires matching triggers live in this process.
 func missionEventPublisher(ctx context.Context, db libdbexec.DBManager, bus missionservice.EventPublisher, workspaceID string, tracker libtracker.ActivityTracker, trigger eventlog.Trigger) missionservice.EventPublisher {
 	if !betaEnabled(ctx, runtimetypes.New(db.WithoutTransaction())) {
 		return bus
@@ -174,14 +154,6 @@ func missionEventPublisher(ctx context.Context, db libdbexec.DBManager, bus miss
 	return eventlog.NewDualPublisher(runtimetypes.NewEventStore(db), bus, "missionservice", workspaceID, tracker, opts...)
 }
 
-// buildInProcessTriggerHook loads this host's trigger files and returns the
-// live in-process dispatch handler over engine — bob2's dual restored:
-// firings happen live in the appending process, and the standalone
-// `events dispatch` consumer is demoted to catch-up duty. Returns nil when
-// nothing should fire here (beta off, no engine, no triggers, or a build
-// error — reported, never fatal: the catch-up path still covers the events).
-// The handler claims the same event_firings rows the dispatcher does, so the
-// two paths never double-fire.
 func buildInProcessTriggerHook(ctx context.Context, db libdbexec.DBManager, contenoxDir, workspaceID string, engine *Engine, opts chatOpts, warnW io.Writer) eventlog.Trigger {
 	if engine == nil || !opts.EffectiveOptInBeta {
 		return nil
@@ -246,11 +218,7 @@ func runEventsDispatch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	o.EffectiveDB = dbPath
-	// The dispatcher ships with the shell on, like beam and unlike `contenox
-	// chat`'s scripted default: trigger chains actuate through local_shell
-	// under their trigger-pinned envelopes (the seeded oracle's respond step
-	// is one), and a dispatcher without the tool makes every seeded actuation
-	// silently inert. An explicit `--shell=false` is still honored.
+	// Shell defaults on: trigger chains actuate through local_shell; explicit --shell=false still wins.
 	if !cmd.Root().Flags().Changed("shell") {
 		o.EffectiveEnableLocalExec = true
 	}
@@ -277,9 +245,7 @@ func runEventsDispatch(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(errOut, "  %s\n", formatTriggerLine(t))
 	}
 
-	// The dispatcher is workspace-bound: it drains only this workspace's
-	// events, under a per-workspace cursor — the same WorkspaceID the run
-	// path hands agentservice.
+	// The dispatcher is workspace-bound: it drains only this workspace's events, under a per-workspace cursor.
 	workspaceID := ResolveWorkspaceID(contenoxDir)
 	fmt.Fprintf(errOut, "Workspace: %s\n", workspaceID)
 	logSvc := eventlog.NewService(db, engine.Bus, engine.Tracker)
@@ -326,10 +292,6 @@ func runEventsDispatch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// chainFiringRunner executes a trigger's chain through the same service path
-// `contenox run` uses. The incoming context already carries the firing's
-// request ID and hop+1 (stamped by the dispatcher); events the chain appends
-// inherit both.
 type chainFiringRunner struct {
 	agent       agentservice.Agent
 	opts        chatOpts
@@ -378,8 +340,6 @@ func runEventsList(cmd *cobra.Command, args []string) error {
 	since, _ := cmd.Flags().GetInt64("since")
 	limit, _ := cmd.Flags().GetInt("limit")
 
-	// Workspace-scoped, like every read of the log: listing shows the
-	// current workspace's events only.
 	db, _, workspaceID, err := openConfigDBWithWorkspace(cmd)
 	if err != nil {
 		return err
@@ -405,8 +365,6 @@ func runEventsList(cmd *cobra.Command, args []string) error {
 	return w.Flush()
 }
 
-// firingStatuses is the accepted --status set, in the order the help lists
-// them; it mirrors runtimetypes' EventFiringStatus* constants.
 var firingStatuses = []string{
 	runtimetypes.EventFiringStatusOK,
 	runtimetypes.EventFiringStatusError,
@@ -420,15 +378,11 @@ func runEventsFirings(cmd *cobra.Command, args []string) error {
 	triggerName, _ := cmd.Flags().GetString("trigger")
 	limit, _ := cmd.Flags().GetInt("limit")
 
-	// Rejected up front rather than silently returning nothing: an unknown
-	// status is a typo, and an empty listing is a meaningful answer here.
 	status = strings.ToLower(strings.TrimSpace(status))
 	if status != "" && !slices.Contains(firingStatuses, status) {
 		return fmt.Errorf("unknown --status %q: use one of %s", status, strings.Join(firingStatuses, ", "))
 	}
 
-	// Workspace-scoped, like every read of the log: one workspace's firings
-	// are never visible from another.
 	db, _, workspaceID, err := openConfigDBWithWorkspace(cmd)
 	if err != nil {
 		return err
@@ -452,8 +406,6 @@ func runEventsFirings(cmd *cobra.Command, args []string) error {
 	return renderFiringsTable(cmd.OutOrStdout(), firings)
 }
 
-// renderFiringsTable prints firings newest-first in the events-list register.
-// No match is not a failure: it prints the empty marker and returns nil.
 func renderFiringsTable(w io.Writer, firings []runtimetypes.EventFiring) error {
 	if len(firings) == 0 {
 		fmt.Fprintln(w, "(no firings)")
@@ -470,13 +422,8 @@ func renderFiringsTable(w io.Writer, firings []runtimetypes.EventFiring) error {
 	return tw.Flush()
 }
 
-// doctorFiringWindow is how many recent firings doctor scans for trouble.
 const doctorFiringWindow = 50
 
-// printFiringTrouble is doctor's one-line firing summary: how many of the
-// recent firings ended in error or refused. Silent when the window is clean,
-// empty, or unreadable — doctor says nothing about firings on a healthy run.
-// Read-only, like every observability path over the event plane.
 func printFiringTrouble(ctx context.Context, w io.Writer, exec libdbexec.Exec, workspaceID string) {
 	store, err := runtimetypes.NewEventFiringStore(exec, workspaceID)
 	if err != nil {
@@ -486,9 +433,7 @@ func printFiringTrouble(ctx context.Context, w io.Writer, exec libdbexec.Exec, w
 	if err != nil {
 		return
 	}
-	// A stranded firing counts too: its claim outlived the host that took it,
-	// so it reads as running forever and no dispatcher will re-fire it. That
-	// failure is otherwise invisible — nothing errored.
+	// A stranded firing counts too: its claim outlived its host and reads as running forever with no error.
 	now := time.Now().UTC()
 	bad := 0
 	for _, f := range firings {
@@ -557,13 +502,10 @@ func runEventsPrune(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// compactEventData renders an event payload on one list line.
 func compactEventData(data json.RawMessage, max int) string {
 	return compactLine(string(data), max)
 }
 
-// compactLine collapses whitespace and truncates at max bytes so a payload or
-// a multi-line chain error stays inside one table cell.
 func compactLine(s string, max int) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > max {
@@ -572,8 +514,6 @@ func compactLine(s string, max int) string {
 	return s
 }
 
-// formatTriggerLine renders one loaded trigger for dispatch startup and
-// doctor: name → event type → chain (policy when named).
 func formatTriggerLine(t eventtrigger.Trigger) string {
 	line := fmt.Sprintf("%s → %s → %s", t.Name, t.ListenFor.Type, t.Chain)
 	if t.Policy != "" {
@@ -582,8 +522,6 @@ func formatTriggerLine(t eventtrigger.Trigger) string {
 	return line
 }
 
-// printLoadedTriggers is doctor's trigger listing — called only under
-// opt-in-beta; renders nothing when no trigger file exists at all.
 func printLoadedTriggers(ctx context.Context, w io.Writer, contenoxDir string) {
 	res, err := eventtrigger.Load(ctx, nil, triggerRoots(contenoxDir)...)
 	if err != nil {
@@ -602,9 +540,6 @@ func printLoadedTriggers(ctx context.Context, w io.Writer, contenoxDir string) {
 	}
 }
 
-// triggerShadowNames extends doctor's workspace-shadow file set with the
-// trigger-*.json basenames present on the search path — beta only, so a
-// stable doctor run never mentions triggers.
 func triggerShadowNames(optInBeta bool, contenoxDir string) []string {
 	if !optInBeta {
 		return nil
@@ -629,8 +564,6 @@ func triggerShadowNames(optInBeta bool, contenoxDir string) []string {
 	return names
 }
 
-// resolveTriggerRef is vet's reference check: a chain or policy a trigger
-// names must resolve on the system-file path.
 func resolveTriggerRef(contenoxDir string) func(name string) error {
 	return func(name string) error {
 		if name != filepath.Base(name) {

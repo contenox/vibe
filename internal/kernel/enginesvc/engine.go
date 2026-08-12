@@ -28,8 +28,7 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// LocalTenantID is re-exported from runtimetypes for backwards compatibility.
-// New code should reference runtimetypes.LocalTenantID directly.
+// LocalTenantID re-exports runtimetypes.LocalTenantID for backwards compatibility.
 const LocalTenantID = runtimetypes.LocalTenantID
 
 func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, error) {
@@ -148,9 +147,6 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 	reachableEnd()
 
 	ss := stateservice.New(state, db, cfg.WorkspaceID)
-	// setupStatus wraps the DB-config readiness check so effective defaults
-	// supplied out-of-band (CLI --model/--provider) satisfy preflight even
-	// when never persisted to KV config.
 	setupStatus := func(ctx context.Context) (setupcheck.Result, error) {
 		r, err := ss.SetupStatus(ctx)
 		if err != nil {
@@ -168,17 +164,20 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 	tokenizer := ollamatokenizer.NewEstimateTokenizer()
 
 	embedding := resolveEmbeddingModel(ctx, runtimetypes.New(db.WithoutTransaction()), cfg, tracker)
+	audio := resolveAudioModel(ctx, runtimetypes.New(db.WithoutTransaction()), cfg)
 
 	repo, err := llmrepo.NewModelManager(state, tokenizer, llmrepo.ModelManagerConfig{
 		DefaultPromptModel:    llmrepo.ModelConfig{Name: cfg.DefaultModel, Provider: cfg.DefaultProvider},
 		DefaultEmbeddingModel: embedding,
 		DefaultChatModel:      llmrepo.ModelConfig{Name: cfg.DefaultModel, Provider: cfg.DefaultProvider},
+		DefaultAudioModel:     audio,
 	}, tracker)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model manager: %w", err)
 	}
 	engine.Models = repo
 	engine.EmbeddingModel = embedding
+	engine.AudioModel = audio
 
 	eventSink := cfg.TaskEventSink
 	if eventSink == nil {
@@ -228,11 +227,6 @@ func Build(ctx context.Context, db libdbexec.DBManager, cfg Config) (*Engine, er
 	return engine, nil
 }
 
-// resolveEmbeddingModel picks the embedding model, in order: an explicit
-// Config field, the default-embed-model/-provider KV keys, then the chat
-// model as a last resort (reported through the tracker as a change, not an
-// error). An unset embed model must never fail Build — it degrades instead,
-// since a chat model does not embed on every provider.
 func resolveEmbeddingModel(ctx context.Context, store runtimetypes.Store, cfg Config, tracker libtracker.ActivityTracker) llmrepo.ModelConfig {
 	if tracker == nil {
 		tracker = libtracker.NoopTracker{}
@@ -257,6 +251,23 @@ func resolveEmbeddingModel(ctx context.Context, store runtimetypes.Store, cfg Co
 	}
 	if provider == "" {
 		provider = cfg.DefaultProvider
+	}
+	return llmrepo.ModelConfig{Name: model, Provider: provider}
+}
+
+func resolveAudioModel(ctx context.Context, store runtimetypes.Store, cfg Config) llmrepo.ModelConfig {
+	model := strings.TrimSpace(cfg.DefaultAudioModel)
+	if model == "" {
+		model = clikv.Read(ctx, store, "default-audio-model")
+	}
+	provider := strings.TrimSpace(cfg.DefaultAudioProvider)
+	if provider == "" {
+		provider = clikv.Read(ctx, store, "default-audio-provider")
+	}
+	if model == "" {
+		// A provider without a model is not a usable role; resolution treats
+		// the whole role as unset rather than pinning a provider by accident.
+		return llmrepo.ModelConfig{}
 	}
 	return llmrepo.ModelConfig{Name: model, Provider: provider}
 }
@@ -289,20 +300,12 @@ func buildTools(engineCtx context.Context, cfg Config, db libdbexec.DBManager, t
 			}
 			hitlSvc = hitlservice.NewWithDefaultPolicy(cfg.HITLPolicySource, hitlTenant, store, tracker, cfg.HITLDefaultPolicyName)
 		}
-		// Unconditional, injected service included: cfg.WorkspaceID is this
-		// engine's workspace and hitlSvc is its gate, so the evaluator reads
-		// the same workspace-scoped cli.hitl-policy-name row `contenox config
-		// set` writes. Binding only the internally-constructed one left the
-		// CLI's own engine (which injects) reading the global row.
+		// Runs unconditionally, injected hitlSvc included: the evaluator must
+		// read this engine's workspace-scoped policy row, not the global one.
 		hitlservice.SetWorkspaceID(hitlSvc, cfg.WorkspaceID)
-		// The mission tools (mission_report / mission_ask_attention /
-		// mission_finish / mission_plan) are exempted from the HITL gate by
-		// construction, not by policy data: they are the attention channel
-		// itself, and gating them behind the approval machinery they exist
-		// to carry would deadlock an unattended unit asking for its own
-		// report. Exempting here, rather than allow-listing in every shipped
-		// policy, means no operator-authored policy can reintroduce that
-		// deadlock by omission.
+		// Mission tools are exempted from the HITL gate by construction: they
+		// are the attention channel itself, and gating them would deadlock an
+		// unattended unit asking for its own report.
 		raw := toolsRepo
 		toolsRepo = hitlExemptProviders(
 			localtools.NewHITLWrapper(toolsRepo, cfg.AskApproval, hitlSvc, tracker, cfg.TaskEventSink),
@@ -311,28 +314,19 @@ func buildTools(engineCtx context.Context, cfg Config, db libdbexec.DBManager, t
 		)
 	}
 
-	// Late-bind whoever needs the aggregate repo they are themselves
-	// registered in (see Config.OnToolsRepoReady). Position matters: after
-	// the HITL wrap, before the guidance wrap, so a nested tool caller meets
-	// the same gate the model meets and isn't counted as model-level
-	// navigation.
+	// Position matters: after the HITL wrap, before the guidance wrap, so a
+	// nested tool caller meets the same gate the model meets.
 	if cfg.OnToolsRepoReady != nil {
 		cfg.OnToolsRepoReady(toolsRepo)
 	}
 
-	// One decorator over the aggregate tools repo observes every provider
-	// and feeds navigation-awareness back to the model through the
-	// tool-result envelope. Sits outside the HITL wrapper so it counts only
-	// model-level calls, not the gate's internal diff reads. On by default;
-	// CONTENOX_TOOL_GUIDANCE=off returns the inner repo untouched.
+	// Sits outside the HITL wrapper so it counts only model-level calls, not
+	// the gate's internal diff reads.
 	toolsRepo = toolguidance.WrapFromEnv(toolsRepo)
 
 	return mgr, localToolNames, toolsRepo, nil
 }
 
-// hitlExemptRepo routes Exec calls for exempted providers around the HITL
-// wrapper to the raw aggregate; everything else, including listings and
-// schemas, goes through the gated repo unchanged.
 type hitlExemptRepo struct {
 	taskengine.ToolsRepo
 	raw    taskengine.ToolsRepo

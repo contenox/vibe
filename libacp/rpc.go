@@ -195,9 +195,8 @@ func ParseIncoming(data []byte) (Incoming, error) {
 		}, nil
 	}
 	if !hasMethod && (raw.Error != nil || raw.Result != nil) {
-		// A response with "id":null — JSON-RPC uses it for errors answering
-		// requests whose id could not be determined (parse errors). The null id
-		// unmarshals to a nil pointer above, so hasID is false here.
+		// A response with "id":null (errors answering requests whose id could
+		// not be determined) unmarshals to a nil ID pointer, so hasID is false here.
 		return Incoming{
 			Kind: IncomingKindResponse,
 			Response: Response{

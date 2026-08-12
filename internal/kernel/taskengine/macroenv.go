@@ -13,20 +13,7 @@ import (
 	"time"
 )
 
-// MacroEnv is a transparent decorator around EnvExecutor that expands
-// special macros in task templates before execution. Supported macros:
-//
-//   - {{toolservice:list}}              -> JSON map of tools name -> tool names
-//   - {{toolservice:tools}}             -> JSON array of tools names
-//   - {{toolservice:tools <tools_name>}} -> JSON array of tool names for that tools
-//   - {{var:<name>}}                    -> value from context template vars (set by caller via WithTemplateVars; engine never reads env); errors if key is missing
-//   - {{var:<name>|<fallback>}}         -> value from context template vars, or fallback when the var is missing or empty
-//   - {{var:<name>|var:<fallback-name>}} -> value from context template vars, or another template var when the first is missing or empty
-//   - {{date}} or {{date:<layout>}}     -> current local date (default 2006-01-02)
-//   - {{now}} or {{now:<layout>}}       -> current time (default RFC3339; layout e.g. 2006-01-02)
-//   - {{chain:id}}                      -> chain ID of the chain being executed
-//
-// The engine does not expand any env:VAR-style macro; var:* is populated only by the caller.
+// MacroEnv is a transparent decorator around EnvExecutor that expands macros (toolservice, var, date, now, chain) in task templates before execution.
 type MacroEnv struct {
 	inner         EnvExecutor
 	toolsProvider ToolsRepo
@@ -53,9 +40,7 @@ func (m *MacroEnv) ExecEnv(
 		return nil, DataTypeAny, nil, fmt.Errorf("chain is nil")
 	}
 
-	// Shallow-copy the chain, then deep-copy tasks and their pointer fields
-	// so macro expansion never mutates the globally-cached chain definition,
-	// which may be shared across goroutines.
+	// Deep-copy tasks and pointer fields so macro expansion never mutates the chain definition, which may be shared across goroutines.
 	clone := *chain
 	clone.Tasks = make([]TaskDefinition, len(chain.Tasks))
 	copy(clone.Tasks, chain.Tasks)
@@ -99,16 +84,12 @@ func (m *MacroEnv) ExecEnv(
 			}
 		}
 		if t.SystemInstruction != "" {
-			// The system instruction is the deepest stable prefix every
-			// provider cache keys on, so it expands with stablePrefix=true:
-			// wall-clock macros degrade to day granularity there (see
-			// expandOne's "now" case).
+			// SystemInstruction is the provider cache's stable prefix, so it expands with stablePrefix=true (wall-clock macros degrade to day granularity).
 			t.SystemInstruction, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.SystemInstruction, true)
 			if err != nil {
 				return nil, DataTypeAny, nil, fmt.Errorf("task %s: system_instruction macro error: %w", t.ID, err)
 			}
 
-			// Resolve the allowlist once — both auto-injections below need it.
 			var allowed []string
 			if len(allowlist) > 0 {
 				allowed, _ = resolveToolsNames(ctx, allowlist, m.toolsProvider)
@@ -121,10 +102,6 @@ func (m *MacroEnv) ExecEnv(
 				}
 			}
 
-			// When both file-touching tool groups are available, steer the
-			// model toward local_fs (read-before-write, sandboxed, size
-			// limits) over local_shell. Authors who want different behavior
-			// exclude one group from the task's tools allowlist.
 			if containsAll(allowed, "local_fs", "local_shell") {
 				t.SystemInstruction += "\n\nTOOL PREFERENCE: For inspecting or modifying files in the project, prefer the local_fs.* tools over their local_shell equivalents (cat / head / tail / grep / sed against files). local_fs enforces sandbox boundaries, output-size limits, denied-path policies, and a read-before-write contract that local_shell does not. Use local_shell only for genuine shell operations: running tests, builds, git, environment inspection."
 			}
@@ -134,8 +111,6 @@ func (m *MacroEnv) ExecEnv(
 			}
 		}
 
-		// Expand {{var:*}} in execute_config fields so chains can use caller
-		// payload values without callers doing manual string replacement.
 		if t.ExecuteConfig != nil {
 			if t.ExecuteConfig.Model != "" {
 				t.ExecuteConfig.Model, err = m.expandSpecialTemplates(ctx, &clone, allowlist, t.ExecuteConfig.Model, false)
@@ -173,13 +148,8 @@ func (m *MacroEnv) ExecEnv(
 	return m.inner.ExecEnv(ctx, &clone, input, dataType)
 }
 
-// unified macro: {{namespace}} or {{namespace:payload}}
 var macroRe = regexp.MustCompile(`\{\{([a-zA-Z0-9_]+)(?::([^}]*))?\}\}`)
 
-// expandSpecialTemplates expands all macros in one template string.
-// stablePrefix marks strings that become part of the request's stable prefix
-// (today: SystemInstruction) — wall-clock macros expand at coarser
-// granularity there so provider prefix caches survive across requests.
 func (m *MacroEnv) expandSpecialTemplates(ctx context.Context, chain *TaskChainDefinition, allowlist []string, in string, stablePrefix bool) (string, error) {
 	matches := macroRe.FindAllStringSubmatchIndex(in, -1)
 	if len(matches) == 0 {
@@ -279,17 +249,10 @@ func (m *MacroEnv) expandOne(ctx context.Context, chain *TaskChainDefinition, al
 		layout := time.RFC3339
 		switch {
 		case payload != "":
-			// An explicit layout is author intent, always respected even in
-			// the stable prefix — a conscious trade of cache reuse for precision.
+			// An explicit layout is always respected, even in the stable prefix — a deliberate trade of cache reuse for precision.
 			layout = payload
 		case stablePrefix:
-			// Provider prefix caches key on the exact system-instruction
-			// bytes, so a default second-precision {{now}} there would
-			// re-cold-start the cache on every request. Only the default
-			// layout, only in stable-prefix strings, degrades to day
-			// granularity, matching {{date}}. Chains needing real time
-			// should place {{now}} in the prompt template (user turn)
-			// instead, a cache-safe suffix.
+			// Provider prefix caches key on exact system-instruction bytes; the default layout degrades to day granularity here to avoid cold-starting the cache every request.
 			layout = "2006-01-02"
 		}
 		return time.Now().Format(layout), nil
@@ -364,7 +327,6 @@ func parseMacroInt(field, value string) (*int, error) {
 	return &n, nil
 }
 
-// containsAll reports whether names contains every required entry.
 func containsAll(names []string, required ...string) bool {
 	if len(required) == 0 {
 		return true
@@ -381,11 +343,6 @@ func containsAll(names []string, required ...string) bool {
 	return true
 }
 
-// sortedCopy returns names sorted ascending without mutating the input.
-// Every tool-name list rendered into a prompt goes through this: rendered
-// names land in the system instruction, which provider prefix caches key on
-// byte-for-byte, so registry/allowlist enumeration order must never show
-// through.
 func sortedCopy(names []string) []string {
 	out := make([]string, len(names))
 	copy(out, names)
@@ -406,15 +363,13 @@ func (m *MacroEnv) renderToolsAndToolsJSON(ctx context.Context, names []string) 
 	for _, name := range names {
 		tools, err := m.toolsProvider.GetToolsForToolsByName(ctx, name)
 		if err != nil {
-			continue // skip broken tools
+			continue
 		}
 		fnNames := make([]string, 0, len(tools))
 		for _, t := range tools {
 			fnNames = append(fnNames, t.Function.Name)
 		}
-		// Pin the inner arrays too: json.Marshal already sorts the map keys,
-		// but the per-tools function lists would otherwise follow registry
-		// order, which is not guaranteed stable across requests.
+		// Pin inner arrays too: map keys sort automatically but per-tools lists don't, and must stay stable across requests.
 		sort.Strings(fnNames)
 		result[name] = fnNames
 	}

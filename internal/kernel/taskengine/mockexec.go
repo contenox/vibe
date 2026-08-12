@@ -31,7 +31,6 @@ func (m *MockTaskExecutor) TaskExec(ctx context.Context, startingTime time.Time,
 	m.CalledWithTask = currentTask
 	m.CalledWithInput = input
 
-	// Get output from sequence or single value
 	var output any
 	if len(m.MockOutputSequence) > 0 {
 		output = m.MockOutputSequence[0]
@@ -42,7 +41,6 @@ func (m *MockTaskExecutor) TaskExec(ctx context.Context, startingTime time.Time,
 		output = m.MockOutput
 	}
 
-	// Get error from sequence or single value
 	var err error
 	if len(m.ErrorSequence) > 0 {
 		err = m.ErrorSequence[0]
@@ -53,7 +51,6 @@ func (m *MockTaskExecutor) TaskExec(ctx context.Context, startingTime time.Time,
 		err = m.MockError
 	}
 
-	// Get output data type from sequence or determine from output
 	var outputDataType DataType
 	if len(m.MockTaskTypeSequence) > 0 {
 		outputDataType = m.MockTaskTypeSequence[0]
@@ -61,7 +58,6 @@ func (m *MockTaskExecutor) TaskExec(ctx context.Context, startingTime time.Time,
 			m.MockTaskTypeSequence = m.MockTaskTypeSequence[1:]
 		}
 	} else {
-		// Fallback: Determine data type from output value
 		switch v := output.(type) {
 		case string:
 			outputDataType = DataTypeString
@@ -73,7 +69,6 @@ func (m *MockTaskExecutor) TaskExec(ctx context.Context, startingTime time.Time,
 			outputDataType = DataTypeJSON
 		default:
 			if v == nil {
-				// If output is nil, preserve input type
 				outputDataType = dataType
 			} else {
 				outputDataType = DataTypeAny
@@ -81,7 +76,6 @@ func (m *MockTaskExecutor) TaskExec(ctx context.Context, startingTime time.Time,
 		}
 	}
 
-	// Get raw transition response from sequence or single value
 	var transitionResponse string
 	if len(m.MockTransitionValueSequence) > 0 {
 		transitionResponse = m.MockTransitionValueSequence[0]
@@ -92,8 +86,6 @@ func (m *MockTaskExecutor) TaskExec(ctx context.Context, startingTime time.Time,
 		transitionResponse = m.MockTransitionValue
 	}
 
-	// If no explicit transition response was provided, infer it.
-	// This is crucial for conditional handlers used in tests.
 	if transitionResponse == "" {
 		if s, ok := output.(string); ok {
 			transitionResponse = s

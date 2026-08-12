@@ -12,10 +12,6 @@ import (
 	"github.com/contenox/contenox/libtracker"
 )
 
-// traceRecorder is an [libtracker.ActivityTracker] that keeps the correlation
-// key each operation was started with. It records the key rather than the
-// context so an assertion cannot accidentally read a value that arrived after
-// the record was opened, which is the mistake this test exists to catch.
 type traceRecorder struct {
 	mu      sync.Mutex
 	started []recordedStart
@@ -35,7 +31,6 @@ func (r *traceRecorder) Start(ctx context.Context, operation, subject string, _ 
 	return func(error) {}, func(string, any) {}, func() {}
 }
 
-// forSubject returns the recorded starts naming subject, in order.
 func (r *traceRecorder) forSubject(subject string) []recordedStart {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -48,27 +43,9 @@ func (r *traceRecorder) forSubject(subject string) []recordedStart {
 	return out
 }
 
-// TestUnit_AttachmentRecordCarriesTheOpeningTrace pins the per-action boundary
-// where it is easiest to get wrong.
-//
-// An attachment's lifetime record names the action that opened it, so the
-// correlation key of the creating frame has to survive the hop from the
-// connector's read-loop context onto the tunnel's own — which is what
-// [libtracker.CopyTrackingValues] is for, the two contexts having different
-// lifetimes and neither being the other's parent.
-//
-// A later frame on the same attachment must not restamp anything. The
-// attachment is not that action and outlives it; a key that followed the most
-// recent frame would be a per-connection key wearing a per-action name, and
-// every record under it would claim a correlation that stopped being true after
-// the first turn.
-//
-// A frame carrying no key opens a record carrying no key. Absent stays absent:
-// nothing here mints a substitute for an action this process never saw.
-//
-// The records are matched by content rather than by position, because two
-// attachments are two goroutines and which of them reaches its tracker first is
-// not ordered by which frame arrived first.
+// TestUnit_AttachmentRecordCarriesTheOpeningTrace checks an attachment's
+// lifetime record carries the trace of the frame that created it, not a
+// later frame's, and stays untraced when the opening frame was.
 func TestUnit_AttachmentRecordCarriesTheOpeningTrace(t *testing.T) {
 	t.Parallel()
 	var counter atomic.Int64
@@ -125,8 +102,6 @@ func TestUnit_AttachmentRecordCarriesTheOpeningTrace(t *testing.T) {
 	}
 }
 
-// traced returns the context the connector would hand [relayacp.Tunnel.Handle]
-// for a frame carrying id.
 func traced(id string) context.Context {
 	return context.WithValue(context.Background(), libtracker.ContextKeyTraceID, id)
 }

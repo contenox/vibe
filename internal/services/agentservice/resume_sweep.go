@@ -1,13 +1,5 @@
 package agentservice
 
-// resume_sweep.go drives the reclaim half of the resume machinery. A verdict
-// is recorded exactly once, but the process that records it can die mid-resume
-// (a stale claim), fail after the gated call (a retained, annotated
-// checkpoint), or predate the ordering gate entirely (an answered, never
-// claimed row). This sweep finds those and runs them to completion in the
-// current process — hitlservice.SweepExpired's analogue one layer up, driven
-// from the same operator seams.
-
 import (
 	"context"
 	"errors"
@@ -16,11 +8,7 @@ import (
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 )
 
-// StrandedCheckpoints reports the checkpoints an answered ask left with no
-// live resumer: never claimed, or claimed longer ago than the resume
-// staleness bound. A pending ask's checkpoint is the normal suspended state,
-// not a strand, and is never listed. Read-only; callable without an engine so
-// hosts can decide whether building one is worth it.
+// StrandedCheckpoints reports the checkpoints an answered ask left with no live resumer: never claimed, or claimed longer ago than the resume staleness bound.
 func StrandedCheckpoints(ctx context.Context, store runtimetypes.Store, limit int) ([]string, error) {
 	cps, err := store.ListChainCheckpoints(ctx, nil, limit)
 	if err != nil {
@@ -41,13 +29,7 @@ func StrandedCheckpoints(ctx context.Context, store runtimetypes.Store, limit in
 	return ids, nil
 }
 
-// SweepStrandedCheckpoints resumes every stranded checkpoint (see
-// StrandedCheckpoints) in this process, re-deriving the stranded set so a
-// state change between a caller's own check and this call is honored. resumed
-// counts runs carried to a terminal or cleanly re-suspended state; failed
-// counts resumes that errored — their checkpoints stay annotated and
-// reclaimable once the claim goes stale again. A racing resumer's claim
-// (ErrNoCheckpoint) is a clean skip, not a failure.
+// SweepStrandedCheckpoints resumes every stranded checkpoint (see StrandedCheckpoints) in this process; resumed counts runs reaching a terminal or re-suspended state, failed counts errored resumes, and a racing resumer's claim is a clean skip, not a failure.
 func SweepStrandedCheckpoints(ctx context.Context, deps Deps, limit int) (resumed, failed int, err error) {
 	store := runtimetypes.New(deps.DB.WithoutTransaction())
 	ids, err := StrandedCheckpoints(ctx, store, limit)

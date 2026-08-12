@@ -14,8 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// boundedManager is a modelManager with no runtime state, for decision-only
-// tests: enforceResolutionBounds consults state only to name a backend id.
 func boundedManager() *modelManager {
 	return &modelManager{tracker: libtracker.NoopTracker{}}
 }

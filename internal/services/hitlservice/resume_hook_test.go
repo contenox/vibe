@@ -1,8 +1,5 @@
 package hitlservice_test
 
-// Resume wire-in tests: Respond triggers the registered resume hook only when
-// the waiter is gone, never when parked, and never from the inline resolve.
-
 import (
 	"context"
 	"errors"
@@ -118,7 +115,6 @@ func TestUnit_ResumeHook_SweepExpiredResumesWithTimeoutOutcome(t *testing.T) {
 	hitlservice.SetResumeHook(svc, rec.hook)
 
 	recorder := svc.(hitlservice.ApprovalRecorder)
-	// TimeoutS 1 puts expiry ~1s out, keeping this test fast.
 	require.NoError(t, recorder.RecordPendingApproval(ctx, "appr-exp", hitlservice.ApprovalRequest{
 		ToolsName: "local_fs", ToolName: "write_file", TimeoutS: 1,
 	}))
@@ -131,8 +127,6 @@ func TestUnit_ResumeHook_SweepExpiredResumesWithTimeoutOutcome(t *testing.T) {
 		"an expired approval backing a suspended run must resume with the timeout outcome, not strand its checkpoint")
 }
 
-// sinkCapturingApprovalID forwards the approval_requested event's ID to ch —
-// how the waiter-parked test learns the RequestApproval-minted ID.
 func sinkCapturingApprovalID(ch chan<- string) taskengine.TaskEventSink {
 	return &approvalIDSink{ch: ch}
 }

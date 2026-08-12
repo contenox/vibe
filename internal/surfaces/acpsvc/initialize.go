@@ -58,8 +58,10 @@ func (t *Transport) Initialize(ctx context.Context, req libacp.InitializeRequest
 			LoadSession: true,
 			PromptCapabilities: libacp.PromptCapabilities{
 				// See extractImageParts: images ride to CanVision providers.
-				Image:           true,
-				Audio:           false,
+				Image: true,
+				// See extractAudioParts: audio rides to CanAudio providers,
+				// bounded per block by the modelrepo inline-audio limits.
+				Audio:           true,
 				EmbeddedContext: true,
 			},
 			McpCapabilities: libacp.McpCapabilities{

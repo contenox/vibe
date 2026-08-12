@@ -94,9 +94,9 @@ type AgentCapabilities struct {
 	Meta                json.RawMessage       `json:"_meta,omitempty"`
 }
 
-// AuthMethod covers the spec's auth method union. Type discriminates on the
-// wire: "" (stable default), "terminal" (unstable; Args/Env launch the agent
-// binary for a TUI), or "env_var" (unstable; Vars lists env vars to collect).
+// AuthMethod covers the spec's auth method union; Type discriminates on the
+// wire between "" (stable default), "terminal" (unstable; Args/Env launch the
+// agent binary for a TUI), and "env_var" (unstable; Vars lists env vars).
 type AuthMethod struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
@@ -114,9 +114,9 @@ const (
 	AuthMethodTypeEnvVar   = "env_var"
 )
 
-// AuthEnvVar describes one variable of an env_var auth method. Secret is a
-// pointer because the spec default is true: nil emits nothing (client assumes
-// secret), an explicit false must reach the wire.
+// AuthEnvVar describes one variable of an env_var auth method; Secret is a
+// pointer because the spec default is true, so an explicit false must reach
+// the wire while nil emits nothing.
 type AuthEnvVar struct {
 	Name     string          `json:"name"`
 	Label    string          `json:"label,omitempty"`
@@ -149,8 +149,8 @@ type AuthenticateResponse struct {
 	Meta json.RawMessage `json:"_meta,omitempty"`
 }
 
-// LogoutRequest terminates the current authenticated session. Only meaningful
-// when the agent advertises AgentCapabilities.Auth.Logout.
+// LogoutRequest terminates the current authenticated session; only
+// meaningful when the agent advertises AgentCapabilities.Auth.Logout.
 type LogoutRequest struct {
 	Meta json.RawMessage `json:"_meta,omitempty"`
 }

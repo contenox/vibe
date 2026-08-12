@@ -16,7 +16,6 @@ type fakeTerminalPeer struct {
 	createErr error
 	createID  string
 
-	// wait blocks until either ctx dies or waitDone is closed.
 	waitBlocks bool
 	waitDone   chan struct{}
 	waitResp   libacp.WaitForTerminalExitResponse
@@ -30,7 +29,7 @@ type fakeTerminalPeer struct {
 	released int
 	outputs  int
 
-	releaseCtxErr error // ctx.Err() observed inside ReleaseTerminal
+	releaseCtxErr error
 	outputCtxErr  error
 }
 
@@ -132,9 +131,8 @@ func TestRunTerminal_Completion(t *testing.T) {
 			wantOut:  "killed",
 		},
 		{
-			name: "signal with explicit non-zero code keeps the code",
-			wait: libacp.WaitForTerminalExitResponse{ExitCode: intp(9), Signal: strp("SIGTERM")},
-			// no output exit status
+			name:     "signal with explicit non-zero code keeps the code",
+			wait:     libacp.WaitForTerminalExitResponse{ExitCode: intp(9), Signal: strp("SIGTERM")},
 			output:   libacp.TerminalOutputResponse{},
 			wantCode: 9,
 			wantSig:  strp("SIGTERM"),

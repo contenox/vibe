@@ -6,8 +6,6 @@ type geminiToolRequest struct {
 	FunctionDeclarations []geminiFunctionDeclaration `json:"functionDeclarations,omitempty"`
 }
 
-// --- Function calls & content parts (messages) ---
-
 type geminiFunctionCall struct {
 	Name             string                 `json:"name"`
 	Args             map[string]interface{} `json:"args"`
@@ -28,10 +26,6 @@ type geminiPart struct {
 	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
 }
 
-// geminiInlineData is an inline binary blob part (e.g. an image) sent in a
-// content part. The Gemini v1beta REST JSON is proto3-JSON, hence the
-// lowerCamelCase field names. encoding/json base64 (StdEncoding) encodes
-// Data []byte on the wire.
 type geminiInlineData struct {
 	MimeType string `json:"mimeType"`
 	Data     []byte `json:"data"`
@@ -46,8 +40,6 @@ type geminiSystemInstruction struct {
 	Parts []geminiPart `json:"parts"`
 }
 
-// --- Responses ---
-
 type geminiGenerateContentResponse struct {
 	Candidates []struct {
 		Content      geminiContent `json:"content"`
@@ -59,11 +51,6 @@ type geminiGenerateContentResponse struct {
 	UsageMetadata *geminiUsageMetadata `json:"usageMetadata,omitempty"`
 }
 
-// geminiUsageMetadata is the API's token accounting, attached to (the last
-// chunk of) a generateContent / streamGenerateContent response.
-// promptTokenCount is already the total prompt count (cached included);
-// cachedContentTokenCount breaks out the tokens served from Gemini's implicit
-// (or explicit) cache.
 type geminiUsageMetadata struct {
 	PromptTokenCount        int `json:"promptTokenCount"`
 	CandidatesTokenCount    int `json:"candidatesTokenCount"`
@@ -71,11 +58,6 @@ type geminiUsageMetadata struct {
 	CachedContentTokenCount int `json:"cachedContentTokenCount"`
 }
 
-// neutralUsage maps usageMetadata onto the neutral TokenUsage. Prompt caching
-// on Gemini is implicit (enabled by default on 2.5+ models, best-effort):
-// nothing is sent on the wire to activate it — the client-side contract is
-// byte-stable prefixes plus session affinity, and this counter is where hits
-// become visible.
 func (u *geminiUsageMetadata) neutralUsage() *modelrepo.TokenUsage {
 	if u == nil {
 		return nil
@@ -92,15 +74,12 @@ func (u *geminiUsageMetadata) neutralUsage() *modelrepo.TokenUsage {
 	}
 }
 
-// geminiFunctionDeclaration matches Gemini API's FunctionDeclaration exactly.
 type geminiFunctionDeclaration struct {
 	Name        string        `json:"name"`
 	Description string        `json:"description,omitempty"`
 	Parameters  *geminiSchema `json:"parameters,omitempty"`
 }
 
-// geminiSchema matches Gemini API's Schema object exactly; only these fields
-// are valid, anything else gets dropped on marshal.
 type geminiSchema struct {
 	Type        string         `json:"type"`
 	Description string         `json:"description,omitempty"`
