@@ -41,16 +41,16 @@ const routeCode = `{
 }`;
 
 const t: LandingStrings = {
-  h1a: 'Ein Roboter, den du selbst programmierst.',
-  h1b: 'Mit der KI, die du schon bezahlst.',
-  lede: 'Contenox ist ein quelloffener Arbeiter, der auf deinem eigenen Rechner läuft. Du beschreibst die Aufgabe — mit Hilfe der KI, die du ohnehin schon bezahlst — und eine Datei in deinem Projekt legt fest, was er darf, was deine Freigabe braucht und was ihn auslöst. Das sind die Guardrails: er kann nicht daran vorbei, und du kannst sie lesen.',
+  h1a: 'Ein Agenten-Server.',
+  h1b: 'Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen.',
+  lede: 'Jedes KI-Produkt betreibt intern eine Agenten-Schleife nach Regeln, die der Anbieter geschrieben hat. Ausgeliefert bekommst du sie nie. contenox ist genau diese Schicht als Server, den du selbst betreibst: Agenten, Werkzeuge und Modelle in Dateien deklariert, jede Aktion vor der Ausführung gegen deine Regeln geprüft, auf deiner Maschine, mit jedem Modell.',
   ctaRecipe: 'Rezept ausführen',
   copyLabel: 'Kopieren',
   installTabPosix: 'macOS / Linux',
   installTabWindows: 'Windows',
   ctaGithub: 'Auf GitHub ansehen',
   installNote: 'Installiert <code class="font-mono">contenox</code>. Mit <code class="font-mono">contenox init</code> richtest du einen Workspace ein.',
-  trustChips: ['jedes Modell', 'eine Binärdatei', 'kein Konto', 'SQLite', 'deine Regeln in einer Datei, die du lesen kannst'],
+  trustChips: ['jedes Modell', 'eine Binärdatei', 'kein Konto', 'deine Regeln in einer Datei, die du lesen kannst'],
 
   missionEyebrow: 'Die Mission, live',
   missionH2: 'Dreißig Sekunden, von Anfang bis Ende.',
@@ -137,7 +137,7 @@ const t: LandingStrings = {
   yoursEyebrow: 'Standardmäßig deins',
   yoursH2: 'Dein Rechner, dein Zustand, deine Modelle.',
   yoursPoints: [
-    'Sessions, Konfiguration, Run-Logs und erfasster Ausführungszustand liegen in SQLite auf deinem Rechner. Kein Konto, kein contenox-Dienst dazwischen — außer du pairst mit dem optionalen Relay unten. Telemetrie ist opt-in und standardmäßig aus.',
+    'Sessions, Konfiguration, Run-Logs und erfasster Ausführungszustand liegen auf deinem Rechner. Kein Konto, kein contenox-Dienst dazwischen — außer du pairst mit dem optionalen Relay unten. Telemetrie ist opt-in und standardmäßig aus.',
     'Inferenz ist Konfiguration: lokales Ollama oder vLLM, wenn nichts dein Netzwerk verlassen darf — oder OpenAI, Anthropic, Gemini, Bedrock und Vertex mit deinen eigenen Schlüsseln, gepinnt auf eine Region deiner Wahl. Ein späterer Wechsel ist eine Konfigurationsänderung, kein Umbau.',
     'Secrets werden zur Anfragezeit aus deiner Umgebung aufgelöst und landen nie in einer Config auf der Platte; Agent-erreichbare Shells bekommen eine bereinigte Umgebung mit genau dem, was die Aufgabe braucht.',
   ],
@@ -152,7 +152,7 @@ const t: LandingStrings = {
   capsEyebrow: 'Außerdem an Bord',
   caps: [
     ['Es liest Go wie der Compiler', 'Definition, References, Implementations, Symbols, Diagnostics — beantwortet in-process vom echten Type-Checker, warm in Mikrosekunden. Kein Language-Server zu installieren oder zu pflegen.'],
-    ['Frag das Repo, bekomm zitierte Zeilen', 'contenox index baut einen hybriden Volltext-plus-Embedding-Index in lokalem SQLite; contenox search antwortet mit file:line-Zitaten und markiert einen Treffer als veraltet, sobald sich seine Datei ändert.'],
+    ['Frag das Repo, bekomm zitierte Zeilen', 'contenox index baut einen hybriden Volltext-plus-Embedding-Index lokal; contenox search antwortet mit file:line-Zitaten und markiert einen Treffer als veraltet, sobald sich seine Datei ändert.'],
   ],
 
   bottomEyebrow: 'Loslegen',
@@ -170,8 +170,8 @@ const t: LandingStrings = {
 };
 ---
 <Base
-  title="Contenox — Ein Roboter, den du selbst programmierst, mit der KI, die du schon bezahlst."
-  description="Ein Roboter, den du selbst programmierst — mit der KI, die du schon bezahlst. Contenox ist quelloffene Automatisierung auf deinem eigenen Rechner: Eine Datei legt fest, was er darf, was deine Freigabe braucht und was ihn auslöst. Guardrails für KI-Agenten, Apache-2.0, kein Konto."
+  title="Contenox — Ein Agenten-Server. Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen."
+  description="Ein Agenten-Server. Agenten, Werkzeuge und Modelle in Dateien deklariert; jede Aktion wird vor der Ausführung gegen deine Regeln geprüft. Quelloffen, auf deiner Maschine, mit jedem Modell."
   lang="de"
   alternates={{ en: '/', de: '/de/' }}
 >

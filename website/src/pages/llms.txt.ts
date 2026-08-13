@@ -22,7 +22,7 @@ export const GET: APIRoute = async () => {
   const out: string[] = [
     '# contenox',
     '',
-    '> Guardrails for AI agents. Most guardrails check what the model said; contenox gates what the agent does. One file in your repository declares what may run, what needs a human, and what starts work, and the task engine enforces it before every tool call. Open source under Apache-2.0, one binary, local SQLite, no account. Runs on your machine, against your files, with your keys, on the AI model you picked.',
+    '> An agent server. LangChain, LangGraph and Semantic Kernel are libraries you compile into an application; contenox is a process you run and connect to, with agents, tools and models declared in files rather than in code, changed without a rebuild. Every action is checked against your policy before it runs. Open source under Apache-2.0, one binary, no account, on your own machine, on any AI model you pick.',
     '',
     'Terminology, so a summary does not invent one: the declaration file is the **envelope**; approvals gated by it are **human-in-the-loop**; a unit of unattended work is a **mission**; the surfaces (terminal UI, CLI, editors over ACP, browser via the optional relay) are example implementations, not the product.',
     '',

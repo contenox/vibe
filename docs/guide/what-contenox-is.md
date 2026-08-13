@@ -5,6 +5,26 @@ description: The rules an AI agent runs under are a file you wrote, in your repo
 
 # What contenox is
 
+**An agent server.** This is an agent, configured:
+
+```json
+{
+  "default_action": "approve",
+  "rules": [
+    { "tools": "local_fs", "tool": "*", "action": "deny",
+      "when": [{ "key": "path", "op": "glob",
+                 "value": "**/{.ssh,.aws,.kube}/**" }] },
+
+    { "tools": "local_shell", "tool": "local_shell", "action": "allow",
+      "when": [{ "key": "command", "op": "command_prefix_allowlist",
+                 "value": "go test,go build,git status" }] }
+  ]
+}
+```
+
+Secrets are unreachable. Those three commands run without asking. Everything
+else stops and asks, because nothing said otherwise.
+
 **The rules your AI agent runs under are a file you wrote — and nothing runs
 that the file does not allow.**
 
