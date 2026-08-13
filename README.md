@@ -1,6 +1,8 @@
 # contenox
 
-**Guardrails for AI agents. Automation you control and own.**
+**A robot you program yourself, with the AI you already pay for.**
+
+Guardrails for AI agents: one file says what it may do, what needs your approval, and what sets it off.
 
 Docs: **[contenox.com](https://contenox.com)**
 
