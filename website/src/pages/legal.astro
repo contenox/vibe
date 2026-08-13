@@ -1,78 +1,19 @@
 ---
+import { getEntry, render } from 'astro:content';
 import Base from '../layouts/Base.astro';
+
+const entry = await getEntry('legal', 'legal');
+if (!entry) throw new Error('docs/legal.md is missing');
+const { Content } = await render(entry);
 ---
-<Base title="Legal Notice — Contenox" description="Legal notice (Impressum), open-source license, and privacy summary for Contenox and contenox.com." noindex>
+<Base
+  title={`${entry.data.title} — Contenox`}
+  description={entry.data.description}
+  alternates={{ en: '/legal', de: '/de/legal' }}
+  noindex
+>
   <article class="prose prose-compact prose-neutral dark:prose-invert mx-auto max-w-3xl px-5 py-10">
     <p class="text-xs font-semibold tracking-widest text-neutral-500 uppercase">Legal</p>
-    <h1>Legal notice</h1>
-    <p>
-      Contact, licensing, and how we handle data on this website — in plain
-      language wherever we can.
-    </p>
-
-    <h2>Legal notice (Impressum gem. § 5 DDG)</h2>
-    <p><strong>Alexander Ertli</strong><br />Jungfernstieg<br />20354 Hamburg, Germany</p>
-    <p>
-      E-mail: <a href="mailto:hello@contenox.com">hello@contenox.com</a><br />
-      Web: <a href="https://ertli.com" rel="noopener noreferrer">ertli.com</a>
-    </p>
-    <p>
-      <strong>Editorial responsibility (§ 18 Abs. 2 MStV)</strong><br />
-      Alexander Ertli, address as above.
-    </p>
-    <p>
-      VAT ID (USt-IdNr.): <code>DE429161583</code><br />
-      Tax number: <code>2247005603265</code>
-    </p>
-    <p>
-      Online dispute resolution pursuant to Art. 14 (1) ODR-VO:
-      <a href="https://consumer-redress.ec.europa.eu/dispute-resolution-bodies" rel="noopener noreferrer">consumer-redress.ec.europa.eu</a>.
-      We are not obligated and not willing to participate in dispute resolution
-      proceedings before a consumer arbitration board.
-    </p>
-
-    <h2>License</h2>
-    <p>
-      Contenox is open-source software released under the
-      <a href="https://www.apache.org/licenses/LICENSE-2.0" rel="noopener noreferrer">Apache License 2.0</a>.
-      While the core engine is Apache 2.0, our commitment to transparency goes
-      beyond the code. We believe you should own your tools and your data.
-    </p>
-    <p>
-      The software is provided "as is", without warranty of any kind — express
-      or implied — including but not limited to warranties of merchantability,
-      fitness for a particular purpose, or non-infringement. In no event shall
-      the author be liable for any claim, damages, or other liability arising
-      from use of the software. Different terms apply only if agreed upon in
-      writing between you and the author.
-    </p>
-
-    <h2>Data &amp; privacy</h2>
-    <p>
-      <strong>No Contenox servers.</strong> Contenox runs on your machine and
-      stores its state (sessions, chains, configuration) locally. Prompts and
-      files you include in a request go only to the model provider you
-      configured — we operate no servers that process your workload.
-    </p>
-    <p>
-      <strong>This website is static.</strong> contenox.com is a static site.
-      It sets no cookies, runs no analytics, and requires no account. Your
-      color-scheme preference is stored locally in your browser
-      (<code>localStorage</code>) and never transmitted. Search runs entirely
-      in your browser against a locally downloaded index.
-    </p>
-    <p>
-      <strong>Third-party requests.</strong> The homepage loads release/star
-      badges from <code>img.shields.io</code> and fonts from Google Fonts;
-      those requests are subject to the respective providers' privacy terms.
-      No other third-party resources are embedded.
-    </p>
-    <p>
-      <strong>E-mail.</strong> If you contact
-      <a href="mailto:hello@contenox.com">hello@contenox.com</a>, we process
-      the information you send to answer your request and for no other
-      purpose.
-    </p>
-    <p><em>Last updated: 6 July 2026</em></p>
+    <Content />
   </article>
 </Base>
