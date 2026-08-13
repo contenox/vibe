@@ -13,7 +13,7 @@ interface Props {
 }
 const {
   title,
-  description = 'Contenox — governance for AI agents. You declare what may run, what needs a human, and what starts work; the task engine enforces it. Chat, missions and tools in your terminal, the terminal UI, or any ACP editor, on the models you choose.',
+  description = 'Contenox — guardrails for AI agents. Not filters on what the model says: gates on what the agent does. One file declares what may run, what needs a human, and what starts work, enforced on your machine.',
   lang = 'en',
   ogType = 'website',
   alternates,
@@ -24,8 +24,8 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
 const ogImage = new URL('/opengraph-image.png', Astro.site);
 
 const t = lang === 'de'
-  ? { start: 'Loslegen', theme: 'Farbschema umschalten', tagline: 'Governance für KI-Agenten — jedes Modell, jeder Editor.' }
-  : { start: 'Get Started', theme: 'Toggle theme', tagline: 'Governance for AI agents — any model, any editor.' };
+  ? { start: 'Loslegen', theme: 'Farbschema umschalten', tagline: 'Guardrails für KI-Agenten — jedes Modell, jeder Editor.' }
+  : { start: 'Get Started', theme: 'Toggle theme', tagline: 'Guardrails for AI agents — any model, any editor.' };
 
 const navSections = await buildNavSections();
 ---

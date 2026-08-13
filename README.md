@@ -1,6 +1,6 @@
 # contenox
 
-**Governance for AI agents. Automation you control and own.**
+**Guardrails for AI agents. Automation you control and own.**
 
 Docs: **[contenox.com](https://contenox.com)**
 

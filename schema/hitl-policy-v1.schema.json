@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contenox.com/schema/hitl-policy-v1.schema.json",
+  "$defs": {
+    "AttentionBounds": {
+      "properties": {
+        "allowAgentAnswers": {
+          "type": "boolean",
+          "description": "AllowAgentAnswers lets the session that fired the mission answer its\nunit's questions with its own model instead of waiting for a human."
+        },
+        "maxAgentAnswers": {
+          "type": "integer",
+          "description": "MaxAgentAnswers caps how many of this mission's questions an agent may\nanswer; zero means the default cap (DefaultMaxAgentAnswers), never unlimited."
+        }
+      },
+      "type": "object",
+      "description": "AttentionBounds is the envelope's say over who may answer a unit's\nquestion; the zero value means only a human may."
+    },
+    "ComputeBounds": {
+      "properties": {
+        "maxTurns": {
+          "type": "integer"
+        },
+        "maxToolCalls": {
+          "type": "integer"
+        },
+        "maxTokens": {
+          "type": "integer"
+        },
+        "modelAllowlist": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "backendAllowlist": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "onExhausted": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "ComputeBounds is the envelope's compute half: an opt-in ceiling on a\nmission's total compute, alongside the per-tool action rules; zero/absent\nis unbounded and exhaustion is never silent (see OnExhausted)."
+    },
+    "Condition": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "op"
+      ],
+      "description": "Condition is a single key/op/value predicate applied to the args of a tool call."
+    },
+    "Rule": {
+      "properties": {
+        "tools": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "when": {
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "type": "array"
+        },
+        "action": {
+          "type": "string"
+        },
+        "timeout_s": {
+          "type": "integer",
+          "description": "TimeoutS is how long to wait for a human response when Action is\nActionApprove; 0 means block indefinitely."
+        },
+        "on_timeout": {
+          "type": "string",
+          "description": "OnTimeout is the fallback when the approval window expires; only\n\"deny\" or \"approve\" is valid (allow would silently bypass approval)."
+        }
+      },
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "description": "Rule matches a tools+tool pair (with optional AND-conditions) and assigns\nan action."
+    },
+    "TrustedBinaries": {
+      "properties": {
+        "dirs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Dirs are absolute directories a resolved binary may live under, at any\ndepth; symlinks are resolved on both sides before comparison."
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Hashes maps an absolute REAL path (post-symlink-resolution) to its hex\nSHA256; a declared symlink never matches."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "TrustedBinaries is the envelope's identity+integrity block, declared once\nper policy; Dirs and Hashes are both opt-in and independent, and an absent\nor empty block changes nothing."
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "Version is the envelope's wire version (see PolicySchemaVersion);\nabsent (0) means PolicySchemaVersion."
+    },
+    "default_action": {
+      "type": "string"
+    },
+    "rules": {
+      "items": {
+        "$ref": "#/$defs/Rule"
+      },
+      "type": "array"
+    },
+    "compute": {
+      "$ref": "#/$defs/ComputeBounds"
+    },
+    "attention": {
+      "$ref": "#/$defs/AttentionBounds",
+      "description": "Attention is the optional attention half: who may answer a unit's\nquestion (see AttentionBounds); nil means a human must."
+    },
+    "trusted_binaries": {
+      "$ref": "#/$defs/TrustedBinaries",
+      "description": "TrustedBinaries gates every allow a command_prefix_allowlist would\ngrant on the identity and integrity of the resolved binary (see\nTrustedBinaries); nil is inert."
+    }
+  },
+  "type": "object",
+  "title": "contenox HITL policy",
+  "description": "Policy is the top-level document stored as hitl-policy.json in the VFS;\nrules are evaluated in order, first match wins, and DefaultAction applies\nwhen none match (fail-closed to \"approve\" when absent)."
+}

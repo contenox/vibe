@@ -89,6 +89,9 @@ that refuses to run past it.
 
 - [Core concepts](/docs/guide/concepts/) — chains, tasks, tools, transitions.
 - [Human-in-the-loop policies](/docs/guide/hitl/) — the full envelope format.
+- [Envelope JSON Schema](/schema/hitl-policy-v1.schema.json) and
+  [chain JSON Schema](/schema/task-chain.schema.json) — the formats, generated from
+  the code that loads them.
 - [Missions](/docs/guide/missions/) — unattended runs, start to finish.
 - [Sovereignty](/docs/guide/sovereignty/) — local inference, EU regions, and
   what the EU AI Act asks of whoever deploys.
