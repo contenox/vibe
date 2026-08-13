@@ -170,7 +170,7 @@ func firstNonFlagIsReserved(args []string) bool {
 
 var rootCmd = &cobra.Command{
 	Use:   "contenox",
-	Short: "A robot you program yourself, with the AI you already pay for — chat, chains, and missions from your terminal.",
+	Short: "Run AI work on your own computer, under rules you wrote — chat, chains, and missions from your terminal.",
 	Long: `Contenox is a worker you program yourself, using the AI you already pay for.
 One file says what it may do, what needs your approval, and what sets it off —
 those are the guardrails, and you can read them.
