@@ -390,12 +390,12 @@ type ToolsCall struct {
 }
 
 type TaskDefinition struct {
-	ID string `yaml:"id" json:"id" example:"validate_input"`
+	ID string `yaml:"id" json:"id" example:"validate_input" jsonschema:"required"`
 
 	Description string `yaml:"description" json:"description" example:"Validates user input meets quality requirements"`
 
 	// Handler determines how the LLM output (or tools) will be interpreted.
-	Handler TaskHandler `yaml:"handler" json:"handler" example:"chat_completion" openapi_include_type:"string"`
+	Handler TaskHandler `yaml:"handler" json:"handler" example:"chat_completion" openapi_include_type:"string" jsonschema:"required"`
 
 	SystemInstruction string `yaml:"system_instruction,omitempty" json:"system_instruction,omitempty" example:"You are a quality control assistant. Respond only with 'valid' or 'invalid'."`
 
@@ -444,14 +444,14 @@ const (
 // TaskChainDefinition describes a sequence of tasks to execute in order,
 // with branching logic, retry policies, and model preferences.
 type TaskChainDefinition struct {
-	ID string `yaml:"id" json:"id"`
+	ID string `yaml:"id" json:"id" jsonschema:"required"`
 
 	// Debug enables capturing user input and output.
 	Debug bool `yaml:"debug" json:"debug"`
 
 	Description string `yaml:"description" json:"description"`
 
-	Tasks []TaskDefinition `yaml:"tasks" json:"tasks" openapi_include_type:"taskengine.TaskDefinition"`
+	Tasks []TaskDefinition `yaml:"tasks" json:"tasks" openapi_include_type:"taskengine.TaskDefinition" jsonschema:"required,minItems=1"`
 
 	// TokenLimit is the token limit for the context window used during execution.
 	TokenLimit int64 `yaml:"token_limit" json:"token_limit"`

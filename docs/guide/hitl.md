@@ -7,6 +7,8 @@ description: Control which tool calls require human approval using named policy 
 
 Human + AI collaboration in contenox is an authored, versioned artifact — not a runtime default. The policy file decides what runs unattended, what pauses to ask a human, and what is denied outright, and it is diffable and swappable like any other file in your repo. Because approvals are durable, a question waits for a person instead of timing out: an unanswered ask checkpoints the run, and answering it later — from any terminal — resumes execution exactly once. A parked turn says so rather than going quiet, and a client that reconnects is shown the question again; see [What a parked approval looks like](#what-a-parked-approval-looks-like). For how these controls fit a sovereignty and oversight posture, see [AI sovereignty & the EU AI Act](/docs/guide/sovereignty/).
 
+The file format has a published JSON Schema, generated from the Go types that load it: [`hitl-policy-v1.schema.json`](/schema/hitl-policy-v1.schema.json). Add it as `$schema` in your policy file and your editor validates as you type. The chain format is at [`task-chain.schema.json`](/schema/task-chain.schema.json).
+
 Human-in-the-loop (HITL) lets you intercept tool calls before they execute and decide — approve, block, or let them pass automatically — based on a named policy file.
 
 ## How it works

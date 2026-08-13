@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contenox.com/schema/task-chain.schema.json",
+  "$defs": {
+    "LLMExecutionConfig": {
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Model is the primary model, placed first in the candidate list and used\nfor token counting; Model plus Models form the full candidate set."
+        },
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Models is an additional candidate pool, considered alongside Model."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Provider is the primary provider, placed first in the candidate list;\nProviders supplies additional candidates."
+        },
+        "providers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "temperature": {
+          "type": "number",
+          "description": "Temperature is the sampling temperature; nil means unset (provider\ndefault for chat_completion, 0.0 for prompt/route)."
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Tools is the allowlist of registry tool names this task may invoke\n(\"*\" exposes all, \"*\",\"!name\" excludes name(s)); client-passed tools are\ngoverned separately by PassClientsTools."
+        },
+        "hide_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "HideTools suppresses specific tools by (namespaced) name from BOTH the\nregistry tools selected via Tools and the client-passed tools."
+        },
+        "tools_policies": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "type": "object",
+          "description": "ToolsPolicies carries per-tools policy overrides for this task (tools\nname -\u003e policy key -\u003e value), injected into context before\nGetToolsForToolsByName."
+        },
+        "pass_clients_tools": {
+          "type": "boolean"
+        },
+        "think": {
+          "type": "string",
+          "description": "Think controls reasoning mode (auto, off, minimal, low, medium, high,\nxhigh, or a boolean-style alias); empty uses the provider default."
+        },
+        "max_tokens": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string",
+              "description": "Unexpanded macro, e.g. \"{{var:max_tokens|8192}}\"."
+            }
+          ],
+          "description": "MaxTokens caps the model's output tokens; unset sends no explicit cap\nand never falls back to the chain's TokenLimit, which bounds input+output."
+        },
+        "shift": {
+          "type": "boolean",
+          "description": "Shift allows the context window to slide on overflow instead of erroring."
+        },
+        "retry_policy": {
+          "$ref": "#/$defs/RetryPolicy",
+          "description": "RetryPolicy wraps the chat/prompt call with classified retry and an\noptional model fallback; nil disables retry."
+        }
+      },
+      "type": "object",
+      "description": "LLMExecutionConfig represents configuration for executing tasks using Large Language Models (LLMs)."
+    },
+    "RetryPolicy": {
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "description": "MaxAttempts is the total attempts including the first. 0 or 1 disables retry."
+        },
+        "initial_backoff": {
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "Go duration string, e.g. \"10s\"."
+            },
+            {
+              "type": "integer",
+              "description": "Nanoseconds."
+            }
+          ],
+          "description": "InitialBackoff is the wait before the second attempt; doubled (capped at\nMaxBackoff) before each subsequent attempt. Defaults to 500ms when zero."
+        },
+        "max_backoff": {
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "Go duration string, e.g. \"10s\"."
+            },
+            {
+              "type": "integer",
+              "description": "Nanoseconds."
+            }
+          ],
+          "description": "MaxBackoff caps the exponential backoff. 0 = no cap."
+        },
+        "jitter": {
+          "type": "number",
+          "description": "Jitter is a 0..1 fraction added to backoff (uniform random)."
+        },
+        "rate_limit_min_wait": {
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "Go duration string, e.g. \"10s\"."
+            },
+            {
+              "type": "integer",
+              "description": "Nanoseconds."
+            }
+          ],
+          "description": "RateLimitMinWait sets a floor for ClassRateLimit backoff."
+        },
+        "fallback_model_id": {
+          "type": "string",
+          "description": "FallbackModelID is the alternate model id used after FallbackAfter\nconsecutive failures. Empty disables fallback."
+        },
+        "fallback_after": {
+          "type": "integer",
+          "description": "FallbackAfter is the consecutive-failure threshold that triggers the\nfallback swap. 0 disables fallback regardless of FallbackModelID."
+        }
+      },
+      "type": "object",
+      "description": "RetryPolicy controls Do's retry/backoff/fallback behavior. The zero value\ndisables retry (MaxAttempts = 0 → 1 attempt total)."
+    },
+    "TaskDefinition": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "handler": {
+          "type": "string",
+          "description": "Handler determines how the LLM output (or tools) will be interpreted."
+        },
+        "system_instruction": {
+          "type": "string"
+        },
+        "execute_config": {
+          "$ref": "#/$defs/LLMExecutionConfig"
+        },
+        "tools": {
+          "$ref": "#/$defs/ToolsCall",
+          "description": "Tools defines an external action to run: required for Tools tasks, nil\nfor all other types."
+        },
+        "print": {
+          "type": "string",
+          "description": "Print optionally formats the output for display/logging, supporting\ntemplate variables from previous task outputs."
+        },
+        "prompt_template": {
+          "type": "string",
+          "description": "PromptTemplate, when set, overrides the resolved input as the prompt\nsent to the LLM."
+        },
+        "output_template": {
+          "type": "string",
+          "description": "OutputTemplate, when set, renders a tools task's JSON output through\nthis go template; the rendered string becomes the task's output."
+        },
+        "input_var": {
+          "type": "string",
+          "description": "InputVar names the variable to use as this task's input; each task\nstores its own output in a variable named after its task id."
+        },
+        "input_max_bytes": {
+          "type": "integer",
+          "description": "InputMaxBytes caps oversized string/chat-history inputs before this task runs."
+        },
+        "transition": {
+          "$ref": "#/$defs/TaskTransition",
+          "description": "Transition defines what to do after this task completes."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Timeout is a Go duration string (\"10s\", \"2m\") bounding task execution."
+        },
+        "retry_on_failure": {
+          "type": "integer",
+          "description": "RetryOnFailure sets how many times to retry this task on failure (all\ntask types); 0 means no retries."
+        }
+      },
+      "type": "object",
+      "required": [
+        "id",
+        "handler"
+      ]
+    },
+    "TaskTransition": {
+      "properties": {
+        "on_failure": {
+          "type": "string",
+          "description": "OnFailure is the task ID to jump to in case of failure."
+        },
+        "branches": {
+          "items": {
+            "$ref": "#/$defs/TransitionBranch"
+          },
+          "type": "array",
+          "description": "Branches defines conditional branches for successful task completion."
+        }
+      },
+      "type": "object",
+      "description": "TaskTransition defines what happens after a task completes,\nincluding which task to go to next and how to handle errors."
+    },
+    "ToolsCall": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name is the registered tools-PROVIDER (the service/server, e.g. \"slack\"),\nnot the tool; required."
+        },
+        "tool_name": {
+          "type": "string",
+          "description": "ToolName is the specific TOOL to invoke on that provider\n(e.g. \"send_slack_notification\")."
+        },
+        "args": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Args are key-value pairs passed to the tool call."
+        }
+      },
+      "type": "object",
+      "description": "ToolsCall configures a `tools` task: a direct, deterministic call to one\ntool of one registered tools-provider, distinct from the model-driven tool\ncalls of chat_completion/execute_tool_calls."
+    },
+    "TransitionBranch": {
+      "properties": {
+        "operator": {
+          "type": "string",
+          "description": "Operator defines how to compare the task's transition eval to When;\nrequired, must be one of SupportedOperators(), and is byte-exact and\ncase-sensitive except for the `route` handler."
+        },
+        "when": {
+          "type": "string",
+          "description": "When is the value this branch matches against the task's transition\neval; its meaning depends on the handler (a control token, or the\n`route` handler's chosen label)."
+        },
+        "goto": {
+          "type": "string",
+          "description": "Goto specifies the target task ID if this branch is taken; empty or\ntaskengine.TermEnd ends the chain."
+        },
+        "edge": {
+          "type": "string",
+          "description": "Edge identifies a graph edge \"fromTaskID-\u003etoTaskID\" consulted by\nedge-state operators; required when Operator is one of those."
+        }
+      },
+      "type": "object",
+      "description": "TransitionBranch defines a single possible path in the workflow,\nselected when the task's output matches the specified condition."
+    }
+  },
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "debug": {
+      "type": "boolean",
+      "description": "Debug enables capturing user input and output."
+    },
+    "description": {
+      "type": "string"
+    },
+    "tasks": {
+      "items": {
+        "$ref": "#/$defs/TaskDefinition"
+      },
+      "type": "array",
+      "minItems": 1
+    },
+    "token_limit": {
+      "type": "integer",
+      "description": "TokenLimit is the token limit for the context window used during execution."
+    }
+  },
+  "type": "object",
+  "required": [
+    "id",
+    "tasks"
+  ],
+  "title": "contenox task chain",
+  "description": "TaskChainDefinition describes a sequence of tasks to execute in order,\nwith branching logic, retry policies, and model preferences."
+}

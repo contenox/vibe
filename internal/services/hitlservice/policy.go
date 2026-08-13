@@ -97,7 +97,7 @@ const (
 // Condition is a single key/op/value predicate applied to the args of a tool call.
 type Condition struct {
 	Key   string      `json:"key"`
-	Op    ConditionOp `json:"op"`
+	Op    ConditionOp `json:"op" jsonschema:"required"`
 	Value string      `json:"value"`
 }
 
@@ -107,7 +107,7 @@ type Rule struct {
 	Tools  string      `json:"tools"`
 	Tool   string      `json:"tool"`
 	When   []Condition `json:"when,omitempty"`
-	Action Action      `json:"action"`
+	Action Action      `json:"action" jsonschema:"required"`
 	// TimeoutS is how long to wait for a human response when Action is
 	// ActionApprove; 0 means block indefinitely.
 	TimeoutS int `json:"timeout_s,omitempty"`
