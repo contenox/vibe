@@ -29,7 +29,7 @@ sh install.sh
 
 ## Quick Start
 
-<!-- TAG=v0.40.1 -->
+<!-- TAG=v0.40.2 -->
 
 ```bash
 contenox setup                          # pick a provider and model, once
