@@ -1,67 +1,8 @@
 # contenox
 
-**Fire work at an agent, under rules you can read.**
-
-An open agentic harness, built around the envelope: a plain file that bounds
-what an agent may do unattended — tool allowlists, command policy, budgets,
-approval gates. Missions are what envelopes make safe: fire one from a
-persistent session, detach, come back to done. Envelopes survive restarts — an
-unanswered approval checkpoints the run; answer it later with
-`contenox approvals respond`, from any terminal that can reach your models, and
-the run resumes exactly once. Terminal CLI, the same
-sessions inside Zed, JetBrains, or any ACP editor, and `contenox new` — a
-full-screen TUI with chat, plan, shell, and editor-grade file tools in one
-persistent coding session. Any model, any MCP server, any OpenAPI spec as
-tools, in combination. SQLite. No account.
-
-| The old way | contenox |
-| --- | --- |
-| A hidden prompt | A file you edit |
-| Guessing the blast radius | An envelope you wrote |
-| Watching it work | Detached missions |
-| One vendor | Any model, any MCP, together |
-
-We don't build toward one model with standing access to everything. You
-declare the agent with exactly what it needs — the tools, the model, the
-budget, the approval gate — nothing implied, nothing assumed.
+**An open agentic harness. Automation you control and own.**
 
 Docs: **[contenox.com](https://contenox.com)**
-
----
-
-## How it compares
-
-Most of what contenox does, the dedicated coding agents also do: a chat loop
-with tools, tool calling, MCP servers, provider switching, ACP editor sessions,
-sessions in local SQLite, a terminal UI. `contenox new` is a real coding
-session — chat, plan, shell, and editor-grade file tools in one persistent
-full-screen UI. Aider, OpenCode, Kilo Code and Claude Code all ship that set,
-and for pure coding ergonomics — repo mapping, diff application, edit formats —
-they are more refined. That part is table stakes, not the argument.
-
-Three things are built differently:
-
-* **The envelope is a separate artifact from the workflow.** The chain says
-  what happens; the [envelope](https://contenox.com/docs/guide/hitl/) says what
-  is permitted. Two files, authored and versioned independently, both checked
-  by `contenox vet`, evaluated before every tool call, fail-closed when nothing
-  matches. Hand someone a chain and keep the policy; tighten the policy without
-  touching the workflow.
-* **Human gates are durable.** An unanswered approval checkpoints the run and
-  releases its process. Answer it days later from another terminal with
-  [`contenox approvals respond`](https://contenox.com/docs/reference/contenox-cli/#contenox-approvals);
-  the verdict is recorded once by a compare-and-swap and the checkpoint is
-  claimed before the run rebuilds. The closest analog is workflow
-  infrastructure, not a dev tool.
-* **Delegation is bounded and attributed.** An envelope may grant an agent
-  [a fixed number of answers](https://contenox.com/docs/guide/hitl/#who-may-answer-a-units-question-attention)
-  to another agent's questions. The budget is durable, your own answers don't
-  spend it, and the record shows who answered.
-
-The cost: the weakest surfaces are the ones you meet first, kernel-enforced
-sandboxing is Landlock and Linux-only, and all three differences pay off on day
-thirty rather than day one. The long version, with the mechanisms and the rest
-of the caveats: **[How contenox compares](https://contenox.com/docs/guide/comparison/)**.
 
 ---
 
@@ -153,37 +94,6 @@ contenox tools add erp_billing \
 # Bind the local shell under a chain policy
 contenox --shell "check Proxmox and flag anything red"
 ```
-
----
-
-## Editor integration
-
-Contenox speaks the [Agent Client Protocol (ACP)](https://github.com/zed-industries/agent-client-protocol)
-over standard I/O — one harness behind every editor session.
-
-### Zed
-
-Add to `~/.config/zed/settings.json`:
-
-```json
-{
-  "agent_servers": {
-    "Contenox": {
-      "type": "custom",
-      "command": "contenox",
-      "args": ["acp"]
-    }
-  }
-}
-```
-
-Tool invocations render as interactive cards, approval prompts hook into the
-editor's native permission UI, and session history replays when you reopen a
-project.
-
-*Step-by-step guides:* [Zed](https://contenox.com/docs/integrations/editors/zed/) | [JetBrains](https://contenox.com/docs/integrations/editors/jetbrains/) | [AionUi](https://contenox.com/docs/integrations/editors/aionui/) | [OpenClaw](https://contenox.com/docs/integrations/editors/openclaw/).
-
-Terminal. Editor. **Contenox**.
 
 ---
 
