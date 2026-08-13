@@ -1,6 +1,6 @@
 # contenox
 
-**An open agentic harness. Automation you control and own.**
+**Governance for AI agents. Automation you control and own.**
 
 Docs: **[contenox.com](https://contenox.com)**
 
