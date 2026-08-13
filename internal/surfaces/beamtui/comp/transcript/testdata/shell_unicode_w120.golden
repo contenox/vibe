@@ -1,6 +1,0 @@
-── scrollback ──
-[shell]! go test ./internal/surfaces/beamtui/...[/]
-[shell]ok  beamtui/frame       0.01s[/]
-[shell]ok  beamtui/textwidth   0.02s[/]
-── live (cursor 0,0) ──
-[shell]partial line without a newline[/]

@@ -1,8 +1,0 @@
-[brand]|[/] [active]picker.go[/]
-  internal/surfaces/beamtui/comp/picker/picker.go  [muted]intern...[/]
-  internal/surfaces/beamtui/comp/fileaddr/fileaddr.go  [muted]in...[/]
-  internal/surfaces/beamtui/frame/frame.go  [muted]internal/surf...[/]
-  internal/services/vfs/vfs.go  [muted]internal/services/vfs[/]
-  docs/development/blueprints/beam-tui.md  [muted]docs/developme...[/]
-  cmd/beam/main.go  [muted]cmd/beam[/]
-  README.md

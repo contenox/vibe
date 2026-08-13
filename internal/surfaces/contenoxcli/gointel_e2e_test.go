@@ -211,17 +211,17 @@ func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *te
 
 			t.Run("go_definition names the real declaration", func(t *testing.T) {
 				start := time.Now()
-				out, err := h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand"})
+				out, err := h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending"})
 				require.NoError(t, err)
 				h.requireAllowedWithoutAsking(t, policy, gointel.ToolDefinition)
 
 				res, ok := out.(*gointel.DefinitionResult)
 				require.Truef(t, ok, "result is %T, not the declared schema", out)
-				require.Equal(t, "github.com/contenox/contenox/internal/surfaces/beamtui/frame.StyleBrand", res.Symbol)
+				require.Equal(t, "github.com/contenox/contenox/internal/store/runtimetypes.HITLApprovalPending", res.Symbol)
 				require.Equal(t, "const", res.Kind)
-				require.Equal(t, "internal/surfaces/beamtui/frame/frame.go:31:2", res.Location,
-					"ground truth moved: check where frame.StyleBrand is declared")
-				require.Contains(t, res.Line, "StyleBrand")
+				require.Equal(t, "internal/store/runtimetypes/hitl_approvals.go:18:2", res.Location,
+					"ground truth moved: check where runtimetypes.HITLApprovalPending is declared")
+				require.Contains(t, res.Line, "HITLApprovalPending")
 				require.Equal(t, "github.com/contenox/contenox", res.Module)
 				require.Contains(t, res.Toolchain, "advisory")
 				t.Logf("go_definition took %v", time.Since(start))
@@ -229,29 +229,29 @@ func TestSystem_GoIntel_EnginePathAnswersWithoutAskingUnderShippedPolicies(t *te
 
 			t.Run("go_describe carries hover-grade truth", func(t *testing.T) {
 				start := time.Now()
-				out, err := h.call(ctx, gointel.ToolDescribe, map[string]string{"symbol": "frame.StyleID"})
+				out, err := h.call(ctx, gointel.ToolDescribe, map[string]string{"symbol": "runtimetypes.HITLApprovalState"})
 				require.NoError(t, err)
 				h.requireAllowedWithoutAsking(t, policy, gointel.ToolDescribe)
 
 				res, ok := out.(*gointel.DescribeResult)
 				require.Truef(t, ok, "result is %T", out)
-				require.Equal(t, "github.com/contenox/contenox/internal/surfaces/beamtui/frame.StyleID", res.Symbol)
+				require.Equal(t, "github.com/contenox/contenox/internal/store/runtimetypes.HITLApprovalState", res.Symbol)
 				require.Equal(t, "type", res.Kind)
-				require.Equal(t, "string", res.Underlying, "StyleID is a defined string type")
-				require.Contains(t, res.Location, "internal/surfaces/beamtui/frame/frame.go:")
+				require.Equal(t, "string", res.Underlying, "HITLApprovalState is a defined string type")
+				require.Contains(t, res.Location, "internal/store/runtimetypes/hitl_approvals.go:")
 				require.NotEmpty(t, res.Doc, "the declaration's doc comment is the point of describe")
 				t.Logf("go_describe took %v", time.Since(start))
 			})
 
 			t.Run("go_references finds the real call sites", func(t *testing.T) {
 				start := time.Now()
-				out, err := h.call(ctx, gointel.ToolReferences, map[string]string{"symbol": "frame.StyleBrand", "max": "200"})
+				out, err := h.call(ctx, gointel.ToolReferences, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "max": "200"})
 				require.NoError(t, err)
 				h.requireAllowedWithoutAsking(t, policy, gointel.ToolReferences)
 
 				res, ok := out.(*gointel.ReferencesResult)
 				require.Truef(t, ok, "result is %T", out)
-				require.Greaterf(t, res.Total, 10, "frame.StyleBrand is used across the TUI; %d locations means resolution collapsed", res.Total)
+				require.Greaterf(t, res.Total, 10, "runtimetypes.HITLApprovalPending is used across the store and its callers; %d locations means resolution collapsed", res.Total)
 				require.Greater(t, len(res.Files), 3, "the uses span several files")
 				for _, f := range res.Files {
 					require.Falsef(t, filepath.IsAbs(f.File), "%s is absolute; anchors are workspace-relative so they can be passed to a read tool", f.File)
@@ -275,7 +275,7 @@ func TestSystem_GoIntel_EnginePathHonoursTheEnvelopeOnDisk(t *testing.T) {
 	ctx := hitlservice.WithPolicyName(context.Background(), "hitl-policy-acpx.json")
 	h.sink.drain()
 
-	out, err := h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand"})
+	out, err := h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending"})
 	require.NoError(t, err, "a denied tool returns the deny MESSAGE, not a chain error")
 
 	var decision *taskengine.TaskEvent
@@ -320,9 +320,9 @@ func TestSystem_GoIntel_EnginePathRefusesHostileArgumentsWithoutEscaping(t *test
 		{"symbol format verbs", gointel.ToolDefinition, map[string]string{"symbol": "%s%s%n"}, false},
 		{"symbol nul byte", gointel.ToolDefinition, map[string]string{"symbol": "frame\x00.StyleBrand"}, false},
 
-		{"dir traversal", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": "../../.."}, true},
-		{"dir absolute outside", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": realSystemDir(t)}, true},
-		{"dir 10KB", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": huge}, false},
+		{"dir traversal", gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "dir": "../../.."}, true},
+		{"dir absolute outside", gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "dir": realSystemDir(t)}, true},
+		{"dir 10KB", gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "dir": huge}, false},
 
 		{"scope garbage", gointel.ToolDiagnostics, map[string]string{"scope": "everything"}, false},
 		{"passes unknown", gointel.ToolDiagnostics, map[string]string{"scope": "all", "passes": "notapass"}, false},
@@ -368,15 +368,15 @@ func TestSystem_GoIntel_EnginePathTolerantOfSloppyButHonestArguments(t *testing.
 		tool string
 		args map[string]string
 	}{
-		{"max as a string", gointel.ToolReferences, map[string]string{"symbol": "frame.StyleBrand", "max": "5"}},
-		{"max above the ceiling", gointel.ToolReferences, map[string]string{"symbol": "frame.StyleBrand", "max": "1000000000"}},
-		{"max negative", gointel.ToolReferences, map[string]string{"symbol": "frame.StyleBrand", "max": "-1"}},
-		{"max zero", gointel.ToolReferences, map[string]string{"symbol": "frame.StyleBrand", "max": "0"}},
-		{"symbol with surrounding space", gointel.ToolDefinition, map[string]string{"symbol": "  frame.StyleBrand  "}},
-		{"full import path", gointel.ToolDefinition, map[string]string{"symbol": "github.com/contenox/contenox/internal/surfaces/beamtui/frame.StyleBrand"}},
-		{"import path suffix", gointel.ToolDefinition, map[string]string{"symbol": "beamtui/frame.StyleBrand"}},
-		{"dir with redundant segments", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": "internal/../internal/surfaces"}},
-		{"dir naming a file", gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand", "dir": "internal/surfaces/beamtui/frame/frame.go"}},
+		{"max as a string", gointel.ToolReferences, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "max": "5"}},
+		{"max above the ceiling", gointel.ToolReferences, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "max": "1000000000"}},
+		{"max negative", gointel.ToolReferences, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "max": "-1"}},
+		{"max zero", gointel.ToolReferences, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "max": "0"}},
+		{"symbol with surrounding space", gointel.ToolDefinition, map[string]string{"symbol": "  runtimetypes.HITLApprovalPending  "}},
+		{"full import path", gointel.ToolDefinition, map[string]string{"symbol": "github.com/contenox/contenox/internal/store/runtimetypes.HITLApprovalPending"}},
+		{"import path suffix", gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending"}},
+		{"dir with redundant segments", gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "dir": "internal/../internal/store"}},
+		{"dir naming a file", gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "dir": "internal/store/runtimetypes/hitl_approvals.go"}},
 		{"passes comma separated", gointel.ToolDiagnostics, map[string]string{"scope": "package", "target": "gointel", "passes": "printf, unreachable"}},
 	} {
 		tc := tc
@@ -388,7 +388,7 @@ func TestSystem_GoIntel_EnginePathTolerantOfSloppyButHonestArguments(t *testing.
 		})
 	}
 
-	out, err := h.call(ctx, gointel.ToolReferences, map[string]string{"symbol": "frame.StyleBrand", "max": "5"})
+	out, err := h.call(ctx, gointel.ToolReferences, map[string]string{"symbol": "runtimetypes.HITLApprovalPending", "max": "5"})
 	require.NoError(t, err)
 	require.LessOrEqual(t, out.(*gointel.ReferencesResult).Shown, 5)
 }
@@ -402,7 +402,7 @@ func TestSystem_GoIntel_EngineStopClosesTheIndexForLateCalls(t *testing.T) {
 	h := newGointelHarness(t, gointelRepoRoot(t))
 	ctx := context.Background()
 
-	_, err := h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand"})
+	_, err := h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending"})
 	require.NoError(t, err, "warm-up")
 
 	stopped := make(chan time.Duration, 1)
@@ -420,7 +420,7 @@ func TestSystem_GoIntel_EngineStopClosesTheIndexForLateCalls(t *testing.T) {
 
 	late := make(chan error, 1)
 	go func() {
-		_, err := h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand"})
+		_, err := h.call(ctx, gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending"})
 		late <- err
 	}()
 	select {
@@ -593,7 +593,7 @@ func TestSystem_GoIntel_EnginePathWithNoAllowedDirRefusesActionably(t *testing.T
 	h := newGointelHarness(t, "")
 
 	// go test sets cwd to this package dir, so the cwd-rooted index must refuse with the boundary refusal.
-	_, err := h.call(context.Background(), gointel.ToolDefinition, map[string]string{"symbol": "frame.StyleBrand"})
+	_, err := h.call(context.Background(), gointel.ToolDefinition, map[string]string{"symbol": "runtimetypes.HITLApprovalPending"})
 	require.Error(t, err, "an index rooted at a dir whose module root lies above it answered a query")
 	msg := err.Error()
 	require.Containsf(t, msg, "module root outside allowed directory", "the refusal does not name the cause: %q", msg)

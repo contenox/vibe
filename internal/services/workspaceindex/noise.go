@@ -8,8 +8,7 @@ import (
 )
 
 // This is a copy of the noise-filter matcher used by localtools' find_files
-// (fs_gitignore.go, fs_policy.go) and beamtui's fileaddr package; none of
-// those identifiers are exported. It is a noise filter only, never access
+// (fs_gitignore.go, fs_policy.go); none of those identifiers are exported. It is a noise filter only, never access
 // control — containment is vfs's job, enforced separately in walkWorkspace.
 
 // defaultSkipDirNames is a copy of localtools' fallback skip-dir set.

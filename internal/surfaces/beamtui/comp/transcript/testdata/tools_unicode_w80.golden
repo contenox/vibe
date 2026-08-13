@@ -1,5 +1,0 @@
-── scrollback ──
-[done]✓[/] [tool]Read frame.go[/]
-[failed]✗[/] [tool]Edit transcript.go[/]
-── live (cursor 0,0) ──
-[pending]⠙[/] [tool]Grep a title long enough that a narrow terminal has to truncate it[/]

@@ -185,9 +185,8 @@ vLLM.
     contenox setup                         # 1. start here: wizard — pick provider, model, API key
     contenox doctor                        # 2. verdict: can I chat right now, yes or no
     contenox init                          # 3. once per project: scaffold .contenox/ and its chains
-    contenox new                           # 4. the terminal UI: chat, plan, and shell in one session
-    contenox resume                        #    reopen your last session, transcript and all
-    contenox "list files in my home dir"   #    or one-shot, session-backed chat
+    contenox "list files in my home dir"   # 4. one-shot, session-backed chat
+    contenox acp                           #    speak Agent Client Protocol over stdio to any ACP client
 
   Inspect models:
     contenox model list                    # models exposed by registered live backends

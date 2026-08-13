@@ -14,7 +14,7 @@ import (
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
-	"github.com/contenox/contenox/internal/surfaces/beamtui/sanitize"
+	"github.com/contenox/contenox/internal/surfaces/contenoxcli/sanitize"
 )
 
 // ErrApprovalAborted is returned when the operator aborts the whole run from an

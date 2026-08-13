@@ -304,10 +304,10 @@ func reportSetupReadiness(ctx context.Context, cmd *cobra.Command, db libdb.DBMa
 
 func printSetupNextCommand(out io.Writer, tty bool) {
 	if tty {
-		fmt.Fprintln(out, "  Next: run `contenox new` for the terminal UI, or `contenox \"your first prompt\"`.")
+		fmt.Fprintln(out, "  Next: run `contenox \"your first prompt\"`, or point an ACP client at `contenox acp`.")
 		return
 	}
-	fmt.Fprintln(out, "  Next: run `contenox \"your first prompt\"` (the terminal UI, `contenox new`, needs a terminal).")
+	fmt.Fprintln(out, "  Next: run `contenox \"your first prompt\"`.")
 }
 
 func stdoutIsTerminal() bool {

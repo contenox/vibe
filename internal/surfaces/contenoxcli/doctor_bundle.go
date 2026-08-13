@@ -23,7 +23,7 @@ const doctorIssueURL = "https://github.com/contenox/contenox/issues/new"
 
 const doctorBundleLogTail = 256 * 1024
 
-var doctorBundleLogNames = []string{"telemetry.log", beamLogFileName}
+var doctorBundleLogNames = []string{"telemetry.log"}
 
 const redactedPlaceholder = "[REDACTED]"
 
@@ -246,7 +246,7 @@ func writeDoctorBundleIfAsked(cmd *cobra.Command, w io.Writer, res setupcheck.Re
 		abs = path
 	}
 	fmt.Fprintf(w, "\nBundle: %s\n", abs)
-	fmt.Fprintf(w, "  Contents: doctor.json, build.txt, and any telemetry.log / %s found.\n", beamLogFileName)
+	fmt.Fprintln(w, "  Contents: doctor.json, build.txt, and any telemetry.log found.")
 	fmt.Fprintf(w, "  Redacted: %d credential-shaped value(s). Review the file before sharing it.\n", redacted)
 	fmt.Fprintf(w, "  Report:   %s\n", doctorIssueLink(res, abs))
 	return nil

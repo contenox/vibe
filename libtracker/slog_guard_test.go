@@ -37,11 +37,7 @@ var slogSinkAllowlist = map[string]string{
 	"libtracker/": "the tracker's slog sink adapter — slog is its output, not its API",
 
 	// Composition roots that configure the sink, named file by file.
-	"internal/surfaces/contenoxcli/cli.go":      "setupTelemetryLogging: tees the default handler to <data-dir>/telemetry.log when the operator sets telemetry-enabled",
-	"internal/surfaces/contenoxcli/beam_cmd.go": "redirectBeamLogsToFile: moves the default handler OFF stderr into beam.log — beam owns the terminal, so a stray record would be drawn over the transcript",
-
-	// Tests that must observe the sink wiring to prove it works.
-	"internal/surfaces/contenoxcli/beam_cmd_test.go": "asserts redirectBeamLogsToFile actually retargets slog.Default() and restores it on failure — it has to call slog to see that",
+	"internal/surfaces/contenoxcli/cli.go": "setupTelemetryLogging: tees the default handler to <data-dir>/telemetry.log when the operator sets telemetry-enabled",
 }
 
 // TestUnit_NoDirectSlogOutsideSinks keeps libtracker the only instrumentation
