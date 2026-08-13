@@ -1,0 +1,22 @@
+---
+import { getCollection, render } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import { entryTitle } from '../../lib/entries';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('legal', (e) => e.id.startsWith('legal/'));
+  return entries.map((entry) => ({
+    params: { slug: entry.id.slice('legal/'.length) },
+    props: { entry },
+  }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+---
+<Base title={`${entryTitle(entry)} — Contenox`} description={entry.data.description} noindex>
+  <article class="prose prose-compact prose-neutral dark:prose-invert mx-auto max-w-3xl px-5 py-10">
+    <p class="text-xs font-semibold tracking-widest text-neutral-500 uppercase">Legal</p>
+    <Content />
+  </article>
+</Base>
