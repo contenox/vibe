@@ -44,6 +44,7 @@ const S3_MEDIA = new Set([
   'beam-login.png',
   'beam-new-chat.png',
   'lab-beam-desktop-shell.png',
+  'lab-beam-session.png',
   'modeld-console.png',
   'vscode-extension-icon.png',
   'lab-blueprints-ticket-triage.png',

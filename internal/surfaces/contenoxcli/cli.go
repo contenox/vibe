@@ -177,7 +177,7 @@ those are the guardrails, and you can read them.
 
 Chat and shell in your terminal, reach the same worker from any ACP editor, and
 package repeatable work into chains: prompts, model routing, tools, retries and
-approval gates in one versioned file. State lives in local SQLite. Hosted
+approval gates in one versioned file. State lives on your machine. Hosted
 providers and Ollama work out of the box; for local inference run Ollama or
 vLLM.
 
@@ -241,7 +241,7 @@ Input is passed as positional args, --input, or piped via stdin.
   echo "summarise README.md" | contenox
   contenox chat --shell "list files in the current dir"
 
-Sessions persist conversation history across invocations (stored in SQLite).
+Sessions persist conversation history across invocations.
 Each session remembers previous messages so the model has context.
 The first run auto-creates a "default" session. Manage sessions with:
 
@@ -363,7 +363,7 @@ func init() {
 	rootCmd.Long = fmt.Sprintf("Version: %s\n\n%s", v, rootCmd.Long)
 
 	f := rootCmd.PersistentFlags()
-	f.String("db", "", "SQLite database path (default: ~/.contenox/local.db)")
+	f.String("db", "", "Database path (default: ~/.contenox/local.db)")
 	f.String("data-dir", "", "Override the .contenox data directory path")
 	f.String("ollama", defaultOllama, "Ollama base URL")
 	f.String("model", defaultModel, "Model name (task/chat/embed)")

@@ -41,16 +41,16 @@ const routeCode = `{
 }`;
 
 const t: LandingStrings = {
-  h1a: 'A robot you program yourself.',
-  h1b: 'With the AI you already pay for.',
-  lede: 'Contenox is an open-source worker that runs on your own computer. You describe the job — with help from the AI you already pay for — and one file in your project says what it may do, what needs your approval, and what sets it off. Those are the guardrails: it cannot step outside them, and you can read them.',
+  h1a: 'An agent server.',
+  h1b: 'Every AI product runs one. Nobody ships you one.',
+  lede: 'Every AI product runs an agent loop under rules its vendor wrote. You have never been handed one. contenox is that layer as a server you run yourself: agents, tools and models declared in files, every action checked against your policy before it happens, on your machine, on any model.',
   ctaRecipe: 'Run a recipe',
   copyLabel: 'Copy',
   installTabPosix: 'macOS / Linux',
   installTabWindows: 'Windows',
   ctaGithub: 'View on GitHub',
   installNote: 'Installs <code class="font-mono">contenox</code>. Run <code class="font-mono">contenox init</code> to scaffold a workspace.',
-  trustChips: ['any model', 'one binary', 'no account', 'SQLite', 'your rules in a file you can read'],
+  trustChips: ['any model', 'one binary', 'no account', 'your rules in a file you can read'],
 
   missionEyebrow: 'The mission, live',
   missionH2: 'Thirty seconds, end to end.',
@@ -137,7 +137,7 @@ const t: LandingStrings = {
   yoursEyebrow: 'Yours by default',
   yoursH2: 'Your machine, your state, your models.',
   yoursPoints: [
-    'Sessions, config, run logs, and captured execution state live in SQLite on your machine. No account, no contenox service in the loop — unless you pair with the optional relay below. Telemetry is opt-in and off by default.',
+    'Sessions, config, run logs, and captured execution state live on your machine. No account, no contenox service in the loop — unless you pair with the optional relay below. Telemetry is opt-in and off by default.',
     'Inference is configuration: local Ollama or vLLM when nothing may leave your network, or OpenAI, Anthropic, Gemini, Bedrock, and Vertex on your own keys, pinned to a region you choose. Swapping later is a config change, not a rewrite.',
     'Secrets resolve from your environment at request time and never land in config on disk; agent-reachable shells get a scrubbed environment with only what the task needs.',
   ],
@@ -152,7 +152,7 @@ const t: LandingStrings = {
   capsEyebrow: 'Also in the box',
   caps: [
     ['It reads Go like the compiler', 'Definition, references, implementations, symbols, diagnostics — answered in-process by the real type-checker, warm in microseconds. No language server to install or babysit.'],
-    ['Ask the repo, get cited lines', 'contenox index builds a hybrid full-text and embedding index in local SQLite; contenox search answers with file:line citations and marks a hit stale the moment its file changes.'],
+    ['Ask the repo, get cited lines', 'contenox index builds a hybrid full-text and embedding index locally; contenox search answers with file:line citations and marks a hit stale the moment its file changes.'],
   ],
 
   bottomEyebrow: 'Get started',
@@ -170,8 +170,8 @@ const t: LandingStrings = {
 };
 ---
 <Base
-  title="Contenox — A robot you program yourself, with the AI you already pay for."
-  description="A robot you program yourself, with the AI you already pay for. Contenox is open-source automation that runs on your own computer: one file says what it may do, what needs your approval, and what sets it off. Guardrails for AI agents — Apache-2.0, one binary, no account."
+  title="Contenox — An agent server. Every AI product runs one. Nobody ships you one."
+  description="An agent server. Agents, tools and models declared in files; every action checked against your policy before it runs. Open source, on your machine, any model — the layer every AI product has and none of them ship."
   alternates={{ en: '/', de: '/de/' }}
 >
   <Landing t={t} />

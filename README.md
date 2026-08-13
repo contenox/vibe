@@ -1,9 +1,10 @@
 # contenox
 
-Contenox is a program you run on your own computer. It connects to the AI model
-you chose and carries out the steps you wrote down. One file says what it may
-do, what needs your approval, and what sets it off — those are the guardrails,
-and you can read them.
+**An agent server.**
+
+Agents, tools and models are declared in files, not compiled into your
+application. Every action is checked against your policy before it runs.
+Changing what an agent may do is an edit, not a release.
 
 Docs: **[contenox.com](https://contenox.com)**
 
@@ -45,7 +46,7 @@ contenox resume                         # same TUI, reopening your last session
 sensible defaults do the rest, and `contenox doctor` explains itself when
 something is missing.
 
-Everything above is local: SQLite on your machine, no account. When you do want
+Everything above is local: on your machine, no account. When you do want
 a running session reachable from elsewhere — reading the transcript and
 answering approvals from your phone — pair the machine with the hosted relay:
 sign in at [app.contenox.com](https://app.contenox.com), tap **Pair
