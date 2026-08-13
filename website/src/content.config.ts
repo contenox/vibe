@@ -12,8 +12,32 @@ const docsSchema = z.object({
 
 const docs = defineCollection({
   // development/internal/** holds work-records, not published pages.
-  loader: glob({ pattern: ['**/*.md', '!development/internal/**'], base: '../docs' }),
+  // legal.md and de/** render outside /docs/, from their own collections.
+  loader: glob({
+    pattern: ['**/*.md', '!development/internal/**', '!legal.md', '!de/**'],
+    base: '../docs',
+  }),
   schema: docsSchema,
 });
 
-export const collections = { docs };
+const legal = defineCollection({
+  loader: glob({ pattern: 'legal.md', base: '../docs' }),
+  schema: docsSchema,
+});
+
+// German pages, each rendered at /de/<id>/ by pages/de/[...slug].astro.
+const deSchema = docsSchema.extend({
+  /** Small label above the h1. */
+  eyebrow: z.string().optional(),
+  ogType: z.string().optional(),
+  /** Path of the English counterpart, which makes the hreflang pair. */
+  en: z.string().optional(),
+  noindex: z.boolean().optional(),
+});
+
+const de = defineCollection({
+  loader: glob({ pattern: '**/*.md', base: '../docs/de' }),
+  schema: deSchema,
+});
+
+export const collections = { docs, legal, de };

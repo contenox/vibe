@@ -1,6 +1,6 @@
 import type { CollectionEntry } from 'astro:content';
 
-type AnyEntry = CollectionEntry<'docs' | 'cookbook' | 'stories'>;
+type AnyEntry = CollectionEntry<'docs' | 'legal' | 'de'>;
 
 // Title precedence: frontmatter, first markdown heading, slug.
 export function entryTitle(entry: AnyEntry): string {

@@ -1,0 +1,31 @@
+---
+import { getCollection, render } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import { published } from '../../lib/entries';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('de', published);
+  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+const alternates = entry.data.en
+  ? { en: entry.data.en, de: `/de/${entry.id}/` }
+  : undefined;
+---
+<Base
+  title={entry.data.title}
+  description={entry.data.description}
+  lang="de"
+  ogType={entry.data.ogType ?? 'website'}
+  alternates={alternates}
+  noindex={entry.data.noindex ?? false}
+>
+  <article data-pagefind-body class="prose prose-compact prose-neutral dark:prose-invert mx-auto max-w-3xl px-5 py-10">
+    {entry.data.eyebrow && (
+      <p class="text-xs font-semibold tracking-widest text-neutral-500 uppercase">{entry.data.eyebrow}</p>
+    )}
+    <Content />
+  </article>
+</Base>
