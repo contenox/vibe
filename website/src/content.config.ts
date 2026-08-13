@@ -14,15 +14,18 @@ const docs = defineCollection({
   // development/internal/** holds work-records, not published pages.
   // legal.md and de/** render outside /docs/, from their own collections.
   loader: glob({
-    pattern: ['**/*.md', '!development/internal/**', '!legal.md', '!de/**'],
+    pattern: ['**/*.md', '!development/internal/**', '!legal.md', '!legal/**', '!de/**'],
     base: '../docs',
   }),
   schema: docsSchema,
 });
 
+// legal.md is the site's own notice at /legal; legal/*.md are the hosted
+// service's documents at /legal/<name>. contenox.com is where they are
+// canonically published — app.contenox.com serves a synced copy.
 const legal = defineCollection({
-  loader: glob({ pattern: 'legal.md', base: '../docs' }),
-  schema: docsSchema,
+  loader: glob({ pattern: ['legal.md', 'legal/*.md'], base: '../docs' }),
+  schema: docsSchema.extend({ eyebrow: z.string().optional() }),
 });
 
 // German pages, each rendered at /de/<id>/ by pages/de/[...slug].astro.
