@@ -116,8 +116,8 @@ const navSections = await buildNavSections();
           <a href="/docs/use-cases/" class="hover:text-black dark:hover:text-white">Use cases</a>
           <a href="/legal/" class="hover:text-black dark:hover:text-white">Legal</a>
           {lang === 'de'
-            ? <a href="/" class="hover:text-black dark:hover:text-white">English</a>
-            : <a href="/de/" class="hover:text-black dark:hover:text-white">Deutsch</a>}
+            ? <a href={alternates?.en ?? '/'} class="hover:text-black dark:hover:text-white">English</a>
+            : <a href={alternates?.de ?? '/de/'} class="hover:text-black dark:hover:text-white">Deutsch</a>}
         </nav>
       </div>
     </footer>

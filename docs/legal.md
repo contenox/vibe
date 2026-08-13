@@ -1,12 +1,32 @@
 ---
-title: Legal notice
-description: Legal notice (Impressum), open-source license, and privacy for Contenox and contenox.com, with pointers to the hosted relay's own documents.
+title: Legal
+description: All Contenox legal documents in one place — terms of service, privacy policy, right of withdrawal, imprint, security and sub-processors for the hosted service, plus the notices for this website and the open-source software.
 ---
 
-# Legal notice
+# Legal
 
-Contact, licensing, and how we handle data on this website — in plain language
-wherever we can.
+Everything legal, in one place. Two groups: the documents for the **hosted
+service** you sign up to, and the notices for **this website and the
+open-source software**, which need no account at all.
+
+## The hosted service (app.contenox.com)
+
+| Document | What it covers |
+|---|---|
+| [Terms of service](/legal/terms) | The contract: the three layers, what we owe, liability, and which rules reach you where you are |
+| [Privacy policy](/legal/privacy) | What is processed, on what legal basis, how long it is kept, how it is secured, and your rights — including outside the EU |
+| [Right of withdrawal](/legal/withdrawal) | For consumers: the fourteen-day right, the model form, and when it lapses |
+| [Imprint](/legal/imprint) | § 5 DDG provider identification for the service |
+| [Security](/legal/security) | How to report a vulnerability, and what we do with it |
+| [Sub-processors](/legal/subprocessors) | Every third party that processes data, and how changes are announced |
+
+All six are published here. The copies served inside the app are mirrors of
+these.
+
+## This website and the software
+
+The rest of this page. Using the open-source software needs no account, and
+none of the documents above apply to it.
 
 ## Legal notice (Impressum gem. § 5 DDG)
 
