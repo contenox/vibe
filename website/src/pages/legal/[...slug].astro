@@ -14,7 +14,7 @@ export async function getStaticPaths() {
 const { entry } = Astro.props;
 const { Content } = await render(entry);
 ---
-<Base title={`${entryTitle(entry)} — Contenox`} description={entry.data.description} noindex>
+<Base title={`${entryTitle(entry)} — Contenox`} description={entry.data.description}>
   <article class="prose prose-compact prose-neutral dark:prose-invert mx-auto max-w-3xl px-5 py-10">
     <p class="text-xs font-semibold tracking-widest text-neutral-500 uppercase">Legal</p>
     <Content />

@@ -1,12 +1,33 @@
 ---
-title: Impressum und Datenschutz
-description: Impressum nach § 5 DDG, Open-Source-Lizenz und Datenschutzhinweise für Contenox und contenox.com, mit Verweis auf die eigenen Dokumente des gehosteten Relays.
+title: Rechtliches
+description: Alle Rechtsdokumente von Contenox an einer Stelle — Nutzungsbedingungen, Datenschutzerklärung, Widerrufsbelehrung, Impressum, Sicherheit und Unterauftragsverarbeiter für den gehosteten Dienst, dazu die Angaben zu dieser Website und der quelloffenen Software.
+en: /legal
 ---
 
-# Impressum und Datenschutz
+# Rechtliches
 
-Kontakt, Lizenz und der Umgang mit Daten auf dieser Website — so klar wie
-möglich formuliert.
+Alles Rechtliche an einer Stelle. Zwei Gruppen: die Dokumente für den
+**gehosteten Dienst**, für den Sie sich anmelden, und die Angaben zu **dieser
+Website und der quelloffenen Software**, für die es kein Konto braucht.
+
+## Der gehostete Dienst (app.contenox.com)
+
+| Dokument | Worum es geht |
+|---|---|
+| [Nutzungsbedingungen](/legal/terms) | Der Vertrag: die drei Ebenen, was wir schulden, die Haftung, und welche Vorschriften Sie wo treffen |
+| [Datenschutzerklärung](/legal/privacy) | Was verarbeitet wird, auf welcher Rechtsgrundlage, wie lange, wie es gesichert ist, und Ihre Rechte |
+| [Widerrufsbelehrung](/legal/withdrawal) | Für Verbraucher: das vierzehntägige Widerrufsrecht, das Musterformular und wann es erlischt |
+| [Impressum des Dienstes](/legal/imprint) | Anbieterkennzeichnung nach § 5 DDG für den Dienst |
+| [Sicherheit](/legal/security) | Wie Sie eine Schwachstelle melden und was damit geschieht |
+| [Unterauftragsverarbeiter](/legal/subprocessors) | Jeder Dritte, der Daten verarbeitet, und wie Änderungen angekündigt werden |
+
+Alle sechs werden hier veröffentlicht. Die Fassungen in der App sind Kopien
+davon.
+
+## Diese Website und die Software
+
+Der Rest dieser Seite. Für die Nutzung der quelloffenen Software braucht es
+kein Konto, und keines der obigen Dokumente gilt für sie.
 
 ## Impressum gem. § 5 DDG
 
