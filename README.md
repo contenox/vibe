@@ -1,8 +1,9 @@
 # contenox
 
-**A robot you program yourself, with the AI you already pay for.**
-
-Guardrails for AI agents: one file says what it may do, what needs your approval, and what sets it off.
+Contenox is a program you run on your own computer. It connects to the AI model
+you chose and carries out the steps you wrote down. One file says what it may
+do, what needs your approval, and what sets it off — those are the guardrails,
+and you can read them.
 
 Docs: **[contenox.com](https://contenox.com)**
 
