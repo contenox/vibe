@@ -84,8 +84,8 @@ what we can fairly be asked to stand behind.
 **Our own work** — the governance system and the parts that carry it:
 
 - the rule format in which you write rules, budgets and limits;
-- approval by a human, with a durable saved state — a run pauses, the process is released, and it resumes exactly once when the
-  question is answered, days later if need be;
+- the human-approval declarations: which actions may not proceed without a
+  person;
 - the system of declared triggers;
 - the task engine, and the interfaces that build on it;
 - the procedure by which a machine pairs to the relay, and the relay's fixed

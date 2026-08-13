@@ -8,18 +8,15 @@ description: The rules an AI agent runs under are a file you wrote, in your repo
 **The rules your AI agent runs under are a file you wrote — and nothing runs
 that the file does not allow.**
 
-That file, the approvals it pauses for, and the things allowed to start a run
-are the product. Three parts, and they have names:
+Three declarations, in files you wrote and can read back. They are the
+product:
 
-- **The rule format.** One JSON file — the envelope — that says what passes
-  silently, what stops for a human, and what is refused outright. Anything no
-  rule covers fails closed: it asks.
-- **Approvals that wait.** A question the agent may not answer alone
-  checkpoints the run. The process is released. You answer days later from any
-  terminal — `contenox approvals respond` — and it continues exactly once.
-- **Declared starts.** What sets work going — a schedule, a signed message from
-  another system, a form on your own site — is something you write down, not
-  something that happens to you.
+- **What may run.** One JSON file — the envelope — says what passes silently
+  and what is refused outright. Anything no rule covers fails closed: it asks.
+- **What needs a human.** The same file names the actions that may not proceed
+  without a person, and who that person is deciding for.
+- **What starts work.** A schedule, a signed message from another system, a
+  form on your own site — declared by you, not discovered at runtime.
 
 Everything you can see is a wrapper around that. The terminal UI, the CLI, the
 browser app: all of them are example implementations, and they change. The
@@ -37,8 +34,8 @@ something decided a cleanup was in order.
 
 So the answer had to be a file I wrote, that I could read back, that was
 enforced by something other than the model's good intentions. Once that file
-existed, the rest followed: approvals had to survive me closing the laptop, and
-the things that trigger work had to be declared rather than discovered.
+existed, the rest followed: the same file names what may not proceed without
+me, and the things that start work are declared rather than discovered.
 
 There is a second reason, and it is not smaller. I did not want the record of
 how my work behaves to live in someone else's dashboard — a product that can

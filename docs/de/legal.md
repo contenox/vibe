@@ -89,9 +89,8 @@ ist, entscheidet darüber, wofür wir billigerweise einstehen können.
 **Unsere eigene Arbeit** — das contenox-Governance-System und was es trägt:
 
 - das Regelformat, in dem Sie Regeln, Budgets und Grenzen aufschreiben;
-- die Freigabe durch einen Menschen, mit dauerhaftem Zwischenstand —
-  ein Lauf hält an, der Prozess wird freigegeben, und er läuft genau einmal
-  weiter, wenn die Frage beantwortet ist, notfalls Tage später;
+- die Festlegung der Freigaben: welche Handlungen ohne einen Menschen nicht
+  weiterlaufen;
 - das System der festgelegten Auslöser;
 - die Ablaufsteuerung sowie die Bedienoberflächen, die auf ihr aufsetzen;
 - das Verfahren, mit dem sich eine Maschine an das Relay koppelt, und dessen
