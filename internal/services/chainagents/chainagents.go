@@ -30,7 +30,7 @@ var shippedAgentChains = map[string]bool{
 	"chain-contenox": true, // default interactive chat agent (chain-agent-contenox.json)
 	"chain-acp":      true, // the ACP agent surface (chain-agent-acp.json)
 	"chain-acpx":     true, // the headless/untrusted-driver ACP agent (chain-agent-acpx.json)
-	"chain-beam":     true, // the beam TUI agent surface (chain-agent-beam.json)
+	"chain-beam":     true, // the attended-session agent surface (chain-agent-beam.json)
 	"chain-run":      true, // the one-shot `contenox run` agent (chain-agent-run.json)
 }
 

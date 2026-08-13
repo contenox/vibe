@@ -77,12 +77,12 @@ func TestUnit_PromptOllamaModelMenu(t *testing.T) {
 	require.Contains(t, out.String(), "Please enter a number between 1 and 2")
 }
 
-// TestUnit_PrintSetupNextCommand asserts the wizard ends by naming a command,
-// and only offers the terminal UI where a terminal exists.
+// TestUnit_PrintSetupNextCommand asserts the wizard ends by naming a command
+// the operator can actually run next.
 func TestUnit_PrintSetupNextCommand(t *testing.T) {
 	var tty bytes.Buffer
 	printSetupNextCommand(&tty, true)
-	require.Contains(t, tty.String(), "contenox new")
+	require.Contains(t, tty.String(), `contenox "your first prompt"`)
 	require.NotContains(t, tty.String(), "Close this tab")
 
 	var piped bytes.Buffer
