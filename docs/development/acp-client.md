@@ -18,12 +18,11 @@ the conversation:
 
 > **Rule:** session-level features — slash commands, session controls, the
 > affordances an operator reaches for mid-conversation — belong in
-> `internal/surfaces/acpsvc` (registry: `commands.go`), never in the terminal
-> UI alone. The TUI consumes `AvailableCommands` from ACP and its local
-> `/`-handling is input classification only; implementing a feature there
-> would give `contenox new` something `contenox acp` and every ACP editor
-> silently lack. Put shared helpers where both surfaces reach them, and
-> verify the feature through `contenox acp` before calling it done.
+> `internal/surfaces/acpsvc` (registry: `commands.go`), never in a client. A
+> client consumes `AvailableCommands` from ACP and its local `/`-handling is
+> input classification only; implementing a feature there would give that one
+> client something `contenox acp` and every ACP editor silently lack. Verify
+> the feature through `contenox acp` before calling it done.
 
 The package documentation (`libacp/doc.go`) carries a compact end-to-end
 client example. `libacp/acpexec` provides the subprocess-over-stdio

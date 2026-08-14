@@ -26,8 +26,15 @@ A task chain is a JSON state machine that defines how the AI agent behaves end-t
 | `id` | string | Unique identifier |
 | `description` | string | Human-readable description |
 | `tasks` | TaskDefinition[] | Ordered list of task definitions |
-| `token_limit` | int | Max token budget for the chat history |
+| `token_limit` | int | Context budget for the chat history, and the source of the per-call tool-result cap. **Set it.** See below. |
 | `debug` | bool | Enable verbose task-level logging |
+
+> **`token_limit` also sizes tool results.** The largest result a tool may
+> return is derived from what is left of this budget after the chat history.
+> Omitting the field does not mean "no limit" — it leaves the budget at zero, so
+> every tool call comes back as `tool_result_too_large` no matter how small the
+> real result is. A chain whose tools all report that error is missing its
+> `token_limit`.
 
 ## Task structure
 

@@ -72,7 +72,7 @@ contenox search "session storage" --json | jq -r '.[].path'
 
 ## In chains and sessions
 
-The agent reaches the same index through the `workspace_search` tool, provided by the `workspace` toolset. It is available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions — add it to a task's tool allowlist like any other tool:
+The agent reaches the same index through the `workspace_search` tool, provided by the `workspace` toolset. It is available in `contenox chat`, `contenox run`, and ACP editor sessions — add it to a task's tool allowlist like any other tool:
 
 ```json
 "execute_config": {
@@ -87,7 +87,7 @@ The model passes a natural-language `question` (and optionally `top_k`) and gets
 The [HITL policy](/docs/guide/hitl/) treats `workspace_search` like any other tool call: the seeded presets allow it by default, and you can gate or deny it with a policy rule like anything else.
 
 > **Note:**
-> `workspace_search` answers by meaning and can be approximately right. For exact questions about Go symbols, prefer the [`gointel` tools](/docs/integrations/tools/local/) — they answer from a type checker, not from retrieval.
+> `workspace_search` answers by meaning and can be approximately right — it answers from retrieval, not from a parser, so treat a hit as a location to verify rather than a proof.
 
 ## Next
 

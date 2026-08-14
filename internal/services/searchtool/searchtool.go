@@ -149,8 +149,8 @@ func echoArg(s string) string {
 }
 
 // echoName renders a model-supplied IDENTIFIER (an argument NAME) unquoted, with
-// non-printable runes replaced — the unknown-argument voice local_fs and gointel
-// share reads as a bare comma-separated list.
+// non-printable runes replaced — the unknown-argument voice local_fs shares
+// reads as a bare comma-separated list.
 func echoName(s string) string {
 	var b strings.Builder
 	for i, r := range []rune(s) {

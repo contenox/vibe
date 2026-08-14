@@ -97,8 +97,6 @@ func TestUnit_BeamChain_CodingPromptStatesToolDiscipline(t *testing.T) {
 		"find_files",
 		"** globs",
 		"workspace_search",
-		"go_definition",
-		"go_references",
 		// no-approval shell verbs, issued as bare argv
 		"go build",
 		"go test",

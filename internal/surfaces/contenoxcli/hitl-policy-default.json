@@ -1,4 +1,5 @@
 {
+  "$schema": "https://contenox.com/schema/hitl-policy-v1.schema.json",
   "//compute": "Generous per-mission ceilings, not per-chat: a fire-and-detach mission has nobody watching it, so unbounded would mean a runaway spends real money unchecked. A mission that crosses a bound finishes at status \"stuck\" with the reason named.",
   "//compute-fields": "maxToolCalls is validated but not enforced by the shipped hosts; maxTokens is best-effort and inert if the unit's provider reports no usage. maxTurns is omitted; only 1 has an effect (it drops the runtime nudge turn), since the dispatcher never issues more than two. modelAllowlist/backendAllowlist are enforced only when set; onExhausted supports only \"finish_stuck\".",
   "compute": {
@@ -602,12 +603,7 @@
       "action": "approve"
     },
     {
-      "//": "Every gointel tool reads the workspace's type-checked Go view, so all are allowed; revisit before any mutating operation is added.",
-      "tools": "gointel",
-      "action": "allow"
-    },
-    {
-      "//": "workspace_search only reads the semantic index the operator already built, so it's allowed like gointel; revisit before any write is added.",
+      "//": "workspace_search only reads the semantic index the operator already built, so it is allowed; revisit before any write is added.",
       "tools": "workspace",
       "action": "allow"
     },
@@ -615,19 +611,6 @@
       "//": "Allowed because the sandbox has no ambient I/O by construction — no filesystem, network or module loader — so there is nothing here for approval to protect; any reach to a tool is evaluated by this same policy. Compute is bounded by a deadline, call-stack cap and output cap; only memory is a soft, rate-bounded limit until the deadline fires.",
       "tools": "goja",
       "tool": "goja_eval",
-      "action": "allow"
-    },
-    {
-      "//": "Allowed because jq_query only reads a file local_fs.read_file already reaches, CANNOT WRITE (gojq has no write path), cannot reach the network or this process (env/$ENV evaluates to an EMPTY object; no module or input loader is wired in), and is fully DEADLINE-BOUNDED including recursion.",
-      "tools": "jq",
-      "action": "allow"
-    },
-    {
-      "tools": "echo",
-      "action": "allow"
-    },
-    {
-      "tools": "print",
       "action": "allow"
     }
   ],

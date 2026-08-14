@@ -1,7 +1,7 @@
 ---
-import Base from '../../layouts/Base.astro';
-import Landing from '../../components/Landing.astro';
-import type { LandingStrings } from '../../components/Landing.astro';
+import Base from "../../layouts/Base.astro";
+import Landing from "../../components/Landing.astro";
+import type { LandingStrings } from "../../components/Landing.astro";
 
 const rulesCode = `{
   "default_action": "approve",
@@ -41,139 +41,227 @@ const routeCode = `{
 }`;
 
 const t: LandingStrings = {
-  h1a: 'Ein Agenten-Server.',
-  h1b: 'Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen.',
-  lede: 'Jedes KI-Produkt betreibt intern eine Agenten-Schleife nach Regeln, die der Anbieter geschrieben hat. Ausgeliefert bekommst du sie nie. contenox ist genau diese Schicht als Server, den du selbst betreibst: Agenten, Werkzeuge und Modelle in Dateien deklariert, jede Aktion vor der Ausführung gegen deine Regeln geprüft, auf deiner Maschine, mit jedem Modell.',
-  ctaRecipe: 'Rezept ausführen',
-  copyLabel: 'Kopieren',
-  installTabPosix: 'macOS / Linux',
-  installTabWindows: 'Windows',
-  ctaGithub: 'Auf GitHub ansehen',
-  installNote: 'Installiert <code class="font-mono">contenox</code>. Mit <code class="font-mono">contenox init</code> richtest du einen Workspace ein.',
-  trustChips: ['jedes Modell', 'eine Binärdatei', 'kein Konto', 'deine Regeln in einer Datei, die du lesen kannst'],
-
-  missionEyebrow: 'Die Mission, live',
-  missionH2: 'Dreißig Sekunden, von Anfang bis Ende.',
-  missionLede: 'Ein Kommando feuert einen deklarierten Agenten auf eine Aufgabe ab, begrenzt durch eine Policy, die du geschrieben hast. Was passiert, nachdem du weggegangen bist, ist der Punkt.',
-  missionLines: [
-    ['note', '# Mission unter strengem Envelope abfeuern'],
-    ['cmd', 'contenox mission fire agent-reviewer "review the payment-retry PR for regressions" --wait'],
-    ['out', 'Mission gestartet · Envelope hitl-policy-strict.json'],
-    ['out', 'Die Unit liest den Diff, führt die Tests aus — erlaubte Regeln laufen still durch'],
-    ['out', '⏸ Der Agent fragt: zwei Regressionen gefunden, Patch entworfen — auf den Branch anwenden?'],
-    ['out', 'keine Antwort: Run checkpointet, Ask gespeichert, Prozess freigegeben'],
-    ['note', '# Laptop zu. Tage vergehen. Dann, aus jedem Terminal, das deine Modelle erreicht:'],
-    ['cmd', 'contenox approvals list'],
-    ['out', 'Ask 8f3c · Patch anwenden? · Mission 01jm…'],
-    ['cmd', 'contenox approvals respond 8f3c --answer "ja, anwenden"'],
-    ['out', 'Checkpoint fortgesetzt — genau einmal. Mission gelandet.'],
-    ['cmd', 'contenox inbox list'],
-    ['out', 'Report · agent-reviewer: Befunde, Patch angewendet, Testergebnisse — warten auf dich'],
+  h1a: "Ein Agenten-Server.",
+  h1b: "Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen.",
+  lede: "Jedes KI-Produkt betreibt intern eine Agenten-Schleife nach Regeln, die der Anbieter geschrieben hat. Ausgeliefert bekommst du sie nie. contenox ist genau diese Schicht als Server, den du selbst betreibst: Du deklarierst Agenten, Werkzeuge und Modelle in Dateien, jede Aktion wird vor der Ausführung gegen deine Regeln geprüft, auf deiner Maschine, mit jedem Modell.",
+  ctaRecipe: "Rezept ausführen",
+  copyLabel: "Kopieren",
+  installTabPosix: "macOS / Linux",
+  installTabWindows: "Windows",
+  ctaGithub: "Auf GitHub ansehen",
+  installNote:
+    'Installiert <code class="font-mono">contenox</code>. Mit <code class="font-mono">contenox init</code> richtest du einen Workspace ein.',
+  trustChips: [
+    "jedes Modell",
+    "eine Binärdatei",
+    "kein Konto",
+    "deine Regeln in einer Datei, die du lesen kannst",
   ],
-  missionOutro: 'Kein Babysitten am Terminal, keine abgelaufenen Freigaben, keine stillen Änderungen. Der Envelope hat entschieden, was unbeaufsichtigt laufen darf, die Chain hat entschieden, wo ein Mensch das letzte Wort hat, und eine Antwort hat den Run genau einmal fortgesetzt.',
-  missionCta: ['Wie Missionen, Freigaben und die Inbox funktionieren', '/docs/reference/contenox-cli/#contenox-mission'],
 
-  panelEyebrow: 'Der Teil, den du nicht herunterladen kannst',
-  panelH2: 'Diese Maschine hast du längst benutzt. Nur die Kontrollen hattest du nie.',
-  panelP1: 'Wenn dir ein Assistent seine „Denkschritte“ zeigt, siehst du eine Orchestrierungs-Schleife: planen, Tool aufrufen, Ergebnis prüfen, Budget prüfen, neu entscheiden. Jedes große KI-Produkt läuft auf so einer Schicht — ereignisgetriebene Agenten-Choreografie unter Governance. Diese Schicht entscheidet, was das Modell darf, wann es pausiert und was es kostet. Der Anbieter konfiguriert sie. Du siehst sie nie — und ändern kannst du sie nicht.',
-  panelP2: 'Contenox ist diese Schicht, ausgeliefert als Produkt — mit dem Schaltpult in der Hand des Operators. Die Schleife ist eine Chain-Datei, die du schreibst. Die Grenzen sind ein Envelope, den du geschrieben hast. Der Zustand liegt auf deiner Platte. Der Unterschied ist nicht, die Maschine erfunden zu haben — sondern wer die Kontrollen hält.',
+  missionEyebrow: "Die Mission, live",
+  missionH2: "Dreißig Sekunden, von Anfang bis Ende.",
+  missionLede:
+    "Ein Kommando feuert einen deklarierten Agenten auf eine Aufgabe ab, begrenzt durch eine Policy, die du geschrieben hast. Was passiert, nachdem du weggegangen bist, ist der Punkt.",
+  missionLines: [
+    ["note", "# Mission unter strengem Envelope abfeuern"],
+    [
+      "cmd",
+      'contenox mission fire agent-reviewer "review the payment-retry PR for regressions" --wait',
+    ],
+    ["out", "Mission gestartet · Envelope hitl-policy-strict.json"],
+    [
+      "out",
+      "Die Unit liest den Diff, führt die Tests aus — erlaubte Regeln laufen still durch",
+    ],
+    [
+      "out",
+      "⏸ Der Agent fragt: zwei Regressionen gefunden, Patch entworfen — auf den Branch anwenden?",
+    ],
+    [
+      "out",
+      "keine Antwort: Run checkpointet, Ask gespeichert, Prozess freigegeben",
+    ],
+    [
+      "note",
+      "# Laptop zu. Tage vergehen. Dann, aus jedem Terminal, das deine Modelle erreicht:",
+    ],
+    ["cmd", "contenox approvals list"],
+    ["out", "Ask 8f3c · Patch anwenden? · Mission 01jm…"],
+    ["cmd", 'contenox approvals respond 8f3c --answer "ja, anwenden"'],
+    ["out", "Checkpoint fortgesetzt — genau einmal. Mission gelandet."],
+    ["cmd", "contenox inbox list"],
+    [
+      "out",
+      "Report · agent-reviewer: Befunde, Patch angewendet, Testergebnisse — warten auf dich",
+    ],
+  ],
+  missionOutro:
+    "Kein Babysitten am Terminal, keine abgelaufenen Freigaben, keine stillen Änderungen. Der Envelope hat entschieden, was unbeaufsichtigt laufen darf, die Chain hat entschieden, wo ein Mensch das letzte Wort hat, und eine Antwort hat den Run genau einmal fortgesetzt.",
+  missionCta: [
+    "Wie Missionen, Freigaben und die Inbox funktionieren",
+    "/docs/reference/contenox-cli/#contenox-mission",
+  ],
 
-  routeEyebrow: 'Chain → Workflow → Agenten-Schleife',
-  routeH2: 'Ein Satz rein. Die Schleife, die dieser Satz verdient.',
-  routeLede: 'Eine Chain beginnt nicht mit einem Agenten. Sie beginnt mit einem route-Task, der die Anfrage liest, sie labelt und an die Schleife übergibt, die für dieses Label gebaut ist — mit eigener Instruktion, eigenem Tool-Umfang, eigenem Budget, eigenem Weg aus dem Fehlerfall. Die interaktiven Chains, die mit contenox kommen, sortieren jede Nachricht in coding_change, general oder review_change, bevor sonst irgendetwas läuft.',
+  panelEyebrow: "Der Teil, den du nicht herunterladen kannst",
+  panelH2:
+    "Diese Maschine hast du längst benutzt. Nur die Kontrollen hattest du nie.",
+  panelP1:
+    "Wenn dir ein Assistent seine „Denkschritte“ zeigt, siehst du eine Orchestrierungs-Schleife: planen, Tool aufrufen, Ergebnis prüfen, Budget prüfen, neu entscheiden. Jedes große KI-Produkt läuft auf so einer Schicht — ereignisgetriebene Agenten-Choreografie unter Governance. Diese Schicht entscheidet, was das Modell darf, wann es pausiert und was es kostet. Der Anbieter konfiguriert sie. Du siehst sie nie — und ändern kannst du sie nicht.",
+  panelP2:
+    "Contenox ist diese Schicht, ausgeliefert als Produkt — mit dem Schaltpult in der Hand des Operators. Die Schleife ist eine Chain-Datei, die du schreibst. Die Grenzen sind ein Envelope, den du geschrieben hast. Der Zustand liegt auf deiner Platte. Der Unterschied ist nicht, die Maschine erfunden zu haben — sondern wer die Kontrollen hält.",
+
+  routeEyebrow: "Chain → Workflow → Agenten-Schleife",
+  routeH2: "Ein Satz rein. Die Schleife, die dieser Satz verdient.",
+  routeLede:
+    "Eine Chain beginnt nicht mit einem Agenten. Sie beginnt mit einem route-Task, der die Anfrage liest, sie labelt und an die Schleife übergibt, die für dieses Label gebaut ist — mit eigener Instruktion, eigenem Tool-Umfang, eigenem Budget, eigenem Weg aus dem Fehlerfall. Die interaktiven Chains, die mit contenox kommen, sortieren jede Nachricht in coding_change, general oder review_change, bevor sonst irgendetwas läuft.",
   routeCode,
-  routeOutro: 'Gekürzt aus der mitgelieferten chain-agent-acp.json. Der Klassifikator hat keine Tools, kann also nicht auf einer Anfrage handeln, die er noch nicht verstanden hat — und er darf auf einem günstigeren Modell laufen als die Schleifen, die er speist. Ein unbekanntes Label fällt in den default-Zweig: auf die schwächste Schleife, nie auf die stärkste. Welcher Zweig lief, steht im Run-Log — eine enttäuschende Antwort ist damit eine Frage, die eine Antwort hat.',
+  routeOutro:
+    "Gekürzt aus der mitgelieferten chain-agent-acp.json. Der Klassifikator hat keine Tools, kann also nicht auf einer Anfrage handeln, die er noch nicht verstanden hat — und er darf auf einem günstigeren Modell laufen als die Schleifen, die er speist. Ein unbekanntes Label fällt in den default-Zweig: auf die schwächste Schleife, nie auf die stärkste. Welcher Zweig lief, steht im Run-Log — eine enttäuschende Antwort ist damit eine Frage, die eine Antwort hat.",
   routeDomains: [
-    'Ein Spezialist ist Konfiguration, keine Formulierung: Die Review-Schleife entzieht per hide_tools jedes schreibende Tool — durchgesetzt dort, wo Aufrufe ausgeführt werden, nicht dadurch, dass man sie dem Modell nur nicht anbietet.',
-    'Ein Support-Assistent leitet Abrechnungsfragen an eine lesende Schleife mit der Billing-API und Kontoänderungen an eine, die schreiben darf, aber für einen Menschen pausiert.',
-    'Ein Daten-Workflow leitet „fasse das zusammen“ und „extrahiere diese Felder“ an Schleifen mit unterschiedlichen Ausgabe-Kontrakten — der Aufrufer bekommt parsebare Ausgabe, ohne jedes Mal darum zu bitten.',
-    'Eine regulierte Installation leitet alles, was regulierte Daten berührt, an eine Schleife unter strengerer Policy — unabhängig davon, wie die Anfrage formuliert war.',
+    "Ein Spezialist ist Konfiguration, keine Formulierung: Die Review-Schleife entzieht per hide_tools jedes schreibende Tool — durchgesetzt dort, wo Aufrufe ausgeführt werden, nicht dadurch, dass man sie dem Modell nur nicht anbietet.",
+    "Ein Support-Assistent leitet Abrechnungsfragen an eine lesende Schleife mit der Billing-API und Kontoänderungen an eine, die schreiben darf, aber für einen Menschen pausiert.",
+    "Ein Daten-Workflow leitet „fasse das zusammen“ und „extrahiere diese Felder“ an Schleifen mit unterschiedlichen Ausgabe-Kontrakten — der Aufrufer bekommt parsebare Ausgabe, ohne jedes Mal darum zu bitten.",
+    "Eine regulierte Installation leitet alles, was regulierte Daten berührt, an eine Schleife unter strengerer Policy — unabhängig davon, wie die Anfrage formuliert war.",
   ],
   routeCtas: [
-    ['Wie Request-Routing funktioniert', '/docs/guide/request-routing/'],
-    ['Die Geschichte: ein Review-Zweig, ohne schreibende Tools', '/docs/use-cases/review-specialist/'],
+    ["Wie Request-Routing funktioniert", "/docs/guide/request-routing/"],
+    [
+      "Die Geschichte: ein Review-Zweig, ohne schreibende Tools",
+      "/docs/use-cases/review-specialist/",
+    ],
   ],
 
-  rulesEyebrow: 'Du schreibst die Regeln',
-  rulesH2: 'Wie viel Agency? Das entscheidest du — schriftlich.',
-  rulesLede: 'Jeder Run ist durch einen Envelope begrenzt: eine JSON-Policy, die benennt, was still durchläuft, was für einen Menschen pausiert und was verweigert wird — plus harte Obergrenzen für Tool-Aufrufe und Tokens und eine Festlegung, welche Modelle und Backends die Unit nutzen darf. Kein versteckter Prompt entscheidet für dich. Die Datei liegt in deinem Repo und wird reviewt wie jede andere Änderung.',
+  rulesEyebrow: "Du schreibst die Regeln",
+  rulesH2: "Wie viel Agency? Das entscheidest du — schriftlich.",
+  rulesLede:
+    "Jeder Run ist durch einen Envelope begrenzt: eine JSON-Policy, die benennt, was still durchläuft, was für einen Menschen pausiert und was verweigert wird — plus harte Obergrenzen für Tool-Aufrufe und Tokens und eine Festlegung, welche Modelle und Backends die Unit nutzen darf. Kein versteckter Prompt entscheidet für dich. Die Datei liegt in deinem Repo und wird reviewt wie jede andere Änderung.",
   rulesCode,
-  rulesOutro: 'Gekürzt aus dem mitgelieferten Default-Preset. Was keine Regel trifft, schlägt geschlossen fehl — es fragt einen Menschen. Sechs Presets kommen mit contenox init, und contenox vet prüft deine Policy, bevor irgendetwas unter ihr läuft.',
-  rulesCta: ['Das vollständige Policy-Format', '/docs/guide/hitl/'],
-  hitlDemoAlt: 'Terminal-Demo: Ein destruktives rm-Kommando stoppt vor der Ausführung an einem Freigabe-Gate',
+  rulesOutro:
+    "Gekürzt aus dem mitgelieferten Default-Preset. Was keine Regel trifft, schlägt geschlossen fehl — es fragt einen Menschen. Sechs Presets kommen mit contenox init, und contenox vet prüft deine Policy, bevor irgendetwas unter ihr läuft.",
+  rulesCta: ["Das vollständige Policy-Format", "/docs/guide/hitl/"],
+  hitlDemoAlt:
+    "Terminal-Demo: Ein destruktives rm-Kommando stoppt vor der Ausführung an einem Freigabe-Gate",
 
-  craftEyebrow: 'Agentic Engineering',
-  craftH2: 'Vibecoding findet die Schleife. Loop Engineering behält sie.',
-  craftP1: 'Vibecoding ist echte Entdeckung — mit einem Agenten improvisieren, bis die Schleife funktioniert. Wir haben so Features gebaut und ehrlich aufgeschrieben, was es gekostet hat. Aber eine Schleife, die morgen laufen muss, in der CI, unbeaufsichtigt, ist kein Vibe mehr. Sie ist ein Artefakt.',
-  craftP2: 'Das ist Agentic Engineering: Die Schleife wird geschrieben, reviewt, versioniert und begrenzt — und welche Schleife läuft, wird ebenfalls geschrieben. Jede Stufe in einer contenox-Chain entstand aus einem benannten Fehlermodus, unter einer Disziplin: Verwirrung darf nie unbeaufsichtigt in Mutation kippen.',
+  craftEyebrow: "Agentic Engineering",
+  craftH2: "Vibecoding findet die Schleife. Loop Engineering behält sie.",
+  craftP1:
+    "Vibecoding ist echte Entdeckung — mit einem Agenten improvisieren, bis die Schleife funktioniert. Wir haben so Features gebaut und ehrlich aufgeschrieben, was es gekostet hat. Aber eine Schleife, die morgen laufen muss, in der CI, unbeaufsichtigt, ist kein Vibe mehr. Sie ist ein Artefakt.",
+  craftP2:
+    "Das ist Agentic Engineering: Die Schleife wird geschrieben, reviewt, versioniert und begrenzt — und welche Schleife läuft, wird ebenfalls geschrieben. Jede Stufe in einer contenox-Chain entstand aus einem benannten Fehlermodus, unter einer Disziplin: Verwirrung darf nie unbeaufsichtigt in Mutation kippen.",
 
-  everyEyebrow: 'Ein Harness, überall',
-  everyH2: 'Einmal schreiben. Laufen lassen, wo die Arbeit ist.',
-  everyLede: 'Derselbe agentische Workflow, derselbe Envelope, derselbe Sitzungszustand hinter jeder Oberfläche — was du im Editor freigegeben hast, ist das, was aus dem Cron läuft.',
+  everyEyebrow: "Ein Harness, überall",
+  everyH2: "Einmal schreiben. Laufen lassen, wo die Arbeit ist.",
+  everyLede:
+    "Derselbe agentische Workflow, derselbe Envelope, derselbe Sitzungszustand hinter jeder Oberfläche — was du im Editor freigegeben hast, ist das, was aus dem Cron läuft.",
   surfaces: [
-    ['Dein Terminal', 'contenox new öffnet eine frische Session für Chat, Plan und Shell; contenox resume öffnet die letzte wieder, mit ihrem Transkript. Zustandsbehaftete Tools behalten ihren Zustand über die Turns, und eine Freigabe ist eine Ein-Tasten-Karte im Transkript.'],
-    ['Dein Editor', 'Der komplette Agent in Zed, JetBrains, AionUi oder OpenClaw — Freigaben laufen über die Oberfläche des Editors, und der Workflow bleibt in der Chain-Datei, nicht im Plugin.'],
-    ['Deine Skripte und Pipelines', 'contenox run führt eine Chain nicht-interaktiv aus — aus Cron, CI oder einem Shell-Skript. Tool-lastige Jobs sind das Heimspiel: Release-Evidenzpakete, Request-Processing-Chains, schmale API-Wrapper mit Freigabe für jeden schreibenden Aufruf.'],
-    ['Nicht vertraute Treiber', 'Eine headless acpx-Session bekommt das gehärtete Profil: Shell, Writes und Netzwerk werden verweigert — statt zur Freigabe angeboten.'],
+    [
+      "Dein Terminal",
+      'contenox "deine Aufgabe" ist ein Chat mit Sitzungsgedächtnis: Der Verlauf bleibt über Aufrufe hinweg erhalten, zustandsbehaftete Tools behalten ihren Zustand über die Turns, und ein regulierter Aufruf hält vor der Ausführung für deine Freigabe an.',
+    ],
+    [
+      "Dein Editor",
+      "Der komplette Agent in Zed, JetBrains, AionUi oder OpenClaw — Freigaben laufen über die Oberfläche des Editors, und der Workflow bleibt in der Chain-Datei, nicht im Plugin.",
+    ],
+    [
+      "Deine Skripte und Pipelines",
+      "contenox run führt eine Chain nicht-interaktiv aus — aus Cron, CI oder einem Shell-Skript. Tool-lastige Jobs sind das Heimspiel: Release-Evidenzpakete, Request-Processing-Chains, schmale API-Wrapper mit Freigabe für jeden schreibenden Aufruf.",
+    ],
+    [
+      "Nicht vertraute Treiber",
+      "Eine headless acpx-Session bekommt das gehärtete Profil: Shell, Writes und Netzwerk werden verweigert — statt zur Freigabe angeboten.",
+    ],
   ],
   protocols: [
-    ['Editoren sprechen mit dem kompletten Agenten über stdio — ohne Plugin-Lock-in.', 'Agent Client Protocol', 'https://agentclientprotocol.com'],
-    ['Jeder MCP-Server — stdio, SSE oder HTTP — registriert sich einmal; seine Tools werden policy-begrenzte Chain-Tools.', 'Model Context Protocol', 'https://modelcontextprotocol.io'],
-    ['Jeder HTTP-Dienst mit Spec wird ein aufrufbares, allowlistbares Tool.', 'OpenAPI-Tools-Anleitung', '/docs/integrations/tools/remote/'],
+    [
+      "Editoren sprechen mit dem kompletten Agenten über stdio — ohne Plugin-Lock-in.",
+      "Agent Client Protocol",
+      "https://agentclientprotocol.com",
+    ],
+    [
+      "Jeder MCP-Server — stdio, SSE oder HTTP — registriert sich einmal; seine Tools werden policy-begrenzte Chain-Tools.",
+      "Model Context Protocol",
+      "https://modelcontextprotocol.io",
+    ],
+    [
+      "Jeder HTTP-Dienst mit Spec wird ein aufrufbares, allowlistbares Tool.",
+      "OpenAPI-Tools-Anleitung",
+      "/docs/integrations/tools/remote/",
+    ],
   ],
   guides: [
-    ['Zed-Anleitung lesen', '/docs/integrations/editors/zed/'],
-    ['JetBrains-Anleitung lesen', '/docs/integrations/editors/jetbrains/'],
-    ['AionUi-Anleitung lesen', '/docs/integrations/editors/aionui/'],
-    ['OpenClaw-Anleitung lesen', '/docs/integrations/editors/openclaw/'],
+    ["Zed-Anleitung lesen", "/docs/integrations/editors/zed/"],
+    ["JetBrains-Anleitung lesen", "/docs/integrations/editors/jetbrains/"],
+    ["AionUi-Anleitung lesen", "/docs/integrations/editors/aionui/"],
+    ["OpenClaw-Anleitung lesen", "/docs/integrations/editors/openclaw/"],
   ],
-  tuiShotAlt: 'contenox new im Terminal: eine Aufgabe in natürlicher Sprache, contenox liest das Repo und antwortet in derselben Session',
+  tuiShotAlt:
+    "contenox im Terminal: eine Aufgabe in natürlicher Sprache, contenox liest das Repo und antwortet in derselben Session",
 
-  seatEyebrow: 'Derselbe Platz, zwei Besetzungen',
-  seatH2: 'Copilot hilft dir beim Tippen. Contenox fährt die Schicht, während du weg bist.',
-  seatP1: 'Die KI, die bei der Arbeit für dich arbeitet, ist ein Platz — und es gibt zwei Arten, ihn zu besetzen. Der Agent des Anbieters läuft auf deiner Arbeit: Verhalten wird in Redmond entschieden, Regeln, die du nicht lesen kannst, gesteuert vom Tenant-Admin, deine Nutzung fließt in fremde Telemetrie.',
-  seatP2: 'Contenox ist der andere Weg: dein Agent unter deinem Envelope — Regeln, die du geschrieben hast, Zustand auf deiner Platte, Modelle, die du gewählt hast. Keine zwei Kategorien. Eine Kategorie, von zwei Enden her besetzt.',
+  seatEyebrow: "Derselbe Platz, zwei Besetzungen",
+  seatH2:
+    "Copilot hilft dir beim Tippen. Contenox fährt die Schicht, während du weg bist.",
+  seatP1:
+    "Die KI, die bei der Arbeit für dich arbeitet, ist ein Platz — und es gibt zwei Arten, ihn zu besetzen. Der Agent des Anbieters läuft auf deiner Arbeit: Verhalten wird in Redmond entschieden, Regeln, die du nicht lesen kannst, gesteuert vom Tenant-Admin, deine Nutzung fließt in fremde Telemetrie.",
+  seatP2:
+    "Contenox ist der andere Weg: dein Agent unter deinem Envelope — Regeln, die du geschrieben hast, Zustand auf deiner Platte, Modelle, die du gewählt hast. Keine zwei Kategorien. Eine Kategorie, von zwei Enden her besetzt.",
 
-  yoursEyebrow: 'Standardmäßig deins',
-  yoursH2: 'Dein Rechner, dein Zustand, deine Modelle.',
+  yoursEyebrow: "Standardmäßig deins",
+  yoursH2: "Dein Rechner, dein Zustand, deine Modelle.",
   yoursPoints: [
-    'Sessions, Konfiguration, Run-Logs und erfasster Ausführungszustand liegen auf deinem Rechner. Kein Konto, kein contenox-Dienst dazwischen — außer du pairst mit dem optionalen Relay unten. Telemetrie ist opt-in und standardmäßig aus.',
-    'Inferenz ist Konfiguration: lokales Ollama oder vLLM, wenn nichts dein Netzwerk verlassen darf — oder OpenAI, Anthropic, Gemini, Bedrock und Vertex mit deinen eigenen Schlüsseln, gepinnt auf eine Region deiner Wahl. Ein späterer Wechsel ist eine Konfigurationsänderung, kein Umbau.',
-    'Secrets werden zur Anfragezeit aus deiner Umgebung aufgelöst und landen nie in einer Config auf der Platte; Agent-erreichbare Shells bekommen eine bereinigte Umgebung mit genau dem, was die Aufgabe braucht.',
+    "Sessions, Konfiguration, Run-Logs und erfasster Ausführungszustand liegen auf deinem Rechner. Kein Konto, kein contenox-Dienst dazwischen — außer du pairst mit dem optionalen Relay unten. Telemetrie ist opt-in und standardmäßig aus.",
+    "Inferenz ist Konfiguration: lokales Ollama oder vLLM, wenn nichts dein Netzwerk verlassen darf — oder OpenAI, Anthropic, Gemini, Bedrock und Vertex mit deinen eigenen Schlüsseln, gepinnt auf eine Region deiner Wahl. Ein späterer Wechsel ist eine Konfigurationsänderung, kein Umbau.",
+    "Secrets werden zur Anfragezeit aus deiner Umgebung aufgelöst und landen nie in einer Config auf der Platte; Agent-erreichbare Shells bekommen eine bereinigte Umgebung mit genau dem, was die Aufgabe braucht.",
   ],
-  yoursCta: ['AI-Souveränität & KI-Verordnung', '/de/ki-souveraenitaet/'],
+  yoursCta: ["AI-Souveränität & KI-Verordnung", "/de/ki-souveraenitaet/"],
 
-  relayEyebrow: 'Optional: das gehostete Relay',
-  relayH2: 'Deine Session, auf deinem Handy.',
-  relayP: 'Alles oben läuft ohne Konto. Wenn eine laufende Session von woanders erreichbar sein soll, pairst du den Rechner mit dem gehosteten Relay: ein getippter Schlüssel aus der contenox-App, kein Browser auf der Maschine. Der Rechner baut die Verbindung selbst nach außen auf und sendet genau zwei Dinge — den Schlüssel und seinen Hostnamen. Danach liest du das Transkript und beantwortest Freigaben vom Handy. Kostenlos für dich und drei Teamkollegen, je eine Maschine — und eine Installation, die nie pairt, kontaktiert kein Relay.',
-  relayCta: ['Wie Pairing funktioniert — und wie man es zurücknimmt', '/docs/guide/pairing/'],
-  relayNote: ['Wir können contenox-Agenten auch für dich provisionieren und betreiben — managed, zu deinen Bedingungen — und suchen dafür frühe Design-Partner:', 'sprich mit uns', 'mailto:hello@contenox.com'],
+  relayEyebrow: "Optional: das gehostete Relay",
+  relayH2: "Deine Session, auf deinem Handy.",
+  relayP:
+    "Alles oben läuft ohne Konto. Wenn eine laufende Session von woanders erreichbar sein soll, pairst du den Rechner mit dem gehosteten Relay: ein getippter Schlüssel aus der contenox-App, kein Browser auf der Maschine. Der Rechner baut die Verbindung selbst nach außen auf und sendet genau zwei Dinge — den Schlüssel und seinen Hostnamen. Danach liest du das Transkript und beantwortest Freigaben vom Handy. Kostenlos für dich und drei Teamkollegen, je eine Maschine — und eine Installation, die nie pairt, kontaktiert kein Relay.",
+  relayCta: [
+    "Wie Pairing funktioniert — und wie man es zurücknimmt",
+    "/docs/guide/pairing/",
+  ],
+  relayNote: [
+    "Wir können contenox-Agenten auch für dich provisionieren und betreiben — managed, zu deinen Bedingungen — und suchen dafür frühe Design-Partner:",
+    "sprich mit uns",
+    "mailto:hello@contenox.com",
+  ],
 
-  capsEyebrow: 'Außerdem an Bord',
+  capsEyebrow: "Außerdem an Bord",
   caps: [
-    ['Es liest Go wie der Compiler', 'Definition, References, Implementations, Symbols, Diagnostics — beantwortet in-process vom echten Type-Checker, warm in Mikrosekunden. Kein Language-Server zu installieren oder zu pflegen.'],
-    ['Frag das Repo, bekomm zitierte Zeilen', 'contenox index baut einen hybriden Volltext-plus-Embedding-Index lokal; contenox search antwortet mit file:line-Zitaten und markiert einen Treffer als veraltet, sobald sich seine Datei ändert.'],
+    [
+      "Es liest Go wie der Compiler",
+      "Definition, References, Implementations, Symbols, Diagnostics — beantwortet in-process vom echten Type-Checker, warm in Mikrosekunden. Kein Language-Server zu installieren oder zu pflegen.",
+    ],
+    [
+      "Frag das Repo, bekomm zitierte Zeilen",
+      "contenox index baut einen hybriden Volltext-plus-Embedding-Index lokal; contenox search antwortet mit file:line-Zitaten und markiert einen Treffer als veraltet, sobald sich seine Datei ändert.",
+    ],
   ],
 
-  bottomEyebrow: 'Loslegen',
-  bottomH2: 'Feuere deine erste Mission ab.',
-  bottomCta: 'Quickstart lesen',
-  bottomContact: 'Fragen? <a href="mailto:hello@contenox.com" class="underline hover:text-black dark:hover:text-white">hello@contenox.com</a> · Issues und PRs auf <a href="https://github.com/contenox/contenox" class="underline hover:text-black dark:hover:text-white">GitHub</a>',
-  builtOnEyebrow: 'Baut auf',
-  builtOnNote: 'Lokale Modelle laufen über Ollama oder vLLM und deren lokale APIs; gehostete Provider über ihre öffentlichen APIs. Keine mitgelieferte Inferenz-Runtime, keine GPU-Treiber im Paket.',
+  bottomEyebrow: "Loslegen",
+  bottomH2: "Feuere deine erste Mission ab.",
+  bottomCta: "Quickstart lesen",
+  bottomContact:
+    'Fragen? <a href="mailto:hello@contenox.com" class="underline hover:text-black dark:hover:text-white">hello@contenox.com</a> · Issues und PRs auf <a href="https://github.com/contenox/contenox" class="underline hover:text-black dark:hover:text-white">GitHub</a>',
+  builtOnEyebrow: "Baut auf",
+  builtOnNote:
+    "Lokale Modelle laufen über Ollama oder vLLM und deren lokale APIs; gehostete Provider über ihre öffentlichen APIs. Keine mitgelieferte Inferenz-Runtime, keine GPU-Treiber im Paket.",
   builtOn: [
-    ['Go', 'die Implementierung', 'https://go.dev'],
-    ['SQLite', 'lokaler Zustand', 'https://sqlite.org'],
-    ['Ollama', 'lokale Modelle', 'https://ollama.com'],
-    ['vLLM', 'lokale Modelle', 'https://github.com/vllm-project/vllm'],
+    ["Go", "die Implementierung", "https://go.dev"],
+    ["SQLite", "lokaler Zustand", "https://sqlite.org"],
+    ["Ollama", "lokale Modelle", "https://ollama.com"],
+    ["vLLM", "lokale Modelle", "https://github.com/vllm-project/vllm"],
   ],
 };
 ---
+
 <Base
   title="Contenox — Ein Agenten-Server. Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen."
-  description="Ein Agenten-Server. Agenten, Werkzeuge und Modelle in Dateien deklariert; jede Aktion wird vor der Ausführung gegen deine Regeln geprüft. Quelloffen, auf deiner Maschine, mit jedem Modell."
+  description="Ein Agenten-Server. KI Agenten die einfach laufen ohne custom Code;Agenten, Werkzeuge und Modelle in Dateien deklariert; jede Aktion wird vor der Ausführung gegen deine Regeln geprüft. Quelloffen, auf deiner Maschine, mit jedem Modell."
   lang="de"
-  alternates={{ en: '/', de: '/de/' }}
+  alternates={{ en: "/", de: "/de/" }}
 >
   <Landing t={t} />
 </Base>

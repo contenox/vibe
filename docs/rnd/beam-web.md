@@ -27,7 +27,3 @@ The companion backend manager configured providers, declared models with their c
 - **Diff-first, inline approval is the right shape for human-in-the-loop.** The approve/reject card pattern proved out here now anchors HITL everywhere else in the runtime.
 - **Cookie-based BFF auth plus handshake-gated WebSockets is a workable remote-access model** for a local-first tool that still needs to leave loopback safely.
 - **Visual chain editing over a graph layout is legible.** The dagre-based workflow visualizer showed that a chain's branches and retries read better as a graph than as raw JSON.
-
-## Where this lives now
-
-These capabilities — the supervise-review-intervene loop, HITL policies, no browser required — now live in contenox's terminal UI (`contenox new`).

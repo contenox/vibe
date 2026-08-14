@@ -22,9 +22,9 @@ Concretely, the overlap:
 | Provider switching | `contenox backend add` for Ollama, vLLM, OpenAI, Anthropic, Gemini, Vertex AI, Bedrock; routing is config, not code |
 | Editor sessions | `contenox acp` over stdio — [Zed](/docs/integrations/editors/zed/), [JetBrains](/docs/integrations/editors/jetbrains/), [AionUi](/docs/integrations/editors/aionui/), [OpenClaw](/docs/integrations/editors/openclaw/) |
 | Local session state | SQLite at `~/.contenox/local.db`; no account — the [relay](/docs/guide/pairing/) is opt-in and never contacted unpaired |
-| Terminal UI | `contenox new` (fresh session) and `contenox resume` (the last one, transcript replayed) — chat, plan, and shell in one persistent full-screen session |
+| Terminal chat | `contenox chat`, or a bare `contenox "..."` — session-backed, history carried across invocations |
 
-`contenox new` is a real coding session, not a demo shell: it routes coding turns into their own loop with its own budget, `local_shell` is on by default there, and the filesystem tools are editor-grade — `read_file`, `read_file_range`, `write_file`, `edit_file`, `sed`, `grep`, `list_dir`, `stat_file`, `delete_file`, with a read-before-write gate that refuses to mutate a file the model has not read. The `/mission` slash command works the same way it does in an editor.
+An ACP editor session is a real coding session, not a demo shell: it routes coding turns into their own loop with its own budget, `local_shell` is available under policy, and the filesystem tools are editor-grade — `read_file`, `read_file_range`, `write_file`, `edit_file`, `sed`, `grep`, `list_dir`, `stat_file`, `delete_file`, with a read-before-write gate that refuses to mutate a file the model has not read. The `/mission` slash command works there too.
 
 And the honest half of that: for **pure coding ergonomics** — repository mapping, diff application, edit formats, the accumulated craft of getting a model to land a patch on the first try — the dedicated coding agents are more refined. That is what they are for, and they have spent their whole existence on it. Table stakes are table stakes; they are not the argument.
 
@@ -119,7 +119,7 @@ Supporting differences — less load-bearing than the three above, still rare:
 
 If what you want is the best pure coding ergonomics available today — repository mapping, diff application, edit formats, the coding-specific interaction craft — use a dedicated coding agent. Aider, OpenCode, Kilo Code and Claude Code are further along there, contenox does not try to beat them at it, and nothing stops you from running one of them and contenox on the same repository. They are a layer, not an opponent.
 
-Reach for contenox when the work is **governed, unattended, or repeatable** and the coding agent is one workload among several. When a run has to stop for a named human at a named point and survive the wait. When the person who owns the permissions is not the person who wrote the workflow. When the same thing must run identically in CI, in a cron job, and on your laptop. When you need to say afterwards, from a file rather than from memory, exactly what the agent was allowed to do. A coding session is one shape that work takes here — `contenox new` is a good one — but it is a workload on the harness, not the reason the harness exists.
+Reach for contenox when the work is **governed, unattended, or repeatable** and the coding agent is one workload among several. When a run has to stop for a named human at a named point and survive the wait. When the person who owns the permissions is not the person who wrote the workflow. When the same thing must run identically in CI, in a cron job, and on your laptop. When you need to say afterwards, from a file rather than from memory, exactly what the agent was allowed to do. A coding session is one shape that work takes here, but it is a workload on the harness, not the reason the harness exists.
 
 ## Next
 

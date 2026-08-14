@@ -14,7 +14,6 @@ import (
 
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/models/ollamatokenizer"
-	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
@@ -124,14 +123,12 @@ func TestUnit_IndexAndSearchCommandsAreReserved(t *testing.T) {
 }
 
 func TestUnit_LocalToolset_RegistersWorkspaceSearchAlwaysOn(t *testing.T) {
-	goIndex := gointel.NewIndex(gointel.Config{AllowedDir: t.TempDir()})
-	t.Cleanup(goIndex.Shutdown)
 	gt, err := gojatool.New(gojatool.Config{})
 	require.NoError(t, err)
 	t.Cleanup(gt.Shutdown)
 
-	// Registered with the shell OFF, like gointel and git: it is a read.
-	tools := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, libtracker.NoopTracker{}, goIndex, gt, missionservice.New(nil), nil)
+	// Registered with the shell OFF, like git: it is a read.
+	tools := localToolset(chatOpts{EffectiveEnableLocalExec: false}, nil, libtracker.NoopTracker{}, gt, missionservice.New(nil), nil)
 	repo, ok := tools[searchtool.ToolsProviderName]
 	require.True(t, ok, "workspace_search is a read surface and must always be registered")
 

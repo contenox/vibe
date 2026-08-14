@@ -10,7 +10,7 @@ export const GET: APIRoute = async () => {
   const out: string[] = [
     '# contenox — full documentation',
     '',
-    '> An agent server. LangChain, LangGraph and Semantic Kernel are libraries you compile into an application; contenox is a process you run and connect to, with agents, tools and models declared in files rather than in code, changed without a rebuild. Every action is checked against your policy before it runs. Open source under Apache-2.0, one binary, no account, on your own machine, on any AI model you pick.',
+    '> An agent server. No need to develop, compile and package an AI agent you configure one and it runs; contenox is a process you run and connect to, where you declare the agents, tools and models in files rather than in code, changed without a rebuild. Every action is checked against your policy before it runs. Open source under Apache-2.0, one binary, no account, on your own machine, on any AI model you pick.',
     '',
     `Generated from ${SITE}. Every published documentation page follows, in path order, each preceded by its canonical URL. The curated index is at ${SITE}/llms.txt; the machine-readable formats are at ${SITE}/schema/.`,
     '',

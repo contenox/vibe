@@ -1,4 +1,5 @@
 {
+  "$schema": "https://contenox.com/schema/hitl-policy-v1.schema.json",
   "//compute": "The widest shipped ceilings, not their absence: default_action \"allow\" gates almost nothing, so an unbounded mission here would have nothing stopping a runaway spend.",
   "//compute-fields": "maxTokens does the real work here since default_action \"allow\" gates almost nothing; it's best-effort and inert without provider usage reporting. maxTurns is omitted; only 1 has an effect (it drops the runtime nudge turn), since the dispatcher never issues more than two; onExhausted supports only \"finish_stuck\".",
   "compute": {

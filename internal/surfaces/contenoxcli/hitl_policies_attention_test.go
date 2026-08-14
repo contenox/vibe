@@ -28,7 +28,6 @@ func TestUnit_SeededPolicies_StateWhoMayAnswer(t *testing.T) {
 		why       string
 	}{
 		{"hitl-policy-acp.json", true, 3, "an editor session's agent holds the conversation the mission came from"},
-		{"hitl-policy-beam.json", true, 3, "beam's default envelope mirrors acp's: an attended session's agent holds the conversation the mission came from"},
 		{"hitl-policy-default.json", true, 3, "the mission path's default envelope: routine questions (e.g. the auto-attention oracle's), with whatever the unit then does still gated"},
 		{"hitl-policy-dev.json", true, 5, "the permissive local-development posture"},
 		{"hitl-policy-strict.json", false, 0, "a policy whose character is 'a human decides' must not delegate deciding"},

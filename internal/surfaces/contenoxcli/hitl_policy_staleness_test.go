@@ -30,7 +30,7 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 		"default_action": "approve",
 		"rules": [
 			{"tools": "local_fs", "tool": "read_file", "action": "allow"},
-			{"tools": "gointel", "tool": "go_symbol", "action": "allow"},
+			{"tools": "git", "tool": "git_status", "action": "allow"},
 			{"tools": "workspace", "tool": "workspace_search", "action": "allow"}
 		]
 	}`
@@ -38,7 +38,7 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 	t.Run("a toolset the file never mentions is detected", func(t *testing.T) {
 		t.Parallel()
 		onDisk := `{"default_action":"approve","rules":[{"tools":"local_fs","tool":"read_file","action":"allow"}]}`
-		require.Equal(t, []string{"gointel", "workspace"}, missingPolicyToolsets([]byte(shipped), []byte(onDisk), nil))
+		require.Equal(t, []string{"git", "workspace"}, missingPolicyToolsets([]byte(shipped), []byte(onDisk), nil))
 	})
 
 	t.Run("reordered or reworded rules are not staleness", func(t *testing.T) {
@@ -49,7 +49,7 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 			"default_action": "deny",
 			"rules": [
 				{"tools": "workspace", "tool": "*", "action": "approve"},
-				{"tools": "gointel", "tool": "go_symbol", "action": "allow", "when": [{"key":"path","op":"prefix","value":"internal/"}]},
+				{"tools": "git", "tool": "git_status", "action": "allow", "when": [{"key":"path","op":"prefix","value":"internal/"}]},
 				{"tools": "local_fs", "tool": "read_file", "action": "allow"},
 				{"tools": "some_local_mcp", "tool": "*", "action": "deny"}
 			]
@@ -63,7 +63,7 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 			"default_action": "approve",
 			"rules": [
 				{"tools": "local_fs", "tool": "read_file", "action": "allow"},
-				{"tools": "gointel", "action": "deny"},
+				{"tools": "git", "action": "deny"},
 				{"tools": "workspace", "action": "deny"}
 			]
 		}`
@@ -87,7 +87,7 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 	t.Run("a wildcard toolset pinned to one tool covers only that tool", func(t *testing.T) {
 		t.Parallel()
 		onDisk := `{"default_action":"approve","rules":[{"tools":"*","tool":"read_file","action":"allow"}]}`
-		require.Equal(t, []string{"gointel", "local_fs", "workspace"},
+		require.Equal(t, []string{"git", "local_fs", "workspace"},
 			missingPolicyToolsets([]byte(shipped), []byte(onDisk), nil))
 	})
 
@@ -109,7 +109,7 @@ func TestUnit_MissingPolicyToolsets(t *testing.T) {
 	})
 }
 
-// TestUnit_StalePolicyPresets_PreStateFileInstall asserts an install predating gointel/goja/jq/workspace, with no provenance record, is detected as stale and left untouched.
+// TestUnit_StalePolicyPresets_PreStateFileInstall asserts an install predating goja/workspace, with no provenance record, is detected as stale and left untouched.
 func TestUnit_StalePolicyPresets_PreStateFileInstall(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -132,7 +132,7 @@ func TestUnit_StalePolicyPresets_PreStateFileInstall(t *testing.T) {
 	require.Equal(t, "hitl-policy-default.json", detected[0].Name)
 	require.Equal(t, filepath.Join(dir, "hitl-policy-default.json"), detected[0].Path)
 	require.Equal(t, "approve", detected[0].DefaultAction)
-	require.Subset(t, detected[0].Toolsets, []string{"gointel", "goja", "jq", "workspace"},
+	require.Subset(t, detected[0].Toolsets, []string{"goja", "local_shell", "webtools", "workspace"},
 		"the toolsets that shipped today must all be named")
 	require.NotContains(t, detected[0].Toolsets, "local_fs")
 	require.NotContains(t, detected[0].Toolsets, "git")

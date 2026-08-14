@@ -2,8 +2,10 @@
 
 **An agent server.**
 
-Agents, tools and models are declared in files, not compiled into your
-application. Every action is checked against your policy before it runs.
+No need to develop, compile and package an AI agent you configure one and it runs. 
+
+You declare agents, tools and models in files, instead of compiling them into
+your application. Every action is checked against your policy before it runs.
 Changing what an agent may do is an edit, not a release.
 
 Docs: **[contenox.com](https://contenox.com)**
@@ -36,12 +38,10 @@ sh install.sh
 contenox setup                          # pick a provider and model, once
 contenox "say hello world in python"    # chat straight from the CLI
 contenox chat -e                        # compose a rich prompt in $EDITOR
-contenox new                            # full-screen TUI: chat, plan, shell, file edits
-contenox resume                         # same TUI, reopening your last session
+contenox acp                            # speak ACP over stdio to any ACP client
 ```
 
-`new` always starts a fresh session; `resume` replays the last active one (or
-`--session <name>`). Sessions persist — `contenox session list` and
+Sessions persist — `contenox session list` and
 `contenox session switch <name>` pick past contexts back up. That's it;
 sensible defaults do the rest, and `contenox doctor` explains itself when
 something is missing.

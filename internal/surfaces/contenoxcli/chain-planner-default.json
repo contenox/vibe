@@ -1,4 +1,5 @@
 {
+  "$schema": "https://contenox.com/schema/task-chain.schema.json",
   "id": "agent-planner",
   "description": "Resident-planner profile (mission-plans.md, slice 4). A single-writer planner that holds and evolves a mission's living plan. Its envelope grants ONLY the mission tools (mission.mission_plan / mission.mission_report / mission.mission_finish / mission.mission_ask_attention) and withholds every execution tool — it plans, it does not execute. Fire it as a mission; the discipline lives in the system prompt, the shape is enforced by missionservice.",
   "tasks": [

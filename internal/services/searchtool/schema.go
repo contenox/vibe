@@ -12,8 +12,9 @@ import (
 // long one pre-teaches is re-taught by the error or note when it matters.
 // Five things are stated anyway since nothing later re-teaches them: what it
 // searches (any language, not just Go), that ranking is keyword AND meaning so
-// an exact identifier is a good query, that it is not gointel, that it is not
-// a live read, and that a missing index is an instruction, not a fault.
+// an exact identifier is a good query, that it answers from text rather than a
+// type checker, that it is not a live read, and that a missing index is an
+// instruction, not a fault.
 //
 // The argument set is declared once (searchProperties) and rendered twice:
 // into the model-facing descriptor and into the published OpenAPI contract, so
@@ -23,7 +24,7 @@ const searchToolDoc = "Hybrid search over this workspace's INDEXED CONTENT — p
 	"Ranks by KEYWORD and by MEANING together, so both an exact identifier (`ResolveHITLApprovalWithinBound`, `CONTENOX_ACP_CHAIN_PATH`, an error string) and a plain question (\"where is retry backoff explained\") are good queries; " +
 	"an exact symbol is found by the keyword half even when nothing was written about it in words. " +
 	"Returns ranked hits, each a file:line-range citation plus the matching text, so an answer can be attributed and the range re-read in full. " +
-	"NOT the Go-structure tool: exact questions about Go (what type is this, who calls this, where is it declared) belong to the go_* tools, which answer from a type checker; this one answers from indexed text and can be approximately right. " +
+	"NOT a parser: it answers from indexed TEXT, never from a type checker, so it can be APPROXIMATELY RIGHT \u2014 a hit is a location to verify, not a proof. " +
 	"NOT a live filesystem read: hits come from the index `contenox index` built, so a file changed since is returned FLAGGED STALE and a file never indexed is simply absent — re-read a cited range before relying on it. " +
 	"A workspace with no index is NOT an error: the result says so and names the command (`contenox index`) for the human to run."
 

@@ -6,10 +6,8 @@ package contenoxcli
 
 import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
-	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
-	"github.com/contenox/contenox/internal/services/jqtool"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
@@ -22,13 +20,12 @@ import (
 // acpToolset is the CLI's full localToolset (engine.go) plus the ACP fs/shell
 // wiring that routes through the live Transport instead of a fixed cwd, plus
 // this profile's mission tools. Same construction, same tool names, so the
-// seeded HITL policies (which already rule on gointel/workspace/jq/goja) gate
-// an ACP session exactly as they gate `contenox chat`/`run`. optInBeta gates
-// goja registration exactly as localToolset does.
+// seeded HITL policies (which already rule on workspace/goja) gate an ACP
+// session exactly as they gate `contenox chat`/`run`. optInBeta gates goja
+// registration exactly as localToolset does.
 func acpToolset(
 	db libdb.DBManager,
 	tracker libtracker.ActivityTracker,
-	goIndex gointel.Index,
 	gt *gojatool.Toolset,
 	workspaceID string,
 	transportFn func() *acpsvc.Transport,
@@ -40,8 +37,6 @@ func acpToolset(
 ) map[string]taskengine.ToolsRepo {
 	cwdResolver := acpsvc.NewACPCwdResolver(transportFn)
 	tools := map[string]taskengine.ToolsRepo{
-		"echo":     localtools.NewEchoTools(),
-		"print":    localtools.NewPrint(tracker),
 		"webtools": localtools.NewWebCaller(tracker),
 		"local_fs": localtools.NewLocalFSToolsWith(
 			"",
@@ -49,21 +44,15 @@ func acpToolset(
 			acpsvc.NewACPFileIO(transportFn),
 			localtools.LocalFSToolsName,
 			cwdResolver,
-			// Same seam localToolset wires (engine.go): a write through the
-			// ACP local_fs tool path invalidates gointel's snapshot
-			// immediately, instead of waiting on the mtime-sweep backstop.
-			localtools.WithOnFileMutated(func(absPath string) { goIndex.Invalidate(absPath) }),
 		),
 		"local_shell": localtools.NewLocalExecToolsWith(
 			acpsvc.NewACPCommandRunnerWithScrub(transportFn, localtools.DetectPlatformShell(), shellScrub),
 		),
-		// The five toolsets `contenox chat`/`run` get via localToolset and an
-		// ACP session previously didn't: same construction, gated by the
-		// same seeded policies (gointel/workspace/jq/goja are allow-tier
-		// reads or pure compute; git's four writes still approve).
+		// The toolsets `contenox chat`/`run` get via localToolset and an ACP
+		// session previously didn't: same construction, gated by the same
+		// seeded policies (workspace/goja are allow-tier reads or pure
+		// compute; git's four writes still approve).
 		localtools.GitToolsName:      localtools.NewGitToolsWith("", localtools.GitToolsName, cwdResolver),
-		gointel.ToolsProviderName:    gointel.NewTools(goIndex),
-		jqtool.ToolsProviderName:     jqtool.NewToolsWith("", jqtool.ToolsProviderName, cwdResolver),
 		searchtool.ToolsProviderName: newWorkspaceSearchTools(workspaceID),
 		// Mission tools: inert without a mission id in session/new `_meta`, so
 		// an ordinary editor session never sees them. The asker raises

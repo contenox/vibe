@@ -14,8 +14,8 @@ command, and until you run it **nothing about your machine leaves it**.
 
 ## The flow
 
-You need the contenox app, signed in, and a running contenox session — the TUI
-(`contenox new`) or any ACP editor. The app lives at
+You need the contenox app, signed in, and a running contenox session from any
+ACP editor. The app lives at
 [app.contenox.com](https://app.contenox.com). An account is free — for you
 and up to three teammates, one machine each.
 

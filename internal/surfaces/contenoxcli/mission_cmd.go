@@ -46,7 +46,7 @@ still running.
 'mission fire' embeds the fleet IN-PROCESS: the dispatched unit is a child
 subprocess of THIS command, so --wait is required — when this process exits,
 its units are torn down with it. Fire-and-detach needs a long-lived host: an
-editor session ('contenox acp', the /mission command) today, beam later.
+editor session ('contenox acp', the /mission command) or any other ACP client.
 
 'mission asks' reads a mission's pending QUESTIONS — a unit's attention asks,
 waiting on a human's own words rather than a yes/no. Answering them is NOT a
@@ -204,7 +204,7 @@ the operator inbox; read them with 'contenox mission show/reports'.
 --wait is REQUIRED, and honestly so: the unit is a child of THIS process, so a
 fired mission dies when this command exits — there is no detached fire from a
 one-shot CLI. Fire-and-detach needs a long-lived host: an editor session
-('contenox acp', the /mission command) today, beam later.
+('contenox acp', the /mission command) or any other ACP client.
 
 Exit status: 0 when the mission lands; non-zero when it derails, gets stuck, is
 abandoned, or the wait times out (--timeout; on timeout the unit is torn down
@@ -280,6 +280,8 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	trigHook := eventlog.NewTriggerHolder()
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)))
 
+	// One instance: a sibling cannot wake the waiters this one parked.
+	var driverHITL hitlservice.Service
 	oracleOn := oracleFlagSet(cmd)
 	optInBeta := betaEnabled(ctx, store)
 	wantTriggers := false
@@ -298,7 +300,6 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		if wantTriggers && !cmd.Root().Flags().Changed("shell") {
 			opts.EffectiveEnableLocalExec = true
 		}
-		var driverHITL hitlservice.Service
 		if oracleOn {
 			opts.EffectiveHITL = true
 			driverHITL = newHITLService(contenoxDir, store, tracker, "")
@@ -343,6 +344,10 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if driverHITL == nil {
+		driverHITL = newHITLService(contenoxDir, store, tracker, "")
+	}
+
 	projectRoot, _ := os.Getwd()
 	fleet, _, stopFleet, err := fleetservice.BuildInProcess(ctx, fleetservice.InProcessDeps{
 		DB:           db,
@@ -352,8 +357,9 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		WorkspaceID:  workspaceID,
 		Tracker:      tracker,
 		PolicySource: hitlPolicySource(contenoxDir),
+		HITL:         driverHITL,
 		DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-			discoverChainAgents(dctx, agents, contenoxDir, tracker, betaEnabled(dctx, store))
+			discoverChainAgents(dctx, agents, contenoxDir, tracker)
 		},
 		AgentSupervisor: supervisor,
 		Stderr:          os.Stderr,

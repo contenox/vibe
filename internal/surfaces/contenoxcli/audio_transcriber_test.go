@@ -16,7 +16,6 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/models/llmrepo"
 	libmodelprovider "github.com/contenox/contenox/internal/models/modelrepo"
-	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/libtracker"
@@ -81,12 +80,10 @@ func wavFixture(t *testing.T, samples int) []byte {
 
 func audioToolsetFixture(t *testing.T, root string) map[string]taskengine.ToolsRepo {
 	t.Helper()
-	goIndex := gointel.NewIndex(gointel.Config{})
-	t.Cleanup(goIndex.Shutdown)
 	gt, err := gojatool.New(gojatool.Config{})
 	require.NoError(t, err)
 	t.Cleanup(gt.Shutdown)
-	return localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, goIndex, gt, missionservice.New(nil), nil)
+	return localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, gt, missionservice.New(nil), nil)
 }
 
 func execReadFile(t *testing.T, tools map[string]taskengine.ToolsRepo, path string) (any, error) {

@@ -1,4 +1,5 @@
 {
+  "$schema": "https://contenox.com/schema/task-chain.schema.json",
   "id": "chain-fim",
   "description": "Default fill-in-middle completion chain for editor autocomplete.",
   "tasks": [

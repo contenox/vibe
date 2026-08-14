@@ -115,6 +115,25 @@ func (h *HITLWrapper) SetParkWindow(d time.Duration) {
 
 const DenyMessage = "User denied the operation. Please ask for clarification or try a different, less destructive approach."
 
+func policyDenyMessage(result hitlservice.EvaluationResult) string {
+	var b strings.Builder
+	b.WriteString("Denied by the active policy")
+	if name := strings.TrimSpace(result.PolicyName); name != "" {
+		fmt.Fprintf(&b, " %s", name)
+	}
+	if result.MatchedRule != nil {
+		fmt.Fprintf(&b, " (rule %d)", *result.MatchedRule)
+	}
+	b.WriteString(".")
+	if detail := strings.TrimSpace(result.Detail); detail != "" {
+		fmt.Fprintf(&b, " %s.", detail)
+	}
+	b.WriteString(" This is the envelope refusing the capability, not a transient error and not a judgement about this particular call." +
+		" Do not retry it and do not attempt another route to the same effect." +
+		" Either continue with the work you can still do, or stop and report that you are blocked on this.")
+	return b.String()
+}
+
 // DenyTimeoutMessage is the result of a gated call auto-denied at its
 // approval deadline; the tool never ran.
 const DenyTimeoutMessage = "Approval timed out. The operation was automatically denied."
@@ -198,7 +217,7 @@ func (h *HITLWrapper) Exec(
 
 	case hitlservice.ActionDeny:
 		h.publishDecision(ctx, tools.Name, toolName, args, result, false)
-		return DenyMessage, taskengine.DataTypeString, nil
+		return policyDenyMessage(result), taskengine.DataTypeString, nil
 
 	case hitlservice.ActionApprove:
 		toolCallID, _ := ctx.Value(taskengine.ContextKeyToolCallID).(string)
