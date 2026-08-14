@@ -43,7 +43,19 @@ const routeCode = `{
 const t: LandingStrings = {
   h1a: "An agent server.",
   h1b: "Every AI product runs one. Nobody ships you one.",
-  lede: "Every AI product runs an agent loop under rules its vendor wrote. You have never been handed one. contenox is that layer as a server you run yourself: you declare the agents, tools and models in files, every action is checked against your policy before it happens, on your machine, on any model.",
+  lede: "contenox is that layer as a server you run yourself — on your machine, on any model. Every action is checked against your policy before it happens.",
+  declareH2: "You don't build an agent. You declare one.",
+  declareTree: [
+    [".contenox/", ""],
+    ["  chain-agent-acp.json        ", "# the editor agent: tasks, routing, tools"],
+    ["  chain-agent-run.json        ", "# the headless agent, for cron and CI"],
+    ["  chain-planner-default.json  ", "# sub-chains the agents call"],
+    ["  hitl-policy-default.json    ", "# what needs a human, and when"],
+    ["  hitl-policy-strict.json     ", "# the same agent, tighter — swap per environment"],
+    ["AGENTS.md                     ", "# project context, loaded into every session"],
+  ],
+  declareNote:
+    "Edit a file, rerun — no build step, no plugin API, no release. Both kinds are JSON Schema–validated, so your editor completes them and CI checks them.",
   ctaRecipe: "Run a recipe",
   copyLabel: "Copy",
   installTabPosix: "macOS / Linux",

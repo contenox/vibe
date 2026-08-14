@@ -22,7 +22,7 @@ export const GET: APIRoute = async () => {
   const out: string[] = [
     '# contenox',
     '',
-    '> An agent server. No need to develop, compile and package an AI agent you configure one and it runs; contenox is a process you run and connect to, where you declare the agents, tools and models in files rather than in code, changed without a rebuild. Every action is checked against your policy before it runs. Open source under Apache-2.0, one binary, no account, on your own machine, on any AI model you pick.',
+    '> An agent server. You don\'t build an agent, you declare one: an agent is files in `.contenox/` — chain files (`chain-agent-*.json`) declaring tasks, model routing, tools, retries and branching, and HITL policy files declaring what needs a human. Edit a file and the next invocation runs it: no build step, no plugin API, no release. Both kinds are JSON Schema–validated. contenox is a process you run and connect to, and the same chain runs unchanged in the terminal, headless in CI, inside an ACP editor, and as a unit the fleet dispatches. Every action is checked against your policy before it runs. Open source under Apache-2.0, one binary, no account, on your own machine, on any AI model you pick.',
     '',
     'Terminology, so a summary does not invent one: the declaration file is the **envelope**; approvals gated by it are **human-in-the-loop**; a unit of unattended work is a **mission**; the surfaces (terminal UI, CLI, editors over ACP, browser via the optional relay) are example implementations, not the product.',
     '',

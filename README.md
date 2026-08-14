@@ -2,13 +2,79 @@
 
 **An agent server.**
 
-No need to develop, compile and package an AI agent you configure one and it runs. 
-
-You declare agents, tools and models in files, instead of compiling them into
-your application. Every action is checked against your policy before it runs.
-Changing what an agent may do is an edit, not a release.
-
 Docs: **[contenox.com](https://contenox.com)**
+
+---
+
+## You don't build an agent. You declare one.
+
+An agent is files in `.contenox/` — discovered on start, live on the next run,
+reviewable in a pull request:
+
+```
+.contenox/
+  chain-agent-acp.json          # the editor agent: tasks, routing, tools, branching
+  chain-agent-run.json          # the headless agent, for cron and CI
+  chain-planner-default.json    # sub-chains the agents call
+  hitl-policy-default.json      # what needs a human, and when
+  hitl-policy-strict.json       # the same agent, tighter — swap per environment
+AGENTS.md                       # project context, loaded into every session
+```
+
+A chain is a state machine over tasks. Edit it and the next invocation runs the
+new one — no build step, no plugin API, no release:
+
+```json
+{
+  "$schema": "https://contenox.com/schema/task-chain.schema.json",
+  "id": "chain-triage",
+  "description": "Classify an incoming issue, then file it or drop it.",
+  "token_limit": 131072,
+  "tasks": [
+    {
+      "id": "classify",
+      "handler": "route",
+      "system_instruction": "Classify the issue: bug, feature, or noise.",
+      "execute_config": { "model": "{{var:model}}", "provider": "{{var:provider}}" },
+      "transition": {
+        "on_failure": "",
+        "branches": [
+          { "operator": "equals",  "when": "bug", "goto": "file_ticket" },
+          { "operator": "default", "when": "",    "goto": "end" }
+        ]
+      }
+    },
+    {
+      "id": "file_ticket",
+      "handler": "chat_completion",
+      "system_instruction": "Open a ticket with a clear title and repro steps.",
+      "execute_config": { "model": "{{var:model}}", "provider": "{{var:provider}}" },
+      "transition": {
+        "on_failure": "",
+        "branches": [ { "operator": "default", "when": "", "goto": "end" } ]
+      }
+    }
+  ]
+}
+```
+
+Both file kinds are JSON Schema–validated — [task
+chains](https://contenox.com/schema/task-chain.schema.json) and [HITL
+policies](https://contenox.com/schema/hitl-policy-v1.schema.json), generated
+from the Go types that load them. Keep the `$schema` line and your editor
+completes and checks them as you type; CI checks them too.
+
+Model routing is the same story — `contenox backend add`, `contenox config set
+default-provider`. Nothing about which model, which tool, or which action needs
+a human is compiled in.
+
+**The same chain runs unchanged** in the terminal, headless in CI, inside an ACP
+editor, and as a unit the fleet dispatches. Tightening what an agent may do is a
+diff.
+
+> Files named `chain-agent-*.json` are also discovered as fleet-dispatchable
+> agents. The shipped ones are always available; surfacing your *own* in the
+> agent roster currently needs `contenox config set opt-in-beta true`.
 
 ---
 
