@@ -1,37 +1,38 @@
 {
-    "id": "chain-compact",
-    "description": "System chain to summarize conversation history for compaction.",
-    "tasks": [
-        {
-            "id": "compact_history",
-            "description": "Summarize the conversation history.",
-            "handler": "chat_completion",
-            "system_instruction": "Current date: {{date}}.\n\nYou are a specialized conversation summarizer. Read the following messages between a user and an AI assistant. Write a dense, factual summary of what happened. Include:\n- Key decisions made\n- Important findings (e.g., from file reads or shell commands)\n- The current state of the task\nDo not editorialize or write a narrative. Use bullet points.\n\nGROUND THE SUMMARY: Include only facts actually present in the messages above. Do not infer, generalize, or invent details — names, numbers, decisions, file contents, or outcomes — that are not stated. If something is unknown or unfinished, say so or omit it; never guess to fill a gap.",
-            "execute_config": {
-                "model": "{{var:alt_model|var:model}}",
-                "provider": "{{var:alt_provider|var:provider}}",
-                "shift": true,
-                "pass_clients_tools": false,
-                "tools": [],
-                "max_tokens": "{{var:max_tokens|32768}}",
-                "retry_policy": {
-                    "max_attempts": 3,
-                    "initial_backoff": "1s",
-                    "max_backoff": "10s",
-                    "jitter": 0.25
-                }
-            },
-            "transition": {
-                "on_failure": "",
-                "branches": [
-                    {
-                        "operator": "default",
-                        "when": "",
-                        "goto": "end"
-                    }
-                ]
-            }
+  "$schema": "https://contenox.com/schema/task-chain.schema.json",
+  "id": "chain-compact",
+  "description": "System chain to summarize conversation history for compaction.",
+  "tasks": [
+    {
+      "id": "compact_history",
+      "description": "Summarize the conversation history.",
+      "handler": "chat_completion",
+      "system_instruction": "Current date: {{date}}.\n\nYou are a specialized conversation summarizer. Read the following messages between a user and an AI assistant. Write a dense, factual summary of what happened. Include:\n- Key decisions made\n- Important findings (e.g., from file reads or shell commands)\n- The current state of the task\nDo not editorialize or write a narrative. Use bullet points.\n\nGROUND THE SUMMARY: Include only facts actually present in the messages above. Do not infer, generalize, or invent details — names, numbers, decisions, file contents, or outcomes — that are not stated. If something is unknown or unfinished, say so or omit it; never guess to fill a gap.",
+      "execute_config": {
+        "model": "{{var:alt_model|var:model}}",
+        "provider": "{{var:alt_provider|var:provider}}",
+        "shift": true,
+        "pass_clients_tools": false,
+        "tools": [],
+        "max_tokens": "{{var:max_tokens|32768}}",
+        "retry_policy": {
+          "max_attempts": 3,
+          "initial_backoff": "1s",
+          "max_backoff": "10s",
+          "jitter": 0.25
         }
-    ],
-    "token_limit": 128000
+      },
+      "transition": {
+        "on_failure": "",
+        "branches": [
+          {
+            "operator": "default",
+            "when": "",
+            "goto": "end"
+          }
+        ]
+      }
+    }
+  ],
+  "token_limit": 128000
 }

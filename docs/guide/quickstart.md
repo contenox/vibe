@@ -43,7 +43,7 @@ contenox doctor
 Its first line is the verdict:
 
 ```
-Ready: yes — chat now with `contenox new` or `contenox "your prompt"`.
+Ready: yes — chat now with `contenox "your prompt"`.
 ```
 
 If it says `Ready: no`, the line under it names the one command that fixes it.
@@ -64,21 +64,8 @@ This creates the project-local `.contenox/workspace.id` marker; the default chai
 
 ## 4. Start working
 
-The terminal UI is the main surface — chat, plan, and shell in one persistent session:
-
-```bash
-contenox new
-```
-
-The transcript flows into your terminal's own scrollback, `/` opens commands, `!` runs a shell line, `@` attaches a file, and gated tool calls are answered inline with one keystroke. Press `?` on an empty composer for the full key list.
-
-`new` always starts fresh. To carry on where you left off, reopen the last session with its transcript replayed:
-
-```bash
-contenox resume
-```
-
-For one-shot and scripted use, pass the prompt directly:
+Pass a prompt straight to the CLI. The session persists, so the next
+invocation carries the conversation forward:
 
 ```bash
 contenox "hello, what can you do?"

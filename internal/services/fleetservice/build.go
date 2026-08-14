@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/contenox/contenox/internal/kernel/agentinstance"
+	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/hitlservice"
@@ -46,6 +47,10 @@ type InProcessDeps struct {
 	// PolicySource backs the creation-time HITL policy existence check; nil skips the check.
 	PolicySource hitlservice.PolicySource
 
+	// HITL judges a viewer-less unit's permission request against its mission's
+	// envelope; nil leaves the hub cancelling every such request.
+	HITL hitlservice.Service
+
 	// DiscoverAgents optionally seeds the agent registry before the kernel is built; best-effort, so it should log and degrade rather than fail.
 	DiscoverAgents func(ctx context.Context, agents agentregistryservice.Service)
 
@@ -67,12 +72,20 @@ func BuildInProcess(ctx context.Context, deps InProcessDeps) (Service, agentregi
 		deps.DiscoverAgents(ctx, agents)
 	}
 
-	// No answerer wired here: the hub's built-in deny stands (fail-closed), and maxToolCalls goes unenforced without one.
 	stderr := deps.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
 	}
 	kernelOpts := []agentinstance.Option{agentinstance.WithStderr(stderr)}
+	if deps.HITL != nil {
+		kernelOpts = append(kernelOpts, agentinstance.WithPermissionFallback(
+			NewUnattendedPermissionAnswerer(UnattendedPermissionDeps{
+				HITL:     deps.HITL,
+				Missions: deps.Missions,
+				Sink:     taskengine.NoopTaskEventSink{},
+				Tracker:  deps.Tracker,
+			})))
+	}
 	if deps.WorkspaceID != "" {
 		kernelOpts = append(kernelOpts, agentinstance.WithWorkspaceID(deps.WorkspaceID))
 	}

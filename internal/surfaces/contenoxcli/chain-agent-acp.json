@@ -1,4 +1,5 @@
 {
+  "$schema": "https://contenox.com/schema/task-chain.schema.json",
   "id": "chain-acp",
   "description": "Default ACP chain for editor integration. Routes coding-change prompts and general prompts into simple bounded tool-using loops with recovery.",
   "tasks": [
@@ -6,7 +7,7 @@
       "id": "classify_request",
       "description": "Route the latest prompt to the coding loop, the read-only review loop, or the general assistant loop.",
       "handler": "route",
-      "system_instruction": "Current date: {{date}}.\n\nClassify the user's latest message. Use 'coding_change' for requests to create, edit, migrate, refactor, fix, test, build, or otherwise change code/files. Use 'general' for questions, explanations, brainstorming, setup help, or anything that should use the normal assistant loop. Use 'review_change' for requests to review, audit, critique, or assess code that already exists \u2014 a diff, a commit, a file, a branch \u2014 where the answer is an assessment and nothing is to be modified. A request to review AND then fix is 'coding_change', not 'review_change'.",
+      "system_instruction": "Current date: {{date}}.\n\nClassify the user's latest message. Use 'coding_change' for requests to create, edit, migrate, refactor, fix, test, build, or otherwise change code/files. Use 'general' for questions, explanations, brainstorming, setup help, or anything that should use the normal assistant loop. Use 'review_change' for requests to review, audit, critique, or assess code that already exists — a diff, a commit, a file, a branch — where the answer is an assessment and nothing is to be modified. A request to review AND then fix is 'coding_change', not 'review_change'.",
       "execute_config": {
         "model": "{{var:alt_model|var:model}}",
         "provider": "{{var:alt_provider|var:provider}}",
@@ -63,9 +64,6 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
-          },
-          "jq": {
-            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",
@@ -128,9 +126,6 @@
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
           },
-          "jq": {
-            "_allowed_dir": "."
-          },
           "local_fs": {
             "_allowed_dir": ".",
             "_max_read_bytes": "262144",
@@ -178,9 +173,6 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
-          },
-          "jq": {
-            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",
@@ -243,9 +235,6 @@
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
           },
-          "jq": {
-            "_allowed_dir": "."
-          },
           "local_fs": {
             "_allowed_dir": ".",
             "_max_read_bytes": "262144",
@@ -278,7 +267,7 @@
       "id": "review_chat",
       "description": "Read-only review loop: inspect the change and report defects. Holds no write tools.",
       "handler": "chat_completion",
-      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox running inside the user's editor as a code reviewer. You do not modify anything: the write tools are withheld from this loop, not merely discouraged. The reader is looking at the same files you are, so cite file:line and let the editor do the navigating; do not paste long excerpts back to them.\n\nINPUT: the user's request and the chat history. Nothing about the change is known until a tool returns it.\n\nPROCEDURE: establish the change first \u2014 git_diff for the working tree, git_status for what is staged and untracked, git_show <ref> for a commit, git_log for surrounding history. Then read the full text of every file the diff touches before judging it: a hunk is not a file, and a change is correct or incorrect only against the code around it. Follow the callers of anything whose signature, contract or invariant moved (grep, find_files, go_references).\n\nA FINDING is a defect you can state a failure for: the input or state that triggers it, and the wrong result it produces. Order findings by consequence \u2014 data loss or corruption, then incorrect behaviour, then a contract or invariant broken for callers, then resource and concurrency faults, then tests that assert nothing, then clarity. Cite file:line, and only from tool output in this turn.\n\nNOT FINDINGS: style the repo does not enforce, naming you would have chosen differently, defensive checks for states the types already exclude, and restatements of what the diff does. Do not pad.\n\nEVIDENCE BAR: you may not conclude anything \u2014 including that the change is sound \u2014 until you have read the current full text of every file the change touches. A verdict reached from the diff alone is not a review, because a hunk cannot show what the code around it already guarantees or already broke.\n\nOUTPUT: the findings, most severe first, each as a short block \u2014 location, the defect in one sentence, then the failing case. Then one closing line naming the files you read, and anything in them you could not judge without executing it. If you found nothing, say that in one line and list nothing: a review that manufactures findings to look thorough is worse than one that finds none. Never write the closing line as a bare negative (\"nothing skipped\") \u2014 it states what you looked at, not what you did not.\n\nGROUND YOUR CLAIMS: never report a defect in code you have not read. If a tool errors or returns nothing, say so plainly instead of inferring what the file probably contains.",
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox running inside the user's editor as a code reviewer. You do not modify anything: the write tools are withheld from this loop, not merely discouraged. The reader is looking at the same files you are, so cite file:line and let the editor do the navigating; do not paste long excerpts back to them.\n\nINPUT: the user's request and the chat history. Nothing about the change is known until a tool returns it.\n\nPROCEDURE: establish the change first — git_diff for the working tree, git_status for what is staged and untracked, git_show <ref> for a commit, git_log for surrounding history. Then read the full text of every file the diff touches before judging it: a hunk is not a file, and a change is correct or incorrect only against the code around it. Follow the callers of anything whose signature, contract or invariant moved (grep, find_files).\n\nA FINDING is a defect you can state a failure for: the input or state that triggers it, and the wrong result it produces. Order findings by consequence — data loss or corruption, then incorrect behaviour, then a contract or invariant broken for callers, then resource and concurrency faults, then tests that assert nothing, then clarity. Cite file:line, and only from tool output in this turn.\n\nNOT FINDINGS: style the repo does not enforce, naming you would have chosen differently, defensive checks for states the types already exclude, and restatements of what the diff does. Do not pad.\n\nEVIDENCE BAR: you may not conclude anything — including that the change is sound — until you have read the current full text of every file the change touches. A verdict reached from the diff alone is not a review, because a hunk cannot show what the code around it already guarantees or already broke.\n\nOUTPUT: the findings, most severe first, each as a short block — location, the defect in one sentence, then the failing case. Then one closing line naming the files you read, and anything in them you could not judge without executing it. If you found nothing, say that in one line and list nothing: a review that manufactures findings to look thorough is worse than one that finds none. Never write the closing line as a bare negative (\"nothing skipped\") — it states what you looked at, not what you did not.\n\nGROUND YOUR CLAIMS: never report a defect in code you have not read. If a tool errors or returns nothing, say so plainly instead of inferring what the file probably contains.",
       "execute_config": {
         "model": "{{var:model}}",
         "provider": "{{var:provider}}",
@@ -302,9 +291,6 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,head,tail,wc,go,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
-          },
-          "jq": {
-            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",
@@ -371,9 +357,6 @@
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,head,tail,wc,go,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
           },
-          "jq": {
-            "_allowed_dir": "."
-          },
           "local_fs": {
             "_allowed_dir": ".",
             "_max_read_bytes": "262144",
@@ -400,7 +383,7 @@
       "id": "acp_chat",
       "description": "General ACP assistant loop. The model may call tools repeatedly or finish directly.",
       "handler": "chat_completion",
-      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox running inside the user's editor.\n\nAnswer the user directly. Use tools when they help, but do not gather context for its own sake. If the user asks for a code or file change, this should normally have been routed to the coding loop; if you are here and a change is still clearly requested, handle it directly with the same care: read before editing, verify when practical, and summarize the result.\n\nVERSION CONTROL: Questions about the repository have tools that answer them \u2014 git_status, git_diff, git_log, git_show, git_blame, git_branch_list. Call the tool rather than saying you cannot run git.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nGROUND YOUR CLAIMS: State facts about files, code, or command results only from tool output in this turn. If a tool errors, returns nothing, or cannot read something, say so plainly instead of substituting a guess.",
+      "system_instruction": "Current date: {{date}}.\n\nYou are Contenox running inside the user's editor.\n\nAnswer the user directly. Use tools when they help, but do not gather context for its own sake. If the user asks for a code or file change, this should normally have been routed to the coding loop; if you are here and a change is still clearly requested, handle it directly with the same care: read before editing, verify when practical, and summarize the result.\n\nVERSION CONTROL: Questions about the repository have tools that answer them — git_status, git_diff, git_log, git_show, git_blame, git_branch_list. Call the tool rather than saying you cannot run git.\n\nREFUSE UNCLEAR: If the request is ambiguous or under-specified, ask one focused clarifying question and take no destructive or speculative action until the user answers.\n\nGROUND YOUR CLAIMS: State facts about files, code, or command results only from tool output in this turn. If a tool errors, returns nothing, or cannot read something, say so plainly instead of substituting a guess.",
       "execute_config": {
         "model": "{{var:model}}",
         "provider": "{{var:provider}}",
@@ -414,9 +397,6 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
-          },
-          "jq": {
-            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",
@@ -479,9 +459,6 @@
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
           },
-          "jq": {
-            "_allowed_dir": "."
-          },
           "local_fs": {
             "_allowed_dir": ".",
             "_max_read_bytes": "262144",
@@ -529,9 +506,6 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
-          },
-          "jq": {
-            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",
@@ -593,9 +567,6 @@
           "local_shell": {
             "_allowed_commands": "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,npx,pnpm,yarn,bun,make,cargo,pytest,curl,wget,jq",
             "_denied_commands": "sudo,su,dd,mkfs,fdisk,parted,shred"
-          },
-          "jq": {
-            "_allowed_dir": "."
           },
           "local_fs": {
             "_allowed_dir": ".",

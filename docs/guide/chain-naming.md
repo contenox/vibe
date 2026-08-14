@@ -33,7 +33,7 @@ The seeded set:
 - `chain-agent-run.json` — the one-shot, stateless `contenox run` loop
 - `chain-agent-acp.json` — editor (ACP) sessions
 - `chain-agent-acpx.json` — the headless / untrusted-driver ACP profile
-- `chain-agent-beam.json` — `contenox new`, the terminal UI
+- `chain-agent-beam.json` — attended terminal sessions
 - `chain-planner-default.json` — the default mission planner
 - `chain-compact-default.json` — history compaction
 - `chain-fim-default.json` — editor autocomplete
@@ -42,6 +42,30 @@ The seeded set:
 `trigger-*.json` and `hitl-policy-*.json` are different kinds of files (event triggers and HITL envelopes) and keep their own conventions; init seeds no trigger files (triggers are operator-authored) and seeds `hitl-policy-oracle.json` — the [attention oracle's](/docs/use-cases/auto-attention/) envelope — alongside the other policy presets.
 
 > **Note:** the fleet agent's *name* is the chain's `id` field, not its filename. The seeded planner's id is `agent-planner`, so `contenox mission fire agent-planner` and a stored `default-mission-agent` config are stable however the file is named.
+
+### Declaring your own agent
+
+Name the file `chain-agent-<something>.json` and put it in the workspace
+`.contenox/` (or `~/.contenox/`). Discovery runs when a host starts — a
+`mission fire`, an editor session — and reconciles the registry from disk.
+
+The **filename** makes the chain eligible. The **`id`** becomes the agent name
+you fire at, so these two do not have to match and usually will not:
+
+```jsonc
+// .contenox/chain-agent-vaultfiler.json
+{ "id": "chain-vaultfiler", ... }
+```
+
+```bash
+contenox agent list                       # NAME is chain-vaultfiler
+contenox mission fire chain-vaultfiler "…" --policy <envelope> --wait
+```
+
+Rename the file freely; the agent keeps its name. Change the `id` and you have
+renamed the agent, and anything referencing the old name — a stored
+`default-mission-agent`, a trigger — stops resolving. A full worked example is
+in [Tutorial: a mission agent](/docs/guide/tutorial-mission-agent/).
 
 ## Resolution: which file wins
 
@@ -52,7 +76,7 @@ For files resolved by name — the CLI chat chain, the run chain, the compact ch
 
 A workspace file wins by name. That is the whole override mechanism: put a same-named file in the workspace `.contenox/` and it shadows the global copy. `contenox doctor` lists every shadowing copy it finds.
 
-The ACP surfaces resolve differently, by design: `contenox acp`, `acpx`, and `contenox new` load their chain from `~/.contenox/` only, each overridable with its own environment variable — `CONTENOX_ACP_CHAIN_PATH`, `CONTENOX_ACPX_CHAIN_PATH`, `CONTENOX_BEAM_CHAIN_PATH`, and `CONTENOX_ACP_FIM_CHAIN_PATH` for autocomplete. An editor may be launched from anywhere, so these surfaces anchor to the home directory rather than a cwd walk; the env var is the per-launch override.
+The ACP surfaces resolve differently, by design: `contenox acp` and `acpx` load their chain from `~/.contenox/` only, each overridable with its own environment variable — `CONTENOX_ACP_CHAIN_PATH`, `CONTENOX_ACPX_CHAIN_PATH`, and `CONTENOX_ACP_FIM_CHAIN_PATH` for autocomplete. An editor may be launched from anywhere, so these surfaces anchor to the home directory rather than a cwd walk; the env var is the per-launch override.
 
 ## What `contenox init` touches — and never touches
 

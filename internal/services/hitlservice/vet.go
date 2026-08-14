@@ -45,12 +45,12 @@ func VetPolicy(data []byte) error {
 	return fmt.Errorf("%w:\n%w", ErrEnvelopeVet, errors.Join(errs...))
 }
 
-func isCommentKey(k string) bool { return strings.HasPrefix(k, "//") }
+func isAnnotationKey(k string) bool { return strings.HasPrefix(k, "//") || k == "$schema" }
 
 func vetUnknownKeys(where string, obj map[string]json.RawMessage, known []string) []error {
 	var errs []error
 	for k := range obj {
-		if isCommentKey(k) {
+		if isAnnotationKey(k) {
 			continue
 		}
 		found := false
@@ -65,7 +65,7 @@ func vetUnknownKeys(where string, obj map[string]json.RawMessage, known []string
 			if where != "" {
 				prefix = where
 			}
-			errs = append(errs, fmt.Errorf("%s: unknown field %q — known fields: %s (keys starting with // are treated as comments)",
+			errs = append(errs, fmt.Errorf("%s: unknown field %q — known fields: %s (keys starting with // are comments; $schema is allowed)",
 				prefix, k, strings.Join(known, ", ")))
 		}
 	}

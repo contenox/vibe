@@ -177,7 +177,7 @@ func TestUnit_Bridge_RecursionIntoGojaIsRefused(t *testing.T) {
 		t.Fatalf("the host was reached by a refused call: %+v", calls)
 	}
 
-	mustEval(t, sb, `host.tool("gointel.go_describe", {symbol: "x"})`)
+	mustEval(t, sb, `host.tool("git.git_status", {path: "x"})`)
 	if len(host.recorded()) != 1 {
 		t.Fatal("a legitimate call was refused")
 	}

@@ -93,10 +93,10 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 		"ANY language", // it is not a Go-only tool
 		"KEYWORD",      // ranking is not vector-only, so an identifier is a good query
 		"exact identifier",
-		"file:line-range", // it cites locations
-		"go_*",            // it is not gointel
-		"NOT a live",      // it is not a filesystem read
-		"contenox index",  // a missing index is a runnable instruction
+		"file:line-range",     // it cites locations
+		"APPROXIMATELY RIGHT", // it answers from text, not a type checker
+		"NOT a live",          // it is not a filesystem read
+		"contenox index",      // a missing index is a runnable instruction
 	} {
 		if !strings.Contains(tool.Function.Description, want) {
 			t.Errorf("description does not state %q:\n%s", want, tool.Function.Description)
@@ -124,7 +124,7 @@ func TestUnit_Tools_SchemaShape(t *testing.T) {
 		t.Errorf("required = %v, want [question]", params["required"])
 	}
 
-	// Addressing one tool by name, and an unknown name, behave like gointel's.
+	// Addressing one tool by name, and an unknown name.
 	one, err := repo.GetToolsForToolsByName(context.Background(), ToolSearch)
 	if err != nil || len(one) != 1 {
 		t.Fatalf("by tool name: %v / %d", err, len(one))
@@ -139,7 +139,7 @@ func TestUnit_Tools_NilCallAndUnknownToolAreRefused(t *testing.T) {
 	if _, _, err := repo.Exec(context.Background(), time.Now(), nil, false, nil); err == nil {
 		t.Fatal("a nil call must be refused")
 	}
-	_, _, err := repo.Exec(context.Background(), time.Now(), map[string]any{}, false, &taskengine.ToolsCall{Name: "go_describe"})
+	_, _, err := repo.Exec(context.Background(), time.Now(), map[string]any{}, false, &taskengine.ToolsCall{Name: "not_a_tool"})
 	if err == nil {
 		t.Fatal("an unknown tool must be refused")
 	}

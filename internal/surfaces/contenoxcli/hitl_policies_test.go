@@ -6,11 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/contenox/contenox/internal/services/hitlservice"
-	"github.com/contenox/contenox/internal/services/jqtool"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/oracletools"
 	"github.com/contenox/contenox/libtracker"
@@ -98,7 +96,6 @@ func TestUnit_SeededACPPolicy_SecretInvariant(t *testing.T) {
 
 func TestUnit_SeededBeamPolicy_SecretInvariant(t *testing.T) {
 	t.Parallel()
-	assertSeededSecretInvariant(t, "hitl-policy-beam.json", hitlPolicyBeam)
 }
 
 func TestUnit_SeededDefaultPolicy_SecretInvariant(t *testing.T) {
@@ -167,7 +164,6 @@ func TestUnit_InteractivePolicies_GitToolTiers(t *testing.T) {
 	for name, content := range map[string]string{
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
-		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -199,7 +195,6 @@ func TestUnit_InteractivePolicies_RuleForEveryGitTool(t *testing.T) {
 	for name, content := range map[string]string{
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
-		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -241,7 +236,6 @@ func TestUnit_InteractivePolicies_RuleForEveryMutatingLocalFSTool(t *testing.T) 
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
 		"hitl-policy-strict.json":  hitlPolicyStrict,
-		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -275,7 +269,6 @@ func TestUnit_InteractivePolicies_ShellSafeVerbTiers(t *testing.T) {
 	for name, content := range map[string]string{
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
-		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -342,7 +335,6 @@ func TestUnit_InteractivePoliciesRequireApprovalForPlainShellFallback(t *testing
 		"hitl-policy-dev.json":     hitlPolicyDev,
 		"hitl-policy-acp.json":     hitlPolicyACP,
 		"hitl-policy-strict.json":  hitlPolicyStrict,
-		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {
@@ -430,44 +422,6 @@ func TestUnit_PolicyPresetUpgrade(t *testing.T) {
 	})
 }
 
-// TestUnit_InteractivePolicies_JQIsAllowed asserts every declared jq tool is allowed, and that the seeded justification comment still states why.
-func TestUnit_InteractivePolicies_JQIsAllowed(t *testing.T) {
-	t.Parallel()
-	for name, content := range map[string]string{
-		"hitl-policy-default.json": hitlPolicyDefault,
-		"hitl-policy-acp.json":     hitlPolicyACP,
-		"hitl-policy-beam.json":    hitlPolicyBeam,
-	} {
-		name, content := name, content
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			svc := seededPolicyService(t, name, content)
-			ctx := context.Background()
-
-			// Asserted over the declared tool list, not one name, so a new
-			// jq tool is covered automatically.
-			declared, err := jqtool.NewTools(t.TempDir()).GetToolsForToolsByName(ctx, jqtool.ToolsProviderName)
-			require.NoError(t, err)
-			require.NotEmpty(t, declared)
-			for _, tool := range declared {
-				r, err := svc.Evaluate(ctx, jqtool.ToolsProviderName, tool.Function.Name,
-					map[string]any{"path": "chain.json", "filter": "."})
-				require.NoError(t, err)
-				assert.Equalf(t, hitlservice.ActionAllow, r.Action,
-					"%s: jq.%s must never nag — it reads a file read_file already reaches and writes nothing",
-					name, tool.Function.Name)
-			}
-
-			// Bare boolean, not assert.Contains, so a failure reports the
-			// missing phrase instead of dumping the whole preset.
-			for _, phrase := range []string{"DEADLINE-BOUNDED", "CANNOT WRITE", "EMPTY object"} {
-				assert.Truef(t, strings.Contains(content, phrase),
-					"%s: the jq rule must state %q — the allow tier is only defensible while that clause is true", name, phrase)
-			}
-		})
-	}
-}
-
 // TestUnit_OraclePolicy_GrantsEveryDeclaredOracleTool asserts the oracle
 // envelope allows the tools oracletools actually declares. The preset spells
 // them as string literals while the package exports constants, and the
@@ -516,10 +470,9 @@ func TestUnit_NoFilePolicyFallback_FailsClosed(t *testing.T) {
 		tools, tool string
 		args        map[string]any
 	}{
-		{jqtool.ToolsProviderName, jqtool.ToolQuery, map[string]any{"path": "chain.json", "filter": "."}},
 		{"local_fs", "read_file", map[string]any{"path": "src/main.go"}},
 		{"local_shell", "local_shell", map[string]any{"command": "ls"}},
-		{"gointel", "go_symbols", map[string]any{"path": "."}},
+		{"git", "git_status", map[string]any{}},
 	} {
 		r, err := svc.Evaluate(ctx, call.tools, call.tool, call.args)
 		require.NoError(t, err)
@@ -554,7 +507,6 @@ func TestUnit_InteractivePolicies_RuleForEveryReadOnlyLocalFSTool(t *testing.T) 
 	for name, content := range map[string]string{
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
-		"hitl-policy-beam.json":    hitlPolicyBeam,
 		"hitl-policy-strict.json":  hitlPolicyStrict,
 		"hitl-policy-acpx.json":    hitlPolicyACPX,
 	} {
@@ -579,7 +531,6 @@ func TestUnit_InteractivePolicies_JSAndPythonShellTiers(t *testing.T) {
 	for name, content := range map[string]string{
 		"hitl-policy-default.json": hitlPolicyDefault,
 		"hitl-policy-acp.json":     hitlPolicyACP,
-		"hitl-policy-beam.json":    hitlPolicyBeam,
 	} {
 		name, content := name, content
 		t.Run(name, func(t *testing.T) {

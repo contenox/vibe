@@ -10,10 +10,8 @@ import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/eventlog"
-	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
-	"github.com/contenox/contenox/internal/services/jqtool"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/services/missiontools"
@@ -51,17 +49,6 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	reportErr, reportChange, end := tracker.Start(ctx, "build", "engine")
 	defer end()
 
-	// The index owns a reaper goroutine; it rides engine.Stop below, and the guard here covers error returns before that.
-	goIndex := gointel.NewIndex(gointel.Config{
-		AllowedDir: opts.EffectiveLocalExecAllowedDir,
-		CwdResolver: func(context.Context) string {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return ""
-			}
-			return cwd
-		},
-	})
 	// Construction loads and validates every script file, so a broken script is a startup error, not a silently skipped tool. Opt-in-beta gated: without it the scripts are never loaded.
 	gojaScriptDir := filepath.Join(opts.ContenoxDir, "tools")
 	if !opts.EffectiveOptInBeta {
@@ -69,7 +56,6 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	}
 	gt, err := gojatool.New(gojatool.Config{ScriptDir: gojaScriptDir})
 	if err != nil {
-		goIndex.Shutdown()
 		reportErr(err)
 		return nil, err
 	}
@@ -80,7 +66,6 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	engineBuilt := false
 	defer func() {
 		if !engineBuilt {
-			goIndex.Shutdown()
 			gt.Shutdown()
 			bus.Close()
 		}
@@ -113,7 +98,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		missionAsker = missionAttentionAsker{hitl: hitlSvc, missions: missions, bus: missionPub}
 	}
 
-	tools := localToolset(opts, db, tracker, goIndex, gt, missions, missionAsker)
+	tools := localToolset(opts, db, tracker, gt, missions, missionAsker)
 
 	askApproval := opts.EffectiveAskApproval
 	if askApproval == nil {
@@ -165,13 +150,12 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 		}))
 	}
 	reportChange("phase", "enginesvc_built")
-	// Rides the engine's chainable stop so the index's reaper joins on shutdown.
+	// Rides the engine's chainable stop so the goja sandbox joins on shutdown.
 	engineBuilt = true
 	oldStop := engine.Stop
 	engine.Stop = func() {
 		// Draining before teardown keeps at-least-once true: a firing claims its row before running, so an exit mid-firing would strand the claim otherwise.
 		trigHook.Drain(eventlog.DefaultDrainTimeout)
-		goIndex.Shutdown()
 		// Refuses further executions and joins in-flight ones (bounded — a call may be parked on a human approval).
 		gt.Shutdown()
 		oldStop()
@@ -181,20 +165,12 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	return engine, nil
 }
 
-func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, goIndex gointel.Index, gojaTools *gojatool.Toolset, missions missionservice.Service, missionAsker missiontools.AttentionAsker) map[string]taskengine.ToolsRepo {
+func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, gojaTools *gojatool.Toolset, missions missionservice.Service, missionAsker missiontools.AttentionAsker) map[string]taskengine.ToolsRepo {
 	tools := map[string]taskengine.ToolsRepo{
-		"echo":     localtools.NewEchoTools(),
-		"print":    localtools.NewPrint(tracker),
 		"webtools": localtools.NewWebCaller(tracker),
-		// Wires a successful write_file/sed/edit_file into gointel's Invalidate so a query right after an edit sees it without waiting on the mtime-sweep backstop.
-		"local_fs": localtools.NewLocalFSToolsWith(opts.EffectiveLocalExecAllowedDir, db, nil, localtools.LocalFSToolsName, nil,
-			localtools.WithOnFileMutated(func(absPath string) { goIndex.Invalidate(absPath) })),
+		"local_fs": localtools.NewLocalFSToolsWith(opts.EffectiveLocalExecAllowedDir, db, nil, localtools.LocalFSToolsName, nil),
 		// Always registered, unlike local_shell: the seeded policies allow the six reads and hold the four writes at an approval.
 		localtools.GitToolsName: localtools.NewGitTools(opts.EffectiveLocalExecAllowedDir),
-		// Always registered: every gointel tool is a read, allowed whole by the seeded policies (revisit before any mutating op lands here).
-		gointel.ToolsProviderName: gointel.NewTools(goIndex),
-		// Always registered: jq_query reads a file read_file already reaches, writes nothing, reaches no network, and is deadline-bounded.
-		jqtool.ToolsProviderName: jqtool.NewTools(opts.EffectiveLocalExecAllowedDir),
 		// Always registered, unbound: completed by bindWorkspaceSearch below once the engine's embedding seam exists.
 		searchtool.ToolsProviderName: newWorkspaceSearchTools(ResolveWorkspaceID(opts.ContenoxDir)),
 		// Wired, not durable-only: this engine resumes suspended mission chains, and a resumed unit asks its remaining questions here.

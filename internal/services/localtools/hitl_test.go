@@ -158,8 +158,12 @@ func TestUnit_HITLWrapper_Deny_BlocksInner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res != localtools.DenyMessage {
-		t.Errorf("expected deny message, got %v", res)
+	text, _ := res.(string)
+	if !strings.Contains(text, "Denied by the active policy") {
+		t.Errorf("a categorical deny must name the envelope that decided, got %v", res)
+	}
+	if !strings.Contains(text, "Do not retry") {
+		t.Errorf("a categorical deny must forbid the retry, or an unattended agent spends its budget on the same wall: %v", res)
 	}
 	if len(inner.calls) != 0 {
 		t.Errorf("inner must not be called on deny, got %v", inner.calls)

@@ -71,7 +71,7 @@ func (pf *parkedAskFleet) parkAsk(t *testing.T, askID, contenoxSessionID string)
 		ToolsName:   "local_shell",
 		ToolName:    "exec",
 		ArgsSummary: "find home/naro -name go.mod",
-		PolicyName:  "hitl-policy-beam.json",
+		PolicyName:  "hitl-policy-acp.json",
 		OnTimeout:   "deny",
 		State:       runtimetypes.HITLApprovalPending,
 		SessionID:   contenoxSessionID,
@@ -176,7 +176,7 @@ func TestFleet_AttachingToAParkedSessionIsShownTheApproval(t *testing.T) {
 	meta, ok := approvalflow.ParseMeta(card.Meta)
 	require.True(t, ok)
 	require.Equal(t, "local_shell", meta.ToolsName)
-	require.Equal(t, "hitl-policy-beam.json", meta.PolicyName)
+	require.Equal(t, "hitl-policy-acp.json", meta.PolicyName)
 	require.Nil(t, card.ToolCall.RawInput,
 		"the durable row keeps no arguments; a re-offered card must not invent the input the policy gated")
 }

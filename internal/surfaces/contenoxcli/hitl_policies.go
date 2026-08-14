@@ -25,9 +25,6 @@ var hitlPolicyACP string
 //go:embed hitl-policy-acpx.json
 var hitlPolicyACPX string
 
-//go:embed hitl-policy-beam.json
-var hitlPolicyBeam string
-
 //go:embed hitl-policy-oracle.json
 var hitlPolicyOracle string
 
@@ -42,7 +39,6 @@ var HITLPolicyPresets = []struct {
 	{"hitl-policy-dev.json", hitlPolicyDev},
 	{"hitl-policy-acp.json", hitlPolicyACP},
 	{"hitl-policy-acpx.json", hitlPolicyACPX},
-	{"hitl-policy-beam.json", hitlPolicyBeam},
 	{"hitl-policy-oracle.json", hitlPolicyOracle},
 }
 

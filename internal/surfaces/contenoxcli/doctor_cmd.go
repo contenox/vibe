@@ -265,7 +265,7 @@ func doctorVerdict(res setupcheck.Result) (ready bool, reason, next string) {
 func printDoctorVerdict(w io.Writer, res setupcheck.Result) {
 	ready, reason, next := doctorVerdict(res)
 	if ready {
-		fmt.Fprintln(w, "Ready: yes — chat now with `contenox new` or `contenox \"your prompt\"`.")
+		fmt.Fprintln(w, "Ready: yes — chat now with `contenox \"your prompt\"`.")
 		fmt.Fprintln(w, "")
 		return
 	}

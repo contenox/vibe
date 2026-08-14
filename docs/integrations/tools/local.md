@@ -132,7 +132,7 @@ Values are strings even when conceptually numeric — `tools_policies` is the ch
 
 ## `git` — Git operations
 
-Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). Runs in-process against the workspace's own Git repository (no `git` binary, no shell quoting) — the read tools are `allow` by default, the mutating ones require approval in the seeded HITL policies. The repository root is found by walking up from the allowed/working directory, same as `git` itself; network operations (push, pull, fetch, clone) are out of scope here — reach them through `local_shell` under its own policy.
+Available in `contenox chat`, `contenox run`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). Runs in-process against the workspace's own Git repository (no `git` binary, no shell quoting) — the read tools are `allow` by default, the mutating ones require approval in the seeded HITL policies. The repository root is found by walking up from the allowed/working directory, same as `git` itself; network operations (push, pull, fetch, clone) are out of scope here — reach them through `local_shell` under its own policy.
 
 ### Tools
 
@@ -163,69 +163,9 @@ The default HITL presets (`hitl-policy-default.json`, `hitl-policy-acp.json`) al
 
 ---
 
-## `gointel` — Go code intelligence
-
-Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). Six read-only tools backed by a real Go type checker over the module containing the target directory (default: workspace root; host `GOOS`/`GOARCH`, no build tags, tests excluded). Prefer these over `grep`/`local_shell` for exact questions about Go symbols — they answer from the type graph, not from text search.
-
-### Tools
-
-| Tool | Parameters | Description |
-|---|---|---|
-| `go_describe` | `symbol`, `dir?` | Type, signature, doc comment, and (for named types) fields and methods of a Go symbol. |
-| `go_definition` | `symbol`, `dir?` | Where a symbol is declared: `file:line:col` plus the source line. |
-| `go_references` | `symbol`, `dir?` | Every use of a symbol in the module, resolved by type identity (not text), grouped by file. Capped at 50 results by default (max 200). |
-| `go_implementations` | `symbol`, `dir?` | Both directions of the implements relation: types implementing an interface, and interfaces a type satisfies. |
-| `go_symbols` | `dir?` | Outline of a package or a single `.go` file: every declaration, kind-tagged, with `file:line`. |
-| `go_diagnostics` | `dir?` | Type/parse errors plus vet passes for a scope (`changed`, `package`, or `all`). Advisory — produced by this binary's own type checker, not the repository's toolchain; `go build` is the arbiter. |
-
-`symbol` is qualified as `"pkg.Ident"`, `"pkg.Type.Method"`, or a bare `"Ident"`; an ambiguous name is refused with the qualified candidates listed. All six tools are `allow` by default in the seeded HITL policies.
-
-### Chain example
-
-```json
-"execute_config": {
-  "model": "qwen3:8b",
-  "provider": "ollama",
-  "tools": ["gointel"]
-}
-```
-
----
-
-## `jq` — Structured data query
-
-Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). One tool, `jq_query`: runs a [jq](https://jqlang.org/) program (pure-Go `gojq`) over a JSON or YAML document and returns the emitted values. Read-only — a filter like `.a = 1` returns a modified copy, never touching the file on disk — with no network access and a bounded execution deadline (including recursion).
-
-### Tool
-
-**`jq_query`**
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `filter` | string | ✅ | The jq program, e.g. `.tasks[] \| select(.handler=="tools") \| .id`. |
-| `path` | string | — | Document to query, relative to the workspace root. Mutually exclusive with `input`. |
-| `input` | string | — | The document itself as a JSON or YAML string. Mutually exclusive with `path`. |
-| `format` | string | — | `json` or `yaml`. Default: inferred from the file extension, then content. |
-| `max` | integer | — | Maximum values to return (default 200, ceiling 5000). |
-| `deadline_ms` | integer | — | Time budget in milliseconds (default 2000, ceiling 30000). |
-
-Prefer `jq_query` over reading a whole config file when you only need one field or a projection — it costs a few tokens where the file costs thousands. `jq_query` is `allow` by default in the seeded HITL policies.
-
-### Chain example
-
-```json
-"execute_config": {
-  "model": "qwen3:8b",
-  "provider": "ollama",
-  "tools": ["jq"]
-}
-```
-
----
-
 ## `workspace` — Semantic search
 
-Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). One tool, `workspace_search`, over the semantic index built by [`contenox index`](/docs/reference/contenox-cli/). Returns ranked hits, each a `file:line-range` citation plus the matching text, so an answer can be attributed and the cited range re-read in full. A workspace with no index is not an error — the result names `contenox index` for the operator to run.
+Available in `contenox chat`, `contenox run`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). One tool, `workspace_search`, over the semantic index built by [`contenox index`](/docs/reference/contenox-cli/). Returns ranked hits, each a `file:line-range` citation plus the matching text, so an answer can be attributed and the cited range re-read in full. A workspace with no index is not an error — the result names `contenox index` for the operator to run.
 
 ### Tool
 
@@ -236,7 +176,7 @@ Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor ses
 | `question` | string | ✅ | Natural-language question about the workspace, phrased as what you want to find (the ranking is semantic, not keyword). |
 | `top_k` | integer | — | Maximum citations to return. The result is also capped by an overall token budget and says how many hits it withheld. |
 
-Results can go stale: a hit is flagged when the source file changed since the last index run. `workspace_search` answers by meaning and can be approximately right; for exact Go-symbol questions use the `gointel` tools instead. `workspace_search` is `allow` by default in the seeded HITL policies. See the [workspace index & search guide](/docs/guide/search/) for setting up the embedding model and building the index.
+Results can go stale: a hit is flagged when the source file changed since the last index run. `workspace_search` answers by meaning and can be approximately right, so treat a hit as a location to verify rather than a proof. `workspace_search` is `allow` by default in the seeded HITL policies. See the [workspace index & search guide](/docs/guide/search/) for setting up the embedding model and building the index.
 
 ### Chain example
 
@@ -254,7 +194,7 @@ Results can go stale: a hit is flagged when the source file changed since the la
 
 > **Beta:** this toolset requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) and its interface may change; without the opt-in it is not registered at all.
 
-Available in `contenox chat`, `contenox run`, `contenox new`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). `goja_eval` runs JavaScript (ES2023) in a sandbox with no network, no filesystem, no `require`/`import`, and no async — its only way out is `host.tool("provider.tool_name", {args})`, which calls another registered tool under the same HITL rules a direct model call would. The sandbox's result is the last expression evaluated.
+Available in `contenox chat`, `contenox run`, and ACP editor sessions (`contenox acp` / `acpx` — Zed, JetBrains, AionUi, OpenClaw). `goja_eval` runs JavaScript (ES2023) in a sandbox with no network, no filesystem, no `require`/`import`, and no async — its only way out is `host.tool("provider.tool_name", {args})`, which calls another registered tool under the same HITL rules a direct model call would. The sandbox's result is the last expression evaluated.
 
 Beyond `goja_eval`, Contenox scans `$CONTENOX_DIR/tools/*.js` at startup and registers one additional tool per script file, each under the name and description the script itself declares — a broken script fails at startup naming the file, rather than silently vanishing as a tool the operator believes still exists.
 
@@ -389,54 +329,6 @@ To use `local_shell` with **no policy restrictions** (fully open), omit `tools_p
 | `cwd` | string | — | Working directory |
 | `timeout` | string | — | Duration e.g. `30s` |
 | `shell` | boolean | — | Run via `/bin/sh -c` (allows pipes, redirects, `$VAR`). **Disabled when `_allowed_commands` or `_allowed_dir` is set.** |
-
----
-
-## `print` — Append to conversation
-
-Always available. Appends a message to the chat history as a system message, or returns the message as a plain string when no chat history is active.
-
-### Tool
-
-**`print`**
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `message` | string | ✅ | Text to append or return |
-
-### Chain example
-
-```json
-"execute_config": {
-  "model": "qwen3:8b",
-  "provider": "ollama",
-  "tools": ["print"]
-}
-```
-
----
-
-## `echo` — Debug passthrough
-
-Always available. Echoes the input back, prefixed with `"Echo: "`. Useful for verifying what a task receives during chain development.
-
-### Tool
-
-**`echo`**
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `input` | string | ✅ | Text to echo |
-
-### Chain example
-
-```json
-"execute_config": {
-  "model": "qwen3:8b",
-  "provider": "ollama",
-  "tools": ["echo"]
-}
-```
 
 ---
 

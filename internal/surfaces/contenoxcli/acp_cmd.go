@@ -20,7 +20,6 @@ import (
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/eventlog"
-	"github.com/contenox/contenox/internal/services/gointel"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
@@ -81,6 +80,7 @@ func init() {
 		c.Flags().Bool("auto", false, "Non-interactive mode: disable HITL permission prompts (gated tools run unattended)")
 		c.Flags().Bool("setup", false, "Run interactive setup wizard to configure provider and model, then exit.")
 		c.Flags().String("workspace-id", "", "Workspace ID for new ACP sessions (default: the stable workspace from ~/.contenox/workspace.id, same as the CLI). Existing sessions are always located by their session ID regardless of workspace.")
+		addWorkspaceRootFlag(c)
 	}
 	acpCmd.Flags().Bool("experimental-acp", false, "Accepted for compatibility with ACP clients that hardcode this launch flag (e.g. AionUi); no effect.")
 	_ = acpCmd.Flags().MarkHidden("experimental-acp")
@@ -273,10 +273,6 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		return fmt.Errorf("resolve sandbox env: %w", err)
 	}
 
-	// The index owns a reaper goroutine; it rides engine.Stop once built, and the guard here covers the setup-only/error paths before that.
-	goIndex := gointel.NewIndex(gointel.Config{
-		CwdResolver: acpsvc.NewACPCwdResolver(func() *acpsvc.Transport { return transport }),
-	})
 	// Opt-in-beta gated: without it the scripts are never loaded and the provider stays unregistered.
 	gojaScriptDir := filepath.Join(contenoxDir, "tools")
 	if !optInBeta {
@@ -284,18 +280,16 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	}
 	gt, err := gojatool.New(gojatool.Config{ScriptDir: gojaScriptDir})
 	if err != nil {
-		goIndex.Shutdown()
 		return fmt.Errorf("build goja sandbox: %w", err)
 	}
 	toolsOwned := false
 	defer func() {
 		if !toolsOwned {
-			goIndex.Shutdown()
 			gt.Shutdown()
 		}
 	}()
 
-	tools := acpToolset(db, tracker, goIndex, gt, workspaceID, func() *acpsvc.Transport { return transport }, shellScrub, missions, acpHITL, missionPub, optInBeta)
+	tools := acpToolset(db, tracker, gt, workspaceID, func() *acpsvc.Transport { return transport }, shellScrub, missions, acpHITL, missionPub, optInBeta)
 
 	// One registry for every connection: without it, an approval raised by remote work would be answered on the local desk instead.
 	sessionRouter := acpsvc.NewSessionRouter()
@@ -355,11 +349,10 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		}
 		// Needs the engine's chat path, which now exists (same post-construction ordering as engine.go).
 		bindAudioTranscriber(tools, engine)
-		// Rides the engine's chainable stop so the index's reaper and the goja sandbox join on shutdown.
+		// Rides the engine's chainable stop so the goja sandbox joins on shutdown.
 		toolsOwned = true
 		oldStop := engine.Stop
 		engine.Stop = func() {
-			goIndex.Shutdown()
 			gt.Shutdown()
 			oldStop()
 		}
@@ -400,7 +393,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			HITL:         acpHITL,
 			PolicySource: hitlPolicySource(contenoxDir),
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-				discoverChainAgents(dctx, agents, contenoxDir, tracker, optInBeta)
+				discoverChainAgents(dctx, agents, contenoxDir, tracker)
 			},
 			// The workspace missionPub stamps; a dispatched unit's own publisher must stamp the same one.
 			WorkspaceID: workspaceID,
@@ -415,9 +408,22 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		defer stopFleetTeardown()
 	}
 
+	// Default root for a client that proposes no workspace; also bounds every relay attachment.
+	launchDir, err := os.Getwd()
+	if err != nil {
+		reportErr(err)
+		return fmt.Errorf("resolve working directory: %w", err)
+	}
+	workspaceRoots, err := buildWorkspaceFactory(cmd, launchDir, runtimetypes.New(db.WithoutTransaction()))
+	if err != nil {
+		reportErr(err)
+		return err
+	}
+
 	transportFactory := acpsvc.New(acpsvc.Deps{
 		Engine:             engine,
 		DB:                 db,
+		WorkspaceRoots:     workspaceRoots,
 		ChainRegistry:      chains,
 		FIMChainRegistry:   fimChains,
 		DefaultModel:       defaultModel,

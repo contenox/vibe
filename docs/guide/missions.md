@@ -16,7 +16,7 @@ Three things run work in contenox, and they are not interchangeable.
 | | What it is | Who drives it | What survives |
 |---|---|---|---|
 | **Chain run** (`contenox run`) | One stateless execution of a chain file | The invoking process, start to finish | The captured execution state (`contenox state show <reqID>`) |
-| **Session** (`contenox new` / `contenox resume`, `contenox acp`, `contenox chat`) | An attended conversation: you prompt, you approve each gated call | You, turn by turn | The session history |
+| **Session** (`contenox acp`, `contenox chat`) | An attended conversation: you prompt, you approve each gated call | You, turn by turn | The session history |
 | **Mission** (`mission fire`, `/mission`) | An unattended work order: one intent, one agent, one envelope | The runtime's drive loop, unattended | The mission record, its reports, its plan, and its asks |
 
 A mission dispatches a **unit**: a child subprocess running the agent, with its own session underneath. You do not prompt that session. The runtime does, under the rules below.
@@ -75,7 +75,6 @@ The unit's lifetime is its host's lifetime. To fire a mission and keep working, 
 | Host | How you fire | Notes |
 |---|---|---|
 | `contenox acp` (editor session) | `/mission <intent>` | Reports stream back into the firing session as they land |
-| `contenox new` (terminal UI) | `/mission <intent>` | Same slash command, same envelope selection |
 | `contenox mission fire --wait` | the CLI | Blocking; the unit dies when the command returns |
 
 There is no daemon and no background mission service. This is stated plainly rather than worked around: process supervision is the host's job, and the durable record is what makes a dead host survivable.

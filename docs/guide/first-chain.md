@@ -26,7 +26,7 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 ├── chain-agent-run.json        ← the one-shot pipeline chain
 ├── chain-agent-acp.json        ← editor (ACP) sessions
 ├── chain-agent-acpx.json       ← headless / untrusted-driver (ACPX) sessions
-├── chain-agent-beam.json       ← contenox new's terminal UI
+├── chain-agent-beam.json       ← attended terminal sessions
 ├── chain-planner-default.json  ← the default mission planner
 ├── chain-compact-default.json  ← history compaction
 ├── chain-fim-default.json      ← editor autocomplete
@@ -34,8 +34,7 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 ├── hitl-policy-strict.json
 ├── hitl-policy-dev.json
 ├── hitl-policy-acp.json        ← editor (ACP) sessions
-├── hitl-policy-acpx.json       ← headless / untrusted-driver (ACPX) sessions
-└── hitl-policy-beam.json       ← contenox new's attended terminal session
+└── hitl-policy-acpx.json       ← headless / untrusted-driver (ACPX) sessions
 
 ./my-project/.contenox/         ← project-local workspace marker
 └── workspace.id                ← unique workspace ID
@@ -58,8 +57,8 @@ You don't have to start there. You can write your own.
 
 Chains live as files in `~/.contenox/` (and your workspace `.contenox/`); the
 CLI picks one per invocation with `--chain`, or falls back to the configured
-`default-chain`. Sessions in the terminal UI (`contenox new`) and in ACP editors
-run the workspace's default chain the same way.
+`default-chain`. Sessions in ACP editors run the workspace's default chain the
+same way.
 
 ---
 

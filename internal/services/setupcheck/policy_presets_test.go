@@ -36,7 +36,7 @@ func TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks(t *testing.T) {
 	res := AddStalePolicyPresetIssue(base, []StalePolicyPreset{{
 		Name:     "hitl-policy-default.json",
 		Path:     "/home/u/.contenox/hitl-policy-default.json",
-		Toolsets: []string{"gointel", "goja", "jq", "workspace"},
+		Toolsets: []string{"goja", "local_shell", "webtools", "workspace"},
 		Effect:   "every call stops for approval",
 	}}, "contenox init --refresh-policies")
 
@@ -55,7 +55,7 @@ func TestUnit_AddStalePolicyPresetIssue_IsAWarningAndNeverBlocks(t *testing.T) {
 	if found.Category != CategoryPolicy {
 		t.Fatalf("category = %q, want %q", found.Category, CategoryPolicy)
 	}
-	for _, want := range []string{"/home/u/.contenox/hitl-policy-default.json", "gointel", "goja", "jq", "workspace", "stops for approval"} {
+	for _, want := range []string{"/home/u/.contenox/hitl-policy-default.json", "goja", "local_shell", "webtools", "workspace", "stops for approval"} {
 		if !strings.Contains(found.Message, want) {
 			t.Fatalf("message does not name %q: %s", want, found.Message)
 		}
@@ -80,7 +80,7 @@ func TestUnit_AddStalePolicyPresetIssue_NamesPathAndDefaultActionFallThrough(t *
 		{
 			Name:     "hitl-policy-default.json",
 			Path:     "/w/.contenox/hitl-policy-default.json",
-			Toolsets: []string{"git", "jq"},
+			Toolsets: []string{"git", "goja"},
 			Effect:   "every call stops for approval",
 		},
 		{
@@ -102,7 +102,7 @@ func TestUnit_AddStalePolicyPresetIssue_NamesPathAndDefaultActionFallThrough(t *
 	}
 	for _, want := range []string{
 		// Path + toolsets + that file's own fall-through, per file.
-		"/w/.contenox/hitl-policy-default.json predates toolsets git, jq — calls to them fall to this file's default_action (every call stops for approval)",
+		"/w/.contenox/hitl-policy-default.json predates toolsets git, goja — calls to them fall to this file's default_action (every call stops for approval)",
 		"/home/u/.contenox/hitl-policy-strict.json predates toolsets git — calls to them fall to this file's default_action (every call is denied)",
 		// The rule list never gates availability; the message must say so.
 		"The tools stay visible to the model",

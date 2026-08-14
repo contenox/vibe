@@ -35,7 +35,7 @@ The `Next:` line is the single command that moves you closest to yes. When every
 
 ## Chat won't answer: no model configured
 
-**Symptom.** `contenox chat`, `contenox new`, or a chain run refuses to resolve a model. `doctor` reports `Ready: no`.
+**Symptom.** `contenox chat`, an editor session, or a chain run refuses to resolve a model. `doctor` reports `Ready: no`.
 
 **Cause.** One of the defaults is unset, or the default names something the reachable backends do not serve. `doctor` distinguishes these:
 
@@ -134,9 +134,28 @@ Unlike `doctor`, **`vet` is a pass/fail gate**: it exits non-zero when any vette
 
 Files are classified by content: a `"tasks"` array is a chain, a `"rules"` array (or a `hitl-policy-*.json` name) is an envelope; anything else is skipped. If your file is being skipped, that is why.
 
+## Every tool call returns `tool_result_too_large`
+
+**Symptom.** The agent reports it cannot read anything. Tool results come back as
+`{"error":"tool_result_too_large", ...}` with a `max_bytes` of `0`, even for a
+file of a few hundred bytes.
+
+**Cause.** The chain has no `token_limit`. The per-call tool-result cap is
+derived from what is left of that budget, so an absent one leaves nothing to
+spend and every result is over the limit.
+
+**Fix.** Set it at the top level of the chain file:
+
+```json
+{ "id": "my-chain", "token_limit": 131072, "tasks": [ ... ] }
+```
+
+Use the context window of the model you configured. The shipped chains use
+`131072`. See [chain structure](/docs/specification/#chain-structure).
+
 ## Recovering after a crash or a restart
 
-**Nothing resumes a *run*.** `contenox resume` reopens a terminal-UI session, not a suspended run — resuming a run is not a verb, it is a side effect of the two commands you would run anyway.
+**Nothing resumes a *run*.** Reopening a session is not resuming a run — resuming a run is not a verb, it is a side effect of the two commands you would run anyway.
 
 **`contenox approvals respond <id> …`** records the verdict and, when a checkpoint exists under that ask, resumes the suspended run *in the responding process*. Ordering matters here and is deliberate: for a checkpointed run, the process proves it can build an engine **before** anything is recorded. A process with no usable model configuration is refused outright and the ask stays pending, answerable from a terminal that can reach your models — because a checkpointed run's verdict is one-shot and must not be spent by a process that cannot act on it.
 
@@ -155,7 +174,7 @@ A resume that itself fails is not lost: its checkpoint is retained with the fail
 | Failure | What survives | What you run |
 |---|---|---|
 | **The firing CLI exits** (`mission fire --wait` timed out, or you hit Ctrl-C) | The mission record and every report filed so far. The unit is a child of that process and is torn down with it. | `contenox mission show <id>` to read it; `contenox mission stop <id>` to close it now instead of waiting for reclaim |
-| **A host dies** (`contenox acp`, `contenox new`, or the firing CLI is killed or crashes) | Everything durable. Its units die with it; their mission rows stay `open` with a heartbeat that will never advance. | `contenox mission list` (or `mission show`, or `doctor`) — each reclaims dead-host missions on the way. A host booting sweeps too. |
+| **A host dies** (`contenox acp` or the firing CLI is killed or crashes) | Everything durable. Its units die with it; their mission rows stay `open` with a heartbeat that will never advance. | `contenox mission list` (or `mission show`, or `doctor`) — each reclaims dead-host missions on the way. A host booting sweeps too. |
 | **The asking process dies** while an ask is pending | The ask row, and the run's checkpoint once the park window has elapsed and the run released its process. | `contenox approvals respond <id> …` — it resumes the run here. If nothing was checkpointed under it, the verdict is recorded and it says so plainly. |
 | **A resumer dies mid-resume** | The checkpoint, with its claim. The claim goes stale after 10 minutes. | `contenox approvals list` — it re-derives the stranded set and finishes them in that process |
 | **The machine restarts** | All of it — missions, reports, asks, checkpoints, inbox, config are in the local database. Nothing resumes on its own; there is no daemon. | `contenox approvals list`, then `contenox mission list` (or `contenox doctor`) |
