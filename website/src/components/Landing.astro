@@ -3,6 +3,12 @@ export interface LandingStrings {
   h1a: string;
   h1b: string;
   lede: string;
+  /** Hero sub-headline: the declare-don't-build claim. */
+  declareH2: string;
+  /** [path, comment] — the `.contenox/` listing shown in the hero. A blank comment renders the path alone. */
+  declareTree: [string, string][];
+  /** Caption under the hero tree. */
+  declareNote: string;
   ctaRecipe: string;
   ctaGithub: string;
   copyLabel: string;
@@ -91,6 +97,16 @@ const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text
     <span class="text-neutral-500 dark:text-neutral-400">{t.h1b}</span>
   </h1>
   <p class="mx-auto mt-6 max-w-xl text-neutral-600 dark:text-neutral-400">{t.lede}</p>
+  <p class="mx-auto mt-10 max-w-2xl text-xl font-bold tracking-tight sm:text-2xl">{t.declareH2}</p>
+  <div class="mx-auto mt-6 max-w-xl overflow-x-auto rounded-xl border border-neutral-200/60 bg-white/60 p-5 text-left font-mono text-xs leading-6 shadow-sm backdrop-blur-md sm:text-sm dark:border-neutral-800/60 dark:bg-neutral-950/60">
+    {t.declareTree.map(([path, comment]) => (
+      <div class="whitespace-pre">
+        <span class="text-neutral-700 dark:text-neutral-300">{path}</span>
+        {comment && <span class="text-neutral-400 dark:text-neutral-500">{comment}</span>}
+      </div>
+    ))}
+  </div>
+  <p class="mx-auto mt-4 max-w-xl text-sm text-neutral-500">{t.declareNote}</p>
   <div class="mt-8 flex flex-wrap justify-center gap-3">
     <a href="/docs/use-cases/" class="rounded-lg bg-gradient-to-r from-primary-500 to-primary-700 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-primary-500/20 transition-all hover:scale-105 hover:shadow-primary-500/40">{t.ctaRecipe}</a>
     <a href="https://github.com/contenox/contenox" class={btnGhost}>{t.ctaGithub}</a>

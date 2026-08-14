@@ -43,7 +43,19 @@ const routeCode = `{
 const t: LandingStrings = {
   h1a: "Ein Agenten-Server.",
   h1b: "Jedes KI-Produkt betreibt einen. Ausgeliefert bekommst du keinen.",
-  lede: "Jedes KI-Produkt betreibt intern eine Agenten-Schleife nach Regeln, die der Anbieter geschrieben hat. Ausgeliefert bekommst du sie nie. contenox ist genau diese Schicht als Server, den du selbst betreibst: Du deklarierst Agenten, Werkzeuge und Modelle in Dateien, jede Aktion wird vor der Ausführung gegen deine Regeln geprüft, auf deiner Maschine, mit jedem Modell.",
+  lede: "contenox ist genau diese Schicht als Server, den du selbst betreibst — auf deiner Maschine, mit jedem Modell. Jede Aktion wird vor der Ausführung gegen deine Regeln geprüft.",
+  declareH2: "Du baust keinen Agenten. Du deklarierst einen.",
+  declareTree: [
+    [".contenox/", ""],
+    ["  chain-agent-acp.json        ", "# der Editor-Agent: Tasks, Routing, Werkzeuge"],
+    ["  chain-agent-run.json        ", "# der Headless-Agent, für Cron und CI"],
+    ["  chain-planner-default.json  ", "# Sub-Chains, die die Agenten aufrufen"],
+    ["  hitl-policy-default.json    ", "# was einen Menschen braucht, und wann"],
+    ["  hitl-policy-strict.json     ", "# derselbe Agent, strenger — pro Umgebung austauschbar"],
+    ["AGENTS.md                     ", "# Projektkontext, in jede Session geladen"],
+  ],
+  declareNote:
+    "Datei ändern, neu ausführen — kein Build-Schritt, keine Plugin-API, kein Release. Beide Dateiarten sind JSON-Schema-validiert: dein Editor vervollständigt sie, die CI prüft sie.",
   ctaRecipe: "Rezept ausführen",
   copyLabel: "Kopieren",
   installTabPosix: "macOS / Linux",
