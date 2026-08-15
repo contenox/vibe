@@ -34,6 +34,7 @@ import (
 	"github.com/contenox/contenox/libbus"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libkvstore"
+	"github.com/contenox/contenox/liblog"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
 )
@@ -100,6 +101,16 @@ type acpProfile struct {
 	seedChain    func(contenoxDir string) error
 	embedFleet   bool
 	seedFIMChain func(contenoxDir string) error
+	// host runs a long-lived host instead of an ACP connection over stdio:
+	// the same runtime, the same relay tunnel, but nothing reading stdin. It
+	// is a field on the profile rather than a separate bootstrap because the
+	// two differ only in what happens once the transport factory exists —
+	// duplicating three hundred lines of setup to change the last twenty is
+	// how the two drift apart.
+	host bool
+	// name labels the startup operation in the logs, so a serve host's
+	// startup is not reported as an editor session's.
+	name string
 }
 
 var acpProfileACP = acpProfile{
@@ -109,6 +120,21 @@ var acpProfileACP = acpProfile{
 	seedChain:    seedACPChainIfMissing,
 	embedFleet:   true,
 	seedFIMChain: seedFIMChainIfMissing,
+	name:         "acp",
+}
+
+// acpProfileServe is the editor profile with the stdio connection removed: a
+// host that keeps this machine reachable through the relay so the app can
+// attach to it without an editor running.
+var acpProfileServe = acpProfile{
+	hitlPolicy:   "hitl-policy-acp.json",
+	chainFile:    chainAgentACPFilename,
+	chainEnv:     "CONTENOX_ACP_CHAIN_PATH",
+	seedChain:    seedACPChainIfMissing,
+	embedFleet:   true,
+	seedFIMChain: seedFIMChainIfMissing,
+	host:         true,
+	name:         "serve",
 }
 
 var acpProfileACPX = acpProfile{
@@ -116,6 +142,7 @@ var acpProfileACPX = acpProfile{
 	chainFile:  chainAgentACPXFilename,
 	chainEnv:   "CONTENOX_ACPX_CHAIN_PATH",
 	seedChain:  seedHeadlessACPChainIfMissing,
+	name:       "acpx",
 }
 
 func runACP(cmd *cobra.Command, _ []string) error  { return runACPProfile(cmd, acpProfileACP) }
@@ -164,9 +191,25 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	workspaceFlag, _ := cmd.Flags().GetString("workspace-id")
 
-	var tracker libtracker.ActivityTracker = libtracker.NewTextActivityTracker(os.Stderr)
+	// A host owns the terminal to draw a status screen on, so its structured
+	// logs go to a rotating file instead of over the top of it. An editor
+	// session keeps stderr, which is where its client reads diagnostics from.
+	logDest := io.Writer(os.Stderr)
+	var serveLog *liblog.Writer
+	if profile.host {
+		rot, logErr := openHostLog(cmd)
+		if logErr != nil {
+			// A host that cannot write its log still serves; it just says so.
+			fmt.Fprintf(os.Stderr, "contenox serve: logging to a file is unavailable, using stderr: %v\n", logErr)
+		} else {
+			serveLog = rot
+			logDest = rot
+			defer rot.Close()
+		}
+	}
+	var tracker libtracker.ActivityTracker = libtracker.NewTextActivityTracker(logDest)
 
-	reportErr, reportChange, endStartup := tracker.Start(ctx, "startup", "acp")
+	reportErr, reportChange, endStartup := tracker.Start(ctx, "startup", profile.name)
 	defer endStartup()
 	reportChange("phase", "flags_parsed")
 
@@ -184,6 +227,14 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	}
 	defer db.Close()
 	reportChange("phase", "open_db")
+
+	// The host log booted on defaults because it had to exist before the
+	// database did; now that config is readable, move it onto the operator's
+	// bounds. Anything unset stays on the default it started with.
+	if serveLog != nil {
+		applyStoredLogSettings(ctx, runtimetypes.New(db.WithoutTransaction()), serveLog)
+		reportChange("phase", "apply_log_settings")
+	}
 
 	// Must match the directory the DB, chain and HITL policy loaders resolve to.
 	contenoxDir, err := globalContenoxDir()
@@ -457,7 +508,14 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		reportErr(err)
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
-	workspaceRoots, err := buildWorkspaceFactory(cmd, launchDir, runtimetypes.New(db.WithoutTransaction()))
+	// A host serves where it was told to, not where it happened to be started
+	// from: this is the root the screen names AND the first entry in the
+	// workspace allowlist, so the two cannot disagree about what is reachable.
+	defaultRoot := launchDir
+	if profile.host {
+		defaultRoot = defaultHostRoot(cmd, launchDir)
+	}
+	workspaceRoots, err := buildWorkspaceFactory(cmd, defaultRoot, runtimetypes.New(db.WithoutTransaction()))
 	if err != nil {
 		reportErr(err)
 		return err
@@ -504,11 +562,31 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 
 	// Best-effort: never blocks or fails serving.
 	acpCwd, _ := os.Getwd()
+	presenceKind := presence.KindACP
+	if profile.host {
+		presenceKind = presence.KindServe
+	}
 	presenceReporter := presence.StartReporter(ctx, presenceStore, presence.Record{
-		Kind: presence.KindACP,
+		Kind: presenceKind,
 		Cwd:  acpCwd,
 	})
 	defer presenceReporter.Stop()
+
+	// A host has no stdin to serve ACP over: the relay tunnel above is its
+	// only inbound path, so it draws its screen and waits to be stopped.
+	if profile.host {
+		return runHost(ctx, cmd, hostScreen{
+			contenoxDir:  contenoxDir,
+			workspaceID:  workspaceID,
+			root:         defaultRoot,
+			model:        defaultModel,
+			provider:     defaultProvider,
+			engineReady:  engine != nil,
+			setupCheck:   hostSetupCheck(ctx, engine),
+			log:          serveLog,
+			relayEnabled: relayIsConfigured(contenoxDir),
+		})
+	}
 
 	conn := libacp.NewAgentSideConnection(acpStdio{}, func(c *libacp.AgentSideConnection) libacp.Agent {
 		agent := transportFactory(c)

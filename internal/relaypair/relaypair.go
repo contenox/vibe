@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -56,6 +57,26 @@ func Endpoint(explicit string) string {
 		return e
 	}
 	return DefaultEndpoint
+}
+
+// AppOrigin reduces a relay endpoint to the origin (scheme://host) a human
+// opens in a browser: the hosted relay maps to [DefaultAppEndpoint], and a
+// self-hosted relay serves its own app at its own origin. Any path the
+// endpoint was configured with is dropped, because the app's routes hang off
+// the root.
+//
+// It lives here rather than beside a caller because both the session surface
+// and the CLI print app links, and two derivations of the same origin is one
+// more place for them to disagree.
+func AppOrigin(endpoint string) (string, error) {
+	if endpoint == DefaultEndpoint {
+		endpoint = DefaultAppEndpoint
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("the stored relay endpoint %q is not a URL an app link can be built from", endpoint)
+	}
+	return u.Scheme + "://" + u.Host, nil
 }
 
 const httpTimeout = 30 * time.Second
