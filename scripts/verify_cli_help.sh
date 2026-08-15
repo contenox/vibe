@@ -39,20 +39,21 @@ fi
 STABLE_CMDS=(
   "acp"
   "acpx"
+  "agent"
   "approvals"
+  "autocomplete"
   "backend"
-  "new"
   "cache"
   "chat"
   "config"
   "doctor"
+  "hitl"
   "inbox"
   "index"
   "init"
   "mcp"
   "mission"
   "model"
-  "resume"
   "run"
   "sandbox"
   "search"
@@ -63,6 +64,7 @@ STABLE_CMDS=(
   "tools"
   "update"
   "version"
+  "vet"
   "workspace"
 )
 
@@ -71,7 +73,6 @@ STABLE_CMDS=(
 # the stable help and present under the opt-in, so the gate still fails if one
 # is deleted outright rather than merely hidden.
 BETA_CMDS=(
-  "agent"
   "events"
 )
 
