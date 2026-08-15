@@ -14,9 +14,10 @@ import (
 // handlePair attaches this machine to a relay with a key minted in the app.
 // No argument reports the stored pairing; the instance token is never printed.
 //
-// A session command rather than a CLI verb: the connection is held by this
-// process, so pairing elsewhere would store a credential with nothing running
-// to use it.
+// This is the in-session entry point to the same work `contenox pair` does
+// from the CLI: a pairing describes the *machine* and is stored in the
+// contenox directory, so whichever one wrote it, the next process to start
+// finds it and dials with it.
 func (t *Transport) handlePair(ctx context.Context, args string) (string, error) {
 	dir := t.deps.ContenoxDir
 	if dir == "" {

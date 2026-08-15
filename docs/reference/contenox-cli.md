@@ -685,7 +685,7 @@ The [oracle](/docs/use-cases/auto-attention/) needs no `/mission` equivalent: it
 
 ### The `/pair` and `/unpair` slash commands
 
-Pairing attaches the machine to a relay, so the sessions this process serves can be reached from somewhere else — the [contenox app](https://app.contenox.com) on a phone, typically. It is a session command, not a CLI verb, on purpose: the process you type it into is the one that holds the connection, so a `contenox pair` run anywhere else would store a credential with nothing running to use it.
+Pairing attaches the machine to a relay, so the sessions this process serves can be reached from somewhere else — the [contenox app](https://app.contenox.com) on a phone, typically. A pairing describes the **machine**, so the credential lands in `~/.contenox/relay.json` and every contenox process on that machine uses it; these slash commands and the [`contenox pair`](#contenox-pair--contenox-unpair) CLI verbs are two entry points to the same stored pairing.
 
 From inside an ACP editor session:
 
@@ -742,6 +742,48 @@ contenox acpx                # headless / untrusted-driver profile
 | `--workspace-id <id>` | Workspace ID for new ACP sessions (default: the stable workspace from `~/.contenox/workspace.id`, same as the CLI) |
 
 The chain each profile loads is overridable via `CONTENOX_ACP_CHAIN_PATH` (acp) and `CONTENOX_ACPX_CHAIN_PATH` (acpx). See the [editor integration guides](/docs/integrations/editors/zed/) for client setup.
+
+### `contenox serve [path]` / `contenox beam [path]`
+
+Run contenox as a long-lived host: the same runtime `contenox acp` builds, reachable from the [contenox app](https://app.contenox.com) through the relay, with no editor involved. `beam` is an alias for the same host.
+
+Where `acp` serves one client over stdio, `serve` has no stdin to serve: the relay tunnel is its inbound path, so it checks its setup, prints a status screen, and stays up until interrupted.
+
+```bash
+contenox serve              # host, rooted at your home directory
+contenox serve .            # host, scoped to the current directory
+contenox serve ~/src/api    # host, scoped to one workspace
+```
+
+The optional path is the default workspace root for sessions the app opens, and the first entry in the [workspace roots](#workspace-roots) allowlist that bounds every relay attachment. With no path the host serves your home directory: a host outlives the shell that started it and is reached from a device that knows nothing about that shell's working directory, so scoping it to the launch directory would make what the app can open depend on where you happened to be standing. `contenox serve .` asks for the narrow scope explicitly.
+
+The status screen reports what the process actually is — setup readiness (the same check `contenox doctor` runs), the workspace root, the model, the relay and app URL when paired, and the log directory with the retention bounds in force. An unpaired host says so and prints the steps to pair it; it still runs, it is simply reachable on that machine only.
+
+| Flag           | Description                                                              |
+| -------------- | ------------------------------------------------------------------------ |
+| `--log-dir <dir>` | Write host logs here (default: `<data-dir>/logs`)                     |
+
+Structured logs go to the log directory rather than the screen, so the screen stays a status display. Files are named `serve-<YYYY-MM-DD>.log`, and a day that outgrows its size bound continues in `serve-<YYYY-MM-DD>.2.log`, `.3.log`, and so on. Retention is bounded by the `log-*` [config keys](/docs/reference/config/#set-persistent-defaults); restarting a host continues the current part rather than starting a new file per launch.
+
+Running a host: [Reaching a machine from the app](/docs/guide/serve/).
+
+### `contenox pair` / `contenox unpair`
+
+Attach this machine to a relay, or detach it, without opening an editor session. Same stored pairing as the [`/pair` slash command](#the-pair-and-unpair-slash-commands) — a pairing describes the machine, so whichever entry point writes it, every later process finds it.
+
+```bash
+contenox pair                    # what is this machine attached to?
+contenox pair K7M-3PQ            # redeem a key minted in the app
+contenox pair K7M-3PQ https://relay.example.internal   # a relay you run yourself
+contenox unpair                  # delete the stored credential
+```
+
+- `contenox pair` with no key reports the relay, instance and account, and the app URL. It never prints the credential.
+- The key is short-lived and redeemable exactly once; mint a new one in the app (**Pair device**) if it expires.
+- A self-hosted relay hands out its own public key at redemption and is verified against that key from then on. `CONTENOX_RELAY_ENDPOINT` sets the same endpoint for every `pair` without an inline one.
+- `contenox unpair` is local: it stops this machine dialling but does not revoke. Revoke an instance in the app — a revoked machine is refused at its next dial whether or not it still holds the file.
+
+Pairing alone attaches the machine; run [`contenox serve`](#contenox-serve-path--contenox-beam-path) to keep it reachable.
 
 ### `contenox autocomplete --stdio`
 

@@ -1,6 +1,6 @@
 ---
 title: "Pairing a machine with a relay"
-description: How /pair attaches a machine to a relay so it can be reached from a phone — what is sent, what is stored, and how to undo it.
+description: How pairing attaches a machine to a relay so it can be reached from a phone — what is sent, what is stored, and how to undo it.
 ---
 
 # Pairing a machine with a relay
@@ -14,17 +14,16 @@ command, and until you run it **nothing about your machine leaves it**.
 
 ## The flow
 
-You need the contenox app, signed in, and a running contenox session from any
-ACP editor. The app lives at
+You need the contenox app, signed in. It lives at
 [app.contenox.com](https://app.contenox.com). An account is free — for you
 and up to three teammates, one machine each.
 
 1. In the app, tap **Pair device**. It shows a six-character key and a
    countdown.
-2. In your contenox session, type the key:
+2. On the machine, redeem the key:
 
-   ```
-   /pair K7M-3PQ
+   ```bash
+   contenox pair K7M-3PQ
    ```
 
 That is the whole flow. No browser opens, on either device. That matters more
@@ -35,16 +34,29 @@ failure rather than a convenience. A typed key works the same everywhere.
 The key is short-lived and can be redeemed exactly once. If it expires while you
 are walking to the machine, mint another — they cost nothing.
 
-From then on the app lists this machine and its sessions; `/link` typed into a
-session prints the direct link that opens that same session in the app, so
-picking it up on a phone does not start with hunting through the list.
+### From a session instead
 
-### Why it is typed into a session rather than a shell command
+If you are already in a contenox session in an editor, `/pair K7M-3PQ` does the
+same thing without leaving it. A pairing describes the **machine**, not the
+process that redeemed the key or the directory it was standing in, so both
+entry points write the same credential and every later process finds it.
 
-There is no `contenox pair`, deliberately. The session you are looking at is the
-process that will hold the connection to the relay, so pairing anywhere else
-would write a credential with nothing running to use it. Pairing where the work
-happens is the point, not an accident of where the command was put.
+## Being reachable
+
+Pairing attaches the machine. Something then has to be running for the app to
+attach *to*:
+
+```bash
+contenox serve
+```
+
+That is the host — the full runtime, no editor involved. It prints what it is
+attached to and stays up until you stop it. See
+[Reaching a machine from the app](/docs/guide/serve/).
+
+An editor session works as well as a host, and `/link` typed into a session
+prints the direct link that opens that same session in the app, so picking it up
+on a phone does not start with hunting through the list.
 
 ## Choosing a relay
 
@@ -60,12 +72,14 @@ export CONTENOX_RELAY_ENDPOINT=https://relay.example.internal
 
 Or pass it inline:
 
-```
-/pair K7M-3PQ https://relay.example.internal
+```bash
+contenox pair K7M-3PQ https://relay.example.internal
 ```
 
 Self-hosting is the same mechanism, not a second one. Your relay hands out its
 own public key at redemption, and the machine verifies that key from then on.
+A self-hosted machine is pointed at your relay's own address everywhere it is
+shown — the hosted service is not substituted back in.
 
 ## What is sent, and what is stored
 
@@ -103,8 +117,8 @@ matter if they were untrue:
 
 ## Turning it off
 
-```
-/unpair
+```bash
+contenox unpair          # or /unpair from inside a session
 ```
 
 This is local: it deletes the credential file, and this machine stops dialling.
@@ -118,11 +132,12 @@ clean up, and no daemon to stop.
 
 To check what a machine is attached to without changing anything:
 
-```
-/pair
+```bash
+contenox pair            # or /pair from inside a session
 ```
 
 It prints the relay, the instance and the account. It never prints the token.
+`contenox serve` shows the same attachment on its status screen.
 
 ## Not pairing at all
 
@@ -133,5 +148,6 @@ reaching your machine from elsewhere works the same.
 
 ## See also
 
+- [Reaching a machine from the app](serve.md) — running the host the app attaches to
 - [Human gates and envelopes](hitl.md) — what parks a run and waits for you
 - [Sovereignty](sovereignty.md) — what stays on your machine, and why

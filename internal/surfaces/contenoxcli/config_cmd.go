@@ -40,6 +40,9 @@ var validConfigKeys = map[string]string{
 	"default-oracle-policy":         "Envelope the oracle chain itself runs under. Unset uses hitl-policy-oracle.json.",
 	"oracle-approves-tool-calls":    "Let the oracle rule on a subagent's approve-tier TOOL CALLS, not just its questions (true/false). The subagent envelope's attention.allowAgentApprovals still has to permit it.",
 	"fleet-max-parallel":            "Fleet-width admission cap: max concurrently open mission units (integer; 0 = unlimited; default 8).",
+	"log-max-size":                  "Start a new part of the host log once it reaches this size (e.g. 10MB, 512KB). Applies to 'contenox serve'.",
+	"log-max-files":                 "How many host log files to keep, counted across every date and part (integer; 0 = unlimited).",
+	"log-max-age-days":              "Delete host logs whose date is older than this many days (integer; 0 = no age limit).",
 }
 
 var configCmd = &cobra.Command{
@@ -47,7 +50,7 @@ var configCmd = &cobra.Command{
 	Short: "Manage persistent CLI settings (default model, provider, chain, HITL policy).",
 	Long: `Store and retrieve persistent CLI defaults backed by SQLite.
 
-Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, default-mission-agent, default-mission-policy
+Global keys (shared across all projects): default-model, default-provider, default-alt-model, default-alt-provider, default-autocomplete-model, default-autocomplete-provider, default-embed-model, default-embed-provider, default-audio-model, default-audio-provider, default-max-tokens, default-think, telemetry-enabled, update-check, opt-in-beta, default-mission-agent, default-mission-policy, log-max-size, log-max-files, log-max-age-days
 Workspace keys (scoped to current project): default-chain, hitl-policy-name
 
 Supported keys:
@@ -72,7 +75,10 @@ Supported keys:
   default-mission-policy         Default subagent envelope (HITL policy) when none is named
   default-oracle-chain           Chain that adjudicates a subagent's asks; unset means human-only
   default-oracle-policy          Envelope the oracle chain runs under (default hitl-policy-oracle.json)
-  oracle-approves-tool-calls     Let the oracle rule on gated tool calls too (true/false)`,
+  oracle-approves-tool-calls     Let the oracle rule on gated tool calls too (true/false)
+  log-max-size                   Size at which 'contenox serve' starts a new log part (e.g. 10MB, 512KB)
+  log-max-files                  How many host log files to keep, across every date and part (0 = unlimited)
+  log-max-age-days               Delete host logs older than this many days (0 = no age limit)`,
 }
 
 var configSetCmd = &cobra.Command{
@@ -114,6 +120,15 @@ Examples:
 			if err != nil {
 				return err
 			}
+			value = normalized
+		}
+		// Log bounds are validated here rather than at read time: a host reads
+		// them while booting, where the only options are to ignore a bad value
+		// or refuse to start. Refusing at `config set` is the moment the person
+		// who typed it is still watching.
+		if normalized, err := normalizeLogConfig(key, value); err != nil {
+			return err
+		} else if normalized != "" {
 			value = normalized
 		}
 		db, store, workspaceID, err := openConfigDBWithWorkspace(cmd)

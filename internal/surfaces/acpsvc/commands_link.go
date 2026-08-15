@@ -53,19 +53,10 @@ func (t *Transport) handleLink(sid libacp.SessionID) (string, error) {
 // self-hosted, and a self-hosted relay serves the app same-origin, so its own
 // origin is the app's.
 func appOrigin(endpoint string) (string, error) {
-	if endpoint == relaypair.DefaultEndpoint {
-		endpoint = relaypair.DefaultAppEndpoint
+	origin, err := relaypair.AppOrigin(endpoint)
+	if err != nil {
+		// The session surface names its own remedy; the shared helper cannot.
+		return "", fmt.Errorf("%w — /pair again", err)
 	}
-	return relayOrigin(endpoint)
-}
-
-// relayOrigin reduces an endpoint to its origin (scheme://host). The app's
-// session routes hang off the root, so any path the endpoint was configured
-// with does not belong in the link.
-func relayOrigin(endpoint string) (string, error) {
-	u, err := url.Parse(endpoint)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("the stored relay endpoint %q is not a URL this session can be linked through — /pair again", endpoint)
-	}
-	return u.Scheme + "://" + u.Host, nil
+	return origin, nil
 }
