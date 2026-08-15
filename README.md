@@ -91,7 +91,7 @@ Pre-built binaries are on the [releases page](https://github.com/contenox/conten
 
 ## Quick Start
 
-<!-- TAG=v0.40.2 -->
+<!-- TAG=v0.40.3 -->
 
 ```bash
 contenox setup                          # pick a provider and model, once
