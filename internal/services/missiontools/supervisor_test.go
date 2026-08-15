@@ -64,7 +64,10 @@ func supervisorFixture(t *testing.T) (context.Context, taskengine.ToolsRepo, *fa
 		"m-mine":  {{AskID: "ask-mine", MissionID: "m-mine", Question: "which project?"}},
 		"m-other": {{AskID: "ask-other", MissionID: "m-other", Question: "not yours"}},
 	}}
-	return ctx, missiontools.New(svc, nil, missiontools.WithSupervision(sup, res)), res
+	return ctx, missiontools.New(svc,
+		missiontools.WithSupervision(sup),
+		missiontools.WithAttentionResolver(res),
+	), res
 }
 
 // TestUnit_Supervisor_ToolsUnlockForAFiringSessionOnly pins that the supervisor/unit/neither surfaces gate on separate facts.
@@ -140,7 +143,7 @@ func TestUnit_Supervisor_ToolsRefuseWithoutASupervisingSession(t *testing.T) {
 	_, _, err := tools.Exec(ctx, time.Now(), nil, false,
 		&taskengine.ToolsCall{Name: missiontools.ToolsProviderName, ToolName: missiontools.ToolNameListMissions})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "fired missions")
+	require.Contains(t, err.Error(), "supervises missions")
 }
 
 func toolNames(tools []taskengine.Tool) []string {

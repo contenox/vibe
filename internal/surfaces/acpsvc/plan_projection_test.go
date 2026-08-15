@@ -110,7 +110,7 @@ func TestUnit_PlanProjection_ReachesAttachedViewer(t *testing.T) {
 
 	// The mission_plan tool's echoed result is the exact value the engine turns
 	// into the tool event's Content.
-	tools := missiontools.New(missions, nil)
+	tools := missiontools.New(missions)
 	planCall := &taskengine.ToolsCall{
 		Name:     missiontools.ToolsProviderName,
 		ToolName: missiontools.ToolNamePlan,

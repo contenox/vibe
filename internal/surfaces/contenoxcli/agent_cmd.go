@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
+	"github.com/contenox/contenox/internal/store/runtimetypes"
 	libdb "github.com/contenox/contenox/libdbexec"
 	"github.com/contenox/contenox/libtracker"
 	"github.com/spf13/cobra"
@@ -18,15 +20,30 @@ var agentCmd = &cobra.Command{
 	Short: "Inspect and manage the runtime's declared agents.",
 	Long: `List, show, and manage the agents the runtime can spawn and drive.
 
-Agents are the runtime's own task chains, discovered from chain files on disk
-and addressable as ACP peers. They are registered automatically by chain-agent
-discovery; this command inspects them and toggles their enabled state.
+An agent is a Markdown file with a YAML frontmatter header:
+
+  ---
+  name: reviewer
+  description: Reviews a file for correctness problems
+  tools: Read, Glob, Grep
+  ---
+
+  You are a code reviewer. Read the file you are asked about, then list the
+  problems you can point at in what you actually read.
+
+Write them in .contenox/agents/ (or ~/.contenox/agents/ for every project).
+Agents you already keep in .claude/agents/ or .agents/agents/ are read where
+they are — nothing to move or convert. Every one is registered automatically;
+this command inspects them and toggles their enabled state.
+
+What a declaration cannot say — context budget, retries, shell allowlists, what
+needs a human — lives in agents.toml beside them.
 
 Examples:
   contenox agent list
-  contenox agent show agent-reviewer
-  contenox agent disable agent-reviewer
-  contenox agent remove agent-reviewer`,
+  contenox agent show reviewer
+  contenox agent disable reviewer
+  contenox agent remove reviewer`,
 }
 
 var agentListCmd = &cobra.Command{
@@ -48,7 +65,21 @@ state. If none are registered, prints a hint.`,
 			return fmt.Errorf("failed to list agents: %w", err)
 		}
 		if len(agents) == 0 {
-			fmt.Fprintln(cmd.OutOrStdout(), "No agents registered.")
+			out := cmd.OutOrStdout()
+			fmt.Fprintln(out, "No agents yet.")
+			fmt.Fprintln(out, "")
+			fmt.Fprintln(out, "An agent is one Markdown file. Write .contenox/agents/reviewer.md:")
+			fmt.Fprintln(out, "")
+			fmt.Fprintln(out, "  ---")
+			fmt.Fprintln(out, "  name: reviewer")
+			fmt.Fprintln(out, "  description: Reviews a file for correctness problems")
+			fmt.Fprintln(out, "  tools: Read, Glob, Grep")
+			fmt.Fprintln(out, "  ---")
+			fmt.Fprintln(out, "")
+			fmt.Fprintln(out, "  You are a code reviewer. Read the file you are asked about, then")
+			fmt.Fprintln(out, "  list the problems you can point at in what you actually read.")
+			fmt.Fprintln(out, "")
+			fmt.Fprintln(out, "Then run this again. Agents already in .claude/agents/ are found too.")
 			return nil
 		}
 
@@ -78,7 +109,7 @@ Provenance (source, registry id/version) is system-managed.`,
 
 		agent, err := svc.GetByName(ctx, name)
 		if err != nil {
-			return fmt.Errorf("agent %q not found: %w", name, err)
+			return fmt.Errorf("agent %q not found%s: %w", name, legacyChainPrefixHint(name), err)
 		}
 
 		out := cmd.OutOrStdout()
@@ -120,7 +151,7 @@ file still exists.`,
 
 		agent, err := svc.GetByName(ctx, name)
 		if err != nil {
-			return fmt.Errorf("agent %q not found: %w", name, err)
+			return fmt.Errorf("agent %q not found%s: %w", name, legacyChainPrefixHint(name), err)
 		}
 		if err := svc.Delete(ctx, agent.ID); err != nil {
 			return fmt.Errorf("failed to remove agent: %w", err)
@@ -154,7 +185,7 @@ func setAgentEnabled(cmd *cobra.Command, name string, enabled bool) error {
 
 	agent, err := svc.GetByName(ctx, name)
 	if err != nil {
-		return fmt.Errorf("agent %q not found: %w", name, err)
+		return fmt.Errorf("agent %q not found%s: %w", name, legacyChainPrefixHint(name), err)
 	}
 	if agent.Enabled == enabled {
 		fmt.Fprintf(cmd.OutOrStdout(), "Agent %q already %s.\n", name, enabledWord(enabled))
@@ -168,6 +199,17 @@ func setAgentEnabled(cmd *cobra.Command, name string, enabled bool) error {
 	return nil
 }
 
+// legacyChainPrefixHint explains a name that would have resolved before
+// declared agents dropped the chain- prefix from their id. Returned empty for
+// anything else, so it can be appended unconditionally.
+func legacyChainPrefixHint(name string) string {
+	bare := strings.TrimPrefix(name, "chain-")
+	if bare == name || bare == "" {
+		return ""
+	}
+	return fmt.Sprintf(" — declared agents no longer carry the chain- prefix; try %q", bare)
+}
+
 func openAgentService(cmd *cobra.Command) (libdb.DBManager, agentregistryservice.Service, error) {
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -178,7 +220,16 @@ func openAgentService(cmd *cobra.Command) (libdb.DBManager, agentregistryservice
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	return db, agentregistryservice.New(db), nil
+	agents := agentregistryservice.New(db)
+	// Declarations are the source of truth, so inspecting the roster runs a
+	// discovery pass first: a file added since the last one is an agent now.
+	// Whatever that pass could not act on is printed here — the roster is where
+	// someone looks when an agent or a knob did not take effect, and a warning
+	// they never see is the same as no warning.
+	if contenoxDir, dirErr := ResolveContenoxDir(cmd); dirErr == nil {
+		printSyncProblems(cmd.ErrOrStderr(), discoverChainAgentsReporting(dbCtx, agents, contenoxDir, libtracker.NoopTracker{}, DiscoverDeps{Store: runtimetypes.New(db.WithoutTransaction())}))
+	}
+	return db, agents, nil
 }
 
 func prettyJSON(raw json.RawMessage) (string, error) {

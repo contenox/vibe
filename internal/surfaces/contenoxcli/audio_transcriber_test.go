@@ -83,7 +83,7 @@ func audioToolsetFixture(t *testing.T, root string) map[string]taskengine.ToolsR
 	gt, err := gojatool.New(gojatool.Config{})
 	require.NoError(t, err)
 	t.Cleanup(gt.Shutdown)
-	return localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, gt, missionservice.New(nil), nil)
+	return localToolset(chatOpts{EffectiveLocalExecAllowedDir: root}, nil, libtracker.NoopTracker{}, gt, missionservice.New(nil))
 }
 
 func execReadFile(t *testing.T, tools map[string]taskengine.ToolsRepo, path string) (any, error) {

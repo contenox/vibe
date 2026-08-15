@@ -1,11 +1,20 @@
 ---
-title: Task Chains
-description: The JSON state machine that defines how your agent behaves — composable, inspectable, backend-agnostic.
+title: The chain format
+description: The reference for the JSON state machine behind an agent — the artifact you read to see what it may do, and the one you write when you need a guarantee instead of an instruction.
 ---
 
-# Task Chains
+# The chain format
 
-A task chain is a JSON state machine that defines how the AI agent behaves end-to-end. Chains are composable, inspectable, and backend-agnostic.
+This is a reference for a file you mostly do not write. An agent is
+[a Markdown declaration](/docs/guide/agents/); contenox generates the chain
+behind it and keeps it in step with the file you edited.
+
+You come here for two reasons. To **read** one — the chain is the audit
+artifact, the single place that says which model runs, which tools are on the
+table, and where the run can go next. And to **write** one, when a declaration
+cannot say what you need it to: a branch, a different model per step, a
+recovery path, a declared point where a human stands. Then the engine runs
+exactly what you wrote.
 
 ![Task Chain Execution Flow](/chain_flow_diagram.png)
 
@@ -69,3 +78,4 @@ See [Handlers](/docs/specification/handlers) and [Transitions](/docs/specificati
 - **[Handlers](/docs/specification/handlers)** — all task handler types and their fields
 - **[Transitions & Branching](/docs/specification/transitions)** — how the chain decides what to do next
 - **[Annotated Examples](/docs/specification/examples)** — full working chains with commentary
+- **[Writing a chain by hand](/docs/guide/first-chain/)** — the walkthrough, when you have decided you need one

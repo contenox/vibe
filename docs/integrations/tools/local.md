@@ -294,7 +294,15 @@ contenox run --shell "clean up unused imports in the codebase"
 contenox chat --shell "run the tests and fix anything that breaks"
 ```
 
-**Command policy is set in the chain, not on the CLI.** Add a `tools_policies` block to `execute_config`:
+**Command policy is a file, not a CLI flag.** For a declared agent it lives in [`agents.toml`](/docs/reference/agents-config/), globally or under `[agents.<name>]`:
+
+```toml
+[tools_policies.local_shell]
+_allowed_commands = "git,go,make,ls,cat"
+_denied_commands  = "sudo,su,dd,mkfs"
+```
+
+In a chain you author yourself it is a `tools_policies` block on `execute_config`, per task:
 
 ```json
 "execute_config": {

@@ -155,6 +155,23 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		return libacp.PromptResponse{}, err
 	}
 
+	// /plan expands into an instruction and then takes the ordinary turn path,
+	// so the model runs it holding its tools. Handled before dispatchCommand
+	// because a command handler returns text and cannot prompt the model.
+	if goal, ok := parsePlanCommand(input); ok {
+		if !t.hasMissionCapability() {
+			err := planPreambleForMissingFleet()
+			reportErr(err)
+			return libacp.PromptResponse{}, err
+		}
+		if goal == "" {
+			err := errors.New(planUsageLine)
+			reportErr(err)
+			return libacp.PromptResponse{}, err
+		}
+		input = planPreamble(goal)
+	}
+
 	if name, args, ok := parseCommand(input); ok {
 		// A slash command is a text verb; an attached image or audio clip has
 		// no meaning here, so it's recorded as dropped rather than silently
@@ -239,9 +256,11 @@ func (d *nativeDriver) Prompt(ctx context.Context, req libacp.PromptRequest, ses
 		promptCtx = missiontools.WithWorkdir(promptCtx, sess.Cwd)
 		promptCtx = llmrepo.WithResolutionBounds(promptCtx, sess.resolutionBounds())
 	}
-	// A session that fired missions carries its own id in, unlocking the
-	// supervisor tools so this turn can answer what a unit asks.
-	if sess.FiredMissions && sess.InternalSessionID != "" {
+	// A session that can supervise subagents carries its own id in, unlocking
+	// the supervisor tools. Gated on capability rather than on having already
+	// fired: starting the first one is itself a supervisor tool. A unit is
+	// excluded — subagents do not spawn subagents.
+	if sess.MissionID == "" && sess.InternalSessionID != "" && t.hasMissionCapability() {
 		promptCtx = missiontools.WithParentSessionID(promptCtx, sess.InternalSessionID)
 	}
 

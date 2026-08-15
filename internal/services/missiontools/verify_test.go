@@ -40,7 +40,7 @@ func TestUnit_Verify_MissingArtifactDowngradesResult(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(workdir, "exists.txt"), []byte("real"), 0o644))
 
 	downgrades := 0
-	tools := missiontools.New(svc, nil, missiontools.WithDowngradeRecorder(func() { downgrades++ }))
+	tools := missiontools.New(svc, missiontools.WithDowngradeRecorder(func() { downgrades++ }))
 
 	toolCtx := missiontools.WithWorkdir(missiontools.WithMissionID(ctx, missionID), workdir)
 	input, call := resultInput("done, see files", []string{"exists.txt", "missing.txt"})
@@ -67,7 +67,7 @@ func TestUnit_Verify_AllPresentStaysResult(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(workdir, "report.md"), []byte("real"), 0o644))
 
 	downgrades := 0
-	tools := missiontools.New(svc, nil, missiontools.WithDowngradeRecorder(func() { downgrades++ }))
+	tools := missiontools.New(svc, missiontools.WithDowngradeRecorder(func() { downgrades++ }))
 
 	toolCtx := missiontools.WithWorkdir(missiontools.WithMissionID(ctx, missionID), workdir)
 	input, call := resultInput("done", []string{"report.md"})
@@ -84,7 +84,7 @@ func TestUnit_Verify_AllPresentStaysResult(t *testing.T) {
 // TestUnit_Verify_UnverifiableRefsFailOpen pins that URLs, prose, and relative paths with no workdir all count as present.
 func TestUnit_Verify_UnverifiableRefsFailOpen(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	// No WithWorkdir: the relative ref is unverifiable by construction.
 	toolCtx := missiontools.WithMissionID(ctx, missionID)
@@ -104,7 +104,7 @@ func TestUnit_Verify_UnverifiableRefsFailOpen(t *testing.T) {
 // TestUnit_Verify_AbsoluteMissingPathNeedsNoWorkdir pins that an absolute missing path downgrades even with no workdir bound.
 func TestUnit_Verify_AbsoluteMissingPathNeedsNoWorkdir(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	gone := filepath.Join(t.TempDir(), "never-written.bin")
 	toolCtx := missiontools.WithMissionID(ctx, missionID) // no workdir
@@ -124,7 +124,7 @@ func TestUnit_Verify_StatErrorCountsAsPresent(t *testing.T) {
 		t.Skip("running as root: permission walls do not apply")
 	}
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	workdir := t.TempDir()
 	locked := filepath.Join(workdir, "locked")
@@ -147,7 +147,7 @@ func TestUnit_Verify_StatErrorCountsAsPresent(t *testing.T) {
 // TestUnit_Verify_HandoverArtifactsAreClaimsToo pins that a missing hand-over artifact downgrades, and the hand-over still lands verbatim.
 func TestUnit_Verify_HandoverArtifactsAreClaimsToo(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	workdir := t.TempDir()
 	toolCtx := missiontools.WithWorkdir(missiontools.WithMissionID(ctx, missionID), workdir)
@@ -174,7 +174,7 @@ func TestUnit_Verify_HandoverArtifactsAreClaimsToo(t *testing.T) {
 // TestUnit_Verify_OnlyResultsAreGated pins that a non-result report naming a missing path is never gated.
 func TestUnit_Verify_OnlyResultsAreGated(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	workdir := t.TempDir()
 	toolCtx := missiontools.WithWorkdir(missiontools.WithMissionID(ctx, missionID), workdir)
@@ -191,7 +191,7 @@ func TestUnit_Verify_OnlyResultsAreGated(t *testing.T) {
 // TestUnit_Verify_WarningAppendsToExistingDetail pins that the unit's detail comes first, the runtime's warning after.
 func TestUnit_Verify_WarningAppendsToExistingDetail(t *testing.T) {
 	ctx, svc, missionID := setup(t)
-	tools := missiontools.New(svc, nil)
+	tools := missiontools.New(svc)
 
 	workdir := t.TempDir()
 	toolCtx := missiontools.WithWorkdir(missiontools.WithMissionID(ctx, missionID), workdir)

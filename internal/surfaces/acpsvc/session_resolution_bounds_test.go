@@ -13,7 +13,7 @@ import (
 // session's model/backend allowlist reaches the turn's resolution bounds.
 func TestUnit_SessionEntry_BindsEnvelopeAllowlistOntoTheTurnContext(t *testing.T) {
 	meta, ok := missionservice.ParseMissionMetaFull(
-		missionservice.MarshalMissionMetaBounded("m-1", []string{"gemini-2.5-flash"}, []string{"my-ollama"}),
+		missionservice.MarshalMissionMetaBounded("m-1", []string{"gemini-2.5-flash"}, []string{"my-ollama"}, ""),
 	)
 	require.True(t, ok)
 

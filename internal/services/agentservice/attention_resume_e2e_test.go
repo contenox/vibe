@@ -64,7 +64,7 @@ func newAttentionInstanceWithAsker(t *testing.T, dbPath string, newAsker func(hi
 	hitl := hitlservice.NewWithDefaultPolicy(hitlservice.NewFSPolicySource(t.TempDir()), "e2e-tenant", store, libtracker.NoopTracker{}, "")
 	missions := missionservice.New(db)
 
-	tools := missiontools.New(missions, newAsker(hitl),
+	tools := missiontools.New(missions, missiontools.WithAttentionAsker(newAsker(hitl)),
 		missiontools.WithAttentionParkWindow(20*time.Millisecond))
 
 	exec, err := taskengine.NewExec(ctx, stubModelRepo{}, tools, libtracker.NoopTracker{})

@@ -25,6 +25,45 @@ func IsACPManagedMCPServerName(name string) bool {
 	return strings.HasPrefix(name, ACPMCPServerNamePrefix)
 }
 
+// DeclaredToolNamePrefix marks MCP servers and remote tools an agent
+// declaration brought with it. Like the ACP prefix it means "not durable
+// operator configuration": the declaration owns the row, a sync pass rewrites
+// it, and deleting the declaration retires it.
+//
+// Kept distinct from the ACP prefix so the boot sweep can tell which owner
+// abandoned a row — an editor that disconnected, or a declaration that is
+// about to be re-synced.
+const DeclaredToolNamePrefix = "decl-"
+
+// IsDeclaredToolName reports a registration owned by an agent declaration
+// rather than by `contenox mcp add` / `contenox tools add`.
+func IsDeclaredToolName(name string) bool {
+	return strings.HasPrefix(name, DeclaredToolNamePrefix)
+}
+
+// DeclaredToolName is the registered name for a source declared by one agent.
+// Derived from the agent id so it is stable across syncs — the emitted chain
+// names this toolset statically — and scoped to that agent so two declarations
+// may each bring a "filesystem" without colliding.
+func DeclaredToolName(agentID, declared string) string {
+	return DeclaredToolNamePrefix + sanitizeDeclaredComponent(agentID) + "-" + sanitizeDeclaredComponent(declared)
+}
+
+func sanitizeDeclaredComponent(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	return b.String()
+}
+
 func orEmptyMap(m map[string]string) map[string]string {
 	if m == nil {
 		return map[string]string{}

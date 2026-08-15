@@ -6,6 +6,8 @@ description: Connect any MCP server — local, SSE, or HTTP — with persistent,
 
 Contenox is a full native MCP client. Every chat session and `contenox run` invocation can connect to any MCP-compatible server—local child processes, remote SSE streams, or HTTP endpoints.
 
+> Servers you register here are available to every agent. An agent can also **bring its own**: `mcpServers:` in an [agent declaration](/docs/guide/agents/#tools-an-agent-brings-with-it) registers a server scoped to that one agent and retires it when the declaration is deleted. Both show in `contenox mcp list`, distinguished by an `OWNER` column.
+
 ## What is MCP?
 
 The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standard (originally created by Anthropic and donated to the [AI Agentic Foundation](https://aaif.ai/) at the Linux Foundation) that lets AI agents talk to tools, memory stores, and data sources using a universal wire format.

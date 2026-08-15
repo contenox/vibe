@@ -15,11 +15,21 @@ type AttentionBounds struct {
 	// MaxAgentAnswers caps how many of this mission's questions an agent may
 	// answer; zero means the default cap (DefaultMaxAgentAnswers), never unlimited.
 	MaxAgentAnswers int `json:"maxAgentAnswers,omitempty"`
+	// AllowAgentApprovals lets an adjudicating agent rule on this mission's
+	// approve-tier tool calls instead of the unit waiting for a human.
+	AllowAgentApprovals bool `json:"allowAgentApprovals,omitempty"`
+	// MaxAgentApprovals caps how many of this mission's gated tool calls an
+	// agent may decide; zero means DefaultMaxAgentApprovals, never unlimited.
+	MaxAgentApprovals int `json:"maxAgentApprovals,omitempty"`
 }
 
 // DefaultMaxAgentAnswers bounds agent-answered questions per mission when
 // the envelope allows them but names no cap.
 const DefaultMaxAgentAnswers = 3
+
+// DefaultMaxAgentApprovals bounds agent-decided tool calls per mission when
+// the envelope allows them but names no cap.
+const DefaultMaxAgentApprovals = 20
 
 const maxAgentAnswersCeiling = 1_000
 
@@ -29,6 +39,14 @@ func (b AttentionBounds) EffectiveMaxAgentAnswers() int {
 		return DefaultMaxAgentAnswers
 	}
 	return b.MaxAgentAnswers
+}
+
+// EffectiveMaxAgentApprovals resolves the adjudication cap actually enforced.
+func (b AttentionBounds) EffectiveMaxAgentApprovals() int {
+	if b.MaxAgentApprovals <= 0 {
+		return DefaultMaxAgentApprovals
+	}
+	return b.MaxAgentApprovals
 }
 
 // AttentionBoundsFor reads an envelope's attention half; a policy that
@@ -60,6 +78,12 @@ func validateAttentionBounds(b *AttentionBounds) error {
 	}
 	if b.MaxAgentAnswers > maxAgentAnswersCeiling {
 		return fmt.Errorf("attention.maxAgentAnswers %d exceeds the sanity ceiling %d", b.MaxAgentAnswers, maxAgentAnswersCeiling)
+	}
+	if b.MaxAgentApprovals < 0 {
+		return fmt.Errorf("attention.maxAgentApprovals must not be negative")
+	}
+	if b.MaxAgentApprovals > maxAgentAnswersCeiling {
+		return fmt.Errorf("attention.maxAgentApprovals %d exceeds the sanity ceiling %d", b.MaxAgentApprovals, maxAgentAnswersCeiling)
 	}
 	return nil
 }

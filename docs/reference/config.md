@@ -13,10 +13,12 @@ There is no YAML file — register backends and set defaults using CLI commands.
 Contenox has two layers of state:
 
 - **Global state** — one shared database at `~/.contenox/local.db`. Holds backends, provider configuration, sessions, MCP registrations, and defaults. Shared by every project on your machine.
-- **Global runtime files** — `~/.contenox/` also stores the shipped default chain/HITL policy presets.
-- **Workspace state** — one `.contenox/` directory per project, containing a `workspace.id` file (a UUID written on `contenox init`) and optional workspace chain overrides. Each workspace scopes its own messages and workspace-specific config overrides inside the single global database.
+- **Global runtime files** — `~/.contenox/` also holds `agents.toml`, an `agents/` directory for agents you want everywhere, the shipped HITL policy presets, and the shipped chain files under `~/.contenox/system/`.
+- **Workspace state** — one `.contenox/` directory per project, containing a `workspace.id` file (a UUID written on `contenox init`), this project's [agent declarations](/docs/guide/agents/) and `agents.toml`, and any chain or policy files that override a global one by name. Each workspace scopes its own messages and workspace-specific config overrides inside the single global database.
 
-Running `contenox init` in a project directory creates a `.contenox/` folder with a fresh `workspace.id` and ensures the default runtime files exist under `~/.contenox/`. The same project always resolves to the same workspace regardless of where you invoke `contenox` from, as long as you're inside the directory tree.
+Files resolve by name, workspace first: the workspace `.contenox/`, then `~/.contenox/`, then `~/.contenox/system/`. Copying a shipped chain up out of `system/` is how you take ownership of it.
+
+Running `contenox init` in a project directory creates a `.contenox/` folder with a fresh `workspace.id`, seeds `agents.toml` and `agents/`, and ensures the default runtime files exist under `~/.contenox/`. The same project always resolves to the same workspace regardless of where you invoke `contenox` from, as long as you're inside the directory tree.
 
 Backends and global defaults survive across every workspace. A workspace's sessions and workspace-scoped overrides are invisible to other workspaces.
 

@@ -92,13 +92,11 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	trigHook := eventlog.NewTriggerHolder()
 	missionPub := missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionPub))
-	// Nil only when HITL is off, the same condition under which no resume hook is registered, so no resumed run ever meets a nil asker.
-	var missionAsker missiontools.AttentionAsker
+	var missionOpts []missiontools.Option
 	if hitlSvc != nil {
-		missionAsker = missionAttentionAsker{hitl: hitlSvc, missions: missions, bus: missionPub}
+		missionOpts = append(missionOpts, missiontools.WithAttentionAsker(missionAttentionAsker{hitl: hitlSvc, missions: missions, bus: missionPub}))
 	}
-
-	tools := localToolset(opts, db, tracker, gt, missions, missionAsker)
+	tools := localToolset(opts, db, tracker, gt, missions, missionOpts...)
 
 	askApproval := opts.EffectiveAskApproval
 	if askApproval == nil {
@@ -165,7 +163,7 @@ func BuildEngine(ctx context.Context, db libdbexec.DBManager, opts chatOpts) (*E
 	return engine, nil
 }
 
-func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, gojaTools *gojatool.Toolset, missions missionservice.Service, missionAsker missiontools.AttentionAsker) map[string]taskengine.ToolsRepo {
+func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.ActivityTracker, gojaTools *gojatool.Toolset, missions missionservice.Service, missionOpts ...missiontools.Option) map[string]taskengine.ToolsRepo {
 	tools := map[string]taskengine.ToolsRepo{
 		"webtools": localtools.NewWebCaller(tracker),
 		"local_fs": localtools.NewLocalFSToolsWith(opts.EffectiveLocalExecAllowedDir, db, nil, localtools.LocalFSToolsName, nil),
@@ -174,7 +172,7 @@ func localToolset(opts chatOpts, db libdbexec.DBManager, tracker libtracker.Acti
 		// Always registered, unbound: completed by bindWorkspaceSearch below once the engine's embedding seam exists.
 		searchtool.ToolsProviderName: newWorkspaceSearchTools(ResolveWorkspaceID(opts.ContenoxDir)),
 		// Wired, not durable-only: this engine resumes suspended mission chains, and a resumed unit asks its remaining questions here.
-		missiontools.ToolsProviderName: missiontools.New(missions, missionAsker),
+		missiontools.ToolsProviderName: missiontools.New(missions, missionOpts...),
 	}
 	if opts.EffectiveOptInBeta {
 		// Registered only under opt-in-beta: with no scripts, goja carries only goja_eval, a pure compute sandbox with no ambient I/O.
@@ -225,12 +223,11 @@ func readinessDefaults(opts chatOpts) (model, provider string) {
 	return model, provider
 }
 
+// hitlPolicySource loads envelopes over policyDirs, so what a unit actually
+// loads is what /mission offers and what `contenox vet` lints — including the
+// envelopes rendered from agent declarations.
 func hitlPolicySource(primaryDir string) hitlservice.PolicySource {
-	dirs := []string{primaryDir}
-	if home, err := os.UserHomeDir(); err == nil {
-		dirs = append(dirs, filepath.Join(home, ".contenox"))
-	}
-	return hitlservice.NewFSPolicySource(dirs...)
+	return hitlservice.NewFSPolicySource(policyDirs(primaryDir)...)
 }
 
 func newHITLService(contenoxDir string, store runtimetypes.Store, tracker libtracker.ActivityTracker, fallbackPolicy string) hitlservice.Service {

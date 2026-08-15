@@ -14,15 +14,17 @@ type MissionMeta struct {
 	// Omitted (nil) means unbounded for that dimension.
 	ModelAllowlist   []string `json:"modelAllowlist,omitempty"`
 	BackendAllowlist []string `json:"backendAllowlist,omitempty"`
+	// HITLPolicyName is the envelope the unit's own tool calls are gated by. Without it a unit falls back to its host's policy, so the envelope the operator accepted is not the one enforced.
+	HITLPolicyName string `json:"hitlPolicyName,omitempty"`
 }
 
 // MarshalMissionMeta builds the `{"contenox.mission": {"missionId": "<id>"}}` object a dispatcher sets on session/new, returning nil for an empty id so a non-mission session sends no `_meta` at all.
 func MarshalMissionMeta(missionID string) json.RawMessage {
-	return MarshalMissionMetaBounded(missionID, nil, nil)
+	return MarshalMissionMetaBounded(missionID, nil, nil, "")
 }
 
 // MarshalMissionMetaBounded is MarshalMissionMeta plus the envelope's model/backend allowlists; empty lists marshal away entirely (omitempty).
-func MarshalMissionMetaBounded(missionID string, modelAllowlist, backendAllowlist []string) json.RawMessage {
+func MarshalMissionMetaBounded(missionID string, modelAllowlist, backendAllowlist []string, hitlPolicyName string) json.RawMessage {
 	if strings.TrimSpace(missionID) == "" {
 		return nil
 	}
@@ -30,6 +32,7 @@ func MarshalMissionMetaBounded(missionID string, modelAllowlist, backendAllowlis
 		MissionID:        missionID,
 		ModelAllowlist:   trimmedNonEmpty(modelAllowlist),
 		BackendAllowlist: trimmedNonEmpty(backendAllowlist),
+		HITLPolicyName:   strings.TrimSpace(hitlPolicyName),
 	}
 	raw, err := json.Marshal(map[string]MissionMeta{MissionMetaKey: meta})
 	if err != nil {
@@ -82,5 +85,6 @@ func ParseMissionMetaFull(meta json.RawMessage) (MissionMeta, bool) {
 		MissionID:        id,
 		ModelAllowlist:   trimmedNonEmpty(mm.ModelAllowlist),
 		BackendAllowlist: trimmedNonEmpty(mm.BackendAllowlist),
+		HITLPolicyName:   strings.TrimSpace(mm.HITLPolicyName),
 	}, true
 }

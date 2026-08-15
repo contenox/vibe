@@ -188,8 +188,12 @@ func resolveSystemChain(cmd *cobra.Command, contenoxDir, name string) (string, e
 	return lookupSystemFile(contenoxDir, name)
 }
 
-// lookupSystemFile finds a config file by name. Workspace .contenox/ overrides
-// home ~/.contenox/. Returns an error if neither exists.
+// lookupSystemFile finds a config file by name, strongest first: the workspace
+// .contenox/, then ~/.contenox/, then the shipped copies in ~/.contenox/system/.
+//
+// The two operator-owned locations come first on purpose — copying a shipped
+// file up one level is how you take ownership of it, and that has to keep
+// working without anything being deleted or renamed.
 func lookupSystemFile(contenoxDir, name string) (string, error) {
 	if contenoxDir != "" {
 		workspacePath := filepath.Join(contenoxDir, name)
@@ -205,7 +209,11 @@ func lookupSystemFile(contenoxDir, name string) (string, error) {
 	if _, err := os.Stat(homePath); err == nil {
 		return homePath, nil
 	}
-	return "", fmt.Errorf("file %q not found in workspace %q or ~/.contenox; run 'contenox init' to populate it", name, contenoxDir)
+	systemPath := filepath.Join(systemDir(homeDir), name)
+	if _, err := os.Stat(systemPath); err == nil {
+		return systemPath, nil
+	}
+	return "", fmt.Errorf("file %q not found in workspace %q, ~/.contenox or ~/.contenox/%s; run 'contenox init' to populate it", name, contenoxDir, SystemDirName)
 }
 
 func resolveDefaultModelProvider(cmd *cobra.Command, db libdb.DBManager) (model, provider, altModel, altProvider, maxTokens string, err error) {

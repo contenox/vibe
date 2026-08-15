@@ -15,9 +15,11 @@ import (
 	"github.com/contenox/contenox/internal/models/backendservice"
 	"github.com/contenox/contenox/internal/models/modelrepo"
 	"github.com/contenox/contenox/internal/models/runtimestate"
+	"github.com/contenox/contenox/internal/services/agentdecl"
 	"github.com/contenox/contenox/internal/services/project"
 	"github.com/contenox/contenox/internal/services/setupcheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
+	"github.com/contenox/contenox/internal/surfaces/acpsvc"
 	"github.com/contenox/contenox/libtracker"
 )
 
@@ -48,21 +50,31 @@ var initPlannerChain string
 //go:embed chain-oracle-default.json
 var initOracleDefaultChain string
 
-//go:embed chain-oracle-conservative.json
-var initOracleConservativeChain string
-
 const (
-	chainAgentContenoxFilename      = "chain-agent-contenox.json"
-	chainAgentRunFilename           = "chain-agent-run.json"
-	chainAgentACPFilename           = "chain-agent-acp.json"
-	chainAgentACPXFilename          = "chain-agent-acpx.json"
-	chainAgentBeamFilename          = "chain-agent-beam.json"
-	chainFIMDefaultFilename         = "chain-fim-default.json"
-	chainCompactDefaultFilename     = "chain-compact-default.json"
-	chainPlannerDefaultFilename     = "chain-planner-default.json"
-	chainOracleDefaultFilename      = "chain-oracle-default.json"
-	chainOracleConservativeFilename = "chain-oracle-conservative.json"
+	chainAgentContenoxFilename  = "chain-agent-contenox.json"
+	chainAgentRunFilename       = "chain-agent-run.json"
+	chainAgentACPFilename       = "chain-agent-acp.json"
+	chainAgentACPXFilename      = "chain-agent-acpx.json"
+	chainAgentBeamFilename      = "chain-agent-beam.json"
+	chainFIMDefaultFilename     = "chain-fim-default.json"
+	chainCompactDefaultFilename = "chain-compact-default.json"
+	chainPlannerDefaultFilename = "chain-planner-default.json"
+	chainOracleDefaultFilename  = "chain-oracle-default.json"
 )
+
+// SystemDirName holds the shipped chain files — the runtime's own execution
+// paths for chat, editor sessions and one-shot runs. They are machinery, not
+// files an operator is expected to author, and a directory of them at the top
+// level was the first thing `contenox init` said about the product.
+//
+// Loaders still read a same-named file in the workspace or directly in
+// ~/.contenox/ first, so copying one up a level is all it takes to own it.
+const SystemDirName = acpsvc.SystemDirName
+
+// systemDir is where a contenox directory keeps its shipped chains.
+func systemDir(contenoxDir string) string {
+	return filepath.Join(contenoxDir, SystemDirName)
+}
 
 var blessedChainHashes = map[string][]string{}
 
@@ -118,45 +130,97 @@ func migrateLegacyChainNamesOnSearchPath(out io.Writer, contenoxDir string) erro
 	return nil
 }
 
+// migrateChainsIntoSystemDir relocates shipped chain files an earlier version
+// wrote to the top level of contenoxDir.
+//
+// Only a file still byte-identical to what we shipped is moved: anything else
+// is the operator's, and their copy at the top level keeps winning over the
+// system one by the ordinary lookup order. So a customised chain survives an
+// upgrade untouched, and an untouched one stops being clutter.
+func migrateChainsIntoSystemDir(out io.Writer, contenoxDir string) error {
+	if contenoxDir == "" {
+		return nil
+	}
+	var moved []string
+	for _, f := range initChainFiles {
+		src := filepath.Join(contenoxDir, f.Name)
+		onDisk, err := os.ReadFile(src)
+		if err != nil || string(onDisk) != f.Content {
+			continue
+		}
+		dir := systemDir(contenoxDir)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, f.Name), onDisk, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", filepath.Join(dir, f.Name), err)
+		}
+		if err := os.Remove(src); err != nil {
+			return fmt.Errorf("remove %s: %w", src, err)
+		}
+		moved = append(moved, f.Name)
+	}
+	if len(moved) > 0 {
+		fmt.Fprintf(out, "  Moved %d unmodified chain file(s) into %s%c\n", len(moved), systemDir(contenoxDir), filepath.Separator)
+	}
+	return nil
+}
+
 func seedHeadlessACPChainIfMissing(contenoxDir string) error {
-	dst := filepath.Join(contenoxDir, chainAgentACPXFilename)
+	if _, err := os.Stat(filepath.Join(contenoxDir, chainAgentACPXFilename)); err == nil {
+		return nil
+	}
+	dir := systemDir(contenoxDir)
+	dst := filepath.Join(dir, chainAgentACPXFilename)
 	if _, err := os.Stat(dst); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return err
 	}
 	return os.WriteFile(dst, []byte(initACPXChain), 0644)
 }
 
 func seedACPChainIfMissing(contenoxDir string) error {
-	dst := filepath.Join(contenoxDir, chainAgentACPFilename)
+	if _, err := os.Stat(filepath.Join(contenoxDir, chainAgentACPFilename)); err == nil {
+		return nil
+	}
+	dir := systemDir(contenoxDir)
+	dst := filepath.Join(dir, chainAgentACPFilename)
 	if _, err := os.Stat(dst); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return err
 	}
 	return os.WriteFile(dst, []byte(initACPChain), 0644)
 }
 
 func seedFIMChainIfMissing(contenoxDir string) error {
-	dst := filepath.Join(contenoxDir, chainFIMDefaultFilename)
+	if _, err := os.Stat(filepath.Join(contenoxDir, chainFIMDefaultFilename)); err == nil {
+		return nil
+	}
+	dir := systemDir(contenoxDir)
+	dst := filepath.Join(dir, chainFIMDefaultFilename)
 	if _, err := os.Stat(dst); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return err
 	}
 	return os.WriteFile(dst, []byte(initFIMChain), 0644)
 }
 
 func seedBeamChainIfMissing(contenoxDir string) error {
-	dst := filepath.Join(contenoxDir, chainAgentBeamFilename)
+	if _, err := os.Stat(filepath.Join(contenoxDir, chainAgentBeamFilename)); err == nil {
+		return nil
+	}
+	dir := systemDir(contenoxDir)
+	dst := filepath.Join(dir, chainAgentBeamFilename)
 	if _, err := os.Stat(dst); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(contenoxDir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return err
 	}
 	return os.WriteFile(dst, []byte(initBeamChain), 0644)
@@ -175,7 +239,6 @@ var initChainFiles = []struct {
 	{chainAgentBeamFilename, initBeamChain},
 	{chainPlannerDefaultFilename, initPlannerChain},
 	{chainOracleDefaultFilename, initOracleDefaultChain},
-	{chainOracleConservativeFilename, initOracleConservativeChain},
 }
 
 var initTriggerFiles = []struct {
@@ -268,6 +331,13 @@ func RunGlobalInit(out io.Writer) error {
 	if err := os.MkdirAll(homeDir, 0o750); err != nil {
 		return fmt.Errorf("create ~/.contenox: %w", err)
 	}
+	if err := migrateChainsIntoSystemDir(out, homeDir); err != nil {
+		return err
+	}
+	sysDir := systemDir(homeDir)
+	if err := os.MkdirAll(sysDir, 0o750); err != nil {
+		return fmt.Errorf("create %s: %w", sysDir, err)
+	}
 	writeFile := func(path, content string) error {
 		if _, err := os.Stat(path); err == nil {
 			return nil
@@ -278,37 +348,20 @@ func RunGlobalInit(out io.Writer) error {
 		fmt.Fprintf(out, "  Created %s\n", path)
 		return nil
 	}
-	if err := writeFile(filepath.Join(homeDir, chainAgentContenoxFilename), initChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainAgentRunFilename), initRunChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainCompactDefaultFilename), initCompactChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainAgentACPFilename), initACPChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainFIMDefaultFilename), initFIMChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainAgentACPXFilename), initACPXChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainAgentBeamFilename), initBeamChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainPlannerDefaultFilename), initPlannerChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainOracleDefaultFilename), initOracleDefaultChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainOracleConservativeFilename), initOracleConservativeChain); err != nil {
-		return err
+	for _, f := range initChainFiles {
+		// Skipped when the operator already owns a copy a level up, so a
+		// customised chain is never shadowed by a fresh shipped one.
+		if _, err := os.Stat(filepath.Join(homeDir, f.Name)); err == nil {
+			continue
+		}
+		if err := writeFile(filepath.Join(sysDir, f.Name), f.Content); err != nil {
+			return err
+		}
 	}
 	if err := writeEmbeddedHITLPolicies(homeDir, false); err != nil {
+		return err
+	}
+	if _, err := agentdecl.Preseed(homeDir); err != nil {
 		return err
 	}
 	return nil
@@ -389,6 +442,13 @@ func RunLocalInit(out io.Writer, force, update bool, contenoxDir, projectName st
 	kept, err := upgradeEmbeddedHITLPolicies(contenoxDir, force)
 	if err != nil {
 		return err
+	}
+	seeded, err := agentdecl.Preseed(contenoxDir)
+	if err != nil {
+		return err
+	}
+	for _, path := range seeded {
+		fmt.Fprintf(out, "  Created %s\n", path)
 	}
 	keptSet := map[string]bool{}
 	for _, name := range kept {
@@ -475,35 +535,24 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 		return nil
 	}
 
-	if err := writeFile(filepath.Join(homeDir, chainAgentContenoxFilename), initChain); err != nil {
+	if err := migrateChainsIntoSystemDir(out, homeDir); err != nil {
 		return err
 	}
-	if err := writeFile(filepath.Join(homeDir, chainAgentRunFilename), initRunChain); err != nil {
-		return err
+	homeSystemDir := systemDir(homeDir)
+	if err := os.MkdirAll(homeSystemDir, 0o750); err != nil {
+		return fmt.Errorf("create %s: %w", homeSystemDir, err)
 	}
-	if err := writeFile(filepath.Join(homeDir, chainCompactDefaultFilename), initCompactChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainAgentACPFilename), initACPChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainFIMDefaultFilename), initFIMChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainAgentACPXFilename), initACPXChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainAgentBeamFilename), initBeamChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainPlannerDefaultFilename), initPlannerChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainOracleDefaultFilename), initOracleDefaultChain); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(homeDir, chainOracleConservativeFilename), initOracleConservativeChain); err != nil {
-		return err
+	for _, f := range initChainFiles {
+		// A copy the operator keeps a level up wins at lookup, so refreshing
+		// the system copy underneath it would be invisible and confusing.
+		if _, err := os.Stat(filepath.Join(homeDir, f.Name)); err == nil {
+			fmt.Fprintf(out, "  note: %s is yours and still wins; %s not written\n",
+				filepath.Join(homeDir, f.Name), filepath.Join(homeSystemDir, f.Name))
+			continue
+		}
+		if err := writeFile(filepath.Join(homeSystemDir, f.Name), f.Content); err != nil {
+			return err
+		}
 	}
 	if force {
 		if err := refreshPoliciesOnSearchPath(out, contenoxDir); err != nil {
@@ -516,6 +565,9 @@ func RunInit(out, errOut io.Writer, force, update bool, provider string, conteno
 		for _, p := range HITLPolicyPresets {
 			noteShadowed(p.Name)
 		}
+	}
+	if _, err := agentdecl.Preseed(homeDir); err != nil {
+		return err
 	}
 
 	fmt.Fprintln(out, "Done.")

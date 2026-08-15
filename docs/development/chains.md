@@ -1,5 +1,13 @@
 # Chains
 
+You do not write one to get one. An agent is a Markdown file with a YAML
+frontmatter header in `.contenox/agents/`, and contenox generates the chain
+behind it — [declaring agents](https://contenox.com/docs/guide/agents/) is the
+front door.
+
+This page is about the generated artifact: what it is for, and when you take
+the pen yourself.
+
 ## Why Chains?
 
 A naked agent loop is useful, but it is not enough when AI can touch real tools.
@@ -23,12 +31,16 @@ task, in [The agentic loop](https://contenox.com/docs/guide/agentic-loop/).
 
 ---
 
-## What You Author
+## What You Read, and Sometimes Write
 
-The unit of work is a Chain: a single versioned file where every decision is a
-visible JSON key. Prompts, provider routing, tool scope, command policy, retry
-policy, token limits, loop budgets, and branches are part of the artifact you
-review.
+A Chain is a single versioned file where every decision is a visible JSON key.
+Prompts, provider routing, tool scope, command policy, retry policy, token
+limits, loop budgets, and branches sit in one artifact — which is what makes it
+the thing you read to see what an agent may do.
+
+You take the pen when you need a guarantee rather than an instruction: a branch,
+a different model per step, a recovery path, a declared point where a human
+stands. A declaration says none of those.
 
 ```json
 {
@@ -102,5 +114,7 @@ HITL is not a hidden toggle. Gated tool calls route through policy files such as
 policies. The Chain defines what the workflow can ask for; the active policy
 decides what must pause for approval before execution.
 
-Walk through your first chain:
+Declare an agent:
+**[contenox.com/docs/guide/agents](https://contenox.com/docs/guide/agents/)**.
+Write a chain by hand:
 **[contenox.com/docs/guide/first-chain](https://contenox.com/docs/guide/first-chain/)**.

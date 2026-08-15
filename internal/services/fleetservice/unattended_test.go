@@ -82,8 +82,15 @@ func (f *fakeHITL) PendingAttentionAsks(context.Context, string) ([]*runtimetype
 func (f *fakeHITL) AttentionBoundsFor(context.Context, string) (hitlservice.AttentionBounds, error) {
 	return hitlservice.AttentionBounds{}, nil
 }
-func (f *fakeHITL) AgentAnswerCount(context.Context, string) (int, error) { return 0, nil }
-func (f *fakeHITL) SweepExpired(context.Context) (int, error)             { return 0, nil }
+func (f *fakeHITL) AgentAnswerCount(context.Context, string) (int, error)   { return 0, nil }
+func (f *fakeHITL) AgentApprovalCount(context.Context, string) (int, error) { return 0, nil }
+func (f *fakeHITL) RespondAsAgentBounded(context.Context, string, string, bool, string, int) error {
+	return nil
+}
+func (f *fakeHITL) AgentGuidanceFor(context.Context, string) ([]hitlservice.GuidanceNote, error) {
+	return nil, nil
+}
+func (f *fakeHITL) SweepExpired(context.Context) (int, error) { return 0, nil }
 func (f *fakeHITL) ListPending(context.Context, int) ([]*runtimetypes.HITLApproval, error) {
 	return nil, nil
 }

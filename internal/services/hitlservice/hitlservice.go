@@ -131,6 +131,17 @@ type Service interface {
 	// AgentAnswerCount reports how many of a mission's questions an agent answered.
 	AgentAnswerCount(ctx context.Context, missionID string) (int, error)
 
+	// RespondAsAgentBounded records a permission verdict attributed to an agent
+	// under an atomic per-mission cap, with optional guidance a denial carries.
+	RespondAsAgentBounded(ctx context.Context, askID, agentName string, approved bool, guidance string, max int) error
+
+	// AgentApprovalCount reports how many of a mission's gated tool calls an agent decided.
+	AgentApprovalCount(ctx context.Context, missionID string) (int, error)
+
+	// AgentGuidanceFor returns the redirects an adjudicating agent attached to
+	// the calls it refused on a mission, oldest first.
+	AgentGuidanceFor(ctx context.Context, missionID string) ([]GuidanceNote, error)
+
 	// SweepExpired resolves every pending approval past its deadline,
 	// applying OnTimeout, and returns the count resolved.
 	SweepExpired(ctx context.Context) (int, error)
@@ -169,6 +180,10 @@ var (
 	ErrVerdictNeedsResumer = errors.New("hitlservice: a suspended run is checkpointed under this ask and this process cannot resume it; the verdict was not recorded and the ask is still pending")
 )
 
+// approvalPollInterval is how often a waiting approval re-reads its row, so a
+// verdict recorded by another process is noticed without a wake-up channel.
+const approvalPollInterval = time.Second
+
 // ResumeHook resumes the suspended run checkpointed under approvalID once
 // its verdict lands with nobody parked; return ErrNoCheckpoint for a clean
 // no-op, any other error is surfaced by Respond.
@@ -200,8 +215,10 @@ type service struct {
 
 	mu              sync.Mutex
 	pending         map[string]chan answer
+	offered         map[string]struct{}
 	approvalCeiling time.Duration
 	resumeHook      ResumeHook
+	adjudicator     Adjudicator
 }
 
 // New constructs a hitlservice bound to a tenant.
@@ -223,6 +240,7 @@ func NewWithDefaultPolicy(src PolicySource, tenantID string, store KVReader, tra
 		tracker:        tracker,
 		fallbackPolicy: fallbackPolicy,
 		pending:        make(map[string]chan answer),
+		offered:        make(map[string]struct{}),
 	}
 	if as, ok := store.(approvalStore); ok {
 		svc.approvals = as
@@ -447,6 +465,12 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 		return false, fmt.Errorf("hitl: publish approval request: %w", err)
 	}
 
+	// Offered after the waiter is registered, so a verdict that lands immediately
+	// wakes it rather than racing it. Adopting a row is no reason to skip: the
+	// creator may be a dispatched unit, which mounts no adjudicator at all. offer
+	// itself drops the duplicate when this process already judged this ask.
+	s.offer(ctx, adjudicationFromApprovalRequest(approvalID, req))
+
 	waitCtx := ctx
 	if !ruleTimeout {
 		// Nothing upstream bounds ctx here; apply the serve-level ceiling ourselves.
@@ -456,7 +480,7 @@ func (s *service) RequestApproval(ctx context.Context, req ApprovalRequest, sink
 	}
 
 	// The channel wakes a same-process Respond; the poll watches for a resolver in another process.
-	poll := time.NewTicker(attentionPollInterval)
+	poll := time.NewTicker(approvalPollInterval)
 	defer poll.Stop()
 	for {
 		select {
@@ -528,6 +552,11 @@ func (s *service) RecordPendingApproval(ctx context.Context, approvalID string, 
 	if err := s.approvals.CreateHITLApproval(ctx, row); err != nil {
 		return fmt.Errorf("hitlservice: persist pending approval %s: %w", approvalID, err)
 	}
+	// The in-process gating path records its row here rather than through
+	// RequestApproval, so this is where its asks reach an adjudicator. Without
+	// it the seam is only ever fed by the external-unit path and a native
+	// subagent's gated call is never offered to anyone but a human.
+	s.offer(ctx, adjudicationFromApprovalRequest(approvalID, req))
 	return nil
 }
 
@@ -577,6 +606,7 @@ func (s *service) resolve(ctx context.Context, approvalID string, approved bool,
 		return ErrApprovalAlreadyResolved
 	}
 	s.hitlLog(ctx, "verdict recorded", "approval_id", approvalID, "approved", approved)
+	s.forgetOffer(approvalID)
 
 	// Best-effort wake-up; when nobody is parked, the row transition above is already the durable record.
 	s.mu.Lock()
@@ -628,6 +658,7 @@ func (s *service) SweepExpired(ctx context.Context) (int, error) {
 			return expired, fmt.Errorf("hitlservice: resolve expired approval %s: %w", row.ID, err)
 		}
 		expired++
+		s.forgetOffer(row.ID)
 		// Best-effort wake-up, in case a requester is somehow still parked on this id in this process.
 		s.mu.Lock()
 		ch, ok := s.pending[row.ID]
@@ -702,6 +733,10 @@ type approvalResolution struct {
 	// AnsweredBy records who answered when not human: the generic "agent"
 	// marker or the agent's name; absent for a human answer.
 	AnsweredBy *string `json:"answeredBy,omitempty"`
+	// DecidedBy is AnsweredBy's permission-ask twin: who ruled on a gated tool call when not a human.
+	DecidedBy *string `json:"decidedBy,omitempty"`
+	// Guidance is what a non-human denial told the unit to do instead.
+	Guidance *string `json:"guidance,omitempty"`
 }
 
 type answer struct {
@@ -754,6 +789,7 @@ func (s *service) AbandonMissionAsks(ctx context.Context, missionID string) ([]s
 			default:
 			}
 		}
+		s.forgetOffer(row.ID)
 		closed = append(closed, row.ID)
 	}
 	return closed, nil

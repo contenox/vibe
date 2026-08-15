@@ -117,20 +117,13 @@ type Deps struct {
 	// fires under whatever name it is given.
 	MissionEnvelopes MissionEnvelopeSource
 
-	// Asks is the durable ask inbox `/answer` records an answer through: the
-	// process's OWN hitlservice.Service, the instance the engine gates on and
-	// the resume hook is registered against. Nil (with Supervision) drops
-	// /answer from the advertised menu.
+	// Asks is the durable ask inbox /answer records through and parked approvals are re-offered from; it must be the process's OWN hitlservice.Service.
 	Asks AskInbox
 
-	// Supervision resolves which missions a session fired, the ownership check
-	// /answer applies. Asks and Supervision together gate whether `/answer` is
-	// advertised and usable.
+	// Supervision resolves which missions a session fired. With Asks, it gates whether /answer is advertised.
 	Supervision MissionSupervision
 
-	// OptInBeta mirrors the CLI's opt-in-beta gate, so a beta lever exposed by
-	// a slash command (today: /mission --oracle) is hidden exactly where its
-	// CLI flag is.
+	// OptInBeta mirrors the CLI's opt-in-beta gate.
 	OptInBeta bool
 }
 

@@ -6,6 +6,7 @@ package contenoxcli
 
 import (
 	"github.com/contenox/contenox/internal/kernel/taskengine"
+	"github.com/contenox/contenox/internal/services/fleetservice"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
@@ -34,8 +35,11 @@ func acpToolset(
 	acpHITL hitlservice.Service,
 	bus missionservice.EventPublisher,
 	optInBeta bool,
+	// fleetFn late-binds the in-process fleet, which is built after this toolset.
+	fleetFn func() fleetservice.Service,
 ) map[string]taskengine.ToolsRepo {
 	cwdResolver := acpsvc.NewACPCwdResolver(transportFn)
+	supervision := missionSupervision{missions: missions, hitl: acpHITL, db: db, tracker: tracker}
 	tools := map[string]taskengine.ToolsRepo{
 		"webtools": localtools.NewWebCaller(tracker),
 		"local_fs": localtools.NewLocalFSToolsWith(
@@ -54,18 +58,17 @@ func acpToolset(
 		// compute; git's four writes still approve).
 		localtools.GitToolsName:      localtools.NewGitToolsWith("", localtools.GitToolsName, cwdResolver),
 		searchtool.ToolsProviderName: newWorkspaceSearchTools(workspaceID),
-		// Mission tools: inert without a mission id in session/new `_meta`, so
-		// an ordinary editor session never sees them. The asker raises
-		// mission_ask_attention as a durable ask over the same store
-		// `contenox approvals` reads.
-		missiontools.ToolsProviderName: missiontools.New(missions, missionAttentionAsker{
-			hitl:     acpHITL,
-			missions: missions,
-			bus:      bus,
-		}, missiontools.WithSupervision(
-			missionSupervision{missions: missions, hitl: acpHITL, db: db, tracker: tracker},
-			missionSupervision{missions: missions, hitl: acpHITL, db: db, tracker: tracker},
-		)),
+		// Inert without a mission id in session/new `_meta`, so an ordinary editor session only ever sees the supervisor half.
+		missiontools.ToolsProviderName: missiontools.New(missions,
+			missiontools.WithAttentionAsker(missionAttentionAsker{
+				hitl:     acpHITL,
+				missions: missions,
+				bus:      bus,
+			}),
+			missiontools.WithSupervision(supervision),
+			missiontools.WithAttentionResolver(supervision),
+			missiontools.WithSpawner(fleetSpawner{fleet: fleetFn}, missions, subagentDefaults(db)),
+		),
 	}
 	if optInBeta {
 		tools[gojatool.ToolsProviderName] = gt

@@ -7,7 +7,9 @@ description: The ReAct loop as contenox implements it — an authored task graph
 
 In contenox the ReAct loop — model reasons, calls a tool, observes, reasons again — is not hidden vendor plumbing. It is an authored task graph: a `chat_completion` task with tools, a branch on whether the model called one, an `execute_tool_calls` task, and an edge back. Every decision is a visible JSON key; every loop is bounded by a budget you can read. The shipped chains stage that loop deliberately: a main loop that works, a recovery loop with a fresh instruction and a smaller budget, and a terminal task with `"tools": []` that can only report. Each stage that follows a failure gets fewer powers and a clearer mandate — the graph never lets confusion default into unattended mutation.
 
-This page maps the loop as the shipped chains actually implement it, then shows how to derive your own. Authoring basics — tasks, handlers, transitions — are covered in [Your first chain](/docs/guide/first-chain/); this page is about loop engineering: the topology, the budgets, and the doctrine for adapting it.
+You do not have to author one to get one. [Declare an agent](/docs/guide/agents/) and contenox generates the chain behind it, staged the way the shipped ones are. This page is for reading that chain, and for the case where you write your own: a branch, a different model per step, a recovery path, a declared point where a human stands.
+
+It maps the loop as the shipped chains actually implement it, then shows how to derive your own. Authoring basics — tasks, handlers, transitions — are covered in [Writing a chain by hand](/docs/guide/first-chain/); this page is about loop engineering: the topology, the budgets, and the doctrine for adapting it.
 
 ## Anatomy of one turn
 
@@ -103,7 +105,7 @@ The doctrine, stated as doctrine: **do not invent a loop topology. Copy the lean
 Walk one adaptation end-to-end — a narrow diff-review loop, single tool, attended use:
 
 ```bash
-cp ~/.contenox/chain-agent-run.json ./chain-agent-diffreview.json
+cp ~/.contenox/system/chain-agent-run.json ./chain-agent-diffreview.json
 ```
 
 1. **Delete the stages you don't need.** Remove `recovery_run`, `recovery_run_tools`, and `summarise_failure` — three tasks gone.
@@ -195,7 +197,7 @@ The production set is the template you copied — so "upgrading" the minimal loo
 ## Next
 
 - [Request routing](/docs/guide/request-routing/) — the layer above this one: how a `route` task picks which loop runs, and what a specialist carries beyond its prompt
-- [Your first chain](/docs/guide/first-chain/) — authoring basics: tasks, prompts, models, policies
+- [Writing a chain by hand](/docs/guide/first-chain/) — authoring basics: tasks, prompts, models, policies
 - [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) — where chain files live and what the `agent` role means
 - [Transitions & branching](/docs/specification/transitions/) and [Handlers](/docs/specification/handlers/) — the full operator and handler reference
 - [HITL policies](/docs/guide/hitl/) — the approval envelope around the loop

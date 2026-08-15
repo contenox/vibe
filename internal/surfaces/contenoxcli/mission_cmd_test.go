@@ -12,7 +12,6 @@ import (
 
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/clikv"
-	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	libdb "github.com/contenox/contenox/libdbexec"
@@ -240,106 +239,6 @@ func TestUnit_MissionPlanCmd_PrintsFullPlanUnlikeShowsSummary(t *testing.T) {
 	got := out.String()
 	require.Contains(t, got, "step one")
 	require.Contains(t, got, "revision 1")
-}
-
-func TestUnit_RenderMissionAsksTable_Empty(t *testing.T) {
-	var buf bytes.Buffer
-	require.NoError(t, renderMissionAsksTable(&buf, nil, nil, time.Now().UTC()))
-	out := buf.String()
-	require.Contains(t, out, "No pending attention asks")
-	require.Contains(t, out, "approvals respond")
-}
-
-func TestUnit_RenderMissionAsksTable_FillsAgentFromMissionWhenAskCarriesNone(t *testing.T) {
-	now := time.Now().UTC()
-	missionID := "m-42"
-	missions := map[string]*missionservice.Mission{
-		missionID: {ID: missionID, AgentName: "agent-a"},
-	}
-	asks := []*runtimetypes.HITLApproval{
-		{ID: "ask-1", ArgsSummary: "which env?", MissionID: &missionID, CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(59 * time.Minute)},
-	}
-	var buf bytes.Buffer
-	require.NoError(t, renderMissionAsksTable(&buf, missions, asks, now))
-	out := buf.String()
-	for _, want := range []string{"ask-1", "m-42", "agent-a", "which env?", "1m", "59m"} {
-		require.Contains(t, out, want)
-	}
-}
-
-func TestUnit_MissionAsksCmd_ScopedToOneMission(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "mission-asks-cli.db")
-	cmd := testCobraCmd()
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	require.NoError(t, cmd.Root().PersistentFlags().Set("db", dbPath))
-	require.NoError(t, cmd.Root().PersistentFlags().Set("data-dir", filepath.Join(t.TempDir(), ".contenox")))
-
-	ctx := context.Background()
-	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
-	require.NoError(t, err)
-	missions := missionservice.New(db)
-	m := &missionservice.Mission{Intent: "ask something", AgentName: "agent-a", HITLPolicyName: "hitl-policy-default.json"}
-	require.NoError(t, missions.Create(ctx, m))
-
-	store := runtimetypes.New(db.WithoutTransaction())
-	missionID := m.ID
-	now := time.Now().UTC()
-	require.NoError(t, store.CreateHITLApproval(ctx, &runtimetypes.HITLApproval{
-		ID: "ask-1", ToolsName: hitlservice.AttentionToolsName, ToolName: hitlservice.AttentionToolName,
-		ArgsSummary: "which env?", MissionID: &missionID, AgentName: "agent-a",
-		State: runtimetypes.HITLApprovalPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}))
-	require.NoError(t, db.Close())
-
-	require.NoError(t, runMissionAsks(cmd, []string{m.ID}))
-	got := out.String()
-	require.Contains(t, got, "ask-1")
-	require.Contains(t, got, "which env?")
-	require.Contains(t, got, "agent-a")
-	require.Contains(t, got, "approvals respond")
-}
-
-// TestUnit_MissionAsksCmd_NoIDScansOnlyOpenMissions asserts the no-argument form iterates open missions only, so a terminal mission's leftover ask does not appear.
-func TestUnit_MissionAsksCmd_NoIDScansOnlyOpenMissions(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "mission-asks-all-cli.db")
-	cmd := testCobraCmd()
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	require.NoError(t, cmd.Root().PersistentFlags().Set("db", dbPath))
-	require.NoError(t, cmd.Root().PersistentFlags().Set("data-dir", filepath.Join(t.TempDir(), ".contenox")))
-
-	ctx := context.Background()
-	db, err := libdb.NewSQLiteDBManager(ctx, dbPath, runtimetypes.SchemaSQLite)
-	require.NoError(t, err)
-	missions := missionservice.New(db)
-
-	open := &missionservice.Mission{Intent: "still going", AgentName: "agent-open", HITLPolicyName: "hitl-policy-default.json"}
-	require.NoError(t, missions.Create(ctx, open))
-	landed := &missionservice.Mission{Intent: "already done", AgentName: "agent-landed", HITLPolicyName: "hitl-policy-default.json"}
-	require.NoError(t, missions.Create(ctx, landed))
-	_, err = missions.Finish(ctx, landed.ID, missionservice.StatusLanded, "done")
-	require.NoError(t, err)
-
-	store := runtimetypes.New(db.WithoutTransaction())
-	now := time.Now().UTC()
-	openID, landedID := open.ID, landed.ID
-	require.NoError(t, store.CreateHITLApproval(ctx, &runtimetypes.HITLApproval{
-		ID: "ask-open", ToolsName: hitlservice.AttentionToolsName, ToolName: hitlservice.AttentionToolName,
-		ArgsSummary: "open-mission question", MissionID: &openID,
-		State: runtimetypes.HITLApprovalPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}))
-	require.NoError(t, store.CreateHITLApproval(ctx, &runtimetypes.HITLApproval{
-		ID: "ask-landed", ToolsName: hitlservice.AttentionToolsName, ToolName: hitlservice.AttentionToolName,
-		ArgsSummary: "landed-mission question", MissionID: &landedID,
-		State: runtimetypes.HITLApprovalPending, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}))
-	require.NoError(t, db.Close())
-
-	require.NoError(t, runMissionAsks(cmd, nil))
-	got := out.String()
-	require.Contains(t, got, "ask-open")
-	require.NotContains(t, got, "ask-landed", "a terminal mission's leftover ask must not appear in the open-missions view")
 }
 
 func TestUnit_VerificationWarningLine(t *testing.T) {

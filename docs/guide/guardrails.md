@@ -14,8 +14,8 @@ each is a file you write, diff and review like any other change.
 
 | What it decides | Where you declare it |
 |---|---|
-| Which model answers | `execute_config.model` / `provider` in the chain |
-| Which tools exist at all | `execute_config.tools` allowlist in the chain |
+| Which model answers | `model:` in the [agent declaration](/docs/guide/agents/); `execute_config.model` / `provider` in an authored chain |
+| Which tools exist at all | `tools:` in the declaration; `execute_config.tools` allowlist in an authored chain |
 | Where it may act | workspace roots, and the [sandbox](/docs/guide/agent-sandbox/) |
 | What runs, asks, or is refused | the envelope — [HITL policy](/docs/guide/hitl/) |
 | What content gets through | a `route` task — [moderation gate](/docs/use-cases/moderation-gate/) |
@@ -23,7 +23,9 @@ each is a file you write, diff and review like any other change.
 
 ## 1. Which model answers
 
-A task names its model and provider. Nothing negotiates that at runtime, and an
+A declaration's `model:` pins the model for that agent; routing stays on your
+configured default when the field is absent. In an authored chain a task names
+its model and provider per step. Nothing negotiates that at runtime, and an
 envelope can pin it further: `modelAllowlist` and `backendAllowlist` in the
 `compute` block mean a unit cannot switch to a model you did not name — see
 [sovereignty](/docs/guide/sovereignty/) for why that matters when the inference
@@ -31,7 +33,11 @@ has to stay on your hardware.
 
 ## 2. Which tools exist at all
 
-`execute_config.tools` is an allowlist, and its default is the important part:
+A declaration's `tools:` line is the allowlist most agents use. Omitting it
+inherits every tool, so name them to narrow it.
+
+Behind that, and in a chain you write yourself, the field is
+`execute_config.tools` — an allowlist whose default is the important part:
 
 > Absent or `null` = none. The task has no tools until this field explicitly
 > grants some.

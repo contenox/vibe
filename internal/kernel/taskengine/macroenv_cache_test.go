@@ -43,13 +43,13 @@ func TestUnit_MacroEnv_SystemInstruction_StableAcrossRegistryOrder(t *testing.T)
 		"local_fs":    {tool("sed"), tool("write_file"), tool("read_file")},
 		"local_shell": {tool("local_shell")},
 	}}
-	outA := runSysInstrExpand(t, repoA, "You are an agent.", []string{"*"})
-	outB := runSysInstrExpand(t, repoB, "You are an agent.", []string{"*"})
+	outA := runSysInstrExpand(t, repoA, "tools={{tools}}", []string{"*"})
+	outB := runSysInstrExpand(t, repoB, "tools={{tools}}", []string{"*"})
 	if outA != outB {
 		t.Fatalf("system instruction bytes depend on registry enumeration order:\nA: %s\nB: %s", outA, outB)
 	}
-	if !strings.Contains(outA, "Available tools") {
-		t.Fatalf("expected the tools summary to be auto-appended: %s", outA)
+	if !strings.Contains(outA, "read_file") {
+		t.Fatalf("{{tools}} did not render the registry: %s", outA)
 	}
 }
 

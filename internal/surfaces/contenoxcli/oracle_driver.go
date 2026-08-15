@@ -1,12 +1,3 @@
-// oracle_driver.go is the oracle attention driver `mission fire --oracle`
-// mounts: a reportrouter.AgentSupervisor — the a2a firing-agent offer's
-// sibling on the same seam — that reviews an operator-fired mission's
-// attention ask by running the oracle chain in-process on the host's engine.
-// A valid ANSWER verdict is delivered through the service layer
-// (hitlservice.EnforceAgentAnswerBounds + AnswerAsAgentNamed as "oracle");
-// WAIT, malformed-after-guidance, a bounds refusal, a chain error, or budget
-// exhaustion changes nothing — the untouched normal path (park → checkpoint →
-// durable ask → human) proceeds.
 package contenoxcli
 
 import (
@@ -22,67 +13,45 @@ import (
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
-	"github.com/contenox/contenox/internal/services/missiontools"
 	"github.com/contenox/contenox/internal/services/oracletools"
-	"github.com/contenox/contenox/internal/services/reportrouter"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libdbexec"
-	"github.com/contenox/contenox/libtracker"
 )
 
-// oracleAgentName is the actor recorded on an oracle-delivered answer
-// (answeredBy on the durable resolution) and its agent-answer-count identity.
-const oracleAgentName = "oracle"
-
-// oraclePolicyName pins the oracle chain's own execution envelope.
-const oraclePolicyName = "hitl-policy-oracle.json"
-
-// oracleAnswerer adapts the service layer to oracletools.Answerer: the same
-// atomic bounded delivery (hitlservice.AnswerAsAgentWithinBounds) that
-// `approvals respond --as-agent` and the `mission_answer` tool run, so the
-// three together spend at most the envelope's cap. Every terminal holding —
-// the envelope's bounds, or the ask already gone — maps to the typed refusal
-// the tool contract never retries, and states its reason on the operator's
-// trace (out) the way the firing-agent offer's declines do.
-type oracleAnswerer struct {
+type oracleResolver struct {
 	hitl     hitlservice.Service
 	missions missionservice.Service
 	store    runtimetypes.Store
-	// out receives one line per refusal — the ONLY place a denial's reason is
-	// ever stated. The model-facing result stays the plain denial.
-	out io.Writer
+	out      io.Writer
 }
 
-var _ oracletools.Answerer = oracleAnswerer{}
+var _ oracletools.Resolver = oracleResolver{}
 
-// refuse writes the operator line for reason and returns the typed refusal;
-// the tool renders that refusal as the plain denied-per-policy result, reason
-// discarded.
-func (a oracleAnswerer) refuse(askID, reason string) error {
-	if a.out != nil {
-		fmt.Fprintf(a.out, "oracle: answer refused for ask %s: %s\n", askID, reason)
+func (r oracleResolver) refuse(askID, reason string) error {
+	if r.out != nil {
+		fmt.Fprintf(r.out, "oracle: verdict refused for ask %s: %s\n", askID, reason)
 	}
-	return &oracletools.AnswerRefusedError{Reason: reason}
+	return &oracletools.RefusedError{Reason: reason}
 }
 
-func (a oracleAnswerer) Answer(ctx context.Context, askID, text string) error {
-	row, err := a.store.GetHITLApproval(ctx, askID)
+func (r oracleResolver) Answer(ctx context.Context, askID, text string) error {
+	row, err := r.store.GetHITLApproval(ctx, askID)
 	if err != nil {
 		if errors.Is(err, libdbexec.ErrNotFound) {
-			return a.refuse(askID, fmt.Sprintf("ask %s no longer exists", askID))
+			return r.refuse(askID, fmt.Sprintf("ask %s no longer exists", askID))
 		}
 		return fmt.Errorf("read ask %s: %w", askID, err)
 	}
 	if !hitlservice.IsAttentionAsk(row) {
-		return a.refuse(askID, fmt.Sprintf("ask %s is a permission request, not a question", askID))
+		return r.refuse(askID, fmt.Sprintf("ask %s is a gated tool call, not a question", askID))
 	}
-	if err := hitlservice.AnswerAsAgentWithinBounds(ctx, a.missions, a.hitl, row, oracleAgentName, text); err != nil {
+	if err := hitlservice.AnswerAsAgentWithinBounds(ctx, r.missions, r.hitl, row, oracleAgentName, text); err != nil {
 		switch {
 		case hitlservice.IsAgentAnswerRefusal(err),
 			errors.Is(err, hitlservice.ErrApprovalNotFound),
 			errors.Is(err, hitlservice.ErrApprovalAlreadyResolved),
 			errors.Is(err, hitlservice.ErrApprovalExpired):
-			return a.refuse(askID, err.Error())
+			return r.refuse(askID, err.Error())
 		default:
 			return err
 		}
@@ -90,74 +59,90 @@ func (a oracleAnswerer) Answer(ctx context.Context, askID, text string) error {
 	return nil
 }
 
-// oracleAttentionDriver runs one oracle-chain review per offered ask, for the
-// missions this host itself dispatched (see OfferToSupervisingAgent).
-type oracleAttentionDriver struct {
-	// mu guards owned: Dispatch registers on the command goroutine while the
-	// bus subscriber reads on the router's.
-	mu    sync.Mutex
-	owned map[string]bool
+func (r oracleResolver) Decide(ctx context.Context, askID string, approve bool, guidance string) error {
+	row, err := r.store.GetHITLApproval(ctx, askID)
+	if err != nil {
+		if errors.Is(err, libdbexec.ErrNotFound) {
+			return r.refuse(askID, fmt.Sprintf("ask %s no longer exists", askID))
+		}
+		return fmt.Errorf("read ask %s: %w", askID, err)
+	}
+	if hitlservice.IsAttentionAsk(row) {
+		return r.refuse(askID, fmt.Sprintf("ask %s is a question, not a gated tool call", askID))
+	}
+	if row.MissionID == nil || *row.MissionID == "" {
+		return r.refuse(askID, fmt.Sprintf("ask %s belongs to no subagent, so no envelope bounds it", askID))
+	}
+	bounds, err := r.boundsFor(ctx, *row.MissionID)
+	if err != nil {
+		return r.refuse(askID, "the subagent's envelope could not be read")
+	}
+	if !bounds.AllowAgentApprovals {
+		return r.refuse(askID, "the subagent's envelope does not allow agent-decided tool calls")
+	}
+	err = r.hitl.RespondAsAgentBounded(ctx, askID, oracleAgentName, approve, guidance, bounds.EffectiveMaxAgentApprovals())
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, hitlservice.ErrAgentApprovalBoundSpent):
+		return r.refuse(askID, fmt.Sprintf("the subagent's agent-approval bound (%d) is spent", bounds.EffectiveMaxAgentApprovals()))
+	case errors.Is(err, hitlservice.ErrApprovalNotFound),
+		errors.Is(err, hitlservice.ErrApprovalAlreadyResolved),
+		errors.Is(err, hitlservice.ErrApprovalExpired):
+		return r.refuse(askID, err.Error())
+	default:
+		return err
+	}
+}
 
+func (r oracleResolver) boundsFor(ctx context.Context, missionID string) (hitlservice.AttentionBounds, error) {
+	m, err := r.missions.Get(ctx, missionID)
+	if err != nil || m == nil {
+		return hitlservice.AttentionBounds{}, fmt.Errorf("read subagent %s: %w", missionID, err)
+	}
+	return r.hitl.AttentionBoundsFor(ctx, m.HITLPolicyName)
+}
+
+type oracleDriver struct {
 	agent         agentservice.Agent
 	chain         *taskengine.TaskChainDefinition
 	chainRef      string
+	policy        string
 	templateVars  map[string]string
 	contextLength int
-	// out receives the driver's one-line trace per review.
-	out io.Writer
+	// approves gates the permission half; the question half needs no switch of its own.
+	approves bool
+	missions missionservice.Service
+	out      io.Writer
+
+	mu       sync.Mutex
+	inFlight map[string]bool
 }
 
-var _ reportrouter.AgentSupervisor = (*oracleAttentionDriver)(nil)
+var _ hitlservice.Adjudicator = (*oracleDriver)(nil)
 
-// own registers a mission this host dispatched, so its asks become eligible
-// for review. Called after Dispatch returns; an ask arriving before the
-// registration lands is declined, which is correct — the driver only ever
-// declines to answer, never answers wrongly.
-func (d *oracleAttentionDriver) own(missionID string) {
-	if missionID == "" {
+func (d *oracleDriver) Adjudicate(ctx context.Context, ask hitlservice.Adjudication) {
+	if ask.AskID == "" || ask.MissionID == "" {
 		return
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.owned == nil {
-		d.owned = map[string]bool{}
+	if ask.Kind == hitlservice.AskKindPermission && !d.approves {
+		return
 	}
-	d.owned[missionID] = true
-}
-
-// owns reports whether missionID was dispatched by this host.
-func (d *oracleAttentionDriver) owns(missionID string) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.owned[missionID]
-}
-
-// OfferToSupervisingAgent implements reportrouter.AgentSupervisor. A
-// parented ask is the firing-agent offer's territory; the driver takes only
-// operator-fired asks. It never returns an error: every non-answer outcome is
-// a decline, and the ask is durable either way.
-//
-// The ownership check is not redundant with parentage: every host's
-// reportrouter subscribes to the SHARED bus, so without it one
-// `mission fire --oracle` would review — and spend a model call on — asks
-// raised by missions fired from other terminals whose operator never passed
-// --oracle. The envelope still gates the write, so this bounds scope and
-// spend, not authority.
-func (d *oracleAttentionDriver) OfferToSupervisingAgent(ctx context.Context, ev missionservice.AttentionAskedEvent) error {
-	if ev.ParentSessionID != "" || ev.AskID == "" || !d.owns(ev.MissionID) {
-		return nil
+	// The oracle chain runs on the same engine and the same hitl instance, so an ask it raises itself must never re-enter here.
+	if !d.claim(ask.AskID) {
+		return
 	}
-	input, err := json.Marshal(ev)
+	defer d.release(ask.AskID)
+
+	input, err := json.Marshal(newOracleInput(ask, d.intentOf(ctx, ask.MissionID)))
 	if err != nil {
-		return nil
+		return
 	}
-
-	binding := oracletools.NewAskBinding(ev.AskID, string(input))
-	runCtx := libtracker.WithNewRequestID(ctx)
-	runCtx = hitlservice.WithPolicyName(runCtx, oraclePolicyName)
+	binding := oracletools.NewAskBinding(ask.AskID, bindingKind(ask.Kind), string(input))
+	runCtx := hitlservice.WithPolicyName(ctx, d.policyName())
 	runCtx = oracletools.WithBinding(runCtx, binding)
 
-	d.tracef("oracle: reviewing ask %s (mission %s): %s", ev.AskID, ev.MissionID, ev.Summary)
+	d.tracef("oracle: reviewing %s ask %s (subagent %s): %s", ask.Kind, ask.AskID, ask.MissionID, askHeadline(ask))
 	start := time.Now()
 	_, runErr := d.agent.Prompt(runCtx, agentservice.PromptRequest{
 		Input:         string(input),
@@ -172,29 +157,111 @@ func (d *oracleAttentionDriver) OfferToSupervisingAgent(ctx context.Context, ev 
 
 	switch binding.Outcome() {
 	case oracletools.OutcomeAnswered:
-		// In-window: the parked unit's poll picks the resolved row up and
-		// continues with NO checkpoint. Past the window the unit already
-		// checkpointed, and the delivery went through the durable respond
-		// path, whose resume hook resumed the run — the human-style late case.
-		late := ""
-		if elapsed > missiontools.AttentionParkWindow {
-			late = " (past the park window: the ask had checkpointed; the durable respond path resumed it)"
-		}
-		d.tracef("oracle: answered ask %s in %s as agent %q: %q%s", ev.AskID, elapsed, oracleAgentName, binding.Answer(), late)
+		d.tracef("oracle: answered ask %s in %s: %q", ask.AskID, elapsed, binding.Answer())
+	case oracletools.OutcomeApproved:
+		d.tracef("oracle: APPROVED %s.%s for subagent %s in %s", ask.ToolsName, ask.ToolName, ask.MissionID, elapsed)
+	case oracletools.OutcomeDenied:
+		// The guidance rides the ask row, not a mission report: a report here would read as the unit reaching its operator and mute the drive loop's next turn.
+		d.tracef("oracle: DENIED %s.%s for subagent %s in %s: %s", ask.ToolsName, ask.ToolName, ask.MissionID, elapsed, binding.Guidance())
 	case oracletools.OutcomeWait:
-		d.tracef("oracle: WAIT for ask %s (%s) — the question stays with a human", ev.AskID, elapsed)
+		d.tracef("oracle: WAIT for ask %s (%s) — it stays with a human", ask.AskID, elapsed)
 	default:
 		if runErr != nil {
-			d.tracef("oracle: chain error for ask %s (%s): %v — the question stays with a human", ev.AskID, elapsed, runErr)
+			d.tracef("oracle: chain error for ask %s (%s): %v — it stays with a human", ask.AskID, elapsed, runErr)
 		} else {
-			d.tracef("oracle: no verdict for ask %s within the chain budgets (%s) — the question stays with a human", ev.AskID, elapsed)
+			d.tracef("oracle: no verdict for ask %s within the chain budgets (%s) — it stays with a human", ask.AskID, elapsed)
 		}
 	}
-	return nil
 }
 
-func (d *oracleAttentionDriver) tracef(format string, args ...any) {
+func (d *oracleDriver) intentOf(ctx context.Context, missionID string) string {
+	if d.missions == nil {
+		return ""
+	}
+	m, err := d.missions.Get(ctx, missionID)
+	if err != nil || m == nil {
+		return ""
+	}
+	return m.Intent
+}
+
+func (d *oracleDriver) policyName() string {
+	if d.policy == "" {
+		return oracleDefaultPolicyName
+	}
+	return d.policy
+}
+
+func (d *oracleDriver) claim(askID string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.inFlight == nil {
+		d.inFlight = map[string]bool{}
+	}
+	if d.inFlight[askID] {
+		return false
+	}
+	d.inFlight[askID] = true
+	return true
+}
+
+func (d *oracleDriver) release(askID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.inFlight, askID)
+}
+
+func (d *oracleDriver) tracef(format string, args ...any) {
 	if d.out != nil {
 		fmt.Fprintf(d.out, format+"\n", args...)
+	}
+}
+
+func bindingKind(k hitlservice.AskKind) oracletools.AskKind {
+	if k == hitlservice.AskKindAttention {
+		return oracletools.AskKindAttention
+	}
+	return oracletools.AskKindPermission
+}
+
+func askHeadline(ask hitlservice.Adjudication) string {
+	if ask.Kind == hitlservice.AskKindAttention {
+		return ask.Summary
+	}
+	return fmt.Sprintf("%s.%s %s", ask.ToolsName, ask.ToolName, ask.ArgsSummary)
+}
+
+// oracleInput is what the chain receives: the whole ask, plus the intent it must be judged against.
+type oracleInput struct {
+	AskID       string `json:"askId"`
+	Kind        string `json:"kind"`
+	MissionID   string `json:"missionId"`
+	AgentName   string `json:"agentName,omitempty"`
+	Intent      string `json:"intent,omitempty"`
+	Summary     string `json:"summary,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+	ToolsName   string `json:"toolsName,omitempty"`
+	ToolName    string `json:"toolName,omitempty"`
+	ArgsSummary string `json:"argsSummary,omitempty"`
+	Diff        string `json:"diff,omitempty"`
+	PolicyName  string `json:"policyName,omitempty"`
+	OnTimeout   string `json:"onTimeout,omitempty"`
+}
+
+func newOracleInput(ask hitlservice.Adjudication, intent string) oracleInput {
+	return oracleInput{
+		AskID:       ask.AskID,
+		Kind:        string(ask.Kind),
+		MissionID:   ask.MissionID,
+		AgentName:   ask.AgentName,
+		Intent:      intent,
+		Summary:     ask.Summary,
+		Detail:      ask.Detail,
+		ToolsName:   ask.ToolsName,
+		ToolName:    ask.ToolName,
+		ArgsSummary: ask.ArgsSummary,
+		Diff:        ask.Diff,
+		PolicyName:  ask.PolicyName,
+		OnTimeout:   ask.OnTimeout,
 	}
 }

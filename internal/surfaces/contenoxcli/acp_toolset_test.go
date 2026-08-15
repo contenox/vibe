@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/contenox/contenox/internal/services/fleetservice"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
@@ -24,8 +25,9 @@ func TestUnit_ACPToolset_CarriesTheSharedToolsets(t *testing.T) {
 	t.Cleanup(gt.Shutdown)
 
 	noTransport := func() *acpsvc.Transport { return nil }
+	noFleet := func() fleetservice.Service { return nil }
 	tools := acpToolset(nil, libtracker.NoopTracker{}, gt, "test-workspace",
-		noTransport, nil, missionservice.New(nil), nil, nil, true)
+		noTransport, nil, missionservice.New(nil), nil, nil, true, noFleet)
 
 	// Every provider chat/run already had must still be present.
 	for _, name := range []string{"webtools", "local_fs", "local_shell", missiontools.ToolsProviderName} {
@@ -53,7 +55,7 @@ func TestUnit_ACPToolset_CarriesTheSharedToolsets(t *testing.T) {
 	// Without opt-in-beta the goja provider is absent, exactly as localToolset
 	// gates it; everything stable stays.
 	stable := acpToolset(nil, libtracker.NoopTracker{}, gt, "test-workspace",
-		noTransport, nil, missionservice.New(nil), nil, nil, false)
+		noTransport, nil, missionservice.New(nil), nil, nil, false, noFleet)
 	require.NotContains(t, stable, gojatool.ToolsProviderName, "goja is a beta surface, absent without opt-in-beta")
 	for _, name := range []string{"webtools", "local_fs", "local_shell",
 		searchtool.ToolsProviderName, localtools.GitToolsName, missiontools.ToolsProviderName} {

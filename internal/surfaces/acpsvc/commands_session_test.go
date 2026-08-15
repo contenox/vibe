@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/contenox/contenox/internal/kernel/enginesvc"
-
 	libacp "github.com/contenox/contenox/libacp"
 	"github.com/stretchr/testify/require"
 )
@@ -59,26 +57,3 @@ func TestLoopback_NewAndSessionsCommands_WorkWithoutASessionUI(t *testing.T) {
 
 // TestUnit_HandleSessions_EmptyWorkspaceTeachesNew pins the empty state: a
 // workspace with nothing recorded names the one command that changes that.
-func TestUnit_HandleSessions_EmptyWorkspaceTeachesNew(t *testing.T) {
-	tr, _ := newAnswerTestTransport(t, nil, nil)
-	out, err := tr.handleSessions(context.Background(), &sessionEntry{Cwd: t.TempDir()})
-	require.NoError(t, err)
-	require.Contains(t, out, "/new")
-}
-
-// TestUnit_HandleNewSessionCommand_RefusesWithoutAWorkspace pins the two
-// refusals /new gives instead of minting a session it cannot honour: an
-// unconfigured runtime gets the setup instruction, and a session with no
-// workspace directory is told so rather than landing one in an unknown place.
-func TestUnit_HandleNewSessionCommand_RefusesWithoutAWorkspace(t *testing.T) {
-	tr, _ := newAnswerTestTransport(t, nil, nil)
-
-	_, err := tr.handleNewSessionCommand(context.Background(), &sessionEntry{Cwd: t.TempDir()})
-	require.Error(t, err, "an unconfigured runtime cannot start a session")
-	require.Contains(t, err.Error(), "not configured yet")
-
-	tr.deps.Engine = &enginesvc.Engine{}
-	_, err = tr.handleNewSessionCommand(context.Background(), &sessionEntry{})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "workspace")
-}

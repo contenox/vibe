@@ -100,35 +100,53 @@ A rule with `when` conditions gates a tool only for calls whose arguments match 
 > **Note:**
 > `command_prefix_allowlist` pins a command **name**, and `PATH` decides what a name means — so an allowlisted `go` can be a `go` planted anywhere earlier on `PATH`. Add a `trusted_binaries` block to pin those names to a real path and a SHA256; see [Trusted binaries](/docs/guide/trusted-binaries/).
 
-## Who may answer a unit's question (`attention`)
+## Who may answer a subagent (`attention`)
 
-A mission unit that hits something it must not decide alone calls its
+A subagent that hits something it must not decide alone calls its
 `mission.mission_ask_attention` tool. That question lands in the session
-that fired the mission, where you answer it in place — your words go straight
-back to the unit as the result of the call it is parked on, and it continues.
+that fired it, where you answer it in place — your words go straight
+back to the subagent as the result of the call it is parked on, and it continues.
 
-By default only a **human** may answer, because that is what the unit escalated
-for. An envelope can hand routine questions to the **agent that fired the
-mission** instead — it often already knows the answer from the conversation the
-mission was fired in:
+The same block also decides who may rule on the subagent's **gated tool calls**:
+a call the envelope put on the `approve` tier normally waits for you, and this
+is where you say whether an adjudicating agent may answer it instead.
+
+By default only a **human** may do either, because that is what the subagent
+escalated for. An envelope can hand routine questions to the **agent that fired
+the mission** — it often already knows the answer from the conversation the
+mission was fired in — and can separately let an **oracle** rule on gated calls:
 
 ```json
 {
   "default_action": "approve",
   "rules": [],
-  "attention": { "allowAgentAnswers": true, "maxAgentAnswers": 2 }
+  "attention": {
+    "allowAgentAnswers": true,
+    "maxAgentAnswers": 2,
+    "allowAgentApprovals": true,
+    "maxAgentApprovals": 10
+  }
 }
 ```
 
 | Field | Type | Description |
 |---|---|---|
-| `attention.allowAgentAnswers` | bool | Let the firing session's agent answer its own unit's questions. Omitted/`false` (the default) means a human must. You can always answer yourself either way — this only decides whether the agent is offered the question first. |
-| `attention.maxAgentAnswers` | int | How many of this mission's questions the agent may answer before the rest wait for a human. Omitted uses a small default (3); `0` is **not** unlimited. The count is durable and actor-aware, so a restart does not refill it and your own answers do not consume it. |
+| `attention.allowAgentAnswers` | bool | Let the firing session's agent, or the oracle, answer this subagent's questions. Omitted/`false` (the default) means a human must. You can always answer yourself either way — this only decides whether an agent is offered the question first. |
+| `attention.maxAgentAnswers` | int | How many of this mission's questions an agent may answer before the rest wait for a human. Omitted uses a small default (3); `0` is **not** unlimited. The count is durable and actor-aware, so a restart does not refill it and your own answers do not consume it. |
+| `attention.allowAgentApprovals` | bool | Let the oracle approve or deny this subagent's `approve`-tier **tool calls**. Omitted/`false` (the default) means every gated call waits for a human. Separate from `allowAgentAnswers` on purpose: letting a model answer a question is a smaller grant than letting it release a gated call. |
+| `attention.maxAgentApprovals` | int | How many of this mission's gated calls the oracle may decide before the rest wait for a human. Omitted uses a default (20); `0` is **not** unlimited. Durable and actor-aware, same as the answer budget. |
 
-Together the two fields are a delegation budget: an envelope may allow a bounded
-number of agent answers per mission, and once the bound is spent every further
-question waits for a human. Every answer — yours or an agent's — durably records
-who answered.
+Together these are a delegation budget: an envelope may allow a bounded number
+of agent answers and agent-decided calls per mission, and once a bound is spent
+every further ask waits for a human. Every verdict — yours or an agent's —
+durably records who gave it.
+
+An adjudicating agent can only ever be **faster** than you, never more
+permissive than the envelope. It cannot widen a rule, cannot reach a tool the
+policy denies, and cannot exceed these counts; the counting and the write happen
+in one statement, so a mix of answerers cannot overrun the budget even
+concurrently. Anything it declines to decide takes the untouched normal path and
+waits for you.
 
 The agent is also skipped when the firing session is busy with a turn you
 started, or is not currently open — a question is never silently swallowed by an
@@ -138,7 +156,7 @@ a person) answered it.
 
 ## Built-in presets
 
-Contenox ships seven policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the next three are the profiles the ACP editor transports and the terminal UI load; the last is the pinned envelope of the beta [attention oracle](/docs/use-cases/auto-attention/).
+Contenox ships seven policy presets, written to `~/.contenox/` by `contenox init`. (A workspace `.contenox/` file with the same name overrides the global one.) The first three are the general-purpose postures; the next three are the profiles the ACP editor transports and the terminal UI load; the last is the pinned envelope of the [oracle](/docs/use-cases/auto-attention/).
 
 | Name | Behaviour |
 |---|---|
@@ -147,18 +165,18 @@ Contenox ships seven policy presets, written to `~/.contenox/` by `contenox init
 | `hitl-policy-dev.json` | `default_action: allow`, but explicit rules still gate `local_shell` (every shell call requires approval, and a fixed blacklist is always denied); useful for local development when you don't want prompts on filesystem/webtools calls. Unlike `hitl-policy-default.json` it carries **no secret quarantine** — its only rules cover the shell, so reads of `.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`, gcloud, browser profiles, wallets, shell history, `.netrc`, `.npmrc` and `id_rsa*` are not denied. Use it on a machine whose secrets you would not mind an agent reading |
 | `hitl-policy-acp.json` | Profile for editor (ACP) sessions — gated tool calls route through the editor's own approval UI |
 | `hitl-policy-acpx.json` | Hardened profile for headless / untrusted-driver (ACPX, e.g. OpenClaw) sessions — shell, writes, and network are denied outright rather than offered for approval |
-| `hitl-policy-oracle.json` | the [attention oracle's](/docs/use-cases/auto-attention/) pinned envelope — `default_action: deny` with exactly two allows, the in-process `oracle.submit_verdict` and `oracle.verdict_state` tools; no shell, filesystem, or network rule of any kind; seeded by init, inert until `mission fire --oracle` mounts the driver |
+| `hitl-policy-oracle.json` | the [oracle's](/docs/use-cases/auto-attention/) pinned envelope — `default_action: deny` with exactly two allows, the in-process `oracle.submit_verdict` and `oracle.verdict_state` tools; no shell, filesystem, or network rule of any kind; seeded by init, inert until `default-oracle-chain` mounts the driver |
 
-Each preset also states who may answer a unit's question (see [`attention`](#who-may-answer-a-units-question-attention)) rather than inheriting the invisible default, and the stances follow each preset's character:
+Each preset also states who may answer a unit's question (see [`attention`](#who-may-answer-a-subagent-attention)) rather than inheriting the invisible default, and the stances follow each preset's character:
 
 | Name | `attention` |
 |---|---|
 | `hitl-policy-acp.json` | agent may answer, up to 3 — an editor session's agent holds the conversation the mission was fired in |
-| `hitl-policy-default.json` | agent may answer, up to 3 — the mission path's default envelope: routine questions (a session agent's, or the attention oracle's), while whatever the unit then *does* stays gated by this same envelope; the file's `//attention` note documents the grant |
+| `hitl-policy-default.json` | agent may answer, up to 3 — the mission path's default envelope: routine questions (a session agent's, or the oracle's), while whatever the subagent then *does* stays gated by this same envelope; the file's `//attention` note documents the grant |
 | `hitl-policy-dev.json` | agent may answer, up to 5 — the permissive local-development posture |
 | `hitl-policy-strict.json` | **human only** — a policy whose character is "a human decides" does not hand the deciding to a model |
 | `hitl-policy-acpx.json` | **human only** — an untrusted driver's agent must not answer its own subagent's escalation |
-| `hitl-policy-oracle.json` | **human only** — the oracle never adjudicates its own asks; a question the oracle chain raises waits for a human |
+| `hitl-policy-oracle.json` | **human only**, on both halves — the oracle never adjudicates its own asks; a question the oracle chain raises waits for a human |
 
 ## Selecting the active policy
 

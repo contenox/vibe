@@ -34,8 +34,11 @@ var validConfigKeys = map[string]string{
 	"telemetry-enabled":             "Enable writing telemetry logs to <data-dir>/telemetry.log (true/false)",
 	"update-check":                  "Enable automatic update availability checks (true/false). Set false for zero-trust/air-gapped environments.",
 	"opt-in-beta":                   "Enable beta features (true/false): goja, shell_session, agent roster. CONTENOX_OPT_IN_BETA overrides per invocation.",
-	"default-mission-agent":         "Default declared agent fired by '/mission <intent>' and 'contenox mission fire' with no --agent.",
-	"default-mission-policy":        "Default mission envelope (HITL policy) used when '/mission' or 'contenox mission fire' names none.",
+	"default-mission-agent":         "Default declared agent run as a subagent by '/plan', mission_start, '/mission <intent>' and 'contenox mission fire' with no --agent.",
+	"default-mission-policy":        "Default subagent envelope (HITL policy) used when none is named.",
+	"default-oracle-chain":          "Chain that adjudicates a subagent's asks (e.g. chain-oracle-default.json). Unset means no oracle: every ask waits for a human.",
+	"default-oracle-policy":         "Envelope the oracle chain itself runs under. Unset uses hitl-policy-oracle.json.",
+	"oracle-approves-tool-calls":    "Let the oracle rule on a subagent's approve-tier TOOL CALLS, not just its questions (true/false). The subagent envelope's attention.allowAgentApprovals still has to permit it.",
 	"fleet-max-parallel":            "Fleet-width admission cap: max concurrently open mission units (integer; 0 = unlimited; default 8).",
 }
 
@@ -65,8 +68,11 @@ Supported keys:
   opt-in-beta                    Enable beta features: goja, shell_session, agent roster (true/false)
   default-chain                  Default chain file path
   hitl-policy-name               Active HITL policy file name (e.g. hitl-policy-strict.json)
-  default-mission-agent          Default agent fired by /mission and 'mission fire' with no --agent
-  default-mission-policy         Default mission envelope (HITL policy) when none is named`,
+  default-mission-agent          Default agent run as a subagent when none is named
+  default-mission-policy         Default subagent envelope (HITL policy) when none is named
+  default-oracle-chain           Chain that adjudicates a subagent's asks; unset means human-only
+  default-oracle-policy          Envelope the oracle chain runs under (default hitl-policy-oracle.json)
+  oracle-approves-tool-calls     Let the oracle rule on gated tool calls too (true/false)`,
 }
 
 var configSetCmd = &cobra.Command{

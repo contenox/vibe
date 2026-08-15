@@ -87,7 +87,7 @@ Nobody is reading the unit's chat. Prose alone reaches no one, so the runtime dr
 
 1. **Turn 1** — a preamble telling the unit it is unattended and that its only channels are `mission_report`, `mission_ask_attention`, `mission_plan`, and `mission_finish`, followed by your intent verbatim.
 2. If the mission was **reached** — a report filed, a plan revised, or a terminal verdict recorded — the loop stops there.
-3. **Turn 2 (the nudge)** — one follow-up telling the unit its last turn reached nobody and naming the tools again.
+3. **Turn 2 (the nudge)** — one follow-up telling the unit its last turn reached nobody and naming the tools again. If an adjudicating agent refused any of its tool calls with a redirect, the nudge carries those redirects: a refusal the unit only saw as "rejected" is what leaves it circling.
 4. If it is still mute, **the runtime files the blocker itself**: a `blocker` report on the mission quoting the unit's last words and naming the session to attach to.
 
 That last step is the design commitment. A mute unit does not silently disappear into an `open` row; it leaves a durable record saying it went silent and where to look. There is no third prompt, ever.
@@ -112,19 +112,24 @@ A `result` report may carry a structured **hand-over** — outcome, artifacts by
 
 `mission show` also surfaces one honesty signal inline: a report the verification gate downgraded because it claimed an artifact that does not exist is printed with a `⚠ claimed artifacts not found` warning beside it.
 
-## How a question gets answered
+## How an ask gets answered
 
-When a unit calls `mission_ask_attention`, the call **blocks** and a durable ask row is written. The answer comes back to the unit as that tool call's result, so it continues on the same turn.
+A subagent raises two kinds of ask, and they share one durable row type:
 
-Three things can resolve it:
+- a **question**, when it calls `mission_ask_attention`. The call blocks, and the answer comes back as that tool call's result, so it continues on the same turn.
+- a **permission gate**, when it makes a tool call the envelope put on the `approve` tier.
 
-- **You answer it.** `contenox approvals respond <ask-id> --answer "use the staging database"`. This is the one verb that answers every pending ask in the system, question or permission gate, mission-bound or not. `contenox mission asks` only narrows the *view* to one mission (or every open one) — it answers nothing.
-- **An agent answers it, within the envelope's attention bounds.** If the envelope grants `attention.allowAgentAnswers`, the firing session's agent may answer a bounded number of the unit's routine questions. The budget is durable and actor-aware: a restart does not refill it, and your own answers do not consume it. See [who may answer a unit's question](/docs/guide/hitl/#who-may-answer-a-units-question-attention).
-- **It expires.** An unanswered ask resolves to its `on_timeout` verdict; the question is recorded as a blocker instead.
+Four things can resolve either:
+
+- **You.** `contenox approvals respond <ask-id> --answer "use the staging database"` for a question, `--approve` / `--deny` for a gate. This is the one verb that answers every pending ask in the system, mission-bound or not. `contenox mission asks` only narrows the *view* to one mission (or every open one) — it answers nothing.
+- **The firing session's agent**, within the envelope's attention bounds. If the envelope grants `attention.allowAgentAnswers`, it may answer a bounded number of routine questions. The budget is durable and actor-aware: a restart does not refill it, and your own answers do not consume it.
+- **The oracle**, if one is configured. It rules on questions under the same bound, and — only when the envelope grants `attention.allowAgentApprovals` and `oracle-approves-tool-calls` is on — on gated tool calls too. See [The oracle](/docs/use-cases/auto-attention/).
+- **The clock.** An unanswered ask resolves to its `on_timeout` verdict; a question is recorded as a blocker instead.
+
+See [who may answer a subagent](/docs/guide/hitl/#who-may-answer-a-subagent-attention) for the bounds.
 
 An ask does not hold a process hostage. After a short park window the run **checkpoints** and releases its process; the ask stays a durable row that any later process can answer, and answering it resumes the suspended run exactly once. That is why you can close the terminal that raised a question and answer it tomorrow from a different one.
 
-Under opt-in-beta, `mission fire --oracle` mounts an in-process driver that reviews an operator-fired mission's routine questions and answers them as agent `"oracle"` inside the same attention bounds — everything else still waits for a human. See [The attention oracle](/docs/use-cases/auto-attention/).
 
 ## Reclaim: what happens when the host dies
 
@@ -229,9 +234,10 @@ contenox mission stop 9f3c… --reason "requirements changed"
 
 ## Next
 
+- [Declaring agents](/docs/guide/agents/) — the file you fire at
 - [HITL policies](/docs/guide/hitl/) — the envelope format, the presets, and the `attention` bounds
 - [Troubleshooting](/docs/guide/troubleshooting/) — a mission stuck in `open`, recovering after a crash, and `doctor --bundle`
-- [The attention oracle (beta)](/docs/use-cases/auto-attention/) — `mission fire --oracle`
+- [The oracle](/docs/use-cases/auto-attention/) — an adjudicating agent that answers a subagent's routine asks so unattended runs finish
 - [Authored approval](/docs/use-cases/authored-approval/) — the envelope as a reviewable artifact
 - [Events & triggers (beta)](/docs/guide/events/) — reacting to mission reports, status changes, and asks
 - [`contenox mission` reference](/docs/reference/contenox-cli/#contenox-mission) — every flag

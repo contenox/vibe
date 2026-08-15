@@ -135,16 +135,14 @@ func (t *Transport) offerParkedAsk(ctx context.Context, sid libacp.SessionID, ro
 // before an answer landed is a row that must not be re-asked. Expiry is the
 // check SQL cannot make: expires_at is the moment SweepExpired applies
 // on_timeout and any later answer is refused, so a row past it is a decided
-// question waiting to be recorded, not an open one. An attention ask is
-// excluded outright — it is answered with text through /answer, and a
-// permission card offering allow/deny cannot answer it.
+// question waiting to be recorded, not an open one. Every pending ask that
+// reaches here is a permission ask, which is exactly what an allow/deny card
+// answers.
 func reofferableAsk(row *runtimetypes.HITLApproval, now time.Time) bool {
 	switch {
 	case row == nil, row.ID == "":
 		return false
 	case row.State != runtimetypes.HITLApprovalPending:
-		return false
-	case hitlservice.IsAttentionAsk(row):
 		return false
 	case !row.ExpiresAt.IsZero() && !row.ExpiresAt.After(now):
 		return false
@@ -202,3 +200,5 @@ func (t *Transport) connContext() context.Context {
 	}
 	return context.Background()
 }
+
+// AskInbox, the seam this file re-offers parked approvals through, is declared with the rest of the ask surface in commands_answer.go.

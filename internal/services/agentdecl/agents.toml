@@ -1,0 +1,193 @@
+# agents.toml — everything an agent declaration cannot state.
+#
+# A declaration is one prompt, one tool list, one model and one permission
+# setting. It has no word for a context budget, a retry, a loop bound, a shell
+# allowlist or a compute cap. This file supplies those, for every agent you
+# declare and every agent you already keep in .claude/agents/. It is read on
+# every run; edit it and the next run picks it up.
+#
+# Precedence, weakest to strongest:
+#   1. these shipped defaults
+#   2. ~/.contenox/agents.toml
+#   3. .contenox/agents.toml          (workspace wins)
+#   4. [agents.<name>] in either file (one agent overrides the rest)
+#   5. values the declaration itself states
+#   6. policy.always_deny, which nothing overrides
+#
+# Any layer may set any subset; keys it omits keep the value inherited from the
+# layer below.
+#
+# Everything under [chain], [routing], [tools_policies] and [policy] can also be
+# set for one agent, by its name, under [agents.<name>]:
+#
+#   [agents.reviewer.chain]
+#   token_limit = 32768
+#
+#   [agents.reviewer.tools_policies.local_shell]
+#   _allowed_commands = "git,go"
+#
+# The name is the one `contenox agent list` shows. Agents read out of another
+# tool's directory carry that tool's prefix there, so theirs is
+# [agents.claude-code-reviewer]. A section naming no agent is reported, not
+# silently ignored.
+
+version = 1
+
+[chain]
+# Context budget for the chat history, and the source of the per-call
+# tool-result cap. A zero budget reports every tool result as too large
+# regardless of its real size.
+token_limit = 131072
+
+# Output cap per model call. Template form is honoured, so a caller overrides
+# it per run without editing anything.
+max_tokens = "{{var:max_tokens|16384}}"
+
+# Reasoning effort. A declaration's own `effort` overrides this; the
+# vocabularies coincide.
+think = "{{var:think}}"
+
+# Bounds on the two-stage tool loop, matching the shipped chain-run topology.
+# The main stage hands to recovery after this many traversals; recovery
+# summarises the failure rather than looping.
+main_rounds = 60
+recovery_rounds = 10
+
+retry_on_failure = 0
+
+[routing]
+# Templates by default, so routing stays your configured default
+# (`contenox config set default-provider`). An agent written against one vendor
+# does not pin this machine to that vendor.
+model = "{{var:model}}"
+provider = "{{var:provider}}"
+
+# Use the model the declaration itself names, instead of the templates above.
+# Off by default for the reason given there; turn it on for one agent with
+# [agents.<name>.routing] when that agent genuinely needs a specific model.
+pin_model = false
+
+# Per-toolset knobs. A declaration has no word for these.
+[tools_policies.local_shell]
+_allowed_commands = "ls,cat,echo,pwd,which,find,grep,git,go,python3,node,npm,make,cargo,curl,wget,jq"
+_denied_commands = "sudo,su,dd,mkfs,fdisk,parted,shred"
+
+[tools_policies.local_fs]
+_allowed_dir = "."
+_max_read_bytes = "262144"
+_max_output_bytes = "131072"
+_max_list_depth = "6"
+_max_grep_matches = "1000"
+_denied_path_substrings = "node_modules,.git/,dist/,/.next/,/out/,package-lock.json"
+
+[tools_policies.webtools]
+_max_response_bytes = "262144"
+_max_request_body_bytes = "262144"
+_request_timeout_seconds = "30"
+_max_attempts = "3"
+
+[policy]
+# Applied to a tool call no rule matched.
+default_action = "approve"
+
+[policy.compute]
+max_tool_calls = 300
+max_tokens = 2000000
+on_exhausted = "finish_stuck"
+# Turn budget for a mission-role agent. Only two values mean anything, because
+# the drive loop issues at most two prompts — the unit's own, plus one nudge
+# when it reports nothing:
+#
+#   0  keep the nudge (the default)
+#   1  drop it: the unit gets exactly one prompt
+#
+# Anything larger is already above the ceiling and is not emitted. Ignored
+# entirely for a primary-role agent, whose turns are the operator's own prompts.
+max_turns = 0
+
+# Who besides a human may resolve a MISSION-role agent's asks. Only emitted for
+# a mission-role declaration: a primary agent talks to you, so it has nobody to
+# escalate to. Both default off — a declaration states what an agent should
+# do, never who is allowed to answer for it.
+[policy.attention]
+allow_agent_answers = false
+max_agent_answers = 3
+allow_agent_approvals = false
+max_agent_approvals = 10
+
+# Emitted under every posture, including the most permissive one. A declaration
+# cannot name credential paths, so it cannot consent to them either.
+[[policy.always_deny]]
+tools = "local_fs"
+tool = "*"
+when_key = "path"
+when_op = "glob"
+when_value = "**/{.ssh,.aws,.kube,.config/gcloud}/**"
+
+# Tools the postures do not name — typically ones you connected — that should
+# run without asking. Emitted after always_deny, so a grant here can never
+# reach a credential path.
+#
+#   [[policy.always_allow]]
+#   tools = "tavily"
+#   tool = "search"
+
+# How one permission setting widens into rules. auto_edit means edits, not
+# shell: nothing grants more than the posture below.
+[policy.postures.read_only]
+local_fs_read = "allow"
+local_fs_write = "deny"
+local_shell = "deny"
+
+[policy.postures.ask_always]
+local_fs_read = "allow"
+local_fs_write = "approve"
+local_shell = "approve"
+
+[policy.postures.auto_edit]
+local_fs_read = "allow"
+local_fs_write = "allow"
+local_shell = "approve"
+
+[naming]
+# Prefix an agent read from another tool's directory with that tool's name, so
+# a `reviewer` in .claude/agents/ and one in .agents/agents/ stay two agents
+# rather than one silently winning. Your own declarations are never prefixed.
+# Safe to disable only when you read from a single tool.
+scope_with_dialect = true
+
+# Tool names a declaration may use, and what each resolves to here.
+#
+# contenox hosts local_fs, local_shell, webtools and git. Everything else is a
+# tool you connect — an MCP server, an OpenAPI spec, a shell command — and this
+# is where you give it the name your declarations already use:
+#
+#   [tools]
+#   WebSearch = "tavily.search"
+#
+# A name here makes a tool reachable, not permitted. It matches no rule under
+# [policy.postures], so it falls to default_action and asks a human on every
+# call until you give it one.
+#
+# Names containing a dot are MCP tools and need no entry.
+[tools]
+Bash = "local_shell.local_shell"
+Edit = "local_fs.edit_file"
+Glob = "local_fs.find_files"
+Grep = "local_fs.grep"
+PowerShell = "local_shell.local_shell"
+Read = "local_fs.read_file"
+WebFetch = "webtools.web_get"
+Write = "local_fs.write_file"
+replace_file_content = "local_fs.write_file"
+run_command = "local_shell.local_shell"
+view_file = "local_fs.read_file"
+
+# Model names a declaration may use. Only consulted when pin_model is on.
+[models]
+fable = "anthropic:claude-fable-5"
+flash = "gemini:gemini-2.5-flash"
+haiku = "anthropic:claude-haiku-4-5-20251001"
+opus = "anthropic:claude-opus-5"
+pro = "gemini:gemini-2.5-pro"
+sonnet = "anthropic:claude-sonnet-5"

@@ -2,7 +2,6 @@ package contenoxcli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,11 +19,12 @@ import (
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
 	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/eventlog"
+	"github.com/contenox/contenox/internal/services/fleetservice"
 	"github.com/contenox/contenox/internal/services/gojatool"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/localtools"
 	"github.com/contenox/contenox/internal/services/missionservice"
-	"github.com/contenox/contenox/internal/services/missiontools"
+	"github.com/contenox/contenox/internal/services/oracletools"
 	"github.com/contenox/contenox/internal/services/presence"
 	"github.com/contenox/contenox/internal/services/updatecheck"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
@@ -80,6 +80,7 @@ func init() {
 		c.Flags().Bool("auto", false, "Non-interactive mode: disable HITL permission prompts (gated tools run unattended)")
 		c.Flags().Bool("setup", false, "Run interactive setup wizard to configure provider and model, then exit.")
 		c.Flags().String("workspace-id", "", "Workspace ID for new ACP sessions (default: the stable workspace from ~/.contenox/workspace.id, same as the CLI). Existing sessions are always located by their session ID regardless of workspace.")
+		registerOracleFlags(c)
 		addWorkspaceRootFlag(c)
 	}
 	acpCmd.Flags().Bool("experimental-acp", false, "Accepted for compatibility with ACP clients that hardcode this launch flag (e.g. AionUi); no effect.")
@@ -263,7 +264,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	missionPub := missionEventPublisher(ctx, db, bus, workspaceID, tracker, trigHook)
 	missions := missionservice.New(db, missionservice.WithEventPublisher(missionPub))
 
-	acpHITL := hitlservice.NewWithDefaultPolicy(acpPolicySource(), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, profile.hitlPolicy)
+	acpHITL := hitlservice.NewWithDefaultPolicy(acpPolicySource(contenoxDir), runtimetypes.LocalTenantID, runtimetypes.New(db.WithoutTransaction()), tracker, profile.hitlPolicy)
 	// /policy and `contenox config set hitl-policy-name` both write this workspace's row; the evaluator must read the same one.
 	hitlservice.SetWorkspaceID(acpHITL, workspaceID)
 
@@ -289,7 +290,27 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		}
 	}()
 
-	tools := acpToolset(db, tracker, gt, workspaceID, func() *acpsvc.Transport { return transport }, shellScrub, missions, acpHITL, missionPub, optInBeta)
+	// Declared here, assigned once the fleet is built below: the toolset's
+	// subagent-start tool resolves it per call, so the ordering holds.
+	var inProcessFleet fleetservice.Service
+
+	tools := acpToolset(db, tracker, gt, workspaceID, func() *acpsvc.Transport { return transport }, shellScrub, missions, acpHITL, missionPub, optInBeta,
+		func() fleetservice.Service { return inProcessFleet })
+
+	oracleStore := runtimetypes.New(db.WithoutTransaction())
+	oracleCfg := resolveOracleConfig(ctx, oracleStore, cmd)
+	// A dispatched unit does not adjudicate. Its own gated calls are ruled on by
+	// the host that fired it, which holds the mission envelope; mounting a second
+	// oracle here makes two models judge one ask, doubling spend and leaving the
+	// winner to a race — the same reason a unit embeds no fleet.
+	if strings.TrimSpace(os.Getenv(profile.chainEnv)) != "" {
+		oracleCfg.chain = ""
+	}
+	if oracleCfg.enabled() {
+		tools[oracletools.ToolsProviderName] = oracletools.New(oracleResolver{
+			hitl: acpHITL, missions: missions, store: oracleStore, out: os.Stderr,
+		})
+	}
 
 	// One registry for every connection: without it, an approval raised by remote work would be answered on the local desk instead.
 	sessionRouter := acpsvc.NewSessionRouter()
@@ -337,7 +358,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		if enableHITL {
 			cfg.EnableHITL = true
 			cfg.AskApproval = askApproval
-			cfg.HITLPolicySource = acpPolicySource()
+			cfg.HITLPolicySource = acpPolicySource(contenoxDir)
 			cfg.HITLDefaultPolicyName = profile.hitlPolicy
 			// The process's one durable-ask service: two instances cannot wake each other's parked waiters.
 			cfg.HITLService = acpHITL
@@ -363,6 +384,24 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			DB:          db,
 			WorkspaceID: workspaceID,
 		}))
+		if oracleCfg.enabled() {
+			oracleChain, oracleChainRef, oracleErr := loadOracleChain(contenoxDir, oracleCfg)
+			if oracleErr != nil {
+				return oracleErr
+			}
+			hitlservice.SetAdjudicator(acpHITL, &oracleDriver{
+				agent:         agentservice.New(agentservice.Deps{Engine: engine, DB: db, WorkspaceID: workspaceID}),
+				chain:         oracleChain,
+				chainRef:      oracleChainRef,
+				policy:        oracleCfg.policy,
+				templateVars:  buildTemplateVars(triggerOpts),
+				contextLength: triggerOpts.EffectiveContext,
+				approves:      oracleCfg.approves,
+				missions:      missions,
+				out:           os.Stderr,
+			})
+			fmt.Fprintln(os.Stderr, oracleMountedLine(oracleCfg))
+		}
 		// Live in-process trigger dispatch on this host's appends (beta; nil when no triggers load).
 		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, triggerOpts, os.Stderr))
 		// Deferred AFTER engine.Stop so LIFO drains in-flight firings before teardown.
@@ -393,15 +432,19 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 			HITL:         acpHITL,
 			PolicySource: hitlPolicySource(contenoxDir),
 			DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-				discoverChainAgents(dctx, agents, contenoxDir, tracker)
+				discoverChainAgents(dctx, agents, contenoxDir, tracker, DiscoverDeps{Store: runtimetypes.New(db.WithoutTransaction()), Bus: bus})
 			},
 			// The workspace missionPub stamps; a dispatched unit's own publisher must stamp the same one.
 			WorkspaceID: workspaceID,
+			// The database this host resolved; a dispatched unit must write its reports into the same one.
+			DBPath: dbPath,
 		})
 		if buildErr != nil {
 			return buildErr
 		}
 		missionFleet, missionAgents, stopFleetTeardown = fleet, agents, stop
+		// Late-bound for the toolset's subagent-start tool (see acpToolset).
+		inProcessFleet = fleet
 	}
 	if stopFleetTeardown != nil {
 		// Children die with the parent: stops the report router and kills every dispatched child subprocess.
@@ -443,8 +486,7 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 		Fleet:  missionFleet,
 		Agents: missionAgents,
 		// Same values the mission toolset uses, so the command and the tool cannot disagree about who owns an ask.
-		Asks:        acpHITL,
-		Supervision: missionSupervision{missions: missions, hitl: acpHITL, db: db, tracker: tracker},
+		Asks: acpHITL,
 		// Read from the same search path the unit's policy loader reads.
 		MissionEnvelopes: newMissionEnvelopes(contenoxDir),
 		OptInBeta:        optInBeta,
@@ -484,68 +526,19 @@ func runACPProfile(cmd *cobra.Command, profile acpProfile) error {
 	return nil
 }
 
-type missionAttentionAsker struct {
-	hitl     hitlservice.Service
-	missions missionservice.Service
-	bus      missionservice.EventPublisher
-}
-
-var _ missiontools.AttentionAsker = missionAttentionAsker{}
-
-func (a missionAttentionAsker) RaiseAttention(ctx context.Context, ask missiontools.AttentionAsk) (string, error) {
-	missionID, summary, detail := ask.MissionID, ask.Summary, ask.Detail
-	// Read for attribution only; a mission that can't be read still asks, with less context.
-	var parentSessionID, agentName, intent string
-	if a.missions != nil {
-		if m, err := a.missions.Get(ctx, missionID); err == nil && m != nil {
-			parentSessionID, agentName, intent = m.ParentSessionID, m.AgentName, m.Intent
+// acpPolicySource is the same search path every other host uses, which is what
+// puts .generated on it: a declared agent's emitted envelope lives there, and a
+// source that could not read it would silently evaluate the agent under the
+// built-in default instead of the envelope it was given.
+func acpPolicySource(contenoxDir string) hitlservice.PolicySource {
+	if contenoxDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return hitlservice.NewFSPolicySource()
 		}
+		contenoxDir = filepath.Join(home, ".contenox")
 	}
-	answer, err := a.hitl.RequestAttention(ctx, hitlservice.AttentionRequest{
-		Summary:    summary,
-		Detail:     detail,
-		MissionID:  missionID,
-		AgentName:  agentName,
-		AskID:      ask.AskID,
-		ParkWindow: ask.ParkWindow,
-		OnRaised: func(askID string) {
-			// With no listener this changes nothing: the ask is already durable and answerable from the queue.
-			a.publishAsked(ctx, missionservice.AttentionAskedEvent{
-				MissionID:       missionID,
-				AskID:           askID,
-				ParentSessionID: parentSessionID,
-				AgentName:       agentName,
-				Intent:          intent,
-				Summary:         summary,
-				Detail:          detail,
-			})
-		},
-	}, taskengine.NoopTaskEventSink{})
-	// Park window elapsed: the engine checkpoints under this ask's ID, the same pattern tool-call approvals use.
-	var pending *hitlservice.AttentionPendingError
-	if errors.As(err, &pending) {
-		return "", &taskengine.ApprovalPendingError{ApprovalID: pending.AskID, ToolName: missiontools.ToolNameAskAttention}
-	}
-	return answer, err
-}
-
-func (a missionAttentionAsker) publishAsked(ctx context.Context, ev missionservice.AttentionAskedEvent) {
-	if a.bus == nil {
-		return
-	}
-	raw, err := json.Marshal(ev)
-	if err != nil {
-		return
-	}
-	_ = a.bus.Publish(ctx, missionservice.AttentionAskedSubject, raw)
-}
-
-func acpPolicySource() hitlservice.PolicySource {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return hitlservice.NewFSPolicySource()
-	}
-	return hitlservice.NewFSPolicySource(filepath.Join(home, ".contenox"))
+	return hitlPolicySource(contenoxDir)
 }
 
 func acpUpdateBanner(ctx context.Context, db libdb.DBManager, contenoxDir string) string {

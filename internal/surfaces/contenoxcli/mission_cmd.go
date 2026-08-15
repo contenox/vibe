@@ -12,15 +12,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/contenox/contenox/internal/kernel/taskengine"
 	"github.com/contenox/contenox/internal/services/agentregistryservice"
-	"github.com/contenox/contenox/internal/services/agentservice"
 	"github.com/contenox/contenox/internal/services/clikv"
 	"github.com/contenox/contenox/internal/services/eventlog"
 	"github.com/contenox/contenox/internal/services/fleetservice"
 	"github.com/contenox/contenox/internal/services/hitlservice"
 	"github.com/contenox/contenox/internal/services/missionservice"
-	"github.com/contenox/contenox/internal/services/oracletools"
 	"github.com/contenox/contenox/internal/services/reportrouter"
 	"github.com/contenox/contenox/internal/store/runtimetypes"
 	"github.com/contenox/contenox/libbus"
@@ -110,7 +107,7 @@ Use 'contenox mission reports <id>' for full report detail.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := libtracker.WithNewRequestID(context.Background())
-		db, missions, hitl, err := openMissionAndHitlServices(cmd)
+		db, missions, _, err := openMissionAndHitlServices(cmd)
 		if err != nil {
 			return err
 		}
@@ -128,7 +125,7 @@ Use 'contenox mission reports <id>' for full report detail.`,
 		if err != nil {
 			return fmt.Errorf("failed to read reports for mission %q: %w", m.ID, err)
 		}
-		asks, _ := hitl.PendingAttentionAsks(ctx, m.ID)
+		var asks []*runtimetypes.HITLApproval
 		renderMissionShow(cmd.OutOrStdout(), m, reports, asks, time.Now().UTC())
 		return nil
 	},
@@ -172,23 +169,6 @@ its status (pending|in_progress|completed) and priority, plus the durable
 (revision 0 — no resident planner has run for its agent) says so plainly.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runMissionPlan,
-}
-
-var missionAsksCmd = &cobra.Command{
-	Use:   "asks [mission-id]",
-	Short: "List a mission's pending attention asks — questions its unit is waiting on a human to answer.",
-	Long: `Print the pending QUESTIONS raised under one mission (or, with no id, under
-every OPEN mission) — the durable attention asks a unit raised via its
-mission_ask_attention tool and is still parked on. This is a READ-ONLY,
-mission-scoped view: answering an ask is 'contenox approvals respond <id>
---answer "..."', the same verb that answers every pending ask in the system,
-question or permission gate, mission-bound or not.
-
-Examples:
-  contenox mission asks                  every open mission's pending questions
-  contenox mission asks <mission-id>     one mission's pending questions`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runMissionAsks,
 }
 
 var missionFireCmd = &cobra.Command{
@@ -282,7 +262,6 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 
 	// One instance: a sibling cannot wake the waiters this one parked.
 	var driverHITL hitlservice.Service
-	oracleOn := oracleFlagSet(cmd)
 	optInBeta := betaEnabled(ctx, store)
 	wantTriggers := false
 	if optInBeta {
@@ -291,7 +270,7 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		}
 	}
 	var supervisor reportrouter.AgentSupervisor
-	if oracleOn || wantTriggers {
+	if wantTriggers {
 		opts, optsErr := buildRunOpts(cmd, db, contenoxDir)
 		if optsErr != nil {
 			return optsErr
@@ -300,48 +279,14 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		if wantTriggers && !cmd.Root().Flags().Changed("shell") {
 			opts.EffectiveEnableLocalExec = true
 		}
-		if oracleOn {
-			opts.EffectiveHITL = true
-			driverHITL = newHITLService(contenoxDir, store, tracker, "")
-			opts.EffectiveExtraTools = map[string]taskengine.ToolsRepo{
-				oracletools.ToolsProviderName: oracletools.New(oracleAnswerer{
-					hitl: driverHITL, missions: missions, store: store, out: cmd.ErrOrStderr(),
-				}),
-			}
-		}
 		engine, engErr := BuildEngine(ctx, db, opts)
 		if engErr != nil {
-			return fmt.Errorf("mission fire: build engine for --oracle/in-process dispatch: %w", engErr)
+			return fmt.Errorf("mission fire: build engine for in-process dispatch: %w", engErr)
 		}
 		defer engine.Stop()
 		trigHook.Set(buildInProcessTriggerHook(ctx, db, contenoxDir, workspaceID, engine, opts, cmd.ErrOrStderr()))
 		// Deferred after engine.Stop so LIFO drains in-flight firings first.
 		defer trigHook.Drain(eventlog.DefaultDrainTimeout)
-		if oracleOn {
-			hitlservice.SetResumeHook(driverHITL, agentservice.ResumeHook(agentservice.Deps{
-				Engine:      engine,
-				DB:          db,
-				WorkspaceID: workspaceID,
-			}))
-			chainPath, lookErr := lookupSystemFile(contenoxDir, chainOracleDefaultFilename)
-			if lookErr != nil {
-				return fmt.Errorf("--oracle: %s not found (run `contenox init` to seed it): %w", chainOracleDefaultFilename, lookErr)
-			}
-			oracleChain, loadErr := loadChainFromFile(chainPath)
-			if loadErr != nil {
-				return fmt.Errorf("--oracle: load %s: %w", chainPath, loadErr)
-			}
-			supervisor = &oracleAttentionDriver{
-				agent:         agentservice.New(agentservice.Deps{Engine: engine, DB: db, WorkspaceID: workspaceID}),
-				chain:         oracleChain,
-				chainRef:      chainPath,
-				templateVars:  buildTemplateVars(opts),
-				contextLength: opts.EffectiveContext,
-				out:           cmd.ErrOrStderr(),
-			}
-			fmt.Fprintf(out, "Oracle attention driver mounted (%s under %s): routine questions may be answered as agent %q within the mission envelope's attention bounds.\n",
-				chainOracleDefaultFilename, oraclePolicyName, oracleAgentName)
-		}
 	}
 
 	if driverHITL == nil {
@@ -350,16 +295,18 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 
 	projectRoot, _ := os.Getwd()
 	fleet, _, stopFleet, err := fleetservice.BuildInProcess(ctx, fleetservice.InProcessDeps{
-		DB:           db,
-		Bus:          bus,
-		Missions:     missions,
-		ProjectRoot:  projectRoot,
-		WorkspaceID:  workspaceID,
+		DB:          db,
+		Bus:         bus,
+		Missions:    missions,
+		ProjectRoot: projectRoot,
+		WorkspaceID: workspaceID,
+		// The database this fire resolved; the unit must report into the same one.
+		DBPath:       dbPath,
 		Tracker:      tracker,
 		PolicySource: hitlPolicySource(contenoxDir),
 		HITL:         driverHITL,
 		DiscoverAgents: func(dctx context.Context, agents agentregistryservice.Service) {
-			discoverChainAgents(dctx, agents, contenoxDir, tracker)
+			discoverChainAgents(dctx, agents, contenoxDir, tracker, DiscoverDeps{Store: runtimetypes.New(db.WithoutTransaction()), Bus: bus})
 		},
 		AgentSupervisor: supervisor,
 		Stderr:          os.Stderr,
@@ -377,11 +324,10 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 		HITLPolicyName: policy,
 	})
 	if err != nil {
+		if hint := legacyChainPrefixHint(agentName); hint != "" && errors.Is(err, libdbexec.ErrNotFound) {
+			return fmt.Errorf("%w%s", err, hint)
+		}
 		return err
-	}
-	// Restricts the driver to this host's own dispatched mission; every host shares the same bus.
-	if d, ok := supervisor.(*oracleAttentionDriver); ok {
-		d.own(res.MissionID)
 	}
 	fmt.Fprintf(out, "Mission fired at agent %q under envelope %q.\nIntent: %s\nMission %s (instance %s, session %s).\nWaiting for a terminal status (timeout %s; the unit is a child of this process and is torn down when it exits)…\n",
 		agentName, policy, intent, res.MissionID, res.InstanceID, res.SessionID, timeout)
@@ -413,23 +359,12 @@ func runMissionFire(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-const oracleFlagName = "oracle"
-
-func oracleFlagSet(cmd *cobra.Command) bool {
-	f := cmd.Flags().Lookup(oracleFlagName)
-	if f == nil || !f.Changed {
-		return false
-	}
-	return f.Value.String() == "true"
-}
-
 func registerMissionFireFlags(beta bool) {
 	missionFireCmd.ResetFlags()
 	missionFireCmd.Flags().String("policy", "", "Mission envelope: the HITL policy bounding the unattended unit (default: the default-mission-policy config)")
 	missionFireCmd.Flags().Bool("wait", false, "Block until the mission reaches a terminal status (REQUIRED: the unit is a child of this process and dies with it)")
 	missionFireCmd.Flags().Duration("timeout", 30*time.Minute, "Maximum time to wait for a terminal status before tearing the unit down")
 	if beta {
-		missionFireCmd.Flags().Bool(oracleFlagName, false, "Mount the oracle attention driver: routine questions the mission's intent already answers are answered in-process as agent \"oracle\", within the envelope's attention bounds; everything else waits for a human")
 	}
 }
 
@@ -609,38 +544,6 @@ func renderMissionPlan(w io.Writer, m *missionservice.Mission) {
 	}
 }
 
-func renderMissionAsksTable(w io.Writer, missions map[string]*missionservice.Mission, asks []*runtimetypes.HITLApproval, now time.Time) error {
-	if len(asks) == 0 {
-		fmt.Fprintln(w, "No pending attention asks. A mission's unit raises one when it needs a human's own words, not a yes/no — answer with 'contenox approvals respond <id> --answer \"...\"'.")
-		return nil
-	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tMISSION\tAGENT\tSUMMARY\tAGE\tEXPIRES-IN")
-	for _, a := range asks {
-		missionID, agent := "", a.AgentName
-		if a.MissionID != nil {
-			missionID = *a.MissionID
-			if agent == "" {
-				if m, ok := missions[missionID]; ok {
-					agent = m.AgentName
-				}
-			}
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			a.ID, missionID, agent, a.ArgsSummary, formatMissionAge(now, a.CreatedAt), formatMissionAge(a.ExpiresAt, now))
-	}
-	if err := tw.Flush(); err != nil {
-		return err
-	}
-	for _, a := range asks {
-		if a.Diff != nil && strings.TrimSpace(*a.Diff) != "" {
-			fmt.Fprintf(w, "\nDetail for %s:\n%s\n", a.ID, *a.Diff)
-		}
-	}
-	fmt.Fprintln(w, "\nAnswer with 'contenox approvals respond <id> --answer \"...\"'.")
-	return nil
-}
-
 func chronological(reports []*missionservice.Report) []*missionservice.Report {
 	out := make([]*missionservice.Report, len(reports))
 	for i, r := range reports {
@@ -733,55 +636,6 @@ func runMissionPlan(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runMissionAsks(cmd *cobra.Command, args []string) error {
-	ctx := libtracker.WithNewRequestID(context.Background())
-	db, missions, hitl, err := openMissionAndHitlServices(cmd)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	now := time.Now().UTC()
-	if len(args) == 1 {
-		missionID := args[0]
-		m, err := missions.Get(ctx, missionID)
-		if err != nil {
-			return fmt.Errorf("mission %q not found: %w — see 'contenox mission list' for recorded missions", missionID, err)
-		}
-		asks, err := hitl.PendingAttentionAsks(ctx, missionID)
-		if err != nil {
-			return fmt.Errorf("failed to list asks for mission %q: %w", missionID, err)
-		}
-		return renderMissionAsksTable(cmd.OutOrStdout(), map[string]*missionservice.Mission{m.ID: m}, asks, now)
-	}
-
-	// No mission id: hitlservice has no cross-mission read, so iterate every
-	// open mission and ask each in turn.
-	limit, _ := cmd.Flags().GetInt("limit")
-	ms, err := missions.List(ctx, nil, limit)
-	if err != nil {
-		return fmt.Errorf("failed to list missions: %w", err)
-	}
-
-	byID := make(map[string]*missionservice.Mission, len(ms))
-	var asks []*runtimetypes.HITLApproval
-	for _, m := range ms {
-		if m.Status != missionservice.StatusOpen {
-			continue
-		}
-		got, err := hitl.PendingAttentionAsks(ctx, m.ID)
-		if err != nil {
-			return fmt.Errorf("failed to list asks for mission %q: %w", m.ID, err)
-		}
-		if len(got) == 0 {
-			continue
-		}
-		byID[m.ID] = m
-		asks = append(asks, got...)
-	}
-	return renderMissionAsksTable(cmd.OutOrStdout(), byID, asks, now)
-}
-
 func openMissionService(cmd *cobra.Command) (io.Closer, missionservice.Service, error) {
 	dbPath, err := resolveDBPath(cmd)
 	if err != nil {
@@ -832,7 +686,6 @@ func openMissionAndHitlServices(cmd *cobra.Command) (io.Closer, missionservice.S
 
 func init() {
 	missionListCmd.Flags().Int("limit", 50, "Maximum number of missions to list")
-	missionAsksCmd.Flags().Int("limit", 200, "Maximum number of open missions to scan for pending asks (only used with no mission-id)")
 	registerMissionFireFlags(false)
 
 	missionStopCmd.Flags().String("reason", "", "One line on why the mission is being stopped (persisted as the status reason)")
@@ -841,7 +694,6 @@ func init() {
 	missionCmd.AddCommand(missionShowCmd)
 	missionCmd.AddCommand(missionReportsCmd)
 	missionCmd.AddCommand(missionPlanCmd)
-	missionCmd.AddCommand(missionAsksCmd)
 	missionCmd.AddCommand(missionFireCmd)
 	missionCmd.AddCommand(missionStopCmd)
 }

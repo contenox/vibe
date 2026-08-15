@@ -19,14 +19,22 @@ import (
 
 const defaultKillGrace = 2 * time.Second
 
-// ChainACPSubcommand, ChainPathEnvVar, ChainHopEnvVar, and ChainWorkspaceFlag describe
-// this binary's own ACP server for a chain-kind spawn: its ACP subcommand, the env var
-// naming the chain file, the env var carrying the dispatch hop, and the flag carrying the
+// ChainACPSubcommand, ChainPathEnvVar, ChainHopEnvVar, ChainDBEnvVar, and
+// ChainWorkspaceFlag describe this binary's own ACP server for a chain-kind spawn: its ACP
+// subcommand, the env var naming the chain file, the env var carrying the dispatch hop, the
+// env var naming the database the dispatching host opened, and the flag carrying the
 // dispatching host's workspace id.
 const (
 	ChainACPSubcommand = "acp"
 	ChainPathEnvVar    = "CONTENOX_ACP_CHAIN_PATH"
 	ChainHopEnvVar     = "CONTENOX_EVENT_HOP"
+	// ChainDBEnvVar hands the child the database its parent is actually using. A
+	// subagent's report, plan and verdict are writes against the mission row the
+	// parent created, so a child that resolved its own default database would find
+	// no such row and fail every mission tool with a not-found. It is an internal
+	// handoff between two contenox processes, not a user-facing knob: an explicit
+	// --db always wins over it.
+	ChainDBEnvVar      = "CONTENOX_ACP_DB"
 	ChainWorkspaceFlag = "workspace-id"
 )
 
@@ -218,6 +226,13 @@ func WithWorkspaceID(id string) Option {
 	return func(m *manager) { m.workspaceID = id }
 }
 
+// WithSelfDBPath passes path to every chain-kind spawn via ChainDBEnvVar so a dispatched
+// unit writes its reports to the same database the dispatching host read its mission from;
+// empty (default) leaves the child to resolve its own.
+func WithSelfDBPath(path string) Option {
+	return func(m *manager) { m.selfDBPath = path }
+}
+
 type manager struct {
 	agents      agentregistryservice.Service
 	stderr      io.Writer
@@ -227,6 +242,7 @@ type manager struct {
 	selfExecutable string
 
 	workspaceID string
+	selfDBPath  string
 
 	restartEnabled     bool
 	restartLimit       int
@@ -335,6 +351,12 @@ func (m *manager) chainSpawner(ctx context.Context, agent *runtimetypes.Agent, c
 	// dispatcher already stamped.
 	if hop := runtimetypes.EventHopFromContext(ctx); hop > 0 {
 		env[ChainHopEnvVar] = strconv.Itoa(hop)
+	}
+	// Without this the child opens its own default database, where the mission row
+	// the dispatcher just wrote does not exist, and every mission tool it calls
+	// fails not-found until the run times out.
+	if m.selfDBPath != "" {
+		env[ChainDBEnvVar] = m.selfDBPath
 	}
 	return &agenthost.ExternalACPAgent{
 		Config: runtimetypes.ExternalACPConfig{

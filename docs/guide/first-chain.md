@@ -1,13 +1,15 @@
 ---
-title: Your first chain
-description: Walk from a blank file to a working authored chain in five edits.
+title: Writing a chain by hand
+description: Walk from a blank file to a working authored chain in five edits — for the agent that has outgrown a declaration.
 ---
 
-# Your first chain
+# Writing a chain by hand
 
-The agent's behavior — system prompt, model, tool policy, retries, when to branch, when to pause — is a JSON file you write. The engine runs what you wrote. This page walks you from a blank file to a working chain in five edits.
+Most agents never need this page. An agent is [a Markdown declaration](/docs/guide/agents/) plus [`agents.toml`](/docs/reference/agents-config/), and contenox builds the chain behind it.
 
-If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstart/) first.
+You are here because you need something a declaration cannot say: a branch, a different model per step, a recovery path, a point where a human is required. Then you write the state machine yourself, and the engine runs exactly what you wrote. This page walks you from a blank file to a working chain in five edits.
+
+If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstart/) first. If you have not written an agent yet, do [your first agent](/docs/guide/tutorial-first-agent/) — it is the shorter road and probably the right one.
 
 ---
 
@@ -17,36 +19,45 @@ If you haven't installed Contenox yet, do the [Quickstart](/docs/guide/quickstar
 
 **A project-local workspace marker** — `.contenox/workspace.id` in the current directory. This is like `.git/` — it marks this directory tree as a Contenox workspace. The engine walks up from your current directory looking for this marker to resolve which workspace you're in.
 
-**Global runtime files** — `~/.contenox/` stores everything that's shared across workspaces: default chain presets, HITL policies, and the SQLite database.
+**Global runtime files** — `~/.contenox/` stores everything that's shared across workspaces: your agents, the envelopes they run under, the SQLite database, and the shipped chains under `system/`.
 
 ```
 ~/.contenox/                    ← global (shared across all workspaces)
 ├── local.db                    ← SQLite: backends, config, sessions, MCP registrations
-├── chain-agent-contenox.json   ← the interactive chat chain
-├── chain-agent-run.json        ← the one-shot pipeline chain
-├── chain-agent-acp.json        ← editor (ACP) sessions
-├── chain-agent-acpx.json       ← headless / untrusted-driver (ACPX) sessions
-├── chain-agent-beam.json       ← attended terminal sessions
-├── chain-planner-default.json  ← the default mission planner
-├── chain-compact-default.json  ← history compaction
-├── chain-fim-default.json      ← editor autocomplete
+├── agents.toml                 ← the knobs a declaration cannot reach
+├── agents/                     ← your agents, one Markdown file each
 ├── hitl-policy-default.json    ← default HITL policy
 ├── hitl-policy-strict.json
 ├── hitl-policy-dev.json
 ├── hitl-policy-acp.json        ← editor (ACP) sessions
-└── hitl-policy-acpx.json       ← headless / untrusted-driver (ACPX) sessions
+├── hitl-policy-acpx.json       ← headless / untrusted-driver (ACPX) sessions
+└── system/                     ← the shipped chains: machinery, not yours to author
+    ├── chain-agent-contenox.json   ← the interactive chat chain
+    ├── chain-agent-run.json        ← the one-shot pipeline chain
+    ├── chain-agent-acp.json        ← editor (ACP) sessions
+    ├── chain-agent-acpx.json       ← headless / untrusted-driver (ACPX) sessions
+    ├── chain-agent-beam.json       ← attended terminal sessions
+    ├── chain-planner-default.json  ← the default mission planner
+    ├── chain-compact-default.json  ← history compaction
+    └── chain-fim-default.json      ← editor autocomplete
 
 ./my-project/.contenox/         ← project-local workspace marker
 └── workspace.id                ← unique workspace ID
 ```
 
-To make any directory a workspace, run `contenox init` inside it. Workspace-scoped config (like `default-chain` and `hitl-policy-name`) is stored per-workspace in the SQLite database. If you place a chain file in the workspace `.contenox/` with the same name as a global preset, the workspace file wins.
+To make any directory a workspace, run `contenox init` inside it. Workspace-scoped config (like `default-chain` and `hitl-policy-name`) is stored per-workspace in the SQLite database.
 
-> **Note:** `contenox init --local` seeds the default chains and HITL policy presets into the workspace `.contenox/` for you — the supported way to create workspace-local overrides without copying files by hand. `contenox doctor` lists which workspace copies are currently shadowing global ones.
+**Taking ownership of a shipped chain is a copy.** Files resolve by name — the workspace `.contenox/` first, then `~/.contenox/`, then `~/.contenox/system/`. So copying one up a level makes it yours, and `contenox init` will not write over it or put a shipped copy back underneath:
+
+```bash
+cp ~/.contenox/system/chain-agent-run.json ~/.contenox/
+```
+
+> **Note:** `contenox init --local` seeds the shipped chains and HITL policy presets into the workspace `.contenox/` for you — the supported way to create workspace-local overrides without copying files by hand. `contenox doctor` lists which workspace copies are currently shadowing global ones.
 
 ## What `contenox init` already gave you
 
-Look in `~/.contenox/`. Every chain file follows the `chain-<role>-<variant>.json` naming convention ([the full grammar](/docs/guide/chain-naming/)). Two of them carry the CLI's day-to-day work:
+Look in `~/.contenox/system/`. Every chain file follows the `chain-<role>-<variant>.json` naming convention ([the full grammar](/docs/guide/chain-naming/)). Two of them carry the CLI's day-to-day work:
 
 - `chain-agent-contenox.json` — the interactive chat loop, used by `contenox chat` **and** by a bare `contenox "..."` (a bare prompt is session-backed chat, not a stateless run)
 - `chain-agent-run.json` — the one-shot, stateless pipeline loop, used only by `contenox run`

@@ -1,0 +1,316 @@
+---
+title: Declaring agents
+description: An agent is a Markdown file with a YAML frontmatter header. Where declarations live, what the frontmatter says, what the config file supplies that a declaration cannot, and what an agent is allowed to do.
+---
+
+# Declaring agents
+
+An agent is one file:
+
+```markdown
+---
+name: reviewer
+description: Reviews a file for correctness problems
+tools: Read, Glob, Grep
+---
+
+You are a code reviewer. Read the file you are asked about, then list the
+problems you can point at in what you actually read.
+```
+
+The frontmatter says how to run it, the body becomes its system prompt. Drop it
+in and the next run picks it up.
+
+If you have written agents for Claude Code, this is the same file.
+
+## Where declarations live
+
+```
+.contenox/
+  agents/
+    reviewer.md      one agent
+    triage.md        another
+  agents.toml        what a declaration cannot say
+```
+
+`~/.contenox/agents/` works the same way for agents you want everywhere.
+
+`.claude/agents/` and `.agents/agents/` in your project are read where they
+are. Those agents are prefixed with the tool they came from (`reviewer` becomes
+`claude-code-reviewer`); your own keep their name.
+
+## The frontmatter
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | the agent's identity |
+| `description` | yes | when to reach for it |
+| `tools` | no | the tools it may call. **Omitted inherits every tool** — name them to narrow it |
+| `model` | no | routing stays on your configured default unless you pin it |
+| `permissionMode` | no | `acceptEdits` auto-accepts file writes; otherwise writes and shell ask you first |
+| `effort` | no | reasoning effort: `low`, `medium`, `high`, `xhigh` |
+| `maxTurns` | no | tightens how much one run may spend |
+| `mcpServers` | no | MCP servers this agent may reach, or ones it brings itself — see [Tools an agent brings with it](#tools-an-agent-brings-with-it) |
+| `remoteTools` | no | OpenAPI services this agent brings itself. contenox's own field; a file without it is unchanged |
+
+The body is the system prompt and expands the usual macros — `{{tools}}`,
+`{{host:os}}`, `{{var:…}}`, `{{date}}` — plus [`{{skills}}`](#skills-procedures-for-repeated-work).
+
+`memory`, `isolation` and `color` are reported as not carried. Three others are
+reported with what replaces them: `hooks` (the runtime governs those events —
+see below), `skills` (a directory the agent reads), and `background` (already
+how a dispatched agent runs).
+
+Tool names resolved out of the box: `Read`, `Write`, `Edit`, `Bash`,
+`PowerShell`, `Glob`, `Grep`, `WebFetch`. An unknown name is dropped and
+reported; the agent runs with the rest. A declaration where no tool resolves
+fails.
+
+## Using it
+
+Declared agents are ordinary agents. They appear in the roster, in an editor's
+`/mission` list, and to the planner:
+
+```bash
+contenox agent list
+contenox mission fire reviewer "review the payment retry change" --wait
+```
+
+## Skills: procedures for repeated work
+
+A skill is a Markdown file describing how to do a recurring job — which tools to
+call, in what order, what to show the human, where to file the result. Put them
+beside your agents:
+
+```
+.contenox/
+  agents/
+    office.md
+  skills/
+    timesheet.md          one procedure
+    release/SKILL.md      or a folder, when it ships reference files
+```
+
+```markdown
+---
+name: timesheet
+description: File this week's hours to the timesheet system
+---
+
+Read the tracked hours from the time tool, present the week for approval,
+submit the approved rows, then file a confirmation note.
+```
+
+Pull the inventory into an agent with `{{skills}}`:
+
+```markdown
+---
+name: office
+description: Handles recurring office work
+---
+
+You handle recurring work.
+
+{{skills}}
+```
+
+which becomes, in that agent's prompt:
+
+```
+Skills are procedures for repeated work. When a request matches one, read its
+file before starting, then follow it.
+
+- timesheet: File this week's hours to the timesheet system — read .contenox/skills/timesheet.md
+```
+
+**The index, not the bodies.** Only the one-line description costs context; the
+agent reads the file with `local_fs.read_file` when a request matches — the same
+call, under the same policy rules, logged where every other read is logged. Ten
+procedures cost ten lines, not ten documents.
+
+The macro expands when the chain is generated, not per request, so the prompt
+stays a stable cache prefix. Add or edit a skill and the next pass rewrites the
+agents that use it.
+
+Frontmatter is optional — a bare Markdown file works, taking its name from the
+filename and its description from the first line.
+
+> Skills are read relative to the project, so they live in the workspace
+> `.contenox/skills/`. One in `~/.contenox/skills/` is not listed: the agent's
+> file tool is rooted at the project and refuses absolute paths, so an entry it
+> cannot open would be an instruction that fails.
+
+**Skill or agent?** Both work for a job like a timesheet. A skill loads into the
+agent you are already talking to and keeps the conversation's context; an agent
+is a separate actor with its own session and envelope, dispatched with
+`mission fire`. Reach for a skill when the procedure should come up mid-task,
+and an agent when it is a job you start.
+
+## Tools an agent brings with it
+
+Most agents use tools you connected once and share across all of them. An agent
+that needs something of its own can carry it in its declaration instead.
+
+### Naming servers you already registered
+
+A list under `mcpServers` is a **grant**: this agent may reach these
+[MCP servers](/docs/guide/mcp/), and nothing else new.
+
+```yaml
+mcpServers: [github, linear]
+```
+
+This is Claude Code's own shape, and it means the same thing here.
+
+### Bringing a server or service
+
+A **mapping** under `mcpServers` defines servers rather than naming them, and
+`remoteTools` does the same for any [OpenAPI service](/docs/integrations/tools/remote/):
+
+```yaml
+---
+name: researcher
+description: Researches a question against internal sources
+mcpServers:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+  linear:
+    type: http                       # or sse
+    url: https://mcp.linear.app/mcp
+    authEnvKey: LINEAR_TOKEN         # the variable's name, never its value
+remoteTools:
+  billing:
+    url: https://internal.example.com
+    spec: https://internal.example.com/openapi.json
+---
+```
+
+These are registered **scoped to this agent**. Two agents may each bring a
+`filesystem` without colliding, no other agent can reach either one — not even
+one that inherits every tool — and deleting the declaration retires what it
+brought.
+
+They show up in `contenox mcp list` and `contenox tools list` under an
+`OWNER` of `declaration`, because they are genuinely running on this machine:
+
+```
+NAME                        TRANSPORT  COMMAND/URL  OWNER
+github                      http       …            you
+decl-researcher-filesystem  stdio      npx          declaration
+```
+
+Anything you registered yourself is never touched by a declaration. The
+reverse also holds: editing or removing a `declaration`-owned row by hand does
+not stick — the next discovery pass writes it back from the file.
+
+### Credentials stay out of the file
+
+A declaration is committed to source control, so it may not carry a literal
+credential. Name the environment variable instead:
+
+```yaml
+    authEnvKey: LINEAR_TOKEN     # accepted
+    authToken: sk-live-abc123    # refused, with the file and field named
+```
+
+For a server that needs an interactive login, register it once with
+[`contenox mcp add`](/docs/reference/contenox-cli/) and `contenox mcp auth`,
+then **name** it from the declaration. Registration can live in a file;
+a browser OAuth round-trip cannot.
+
+### What this means for a shared repository
+
+`.claude/agents/` is read out of your workspace, so an agent declaration can
+arrive with a `git clone` or a merged pull request — and a declaration with a
+stdio `command` starts that process when the agent it belongs to is registered.
+contenox does not second-guess this: the file is in your tree and you chose to
+run the agent. Treat a declaration the way you treat a `Makefile` or a
+`package.json` script, and read one before you run an agent from a repository
+you do not control.
+
+## Tools you connect
+
+contenox hosts `local_fs`, `local_shell`, `webtools` and git. Everything else
+you connect as an [MCP server](/docs/guide/mcp/), an OpenAPI spec, or a shell
+command.
+
+A declaration naming `WebSearch` keeps its other tools and reports the drop:
+
+```
+not carried  tools: WebSearch    resolves to nothing connected here; the agent
+                                 runs without it. Connect it and name it under
+                                 [tools] in agents.toml
+```
+
+Connect the tool, then give it the name your declarations already use:
+
+```toml
+# .contenox/agents.toml
+[tools]
+WebSearch = "tavily.search"
+```
+
+
+
+## Naming a tool is not permitting it
+
+Every tool call is checked against a policy before it runs. That policy has
+rules for the tools contenox hosts. It has no rule for `tavily.search`, so a
+newly connected tool falls through to `default_action` — `approve` — and asks
+you on every call.
+
+To let it run unattended, give it a rule in `agents.toml`:
+
+```toml
+[[policy.always_allow]]
+tools = "tavily"
+tool = "search"
+```
+
+Two rules apply to every agent and cannot be overridden:
+
+- Filesystem access to `.ssh`, `.aws`, `.kube` and gcloud config is denied under
+  every permission setting.
+- `permissionMode: bypassPermissions` is refused.
+
+## What a declaration cannot say
+
+Context budgets, retries, loop bounds and shell allowlists live in
+[`agents.toml`](/docs/reference/agents-config/) beside your declarations.
+
+By default a value there applies to every agent:
+
+```toml
+# .contenox/agents.toml
+[chain]
+token_limit = 131072
+```
+
+Nest it under `[agents.<name>]` and it applies to one — the name is the one
+`contenox agent list` shows:
+
+```toml
+[agents.reviewer.chain]
+token_limit = 32768
+
+[agents.reviewer.tools_policies.local_shell]
+_allowed_commands = "git,go"
+```
+
+Keys you leave out keep the value from the layer below, so a per-agent section
+is only the difference, never a restatement. Edit the file and the next run
+picks it up; you do not touch the declaration.
+
+A section naming an agent that does not exist is reported rather than ignored,
+so a typo does not read as a knob that does nothing.
+
+## Checking before anything runs
+
+[`contenox vet`](/docs/reference/contenox-cli/) validates what a declaration
+became — handler signatures, dataflow, rule shapes, transitions that can never
+fire:
+
+```bash
+contenox vet
+```

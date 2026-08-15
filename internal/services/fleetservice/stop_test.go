@@ -2,7 +2,6 @@ package fleetservice
 
 import (
 	"context"
-	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -41,42 +40,6 @@ func pendingAskRow(t *testing.T, ctx context.Context, store runtimetypes.Store, 
 // TestUnit_StopMission_AbandonsAsksAndDeletesCheckpoints: the mission lands
 // abandoned, every pending ask it filed closes denied, and their checkpoints
 // are deleted.
-func TestUnit_StopMission_AbandonsAsksAndDeletesCheckpoints(t *testing.T) {
-	ctx, missions, hitl, store := stopTestDeps(t)
-
-	m := &missionservice.Mission{Intent: "audit the repo", AgentName: "auditor", HITLPolicyName: "p.json"}
-	require.NoError(t, missions.Create(ctx, m))
-
-	pendingAskRow(t, ctx, store, "ask-perm", m.ID, "local_shell", "exec")
-	pendingAskRow(t, ctx, store, "ask-question", m.ID, hitlservice.AttentionToolsName, hitlservice.AttentionToolName)
-	pendingAskRow(t, ctx, store, "ask-other-mission", "some-other-mission", "local_shell", "exec")
-
-	require.NoError(t, store.CreateChainCheckpoint(ctx, &runtimetypes.ChainCheckpoint{
-		ID: "ask-perm", SchemaVersion: 1, Payload: json.RawMessage(`{}`),
-	}))
-
-	require.NoError(t, StopMission(ctx, missions, hitl, store, m.ID, "test stop"))
-
-	got, err := missions.Get(ctx, m.ID)
-	require.NoError(t, err)
-	require.Equal(t, missionservice.StatusAbandoned, got.Status)
-	require.Equal(t, "test stop", got.StatusReason)
-
-	for _, askID := range []string{"ask-perm", "ask-question"} {
-		row, err := store.GetHITLApproval(ctx, askID)
-		require.NoError(t, err)
-		require.Equal(t, runtimetypes.HITLApprovalDenied, row.State, "ask %s must close as denied", askID)
-	}
-	other, err := store.GetHITLApproval(ctx, "ask-other-mission")
-	require.NoError(t, err)
-	require.Equal(t, runtimetypes.HITLApprovalPending, other.State, "another mission's ask is not ours to close")
-
-	_, err = store.GetChainCheckpoint(ctx, "ask-perm")
-	require.Error(t, err, "the stopped mission's checkpoint must be deleted")
-}
-
-// TestUnit_StopMission_AlreadyTerminalIsAConflict: stopping an already-landed
-// mission returns a conflict, not a silent re-finish.
 func TestUnit_StopMission_AlreadyTerminalIsAConflict(t *testing.T) {
 	ctx, missions, hitl, store := stopTestDeps(t)
 

@@ -5,7 +5,7 @@ description: Every contenox subcommand, flag, and environment variable.
 
 # Contenox CLI Reference
 
-`contenox` is the local AI agent CLI. It runs the Contenox chain engine entirely on your machine.
+`contenox` is the local agent server, driven from the command line. Agents, tools, models and the rules they run under are files on your machine, and so is everything it executes.
 
 ![A natural-language task in the terminal: contenox reads the repo and answers](/hero.gif)
 
@@ -54,7 +54,7 @@ If the first token is **not** a reserved subcommand (`chat`, `init`, `run`, …)
 
 Running plain `contenox` with no prompt at all (and nothing piped on stdin) does not start a chat — it prints the version line and the full help text, then exits 0.
 
-The default chat chain is resolved by name: workspace `.contenox/chain-agent-contenox.json` wins when present, otherwise Contenox falls back to `~/.contenox/chain-agent-contenox.json`. See [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for the naming convention behind every shipped chain.
+The default chat chain is resolved by name: workspace `.contenox/chain-agent-contenox.json` wins when present, then `~/.contenox/chain-agent-contenox.json`, then the shipped copy in `~/.contenox/system/`. See [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for the naming convention behind every shipped chain.
 
 ```bash
 contenox "what can you do?"
@@ -269,7 +269,7 @@ The login-flow flags and `--insecure-skip-tls-verify` can only be set at `tools 
 
 > **Beta:** the agent roster requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) and its interface may change; without it this command is hidden and only the shipped `agent-planner` is discovered (`agent-planner` is the chain's `id`, declared inside `chain-planner-default.json` — see [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/)).
 
-Inspect and manage the runtime's declared agents. An agent is one of the runtime's own [task chains](/docs/guide/first-chain/), addressable and spawnable as an ACP peer. Agents are registered automatically by chain-agent discovery from the chain files on disk — this command inspects them, toggles their enabled state, and removes stale registrations. Declared agents are what `/mission` and `contenox mission fire` dispatch.
+Inspect and manage the runtime's declared agents. Most agents are [declared in a Markdown file](/docs/guide/agents/) under `.contenox/agents/`; agents you already keep in `.claude/agents/` or `.agents/agents/` are found there too, and a task chain on disk is an agent as well. Every one is registered automatically by discovery — this command inspects them, toggles their enabled state, and removes stale registrations. Declared agents are what `/mission` and `contenox mission fire` dispatch.
 
 ```bash
 contenox agent list                       # id, name, source, kind, enabled
@@ -322,14 +322,14 @@ Names are resolved exactly as the policy evaluator resolves them (`PATH` lookup,
 
 Initializes a workspace (`.contenox/`) and ensures default runtime presets exist globally (`~/.contenox/`). It's best to run `contenox setup` first for a guided configuration.
 
-`init` creates the `.contenox/workspace.id` marker — a project's portable identity. The marker carries a stable workspace UUID (the database scoping token every session under the project is filed under) plus an optional friendly **name**. It travels *with* the directory, so a project means one thing to the CLI and every ACP session alike. Default chains, HITL policies, and the [attention oracle](/docs/use-cases/auto-attention/) set (its two chains and `hitl-policy-oracle.json` — inert until `mission fire --oracle` mounts the driver under opt-in-beta) are written under `~/.contenox/` unless they already exist. Workspace-local `.contenox/` files can override these global presets by name; `init --local` seeds those workspace copies for you instead of writing to `~/.contenox/`. The seeded chain files follow the `chain-<role>-<variant>.json` convention — [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) covers the grammar and the exact touch/never-touch matrix of every init flag.
+`init` creates the `.contenox/workspace.id` marker — a project's portable identity. The marker carries a stable workspace UUID (the database scoping token every session under the project is filed under) plus an optional friendly **name**. It travels *with* the directory, so a project means one thing to the CLI and every ACP session alike. It also seeds `agents.toml` and an `agents/` directory — where you [declare an agent](/docs/guide/agents/) — plus the HITL policies and the [oracle](/docs/use-cases/auto-attention/) set (`chain-oracle-default.json` and `hitl-policy-oracle.json` — inert until `default-oracle-chain` names one) under `~/.contenox/`, and the shipped chain files under `~/.contenox/system/`, unless they already exist. Workspace-local `.contenox/` files can override these global presets by name; `init --local` seeds those workspace copies for you instead of writing to `~/.contenox/`. The seeded chain files follow the `chain-<role>-<variant>.json` convention — [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) covers the grammar and the exact touch/never-touch matrix of every init flag.
 
 By default `init` walks up to reuse an ancestor's `.contenox` if one exists (like `git`). Pass `--project` to force a *fresh* project marker in the current directory instead — a distinct workspace nested under a larger one — and `--name` to give it a friendly name (default: the folder's own name). Marking a project does not by itself let sessions open it; `init --project` prints the `contenox workspace add` line that grants it.
 
 You can optionally specify a provider to pre-configure defaults.
 
 ```bash
-contenox init                          # scaffold with default chains
+contenox init                          # scaffold a workspace
 contenox init gemini                   # pre-configure for Gemini
 contenox init openai                   # pre-configure for OpenAI
 contenox init --force                  # overwrite existing files
@@ -401,7 +401,7 @@ contenox config get default-model
 contenox config list
 ```
 
-Valid global keys: `default-model`, `default-provider`, `default-alt-model`, `default-alt-provider`, `default-autocomplete-model`, `default-autocomplete-provider`, `default-embed-model`, `default-embed-provider`, `default-audio-model`, `default-audio-provider`, `default-max-tokens`, `default-think`, `telemetry-enabled`, `update-check`, `opt-in-beta`, `default-mission-agent`, `default-mission-policy`, `fleet-max-parallel`. `opt-in-beta` (`true`/`false`) enables the beta features — the `goja` and `shell_session` toolsets, the agent roster, and the [event tier](/docs/guide/events/) — which are otherwise absent entirely.
+Valid global keys: `default-model`, `default-provider`, `default-alt-model`, `default-alt-provider`, `default-autocomplete-model`, `default-autocomplete-provider`, `default-embed-model`, `default-embed-provider`, `default-audio-model`, `default-audio-provider`, `default-max-tokens`, `default-think`, `telemetry-enabled`, `update-check`, `opt-in-beta`, `default-mission-agent`, `default-mission-policy`, `default-oracle-chain`, `default-oracle-policy`, `oracle-approves-tool-calls`, `fleet-max-parallel`. `opt-in-beta` (`true`/`false`) enables the beta features — the `goja` and `shell_session` toolsets, the agent roster, and the [event tier](/docs/guide/events/) — which are otherwise absent entirely.
 
 Valid workspace keys: `default-chain`, `hitl-policy-name`.
 
@@ -412,7 +412,10 @@ Valid workspace keys: `default-chain`, `hitl-policy-name`.
 | `default-audio-model` | Model preferred for requests carrying audio attachments, independent from `default-model`. Unset falls back to `default-model`; audio requests resolve only to audio-capable models either way. |
 | `default-audio-provider` | Provider type for the audio model, independent from `default-provider`. Unset uses `default-provider`. |
 | `default-mission-agent` | Declared agent the ACP `/mission <intent>` slash command falls back to when none is named. `contenox mission fire` always requires the agent name as a positional argument, so this key does not affect it. |
-| `default-mission-policy` | Envelope (HITL policy) name that both `/mission` and `contenox mission fire --policy` fall back to when none is named. `/mission --policy <envelope>` overrides it for one mission. |
+| `default-mission-policy` | Envelope (HITL policy) name that both `/mission` and `contenox mission fire --policy` fall back to when none is named. `/mission --policy <envelope>` overrides it for one mission. It is also the envelope a subagent started by `/plan` or the `mission_start` tool runs under. |
+| `default-oracle-chain` | Chain that adjudicates a subagent's asks, e.g. `chain-oracle-default.json`. **Setting it is what turns the [oracle](/docs/use-cases/auto-attention/) on**; unset means no oracle and every ask waits for a human. `contenox acp --oracle <chain>` overrides it for one run, and `--oracle off` disables it. |
+| `default-oracle-policy` | Envelope the oracle chain itself runs under. Unset uses `hitl-policy-oracle.json`. Override per run with `--oracle-policy`. |
+| `oracle-approves-tool-calls` | `true`/`false` (default false). Lets the oracle rule on a subagent's `approve`-tier **tool calls**, not just its questions. The subagent's own envelope must also grant `attention.allowAgentApprovals` — both have to agree. Override per run with `--oracle-approves-tool-calls`. |
 | `fleet-max-parallel` | Fleet-wide admission cap: max concurrently open mission units (integer; `0` = unlimited; default 8). |
 
 `contenox config list` shows each key's current value **and its scope** (`global` / `workspace`) so you can see whether a setting is inherited or overridden locally.
@@ -501,7 +504,7 @@ contenox mission stop <mission-id> --reason "no longer needed"
 | `--timeout` (`fire`)            | Maximum time to wait for a terminal status before tearing the unit down (default `30m`)           |
 | `--reason` (`stop`)             | One line on why the mission is being stopped, persisted as the status reason                     |
 
-`mission fire <agent> <intent...>` dispatches the fleet **in-process**: the unit is a child subprocess of this CLI invocation, so `--wait` is required — a detached fire from a one-shot CLI would tear its own mission down when the command exits. Fire-and-detach needs a long-lived host: an editor session (`contenox acp`, the `/mission` command). Exit status is 0 when the mission lands; non-zero when it derails, gets stuck, is abandoned, or the wait times out. Under opt-in-beta, `--oracle` mounts the [attention oracle](/docs/use-cases/auto-attention/): routine questions the mission's intent already answers are answered in-process as agent `"oracle"`, within the envelope's attention bounds; everything else waits for a human exactly as without the flag.
+`mission fire <agent> <intent...>` dispatches the fleet **in-process**: the unit is a child subprocess of this CLI invocation, so `--wait` is required — a detached fire from a one-shot CLI would tear its own mission down when the command exits. Fire-and-detach needs a long-lived host: an editor session (`contenox acp`, the `/mission` command). Exit status is 0 when the mission lands; non-zero when it derails, gets stuck, is abandoned, or the wait times out.
 
 > **Beta:** user-authored agents (custom `chain-agent-*` chain files, like the one declaring `agent-reviewer` above) require `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`) and their interface may change; missions themselves and the shipped `agent-planner` work without it.
 
@@ -530,7 +533,7 @@ contenox approvals respond <ask-id> --answer "use the staging database"
 
 > **Beta:** `--as-agent` requires `contenox config set opt-in-beta true` (or `CONTENOX_OPT_IN_BETA=1`); without the opt-in the flag is absent, not hidden.
 
-`--as-agent <name>` attributes a question's answer to a named agent, and it is enforced against the mission envelope's attention bounds: it is refused when the ask belongs to no mission, when the envelope carries no `attention.allowAgentAnswers` grant, or when the mission's agent-answer bound is already spent — in every refusal the question waits for a human instead. An accepted agent answer counts against the bound, and the durable ask records which agent answered. See [who may answer a unit's question](/docs/guide/hitl/#who-may-answer-a-units-question-attention).
+`--as-agent <name>` attributes a question's answer to a named agent, and it is enforced against the mission envelope's attention bounds: it is refused when the ask belongs to no mission, when the envelope carries no `attention.allowAgentAnswers` grant, or when the mission's agent-answer bound is already spent — in every refusal the question waits for a human instead. An accepted agent answer counts against the bound, and the durable ask records which agent answered. See [who may answer a unit's question](/docs/guide/hitl/#who-may-answer-a-subagent-attention).
 
 ### `contenox inbox`
 
@@ -678,7 +681,7 @@ The two agent forms are the same shape, so contenox resolves the first token aga
 
 The dispatch runs **in-process**: the fired unit is a child subprocess of the calling session's own process, no daemon is needed, and the unit's reports stream live back into the firing session as they land. A mission with no agent or no envelope is refused. The hardened `acpx` profile never offers `/mission`.
 
-`mission fire --oracle`'s [attention oracle](/docs/use-cases/auto-attention/) has no `/mission` equivalent, by design: the driver reviews **operator-fired** missions only — it declines any question that carries a parent session — and every `/mission` is parented to the session that fired it, so its questions come back to you. In a session the same lever is the envelope: its `attention` bounds decide whether the firing session's own agent may answer a unit's routine questions, and how many. Under opt-in-beta, `/mission --oracle` says so rather than silently ignoring the flag; without the gate the flag is unknown here exactly as it is on the CLI.
+The [oracle](/docs/use-cases/auto-attention/) needs no `/mission` equivalent: it mounts on the ACP host itself, from `contenox config set default-oracle-chain`, so every subagent this session fires — through `/mission`, `/plan`, or the `mission_start` tool — is already covered. Whether it may rule on a given subagent's asks is the envelope's `attention` bounds, not a per-command flag.
 
 ### The `/pair` and `/unpair` slash commands
 

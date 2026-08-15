@@ -56,7 +56,7 @@ Restart the IDE. Open the agent panel — Contenox now appears in the agent pick
 
 ACP sessions use a dedicated chain file separate from the CLI's default chain:
 
-- Loaded from `~/.contenox/chain-agent-acp.json` (formerly `default-acp-chain.json` — `contenox init --update` renames it).
+- Loaded from `~/.contenox/chain-agent-acp.json`, falling back to the shipped copy in `~/.contenox/system/`. Copy it up a level to edit it.
 - Override path with the `CONTENOX_ACP_CHAIN_PATH` environment variable (set it in the shell that launches the IDE).
 
 The default chain uses `"tools": ["*"]`, which exposes everything the engine has registered — `local_fs`, `local_shell`, `webtools`, plus any MCP servers you've added via `contenox mcp add`.
@@ -100,7 +100,8 @@ Subsequent ACP sessions write structured operation traces to `~/.contenox/teleme
 
 ## Where to next
 
-- [Author your first chain](/docs/guide/first-chain/) — the chain file is what defines the agent's behavior, regardless of which client drives it.
+- [Declaring agents](/docs/guide/agents/) — one Markdown file is the agent, regardless of which client drives it.
+- [Writing a chain by hand](/docs/guide/first-chain/) — for the agent that has outgrown a declaration.
 - [HITL policies](/docs/guide/hitl/) — choose what requires approval and what doesn't.
 - [MCP](/docs/integrations/tools/mcp/) — register MCP servers once globally; ACP sessions pick them up automatically.
 - [Use from Zed](/docs/integrations/editors/zed/) — the same agent, driven from Zed (with a live embedded terminal).

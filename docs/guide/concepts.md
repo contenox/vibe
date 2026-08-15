@@ -1,17 +1,33 @@
 ---
 title: Core Concepts
-description: How chains, tasks, tools, transitions, and macros fit together in Contenox.
+description: How agents, chains, tasks, tools, transitions, and macros fit together in Contenox.
 ---
 
 # Core Concepts
 
+## Agents
+
+An **agent** is a Markdown file with a YAML frontmatter header: the frontmatter says how to run it, the body becomes its system prompt.
+
+```markdown
+---
+name: reviewer
+description: Reviews a file for correctness problems
+tools: Read, Glob, Grep
+---
+
+You are a code reviewer.
+```
+
+Drop it in `.contenox/agents/` and the next run picks it up. What a declaration cannot say — context budgets, retries, loop bounds, shell allowlists — lives in [`agents.toml`](/docs/reference/agents-config/) beside it. Between them, that is the whole authoring surface for most agents. See [Declaring agents](/docs/guide/agents/).
+
 ## Task Chains
 
-A **chain** is a JSON file that defines how the AI agent behaves — which model to use, what it can do, and how it moves between steps.
+Behind each declaration contenox builds a **chain**: a JSON state machine that says which model to use, what the agent can do, and how it moves between steps. You do not maintain it — edit the declaration and it follows.
 
-Chains are the central building block. The `contenox` CLI and headless runs all use the same chain engine.
+You can also write one by hand, and that is the reason the format is documented rather than hidden. A declaration is one prompt, one tool list, one permission setting: it cannot branch, cannot vary the model per step, cannot declare a recovery path or a point where a human is required. When you need one of those, you write the chain.
 
-Chains aren't limited to AI loops. A single chain can mix LLM steps, direct tool/tools calls, and manual transitions — in any order. Swapping chains is easy:
+Chains aren't limited to AI loops. A single chain can mix LLM steps, direct tool/tools calls, and manual transitions — in any order:
 
 ```bash
 # run subcommand — use any chain for this invocation:
@@ -23,7 +39,7 @@ contenox config set default-chain ./my-chain.json
 # (falls back to chain-agent-contenox.json if not set)
 ```
 
-Fallback chain files are resolved by name, workspace-first: the workspace `.contenox/` copy wins when present, otherwise `~/.contenox/`. The shipped files follow the `chain-<role>-<variant>.json` convention — see [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for every role and the full resolution story.
+Fallback chain files are resolved by name: the workspace `.contenox/` copy wins when present, then `~/.contenox/`, then the shipped copies in `~/.contenox/system/`. Copying one up out of `system/` is how you take ownership of it. The shipped files follow the `chain-<role>-<variant>.json` convention — see [Chain files: naming, roles, and resolution](/docs/guide/chain-naming/) for every role and the full resolution story.
 
 ```json
 {
@@ -124,7 +140,13 @@ Chain JSON supports runtime macros inside string fields:
 | `{{var:alt_provider}}` | Optional secondary provider from config |
 | `{{var:max_tokens}}` | Optional response token cap from config or `--max-tokens` |
 | `{{now:2006-01-02}}` | Current date (Go time format) |
+| `{{tools}}` | JSON object mapping toolset name → its tool names, filtered to the task's `tools` allowlist |
+| `{{host:os}}` | Host operating system (`linux`, `darwin`, `windows`) |
+| `{{host:arch}}` | Host architecture (`amd64`, `arm64`) |
 | `{{toolservice:list}}` | JSON manifest of tools visible to the current task |
+
+A `system_instruction` is sent as written. Macros are the only substitution — a
+task that does not declare `{{tools}}` does not receive a tool manifest.
 
 ### Fallbacks
 

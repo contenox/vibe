@@ -41,7 +41,7 @@ That's it — pick **Contenox** as the active agent and start a session.
 
 ## What you get
 
-**Your chain, in a chat UI.** Every prompt runs your contenox `chain-agent-acp.json` chain — the same agent behavior you'd get from the CLI or any other ACP client, in AionUi's conversation surface.
+**Your agent, in a chat UI.** Every prompt runs the ACP session chain, `chain-agent-acp.json` — the same agent behavior you'd get from the CLI or any other ACP client, in AionUi's conversation surface.
 
 **Tool steps with real context.** When the chain runs a tool, AionUi's step view shows the actual operation — `local_shell: ls -l`, `local_fs.read_file: README.md` — not just a bare tool name.
 
@@ -53,7 +53,7 @@ That's it — pick **Contenox** as the active agent and start a session.
 
 **Missions from the composer.** `/mission <intent>` (or `/mission <agent-name> <intent>`) fires a declared agent at the intent unattended, as a child subprocess of this editor session, and its reports stream live back into the firing session. Configure the fallbacks first (`contenox config set default-mission-agent` / `default-mission-policy`); details in the [Zed guide](/docs/integrations/editors/zed/#fire-missions-with-mission) and the [CLI reference](/docs/reference/contenox-cli/#the-mission-slash-command).
 
-AionUi layers its own chat UI and skill ecosystem on top; the agent itself — the chain, tools, and policy — is your contenox.
+AionUi layers its own chat UI and skill ecosystem on top; the agent itself — declared in a file, with its tools and its policy — is your contenox.
 
 ---
 
@@ -61,7 +61,7 @@ AionUi layers its own chat UI and skill ecosystem on top; the agent itself — t
 
 ACP sessions use a dedicated chain file separate from the CLI's default chain:
 
-- Loaded from `~/.contenox/chain-agent-acp.json` (formerly `default-acp-chain.json` — `contenox init --update` renames it).
+- Loaded from `~/.contenox/chain-agent-acp.json`, falling back to the shipped copy in `~/.contenox/system/`. Copy it up a level to edit it.
 - Override with the `CONTENOX_ACP_CHAIN_PATH` environment variable.
 
 The default chain uses `"tools": ["*"]`, exposing everything the engine has registered — `local_fs`, `local_shell`, `webtools`, plus any MCP servers you've added.
@@ -99,7 +99,8 @@ Models are global; chains resolve workspace-first. Switching the model for ACP a
 
 ## Where to next
 
-- [Author your first chain](/docs/guide/first-chain/) — the chain defines the agent's behavior, regardless of which client drives it.
+- [Declaring agents](/docs/guide/agents/) — one Markdown file is the agent, regardless of which client drives it.
+- [Writing a chain by hand](/docs/guide/first-chain/) — for the agent that has outgrown a declaration.
 - [HITL policies](/docs/guide/hitl/) — choose what requires approval.
 - [MCP](/docs/integrations/tools/mcp/) — register servers once globally; ACP sessions pick them up.
 - [Use from Zed](/docs/integrations/editors/zed/) · [Use from JetBrains](/docs/integrations/editors/jetbrains/) — the same agent, other clients.

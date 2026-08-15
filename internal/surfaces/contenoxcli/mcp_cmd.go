@@ -208,16 +208,31 @@ servers. If none are registered, prints a hint to run 'contenox mcp add'.`,
 		}
 
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tTRANSPORT\tCOMMAND/URL")
+		fmt.Fprintln(w, "NAME\tTRANSPORT\tCOMMAND/URL\tOWNER")
 		for _, s := range servers {
 			target := s.Command
 			if s.Transport == "sse" || s.Transport == "http" {
 				target = s.URL
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\n", s.Name, s.Transport, target)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.Name, s.Transport, target, mcpServerOwner(s.Name))
 		}
 		return w.Flush()
 	},
+}
+
+// mcpServerOwner says who a registration belongs to, so a row an agent brought
+// with it is not mistaken for one to manage by hand. A declaration-owned row is
+// rewritten by the next discovery pass and retired with its declaration —
+// editing or removing it here does not stick.
+func mcpServerOwner(name string) string {
+	switch {
+	case runtimetypes.IsDeclaredToolName(name):
+		return "declaration"
+	case runtimetypes.IsACPManagedMCPServerName(name):
+		return "editor session"
+	default:
+		return "you"
+	}
 }
 
 var mcpShowCmd = &cobra.Command{

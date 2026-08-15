@@ -22,7 +22,7 @@ func missionToolSchemas() []missionToolSchema {
 		{tool: askAttentionToolSchema(), component: "MissionAskAttention", response: askAttentionResponseSchema},
 		{tool: planToolSchema(), component: "MissionPlan", response: planResponseSchema},
 		{tool: finishToolSchema(), component: "MissionFinish", response: finishResponseSchema},
-		{tool: listMissionsToolSchema(), component: "MissionList", response: listMissionsResponseSchema},
+		{tool: listMissionsToolSchema(true), component: "MissionList", response: listMissionsResponseSchema},
 		{tool: answerToolSchema(), component: "MissionAnswer", response: answerResponseSchema},
 	}
 }
@@ -81,16 +81,16 @@ func reportResponseSchema() *openapi3.SchemaRef {
 	return textResponse("One line naming what was filed, e.g. `recorded progress report \"rep-1\"`. A `result` whose claimed artifacts include a path that is positively missing is filed as `progress` instead, and the line then also carries `(downgraded from result: …)` naming the paths — the durable row and this reply say the same thing.")
 }
 
-func askAttentionResponseSchema() *openapi3.SchemaRef {
-	return textResponse("The operator's answer, verbatim: the call blocks until a human replies and their words ARE this result, so the unit continues with them on the same turn. When no answer channel is wired or nobody answered, the question is filed as a durable blocker instead and the result is `attention requested (recorded as blocker — no operator answered)`. When the park window elapses with the question still open the call does not return a result at all — the run suspends and resumes with the answer.")
-}
-
 func finishResponseSchema() *openapi3.SchemaRef {
 	return textResponse("`mission finished as <status>`, naming the terminal state the mission came to rest in. Finishing is immutable: a second call with a different status is an error, not a correction.")
 }
 
+func askAttentionResponseSchema() *openapi3.SchemaRef {
+	return textResponse("The answerer's own words, verbatim — a human's, the supervising session's agent's, or the oracle's — which the unit continues with on the same turn. When nobody answered within the window, the question is filed as a blocker report instead and the reply says so.")
+}
+
 func answerResponseSchema() *openapi3.SchemaRef {
-	return textResponse("`answered <askId> — unit \"<agentName>\" has your reply and continues`. An askId that is not one of your own missions' open questions (already answered, expired, or never yours) is an error rather than a silent no-op.")
+	return textResponse("`answered <askId> — subagent \"<agentName>\" has your reply and continues`. An askId that is not one of your own subagents' open questions (already answered, expired, or never yours) is an error rather than a silent no-op.")
 }
 
 func listMissionsResponseSchema() *openapi3.SchemaRef {
@@ -150,7 +150,7 @@ func pendingAskSchema() *openapi3.SchemaRef {
 	return &openapi3.SchemaRef{Value: &openapi3.Schema{
 		Type: &openapi3.Types{openapi3.TypeObject},
 		Properties: map[string]*openapi3.SchemaRef{
-			"askId":     {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "The handle to answer with — pass it to " + ToolNameAnswer + "."}},
+			"askId":     {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "The handle to answer this question with."}},
 			"missionId": {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "The mission whose unit is waiting."}},
 			"question":  {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "The unit's one-line question."}},
 			"detail":    {Value: &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeString}, Description: "The longer detail the unit gave, when it gave any."}},

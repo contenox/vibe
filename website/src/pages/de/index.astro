@@ -47,15 +47,15 @@ const t: LandingStrings = {
   declareH2: "Du baust keinen Agenten. Du deklarierst einen.",
   declareTree: [
     [".contenox/", ""],
-    ["  chain-agent-acp.json        ", "# der Editor-Agent: Tasks, Routing, Werkzeuge"],
-    ["  chain-agent-run.json        ", "# der Headless-Agent, für Cron und CI"],
-    ["  chain-planner-default.json  ", "# Sub-Chains, die die Agenten aufrufen"],
-    ["  hitl-policy-default.json    ", "# was einen Menschen braucht, und wann"],
-    ["  hitl-policy-strict.json     ", "# derselbe Agent, strenger — pro Umgebung austauschbar"],
-    ["AGENTS.md                     ", "# Projektkontext, in jede Session geladen"],
+    ["  agents/", ""],
+    ["    reviewer.md               ", "# ein Agent, eine Datei"],
+    ["    triage.md                 ", "# noch einer"],
+    ["  agents.toml                 ", "# die Stellschrauben, die eine Deklaration nicht kennt"],
+    ["", ""],
+    [".claude/agents/               ", "# schon Agenten? werden dort gelesen, wo sie liegen"],
   ],
   declareNote:
-    "Datei ändern, neu ausführen — kein Build-Schritt, keine Plugin-API, kein Release. Beide Dateiarten sind JSON-Schema-validiert: dein Editor vervollständigt sie, die CI prüft sie.",
+    "Markdown mit YAML-Frontmatter — dieselbe Datei, die Claude Code liest. Reinlegen genügt, der nächste Lauf nimmt sie auf: kein Build-Schritt, keine Plugin-API, nichts zu konvertieren.",
   ctaRecipe: "Rezept ausführen",
   copyLabel: "Kopieren",
   installTabPosix: "macOS / Linux",
@@ -78,7 +78,7 @@ const t: LandingStrings = {
     ["note", "# Mission unter strengem Envelope abfeuern"],
     [
       "cmd",
-      'contenox mission fire agent-reviewer "review the payment-retry PR for regressions" --wait',
+      'contenox mission fire reviewer "review the payment-retry PR for regressions" --wait',
     ],
     ["out", "Mission gestartet · Envelope hitl-policy-strict.json"],
     [
@@ -104,11 +104,11 @@ const t: LandingStrings = {
     ["cmd", "contenox inbox list"],
     [
       "out",
-      "Report · agent-reviewer: Befunde, Patch angewendet, Testergebnisse — warten auf dich",
+      "Report · reviewer: Befunde, Patch angewendet, Testergebnisse — warten auf dich",
     ],
   ],
   missionOutro:
-    "Kein Babysitten am Terminal, keine abgelaufenen Freigaben, keine stillen Änderungen. Der Envelope hat entschieden, was unbeaufsichtigt laufen darf, die Chain hat entschieden, wo ein Mensch das letzte Wort hat, und eine Antwort hat den Run genau einmal fortgesetzt.",
+    "Kein Babysitten am Terminal, keine abgelaufenen Freigaben, keine stillen Änderungen. Der Envelope hat entschieden, was unbeaufsichtigt laufen darf, der Agent, den du deklariert hast, nichts darüber hinaus, und eine Antwort hat den Run genau einmal fortgesetzt.",
   missionCta: [
     "Wie Missionen, Freigaben und die Inbox funktionieren",
     "/docs/reference/contenox-cli/#contenox-mission",
@@ -120,12 +120,12 @@ const t: LandingStrings = {
   panelP1:
     "Wenn dir ein Assistent seine „Denkschritte“ zeigt, siehst du eine Orchestrierungs-Schleife: planen, Tool aufrufen, Ergebnis prüfen, Budget prüfen, neu entscheiden. Jedes große KI-Produkt läuft auf so einer Schicht — ereignisgetriebene Agenten-Choreografie unter Governance. Diese Schicht entscheidet, was das Modell darf, wann es pausiert und was es kostet. Der Anbieter konfiguriert sie. Du siehst sie nie — und ändern kannst du sie nicht.",
   panelP2:
-    "Contenox ist diese Schicht, ausgeliefert als Produkt — mit dem Schaltpult in der Hand des Operators. Die Schleife ist eine Chain-Datei, die du schreibst. Die Grenzen sind ein Envelope, den du geschrieben hast. Der Zustand liegt auf deiner Platte. Der Unterschied ist nicht, die Maschine erfunden zu haben — sondern wer die Kontrollen hält.",
+    "Contenox ist diese Schicht, ausgeliefert als Produkt — mit dem Schaltpult in der Hand des Operators. Der Agent ist eine Datei, die du deklarierst. Die Grenzen sind ein Envelope, den du geschrieben hast. Die Schleife, die daraus entsteht, ist JSON, das du lesen kannst — und selbst schreiben, wenn du musst. Der Zustand liegt auf deiner Platte. Der Unterschied ist nicht, die Maschine erfunden zu haben — sondern wer die Kontrollen hält.",
 
-  routeEyebrow: "Chain → Workflow → Agenten-Schleife",
+  routeEyebrow: "Route → Workflow → Agenten-Schleife",
   routeH2: "Ein Satz rein. Die Schleife, die dieser Satz verdient.",
   routeLede:
-    "Eine Chain beginnt nicht mit einem Agenten. Sie beginnt mit einem route-Task, der die Anfrage liest, sie labelt und an die Schleife übergibt, die für dieses Label gebaut ist — mit eigener Instruktion, eigenem Tool-Umfang, eigenem Budget, eigenem Weg aus dem Fehlerfall. Die interaktiven Chains, die mit contenox kommen, sortieren jede Nachricht in coding_change, general oder review_change, bevor sonst irgendetwas läuft.",
+    "Hinter einem Agenten steht eine Chain, und die interaktiven beginnen nicht mit einer einzigen Schleife. Sie beginnen mit einem route-Task, der die Anfrage liest, sie labelt und an die Schleife übergibt, die für dieses Label gebaut ist — mit eigener Instruktion, eigenem Tool-Umfang, eigenem Budget, eigenem Weg aus dem Fehlerfall. Die Chains, die mit contenox kommen, sortieren jede Nachricht in coding_change, general oder review_change, bevor sonst irgendetwas läuft.",
   routeCode,
   routeOutro:
     "Gekürzt aus der mitgelieferten chain-agent-acp.json. Der Klassifikator hat keine Tools, kann also nicht auf einer Anfrage handeln, die er noch nicht verstanden hat — und er darf auf einem günstigeren Modell laufen als die Schleifen, die er speist. Ein unbekanntes Label fällt in den default-Zweig: auf die schwächste Schleife, nie auf die stärkste. Welcher Zweig lief, steht im Run-Log — eine enttäuschende Antwort ist damit eine Frage, die eine Antwort hat.",
@@ -172,7 +172,7 @@ const t: LandingStrings = {
     ],
     [
       "Dein Editor",
-      "Der komplette Agent in Zed, JetBrains, AionUi oder OpenClaw — Freigaben laufen über die Oberfläche des Editors, und der Workflow bleibt in der Chain-Datei, nicht im Plugin.",
+      "Der komplette Agent in Zed, JetBrains, AionUi oder OpenClaw — Freigaben laufen über die Oberfläche des Editors, und der Agent bleibt in deinen Dateien, nicht im Plugin.",
     ],
     [
       "Deine Skripte und Pipelines",

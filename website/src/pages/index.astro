@@ -47,15 +47,15 @@ const t: LandingStrings = {
   declareH2: "You don't build an agent. You declare one.",
   declareTree: [
     [".contenox/", ""],
-    ["  chain-agent-acp.json        ", "# the editor agent: tasks, routing, tools"],
-    ["  chain-agent-run.json        ", "# the headless agent, for cron and CI"],
-    ["  chain-planner-default.json  ", "# sub-chains the agents call"],
-    ["  hitl-policy-default.json    ", "# what needs a human, and when"],
-    ["  hitl-policy-strict.json     ", "# the same agent, tighter — swap per environment"],
-    ["AGENTS.md                     ", "# project context, loaded into every session"],
+    ["  agents/", ""],
+    ["    reviewer.md               ", "# one agent, one file"],
+    ["    triage.md                 ", "# another"],
+    ["  agents.toml                 ", "# the knobs a declaration cannot reach"],
+    ["", ""],
+    [".claude/agents/               ", "# already have agents? read where they are"],
   ],
   declareNote:
-    "Edit a file, rerun — no build step, no plugin API, no release. Both kinds are JSON Schema–validated, so your editor completes them and CI checks them.",
+    "Markdown with a YAML frontmatter header — the same file Claude Code reads. Drop it in and the next run picks it up: no build step, no plugin API, nothing to convert.",
   ctaRecipe: "Run a recipe",
   copyLabel: "Copy",
   installTabPosix: "macOS / Linux",
@@ -78,7 +78,7 @@ const t: LandingStrings = {
     ["note", "# fire a mission under a strict envelope"],
     [
       "cmd",
-      'contenox mission fire agent-reviewer "review the payment-retry PR for regressions" --wait',
+      'contenox mission fire reviewer "review the payment-retry PR for regressions" --wait',
     ],
     ["out", "mission fired · envelope hitl-policy-strict.json"],
     [
@@ -101,11 +101,11 @@ const t: LandingStrings = {
     ["cmd", "contenox inbox list"],
     [
       "out",
-      "report · agent-reviewer: findings, patch applied, test results — waiting for you",
+      "report · reviewer: findings, patch applied, test results — waiting for you",
     ],
   ],
   missionOutro:
-    "No babysitting a terminal, no timed-out approvals, no silent changes. The envelope decided what could run unattended, the chain decided where a human gets the final word, and one answer resumed the run exactly once.",
+    "No babysitting a terminal, no timed-out approvals, no silent changes. The envelope decided what could run unattended, the agent you declared decided nothing beyond it, and one answer resumed the run exactly once.",
   missionCta: [
     "How missions, approvals, and the inbox work",
     "/docs/reference/contenox-cli/#contenox-mission",
@@ -117,12 +117,12 @@ const t: LandingStrings = {
   panelP1:
     'When an assistant shows you its "thinking steps," you’re watching an orchestration loop: plan, call a tool, check the result, check the budget, decide again. Every major AI product runs on one — event-driven agent choreography under governance. That layer decides what the model may do, when it pauses, and what it costs. The vendor configures it. You never see it, and you can’t change it.',
   panelP2:
-    "Contenox is that layer, shipped as the product — with the control panel handed to the operator. The loop is a chain file you author. The boundaries are an envelope you wrote. The state is on your disk. The differentiator isn’t inventing the machine; it’s who holds the controls.",
+    "Contenox is that layer, shipped as the product — with the control panel handed to the operator. The agent is a file you declare. The boundaries are an envelope you wrote. The loop it generates is JSON you can read, and take the pen to. The state is on your disk. The differentiator isn’t inventing the machine; it’s who holds the controls.",
 
-  routeEyebrow: "Chain → workflow → agent loop",
+  routeEyebrow: "Route → workflow → agent loop",
   routeH2: "One sentence in. The loop that sentence deserves.",
   routeLede:
-    "A chain does not begin with an agent. It begins with a route task that reads the request, labels it, and hands it to the loop built for that label — its own instruction, its own tool scope, its own budget, its own recovery path. The interactive chains that ship with contenox sort every message into coding_change, general, or review_change before anything else runs.",
+    "Behind an agent is a chain, and the interactive ones do not begin with a single loop. They begin with a route task that reads the request, labels it, and hands it to the loop built for that label — its own instruction, its own tool scope, its own budget, its own recovery path. The chains that ship with contenox sort every message into coding_change, general, or review_change before anything else runs.",
   routeCode,
   routeOutro:
     "Trimmed from the shipped chain-agent-acp.json. The classifier holds no tools, so it cannot act on a request it has not yet understood, and it can run on a cheaper model than the loops it feeds. An unrecognised label falls to the default branch — the least-powerful loop, never the most. Which branch ran is in the run log, so a disappointing answer is a question with an answer.",
@@ -169,7 +169,7 @@ const t: LandingStrings = {
     ],
     [
       "Your editor",
-      "The full agent inside Zed, JetBrains, AionUi, or OpenClaw — approvals route through the editor’s own UI, and the workflow stays in the chain file, not the plugin.",
+      "The full agent inside Zed, JetBrains, AionUi, or OpenClaw — approvals route through the editor’s own UI, and the agent stays in your files, not the plugin.",
     ],
     [
       "Your scripts and pipelines",

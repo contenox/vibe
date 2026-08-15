@@ -62,7 +62,7 @@ func newMissionAnswerFixture(t *testing.T, envelope string) *missionAnswerFixtur
 	sup := missionSupervision{missions: missions, hitl: hitl, db: db, tracker: libtracker.NoopTracker{}}
 	return &missionAnswerFixture{
 		ctx: ctx, store: store, hitl: hitl, missions: missions, sup: sup,
-		tools:   missiontools.New(missions, nil, missiontools.WithSupervision(sup, sup)),
+		tools:   missiontools.New(missions, missiontools.WithSupervision(sup), missiontools.WithAttentionResolver(sup)),
 		mission: m,
 	}
 }
