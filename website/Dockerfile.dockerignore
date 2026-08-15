@@ -1,7 +1,8 @@
 # Per-Dockerfile ignore (BuildKit): applies only to website/Dockerfile builds.
-# Allowlist style — the site needs docs/ and website/ sources.
+# Allowlist style — the site needs docs/, schema/ and website/ sources.
 *
 !docs
+!schema
 !website
 website/node_modules
 website/dist
