@@ -70,8 +70,6 @@ export interface LandingStrings {
   relayCta: [string, string];
   /** [line text, link label, href] — one muted line under the relay CTA: the managed option, ending in the contact link. */
   relayNote: [string, string, string];
-  capsEyebrow: string;
-  caps: [string, string][];
   bottomEyebrow: string;
   bottomH2: string;
   bottomCta: string;
@@ -273,18 +271,6 @@ const ctaLink = 'font-semibold text-primary-700 hover:text-primary-600 dark:text
   <p class="mx-auto mt-6 max-w-2xl text-center text-sm text-neutral-500">
     {t.relayNote[0]} <a href={t.relayNote[2]} class="underline hover:text-black dark:hover:text-white">{t.relayNote[1]}</a>.
   </p>
-</section>
-
-<section class="px-5 py-16">
-  <p class="text-center text-xs font-semibold tracking-widest text-neutral-500 uppercase">{t.capsEyebrow}</p>
-  <div class="mx-auto mt-8 grid max-w-4xl gap-4 sm:grid-cols-2">
-    {t.caps.map(([title, body]) => (
-      <div class={card}>
-        <h3 class="font-semibold">{title}</h3>
-        <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{body}</p>
-      </div>
-    ))}
-  </div>
 </section>
 
 <section class="hero-grid border-t border-neutral-200 px-5 py-16 text-center dark:border-neutral-800">
