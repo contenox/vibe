@@ -23,9 +23,14 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # check-latest resolves 1.25 against the version manifest instead of
+      # accepting whatever 1.25.x the runner image happens to have cached.
+      # Without it govulncheck fails the build on stdlib CVEs that are already
+      # fixed in the current patch release — a red CI nobody here can action.
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
+          check-latest: true
 
       # CONTRIBUTING says "run gofmt on Go changes". A rule that is not
       # machine-enforced is not a rule.
